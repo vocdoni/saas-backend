@@ -63,11 +63,11 @@ func (a *API) router() http.Handler {
 		// Handle valid JWT tokens.
 		r.Use(a.authenticator)
 		// Refresh the token
-		log.Infow("new route", "method", "POST", "path", authRefresToken)
-		r.Post(authRefresToken, a.refreshHandler)
+		log.Infow("new route", "method", "POST", "path", authRefresTokenEndpoint)
+		r.Post(authRefresTokenEndpoint, a.refreshTokenHandler)
 		// Get the address
-		log.Infow("new route", "method", "GET", "path", userAddress)
-		r.Get(userAddress, a.addressHandler)
+		log.Infow("new route", "method", "GET", "path", currentUserAddressEndpoint)
+		r.Get(currentUserAddressEndpoint, a.addressHandler)
 	})
 	// Public routes
 	r.Group(func(r chi.Router) {
@@ -77,11 +77,11 @@ func (a *API) router() http.Handler {
 			}
 		})
 		// Register new users
-		log.Infow("new route", "method", "POST", "path", userRegister)
-		r.Post(userRegister, a.registerHandler)
+		log.Infow("new route", "method", "POST", "path", usersEndpoint)
+		r.Post(usersEndpoint, a.registerHandler)
 		// Login
-		log.Infow("new route", "method", "POST", "path", authLogin)
-		r.Post(authLogin, a.loginHandler)
+		log.Infow("new route", "method", "POST", "path", authLoginEndpoint)
+		r.Post(authLoginEndpoint, a.authLoginHandler)
 	})
 	return r
 }

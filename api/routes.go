@@ -2,9 +2,9 @@ package api
 
 const (
 	// auth routes
-	authRefresToken = "/auth/refresh"
-	authLogin       = "/auth/login"
+	authRefresTokenEndpoint = "/auth/refresh"
+	authLoginEndpoint       = "/auth/login"
 	// user routes
-	userRegister = "/users/register"
-	userAddress  = "/users/address"
+	usersEndpoint              = "/users"
+	currentUserAddressEndpoint = "/users/address"
 )
