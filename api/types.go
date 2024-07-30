@@ -27,8 +27,8 @@ type UserAddressResponse struct {
 	Address string `json:"address"`
 }
 
-// EncodedSignedTxResponse is the response of the sign a transaction request.
-// It includes the signed transaction encoded in base64.
-type EncodedSignedTxResponse struct {
+// TransactionData is the struct that contains the data of a transaction to
+// be signed, but also is used to return the signed transaction.
+type TransactionData struct {
 	Data string `json:"data"`
 }

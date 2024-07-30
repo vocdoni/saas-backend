@@ -3,7 +3,7 @@ package api
 import (
 	"encoding/base64"
 	"encoding/hex"
-	"io"
+	"encoding/json"
 	"net/http"
 
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
@@ -25,10 +25,13 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// read the tx from the request body
-	defer r.Body.Close()
-	txData, err := io.ReadAll(r.Body)
+	signReq := &TransactionData{}
+	if err := json.NewDecoder(r.Body).Decode(signReq); err != nil {
+		ErrMalformedBody.Withf("could not decode request body: %v", err).Write(w)
+	}
+	txData, err := base64.StdEncoding.DecodeString(signReq.Data)
 	if err != nil {
-		ErrMalformedBody.Write(w)
+		ErrMalformedBody.Withf("could not decode the base64 data from the body").Write(w)
 		return
 	}
 	// decode the tx provided
@@ -64,7 +67,7 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 		ErrGenericInternalServerError.Withf("could not marshal signed tx: %v", err).Write(w)
 		return
 	}
-	httpWriteJSON(w, &EncodedSignedTxResponse{
+	httpWriteJSON(w, &TransactionData{
 		Data: base64.StdEncoding.EncodeToString(stx),
 	})
 }
