@@ -20,14 +20,16 @@ const (
 
 // API type represents the API HTTP server with JWT authentication capabilities.
 type API struct {
-	Router *chi.Mux
-	auth   *jwtauth.JWTAuth
+	Router       *chi.Mux
+	auth         *jwtauth.JWTAuth
+	vocdoniChain string
 }
 
 // New creates a new API HTTP server. It does not start the server. Use Start() for that.
-func New(secret string) *API {
+func New(secret, vocdoniChain string) *API {
 	return &API{
-		auth: jwtauth.New("HS256", []byte(secret), nil),
+		auth:         jwtauth.New("HS256", []byte(secret), nil),
+		vocdoniChain: vocdoniChain,
 	}
 }
 
@@ -68,6 +70,9 @@ func (a *API) router() http.Handler {
 		// Get the address
 		log.Infow("new route", "method", "GET", "path", currentUserAddressEndpoint)
 		r.Get(currentUserAddressEndpoint, a.addressHandler)
+		// Sign a payload
+		log.Infow("new route", "method", "POST", "path", signTxEndpoint)
+		r.Post(signTxEndpoint, a.signTxHandler)
 	})
 	// Public routes
 	r.Group(func(r chi.Router) {

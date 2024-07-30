@@ -26,3 +26,9 @@ type LoginResponse struct {
 type UserAddressResponse struct {
 	Address string `json:"address"`
 }
+
+// TransactionData is the struct that contains the data of a transaction to
+// be signed, but also is used to return the signed transaction.
+type TransactionData struct {
+	Data string `json:"data"`
+}
