@@ -11,7 +11,7 @@ import (
 
 func main() {
 	log.Init("debug", "stdout", nil)
-	api.New("vocdoniSuperSecret").Start("localhost", 8080)
+	api.New("vocdoniSuperSecret").Start("0.0.0.0", 8080)
 
 	// Wait forever, as the server is running in a goroutine
 	log.Infow("server started", "host", "localhost", "port", 8080)
