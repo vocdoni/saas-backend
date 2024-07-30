@@ -14,4 +14,7 @@ const (
 	usersEndpoint = "/users"
 	// GET /users/address to get the address of the current user
 	currentUserAddressEndpoint = "/users/address"
+
+	// signer routes
+	signTxEndpoint = "/transactions"
 )

@@ -26,3 +26,9 @@ type LoginResponse struct {
 type UserAddressResponse struct {
 	Address string `json:"address"`
 }
+
+// EncodedSignedTxResponse is the response of the sign a transaction request.
+// It includes the signed transaction encoded in base64.
+type EncodedSignedTxResponse struct {
+	Data string `json:"data"`
+}
