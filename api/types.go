@@ -21,3 +21,8 @@ type LoginResponse struct {
 	Token    string    `json:"token"`
 	Expirity time.Time `json:"expirity"`
 }
+
+// UserAddressResponse is the response of the address request for a user
+type UserAddressResponse struct {
+	Address string `json:"address"`
+}

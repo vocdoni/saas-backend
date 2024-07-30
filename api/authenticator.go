@@ -31,10 +31,10 @@ func (a *API) authenticator(next http.Handler) http.Handler {
 	})
 }
 
-// makeToken creates a JWT token for the given user identifier.
+// buildLoginResponse creates a JWT token for the given user identifier.
 // The token is signed with the API secret, following the JWT specification.
 // The token is valid for the period specified on jwtExpiration constant.
-func (a *API) makeToken(id string) (*LoginResponse, error) {
+func (a *API) buildLoginResponse(id string) (*LoginResponse, error) {
 	j := jwt.New()
 	if err := j.Set("userId", id); err != nil {
 		return nil, err

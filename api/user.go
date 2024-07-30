@@ -30,22 +30,19 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		ErrEmailMalformed.Write(w)
 		return
 	}
-
 	// add the user to the database
 	if err := a.addUser(userInfo); err != nil {
 		ErrInvalidUserData.WithErr(err).Write(w)
 		return
 	}
-
 	// Generate a new token with the user name as the subject
-	token, err := a.makeToken(userInfo.Email)
+	res, err := a.buildLoginResponse(userInfo.Email)
 	if err != nil {
 		ErrGenericInternalServerError.Write(w)
 		return
 	}
-
 	// Send the token back to the user
-	httpWriteJSON(w, token)
+	httpWriteJSON(w, res)
 }
 
 // addUser adds a new user to the database. It returns an error if the user already exists.
@@ -69,16 +66,14 @@ func (a *API) refreshHandler(w http.ResponseWriter, r *http.Request) {
 		ErrUnauthorized.Write(w)
 		return
 	}
-
 	// Generate a new token with the user name as the subject
-	token, err := a.makeToken(userID)
+	res, err := a.buildLoginResponse(userID)
 	if err != nil {
 		ErrGenericInternalServerError.Write(w)
 		return
 	}
-
 	// Send the token back to the user
-	httpWriteJSON(w, token)
+	httpWriteJSON(w, res)
 }
 
 // login handles the login request. It returns a JWT token if the login is successful.
@@ -89,28 +84,24 @@ func (a *API) loginHandler(w http.ResponseWriter, r *http.Request) {
 		ErrMalformedBody.Write(w)
 		return
 	}
-
 	// Retrieve the user from the database
 	if _, ok := userMapForTest[loginInfo.Email]; !ok {
 		ErrUnauthorized.Write(w)
 		return
 	}
-
 	// Check the password
 	if !bytes.Equal(userMapForTest[loginInfo.Email], hashPassword(loginInfo.Password)) {
 		ErrUnauthorized.Write(w)
 		return
 	}
-
 	// Generate a new token with the user name as the subject
-	token, err := a.makeToken(loginInfo.Email)
+	res, err := a.buildLoginResponse(loginInfo.Email)
 	if err != nil {
 		ErrGenericInternalServerError.Write(w)
 		return
 	}
-
 	// Send the token back to the user
-	httpWriteJSON(w, token)
+	httpWriteJSON(w, res)
 }
 
 // addressHandler handles the address request. It returns the Ethereum address of the user.
@@ -127,7 +118,6 @@ func (a *API) addressHandler(w http.ResponseWriter, r *http.Request) {
 		ErrGenericInternalServerError.Withf("could not create signer for user: %v", err).Write(w)
 		return
 	}
-
 	// Send the token back to the user
-	httpWriteJSON(w, map[string]string{"address": signer.AddressString()})
+	httpWriteJSON(w, UserAddressResponse{Address: signer.AddressString()})
 }
