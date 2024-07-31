@@ -2,8 +2,8 @@ package db
 
 type User struct {
 	ID            uint64               `json:"id" bson:"_id"`
-	Email         string               `json:"email" bson:"email"`       // unique (email format)
-	Password      string               `json:"password" bson:"password"` // hashed not null
+	Email         string               `json:"email" bson:"email"`
+	Password      string               `json:"password" bson:"password"`
 	Organizations []OrganizationMember `json:"organizations" bson:"organizations"`
 }
 
@@ -18,7 +18,7 @@ type OrganizationMember struct {
 
 type Organization struct {
 	Address         string           `json:"address" bson:"_id"`
-	Name            string           `json:"name" bson:"name"` // unique
+	Name            string           `json:"name" bson:"name"`
 	Type            OrganizationType `json:"type" bson:"type"`
 	Description     string           `json:"description" bson:"description"`
 	Size            uint64           `json:"size" bson:"size"`

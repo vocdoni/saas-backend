@@ -88,64 +88,6 @@ func (ms *MongoStorage) Close() {
 	}
 }
 
-func (ms *MongoStorage) initCollections(database string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	currentCollections, err := ms.client.Database(database).ListCollectionNames(ctx, nil)
-	if err != nil {
-		return err
-	}
-	// aux method to get a collection if it exists, or create it if it doesn't
-	getCollection := func(name string) (*mongo.Collection, error) {
-		alreadyCreated := false
-		for _, c := range currentCollections {
-			if c == name {
-				alreadyCreated = true
-				break
-			}
-		}
-		// if the collection doesn't exist, create it
-		if !alreadyCreated {
-			// if the collection has a validator create it with it
-			opts := options.CreateCollection()
-			if validator, ok := collectionsValidators[name]; ok {
-				opts.SetValidator(validator)
-			}
-			// create the collection
-			if err := ms.client.Database(database).CreateCollection(ctx, "users", opts); err != nil {
-				return nil, err
-			}
-		}
-		// return the collection
-		return ms.client.Database(database).Collection(name), nil
-	}
-	// users collection
-	if ms.users, err = getCollection("users"); err != nil {
-		return err
-	}
-	// organizations collection
-	if ms.organizations, err = getCollection("organizations"); err != nil {
-		return nil
-	}
-	return nil
-}
-
-func (ms *MongoStorage) createIndexes() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	// Create an index for the 'email' field on users
-	userEmailIndex := mongo.IndexModel{
-		Keys:    bson.D{{Key: "email", Value: 1}}, // 1 for ascending order
-		Options: nil,
-	}
-	if _, err := ms.users.Indexes().CreateOne(ctx, userEmailIndex); err != nil {
-		return fmt.Errorf("failed to create index on addresses for users: %w", err)
-	}
-
-	return nil
-}
-
 func (ms *MongoStorage) Reset() error {
 	log.Infof("resetting database")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
