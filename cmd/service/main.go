@@ -19,8 +19,8 @@ func main() {
 	flag.StringP("host", "h", "0.0.0.0", "listen address")
 	flag.IntP("port", "p", 8080, "listen port")
 	flag.StringP("secret", "s", "", "API secret")
-	flag.String("mongo-url", "", "The URL of the MongoDB server")
-	flag.String("mongo-db", "backend-saas", "The name of the MongoDB database")
+	flag.StringP("mongo-url", "murl", "", "The URL of the MongoDB server")
+	flag.StringP("mongo-db", "db", "backend-saas", "The name of the MongoDB database")
 	flag.StringP("vocdoniApi", "v", "https://api-dev.vocdoni.net/v2", "vocdoni node remote API URL")
 	// parse flags
 	flag.Parse()
