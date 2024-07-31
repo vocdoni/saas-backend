@@ -25,14 +25,14 @@ type APIConfig struct {
 	Port   int
 	Secret string
 	Chain  string
-	DB     db.Database
+	DB     *db.MongoStorage
 	Client *apiclient.HTTPclient
 }
 
 // API type represents the API HTTP server with JWT authentication capabilities.
 type API struct {
 	client *apiclient.HTTPclient
-	db     db.Database
+	db     *db.MongoStorage
 	Router *chi.Mux
 	auth   *jwtauth.JWTAuth
 	host   string

@@ -8,7 +8,7 @@ import (
 	flag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	"github.com/vocdoni/saas-backend/api"
-	"github.com/vocdoni/saas-backend/db/mongo"
+	"github.com/vocdoni/saas-backend/db"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 )
@@ -41,11 +41,11 @@ func main() {
 	mongoURL := viper.GetString("mongo-url")
 	mongoDB := viper.GetString("mongo-db")
 	// initialize the MongoDB database
-	db, err := mongo.New(mongoURL, mongoDB)
+	database, err := db.New(mongoURL, mongoDB)
 	if err != nil {
 		log.Fatalf("could not create the MongoDB database: %v", err)
 	}
-	defer db.Close()
+	defer database.Close()
 	// create the remote API client
 	apiClient, err := apiclient.New(apiEndpoint)
 	if err != nil {
@@ -57,7 +57,7 @@ func main() {
 		Host:   host,
 		Port:   port,
 		Secret: secret,
-		DB:     db,
+		DB:     database,
 		Client: apiClient,
 	}).Start()
 	// wait forever, as the server is running in a goroutine
