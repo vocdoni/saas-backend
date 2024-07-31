@@ -27,6 +27,11 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 	signReq := &TransactionData{}
 	if err := json.NewDecoder(r.Body).Decode(signReq); err != nil {
 		ErrMalformedBody.Withf("could not decode request body: %v", err).Write(w)
+		return
+	}
+	if signReq.Data == "" {
+		ErrMalformedBody.Withf("missing data field in request body").Write(w)
+		return
 	}
 	txData, err := base64.StdEncoding.DecodeString(signReq.Data)
 	if err != nil {
@@ -44,7 +49,7 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 	// sign the tx
 	signature, err := signer.SignVocdoniTx(txData, a.client.ChainID())
 	if err != nil {
-		ErrGenericInternalServerError.Withf("could not sign tx: %v", err).Write(w)
+		ErrInvalidTxFormat.Write(w)
 		return
 	}
 
