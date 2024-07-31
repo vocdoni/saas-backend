@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 
-	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/proto/build/go/models"
 	"google.golang.org/protobuf/proto"
@@ -34,30 +33,22 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 		ErrMalformedBody.Withf("could not decode the base64 data from the body").Write(w)
 		return
 	}
-	// decode the tx provided
-	tx := &models.Tx{}
-	if err := proto.Unmarshal(txData, tx); err != nil {
-		ErrMalformedBody.Write(w)
-		return
-	}
-	// create the payload to sign
-	payloadToSign, err := ethereum.BuildVocdoniProtoTxMessage(tx, a.vocdoniChain, ethereum.HashRaw(txData))
-	if err != nil {
-		ErrGenericInternalServerError.Withf("could not build payload to sign: %v", err).Write(w)
-		return
-	}
-	// get the user register from the user identifier
+
+	// get the user signer from the user identifier
 	signer, err := signerFromUserEmail(userID)
 	if err != nil {
 		ErrGenericInternalServerError.Withf("could not create signer for user: %v", err).Write(w)
 		return
 	}
-	// sign the payload
-	signature, err := ethcrypto.Sign(payloadToSign, &signer.Private)
+
+	// sign the tx
+	signature, err := signer.SignVocdoniTx(txData, a.client.ChainID())
 	if err != nil {
-		ErrGenericInternalServerError.Withf("could not sign payload: %v", err).Write(w)
+		ErrGenericInternalServerError.Withf("could not sign tx: %v", err).Write(w)
 		return
 	}
+
+	// marshal the signed tx and send it back
 	stx, err := proto.Marshal(
 		&models.SignedTx{
 			Tx:        txData,

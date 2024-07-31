@@ -10,26 +10,27 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/go-chi/jwtauth/v5"
 
+	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 )
 
 const (
-	jwtExpiration = 720 * time.Hour // 30 days
-	passwordSalt  = "vocdoni"       // salt for password hashing
+	jwtExpiration = 360 * time.Hour // 15 days
+	passwordSalt  = "vocdoni365"    // salt for password hashing
 )
 
 // API type represents the API HTTP server with JWT authentication capabilities.
 type API struct {
-	Router       *chi.Mux
-	auth         *jwtauth.JWTAuth
-	vocdoniChain string
+	Router *chi.Mux
+	auth   *jwtauth.JWTAuth
+	client *apiclient.HTTPclient
 }
 
 // New creates a new API HTTP server. It does not start the server. Use Start() for that.
-func New(secret, vocdoniChain string) *API {
+func New(secret string, client *apiclient.HTTPclient) *API {
 	return &API{
-		auth:         jwtauth.New("HS256", []byte(secret), nil),
-		vocdoniChain: vocdoniChain,
+		auth:   jwtauth.New("HS256", []byte(secret), nil),
+		client: client,
 	}
 }
 
@@ -56,8 +57,9 @@ func (a *API) router() http.Handler {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Throttle(100))
-	r.Use(middleware.ThrottleBacklog(5000, 40000, 30*time.Second))
-	r.Use(middleware.Timeout(30 * time.Second))
+	r.Use(middleware.ThrottleBacklog(5000, 40000, 60*time.Second))
+	r.Use(middleware.Timeout(45 * time.Second))
+
 	// Protected routes
 	r.Group(func(r chi.Router) {
 		// Seek, verify and validate JWT tokens
@@ -74,6 +76,7 @@ func (a *API) router() http.Handler {
 		log.Infow("new route", "method", "POST", "path", signTxEndpoint)
 		r.Post(signTxEndpoint, a.signTxHandler)
 	})
+
 	// Public routes
 	r.Group(func(r chi.Router) {
 		r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
