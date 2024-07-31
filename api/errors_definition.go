@@ -31,6 +31,7 @@ var (
 	ErrMalformedBody     = Error{Code: 40004, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("malformed JSON body")}
 	ErrDuplicateConflict = Error{Code: 40901, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("duplicate conflict")}
 	ErrInvalidUserData   = Error{Code: 40005, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid user data")}
+	ErrInvalidTxFormat   = Error{Code: 40006, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid transaction format")}
 
 	ErrMarshalingServerJSONFailed = Error{Code: 50001, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("marshaling (server-side) JSON failed")}
 	ErrGenericInternalServerError = Error{Code: 50002, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("internal server error")}

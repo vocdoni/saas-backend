@@ -27,8 +27,13 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 	signReq := &TransactionData{}
 	if err := json.NewDecoder(r.Body).Decode(signReq); err != nil {
 		ErrMalformedBody.Withf("could not decode request body: %v", err).Write(w)
+		return
 	}
-	txData, err := base64.StdEncoding.DecodeString(signReq.Data)
+	if signReq.TxPayload == "" {
+		ErrMalformedBody.Withf("missing data field in request body").Write(w)
+		return
+	}
+	txData, err := base64.StdEncoding.DecodeString(signReq.TxPayload)
 	if err != nil {
 		ErrMalformedBody.Withf("could not decode the base64 data from the body").Write(w)
 		return
@@ -42,7 +47,7 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 	// sign the tx
 	signature, err := signer.SignVocdoniTx(txData, a.client.ChainID())
 	if err != nil {
-		ErrGenericInternalServerError.Withf("could not sign tx: %v", err).Write(w)
+		ErrInvalidTxFormat.Write(w)
 		return
 	}
 	// marshal the signed tx and send it back
@@ -56,6 +61,6 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpWriteJSON(w, &TransactionData{
-		Data: base64.StdEncoding.EncodeToString(stx),
+		TxPayload: base64.StdEncoding.EncodeToString(stx),
 	})
 }
