@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/go-chi/jwtauth/v5"
+	"github.com/vocdoni/saas-backend/db"
 
 	"go.vocdoni.io/dvote/log"
 )
@@ -18,25 +19,42 @@ const (
 	passwordSalt  = "vocdoni"       // salt for password hashing
 )
 
+type APIConfig struct {
+	Host   string
+	Port   int
+	Secret string
+	Chain  string
+	DB     db.Database
+}
+
 // API type represents the API HTTP server with JWT authentication capabilities.
 type API struct {
-	Router       *chi.Mux
-	auth         *jwtauth.JWTAuth
-	vocdoniChain string
+	db       db.Database
+	Router   *chi.Mux
+	auth     *jwtauth.JWTAuth
+	chainEnv string
+	host     string
+	port     int
 }
 
 // New creates a new API HTTP server. It does not start the server. Use Start() for that.
-func New(secret, vocdoniChain string) *API {
+func New(conf *APIConfig) *API {
+	if conf == nil {
+		return nil
+	}
 	return &API{
-		auth:         jwtauth.New("HS256", []byte(secret), nil),
-		vocdoniChain: vocdoniChain,
+		db:       conf.DB,
+		auth:     jwtauth.New("HS256", []byte(conf.Secret), nil),
+		chainEnv: conf.Chain,
+		host:     conf.Host,
+		port:     conf.Port,
 	}
 }
 
 // Start starts the API HTTP server (non blocking).
-func (a *API) Start(host string, port int) {
+func (a *API) Start() {
 	go func() {
-		if err := http.ListenAndServe(fmt.Sprintf("%s:%d", host, port), a.router()); err != nil {
+		if err := http.ListenAndServe(fmt.Sprintf("%s:%d", a.host, a.port), a.router()); err != nil {
 			log.Fatalf("failed to start the API server: %v", err)
 		}
 	}()
@@ -88,5 +106,6 @@ func (a *API) router() http.Handler {
 		log.Infow("new route", "method", "POST", "path", authLoginEndpoint)
 		r.Post(authLoginEndpoint, a.authLoginHandler)
 	})
+	a.Router = r
 	return r
 }

@@ -41,7 +41,7 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// create the payload to sign
-	payloadToSign, err := ethereum.BuildVocdoniProtoTxMessage(tx, a.vocdoniChain, ethereum.HashRaw(txData))
+	payloadToSign, err := ethereum.BuildVocdoniProtoTxMessage(tx, a.chainEnv, ethereum.HashRaw(txData))
 	if err != nil {
 		ErrGenericInternalServerError.Withf("could not build payload to sign: %v", err).Write(w)
 		return

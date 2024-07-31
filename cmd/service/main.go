@@ -8,6 +8,7 @@ import (
 	flag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	"github.com/vocdoni/saas-backend/api"
+	"github.com/vocdoni/saas-backend/db/mongo"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -18,6 +19,8 @@ func main() {
 	flag.StringP("host", "h", "0.0.0.0", "API endpoint listen address")
 	flag.IntP("port", "p", 9090, "API endpoint http port")
 	flag.StringP("secret", "s", "vocdoniSuperSecret", "API secret")
+	flag.String("mongo-url", "", "The URL of the MongoDB server")
+	flag.String("mongo-db", "backend-saas", "The name of the MongoDB database")
 	// parse flags
 	flag.Parse()
 	// initialize Viper
@@ -31,8 +34,21 @@ func main() {
 	port := viper.GetInt("port")
 	chain := viper.GetString("chain")
 	secret := viper.GetString("secret")
+	mongoURL := viper.GetString("mongo-url")
+	mongoDB := viper.GetString("mongo-db")
 
-	api.New(secret, chain).Start(host, port)
+	db, err := mongo.New(mongoURL, mongoDB)
+	if err != nil {
+		log.Fatalf("could not create the MongoDB database: %v", err)
+	}
+
+	api.New(&api.APIConfig{
+		Host:   host,
+		Port:   port,
+		Secret: secret,
+		Chain:  chain,
+		DB:     db,
+	}).Start()
 
 	// Wait forever, as the server is running in a goroutine
 	log.Infow("server started", "host", host, "port", port)
