@@ -7,8 +7,9 @@ import (
 
 	flag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
+	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api"
-	"go.vocdoni.io/dvote/apiclient"
+
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -19,6 +20,7 @@ func main() {
 	flag.StringP("host", "h", "0.0.0.0", "listen address")
 	flag.IntP("port", "p", 8080, "listen port")
 	flag.StringP("secret", "s", "", "API secret")
+	flag.StringP("privateKey", "k", "", "private key for the Vocdoni account")
 	// parse flags
 	flag.Parse()
 
@@ -33,20 +35,19 @@ func main() {
 	port := viper.GetInt("port")
 	apiEndpoint := viper.GetString("vocdoniApi")
 	secret := viper.GetString("secret")
+	privKey := viper.GetString("privateKey")
 
-	if secret == "" {
-		log.Fatal("secret is required")
+	if secret == "" || privKey == "" {
+		log.Fatal("secret and privateKey are required")
 	}
 
-	// create the remote API client
-	apiClient, err := apiclient.New(apiEndpoint)
+	acc, err := account.New(privKey, apiEndpoint)
 	if err != nil {
-		log.Fatalf("failed to create API client: %v", err)
+		log.Fatal(err)
 	}
-	log.Infow("API client created", "endpoint", apiEndpoint, "chainID", apiClient.ChainID())
 
 	// create the local API server
-	api.New(secret, apiClient).Start(host, port)
+	api.New(secret, acc).Start(host, port)
 
 	// Wait forever, as the server is running in a goroutine
 	log.Infow("server started", "host", host, "port", port)

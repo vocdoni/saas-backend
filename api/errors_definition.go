@@ -25,14 +25,17 @@ import (
 // Do note that HTTPstatus 204 No Content implies the response body will be empty,
 // so the Code and Message will actually be discarded, never sent to the client
 var (
-	ErrUnauthorized      = Error{Code: 40001, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("user not authorized")}
-	ErrEmailMalformed    = Error{Code: 40002, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("email malformed")}
-	ErrPasswordTooShort  = Error{Code: 40003, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("password too short")}
-	ErrMalformedBody     = Error{Code: 40004, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("malformed JSON body")}
-	ErrDuplicateConflict = Error{Code: 40901, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("duplicate conflict")}
-	ErrInvalidUserData   = Error{Code: 40005, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid user data")}
-	ErrInvalidTxFormat   = Error{Code: 40006, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid transaction format")}
+	ErrUnauthorized            = Error{Code: 40001, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("user not authorized")}
+	ErrEmailMalformed          = Error{Code: 40002, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("email malformed")}
+	ErrPasswordTooShort        = Error{Code: 40003, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("password too short")}
+	ErrMalformedBody           = Error{Code: 40004, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("malformed JSON body")}
+	ErrDuplicateConflict       = Error{Code: 40901, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("duplicate conflict")}
+	ErrInvalidUserData         = Error{Code: 40005, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid user data")}
+	ErrCouldNotSignTransaction = Error{Code: 40006, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("could not sign transaction")}
+	ErrInvalidTxFormat         = Error{Code: 40007, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid transaction format")}
+	ErrTxTypeNotAllowed        = Error{Code: 40008, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("transaction type not allowed")}
 
-	ErrMarshalingServerJSONFailed = Error{Code: 50001, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("marshaling (server-side) JSON failed")}
-	ErrGenericInternalServerError = Error{Code: 50002, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("internal server error")}
+	ErrMarshalingServerJSONFailed  = Error{Code: 50001, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("marshaling (server-side) JSON failed")}
+	ErrGenericInternalServerError  = Error{Code: 50002, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("internal server error")}
+	ErrCouldNotCreateFaucetPackage = Error{Code: 50003, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("could not create faucet package")}
 )

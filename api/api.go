@@ -9,8 +9,8 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/go-chi/jwtauth/v5"
+	"github.com/vocdoni/saas-backend/account"
 
-	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -23,14 +23,14 @@ const (
 type API struct {
 	Router *chi.Mux
 	auth   *jwtauth.JWTAuth
-	client *apiclient.HTTPclient
+	acc    *account.Account
 }
 
 // New creates a new API HTTP server. It does not start the server. Use Start() for that.
-func New(secret string, client *apiclient.HTTPclient) *API {
+func New(secret string, acc *account.Account) *API {
 	return &API{
-		auth:   jwtauth.New("HS256", []byte(secret), nil),
-		client: client,
+		auth: jwtauth.New("HS256", []byte(secret), nil),
+		acc:  acc,
 	}
 }
 
