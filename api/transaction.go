@@ -61,49 +61,52 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// check the tx payload
-	switch tx.Payload.(type) {
-	case *models.Tx_SetAccount:
-		// check the account is the same as the user
-		txSetAccount := tx.GetSetAccount()
-		if txSetAccount == nil || txSetAccount.Account == nil || txSetAccount.InfoURI == nil {
-			ErrInvalidTxFormat.With("missing fields").Write(w)
-			return
-		}
-		if !bytes.Equal(txSetAccount.GetAccount(), organizationSigner.Address().Bytes()) {
-			ErrUnauthorized.With("invalid account").Write(w)
-			return
-		}
-		log.Infow("signing SetAccount transaction", "user", userID, "type", txSetAccount.Txtype.String())
+	if !FullTransparentMode {
+		switch tx.Payload.(type) {
+		case *models.Tx_SetAccount:
+			// check the account is the same as the user
+			txSetAccount := tx.GetSetAccount()
+			if txSetAccount == nil || txSetAccount.Account == nil || txSetAccount.InfoURI == nil {
+				ErrInvalidTxFormat.With("missing fields").Write(w)
+				return
+			}
+			if !bytes.Equal(txSetAccount.GetAccount(), organizationSigner.Address().Bytes()) {
+				ErrUnauthorized.With("invalid account").Write(w)
+				return
+			}
+			log.Infow("signing SetAccount transaction", "user", userID, "type", txSetAccount.Txtype.String())
 
-		// check the tx subtype
-		switch txSetAccount.Txtype {
-		case models.TxType_CREATE_ACCOUNT:
-			// generate a new faucet package if it's not present and include it in the tx
-			if txSetAccount.FaucetPackage == nil {
-				faucetPkg, err := a.acc.FaucetPackage(organizationSigner.AddressString(), bootStrapFaucetAmount)
-				if err != nil {
-					ErrCouldNotCreateFaucetPackage.WithErr(err).Write(w)
-					return
-				}
-				txSetAccount.FaucetPackage = faucetPkg
-				tx = &models.Tx{
-					Payload: &models.Tx_SetAccount{
-						SetAccount: txSetAccount,
-					},
+			// check the tx subtype
+			switch txSetAccount.Txtype {
+			case models.TxType_CREATE_ACCOUNT:
+				// generate a new faucet package if it's not present and include it in the tx
+				if txSetAccount.FaucetPackage == nil {
+					faucetPkg, err := a.acc.FaucetPackage(organizationSigner.AddressString(), bootStrapFaucetAmount)
+					if err != nil {
+						ErrCouldNotCreateFaucetPackage.WithErr(err).Write(w)
+						return
+					}
+					txSetAccount.FaucetPackage = faucetPkg
+					tx = &models.Tx{
+						Payload: &models.Tx_SetAccount{
+							SetAccount: txSetAccount,
+						},
+					}
 				}
 			}
+		case *models.Tx_SetProcess:
+			log.Infow("signing SetProcess transaction", "user", userID)
+		case *models.Tx_CollectFaucet:
+			log.Infow("signing CollectFaucet transaction", "user", userID)
+		case *models.Tx_NewProcess:
+			log.Infow("signing NewProcess transaction", "user", userID)
+		default:
+			log.Warnw("transaction type not allowed", "user", userID, "type", fmt.Sprintf("%T", tx.Payload))
+			ErrTxTypeNotAllowed.Write(w)
+			return
 		}
-
-	case *models.Tx_SetProcess:
-		log.Infow("signing SetProcess transaction", "user", userID)
-	case *models.Tx_CollectFaucet:
-		log.Infow("signing CollectFaucet transaction", "user", userID)
-	case *models.Tx_NewProcess:
-		log.Infow("signing NewProcess transaction", "user", userID)
-	default:
-		log.Warnw("transaction type not allowed", "user", userID, "type", fmt.Sprintf("%T", tx.Payload))
-		ErrTxTypeNotAllowed.Write(w)
-		return
+	} else {
+		log.Infow("signing transaction in full transparent mode", "user", userID, "type", fmt.Sprintf("%T", tx.Payload))
 	}
 
 	// sign the tx

@@ -19,6 +19,9 @@ const (
 	passwordSalt  = "vocdoni365"    // salt for password hashing
 )
 
+// FullTransparentMode if true allows signing all transactions and does not modify any of them.
+var FullTransparentMode = false
+
 // API type represents the API HTTP server with JWT authentication capabilities.
 type API struct {
 	Router *chi.Mux

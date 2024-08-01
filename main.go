@@ -21,6 +21,7 @@ func main() {
 	flag.IntP("port", "p", 8080, "listen port")
 	flag.StringP("secret", "s", "", "API secret")
 	flag.StringP("privateKey", "k", "", "private key for the Vocdoni account")
+	flag.BoolP("fullTransparentMode", "a", false, "allow all transactions and do not modify any of them")
 	// parse flags
 	flag.Parse()
 
@@ -36,6 +37,7 @@ func main() {
 	apiEndpoint := viper.GetString("vocdoniApi")
 	secret := viper.GetString("secret")
 	privKey := viper.GetString("privateKey")
+	api.FullTransparentMode = viper.GetBool("fullTransparentMode")
 
 	if secret == "" || privKey == "" {
 		log.Fatal("secret and privateKey are required")
