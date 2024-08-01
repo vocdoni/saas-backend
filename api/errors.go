@@ -44,6 +44,10 @@ func (e Error) Write(w http.ResponseWriter) {
 	if err != nil {
 		log.Warn(err)
 		http.Error(w, "marshal failed", http.StatusInternalServerError)
+		return
+	}
+	if log.Level() == log.LogLevelDebug {
+		log.Debugw("API error response", "error", e.Error(), "code", e.Code, "httpStatus", e.HTTPstatus)
 	}
 	http.Error(w, string(msg), e.HTTPstatus)
 }

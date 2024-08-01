@@ -77,7 +77,6 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 
 		// check the tx subtype
 		switch txSetAccount.Txtype {
-
 		case models.TxType_CREATE_ACCOUNT:
 			// generate a new faucet package if it's not present and include it in the tx
 			if txSetAccount.FaucetPackage == nil {
@@ -108,7 +107,7 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// sign the tx
-	stx, err := a.acc.SignTransaction(tx)
+	stx, err := a.acc.SignTransaction(tx, organizationSigner)
 	if err != nil {
 		ErrCouldNotSignTransaction.WithErr(err).Write(w)
 		return

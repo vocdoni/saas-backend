@@ -64,14 +64,14 @@ func New(privateKey string, apiEndpoint string) (*Account, error) {
 
 // SignTransaction signs a transaction with the account's private key.
 // Returns the payload of the signed protobuf transaction (models.SignedTx).
-func (a *Account) SignTransaction(tx *models.Tx) ([]byte, error) {
+func (a *Account) SignTransaction(tx *models.Tx, signer *ethereum.SignKeys) ([]byte, error) {
 	// marshal the tx
 	txData, err := proto.Marshal(tx)
 	if err != nil {
 		return nil, fmt.Errorf("could not marshal tx: %w", err)
 	}
 	// sign the tx
-	signature, err := a.signer.SignVocdoniTx(txData, a.client.ChainID())
+	signature, err := signer.SignVocdoniTx(txData, a.client.ChainID())
 	if err != nil {
 		return nil, fmt.Errorf("could not sign tx: %w", err)
 	}
