@@ -13,7 +13,6 @@ import (
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/dvote/vochain"
 	"go.vocdoni.io/proto/build/go/models"
-	"google.golang.org/protobuf/proto"
 )
 
 // Account handles the account operations that include signing transactions, creating faucet packages, etc.
@@ -60,32 +59,6 @@ func New(privateKey string, apiEndpoint string) (*Account, error) {
 		client: apiClient,
 		signer: &signer,
 	}, nil
-}
-
-// SignTransaction signs a transaction with the account's private key.
-// Returns the payload of the signed protobuf transaction (models.SignedTx).
-func (a *Account) SignTransaction(tx *models.Tx, signer *ethereum.SignKeys) ([]byte, error) {
-	// marshal the tx
-	txData, err := proto.Marshal(tx)
-	if err != nil {
-		return nil, fmt.Errorf("could not marshal tx: %w", err)
-	}
-	// sign the tx
-	signature, err := signer.SignVocdoniTx(txData, a.client.ChainID())
-	if err != nil {
-		return nil, fmt.Errorf("could not sign tx: %w", err)
-	}
-
-	// marshal the signed tx and send it back
-	stx, err := proto.Marshal(
-		&models.SignedTx{
-			Tx:        txData,
-			Signature: signature,
-		})
-	if err != nil {
-		return nil, fmt.Errorf("could not marshal signed tx: %w", err)
-	}
-	return stx, nil
 }
 
 // FaucetPackage generates a faucet package for the given address and amount.

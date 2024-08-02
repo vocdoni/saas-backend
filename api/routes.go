@@ -16,5 +16,6 @@ const (
 	currentUserAddressEndpoint = "/users/address"
 
 	// signer routes
-	signTxEndpoint = "/transactions"
+	signTxEndpoint      = "/transactions"
+	signMessageEndpoint = "/transactions/message"
 )

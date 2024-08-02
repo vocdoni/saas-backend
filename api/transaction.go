@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/vocdoni/saas-backend/account"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/proto/build/go/models"
@@ -118,5 +119,42 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 
 	httpWriteJSON(w, &TransactionData{
 		TxPayload: base64.StdEncoding.EncodeToString(stx),
+	})
+}
+
+// signMessageHandler signs a message with the user's private key. Only certain messages are allowed to be signed.
+func (a *API) signMessageHandler(w http.ResponseWriter, r *http.Request) {
+	// retrieve the user identifier from the HTTP header
+	userID := r.Header.Get("X-User-Id")
+	if userID == "" {
+		ErrUnauthorized.Write(w)
+		return
+	}
+	// read the message from the request body
+	signReq := &MessageSignature{}
+	if err := json.NewDecoder(r.Body).Decode(signReq); err != nil {
+		ErrMalformedBody.Withf("could not decode request body: %v", err).Write(w)
+		return
+	}
+	if signReq.Payload == nil {
+		ErrMalformedBody.Withf("missing payload field in request body").Write(w)
+		return
+	}
+
+	// get the user signer from the user identifier
+	organizationSigner, err := signerFromUserEmail(userID)
+	if err != nil {
+		ErrGenericInternalServerError.Withf("could not create signer for user: %v", err).Write(w)
+		return
+	}
+
+	// sign the message
+	signature, err := account.SignMessage(signReq.Payload, organizationSigner)
+	if err != nil {
+		ErrGenericInternalServerError.With("could not sign message").Write(w)
+	}
+
+	httpWriteJSON(w, &MessageSignature{
+		Signature: signature,
 	})
 }

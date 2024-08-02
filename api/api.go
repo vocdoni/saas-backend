@@ -78,6 +78,9 @@ func (a *API) router() http.Handler {
 		// Sign a payload
 		log.Infow("new route", "method", "POST", "path", signTxEndpoint)
 		r.Post(signTxEndpoint, a.signTxHandler)
+		// Sign a message
+		log.Infow("new route", "method", "POST", "path", signMessageEndpoint)
+		r.Post(signMessageEndpoint, a.signMessageHandler)
 	})
 
 	// Public routes
