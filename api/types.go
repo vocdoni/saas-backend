@@ -6,27 +6,39 @@ import (
 	"go.vocdoni.io/dvote/types"
 )
 
-// Register is the request to register a new user.
-type Register struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+// Organization is the struct that represents an organization in the API
+type Organization struct {
+	Address     string        `json:"address"`
+	Name        string        `json:"name"`
+	Type        string        `json:"type"`
+	Description string        `json:"description"`
+	Size        uint64        `json:"size"`
+	Color       string        `json:"color"`
+	Logo        string        `json:"logo"`
+	Subdomain   string        `json:"subdomain"`
+	Timezone    string        `json:"timezone"`
+	Parent      *Organization `json:"parent"`
 }
 
-// Login is the request to login a user.
-type Login struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+// UserOrganization is the struct that represents the organization of a user in
+// the API, including the role of the user in the organization.
+type UserOrganization struct {
+	Role         string        `json:"role"`
+	Organization *Organization `json:"organization"`
+}
+
+// UserInfo is the request to register a new user.
+type UserInfo struct {
+	Email         string              `json:"email,omitempty"`
+	Password      string              `json:"password,omitempty"`
+	Address       string              `json:"address,omitempty"`
+	Organizations []*UserOrganization `json:"organizations,omitempty"`
 }
 
 // LoginResponse is the response of the login request which includes the JWT token
 type LoginResponse struct {
 	Token    string    `json:"token"`
 	Expirity time.Time `json:"expirity"`
-}
-
-// UserAddressResponse is the response of the address request for a user
-type UserAddressResponse struct {
-	Address string `json:"address"`
 }
 
 // TransactionData is the struct that contains the data of a transaction to

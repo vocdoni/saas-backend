@@ -9,7 +9,7 @@ var collectionsValidators = map[string]bson.M{
 var usersCollectionValidator = bson.M{
 	"$jsonSchema": bson.M{
 		"bsonType": "object",
-		"required": []string{"id", "email", "password"},
+		"required": []string{"_id", "email", "password"},
 		"properties": bson.M{
 			"id": bson.M{
 				"bsonType":    "int",
@@ -19,7 +19,7 @@ var usersCollectionValidator = bson.M{
 			"email": bson.M{
 				"bsonType":    "string",
 				"description": "must be a string and is required",
-				"pattern":     `^[\w-\.]+@([\w-]+\.)+[\w-]{2,}$`,
+				"pattern":     `^[\w.\-]+@([\w\-]+\.)+[\w]{2,}$`,
 			},
 			"password": bson.M{
 				"bsonType":    "string",

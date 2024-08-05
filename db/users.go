@@ -9,6 +9,9 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+// nextUserID internal method returns the next available user ID. If an error
+// occurs, it returns the error. This method must be called with the keysLock
+// held.
 func (ms *MongoStorage) nextUserID(ctx context.Context) (uint64, error) {
 	var user User
 	opts := options.FindOne().SetSort(bson.D{{Key: "_id", Value: -1}})
@@ -22,6 +25,9 @@ func (ms *MongoStorage) nextUserID(ctx context.Context) (uint64, error) {
 	return user.ID + 1, nil
 }
 
+// UserByEmail method returns the user with the given email. If the user doesn't
+// exist, it returns a specific error. If other errors occur, it returns the
+// error.
 func (ms *MongoStorage) UserByEmail(email string) (*User, error) {
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
@@ -40,13 +46,15 @@ func (ms *MongoStorage) UserByEmail(email string) (*User, error) {
 	return user, nil
 }
 
+// User method returns the user with the given ID. If the user doesn't exist, it
+// returns a specific error. If other errors occur, it returns the error.
 func (ms *MongoStorage) User(id uint64) (*User, error) {
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
-
+	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
+	// find the user in the database
 	result := ms.users.FindOne(ctx, bson.M{"_id": id})
 	user := &User{}
 	if err := result.Decode(user); err != nil {
@@ -58,14 +66,17 @@ func (ms *MongoStorage) User(id uint64) (*User, error) {
 	return user, nil
 }
 
+// SetUser method creates or updates the user in the database. If the user
+// already exists, it updates the fields that have changed. If the user doesn't
+// exist, it creates it. If an error occurs, it returns the error.
 func (ms *MongoStorage) SetUser(user *User) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-
+	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	// check if the user exists or needs to be created
-	if user.ID != 0 {
+	if user.ID > 0 {
 		// if the user exists, update it with the new data
 		updateDoc, err := dynamicUpdateDocument(user, nil)
 		if err != nil {
@@ -88,13 +99,15 @@ func (ms *MongoStorage) SetUser(user *User) error {
 	return nil
 }
 
+// DelUser method deletes the user from the database. If an error occurs, it
+// returns the error.
 func (ms *MongoStorage) DelUser(user *User) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-
+	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
+	// delete the user from the database
 	_, err := ms.users.DeleteOne(ctx, bson.M{"_id": user.ID})
 	return err
 }

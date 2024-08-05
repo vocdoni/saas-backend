@@ -20,8 +20,8 @@ func main() {
 	flag.StringP("host", "h", "0.0.0.0", "listen address")
 	flag.IntP("port", "p", 8080, "listen port")
 	flag.StringP("secret", "s", "", "API secret")
-	flag.StringP("mongo-url", "murl", "", "The URL of the MongoDB server")
-	flag.StringP("mongo-db", "db", "backend-saas", "The name of the MongoDB database")
+	flag.StringP("mongoURL", "m", "", "The URL of the MongoDB server")
+	flag.StringP("mongoDB", "d", "saasdb", "The name of the MongoDB database")
 	flag.StringP("vocdoniApi", "v", "https://api-dev.vocdoni.net/v2", "vocdoni node remote API URL")
 	flag.StringP("privateKey", "k", "", "private key for the Vocdoni account")
 	flag.BoolP("fullTransparentMode", "a", false, "allow all transactions and do not modify any of them")
@@ -41,8 +41,8 @@ func main() {
 	if secret == "" {
 		log.Fatal("secret is required")
 	}
-	mongoURL := viper.GetString("mongo-url")
-	mongoDB := viper.GetString("mongo-db")
+	mongoURL := viper.GetString("mongoURL")
+	mongoDB := viper.GetString("mongoDB")
 	// initialize the MongoDB database
 	database, err := db.New(mongoURL, mongoDB)
 	if err != nil {
@@ -51,8 +51,11 @@ func main() {
 	defer database.Close()
 	// create the remote API client
 	apiClient, err := apiclient.New(apiEndpoint)
+	if err != nil {
+		log.Fatalf("could not create the remote API client: %v", err)
+	}
 	privKey := viper.GetString("privateKey")
-	api.FullTransparentMode = viper.GetBool("fullTransparentMode")
+	fullTransparentMode := viper.GetBool("fullTransparentMode")
 	// check the required parameters
 	if secret == "" || privKey == "" {
 		log.Fatal("secret and privateKey are required")
@@ -65,12 +68,13 @@ func main() {
 	log.Infow("API client created", "endpoint", apiEndpoint, "chainID", apiClient.ChainID())
 	// create the local API server
 	api.New(&api.APIConfig{
-		Host:    host,
-		Port:    port,
-		Secret:  secret,
-		DB:      database,
-		Client:  apiClient,
-		Account: acc,
+		Host:                host,
+		Port:                port,
+		Secret:              secret,
+		DB:                  database,
+		Client:              apiClient,
+		Account:             acc,
+		FullTransparentMode: fullTransparentMode,
 	}).Start()
 	// wait forever, as the server is running in a goroutine
 	log.Infow("server started", "host", host, "port", port)

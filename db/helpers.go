@@ -11,10 +11,14 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+// initCollections creates the collections in the MongoDB database if they
+// don't exist. It also includes the registered validations for every collection
+// and creates the indexes for the collections.
 func (ms *MongoStorage) initCollections(database string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	currentCollections, err := ms.client.Database(database).ListCollectionNames(ctx, nil)
+	// get the current collections names to create only the missing ones
+	currentCollections, err := ms.collectionNames(ctx, database)
 	if err != nil {
 		return err
 	}
@@ -35,7 +39,7 @@ func (ms *MongoStorage) initCollections(database string) error {
 				opts.SetValidator(validator)
 			}
 			// create the collection
-			if err := ms.client.Database(database).CreateCollection(ctx, "users", opts); err != nil {
+			if err := ms.client.Database(database).CreateCollection(ctx, name, opts); err != nil {
 				return nil, err
 			}
 		}
@@ -53,6 +57,32 @@ func (ms *MongoStorage) initCollections(database string) error {
 	return nil
 }
 
+// collectionNames returns the names of the collections in the given database.
+// It uses the ListCollections method of the MongoDB client to get the
+// collections info and decode the names from the result.
+func (ms *MongoStorage) collectionNames(ctx context.Context, database string) ([]string, error) {
+	collectionsCursor, err := ms.client.Database(database).ListCollections(ctx, bson.D{})
+	if err != nil {
+		return nil, err
+	}
+	defer collectionsCursor.Close(ctx)
+	collections := []bson.D{}
+	if err := collectionsCursor.All(ctx, &collections); err != nil {
+		return nil, err
+	}
+	names := []string{}
+	for _, col := range collections {
+		for _, v := range col {
+			if v.Key == "name" {
+				names = append(names, v.Value.(string))
+			}
+		}
+	}
+	return names, nil
+}
+
+// createIndexes creates the indexes for the collections in the MongoDB
+// database. Add more indexes here as needed.
 func (ms *MongoStorage) createIndexes() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -90,16 +120,13 @@ func dynamicUpdateDocument(item interface{}, alwaysUpdateTags []string) (bson.M,
 	if !val.IsValid() || val.Kind() != reflect.Struct {
 		return nil, fmt.Errorf("input must be a valid struct")
 	}
-
 	update := bson.M{}
 	typ := val.Type()
-
 	// Create a map for quick lookup
 	alwaysUpdateMap := make(map[string]bool, len(alwaysUpdateTags))
 	for _, tag := range alwaysUpdateTags {
 		alwaysUpdateMap[tag] = true
 	}
-
 	for i := 0; i < val.NumField(); i++ {
 		field := val.Field(i)
 		if !field.CanInterface() {
@@ -117,6 +144,5 @@ func dynamicUpdateDocument(item interface{}, alwaysUpdateTags []string) (bson.M,
 			update[tag] = field.Interface()
 		}
 	}
-
 	return bson.M{"$set": update}, nil
 }

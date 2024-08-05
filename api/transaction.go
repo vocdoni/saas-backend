@@ -62,7 +62,7 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// check the tx payload
-	if !FullTransparentMode {
+	if !a.transparentMode {
 		switch tx.Payload.(type) {
 		case *models.Tx_SetAccount:
 			// check the account is the same as the user

@@ -28,20 +28,21 @@ type APIConfig struct {
 	DB      *db.MongoStorage
 	Client  *apiclient.HTTPclient
 	Account *account.Account
+	// FullTransparentMode if true allows signing all transactions and does not
+	// modify any of them.
+	FullTransparentMode bool
 }
-
-// FullTransparentMode if true allows signing all transactions and does not modify any of them.
-var FullTransparentMode = false
 
 // API type represents the API HTTP server with JWT authentication capabilities.
 type API struct {
-	db      *db.MongoStorage
-	auth    *jwtauth.JWTAuth
-	host    string
-	port    int
-	router  *chi.Mux
-	client  *apiclient.HTTPclient
-	account *account.Account
+	db              *db.MongoStorage
+	auth            *jwtauth.JWTAuth
+	host            string
+	port            int
+	router          *chi.Mux
+	client          *apiclient.HTTPclient
+	account         *account.Account
+	transparentMode bool
 }
 
 // New creates a new API HTTP server. It does not start the server. Use Start() for that.
@@ -50,12 +51,13 @@ func New(conf *APIConfig) *API {
 		return nil
 	}
 	return &API{
-		db:      conf.DB,
-		auth:    jwtauth.New("HS256", []byte(conf.Secret), nil),
-		host:    conf.Host,
-		port:    conf.Port,
-		client:  conf.Client,
-		account: conf.Account,
+		db:              conf.DB,
+		auth:            jwtauth.New("HS256", []byte(conf.Secret), nil),
+		host:            conf.Host,
+		port:            conf.Port,
+		client:          conf.Client,
+		account:         conf.Account,
+		transparentMode: conf.FullTransparentMode,
 	}
 }
 
@@ -85,22 +87,22 @@ func (a *API) initRouter() http.Handler {
 	r.Use(middleware.ThrottleBacklog(5000, 40000, 60*time.Second))
 	r.Use(middleware.Timeout(45 * time.Second))
 
-	// Protected routes
+	// protected routes
 	r.Group(func(r chi.Router) {
-		// Seek, verify and validate JWT tokens
+		// seek, verify and validate JWT tokens
 		r.Use(jwtauth.Verifier(a.auth))
-		// Handle valid JWT tokens.
+		// handle valid JWT tokens.
 		r.Use(a.authenticator)
-		// Refresh the token
+		// refresh the token
 		log.Infow("new route", "method", "POST", "path", authRefresTokenEndpoint)
 		r.Post(authRefresTokenEndpoint, a.refreshTokenHandler)
-		// Get the address
-		log.Infow("new route", "method", "GET", "path", currentUserAddressEndpoint)
-		r.Get(currentUserAddressEndpoint, a.addressHandler)
-		// Sign a payload
+		// get user information
+		log.Infow("new route", "method", "GET", "path", myUsersEndpoint)
+		r.Get(myUsersEndpoint, a.userInfoHandler)
+		// sign a payload
 		log.Infow("new route", "method", "POST", "path", signTxEndpoint)
 		r.Post(signTxEndpoint, a.signTxHandler)
-		// Sign a message
+		// sign a message
 		log.Infow("new route", "method", "POST", "path", signMessageEndpoint)
 		r.Post(signMessageEndpoint, a.signMessageHandler)
 	})
