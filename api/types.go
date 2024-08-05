@@ -2,6 +2,8 @@ package api
 
 import (
 	"time"
+
+	"go.vocdoni.io/dvote/types"
 )
 
 // Register is the request to register a new user.
@@ -31,4 +33,11 @@ type UserAddressResponse struct {
 // be signed, but also is used to return the signed transaction.
 type TransactionData struct {
 	TxPayload string `json:"txPayload"`
+}
+
+// MessageSignature is the struct that contains the payload and the signature.
+// Its used to receive and return a signed message.
+type MessageSignature struct {
+	Payload   []byte         `json:"payload,omitempty"`
+	Signature types.HexBytes `json:"signature,omitempty"`
 }

@@ -7,6 +7,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
+	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api"
 	"github.com/vocdoni/saas-backend/db"
 	"go.vocdoni.io/dvote/apiclient"
@@ -22,6 +23,8 @@ func main() {
 	flag.StringP("mongo-url", "murl", "", "The URL of the MongoDB server")
 	flag.StringP("mongo-db", "db", "backend-saas", "The name of the MongoDB database")
 	flag.StringP("vocdoniApi", "v", "https://api-dev.vocdoni.net/v2", "vocdoni node remote API URL")
+	flag.StringP("privateKey", "k", "", "private key for the Vocdoni account")
+	flag.BoolP("fullTransparentMode", "a", false, "allow all transactions and do not modify any of them")
 	// parse flags
 	flag.Parse()
 	// initialize Viper
@@ -48,17 +51,26 @@ func main() {
 	defer database.Close()
 	// create the remote API client
 	apiClient, err := apiclient.New(apiEndpoint)
+	privKey := viper.GetString("privateKey")
+	api.FullTransparentMode = viper.GetBool("fullTransparentMode")
+	// check the required parameters
+	if secret == "" || privKey == "" {
+		log.Fatal("secret and privateKey are required")
+	}
+	// create the Vocdoni client account with the private key
+	acc, err := account.New(privKey, apiEndpoint)
 	if err != nil {
-		log.Fatalf("failed to create API client: %v", err)
+		log.Fatal(err)
 	}
 	log.Infow("API client created", "endpoint", apiEndpoint, "chainID", apiClient.ChainID())
 	// create the local API server
 	api.New(&api.APIConfig{
-		Host:   host,
-		Port:   port,
-		Secret: secret,
-		DB:     database,
-		Client: apiClient,
+		Host:    host,
+		Port:    port,
+		Secret:  secret,
+		DB:      database,
+		Client:  apiClient,
+		Account: acc,
 	}).Start()
 	// wait forever, as the server is running in a goroutine
 	log.Infow("server started", "host", host, "port", port)

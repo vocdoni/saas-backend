@@ -85,7 +85,6 @@ func (ms *MongoStorage) SetUser(user *User) error {
 			return err
 		}
 	}
-
 	return nil
 }
 

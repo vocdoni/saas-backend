@@ -9,8 +9,8 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/go-chi/jwtauth/v5"
+	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/db"
-
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 )
@@ -21,22 +21,27 @@ const (
 )
 
 type APIConfig struct {
-	Host   string
-	Port   int
-	Secret string
-	Chain  string
-	DB     *db.MongoStorage
-	Client *apiclient.HTTPclient
+	Host    string
+	Port    int
+	Secret  string
+	Chain   string
+	DB      *db.MongoStorage
+	Client  *apiclient.HTTPclient
+	Account *account.Account
 }
+
+// FullTransparentMode if true allows signing all transactions and does not modify any of them.
+var FullTransparentMode = false
 
 // API type represents the API HTTP server with JWT authentication capabilities.
 type API struct {
-	client *apiclient.HTTPclient
-	db     *db.MongoStorage
-	Router *chi.Mux
-	auth   *jwtauth.JWTAuth
-	host   string
-	port   int
+	db      *db.MongoStorage
+	auth    *jwtauth.JWTAuth
+	host    string
+	port    int
+	router  *chi.Mux
+	client  *apiclient.HTTPclient
+	account *account.Account
 }
 
 // New creates a new API HTTP server. It does not start the server. Use Start() for that.
@@ -45,25 +50,26 @@ func New(conf *APIConfig) *API {
 		return nil
 	}
 	return &API{
-		db:     conf.DB,
-		auth:   jwtauth.New("HS256", []byte(conf.Secret), nil),
-		host:   conf.Host,
-		port:   conf.Port,
-		client: conf.Client,
+		db:      conf.DB,
+		auth:    jwtauth.New("HS256", []byte(conf.Secret), nil),
+		host:    conf.Host,
+		port:    conf.Port,
+		client:  conf.Client,
+		account: conf.Account,
 	}
 }
 
 // Start starts the API HTTP server (non blocking).
 func (a *API) Start() {
 	go func() {
-		if err := http.ListenAndServe(fmt.Sprintf("%s:%d", a.host, a.port), a.router()); err != nil {
+		if err := http.ListenAndServe(fmt.Sprintf("%s:%d", a.host, a.port), a.initRouter()); err != nil {
 			log.Fatalf("failed to start the API server: %v", err)
 		}
 	}()
 }
 
 // router creates the router with all the routes and middleware.
-func (a *API) router() http.Handler {
+func (a *API) initRouter() http.Handler {
 	// Create the router with a basic middleware stack
 	r := chi.NewRouter()
 	r.Use(cors.New(cors.Options{
@@ -94,6 +100,9 @@ func (a *API) router() http.Handler {
 		// Sign a payload
 		log.Infow("new route", "method", "POST", "path", signTxEndpoint)
 		r.Post(signTxEndpoint, a.signTxHandler)
+		// Sign a message
+		log.Infow("new route", "method", "POST", "path", signMessageEndpoint)
+		r.Post(signMessageEndpoint, a.signMessageHandler)
 	})
 
 	// Public routes
@@ -110,6 +119,6 @@ func (a *API) router() http.Handler {
 		log.Infow("new route", "method", "POST", "path", authLoginEndpoint)
 		r.Post(authLoginEndpoint, a.authLoginHandler)
 	})
-	a.Router = r
+	a.router = r
 	return r
 }
