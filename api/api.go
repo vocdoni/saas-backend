@@ -10,7 +10,8 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/go-chi/jwtauth/v5"
 	"github.com/vocdoni/saas-backend/account"
-
+	"github.com/vocdoni/saas-backend/db"
+	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -19,35 +20,60 @@ const (
 	passwordSalt  = "vocdoni365"    // salt for password hashing
 )
 
-// FullTransparentMode if true allows signing all transactions and does not modify any of them.
-var FullTransparentMode = false
+type APIConfig struct {
+	Host    string
+	Port    int
+	Secret  string
+	Chain   string
+	DB      *db.MongoStorage
+	Client  *apiclient.HTTPclient
+	Account *account.Account
+	// FullTransparentMode if true allows signing all transactions and does not
+	// modify any of them.
+	FullTransparentMode bool
+}
 
 // API type represents the API HTTP server with JWT authentication capabilities.
 type API struct {
-	Router *chi.Mux
-	auth   *jwtauth.JWTAuth
-	acc    *account.Account
+	db              *db.MongoStorage
+	auth            *jwtauth.JWTAuth
+	host            string
+	port            int
+	router          *chi.Mux
+	client          *apiclient.HTTPclient
+	account         *account.Account
+	secret          string
+	transparentMode bool
 }
 
 // New creates a new API HTTP server. It does not start the server. Use Start() for that.
-func New(secret string, acc *account.Account) *API {
+func New(conf *APIConfig) *API {
+	if conf == nil {
+		return nil
+	}
 	return &API{
-		auth: jwtauth.New("HS256", []byte(secret), nil),
-		acc:  acc,
+		db:              conf.DB,
+		auth:            jwtauth.New("HS256", []byte(conf.Secret), nil),
+		host:            conf.Host,
+		port:            conf.Port,
+		client:          conf.Client,
+		account:         conf.Account,
+		secret:          conf.Secret,
+		transparentMode: conf.FullTransparentMode,
 	}
 }
 
 // Start starts the API HTTP server (non blocking).
-func (a *API) Start(host string, port int) {
+func (a *API) Start() {
 	go func() {
-		if err := http.ListenAndServe(fmt.Sprintf("%s:%d", host, port), a.router()); err != nil {
+		if err := http.ListenAndServe(fmt.Sprintf("%s:%d", a.host, a.port), a.initRouter()); err != nil {
 			log.Fatalf("failed to start the API server: %v", err)
 		}
 	}()
 }
 
 // router creates the router with all the routes and middleware.
-func (a *API) router() http.Handler {
+func (a *API) initRouter() http.Handler {
 	// Create the router with a basic middleware stack
 	r := chi.NewRouter()
 	r.Use(cors.New(cors.Options{
@@ -63,24 +89,27 @@ func (a *API) router() http.Handler {
 	r.Use(middleware.ThrottleBacklog(5000, 40000, 60*time.Second))
 	r.Use(middleware.Timeout(45 * time.Second))
 
-	// Protected routes
+	// protected routes
 	r.Group(func(r chi.Router) {
-		// Seek, verify and validate JWT tokens
+		// seek, verify and validate JWT tokens
 		r.Use(jwtauth.Verifier(a.auth))
-		// Handle valid JWT tokens.
+		// handle valid JWT tokens.
 		r.Use(a.authenticator)
-		// Refresh the token
+		// refresh the token
 		log.Infow("new route", "method", "POST", "path", authRefresTokenEndpoint)
 		r.Post(authRefresTokenEndpoint, a.refreshTokenHandler)
-		// Get the address
-		log.Infow("new route", "method", "GET", "path", currentUserAddressEndpoint)
-		r.Get(currentUserAddressEndpoint, a.addressHandler)
-		// Sign a payload
+		// get user information
+		log.Infow("new route", "method", "GET", "path", myUsersEndpoint)
+		r.Get(myUsersEndpoint, a.userInfoHandler)
+		// sign a payload
 		log.Infow("new route", "method", "POST", "path", signTxEndpoint)
 		r.Post(signTxEndpoint, a.signTxHandler)
-		// Sign a message
+		// sign a message
 		log.Infow("new route", "method", "POST", "path", signMessageEndpoint)
 		r.Post(signMessageEndpoint, a.signMessageHandler)
+		// create an organization
+		log.Infow("new route", "method", "POST", "path", organizationsEndpoint)
+		r.Post(organizationsEndpoint, a.createOrganizationHandler)
 	})
 
 	// Public routes
@@ -97,5 +126,6 @@ func (a *API) router() http.Handler {
 		log.Infow("new route", "method", "POST", "path", authLoginEndpoint)
 		r.Post(authLoginEndpoint, a.authLoginHandler)
 	})
+	a.router = r
 	return r
 }

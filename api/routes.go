@@ -12,10 +12,16 @@ const (
 
 	// POST /users to register a new user
 	usersEndpoint = "/users"
-	// GET /users/address to get the address of the current user
-	currentUserAddressEndpoint = "/users/address"
+	// GET /users/me to get the user information
+	myUsersEndpoint = "/users/me"
 
 	// signer routes
-	signTxEndpoint      = "/transactions"
+	// POST /transactions to sign a transaction
+	signTxEndpoint = "/transactions"
+	// POST /transactions/message to sign a message
 	signMessageEndpoint = "/transactions/message"
+
+	// organization routes
+	// POST /organizations to create a new organization
+	organizationsEndpoint = "/organizations"
 )
