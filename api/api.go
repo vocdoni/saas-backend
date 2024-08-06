@@ -42,6 +42,7 @@ type API struct {
 	router          *chi.Mux
 	client          *apiclient.HTTPclient
 	account         *account.Account
+	secret          string
 	transparentMode bool
 }
 
@@ -57,6 +58,7 @@ func New(conf *APIConfig) *API {
 		port:            conf.Port,
 		client:          conf.Client,
 		account:         conf.Account,
+		secret:          conf.Secret,
 		transparentMode: conf.FullTransparentMode,
 	}
 }
@@ -105,6 +107,9 @@ func (a *API) initRouter() http.Handler {
 		// sign a message
 		log.Infow("new route", "method", "POST", "path", signMessageEndpoint)
 		r.Post(signMessageEndpoint, a.signMessageHandler)
+		// create an organization
+		log.Infow("new route", "method", "POST", "path", organizationsEndpoint)
+		r.Post(organizationsEndpoint, a.createOrganizationHandler)
 	})
 
 	// Public routes

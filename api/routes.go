@@ -20,4 +20,8 @@ const (
 	signTxEndpoint = "/transactions"
 	// POST /transactions/message to sign a message
 	signMessageEndpoint = "/transactions/message"
+
+	// organization routes
+	// POST /organizations to create a new organization
+	organizationsEndpoint = "/organizations"
 )

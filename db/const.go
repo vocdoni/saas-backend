@@ -9,3 +9,13 @@ const (
 	CompanyType   OrganizationType = "company"
 	CommunityType OrganizationType = "community"
 )
+
+var validOrganizationTypes = map[OrganizationType]bool{
+	CompanyType:   true,
+	CommunityType: true,
+}
+
+func IsOrganizationTypeValid(ot string) bool {
+	_, valid := validOrganizationTypes[OrganizationType(ot)]
+	return valid
+}

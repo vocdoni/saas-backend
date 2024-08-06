@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -38,7 +39,7 @@ func (ms *MongoStorage) Organization(address string) (*Organization, error) {
 func (ms *MongoStorage) SetOrganization(org *Organization) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-
+	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	// prepare the document to be updated in the database modifying only the
@@ -52,7 +53,18 @@ func (ms *MongoStorage) SetOrganization(org *Organization) error {
 	if _, err := ms.organizations.UpdateOne(ctx, bson.M{"_id": org.Address}, updateDoc, opts); err != nil {
 		return err
 	}
-	return err
+	// assing organization to the creator if it's not empty including the address
+	// in the organizations list of the user if it's not already there as admin
+	if org.Creator != "" {
+		if err := ms.addOrganizationToUser(ctx, org.Creator, org.Address, AdminRole); err != nil {
+			// if an error occurs, delete the organization from the database
+			if _, delErr := ms.organizations.DeleteOne(ctx, bson.M{"_id": org.Address}); delErr != nil {
+				return errors.Join(err, delErr)
+			}
+			return err
+		}
+	}
+	return nil
 }
 
 // DelOrganization method deletes the organization from the database. If an

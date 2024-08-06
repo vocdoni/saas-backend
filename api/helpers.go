@@ -4,12 +4,16 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
 	"time"
 
 	"github.com/go-chi/jwtauth/v5"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/vocdoni/saas-backend/account"
+	"github.com/vocdoni/saas-backend/db"
+	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -67,6 +71,42 @@ func (a *API) buildLoginResponse(id string) (*LoginResponse, error) {
 	return &lr, nil
 }
 
+func (a *API) organizationSignerForUser(address, userEmail string) (*ethereum.SignKeys, error) {
+	// get the user from the database
+	dbUser, err := a.db.UserByEmail(userEmail)
+	if err != nil {
+		if err == db.ErrNotFound {
+			return nil, fmt.Errorf("user not found")
+		}
+		return nil, fmt.Errorf("could not retrieve user from database: %v", err)
+	}
+	// get the organization from the database
+	dbOrg, err := a.db.Organization(address)
+	if err != nil {
+		if err == db.ErrNotFound {
+			return nil, fmt.Errorf("organization not found")
+		}
+		return nil, fmt.Errorf("could not retrieve organization from database: %v", err)
+	}
+	// check if the user is part of the organization
+	isUserOrg := false
+	for _, userOrgs := range dbUser.Organizations {
+		if userOrgs.Address == dbOrg.Address {
+			isUserOrg = true
+			break
+		}
+	}
+	if !isUserOrg {
+		return nil, fmt.Errorf("user is not part of the organization")
+	}
+	// get the user signer from the user identifier
+	organizationSigner, err := account.OrganizationSigner(a.secret, userEmail, dbOrg.Nonce)
+	if err != nil {
+		return nil, fmt.Errorf("could not restore the signer of the organization: %v", err)
+	}
+	return organizationSigner, nil
+}
+
 // httpWriteJSON helper function allows to write a JSON response.
 func httpWriteJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -75,6 +115,14 @@ func httpWriteJSON(w http.ResponseWriter, data interface{}) {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
+	if _, err := w.Write([]byte("\n")); err != nil {
+		log.Warnw("failed to write on response", "error", err)
+	}
+}
+
+// httpWriteOK helper function allows to write an OK response.
+func httpWriteOK(w http.ResponseWriter) {
+	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write([]byte("\n")); err != nil {
 		log.Warnw("failed to write on response", "error", err)
 	}

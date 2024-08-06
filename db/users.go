@@ -7,6 +7,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.vocdoni.io/dvote/log"
 )
 
 // nextUserID internal method returns the next available user ID. If an error
@@ -23,6 +24,26 @@ func (ms *MongoStorage) nextUserID(ctx context.Context) (uint64, error) {
 		}
 	}
 	return user.ID + 1, nil
+}
+
+// addOrganizationToUser internal method adds the organization to the user with
+// the given email. If an error occurs, it returns the error. This method must
+// be called with the keysLock held.
+func (ms *MongoStorage) addOrganizationToUser(ctx context.Context, userEmail, address string, role UserRole) error {
+	filter := bson.M{"email": userEmail}
+	updateDoc := bson.M{
+		"$addToSet": bson.M{
+			"organizations": OrganizationMember{
+				Address: address,
+				Role:    role,
+			},
+		},
+	}
+	if _, err := ms.users.UpdateOne(ctx, filter, updateDoc); err != nil {
+		log.Warnw("error adding organization to user", "error", err)
+		return err
+	}
+	return nil
 }
 
 // UserByEmail method returns the user with the given email. If the user doesn't
@@ -91,6 +112,9 @@ func (ms *MongoStorage) SetUser(user *User) error {
 		var err error
 		if user.ID, err = ms.nextUserID(ctx); err != nil {
 			return err
+		}
+		if user.Organizations == nil {
+			user.Organizations = []OrganizationMember{}
 		}
 		if _, err := ms.users.InsertOne(ctx, user); err != nil {
 			return err

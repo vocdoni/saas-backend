@@ -77,7 +77,7 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 			ErrGenericInternalServerError.Write(w)
 			return
 		}
-		apiOrg := &Organization{
+		apiOrg := &OrganizationInfo{
 			Address:     org.Address,
 			Name:        org.Name,
 			Type:        string(org.Type),
@@ -94,7 +94,7 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 				ErrGenericInternalServerError.Write(w)
 				return
 			}
-			apiOrg.Parent = &Organization{
+			apiOrg.Parent = &OrganizationInfo{
 				Address: parentOrg.Address,
 				Name:    parentOrg.Name,
 			}

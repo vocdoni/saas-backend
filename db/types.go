@@ -20,6 +20,8 @@ type Organization struct {
 	Address         string           `json:"address" bson:"_id"`
 	Name            string           `json:"name" bson:"name"`
 	Type            OrganizationType `json:"type" bson:"type"`
+	Creator         string           `json:"creator" bson:"creator"`
+	Nonce           string           `json:"nonce" bson:"nonce"`
 	Description     string           `json:"description" bson:"description"`
 	Size            uint64           `json:"size" bson:"size"`
 	Color           string           `json:"color" bson:"color"`
