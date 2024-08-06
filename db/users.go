@@ -135,3 +135,20 @@ func (ms *MongoStorage) DelUser(user *User) error {
 	_, err := ms.users.DeleteOne(ctx, bson.M{"_id": user.ID})
 	return err
 }
+
+// IsMemberOf method checks if the user with the given email is a member of the
+// organization with the given address and role. If the user is a member, it
+// returns true. If the user is not a member, it returns false. If an error
+// occurs, it returns the error.
+func (ms *MongoStorage) IsMemberOf(userEmail, organizationAddress string, role UserRole) (bool, error) {
+	user, err := ms.UserByEmail(userEmail)
+	if err != nil {
+		return false, err
+	}
+	for _, org := range user.Organizations {
+		if org.Address == organizationAddress && org.Role == role {
+			return true, nil
+		}
+	}
+	return false, nil
+}

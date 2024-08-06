@@ -119,13 +119,22 @@ func (a *API) initRouter() http.Handler {
 				log.Warnw("failed to write ping response", "error", err)
 			}
 		})
-		// Register new users
+		// register new users
 		log.Infow("new route", "method", "POST", "path", usersEndpoint)
 		r.Post(usersEndpoint, a.registerHandler)
-		// Login
+		// login
 		log.Infow("new route", "method", "POST", "path", authLoginEndpoint)
 		r.Post(authLoginEndpoint, a.authLoginHandler)
+		// get organization information
+		log.Infow("new route", "method", "GET", "path", authLoginEndpoint)
+		r.Get(organizationEndpoint, a.organizationInfoHandler)
 	})
 	a.router = r
 	return r
+}
+
+// urlParam returns the URL parameter value for the given key. It is a wrapper
+// around chi.URLParam.
+func (a *API) urlParam(r *http.Request, key string) string {
+	return chi.URLParam(r, key)
 }

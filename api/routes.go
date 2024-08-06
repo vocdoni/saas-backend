@@ -24,4 +24,6 @@ const (
 	// organization routes
 	// POST /organizations to create a new organization
 	organizationsEndpoint = "/organizations"
+	// GET /organizations/{address} to get the organization information
+	organizationEndpoint = "/organizations/{address}"
 )

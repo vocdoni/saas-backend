@@ -8,18 +8,16 @@ import (
 
 // Organization is the struct that represents an organization in the API
 type OrganizationInfo struct {
-	Address         string            `json:"address"`
-	Name            string            `json:"name"`
-	Type            string            `json:"type"`
-	Description     string            `json:"description"`
-	Size            uint64            `json:"size"`
-	Color           string            `json:"color"`
-	Logo            string            `json:"logo"`
-	Subdomain       string            `json:"subdomain"`
-	Timezone        string            `json:"timezone"`
-	Parent          *OrganizationInfo `json:"parent"`
-	TokensPurchased uint64            `json:"tokensPurchased"`
-	TokensRemaining uint64            `json:"tokensRemaining"`
+	Address     string            `json:"address"`
+	Name        string            `json:"name"`
+	Type        string            `json:"type"`
+	Description string            `json:"description"`
+	Size        uint64            `json:"size"`
+	Color       string            `json:"color"`
+	Logo        string            `json:"logo"`
+	Subdomain   string            `json:"subdomain"`
+	Timezone    string            `json:"timezone"`
+	Parent      *OrganizationInfo `json:"parent"`
 }
 
 // UserOrganization is the struct that represents the organization of a user in

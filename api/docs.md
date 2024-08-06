@@ -106,7 +106,10 @@
         "color": "#ff0000",
         "logo": "https://[...].png",
         "subdomain": "mysubdomain",
-        "timezone": "GMT+2"
+        "timezone": "GMT+2",
+        "parent": {
+            "...": "..."
+        }
       }
     }
   ]
@@ -139,7 +142,46 @@
   "color": "#ff0000",
   "logo": "https://[...].png",
   "subdomain": "mysubdomain",
-  "timezone": "GMT+2"
+  "timezone": "GMT+2",
+}
+```
+If the user want to create a sub org, the address of the root organization must be provided inside an organization object in `parent` param. The creator must be admin of the parent organization to be able to create suborganizations. Example:
+```json
+{
+    "parent": {
+        "address": "0x..."
+    }
+}
+```
+
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40009` | `organization not found` |
+| `500` | `50002` | `internal server error` |
+
+### Organization info
+
+* **Path** `/organizations/{address}`
+* **Method** `GET`
+* **Response**
+```json
+{
+  "name": "Test Organization",
+  "type": "community",
+  "description": "My amazing testing organization",
+  "size": 10,
+  "color": "#ff0000",
+  "logo": "https://[...].png",
+  "subdomain": "mysubdomain",
+  "timezone": "GMT+2",
+  "parent": {
+    "...": "..."
+  }
 }
 ```
 
@@ -149,6 +191,8 @@
 |:---:|:---:|:---|
 | `401` | `40001` | `user not authorized` |
 | `400` | `40004` | `malformed JSON body` |
+| `400` | `40009` | `organization not found` |
+| `400` | `40010` | `malformed URL parameter` |
 | `500` | `50002` | `internal server error` |
 
 ## Transactions

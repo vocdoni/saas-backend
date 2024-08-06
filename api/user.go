@@ -53,6 +53,8 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 	httpWriteJSON(w, res)
 }
 
+// userInfoHandler handles the request to get the information of the current
+// authenticated user.
 func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// retrieve the user identifier from the HTTP header
 	userID := r.Header.Get("X-User-Id")
