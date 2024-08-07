@@ -135,7 +135,7 @@
 * **Headers**
   * `Authentication: Bearer <user_token>`
 
-* **Response**
+* **Request body**
 ```json
 {
   "name": "Test Organization",
@@ -158,6 +158,36 @@ If the user want to create a sub org, the address of the root organization must 
 }
 ```
 
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40009` | `organization not found` |
+| `500` | `50002` | `internal server error` |
+
+### Update organization
+
+* **Path** `/organizations/{address}`
+* **Method** `PUT`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+
+* **Request body**
+Only the following parameters can be changed. Every parameter is optional.
+```json
+{
+  "name": "Test Organization",
+  "description": "My amazing testing organization",
+  "size": 10,
+  "color": "#ff0000",
+  "logo": "https://[...].png",
+  "subdomain": "mysubdomain",
+  "timezone": "GMT+2",
+  "active": true,
+}
+```
 
 * **Errors**
 
@@ -166,6 +196,7 @@ If the user want to create a sub org, the address of the root organization must 
 | `401` | `40001` | `user not authorized` |
 | `400` | `40004` | `malformed JSON body` |
 | `400` | `40009` | `organization not found` |
+| `400` | `40011` | `no organization provided` |
 | `500` | `50002` | `internal server error` |
 
 ### Organization info

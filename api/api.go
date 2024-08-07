@@ -93,7 +93,7 @@ func (a *API) initRouter() http.Handler {
 	r.Group(func(r chi.Router) {
 		// seek, verify and validate JWT tokens
 		r.Use(jwtauth.Verifier(a.auth))
-		// handle valid JWT tokens.
+		// handle valid JWT tokens
 		r.Use(a.authenticator)
 		// refresh the token
 		log.Infow("new route", "method", "POST", "path", authRefresTokenEndpoint)
@@ -110,6 +110,11 @@ func (a *API) initRouter() http.Handler {
 		// create an organization
 		log.Infow("new route", "method", "POST", "path", organizationsEndpoint)
 		r.Post(organizationsEndpoint, a.createOrganizationHandler)
+		// create a route for those endpoints that include the organization
+		// address to get the organization data from the database
+		// update the organization
+		log.Infow("new route", "method", "PUT", "path", organizationEndpoint)
+		r.Put(organizationEndpoint, a.updateOrganizationHandler)
 	})
 
 	// Public routes
@@ -126,15 +131,9 @@ func (a *API) initRouter() http.Handler {
 		log.Infow("new route", "method", "POST", "path", authLoginEndpoint)
 		r.Post(authLoginEndpoint, a.authLoginHandler)
 		// get organization information
-		log.Infow("new route", "method", "GET", "path", authLoginEndpoint)
+		log.Infow("new route", "method", "GET", "path", organizationEndpoint)
 		r.Get(organizationEndpoint, a.organizationInfoHandler)
 	})
 	a.router = r
 	return r
-}
-
-// urlParam returns the URL parameter value for the given key. It is a wrapper
-// around chi.URLParam.
-func (a *API) urlParam(r *http.Request, key string) string {
-	return chi.URLParam(r, key)
 }

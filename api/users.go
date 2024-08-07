@@ -32,6 +32,11 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		ErrPasswordTooShort.Write(w)
 		return
 	}
+	// check the full name is not empty
+	if userInfo.FullName == "" {
+		ErrMalformedBody.Withf("full name is empty").Write(w)
+		return
+	}
 	// hash the password
 	hPassword := hashPassword(userInfo.Password)
 	// add the user to the database
@@ -57,35 +62,21 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 // userInfoHandler handles the request to get the information of the current
 // authenticated user.
 func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
-	// retrieve the user identifier from the HTTP header
-	userID := r.Header.Get("X-User-Id")
-	if userID == "" {
+	user, ok := userFromContext(r.Context())
+	if !ok {
 		ErrUnauthorized.Write(w)
-		return
-	}
-	// get user info from the database
-	dbUser, err := a.db.UserByEmail(userID)
-	if err != nil {
-		ErrGenericInternalServerError.Write(w)
 		return
 	}
 	// get the user organizations information from the database if any
 	userOrgs := make([]*UserOrganization, 0)
-	for _, orgInfo := range dbUser.Organizations {
-		org, err := a.db.Organization(orgInfo.Address)
+	for _, orgInfo := range user.Organizations {
+		org, parent, err := a.db.Organization(orgInfo.Address, true)
 		if err != nil {
 			if err == db.ErrNotFound {
 				continue
 			}
 			ErrGenericInternalServerError.Write(w)
 			return
-		}
-		var parent *db.Organization
-		if org.Parent != "" {
-			if parent, err = a.db.Organization(org.Parent); err != nil {
-				ErrGenericInternalServerError.Write(w)
-				return
-			}
 		}
 		userOrgs = append(userOrgs, &UserOrganization{
 			Role:         string(orgInfo.Role),
@@ -94,8 +85,8 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// return the user information
 	httpWriteJSON(w, UserInfo{
-		Email:         dbUser.Email,
-		FullName:      dbUser.FullName,
+		Email:         user.Email,
+		FullName:      user.FullName,
 		Organizations: userOrgs,
 	})
 }

@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/vocdoni/saas-backend/account"
+	"github.com/vocdoni/saas-backend/db"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/proto/build/go/models"
 	"google.golang.org/protobuf/proto"
@@ -16,9 +17,9 @@ import (
 const bootStrapFaucetAmount = 100
 
 func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
-	// retrieve the user identifier from the HTTP header
-	userEmail := r.Header.Get("X-User-Id")
-	if userEmail == "" {
+	// get the user from the request context
+	user, ok := userFromContext(r.Context())
+	if !ok {
 		ErrUnauthorized.Write(w)
 		return
 	}
@@ -28,8 +29,24 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 		ErrMalformedBody.Withf("could not decode request body: %v", err).Write(w)
 		return
 	}
-	// get the user signer from the user identifier
-	organizationSigner, err := a.organizationSignerForUser(signReq.OrganizationAddress, userEmail)
+	// check if the user has the admin role for the organization
+	if !user.HasRoleFor(signReq.OrganizationAddress, db.AdminRole) {
+		ErrUnauthorized.With("user does not have admin role").Write(w)
+		return
+	}
+	// get the organization info from the database with the address provided in
+	// the request
+	org, _, err := a.db.Organization(signReq.OrganizationAddress, false)
+	if err != nil {
+		if err == db.ErrNotFound {
+			ErrOrganizationNotFound.Withf("organization not found").Write(w)
+			return
+		}
+		ErrGenericInternalServerError.Withf("could not get organization: %v", err).Write(w)
+		return
+	}
+	// get the user signer from secret, organization creator and organization nonce
+	organizationSigner, err := account.OrganizationSigner(a.secret, org.Creator, org.Nonce)
 	if err != nil {
 		ErrGenericInternalServerError.Withf("could not restore the signer of the organization: %v", err).Write(w)
 		return
@@ -65,7 +82,7 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 				ErrUnauthorized.With("invalid account").Write(w)
 				return
 			}
-			log.Infow("signing SetAccount transaction", "user", userEmail, "type", txSetAccount.Txtype.String())
+			log.Infow("signing SetAccount transaction", "user", user.Email, "type", txSetAccount.Txtype.String())
 			// check the tx subtype
 			switch txSetAccount.Txtype {
 			case models.TxType_CREATE_ACCOUNT:
@@ -85,18 +102,18 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		case *models.Tx_SetProcess:
-			log.Infow("signing SetProcess transaction", "user", userEmail)
+			log.Infow("signing SetProcess transaction", "user", user.Email)
 		case *models.Tx_CollectFaucet:
-			log.Infow("signing CollectFaucet transaction", "user", userEmail)
+			log.Infow("signing CollectFaucet transaction", "user", user.Email)
 		case *models.Tx_NewProcess:
-			log.Infow("signing NewProcess transaction", "user", userEmail)
+			log.Infow("signing NewProcess transaction", "user", user.Email)
 		default:
-			log.Warnw("transaction type not allowed", "user", userEmail, "type", fmt.Sprintf("%T", tx.Payload))
+			log.Warnw("transaction type not allowed", "user", user.Email, "type", fmt.Sprintf("%T", tx.Payload))
 			ErrTxTypeNotAllowed.Write(w)
 			return
 		}
 	} else {
-		log.Infow("signing transaction in full transparent mode", "user", userEmail, "type", fmt.Sprintf("%T", tx.Payload))
+		log.Infow("signing transaction in full transparent mode", "user", user.Email, "type", fmt.Sprintf("%T", tx.Payload))
 	}
 	// sign the tx
 	stx, err := a.account.SignTransaction(tx, organizationSigner)
@@ -104,6 +121,7 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 		ErrCouldNotSignTransaction.WithErr(err).Write(w)
 		return
 	}
+	// return the signed tx payload
 	httpWriteJSON(w, &TransactionData{
 		TxPayload: base64.StdEncoding.EncodeToString(stx),
 	})
@@ -111,9 +129,9 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 
 // signMessageHandler signs a message with the user's private key. Only certain messages are allowed to be signed.
 func (a *API) signMessageHandler(w http.ResponseWriter, r *http.Request) {
-	// retrieve the user identifier from the HTTP header
-	userEmail := r.Header.Get("X-User-Id")
-	if userEmail == "" {
+	// get the user from the request context
+	user, ok := userFromContext(r.Context())
+	if !ok {
 		ErrUnauthorized.Write(w)
 		return
 	}
@@ -123,12 +141,29 @@ func (a *API) signMessageHandler(w http.ResponseWriter, r *http.Request) {
 		ErrMalformedBody.Withf("could not decode request body: %v", err).Write(w)
 		return
 	}
+	// check if the request includes a payload to sign
 	if signReq.Payload == nil {
 		ErrMalformedBody.Withf("missing payload field in request body").Write(w)
 		return
 	}
-	// get the user signer from the user identifier
-	organizationSigner, err := a.organizationSignerForUser(signReq.OrganizationAddress, userEmail)
+	// check if the user has the admin role for the organization
+	if !user.HasRoleFor(signReq.OrganizationAddress, db.AdminRole) {
+		ErrUnauthorized.With("user does not have admin role").Write(w)
+		return
+	}
+	// get the organization info from the database with the address provided in
+	// the request
+	org, _, err := a.db.Organization(signReq.OrganizationAddress, false)
+	if err != nil {
+		if err == db.ErrNotFound {
+			ErrOrganizationNotFound.Withf("organization not found").Write(w)
+			return
+		}
+		ErrGenericInternalServerError.Withf("could not get organization: %v", err).Write(w)
+		return
+	}
+	// get the user signer from secret, organization creator and organization nonce
+	organizationSigner, err := account.OrganizationSigner(a.secret, org.Creator, org.Nonce)
 	if err != nil {
 		ErrGenericInternalServerError.Withf("could not restore the signer of the organization: %v", err).Write(w)
 		return
@@ -138,7 +173,7 @@ func (a *API) signMessageHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		ErrGenericInternalServerError.With("could not sign message").Write(w)
 	}
-
+	// return the signature
 	httpWriteJSON(w, &MessageSignature{
 		Signature: signature,
 	})

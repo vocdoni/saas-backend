@@ -1,6 +1,10 @@
 package db
 
-import "time"
+import (
+	"time"
+
+	"go.vocdoni.io/dvote/log"
+)
 
 type User struct {
 	ID            uint64               `json:"id" bson:"_id"`
@@ -8,6 +12,16 @@ type User struct {
 	Password      string               `json:"password" bson:"password"`
 	FullName      string               `json:"fullName" bson:"fullName"`
 	Organizations []OrganizationMember `json:"organizations" bson:"organizations"`
+}
+
+func (u *User) HasRoleFor(address string, role UserRole) bool {
+	for _, org := range u.Organizations {
+		log.Info(org.Address == address, org.Role == role)
+		if org.Address == address && string(org.Role) == string(role) {
+			return true
+		}
+	}
+	return false
 }
 
 type UserRole string
