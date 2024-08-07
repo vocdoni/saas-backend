@@ -1,9 +1,12 @@
 package db
 
+import "time"
+
 type User struct {
 	ID            uint64               `json:"id" bson:"_id"`
 	Email         string               `json:"email" bson:"email"`
 	Password      string               `json:"password" bson:"password"`
+	FullName      string               `json:"fullName" bson:"fullName"`
 	Organizations []OrganizationMember `json:"organizations" bson:"organizations"`
 }
 
@@ -21,6 +24,7 @@ type Organization struct {
 	Name            string           `json:"name" bson:"name"`
 	Type            OrganizationType `json:"type" bson:"type"`
 	Creator         string           `json:"creator" bson:"creator"`
+	CreatedAt       time.Time        `json:"createdAt" bson:"createdAt"`
 	Nonce           string           `json:"nonce" bson:"nonce"`
 	Description     string           `json:"description" bson:"description"`
 	Size            uint64           `json:"size" bson:"size"`
@@ -28,7 +32,8 @@ type Organization struct {
 	Logo            string           `json:"logo" bson:"logo"`
 	Subdomain       string           `json:"subdomain" bson:"subdomain"`
 	Timezone        string           `json:"timezone" bson:"timezone"`
-	Parent          string           `json:"parent" bson:"parent"`
+	Active          bool             `json:"active" bson:"active"`
 	TokensPurchased uint64           `json:"tokensPurchased" bson:"tokensPurchased"`
 	TokensRemaining uint64           `json:"tokensRemaining" bson:"tokensRemaining"`
+	Parent          string           `json:"parent" bson:"parent"`
 }

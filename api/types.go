@@ -3,6 +3,7 @@ package api
 import (
 	"time"
 
+	"github.com/vocdoni/saas-backend/db"
 	"go.vocdoni.io/dvote/types"
 )
 
@@ -10,6 +11,7 @@ import (
 type OrganizationInfo struct {
 	Address     string            `json:"address"`
 	Name        string            `json:"name"`
+	CreatedAt   string            `json:"createdAt"`
 	Type        string            `json:"type"`
 	Description string            `json:"description"`
 	Size        uint64            `json:"size"`
@@ -17,6 +19,7 @@ type OrganizationInfo struct {
 	Logo        string            `json:"logo"`
 	Subdomain   string            `json:"subdomain"`
 	Timezone    string            `json:"timezone"`
+	Active      bool              `json:"active"`
 	Parent      *OrganizationInfo `json:"parent"`
 }
 
@@ -31,6 +34,7 @@ type UserOrganization struct {
 type UserInfo struct {
 	Email         string              `json:"email,omitempty"`
 	Password      string              `json:"password,omitempty"`
+	FullName      string              `json:"fullName,omitempty"`
 	Organizations []*UserOrganization `json:"organizations"`
 }
 
@@ -53,4 +57,30 @@ type MessageSignature struct {
 	OrganizationAddress string         `json:"organizationAddress"`
 	Payload             []byte         `json:"payload,omitempty"`
 	Signature           types.HexBytes `json:"signature,omitempty"`
+}
+
+// organizationFromDB converts a db.Organization to an OrganizationInfo, if the parent
+// organization is provided it will be included in the response.
+func organizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
+	if dbOrg == nil {
+		return nil
+	}
+	var parentOrg *OrganizationInfo
+	if parent != nil {
+		parentOrg = organizationFromDB(parent, nil)
+	}
+	return &OrganizationInfo{
+		Address:     dbOrg.Address,
+		Name:        dbOrg.Name,
+		CreatedAt:   dbOrg.CreatedAt.Format(time.RFC3339),
+		Type:        string(dbOrg.Type),
+		Description: dbOrg.Description,
+		Size:        dbOrg.Size,
+		Color:       dbOrg.Color,
+		Logo:        dbOrg.Logo,
+		Subdomain:   dbOrg.Subdomain,
+		Timezone:    dbOrg.Timezone,
+		Active:      dbOrg.Active,
+		Parent:      parentOrg,
+	}
 }

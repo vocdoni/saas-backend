@@ -37,6 +37,7 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 	// add the user to the database
 	if err := a.db.SetUser(&db.User{
 		Email:    userInfo.Email,
+		FullName: userInfo.FullName,
 		Password: hex.EncodeToString(hPassword),
 	}); err != nil {
 		log.Warnw("could not create user", "error", err)
@@ -79,36 +80,22 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 			ErrGenericInternalServerError.Write(w)
 			return
 		}
-		apiOrg := &OrganizationInfo{
-			Address:     org.Address,
-			Name:        org.Name,
-			Type:        string(org.Type),
-			Description: org.Description,
-			Size:        org.Size,
-			Color:       org.Color,
-			Logo:        org.Logo,
-			Subdomain:   org.Subdomain,
-			Timezone:    org.Timezone,
-		}
+		var parent *db.Organization
 		if org.Parent != "" {
-			parentOrg, err := a.db.Organization(org.Parent)
-			if err != nil {
+			if parent, err = a.db.Organization(org.Parent); err != nil {
 				ErrGenericInternalServerError.Write(w)
 				return
-			}
-			apiOrg.Parent = &OrganizationInfo{
-				Address: parentOrg.Address,
-				Name:    parentOrg.Name,
 			}
 		}
 		userOrgs = append(userOrgs, &UserOrganization{
 			Role:         string(orgInfo.Role),
-			Organization: apiOrg,
+			Organization: organizationFromDB(org, parent),
 		})
 	}
 	// return the user information
 	httpWriteJSON(w, UserInfo{
 		Email:         dbUser.Email,
+		FullName:      dbUser.FullName,
 		Organizations: userOrgs,
 	})
 }

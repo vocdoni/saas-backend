@@ -62,6 +62,7 @@
 ```json
 {
     "email": "my@email.me",
+    "fullName": "Steve Urkel",
     "password": "secretpass1234"
 }
 ```
@@ -94,6 +95,7 @@
 ```json
 {
   "email": "test@test.test",
+  "fullName": "steve_urkel",
   "organizations": [
     {
       "role": "admin",
@@ -107,6 +109,7 @@
         "logo": "https://[...].png",
         "subdomain": "mysubdomain",
         "timezone": "GMT+2",
+        "active": true,
         "parent": {
             "...": "..."
         }
@@ -143,6 +146,7 @@
   "logo": "https://[...].png",
   "subdomain": "mysubdomain",
   "timezone": "GMT+2",
+  "active": true,
 }
 ```
 If the user want to create a sub org, the address of the root organization must be provided inside an organization object in `parent` param. The creator must be admin of the parent organization to be able to create suborganizations. Example:
@@ -179,6 +183,7 @@ If the user want to create a sub org, the address of the root organization must 
   "logo": "https://[...].png",
   "subdomain": "mysubdomain",
   "timezone": "GMT+2",
+  "active": true,
   "parent": {
     "...": "..."
   }

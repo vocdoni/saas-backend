@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/db"
@@ -69,6 +70,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		Address:         signer.AddressString(),
 		Name:            orgInfo.Name,
 		Creator:         userID,
+		CreatedAt:       time.Now(),
 		Nonce:           nonce,
 		Type:            db.OrganizationType(orgInfo.Type),
 		Description:     orgInfo.Description,
@@ -77,9 +79,10 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		Logo:            orgInfo.Logo,
 		Subdomain:       orgInfo.Subdomain,
 		Timezone:        orgInfo.Timezone,
-		Parent:          parentOrg,
+		Active:          true,
 		TokensPurchased: 0,
 		TokensRemaining: 0,
+		Parent:          parentOrg,
 	}); err != nil {
 		ErrGenericInternalServerError.Write(w)
 		return
@@ -108,36 +111,13 @@ func (a *API) organizationInfoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// get the parent organization from the database if any
-	var parentOrg *OrganizationInfo
+	var parent *db.Organization
 	if org.Parent != "" {
-		dbParentOrg, err := a.db.Organization(org.Parent)
-		if err != nil {
+		if parent, err = a.db.Organization(org.Parent); err != nil {
 			ErrGenericInternalServerError.Withf("could not get parent organization: %v", err).Write(w)
 			return
 		}
-		parentOrg = &OrganizationInfo{
-			Address:     dbParentOrg.Address,
-			Name:        dbParentOrg.Name,
-			Type:        string(dbParentOrg.Type),
-			Description: dbParentOrg.Description,
-			Size:        dbParentOrg.Size,
-			Color:       dbParentOrg.Color,
-			Logo:        dbParentOrg.Logo,
-			Subdomain:   dbParentOrg.Subdomain,
-			Timezone:    dbParentOrg.Timezone,
-		}
 	}
 	// send the organization back to the user
-	httpWriteJSON(w, OrganizationInfo{
-		Address:     org.Address,
-		Name:        org.Name,
-		Type:        string(org.Type),
-		Description: org.Description,
-		Size:        org.Size,
-		Color:       org.Color,
-		Logo:        org.Logo,
-		Subdomain:   org.Subdomain,
-		Timezone:    org.Timezone,
-		Parent:      parentOrg,
-	})
+	httpWriteJSON(w, organizationFromDB(org, parent))
 }
