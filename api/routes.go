@@ -12,8 +12,11 @@ const (
 
 	// POST /users to register a new user
 	usersEndpoint = "/users"
-	// GET /users/me to get the user information
+	// GET /users/me to get the current user information
+	// PUT /users/me to update the current user information
 	myUsersEndpoint = "/users/me"
+	// PUT /users/me/password to update the current user password
+	myUsersPasswordEndpoint = "/users/me/password"
 
 	// signer routes
 	// POST /transactions to sign a transaction

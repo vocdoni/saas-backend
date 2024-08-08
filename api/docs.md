@@ -1,5 +1,27 @@
 # API Docs
 
+<details>
+  <summary>Table of contents</summary>
+  <br/>
+
+- [Auth](#auth)
+  - [Login](#login)
+  - [Refresh token](#refresh-token)
+- [Users](#users)
+  - [Register](#register)
+  - [Get current user info](#get-current-user-info)
+  - [Update current user info](#update-current-user-info)
+  - [Update current user password](#update-current-user-password)
+- [Organizations](#organizations)
+  - [Create organization](#create-organization)
+  - [Update organization](#update-organization)
+  - [Organization info](#organization-info)
+- [Transactions](#transactions)
+  - [Sign tx](#sign-tx)
+  - [Sign message](#sign-message)
+
+</details>
+
 ## Auth
 
 ### Login
@@ -84,7 +106,7 @@
 | `400` | `40004` | `malformed JSON body` |
 | `500` | `50002` | `internal server error` |
 
-### Current user info
+### Get current user info
 
 * **Path** `/users/me`
 * **Method** `GET`
@@ -124,6 +146,59 @@
 | HTTP Status | Error code | Message |
 |:---:|:---:|:---|
 | `401` | `40001` | `user not authorized` |
+| `500` | `50002` | `internal server error` |
+
+### Update current user info
+
+* **Path** `/users/me`
+* **Method** `PUT`
+* **Request body**
+```json
+{
+    "email": "my@email.me",
+    "fullName": "Steve Urkel",
+}
+```
+
+* **Response**
+
+This method invalidates any previous JWT token for the user, so it returns a new token to be used in following requests.
+
+```json
+{
+  "token": "<jwt_token>",
+  "expirity": "2024-08-21T11:26:54.368718+02:00"
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40002` | `email malformed` |
+| `400` | `40004` | `malformed JSON body` |
+| `500` | `50002` | `internal server error` |
+
+### Update current user password
+
+* **Path** `/users/me/password`
+* **Method** `PUT`
+* **Request body**
+```json
+{
+  "oldPassword": "secretpass1234",
+  "newPassword": "secretpass0987"
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40003` | `password too short` |
+| `400` | `40004` | `malformed JSON body` |
 | `500` | `50002` | `internal server error` |
 
 ## Organizations

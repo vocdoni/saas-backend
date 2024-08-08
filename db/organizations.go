@@ -96,3 +96,19 @@ func (ms *MongoStorage) DelOrganization(org *Organization) error {
 	_, err := ms.organizations.DeleteOne(ctx, bson.M{"_id": org.Address})
 	return err
 }
+
+// ReplaceCreatorEmail method replaces the creator email in the organizations
+// where it is the creator. If an error occurs, it returns the error.
+func (ms *MongoStorage) ReplaceCreatorEmail(oldEmail, newEmail string) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// update the creator email in the organizations where it is the creator
+	updateDoc := bson.M{"$set": bson.M{"creator": newEmail}}
+	if _, err := ms.organizations.UpdateMany(ctx, bson.M{"creator": oldEmail}, updateDoc); err != nil {
+		return err
+	}
+	return nil
+}

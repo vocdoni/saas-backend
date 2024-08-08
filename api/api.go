@@ -101,6 +101,12 @@ func (a *API) initRouter() http.Handler {
 		// get user information
 		log.Infow("new route", "method", "GET", "path", myUsersEndpoint)
 		r.Get(myUsersEndpoint, a.userInfoHandler)
+		// update user information
+		log.Infow("new route", "method", "PUT", "path", myUsersEndpoint)
+		r.Put(myUsersEndpoint, a.updateUserInfoHandler)
+		// update user password
+		log.Infow("new route", "method", "PUT", "path", myUsersPasswordEndpoint)
+		r.Put(myUsersPasswordEndpoint, a.updateUserPasswordHandler)
 		// sign a payload
 		log.Infow("new route", "method", "POST", "path", signTxEndpoint)
 		r.Post(signTxEndpoint, a.signTxHandler)

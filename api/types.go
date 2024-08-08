@@ -38,6 +38,12 @@ type UserInfo struct {
 	Organizations []*UserOrganization `json:"organizations"`
 }
 
+// UserPasswordUpdate is the request to update the password of a user.
+type UserPasswordUpdate struct {
+	OldPassword string `json:"oldPassword"`
+	NewPassword string `json:"newPassword"`
+}
+
 // LoginResponse is the response of the login request which includes the JWT token
 type LoginResponse struct {
 	Token    string    `json:"token"`
