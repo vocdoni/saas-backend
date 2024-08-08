@@ -30,7 +30,19 @@ func (ms *MongoStorage) nextUserID(ctx context.Context) (uint64, error) {
 // the given email. If an error occurs, it returns the error. This method must
 // be called with the keysLock held.
 func (ms *MongoStorage) addOrganizationToUser(ctx context.Context, userEmail, address string, role UserRole) error {
+	// check if the user exists after add the organization
 	filter := bson.M{"email": userEmail}
+	count, err := ms.users.CountDocuments(ctx, filter)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return ErrNotFound
+		}
+		return err
+	}
+	if count == 0 {
+		return ErrNotFound
+	}
+	// add the organization to the user
 	updateDoc := bson.M{
 		"$addToSet": bson.M{
 			"organizations": OrganizationMember{

@@ -67,6 +67,7 @@ func New(url, database string) (*MongoStorage, error) {
 	// if reset flag is enabled, Reset drops the database documents and recreates indexes
 	// else, just createIndexes
 	if reset := os.Getenv("VOCDONI_MONGO_RESET_DB"); reset != "" {
+		log.Info("resetting database")
 		err := ms.Reset()
 		if err != nil {
 			return nil, err
@@ -92,7 +93,12 @@ func (ms *MongoStorage) Reset() error {
 	log.Infof("resetting database")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	// drop users collection
 	if err := ms.users.Drop(ctx); err != nil {
+		return err
+	}
+	// drop organizations collection
+	if err := ms.organizations.Drop(ctx); err != nil {
 		return err
 	}
 	if err := ms.createIndexes(); err != nil {
