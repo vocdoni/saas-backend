@@ -4,27 +4,27 @@
   <summary>Table of contents</summary>
   <br/>
 
-- [Auth](#auth)
-  - [Login](#login)
-  - [Refresh token](#refresh-token)
-- [Users](#users)
-  - [Register](#register)
-  - [Get current user info](#get-current-user-info)
-  - [Update current user info](#update-current-user-info)
-  - [Update current user password](#update-current-user-password)
-- [Organizations](#organizations)
-  - [Create organization](#create-organization)
-  - [Update organization](#update-organization)
-  - [Organization info](#organization-info)
-- [Transactions](#transactions)
-  - [Sign tx](#sign-tx)
-  - [Sign message](#sign-message)
+- [🔐 Auth](#auth)
+  - [🔑 Login](#login)
+  - [🥤 Refresh token](#refresh-token)
+- [👥 Users](#users)
+  - [🙋 Register](#register)
+  - [🧑‍💻 Get current user info](#get-current-user-info)
+  - [💇 Update current user info](#update-current-user-info)
+  - [🔏 Update current user password](#update-current-user-password)
+- [🏤 Organizations](#organizations)
+  - [🆕 Create organization](#create-organization)
+  - [⚙️ Update organization](#update-organization)
+  - [🔍 Organization info](#organization-info)
+- [🧾 Transactions](#transactions)
+  - [✍️ Sign tx](#sign-tx)
+  - [📝 Sign message](#sign-message)
 
 </details>
 
-## Auth
+## 🔐 Auth
 
-### Login
+### 🔑 Login
 
 * **Path** `/auth`
 * **Method** `POST`
@@ -52,7 +52,7 @@
 | `400` | `40004` | `malformed JSON body` |
 | `500` | `50002` | `internal server error` |
 
-### Refresh token
+### 🥤 Refresh token
 
 * **Path** `/auth/refresh`
 * **Method** `POST`
@@ -74,9 +74,9 @@
 | `401` | `40001` | `user not authorized` |
 | `500` | `50002` | `internal server error` |
 
-## Users
+## 👥 Users
 
-### Register
+### 🙋 Register
 
 * **Path** `/users`
 * **Method** `POST`
@@ -106,7 +106,7 @@
 | `400` | `40004` | `malformed JSON body` |
 | `500` | `50002` | `internal server error` |
 
-### Get current user info
+### 🧑‍💻 Get current user info
 
 * **Path** `/users/me`
 * **Method** `GET`
@@ -148,7 +148,7 @@
 | `401` | `40001` | `user not authorized` |
 | `500` | `50002` | `internal server error` |
 
-### Update current user info
+### 💇 Update current user info
 
 * **Path** `/users/me`
 * **Method** `PUT`
@@ -180,7 +180,7 @@ This method invalidates any previous JWT token for the user, so it returns a new
 | `400` | `40004` | `malformed JSON body` |
 | `500` | `50002` | `internal server error` |
 
-### Update current user password
+### 🔏 Update current user password
 
 * **Path** `/users/me/password`
 * **Method** `PUT`
@@ -201,9 +201,9 @@ This method invalidates any previous JWT token for the user, so it returns a new
 | `400` | `40004` | `malformed JSON body` |
 | `500` | `50002` | `internal server error` |
 
-## Organizations
+## 🏤 Organizations
 
-### Create organization
+### 🆕 Create organization
 
 * **Path** `/organizations`
 * **Method** `POST`
@@ -242,7 +242,7 @@ If the user want to create a sub org, the address of the root organization must 
 | `400` | `40009` | `organization not found` |
 | `500` | `50002` | `internal server error` |
 
-### Update organization
+### ⚙️ Update organization
 
 * **Path** `/organizations/{address}`
 * **Method** `PUT`
@@ -274,7 +274,7 @@ Only the following parameters can be changed. Every parameter is optional.
 | `400` | `40011` | `no organization provided` |
 | `500` | `50002` | `internal server error` |
 
-### Organization info
+### 🔍 Organization info
 
 * **Path** `/organizations/{address}`
 * **Method** `GET`
@@ -306,9 +306,9 @@ Only the following parameters can be changed. Every parameter is optional.
 | `400` | `40010` | `malformed URL parameter` |
 | `500` | `50002` | `internal server error` |
 
-## Transactions
+## 🧾 Transactions
 
-### Sign tx
+### ✍️ Sign tx
 
 * **Path** `/transactions`
 * **Method** `POST`
@@ -335,7 +335,7 @@ Only the following parameters can be changed. Every parameter is optional.
 | `500` | `50002` | `internal server error` |
 | `500` | `50003` | `could not create faucet package` |
 
-### Sign message
+### 📝 Sign message
 
 * **Path** `/transactions/message`
 * **Method** `POST`
