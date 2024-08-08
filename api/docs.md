@@ -4,21 +4,21 @@
   <summary>Table of contents</summary>
   <br/>
 
-- [🔐 Auth](#auth)
-  - [🔑 Login](#login)
-  - [🥤 Refresh token](#refresh-token)
-- [👥 Users](#users)
-  - [🙋 Register](#register)
-  - [🧑‍💻 Get current user info](#get-current-user-info)
-  - [💇 Update current user info](#update-current-user-info)
-  - [🔏 Update current user password](#update-current-user-password)
-- [🏤 Organizations](#organizations)
-  - [🆕 Create organization](#create-organization)
-  - [⚙️ Update organization](#update-organization)
-  - [🔍 Organization info](#organization-info)
-- [🧾 Transactions](#transactions)
-  - [✍️ Sign tx](#sign-tx)
-  - [📝 Sign message](#sign-message)
+- [🔐 Auth](#-auth)
+  - [🔑 Login](#-login)
+  - [🥤 Refresh token](#-refresh-token)
+- [👥 Users](#-users)
+  - [🙋 Register](#-register)
+  - [🧑‍💻 Get current user info](#-get-current-user-info)
+  - [💇 Update current user info](#-update-current-user-info)
+  - [🔏 Update current user password](#-update-current-user-password)
+- [🏤 Organizations](#-organizations)
+  - [🆕 Create organization](#-create-organization)
+  - [⚙️ Update organization](#-update-organization)
+  - [🔍 Organization info](#-organization-info)
+- [🧾 Transactions](#-transactions)
+  - [✍️ Sign tx](#-sign-tx)
+  - [📝 Sign message](#-sign-message)
 
 </details>
 
