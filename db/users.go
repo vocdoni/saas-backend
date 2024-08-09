@@ -108,8 +108,20 @@ func (ms *MongoStorage) SetUser(user *User) error {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	// get the next available user ID
+	nextID, err := ms.nextUserID(ctx)
+	if err != nil {
+		return err
+	}
+	// if the user provided doesn't have organizations, create an empty slice
+	if user.Organizations == nil {
+		user.Organizations = []OrganizationMember{}
+	}
 	// check if the user exists or needs to be created
 	if user.ID > 0 {
+		if user.ID >= nextID {
+			return ErrInvalidData
+		}
 		// if the user exists, update it with the new data
 		updateDoc, err := dynamicUpdateDocument(user, nil)
 		if err != nil {
@@ -121,13 +133,7 @@ func (ms *MongoStorage) SetUser(user *User) error {
 		}
 	} else {
 		// if the user doesn't exist, create it setting the ID first
-		var err error
-		if user.ID, err = ms.nextUserID(ctx); err != nil {
-			return err
-		}
-		if user.Organizations == nil {
-			user.Organizations = []OrganizationMember{}
-		}
+		user.ID = nextID
 		if _, err := ms.users.InsertOne(ctx, user); err != nil {
 			return err
 		}
@@ -138,13 +144,21 @@ func (ms *MongoStorage) SetUser(user *User) error {
 // DelUser method deletes the user from the database. If an error occurs, it
 // returns the error.
 func (ms *MongoStorage) DelUser(user *User) error {
+	// check if the user is valid (has an ID or an email)
+	if user.ID == 0 && user.Email == "" {
+		return ErrInvalidData
+	}
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	// delete the user from the database
-	_, err := ms.users.DeleteOne(ctx, bson.M{"_id": user.ID})
+	// delete the user from the database using the ID or the email
+	filter := bson.M{"_id": user.ID}
+	if user.ID == 0 {
+		filter = bson.M{"email": user.Email}
+	}
+	_, err := ms.users.DeleteOne(ctx, filter)
 	return err
 }
 

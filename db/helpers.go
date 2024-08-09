@@ -9,6 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.vocdoni.io/dvote/log"
 )
 
 // initCollections creates the collections in the MongoDB database if they
@@ -32,11 +33,24 @@ func (ms *MongoStorage) initCollections(database string) error {
 			}
 		}
 		// if the collection doesn't exist, create it
-		if !alreadyCreated {
+		if alreadyCreated {
+			if validator, ok := collectionsValidators[name]; ok {
+				log.Debugw("updating collection with validator", "collection", name)
+				err := ms.client.Database(database).RunCommand(ctx, bson.D{
+					{Key: "collMod", Value: name},
+					{Key: "validator", Value: validator},
+				}).Err()
+				if err != nil {
+					return nil, fmt.Errorf("failed to update collection validator: %w", err)
+				}
+			}
+		} else {
 			// if the collection has a validator create it with it
 			opts := options.CreateCollection()
 			if validator, ok := collectionsValidators[name]; ok {
-				opts.SetValidator(validator)
+				log.Debugw("creating collection with validator", "collection", name)
+				opts = opts.SetValidator(validator).SetValidationLevel("strict").SetValidationAction("error")
+
 			}
 			// create the collection
 			if err := ms.client.Database(database).CreateCollection(ctx, name, opts); err != nil {

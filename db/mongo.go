@@ -17,6 +17,7 @@ import (
 
 // MongoStorage uses an external MongoDB service for stoting the user data and election details.
 type MongoStorage struct {
+	database string
 	client   *mongo.Client
 	keysLock sync.RWMutex
 
@@ -59,13 +60,15 @@ func New(url, database string) (*MongoStorage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot connect to mongodb: %w", err)
 	}
-	// init the collections
+	// init the database client
 	ms.client = client
-	if err := ms.initCollections(database); err != nil {
+	ms.database = database
+	// init the collections
+	if err := ms.initCollections(ms.database); err != nil {
 		return nil, err
 	}
 	// if reset flag is enabled, Reset drops the database documents and recreates indexes
-	// else, just createIndexes
+	// else, just init collections and create indexes
 	if reset := os.Getenv("VOCDONI_MONGO_RESET_DB"); reset != "" {
 		log.Info("resetting database")
 		err := ms.Reset()
@@ -73,8 +76,8 @@ func New(url, database string) (*MongoStorage, error) {
 			return nil, err
 		}
 	} else {
-		err := ms.createIndexes()
-		if err != nil {
+		// create indexes
+		if err := ms.createIndexes(); err != nil {
 			return nil, err
 		}
 	}
@@ -101,6 +104,11 @@ func (ms *MongoStorage) Reset() error {
 	if err := ms.organizations.Drop(ctx); err != nil {
 		return err
 	}
+	// init the collections
+	if err := ms.initCollections(ms.database); err != nil {
+		return err
+	}
+	// create indexes
 	if err := ms.createIndexes(); err != nil {
 		return err
 	}
@@ -111,28 +119,48 @@ func (ms *MongoStorage) String() string {
 	const contextTimeout = 30 * time.Second
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
-
+	// get all users
 	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
 	defer cancel()
-	cur, err := ms.users.Find(ctx, bson.D{{}})
+	userCur, err := ms.users.Find(ctx, bson.D{{}})
 	if err != nil {
 		log.Warn(err)
 		return "{}"
 	}
-
-	ctx2, cancel2 := context.WithTimeout(context.Background(), contextTimeout)
+	// append all users to the export data
+	ctx, cancel2 := context.WithTimeout(context.Background(), contextTimeout)
 	defer cancel2()
 	var users UserCollection
-	for cur.Next(ctx2) {
+	for userCur.Next(ctx) {
 		var user User
-		err := cur.Decode(&user)
+		err := userCur.Decode(&user)
 		if err != nil {
 			log.Warn(err)
 		}
 		users.Users = append(users.Users, user)
 	}
-
-	data, err := json.Marshal(&Collection{users})
+	// get all organizations
+	ctx, cancel3 := context.WithTimeout(context.Background(), contextTimeout)
+	defer cancel3()
+	orgCur, err := ms.organizations.Find(ctx, bson.D{{}})
+	if err != nil {
+		log.Warn(err)
+		return "{}"
+	}
+	// append all organizations to the export data
+	ctx, cancel4 := context.WithTimeout(context.Background(), contextTimeout)
+	defer cancel4()
+	var organizations OrganizationCollection
+	for orgCur.Next(ctx) {
+		var org Organization
+		err := orgCur.Decode(&org)
+		if err != nil {
+			log.Warn(err)
+		}
+		organizations.Organizations = append(organizations.Organizations, org)
+	}
+	// encode the data to JSON and return it
+	data, err := json.Marshal(&Collection{users, organizations})
 	if err != nil {
 		log.Warn(err)
 	}
@@ -143,18 +171,17 @@ func (ms *MongoStorage) String() string {
 func (ms *MongoStorage) Import(jsonData []byte) error {
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
-
+	// decode import data
 	log.Infof("importing database")
 	var collection Collection
 	err := json.Unmarshal(jsonData, &collection)
 	if err != nil {
 		return err
 	}
-
+	// create global context to import data
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
-
-	// Upsert Users
+	// upsert users collection
 	log.Infow("importing users", "count", len(collection.Users))
 	for _, user := range collection.Users {
 		filter := bson.M{"_id": user.ID}
@@ -165,7 +192,17 @@ func (ms *MongoStorage) Import(jsonData []byte) error {
 			log.Warnw("error upserting user", "err", err, "user", user.ID)
 		}
 	}
-
+	// upsert organizations collection
+	log.Infow("importing organizations", "count", len(collection.Organizations))
+	for _, org := range collection.Organizations {
+		filter := bson.M{"_id": org.Address}
+		update := bson.M{"$set": org}
+		opts := options.Update().SetUpsert(true)
+		_, err := ms.organizations.UpdateOne(ctx, filter, update, opts)
+		if err != nil {
+			log.Warnw("error upserting organization", "err", err, "organization", org.Address)
+		}
+	}
 	log.Infof("imported database!")
 	return nil
 }
