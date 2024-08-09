@@ -136,7 +136,7 @@ func TestReplaceCreatorEmail(t *testing.T) {
 	address := "orgToReplaceCreator"
 	name := "Organization to replace creator"
 	c.Assert(db.SetUser(&User{
-		Email:    testUserPass,
+		Email:    testUserEmail,
 		Password: testUserPass,
 	}), qt.IsNil)
 	c.Assert(db.SetOrganization(&Organization{
