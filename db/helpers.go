@@ -79,7 +79,11 @@ func (ms *MongoStorage) collectionNames(ctx context.Context, database string) ([
 	if err != nil {
 		return nil, err
 	}
-	defer collectionsCursor.Close(ctx)
+	defer func() {
+		if err := collectionsCursor.Close(ctx); err != nil {
+			log.Warnw("failed to close collections cursor", "error", err)
+		}
+	}()
 	collections := []bson.D{}
 	if err := collectionsCursor.All(ctx, &collections); err != nil {
 		return nil, err

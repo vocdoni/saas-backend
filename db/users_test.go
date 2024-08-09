@@ -6,33 +6,44 @@ import (
 	qt "github.com/frankban/quicktest"
 )
 
+const (
+	testUserEmail    = "user@email.test"
+	testUserPass     = "testPassword"
+	testUserFullName = "User Name"
+)
+
 func TestUserByEmail(t *testing.T) {
-	defer db.Reset()
+	defer func() {
+		if err := db.Reset(); err != nil {
+			t.Error(err)
+		}
+	}()
 	c := qt.New(t)
 	// test not found user
-	email := "user@email.test"
-	user, err := db.UserByEmail(email)
+	user, err := db.UserByEmail(testUserEmail)
 	c.Assert(user, qt.IsNil)
 	c.Assert(err, qt.Equals, ErrNotFound)
 	// create a new user with the email
-	password := "password"
-	fullName := "User Name"
 	c.Assert(db.SetUser(&User{
-		Email:    email,
-		Password: password,
-		FullName: fullName,
+		Email:    testUserEmail,
+		Password: testUserPass,
+		FullName: testUserFullName,
 	}), qt.IsNil)
 	// test found user
-	user, err = db.UserByEmail(email)
+	user, err = db.UserByEmail(testUserEmail)
 	c.Assert(err, qt.IsNil)
 	c.Assert(user, qt.Not(qt.IsNil))
-	c.Assert(user.Email, qt.Equals, email)
-	c.Assert(user.Password, qt.Equals, password)
-	c.Assert(user.FullName, qt.Equals, fullName)
+	c.Assert(user.Email, qt.Equals, testUserEmail)
+	c.Assert(user.Password, qt.Equals, testUserPass)
+	c.Assert(user.FullName, qt.Equals, testUserFullName)
 }
 
 func TestUser(t *testing.T) {
-	defer db.Reset()
+	defer func() {
+		if err := db.Reset(); err != nil {
+			t.Error(err)
+		}
+	}()
 	c := qt.New(t)
 	// test not found user
 	id := uint64(100)
@@ -40,35 +51,36 @@ func TestUser(t *testing.T) {
 	c.Assert(user, qt.IsNil)
 	c.Assert(err, qt.Equals, ErrNotFound)
 	// create a new user with the ID
-	email := "user@email.test"
-	password := "password"
-	fullName := "User Name"
 	c.Assert(db.SetUser(&User{
-		Email:    email,
-		Password: password,
-		FullName: fullName,
+		Email:    testUserEmail,
+		Password: testUserPass,
+		FullName: testUserFullName,
 	}), qt.IsNil)
 	// get the user ID
-	user, err = db.UserByEmail(email)
+	user, err = db.UserByEmail(testUserEmail)
 	c.Assert(err, qt.IsNil)
 	c.Assert(user, qt.Not(qt.IsNil))
 	// test found user by ID
 	user, err = db.User(user.ID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(user, qt.Not(qt.IsNil))
-	c.Assert(user.Email, qt.Equals, email)
-	c.Assert(user.Password, qt.Equals, password)
-	c.Assert(user.FullName, qt.Equals, fullName)
+	c.Assert(user.Email, qt.Equals, testUserEmail)
+	c.Assert(user.Password, qt.Equals, testUserPass)
+	c.Assert(user.FullName, qt.Equals, testUserFullName)
 }
 
 func TestSetUser(t *testing.T) {
-	defer db.Reset()
+	defer func() {
+		if err := db.Reset(); err != nil {
+			t.Error(err)
+		}
+	}()
 	c := qt.New(t)
 	// trying to create a new user with invalid email
 	user := &User{
 		Email:    "invalid-email",
-		Password: "password",
-		FullName: "User Name",
+		Password: testUserPass,
+		FullName: testUserFullName,
 	}
 	c.Assert(db.SetUser(user), qt.IsNotNil)
 	// trying to update a non existing user
@@ -76,29 +88,34 @@ func TestSetUser(t *testing.T) {
 	c.Assert(db.SetUser(user), qt.Equals, ErrInvalidData)
 	// unset the ID to create a new user
 	user.ID = 0
-	user.Email = "user@email.test"
+	user.Email = testUserEmail
 	// create a new user
 	c.Assert(db.SetUser(user), qt.IsNil)
 	// update the user
-	user.FullName = "New User Name"
+	newFullName := "New User Name"
+	user.FullName = newFullName
 	c.Assert(db.SetUser(user), qt.IsNil)
 	// get the user
 	user, err := db.UserByEmail(user.Email)
 	c.Assert(err, qt.IsNil)
 	c.Assert(user, qt.Not(qt.IsNil))
-	c.Assert(user.Email, qt.Equals, user.Email)
-	c.Assert(user.Password, qt.Equals, user.Password)
-	c.Assert(user.FullName, qt.Equals, user.FullName)
+	c.Assert(user.Email, qt.Equals, testUserEmail)
+	c.Assert(user.Password, qt.Equals, testUserPass)
+	c.Assert(user.FullName, qt.Equals, newFullName)
 }
 
 func TestDelUser(t *testing.T) {
-	defer db.Reset()
+	defer func() {
+		if err := db.Reset(); err != nil {
+			t.Error(err)
+		}
+	}()
 	c := qt.New(t)
 	// create a new user
 	user := &User{
-		Email:    "user@email.test",
-		Password: "password",
-		FullName: "User Name",
+		Email:    testUserEmail,
+		Password: testUserPass,
+		FullName: testUserFullName,
 	}
 	c.Assert(db.SetUser(user), qt.IsNil)
 	// get the user
@@ -109,7 +126,7 @@ func TestDelUser(t *testing.T) {
 	user.Email = ""
 	c.Assert(db.DelUser(user), qt.IsNil)
 	// restore the email and try to get the user
-	user.Email = "user@email.test"
+	user.Email = testUserEmail
 	_, err = db.UserByEmail(user.Email)
 	c.Assert(err, qt.Equals, ErrNotFound)
 	// insert the user again with the same email but no ID
@@ -123,12 +140,16 @@ func TestDelUser(t *testing.T) {
 }
 
 func TestIsMemberOf(t *testing.T) {
-	defer db.Reset()
+	defer func() {
+		if err := db.Reset(); err != nil {
+			t.Error(err)
+		}
+	}()
 	c := qt.New(t)
 	// create a new user with some organizations
 	user := &User{
-		Email:    "user@email.test",
-		Password: "password",
+		Email:    testUserEmail,
+		Password: testUserPass,
 		Organizations: []OrganizationMember{
 			{Address: "adminOrg", Role: AdminRole},
 			{Address: "managerOrg", Role: ManagerRole},
