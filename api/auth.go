@@ -10,19 +10,19 @@ import (
 
 // refresh handles the refresh request. It returns a new JWT token.
 func (a *API) refreshTokenHandler(w http.ResponseWriter, r *http.Request) {
-	// Retrieve the user identifier from the HTTP header
+	// retrieve the user identifier from the HTTP header
 	userID := r.Header.Get("X-User-Id")
 	if userID == "" {
 		ErrUnauthorized.Write(w)
 		return
 	}
-	// Generate a new token with the user name as the subject
+	// generate a new token with the user name as the subject
 	res, err := a.buildLoginResponse(userID)
 	if err != nil {
 		ErrGenericInternalServerError.Write(w)
 		return
 	}
-	// Send the token back to the user
+	// send the token back to the user
 	httpWriteJSON(w, res)
 }
 
@@ -72,6 +72,7 @@ func (a *API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *htt
 	// check if the user has organizations
 	if len(user.Organizations) == 0 {
 		ErrNoOrganizations.Write(w)
+		return
 	}
 	// get the user organizations information from the database if any
 	userAddresses := &OrganizationAddresses{
@@ -90,6 +91,6 @@ func (a *API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *htt
 		ErrGenericInternalServerError.Write(w)
 		return
 	}
-	// Send the token back to the user
+	// write the response back to the user
 	httpWriteJSON(w, res)
 }
