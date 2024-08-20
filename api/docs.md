@@ -84,7 +84,8 @@
 ```json
 {
     "email": "my@email.me",
-    "fullName": "Steve Urkel",
+    "firstName": "Steve",
+    "lastName": "Urkel",
     "password": "secretpass1234"
 }
 ```
@@ -117,7 +118,8 @@
 ```json
 {
   "email": "test@test.test",
-  "fullName": "steve_urkel",
+  "firstName": "Steve",
+  "lastName": "Urkel",
   "organizations": [
     {
       "role": "admin",
@@ -156,7 +158,8 @@
 ```json
 {
     "email": "my@email.me",
-    "fullName": "Steve Urkel",
+    "firstName": "Steve",
+    "lastName": "Urkel",
 }
 ```
 

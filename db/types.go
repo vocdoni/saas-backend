@@ -10,7 +10,8 @@ type User struct {
 	ID            uint64               `json:"id" bson:"_id"`
 	Email         string               `json:"email" bson:"email"`
 	Password      string               `json:"password" bson:"password"`
-	FullName      string               `json:"fullName" bson:"fullName"`
+	FirstName     string               `json:"firstName" bson:"firstName"`
+	LastName      string               `json:"lastName" bson:"lastName"`
 	Organizations []OrganizationMember `json:"organizations" bson:"organizations"`
 }
 

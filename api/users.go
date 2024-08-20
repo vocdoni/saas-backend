@@ -32,18 +32,24 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		ErrPasswordTooShort.Write(w)
 		return
 	}
-	// check the full name is not empty
-	if userInfo.FullName == "" {
-		ErrMalformedBody.Withf("full name is empty").Write(w)
+	// check the first name is not empty
+	if userInfo.FirstName == "" {
+		ErrMalformedBody.Withf("first name is empty").Write(w)
+		return
+	}
+	// check the last name is not empty
+	if userInfo.LastName == "" {
+		ErrMalformedBody.Withf("last name is empty").Write(w)
 		return
 	}
 	// hash the password
 	hPassword := hashPassword(userInfo.Password)
 	// add the user to the database
 	if err := a.db.SetUser(&db.User{
-		Email:    userInfo.Email,
-		FullName: userInfo.FullName,
-		Password: hex.EncodeToString(hPassword),
+		Email:     userInfo.Email,
+		FirstName: userInfo.FirstName,
+		LastName:  userInfo.LastName,
+		Password:  hex.EncodeToString(hPassword),
 	}); err != nil {
 		log.Warnw("could not create user", "error", err)
 		ErrGenericInternalServerError.Write(w)
@@ -86,7 +92,8 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// return the user information
 	httpWriteJSON(w, UserInfo{
 		Email:         user.Email,
-		FullName:      user.FullName,
+		FirstName:     user.FirstName,
+		LastName:      user.LastName,
 		Organizations: userOrgs,
 	})
 }
@@ -120,11 +127,18 @@ func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 		user.Email = userInfo.Email
 		updateUser = true
 	}
-	// check the full name is not empty
-	if userInfo.FullName != "" {
-		// update the user full name and set the flag to true to update the user
-		// info
-		user.FullName = userInfo.FullName
+	// check the first name is not empty
+	if userInfo.FirstName != "" {
+		// update the user first name and set the flag to true to update the
+		// user info
+		user.FirstName = userInfo.FirstName
+		updateUser = true
+	}
+	// check the last name is not empty
+	if userInfo.LastName != "" {
+		// update the user last name and set the flag to true to update the
+		// user info
+		user.LastName = userInfo.LastName
 		updateUser = true
 	}
 	// update the user information if needed
