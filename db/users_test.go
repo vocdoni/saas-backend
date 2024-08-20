@@ -165,7 +165,7 @@ func TestIsMemberOf(t *testing.T) {
 	}
 	// test the user is not member of the organizations
 	success, err := db.IsMemberOf(user.Email, "notFoundOrg", AdminRole)
-	c.Assert(err, qt.IsNil)
+	c.Assert(err, qt.Equals, ErrNotFound)
 	c.Assert(success, qt.IsFalse)
 	// test the user has no role in the organization
 	success, err = db.IsMemberOf(user.Email, "adminOrg", ViewerRole)
