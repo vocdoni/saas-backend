@@ -7,6 +7,9 @@
 - [🔐 Auth](#-auth)
   - [🔑 Login](#-login)
   - [🥤 Refresh token](#-refresh-token)
+- [🧾 Transactions](#-transactions)
+  - [✍️ Sign tx](#-sign-tx)
+  - [📝 Sign message](#-sign-message)
 - [👥 Users](#-users)
   - [🙋 Register](#-register)
   - [🧑‍💻 Get current user info](#-get-current-user-info)
@@ -16,15 +19,14 @@
   - [🆕 Create organization](#-create-organization)
   - [⚙️ Update organization](#-update-organization)
   - [🔍 Organization info](#-organization-info)
-- [🧾 Transactions](#-transactions)
-  - [✍️ Sign tx](#-sign-tx)
-  - [📝 Sign message](#-sign-message)
 
 </details>
 
 ## 🔐 Auth
 
 ### 🔑 Login
+
+> **SDK method**: This method is required by the Vocdoni SDK to use this service as a valid remote signer.
 
 * **Path** `/auth`
 * **Method** `POST`
@@ -54,6 +56,8 @@
 
 ### 🥤 Refresh token
 
+> **SDK method**: This method is required by the Vocdoni SDK to use this service as a valid remote signer.
+
 * **Path** `/auth/refresh`
 * **Method** `POST`
 * **Headers**
@@ -75,6 +79,9 @@
 | `500` | `50002` | `internal server error` |
 
 ### 💼 User writable organizations addresses
+
+> **SDK method**: This method is required by the Vocdoni SDK to use this service as a valid remote signer.
+
 This endpoint only returns the addresses of the organizations where the current user (identified by the JWT) has a role with write permission.
 
 * **Path** `/auth/addresses`
@@ -99,6 +106,74 @@ This endpoint only returns the addresses of the organizations where the current 
 |:---:|:---:|:---|
 | `401` | `40001` | `user not authorized` |
 | `404` | `40012` | `this user has not been assigned to any organization` |
+| `500` | `50002` | `internal server error` |
+
+## 🧾 Transactions
+
+### ✍️ Sign tx
+
+> **SDK method**: This method is required by the Vocdoni SDK to use this service as a valid remote signer.
+
+* **Path** `/transactions`
+* **Method** `POST`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Request body**
+```json
+{
+  "address": "0x...",
+  "txPayload": "<base64_encoded_protobuf>"
+}
+```
+
+* **Response**
+```json
+{
+  "txPayload": "<base64_encoded_protobuf>"
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40006` | `could not sign transaction` |
+| `400` | `40007` | `invalid transaction format` |
+| `400` | `40008` | `transaction type not allowed` |
+| `500` | `50002` | `internal server error` |
+| `500` | `50003` | `could not create faucet package` |
+
+### 📝 Sign message
+
+> **SDK method**: This method is required by the Vocdoni SDK to use this service as a valid remote signer.
+
+* **Path** `/transactions/message`
+* **Method** `POST`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Request body**
+```json
+{
+  "address": "0x...",
+  "payload": "<payload_to_sign>"
+}
+```
+
+* **Response**
+```json
+{
+  "payload": "<payload_to_sign>"
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40004` | `malformed JSON body` |
 | `500` | `50002` | `internal server error` |
 
 ## 👥 Users
@@ -331,68 +406,4 @@ Only the following parameters can be changed. Every parameter is optional.
 | `400` | `40004` | `malformed JSON body` |
 | `400` | `40009` | `organization not found` |
 | `400` | `40010` | `malformed URL parameter` |
-| `500` | `50002` | `internal server error` |
-
-## 🧾 Transactions
-
-### ✍️ Sign tx
-
-* **Path** `/transactions`
-* **Method** `POST`
-* **Headers**
-  * `Authentication: Bearer <user_token>`
-* **Request body**
-```json
-{
-  "address": "0x...",
-  "txPayload": "<base64_encoded_protobuf>"
-}
-```
-
-* **Response**
-```json
-{
-  "txPayload": "<base64_encoded_protobuf>"
-}
-```
-
-* **Errors**
-
-| HTTP Status | Error code | Message |
-|:---:|:---:|:---|
-| `401` | `40001` | `user not authorized` |
-| `400` | `40004` | `malformed JSON body` |
-| `400` | `40006` | `could not sign transaction` |
-| `400` | `40007` | `invalid transaction format` |
-| `400` | `40008` | `transaction type not allowed` |
-| `500` | `50002` | `internal server error` |
-| `500` | `50003` | `could not create faucet package` |
-
-### 📝 Sign message
-
-* **Path** `/transactions/message`
-* **Method** `POST`
-* **Headers**
-  * `Authentication: Bearer <user_token>`
-* **Request body**
-```json
-{
-  "address": "0x...",
-  "payload": "<payload_to_sign>"
-}
-```
-
-* **Response**
-```json
-{
-  "payload": "<payload_to_sign>"
-}
-```
-
-* **Errors**
-
-| HTTP Status | Error code | Message |
-|:---:|:---:|:---|
-| `401` | `40001` | `user not authorized` |
-| `400` | `40004` | `malformed JSON body` |
 | `500` | `50002` | `internal server error` |
