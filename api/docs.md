@@ -74,6 +74,33 @@
 | `401` | `40001` | `user not authorized` |
 | `500` | `50002` | `internal server error` |
 
+### 💼 User writable organizations addresses
+This endpoint only returns the addresses of the organizations where the current user (identified by the JWT) has a role with write permission.
+
+* **Path** `/auth/addresses`
+* **Method** `GET`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+
+* **Response**
+```json
+{
+  "addresses": [
+    "0x0000000001",
+    "0x0000000002",
+    "0x0000000003",
+  ]
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `404` | `40012` | `this user has not been assigned to any organization` |
+| `500` | `50002` | `internal server error` |
+
 ## 👥 Users
 
 ### 🙋 Register
@@ -314,11 +341,17 @@ Only the following parameters can be changed. Every parameter is optional.
 * **Method** `POST`
 * **Headers**
   * `Authentication: Bearer <user_token>`
+* **Request body**
+```json
+{
+  "address": "0x...",
+  "txPayload": "<base64_encoded_protobuf>"
+}
+```
 
 * **Response**
 ```json
 {
-  "organizationAddress": "0x...",
   "txPayload": "<base64_encoded_protobuf>"
 }
 ```
@@ -341,11 +374,17 @@ Only the following parameters can be changed. Every parameter is optional.
 * **Method** `POST`
 * **Headers**
   * `Authentication: Bearer <user_token>`
+* **Request body**
+```json
+{
+  "address": "0x...",
+  "payload": "<payload_to_sign>"
+}
+```
 
 * **Response**
 ```json
 {
-  "organizationAddress": "0x...",
   "payload": "<payload_to_sign>"
 }
 ```

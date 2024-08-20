@@ -30,13 +30,13 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// check if the user has the admin role for the organization
-	if !user.HasRoleFor(signReq.OrganizationAddress, db.AdminRole) {
+	if !user.HasRoleFor(signReq.Address, db.AdminRole) {
 		ErrUnauthorized.With("user does not have admin role").Write(w)
 		return
 	}
 	// get the organization info from the database with the address provided in
 	// the request
-	org, _, err := a.db.Organization(signReq.OrganizationAddress, false)
+	org, _, err := a.db.Organization(signReq.Address, false)
 	if err != nil {
 		if err == db.ErrNotFound {
 			ErrOrganizationNotFound.Withf("organization not found").Write(w)
@@ -147,13 +147,13 @@ func (a *API) signMessageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// check if the user has the admin role for the organization
-	if !user.HasRoleFor(signReq.OrganizationAddress, db.AdminRole) {
+	if !user.HasRoleFor(signReq.Address, db.AdminRole) {
 		ErrUnauthorized.With("user does not have admin role").Write(w)
 		return
 	}
 	// get the organization info from the database with the address provided in
 	// the request
-	org, _, err := a.db.Organization(signReq.OrganizationAddress, false)
+	org, _, err := a.db.Organization(signReq.Address, false)
 	if err != nil {
 		if err == db.ErrNotFound {
 			ErrOrganizationNotFound.Withf("organization not found").Write(w)

@@ -98,6 +98,9 @@ func (a *API) initRouter() http.Handler {
 		// refresh the token
 		log.Infow("new route", "method", "POST", "path", authRefresTokenEndpoint)
 		r.Post(authRefresTokenEndpoint, a.refreshTokenHandler)
+		// writable organization addresses
+		log.Infow("new route", "method", "GET", "path", authAddressesEndpoint)
+		r.Get(authAddressesEndpoint, a.writableOrganizationAddressesHandler)
 		// get user information
 		log.Infow("new route", "method", "GET", "path", myUsersEndpoint)
 		r.Get(myUsersEndpoint, a.userInfoHandler)

@@ -59,3 +59,37 @@ func (a *API) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 	// send the token back to the user
 	httpWriteJSON(w, res)
 }
+
+// writableOrganizationAddressesHandler returns the list of addresses of the
+// organizations where the user has write access.
+func (a *API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *http.Request) {
+	// get the user from the request context
+	user, ok := userFromContext(r.Context())
+	if !ok {
+		ErrUnauthorized.Write(w)
+		return
+	}
+	// check if the user has organizations
+	if len(user.Organizations) == 0 {
+		ErrNoOrganizations.Write(w)
+	}
+	// get the user organizations information from the database if any
+	userAddresses := &OrganizationAddresses{
+		Addresses: []string{},
+	}
+	// get the addresses of the organizations where the user has write access
+	for _, org := range user.Organizations {
+		// check if the user has write access to the organization based on the
+		// role of the user in the organization
+		if db.HasWriteAccess(org.Role) {
+			userAddresses.Addresses = append(userAddresses.Addresses, org.Address)
+		}
+	}
+	res, err := json.Marshal(userAddresses)
+	if err != nil {
+		ErrGenericInternalServerError.Write(w)
+		return
+	}
+	// Send the token back to the user
+	httpWriteJSON(w, res)
+}
