@@ -187,7 +187,8 @@ This endpoint only returns the addresses of the organizations where the current 
 ```json
 {
     "email": "my@email.me",
-    "fullName": "Steve Urkel",
+    "firstName": "Steve",
+    "lastName": "Urkel",
     "password": "secretpass1234"
 }
 ```
@@ -220,7 +221,8 @@ This endpoint only returns the addresses of the organizations where the current 
 ```json
 {
   "email": "test@test.test",
-  "fullName": "steve_urkel",
+  "firstName": "Steve",
+  "lastName": "Urkel",
   "organizations": [
     {
       "role": "admin",
@@ -259,7 +261,8 @@ This endpoint only returns the addresses of the organizations where the current 
 ```json
 {
     "email": "my@email.me",
-    "fullName": "Steve Urkel",
+    "firstName": "Steve",
+    "lastName": "Urkel",
 }
 ```
 

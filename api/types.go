@@ -40,7 +40,8 @@ type UserOrganization struct {
 type UserInfo struct {
 	Email         string              `json:"email,omitempty"`
 	Password      string              `json:"password,omitempty"`
-	FullName      string              `json:"fullName,omitempty"`
+	FirstName     string              `json:"firstName,omitempty"`
+	LastName      string              `json:"lastName,omitempty"`
 	Organizations []*UserOrganization `json:"organizations"`
 }
 
