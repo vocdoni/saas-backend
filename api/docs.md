@@ -7,6 +7,7 @@
 - [🔐 Auth](#-auth)
   - [🔑 Login](#-login)
   - [🥤 Refresh token](#-refresh-token)
+  - [💼 User writable organizations addresses](#-user-writable-organizations-addresses)
 - [🧾 Transactions](#-transactions)
   - [✍️ Sign tx](#-sign-tx)
   - [📝 Sign message](#-sign-message)
