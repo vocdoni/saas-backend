@@ -102,6 +102,46 @@ func (a *API) organizationInfoHandler(w http.ResponseWriter, r *http.Request) {
 	httpWriteJSON(w, organizationFromDB(org, parent))
 }
 
+// organizationMembersHandler handles the request to get the members of an
+// organization. It returns the list of members with their role in the
+// organization with the address provided in the request.
+func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request) {
+	// get the organization info from the request context
+	org, _, ok := a.organizationFromRequest(r)
+	if !ok {
+		ErrUnauthorized.Write(w)
+		return
+	}
+	// send the organization back to the user
+	members, err := a.db.OrganizationsMembers(org.Address)
+	if err != nil {
+		ErrGenericInternalServerError.Withf("could not get organization members: %v", err).Write(w)
+		return
+	}
+	orgMembers := []OrganizationMember{}
+	for _, member := range members {
+		var role string
+		for _, userOrg := range member.Organizations {
+			if userOrg.Address == org.Address {
+				role = string(userOrg.Role)
+				break
+			}
+		}
+		if role == "" {
+			continue
+		}
+		orgMembers = append(orgMembers, OrganizationMember{
+			Info: &UserInfo{
+				Email:     member.Email,
+				FirstName: member.FirstName,
+				LastName:  member.LastName,
+			},
+			Role: role,
+		})
+	}
+	httpWriteJSON(w, orgMembers)
+}
+
 // updateOrganizationHandler handles the request to update the information of an
 // organization. Only the admin of the organization can update the information.
 // Only certain fields can be updated, and they will be updated only if they are

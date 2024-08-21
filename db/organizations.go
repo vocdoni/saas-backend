@@ -112,3 +112,31 @@ func (ms *MongoStorage) ReplaceCreatorEmail(oldEmail, newEmail string) error {
 	}
 	return nil
 }
+
+// OrganizationsMembers method returns the users that are members of the
+// organization with the given address. If an error occurs, it returns the
+// error.
+func (ms *MongoStorage) OrganizationsMembers(address string) ([]User, error) {
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// find the organization in the database
+	filter := bson.M{
+		"organizations": bson.M{
+			"$elemMatch": bson.M{
+				"_id": address,
+			},
+		},
+	}
+	users := []User{}
+	cursor, err := ms.users.Find(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	if err := cursor.All(ctx, &users); err != nil {
+		return nil, err
+	}
+	return users, nil
+}

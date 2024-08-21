@@ -31,4 +31,6 @@ const (
 	organizationsEndpoint = "/organizations"
 	// GET /organizations/{address} to get the organization information
 	organizationEndpoint = "/organizations/{address}"
+	// GET /organizations/{address}/members to get the organization members
+	organizationMembersEndpoint = "/organizations/{address}/members"
 )
