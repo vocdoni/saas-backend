@@ -7,6 +7,8 @@ const (
 	authRefresTokenEndpoint = "/auth/refresh"
 	// POST /auth/login to login and get a JWT token
 	authLoginEndpoint = "/auth/login"
+	// GET /auth/addresses to get the writable organization addresses
+	authAddressesEndpoint = "/auth/addresses"
 
 	// user routes
 

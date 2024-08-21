@@ -23,6 +23,12 @@ type OrganizationInfo struct {
 	Parent      *OrganizationInfo `json:"parent"`
 }
 
+// OrganizationAddresses is the struct that represents a list of addresses of
+// organizations in the API.
+type OrganizationAddresses struct {
+	Addresses []string `json:"addresses"`
+}
+
 // UserOrganization is the struct that represents the organization of a user in
 // the API, including the role of the user in the organization.
 type UserOrganization struct {
@@ -54,16 +60,16 @@ type LoginResponse struct {
 // TransactionData is the struct that contains the data of a transaction to
 // be signed, but also is used to return the signed transaction.
 type TransactionData struct {
-	OrganizationAddress string `json:"organizationAddress"`
-	TxPayload           string `json:"txPayload"`
+	Address   string `json:"address"`
+	TxPayload string `json:"txPayload"`
 }
 
 // MessageSignature is the struct that contains the payload and the signature.
 // Its used to receive and return a signed message.
 type MessageSignature struct {
-	OrganizationAddress string         `json:"organizationAddress"`
-	Payload             []byte         `json:"payload,omitempty"`
-	Signature           types.HexBytes `json:"signature,omitempty"`
+	Address   string         `json:"address"`
+	Payload   []byte         `json:"payload,omitempty"`
+	Signature types.HexBytes `json:"signature,omitempty"`
 }
 
 // organizationFromDB converts a db.Organization to an OrganizationInfo, if the parent

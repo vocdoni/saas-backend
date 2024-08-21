@@ -172,9 +172,9 @@ func (ms *MongoStorage) IsMemberOf(userEmail, organizationAddress string, role U
 		return false, err
 	}
 	for _, org := range user.Organizations {
-		if org.Address == organizationAddress && org.Role == role {
-			return true, nil
+		if org.Address == organizationAddress {
+			return org.Role == role, nil
 		}
 	}
-	return false, nil
+	return false, ErrNotFound
 }

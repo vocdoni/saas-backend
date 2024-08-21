@@ -10,19 +10,19 @@ import (
 
 // refresh handles the refresh request. It returns a new JWT token.
 func (a *API) refreshTokenHandler(w http.ResponseWriter, r *http.Request) {
-	// Retrieve the user identifier from the HTTP header
+	// retrieve the user identifier from the HTTP header
 	userID := r.Header.Get("X-User-Id")
 	if userID == "" {
 		ErrUnauthorized.Write(w)
 		return
 	}
-	// Generate a new token with the user name as the subject
+	// generate a new token with the user name as the subject
 	res, err := a.buildLoginResponse(userID)
 	if err != nil {
 		ErrGenericInternalServerError.Write(w)
 		return
 	}
-	// Send the token back to the user
+	// send the token back to the user
 	httpWriteJSON(w, res)
 }
 
@@ -57,5 +57,40 @@ func (a *API) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// send the token back to the user
+	httpWriteJSON(w, res)
+}
+
+// writableOrganizationAddressesHandler returns the list of addresses of the
+// organizations where the user has write access.
+func (a *API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *http.Request) {
+	// get the user from the request context
+	user, ok := userFromContext(r.Context())
+	if !ok {
+		ErrUnauthorized.Write(w)
+		return
+	}
+	// check if the user has organizations
+	if len(user.Organizations) == 0 {
+		ErrNoOrganizations.Write(w)
+		return
+	}
+	// get the user organizations information from the database if any
+	userAddresses := &OrganizationAddresses{
+		Addresses: []string{},
+	}
+	// get the addresses of the organizations where the user has write access
+	for _, org := range user.Organizations {
+		// check if the user has write access to the organization based on the
+		// role of the user in the organization
+		if db.HasWriteAccess(org.Role) {
+			userAddresses.Addresses = append(userAddresses.Addresses, org.Address)
+		}
+	}
+	res, err := json.Marshal(userAddresses)
+	if err != nil {
+		ErrGenericInternalServerError.Write(w)
+		return
+	}
+	// write the response back to the user
 	httpWriteJSON(w, res)
 }
