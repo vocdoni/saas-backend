@@ -160,3 +160,32 @@ func TestReplaceCreatorEmail(t *testing.T) {
 	c.Assert(org.Name, qt.Equals, name)
 	c.Assert(org.Creator, qt.Equals, newCreator)
 }
+
+func TestOrganizationsMembers(t *testing.T) {
+	defer func() {
+		if err := db.Reset(); err != nil {
+			t.Error(err)
+		}
+	}()
+	c := qt.New(t)
+	// create a new organization with a creator
+	address := "orgToReplaceCreator"
+	name := "Organization to replace creator"
+	c.Assert(db.SetUser(&User{
+		Email:    testUserEmail,
+		Password: testUserPass,
+	}), qt.IsNil)
+	c.Assert(db.SetOrganization(&Organization{
+		Address: address,
+		Name:    name,
+		Creator: testUserEmail,
+	}), qt.IsNil)
+	_, _, err := db.Organization(address, false)
+	c.Assert(err, qt.IsNil)
+	// get the organization members
+	members, err := db.OrganizationsMembers(address)
+	c.Assert(err, qt.IsNil)
+	c.Assert(members, qt.HasLen, 1)
+	singleMember := members[0]
+	c.Assert(singleMember.Email, qt.Equals, testUserEmail)
+}
