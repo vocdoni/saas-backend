@@ -406,8 +406,30 @@ Only the following parameters can be changed. Every parameter is optional.
 
 | HTTP Status | Error code | Message |
 |:---:|:---:|:---|
-| `401` | `40001` | `user not authorized` |
-| `400` | `40004` | `malformed JSON body` |
 | `400` | `40009` | `organization not found` |
 | `400` | `40010` | `malformed URL parameter` |
+| `400` | `4012` | `no organization provided` |
+| `500` | `50002` | `internal server error` |
+
+### 🧑‍🤝‍🧑 Organization members
+
+* **Path** `/organizations/{address}/members`
+* **Method** `GET`
+* **Response**
+```json
+[
+  {
+    "info": { /* user info response */ },
+    "role": "admin"
+  }
+]
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `400` | `40009` | `organization not found` |
+| `400` | `40010` | `malformed URL parameter` |
+| `400` | `4012` | `no organization provided` |
 | `500` | `50002` | `internal server error` |

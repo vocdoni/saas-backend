@@ -95,7 +95,7 @@ func (a *API) organizationInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
 	org, parent, ok := a.organizationFromRequest(r)
 	if !ok {
-		ErrUnauthorized.Write(w)
+		ErrNoOrganizationProvided.Write(w)
 		return
 	}
 	// send the organization back to the user
@@ -109,7 +109,7 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)
 	if !ok {
-		ErrUnauthorized.Write(w)
+		ErrNoOrganizationProvided.Write(w)
 		return
 	}
 	// send the organization back to the user
