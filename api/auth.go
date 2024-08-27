@@ -86,11 +86,6 @@ func (a *API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *htt
 			userAddresses.Addresses = append(userAddresses.Addresses, org.Address)
 		}
 	}
-	res, err := json.Marshal(userAddresses)
-	if err != nil {
-		ErrGenericInternalServerError.Write(w)
-		return
-	}
 	// write the response back to the user
-	httpWriteJSON(w, res)
+	httpWriteJSON(w, userAddresses)
 }
