@@ -29,7 +29,7 @@
 
 > **SDK method**: This method is required by the Vocdoni SDK to use this service as a valid remote signer.
 
-* **Path** `/auth`
+* **Path** `/auth/login`
 * **Method** `POST`
 * **Request Body** 
 ```json
