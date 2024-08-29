@@ -10,14 +10,14 @@ import (
 
 // refresh handles the refresh request. It returns a new JWT token.
 func (a *API) refreshTokenHandler(w http.ResponseWriter, r *http.Request) {
-	// retrieve the user identifier from the HTTP header
-	userID := r.Header.Get("X-User-Id")
-	if userID == "" {
+	// get the user from the request context
+	user, ok := userFromContext(r.Context())
+	if !ok {
 		ErrUnauthorized.Write(w)
 		return
 	}
 	// generate a new token with the user name as the subject
-	res, err := a.buildLoginResponse(userID)
+	res, err := a.buildLoginResponse(user.Email)
 	if err != nil {
 		ErrGenericInternalServerError.Write(w)
 		return
