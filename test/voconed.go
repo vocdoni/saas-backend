@@ -42,7 +42,7 @@ func StartVoconedContainer(ctx context.Context) (testcontainers.Container, error
 	return testcontainers.GenericContainer(ctx,
 		testcontainers.GenericContainerRequest{
 			ContainerRequest: testcontainers.ContainerRequest{
-				Image:        "ghcr.io/vocdoni/voconed:main",
+				Image:        "ghcr.io/vocdoni/vocdoni-node:main",
 				Entrypoint:   []string{"/app/voconed"},
 				Cmd:          voconedCmd,
 				ExposedPorts: []string{exposedPort},
