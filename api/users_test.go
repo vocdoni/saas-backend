@@ -123,7 +123,11 @@ func Test_registerHandler(t *testing.T) {
 
 		resp, err := http.DefaultClient.Do(req)
 		c.Assert(err, qt.IsNil)
-		defer resp.Body.Close()
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				c.Errorf("error closing response body: %v", err)
+			}
+		}()
 
 		c.Assert(resp.StatusCode, qt.Equals, testCase.expectedStatus)
 		if testCase.expectedBody != nil {
