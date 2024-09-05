@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 
@@ -12,12 +14,32 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
+type apiTestCase struct {
+	uri            string
+	method         string
+	body           []byte
+	expectedStatus int
+	expectedBody   []byte
+}
+
 const (
 	testHost    = "localhost"
 	testPort    = 7788
 	testPrivKey = ""
 	testSecret  = ""
 )
+
+func testURL(path string) string {
+	return fmt.Sprintf("http://%s:%d%s", testHost, testPort, path)
+}
+
+func mustMarshall(i any) []byte {
+	b, err := json.Marshal(i)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
 
 func TestMain(m *testing.M) {
 	ctx := context.Background()
