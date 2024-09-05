@@ -3,7 +3,7 @@ package test
 import (
 	"context"
 	"fmt"
-	"path"
+	"net/url"
 
 	"github.com/docker/go-connections/nat"
 	"github.com/testcontainers/testcontainers-go"
@@ -28,8 +28,12 @@ const (
 	VocfaucetWaitPeriod = "10m"
 )
 
-func VoconedAPIURL(containerURI string) string {
-	return path.Join(containerURI, VoconedURLPath)
+func VoconedAPIURL(base string) string {
+	apiURL, err := url.JoinPath(base, VocfaucetBaseRoute)
+	if err != nil {
+		panic(err)
+	}
+	return apiURL
 }
 
 func StartVoconedContainer(ctx context.Context) (testcontainers.Container, error) {
@@ -37,17 +41,17 @@ func StartVoconedContainer(ctx context.Context) (testcontainers.Container, error
 	voconedCmd := []string{
 		"--setTxCosts", fmt.Sprintf("--txCosts=%d", VoconedTxCosts),
 		fmt.Sprintf("--fundedAccounts=%s:%d", VoconedFundedAccount, VoconedFunds),
+		fmt.Sprintf("--port=%d", VoconedPort),
 	}
-
 	return testcontainers.GenericContainer(ctx,
 		testcontainers.GenericContainerRequest{
 			ContainerRequest: testcontainers.ContainerRequest{
-				Image:        "ghcr.io/vocdoni/vocdoni-node:main",
-				Entrypoint:   []string{"/app/voconed"},
-				Cmd:          voconedCmd,
-				ExposedPorts: []string{exposedPort},
+				Image:         "ghcr.io/vocdoni/vocdoni-node:main",
+				Entrypoint:    []string{"/app/voconed"},
+				Cmd:           voconedCmd,
+				ImagePlatform: "linux/amd64",
+				ExposedPorts:  []string{exposedPort},
 				WaitingFor: wait.ForAll(
-					wait.ForLog("Waiting for connections"),
 					wait.ForListeningPort(nat.Port(exposedPort)),
 				),
 			},
@@ -75,7 +79,6 @@ func StartVocfaucetContainer(ctx context.Context) (testcontainers.Container, err
 				Cmd:          vocfaucetCmd,
 				ExposedPorts: []string{exposedPort},
 				WaitingFor: wait.ForAll(
-					wait.ForLog("Waiting for connections"),
 					wait.ForListeningPort(nat.Port(exposedPort)),
 				),
 			},

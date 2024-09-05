@@ -15,7 +15,7 @@ func StartMongoContainer(ctx context.Context) (testcontainers.Container, error) 
 	return testcontainers.GenericContainer(ctx,
 		testcontainers.GenericContainerRequest{
 			ContainerRequest: testcontainers.ContainerRequest{
-				Image:        "mongo:6",
+				Image:        "mongo",
 				ExposedPorts: []string{"27017/tcp"},
 				WaitingFor: wait.ForAll(
 					wait.ForLog("Waiting for connections"),

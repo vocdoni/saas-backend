@@ -11,7 +11,6 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/test"
 	"go.vocdoni.io/dvote/apiclient"
-	"go.vocdoni.io/dvote/log"
 )
 
 type apiTestCase struct {
@@ -23,10 +22,11 @@ type apiTestCase struct {
 }
 
 const (
-	testHost    = "localhost"
-	testPort    = 7788
-	testPrivKey = ""
-	testSecret  = ""
+	testSecret = "super-secret"
+	testEmail  = "admin@test.com"
+	testPass   = "password123"
+	testHost   = "0.0.0.0"
+	testPort   = 7788
 )
 
 func testURL(path string) string {
@@ -55,12 +55,23 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
+	// start the faucet and voconed containers
+	// faucetContainer, err := test.StartVocfaucetContainer(ctx)
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// defer func() { _ = faucetContainer.Terminate(ctx) }()
 	apiContainer, err := test.StartVoconedContainer(ctx)
 	if err != nil {
 		panic(err)
 	}
 	defer func() { _ = apiContainer.Terminate(ctx) }()
-	testAPIEndpoint := test.VoconedAPIURL(apiContainer.GetContainerID())
+	// get the API endpoint
+	apiEndpoint, err := apiContainer.Endpoint(ctx, "http")
+	if err != nil {
+		panic(err)
+	}
+	testAPIEndpoint := test.VoconedAPIURL(apiEndpoint)
 	// set reset db env var to true
 	_ = os.Setenv("VOCDONI_MONGO_RESET_DB", "true")
 	// create a new MongoDB connection with the test database
@@ -72,15 +83,15 @@ func TestMain(m *testing.M) {
 	// create the remote test API client
 	testAPIClient, err := apiclient.New(testAPIEndpoint)
 	if err != nil {
-		log.Fatalf("could not create the remote API client: %v", err)
+		panic(err)
 	}
-	// create the Vocdoni client account with the private key
-	testAccount, err := account.New(testPrivKey, testAPIEndpoint)
+	// create the test account with the Voconed private key and the API
+	// container endpoint
+	testAccount, err := account.New(test.VoconedFoundedPrivKey, testAPIEndpoint)
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	// start the API
-	// create the local API server
 	New(&APIConfig{
 		Host:                testHost,
 		Port:                testPort,
