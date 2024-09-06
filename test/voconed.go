@@ -51,9 +51,7 @@ func StartVoconedContainer(ctx context.Context) (testcontainers.Container, error
 				Cmd:           voconedCmd,
 				ImagePlatform: "linux/amd64",
 				ExposedPorts:  []string{exposedPort},
-				WaitingFor: wait.ForAll(
-					wait.ForListeningPort(nat.Port(exposedPort)),
-				),
+				WaitingFor:    wait.ForListeningPort(nat.Port(exposedPort)),
 			},
 			Started: true,
 		})
@@ -75,12 +73,11 @@ func StartVocfaucetContainer(ctx context.Context) (testcontainers.Container, err
 	return testcontainers.GenericContainer(ctx,
 		testcontainers.GenericContainerRequest{
 			ContainerRequest: testcontainers.ContainerRequest{
-				Image:        "ghcr.io/vocdoni/vocfaucet:main",
-				Cmd:          vocfaucetCmd,
-				ExposedPorts: []string{exposedPort},
-				WaitingFor: wait.ForAll(
-					wait.ForListeningPort(nat.Port(exposedPort)),
-				),
+				Image:         "ghcr.io/vocdoni/vocfaucet:main",
+				Cmd:           vocfaucetCmd,
+				ImagePlatform: "linux/amd64",
+				ExposedPorts:  []string{exposedPort},
+				WaitingFor:    wait.ForListeningPort(nat.Port(exposedPort)),
 			},
 			Started: true,
 		})

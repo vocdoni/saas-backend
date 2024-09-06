@@ -95,12 +95,13 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	// start the faucet and voconed containers
-	// faucetContainer, err := test.StartVocfaucetContainer(ctx)
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// defer func() { _ = faucetContainer.Terminate(ctx) }()
+	// start the faucet container
+	faucetContainer, err := test.StartVocfaucetContainer(ctx)
+	if err != nil {
+		panic(err)
+	}
+	defer func() { _ = faucetContainer.Terminate(ctx) }()
+	// start the voconed container
 	apiContainer, err := test.StartVoconedContainer(ctx)
 	if err != nil {
 		panic(err)
