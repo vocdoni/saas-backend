@@ -65,6 +65,7 @@ func New(conf *APIConfig) *API {
 
 // Start starts the API HTTP server (non blocking).
 func (a *API) Start() {
+	log.Infof("starting API server on %s:%d", a.host, a.port)
 	go func() {
 		if err := http.ListenAndServe(fmt.Sprintf("%s:%d", a.host, a.port), a.initRouter()); err != nil {
 			log.Fatalf("failed to start the API server: %v", err)

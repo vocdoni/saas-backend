@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/db"
@@ -29,10 +31,14 @@ const (
 	testPort   = 7788
 )
 
+// testURL helper function returns the full URL for the given path using the
+// test host and port.
 func testURL(path string) string {
 	return fmt.Sprintf("http://%s:%d%s", testHost, testPort, path)
 }
 
+// mustMarshall helper function marshalls the input interface into a byte slice.
+// It panics if the marshalling fails.
 func mustMarshall(i any) []byte {
 	b, err := json.Marshal(i)
 	if err != nil {
@@ -41,6 +47,36 @@ func mustMarshall(i any) []byte {
 	return b
 }
 
+// pingAPI helper function pings the API endpoint and retries the request
+// if it fails until the retries limit is reached. It returns an error if the
+// request fails or the status code is not 200 as many times as the retries
+// limit.
+func pingAPI(endpoint string, retries int) error {
+	// create a new ping request
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	// try to ping the API
+	var pingErr error
+	for i := 0; i < retries; i++ {
+		var resp *http.Response
+		if resp, pingErr = http.DefaultClient.Do(req); pingErr == nil {
+			if resp.StatusCode == http.StatusOK {
+				return nil
+			}
+			pingErr = fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+		time.Sleep(time.Second)
+	}
+	return pingErr
+}
+
+// TestMain function starts the MongoDB container, the Voconed container, and
+// the API server before running the tests. It also creates a new MongoDB
+// connection with a random database name, a new Voconed API client, and a new
+// account with the Voconed private key and the API container endpoint. It
+// starts the API server and waits for it to start before running the tests.
 func TestMain(m *testing.M) {
 	ctx := context.Background()
 	// start a MongoDB container for testing
@@ -101,6 +137,10 @@ func TestMain(m *testing.M) {
 		Account:             testAccount,
 		FullTransparentMode: false,
 	}).Start()
+	// wait for the API to start
+	if err := pingAPI(testURL(pingEndpoint), 5); err != nil {
+		panic(err)
+	}
 	// run the tests
 	os.Exit(m.Run())
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
@@ -133,7 +134,7 @@ func Test_registerHandler(t *testing.T) {
 		if testCase.expectedBody != nil {
 			body, err := io.ReadAll(resp.Body)
 			c.Assert(err, qt.IsNil)
-			c.Assert(body, qt.DeepEquals, testCase.expectedBody)
+			c.Assert(strings.TrimSpace(string(body)), qt.Equals, string(testCase.expectedBody))
 		}
 	}
 }
