@@ -10,7 +10,7 @@ import (
 	qt "github.com/frankban/quicktest"
 )
 
-func Test_registerHandler(t *testing.T) {
+func TestRegisterHandler(t *testing.T) {
 	c := qt.New(t)
 	defer func() {
 		if err := testDB.Reset(); err != nil {
@@ -25,12 +25,12 @@ func Test_registerHandler(t *testing.T) {
 			method:         http.MethodPost,
 			body:           []byte("invalid body"),
 			expectedStatus: http.StatusBadRequest,
-			expectedBody:   mustMarshall(ErrMalformedBody),
+			expectedBody:   mustMarshal(ErrMalformedBody),
 		},
 		{
 			uri:    registerURL,
 			method: http.MethodPost,
-			body: mustMarshall(&UserInfo{
+			body: mustMarshal(&UserInfo{
 				Email:     "valid@test.com",
 				Password:  "password",
 				FirstName: "first",
@@ -41,79 +41,79 @@ func Test_registerHandler(t *testing.T) {
 		{
 			uri:    registerURL,
 			method: http.MethodPost,
-			body: mustMarshall(&UserInfo{
+			body: mustMarshal(&UserInfo{
 				Email:     "valid@test.com",
 				Password:  "password",
 				FirstName: "first",
 				LastName:  "last",
 			}),
 			expectedStatus: http.StatusInternalServerError,
-			expectedBody:   mustMarshall(ErrGenericInternalServerError),
+			expectedBody:   mustMarshal(ErrGenericInternalServerError),
 		},
 		{
 			uri:    registerURL,
 			method: http.MethodPost,
-			body: mustMarshall(&UserInfo{
+			body: mustMarshal(&UserInfo{
 				Email:     "valid2@test.com",
 				Password:  "password",
 				FirstName: "first",
 				LastName:  "",
 			}),
 			expectedStatus: http.StatusBadRequest,
-			expectedBody:   mustMarshall(ErrMalformedBody.Withf("last name is empty")),
+			expectedBody:   mustMarshal(ErrMalformedBody.Withf("last name is empty")),
 		},
 		{
 			uri:    registerURL,
 			method: http.MethodPost,
-			body: mustMarshall(&UserInfo{
+			body: mustMarshal(&UserInfo{
 				Email:     "valid2@test.com",
 				Password:  "password",
 				FirstName: "",
 				LastName:  "last",
 			}),
 			expectedStatus: http.StatusBadRequest,
-			expectedBody:   mustMarshall(ErrMalformedBody.Withf("first name is empty")),
+			expectedBody:   mustMarshal(ErrMalformedBody.Withf("first name is empty")),
 		},
 		{
 			uri:    registerURL,
 			method: http.MethodPost,
-			body: mustMarshall(&UserInfo{
+			body: mustMarshal(&UserInfo{
 				Email:     "invalid",
 				Password:  "password",
 				FirstName: "first",
 				LastName:  "last",
 			}),
 			expectedStatus: http.StatusBadRequest,
-			expectedBody:   mustMarshall(ErrEmailMalformed),
+			expectedBody:   mustMarshal(ErrEmailMalformed),
 		},
 		{
 			uri:    registerURL,
 			method: http.MethodPost,
-			body: mustMarshall(&UserInfo{
+			body: mustMarshal(&UserInfo{
 				Email:     "",
 				Password:  "password",
 				FirstName: "first",
 				LastName:  "last",
 			}),
 			expectedStatus: http.StatusBadRequest,
-			expectedBody:   mustMarshall(ErrEmailMalformed),
+			expectedBody:   mustMarshal(ErrEmailMalformed),
 		},
 		{
 			uri:    registerURL,
 			method: http.MethodPost,
-			body: mustMarshall(&UserInfo{
+			body: mustMarshal(&UserInfo{
 				Email:     "valid2@test.com",
 				Password:  "short",
 				FirstName: "first",
 				LastName:  "last",
 			}),
 			expectedStatus: http.StatusBadRequest,
-			expectedBody:   mustMarshall(ErrPasswordTooShort),
+			expectedBody:   mustMarshal(ErrPasswordTooShort),
 		},
 		{
 			uri:    registerURL,
 			method: http.MethodPost,
-			body: mustMarshall(&UserInfo{
+			body: mustMarshal(&UserInfo{
 				Email:     "valid2@test.com",
 				Password:  "",
 				FirstName: "first",

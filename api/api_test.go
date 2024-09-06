@@ -41,9 +41,9 @@ func testURL(path string) string {
 	return fmt.Sprintf("http://%s:%d%s", testHost, testPort, path)
 }
 
-// mustMarshall helper function marshalls the input interface into a byte slice.
+// mustMarshal helper function marshalls the input interface into a byte slice.
 // It panics if the marshalling fails.
-func mustMarshall(i any) []byte {
+func mustMarshal(i any) []byte {
 	b, err := json.Marshal(i)
 	if err != nil {
 		panic(err)
