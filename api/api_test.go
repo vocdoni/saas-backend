@@ -31,6 +31,10 @@ const (
 	testPort   = 7788
 )
 
+// testDB is the MongoDB storage for the tests. Make it global so it can be
+// accessed by the tests directly.
+var testDB *db.MongoStorage
+
 // testURL helper function returns the full URL for the given path using the
 // test host and port.
 func testURL(path string) string {
@@ -111,8 +115,7 @@ func TestMain(m *testing.M) {
 	// set reset db env var to true
 	_ = os.Setenv("VOCDONI_MONGO_RESET_DB", "true")
 	// create a new MongoDB connection with the test database
-	testDB, err := db.New(mongoURI, test.RandomDatabaseName())
-	if err != nil {
+	if testDB, err = db.New(mongoURI, test.RandomDatabaseName()); err != nil {
 		panic(err)
 	}
 	defer testDB.Close()

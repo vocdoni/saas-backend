@@ -12,6 +12,11 @@ import (
 
 func Test_registerHandler(t *testing.T) {
 	c := qt.New(t)
+	defer func() {
+		if err := testDB.Reset(); err != nil {
+			c.Logf("error resetting test database: %v", err)
+		}
+	}()
 
 	registerURL := testURL(usersEndpoint)
 	testCases := []apiTestCase{
