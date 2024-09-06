@@ -44,10 +44,10 @@ jobs:
             exit 1
           fi
       - name: Run Go test
-        run: go test ./...
+        run: go test -v -timeout=30m ./...
       - name: Run Go test -race
         if: github.ref == 'refs/heads/stage' ||  startsWith(github.ref, 'refs/heads/release')
-        run: go test -vet=off -timeout=15m -race ./... # note that -race can easily make the crypto stuff 10x slower
+        run: go test -vet=off -timeout=30m -race ./... # note that -race can easily make the crypto stuff 10x slower
 
   docker-release:
     runs-on: ubuntu-latest

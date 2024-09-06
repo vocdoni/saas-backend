@@ -1,6 +1,10 @@
 package api
 
 const (
+	// ping route
+	// GET /ping to check the server status
+	pingEndpoint = "/ping"
+
 	// auth routes
 
 	// POST /auth/refresh to refresh the JWT token

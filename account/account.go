@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/spf13/viper"
 	vocdoniapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/crypto/ethereum"
@@ -29,32 +28,28 @@ func New(privateKey string, apiEndpoint string) (*Account, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create API client: %w", err)
 	}
-	if err := apiClient.SetAccount(viper.GetString("privateKey")); err != nil {
+	if err := apiClient.SetAccount(privateKey); err != nil {
 		return nil, fmt.Errorf("failed to set account: %w", err)
 	}
 	if err := ensureAccountExist(apiClient); err != nil {
 		return nil, fmt.Errorf("failed to ensure account exists: %w", err)
 	}
-
 	// create the signer
 	signer := ethereum.SignKeys{}
 	if err := signer.AddHexKey(privateKey); err != nil {
 		return nil, err
 	}
-
 	// get account and log some info
 	account, err := apiClient.Account("")
 	if err != nil {
 		log.Fatalf("failed to get account: %v", err)
 	}
-
 	log.Infow("Vocdoni account initialized",
 		"endpoint", apiEndpoint,
 		"chainID", apiClient.ChainID(),
 		"address", account.Address,
 		"balance", account.Balance,
 	)
-
 	return &Account{
 		client: apiClient,
 		signer: &signer,
@@ -68,13 +63,9 @@ func (a *Account) FaucetPackage(toAddr string, amount uint64) (*models.FaucetPac
 
 // ensureAccountExist checks if the account exists and creates it if it doesn't.
 func ensureAccountExist(cli *apiclient.HTTPclient) error {
-	account, err := cli.Account("")
-	if err == nil {
-		log.Infow("account already exists", "address", account.Address)
+	if _, err := cli.Account(""); err == nil {
 		return nil
 	}
-
-	log.Infow("creating new account", "address", cli.MyAddress().Hex())
 	faucetPkg, err := apiclient.GetFaucetPackageFromDefaultService(cli.MyAddress().Hex(), cli.ChainID())
 	if err != nil {
 		return fmt.Errorf("failed to get faucet package: %w", err)
