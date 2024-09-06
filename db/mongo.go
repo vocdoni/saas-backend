@@ -70,9 +70,7 @@ func New(url, database string) (*MongoStorage, error) {
 	// if reset flag is enabled, Reset drops the database documents and recreates indexes
 	// else, just init collections and create indexes
 	if reset := os.Getenv("VOCDONI_MONGO_RESET_DB"); reset != "" {
-		log.Info("resetting database")
-		err := ms.Reset()
-		if err != nil {
+		if err := ms.Reset(); err != nil {
 			return nil, err
 		}
 	} else {

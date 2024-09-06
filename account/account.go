@@ -63,12 +63,9 @@ func (a *Account) FaucetPackage(toAddr string, amount uint64) (*models.FaucetPac
 
 // ensureAccountExist checks if the account exists and creates it if it doesn't.
 func ensureAccountExist(cli *apiclient.HTTPclient) error {
-	account, err := cli.Account("")
-	if err == nil {
-		log.Infow("account already exists", "address", account.Address)
+	if _, err := cli.Account(""); err == nil {
 		return nil
 	}
-	log.Infow("creating new account", "address", cli.MyAddress().Hex())
 	faucetPkg, err := apiclient.GetFaucetPackageFromDefaultService(cli.MyAddress().Hex(), cli.ChainID())
 	if err != nil {
 		return fmt.Errorf("failed to get faucet package: %w", err)
