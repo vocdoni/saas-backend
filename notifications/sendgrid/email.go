@@ -34,10 +34,11 @@ func (sg *SendGridEmail) Init(rawConfig any) error {
 }
 
 func (sg *SendGridEmail) SendNotification(ctx context.Context, notification *notifications.Notification) error {
-	// create from email
+	// create from and to email
 	from := mail.NewEmail(sg.config.FromName, sg.config.FromAddress)
+	to := mail.NewEmail("", notification.To)
 	// create email with notification data
-	message := mail.NewSingleEmail(from, notification.Subject, mail.NewEmail("", notification.To), notification.Body, notification.Body)
+	message := mail.NewSingleEmail(from, notification.Subject, to, notification.Body, notification.Body)
 	// send the email
 	_, err := sg.client.SendWithContext(ctx, message)
 	return err

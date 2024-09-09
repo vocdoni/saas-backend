@@ -22,6 +22,7 @@ type MongoStorage struct {
 	keysLock sync.RWMutex
 
 	users         *mongo.Collection
+	verifications *mongo.Collection
 	organizations *mongo.Collection
 }
 

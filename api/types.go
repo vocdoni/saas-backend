@@ -49,6 +49,7 @@ type UserInfo struct {
 	Password      string              `json:"password,omitempty"`
 	FirstName     string              `json:"firstName,omitempty"`
 	LastName      string              `json:"lastName,omitempty"`
+	Verified      bool                `json:"verified,omitempty"`
 	Organizations []*UserOrganization `json:"organizations"`
 }
 
@@ -56,6 +57,10 @@ type UserInfo struct {
 type UserPasswordUpdate struct {
 	OldPassword string `json:"oldPassword"`
 	NewPassword string `json:"newPassword"`
+}
+
+type UserVerification struct {
+	Code string `json:"code"`
 }
 
 // LoginResponse is the response of the login request which includes the JWT token

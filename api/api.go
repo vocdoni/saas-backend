@@ -139,6 +139,9 @@ func (a *API) initRouter() http.Handler {
 		// login
 		log.Infow("new route", "method", "POST", "path", authLoginEndpoint)
 		r.Post(authLoginEndpoint, a.authLoginHandler)
+		// verify user
+		log.Infow("new route", "method", "POST", "path", verifyUserEndpoint)
+		r.Post(verifyUserEndpoint, a.verifyUserHandler)
 		// get organization information
 		log.Infow("new route", "method", "GET", "path", organizationEndpoint)
 		r.Get(organizationEndpoint, a.organizationInfoHandler)

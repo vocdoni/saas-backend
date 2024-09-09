@@ -8,6 +8,7 @@ import (
 
 	"github.com/vocdoni/saas-backend/db"
 	"go.vocdoni.io/dvote/log"
+	"go.vocdoni.io/dvote/util"
 )
 
 // registerHandler handles the register request. It creates a new user in the database.
@@ -45,24 +46,30 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 	// hash the password
 	hPassword := hashPassword(userInfo.Password)
 	// add the user to the database
-	if err := a.db.SetUser(&db.User{
+	userID, err := a.db.SetUser(&db.User{
 		Email:     userInfo.Email,
 		FirstName: userInfo.FirstName,
 		LastName:  userInfo.LastName,
 		Password:  hex.EncodeToString(hPassword),
-	}); err != nil {
+	})
+	if err != nil {
 		log.Warnw("could not create user", "error", err)
 		ErrGenericInternalServerError.Write(w)
 		return
 	}
-	// generate a new token with the user name as the subject
-	res, err := a.buildLoginResponse(userInfo.Email)
-	if err != nil {
-		ErrGenericInternalServerError.Write(w)
+	// generate verification code
+	code := util.RandomHex(6)
+	// store the verification code in the database
+	if err := a.db.SetVerificationCode(&db.User{ID: userID}, code); err != nil {
+		log.Warnw("could not store verification code", "error", err)
+		ErrGenericInternalServerError.Withf("could not store verification code").Write(w)
 		return
 	}
+	// send the verification code via email
+	// TODO: implement email sending
+
 	// send the token back to the user
-	httpWriteJSON(w, res)
+	httpWriteOK(w)
 }
 
 // userInfoHandler handles the request to get the information of the current
@@ -94,6 +101,7 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 		Email:         user.Email,
 		FirstName:     user.FirstName,
 		LastName:      user.LastName,
+		Verified:      user.Verified,
 		Organizations: userOrgs,
 	})
 }
@@ -143,7 +151,7 @@ func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// update the user information if needed
 	if updateUser {
-		if err := a.db.SetUser(user); err != nil {
+		if _, err := a.db.SetUser(user); err != nil {
 			log.Warnw("could not update user", "error", err)
 			ErrGenericInternalServerError.Write(w)
 			return
@@ -154,7 +162,7 @@ func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 			if err := a.db.ReplaceCreatorEmail(currentEmail, user.Email); err != nil {
 				// revert the user update if the creator email update fails
 				user.Email = currentEmail
-				if err := a.db.SetUser(user); err != nil {
+				if _, err := a.db.SetUser(user); err != nil {
 					log.Warnw("could not revert user update", "error", err)
 				}
 				// return an error
@@ -199,7 +207,7 @@ func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	// hash and update the new password
 	user.Password = hex.EncodeToString(hashPassword(userPasswords.NewPassword))
-	if err := a.db.SetUser(user); err != nil {
+	if _, err := a.db.SetUser(user); err != nil {
 		log.Warnw("could not update user password", "error", err)
 		ErrGenericInternalServerError.Write(w)
 		return

@@ -13,6 +13,8 @@ const (
 	authLoginEndpoint = "/auth/login"
 	// GET /auth/addresses to get the writable organization addresses
 	authAddressesEndpoint = "/auth/addresses"
+	// POST /auth/verify to verify the user
+	verifyUserEndpoint = "/auth/verify"
 
 	// user routes
 

@@ -7,6 +7,7 @@
 - [🔐 Auth](#-auth)
   - [🔑 Login](#-login)
   - [🥤 Refresh token](#-refresh-token)
+  - [✅ Verify user](#-verify-user)
   - [💼 User writable organizations addresses](#-user-writable-organizations-addresses)
 - [🧾 Transactions](#-transactions)
   - [✍️ Sign tx](#-sign-tx)
@@ -55,6 +56,25 @@
 | `400` | `40004` | `malformed JSON body` |
 | `500` | `50002` | `internal server error` |
 
+### ✅ Verify user
+
+* **Path** `/auth/verify`
+* **Method** `POST`
+* **Request Body** 
+```json
+{
+    "code": "******",
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40004` | `malformed JSON body` |
+| `500` | `50002` | `internal server error` |
+
 ### 🥤 Refresh token
 
 > **SDK method**: This method is required by the Vocdoni SDK to use this service as a valid remote signer.
@@ -63,14 +83,6 @@
 * **Method** `POST`
 * **Headers**
   * `Authentication: Bearer <user_token>`
-
-* **Response**
-```json
-{
-  "token": "<jwt_token>",
-  "expirity": "2024-08-21T11:26:54.368718+02:00"
-}
-```
 
 * **Errors**
 

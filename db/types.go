@@ -9,6 +9,12 @@ type User struct {
 	FirstName     string               `json:"firstName" bson:"firstName"`
 	LastName      string               `json:"lastName" bson:"lastName"`
 	Organizations []OrganizationMember `json:"organizations" bson:"organizations"`
+	Verified      bool                 `json:"verified" bson:"verified"`
+}
+
+type UserVerification struct {
+	ID   uint64 `json:"id" bson:"_id"`
+	Code string `json:"code" bson:"code"`
 }
 
 func (u *User) HasRoleFor(address string, role UserRole) bool {

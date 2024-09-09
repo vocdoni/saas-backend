@@ -50,6 +50,10 @@ func (a *API) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 		ErrUnauthorized.Write(w)
 		return
 	}
+	// check if the user is verified
+	if !user.Verified {
+		ErrUnauthorized.Withf("user not verified").Write(w)
+	}
 	// generate a new token with the user name as the subject
 	res, err := a.buildLoginResponse(loginInfo.Email)
 	if err != nil {
@@ -58,6 +62,28 @@ func (a *API) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// send the token back to the user
 	httpWriteJSON(w, res)
+}
+
+func (a *API) verifyUserHandler(w http.ResponseWriter, r *http.Request) {
+	verification := &UserVerification{}
+	if err := json.NewDecoder(r.Body).Decode(verification); err != nil {
+		ErrMalformedBody.Write(w)
+		return
+	}
+	user, err := a.db.UserByVerificationCode(verification.Code)
+	if err != nil {
+		if err == db.ErrNotFound {
+			ErrUnauthorized.Write(w)
+			return
+		}
+		ErrGenericInternalServerError.Write(w)
+		return
+	}
+	if err := a.db.VerifyUser(user); err != nil {
+		ErrGenericInternalServerError.Write(w)
+		return
+	}
+	httpWriteOK(w)
 }
 
 // writableOrganizationAddressesHandler returns the list of addresses of the
