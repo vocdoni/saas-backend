@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,6 +11,7 @@ import (
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/notifications/sendgrid"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 )
@@ -24,6 +26,7 @@ func main() {
 	flag.StringP("mongoDB", "d", "saasdb", "The name of the MongoDB database")
 	flag.StringP("vocdoniApi", "v", "https://api-dev.vocdoni.net/v2", "vocdoni node remote API URL")
 	flag.StringP("privateKey", "k", "", "private key for the Vocdoni account")
+	flag.StringP("sendgridAPIKey", "g", "", "SendGrid API key")
 	flag.BoolP("fullTransparentMode", "a", false, "allow all transactions and do not modify any of them")
 	// parse flags
 	flag.Parse()
@@ -43,6 +46,7 @@ func main() {
 	}
 	mongoURL := viper.GetString("mongoURL")
 	mongoDB := viper.GetString("mongoDB")
+	sendgridAPIKey := viper.GetString("sendgridAPIKey")
 	// initialize the MongoDB database
 	database, err := db.New(mongoURL, mongoDB)
 	if err != nil {
@@ -66,6 +70,18 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Infow("API client created", "endpoint", apiEndpoint, "chainID", apiClient.ChainID())
+	// create email notifications service
+	fromName := "Test Vocdoni"
+	fromAddress := "lucas@vocdoni.org"
+	mailService := new(sendgrid.SendGridEmail)
+	if err := mailService.Init(&sendgrid.SendGridConfig{
+		FromName:    fromName,
+		FromAddress: fromAddress,
+		APIKey:      sendgridAPIKey,
+	}); err != nil {
+		log.Fatalf("could not create the email service: %v", err)
+	}
+	log.Infow("email service created", "from", fmt.Sprintf("%s <%s>", fromName, fromAddress), "sendgridAPIKey", sendgridAPIKey)
 	// create the local API server
 	api.New(&api.APIConfig{
 		Host:                host,
@@ -74,10 +90,11 @@ func main() {
 		DB:                  database,
 		Client:              apiClient,
 		Account:             acc,
+		MailService:         mailService,
 		FullTransparentMode: fullTransparentMode,
 	}).Start()
-	// wait forever, as the server is running in a goroutine
 	log.Infow("server started", "host", host, "port", port)
+	// wait forever, as the server is running in a goroutine
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	<-c

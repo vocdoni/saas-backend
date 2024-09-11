@@ -36,10 +36,17 @@ func (sg *SendGridEmail) Init(rawConfig any) error {
 func (sg *SendGridEmail) SendNotification(ctx context.Context, notification *notifications.Notification) error {
 	// create from and to email
 	from := mail.NewEmail(sg.config.FromName, sg.config.FromAddress)
-	to := mail.NewEmail("", notification.To)
+	to := mail.NewEmail(notification.ToName, notification.ToAddress)
 	// create email with notification data
 	message := mail.NewSingleEmail(from, notification.Subject, to, notification.Body, notification.Body)
 	// send the email
-	_, err := sg.client.SendWithContext(ctx, message)
-	return err
+	res, err := sg.client.SendWithContext(ctx, message)
+	if err != nil {
+		return fmt.Errorf("could not send email: %v", err)
+	}
+	// check the response status code, it should be 2xx
+	if res.StatusCode/100 != 2 {
+		return fmt.Errorf("could not send email: %v", res.Body)
+	}
+	return nil
 }

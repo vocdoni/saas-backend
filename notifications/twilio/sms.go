@@ -49,7 +49,7 @@ func (tsms *TwilioSMS) Init(rawConfig any) error {
 func (tsms *TwilioSMS) SendNotification(_ context.Context, notification *notifications.Notification) error {
 	// create message with configured sender number and notification data
 	params := &api.CreateMessageParams{}
-	params.SetTo(notification.To)
+	params.SetTo(notification.ToNumber)
 	params.SetFrom(tsms.config.FromNumber)
 	params.SetBody(notification.Body)
 	// send the message

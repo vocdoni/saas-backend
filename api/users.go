@@ -1,12 +1,16 @@
 package api
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/notifications"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/dvote/util"
 )
@@ -58,7 +62,8 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// generate verification code
-	code := util.RandomHex(6)
+	code := util.RandomHex(3)
+	log.Infof("verification code: %s", code)
 	// store the verification code in the database
 	if err := a.db.SetVerificationCode(&db.User{ID: userID}, code); err != nil {
 		log.Warnw("could not store verification code", "error", err)
@@ -66,8 +71,18 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// send the verification code via email
-	// TODO: implement email sending
-
+	ctx, cancel := context.WithTimeout(r.Context(), time.Second*10)
+	defer cancel()
+	if err := a.mail.SendNotification(ctx, &notifications.Notification{
+		ToName:    fmt.Sprintf("%s %s", userInfo.FirstName, userInfo.LastName),
+		ToAddress: userInfo.Email,
+		Subject:   "Vocdoni: Verify your email",
+		Body:      "Your verification code is: " + code,
+	}); err != nil {
+		log.Warnw("could not send verification email", "error", err)
+		ErrGenericInternalServerError.Withf("could not send verification email").Write(w)
+		return
+	}
 	// send the token back to the user
 	httpWriteOK(w)
 }

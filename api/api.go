@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/jwtauth/v5"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/notifications"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 )
@@ -21,13 +22,14 @@ const (
 )
 
 type APIConfig struct {
-	Host    string
-	Port    int
-	Secret  string
-	Chain   string
-	DB      *db.MongoStorage
-	Client  *apiclient.HTTPclient
-	Account *account.Account
+	Host        string
+	Port        int
+	Secret      string
+	Chain       string
+	DB          *db.MongoStorage
+	Client      *apiclient.HTTPclient
+	Account     *account.Account
+	MailService notifications.NotificationService
 	// FullTransparentMode if true allows signing all transactions and does not
 	// modify any of them.
 	FullTransparentMode bool
@@ -42,6 +44,7 @@ type API struct {
 	router          *chi.Mux
 	client          *apiclient.HTTPclient
 	account         *account.Account
+	mail            notifications.NotificationService
 	secret          string
 	transparentMode bool
 }
@@ -58,6 +61,7 @@ func New(conf *APIConfig) *API {
 		port:            conf.Port,
 		client:          conf.Client,
 		account:         conf.Account,
+		mail:            conf.MailService,
 		secret:          conf.Secret,
 		transparentMode: conf.FullTransparentMode,
 	}

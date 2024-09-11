@@ -3,9 +3,11 @@ package notifications
 import "context"
 
 type Notification struct {
-	To      string
-	Subject string
-	Body    string
+	ToName    string
+	ToAddress string
+	ToNumber  string
+	Subject   string
+	Body      string
 }
 
 type NotificationService interface {
