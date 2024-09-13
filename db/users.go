@@ -184,9 +184,9 @@ func (ms *MongoStorage) IsMemberOf(userEmail, organizationAddress string, role U
 }
 
 // UserByVerificationCode method returns the user with the given verification
-// code. If the user or the verification code doesn't exist, it returns a 
-// specific error. If other errors occur, it returns the error. It checks the 
-// user verification code in the verifications collection and returns the user 
+// code. If the user or the verification code doesn't exist, it returns a
+// specific error. If other errors occur, it returns the error. It checks the
+// user verification code in the verifications collection and returns the user
 // with the ID associated with the verification code.
 func (ms *MongoStorage) UserByVerificationCode(code string) (*User, error) {
 	ms.keysLock.RLock()
