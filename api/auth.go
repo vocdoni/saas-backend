@@ -83,7 +83,14 @@ func (a *API) verifyUserHandler(w http.ResponseWriter, r *http.Request) {
 		ErrGenericInternalServerError.Write(w)
 		return
 	}
-	httpWriteOK(w)
+	// generate a new token with the user name as the subject
+	res, err := a.buildLoginResponse(user.Email)
+	if err != nil {
+		ErrGenericInternalServerError.Write(w)
+		return
+	}
+	// send the token back to the user
+	httpWriteJSON(w, res)
 }
 
 // writableOrganizationAddressesHandler returns the list of addresses of the

@@ -40,6 +40,7 @@ func TestUserByEmail(t *testing.T) {
 	c.Assert(user.Password, qt.Equals, testUserPass)
 	c.Assert(user.FirstName, qt.Equals, testUserFirstName)
 	c.Assert(user.LastName, qt.Equals, testUserLastName)
+	c.Assert(user.Verified, qt.IsFalse)
 }
 
 func TestUser(t *testing.T) {
@@ -74,6 +75,7 @@ func TestUser(t *testing.T) {
 	c.Assert(user.Password, qt.Equals, testUserPass)
 	c.Assert(user.FirstName, qt.Equals, testUserFirstName)
 	c.Assert(user.LastName, qt.Equals, testUserLastName)
+	c.Assert(user.Verified, qt.IsFalse)
 }
 
 func TestSetUser(t *testing.T) {
@@ -115,6 +117,7 @@ func TestSetUser(t *testing.T) {
 	c.Assert(user.Password, qt.Equals, testUserPass)
 	c.Assert(user.FirstName, qt.Equals, newFirstName)
 	c.Assert(user.LastName, qt.Equals, testUserLastName)
+	c.Assert(user.Verified, qt.IsFalse)
 }
 
 func TestDelUser(t *testing.T) {

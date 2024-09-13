@@ -67,6 +67,14 @@
 }
 ```
 
+* **Response**
+```json
+{
+  "token": "<jwt_token>",
+  "expirity": "2024-08-21T11:26:54.368718+02:00"
+}
+```
+
 * **Errors**
 
 | HTTP Status | Error code | Message |
@@ -202,13 +210,6 @@ This endpoint only returns the addresses of the organizations where the current 
     "firstName": "Steve",
     "lastName": "Urkel",
     "password": "secretpass1234"
-}
-```
-* **Response**
-```json
-{
-  "token": "<jwt_token>",
-  "expirity": "2024-08-21T11:26:54.368718+02:00"
 }
 ```
 

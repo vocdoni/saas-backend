@@ -11,6 +11,7 @@ import (
 
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/notifications/testmail"
 	"github.com/vocdoni/saas-backend/test"
 	"go.vocdoni.io/dvote/apiclient"
 )
@@ -24,16 +25,26 @@ type apiTestCase struct {
 }
 
 const (
-	testSecret = "super-secret"
-	testEmail  = "admin@test.com"
-	testPass   = "password123"
-	testHost   = "0.0.0.0"
-	testPort   = 7788
+	testSecret    = "super-secret"
+	testEmail     = "user@test.com"
+	testPass      = "password123"
+	testFirstName = "test"
+	testLastName  = "user"
+	testHost      = "0.0.0.0"
+	testPort      = 7788
+
+	adminEmail = "admin@test.com"
+	adminUser  = "admin"
+	adminPass  = "admin123"
 )
 
 // testDB is the MongoDB storage for the tests. Make it global so it can be
 // accessed by the tests directly.
 var testDB *db.MongoStorage
+
+// testMailService is the test mail service for the tests. Make it global so it
+// can be accessed by the tests directly.
+var testMailService *testmail.TestMail
 
 // testURL helper function returns the full URL for the given path using the
 // test host and port.
@@ -95,6 +106,13 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
+	// set reset db env var to true
+	_ = os.Setenv("VOCDONI_MONGO_RESET_DB", "true")
+	// create a new MongoDB connection with the test database
+	if testDB, err = db.New(mongoURI, test.RandomDatabaseName()); err != nil {
+		panic(err)
+	}
+	defer testDB.Close()
 	// start the faucet container
 	faucetContainer, err := test.StartVocfaucetContainer(ctx)
 	if err != nil {
@@ -113,13 +131,24 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	testAPIEndpoint := test.VoconedAPIURL(apiEndpoint)
-	// set reset db env var to true
-	_ = os.Setenv("VOCDONI_MONGO_RESET_DB", "true")
-	// create a new MongoDB connection with the test database
-	if testDB, err = db.New(mongoURI, test.RandomDatabaseName()); err != nil {
+	// start test mail server
+	testMailServer, err := test.StartMailService(ctx)
+	if err != nil {
 		panic(err)
 	}
-	defer testDB.Close()
+	// get the host, the SMTP port and the API port
+	mailHost, err := testMailServer.Host(ctx)
+	if err != nil {
+		panic(err)
+	}
+	smtpPort, err := testMailServer.MappedPort(ctx, test.MailSMTPPort)
+	if err != nil {
+		panic(err)
+	}
+	apiPort, err := testMailServer.MappedPort(ctx, test.MailAPIPort)
+	if err != nil {
+		panic(err)
+	}
 	// create the remote test API client
 	testAPIClient, err := apiclient.New(testAPIEndpoint)
 	if err != nil {
@@ -131,6 +160,18 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
+	// create test mail service
+	testMailService = new(testmail.TestMail)
+	if err := testMailService.Init(&testmail.TestMailConfig{
+		FromAddress:  adminEmail,
+		SMTPUser:     adminUser,
+		SMTPPassword: adminPass,
+		Host:         mailHost,
+		SMTPPort:     smtpPort.Int(),
+		APIPort:      apiPort.Int(),
+	}); err != nil {
+		panic(err)
+	}
 	// start the API
 	New(&APIConfig{
 		Host:                testHost,
@@ -139,6 +180,7 @@ func TestMain(m *testing.M) {
 		DB:                  testDB,
 		Client:              testAPIClient,
 		Account:             testAccount,
+		MailService:         testMailService,
 		FullTransparentMode: false,
 	}).Start()
 	// wait for the API to start

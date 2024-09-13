@@ -9,6 +9,9 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+// UserVerificationCode returns the verification code for the user provided. If
+// the user has not a verification code, it returns an specific error, if other
+// error occurs, it returns the error.
 func (ms *MongoStorage) UserVerificationCode(user *User) (string, error) {
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
@@ -27,10 +30,16 @@ func (ms *MongoStorage) UserVerificationCode(user *User) (string, error) {
 	return verification.Code, nil
 }
 
+// SetVerificationCode method sets the verification code for the user provided.
+// If the user already has a verification code, it updates it. If an error
+// occurs, it returns the error.
 func (ms *MongoStorage) SetVerificationCode(user *User, code string) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-
+	// try to get the user to ensure it exists
+	if _, err := ms.user(user.ID); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	// insert the verification code for the user provided
@@ -44,13 +53,18 @@ func (ms *MongoStorage) SetVerificationCode(user *User, code string) error {
 	return err
 }
 
+// VerifyUser method verifies the user provided, modifying the user to mark as
+// verified and removing the verification code. If an error occurs, it returns
+// the error.
 func (ms *MongoStorage) VerifyUser(user *User) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-
+	// try to get the user to ensure it exists
+	if _, err := ms.user(user.ID); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
 	// update the user to mark as verified
 	filter := bson.M{"_id": user.ID}
 	if _, err := ms.users.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"verified": true}}); err != nil {

@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"strings"
@@ -142,4 +143,63 @@ func TestRegisterHandler(t *testing.T) {
 			c.Assert(strings.TrimSpace(string(body)), qt.Equals, string(testCase.expectedBody))
 		}
 	}
+}
+
+func TestVerifyAccountHandler(t *testing.T) {
+	c := qt.New(t)
+	defer func() {
+		if err := testDB.Reset(); err != nil {
+			c.Logf("error resetting test database: %v", err)
+		}
+	}()
+	// register a user
+	jsonUser := mustMarshal(&UserInfo{
+		Email:     testEmail,
+		Password:  testPass,
+		FirstName: testFirstName,
+		LastName:  testLastName,
+	})
+	req, err := http.NewRequest(http.MethodPost, testURL(usersEndpoint), bytes.NewBuffer(jsonUser))
+	c.Assert(err, qt.IsNil)
+	resp, err := http.DefaultClient.Do(req)
+	c.Assert(err, qt.IsNil)
+	c.Assert(resp.StatusCode, qt.Equals, http.StatusOK)
+	c.Assert(resp.Body.Close(), qt.IsNil)
+	// try to login (should fail)
+	jsonLogin := mustMarshal(&UserInfo{
+		Email:    testEmail,
+		Password: testPass,
+	})
+	req, err = http.NewRequest(http.MethodPost, testURL(authLoginEndpoint), bytes.NewBuffer(jsonLogin))
+	c.Assert(err, qt.IsNil)
+	resp, err = http.DefaultClient.Do(req)
+	c.Assert(err, qt.IsNil)
+	c.Assert(resp.StatusCode, qt.Equals, http.StatusUnauthorized)
+	c.Assert(resp.Body.Close(), qt.IsNil)
+	// get the verification code from the email
+	mailBody, err := testMailService.FindEmail(context.Background(), testEmail)
+	c.Assert(err, qt.IsNil)
+	mailCode := strings.TrimPrefix(mailBody, "Your verification code is: ")
+	// verify the user
+	verification := mustMarshal(&UserVerification{mailCode})
+	req, err = http.NewRequest(http.MethodPost, testURL(verifyUserEndpoint), bytes.NewBuffer(verification))
+	c.Assert(err, qt.IsNil)
+	resp, err = http.DefaultClient.Do(req)
+	c.Assert(err, qt.IsNil)
+	c.Assert(resp.StatusCode, qt.Equals, http.StatusOK)
+	c.Assert(resp.Body.Close(), qt.IsNil)
+	// try to verify the user again (should fail)
+	req, err = http.NewRequest(http.MethodPost, testURL(verifyUserEndpoint), bytes.NewBuffer(verification))
+	c.Assert(err, qt.IsNil)
+	resp, err = http.DefaultClient.Do(req)
+	c.Assert(err, qt.IsNil)
+	c.Assert(resp.StatusCode, qt.Equals, http.StatusUnauthorized)
+	c.Assert(resp.Body.Close(), qt.IsNil)
+	// try to login again
+	req, err = http.NewRequest(http.MethodPost, testURL(authLoginEndpoint), bytes.NewBuffer(jsonLogin))
+	c.Assert(err, qt.IsNil)
+	resp, err = http.DefaultClient.Do(req)
+	c.Assert(err, qt.IsNil)
+	c.Assert(resp.StatusCode, qt.Equals, http.StatusOK)
+	c.Assert(resp.Body.Close(), qt.IsNil)
 }
