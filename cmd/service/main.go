@@ -27,6 +27,8 @@ func main() {
 	flag.StringP("vocdoniApi", "v", "https://api-dev.vocdoni.net/v2", "vocdoni node remote API URL")
 	flag.StringP("privateKey", "k", "", "private key for the Vocdoni account")
 	flag.StringP("sendgridAPIKey", "g", "", "SendGrid API key")
+	flag.StringP("sendgirdFromAddress", "f", "", "SendGrid from address")
+	flag.StringP("sendgridFromName", "n", "", "SendGrid from name")
 	flag.BoolP("fullTransparentMode", "a", false, "allow all transactions and do not modify any of them")
 	// parse flags
 	flag.Parse()
@@ -47,6 +49,8 @@ func main() {
 	mongoURL := viper.GetString("mongoURL")
 	mongoDB := viper.GetString("mongoDB")
 	sendgridAPIKey := viper.GetString("sendgridAPIKey")
+	sendgridFromAddress := viper.GetString("sendgirdFromAddress")
+	sendgridFromName := viper.GetString("sendgridFromName")
 	// initialize the MongoDB database
 	database, err := db.New(mongoURL, mongoDB)
 	if err != nil {
@@ -71,17 +75,15 @@ func main() {
 	}
 	log.Infow("API client created", "endpoint", apiEndpoint, "chainID", apiClient.ChainID())
 	// create email notifications service
-	fromName := "Test Vocdoni"
-	fromAddress := "lucas@vocdoni.org"
 	mailService := new(sendgrid.SendGridEmail)
 	if err := mailService.Init(&sendgrid.SendGridConfig{
-		FromName:    fromName,
-		FromAddress: fromAddress,
+		FromName:    sendgridFromName,
+		FromAddress: sendgridFromAddress,
 		APIKey:      sendgridAPIKey,
 	}); err != nil {
 		log.Fatalf("could not create the email service: %v", err)
 	}
-	log.Infow("email service created", "from", fmt.Sprintf("%s <%s>", fromName, fromAddress), "sendgridAPIKey", sendgridAPIKey)
+	log.Infow("email service created", "from", fmt.Sprintf("%s <%s>", sendgridFromName, sendgridFromAddress))
 	// create the local API server
 	api.New(&api.APIConfig{
 		Host:                host,
