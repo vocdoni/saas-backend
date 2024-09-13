@@ -60,7 +60,8 @@ type UserPasswordUpdate struct {
 }
 
 type UserVerification struct {
-	Code string `json:"code"`
+	Email string `json:"email"`
+	Code  string `json:"code"`
 }
 
 // LoginResponse is the response of the login request which includes the JWT token

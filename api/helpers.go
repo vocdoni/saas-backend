@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"regexp"
@@ -24,6 +25,12 @@ func isEmailValid(email string) bool {
 // hashPassword helper function allows to hash a password using a salt.
 func hashPassword(password string) []byte {
 	return sha256.New().Sum([]byte(passwordSalt + password))
+}
+
+// hashVerificationCode helper function allows to hash a verification code
+// associated to the email of the user that requested it.
+func hashVerificationCode(userEmail, code string) string {
+	return hex.EncodeToString(sha256.New().Sum([]byte(userEmail + code)))
 }
 
 // organizationFromRequest helper function allows to get the organization info

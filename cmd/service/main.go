@@ -74,27 +74,31 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Infow("API client created", "endpoint", apiEndpoint, "chainID", apiClient.ChainID())
-	// create email notifications service
-	mailService := new(sendgrid.SendGridEmail)
-	if err := mailService.Init(&sendgrid.SendGridConfig{
-		FromName:    sendgridFromName,
-		FromAddress: sendgridFromAddress,
-		APIKey:      sendgridAPIKey,
-	}); err != nil {
-		log.Fatalf("could not create the email service: %v", err)
-	}
-	log.Infow("email service created", "from", fmt.Sprintf("%s <%s>", sendgridFromName, sendgridFromAddress))
-	// create the local API server
-	api.New(&api.APIConfig{
+	// init the API configuration
+	apiConf := &api.APIConfig{
 		Host:                host,
 		Port:                port,
 		Secret:              secret,
 		DB:                  database,
 		Client:              apiClient,
 		Account:             acc,
-		MailService:         mailService,
 		FullTransparentMode: fullTransparentMode,
-	}).Start()
+	}
+	// create email notifications service if the required parameters are set and
+	// include it in the API configuration
+	if sendgridAPIKey != "" && sendgridFromAddress != "" && sendgridFromName != "" {
+		apiConf.MailService = new(sendgrid.SendGridEmail)
+		if err := apiConf.MailService.Init(&sendgrid.SendGridConfig{
+			FromName:    sendgridFromName,
+			FromAddress: sendgridFromAddress,
+			APIKey:      sendgridAPIKey,
+		}); err != nil {
+			log.Fatalf("could not create the email service: %v", err)
+		}
+	}
+	log.Infow("email service created", "from", fmt.Sprintf("%s <%s>", sendgridFromName, sendgridFromAddress))
+	// create the local API server
+	api.New(apiConf).Start()
 	log.Infow("server started", "host", host, "port", port)
 	// wait forever, as the server is running in a goroutine
 	c := make(chan os.Signal, 1)

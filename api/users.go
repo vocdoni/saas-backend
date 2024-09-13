@@ -61,27 +61,34 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		ErrGenericInternalServerError.Write(w)
 		return
 	}
-	// generate verification code
-	code := util.RandomHex(3)
-	log.Infof("verification code: %s", code)
+	// generate verification code if the mail service is available, if not
+	// the verification code will not be sent but stored in the database
+	// generated with just the user email to mock the verification process
+	var code string
+	if a.mail != nil {
+		code = util.RandomHex(3)
+	}
+	hashCode := hashVerificationCode(userInfo.Email, code)
 	// store the verification code in the database
-	if err := a.db.SetVerificationCode(&db.User{ID: userID}, code); err != nil {
+	if err := a.db.SetVerificationCode(&db.User{ID: userID}, hashCode); err != nil {
 		log.Warnw("could not store verification code", "error", err)
 		ErrGenericInternalServerError.Withf("could not store verification code").Write(w)
 		return
 	}
-	// send the verification code via email
-	ctx, cancel := context.WithTimeout(r.Context(), time.Second*10)
-	defer cancel()
-	if err := a.mail.SendNotification(ctx, &notifications.Notification{
-		ToName:    fmt.Sprintf("%s %s", userInfo.FirstName, userInfo.LastName),
-		ToAddress: userInfo.Email,
-		Subject:   "Vocdoni: Verify your email",
-		Body:      "Your verification code is: " + code,
-	}); err != nil {
-		log.Warnw("could not send verification email", "error", err)
-		ErrGenericInternalServerError.Withf("could not send verification email").Write(w)
-		return
+	// send the verification code via email if the mail service is available
+	if a.mail != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), time.Second*10)
+		defer cancel()
+		if err := a.mail.SendNotification(ctx, &notifications.Notification{
+			ToName:    fmt.Sprintf("%s %s", userInfo.FirstName, userInfo.LastName),
+			ToAddress: userInfo.Email,
+			Subject:   "Vocdoni: Verify your email",
+			Body:      "Your verification code is: " + code,
+		}); err != nil {
+			log.Warnw("could not send verification email", "error", err)
+			ErrGenericInternalServerError.Withf("could not send verification email").Write(w)
+			return
+		}
 	}
 	// send the token back to the user
 	httpWriteOK(w)

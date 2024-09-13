@@ -63,7 +63,8 @@
 * **Request Body** 
 ```json
 {
-    "code": "******",
+  "email": "user2veryfy@email.com",
+  "code": "******",
 }
 ```
 

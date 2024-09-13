@@ -70,7 +70,8 @@ func (a *API) verifyUserHandler(w http.ResponseWriter, r *http.Request) {
 		ErrMalformedBody.Write(w)
 		return
 	}
-	user, err := a.db.UserByVerificationCode(verification.Code)
+	hashCode := hashVerificationCode(verification.Email, verification.Code)
+	user, err := a.db.UserByVerificationCode(hashCode)
 	if err != nil {
 		if err == db.ErrNotFound {
 			ErrUnauthorized.Write(w)

@@ -181,7 +181,10 @@ func TestVerifyAccountHandler(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	mailCode := strings.TrimPrefix(mailBody, "Your verification code is: ")
 	// verify the user
-	verification := mustMarshal(&UserVerification{mailCode})
+	verification := mustMarshal(&UserVerification{
+		Email: testEmail,
+		Code:  mailCode,
+	})
 	req, err = http.NewRequest(http.MethodPost, testURL(verifyUserEndpoint), bytes.NewBuffer(verification))
 	c.Assert(err, qt.IsNil)
 	resp, err = http.DefaultClient.Do(req)
