@@ -340,9 +340,10 @@ This method invalidates any previous JWT token for the user, so it returns a new
   "logo": "https://[...].png",
   "subdomain": "mysubdomain",
   "timezone": "GMT+2",
-  "active": true,
 }
 ```
+By default, the organization is created with `activated: true`.
+
 If the user want to create a sub org, the address of the root organization must be provided inside an organization object in `parent` param. The creator must be admin of the parent organization to be able to create suborganizations. Example:
 ```json
 {
