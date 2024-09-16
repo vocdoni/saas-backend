@@ -203,6 +203,10 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		org.Subdomain = newOrgInfo.Subdomain
 		updateOrg = true
 	}
+	if newOrgInfo.Country != "" {
+		org.Country = newOrgInfo.Country
+		updateOrg = true
+	}
 	if newOrgInfo.Timezone != "" {
 		org.Timezone = newOrgInfo.Timezone
 		updateOrg = true

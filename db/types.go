@@ -43,6 +43,7 @@ type Organization struct {
 	Logo            string           `json:"logo" bson:"logo"`
 	Header          string           `json:"header" bson:"header"`
 	Subdomain       string           `json:"subdomain" bson:"subdomain"`
+	Country         string           `json:"country" bson:"country"`
 	Timezone        string           `json:"timezone" bson:"timezone"`
 	Language        string           `json:"language" bson:"language"`
 	Active          bool             `json:"active" bson:"active"`

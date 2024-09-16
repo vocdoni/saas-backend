@@ -20,6 +20,7 @@ type OrganizationInfo struct {
 	Logo        string            `json:"logo"`
 	Header      string            `json:"header"`
 	Subdomain   string            `json:"subdomain"`
+	Country     string            `json:"country"`
 	Timezone    string            `json:"timezone"`
 	Language    string            `json:"language"`
 	Active      bool              `json:"active"`
@@ -104,6 +105,7 @@ func organizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 		Logo:        dbOrg.Logo,
 		Header:      dbOrg.Header,
 		Subdomain:   dbOrg.Subdomain,
+		Country:     dbOrg.Country,
 		Timezone:    dbOrg.Timezone,
 		Language:    dbOrg.Language,
 		Active:      dbOrg.Active,
