@@ -12,14 +12,14 @@ import (
 // UserVerificationCode returns the verification code for the user provided. If
 // the user has not a verification code, it returns an specific error, if other
 // error occurs, it returns the error.
-func (ms *MongoStorage) UserVerificationCode(user *User) (string, error) {
+func (ms *MongoStorage) UserVerificationCode(user *User, t CodeType) (string, error) {
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	result := ms.verifications.FindOne(ctx, bson.M{"_id": user.ID})
+	result := ms.verifications.FindOne(ctx, bson.M{"_id": user.ID, "type": t})
 	verification := &UserVerification{}
 	if err := result.Decode(verification); err != nil {
 		if err == mongo.ErrNoDocuments {
@@ -33,7 +33,7 @@ func (ms *MongoStorage) UserVerificationCode(user *User) (string, error) {
 // SetVerificationCode method sets the verification code for the user provided.
 // If the user already has a verification code, it updates it. If an error
 // occurs, it returns the error.
-func (ms *MongoStorage) SetVerificationCode(user *User, code string) error {
+func (ms *MongoStorage) SetVerificationCode(user *User, code string, t CodeType) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// try to get the user to ensure it exists
@@ -47,16 +47,17 @@ func (ms *MongoStorage) SetVerificationCode(user *User, code string) error {
 	verification := &UserVerification{
 		ID:   user.ID,
 		Code: code,
+		Type: t,
 	}
 	opts := options.Replace().SetUpsert(true)
 	_, err := ms.verifications.ReplaceOne(ctx, filter, verification, opts)
 	return err
 }
 
-// VerifyUser method verifies the user provided, modifying the user to mark as
-// verified and removing the verification code. If an error occurs, it returns
-// the error.
-func (ms *MongoStorage) VerifyUser(user *User) error {
+// VerifyUserAccount method verifies the user provided, modifying the user to
+// mark as verified and removing the verification code. If an error occurs, it
+// returns the error.
+func (ms *MongoStorage) VerifyUserAccount(user *User) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// try to get the user to ensure it exists
@@ -71,6 +72,6 @@ func (ms *MongoStorage) VerifyUser(user *User) error {
 		return err
 	}
 	// remove the verification code
-	_, err := ms.verifications.DeleteOne(ctx, bson.M{"_id": user.ID})
+	_, err := ms.verifications.DeleteOne(ctx, bson.M{"_id": user.ID, "type": CodeTypeAccountVerification})
 	return err
 }

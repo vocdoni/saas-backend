@@ -188,14 +188,14 @@ func (ms *MongoStorage) IsMemberOf(userEmail, organizationAddress string, role U
 // specific error. If other errors occur, it returns the error. It checks the
 // user verification code in the verifications collection and returns the user
 // with the ID associated with the verification code.
-func (ms *MongoStorage) UserByVerificationCode(code string) (*User, error) {
+func (ms *MongoStorage) UserByVerificationCode(code string, t CodeType) (*User, error) {
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	result := ms.verifications.FindOne(ctx, bson.M{"code": code})
+	result := ms.verifications.FindOne(ctx, bson.M{"code": code, "type": t})
 	verification := &UserVerification{}
 	if err := result.Decode(verification); err != nil {
 		if err == mongo.ErrNoDocuments {

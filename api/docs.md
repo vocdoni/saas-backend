@@ -7,16 +7,18 @@
 - [🔐 Auth](#-auth)
   - [🔑 Login](#-login)
   - [🥤 Refresh token](#-refresh-token)
-  - [✅ Verify user](#-verify-user)
   - [💼 User writable organizations addresses](#-user-writable-organizations-addresses)
 - [🧾 Transactions](#-transactions)
   - [✍️ Sign tx](#-sign-tx)
   - [📝 Sign message](#-sign-message)
 - [👥 Users](#-users)
   - [🙋 Register](#-register)
+  - [✅ Verify user](#-verify-user)
   - [🧑‍💻 Get current user info](#-get-current-user-info)
   - [💇 Update current user info](#-update-current-user-info)
   - [🔏 Update current user password](#-update-current-user-password)
+  - [⛓️‍💥 Request a password recovery](#-request-a-password-recovery)
+  - [🔗 Reset user password](#-reset-user-password)
 - [🏤 Organizations](#-organizations)
   - [🆕 Create organization](#-create-organization)
   - [⚙️ Update organization](#-update-organization)
@@ -37,34 +39,6 @@
 {
     "email": "my@email.me",
     "password": "secretpass1234"
-}
-```
-
-* **Response**
-```json
-{
-  "token": "<jwt_token>",
-  "expirity": "2024-08-21T11:26:54.368718+02:00"
-}
-```
-
-* **Errors**
-
-| HTTP Status | Error code | Message |
-|:---:|:---:|:---|
-| `401` | `40001` | `user not authorized` |
-| `400` | `40004` | `malformed JSON body` |
-| `500` | `50002` | `internal server error` |
-
-### ✅ Verify user
-
-* **Path** `/auth/verify`
-* **Method** `POST`
-* **Request Body** 
-```json
-{
-  "email": "user2veryfy@email.com",
-  "code": "******",
 }
 ```
 
@@ -224,6 +198,34 @@ This endpoint only returns the addresses of the organizations where the current 
 | `400` | `40004` | `malformed JSON body` |
 | `500` | `50002` | `internal server error` |
 
+### ✅ Verify user
+
+* **Path** `/auth/verify`
+* **Method** `POST`
+* **Request Body** 
+```json
+{
+  "email": "user2veryfy@email.com",
+  "code": "******",
+}
+```
+
+* **Response**
+```json
+{
+  "token": "<jwt_token>",
+  "expirity": "2024-08-21T11:26:54.368718+02:00"
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40004` | `malformed JSON body` |
+| `500` | `50002` | `internal server error` |
+
 ### 🧑‍💻 Get current user info
 
 * **Path** `/users/me`
@@ -302,13 +304,54 @@ This method invalidates any previous JWT token for the user, so it returns a new
 
 ### 🔏 Update current user password
 
-* **Path** `/users/me/password`
+* **Path** `/users/password`
 * **Method** `PUT`
 * **Request body**
 ```json
 {
   "oldPassword": "secretpass1234",
   "newPassword": "secretpass0987"
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40003` | `password too short` |
+| `400` | `40004` | `malformed JSON body` |
+| `500` | `50002` | `internal server error` |
+
+### ⛓️‍💥 Request a password recovery
+
+* **Path** `/users/password/recovery`
+* **Method** `POST`
+* **Request body**
+```json
+{
+  "email": "user@test.com",
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40004` | `malformed JSON body` |
+| `500` | `50002` | `internal server error` |
+
+### 🔗 Reset user password
+
+* **Path** `/users/password/reset`
+* **Method** `POST`
+* **Request body**
+```json
+{
+  "email": "user@test.com",
+  "code": "******",
+  "newPassword": "newpassword123"
 }
 ```
 

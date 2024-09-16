@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
 	"time"
@@ -12,7 +13,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/notifications"
 	"go.vocdoni.io/dvote/log"
+	"go.vocdoni.io/dvote/util"
 )
 
 var regexpEmail = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
@@ -69,6 +72,35 @@ func (a *API) buildLoginResponse(id string) (*LoginResponse, error) {
 	}
 	_, lr.Token, _ = a.auth.Encode(jmap)
 	return &lr, nil
+}
+
+func (a *API) sendUserCode(ctx context.Context, user *db.User, codeType db.CodeType) error {
+	// generate verification code if the mail service is available, if not
+	// the verification code will not be sent but stored in the database
+	// generated with just the user email to mock the verification process
+	var code string
+	if a.mail != nil {
+		code = util.RandomHex(VerificationCodeLength)
+	}
+	hashCode := hashVerificationCode(user.Email, code)
+	// store the verification code in the database
+	if err := a.db.SetVerificationCode(&db.User{ID: user.ID}, hashCode, codeType); err != nil {
+		return err
+	}
+	// send the verification code via email if the mail service is available
+	if a.mail != nil {
+		ctx, cancel := context.WithTimeout(ctx, time.Second*10)
+		defer cancel()
+		if err := a.mail.SendNotification(ctx, &notifications.Notification{
+			ToName:    fmt.Sprintf("%s %s", user.FirstName, user.LastName),
+			ToAddress: user.Email,
+			Subject:   VerificationCodeEmailSubject,
+			Body:      VerificationCodeEmailBody + code,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // httpWriteJSON helper function allows to write a JSON response.

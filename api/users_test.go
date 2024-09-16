@@ -179,7 +179,7 @@ func TestVerifyAccountHandler(t *testing.T) {
 	// get the verification code from the email
 	mailBody, err := testMailService.FindEmail(context.Background(), testEmail)
 	c.Assert(err, qt.IsNil)
-	mailCode := strings.TrimPrefix(mailBody, "Your verification code is: ")
+	mailCode := strings.TrimPrefix(mailBody, VerificationCodeEmailBody)
 	// verify the user
 	verification := mustMarshal(&UserVerification{
 		Email: testEmail,

@@ -59,9 +59,16 @@ type UserPasswordUpdate struct {
 	NewPassword string `json:"newPassword"`
 }
 
+// UserVerificationRequest is the request to verify a user.
 type UserVerification struct {
 	Email string `json:"email"`
 	Code  string `json:"code"`
+}
+
+type UserPasswordReset struct {
+	Email       string `json:"email"`
+	Code        string `json:"code"`
+	NewPassword string `json:"newPassword"`
 }
 
 // LoginResponse is the response of the login request which includes the JWT token

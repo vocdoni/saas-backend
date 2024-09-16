@@ -64,36 +64,6 @@ func (a *API) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 	httpWriteJSON(w, res)
 }
 
-func (a *API) verifyUserHandler(w http.ResponseWriter, r *http.Request) {
-	verification := &UserVerification{}
-	if err := json.NewDecoder(r.Body).Decode(verification); err != nil {
-		ErrMalformedBody.Write(w)
-		return
-	}
-	hashCode := hashVerificationCode(verification.Email, verification.Code)
-	user, err := a.db.UserByVerificationCode(hashCode)
-	if err != nil {
-		if err == db.ErrNotFound {
-			ErrUnauthorized.Write(w)
-			return
-		}
-		ErrGenericInternalServerError.Write(w)
-		return
-	}
-	if err := a.db.VerifyUser(user); err != nil {
-		ErrGenericInternalServerError.Write(w)
-		return
-	}
-	// generate a new token with the user name as the subject
-	res, err := a.buildLoginResponse(user.Email)
-	if err != nil {
-		ErrGenericInternalServerError.Write(w)
-		return
-	}
-	// send the token back to the user
-	httpWriteJSON(w, res)
-}
-
 // writableOrganizationAddressesHandler returns the list of addresses of the
 // organizations where the user has write access.
 func (a *API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *http.Request) {

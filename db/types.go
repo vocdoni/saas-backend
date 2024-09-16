@@ -12,9 +12,12 @@ type User struct {
 	Verified      bool                 `json:"verified" bson:"verified"`
 }
 
+type CodeType string
+
 type UserVerification struct {
-	ID   uint64 `json:"id" bson:"_id"`
-	Code string `json:"code" bson:"code"`
+	ID   uint64   `json:"id" bson:"_id"`
+	Code string   `json:"code" bson:"code"`
+	Type CodeType `json:"type" bson:"type"`
 }
 
 func (u *User) HasRoleFor(address string, role UserRole) bool {

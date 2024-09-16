@@ -1,18 +1,13 @@
 package api
 
 import (
-	"context"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
-	"time"
 
 	"github.com/vocdoni/saas-backend/db"
-	"github.com/vocdoni/saas-backend/notifications"
 	"go.vocdoni.io/dvote/log"
-	"go.vocdoni.io/dvote/util"
 )
 
 // registerHandler handles the register request. It creates a new user in the database.
@@ -61,37 +56,55 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		ErrGenericInternalServerError.Write(w)
 		return
 	}
-	// generate verification code if the mail service is available, if not
-	// the verification code will not be sent but stored in the database
-	// generated with just the user email to mock the verification process
-	var code string
-	if a.mail != nil {
-		code = util.RandomHex(3)
+	// compose the new user and send the verification code
+	newUser := &db.User{
+		ID:        userID,
+		Email:     userInfo.Email,
+		FirstName: userInfo.FirstName,
+		LastName:  userInfo.LastName,
 	}
-	hashCode := hashVerificationCode(userInfo.Email, code)
-	// store the verification code in the database
-	if err := a.db.SetVerificationCode(&db.User{ID: userID}, hashCode); err != nil {
-		log.Warnw("could not store verification code", "error", err)
-		ErrGenericInternalServerError.Withf("could not store verification code").Write(w)
+	if err := a.sendUserCode(r.Context(), newUser, db.CodeTypeAccountVerification); err != nil {
+		log.Warnw("could not send verification code", "error", err)
+		ErrGenericInternalServerError.Write(w)
 		return
-	}
-	// send the verification code via email if the mail service is available
-	if a.mail != nil {
-		ctx, cancel := context.WithTimeout(r.Context(), time.Second*10)
-		defer cancel()
-		if err := a.mail.SendNotification(ctx, &notifications.Notification{
-			ToName:    fmt.Sprintf("%s %s", userInfo.FirstName, userInfo.LastName),
-			ToAddress: userInfo.Email,
-			Subject:   "Vocdoni: Verify your email",
-			Body:      "Your verification code is: " + code,
-		}); err != nil {
-			log.Warnw("could not send verification email", "error", err)
-			ErrGenericInternalServerError.Withf("could not send verification email").Write(w)
-			return
-		}
 	}
 	// send the token back to the user
 	httpWriteOK(w)
+}
+
+// verifyUserAccountHandler handles the request to verify the user account. It
+// requires the user email and the verification code to be provided. If the
+// verification code is correct, the user account is verified and a new token is
+// generated and sent back to the user. If the verification code is incorrect,
+// an error is returned.
+func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
+	verification := &UserVerification{}
+	if err := json.NewDecoder(r.Body).Decode(verification); err != nil {
+		ErrMalformedBody.Write(w)
+		return
+	}
+	hashCode := hashVerificationCode(verification.Email, verification.Code)
+	user, err := a.db.UserByVerificationCode(hashCode, db.CodeTypeAccountVerification)
+	if err != nil {
+		if err == db.ErrNotFound {
+			ErrUnauthorized.Write(w)
+			return
+		}
+		ErrGenericInternalServerError.Write(w)
+		return
+	}
+	if err := a.db.VerifyUserAccount(user); err != nil {
+		ErrGenericInternalServerError.Write(w)
+		return
+	}
+	// generate a new token with the user name as the subject
+	res, err := a.buildLoginResponse(user.Email)
+	if err != nil {
+		ErrGenericInternalServerError.Write(w)
+		return
+	}
+	// send the token back to the user
+	httpWriteJSON(w, res)
 }
 
 // userInfoHandler handles the request to get the information of the current
@@ -225,6 +238,72 @@ func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) 
 	hOldPassword := hex.EncodeToString(hashPassword(userPasswords.OldPassword))
 	if hOldPassword != user.Password {
 		ErrUnauthorized.Withf("old password does not match").Write(w)
+		return
+	}
+	// hash and update the new password
+	user.Password = hex.EncodeToString(hashPassword(userPasswords.NewPassword))
+	if _, err := a.db.SetUser(user); err != nil {
+		log.Warnw("could not update user password", "error", err)
+		ErrGenericInternalServerError.Write(w)
+		return
+	}
+	httpWriteOK(w)
+}
+
+// recoveryUserPasswordHandler handles the request to recover the password of a
+// user. It requires the user email to be provided. If the email is correct, a
+// new verification code is generated and sent to the user email. If the email
+// is incorrect, an error is returned.
+func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
+	// get the user info from the request body
+	userInfo := &UserInfo{}
+	if err := json.NewDecoder(r.Body).Decode(userInfo); err != nil {
+		ErrMalformedBody.Write(w)
+		return
+	}
+	// get the user information from the database by email
+	user, err := a.db.UserByEmail(userInfo.Email)
+	if err != nil {
+		if err == db.ErrNotFound {
+			ErrUnauthorized.Write(w)
+			return
+		}
+		ErrGenericInternalServerError.Write(w)
+		return
+	}
+	// generate a new verification code
+	if err := a.sendUserCode(r.Context(), user, db.CodeTypePasswordReset); err != nil {
+		log.Warnw("could not send verification code", "error", err)
+		ErrGenericInternalServerError.Write(w)
+		return
+	}
+	httpWriteOK(w)
+}
+
+// resetUserPasswordHandler handles the request to reset the password of a user.
+// It requires the user email, the verification code and the new password to be
+// provided. If the verification code is correct, the user password is updated
+// to the new one. If the verification code is incorrect, an error is returned.
+func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
+	userPasswords := &UserPasswordReset{}
+	if err := json.NewDecoder(r.Body).Decode(userPasswords); err != nil {
+		ErrMalformedBody.Write(w)
+		return
+	}
+	// check the password is correct format
+	if len(userPasswords.NewPassword) < 8 {
+		ErrPasswordTooShort.Write(w)
+		return
+	}
+	// get the user information from the database by the verification code
+	hashCode := hashVerificationCode(userPasswords.Email, userPasswords.Code)
+	user, err := a.db.UserByVerificationCode(hashCode, db.CodeTypePasswordReset)
+	if err != nil {
+		if err == db.ErrNotFound {
+			ErrUnauthorized.Write(w)
+			return
+		}
+		ErrGenericInternalServerError.Write(w)
 		return
 	}
 	// hash and update the new password
