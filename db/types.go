@@ -32,16 +32,19 @@ type OrganizationMember struct {
 type Organization struct {
 	Address         string           `json:"address" bson:"_id"`
 	Name            string           `json:"name" bson:"name"`
+	Website         string           `json:"website" bson:"website"`
 	Type            OrganizationType `json:"type" bson:"type"`
 	Creator         string           `json:"creator" bson:"creator"`
 	CreatedAt       time.Time        `json:"createdAt" bson:"createdAt"`
 	Nonce           string           `json:"nonce" bson:"nonce"`
 	Description     string           `json:"description" bson:"description"`
-	Size            uint64           `json:"size" bson:"size"`
+	Size            string           `json:"size" bson:"size"`
 	Color           string           `json:"color" bson:"color"`
 	Logo            string           `json:"logo" bson:"logo"`
+	Header          string           `json:"header" bson:"header"`
 	Subdomain       string           `json:"subdomain" bson:"subdomain"`
 	Timezone        string           `json:"timezone" bson:"timezone"`
+	Language        string           `json:"language" bson:"language"`
 	Active          bool             `json:"active" bson:"active"`
 	TokensPurchased uint64           `json:"tokensPurchased" bson:"tokensPurchased"`
 	TokensRemaining uint64           `json:"tokensRemaining" bson:"tokensRemaining"`

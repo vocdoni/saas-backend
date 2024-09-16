@@ -11,14 +11,17 @@ import (
 type OrganizationInfo struct {
 	Address     string            `json:"address"`
 	Name        string            `json:"name"`
+	Website     string            `json:"website"`
 	CreatedAt   string            `json:"createdAt"`
 	Type        string            `json:"type"`
 	Description string            `json:"description"`
-	Size        uint64            `json:"size"`
+	Size        string            `json:"size"`
 	Color       string            `json:"color"`
 	Logo        string            `json:"logo"`
+	Header      string            `json:"header"`
 	Subdomain   string            `json:"subdomain"`
 	Timezone    string            `json:"timezone"`
+	Language    string            `json:"language"`
 	Active      bool              `json:"active"`
 	Parent      *OrganizationInfo `json:"parent"`
 }
@@ -92,14 +95,17 @@ func organizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 	return &OrganizationInfo{
 		Address:     dbOrg.Address,
 		Name:        dbOrg.Name,
+		Website:     dbOrg.Website,
 		CreatedAt:   dbOrg.CreatedAt.Format(time.RFC3339),
 		Type:        string(dbOrg.Type),
 		Description: dbOrg.Description,
 		Size:        dbOrg.Size,
 		Color:       dbOrg.Color,
 		Logo:        dbOrg.Logo,
+		Header:      dbOrg.Header,
 		Subdomain:   dbOrg.Subdomain,
 		Timezone:    dbOrg.Timezone,
+		Language:    dbOrg.Language,
 		Active:      dbOrg.Active,
 		Parent:      parentOrg,
 	}

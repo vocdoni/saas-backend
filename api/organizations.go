@@ -179,7 +179,11 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		org.Description = newOrgInfo.Description
 		updateOrg = true
 	}
-	if newOrgInfo.Size > 0 {
+	if newOrgInfo.Website != "" {
+		org.Website = newOrgInfo.Website
+		updateOrg = true
+	}
+	if newOrgInfo.Size != "" {
 		org.Size = newOrgInfo.Size
 		updateOrg = true
 	}
@@ -191,12 +195,20 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		org.Logo = newOrgInfo.Logo
 		updateOrg = true
 	}
+	if newOrgInfo.Header != "" {
+		org.Header = newOrgInfo.Header
+		updateOrg = true
+	}
 	if newOrgInfo.Subdomain != "" {
 		org.Subdomain = newOrgInfo.Subdomain
 		updateOrg = true
 	}
 	if newOrgInfo.Timezone != "" {
 		org.Timezone = newOrgInfo.Timezone
+		updateOrg = true
+	}
+	if newOrgInfo.Language != "" {
+		org.Language = newOrgInfo.Language
 		updateOrg = true
 	}
 	if newOrgInfo.Active != org.Active {
