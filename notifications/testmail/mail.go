@@ -43,6 +43,25 @@ func (tm *TestMail) SendNotification(_ context.Context, notification *notificati
 	return smtp.SendMail(smtpAddr, auth, tm.config.FromAddress, []string{notification.ToAddress}, msg)
 }
 
+func (tm *TestMail) clear() error {
+	clearEndpoint := fmt.Sprintf("http://%s:%d/api/v1/messages", tm.config.Host, tm.config.APIPort)
+	req, err := http.NewRequest("DELETE", clearEndpoint, nil)
+	if err != nil {
+		return fmt.Errorf("could not create request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("could not send request: %v", err)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+	return nil
+}
+
 func (tm *TestMail) FindEmail(ctx context.Context, to string) (string, error) {
 	searchEndpoint := fmt.Sprintf("http://%s:%d/api/v2/search?kind=to&query=%s", tm.config.Host, tm.config.APIPort, to)
 	req, err := http.NewRequestWithContext(ctx, "GET", searchEndpoint, nil)
@@ -74,5 +93,5 @@ func (tm *TestMail) FindEmail(ctx context.Context, to string) (string, error) {
 	if len(mailResults.Items) == 0 {
 		return "", io.EOF
 	}
-	return mailResults.Items[0].Content.Body, nil
+	return mailResults.Items[0].Content.Body, tm.clear()
 }

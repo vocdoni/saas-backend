@@ -271,6 +271,11 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 		ErrGenericInternalServerError.Write(w)
 		return
 	}
+	// check the user is verified
+	if !user.Verified {
+		ErrUnauthorized.With("user not verified").Write(w)
+		return
+	}
 	// generate a new verification code
 	if err := a.sendUserCode(r.Context(), user, db.CodeTypePasswordReset); err != nil {
 		log.Warnw("could not send verification code", "error", err)
