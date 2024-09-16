@@ -408,6 +408,7 @@ If the user want to create a sub org, the address of the root organization must 
 | `401` | `40001` | `user not authorized` |
 | `400` | `40004` | `malformed JSON body` |
 | `400` | `40009` | `organization not found` |
+| `400` | `40013` | `invalid organization data` |
 | `500` | `50002` | `internal server error` |
 
 ### ⚙️ Update organization
