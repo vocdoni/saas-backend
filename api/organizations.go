@@ -83,7 +83,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		Parent:          parentOrg,
 	}); err != nil {
 		if err == db.ErrAlreadyExists {
-			ErrMalformedBody.WithErr(err).Write(w)
+			ErrInvalidOrganizationData.WithErr(err).Write(w)
 			return
 		}
 		ErrGenericInternalServerError.Write(w)

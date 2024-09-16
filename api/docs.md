@@ -330,7 +330,7 @@ This method invalidates any previous JWT token for the user, so it returns a new
   "subdomain": "mysubdomain",
   "country": "Germany",
   "timezone": "GMT+2",
-  "Language": "EN"
+  "language": "EN"
 }
 ```
 If the user want to create a sub org, the address of the root organization must be provided inside an organization object in `parent` param. The creator must be admin of the parent organization to be able to create suborganizations. Example:
@@ -349,6 +349,7 @@ If the user want to create a sub org, the address of the root organization must 
 | `401` | `40001` | `user not authorized` |
 | `400` | `40004` | `malformed JSON body` |
 | `400` | `40009` | `organization not found` |
+| `400` | `40013` | `invalid organization data` |
 | `500` | `50002` | `internal server error` |
 
 ### ⚙️ Update organization
