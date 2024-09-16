@@ -52,6 +52,10 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		Password:  hex.EncodeToString(hPassword),
 	})
 	if err != nil {
+		if err == db.ErrAlreadyExists {
+			ErrMalformedBody.WithErr(err).Write(w)
+			return
+		}
 		log.Warnw("could not create user", "error", err)
 		ErrGenericInternalServerError.Write(w)
 		return

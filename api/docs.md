@@ -377,13 +377,17 @@ This method invalidates any previous JWT token for the user, so it returns a new
 ```json
 {
   "name": "Test Organization",
+  "website": "https://[...].com",
   "type": "community",
   "description": "My amazing testing organization",
-  "size": 10,
+  "size": "10",
   "color": "#ff0000",
   "logo": "https://[...].png",
+  "header": "https://[...].png",
   "subdomain": "mysubdomain",
+  "country": "Germany",
   "timezone": "GMT+2",
+  "language": "EN"
 }
 ```
 By default, the organization is created with `activated: true`.
@@ -418,13 +422,18 @@ Only the following parameters can be changed. Every parameter is optional.
 ```json
 {
   "name": "Test Organization",
+  "website": "https://[...].com",
+  "type": "community",
   "description": "My amazing testing organization",
-  "size": 10,
+  "size": "10",
   "color": "#ff0000",
   "logo": "https://[...].png",
+  "header": "https://[...].png",
   "subdomain": "mysubdomain",
+  "country": "Germany",
   "timezone": "GMT+2",
-  "active": true,
+  "Language": "EN",
+  "active": true
 }
 ```
 
@@ -445,14 +454,19 @@ Only the following parameters can be changed. Every parameter is optional.
 * **Response**
 ```json
 {
+  "address": "0x1234",
   "name": "Test Organization",
+  "website": "https://[...].com",
   "type": "community",
   "description": "My amazing testing organization",
-  "size": 10,
+  "size": "10",
   "color": "#ff0000",
   "logo": "https://[...].png",
+  "header": "https://[...].png",
   "subdomain": "mysubdomain",
+  "country": "Germany",
   "timezone": "GMT+2",
+  "Language": "EN",
   "active": true,
   "parent": {
     "...": "..."

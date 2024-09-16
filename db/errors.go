@@ -3,6 +3,7 @@ package db
 import "fmt"
 
 var (
-	ErrNotFound    = fmt.Errorf("not found")
-	ErrInvalidData = fmt.Errorf("invalid data provided")
+	ErrNotFound      = fmt.Errorf("not found")
+	ErrInvalidData   = fmt.Errorf("invalid data provided")
+	ErrAlreadyExists = fmt.Errorf("already exists")
 )
