@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -68,6 +69,9 @@ func (ms *MongoStorage) SetOrganization(org *Organization) error {
 	// set upsert to true to create the document if it doesn't exist
 	opts := options.Update().SetUpsert(true)
 	if _, err := ms.organizations.UpdateOne(ctx, bson.M{"_id": org.Address}, updateDoc, opts); err != nil {
+		if strings.Contains(err.Error(), "duplicate key error") {
+			return ErrAlreadyExists
+		}
 		return err
 	}
 	// assing organization to the creator if it's not empty including the address
