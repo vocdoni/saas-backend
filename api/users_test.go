@@ -179,7 +179,7 @@ func TestVerifyAccountHandler(t *testing.T) {
 	// get the verification code from the email
 	mailBody, err := testMailService.FindEmail(context.Background(), testEmail)
 	c.Assert(err, qt.IsNil)
-	mailCode := strings.TrimPrefix(mailBody, VerificationCodeEmailPlainBody)
+	mailCode := strings.TrimPrefix(mailBody, VerificationCodeTextBody)
 	// verify the user
 	verification := mustMarshal(&UserVerification{
 		Email: testEmail,
@@ -240,7 +240,7 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	// get the verification code from the email
 	mailBody, err := testMailService.FindEmail(context.Background(), testEmail)
 	c.Assert(err, qt.IsNil)
-	verifyMailCode := strings.TrimPrefix(mailBody, VerificationCodeEmailPlainBody)
+	verifyMailCode := strings.TrimPrefix(mailBody, VerificationCodeTextBody)
 	// verify the user
 	verification := mustMarshal(&UserVerification{
 		Email: testEmail,
@@ -262,7 +262,7 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	// get the recovery code from the email
 	mailBody, err = testMailService.FindEmail(context.Background(), testEmail)
 	c.Assert(err, qt.IsNil)
-	passResetMailCode := strings.TrimPrefix(mailBody, VerificationCodeEmailPlainBody)
+	passResetMailCode := strings.TrimPrefix(mailBody, VerificationCodeTextBody)
 	// reset the password
 	newPassword := "password2"
 	resetPass := mustMarshal(&UserPasswordReset{

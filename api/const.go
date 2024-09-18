@@ -7,8 +7,8 @@ const (
 	VerificationCodeLength = 3
 	// VerificationCodeEmailSubject is the subject of the verification code email
 	VerificationCodeEmailSubject = "Vocdoni verification code"
-	// VerificationCodeEmailBody is the body of the verification code email
-	VerificationCodeEmailPlainBody = "Your verification code is: "
+	// VerificationCodeTextBody is the body of the verification code email
+	VerificationCodeTextBody = "Your Vocdoni verification code is: "
 	// VerificationAccountTemplate is the key that identifies the verification
 	// account email template. It must be also the name of the file in the
 	// email templates directory.
