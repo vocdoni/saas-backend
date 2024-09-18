@@ -30,7 +30,7 @@ func main() {
 	flag.BoolP("fullTransparentMode", "a", false, "allow all transactions and do not modify any of them")
 	flag.String("sendgridAPIKey", "", "SendGrid API key")
 	flag.String("sendgridFromAddress", "", "SendGrid from address")
-	flag.String("sendgridFromName", "", "SendGrid from name")
+	flag.String("sendgridFromName", "Vocdoni", "SendGrid from name")
 	flag.String("twilioAccountSid", "", "Twilio account SID")
 	flag.String("twilioAuthToken", "", "Twilio auth token")
 	flag.String("twilioFromNumber", "", "Twilio from number")
