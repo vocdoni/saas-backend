@@ -5,6 +5,6 @@ const (
 	VerificationCodeLength = 3
 	// VerificationCodeEmailSubject is the subject of the verification code email
 	VerificationCodeEmailSubject = "Vocdoni verification code"
-	// VerificationCodeEmailBody is the body of the verification code email
-	VerificationCodeEmailBody = "Your verification code is: "
+	// VerificationCodeTextBody is the body of the verification code email
+	VerificationCodeTextBody = "Your Vocdoni verification code is: "
 )
