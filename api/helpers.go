@@ -2,39 +2,19 @@ package api
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"regexp"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/dvote/util"
 )
-
-var regexpEmail = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
-
-// isEmailValid helper function allows to validate an email address.
-func isEmailValid(email string) bool {
-	return regexpEmail.MatchString(email)
-}
-
-// hashPassword helper function allows to hash a password using a salt.
-func hashPassword(password string) []byte {
-	return sha256.New().Sum([]byte(passwordSalt + password))
-}
-
-// hashVerificationCode helper function allows to hash a verification code
-// associated to the email of the user that requested it.
-func hashVerificationCode(userEmail, code string) string {
-	return hex.EncodeToString(sha256.New().Sum([]byte(userEmail + code)))
-}
 
 // organizationFromRequest helper function allows to get the organization info
 // related to the request provided. It gets the organization address from the
@@ -91,7 +71,7 @@ func (a *API) sendUserCode(ctx context.Context, user *db.User, codeType db.CodeT
 	if a.mail != nil || a.sms != nil {
 		code = util.RandomHex(VerificationCodeLength)
 	}
-	hashCode := hashVerificationCode(user.Email, code)
+	hashCode := internal.HashVerificationCode(user.Email, code)
 	// store the verification code in the database
 	if err := a.db.SetVerificationCode(&db.User{ID: user.ID}, hashCode, codeType); err != nil {
 		return err

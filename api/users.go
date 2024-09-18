@@ -1,12 +1,12 @@
 package api
 
 import (
-	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
 
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -23,7 +23,7 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// check the email is correct format
-	if !isEmailValid(userInfo.Email) {
+	if !internal.ValidEmail(userInfo.Email) {
 		ErrEmailMalformed.Write(w)
 		return
 	}
@@ -43,13 +43,13 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// hash the password
-	hPassword := hashPassword(userInfo.Password)
+	hPassword := internal.HexHashPassword(passwordSalt, userInfo.Password)
 	// add the user to the database
 	userID, err := a.db.SetUser(&db.User{
 		Email:     userInfo.Email,
 		FirstName: userInfo.FirstName,
 		LastName:  userInfo.LastName,
-		Password:  hex.EncodeToString(hPassword),
+		Password:  hPassword,
 	})
 	if err != nil {
 		if err == db.ErrAlreadyExists {
@@ -87,7 +87,7 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 		ErrMalformedBody.Write(w)
 		return
 	}
-	hashCode := hashVerificationCode(verification.Email, verification.Code)
+	hashCode := internal.HashVerificationCode(verification.Email, verification.Code)
 	user, err := a.db.UserByVerificationCode(hashCode, db.CodeTypeAccountVerification)
 	if err != nil {
 		if err == db.ErrNotFound {
@@ -165,7 +165,7 @@ func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 	currentEmail := user.Email
 	// check the email is correct format if it is not empty
 	if userInfo.Email != "" {
-		if !isEmailValid(userInfo.Email) {
+		if !internal.ValidEmail(userInfo.Email) {
 			ErrEmailMalformed.Write(w)
 			return
 		}
@@ -239,13 +239,13 @@ func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// hash the password the old password to compare it with the stored one
-	hOldPassword := hex.EncodeToString(hashPassword(userPasswords.OldPassword))
+	hOldPassword := internal.HexHashPassword(passwordSalt, userPasswords.OldPassword)
 	if hOldPassword != user.Password {
 		ErrUnauthorized.Withf("old password does not match").Write(w)
 		return
 	}
 	// hash and update the new password
-	user.Password = hex.EncodeToString(hashPassword(userPasswords.NewPassword))
+	user.Password = internal.HexHashPassword(passwordSalt, userPasswords.NewPassword)
 	if _, err := a.db.SetUser(user); err != nil {
 		log.Warnw("could not update user password", "error", err)
 		ErrGenericInternalServerError.Write(w)
@@ -305,7 +305,7 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// get the user information from the database by the verification code
-	hashCode := hashVerificationCode(userPasswords.Email, userPasswords.Code)
+	hashCode := internal.HashVerificationCode(userPasswords.Email, userPasswords.Code)
 	user, err := a.db.UserByVerificationCode(hashCode, db.CodeTypePasswordReset)
 	if err != nil {
 		if err == db.ErrNotFound {
@@ -316,7 +316,7 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// hash and update the new password
-	user.Password = hex.EncodeToString(hashPassword(userPasswords.NewPassword))
+	user.Password = internal.HexHashPassword(passwordSalt, userPasswords.NewPassword)
 	if _, err := a.db.SetUser(user); err != nil {
 		log.Warnw("could not update user password", "error", err)
 		ErrGenericInternalServerError.Write(w)
