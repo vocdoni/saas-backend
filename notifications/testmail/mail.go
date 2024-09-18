@@ -39,7 +39,7 @@ func (tm *TestMail) SendNotification(_ context.Context, notification *notificati
 	msg := []byte("To: " + notification.ToAddress + "\r\n" +
 		"Subject: " + notification.Subject + "\r\n" +
 		"\r\n" +
-		notification.Body + "\r\n")
+		notification.PlainBody + "\r\n")
 	return smtp.SendMail(smtpAddr, auth, tm.config.FromAddress, []string{notification.ToAddress}, msg)
 }
 

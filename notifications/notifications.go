@@ -8,6 +8,7 @@ type Notification struct {
 	ToNumber  string
 	Subject   string
 	Body      string
+	PlainBody string
 }
 
 type NotificationService interface {

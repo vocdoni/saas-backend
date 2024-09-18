@@ -11,6 +11,7 @@ import (
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/vocdoni/saas-backend/notifications/sendgrid"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
@@ -29,6 +30,7 @@ func main() {
 	flag.StringP("sendgridAPIKey", "g", "", "SendGrid API key")
 	flag.StringP("sendgirdFromAddress", "f", "", "SendGrid from address")
 	flag.StringP("sendgridFromName", "n", "", "SendGrid from name")
+	flag.StringP("emailTemplatesPath", "t", "./assets", "path to the email templates")
 	flag.BoolP("fullTransparentMode", "a", false, "allow all transactions and do not modify any of them")
 	// parse flags
 	flag.Parse()
@@ -51,6 +53,7 @@ func main() {
 	sendgridAPIKey := viper.GetString("sendgridAPIKey")
 	sendgridFromAddress := viper.GetString("sendgirdFromAddress")
 	sendgridFromName := viper.GetString("sendgridFromName")
+	emailTemplatesPath := viper.GetString("emailTemplatesPath")
 	// initialize the MongoDB database
 	database, err := db.New(mongoURL, mongoDB)
 	if err != nil {
@@ -94,6 +97,13 @@ func main() {
 			APIKey:      sendgridAPIKey,
 		}); err != nil {
 			log.Fatalf("could not create the email service: %v", err)
+		}
+		// load email templates
+		if emailTemplatesPath != "" {
+			apiConf.MailTemplates, err = notifications.GetMailTemplates(emailTemplatesPath)
+			if err != nil {
+				log.Fatalf("could not load email templates: %v", err)
+			}
 		}
 	}
 	log.Infow("email service created", "from", fmt.Sprintf("%s <%s>", sendgridFromName, sendgridFromAddress))

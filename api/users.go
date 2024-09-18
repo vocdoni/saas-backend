@@ -67,7 +67,8 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		FirstName: userInfo.FirstName,
 		LastName:  userInfo.LastName,
 	}
-	if err := a.sendUserCode(r.Context(), newUser, db.CodeTypeAccountVerification); err != nil {
+	if err := a.sendUserCode(r.Context(), newUser, db.CodeTypeAccountVerification,
+		VerificationAccountTemplate); err != nil {
 		log.Warnw("could not send verification code", "error", err)
 		ErrGenericInternalServerError.Write(w)
 		return
@@ -281,7 +282,8 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	// generate a new verification code
-	if err := a.sendUserCode(r.Context(), user, db.CodeTypePasswordReset); err != nil {
+	if err := a.sendUserCode(r.Context(), user, db.CodeTypePasswordReset,
+		PasswordResetTemplate); err != nil {
 		log.Warnw("could not send verification code", "error", err)
 		ErrGenericInternalServerError.Write(w)
 		return

@@ -38,7 +38,7 @@ func (sg *SendGridEmail) SendNotification(ctx context.Context, notification *not
 	from := mail.NewEmail(sg.config.FromName, sg.config.FromAddress)
 	to := mail.NewEmail(notification.ToName, notification.ToAddress)
 	// create email with notification data
-	message := mail.NewSingleEmail(from, notification.Subject, to, notification.Body, notification.Body)
+	message := mail.NewSingleEmail(from, notification.Subject, to, notification.PlainBody, notification.Body)
 	// send the email
 	res, err := sg.client.SendWithContext(ctx, message)
 	if err != nil {

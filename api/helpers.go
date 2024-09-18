@@ -1,11 +1,13 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"net/http"
 	"regexp"
 	"time"
@@ -74,7 +76,9 @@ func (a *API) buildLoginResponse(id string) (*LoginResponse, error) {
 	return &lr, nil
 }
 
-func (a *API) sendUserCode(ctx context.Context, user *db.User, codeType db.CodeType) error {
+func (a *API) sendUserCode(ctx context.Context, user *db.User, codeType db.CodeType,
+	temp notifications.MailTemplate,
+) error {
 	// generate verification code if the mail service is available, if not
 	// the verification code will not be sent but stored in the database
 	// generated with just the user email to mock the verification process
@@ -91,12 +95,33 @@ func (a *API) sendUserCode(ctx context.Context, user *db.User, codeType db.CodeT
 	if a.mail != nil {
 		ctx, cancel := context.WithTimeout(ctx, time.Second*10)
 		defer cancel()
-		if err := a.mail.SendNotification(ctx, &notifications.Notification{
+
+		notification := &notifications.Notification{
 			ToName:    fmt.Sprintf("%s %s", user.FirstName, user.LastName),
 			ToAddress: user.Email,
 			Subject:   VerificationCodeEmailSubject,
-			Body:      VerificationCodeEmailBody + code,
-		}); err != nil {
+			PlainBody: VerificationCodeEmailPlainBody + code,
+			Body:      VerificationCodeEmailPlainBody + code,
+		}
+		// check if the mail template is available
+		if templatePath, ok := a.mailTemplates[temp]; ok {
+			tmpl, err := template.ParseFiles(templatePath)
+			if err != nil {
+				return err
+			}
+			buf := new(bytes.Buffer)
+			if err := tmpl.Execute(buf, struct {
+				Code string
+				Link string
+			}{
+				Code: code,
+				Link: "#",
+			}); err != nil {
+				return err
+			}
+			notification.Body = buf.String()
+		}
+		if err := a.mail.SendNotification(ctx, notification); err != nil {
 			return err
 		}
 	}
