@@ -11,7 +11,7 @@ import (
 type MailTemplate string
 
 // GetMailTemplates reads the email templates from the specified directory.
-// Returns a map with the filename and file absoulte path. The filename is the
+// Returns a map with the filename and file absolute path. The filename is the
 // key and the path is the value.
 func GetMailTemplates(templatesPath string) (map[MailTemplate]string, error) {
 	// create a map to store the filename and file content
