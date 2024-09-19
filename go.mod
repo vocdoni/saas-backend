@@ -15,7 +15,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.32.0
 	go.mongodb.org/mongo-driver v1.14.0
 	go.vocdoni.io/dvote v1.10.2-0.20240726114655-b510ac8a7e42
-	go.vocdoni.io/proto v1.15.8
+	go.vocdoni.io/proto v1.15.10
 	google.golang.org/protobuf v1.34.0
 )
 

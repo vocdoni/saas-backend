@@ -67,22 +67,21 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 	if err := proto.Unmarshal(txData, tx); err != nil {
 		ErrInvalidTxFormat.Write(w)
 		return
-	}
-	// check the tx payload
+	} // check the tx payload
 	if !a.transparentMode {
 		switch tx.Payload.(type) {
 		case *models.Tx_SetAccount:
-			// check the account is the same as the user
 			txSetAccount := tx.GetSetAccount()
+			// check the tx fields
 			if txSetAccount == nil || txSetAccount.Account == nil || txSetAccount.InfoURI == nil {
 				ErrInvalidTxFormat.With("missing fields").Write(w)
 				return
 			}
+			// check the account is the same as the user
 			if !bytes.Equal(txSetAccount.GetAccount(), organizationSigner.Address().Bytes()) {
 				ErrUnauthorized.With("invalid account").Write(w)
 				return
 			}
-			log.Infow("signing SetAccount transaction", "user", user.Email, "type", txSetAccount.Txtype.String())
 			// check the tx subtype
 			switch txSetAccount.Txtype {
 			case models.TxType_CREATE_ACCOUNT:
@@ -101,12 +100,122 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-		case *models.Tx_SetProcess:
-			log.Infow("signing SetProcess transaction", "user", user.Email)
-		case *models.Tx_CollectFaucet:
-			log.Infow("signing CollectFaucet transaction", "user", user.Email)
 		case *models.Tx_NewProcess:
-			log.Infow("signing NewProcess transaction", "user", user.Email)
+			txNewProcess := tx.GetNewProcess()
+			// check the tx fields
+			if txNewProcess == nil || txNewProcess.Process == nil || txNewProcess.Nonce == 0 {
+				ErrInvalidTxFormat.With("missing fields").Write(w)
+				return
+			}
+			// check the tx subtype
+			switch txNewProcess.Txtype {
+			case models.TxType_NEW_PROCESS:
+				// generate a new faucet package if it's not present and include it in the tx
+				if txNewProcess.FaucetPackage == nil {
+					faucetPkg, err := a.account.FaucetPackage(organizationSigner.AddressString(), bootStrapFaucetAmount)
+					if err != nil {
+						ErrCouldNotCreateFaucetPackage.WithErr(err).Write(w)
+						return
+					}
+					txNewProcess.FaucetPackage = faucetPkg
+					tx = &models.Tx{
+						Payload: &models.Tx_NewProcess{
+							NewProcess: txNewProcess,
+						},
+					}
+				}
+			}
+		case *models.Tx_SetProcess:
+			txSetProcess := tx.GetSetProcess()
+			// check the tx fields
+			if txSetProcess == nil || txSetProcess.ProcessId == nil {
+				ErrInvalidTxFormat.With("missing fields").Write(w)
+				return
+			}
+			// check the tx subtype
+			switch txSetProcess.Txtype {
+			case models.TxType_SET_PROCESS_STATUS:
+				// check if the process status is in the tx
+				if txSetProcess.Status == nil {
+					ErrInvalidTxFormat.With("missing status field").Write(w)
+					return
+				}
+			case models.TxType_SET_PROCESS_CENSUS:
+				// check if the process census is in the tx
+				if (txSetProcess.CensusRoot == nil || txSetProcess.CensusURI == nil) && txSetProcess.CensusSize == nil {
+					ErrInvalidTxFormat.With("missing census fields").Write(w)
+					return
+				}
+			case models.TxType_SET_PROCESS_QUESTION_INDEX:
+				// check if the process question index is in the tx
+				if txSetProcess.QuestionIndex == nil {
+					ErrInvalidTxFormat.With("missing question index field").Write(w)
+					return
+				}
+			case models.TxType_SET_PROCESS_RESULTS:
+				// check if the process results are in the tx
+				if txSetProcess.Results == nil {
+					ErrInvalidTxFormat.With("missing results field").Write(w)
+					return
+				}
+			case models.TxType_SET_PROCESS_DURATION:
+				// check if the process duration is in the tx
+				if txSetProcess.Duration == nil {
+					ErrInvalidTxFormat.With("missing duration field").Write(w)
+					return
+				}
+			}
+			// include the faucet package in the tx if it's not present
+			if txSetProcess.FaucetPackage == nil {
+				faucetPkg, err := a.account.FaucetPackage(organizationSigner.AddressString(), bootStrapFaucetAmount)
+				if err != nil {
+					ErrCouldNotCreateFaucetPackage.WithErr(err).Write(w)
+					return
+				}
+				txSetProcess.FaucetPackage = faucetPkg
+				tx = &models.Tx{
+					Payload: &models.Tx_SetProcess{
+						SetProcess: txSetProcess,
+					},
+				}
+			}
+		case *models.Tx_SetSIK, *models.Tx_DelSIK:
+			txSetSIK := tx.GetSetSIK()
+			// check the tx fields
+			if txSetSIK == nil || txSetSIK.SIK == nil {
+				ErrInvalidTxFormat.With("missing fields").Write(w)
+				return
+			}
+			// include the faucet package in the tx if it's not present
+			if txSetSIK.FaucetPackage == nil {
+				faucetPkg, err := a.account.FaucetPackage(organizationSigner.AddressString(), bootStrapFaucetAmount)
+				if err != nil {
+					ErrCouldNotCreateFaucetPackage.WithErr(err).Write(w)
+					return
+				}
+				txSetSIK.FaucetPackage = faucetPkg
+				tx = &models.Tx{
+					Payload: &models.Tx_SetSIK{
+						SetSIK: txSetSIK,
+					},
+				}
+			}
+		case *models.Tx_CollectFaucet:
+			txCollectFaucet := tx.GetCollectFaucet()
+			// include the faucet package in the tx if it's not present
+			if txCollectFaucet.FaucetPackage == nil {
+				faucetPkg, err := a.account.FaucetPackage(organizationSigner.AddressString(), bootStrapFaucetAmount)
+				if err != nil {
+					ErrCouldNotCreateFaucetPackage.WithErr(err).Write(w)
+					return
+				}
+				txCollectFaucet.FaucetPackage = faucetPkg
+				tx = &models.Tx{
+					Payload: &models.Tx_CollectFaucet{
+						CollectFaucet: txCollectFaucet,
+					},
+				}
+			}
 		default:
 			log.Warnw("transaction type not allowed", "user", user.Email, "type", fmt.Sprintf("%T", tx.Payload))
 			ErrTxTypeNotAllowed.Write(w)
