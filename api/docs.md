@@ -200,7 +200,7 @@ This endpoint only returns the addresses of the organizations where the current 
 
 ### ✅ Verify user
 
-* **Path** `/auth/verify`
+* **Path** `/users/verify`
 * **Method** `POST`
 * **Request Body** 
 ```json
