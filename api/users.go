@@ -328,7 +328,7 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 	}
 	// check the user is verified
 	if !user.Verified {
-		ErrUnauthorized.With("user not verified").Write(w)
+		ErrUserNoVerified.Write(w)
 		return
 	}
 	// generate a new verification code
