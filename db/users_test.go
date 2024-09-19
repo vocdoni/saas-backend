@@ -25,12 +25,13 @@ func TestUserByEmail(t *testing.T) {
 	c.Assert(user, qt.IsNil)
 	c.Assert(err, qt.Equals, ErrNotFound)
 	// create a new user with the email
-	c.Assert(db.SetUser(&User{
+	_, err = db.SetUser(&User{
 		Email:     testUserEmail,
 		Password:  testUserPass,
 		FirstName: testUserFirstName,
 		LastName:  testUserLastName,
-	}), qt.IsNil)
+	})
+	c.Assert(err, qt.IsNil)
 	// test found user
 	user, err = db.UserByEmail(testUserEmail)
 	c.Assert(err, qt.IsNil)
@@ -39,6 +40,7 @@ func TestUserByEmail(t *testing.T) {
 	c.Assert(user.Password, qt.Equals, testUserPass)
 	c.Assert(user.FirstName, qt.Equals, testUserFirstName)
 	c.Assert(user.LastName, qt.Equals, testUserLastName)
+	c.Assert(user.Verified, qt.IsFalse)
 }
 
 func TestUser(t *testing.T) {
@@ -54,12 +56,13 @@ func TestUser(t *testing.T) {
 	c.Assert(user, qt.IsNil)
 	c.Assert(err, qt.Equals, ErrNotFound)
 	// create a new user with the ID
-	c.Assert(db.SetUser(&User{
+	_, err = db.SetUser(&User{
 		Email:     testUserEmail,
 		Password:  testUserPass,
 		FirstName: testUserFirstName,
 		LastName:  testUserLastName,
-	}), qt.IsNil)
+	})
+	c.Assert(err, qt.IsNil)
 	// get the user ID
 	user, err = db.UserByEmail(testUserEmail)
 	c.Assert(err, qt.IsNil)
@@ -72,6 +75,7 @@ func TestUser(t *testing.T) {
 	c.Assert(user.Password, qt.Equals, testUserPass)
 	c.Assert(user.FirstName, qt.Equals, testUserFirstName)
 	c.Assert(user.LastName, qt.Equals, testUserLastName)
+	c.Assert(user.Verified, qt.IsFalse)
 }
 
 func TestSetUser(t *testing.T) {
@@ -88,27 +92,32 @@ func TestSetUser(t *testing.T) {
 		FirstName: testUserFirstName,
 		LastName:  testUserLastName,
 	}
-	c.Assert(db.SetUser(user), qt.IsNotNil)
+	_, err := db.SetUser(user)
+	c.Assert(err, qt.IsNotNil)
 	// trying to update a non existing user
 	user.ID = 100
-	c.Assert(db.SetUser(user), qt.Equals, ErrInvalidData)
+	_, err = db.SetUser(user)
+	c.Assert(err, qt.Equals, ErrInvalidData)
 	// unset the ID to create a new user
 	user.ID = 0
 	user.Email = testUserEmail
 	// create a new user
-	c.Assert(db.SetUser(user), qt.IsNil)
+	_, err = db.SetUser(user)
+	c.Assert(err, qt.IsNil)
 	// update the user
 	newFirstName := "New User"
 	user.FirstName = newFirstName
-	c.Assert(db.SetUser(user), qt.IsNil)
+	_, err = db.SetUser(user)
+	c.Assert(err, qt.IsNil)
 	// get the user
-	user, err := db.UserByEmail(user.Email)
+	user, err = db.UserByEmail(user.Email)
 	c.Assert(err, qt.IsNil)
 	c.Assert(user, qt.Not(qt.IsNil))
 	c.Assert(user.Email, qt.Equals, testUserEmail)
 	c.Assert(user.Password, qt.Equals, testUserPass)
 	c.Assert(user.FirstName, qt.Equals, newFirstName)
 	c.Assert(user.LastName, qt.Equals, testUserLastName)
+	c.Assert(user.Verified, qt.IsFalse)
 }
 
 func TestDelUser(t *testing.T) {
@@ -125,9 +134,10 @@ func TestDelUser(t *testing.T) {
 		FirstName: testUserFirstName,
 		LastName:  testUserLastName,
 	}
-	c.Assert(db.SetUser(user), qt.IsNil)
+	_, err := db.SetUser(user)
+	c.Assert(err, qt.IsNil)
 	// get the user
-	user, err := db.UserByEmail(user.Email)
+	user, err = db.UserByEmail(user.Email)
 	c.Assert(err, qt.IsNil)
 	c.Assert(user, qt.Not(qt.IsNil))
 	// delete the user by ID removing the email
@@ -139,7 +149,8 @@ func TestDelUser(t *testing.T) {
 	c.Assert(err, qt.Equals, ErrNotFound)
 	// insert the user again with the same email but no ID
 	user.ID = 0
-	c.Assert(db.SetUser(user), qt.IsNil)
+	_, err = db.SetUser(user)
+	c.Assert(err, qt.IsNil)
 	// delete the user by email
 	c.Assert(db.DelUser(user), qt.IsNil)
 	// try to get the user
@@ -166,7 +177,8 @@ func TestIsMemberOf(t *testing.T) {
 			{Address: "viewOrg", Role: ViewerRole},
 		},
 	}
-	c.Assert(db.SetUser(user), qt.IsNil)
+	_, err := db.SetUser(user)
+	c.Assert(err, qt.IsNil)
 	// test the user is member of the organizations
 	for _, org := range user.Organizations {
 		success, err := db.IsMemberOf(user.Email, org.Address, org.Role)

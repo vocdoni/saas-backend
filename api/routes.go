@@ -18,11 +18,17 @@ const (
 
 	// POST /users to register a new user
 	usersEndpoint = "/users"
+	// POST /users/verify to verify the user
+	verifyUserEndpoint = "/users/verify"
 	// GET /users/me to get the current user information
 	// PUT /users/me to update the current user information
-	myUsersEndpoint = "/users/me"
+	usersMeEndpoint = "/users/me"
 	// PUT /users/me/password to update the current user password
-	myUsersPasswordEndpoint = "/users/me/password"
+	usersPasswordEndpoint = "/users/password"
+	// POST /users/password/recovery to recover the user password
+	usersRecoveryPasswordEndpoint = "/users/password/recovery"
+	// POST /users/password/reset to reset the user password
+	usersResetPasswordEndpoint = "/users/password/reset"
 
 	// signer routes
 	// POST /transactions to sign a transaction

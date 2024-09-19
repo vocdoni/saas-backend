@@ -5,10 +5,20 @@ import "time"
 type User struct {
 	ID            uint64               `json:"id" bson:"_id"`
 	Email         string               `json:"email" bson:"email"`
+	Phone         string               `json:"phone" bson:"phone"`
 	Password      string               `json:"password" bson:"password"`
 	FirstName     string               `json:"firstName" bson:"firstName"`
 	LastName      string               `json:"lastName" bson:"lastName"`
 	Organizations []OrganizationMember `json:"organizations" bson:"organizations"`
+	Verified      bool                 `json:"verified" bson:"verified"`
+}
+
+type CodeType string
+
+type UserVerification struct {
+	ID   uint64   `json:"id" bson:"_id"`
+	Code string   `json:"code" bson:"code"`
+	Type CodeType `json:"type" bson:"type"`
 }
 
 func (u *User) HasRoleFor(address string, role UserRole) bool {

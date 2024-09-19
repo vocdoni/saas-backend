@@ -13,9 +13,12 @@
   - [📝 Sign message](#-sign-message)
 - [👥 Users](#-users)
   - [🙋 Register](#-register)
+  - [✅ Verify user](#-verify-user)
   - [🧑‍💻 Get current user info](#-get-current-user-info)
   - [💇 Update current user info](#-update-current-user-info)
   - [🔏 Update current user password](#-update-current-user-password)
+  - [⛓️‍💥 Request a password recovery](#-request-a-password-recovery)
+  - [🔗 Reset user password](#-reset-user-password)
 - [🏤 Organizations](#-organizations)
   - [🆕 Create organization](#-create-organization)
   - [⚙️ Update organization](#-update-organization)
@@ -63,14 +66,6 @@
 * **Method** `POST`
 * **Headers**
   * `Authentication: Bearer <user_token>`
-
-* **Response**
-```json
-{
-  "token": "<jwt_token>",
-  "expirity": "2024-08-21T11:26:54.368718+02:00"
-}
-```
 
 * **Errors**
 
@@ -192,6 +187,29 @@ This endpoint only returns the addresses of the organizations where the current 
     "password": "secretpass1234"
 }
 ```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40002` | `email malformed` |
+| `400` | `40003` | `password too short` |
+| `400` | `40004` | `malformed JSON body` |
+| `500` | `50002` | `internal server error` |
+
+### ✅ Verify user
+
+* **Path** `/auth/verify`
+* **Method** `POST`
+* **Request Body** 
+```json
+{
+  "email": "user2veryfy@email.com",
+  "code": "******",
+}
+```
+
 * **Response**
 ```json
 {
@@ -205,8 +223,6 @@ This endpoint only returns the addresses of the organizations where the current 
 | HTTP Status | Error code | Message |
 |:---:|:---:|:---|
 | `401` | `40001` | `user not authorized` |
-| `400` | `40002` | `email malformed` |
-| `400` | `40003` | `password too short` |
 | `400` | `40004` | `malformed JSON body` |
 | `500` | `50002` | `internal server error` |
 
@@ -288,13 +304,54 @@ This method invalidates any previous JWT token for the user, so it returns a new
 
 ### 🔏 Update current user password
 
-* **Path** `/users/me/password`
+* **Path** `/users/password`
 * **Method** `PUT`
 * **Request body**
 ```json
 {
   "oldPassword": "secretpass1234",
   "newPassword": "secretpass0987"
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40003` | `password too short` |
+| `400` | `40004` | `malformed JSON body` |
+| `500` | `50002` | `internal server error` |
+
+### ⛓️‍💥 Request a password recovery
+
+* **Path** `/users/password/recovery`
+* **Method** `POST`
+* **Request body**
+```json
+{
+  "email": "user@test.com",
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40004` | `malformed JSON body` |
+| `500` | `50002` | `internal server error` |
+
+### 🔗 Reset user password
+
+* **Path** `/users/password/reset`
+* **Method** `POST`
+* **Request body**
+```json
+{
+  "email": "user@test.com",
+  "code": "******",
+  "newPassword": "newpassword123"
 }
 ```
 
@@ -333,6 +390,8 @@ This method invalidates any previous JWT token for the user, so it returns a new
   "language": "EN"
 }
 ```
+By default, the organization is created with `activated: true`.
+
 If the user want to create a sub org, the address of the root organization must be provided inside an organization object in `parent` param. The creator must be admin of the parent organization to be able to create suborganizations. Example:
 ```json
 {

@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/jwtauth/v5"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/notifications"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 )
@@ -21,13 +22,15 @@ const (
 )
 
 type APIConfig struct {
-	Host    string
-	Port    int
-	Secret  string
-	Chain   string
-	DB      *db.MongoStorage
-	Client  *apiclient.HTTPclient
-	Account *account.Account
+	Host        string
+	Port        int
+	Secret      string
+	Chain       string
+	DB          *db.MongoStorage
+	Client      *apiclient.HTTPclient
+	Account     *account.Account
+	MailService notifications.NotificationService
+	SMSService  notifications.NotificationService
 	// FullTransparentMode if true allows signing all transactions and does not
 	// modify any of them.
 	FullTransparentMode bool
@@ -42,6 +45,8 @@ type API struct {
 	router          *chi.Mux
 	client          *apiclient.HTTPclient
 	account         *account.Account
+	mail            notifications.NotificationService
+	sms             notifications.NotificationService
 	secret          string
 	transparentMode bool
 }
@@ -58,6 +63,8 @@ func New(conf *APIConfig) *API {
 		port:            conf.Port,
 		client:          conf.Client,
 		account:         conf.Account,
+		mail:            conf.MailService,
+		sms:             conf.SMSService,
 		secret:          conf.Secret,
 		transparentMode: conf.FullTransparentMode,
 	}
@@ -102,14 +109,14 @@ func (a *API) initRouter() http.Handler {
 		log.Infow("new route", "method", "GET", "path", authAddressesEndpoint)
 		r.Get(authAddressesEndpoint, a.writableOrganizationAddressesHandler)
 		// get user information
-		log.Infow("new route", "method", "GET", "path", myUsersEndpoint)
-		r.Get(myUsersEndpoint, a.userInfoHandler)
+		log.Infow("new route", "method", "GET", "path", usersMeEndpoint)
+		r.Get(usersMeEndpoint, a.userInfoHandler)
 		// update user information
-		log.Infow("new route", "method", "PUT", "path", myUsersEndpoint)
-		r.Put(myUsersEndpoint, a.updateUserInfoHandler)
+		log.Infow("new route", "method", "PUT", "path", usersMeEndpoint)
+		r.Put(usersMeEndpoint, a.updateUserInfoHandler)
 		// update user password
-		log.Infow("new route", "method", "PUT", "path", myUsersPasswordEndpoint)
-		r.Put(myUsersPasswordEndpoint, a.updateUserPasswordHandler)
+		log.Infow("new route", "method", "PUT", "path", usersPasswordEndpoint)
+		r.Put(usersPasswordEndpoint, a.updateUserPasswordHandler)
 		// sign a payload
 		log.Infow("new route", "method", "POST", "path", signTxEndpoint)
 		r.Post(signTxEndpoint, a.signTxHandler)
@@ -133,12 +140,21 @@ func (a *API) initRouter() http.Handler {
 				log.Warnw("failed to write ping response", "error", err)
 			}
 		})
-		// register new users
-		log.Infow("new route", "method", "POST", "path", usersEndpoint)
-		r.Post(usersEndpoint, a.registerHandler)
 		// login
 		log.Infow("new route", "method", "POST", "path", authLoginEndpoint)
 		r.Post(authLoginEndpoint, a.authLoginHandler)
+		// register user
+		log.Infow("new route", "method", "POST", "path", usersEndpoint)
+		r.Post(usersEndpoint, a.registerHandler)
+		// verify user
+		log.Infow("new route", "method", "POST", "path", verifyUserEndpoint)
+		r.Post(verifyUserEndpoint, a.verifyUserAccountHandler)
+		// request user password recovery
+		log.Infow("new route", "method", "POST", "path", usersRecoveryPasswordEndpoint)
+		r.Post(usersRecoveryPasswordEndpoint, a.recoverUserPasswordHandler)
+		// reset user password
+		log.Infow("new route", "method", "POST", "path", usersResetPasswordEndpoint)
+		r.Post(usersResetPasswordEndpoint, a.resetUserPasswordHandler)
 		// get organization information
 		log.Infow("new route", "method", "GET", "path", organizationEndpoint)
 		r.Get(organizationEndpoint, a.organizationInfoHandler)

@@ -2,10 +2,8 @@ package api
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"net/http"
-	"regexp"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -13,18 +11,6 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"go.vocdoni.io/dvote/log"
 )
-
-var regexpEmail = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
-
-// isEmailValid helper function allows to validate an email address.
-func isEmailValid(email string) bool {
-	return regexpEmail.MatchString(email)
-}
-
-// hashPassword helper function allows to hash a password using a salt.
-func hashPassword(password string) []byte {
-	return sha256.New().Sum([]byte(passwordSalt + password))
-}
 
 // organizationFromRequest helper function allows to get the organization info
 // related to the request provided. It gets the organization address from the
