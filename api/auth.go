@@ -52,6 +52,7 @@ func (a *API) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 	// check if the user is verified
 	if !user.Verified {
 		ErrUnauthorized.Withf("user not verified").Write(w)
+		return
 	}
 	// generate a new token with the user name as the subject
 	res, err := a.buildLoginResponse(loginInfo.Email)
