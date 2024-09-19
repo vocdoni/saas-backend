@@ -17,7 +17,7 @@
   - [🧑‍💻 Get current user info](#-get-current-user-info)
   - [💇 Update current user info](#-update-current-user-info)
   - [🔏 Update current user password](#-update-current-user-password)
-  - [⛓️‍💥 Request a password recovery](#-request-a-password-recovery)
+  - [⛓️‍💥 Request a password recovery](#%EF%B8%8F-request-a-password-recovery)
   - [🔗 Reset user password](#-reset-user-password)
 - [🏤 Organizations](#-organizations)
   - [🆕 Create organization](#-create-organization)
