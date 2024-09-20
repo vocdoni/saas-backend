@@ -1,11 +1,11 @@
 package api
 
 import (
-	"encoding/hex"
 	"encoding/json"
 	"net/http"
 
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 )
 
 // refresh handles the refresh request. It returns a new JWT token.
@@ -45,9 +45,13 @@ func (a *API) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// check the password
-	hPassword := hashPassword(loginInfo.Password)
-	if hex.EncodeToString(hPassword) != user.Password {
+	if pass := internal.HexHashPassword(passwordSalt, loginInfo.Password); pass != user.Password {
 		ErrUnauthorized.Write(w)
+		return
+	}
+	// check if the user is verified
+	if !user.Verified {
+		ErrUserNoVerified.Write(w)
 		return
 	}
 	// generate a new token with the user name as the subject

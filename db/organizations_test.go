@@ -87,10 +87,11 @@ func TestSetOrganization(t *testing.T) {
 		Creator: testUserEmail,
 	}), qt.IsNotNil)
 	// register the creator and retry to create the organization
-	c.Assert(db.SetUser(&User{
+	_, err = db.SetUser(&User{
 		Email:    testUserEmail,
 		Password: testUserPass,
-	}), qt.IsNil)
+	})
+	c.Assert(err, qt.IsNil)
 	c.Assert(db.SetOrganization(&Organization{
 		Address: newOrgAddress,
 		Name:    newOrgName,
@@ -135,10 +136,11 @@ func TestReplaceCreatorEmail(t *testing.T) {
 	// create a new organization with a creator
 	address := "orgToReplaceCreator"
 	name := "Organization to replace creator"
-	c.Assert(db.SetUser(&User{
+	_, err := db.SetUser(&User{
 		Email:    testUserEmail,
 		Password: testUserPass,
-	}), qt.IsNil)
+	})
+	c.Assert(err, qt.IsNil)
 	c.Assert(db.SetOrganization(&Organization{
 		Address: address,
 		Name:    name,
@@ -171,16 +173,17 @@ func TestOrganizationsMembers(t *testing.T) {
 	// create a new organization with a creator
 	address := "orgToReplaceCreator"
 	name := "Organization to replace creator"
-	c.Assert(db.SetUser(&User{
+	_, err := db.SetUser(&User{
 		Email:    testUserEmail,
 		Password: testUserPass,
-	}), qt.IsNil)
+	})
+	c.Assert(err, qt.IsNil)
 	c.Assert(db.SetOrganization(&Organization{
 		Address: address,
 		Name:    name,
 		Creator: testUserEmail,
 	}), qt.IsNil)
-	_, _, err := db.Organization(address, false)
+	_, _, err = db.Organization(address, false)
 	c.Assert(err, qt.IsNil)
 	// get the organization members
 	members, err := db.OrganizationsMembers(address)

@@ -8,6 +8,9 @@ const (
 	// organization types
 	CompanyType   OrganizationType = "company"
 	CommunityType OrganizationType = "community"
+	// verification code types
+	CodeTypeAccountVerification CodeType = "account"
+	CodeTypePasswordReset       CodeType = "password"
 )
 
 // writableRoles is a map that contains if the role is writable or not

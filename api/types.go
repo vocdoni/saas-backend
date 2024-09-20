@@ -50,15 +50,30 @@ type UserOrganization struct {
 // UserInfo is the request to register a new user.
 type UserInfo struct {
 	Email         string              `json:"email,omitempty"`
+	Phone         string              `json:"phone,omitempty"`
 	Password      string              `json:"password,omitempty"`
 	FirstName     string              `json:"firstName,omitempty"`
 	LastName      string              `json:"lastName,omitempty"`
+	Verified      bool                `json:"verified,omitempty"`
 	Organizations []*UserOrganization `json:"organizations"`
 }
 
 // UserPasswordUpdate is the request to update the password of a user.
 type UserPasswordUpdate struct {
 	OldPassword string `json:"oldPassword"`
+	NewPassword string `json:"newPassword"`
+}
+
+// UserVerificationRequest is the request to verify a user.
+type UserVerification struct {
+	Email string `json:"email"`
+	Code  string `json:"code"`
+	Phone string `json:"phone"`
+}
+
+type UserPasswordReset struct {
+	Email       string `json:"email"`
+	Code        string `json:"code"`
 	NewPassword string `json:"newPassword"`
 }
 

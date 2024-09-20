@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,6 +11,8 @@ import (
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/notifications/sendgrid"
+	"github.com/vocdoni/saas-backend/notifications/twilio"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 )
@@ -25,6 +28,12 @@ func main() {
 	flag.StringP("vocdoniApi", "v", "https://api-dev.vocdoni.net/v2", "vocdoni node remote API URL")
 	flag.StringP("privateKey", "k", "", "private key for the Vocdoni account")
 	flag.BoolP("fullTransparentMode", "a", false, "allow all transactions and do not modify any of them")
+	flag.String("sendgridAPIKey", "", "SendGrid API key")
+	flag.String("sendgridFromAddress", "", "SendGrid from address")
+	flag.String("sendgridFromName", "Vocdoni", "SendGrid from name")
+	flag.String("twilioAccountSid", "", "Twilio account SID")
+	flag.String("twilioAuthToken", "", "Twilio auth token")
+	flag.String("twilioFromNumber", "", "Twilio from number")
 	// parse flags
 	flag.Parse()
 	// initialize Viper
@@ -43,6 +52,14 @@ func main() {
 	}
 	mongoURL := viper.GetString("mongoURL")
 	mongoDB := viper.GetString("mongoDB")
+	// mail vars
+	sendgridAPIKey := viper.GetString("sendgridAPIKey")
+	sendgridFromAddress := viper.GetString("sendgridFromAddress")
+	sendgridFromName := viper.GetString("sendgridFromName")
+	// sms vars
+	twilioAccountSid := viper.GetString("twilioAccountSid")
+	twilioAuthToken := viper.GetString("twilioAuthToken")
+	twilioFromNumber := viper.GetString("twilioFromNumber")
 	// initialize the MongoDB database
 	database, err := db.New(mongoURL, mongoDB)
 	if err != nil {
@@ -66,8 +83,8 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Infow("API client created", "endpoint", apiEndpoint, "chainID", apiClient.ChainID())
-	// create the local API server
-	api.New(&api.APIConfig{
+	// init the API configuration
+	apiConf := &api.APIConfig{
 		Host:                host,
 		Port:                port,
 		Secret:              secret,
@@ -75,9 +92,37 @@ func main() {
 		Client:              apiClient,
 		Account:             acc,
 		FullTransparentMode: fullTransparentMode,
-	}).Start()
-	// wait forever, as the server is running in a goroutine
+	}
+	// create email notifications service if the required parameters are set and
+	// include it in the API configuration
+	if sendgridAPIKey != "" && sendgridFromAddress != "" && sendgridFromName != "" {
+		apiConf.MailService = new(sendgrid.SendGridEmail)
+		if err := apiConf.MailService.Init(&sendgrid.SendGridConfig{
+			FromName:    sendgridFromName,
+			FromAddress: sendgridFromAddress,
+			APIKey:      sendgridAPIKey,
+		}); err != nil {
+			log.Fatalf("could not create the email service: %v", err)
+		}
+		log.Infow("email service created", "from", fmt.Sprintf("%s <%s>", sendgridFromName, sendgridFromAddress))
+	}
+	// create SMS notifications service if the required parameters are set and
+	// include it in the API configuration
+	if twilioAccountSid != "" && twilioAuthToken != "" && twilioFromNumber != "" {
+		apiConf.SMSService = new(twilio.TwilioSMS)
+		if err := apiConf.SMSService.Init(&twilio.TwilioConfig{
+			AccountSid: twilioAccountSid,
+			AuthToken:  twilioAuthToken,
+			FromNumber: twilioFromNumber,
+		}); err != nil {
+			log.Fatalf("could not create the SMS service: %v", err)
+		}
+		log.Infow("SMS service created", "from", twilioFromNumber)
+	}
+	// create the local API server
+	api.New(apiConf).Start()
 	log.Infow("server started", "host", host, "port", port)
+	// wait forever, as the server is running in a goroutine
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	<-c

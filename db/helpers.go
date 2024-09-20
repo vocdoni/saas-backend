@@ -35,7 +35,6 @@ func (ms *MongoStorage) initCollections(database string) error {
 		// if the collection doesn't exist, create it
 		if alreadyCreated {
 			if validator, ok := collectionsValidators[name]; ok {
-				log.Debugw("updating collection with validator", "collection", name)
 				err := ms.client.Database(database).RunCommand(ctx, bson.D{
 					{Key: "collMod", Value: name},
 					{Key: "validator", Value: validator},
@@ -48,9 +47,7 @@ func (ms *MongoStorage) initCollections(database string) error {
 			// if the collection has a validator create it with it
 			opts := options.CreateCollection()
 			if validator, ok := collectionsValidators[name]; ok {
-				log.Debugw("creating collection with validator", "collection", name)
 				opts = opts.SetValidator(validator).SetValidationLevel("strict").SetValidationAction("error")
-
 			}
 			// create the collection
 			if err := ms.client.Database(database).CreateCollection(ctx, name, opts); err != nil {
@@ -66,7 +63,11 @@ func (ms *MongoStorage) initCollections(database string) error {
 	}
 	// organizations collection
 	if ms.organizations, err = getCollection("organizations"); err != nil {
-		return nil
+		return err
+	}
+	// verifications collection
+	if ms.verifications, err = getCollection("verifications"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -104,8 +105,7 @@ func (ms *MongoStorage) collectionNames(ctx context.Context, database string) ([
 func (ms *MongoStorage) createIndexes() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-
-	// Create an index for the 'email' field on users
+	// create an index for the 'email' field on users
 	userEmailIndex := mongo.IndexModel{
 		Keys:    bson.D{{Key: "email", Value: 1}}, // 1 for ascending order
 		Options: options.Index().SetUnique(true),
@@ -113,8 +113,7 @@ func (ms *MongoStorage) createIndexes() error {
 	if _, err := ms.users.Indexes().CreateOne(ctx, userEmailIndex); err != nil {
 		return fmt.Errorf("failed to create index on addresses for users: %w", err)
 	}
-
-	// Create an index for the 'name' field on organizations (must be unique)
+	// create an index for the 'name' field on organizations (must be unique)
 	organizationNameIndex := mongo.IndexModel{
 		Keys:    bson.D{{Key: "name", Value: 1}}, // 1 for ascending order
 		Options: options.Index().SetUnique(true),
@@ -122,7 +121,14 @@ func (ms *MongoStorage) createIndexes() error {
 	if _, err := ms.organizations.Indexes().CreateOne(ctx, organizationNameIndex); err != nil {
 		return fmt.Errorf("failed to create index on name for organizations: %w", err)
 	}
-
+	// create an index for the 'code' field on user verifications (must be unique)
+	verificationCodeIndex := mongo.IndexModel{
+		Keys:    bson.D{{Key: "code", Value: 1}}, // 1 for ascending order
+		Options: options.Index().SetUnique(true),
+	}
+	if _, err := ms.verifications.Indexes().CreateOne(ctx, verificationCodeIndex); err != nil {
+		return fmt.Errorf("failed to create index on code for verifications: %w", err)
+	}
 	return nil
 }
 
@@ -140,7 +146,7 @@ func dynamicUpdateDocument(item interface{}, alwaysUpdateTags []string) (bson.M,
 	}
 	update := bson.M{}
 	typ := val.Type()
-	// Create a map for quick lookup
+	// create a map for quick lookup
 	alwaysUpdateMap := make(map[string]bool, len(alwaysUpdateTags))
 	for _, tag := range alwaysUpdateTags {
 		alwaysUpdateMap[tag] = true
@@ -155,8 +161,7 @@ func dynamicUpdateDocument(item interface{}, alwaysUpdateTags []string) (bson.M,
 		if tag == "" || tag == "-" || tag == "_id" {
 			continue
 		}
-
-		// Check if the field should always be updated or is not the zero value
+		// check if the field should always be updated or is not the zero value
 		_, alwaysUpdate := alwaysUpdateMap[tag]
 		if alwaysUpdate || !reflect.DeepEqual(field.Interface(), reflect.Zero(field.Type()).Interface()) {
 			update[tag] = field.Interface()
