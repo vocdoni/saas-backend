@@ -67,7 +67,8 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 	if err := proto.Unmarshal(txData, tx); err != nil {
 		ErrInvalidTxFormat.Write(w)
 		return
-	} // check the tx payload
+	}
+	// check if the api is not in transparent mode
 	if !a.transparentMode {
 		switch tx.Payload.(type) {
 		case *models.Tx_SetAccount:
@@ -221,8 +222,6 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 			ErrTxTypeNotAllowed.Write(w)
 			return
 		}
-	} else {
-		log.Infow("signing transaction in full transparent mode", "user", user.Email, "type", fmt.Sprintf("%T", tx.Payload))
 	}
 	// sign the tx
 	stx, err := a.account.SignTransaction(tx, organizationSigner)
