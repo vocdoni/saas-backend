@@ -129,6 +129,13 @@ func (ms *MongoStorage) createIndexes() error {
 	if _, err := ms.verifications.Indexes().CreateOne(ctx, verificationCodeIndex); err != nil {
 		return fmt.Errorf("failed to create index on code for verifications: %w", err)
 	}
+	// create an index for the 'type' field on user verifications
+	verificationTypeIndex := mongo.IndexModel{
+		Keys: bson.D{{Key: "type", Value: 1}}, // 1 for ascending order
+	}
+	if _, err := ms.verifications.Indexes().CreateOne(ctx, verificationTypeIndex); err != nil {
+		return fmt.Errorf("failed to create index on type for verifications: %w", err)
+	}
 	return nil
 }
 

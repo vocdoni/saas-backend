@@ -24,7 +24,7 @@ import (
 // of codes can be added in the future. If neither the mail service nor the SMS
 // service are available, the verification code will be empty but stored in the
 // database to mock the verification process in any case.
-func (a *API) sendUserCode(ctx context.Context, user *db.User, codeType db.CodeType) error {
+func (a *API) sendUserCode(ctx context.Context, user *db.User, t db.CodeType) error {
 	// generate verification code if the mail service is available, if not
 	// the verification code will not be sent but stored in the database
 	// generated with just the user email to mock the verification process
@@ -32,9 +32,10 @@ func (a *API) sendUserCode(ctx context.Context, user *db.User, codeType db.CodeT
 	if a.mail != nil || a.sms != nil {
 		code = util.RandomHex(VerificationCodeLength)
 	}
-	hashCode := internal.HashVerificationCode(user.Email, code)
 	// store the verification code in the database
-	if err := a.db.SetVerificationCode(&db.User{ID: user.ID}, hashCode, codeType); err != nil {
+	hashCode := internal.HashVerificationCode(user.Email, code)
+	exp := time.Now().Add(VerificationCodeExpiration)
+	if err := a.db.SetVerificationCode(&db.User{ID: user.ID}, hashCode, t, exp); err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
@@ -128,18 +129,27 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // verifyUserAccountHandler handles the request to verify the user account. It
-// requires the user email and the verification code to be provided. If the
-// verification code is correct, the user account is verified and a new token is
-// generated and sent back to the user. If the verification code is incorrect,
-// an error is returned.
+// requires the user email and the verification code to be provided. It checks
+// if the user has not been verified yet, if the verification code is not
+// expired and if the verification code is correct. If all the checks are
+// correct, the user account is verified and a new token is generated and sent
+// back to the user. If the user is already verified, an error is returned. If
+// the verification code is expired, an error is returned. If the verification
+// code is incorrect, an error is returned and the number of attempts to verify
+// it is increased. If any other error occurs, a generic error is returned.
 func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 	verification := &UserVerification{}
 	if err := json.NewDecoder(r.Body).Decode(verification); err != nil {
 		ErrMalformedBody.Write(w)
 		return
 	}
-	hashCode := internal.HashVerificationCode(verification.Email, verification.Code)
-	user, err := a.db.UserByVerificationCode(hashCode, db.CodeTypeAccountVerification)
+	// check the email and verification code are not empty
+	if verification.Email == "" || verification.Code == "" {
+		ErrInvalidUserData.With("no verification code or email provided").Write(w)
+		return
+	}
+	// get the user information from the database by email
+	user, err := a.db.UserByEmail(verification.Email)
 	if err != nil {
 		if err == db.ErrNotFound {
 			ErrUnauthorized.Write(w)
@@ -148,6 +158,33 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 		ErrGenericInternalServerError.Write(w)
 		return
 	}
+	// check the user is not already verified
+	if user.Verified {
+		ErrUserAlreadyVerified.Write(w)
+		return
+	}
+	// get the verification code from the database
+	code, err := a.db.UserVerificationCode(user, db.CodeTypeAccountVerification)
+	if err != nil {
+		if err != db.ErrNotFound {
+			log.Warnw("could not get verification code", "error", err)
+		}
+		ErrUnauthorized.Write(w)
+		return
+	}
+	// check the verification code is not expired
+	if code.Expiration.Before(time.Now()) {
+		ErrVerificationCodeExpired.Write(w)
+		return
+	}
+	// check the verification code is correct
+	hashCode := internal.HashVerificationCode(verification.Email, verification.Code)
+	if code.Code != hashCode {
+		ErrUnauthorized.Write(w)
+		return
+	}
+	// verify the user account if the current verification code is valid and
+	// matches with the provided one
 	if err := a.db.VerifyUserAccount(user); err != nil {
 		ErrGenericInternalServerError.Write(w)
 		return
@@ -160,6 +197,108 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// send the token back to the user
 	httpWriteJSON(w, res)
+}
+
+// userVerificationCodeInfoHandler handles the request to get the verification
+// code information of a user. It requires the user email to be provided. It
+// returns the user email, the verification code, the phone number, the code
+// expiration and if the code is valid (not expired and has not reached the
+// maximum number of attempts). If the user is already verified, an error is
+// returned. If the user is not found, an error is returned. If the
+// verification code is not found, an error is returned. If any other error
+// occurs, a generic error is returned.
+func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Request) {
+	// get the user email from the request query
+	userEmail := r.URL.Query().Get("email")
+	if userEmail == "" {
+		ErrInvalidUserData.With("no email provided").Write(w)
+		return
+	}
+	// get the user information from the database by email
+	user, err := a.db.UserByEmail(userEmail)
+	if err != nil {
+		if err == db.ErrNotFound {
+			ErrUserNotFound.Write(w)
+			return
+		}
+		ErrGenericInternalServerError.Write(w)
+		return
+	}
+	// check if the user is already verified
+	if user.Verified {
+		ErrUserAlreadyVerified.Write(w)
+		return
+	}
+	// get the verification code from the database
+	code, err := a.db.UserVerificationCode(user, db.CodeTypeAccountVerification)
+	if err != nil {
+		if err != db.ErrNotFound {
+			log.Warnw("could not get verification code", "error", err)
+		}
+		ErrUnauthorized.Write(w)
+		return
+	}
+	// return the verification code information
+	httpWriteJSON(w, UserVerification{
+		Email:      user.Email,
+		Phone:      user.Phone,
+		Expiration: code.Expiration,
+		Valid:      code.Expiration.After(time.Now()),
+	})
+}
+
+// resendUserVerificationCodeHandler handles the request to resend the user
+// verification code. It requires the user email to be provided. If the user is
+// not found, an error is returned. If the user is already verified, an error is
+// returned. If the verification code is not expired, an error is returned. If
+// the verification code is found and expired, a new verification code is sent
+// to the user email. If any other error occurs, a generic error is returned.
+func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.Request) {
+	verification := &UserVerification{}
+	if err := json.NewDecoder(r.Body).Decode(verification); err != nil {
+		ErrMalformedBody.Write(w)
+		return
+	}
+	if verification.Email == "" {
+		ErrInvalidUserData.With("no email provided").Write(w)
+		return
+	}
+	// get the user information from the database by email
+	user, err := a.db.UserByEmail(verification.Email)
+	if err != nil {
+		if err == db.ErrNotFound {
+			ErrUnauthorized.Write(w)
+			return
+		}
+		ErrGenericInternalServerError.Write(w)
+		return
+	}
+	// check the user is not already verified
+	if user.Verified {
+		ErrUserAlreadyVerified.Write(w)
+		return
+	}
+	// get the verification code from the database
+	code, err := a.db.UserVerificationCode(user, db.CodeTypeAccountVerification)
+	if err != nil {
+		if err != db.ErrNotFound {
+			log.Warnw("could not get verification code", "error", err)
+		}
+		ErrUnauthorized.Write(w)
+		return
+	}
+	// if the verification code is not expired, return an error
+	if code.Expiration.After(time.Now()) {
+		ErrVerificationCodeValid.Write(w)
+		return
+	}
+	// set a new code and send it
+	if err := a.sendUserCode(r.Context(), user, db.CodeTypeAccountVerification); err != nil {
+		log.Warnw("could not send verification code", "error", err)
+		ErrGenericInternalServerError.Write(w)
+		return
+	}
+	httpWriteOK(w)
 }
 
 // userInfoHandler handles the request to get the information of the current

@@ -66,9 +66,11 @@ type UserPasswordUpdate struct {
 
 // UserVerificationRequest is the request to verify a user.
 type UserVerification struct {
-	Email string `json:"email"`
-	Code  string `json:"code"`
-	Phone string `json:"phone"`
+	Email      string    `json:"email,omitempty"`
+	Code       string    `json:"code,omitempty"`
+	Phone      string    `json:"phone,omitempty"`
+	Expiration time.Time `json:"expiration,omitempty"`
+	Valid      bool      `json:"valid"`
 }
 
 type UserPasswordReset struct {

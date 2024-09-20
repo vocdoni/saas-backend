@@ -2,6 +2,7 @@ package db
 
 import (
 	"testing"
+	"time"
 
 	qt "github.com/frankban/quicktest"
 )
@@ -26,7 +27,7 @@ func TestUserVerificationCode(t *testing.T) {
 	c.Assert(err, qt.Equals, ErrNotFound)
 
 	testCode := "testCode"
-	c.Assert(db.SetVerificationCode(&User{ID: userID}, testCode, CodeTypeAccountVerification), qt.IsNil)
+	c.Assert(db.SetVerificationCode(&User{ID: userID}, testCode, CodeTypeAccountVerification, time.Now()), qt.IsNil)
 
 	code, err := db.UserVerificationCode(&User{ID: userID}, CodeTypeAccountVerification)
 	c.Assert(err, qt.IsNil)
@@ -46,7 +47,7 @@ func TestSetVerificationCode(t *testing.T) {
 	c := qt.New(t)
 
 	nonExistingUserID := uint64(100)
-	c.Assert(db.SetVerificationCode(&User{ID: nonExistingUserID}, "testCode", CodeTypeAccountVerification), qt.Equals, ErrNotFound)
+	c.Assert(db.SetVerificationCode(&User{ID: nonExistingUserID}, "testCode", CodeTypeAccountVerification, time.Now()), qt.Equals, ErrNotFound)
 
 	userID, err := db.SetUser(&User{
 		Email:     testUserEmail,
@@ -57,14 +58,14 @@ func TestSetVerificationCode(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 
 	testCode := "testCode"
-	c.Assert(db.SetVerificationCode(&User{ID: userID}, testCode, CodeTypeAccountVerification), qt.IsNil)
+	c.Assert(db.SetVerificationCode(&User{ID: userID}, testCode, CodeTypeAccountVerification, time.Now()), qt.IsNil)
 
 	code, err := db.UserVerificationCode(&User{ID: userID}, CodeTypeAccountVerification)
 	c.Assert(err, qt.IsNil)
 	c.Assert(code, qt.Equals, testCode)
 
 	testCode = "testCode2"
-	c.Assert(db.SetVerificationCode(&User{ID: userID}, testCode, CodeTypeAccountVerification), qt.IsNil)
+	c.Assert(db.SetVerificationCode(&User{ID: userID}, testCode, CodeTypeAccountVerification, time.Now()), qt.IsNil)
 
 	code, err = db.UserVerificationCode(&User{ID: userID}, CodeTypeAccountVerification)
 	c.Assert(err, qt.IsNil)
