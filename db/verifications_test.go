@@ -31,7 +31,7 @@ func TestUserVerificationCode(t *testing.T) {
 
 	code, err := db.UserVerificationCode(&User{ID: userID}, CodeTypeAccountVerification)
 	c.Assert(err, qt.IsNil)
-	c.Assert(code, qt.Equals, testCode)
+	c.Assert(code.Code, qt.Equals, testCode)
 
 	c.Assert(db.VerifyUserAccount(&User{ID: userID}), qt.IsNil)
 	_, err = db.UserVerificationCode(&User{ID: userID}, CodeTypeAccountVerification)
@@ -62,14 +62,14 @@ func TestSetVerificationCode(t *testing.T) {
 
 	code, err := db.UserVerificationCode(&User{ID: userID}, CodeTypeAccountVerification)
 	c.Assert(err, qt.IsNil)
-	c.Assert(code, qt.Equals, testCode)
+	c.Assert(code.Code, qt.Equals, testCode)
 
 	testCode = "testCode2"
 	c.Assert(db.SetVerificationCode(&User{ID: userID}, testCode, CodeTypeAccountVerification, time.Now()), qt.IsNil)
 
 	code, err = db.UserVerificationCode(&User{ID: userID}, CodeTypeAccountVerification)
 	c.Assert(err, qt.IsNil)
-	c.Assert(code, qt.Equals, testCode)
+	c.Assert(code.Code, qt.Equals, testCode)
 }
 
 func TestVerifyUser(t *testing.T) {
