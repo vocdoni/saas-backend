@@ -196,7 +196,7 @@ func TestVerifyAccountHandler(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	resp, err = http.DefaultClient.Do(req)
 	c.Assert(err, qt.IsNil)
-	c.Assert(resp.StatusCode, qt.Equals, http.StatusUnauthorized)
+	c.Assert(resp.StatusCode, qt.Equals, http.StatusBadRequest)
 	c.Assert(resp.Body.Close(), qt.IsNil)
 	// try to login again
 	req, err = http.NewRequest(http.MethodPost, testURL(authLoginEndpoint), bytes.NewBuffer(jsonLogin))

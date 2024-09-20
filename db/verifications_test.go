@@ -47,7 +47,8 @@ func TestSetVerificationCode(t *testing.T) {
 	c := qt.New(t)
 
 	nonExistingUserID := uint64(100)
-	c.Assert(db.SetVerificationCode(&User{ID: nonExistingUserID}, "testCode", CodeTypeAccountVerification, time.Now()), qt.Equals, ErrNotFound)
+	err := db.SetVerificationCode(&User{ID: nonExistingUserID}, "testCode", CodeTypeAccountVerification, time.Now())
+	c.Assert(err, qt.Equals, ErrNotFound)
 
 	userID, err := db.SetUser(&User{
 		Email:     testUserEmail,
