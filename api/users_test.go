@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	qt "github.com/frankban/quicktest"
 )
@@ -152,7 +153,8 @@ func TestVerifyAccountHandler(t *testing.T) {
 			c.Logf("error resetting test database: %v", err)
 		}
 	}()
-	// register a user
+	// register a user with short expiration time
+	VerificationCodeExpiration = 5 * time.Second
 	jsonUser := mustMarshal(&UserInfo{
 		Email:     testEmail,
 		Password:  testPass,
@@ -176,12 +178,37 @@ func TestVerifyAccountHandler(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(resp.StatusCode, qt.Equals, http.StatusUnauthorized)
 	c.Assert(resp.Body.Close(), qt.IsNil)
+	// try to verify the user (should fail)
 	// get the verification code from the email
 	mailBody, err := testMailService.FindEmail(context.Background(), testEmail)
 	c.Assert(err, qt.IsNil)
 	mailCode := strings.TrimPrefix(mailBody, VerificationCodeTextBody)
 	// verify the user
 	verification := mustMarshal(&UserVerification{
+		Email: testEmail,
+		Code:  mailCode,
+	})
+	req, err = http.NewRequest(http.MethodPost, testURL(verifyUserEndpoint), bytes.NewBuffer(verification))
+	c.Assert(err, qt.IsNil)
+	// wait to expire the verification code
+	time.Sleep(VerificationCodeExpiration)
+	resp, err = http.DefaultClient.Do(req)
+	c.Assert(err, qt.IsNil)
+	c.Assert(resp.StatusCode, qt.Equals, http.StatusUnauthorized)
+	c.Assert(resp.Body.Close(), qt.IsNil)
+	// resend the verification code and verify the user
+	req, err = http.NewRequest(http.MethodPost, testURL(verifyUserCodeEndpoint), bytes.NewBuffer(verification))
+	c.Assert(err, qt.IsNil)
+	resp, err = http.DefaultClient.Do(req)
+	c.Assert(err, qt.IsNil)
+	c.Assert(resp.StatusCode, qt.Equals, http.StatusOK)
+	c.Assert(resp.Body.Close(), qt.IsNil)
+	// get the verification code from the email
+	mailBody, err = testMailService.FindEmail(context.Background(), testEmail)
+	c.Assert(err, qt.IsNil)
+	mailCode = strings.TrimPrefix(mailBody, VerificationCodeTextBody)
+	// verify the user
+	verification = mustMarshal(&UserVerification{
 		Email: testEmail,
 		Code:  mailCode,
 	})
