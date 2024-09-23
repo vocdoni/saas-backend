@@ -10,6 +10,7 @@ import (
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/db"
 	"go.vocdoni.io/dvote/log"
+	"go.vocdoni.io/dvote/vochain/state/electionprice"
 	"go.vocdoni.io/proto/build/go/models"
 	"google.golang.org/protobuf/proto"
 )
@@ -113,7 +114,16 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 			case models.TxType_NEW_PROCESS:
 				// generate a new faucet package if it's not present and include it in the tx
 				if txNewProcess.FaucetPackage == nil {
-					faucetPkg, err := a.account.FaucetPackage(organizationSigner.AddressString(), bootStrapFaucetAmount)
+					// calculate the election price to fund the faucet package
+					// with the required amount for the election
+					amount := a.account.ElectionPriceCalc.Price(&electionprice.ElectionParameters{
+						MaxCensusSize:           txNewProcess.Process.MaxCensusSize,
+						ElectionDurationSeconds: txNewProcess.Process.Duration,
+						EncryptedVotes:          txNewProcess.Process.EnvelopeType.EncryptedVotes,
+						AnonymousVotes:          txNewProcess.Process.EnvelopeType.Anonymous,
+						MaxVoteOverwrite:        txNewProcess.Process.VoteOptions.MaxVoteOverwrites,
+					})
+					faucetPkg, err := a.account.FaucetPackage(organizationSigner.AddressString(), amount)
 					if err != nil {
 						ErrCouldNotCreateFaucetPackage.WithErr(err).Write(w)
 						return
@@ -168,7 +178,24 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			// include the faucet package in the tx if it's not present
 			if txSetProcess.FaucetPackage == nil {
-				faucetPkg, err := a.account.FaucetPackage(organizationSigner.AddressString(), bootStrapFaucetAmount)
+				// get the current process to fill the missing fields in the tx
+				// to calculate the election price
+				currentProcess, err := a.client.Election(txSetProcess.ProcessId)
+				if err != nil {
+					ErrVochainRequestFailed.WithErr(err).Write(w)
+					return
+				}
+				// calculate the election price to fund the faucet package with
+				// the required amount for the election
+				amount := a.account.ElectionPriceCalc.Price(&electionprice.ElectionParameters{
+					MaxCensusSize:           txSetProcess.GetCensusSize(),
+					ElectionDurationSeconds: txSetProcess.GetDuration(),
+					EncryptedVotes:          currentProcess.VoteMode.EncryptedVotes,
+					AnonymousVotes:          currentProcess.VoteMode.Anonymous,
+					MaxVoteOverwrite:        currentProcess.TallyMode.MaxVoteOverwrites,
+				})
+				// generate the faucet package with the calculated amount
+				faucetPkg, err := a.account.FaucetPackage(organizationSigner.AddressString(), amount)
 				if err != nil {
 					ErrCouldNotCreateFaucetPackage.WithErr(err).Write(w)
 					return
