@@ -45,7 +45,9 @@ func electionPriceFactors(vochainURI string) (uint64, uint64, electionprice.Fact
 	if err != nil {
 		return 0, 0, electionprice.Factors{}, fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	// parse the response
 	if resp.StatusCode != http.StatusOK {
 		return 0, 0, electionprice.Factors{}, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
