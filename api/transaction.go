@@ -15,8 +15,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const bootStrapFaucetAmount = 100
-
 func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := userFromContext(r.Context())
