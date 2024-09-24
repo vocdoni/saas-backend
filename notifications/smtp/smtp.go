@@ -44,10 +44,35 @@ func (se *SMTPEmail) Init(rawConfig any) error {
 }
 
 func (se *SMTPEmail) SendNotification(ctx context.Context, notification *notifications.Notification) error {
+	// compose email body
+	body, err := se.composeBody(notification)
+	if err != nil {
+		return fmt.Errorf("could not compose email body: %v", err)
+	}
+	// send the email
+	server := fmt.Sprintf("%s:%d", se.config.SMTPServer, se.config.SMTPPort)
+	// create a channel to handle errors
+	errCh := make(chan error, 1)
+	go func() {
+		// send the message
+		err := smtp.SendMail(server, se.auth, se.config.FromAddress, []string{notification.ToAddress}, body)
+		errCh <- err
+		close(errCh)
+	}()
+	// wait for the message to be sent or the context to be done
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-errCh:
+		return err
+	}
+}
+
+func (se *SMTPEmail) composeBody(notification *notifications.Notification) ([]byte, error) {
 	// parse 'to' email
 	to, err := mail.ParseAddress(notification.ToAddress)
 	if err != nil {
-		return fmt.Errorf("could not parse to email: %v", err)
+		return nil, fmt.Errorf("could not parse to email: %v", err)
 	}
 	// create email headers
 	var headers bytes.Buffer
@@ -61,7 +86,9 @@ func (se *SMTPEmail) SendNotification(ctx context.Context, notification *notific
 	// create multipart writer
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	writer.SetBoundary(boundary)
+	if err := writer.SetBoundary(boundary); err != nil {
+		return nil, fmt.Errorf("could not set boundary: %v", err)
+	}
 	// TODO: plain text part
 	// textPart, _ := writer.CreatePart(textproto.MIMEHeader{
 	// 	"Content-Type":              {"text/plain; charset=\"UTF-8\""},
@@ -73,13 +100,15 @@ func (se *SMTPEmail) SendNotification(ctx context.Context, notification *notific
 		"Content-Type":              {"text/html; charset=\"UTF-8\""},
 		"Content-Transfer-Encoding": {"7bit"},
 	})
-	htmlPart.Write([]byte(notification.Body))
-	writer.Close()
-	// combine headers and body
+	if _, err := htmlPart.Write([]byte(notification.Body)); err != nil {
+		return nil, fmt.Errorf("could not write HTML part: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("could not close writer: %v", err)
+	}
+	// combine headers and body and return the content
 	var email bytes.Buffer
 	email.Write(headers.Bytes())
 	email.Write(body.Bytes())
-	// send the email
-	server := fmt.Sprintf("%s:%d", se.config.SMTPServer, se.config.SMTPPort)
-	return smtp.SendMail(server, se.auth, se.config.FromAddress, []string{notification.ToAddress}, email.Bytes())
+	return email.Bytes(), nil
 }
