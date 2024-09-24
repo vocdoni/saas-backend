@@ -7,12 +7,20 @@ import (
 	"net/http"
 	"time"
 
+	"go.vocdoni.io/dvote/api"
+	"go.vocdoni.io/dvote/vochain/genesis"
 	"go.vocdoni.io/dvote/vochain/state/electionprice"
+	"go.vocdoni.io/proto/build/go/models"
 )
 
-// electionPriceEndpoint is the endpoint to get the election price factors from
-// the Vochain.
-const electionPriceEndpoint = "/chain/info/electionPriceFactors"
+const (
+	// electionPriceEndpoint is the endpoint to get the election price factors
+	// from the Vochain.
+	electionPriceEndpoint = "/chain/info/electionPriceFactors"
+	// txCostsEndpoint is the endpoint to get the transaction costs from the
+	// Vochain.
+	txCostsEndpoint = "/chain/transactions/cost"
+)
 
 // InitElectionPriceCalculator initializes the election price calculator with
 // the factors from the Vochain. It returns the election price calculator or an
@@ -57,4 +65,38 @@ func electionPriceFactors(vochainURI string) (uint64, uint64, electionprice.Fact
 		return 0, 0, electionprice.Factors{}, fmt.Errorf("failed to decode response: %w", err)
 	}
 	return data.BasePrice, data.Capacity, data.Factors, nil
+}
+
+// vochainTxCosts returns the transaction costs from the Vochain. It returns the
+// transaction costs or an error if it fails to get them.
+func vochainTxCosts(vochainURI string) (map[models.TxType]uint64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
+	// create the request to get the transactions costs
+	url := vochainURI + txCostsEndpoint
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	// send the request
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	// parse the response
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+	var strTxCosts api.Transaction
+	if err := json.NewDecoder(resp.Body).Decode(&strTxCosts); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	txCosts := make(map[models.TxType]uint64)
+	for strType, cost := range strTxCosts.Costs {
+		txCosts[genesis.TxCostNameToTxType(strType)] = cost
+	}
+	return txCosts, nil
 }

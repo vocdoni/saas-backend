@@ -89,11 +89,19 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 			case models.TxType_CREATE_ACCOUNT:
 				// generate a new faucet package if it's not present and include it in the tx
 				if txSetAccount.FaucetPackage == nil {
-					faucetPkg, err := a.account.FaucetPackage(organizationSigner.AddressString(), bootStrapFaucetAmount)
+					// get the tx cost for the tx type
+					amount, ok := a.account.TxCosts[models.TxType_CREATE_ACCOUNT]
+					if !ok {
+						ErrInvalidTxFormat.With("invalid tx type").Write(w)
+						return
+					}
+					// generate the faucet package with the calculated amount
+					faucetPkg, err := a.account.FaucetPackage(organizationSigner.AddressString(), amount)
 					if err != nil {
 						ErrCouldNotCreateFaucetPackage.WithErr(err).Write(w)
 						return
 					}
+					// include the faucet package in the tx
 					txSetAccount.FaucetPackage = faucetPkg
 					tx = &models.Tx{
 						Payload: &models.Tx_SetAccount{
@@ -114,20 +122,29 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 			case models.TxType_NEW_PROCESS:
 				// generate a new faucet package if it's not present and include it in the tx
 				if txNewProcess.FaucetPackage == nil {
-					// calculate the election price to fund the faucet package
-					// with the required amount for the election
-					amount := a.account.ElectionPriceCalc.Price(&electionprice.ElectionParameters{
+					// get the tx cost for the tx type
+					amount, ok := a.account.TxCosts[models.TxType_NEW_PROCESS]
+					if !ok {
+						ErrInvalidTxFormat.With("invalid tx type").Write(w)
+						return
+					}
+					// increment the amount with the election price to fund the
+					// faucet package with the required amount for this type of
+					// election
+					amount += a.account.ElectionPriceCalc.Price(&electionprice.ElectionParameters{
 						MaxCensusSize:           txNewProcess.Process.MaxCensusSize,
 						ElectionDurationSeconds: txNewProcess.Process.Duration,
 						EncryptedVotes:          txNewProcess.Process.EnvelopeType.EncryptedVotes,
 						AnonymousVotes:          txNewProcess.Process.EnvelopeType.Anonymous,
 						MaxVoteOverwrite:        txNewProcess.Process.VoteOptions.MaxVoteOverwrites,
 					})
+					// generate the faucet package with the calculated amount
 					faucetPkg, err := a.account.FaucetPackage(organizationSigner.AddressString(), amount)
 					if err != nil {
 						ErrCouldNotCreateFaucetPackage.WithErr(err).Write(w)
 						return
 					}
+					// include the faucet package in the tx
 					txNewProcess.FaucetPackage = faucetPkg
 					tx = &models.Tx{
 						Payload: &models.Tx_NewProcess{
@@ -141,6 +158,12 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 			// check the tx fields
 			if txSetProcess == nil || txSetProcess.ProcessId == nil {
 				ErrInvalidTxFormat.With("missing fields").Write(w)
+				return
+			}
+			// get the tx cost for the tx type
+			amount, ok := a.account.TxCosts[txSetProcess.Txtype]
+			if !ok {
+				ErrInvalidTxFormat.With("invalid tx type").Write(w)
 				return
 			}
 			// check the tx subtype
@@ -157,6 +180,23 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 					ErrInvalidTxFormat.With("missing census fields").Write(w)
 					return
 				}
+				// get the current process to fill the missing fields in the tx to
+				// calculate the election price
+				currentProcess, err := a.client.Election(txSetProcess.ProcessId)
+				if err != nil {
+					ErrVochainRequestFailed.WithErr(err).Write(w)
+					return
+				}
+				// increment the amount with the election price to fund the
+				// faucet package with the required amount for this type of
+				// election update
+				amount += a.account.ElectionPriceCalc.Price(&electionprice.ElectionParameters{
+					MaxCensusSize:           txSetProcess.GetCensusSize(),
+					ElectionDurationSeconds: uint32(currentProcess.EndDate.Sub(currentProcess.StartDate).Seconds()),
+					EncryptedVotes:          currentProcess.VoteMode.EncryptedVotes,
+					AnonymousVotes:          currentProcess.VoteMode.Anonymous,
+					MaxVoteOverwrite:        currentProcess.TallyMode.MaxVoteOverwrites,
+				})
 			case models.TxType_SET_PROCESS_QUESTION_INDEX:
 				// check if the process question index is in the tx
 				if txSetProcess.QuestionIndex == nil {
@@ -175,31 +215,33 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 					ErrInvalidTxFormat.With("missing duration field").Write(w)
 					return
 				}
-			}
-			// include the faucet package in the tx if it's not present
-			if txSetProcess.FaucetPackage == nil {
-				// get the current process to fill the missing fields in the tx
-				// to calculate the election price
+				// get the current process to fill the missing fields in the tx to
+				// calculate the election price
 				currentProcess, err := a.client.Election(txSetProcess.ProcessId)
 				if err != nil {
 					ErrVochainRequestFailed.WithErr(err).Write(w)
 					return
 				}
-				// calculate the election price to fund the faucet package with
-				// the required amount for the election
-				amount := a.account.ElectionPriceCalc.Price(&electionprice.ElectionParameters{
-					MaxCensusSize:           txSetProcess.GetCensusSize(),
+				// increment the amount with the election price to fund the
+				// faucet package with the required amount for this type of
+				// election update
+				amount += a.account.ElectionPriceCalc.Price(&electionprice.ElectionParameters{
+					MaxCensusSize:           currentProcess.Census.MaxCensusSize,
 					ElectionDurationSeconds: txSetProcess.GetDuration(),
 					EncryptedVotes:          currentProcess.VoteMode.EncryptedVotes,
 					AnonymousVotes:          currentProcess.VoteMode.Anonymous,
 					MaxVoteOverwrite:        currentProcess.TallyMode.MaxVoteOverwrites,
 				})
+			}
+			// include the faucet package in the tx if it's not present
+			if txSetProcess.FaucetPackage == nil {
 				// generate the faucet package with the calculated amount
 				faucetPkg, err := a.account.FaucetPackage(organizationSigner.AddressString(), amount)
 				if err != nil {
 					ErrCouldNotCreateFaucetPackage.WithErr(err).Write(w)
 					return
 				}
+				// include the faucet package in the tx
 				txSetProcess.FaucetPackage = faucetPkg
 				tx = &models.Tx{
 					Payload: &models.Tx_SetProcess{
@@ -216,11 +258,19 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			// include the faucet package in the tx if it's not present
 			if txSetSIK.FaucetPackage == nil {
-				faucetPkg, err := a.account.FaucetPackage(organizationSigner.AddressString(), bootStrapFaucetAmount)
+				// get the tx cost for the tx type
+				amount, ok := a.account.TxCosts[models.TxType_SET_ACCOUNT_SIK]
+				if !ok {
+					ErrInvalidTxFormat.With("invalid tx type").Write(w)
+					return
+				}
+				// generate the faucet package with the calculated amount
+				faucetPkg, err := a.account.FaucetPackage(organizationSigner.AddressString(), amount)
 				if err != nil {
 					ErrCouldNotCreateFaucetPackage.WithErr(err).Write(w)
 					return
 				}
+				// include the faucet package in the tx
 				txSetSIK.FaucetPackage = faucetPkg
 				tx = &models.Tx{
 					Payload: &models.Tx_SetSIK{
@@ -232,11 +282,19 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 			txCollectFaucet := tx.GetCollectFaucet()
 			// include the faucet package in the tx if it's not present
 			if txCollectFaucet.FaucetPackage == nil {
-				faucetPkg, err := a.account.FaucetPackage(organizationSigner.AddressString(), bootStrapFaucetAmount)
+				// get the tx cost for the tx type
+				amount, ok := a.account.TxCosts[models.TxType_COLLECT_FAUCET]
+				if !ok {
+					ErrInvalidTxFormat.With("invalid tx type").Write(w)
+					return
+				}
+				// generate the faucet package with the calculated amount
+				faucetPkg, err := a.account.FaucetPackage(organizationSigner.AddressString(), amount)
 				if err != nil {
 					ErrCouldNotCreateFaucetPackage.WithErr(err).Write(w)
 					return
 				}
+				// include the faucet package in the tx
 				txCollectFaucet.FaucetPackage = faucetPkg
 				tx = &models.Tx{
 					Payload: &models.Tx_CollectFaucet{
