@@ -208,14 +208,23 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 // verification code is not found, an error is returned. If any other error
 // occurs, a generic error is returned.
 func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Request) {
-	// get the user email from the request query
+	// get the user email or the phone number of the user from the request query
 	userEmail := r.URL.Query().Get("email")
-	if userEmail == "" {
-		ErrInvalidUserData.With("no email provided").Write(w)
+	userPhone := r.URL.Query().Get("phone")
+	// check the email or the phone number is not empty
+	if userEmail == "" && userPhone == "" {
+		ErrInvalidUserData.With("no email or phone number provided").Write(w)
 		return
 	}
-	// get the user information from the database by email
-	user, err := a.db.UserByEmail(userEmail)
+	var err error
+	var user *db.User
+	// get the user information from the database by email or phone
+	if userEmail != "" {
+		user, err = a.db.UserByEmail(userEmail)
+	} else {
+		user, err = a.db.UserByPhone(userPhone)
+	}
+	// check the error getting the user information
 	if err != nil {
 		if err == db.ErrNotFound {
 			ErrUserNotFound.Write(w)
@@ -259,12 +268,20 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 		ErrMalformedBody.Write(w)
 		return
 	}
-	if verification.Email == "" {
-		ErrInvalidUserData.With("no email provided").Write(w)
+	// check the email or the phone number is not empty
+	if verification.Email == "" && verification.Phone == "" {
+		ErrInvalidUserData.With("no email or phone number provided").Write(w)
 		return
 	}
-	// get the user information from the database by email
-	user, err := a.db.UserByEmail(verification.Email)
+	var err error
+	var user *db.User
+	// get the user information from the database by email or phone
+	if verification.Email != "" {
+		user, err = a.db.UserByEmail(verification.Email)
+	} else {
+		user, err = a.db.UserByPhone(verification.Phone)
+	}
+	// check the error getting the user information
 	if err != nil {
 		if err == db.ErrNotFound {
 			ErrUnauthorized.Write(w)

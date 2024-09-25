@@ -113,6 +113,14 @@ func (ms *MongoStorage) createIndexes() error {
 	if _, err := ms.users.Indexes().CreateOne(ctx, userEmailIndex); err != nil {
 		return fmt.Errorf("failed to create index on addresses for users: %w", err)
 	}
+	// create an index for the 'phone' field on users
+	userPhoneIndex := mongo.IndexModel{
+		Keys:    bson.D{{Key: "phone", Value: 1}}, // 1 for ascending order
+		Options: options.Index().SetUnique(true),
+	}
+	if _, err := ms.users.Indexes().CreateOne(ctx, userPhoneIndex); err != nil {
+		return fmt.Errorf("failed to create index on phone for users: %w", err)
+	}
 	// create an index for the 'name' field on organizations (must be unique)
 	organizationNameIndex := mongo.IndexModel{
 		Keys:    bson.D{{Key: "name", Value: 1}}, // 1 for ascending order
@@ -121,20 +129,16 @@ func (ms *MongoStorage) createIndexes() error {
 	if _, err := ms.organizations.Indexes().CreateOne(ctx, organizationNameIndex); err != nil {
 		return fmt.Errorf("failed to create index on name for organizations: %w", err)
 	}
-	// create an index for the 'code' field on user verifications (must be unique)
+	// create an index for the ('code', 'type') tuple on user verifications (must be unique)
 	verificationCodeIndex := mongo.IndexModel{
-		Keys:    bson.D{{Key: "code", Value: 1}}, // 1 for ascending order
+		Keys: bson.D{
+			{Key: "code", Value: 1}, // 1 for ascending order
+			{Key: "type", Value: 1}, // 1 for ascending order
+		},
 		Options: options.Index().SetUnique(true),
 	}
 	if _, err := ms.verifications.Indexes().CreateOne(ctx, verificationCodeIndex); err != nil {
 		return fmt.Errorf("failed to create index on code for verifications: %w", err)
-	}
-	// create an index for the 'type' field on user verifications
-	verificationTypeIndex := mongo.IndexModel{
-		Keys: bson.D{{Key: "type", Value: 1}}, // 1 for ascending order
-	}
-	if _, err := ms.verifications.Indexes().CreateOne(ctx, verificationTypeIndex); err != nil {
-		return fmt.Errorf("failed to create index on type for verifications: %w", err)
 	}
 	return nil
 }
