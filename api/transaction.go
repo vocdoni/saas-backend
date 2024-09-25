@@ -91,7 +91,6 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 					amount, ok := a.account.TxCosts[models.TxType_CREATE_ACCOUNT]
 					if !ok {
 						panic("invalid tx type")
-						return
 					}
 					// generate the faucet package with the calculated amount
 					faucetPkg, err := a.account.FaucetPackage(organizationSigner.AddressString(), amount)
@@ -124,7 +123,6 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 					amount, ok := a.account.TxCosts[models.TxType_NEW_PROCESS]
 					if !ok {
 						panic("invalid tx type")
-						return
 					}
 					// increment the amount with the election price to fund the
 					// faucet package with the required amount for this type of
