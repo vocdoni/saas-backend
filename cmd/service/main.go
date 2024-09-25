@@ -106,7 +106,7 @@ func main() {
 			log.Fatal("emailFromAddress and emailFromName are required")
 		}
 		apiConf.MailService = new(smtp.SMTPEmail)
-		if err := apiConf.MailService.Init(&smtp.SMTPConfig{
+		if err := apiConf.MailService.New(&smtp.SMTPConfig{
 			FromName:     emailFromName,
 			FromAddress:  emailFromAddress,
 			SMTPServer:   smtpServer,
@@ -122,7 +122,7 @@ func main() {
 	// include it in the API configuration
 	if twilioAccountSid != "" && twilioAuthToken != "" && twilioFromNumber != "" {
 		apiConf.SMSService = new(twilio.TwilioSMS)
-		if err := apiConf.SMSService.Init(&twilio.TwilioConfig{
+		if err := apiConf.SMSService.New(&twilio.TwilioConfig{
 			AccountSid: twilioAccountSid,
 			AuthToken:  twilioAuthToken,
 			FromNumber: twilioFromNumber,

@@ -12,21 +12,33 @@ import (
 	"github.com/vocdoni/saas-backend/notifications"
 )
 
+// SMTPConfig represents the configuration for the SMTP email service. It
+// contains the sender's name, address, SMTP username, password, server and
+// port. The TestAPIPort is used to define the port of the API service used
+// for testing the email service locally to check messages (for example using
+// MailHog).
 type SMTPConfig struct {
 	FromName     string
 	FromAddress  string
-	SMTPServer   string
-	SMTPPort     int
 	SMTPUsername string
 	SMTPPassword string
+	SMTPServer   string
+	SMTPPort     int
+	TestAPIPort  int
 }
 
+// SMTPEmail is the implementation of the NotificationService interface for the
+// SMTP email service. It contains the configuration and the SMTP auth. It uses
+// the net/smtp package to send emails.
 type SMTPEmail struct {
 	config *SMTPConfig
 	auth   smtp.Auth
 }
 
-func (se *SMTPEmail) Init(rawConfig any) error {
+// New initializes the SMTP email service with the configuration. It sets the
+// SMTP auth if the username and password are provided. It returns an error if
+// the configuration is invalid or if the from email could not be parsed.
+func (se *SMTPEmail) New(rawConfig any) error {
 	// parse configuration
 	config, ok := rawConfig.(*SMTPConfig)
 	if !ok {
@@ -39,10 +51,14 @@ func (se *SMTPEmail) Init(rawConfig any) error {
 	// set configuration in struct
 	se.config = config
 	// init SMTP auth
-	se.auth = smtp.PlainAuth("", se.config.SMTPUsername, se.config.SMTPPassword, se.config.SMTPServer)
+	if se.config.SMTPUsername == "" || se.config.SMTPPassword == "" {
+		se.auth = smtp.PlainAuth("", se.config.SMTPUsername, se.config.SMTPPassword, se.config.SMTPServer)
+	}
 	return nil
 }
 
+// SendNotification sends an email notification to the recipient. It composes
+// the email body with the notification data and sends it using the SMTP server.
 func (se *SMTPEmail) SendNotification(ctx context.Context, notification *notifications.Notification) error {
 	// compose email body
 	body, err := se.composeBody(notification)
@@ -68,6 +84,9 @@ func (se *SMTPEmail) SendNotification(ctx context.Context, notification *notific
 	}
 }
 
+// composeBody creates the email body with the notification data. It creates a
+// multipart email with a plain text and an HTML part. It returns the email
+// content as a byte slice or an error if the body could not be composed.
 func (se *SMTPEmail) composeBody(notification *notifications.Notification) ([]byte, error) {
 	// parse 'to' email
 	to, err := mail.ParseAddress(notification.ToAddress)
