@@ -90,7 +90,7 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 					// get the tx cost for the tx type
 					amount, ok := a.account.TxCosts[models.TxType_CREATE_ACCOUNT]
 					if !ok {
-						ErrInvalidTxFormat.With("invalid tx type").Write(w)
+						panic("invalid tx type")
 						return
 					}
 					// generate the faucet package with the calculated amount
@@ -123,7 +123,7 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 					// get the tx cost for the tx type
 					amount, ok := a.account.TxCosts[models.TxType_NEW_PROCESS]
 					if !ok {
-						ErrInvalidTxFormat.With("invalid tx type").Write(w)
+						panic("invalid tx type")
 						return
 					}
 					// increment the amount with the election price to fund the
@@ -195,12 +195,6 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 					AnonymousVotes:          currentProcess.VoteMode.Anonymous,
 					MaxVoteOverwrite:        currentProcess.TallyMode.MaxVoteOverwrites,
 				})
-			case models.TxType_SET_PROCESS_QUESTION_INDEX:
-				// check if the process question index is in the tx
-				if txSetProcess.QuestionIndex == nil {
-					ErrInvalidTxFormat.With("missing question index field").Write(w)
-					return
-				}
 			case models.TxType_SET_PROCESS_RESULTS:
 				// check if the process results are in the tx
 				if txSetProcess.Results == nil {
