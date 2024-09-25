@@ -11,7 +11,7 @@ import (
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api"
 	"github.com/vocdoni/saas-backend/db"
-	"github.com/vocdoni/saas-backend/notifications/sendgrid"
+	"github.com/vocdoni/saas-backend/notifications/smtp"
 	"github.com/vocdoni/saas-backend/notifications/twilio"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
@@ -28,12 +28,15 @@ func main() {
 	flag.StringP("vocdoniApi", "v", "https://api-dev.vocdoni.net/v2", "vocdoni node remote API URL")
 	flag.StringP("privateKey", "k", "", "private key for the Vocdoni account")
 	flag.BoolP("fullTransparentMode", "a", false, "allow all transactions and do not modify any of them")
-	flag.String("sendgridAPIKey", "", "SendGrid API key")
-	flag.String("sendgridFromAddress", "", "SendGrid from address")
-	flag.String("sendgridFromName", "Vocdoni", "SendGrid from name")
+	flag.String("smtpServer", "", "SMTP server")
+	flag.Int("smtpPort", 587, "SMTP port")
+	flag.String("smtpUsername", "", "SMTP username")
+	flag.String("smtpPassword", "", "SMTP password")
+	flag.String("emailFromAddress", "", "Email service from address")
+	flag.String("emailFromName", "Vocdoni", "Email service from name")
 	flag.String("twilioAccountSid", "", "Twilio account SID")
 	flag.String("twilioAuthToken", "", "Twilio auth token")
-	flag.String("twilioFromNumber", "", "Twilio from number")
+	flag.String("smsFromNumber", "", "SMS from number")
 	// parse flags
 	flag.Parse()
 	// initialize Viper
@@ -52,10 +55,13 @@ func main() {
 	}
 	mongoURL := viper.GetString("mongoURL")
 	mongoDB := viper.GetString("mongoDB")
-	// mail vars
-	sendgridAPIKey := viper.GetString("sendgridAPIKey")
-	sendgridFromAddress := viper.GetString("sendgridFromAddress")
-	sendgridFromName := viper.GetString("sendgridFromName")
+	// email vars
+	smtpServer := viper.GetString("smtpServer")
+	smtpPort := viper.GetInt("smtpPort")
+	smtpUsername := viper.GetString("smtpUsername")
+	smtpPassword := viper.GetString("smtpPassword")
+	emailFromAddress := viper.GetString("emailFromAddress")
+	emailFromName := viper.GetString("emailFromName")
 	// sms vars
 	twilioAccountSid := viper.GetString("twilioAccountSid")
 	twilioAuthToken := viper.GetString("twilioAuthToken")
@@ -93,24 +99,30 @@ func main() {
 		Account:             acc,
 		FullTransparentMode: fullTransparentMode,
 	}
-	// create email notifications service if the required parameters are set and
-	// include it in the API configuration
-	if sendgridAPIKey != "" && sendgridFromAddress != "" && sendgridFromName != "" {
-		apiConf.MailService = new(sendgrid.SendGridEmail)
-		if err := apiConf.MailService.Init(&sendgrid.SendGridConfig{
-			FromName:    sendgridFromName,
-			FromAddress: sendgridFromAddress,
-			APIKey:      sendgridAPIKey,
+	// overwrite the email notifications service with the SMTP service if the
+	// required parameters are set and include it in the API configuration
+	if smtpServer != "" && smtpUsername != "" && smtpPassword != "" {
+		if emailFromAddress == "" || emailFromName == "" {
+			log.Fatal("emailFromAddress and emailFromName are required")
+		}
+		apiConf.MailService = new(smtp.SMTPEmail)
+		if err := apiConf.MailService.New(&smtp.SMTPConfig{
+			FromName:     emailFromName,
+			FromAddress:  emailFromAddress,
+			SMTPServer:   smtpServer,
+			SMTPPort:     smtpPort,
+			SMTPUsername: smtpUsername,
+			SMTPPassword: smtpPassword,
 		}); err != nil {
 			log.Fatalf("could not create the email service: %v", err)
 		}
-		log.Infow("email service created", "from", fmt.Sprintf("%s <%s>", sendgridFromName, sendgridFromAddress))
+		log.Infow("email service created", "from", fmt.Sprintf("%s <%s>", emailFromName, emailFromAddress))
 	}
 	// create SMS notifications service if the required parameters are set and
 	// include it in the API configuration
 	if twilioAccountSid != "" && twilioAuthToken != "" && twilioFromNumber != "" {
 		apiConf.SMSService = new(twilio.TwilioSMS)
-		if err := apiConf.SMSService.Init(&twilio.TwilioConfig{
+		if err := apiConf.SMSService.New(&twilio.TwilioConfig{
 			AccountSid: twilioAccountSid,
 			AuthToken:  twilioAuthToken,
 			FromNumber: twilioFromNumber,
