@@ -210,11 +210,11 @@ func TestVerifyAccountHandler(t *testing.T) {
 	// get the verification code from the email
 	mailBody, err = testMailService.FindEmail(context.Background(), testEmail)
 	c.Assert(err, qt.IsNil)
-	mailCode = strings.TrimPrefix(mailBody, VerificationCodeTextBody)
+	mailCode = mailCodeRgx.FindStringSubmatch(mailBody)
 	// verify the user
 	verification = mustMarshal(&UserVerification{
 		Email: testEmail,
-		Code:  mailCode,
+		Code:  mailCode[1],
 	})
 	req, err = http.NewRequest(http.MethodPost, testURL(verifyUserEndpoint), bytes.NewBuffer(verification))
 	c.Assert(err, qt.IsNil)
