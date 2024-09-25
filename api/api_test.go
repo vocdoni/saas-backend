@@ -11,7 +11,7 @@ import (
 
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/db"
-	"github.com/vocdoni/saas-backend/notifications/testmail"
+	"github.com/vocdoni/saas-backend/notifications/smtp"
 	"github.com/vocdoni/saas-backend/test"
 	"go.vocdoni.io/dvote/apiclient"
 )
@@ -44,7 +44,7 @@ var testDB *db.MongoStorage
 
 // testMailService is the test mail service for the tests. Make it global so it
 // can be accessed by the tests directly.
-var testMailService *testmail.TestMail
+var testMailService *smtp.SMTPEmail
 
 // testURL helper function returns the full URL for the given path using the
 // test host and port.
@@ -161,14 +161,14 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	// create test mail service
-	testMailService = new(testmail.TestMail)
-	if err := testMailService.Init(&testmail.TestMailConfig{
+	testMailService = new(smtp.SMTPEmail)
+	if err := testMailService.New(&smtp.SMTPConfig{
 		FromAddress:  adminEmail,
-		SMTPUser:     adminUser,
+		SMTPUsername: adminUser,
 		SMTPPassword: adminPass,
-		Host:         mailHost,
+		SMTPServer:   mailHost,
 		SMTPPort:     smtpPort.Int(),
-		APIPort:      apiPort.Int(),
+		TestAPIPort:  apiPort.Int(),
 	}); err != nil {
 		panic(err)
 	}
