@@ -1,14 +1,18 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
+	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/notifications/smtp"
@@ -17,8 +21,10 @@ import (
 )
 
 type apiTestCase struct {
+	name           string
 	uri            string
 	method         string
+	headers        map[string]string
 	body           []byte
 	expectedStatus int
 	expectedBody   []byte
@@ -60,6 +66,30 @@ func mustMarshal(i any) []byte {
 		panic(err)
 	}
 	return b
+}
+
+// runAPITestCase helper function runs the given API test case and checks the
+// response status code and body against the expected values.
+func runAPITestCase(c *qt.C, tc apiTestCase) {
+	c.Logf("running api test case: %s", tc.name)
+	req, err := http.NewRequest(tc.method, tc.uri, bytes.NewBuffer(tc.body))
+	c.Assert(err, qt.IsNil)
+	for k, v := range tc.headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	c.Assert(err, qt.IsNil)
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.Errorf("error closing response body: %v", err)
+		}
+	}()
+	c.Assert(resp.StatusCode, qt.Equals, tc.expectedStatus)
+	if tc.expectedBody != nil {
+		body, err := io.ReadAll(resp.Body)
+		c.Assert(err, qt.IsNil)
+		c.Assert(strings.TrimSpace(string(body)), qt.Equals, string(tc.expectedBody))
+	}
 }
 
 // pingAPI helper function pings the API endpoint and retries the request

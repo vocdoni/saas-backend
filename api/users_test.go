@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"regexp"
-	"strings"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
@@ -24,6 +22,7 @@ func TestRegisterHandler(t *testing.T) {
 	registerURL := testURL(usersEndpoint)
 	testCases := []apiTestCase{
 		{
+			name:           "invalidBody",
 			uri:            registerURL,
 			method:         http.MethodPost,
 			body:           []byte("invalid body"),
@@ -31,6 +30,7 @@ func TestRegisterHandler(t *testing.T) {
 			expectedBody:   mustMarshal(ErrMalformedBody),
 		},
 		{
+			name:   "validUser",
 			uri:    registerURL,
 			method: http.MethodPost,
 			body: mustMarshal(&UserInfo{
@@ -42,6 +42,7 @@ func TestRegisterHandler(t *testing.T) {
 			expectedStatus: http.StatusOK,
 		},
 		{
+			name:   "duplicateUser",
 			uri:    registerURL,
 			method: http.MethodPost,
 			body: mustMarshal(&UserInfo{
@@ -54,6 +55,7 @@ func TestRegisterHandler(t *testing.T) {
 			expectedBody:   mustMarshal(ErrGenericInternalServerError),
 		},
 		{
+			name:   "noLastName",
 			uri:    registerURL,
 			method: http.MethodPost,
 			body: mustMarshal(&UserInfo{
@@ -78,6 +80,7 @@ func TestRegisterHandler(t *testing.T) {
 			expectedBody:   mustMarshal(ErrMalformedBody.Withf("first name is empty")),
 		},
 		{
+			name:   "invalidEmail",
 			uri:    registerURL,
 			method: http.MethodPost,
 			body: mustMarshal(&UserInfo{
@@ -90,6 +93,7 @@ func TestRegisterHandler(t *testing.T) {
 			expectedBody:   mustMarshal(ErrEmailMalformed),
 		},
 		{
+			name:   "emptyEmail",
 			uri:    registerURL,
 			method: http.MethodPost,
 			body: mustMarshal(&UserInfo{
@@ -102,6 +106,7 @@ func TestRegisterHandler(t *testing.T) {
 			expectedBody:   mustMarshal(ErrEmailMalformed),
 		},
 		{
+			name:   "shortPassword",
 			uri:    registerURL,
 			method: http.MethodPost,
 			body: mustMarshal(&UserInfo{
@@ -114,6 +119,7 @@ func TestRegisterHandler(t *testing.T) {
 			expectedBody:   mustMarshal(ErrPasswordTooShort),
 		},
 		{
+			name:   "emptyPassword",
 			uri:    registerURL,
 			method: http.MethodPost,
 			body: mustMarshal(&UserInfo{
@@ -125,25 +131,9 @@ func TestRegisterHandler(t *testing.T) {
 			expectedStatus: http.StatusBadRequest,
 		},
 	}
-
+	// run the test cases
 	for _, testCase := range testCases {
-		req, err := http.NewRequest(testCase.method, testCase.uri, bytes.NewBuffer(testCase.body))
-		c.Assert(err, qt.IsNil)
-
-		resp, err := http.DefaultClient.Do(req)
-		c.Assert(err, qt.IsNil)
-		defer func() {
-			if err := resp.Body.Close(); err != nil {
-				c.Errorf("error closing response body: %v", err)
-			}
-		}()
-
-		c.Assert(resp.StatusCode, qt.Equals, testCase.expectedStatus)
-		if testCase.expectedBody != nil {
-			body, err := io.ReadAll(resp.Body)
-			c.Assert(err, qt.IsNil)
-			c.Assert(strings.TrimSpace(string(body)), qt.Equals, string(testCase.expectedBody))
-		}
+		runAPITestCase(c, testCase)
 	}
 }
 

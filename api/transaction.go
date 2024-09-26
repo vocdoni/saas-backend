@@ -106,6 +106,10 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 						},
 					}
 				}
+			default:
+				log.Warnw("transaction type not allowed", "user", user.Email, "type", fmt.Sprintf("%T", tx.Payload))
+				ErrTxTypeNotAllowed.Write(w)
+				return
 			}
 		case *models.Tx_NewProcess:
 			txNewProcess := tx.GetNewProcess()
@@ -148,6 +152,10 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 						},
 					}
 				}
+			default:
+				log.Warnw("transaction type not allowed", "user", user.Email, "type", fmt.Sprintf("%T", tx.Payload))
+				ErrTxTypeNotAllowed.Write(w)
+				return
 			}
 		case *models.Tx_SetProcess:
 			txSetProcess := tx.GetSetProcess()
@@ -222,6 +230,10 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 					AnonymousVotes:          currentProcess.VoteMode.Anonymous,
 					MaxVoteOverwrite:        currentProcess.TallyMode.MaxVoteOverwrites,
 				})
+			default:
+				log.Warnw("transaction type not allowed", "user", user.Email, "type", fmt.Sprintf("%T", tx.Payload))
+				ErrTxTypeNotAllowed.Write(w)
+				return
 			}
 			// include the faucet package in the tx if it's not present
 			if txSetProcess.FaucetPackage == nil {
