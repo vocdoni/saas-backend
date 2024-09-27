@@ -24,7 +24,7 @@ func (ms *MongoStorage) Organization(address string, parent bool) (*Organization
 	defer cancel()
 	// find the organization in the database
 	result := ms.organizations.FindOne(ctx, bson.M{"_id": address})
-	org := &Organization{}
+	org := &Organization{Subscription: OrganizationSubscription{}}
 	if err := result.Decode(org); err != nil {
 		// if the organization doesn't exist return a specific error
 		if err == mongo.ErrNoDocuments {
@@ -143,4 +143,26 @@ func (ms *MongoStorage) OrganizationsMembers(address string) ([]User, error) {
 		return nil, err
 	}
 	return users, nil
+}
+
+// addSubscriptionToOrganization internal method adds the subscription to the organiation with
+// the given email. If an error occurs, it returns the error. This method must
+// be called with the keysLock held.
+func (ms *MongoStorage) AddSubscriptionToOrganization(address string, orgSubscription *OrganizationSubscription) error {
+	if _, err := ms.Subscription(orgSubscription.SubscriptionID); err != nil {
+		return ErrInvalidData
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// prepare the document to be updated in the database
+	filter := bson.M{"_id": address}
+	updateDoc := bson.M{"$set": bson.M{"subscription": orgSubscription}}
+	// update the organization in the database
+	if _, err := ms.organizations.UpdateOne(ctx, filter, updateDoc); err != nil {
+		return err
+	}
+	return nil
 }

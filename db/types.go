@@ -41,24 +41,59 @@ type OrganizationMember struct {
 }
 
 type Organization struct {
-	Address         string           `json:"address" bson:"_id"`
-	Name            string           `json:"name" bson:"name"`
-	Website         string           `json:"website" bson:"website"`
-	Type            OrganizationType `json:"type" bson:"type"`
-	Creator         string           `json:"creator" bson:"creator"`
-	CreatedAt       time.Time        `json:"createdAt" bson:"createdAt"`
-	Nonce           string           `json:"nonce" bson:"nonce"`
-	Description     string           `json:"description" bson:"description"`
-	Size            string           `json:"size" bson:"size"`
-	Color           string           `json:"color" bson:"color"`
-	Logo            string           `json:"logo" bson:"logo"`
-	Header          string           `json:"header" bson:"header"`
-	Subdomain       string           `json:"subdomain" bson:"subdomain"`
-	Country         string           `json:"country" bson:"country"`
-	Timezone        string           `json:"timezone" bson:"timezone"`
-	Language        string           `json:"language" bson:"language"`
-	Active          bool             `json:"active" bson:"active"`
-	TokensPurchased uint64           `json:"tokensPurchased" bson:"tokensPurchased"`
-	TokensRemaining uint64           `json:"tokensRemaining" bson:"tokensRemaining"`
-	Parent          string           `json:"parent" bson:"parent"`
+	Address         string                   `json:"address" bson:"_id"`
+	Name            string                   `json:"name" bson:"name"`
+	Website         string                   `json:"website" bson:"website"`
+	Type            OrganizationType         `json:"type" bson:"type"`
+	Creator         string                   `json:"creator" bson:"creator"`
+	CreatedAt       time.Time                `json:"createdAt" bson:"createdAt"`
+	Nonce           string                   `json:"nonce" bson:"nonce"`
+	Description     string                   `json:"description" bson:"description"`
+	Size            string                   `json:"size" bson:"size"`
+	Color           string                   `json:"color" bson:"color"`
+	Logo            string                   `json:"logo" bson:"logo"`
+	Header          string                   `json:"header" bson:"header"`
+	Subdomain       string                   `json:"subdomain" bson:"subdomain"`
+	Country         string                   `json:"country" bson:"country"`
+	Timezone        string                   `json:"timezone" bson:"timezone"`
+	Language        string                   `json:"language" bson:"language"`
+	Active          bool                     `json:"active" bson:"active"`
+	TokensPurchased uint64                   `json:"tokensPurchased" bson:"tokensPurchased"`
+	TokensRemaining uint64                   `json:"tokensRemaining" bson:"tokensRemaining"`
+	Parent          string                   `json:"parent" bson:"parent"`
+	Subscription    OrganizationSubscription `json:"subscription" bson:"subscription"`
+}
+
+type OrganizationLimits struct {
+	Memberships   int `bson:"memberships"`
+	SubOrgs       int `bson:"subOrgs"`
+	MaxCensusSize int `bson:"maxCensusSize"`
+}
+
+type VotingTypes struct {
+	Approval bool `bson:"approval"`
+	Ranked   bool `bson:"ranked"`
+	Weighted bool `bson:"weighted"`
+}
+
+type Features struct {
+	Personalization bool `bson:"personalization"`
+	EmailReminder   bool `bson:"emailReminder"`
+	SmsNotification bool `bson:"smsNotification"`
+}
+
+type Subscription struct {
+	ID           uint64             `bson:"_id"`
+	Name         string             `bson:"name"`
+	StripeID     string             `bson:"stripeID"`
+	Organization OrganizationLimits `bson:"organization"`
+	VotingTypes  VotingTypes        `bson:"votingTypes"`
+	Features     Features           `bson:"features"`
+}
+
+type OrganizationSubscription struct {
+	SubscriptionID uint64    `bson:"subscriptionID"`
+	StartDate      time.Time `bson:"startDate"`
+	EndDate        time.Time `bson:"endDate"`
+	Active         bool      `bson:"active"`
 }
