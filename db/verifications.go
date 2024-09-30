@@ -9,6 +9,14 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+// delVerificationCode private method deletes the verification code for the
+// user and type provided. This method must be called with the keysLock held.
+func (ms *MongoStorage) delVerificationCode(ctx context.Context, id uint64, t CodeType) error {
+	// delete the verification code for the user provided
+	_, err := ms.verifications.DeleteOne(ctx, bson.M{"_id": id, "type": t})
+	return err
+}
+
 // UserByVerificationCode method returns the user with the given verification
 // code. If the user or the verification code doesn't exist, it returns a
 // specific error. If other errors occur, it returns the error. It checks the
@@ -35,7 +43,7 @@ func (ms *MongoStorage) UserByVerificationCode(code string, t CodeType) (*User, 
 // UserVerificationCode returns the verification code for the user provided. If
 // the user has not a verification code, it returns an specific error, if other
 // error occurs, it returns the error.
-func (ms *MongoStorage) UserVerificationCode(user *User, t CodeType) (string, error) {
+func (ms *MongoStorage) UserVerificationCode(user *User, t CodeType) (*UserVerification, error) {
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
 
@@ -46,17 +54,17 @@ func (ms *MongoStorage) UserVerificationCode(user *User, t CodeType) (string, er
 	verification := &UserVerification{}
 	if err := result.Decode(verification); err != nil {
 		if err == mongo.ErrNoDocuments {
-			return "", ErrNotFound
+			return nil, ErrNotFound
 		}
-		return "", err
+		return nil, err
 	}
-	return verification.Code, nil
+	return verification, nil
 }
 
 // SetVerificationCode method sets the verification code for the user provided.
 // If the user already has a verification code, it updates it. If an error
 // occurs, it returns the error.
-func (ms *MongoStorage) SetVerificationCode(user *User, code string, t CodeType) error {
+func (ms *MongoStorage) SetVerificationCode(user *User, code string, t CodeType, exp time.Time) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -68,17 +76,12 @@ func (ms *MongoStorage) SetVerificationCode(user *User, code string, t CodeType)
 	// insert the verification code for the user provided
 	filter := bson.M{"_id": user.ID}
 	verification := &UserVerification{
-		ID:   user.ID,
-		Code: code,
-		Type: t,
+		ID:         user.ID,
+		Code:       code,
+		Type:       t,
+		Expiration: exp,
 	}
 	opts := options.Replace().SetUpsert(true)
 	_, err := ms.verifications.ReplaceOne(ctx, filter, verification, opts)
-	return err
-}
-
-func (ms *MongoStorage) delVerificationCode(ctx context.Context, id uint64, t CodeType) error {
-	// delete the verification code for the user provided
-	_, err := ms.verifications.DeleteOne(ctx, bson.M{"_id": id, "type": t})
 	return err
 }

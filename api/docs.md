@@ -14,6 +14,8 @@
 - [👥 Users](#-users)
   - [🙋 Register](#-register)
   - [✅ Verify user](#-verify-user)
+  - [🪪 User verification code info](#-user-verification-code-info)
+  - [📤 Resend user verification code](#-resend-user-verification-code)
   - [🧑‍💻 Get current user info](#-get-current-user-info)
   - [💇 Update current user info](#-update-current-user-info)
   - [🔏 Update current user password](#-update-current-user-password)
@@ -225,6 +227,57 @@ This endpoint only returns the addresses of the organizations where the current 
 |:---:|:---:|:---|
 | `401` | `40001` | `user not authorized` |
 | `400` | `40004` | `malformed JSON body` |
+| `400` | `40005` | `invalid user data` |
+| `400` | `40015` | `user account already verified` |
+| `401` | `40016` | `verification code expired` |
+| `500` | `50002` | `internal server error` |
+
+### 🪪 User verification code info
+
+* **Path** `/users/verify/code`
+* **Method** `GET`
+* **Query params**
+  * `email` 
+
+* **Response**
+```json
+{
+  "email": "user@email.com",
+  "expiration": "2024-09-20T09:02:26.849Z",
+  "valid": true
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40005` | `invalid user data` |
+| `400` | `40015` | `user account already verified` |
+| `404` | `40018` | `user not found` |
+| `500` | `50002` | `internal server error` |
+
+### 📤 Resend user verification code
+
+* **Path** `/users/verify/code`
+* **Method** `POST`
+* **Request Body** 
+```json
+{
+  "email": "user@email.com",
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40005` | `invalid user data` |
+| `400` | `40015` | `user account already verified` |
+| `400` | `40017` | `last verification code still valid` |
 | `500` | `50002` | `internal server error` |
 
 ### 🧑‍💻 Get current user info

@@ -20,6 +20,9 @@ const (
 	usersEndpoint = "/users"
 	// POST /users/verify to verify the user
 	verifyUserEndpoint = "/users/verify"
+	// GET /users/verify/code to get the user verification code information
+	// POST /users/verify/code to try to resend the user verification code
+	verifyUserCodeEndpoint = "/users/verify/code"
 	// GET /users/me to get the current user information
 	// PUT /users/me to update the current user information
 	usersMeEndpoint = "/users/me"
