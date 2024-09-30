@@ -27,6 +27,12 @@ type OrganizationInfo struct {
 	Parent      *OrganizationInfo `json:"parent"`
 }
 
+// OrganizationMembers is the struct that represents a list of members of
+// organizations in the API.
+type OrganizationMembers struct {
+	Members []*OrganizationMember `json:"members"`
+}
+
 // OrganizationMember is the struct that represents a members of organizations
 // with his role in the API.
 type OrganizationMember struct {

@@ -25,6 +25,7 @@
   - [🆕 Create organization](#-create-organization)
   - [⚙️ Update organization](#-update-organization)
   - [🔍 Organization info](#-organization-info)
+  - [🧑‍🤝‍🧑 Organization members](#-organization-members)
 
 </details>
 
@@ -545,12 +546,14 @@ Only the following parameters can be changed. Every parameter is optional.
 * **Method** `GET`
 * **Response**
 ```json
-[
-  {
-    "info": { /* user info response */ },
-    "role": "admin"
-  }
-]
+{
+  "members": [
+    {
+      "info": { /* user info response */ },
+      "role": "admin"
+    }
+  ]
+}
 ```
 
 * **Errors**
