@@ -49,6 +49,8 @@ func (e Error) Write(w http.ResponseWriter) {
 	if log.Level() == log.LogLevelDebug {
 		log.Debugw("API error response", "error", e.Error(), "code", e.Code, "httpStatus", e.HTTPstatus)
 	}
+	// set the content type to JSON
+	w.Header().Set("Content-Type", "application/json")
 	http.Error(w, string(msg), e.HTTPstatus)
 }
 

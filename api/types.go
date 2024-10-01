@@ -27,6 +27,12 @@ type OrganizationInfo struct {
 	Parent      *OrganizationInfo `json:"parent"`
 }
 
+// OrganizationMembers is the struct that represents a list of members of
+// organizations in the API.
+type OrganizationMembers struct {
+	Members []*OrganizationMember `json:"members"`
+}
+
 // OrganizationMember is the struct that represents a members of organizations
 // with his role in the API.
 type OrganizationMember struct {
@@ -66,9 +72,11 @@ type UserPasswordUpdate struct {
 
 // UserVerificationRequest is the request to verify a user.
 type UserVerification struct {
-	Email string `json:"email"`
-	Code  string `json:"code"`
-	Phone string `json:"phone"`
+	Email      string    `json:"email,omitempty"`
+	Code       string    `json:"code,omitempty"`
+	Phone      string    `json:"phone,omitempty"`
+	Expiration time.Time `json:"expiration,omitempty"`
+	Valid      bool      `json:"valid"`
 }
 
 type UserPasswordReset struct {

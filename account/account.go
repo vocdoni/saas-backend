@@ -11,6 +11,7 @@ import (
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/dvote/vochain"
+	"go.vocdoni.io/dvote/vochain/state/electionprice"
 	"go.vocdoni.io/proto/build/go/models"
 )
 
@@ -18,6 +19,9 @@ import (
 type Account struct {
 	client *apiclient.HTTPclient
 	signer *ethereum.SignKeys
+
+	TxCosts           map[models.TxType]uint64
+	ElectionPriceCalc *electionprice.Calculator
 }
 
 // New creates a new account with the given private key and API endpoint.
@@ -50,9 +54,20 @@ func New(privateKey string, apiEndpoint string) (*Account, error) {
 		"address", account.Address,
 		"balance", account.Balance,
 	)
+	// initialize the election price calculator
+	electionPriceCalc, err := InitElectionPriceCalculator(apiEndpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize election price calculator: %w", err)
+	}
+	txCosts, err := vochainTxCosts(apiEndpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get transaction costs: %w", err)
+	}
 	return &Account{
-		client: apiClient,
-		signer: &signer,
+		client:            apiClient,
+		signer:            &signer,
+		TxCosts:           txCosts,
+		ElectionPriceCalc: electionPriceCalc,
 	}, nil
 }
 

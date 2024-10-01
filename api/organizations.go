@@ -122,7 +122,9 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 		ErrGenericInternalServerError.Withf("could not get organization members: %v", err).Write(w)
 		return
 	}
-	orgMembers := []OrganizationMember{}
+	orgMembers := OrganizationMembers{
+		Members: make([]*OrganizationMember, 0, len(members)),
+	}
 	for _, member := range members {
 		var role string
 		for _, userOrg := range member.Organizations {
@@ -134,7 +136,7 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 		if role == "" {
 			continue
 		}
-		orgMembers = append(orgMembers, OrganizationMember{
+		orgMembers.Members = append(orgMembers.Members, &OrganizationMember{
 			Info: &UserInfo{
 				Email:     member.Email,
 				FirstName: member.FirstName,

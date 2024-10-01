@@ -1,6 +1,14 @@
 package api
 
-import "github.com/vocdoni/saas-backend/notifications"
+import (
+	"time"
+
+	"github.com/vocdoni/saas-backend/notifications"
+)
+
+// VerificationCodeExpiration is the duration of the verification code
+// before it is invalidated
+var VerificationCodeExpiration = 2 * time.Minute
 
 const (
 	// VerificationCodeLength is the length of the verification code in bytes

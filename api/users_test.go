@@ -3,10 +3,13 @@ package api
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	qt "github.com/frankban/quicktest"
 )
@@ -152,7 +155,8 @@ func TestVerifyAccountHandler(t *testing.T) {
 			c.Logf("error resetting test database: %v", err)
 		}
 	}()
-	// register a user
+	// register a user with short expiration time
+	VerificationCodeExpiration = 5 * time.Second
 	jsonUser := mustMarshal(&UserInfo{
 		Email:     testEmail,
 		Password:  testPass,
@@ -176,14 +180,41 @@ func TestVerifyAccountHandler(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(resp.StatusCode, qt.Equals, http.StatusUnauthorized)
 	c.Assert(resp.Body.Close(), qt.IsNil)
+	// try to verify the user (should fail)
 	// get the verification code from the email
 	mailBody, err := testMailService.FindEmail(context.Background(), testEmail)
 	c.Assert(err, qt.IsNil)
-	mailCode := strings.TrimPrefix(mailBody, VerificationCodeTextBody)
+	// create a regex to find the verification code in the email
+	mailCodeRgx := regexp.MustCompile(fmt.Sprintf(`%s(.{%d})`, VerificationCodeTextBody, VerificationCodeLength*2))
+	mailCode := mailCodeRgx.FindStringSubmatch(mailBody)
 	// verify the user
 	verification := mustMarshal(&UserVerification{
 		Email: testEmail,
-		Code:  mailCode,
+		Code:  mailCode[1],
+	})
+	req, err = http.NewRequest(http.MethodPost, testURL(verifyUserEndpoint), bytes.NewBuffer(verification))
+	c.Assert(err, qt.IsNil)
+	// wait to expire the verification code
+	time.Sleep(VerificationCodeExpiration)
+	resp, err = http.DefaultClient.Do(req)
+	c.Assert(err, qt.IsNil)
+	c.Assert(resp.StatusCode, qt.Equals, http.StatusUnauthorized)
+	c.Assert(resp.Body.Close(), qt.IsNil)
+	// resend the verification code and verify the user
+	req, err = http.NewRequest(http.MethodPost, testURL(verifyUserCodeEndpoint), bytes.NewBuffer(verification))
+	c.Assert(err, qt.IsNil)
+	resp, err = http.DefaultClient.Do(req)
+	c.Assert(err, qt.IsNil)
+	c.Assert(resp.StatusCode, qt.Equals, http.StatusOK)
+	c.Assert(resp.Body.Close(), qt.IsNil)
+	// get the verification code from the email
+	mailBody, err = testMailService.FindEmail(context.Background(), testEmail)
+	c.Assert(err, qt.IsNil)
+	mailCode = mailCodeRgx.FindStringSubmatch(mailBody)
+	// verify the user
+	verification = mustMarshal(&UserVerification{
+		Email: testEmail,
+		Code:  mailCode[1],
 	})
 	req, err = http.NewRequest(http.MethodPost, testURL(verifyUserEndpoint), bytes.NewBuffer(verification))
 	c.Assert(err, qt.IsNil)
@@ -196,7 +227,7 @@ func TestVerifyAccountHandler(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	resp, err = http.DefaultClient.Do(req)
 	c.Assert(err, qt.IsNil)
-	c.Assert(resp.StatusCode, qt.Equals, http.StatusUnauthorized)
+	c.Assert(resp.StatusCode, qt.Equals, http.StatusBadRequest)
 	c.Assert(resp.Body.Close(), qt.IsNil)
 	// try to login again
 	req, err = http.NewRequest(http.MethodPost, testURL(authLoginEndpoint), bytes.NewBuffer(jsonLogin))
@@ -240,11 +271,14 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	// get the verification code from the email
 	mailBody, err := testMailService.FindEmail(context.Background(), testEmail)
 	c.Assert(err, qt.IsNil)
-	verifyMailCode := strings.TrimPrefix(mailBody, VerificationCodeTextBody)
+	// create a regex to find the verification code in the email
+	mailCodeRgx := regexp.MustCompile(fmt.Sprintf(`%s(.{%d})`, VerificationCodeTextBody, VerificationCodeLength*2))
+	verifyMailCode := mailCodeRgx.FindStringSubmatch(mailBody)
+	c.Log(verifyMailCode[1])
 	// verify the user
 	verification := mustMarshal(&UserVerification{
 		Email: testEmail,
-		Code:  verifyMailCode,
+		Code:  verifyMailCode[1],
 	})
 	req, err = http.NewRequest(http.MethodPost, testURL(verifyUserEndpoint), bytes.NewBuffer(verification))
 	c.Assert(err, qt.IsNil)
@@ -262,12 +296,12 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	// get the recovery code from the email
 	mailBody, err = testMailService.FindEmail(context.Background(), testEmail)
 	c.Assert(err, qt.IsNil)
-	passResetMailCode := strings.TrimPrefix(mailBody, VerificationCodeTextBody)
+	passResetMailCode := mailCodeRgx.FindStringSubmatch(mailBody)
 	// reset the password
 	newPassword := "password2"
 	resetPass := mustMarshal(&UserPasswordReset{
 		Email:       testEmail,
-		Code:        passResetMailCode,
+		Code:        passResetMailCode[1],
 		NewPassword: newPassword,
 	})
 	req, err = http.NewRequest(http.MethodPost, testURL(usersResetPasswordEndpoint), bytes.NewBuffer(resetPass))

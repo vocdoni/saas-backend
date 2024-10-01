@@ -10,14 +10,13 @@ require (
 	github.com/go-chi/cors v1.2.1
 	github.com/go-chi/jwtauth/v5 v5.3.1
 	github.com/lestrrat-go/jwx/v2 v2.0.20
-	github.com/sendgrid/sendgrid-go v3.16.0+incompatible
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.18.2
 	github.com/testcontainers/testcontainers-go v0.32.0
 	github.com/twilio/twilio-go v1.23.0
 	go.mongodb.org/mongo-driver v1.14.0
 	go.vocdoni.io/dvote v1.10.2-0.20240726114655-b510ac8a7e42
-	go.vocdoni.io/proto v1.15.8
+	go.vocdoni.io/proto v1.15.10
 	google.golang.org/protobuf v1.34.0
 )
 
@@ -297,7 +296,6 @@ require (
 	github.com/samber/lo v1.39.0 // indirect
 	github.com/sasha-s/go-deadlock v0.3.1 // indirect
 	github.com/segmentio/asm v1.2.0 // indirect
-	github.com/sendgrid/rest v2.6.9+incompatible // indirect
 	github.com/sethvargo/go-retry v0.2.4 // indirect
 	github.com/shirou/gopsutil v3.21.11+incompatible // indirect
 	github.com/shirou/gopsutil/v3 v3.23.12 // indirect

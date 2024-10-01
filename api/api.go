@@ -155,6 +155,12 @@ func (a *API) initRouter() http.Handler {
 		// verify user
 		log.Infow("new route", "method", "POST", "path", verifyUserEndpoint)
 		r.Post(verifyUserEndpoint, a.verifyUserAccountHandler)
+		// get user verification code information
+		log.Infow("new route", "method", "GET", "path", verifyUserCodeEndpoint)
+		r.Get(verifyUserCodeEndpoint, a.userVerificationCodeInfoHandler)
+		// resend user verification code
+		log.Infow("new route", "method", "POST", "path", verifyUserCodeEndpoint)
+		r.Post(verifyUserCodeEndpoint, a.resendUserVerificationCodeHandler)
 		// request user password recovery
 		log.Infow("new route", "method", "POST", "path", usersRecoveryPasswordEndpoint)
 		r.Post(usersRecoveryPasswordEndpoint, a.recoverUserPasswordHandler)
