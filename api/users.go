@@ -47,7 +47,7 @@ func (a *API) sendUserCode(ctx context.Context, user *db.User, codeType db.CodeT
 	if a.mail != nil {
 		ctx, cancel := context.WithTimeout(ctx, time.Second*10)
 		defer cancel()
-
+		// create the notification with the verification code
 		notification := &notifications.Notification{
 			ToName:    fmt.Sprintf("%s %s", user.FirstName, user.LastName),
 			ToAddress: user.Email,
@@ -55,6 +55,7 @@ func (a *API) sendUserCode(ctx context.Context, user *db.User, codeType db.CodeT
 			PlainBody: VerificationCodeTextBody + code,
 			Body:      VerificationCodeTextBody + code,
 		}
+		// compose de verification link
 		// check if the mail template is available
 		if templatePath, ok := a.mailTemplates[temp]; ok {
 			tmpl, err := template.ParseFiles(templatePath)
@@ -67,7 +68,7 @@ func (a *API) sendUserCode(ctx context.Context, user *db.User, codeType db.CodeT
 				Link string
 			}{
 				Code: code,
-				Link: "#",
+				Link: fmt.Sprintf(a.webAppURL+VerificationURI, user.Email, code),
 			}); err != nil {
 				return err
 			}

@@ -32,6 +32,7 @@ type APIConfig struct {
 	MailTemplates map[notifications.MailTemplate]string
 	MailService   notifications.NotificationService
 	SMSService    notifications.NotificationService
+	WebAppURL     string
 	// FullTransparentMode if true allows signing all transactions and does not
 	// modify any of them.
 	FullTransparentMode bool
@@ -50,6 +51,7 @@ type API struct {
 	mailTemplates   map[notifications.MailTemplate]string
 	sms             notifications.NotificationService
 	secret          string
+	webAppURL       string
 	transparentMode bool
 }
 
@@ -69,6 +71,7 @@ func New(conf *APIConfig) *API {
 		mailTemplates:   conf.MailTemplates,
 		sms:             conf.SMSService,
 		secret:          conf.Secret,
+		webAppURL:       conf.WebAppURL,
 		transparentMode: conf.FullTransparentMode,
 	}
 }
