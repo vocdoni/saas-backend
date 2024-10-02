@@ -9,22 +9,17 @@ import (
 
 // Organization is the struct that represents an organization in the API
 type OrganizationInfo struct {
-	Address     string            `json:"address"`
-	Name        string            `json:"name"`
-	Website     string            `json:"website"`
-	CreatedAt   string            `json:"createdAt"`
-	Type        string            `json:"type"`
-	Description string            `json:"description"`
-	Size        string            `json:"size"`
-	Color       string            `json:"color"`
-	Logo        string            `json:"logo"`
-	Header      string            `json:"header"`
-	Subdomain   string            `json:"subdomain"`
-	Country     string            `json:"country"`
-	Timezone    string            `json:"timezone"`
-	Language    string            `json:"language"`
-	Active      bool              `json:"active"`
-	Parent      *OrganizationInfo `json:"parent"`
+	Address   string            `json:"address"`
+	Website   string            `json:"website"`
+	CreatedAt string            `json:"createdAt"`
+	Type      string            `json:"type"`
+	Size      string            `json:"size"`
+	Color     string            `json:"color"`
+	Subdomain string            `json:"subdomain"`
+	Country   string            `json:"country"`
+	Timezone  string            `json:"timezone"`
+	Active    bool              `json:"active"`
+	Parent    *OrganizationInfo `json:"parent"`
 }
 
 // OrganizationMembers is the struct that represents a list of members of
@@ -117,21 +112,16 @@ func organizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 		parentOrg = organizationFromDB(parent, nil)
 	}
 	return &OrganizationInfo{
-		Address:     dbOrg.Address,
-		Name:        dbOrg.Name,
-		Website:     dbOrg.Website,
-		CreatedAt:   dbOrg.CreatedAt.Format(time.RFC3339),
-		Type:        string(dbOrg.Type),
-		Description: dbOrg.Description,
-		Size:        dbOrg.Size,
-		Color:       dbOrg.Color,
-		Logo:        dbOrg.Logo,
-		Header:      dbOrg.Header,
-		Subdomain:   dbOrg.Subdomain,
-		Country:     dbOrg.Country,
-		Timezone:    dbOrg.Timezone,
-		Language:    dbOrg.Language,
-		Active:      dbOrg.Active,
-		Parent:      parentOrg,
+		Address:   dbOrg.Address,
+		Website:   dbOrg.Website,
+		CreatedAt: dbOrg.CreatedAt.Format(time.RFC3339),
+		Type:      string(dbOrg.Type),
+		Size:      dbOrg.Size,
+		Color:     dbOrg.Color,
+		Subdomain: dbOrg.Subdomain,
+		Country:   dbOrg.Country,
+		Timezone:  dbOrg.Timezone,
+		Active:    dbOrg.Active,
+		Parent:    parentOrg,
 	}
 }
