@@ -166,3 +166,21 @@ func (ms *MongoStorage) AddSubscriptionToOrganization(address string, orgSubscri
 	}
 	return nil
 }
+
+// Implement update subscription method and ensuere that only members
+// with adequate role can update the subscription
+func (ms *MongoStorage) UpdateOrganizationSubscritpion(address string, orgSubscription *OrganizationSubscription) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// prepare the document to be updated in the database
+	filter := bson.M{"_id": address}
+	updateDoc := bson.M{"$set": bson.M{"subscription": orgSubscription}}
+	// update the organization in the database
+	if _, err := ms.organizations.UpdateOne(ctx, filter, updateDoc); err != nil {
+		return err
+	}
+	return nil
+}

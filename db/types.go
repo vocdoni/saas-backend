@@ -1,6 +1,8 @@
 package db
 
-import "time"
+import (
+	"time"
+)
 
 type User struct {
 	ID            uint64               `json:"id" bson:"_id"`
@@ -62,38 +64,47 @@ type Organization struct {
 	TokensRemaining uint64                   `json:"tokensRemaining" bson:"tokensRemaining"`
 	Parent          string                   `json:"parent" bson:"parent"`
 	Subscription    OrganizationSubscription `json:"subscription" bson:"subscription"`
+	Counters        OrganizationCounters     `json:"counters" bson:"counters"`
 }
 
-type OrganizationLimits struct {
-	Memberships   int `bson:"memberships"`
-	SubOrgs       int `bson:"subOrgs"`
-	MaxCensusSize int `bson:"maxCensusSize"`
+type SubscriptionLimits struct {
+	Memberships int `json:"memberships" bson:"memberships"`
+	SubOrgs     int `json:"subOrgs" bson:"subOrgs"`
 }
 
 type VotingTypes struct {
-	Approval bool `bson:"approval"`
-	Ranked   bool `bson:"ranked"`
-	Weighted bool `bson:"weighted"`
+	Approval bool `json:"approval" bson:"approval"`
+	Ranked   bool `json:"ranked" bson:"ranked"`
+	Weighted bool `json:"weighted" bson:"weighted"`
 }
 
 type Features struct {
-	Personalization bool `bson:"personalization"`
-	EmailReminder   bool `bson:"emailReminder"`
-	SmsNotification bool `bson:"smsNotification"`
+	Personalization bool `json:"personalization" bson:"personalization"`
+	EmailReminder   bool `json:"emailReminder" bson:"emailReminder"`
+	SmsNotification bool `json:"smsNotification" bson:"smsNotification"`
 }
 
 type Subscription struct {
-	ID           uint64             `bson:"_id"`
-	Name         string             `bson:"name"`
-	StripeID     string             `bson:"stripeID"`
-	Organization OrganizationLimits `bson:"organization"`
-	VotingTypes  VotingTypes        `bson:"votingTypes"`
-	Features     Features           `bson:"features"`
+	ID           uint64             `json:"id" bson:"_id"`
+	Name         string             `json:"name" bson:"name"`
+	StripeID     string             `json:"stripeID" bson:"stripeID"`
+	Organization SubscriptionLimits `json:"organization" bson:"organization"`
+	VotingTypes  VotingTypes        `json:"votingTypes" bson:"votingTypes"`
+	Features     Features           `json:"features" bson:"features"`
 }
 
 type OrganizationSubscription struct {
 	SubscriptionID uint64    `bson:"subscriptionID"`
 	StartDate      time.Time `bson:"startDate"`
 	EndDate        time.Time `bson:"endDate"`
+	RenewalDate    time.Time `bson:"renewalDate"`
 	Active         bool      `bson:"active"`
+	MaxCensusSize  int       `bson:"maxCensusSize"`
+}
+
+type OrganizationCounters struct {
+	SentSMS    int `bson:"sentSMS"`
+	SentEmails int `bson:"sentEmails"`
+	SubOrgs    int `bson:"subOrgs"`
+	Members    int `bson:"members"`
 }
