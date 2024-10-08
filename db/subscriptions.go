@@ -8,6 +8,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.vocdoni.io/dvote/log"
 )
 
 // nextSubscriptionID internal method returns the next available subsbscription ID. If an error
@@ -92,7 +93,12 @@ func (ms *MongoStorage) Subscriptions() ([]*Subscription, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer cursor.Close(ctx)
+	defer func() {
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("failed to close subscriptions file", "error", err)
+		}
+	}()
+
 	// iterate over the cursor and decode each subscription
 	var subscriptions []*Subscription
 	for cursor.Next(ctx) {

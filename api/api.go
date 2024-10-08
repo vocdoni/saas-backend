@@ -167,6 +167,9 @@ func (a *API) initRouter() http.Handler {
 		// get organization members
 		log.Infow("new route", "method", "GET", "path", organizationMembersEndpoint)
 		r.Get(organizationMembersEndpoint, a.organizationMembersHandler)
+		// get subscriptions
+		log.Infow("new route", "method", "GET", "path", subscriptionsEndpoint)
+		r.Get(subscriptionsEndpoint, a.getSubscriptionsHandler)
 	})
 	a.router = r
 	return r

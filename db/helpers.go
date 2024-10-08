@@ -226,7 +226,11 @@ func readSubscriptionJSON(subscriptionsFile string) ([]*Subscription, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			log.Warnw("failed to close subscriptions file", "error", err)
+		}
+	}()
 
 	// Create a JSON decoder
 	decoder := json.NewDecoder(file)

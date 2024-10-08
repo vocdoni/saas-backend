@@ -26,6 +26,8 @@
   - [⚙️ Update organization](#-update-organization)
   - [🔍 Organization info](#-organization-info)
   - [🧑‍🤝‍🧑 Organization members](#-organization-members)
+- [Subscriptions](#subscriptions)
+  - [Get Available Subscritptions](#get-subscriptions)
 
 </details>
 
@@ -563,4 +565,26 @@ Only the following parameters can be changed. Every parameter is optional.
 | `400` | `40009` | `organization not found` |
 | `400` | `40010` | `malformed URL parameter` |
 | `400` | `4012` | `no organization provided` |
+| `500` | `50002` | `internal server error` |
+
+
+## Subscriptions
+
+
+### Get Subscriptions
+* * **Path** `/subscriptions`
+* **Method** `GET`
+* **Response**
+```json
+{
+  "subscriptions": [
+    [{"id":1,"name":"Basic","stripeID":"stripe_123","organization":{"memberships":1,"subOrgs":1},"votingTypes":{"approval":true,"ranked":true,"weighted":true},"features":{"personalization":false,"emailReminder":true,"smsNotification":false}}]
+  ]
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
 | `500` | `50002` | `internal server error` |
