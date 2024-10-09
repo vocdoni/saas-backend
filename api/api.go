@@ -131,6 +131,9 @@ func (a *API) initRouter() http.Handler {
 		// update the organization
 		log.Infow("new route", "method", "PUT", "path", organizationEndpoint)
 		r.Put(organizationEndpoint, a.updateOrganizationHandler)
+		// get organization subscription
+		log.Infow("new route", "method", "GET", "path", organizationSubscriptionEndpoint)
+		r.Get(organizationSubscriptionEndpoint, a.getOrganizationSubscriptionHandler)
 	})
 
 	// Public routes

@@ -46,6 +46,8 @@ const (
 	organizationEndpoint = "/organizations/{address}"
 	// GET /organizations/{address}/members to get the organization members
 	organizationMembersEndpoint = "/organizations/{address}/members"
+	// GET /organizations/{address}/subscription to get the organization subscription
+	organizationSubscriptionEndpoint = "/organizations/{address}/subscription"
 
 	// subscription routes
 	// GET /subscriptions to get the subscriptions of an organization
