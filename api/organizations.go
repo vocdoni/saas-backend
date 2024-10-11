@@ -281,11 +281,6 @@ func (a *API) inviteOrganizationAdminHandler(w http.ResponseWriter, r *http.Requ
 		ErrEmailMalformed.Write(w)
 		return
 	}
-	// check the phone is not empty
-	if invite.User.Phone == "" {
-		ErrMalformedBody.Withf("phone is empty").Write(w)
-		return
-	}
 	// check the role is valid
 	if valid := db.ValidRoles[db.UserRole(invite.Role)]; !valid {
 		ErrInvalidUserData.Withf("invalid role").Write(w)
@@ -329,6 +324,11 @@ func (a *API) inviteOrganizationAdminHandler(w http.ResponseWriter, r *http.Requ
 	// check the last name is not empty
 	if invite.User.LastName == "" {
 		ErrMalformedBody.Withf("last name is empty").Write(w)
+		return
+	}
+	// check the phone is not empty
+	if invite.User.Phone == "" {
+		ErrMalformedBody.Withf("phone is empty").Write(w)
 		return
 	}
 	newUser := &db.User{
