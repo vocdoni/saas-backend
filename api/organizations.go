@@ -260,6 +260,11 @@ func (a *API) inviteOrganizationAdminHandler(w http.ResponseWriter, r *http.Requ
 		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
+	// check if the user is already verified
+	if !user.Verified {
+		ErrUserNoVerified.With("user account not verified").Write(w)
+		return
+	}
 	// get new admin info from the request body
 	invite := &OrganizationInvite{}
 	body, err := io.ReadAll(r.Body)
