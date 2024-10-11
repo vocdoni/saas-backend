@@ -36,3 +36,10 @@ func IsOrganizationTypeValid(ot string) bool {
 	_, valid := validOrganizationTypes[OrganizationType(ot)]
 	return valid
 }
+
+// ValidRoles is a map that contains the valid user roles
+var ValidRoles = map[UserRole]bool{
+	AdminRole:   true,
+	ManagerRole: true,
+	ViewerRole:  true,
+}

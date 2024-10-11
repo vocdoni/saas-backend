@@ -94,6 +94,11 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		ErrMalformedBody.Withf("last name is empty").Write(w)
 		return
 	}
+	// check the phone is not empty
+	if userInfo.Phone == "" {
+		ErrMalformedBody.Withf("phone is empty").Write(w)
+		return
+	}
 	// hash the password
 	hPassword := internal.HexHashPassword(passwordSalt, userInfo.Password)
 	// add the user to the database
@@ -144,7 +149,7 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// check the email and verification code are not empty
-	if verification.Email == "" || verification.Code == "" {
+	if verification.Email == "" || (verification.Code == "" && (a.mail != nil || a.sms != nil)) {
 		ErrInvalidUserData.With("no verification code or email provided").Write(w)
 		return
 	}
