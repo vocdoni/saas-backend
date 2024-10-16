@@ -151,7 +151,7 @@ func (ms *MongoStorage) createIndexes() error {
 	// create an index for the 'phone' field on users
 	userPhoneIndex := mongo.IndexModel{
 		Keys:    bson.D{{Key: "phone", Value: 1}}, // 1 for ascending order
-		Options: options.Index().SetUnique(true),
+		Options: options.Index().SetSparse(true),
 	}
 	if _, err := ms.users.Indexes().CreateOne(ctx, userPhoneIndex); err != nil {
 		return fmt.Errorf("failed to create index on phone for users: %w", err)

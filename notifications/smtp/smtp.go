@@ -51,7 +51,7 @@ func (se *SMTPEmail) New(rawConfig any) error {
 	// set configuration in struct
 	se.config = config
 	// init SMTP auth
-	if se.config.SMTPUsername == "" || se.config.SMTPPassword == "" {
+	if se.config.SMTPUsername != "" && se.config.SMTPPassword != "" {
 		se.auth = smtp.PlainAuth("", se.config.SMTPUsername, se.config.SMTPPassword, se.config.SMTPServer)
 	}
 	return nil
