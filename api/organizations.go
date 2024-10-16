@@ -234,3 +234,35 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	httpWriteOK(w)
 }
+
+// getOrganizationSubscriptionHandler handles the request to get the subscription of an organization.
+// It returns the subscription with its information.
+func (a *API) getOrganizationSubscriptionHandler(w http.ResponseWriter, r *http.Request) {
+	// get the organization info from the request context
+	org, _, ok := a.organizationFromRequest(r)
+	if !ok {
+		ErrNoOrganizationProvided.Write(w)
+		return
+	}
+	if org.Subscription == (db.OrganizationSubscription{}) {
+		ErrNoOrganizationSubscription.Write(w)
+		return
+	}
+	if !org.Subscription.Active ||
+		(org.Subscription.EndDate.After(time.Now()) && org.Subscription.StartDate.Before(time.Now())) {
+		ErrrOganizationSubscriptionIncative.Write(w)
+		return
+	}
+	// get the subscription from the database
+	plan, err := a.db.Subscription(org.Subscription.SubscriptionID)
+	if err != nil {
+		ErrGenericInternalServerError.Withf("could not get subscription: %v", err).Write(w)
+		return
+	}
+	info := &OrganizationSubscriptionInfo{
+		SubcriptionDetails: &org.Subscription,
+		Usage:              &org.Counters,
+		Plan:               plan,
+	}
+	httpWriteJSON(w, info)
+}

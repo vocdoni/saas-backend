@@ -135,3 +135,9 @@ func organizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 		Parent:      parentOrg,
 	}
 }
+
+type OrganizationSubscriptionInfo struct {
+	SubcriptionDetails *db.OrganizationSubscription `json:"subscriptionDetails"`
+	Usage              *db.OrganizationCounters     `json:"usage"`
+	Plan               *db.Subscription             `json:"plan"`
+}

@@ -24,6 +24,7 @@ type MongoStorage struct {
 	users         *mongo.Collection
 	verifications *mongo.Collection
 	organizations *mongo.Collection
+	subscriptions *mongo.Collection
 }
 
 type Options struct {
@@ -103,6 +104,10 @@ func (ms *MongoStorage) Reset() error {
 	if err := ms.organizations.Drop(ctx); err != nil {
 		return err
 	}
+	// drop subscriptions collection
+	if err := ms.subscriptions.Drop(ctx); err != nil {
+		return err
+	}
 	// init the collections
 	if err := ms.initCollections(ms.database); err != nil {
 		return err
@@ -158,6 +163,9 @@ func (ms *MongoStorage) String() string {
 		}
 		organizations.Organizations = append(organizations.Organizations, org)
 	}
+
+	// get all subsc
+
 	// encode the data to JSON and return it
 	data, err := json.Marshal(&Collection{users, organizations})
 	if err != nil {
