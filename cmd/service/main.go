@@ -23,9 +23,10 @@ func main() {
 	flag.StringP("host", "h", "0.0.0.0", "listen address")
 	flag.IntP("port", "p", 8080, "listen port")
 	flag.StringP("secret", "s", "", "API secret")
+	flag.StringP("vocdoniApi", "v", "https://api-dev.vocdoni.net/v2", "vocdoni node remote API URL")
+	flag.StringP("webURL", "w", "https://saas-dev.vocdoni.app/account/verify", "The URL of the web application")
 	flag.StringP("mongoURL", "m", "", "The URL of the MongoDB server")
 	flag.StringP("mongoDB", "d", "saasdb", "The name of the MongoDB database")
-	flag.StringP("vocdoniApi", "v", "https://api-dev.vocdoni.net/v2", "vocdoni node remote API URL")
 	flag.StringP("privateKey", "k", "", "private key for the Vocdoni account")
 	flag.BoolP("fullTransparentMode", "a", false, "allow all transactions and do not modify any of them")
 	flag.String("smtpServer", "", "SMTP server")
@@ -49,10 +50,12 @@ func main() {
 	host := viper.GetString("host")
 	port := viper.GetInt("port")
 	apiEndpoint := viper.GetString("vocdoniApi")
+	webURL := viper.GetString("webURL")
 	secret := viper.GetString("secret")
 	if secret == "" {
 		log.Fatal("secret is required")
 	}
+	// MongoDB vars
 	mongoURL := viper.GetString("mongoURL")
 	mongoDB := viper.GetString("mongoDB")
 	// email vars
@@ -97,6 +100,7 @@ func main() {
 		DB:                  database,
 		Client:              apiClient,
 		Account:             acc,
+		WebAppURL:           webURL,
 		FullTransparentMode: fullTransparentMode,
 	}
 	// overwrite the email notifications service with the SMTP service if the

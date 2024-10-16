@@ -12,6 +12,7 @@ type Notification struct {
 	ToNumber  string
 	Subject   string
 	Body      string
+	PlainBody string
 }
 
 // NotificationService is the interface that must be implemented by any

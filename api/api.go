@@ -22,15 +22,17 @@ const (
 )
 
 type APIConfig struct {
-	Host        string
-	Port        int
-	Secret      string
-	Chain       string
-	DB          *db.MongoStorage
-	Client      *apiclient.HTTPclient
-	Account     *account.Account
-	MailService notifications.NotificationService
-	SMSService  notifications.NotificationService
+	Host          string
+	Port          int
+	Secret        string
+	Chain         string
+	DB            *db.MongoStorage
+	Client        *apiclient.HTTPclient
+	Account       *account.Account
+	MailTemplates map[notifications.MailTemplate]string
+	MailService   notifications.NotificationService
+	SMSService    notifications.NotificationService
+	WebAppURL     string
 	// FullTransparentMode if true allows signing all transactions and does not
 	// modify any of them.
 	FullTransparentMode bool
@@ -46,8 +48,10 @@ type API struct {
 	client          *apiclient.HTTPclient
 	account         *account.Account
 	mail            notifications.NotificationService
+	mailTemplates   map[notifications.MailTemplate]string
 	sms             notifications.NotificationService
 	secret          string
+	webAppURL       string
 	transparentMode bool
 }
 
@@ -64,8 +68,10 @@ func New(conf *APIConfig) *API {
 		client:          conf.Client,
 		account:         conf.Account,
 		mail:            conf.MailService,
+		mailTemplates:   conf.MailTemplates,
 		sms:             conf.SMSService,
 		secret:          conf.Secret,
+		webAppURL:       conf.WebAppURL,
 		transparentMode: conf.FullTransparentMode,
 	}
 }
