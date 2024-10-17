@@ -143,9 +143,14 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 		ErrMalformedBody.Write(w)
 		return
 	}
+
 	// check the email and verification code are not empty
-	if verification.Email == "" || verification.Code == "" {
-		ErrInvalidUserData.With("no verification code or email provided").Write(w)
+	if (a.mail != nil || a.sms != nil) &&
+		(verification.Code == "" ||
+			(verification.Email == "" && verification.Phone == "") ||
+			(a.mail == nil && verification.Email != "") ||
+			(a.sms == nil && verification.Phone != "")) {
+		ErrInvalidUserData.With("no verification code or email/phone provided").Write(w)
 		return
 	}
 	// get the user information from the database by email
