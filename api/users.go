@@ -94,6 +94,11 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		ErrMalformedBody.Withf("last name is empty").Write(w)
 		return
 	}
+	// check the phone is not empty
+	if userInfo.Phone == "" {
+		ErrMalformedBody.Withf("phone is empty").Write(w)
+		return
+	}
 	// hash the password
 	hPassword := internal.HexHashPassword(passwordSalt, userInfo.Password)
 	// add the user to the database

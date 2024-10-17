@@ -39,6 +39,7 @@ func TestRegisterHandler(t *testing.T) {
 				Password:  "password",
 				FirstName: "first",
 				LastName:  "last",
+				Phone:     "123456789",
 			}),
 			expectedStatus: http.StatusOK,
 		},
@@ -50,6 +51,7 @@ func TestRegisterHandler(t *testing.T) {
 				Password:  "password",
 				FirstName: "first",
 				LastName:  "last",
+				Phone:     "123456789",
 			}),
 			expectedStatus: http.StatusInternalServerError,
 			expectedBody:   mustMarshal(ErrGenericInternalServerError),
@@ -62,6 +64,7 @@ func TestRegisterHandler(t *testing.T) {
 				Password:  "password",
 				FirstName: "first",
 				LastName:  "",
+				Phone:     "123456789",
 			}),
 			expectedStatus: http.StatusBadRequest,
 			expectedBody:   mustMarshal(ErrMalformedBody.Withf("last name is empty")),
@@ -74,6 +77,7 @@ func TestRegisterHandler(t *testing.T) {
 				Password:  "password",
 				FirstName: "",
 				LastName:  "last",
+				Phone:     "123456789",
 			}),
 			expectedStatus: http.StatusBadRequest,
 			expectedBody:   mustMarshal(ErrMalformedBody.Withf("first name is empty")),
@@ -86,6 +90,7 @@ func TestRegisterHandler(t *testing.T) {
 				Password:  "password",
 				FirstName: "first",
 				LastName:  "last",
+				Phone:     "123456789",
 			}),
 			expectedStatus: http.StatusBadRequest,
 			expectedBody:   mustMarshal(ErrEmailMalformed),
@@ -98,6 +103,7 @@ func TestRegisterHandler(t *testing.T) {
 				Password:  "password",
 				FirstName: "first",
 				LastName:  "last",
+				Phone:     "123456789",
 			}),
 			expectedStatus: http.StatusBadRequest,
 			expectedBody:   mustMarshal(ErrEmailMalformed),
@@ -110,6 +116,7 @@ func TestRegisterHandler(t *testing.T) {
 				Password:  "short",
 				FirstName: "first",
 				LastName:  "last",
+				Phone:     "123456789",
 			}),
 			expectedStatus: http.StatusBadRequest,
 			expectedBody:   mustMarshal(ErrPasswordTooShort),
@@ -120,6 +127,18 @@ func TestRegisterHandler(t *testing.T) {
 			body: mustMarshal(&UserInfo{
 				Email:     "valid2@test.com",
 				Password:  "",
+				FirstName: "first",
+				LastName:  "last",
+				Phone:     "123456789",
+			}),
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			uri:    registerURL,
+			method: http.MethodPost,
+			body: mustMarshal(&UserInfo{
+				Email:     "valid@test.com",
+				Password:  "password",
 				FirstName: "first",
 				LastName:  "last",
 			}),
@@ -162,6 +181,7 @@ func TestVerifyAccountHandler(t *testing.T) {
 		Password:  testPass,
 		FirstName: testFirstName,
 		LastName:  testLastName,
+		Phone:     testPhone,
 	})
 	req, err := http.NewRequest(http.MethodPost, testURL(usersEndpoint), bytes.NewBuffer(jsonUser))
 	c.Assert(err, qt.IsNil)
@@ -251,6 +271,7 @@ func TestRecoverAndResetPassword(t *testing.T) {
 		Password:  testPass,
 		FirstName: testFirstName,
 		LastName:  testLastName,
+		Phone:     testPhone,
 	})
 	req, err := http.NewRequest(http.MethodPost, testURL(usersEndpoint), bytes.NewBuffer(jsonUser))
 	c.Assert(err, qt.IsNil)
