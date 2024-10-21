@@ -38,8 +38,14 @@ func IsOrganizationTypeValid(ot string) bool {
 }
 
 // ValidRoles is a map that contains the valid user roles
-var ValidRoles = map[UserRole]bool{
+var validRoles = map[UserRole]bool{
 	AdminRole:   true,
 	ManagerRole: true,
 	ViewerRole:  true,
+}
+
+// IsValidUserRole function checks if the user role is valid
+func IsValidUserRole(role UserRole) bool {
+	_, valid := validRoles[role]
+	return valid
 }

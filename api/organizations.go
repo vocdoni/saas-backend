@@ -282,7 +282,7 @@ func (a *API) inviteOrganizationAdminHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	// check the role is valid
-	if valid := db.ValidRoles[db.UserRole(invite.Role)]; !valid {
+	if valid := db.IsValidUserRole(db.UserRole(invite.Role)); !valid {
 		ErrInvalidUserData.Withf("invalid role").Write(w)
 		return
 	}
