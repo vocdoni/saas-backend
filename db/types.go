@@ -70,6 +70,7 @@ type Organization struct {
 type SubscriptionLimits struct {
 	Memberships int `json:"memberships" bson:"memberships"`
 	SubOrgs     int `json:"subOrgs" bson:"subOrgs"`
+	CensusSize  int `json:"censusSize" bson:"censusSize"`
 }
 
 type VotingTypes struct {
@@ -88,6 +89,7 @@ type Subscription struct {
 	ID           uint64             `json:"id" bson:"_id"`
 	Name         string             `json:"name" bson:"name"`
 	StripeID     string             `json:"stripeID" bson:"stripeID"`
+	Default      bool               `json:"default" bson:"default"`
 	Organization SubscriptionLimits `json:"organization" bson:"organization"`
 	VotingTypes  VotingTypes        `json:"votingTypes" bson:"votingTypes"`
 	Features     Features           `json:"features" bson:"features"`

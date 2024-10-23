@@ -48,6 +48,43 @@ func (ms *MongoStorage) Organization(address string, parent bool) (*Organization
 	return org, parentOrg, nil
 }
 
+// Organization method returns the organization with the given address. If the
+// parent flag is true, it also returns the parent organization if it exists. If
+// the organization doesn't exist or the parent organization doesn't exist and
+// it should be returned, it returns the specific error. If other errors occur,
+// it returns the error.
+func (ms *MongoStorage) OrganizationByCreatorEmail(email string, parent bool) (*Organization, *Organization, error) {
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// find the organization in the database
+	result := ms.organizations.FindOne(ctx, bson.M{"creator": email})
+	org := &Organization{Subscription: OrganizationSubscription{}}
+	if err := result.Decode(org); err != nil {
+		// if the organization doesn't exist return a specific error
+		if err == mongo.ErrNoDocuments {
+			return nil, nil, ErrNotFound
+		}
+		return nil, nil, err
+	}
+	if !parent || org.Parent == "" {
+		return org, nil, nil
+	}
+	// find the parent organization in the database
+	result = ms.organizations.FindOne(ctx, bson.M{"_id": org.Parent})
+	parentOrg := &Organization{}
+	if err := result.Decode(parentOrg); err != nil {
+		// if the parent organization doesn't exist return a specific error
+		if err == mongo.ErrNoDocuments {
+			return nil, nil, ErrNotFound
+		}
+		return nil, nil, err
+	}
+	return org, parentOrg, nil
+}
+
 // SetOrganization method creates or updates the organization in the database.
 // If the organization already exists, it updates the fields that have changed.
 // If the organization doesn't exist, it creates it. If an error occurs, it
@@ -146,7 +183,7 @@ func (ms *MongoStorage) OrganizationsMembers(address string) ([]User, error) {
 }
 
 // addSubscriptionToOrganization internal method adds the subscription to the organiation with
-// the given email. If an error occurs, it returns the error. This method must
+// the given address. If an error occurs, it returns the error. This method must
 // be called with the keysLock held.
 func (ms *MongoStorage) AddSubscriptionToOrganization(address string, orgSubscription *OrganizationSubscription) error {
 	if _, err := ms.Subscription(orgSubscription.SubscriptionID); err != nil {

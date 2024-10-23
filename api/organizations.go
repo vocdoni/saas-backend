@@ -63,6 +63,18 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		parentOrg = orgInfo.Parent.Address
 	}
+	// find default plan
+	defaultPlan, err := a.db.DefaultSubscription()
+	if err != nil || defaultPlan == nil {
+		ErrNoDefaultPLan.WithErr((err)).Write(w)
+		return
+	}
+	subscription := &db.OrganizationSubscription{
+		SubscriptionID: defaultPlan.ID,
+		StartDate:      time.Now(),
+		Active:         true,
+		MaxCensusSize:  defaultPlan.Organization.CensusSize,
+	}
 	// create the organization
 	if err := a.db.SetOrganization(&db.Organization{
 		Address:         signer.AddressString(),
@@ -81,6 +93,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		TokensPurchased: 0,
 		TokensRemaining: 0,
 		Parent:          parentOrg,
+		Subscription:    *subscription,
 	}); err != nil {
 		if err == db.ErrAlreadyExists {
 			ErrInvalidOrganizationData.WithErr(err).Write(w)
@@ -250,7 +263,7 @@ func (a *API) getOrganizationSubscriptionHandler(w http.ResponseWriter, r *http.
 	}
 	if !org.Subscription.Active ||
 		(org.Subscription.EndDate.After(time.Now()) && org.Subscription.StartDate.Before(time.Now())) {
-		ErrrOganizationSubscriptionIncative.Write(w)
+		ErrOganizationSubscriptionIncative.Write(w)
 		return
 	}
 	// get the subscription from the database

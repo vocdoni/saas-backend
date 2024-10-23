@@ -2,9 +2,10 @@
     {
         "ID": 1,
         "Name": "Basic",
-        "StripeID": "stripe_123",
+        "StripeID": "prod_R2CnSIL0Yf9CQr",
+        "Default": false,
         "Organization": {
-            "Memberships": 1,
+            "Memberships": 5,
             "SubOrgs": 1
         },
         "VotingTypes": {
@@ -21,26 +22,8 @@
     {
         "ID": 2,
         "Name": "Pro",
-        "StripeID": "stripe_456",
-        "Organization": {
-            "Memberships": 10,
-            "SubOrgs": 5
-        },
-        "VotingTypes": {
-            "Approval": true,
-            "Ranked": false,
-            "Weighted": true
-        },
-        "Features": {
-            "Personalization": false,
-            "EmailReminder": false,
-            "SmsNotification": false
-        }
-    },
-    {
-        "ID": 3,
-        "Name": "Ulimited",
-        "StripeID": "stripe_789",
+        "StripeID": "prod_R3Ix2En2xeK1Dq",
+        "Default": false,
         "Organization": {
             "Memberships": 10,
             "SubOrgs": 5
@@ -54,6 +37,27 @@
             "Personalization": true,
             "EmailReminder": true,
             "SmsNotification": true
+        }
+    },
+    {
+        "ID": 3,
+        "Name": "free",
+        "Default": true,
+        "StripeID": "stripe_789",
+        "Organization": {
+            "Memberships": 10,
+            "SubOrgs": 5,
+            "CensusSize": 10
+        },
+        "VotingTypes": {
+            "Approval": false,
+            "Ranked": false,
+            "Weighted": true
+        },
+        "Features": {
+            "Personalization": false,
+            "EmailReminder": false,
+            "SmsNotification": false
         }
     }
 ]

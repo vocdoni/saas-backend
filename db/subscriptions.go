@@ -81,6 +81,48 @@ func (ms *MongoStorage) Subscription(subscriptionID uint64) (*Subscription, erro
 	return subscription, nil
 }
 
+// SubscriptionByStripeId method returns the subscription with the given stripe ID. If the
+// subscription doesn't exist, it returns the specific error.
+func (ms *MongoStorage) SubscriptionByStripeId(stripeID string) (*Subscription, error) {
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// find the subscription in the database
+	filter := bson.M{"stripeID": stripeID}
+	subscription := &Subscription{}
+	err := ms.subscriptions.FindOne(ctx, filter).Decode(subscription)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, ErrNotFound // Subscription not found
+		}
+		return nil, errors.New("failed to get subscription")
+	}
+	return subscription, nil
+}
+
+// DefaultSubscription method returns the default subscription plan. If the
+// subscription doesn't exist, it returns the specific error.
+func (ms *MongoStorage) DefaultSubscription() (*Subscription, error) {
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// find the subscription in the database
+	filter := bson.M{"default": true}
+	subscription := &Subscription{}
+	err := ms.subscriptions.FindOne(ctx, filter).Decode(subscription)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, ErrNotFound // Subscription not found
+		}
+		return nil, errors.New("failed to get subscription")
+	}
+	return subscription, nil
+}
+
 // Subscriptions method returns all subscriptions from the database.
 func (ms *MongoStorage) Subscriptions() ([]*Subscription, error) {
 	ms.keysLock.RLock()

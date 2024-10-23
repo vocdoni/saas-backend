@@ -1,5 +1,3 @@
-// FILEPATH: /home/user/Projects/vocdoni/saas-backend/db/subscriptions_test.go
-
 package db
 
 import (

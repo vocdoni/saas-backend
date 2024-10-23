@@ -52,4 +52,5 @@ const (
 	// subscription routes
 	// GET /subscriptions to get the subscriptions of an organization
 	subscriptionsEndpoint = "/subscriptions"
+	subscriptionsWebhook  = "/subscriptions/webhook"
 )

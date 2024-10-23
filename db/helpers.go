@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"reflect"
 	"time"
 
+	root "github.com/vocdoni/saas-backend"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -25,7 +25,9 @@ func (ms *MongoStorage) initCollections(database string) error {
 	if err != nil {
 		return err
 	}
-	loadedSubscriptions, err := readSubscriptionJSON("")
+	log.Infow("current collections", "collections", currentCollections)
+	log.Infow("reading subscriptions from file %s", ms.subscriptionsFile)
+	loadedSubscriptions, err := readSubscriptionJSON(ms.subscriptionsFile)
 	if err != nil {
 		return err
 	}
@@ -54,14 +56,6 @@ func (ms *MongoStorage) initCollections(database string) error {
 				if _, err := ms.client.Database(database).Collection(name).DeleteMany(ctx, bson.D{}); err != nil {
 					return nil, err
 				}
-				var subscriptions []interface{}
-				for _, sub := range loadedSubscriptions {
-					subscriptions = append(subscriptions, sub)
-				}
-				count, err := ms.client.Database(database).Collection(name).InsertMany(ctx, subscriptions)
-				if err != nil || len(count.InsertedIDs) != len(loadedSubscriptions) {
-					return nil, fmt.Errorf("failed to insert subscriptions: %w", err)
-				}
 			}
 		} else {
 			// if the collection has a validator create it with it
@@ -73,16 +67,15 @@ func (ms *MongoStorage) initCollections(database string) error {
 			if err := ms.client.Database(database).CreateCollection(ctx, name, opts); err != nil {
 				return nil, err
 			}
-
-			if name == "subscriptions" {
-				var subscriptions []interface{}
-				for _, sub := range loadedSubscriptions {
-					subscriptions = append(subscriptions, sub)
-				}
-				count, err := ms.client.Database(database).Collection(name).InsertMany(ctx, subscriptions)
-				if err != nil || len(count.InsertedIDs) != len(loadedSubscriptions) {
-					return nil, fmt.Errorf("failed to insert subscriptions: %w", err)
-				}
+		}
+		if name == "subscriptions" {
+			var subscriptions []interface{}
+			for _, sub := range loadedSubscriptions {
+				subscriptions = append(subscriptions, sub)
+			}
+			count, err := ms.client.Database(database).Collection(name).InsertMany(ctx, subscriptions)
+			if err != nil || len(count.InsertedIDs) != len(loadedSubscriptions) {
+				return nil, fmt.Errorf("failed to insert subscriptions: %w", err)
 			}
 		}
 		// return the collection
@@ -219,18 +212,20 @@ func dynamicUpdateDocument(item interface{}, alwaysUpdateTags []string) (bson.M,
 // readSubscriptionJSON reads a JSON file with an array of subscritpions
 // and return it as a Subscription array
 func readSubscriptionJSON(subscriptionsFile string) ([]*Subscription, error) {
-	if subscriptionsFile == "" {
-		subscriptionsFile = "subscriptions.json"
-	}
-	file, err := os.Open(subscriptionsFile)
+	log.Warnf("Reading subscriptions from %s", subscriptionsFile)
+	file, err := root.Assets.Open(fmt.Sprintf("assets/%s", subscriptionsFile))
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			log.Warnw("failed to close subscriptions file", "error", err)
-		}
-	}()
+	// file, err := os.Open(subscriptionsFile)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// defer func() {
+	// 	if err := file.Close(); err != nil {
+	// 		log.Warnw("failed to close subscriptions file", "error", err)
+	// 	}
+	// }()
 
 	// Create a JSON decoder
 	decoder := json.NewDecoder(file)

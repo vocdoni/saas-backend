@@ -12,6 +12,7 @@ require (
 	github.com/lestrrat-go/jwx/v2 v2.0.20
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.18.2
+	github.com/stripe/stripe-go/v80 v80.2.0
 	github.com/testcontainers/testcontainers-go v0.32.0
 	github.com/twilio/twilio-go v1.23.0
 	go.mongodb.org/mongo-driver v1.14.0
