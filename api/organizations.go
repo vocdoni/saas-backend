@@ -242,9 +242,8 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 
 // inviteOrganizationMemberHandler handles the request to invite a new admin
 // member to an organization. Only the admin of the organization can invite a
-// new admin member. The new admin will be created as a verified user if it
-// does not exist yet (with a random password), and an email will be sent to
-// the new admin with the invitation code to change that password.
+// new member. It stores the invitation in the database and sends an email to
+// the new member with the invitation code.
 func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := userFromContext(r.Context())
@@ -319,6 +318,12 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 	httpWriteOK(w)
 }
 
+// acceptOrganizationMemberInvitationHandler handles the request to accept an
+// invitation to an organization. It checks if the invitation is valid and not
+// expired, and if the user is not already a member of the organization. If the
+// user does not exist, it creates a new user with the provided information.
+// If the user already exists and is verified, it adds the organization to the
+// user.
 func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)
