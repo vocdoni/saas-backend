@@ -21,7 +21,7 @@ var usersCollectionValidator = bson.M{
 			"email": bson.M{
 				"bsonType":    "string",
 				"description": "must be an email and is required",
-				"pattern":     `^[\w.\-]+@([\w\-]+\.)+[\w]{2,}$`,
+				"pattern":     `^[\w.\+\.\-]+@([\w\-]+\.)+[\w]{2,}$`,
 			},
 			"password": bson.M{
 				"bsonType":    "string",
