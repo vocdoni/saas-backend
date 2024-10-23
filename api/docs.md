@@ -595,7 +595,7 @@ Only the following parameters can be changed. Every parameter is optional.
 | `409` | `40901` | `duplicate conflict` |
 | `500` | `50002` | `internal server error` |
 
-### 🧑‍💼 Accept organization invitation
+### 🤝 Accept organization invitation
 
 * **Path** `/organizations/{address}/members/accept`
 * **Method** `POST`
