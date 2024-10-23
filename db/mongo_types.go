@@ -12,7 +12,13 @@ type OrganizationCollection struct {
 	Organizations []Organization `json:"organizations" bson:"organizations"`
 }
 
+type OrganizationInvitesCollection struct {
+	OrganizationInvites []OrganizationInvite `json:"organizationInvites" bson:"organizationInvites"`
+}
+
 type Collection struct {
 	UserCollection
+	UserVerifications
 	OrganizationCollection
+	OrganizationInvitesCollection
 }

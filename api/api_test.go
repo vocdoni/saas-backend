@@ -30,6 +30,7 @@ const (
 	testPass      = "password123"
 	testFirstName = "test"
 	testLastName  = "user"
+	testPhone     = "+1234567890"
 	testHost      = "0.0.0.0"
 	testPort      = 7788
 

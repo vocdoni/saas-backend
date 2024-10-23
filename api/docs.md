@@ -26,6 +26,8 @@
   - [⚙️ Update organization](#-update-organization)
   - [🔍 Organization info](#-organization-info)
   - [🧑‍🤝‍🧑 Organization members](#-organization-members)
+  - [🧑‍💼 Invite organization member](#-invite-organization-member)
+  - [🤝 Accept organization invitation](#-accept-organization-invitation)
 
 </details>
 
@@ -188,7 +190,8 @@ This endpoint only returns the addresses of the organizations where the current 
     "email": "my@email.me",
     "firstName": "Steve",
     "lastName": "Urkel",
-    "password": "secretpass1234"
+    "password": "secretpass1234",
+    "phone": "123456789"
 }
 ```
 
@@ -563,4 +566,65 @@ Only the following parameters can be changed. Every parameter is optional.
 | `400` | `40009` | `organization not found` |
 | `400` | `40010` | `malformed URL parameter` |
 | `400` | `4012` | `no organization provided` |
+| `500` | `50002` | `internal server error` |
+
+### 🧑‍💼 Invite organization member
+
+* **Path** `/organizations/{address}/members`
+* **Method** `POST`
+* **Response**
+```json
+{
+  "role": "admin",
+  "email": "newadmin@email.com"
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40002` | `email malformed` |
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40005` | `invalid user data` |
+| `400` | `40009` | `organization not found` |
+| `400` | `40011` | `no organization provided` |
+| `401` | `40014` | `user account not verified` |
+| `400` | `40019` | `inviation code expired` |
+| `409` | `40901` | `duplicate conflict` |
+| `500` | `50002` | `internal server error` |
+
+### 🤝 Accept organization invitation
+
+* **Path** `/organizations/{address}/members/accept`
+* **Method** `POST`
+* **Response**
+```json
+{
+  "code": "a3f3b5",
+  "user": { // only if the invited user is not already registered
+    "email": "my@email.me",
+    "firstName": "Steve",
+    "lastName": "Urkel",
+    "password": "secretpass1234",
+    "phone": "123456789"
+  }
+}
+```
+`user` object is only required if invited user is not registered yet.
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40002` | `email malformed` |
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40005` | `invalid user data` |
+| `400` | `40009` | `organization not found` |
+| `400` | `40011` | `no organization provided` |
+| `401` | `40014` | `user account not verified` |
+| `400` | `40019` | `inviation code expired` |
+| `409` | `40901` | `duplicate conflict` |
 | `500` | `50002` | `internal server error` |
