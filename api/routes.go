@@ -46,6 +46,8 @@ const (
 	organizationEndpoint = "/organizations/{address}"
 	// GET /organizations/{address}/members to get the organization members
 	organizationMembersEndpoint = "/organizations/{address}/members"
-	// POST /organizations/{address}/members/admin to add a new admin member
-	organizationAddAdminEndpoint = "/organizations/{address}/members/admin"
+	// POST /organizations/{address}/members/invite to add a new member
+	organizationAddMemberEndpoint = "/organizations/{address}/members"
+	// POST /organizations/{address}/members/invite/accept to accept the invitation
+	organizationAcceptMemberEndpoint = "/organizations/{address}/members/accept"
 )

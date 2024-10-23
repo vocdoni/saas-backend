@@ -67,8 +67,15 @@ type UserInfo struct {
 // OrganizationInvite is the struct that represents an invitation to an
 // organization in the API.
 type OrganizationInvite struct {
+	Email string `json:"email"`
+	Role  string `json:"role"`
+}
+
+// AcceptOrganizationInvitation is the request to accept an invitation to an
+// organization.
+type AcceptOrganizationInvitation struct {
+	Code string    `json:"code"`
 	User *UserInfo `json:"user"`
-	Role string    `json:"role"`
 }
 
 // UserPasswordUpdate is the request to update the password of a user.

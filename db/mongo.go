@@ -21,9 +21,10 @@ type MongoStorage struct {
 	client   *mongo.Client
 	keysLock sync.RWMutex
 
-	users         *mongo.Collection
-	verifications *mongo.Collection
-	organizations *mongo.Collection
+	users               *mongo.Collection
+	verifications       *mongo.Collection
+	organizations       *mongo.Collection
+	organizationInvites *mongo.Collection
 }
 
 type Options struct {
@@ -138,17 +139,37 @@ func (ms *MongoStorage) String() string {
 		}
 		users.Users = append(users.Users, user)
 	}
-	// get all organizations
+	// get all user verifications
 	ctx, cancel3 := context.WithTimeout(context.Background(), contextTimeout)
 	defer cancel3()
+	verCur, err := ms.verifications.Find(ctx, bson.D{{}})
+	if err != nil {
+		log.Warn(err)
+		return "{}"
+	}
+	// append all user verifications to the export data
+	ctx, cancel4 := context.WithTimeout(context.Background(), contextTimeout)
+	defer cancel4()
+	var verifications UserVerifications
+	for verCur.Next(ctx) {
+		var ver UserVerification
+		err := verCur.Decode(&ver)
+		if err != nil {
+			log.Warn(err)
+		}
+		verifications.Verifications = append(verifications.Verifications, ver)
+	}
+	// get all organizations
+	ctx, cancel5 := context.WithTimeout(context.Background(), contextTimeout)
+	defer cancel5()
 	orgCur, err := ms.organizations.Find(ctx, bson.D{{}})
 	if err != nil {
 		log.Warn(err)
 		return "{}"
 	}
 	// append all organizations to the export data
-	ctx, cancel4 := context.WithTimeout(context.Background(), contextTimeout)
-	defer cancel4()
+	ctx, cancel6 := context.WithTimeout(context.Background(), contextTimeout)
+	defer cancel6()
 	var organizations OrganizationCollection
 	for orgCur.Next(ctx) {
 		var org Organization
@@ -158,8 +179,28 @@ func (ms *MongoStorage) String() string {
 		}
 		organizations.Organizations = append(organizations.Organizations, org)
 	}
+	// get all organization invites
+	ctx, cancel7 := context.WithTimeout(context.Background(), contextTimeout)
+	defer cancel7()
+	invCur, err := ms.organizationInvites.Find(ctx, bson.D{{}})
+	if err != nil {
+		log.Warn(err)
+		return "{}"
+	}
+	// append all organization invites to the export data
+	ctx, cancel8 := context.WithTimeout(context.Background(), contextTimeout)
+	defer cancel8()
+	var organizationInvites OrganizationInvitesCollection
+	for invCur.Next(ctx) {
+		var inv OrganizationInvite
+		err := invCur.Decode(&inv)
+		if err != nil {
+			log.Warn(err)
+		}
+		organizationInvites.OrganizationInvites = append(organizationInvites.OrganizationInvites, inv)
+	}
 	// encode the data to JSON and return it
-	data, err := json.Marshal(&Collection{users, organizations})
+	data, err := json.Marshal(&Collection{users, verifications, organizations, organizationInvites})
 	if err != nil {
 		log.Warn(err)
 	}

@@ -62,3 +62,12 @@ type Organization struct {
 	TokensRemaining uint64           `json:"tokensRemaining" bson:"tokensRemaining"`
 	Parent          string           `json:"parent" bson:"parent"`
 }
+
+type OrganizationInvite struct {
+	InvitationCode      string    `json:"invitationCode" bson:"invitationCode"`
+	OrganizationAddress string    `json:"organizationAddress" bson:"organizationAddress"`
+	CurrentUserID       uint64    `json:"currentUserID" bson:"currentUserID"`
+	NewUserEmail        string    `json:"newUserEmail" bson:"newUserEmail"`
+	Role                UserRole  `json:"role" bson:"role"`
+	Expiration          time.Time `json:"expiration" bson:"expiration"`
+}

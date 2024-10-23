@@ -132,8 +132,8 @@ func (a *API) initRouter() http.Handler {
 		log.Infow("new route", "method", "PUT", "path", organizationEndpoint)
 		r.Put(organizationEndpoint, a.updateOrganizationHandler)
 		// invite a new admin member to the organization
-		log.Infow("new route", "method", "POST", "path", organizationAddAdminEndpoint)
-		r.Post(organizationAddAdminEndpoint, a.inviteOrganizationAdminHandler)
+		log.Infow("new route", "method", "POST", "path", organizationAddMemberEndpoint)
+		r.Post(organizationAddMemberEndpoint, a.inviteOrganizationMemberHandler)
 	})
 
 	// Public routes
@@ -170,6 +170,9 @@ func (a *API) initRouter() http.Handler {
 		// get organization members
 		log.Infow("new route", "method", "GET", "path", organizationMembersEndpoint)
 		r.Get(organizationMembersEndpoint, a.organizationMembersHandler)
+		// accept organization invitation
+		log.Infow("new route", "method", "POST", "path", organizationAcceptMemberEndpoint)
+		r.Post(organizationAcceptMemberEndpoint, a.acceptOrganizationMemberInvitationHandler)
 	})
 	a.router = r
 	return r
