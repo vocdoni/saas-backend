@@ -17,13 +17,15 @@ import (
 
 // MongoStorage uses an external MongoDB service for stoting the user data and election details.
 type MongoStorage struct {
-	database string
-	client   *mongo.Client
-	keysLock sync.RWMutex
+	database          string
+	client            *mongo.Client
+	keysLock          sync.RWMutex
+	subscriptionsFile string
 
 	users         *mongo.Collection
 	verifications *mongo.Collection
 	organizations *mongo.Collection
+	subscriptions *mongo.Collection
 }
 
 type Options struct {
@@ -31,7 +33,7 @@ type Options struct {
 	Database string
 }
 
-func New(url, database string) (*MongoStorage, error) {
+func New(url, database, subscriptionsFile string) (*MongoStorage, error) {
 	var err error
 	ms := &MongoStorage{}
 	if url == "" {
@@ -64,6 +66,7 @@ func New(url, database string) (*MongoStorage, error) {
 	// init the database client
 	ms.client = client
 	ms.database = database
+	ms.subscriptionsFile = subscriptionsFile
 	// init the collections
 	if err := ms.initCollections(ms.database); err != nil {
 		return nil, err
@@ -101,6 +104,10 @@ func (ms *MongoStorage) Reset() error {
 	}
 	// drop organizations collection
 	if err := ms.organizations.Drop(ctx); err != nil {
+		return err
+	}
+	// drop subscriptions collection
+	if err := ms.subscriptions.Drop(ctx); err != nil {
 		return err
 	}
 	// init the collections
@@ -158,6 +165,9 @@ func (ms *MongoStorage) String() string {
 		}
 		organizations.Organizations = append(organizations.Organizations, org)
 	}
+
+	// get all subsc
+
 	// encode the data to JSON and return it
 	data, err := json.Marshal(&Collection{users, organizations})
 	if err != nil {

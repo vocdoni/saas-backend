@@ -13,12 +13,12 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/notifications/smtp"
 	"github.com/vocdoni/saas-backend/notifications/twilio"
+	"github.com/vocdoni/saas-backend/stripe"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 )
 
 func main() {
-	log.Init("debug", "stdout", nil)
 	// define flags
 	flag.StringP("host", "h", "0.0.0.0", "listen address")
 	flag.IntP("port", "p", 8080, "listen port")
@@ -37,6 +37,9 @@ func main() {
 	flag.String("twilioAccountSid", "", "Twilio account SID")
 	flag.String("twilioAuthToken", "", "Twilio auth token")
 	flag.String("smsFromNumber", "", "SMS from number")
+	flag.String("subscriptionsFile", "subscriptions.json", "JSON file that contains the subscriptions info")
+	flag.String("stripeApiSecret", "", "Stripe API secret")
+	flag.String("stripeWebhookSecret", "", "Stripe Webhook secret")
 	// parse flags
 	flag.Parse()
 	// initialize Viper
@@ -66,8 +69,13 @@ func main() {
 	twilioAccountSid := viper.GetString("twilioAccountSid")
 	twilioAuthToken := viper.GetString("twilioAuthToken")
 	twilioFromNumber := viper.GetString("twilioFromNumber")
+	subscriptionsFile := viper.GetString("subscriptionsFile")
+	stripeApiSecret := viper.GetString("stripeApiSecret")
+	stripeWebhookSecret := viper.GetString("stripeWebhookSecret")
+	// stripe vars
+
 	// initialize the MongoDB database
-	database, err := db.New(mongoURL, mongoDB)
+	database, err := db.New(mongoURL, mongoDB, subscriptionsFile)
 	if err != nil {
 		log.Fatalf("could not create the MongoDB database: %v", err)
 	}
@@ -130,6 +138,12 @@ func main() {
 			log.Fatalf("could not create the SMS service: %v", err)
 		}
 		log.Infow("SMS service created", "from", twilioFromNumber)
+	}
+	// create Stripe client and include it in the API configuration
+	if stripeApiSecret != "" || stripeWebhookSecret != "" {
+		apiConf.StripeClient = stripe.New(stripeApiSecret, stripeWebhookSecret)
+	} else {
+		log.Fatalf("stripeApiSecret and stripeWebhookSecret are required")
 	}
 	// create the local API server
 	api.New(apiConf).Start()

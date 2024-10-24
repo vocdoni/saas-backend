@@ -27,7 +27,7 @@ func TestMain(m *testing.M) {
 	// set reset db env var to true
 	_ = os.Setenv("VOCDONI_MONGO_RESET_DB", "true")
 	// create a new MongoDB connection with the test database
-	db, err = New(mongoURI, test.RandomDatabaseName())
+	db, err = New(mongoURI, test.RandomDatabaseName(), "subscriptions.json")
 	if err != nil {
 		panic(err)
 	}
