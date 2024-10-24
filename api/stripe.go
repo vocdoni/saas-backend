@@ -41,12 +41,11 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		email := customer.Email
-		org, _, err := a.db.OrganizationByCreatorEmail(email, false)
+		org, _, err := a.db.OrganizationByCreatorEmail(customer.Email, false)
 		if err != nil || org == nil {
 			log.Warnf("Could not update subscription %s, a corresponding organization was not found.", subscription.ID)
 
-			log.Warnf("Please do manually for creator %s \n Error:  %s", email, err.Error())
+			log.Warnf("Please do manually for creator %s \n Error:  %s", customer.Email, err.Error())
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}

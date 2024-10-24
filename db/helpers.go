@@ -25,7 +25,9 @@ func (ms *MongoStorage) initCollections(database string) error {
 	if err != nil {
 		return err
 	}
-	loadedSubscriptions, err := readSubscriptionJSON("")
+	log.Infow("current collections", "collections", currentCollections)
+	log.Infow("reading subscriptions from file %s", ms.subscriptionsFile)
+	loadedSubscriptions, err := readSubscriptionJSON(ms.subscriptionsFile)
 	if err != nil {
 		return err
 	}
@@ -219,9 +221,7 @@ func dynamicUpdateDocument(item interface{}, alwaysUpdateTags []string) (bson.M,
 // readSubscriptionJSON reads a JSON file with an array of subscritpions
 // and return it as a Subscription array
 func readSubscriptionJSON(subscriptionsFile string) ([]*Subscription, error) {
-	if subscriptionsFile == "" {
-		subscriptionsFile = "subscriptions.json"
-	}
+	log.Warnf("Reading subscriptions from %s", subscriptionsFile)
 	file, err := os.Open(subscriptionsFile)
 	if err != nil {
 		return nil, err

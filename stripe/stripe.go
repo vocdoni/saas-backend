@@ -13,12 +13,12 @@ type StripeClient struct {
 	webhookSecret string
 }
 
-func New(apiSecret, webhookSecret string) (*StripeClient, error) {
+func New(apiSecret, webhookSecret string) *StripeClient {
 	stripe.Key = apiSecret
 	log.Infof("Stripe webhook key: %s", webhookSecret)
 	return &StripeClient{
 		webhookSecret: webhookSecret,
-	}, nil
+	}
 }
 
 func (s *StripeClient) DecodeEvent(payload []byte, signatureHeader string) (*stripe.Event, error) {
@@ -44,11 +44,10 @@ func (s *StripeClient) GetInfoFromEvent(event stripe.Event) (*stripe.Customer, *
 		log.Warnf("Error parsing webhook JSON: %s\n", err.Error())
 		return nil, nil, err
 	}
-	log.Warnf("Subscription created for %s.", subscription.ID)
-	log.Warnf("Subscription plan for %s.", subscription.Items.Data[0].Plan.ID)
-	customerID := subscription.Customer.ID
+
+	log.Debugf("Subscription created for %s and plan %s", subscription.ID, subscription.Customer.ID)
 	params := &stripe.CustomerParams{}
-	customer, err := customer.Get(customerID, params)
+	customer, err := customer.Get(subscription.Customer.ID, params)
 	if err != nil || customer == nil {
 		log.Warnf("Could not update subscription %s, stripe internal error getting customer", subscription.ID)
 		return nil, nil, err
