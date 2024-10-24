@@ -1,9 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
 	"net/http"
 	"time"
@@ -24,7 +26,9 @@ import (
 // of codes can be added in the future. If neither the mail service nor the SMS
 // service are available, the verification code will be empty but stored in the
 // database to mock the verification process in any case.
-func (a *API) sendUserCode(ctx context.Context, user *db.User, t db.CodeType) error {
+func (a *API) sendUserCode(ctx context.Context, user *db.User, codeType db.CodeType,
+	temp notifications.MailTemplate,
+) error {
 	// generate verification code if the mail service is available, if not
 	// the verification code will not be sent but stored in the database
 	// generated with just the user email to mock the verification process
@@ -35,19 +39,43 @@ func (a *API) sendUserCode(ctx context.Context, user *db.User, t db.CodeType) er
 	// store the verification code in the database
 	hashCode := internal.HashVerificationCode(user.Email, code)
 	exp := time.Now().Add(VerificationCodeExpiration)
-	if err := a.db.SetVerificationCode(&db.User{ID: user.ID}, hashCode, t, exp); err != nil {
+	if err := a.db.SetVerificationCode(&db.User{ID: user.ID}, hashCode, codeType, exp); err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
 	// send the verification code via email if the mail service is available
 	if a.mail != nil {
-		if err := a.mail.SendNotification(ctx, &notifications.Notification{
+		ctx, cancel := context.WithTimeout(ctx, time.Second*10)
+		defer cancel()
+		// create the notification with the verification code
+		notification := &notifications.Notification{
 			ToName:    fmt.Sprintf("%s %s", user.FirstName, user.LastName),
 			ToAddress: user.Email,
 			Subject:   VerificationCodeEmailSubject,
+			PlainBody: VerificationCodeTextBody + code,
 			Body:      VerificationCodeTextBody + code,
-		}); err != nil {
+		}
+		// compose de verification link
+		// check if the mail template is available
+		if templatePath, ok := a.mailTemplates[temp]; ok {
+			tmpl, err := template.ParseFiles(templatePath)
+			if err != nil {
+				return err
+			}
+			buf := new(bytes.Buffer)
+			if err := tmpl.Execute(buf, struct {
+				Code string
+				Link string
+			}{
+				Code: code,
+				Link: fmt.Sprintf(a.webAppURL+VerificationURI, user.Email, code),
+			}); err != nil {
+				return err
+			}
+			notification.Body = buf.String()
+		}
+		if err := a.mail.SendNotification(ctx, notification); err != nil {
 			return err
 		}
 	} else if a.sms != nil {
@@ -119,7 +147,8 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		FirstName: userInfo.FirstName,
 		LastName:  userInfo.LastName,
 	}
-	if err := a.sendUserCode(r.Context(), newUser, db.CodeTypeAccountVerification); err != nil {
+	if err := a.sendUserCode(r.Context(), newUser, db.CodeTypeAccountVerification,
+		VerificationAccountTemplate); err != nil {
 		log.Warnw("could not send verification code", "error", err)
 		ErrGenericInternalServerError.Write(w)
 		return
@@ -315,7 +344,7 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 	// set a new code and send it
-	if err := a.sendUserCode(r.Context(), user, db.CodeTypeAccountVerification); err != nil {
+	if err := a.sendUserCode(r.Context(), user, db.CodeTypeAccountVerification, ""); err != nil {
 		log.Warnw("could not send verification code", "error", err)
 		ErrGenericInternalServerError.Write(w)
 		return
@@ -493,7 +522,8 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	// generate a new verification code
-	if err := a.sendUserCode(r.Context(), user, db.CodeTypePasswordReset); err != nil {
+	if err := a.sendUserCode(r.Context(), user, db.CodeTypePasswordReset,
+		PasswordResetTemplate); err != nil {
 		log.Warnw("could not send verification code", "error", err)
 		ErrGenericInternalServerError.Write(w)
 		return
