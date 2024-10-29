@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -12,11 +13,39 @@ import (
 func (ms *MongoStorage) CreateInvitation(invite *OrganizationInvite) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-
+	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
-	_, err := ms.organizationInvites.InsertOne(ctx, invite)
+	// check if the organization exists
+	if _, err := ms.organization(ctx, invite.OrganizationAddress); err != nil {
+		return err
+	}
+	// check if the user exists
+	user, err := ms.user(ctx, invite.CurrentUserID)
+	if err != nil {
+		return err
+	}
+	// check if the user is already a member of the organization
+	partOfOrg := false
+	for _, org := range user.Organizations {
+		if org.Address == invite.OrganizationAddress {
+			partOfOrg = true
+			break
+		}
+	}
+	if !partOfOrg {
+		return fmt.Errorf("user is not part of the organization")
+	}
+	// check if expiration date is in the future
+	if !invite.Expiration.After(time.Now()) {
+		return fmt.Errorf("expiration date must be in the future")
+	}
+	// check if the role is valid
+	if !IsValidUserRole(invite.Role) {
+		return fmt.Errorf("invalid role")
+	}
+	// insert the invitation in the database
+	_, err = ms.organizationInvites.InsertOne(ctx, invite)
 	return err
 }
 
@@ -39,8 +68,8 @@ func (ms *MongoStorage) Invitation(invitationCode string) (*OrganizationInvite, 
 	return invite, nil
 }
 
-// DeclineInvitation removes the invitation from the database.
-func (ms *MongoStorage) DeclineInvitation(invitationCode string) error {
+// DeleteInvitation removes the invitation from the database.
+func (ms *MongoStorage) DeleteInvitation(invitationCode string) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 

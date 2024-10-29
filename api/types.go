@@ -56,7 +56,6 @@ type UserOrganization struct {
 // UserInfo is the request to register a new user.
 type UserInfo struct {
 	Email         string              `json:"email,omitempty"`
-	Phone         string              `json:"phone,omitempty"`
 	Password      string              `json:"password,omitempty"`
 	FirstName     string              `json:"firstName,omitempty"`
 	LastName      string              `json:"lastName,omitempty"`
@@ -88,7 +87,6 @@ type UserPasswordUpdate struct {
 type UserVerification struct {
 	Email      string    `json:"email,omitempty"`
 	Code       string    `json:"code,omitempty"`
-	Phone      string    `json:"phone,omitempty"`
 	Expiration time.Time `json:"expiration,omitempty"`
 	Valid      bool      `json:"valid"`
 }

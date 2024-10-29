@@ -11,6 +11,20 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+func (ms *MongoStorage) organization(ctx context.Context, address string) (*Organization, error) {
+	// find the organization in the database
+	result := ms.organizations.FindOne(ctx, bson.M{"_id": address})
+	org := &Organization{}
+	if err := result.Decode(org); err != nil {
+		// if the organization doesn't exist return a specific error
+		if err == mongo.ErrNoDocuments {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return org, nil
+}
+
 // Organization method returns the organization with the given address. If the
 // parent flag is true, it also returns the parent organization if it exists. If
 // the organization doesn't exist or the parent organization doesn't exist and
@@ -23,26 +37,16 @@ func (ms *MongoStorage) Organization(address string, parent bool) (*Organization
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	// find the organization in the database
-	result := ms.organizations.FindOne(ctx, bson.M{"_id": address})
-	org := &Organization{}
-	if err := result.Decode(org); err != nil {
-		// if the organization doesn't exist return a specific error
-		if err == mongo.ErrNoDocuments {
-			return nil, nil, ErrNotFound
-		}
+	org, err := ms.organization(ctx, address)
+	if err != nil {
 		return nil, nil, err
 	}
 	if !parent || org.Parent == "" {
 		return org, nil, nil
 	}
 	// find the parent organization in the database
-	result = ms.organizations.FindOne(ctx, bson.M{"_id": org.Parent})
-	parentOrg := &Organization{}
-	if err := result.Decode(parentOrg); err != nil {
-		// if the parent organization doesn't exist return a specific error
-		if err == mongo.ErrNoDocuments {
-			return nil, nil, ErrNotFound
-		}
+	parentOrg, err := ms.organization(ctx, org.Parent)
+	if err != nil {
 		return nil, nil, err
 	}
 	return org, parentOrg, nil

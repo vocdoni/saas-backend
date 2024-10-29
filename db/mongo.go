@@ -104,6 +104,14 @@ func (ms *MongoStorage) Reset() error {
 	if err := ms.organizations.Drop(ctx); err != nil {
 		return err
 	}
+	// drop organizationInvites collection
+	if err := ms.organizationInvites.Drop(ctx); err != nil {
+		return err
+	}
+	// drop verifications collection
+	if err := ms.verifications.Drop(ctx); err != nil {
+		return err
+	}
 	// init the collections
 	if err := ms.initCollections(ms.database); err != nil {
 		return err

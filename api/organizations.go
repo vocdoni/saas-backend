@@ -351,7 +351,7 @@ func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r
 	// create a helper function to remove the invitation from the database in
 	// case of error or expiration
 	removeInvitation := func() {
-		if err := a.db.DeclineInvitation(invitationReq.Code); err != nil {
+		if err := a.db.DeleteInvitation(invitationReq.Code); err != nil {
 			log.Warnf("could not delete invitation: %v", err)
 		}
 	}
@@ -383,7 +383,6 @@ func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r
 		hPassword := internal.HexHashPassword(passwordSalt, invitationReq.User.Password)
 		dbUser = &db.User{
 			Email:     invitationReq.User.Email,
-			Phone:     invitationReq.User.Phone,
 			Password:  hPassword,
 			FirstName: invitationReq.User.FirstName,
 			LastName:  invitationReq.User.LastName,
