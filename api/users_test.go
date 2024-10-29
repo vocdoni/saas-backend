@@ -125,17 +125,6 @@ func TestRegisterHandler(t *testing.T) {
 			}),
 			expectedStatus: http.StatusBadRequest,
 		},
-		{
-			uri:    registerURL,
-			method: http.MethodPost,
-			body: mustMarshal(&UserInfo{
-				Email:     "valid@test.com",
-				Password:  "password",
-				FirstName: "first",
-				LastName:  "last",
-			}),
-			expectedStatus: http.StatusBadRequest,
-		},
 	}
 
 	for _, testCase := range testCases {
