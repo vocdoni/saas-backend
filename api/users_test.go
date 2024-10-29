@@ -51,8 +51,8 @@ func TestRegisterHandler(t *testing.T) {
 				FirstName: "first",
 				LastName:  "last",
 			}),
-			expectedStatus: http.StatusInternalServerError,
-			expectedBody:   mustMarshal(ErrGenericInternalServerError),
+			expectedStatus: http.StatusConflict,
+			expectedBody:   mustMarshal(ErrDuplicateConflict.With("user already exists")),
 		},
 		{
 			uri:    registerURL,
