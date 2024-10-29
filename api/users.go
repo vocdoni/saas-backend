@@ -105,11 +105,11 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if err == db.ErrAlreadyExists {
-			ErrMalformedBody.WithErr(err).Write(w)
+			ErrDuplicateConflict.With("user already exists").Write(w)
 			return
 		}
 		log.Warnw("could not create user", "error", err)
-		ErrGenericInternalServerError.Write(w)
+		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 	// compose the new user and send the verification code
@@ -121,7 +121,7 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := a.sendUserCode(r.Context(), newUser, db.CodeTypeAccountVerification); err != nil {
 		log.Warnw("could not send verification code", "error", err)
-		ErrGenericInternalServerError.Write(w)
+		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 	// send the token back to the user

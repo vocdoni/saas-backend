@@ -200,6 +200,7 @@ This endpoint only returns the addresses of the organizations where the current 
 | `400` | `40002` | `email malformed` |
 | `400` | `40003` | `password too short` |
 | `400` | `40004` | `malformed JSON body` |
+| `409` | `40901` | `duplicate conflict` |
 | `500` | `50002` | `internal server error` |
 
 ### ✅ Verify user
