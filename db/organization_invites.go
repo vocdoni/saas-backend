@@ -7,6 +7,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.vocdoni.io/dvote/log"
 )
 
 // CreateInvitation creates a new invitation for a user to join an organization.
@@ -91,8 +92,11 @@ func (ms *MongoStorage) PendingInvitations(organizationAddress string) ([]Organi
 	if err != nil {
 		return nil, err
 	}
-	defer cursor.Close(ctx)
-
+	defer func() {
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("error closing cursor", "error", err)
+		}
+	}()
 	invitations := []OrganizationInvite{}
 	if err := cursor.All(ctx, &invitations); err != nil {
 		return nil, err
