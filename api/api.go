@@ -30,7 +30,6 @@ type APIConfig struct {
 	Client      *apiclient.HTTPclient
 	Account     *account.Account
 	MailService notifications.NotificationService
-	SMSService  notifications.NotificationService
 	// FullTransparentMode if true allows signing all transactions and does not
 	// modify any of them.
 	FullTransparentMode bool
@@ -46,7 +45,6 @@ type API struct {
 	client          *apiclient.HTTPclient
 	account         *account.Account
 	mail            notifications.NotificationService
-	sms             notifications.NotificationService
 	secret          string
 	transparentMode bool
 }
@@ -64,7 +62,6 @@ func New(conf *APIConfig) *API {
 		client:          conf.Client,
 		account:         conf.Account,
 		mail:            conf.MailService,
-		sms:             conf.SMSService,
 		secret:          conf.Secret,
 		transparentMode: conf.FullTransparentMode,
 	}
@@ -131,6 +128,9 @@ func (a *API) initRouter() http.Handler {
 		// update the organization
 		log.Infow("new route", "method", "PUT", "path", organizationEndpoint)
 		r.Put(organizationEndpoint, a.updateOrganizationHandler)
+		// invite a new admin member to the organization
+		log.Infow("new route", "method", "POST", "path", organizationAddMemberEndpoint)
+		r.Post(organizationAddMemberEndpoint, a.inviteOrganizationMemberHandler)
 	})
 
 	// Public routes
@@ -167,6 +167,9 @@ func (a *API) initRouter() http.Handler {
 		// get organization members
 		log.Infow("new route", "method", "GET", "path", organizationMembersEndpoint)
 		r.Get(organizationMembersEndpoint, a.organizationMembersHandler)
+		// accept organization invitation
+		log.Infow("new route", "method", "POST", "path", organizationAcceptMemberEndpoint)
+		r.Post(organizationAcceptMemberEndpoint, a.acceptOrganizationMemberInvitationHandler)
 		// get organization roles
 		log.Infow("new route", "method", "GET", "path", organizationRolesEndpoint)
 		r.Get(organizationRolesEndpoint, a.organizationsMembersRolesHandler)

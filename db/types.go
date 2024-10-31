@@ -5,7 +5,6 @@ import "time"
 type User struct {
 	ID            uint64               `json:"id" bson:"_id"`
 	Email         string               `json:"email" bson:"email"`
-	Phone         string               `json:"phone" bson:"phone"`
 	Password      string               `json:"password" bson:"password"`
 	FirstName     string               `json:"firstName" bson:"firstName"`
 	LastName      string               `json:"lastName" bson:"lastName"`
@@ -56,4 +55,13 @@ type Organization struct {
 	TokensPurchased uint64           `json:"tokensPurchased" bson:"tokensPurchased"`
 	TokensRemaining uint64           `json:"tokensRemaining" bson:"tokensRemaining"`
 	Parent          string           `json:"parent" bson:"parent"`
+}
+
+type OrganizationInvite struct {
+	InvitationCode      string    `json:"invitationCode" bson:"invitationCode"`
+	OrganizationAddress string    `json:"organizationAddress" bson:"organizationAddress"`
+	CurrentUserID       uint64    `json:"currentUserID" bson:"currentUserID"`
+	NewUserEmail        string    `json:"newUserEmail" bson:"newUserEmail"`
+	Role                UserRole  `json:"role" bson:"role"`
+	Expiration          time.Time `json:"expiration" bson:"expiration"`
 }

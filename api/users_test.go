@@ -138,7 +138,6 @@ func TestRegisterHandler(t *testing.T) {
 				c.Errorf("error closing response body: %v", err)
 			}
 		}()
-
 		c.Assert(resp.StatusCode, qt.Equals, testCase.expectedStatus)
 		if testCase.expectedBody != nil {
 			body, err := io.ReadAll(resp.Body)
@@ -274,7 +273,6 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	// create a regex to find the verification code in the email
 	mailCodeRgx := regexp.MustCompile(fmt.Sprintf(`%s(.{%d})`, VerificationCodeTextBody, VerificationCodeLength*2))
 	verifyMailCode := mailCodeRgx.FindStringSubmatch(mailBody)
-	c.Log(verifyMailCode[1])
 	// verify the user
 	verification := mustMarshal(&UserVerification{
 		Email: testEmail,

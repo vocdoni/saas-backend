@@ -78,12 +78,25 @@ type OrganizationTypeList struct {
 // UserInfo is the request to register a new user.
 type UserInfo struct {
 	Email         string              `json:"email,omitempty"`
-	Phone         string              `json:"phone,omitempty"`
 	Password      string              `json:"password,omitempty"`
 	FirstName     string              `json:"firstName,omitempty"`
 	LastName      string              `json:"lastName,omitempty"`
 	Verified      bool                `json:"verified,omitempty"`
 	Organizations []*UserOrganization `json:"organizations"`
+}
+
+// OrganizationInvite is the struct that represents an invitation to an
+// organization in the API.
+type OrganizationInvite struct {
+	Email string `json:"email"`
+	Role  string `json:"role"`
+}
+
+// AcceptOrganizationInvitation is the request to accept an invitation to an
+// organization.
+type AcceptOrganizationInvitation struct {
+	Code string    `json:"code"`
+	User *UserInfo `json:"user"`
 }
 
 // UserPasswordUpdate is the request to update the password of a user.
@@ -96,7 +109,6 @@ type UserPasswordUpdate struct {
 type UserVerification struct {
 	Email      string    `json:"email,omitempty"`
 	Code       string    `json:"code,omitempty"`
-	Phone      string    `json:"phone,omitempty"`
 	Expiration time.Time `json:"expiration,omitempty"`
 	Valid      bool      `json:"valid"`
 }

@@ -29,7 +29,7 @@ func (a *API) sendUserCode(ctx context.Context, user *db.User, t db.CodeType) er
 	// the verification code will not be sent but stored in the database
 	// generated with just the user email to mock the verification process
 	var code string
-	if a.mail != nil || a.sms != nil {
+	if a.mail != nil {
 		code = util.RandomHex(VerificationCodeLength)
 	}
 	// store the verification code in the database
@@ -47,14 +47,6 @@ func (a *API) sendUserCode(ctx context.Context, user *db.User, t db.CodeType) er
 			ToAddress: user.Email,
 			Subject:   VerificationCodeEmailSubject,
 			Body:      VerificationCodeTextBody + code,
-		}); err != nil {
-			return err
-		}
-	} else if a.sms != nil {
-		// send the verification code via SMS if the SMS service is available
-		if err := a.sms.SendNotification(ctx, &notifications.Notification{
-			ToNumber: user.Phone,
-			Body:     VerificationCodeTextBody + code,
 		}); err != nil {
 			return err
 		}
@@ -144,13 +136,10 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// check the email and verification code are not empty
-	if (a.mail != nil || a.sms != nil) &&
-		(verification.Code == "" ||
-			(verification.Email == "" && verification.Phone == "") ||
-			(a.mail == nil && verification.Email != "") ||
-			(a.sms == nil && verification.Phone != "")) {
-		ErrInvalidUserData.With("no verification code or email/phone provided").Write(w)
+	// check the email and verification code are not empty only if the mail
+	// service is available
+	if a.mail != nil && (verification.Code == "" || verification.Email == "") {
+		ErrInvalidUserData.With("no verification code or email provided").Write(w)
 		return
 	}
 	// get the user information from the database by email
@@ -255,7 +244,6 @@ func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Req
 	// return the verification code information
 	httpWriteJSON(w, UserVerification{
 		Email:      user.Email,
-		Phone:      user.Phone,
 		Expiration: code.Expiration,
 		Valid:      code.Expiration.After(time.Now()),
 	})
@@ -274,7 +262,7 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 	// check the email or the phone number is not empty
-	if verification.Email == "" && verification.Phone == "" {
+	if verification.Email == "" {
 		ErrInvalidUserData.With("no email or phone number provided").Write(w)
 		return
 	}
@@ -283,8 +271,6 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 	// get the user information from the database by email or phone
 	if verification.Email != "" {
 		user, err = a.db.UserByEmail(verification.Email)
-	} else {
-		user, err = a.db.UserByPhone(verification.Phone)
 	}
 	// check the error getting the user information
 	if err != nil {

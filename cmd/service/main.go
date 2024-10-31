@@ -12,7 +12,6 @@ import (
 	"github.com/vocdoni/saas-backend/api"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/notifications/smtp"
-	"github.com/vocdoni/saas-backend/notifications/twilio"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 )
@@ -34,9 +33,6 @@ func main() {
 	flag.String("smtpPassword", "", "SMTP password")
 	flag.String("emailFromAddress", "", "Email service from address")
 	flag.String("emailFromName", "Vocdoni", "Email service from name")
-	flag.String("twilioAccountSid", "", "Twilio account SID")
-	flag.String("twilioAuthToken", "", "Twilio auth token")
-	flag.String("smsFromNumber", "", "SMS from number")
 	// parse flags
 	flag.Parse()
 	// initialize Viper
@@ -62,10 +58,6 @@ func main() {
 	smtpPassword := viper.GetString("smtpPassword")
 	emailFromAddress := viper.GetString("emailFromAddress")
 	emailFromName := viper.GetString("emailFromName")
-	// sms vars
-	twilioAccountSid := viper.GetString("twilioAccountSid")
-	twilioAuthToken := viper.GetString("twilioAuthToken")
-	twilioFromNumber := viper.GetString("twilioFromNumber")
 	// initialize the MongoDB database
 	database, err := db.New(mongoURL, mongoDB)
 	if err != nil {
@@ -117,19 +109,6 @@ func main() {
 			log.Fatalf("could not create the email service: %v", err)
 		}
 		log.Infow("email service created", "from", fmt.Sprintf("%s <%s>", emailFromName, emailFromAddress))
-	}
-	// create SMS notifications service if the required parameters are set and
-	// include it in the API configuration
-	if twilioAccountSid != "" && twilioAuthToken != "" && twilioFromNumber != "" {
-		apiConf.SMSService = new(twilio.TwilioSMS)
-		if err := apiConf.SMSService.New(&twilio.TwilioConfig{
-			AccountSid: twilioAccountSid,
-			AuthToken:  twilioAuthToken,
-			FromNumber: twilioFromNumber,
-		}); err != nil {
-			log.Fatalf("could not create the SMS service: %v", err)
-		}
-		log.Infow("SMS service created", "from", twilioFromNumber)
 	}
 	// create the local API server
 	api.New(apiConf).Start()

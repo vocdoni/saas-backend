@@ -1,12 +1,17 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
+	"github.com/vocdoni/saas-backend/notifications"
+	"go.vocdoni.io/dvote/log"
 )
 
 // createOrganizationHandler handles the request to create a new organization.
@@ -209,6 +214,182 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
+	httpWriteOK(w)
+}
+
+// inviteOrganizationMemberHandler handles the request to invite a new admin
+// member to an organization. Only the admin of the organization can invite a
+// new member. It stores the invitation in the database and sends an email to
+// the new member with the invitation code.
+func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Request) {
+	// get the user from the request context
+	user, ok := userFromContext(r.Context())
+	if !ok {
+		ErrUnauthorized.Write(w)
+		return
+	}
+	// get the organization info from the request context
+	org, _, ok := a.organizationFromRequest(r)
+	if !ok {
+		ErrNoOrganizationProvided.Write(w)
+		return
+	}
+	if !user.HasRoleFor(org.Address, db.AdminRole) {
+		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		return
+	}
+	// check if the user is already verified
+	if !user.Verified {
+		ErrUserNoVerified.With("user account not verified").Write(w)
+		return
+	}
+	// get new admin info from the request body
+	invite := &OrganizationInvite{}
+	if err := json.NewDecoder(r.Body).Decode(invite); err != nil {
+		ErrMalformedBody.Write(w)
+		return
+	}
+	// check the email is correct format
+	if !internal.ValidEmail(invite.Email) {
+		ErrEmailMalformed.Write(w)
+		return
+	}
+	// check the role is valid
+	if valid := db.IsValidUserRole(db.UserRole(invite.Role)); !valid {
+		ErrInvalidUserData.Withf("invalid role").Write(w)
+		return
+	}
+	// check if the new user is already a member of the organization
+	if _, err := a.db.IsMemberOf(invite.Email, org.Address, db.AdminRole); err == nil {
+		ErrDuplicateConflict.With("user is already admin of organization").Write(w)
+		return
+	}
+	// create new invitation
+	inviteCode := internal.RandomHex(VerificationCodeLength)
+	if err := a.db.CreateInvitation(&db.OrganizationInvite{
+		InvitationCode:      inviteCode,
+		OrganizationAddress: org.Address,
+		NewUserEmail:        invite.Email,
+		Role:                db.UserRole(invite.Role),
+		CurrentUserID:       user.ID,
+		Expiration:          time.Now().Add(InvitationExpiration),
+	}); err != nil {
+		ErrGenericInternalServerError.Withf("could not create invitation: %v", err).Write(w)
+		return
+	}
+	// send the invitation email
+	ctx, cancel := context.WithTimeout(r.Context(), time.Second*10)
+	defer cancel()
+	// send the verification code via email if the mail service is available
+	if a.mail != nil {
+		if err := a.mail.SendNotification(ctx, &notifications.Notification{
+			ToName:    fmt.Sprintf("%s %s", user.FirstName, user.LastName),
+			ToAddress: invite.Email,
+			Subject:   InvitationEmailSubject,
+			Body:      fmt.Sprintf(InvitationTextBody, org.Address, inviteCode),
+		}); err != nil {
+			ErrGenericInternalServerError.Withf("could not send verification code: %v", err).Write(w)
+			return
+		}
+	}
+	httpWriteOK(w)
+}
+
+// acceptOrganizationMemberInvitationHandler handles the request to accept an
+// invitation to an organization. It checks if the invitation is valid and not
+// expired, and if the user is not already a member of the organization. If the
+// user does not exist, it creates a new user with the provided information.
+// If the user already exists and is verified, it adds the organization to the
+// user.
+func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r *http.Request) {
+	// get the organization info from the request context
+	org, _, ok := a.organizationFromRequest(r)
+	if !ok {
+		ErrNoOrganizationProvided.Write(w)
+		return
+	}
+	// get new member info from the request body
+	invitationReq := &AcceptOrganizationInvitation{}
+	if err := json.NewDecoder(r.Body).Decode(invitationReq); err != nil {
+		ErrMalformedBody.Write(w)
+		return
+	}
+	// get the invitation from the database
+	invitation, err := a.db.Invitation(invitationReq.Code)
+	if err != nil {
+		ErrUnauthorized.Withf("could not get invitation: %v", err).Write(w)
+		return
+	}
+	// check if the organization is correct
+	if invitation.OrganizationAddress != org.Address {
+		ErrUnauthorized.Withf("invitation is not for this organization").Write(w)
+		return
+	}
+	// create a helper function to remove the invitation from the database in
+	// case of error or expiration
+	removeInvitation := func() {
+		if err := a.db.DeleteInvitation(invitationReq.Code); err != nil {
+			log.Warnf("could not delete invitation: %v", err)
+		}
+	}
+	// check if the invitation is expired
+	if invitation.Expiration.Before(time.Now()) {
+		go removeInvitation()
+		ErrInvitationExpired.Write(w)
+		return
+	}
+	// try to get the user from the database
+	dbUser, err := a.db.UserByEmail(invitation.NewUserEmail)
+	if err != nil {
+		// if the user does not exist, create it
+		if err != db.ErrNotFound {
+			ErrGenericInternalServerError.Withf("could not get user: %v", err).Write(w)
+			return
+		}
+		// check if the user info is provided
+		if invitationReq.User == nil {
+			ErrMalformedBody.With("user info not provided").Write(w)
+			return
+		}
+		// check the email is correct
+		if invitationReq.User.Email != invitation.NewUserEmail {
+			ErrInvalidUserData.With("email does not match").Write(w)
+			return
+		}
+		// create the new user and move on to include the organization
+		hPassword := internal.HexHashPassword(passwordSalt, invitationReq.User.Password)
+		dbUser = &db.User{
+			Email:     invitationReq.User.Email,
+			Password:  hPassword,
+			FirstName: invitationReq.User.FirstName,
+			LastName:  invitationReq.User.LastName,
+			Verified:  true,
+		}
+	} else {
+		// if it does, check if the user is already verified
+		if !dbUser.Verified {
+			ErrUserNoVerified.With("user already exists but is not verified").Write(w)
+			return
+		}
+		// check if the user is already a member of the organization
+		if _, err := a.db.IsMemberOf(invitation.NewUserEmail, org.Address, invitation.Role); err == nil {
+			go removeInvitation()
+			ErrDuplicateConflict.With("user is already admin of organization").Write(w)
+			return
+		}
+	}
+	// include the new organization in the user
+	dbUser.Organizations = append(dbUser.Organizations, db.OrganizationMember{
+		Address: org.Address,
+		Role:    invitation.Role,
+	})
+	// set the user in the database
+	if _, err := a.db.SetUser(dbUser); err != nil {
+		ErrGenericInternalServerError.Withf("could not set user: %v", err).Write(w)
+		return
+	}
+	// delete the invitation
+	go removeInvitation()
 	httpWriteOK(w)
 }
 
