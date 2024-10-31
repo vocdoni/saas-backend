@@ -286,7 +286,7 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 			ToName:    fmt.Sprintf("%s %s", user.FirstName, user.LastName),
 			ToAddress: invite.Email,
 			Subject:   InvitationEmailSubject,
-			Body:      fmt.Sprintf(InvitationTextBody, org.Name, inviteCode),
+			Body:      fmt.Sprintf(InvitationTextBody, org.Address, inviteCode),
 		}); err != nil {
 			ErrGenericInternalServerError.Withf("could not send verification code: %v", err).Write(w)
 			return
