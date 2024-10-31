@@ -88,8 +88,15 @@ type UserInfo struct {
 // OrganizationInvite is the struct that represents an invitation to an
 // organization in the API.
 type OrganizationInvite struct {
-	Email string `json:"email"`
-	Role  string `json:"role"`
+	Email      string    `json:"email"`
+	Role       string    `json:"role"`
+	Expiration time.Time `json:"expiration"`
+}
+
+// OrganizationInviteList is the struct that represents a list of invitations to
+// organizations in the API.
+type OrganizationInviteList struct {
+	Invites []*OrganizationInvite `json:"pending"`
 }
 
 // AcceptOrganizationInvitation is the request to accept an invitation to an

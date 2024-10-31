@@ -79,6 +79,27 @@ func (ms *MongoStorage) Invitation(invitationCode string) (*OrganizationInvite, 
 	return invite, nil
 }
 
+// PendingInvitations returns the pending invitations for the given organization.
+func (ms *MongoStorage) PendingInvitations(organizationAddress string) ([]OrganizationInvite, error) {
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cursor, err := ms.organizationInvites.Find(ctx, bson.M{"organizationAddress": organizationAddress})
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	invitations := []OrganizationInvite{}
+	if err := cursor.All(ctx, &invitations); err != nil {
+		return nil, err
+	}
+	return invitations, nil
+}
+
 // DeleteInvitation removes the invitation from the database.
 func (ms *MongoStorage) DeleteInvitation(invitationCode string) error {
 	ms.keysLock.Lock()

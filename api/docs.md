@@ -27,6 +27,7 @@
   - [🔍 Organization info](#-organization-info)
   - [🧑‍🤝‍🧑 Organization members](#-organization-members)
   - [🧑‍💼 Invite organization member](#-invite-organization-member)
+  - [⏳ List pending invitations](#-list-pending-invitations)
   - [🤝 Accept organization invitation](#-accept-organization-invitation)
   - [🤠 Available organization members roles](#-available-organization-members-roles)
   - [🏛️ Available organization types](#-available-organization-types)
@@ -575,6 +576,8 @@ Only the following parameters can be changed. Every parameter is optional.
 
 * **Path** `/organizations/{address}/members`
 * **Method** `POST`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
 * **Request**
 ```json
 {
@@ -596,6 +599,35 @@ Only the following parameters can be changed. Every parameter is optional.
 | `401` | `40014` | `user account not verified` |
 | `400` | `40019` | `inviation code expired` |
 | `409` | `40901` | `duplicate conflict` |
+| `500` | `50002` | `internal server error` |
+
+### ⏳ List pending invitations
+
+* **Path** `/organizations/{address}/members/pending`
+* **Method** `POST`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Response**
+```json
+{
+  "pending": [
+    {
+      "email": "newuser@email.me",
+      "role": "admin",
+      "expiration": "2024-12-12T12:00:00.000Z"
+    }
+  ]
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40009` | `organization not found` |
+| `400` | `40011` | `no organization provided` |
+| `401` | `40014` | `user account not verified` |
 | `500` | `50002` | `internal server error` |
 
 ### 🤝 Accept organization invitation
