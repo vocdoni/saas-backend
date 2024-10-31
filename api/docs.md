@@ -27,6 +27,7 @@
   - [🔍 Organization info](#-organization-info)
   - [🧑‍🤝‍🧑 Organization members](#-organization-members)
   - [🤠 Available organization members roles](#-available-organization-members-roles)
+  - [🏛️ Available organization types](#-available-organization-types)
 
 </details>
 
@@ -588,6 +589,73 @@ Only the following parameters can be changed. Every parameter is optional.
       "role": "admin",
       "name": "Admin",
       "writePermission": true
+    }
+  ]
+}
+```
+
+### 🏛️ Available organization types
+* **Path** `/organizations/types`
+* **Method** `GET`
+* **Response**
+```json
+{
+  "types": [
+    {
+      "type": "cooperative",
+      "name": "Cooperative"
+    },
+    {
+      "type": "educational",
+      "name": "University / Educational Institution"
+    },
+    {
+      "type": "others",
+      "name": "Others"
+    },
+    {
+      "type": "assembly",
+      "name": "Assembly"
+    },
+    {
+      "type": "religious",
+      "name": "Church / Religious Organization"
+    },
+    {
+      "type": "company",
+      "name": "Company / Corporation"
+    },
+    {
+      "type": "political_party",
+      "name": "Political Party"
+    },
+    {
+      "type": "chamber",
+      "name": "Chamber"
+    },
+    {
+      "type": "nonprofit",
+      "name": "Nonprofit / NGO"
+    },
+    {
+      "type": "community",
+      "name": "Community Group"
+    },
+    {
+      "type": "professional_college",
+      "name": "Professional College"
+    },
+    {
+      "type": "association",
+      "name": "Association"
+    },
+    {
+      "type": "city",
+      "name": "City / Municipality"
+    },
+    {
+      "type": "union",
+      "name": "Union"
     }
   ]
 }
