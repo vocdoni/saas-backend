@@ -12,8 +12,9 @@ import (
 )
 
 func (ms *MongoStorage) organization(ctx context.Context, address string) (*Organization, error) {
-	// find the organization in the database
-	result := ms.organizations.FindOne(ctx, bson.M{"_id": address})
+	// find the organization in the database by its address (case insensitive)
+	filter := bson.M{"_id": bson.M{"$regex": address, "$options": "i"}}
+	result := ms.organizations.FindOne(ctx, filter)
 	org := &Organization{}
 	if err := result.Decode(org); err != nil {
 		// if the organization doesn't exist return a specific error

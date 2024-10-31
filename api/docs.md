@@ -575,7 +575,7 @@ Only the following parameters can be changed. Every parameter is optional.
 
 * **Path** `/organizations/{address}/members`
 * **Method** `POST`
-* **Response**
+* **Request**
 ```json
 {
   "role": "admin",
@@ -602,7 +602,7 @@ Only the following parameters can be changed. Every parameter is optional.
 
 * **Path** `/organizations/{address}/members/accept`
 * **Method** `POST`
-* **Response**
+* **Request**
 ```json
 {
   "code": "a3f3b5",

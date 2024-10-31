@@ -46,6 +46,17 @@ func (ms *MongoStorage) CreateInvitation(invite *OrganizationInvite) error {
 	}
 	// insert the invitation in the database
 	_, err = ms.organizationInvites.InsertOne(ctx, invite)
+	// check if the user is already invited to the organization, the error is
+	// about the unique index
+	if merr, ok := err.(mongo.WriteException); ok {
+		for _, we := range merr.WriteErrors {
+			// duplicate key error has the code 11000:
+			// https://www.mongodb.com/docs/manual/reference/error-codes
+			if we.Code == 11000 {
+				return ErrAlreadyExists
+			}
+		}
+	}
 	return err
 }
 

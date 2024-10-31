@@ -274,6 +274,10 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		CurrentUserID:       user.ID,
 		Expiration:          time.Now().Add(InvitationExpiration),
 	}); err != nil {
+		if err == db.ErrAlreadyExists {
+			ErrDuplicateConflict.With("user is already invited to the organization").Write(w)
+			return
+		}
 		ErrGenericInternalServerError.Withf("could not create invitation: %v", err).Write(w)
 		return
 	}
