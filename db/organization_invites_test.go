@@ -35,7 +35,6 @@ func TestCreateInvitation(t *testing.T) {
 	// non existing user
 	c.Assert(db.SetOrganization(&Organization{
 		Address: orgAddress,
-		Name:    "Organization",
 	}), qt.IsNil)
 	c.Assert(db.CreateInvitation(testInvite), qt.ErrorIs, ErrNotFound)
 	// non organization member
@@ -86,7 +85,6 @@ func TestInvitation(t *testing.T) {
 	c.Assert(err, qt.ErrorIs, ErrNotFound)
 	c.Assert(db.SetOrganization(&Organization{
 		Address: orgAddress,
-		Name:    "Organization",
 	}), qt.IsNil)
 	_, err = db.SetUser(&User{
 		Email:     testUserEmail,
@@ -130,7 +128,6 @@ func TestDeleteInvitation(t *testing.T) {
 	// create valid invitation
 	c.Assert(db.SetOrganization(&Organization{
 		Address: orgAddress,
-		Name:    "Organization",
 	}), qt.IsNil)
 	_, err := db.SetUser(&User{
 		Email:     testUserEmail,
