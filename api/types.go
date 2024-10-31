@@ -53,6 +53,20 @@ type UserOrganization struct {
 	Organization *OrganizationInfo `json:"organization"`
 }
 
+// OrganizationRole is the struct that represents the role of an organization
+// member in the API.
+type OrganizationRole struct {
+	Role            string `json:"role"`
+	Name            string `json:"name"`
+	WritePermission bool   `json:"writePermission"`
+}
+
+// OrganizationRoleList is the struct that represents a list of roles of an
+// organization member in the API.
+type OrganizationRoleList struct {
+	Roles []*OrganizationRole `json:"roles"`
+}
+
 // UserInfo is the request to register a new user.
 type UserInfo struct {
 	Email         string              `json:"email,omitempty"`

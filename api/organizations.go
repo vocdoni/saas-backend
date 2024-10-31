@@ -234,3 +234,17 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	httpWriteOK(w)
 }
+
+// memberRolesHandler returns the available roles that can be assigned to a
+// member of an organization.
+func (a *API) organizationsMembersRolesHandler(w http.ResponseWriter, _ *http.Request) {
+	availableRoles := []*OrganizationRole{}
+	for role, name := range db.UserRolesNames {
+		availableRoles = append(availableRoles, &OrganizationRole{
+			Role:            string(role),
+			Name:            name,
+			WritePermission: db.HasWriteAccess(role),
+		})
+	}
+	httpWriteJSON(w, &OrganizationRoleList{Roles: availableRoles})
+}

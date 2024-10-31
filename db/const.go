@@ -20,6 +20,13 @@ var writableRoles = map[UserRole]bool{
 	ViewerRole:  false,
 }
 
+// UserRoleNames is a map that contains the user role names by role
+var UserRolesNames = map[UserRole]string{
+	AdminRole:   "Admin",
+	ManagerRole: "Manager",
+	ViewerRole:  "Viewer",
+}
+
 // HasWriteAccess function checks if the user role has write access
 func HasWriteAccess(role UserRole) bool {
 	return writableRoles[role]

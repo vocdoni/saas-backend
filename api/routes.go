@@ -46,4 +46,6 @@ const (
 	organizationEndpoint = "/organizations/{address}"
 	// GET /organizations/{address}/members to get the organization members
 	organizationMembersEndpoint = "/organizations/{address}/members"
+	// GET /organizations/roles to get the available organization member roles
+	organizationRolesEndpoint = "/organizations/roles"
 )
