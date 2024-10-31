@@ -114,15 +114,7 @@ func (ms *MongoStorage) createIndexes() error {
 		Keys:    bson.D{{Key: "email", Value: 1}}, // 1 for ascending order
 		Options: options.Index().SetUnique(true),
 	}
-	// create an index for the 'phone' field on users
-	userPhoneIndex := mongo.IndexModel{
-		Keys:    bson.D{{Key: "phone", Value: 1}}, // 1 for ascending order
-		Options: options.Index().SetSparse(true),
-	}
-	if _, err := ms.users.Indexes().CreateMany(ctx, []mongo.IndexModel{
-		userEmailIndex,
-		userPhoneIndex,
-	}); err != nil {
+	if _, err := ms.users.Indexes().CreateOne(ctx, userEmailIndex); err != nil {
 		return fmt.Errorf("failed to create index on phone for users: %w", err)
 	}
 	// create an index for the 'name' field on organizations (must be unique)
