@@ -50,4 +50,8 @@ const (
 	organizationAddMemberEndpoint = "/organizations/{address}/members"
 	// POST /organizations/{address}/members/invite/accept to accept the invitation
 	organizationAcceptMemberEndpoint = "/organizations/{address}/members/accept"
+	// GET /organizations/roles to get the available organization member roles
+	organizationRolesEndpoint = "/organizations/roles"
+	// GET /organizations/types to get the available organization types
+	organizationTypesEndpoint = "/organizations/types"
 )
