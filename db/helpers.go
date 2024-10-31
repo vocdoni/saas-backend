@@ -117,14 +117,6 @@ func (ms *MongoStorage) createIndexes() error {
 	if _, err := ms.users.Indexes().CreateOne(ctx, userEmailIndex); err != nil {
 		return fmt.Errorf("failed to create index on phone for users: %w", err)
 	}
-	// create an index for the 'name' field on organizations (must be unique)
-	organizationNameIndex := mongo.IndexModel{
-		Keys:    bson.D{{Key: "name", Value: 1}}, // 1 for ascending order
-		Options: options.Index().SetUnique(true),
-	}
-	if _, err := ms.organizations.Indexes().CreateOne(ctx, organizationNameIndex); err != nil {
-		return fmt.Errorf("failed to create index on name for organizations: %w", err)
-	}
 	// create an index for the ('code', 'type') tuple on user verifications (must be unique)
 	verificationCodeIndex := mongo.IndexModel{
 		Keys: bson.D{

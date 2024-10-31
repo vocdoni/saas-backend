@@ -71,15 +71,12 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	// create the organization
 	if err := a.db.SetOrganization(&db.Organization{
 		Address:         signer.AddressString(),
-		Name:            orgInfo.Name,
 		Creator:         user.Email,
 		CreatedAt:       time.Now(),
 		Nonce:           nonce,
 		Type:            db.OrganizationType(orgInfo.Type),
-		Description:     orgInfo.Description,
 		Size:            orgInfo.Size,
 		Color:           orgInfo.Color,
-		Logo:            orgInfo.Logo,
 		Subdomain:       orgInfo.Subdomain,
 		Timezone:        orgInfo.Timezone,
 		Active:          true,
@@ -182,14 +179,6 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	// update just the fields that can be updated and are not empty
 	updateOrg := false
-	if newOrgInfo.Name != "" {
-		org.Name = newOrgInfo.Name
-		updateOrg = true
-	}
-	if newOrgInfo.Description != "" {
-		org.Description = newOrgInfo.Description
-		updateOrg = true
-	}
 	if newOrgInfo.Website != "" {
 		org.Website = newOrgInfo.Website
 		updateOrg = true
@@ -202,14 +191,6 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		org.Color = newOrgInfo.Color
 		updateOrg = true
 	}
-	if newOrgInfo.Logo != "" {
-		org.Logo = newOrgInfo.Logo
-		updateOrg = true
-	}
-	if newOrgInfo.Header != "" {
-		org.Header = newOrgInfo.Header
-		updateOrg = true
-	}
 	if newOrgInfo.Subdomain != "" {
 		org.Subdomain = newOrgInfo.Subdomain
 		updateOrg = true
@@ -220,10 +201,6 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	if newOrgInfo.Timezone != "" {
 		org.Timezone = newOrgInfo.Timezone
-		updateOrg = true
-	}
-	if newOrgInfo.Language != "" {
-		org.Language = newOrgInfo.Language
 		updateOrg = true
 	}
 	if newOrgInfo.Active != org.Active {
