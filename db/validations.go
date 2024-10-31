@@ -1,6 +1,9 @@
 package db
 
-import "go.mongodb.org/mongo-driver/bson"
+import (
+	"github.com/vocdoni/saas-backend/internal"
+	"go.mongodb.org/mongo-driver/bson"
+)
 
 var collectionsValidators = map[string]bson.M{
 	"users":               usersCollectionValidator,
@@ -20,7 +23,7 @@ var usersCollectionValidator = bson.M{
 			"email": bson.M{
 				"bsonType":    "string",
 				"description": "must be an email and is required",
-				"pattern":     `^[\w.\+\.\-]+@([\w\-]+\.)+[\w]{2,}$`,
+				"pattern":     internal.EmailRegexTemplate,
 			},
 			"password": bson.M{
 				"bsonType":    "string",
@@ -55,7 +58,7 @@ var organizationInvitesCollectionValidator = bson.M{
 			"newUserEmail": bson.M{
 				"bsonType":    "string",
 				"description": "must be an email and is required",
-				"pattern":     `^[\w.\+\.\-]+@([\w\-]+\.)+[\w]{2,}$`,
+				"pattern":     internal.EmailRegexTemplate,
 			},
 			"expiration": bson.M{
 				"bsonType":    "date",
