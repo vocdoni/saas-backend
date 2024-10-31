@@ -29,7 +29,7 @@ func (a *API) sendUserCode(ctx context.Context, user *db.User, t db.CodeType) er
 	// the verification code will not be sent but stored in the database
 	// generated with just the user email to mock the verification process
 	var code string
-	if a.mail != nil || a.sms != nil {
+	if a.mail != nil {
 		code = util.RandomHex(VerificationCodeLength)
 	}
 	// store the verification code in the database
@@ -136,11 +136,10 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// check the email and verification code are not empty
-	if (a.mail != nil || a.sms != nil) &&
-		(verification.Code == "" || verification.Email == "" ||
-			(a.mail == nil && verification.Email != "")) {
-		ErrInvalidUserData.With("no verification code or email/phone provided").Write(w)
+	// check the email and verification code are not empty only if the mail
+	// service is available
+	if a.mail != nil && (verification.Code == "" || verification.Email == "") {
+		ErrInvalidUserData.With("no verification code or email provided").Write(w)
 		return
 	}
 	// get the user information from the database by email
