@@ -4,7 +4,7 @@ import "time"
 
 // VerificationCodeExpiration is the duration of the verification code
 // before it is invalidated
-var VerificationCodeExpiration = 2 * time.Minute
+var VerificationCodeExpiration = 3 * time.Minute
 
 const (
 	// VerificationCodeLength is the length of the verification code in bytes
