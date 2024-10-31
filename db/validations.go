@@ -55,7 +55,7 @@ var organizationInvitesCollectionValidator = bson.M{
 			"newUserEmail": bson.M{
 				"bsonType":    "string",
 				"description": "must be an email and is required",
-				"pattern":     `^[\w.\-]+@([\w\-]+\.)+[\w]{2,}$`,
+				"pattern":     `^[\w.\+\.\-]+@([\w\-]+\.)+[\w]{2,}$`,
 			},
 			"expiration": bson.M{
 				"bsonType":    "date",
