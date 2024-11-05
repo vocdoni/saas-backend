@@ -397,6 +397,45 @@ func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r
 	httpWriteOK(w)
 }
 
+func (a *API) pendingOrganizationMembersHandler(w http.ResponseWriter, r *http.Request) {
+	// get the user from the request context
+	user, ok := userFromContext(r.Context())
+	if !ok {
+		ErrUnauthorized.Write(w)
+		return
+	}
+	// get the organization info from the request context
+	org, _, ok := a.organizationFromRequest(r)
+	if !ok {
+		ErrNoOrganizationProvided.Write(w)
+		return
+	}
+	if !user.HasRoleFor(org.Address, db.AdminRole) {
+		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		return
+	}
+	// check if the user is already verified
+	if !user.Verified {
+		ErrUserNoVerified.With("user account not verified").Write(w)
+		return
+	}
+	// get the pending invitations
+	invitations, err := a.db.PendingInvitations(org.Address)
+	if err != nil {
+		ErrGenericInternalServerError.Withf("could not get pending invitations: %v", err).Write(w)
+		return
+	}
+	invitationsList := make([]*OrganizationInvite, 0, len(invitations))
+	for _, invitation := range invitations {
+		invitationsList = append(invitationsList, &OrganizationInvite{
+			Email:      invitation.NewUserEmail,
+			Role:       string(invitation.Role),
+			Expiration: invitation.Expiration,
+		})
+	}
+	httpWriteJSON(w, &OrganizationInviteList{Invites: invitationsList})
+}
+
 // memberRolesHandler returns the available roles that can be assigned to a
 // member of an organization.
 func (a *API) organizationsMembersRolesHandler(w http.ResponseWriter, _ *http.Request) {

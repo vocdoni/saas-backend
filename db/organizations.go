@@ -9,6 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.vocdoni.io/dvote/log"
 )
 
 func (ms *MongoStorage) organization(ctx context.Context, address string) (*Organization, error) {
@@ -144,6 +145,11 @@ func (ms *MongoStorage) OrganizationsMembers(address string) ([]User, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("error closing cursor", "error", err)
+		}
+	}()
 	if err := cursor.All(ctx, &users); err != nil {
 		return nil, err
 	}

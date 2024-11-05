@@ -7,6 +7,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.vocdoni.io/dvote/log"
 )
 
 // CreateInvitation creates a new invitation for a user to join an organization.
@@ -77,6 +78,30 @@ func (ms *MongoStorage) Invitation(invitationCode string) (*OrganizationInvite, 
 		return nil, err
 	}
 	return invite, nil
+}
+
+// PendingInvitations returns the pending invitations for the given organization.
+func (ms *MongoStorage) PendingInvitations(organizationAddress string) ([]OrganizationInvite, error) {
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cursor, err := ms.organizationInvites.Find(ctx, bson.M{"organizationAddress": organizationAddress})
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("error closing cursor", "error", err)
+		}
+	}()
+	invitations := []OrganizationInvite{}
+	if err := cursor.All(ctx, &invitations); err != nil {
+		return nil, err
+	}
+	return invitations, nil
 }
 
 // DeleteInvitation removes the invitation from the database.

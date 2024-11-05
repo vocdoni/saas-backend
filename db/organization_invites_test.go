@@ -115,6 +115,59 @@ func TestInvitation(t *testing.T) {
 	c.Assert(invitation.Expiration.Truncate(time.Second).UTC(), qt.Equals, expires.Truncate(time.Second).UTC())
 }
 
+func TestPendingInvitations(t *testing.T) {
+	c := qt.New(t)
+	defer func() {
+		if err := db.Reset(); err != nil {
+			t.Error(err)
+		}
+	}()
+	// list invitations expecting none
+	invitations, err := db.PendingInvitations(orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(invitations, qt.HasLen, 0)
+
+	// create valid invitation
+	c.Assert(db.SetOrganization(&Organization{
+		Address: orgAddress,
+	}), qt.IsNil)
+	_, err = db.SetUser(&User{
+		Email:     testUserEmail,
+		Password:  testUserPass,
+		FirstName: testUserFirstName,
+		LastName:  testUserLastName,
+		Organizations: []OrganizationMember{
+			{Address: orgAddress, Role: AdminRole},
+		},
+	})
+	c.Assert(err, qt.IsNil)
+	c.Assert(db.CreateInvitation(&OrganizationInvite{
+		InvitationCode:      invitationCode,
+		OrganizationAddress: orgAddress,
+		CurrentUserID:       currentUserID,
+		NewUserEmail:        newMemberEmail,
+		Role:                AdminRole,
+		Expiration:          expires,
+	}), qt.IsNil)
+	// list invitations expecting one
+	invitations, err = db.PendingInvitations(orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(invitations, qt.HasLen, 1)
+	c.Assert(invitations[0].InvitationCode, qt.Equals, invitationCode)
+	c.Assert(invitations[0].OrganizationAddress, qt.Equals, orgAddress)
+	c.Assert(invitations[0].CurrentUserID, qt.Equals, currentUserID)
+	c.Assert(invitations[0].NewUserEmail, qt.Equals, newMemberEmail)
+	c.Assert(invitations[0].Role, qt.Equals, AdminRole)
+	// truncate expiration to seconds to avoid rounding issues, also set to UTC
+	c.Assert(invitations[0].Expiration.Truncate(time.Second).UTC(), qt.Equals, expires.Truncate(time.Second).UTC())
+	// delete the invitation
+	c.Assert(db.DeleteInvitation(invitationCode), qt.IsNil)
+	// list invitations expecting none
+	invitations, err = db.PendingInvitations(orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(invitations, qt.HasLen, 0)
+}
+
 func TestDeleteInvitation(t *testing.T) {
 	c := qt.New(t)
 	defer func() {
