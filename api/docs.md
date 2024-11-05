@@ -604,7 +604,7 @@ Only the following parameters can be changed. Every parameter is optional.
 ### ⏳ List pending invitations
 
 * **Path** `/organizations/{address}/members/pending`
-* **Method** `POST`
+* **Method** `GET`
 * **Headers**
   * `Authentication: Bearer <user_token>`
 * **Response**
