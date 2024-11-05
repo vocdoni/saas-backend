@@ -132,8 +132,8 @@ func (a *API) initRouter() http.Handler {
 		log.Infow("new route", "method", "POST", "path", organizationAddMemberEndpoint)
 		r.Post(organizationAddMemberEndpoint, a.inviteOrganizationMemberHandler)
 		// pending organization invitations
-		log.Infow("new route", "method", "GET", "path", organizationPendingMemberEndpoint)
-		r.Get(organizationPendingMemberEndpoint, a.pendingOrganizationMembersHandler)
+		log.Infow("new route", "method", "GET", "path", organizationPendingMembersEndpoint)
+		r.Get(organizationPendingMembersEndpoint, a.pendingOrganizationMembersHandler)
 	})
 
 	// Public routes

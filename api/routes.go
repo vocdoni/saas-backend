@@ -51,7 +51,7 @@ const (
 	// POST /organizations/{address}/members/invite/accept to accept the invitation
 	organizationAcceptMemberEndpoint = "/organizations/{address}/members/accept"
 	// GET /organizations/{address}/members/pending to get the pending members
-	organizationPendingMemberEndpoint = "/organizations/{address}/members/pending"
+	organizationPendingMembersEndpoint = "/organizations/{address}/members/pending"
 	// GET /organizations/roles to get the available organization member roles
 	organizationRolesEndpoint = "/organizations/roles"
 	// GET /organizations/types to get the available organization types
