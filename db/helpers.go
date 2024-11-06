@@ -115,7 +115,7 @@ func (ms *MongoStorage) createIndexes() error {
 		Options: options.Index().SetUnique(true),
 	}
 	if _, err := ms.users.Indexes().CreateOne(ctx, userEmailIndex); err != nil {
-		return fmt.Errorf("failed to create index on phone for users: %w", err)
+		return fmt.Errorf("failed to create index on email for users: %w", err)
 	}
 	// create an index for the ('code', 'type') tuple on user verifications (must be unique)
 	verificationCodeIndex := mongo.IndexModel{

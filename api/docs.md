@@ -193,8 +193,7 @@ This endpoint only returns the addresses of the organizations where the current 
     "email": "my@email.me",
     "firstName": "Steve",
     "lastName": "Urkel",
-    "password": "secretpass1234",
-    "phone": "123456789"
+    "password": "secretpass1234"
 }
 ```
 
@@ -642,8 +641,7 @@ Only the following parameters can be changed. Every parameter is optional.
     "email": "my@email.me",
     "firstName": "Steve",
     "lastName": "Urkel",
-    "password": "secretpass1234",
-    "phone": "123456789"
+    "password": "secretpass1234"
   }
 }
 ```

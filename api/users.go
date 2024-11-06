@@ -195,30 +195,24 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 
 // userVerificationCodeInfoHandler handles the request to get the verification
 // code information of a user. It requires the user email to be provided. It
-// returns the user email, the verification code, the phone number, the code
-// expiration and if the code is valid (not expired and has not reached the
-// maximum number of attempts). If the user is already verified, an error is
-// returned. If the user is not found, an error is returned. If the
-// verification code is not found, an error is returned. If any other error
-// occurs, a generic error is returned.
+// returns the user email, the verification code, the code expiration and if
+// the code is valid (not expired and has not reached the maximum number of
+// attempts). If the user is already verified, an error is returned. If the
+// user is not found, an error is returned. If the verification code is not
+// found, an error is returned. If any other error occurs, a generic error is
+// returned.
 func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Request) {
-	// get the user email or the phone number of the user from the request query
+	// get the user email of the user from the request query
 	userEmail := r.URL.Query().Get("email")
-	userPhone := r.URL.Query().Get("phone")
-	// check the email or the phone number is not empty
-	if userEmail == "" && userPhone == "" {
-		ErrInvalidUserData.With("no email or phone number provided").Write(w)
+	// check the email is not empty
+	if userEmail == "" {
+		ErrInvalidUserData.With("no email provided").Write(w)
 		return
 	}
 	var err error
 	var user *db.User
-	// get the user information from the database by email or phone
-	if userEmail != "" {
-		user, err = a.db.UserByEmail(userEmail)
-	} else {
-		user, err = a.db.UserByPhone(userPhone)
-	}
-	// check the error getting the user information
+	// get the user information from the database by email
+	user, err = a.db.UserByEmail(userEmail)
 	if err != nil {
 		if err == db.ErrNotFound {
 			ErrUserNotFound.Write(w)
@@ -261,14 +255,14 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 		ErrMalformedBody.Write(w)
 		return
 	}
-	// check the email or the phone number is not empty
+	// check the email is not empty
 	if verification.Email == "" {
-		ErrInvalidUserData.With("no email or phone number provided").Write(w)
+		ErrInvalidUserData.With("no email provided").Write(w)
 		return
 	}
 	var err error
 	var user *db.User
-	// get the user information from the database by email or phone
+	// get the user information from the database by email
 	if verification.Email != "" {
 		user, err = a.db.UserByEmail(verification.Email)
 	}
