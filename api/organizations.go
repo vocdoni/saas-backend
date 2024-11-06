@@ -238,11 +238,6 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
-	// check if the user is already verified
-	if !user.Verified {
-		ErrUserNoVerified.With("user account not verified").Write(w)
-		return
-	}
 	// get new admin info from the request body
 	invite := &OrganizationInvite{}
 	if err := json.NewDecoder(r.Body).Decode(invite); err != nil {
@@ -412,11 +407,6 @@ func (a *API) pendingOrganizationMembersHandler(w http.ResponseWriter, r *http.R
 	}
 	if !user.HasRoleFor(org.Address, db.AdminRole) {
 		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
-		return
-	}
-	// check if the user is already verified
-	if !user.Verified {
-		ErrUserNoVerified.With("user account not verified").Write(w)
 		return
 	}
 	// get the pending invitations

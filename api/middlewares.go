@@ -43,6 +43,11 @@ func (a *API) authenticator(next http.Handler) http.Handler {
 			ErrGenericInternalServerError.Withf("could not retrieve user from database: %v", err).Write(w)
 			return
 		}
+		// check if the user is already verified
+		if !user.Verified {
+			ErrUserNoVerified.With("user account not verified").Write(w)
+			return
+		}
 		// add the user to the context
 		ctx := context.WithValue(r.Context(), userMetadataKey, *user)
 		// token is authenticated, pass it through with the new context with the
