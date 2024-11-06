@@ -260,13 +260,8 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 		ErrInvalidUserData.With("no email provided").Write(w)
 		return
 	}
-	var err error
-	var user *db.User
 	// get the user information from the database by email
-	if verification.Email != "" {
-		user, err = a.db.UserByEmail(verification.Email)
-	}
-	// check the error getting the user information
+	user, err := a.db.UserByEmail(verification.Email)
 	if err != nil {
 		if err == db.ErrNotFound {
 			ErrUnauthorized.Write(w)
