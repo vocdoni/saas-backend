@@ -29,6 +29,7 @@
   - [🧑‍💼 Invite organization member](#-invite-organization-member)
   - [⏳ List pending invitations](#-list-pending-invitations)
   - [🤝 Accept organization invitation](#-accept-organization-invitation)
+  - [👥 Organization Subscription Info](#-organization_subscription-info)
   - [🤠 Available organization members roles](#-available-organization-members-roles)
   - [🏛️ Available organization types](#-available-organization-types)
 - [💳 Plans](#-plans)
@@ -671,6 +672,60 @@ Only the following parameters can be changed. Every parameter is optional.
 | `401` | `40014` | `user account not verified` |
 | `400` | `40019` | `inviation code expired` |
 | `409` | `40901` | `duplicate conflict` |
+| `500` | `50002` | `internal server error` |
+
+### 👥 Organization subscription info
+
+* **Path** `/organizations/{address}/subscription`
+* **Method** `GET`
+* **Request**
+```json
+{
+  "subscriptionDetails":{
+    "planID":3,
+    "startDate":"2024-11-07T15:25:49.218Z",
+    "endDate":"0001-01-01T00:00:00Z",
+    "renewalDate":"0001-01-01T00:00:00Z",
+    "active":true,
+    "maxCensusSize":10
+  },
+  "usage":{
+    "sentSMS":0,
+    "sentEmails":0,
+    "subOrgs":0,
+    "members":0
+  },
+  "plan":{
+    "id":3,
+    "name":"free",
+    "stripeID":"stripe_789",
+    "default":true,
+    "organization":{
+      "memberships":10,
+      "subOrgs":5,
+      "censusSize":10
+    },
+    "votingTypes":{
+      "approval":false,
+      "ranked":false,
+      "weighted":true
+    },
+    "features":{
+      "personalization":false,
+      "emailReminder":false,
+      "smsNotification":false
+    }
+  }
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40009` | `organization not found` |
+| `400` | `40011` | `no organization provided` |
 | `500` | `50002` | `internal server error` |
 
 ### 🤠 Available organization members roles

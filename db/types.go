@@ -89,19 +89,19 @@ type Plan struct {
 }
 
 type OrganizationSubscription struct {
-	PlanID        uint64    `bson:"planID"`
-	StartDate     time.Time `bson:"startDate"`
-	EndDate       time.Time `bson:"endDate"`
-	RenewalDate   time.Time `bson:"renewalDate"`
-	Active        bool      `bson:"active"`
-	MaxCensusSize int       `bson:"maxCensusSize"`
+	PlanID        uint64    `json:"planID" bson:"planID"`
+	StartDate     time.Time `json:"startDate" bson:"startDate"`
+	EndDate       time.Time `json:"endDate" bson:"endDate"`
+	RenewalDate   time.Time `json:"renewalDate" bson:"renewalDate"`
+	Active        bool      `json:"active" bson:"active"`
+	MaxCensusSize int       `json:"maxCensusSize" bson:"maxCensusSize"`
 }
 
 type OrganizationCounters struct {
-	SentSMS    int `bson:"sentSMS"`
-	SentEmails int `bson:"sentEmails"`
-	SubOrgs    int `bson:"subOrgs"`
-	Members    int `bson:"members"`
+	SentSMS    int `json:"sentSMS" bson:"sentSMS"`
+	SentEmails int `json:"sentEmails" bson:"sentEmails"`
+	SubOrgs    int `json:"subOrgs" bson:"subOrgs"`
+	Members    int `json:"members" bson:"members"`
 }
 
 type OrganizationInvite struct {
