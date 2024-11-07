@@ -32,7 +32,6 @@ type APIConfig struct {
 	Client      *apiclient.HTTPclient
 	Account     *account.Account
 	MailService notifications.NotificationService
-	SMSService  notifications.NotificationService
 	// FullTransparentMode if true allows signing all transactions and does not
 	// modify any of them.
 	FullTransparentMode bool
@@ -52,7 +51,6 @@ type API struct {
 	client          *apiclient.HTTPclient
 	account         *account.Account
 	mail            notifications.NotificationService
-	sms             notifications.NotificationService
 	secret          string
 	transparentMode bool
 	stripe          *stripe.StripeClient
@@ -72,7 +70,6 @@ func New(conf *APIConfig) *API {
 		client:          conf.Client,
 		account:         conf.Account,
 		mail:            conf.MailService,
-		sms:             conf.SMSService,
 		secret:          conf.Secret,
 		transparentMode: conf.FullTransparentMode,
 		stripe:          conf.StripeClient,
@@ -144,6 +141,12 @@ func (a *API) initRouter() http.Handler {
 		// get organization subscription
 		log.Infow("new route", "method", "GET", "path", organizationSubscriptionEndpoint)
 		r.Get(organizationSubscriptionEndpoint, a.getOrganizationSubscriptionHandler)
+		// invite a new admin member to the organization
+		log.Infow("new route", "method", "POST", "path", organizationAddMemberEndpoint)
+		r.Post(organizationAddMemberEndpoint, a.inviteOrganizationMemberHandler)
+		// pending organization invitations
+		log.Infow("new route", "method", "GET", "path", organizationPendingMembersEndpoint)
+		r.Get(organizationPendingMembersEndpoint, a.pendingOrganizationMembersHandler)
 	})
 
 	// Public routes
@@ -185,6 +188,15 @@ func (a *API) initRouter() http.Handler {
 		r.Get(subscriptionsEndpoint, a.getSubscriptionsHandler)
 		log.Infow("new route", "method", "POST", "path", subscriptionsWebhook)
 		r.Post(subscriptionsWebhook, a.handleWebhook)
+		// accept organization invitation
+		log.Infow("new route", "method", "POST", "path", organizationAcceptMemberEndpoint)
+		r.Post(organizationAcceptMemberEndpoint, a.acceptOrganizationMemberInvitationHandler)
+		// get organization roles
+		log.Infow("new route", "method", "GET", "path", organizationRolesEndpoint)
+		r.Get(organizationRolesEndpoint, a.organizationsMembersRolesHandler)
+		// get organization types
+		log.Infow("new route", "method", "GET", "path", organizationTypesEndpoint)
+		r.Get(organizationTypesEndpoint, a.organizationsTypesHandler)
 	})
 	a.router = r
 	return r

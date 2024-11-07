@@ -26,8 +26,13 @@
   - [⚙️ Update organization](#-update-organization)
   - [🔍 Organization info](#-organization-info)
   - [🧑‍🤝‍🧑 Organization members](#-organization-members)
-- [Subscriptions](#subscriptions)
-  - [Get Available Subscritptions](#get-subscriptions)
+  - [🧑‍💼 Invite organization member](#-invite-organization-member)
+  - [⏳ List pending invitations](#-list-pending-invitations)
+  - [🤝 Accept organization invitation](#-accept-organization-invitation)
+  - [🤠 Available organization members roles](#-available-organization-members-roles)
+  - [🏛️ Available organization types](#-available-organization-types)
+- [💳 Subscriptions](#-subscriptions)
+  - [Get Available Subscritptions](#-get-subscriptions)
 
 </details>
 
@@ -202,6 +207,7 @@ This endpoint only returns the addresses of the organizations where the current 
 | `400` | `40002` | `email malformed` |
 | `400` | `40003` | `password too short` |
 | `400` | `40004` | `malformed JSON body` |
+| `409` | `40901` | `duplicate conflict` |
 | `500` | `50002` | `internal server error` |
 
 ### ✅ Verify user
@@ -567,8 +573,191 @@ Only the following parameters can be changed. Every parameter is optional.
 | `400` | `4012` | `no organization provided` |
 | `500` | `50002` | `internal server error` |
 
+### 🧑‍💼 Invite organization member
 
-## Subscriptions
+* **Path** `/organizations/{address}/members`
+* **Method** `POST`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Request**
+```json
+{
+  "role": "admin",
+  "email": "newadmin@email.com"
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40002` | `email malformed` |
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40005` | `invalid user data` |
+| `400` | `40009` | `organization not found` |
+| `400` | `40011` | `no organization provided` |
+| `401` | `40014` | `user account not verified` |
+| `400` | `40019` | `inviation code expired` |
+| `409` | `40901` | `duplicate conflict` |
+| `500` | `50002` | `internal server error` |
+
+### ⏳ List pending invitations
+
+* **Path** `/organizations/{address}/members/pending`
+* **Method** `GET`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Response**
+```json
+{
+  "pending": [
+    {
+      "email": "newuser@email.me",
+      "role": "admin",
+      "expiration": "2024-12-12T12:00:00.000Z"
+    }
+  ]
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40009` | `organization not found` |
+| `400` | `40011` | `no organization provided` |
+| `401` | `40014` | `user account not verified` |
+| `500` | `50002` | `internal server error` |
+
+### 🤝 Accept organization invitation
+
+* **Path** `/organizations/{address}/members/accept`
+* **Method** `POST`
+* **Request**
+```json
+{
+  "code": "a3f3b5",
+  "user": { // only if the invited user is not already registered
+    "email": "my@email.me",
+    "firstName": "Steve",
+    "lastName": "Urkel",
+    "password": "secretpass1234"
+  }
+}
+```
+`user` object is only required if invited user is not registered yet.
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40002` | `email malformed` |
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40005` | `invalid user data` |
+| `400` | `40009` | `organization not found` |
+| `400` | `40011` | `no organization provided` |
+| `401` | `40014` | `user account not verified` |
+| `400` | `40019` | `inviation code expired` |
+| `409` | `40901` | `duplicate conflict` |
+| `500` | `50002` | `internal server error` |
+
+### 🤠 Available organization members roles
+* **Path** `/organizations/roles`
+* **Method** `GET`
+* **Response**
+```json
+{
+  "roles": [
+    {
+      "role": "manager",
+      "name": "Manager",
+      "writePermission": true
+    },
+    {
+      "role": "viewer",
+      "name": "Viewer",
+      "writePermission": false
+    },
+    {
+      "role": "admin",
+      "name": "Admin",
+      "writePermission": true
+    }
+  ]
+}
+```
+
+### 🏛️ Available organization types
+* **Path** `/organizations/types`
+* **Method** `GET`
+* **Response**
+```json
+{
+  "types": [
+    {
+      "type": "cooperative",
+      "name": "Cooperative"
+    },
+    {
+      "type": "educational",
+      "name": "University / Educational Institution"
+    },
+    {
+      "type": "others",
+      "name": "Others"
+    },
+    {
+      "type": "assembly",
+      "name": "Assembly"
+    },
+    {
+      "type": "religious",
+      "name": "Church / Religious Organization"
+    },
+    {
+      "type": "company",
+      "name": "Company / Corporation"
+    },
+    {
+      "type": "political_party",
+      "name": "Political Party"
+    },
+    {
+      "type": "chamber",
+      "name": "Chamber"
+    },
+    {
+      "type": "nonprofit",
+      "name": "Nonprofit / NGO"
+    },
+    {
+      "type": "community",
+      "name": "Community Group"
+    },
+    {
+      "type": "professional_college",
+      "name": "Professional College"
+    },
+    {
+      "type": "association",
+      "name": "Association"
+    },
+    {
+      "type": "city",
+      "name": "City / Municipality"
+    },
+    {
+      "type": "union",
+      "name": "Union"
+    }
+  ]
+}
+```
+
+## 💳 Subscriptions
 
 
 ### Get Subscriptions

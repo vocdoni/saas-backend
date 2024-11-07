@@ -44,9 +44,10 @@ var (
 	ErrVerificationCodeExpired         = Error{Code: 40016, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("verification code expired")}
 	ErrVerificationCodeValid           = Error{Code: 40017, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("last verification code still valid")}
 	ErrUserNotFound                    = Error{Code: 40018, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("user not found")}
-	ErrNoOrganizationSubscription      = Error{Code: 40019, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("organization subscription not found")}
-	ErrOganizationSubscriptionIncative = Error{Code: 40020, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("organization subscription not active")}
-	ErrNoDefaultPLan                   = Error{Code: 40021, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("did not found default plan for organization")}
+	ErrInvitationExpired               = Error{Code: 40019, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("inviation code expired")}
+	ErrNoOrganizationSubscription      = Error{Code: 40020, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("organization subscription not found")}
+	ErrOganizationSubscriptionIncative = Error{Code: 40021, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("organization subscription not active")}
+	ErrNoDefaultPLan                   = Error{Code: 40022, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("did not found default plan for organization")}
 
 	ErrMarshalingServerJSONFailed  = Error{Code: 50001, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("marshaling (server-side) JSON failed")}
 	ErrGenericInternalServerError  = Error{Code: 50002, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("internal server error")}

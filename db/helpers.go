@@ -85,12 +85,16 @@ func (ms *MongoStorage) initCollections(database string) error {
 	if ms.users, err = getCollection("users"); err != nil {
 		return err
 	}
+	// verifications collection
+	if ms.verifications, err = getCollection("verifications"); err != nil {
+		return err
+	}
 	// organizations collection
 	if ms.organizations, err = getCollection("organizations"); err != nil {
 		return err
 	}
-	// verifications collection
-	if ms.verifications, err = getCollection("verifications"); err != nil {
+	// organizationInvites collection
+	if ms.organizationInvites, err = getCollection("organizationInvites"); err != nil {
 		return err
 	}
 	// subscriptions collection
@@ -139,23 +143,7 @@ func (ms *MongoStorage) createIndexes() error {
 		Options: options.Index().SetUnique(true),
 	}
 	if _, err := ms.users.Indexes().CreateOne(ctx, userEmailIndex); err != nil {
-		return fmt.Errorf("failed to create index on addresses for users: %w", err)
-	}
-	// create an index for the 'phone' field on users
-	userPhoneIndex := mongo.IndexModel{
-		Keys:    bson.D{{Key: "phone", Value: 1}}, // 1 for ascending order
-		Options: options.Index().SetSparse(true),
-	}
-	if _, err := ms.users.Indexes().CreateOne(ctx, userPhoneIndex); err != nil {
-		return fmt.Errorf("failed to create index on phone for users: %w", err)
-	}
-	// create an index for the 'name' field on organizations (must be unique)
-	organizationNameIndex := mongo.IndexModel{
-		Keys:    bson.D{{Key: "name", Value: 1}}, // 1 for ascending order
-		Options: options.Index().SetUnique(true),
-	}
-	if _, err := ms.organizations.Indexes().CreateOne(ctx, organizationNameIndex); err != nil {
-		return fmt.Errorf("failed to create index on name for organizations: %w", err)
+		return fmt.Errorf("failed to create index on email for users: %w", err)
 	}
 	// create an index for the ('code', 'type') tuple on user verifications (must be unique)
 	verificationCodeIndex := mongo.IndexModel{
@@ -167,6 +155,31 @@ func (ms *MongoStorage) createIndexes() error {
 	}
 	if _, err := ms.verifications.Indexes().CreateOne(ctx, verificationCodeIndex); err != nil {
 		return fmt.Errorf("failed to create index on code for verifications: %w", err)
+	}
+	// create an index for the 'invitationCode' field on organization invites (must be unique)
+	organizationInviteIndex := mongo.IndexModel{
+		Keys:    bson.D{{Key: "invitationCode", Value: 1}}, // 1 for ascending order
+		Options: options.Index().SetUnique(true),
+	}
+	// create a ttl index for the 'expiration' field on organization invites
+	organizationInviteExpirationIndex := mongo.IndexModel{
+		Keys:    bson.D{{Key: "expiration", Value: 1}}, // 1 for ascending order
+		Options: options.Index().SetExpireAfterSeconds(0),
+	}
+	// create an index to ensure that the tuple ('organizationAddress', 'newUserEmail') is unique
+	organizationInviteUniqueIndex := mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "organizationAddress", Value: 1}, // 1 for ascending order
+			{Key: "newUserEmail", Value: 1},        // 1 for ascending order
+		},
+		Options: options.Index().SetUnique(true),
+	}
+	if _, err := ms.organizationInvites.Indexes().CreateMany(ctx, []mongo.IndexModel{
+		organizationInviteIndex,
+		organizationInviteExpirationIndex,
+		organizationInviteUniqueIndex,
+	}); err != nil {
+		return fmt.Errorf("failed to create index on invitationCode for organization invites: %w", err)
 	}
 	return nil
 }

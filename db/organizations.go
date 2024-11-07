@@ -9,7 +9,23 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.vocdoni.io/dvote/log"
 )
+
+func (ms *MongoStorage) organization(ctx context.Context, address string) (*Organization, error) {
+	// find the organization in the database by its address (case insensitive)
+	filter := bson.M{"_id": bson.M{"$regex": address, "$options": "i"}}
+	result := ms.organizations.FindOne(ctx, filter)
+	org := &Organization{Subscription: OrganizationSubscription{}}
+	if err := result.Decode(org); err != nil {
+		// if the organization doesn't exist return a specific error
+		if err == mongo.ErrNoDocuments {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return org, nil
+}
 
 // Organization method returns the organization with the given address. If the
 // parent flag is true, it also returns the parent organization if it exists. If
@@ -23,26 +39,16 @@ func (ms *MongoStorage) Organization(address string, parent bool) (*Organization
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	// find the organization in the database
-	result := ms.organizations.FindOne(ctx, bson.M{"_id": address})
-	org := &Organization{Subscription: OrganizationSubscription{}}
-	if err := result.Decode(org); err != nil {
-		// if the organization doesn't exist return a specific error
-		if err == mongo.ErrNoDocuments {
-			return nil, nil, ErrNotFound
-		}
+	org, err := ms.organization(ctx, address)
+	if err != nil {
 		return nil, nil, err
 	}
 	if !parent || org.Parent == "" {
 		return org, nil, nil
 	}
 	// find the parent organization in the database
-	result = ms.organizations.FindOne(ctx, bson.M{"_id": org.Parent})
-	parentOrg := &Organization{}
-	if err := result.Decode(parentOrg); err != nil {
-		// if the parent organization doesn't exist return a specific error
-		if err == mongo.ErrNoDocuments {
-			return nil, nil, ErrNotFound
-		}
+	parentOrg, err := ms.organization(ctx, org.Parent)
+	if err != nil {
 		return nil, nil, err
 	}
 	return org, parentOrg, nil
@@ -67,19 +73,13 @@ func (ms *MongoStorage) OrganizationByCreatorEmail(email string, parent bool) (*
 		if err == mongo.ErrNoDocuments {
 			return nil, nil, ErrNotFound
 		}
-		return nil, nil, err
 	}
 	if !parent || org.Parent == "" {
 		return org, nil, nil
 	}
 	// find the parent organization in the database
-	result = ms.organizations.FindOne(ctx, bson.M{"_id": org.Parent})
-	parentOrg := &Organization{}
-	if err := result.Decode(parentOrg); err != nil {
-		// if the parent organization doesn't exist return a specific error
-		if err == mongo.ErrNoDocuments {
-			return nil, nil, ErrNotFound
-		}
+	parentOrg, err := ms.organization(ctx, org.Parent)
+	if err != nil {
 		return nil, nil, err
 	}
 	return org, parentOrg, nil
@@ -176,6 +176,11 @@ func (ms *MongoStorage) OrganizationsMembers(address string) ([]User, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("error closing cursor", "error", err)
+		}
+	}()
 	if err := cursor.All(ctx, &users); err != nil {
 		return nil, err
 	}

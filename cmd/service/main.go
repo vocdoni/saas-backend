@@ -12,7 +12,6 @@ import (
 	"github.com/vocdoni/saas-backend/api"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/notifications/smtp"
-	"github.com/vocdoni/saas-backend/notifications/twilio"
 	"github.com/vocdoni/saas-backend/stripe"
 	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.vocdoni.io/dvote/apiclient"
@@ -36,9 +35,6 @@ func main() {
 	flag.String("smtpPassword", "", "SMTP password")
 	flag.String("emailFromAddress", "", "Email service from address")
 	flag.String("emailFromName", "Vocdoni", "Email service from name")
-	flag.String("twilioAccountSid", "", "Twilio account SID")
-	flag.String("twilioAuthToken", "", "Twilio auth token")
-	flag.String("smsFromNumber", "", "SMS from number")
 	flag.String("stripeApiSecret", "", "Stripe API secret")
 	flag.String("stripeWebhookSecret", "", "Stripe Webhook secret")
 	// parse flags
@@ -67,16 +63,11 @@ func main() {
 	smtpPassword := viper.GetString("smtpPassword")
 	emailFromAddress := viper.GetString("emailFromAddress")
 	emailFromName := viper.GetString("emailFromName")
-	// sms vars
-	twilioAccountSid := viper.GetString("twilioAccountSid")
-	twilioAuthToken := viper.GetString("twilioAuthToken")
-	twilioFromNumber := viper.GetString("twilioFromNumber")
+	// stripe vars
 	stripeApiSecret := viper.GetString("stripeApiSecret")
 	stripeWebhookSecret := viper.GetString("stripeWebhookSecret")
-	// stripe vars
 
 	log.Init("debug", "stdout", os.Stderr)
-
 	// initialize the MongoDB database
 	database, err := db.New(mongoURL, mongoDB, subscriptionsFile)
 	if err != nil {
@@ -128,19 +119,6 @@ func main() {
 			log.Fatalf("could not create the email service: %v", err)
 		}
 		log.Infow("email service created", "from", fmt.Sprintf("%s <%s>", emailFromName, emailFromAddress))
-	}
-	// create SMS notifications service if the required parameters are set and
-	// include it in the API configuration
-	if twilioAccountSid != "" && twilioAuthToken != "" && twilioFromNumber != "" {
-		apiConf.SMSService = new(twilio.TwilioSMS)
-		if err := apiConf.SMSService.New(&twilio.TwilioConfig{
-			AccountSid: twilioAccountSid,
-			AuthToken:  twilioAuthToken,
-			FromNumber: twilioFromNumber,
-		}); err != nil {
-			log.Fatalf("could not create the SMS service: %v", err)
-		}
-		log.Infow("SMS service created", "from", twilioFromNumber)
 	}
 	// create Stripe client and include it in the API configuration
 	if stripeApiSecret != "" || stripeWebhookSecret != "" {
