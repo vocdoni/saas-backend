@@ -718,6 +718,7 @@ Only the following parameters can be changed. Every parameter is optional.
   }
 }
 ```
+This request can be made only by organization admins.
 
 * **Errors**
 

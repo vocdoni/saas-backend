@@ -469,10 +469,20 @@ func (a *API) organizationsTypesHandler(w http.ResponseWriter, _ *http.Request) 
 // getOrganizationSubscriptionHandler handles the request to get the subscription of an organization.
 // It returns the subscription with its information.
 func (a *API) getOrganizationSubscriptionHandler(w http.ResponseWriter, r *http.Request) {
+	// get the user from the request context
+	user, ok := userFromContext(r.Context())
+	if !ok {
+		ErrUnauthorized.Write(w)
+		return
+	}
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)
 	if !ok {
 		ErrNoOrganizationProvided.Write(w)
+		return
+	}
+	if !user.HasRoleFor(org.Address, db.AdminRole) {
+		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
 	if org.Subscription == (db.OrganizationSubscription{}) {
