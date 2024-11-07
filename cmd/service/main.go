@@ -28,7 +28,7 @@ func main() {
 	flag.StringP("vocdoniApi", "v", "https://api-dev.vocdoni.net/v2", "vocdoni node remote API URL")
 	flag.StringP("privateKey", "k", "", "private key for the Vocdoni account")
 	flag.BoolP("fullTransparentMode", "a", false, "allow all transactions and do not modify any of them")
-	flag.String("subscriptionsFile", "subscriptions.json", "JSON file that contains the subscriptions info")
+	flag.String("plansFile", "subscriptions.json", "JSON file that contains the subscriptions info")
 	flag.String("smtpServer", "", "SMTP server")
 	flag.Int("smtpPort", 587, "SMTP port")
 	flag.String("smtpUsername", "", "SMTP username")
@@ -55,7 +55,7 @@ func main() {
 	}
 	mongoURL := viper.GetString("mongoURL")
 	mongoDB := viper.GetString("mongoDB")
-	subscriptionsFile := viper.GetString("subscriptionsFile")
+	plansFile := viper.GetString("plansFile")
 	// email vars
 	smtpServer := viper.GetString("smtpServer")
 	smtpPort := viper.GetInt("smtpPort")
@@ -69,7 +69,7 @@ func main() {
 
 	log.Init("debug", "stdout", os.Stderr)
 	// initialize the MongoDB database
-	database, err := db.New(mongoURL, mongoDB, subscriptionsFile)
+	database, err := db.New(mongoURL, mongoDB, plansFile)
 	if err != nil {
 		log.Fatalf("could not create the MongoDB database: %v", err)
 	}

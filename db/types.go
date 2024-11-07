@@ -60,7 +60,7 @@ type Organization struct {
 	Subscription    OrganizationSubscription `json:"subscription" bson:"subscription"`
 	Counters        OrganizationCounters     `json:"counters" bson:"counters"`
 }
-type SubscriptionLimits struct {
+type PlanLimits struct {
 	Memberships int `json:"memberships" bson:"memberships"`
 	SubOrgs     int `json:"subOrgs" bson:"subOrgs"`
 	CensusSize  int `json:"censusSize" bson:"censusSize"`
@@ -78,23 +78,23 @@ type Features struct {
 	SmsNotification bool `json:"smsNotification" bson:"smsNotification"`
 }
 
-type Subscription struct {
-	ID           uint64             `json:"id" bson:"_id"`
-	Name         string             `json:"name" bson:"name"`
-	StripeID     string             `json:"stripeID" bson:"stripeID"`
-	Default      bool               `json:"default" bson:"default"`
-	Organization SubscriptionLimits `json:"organization" bson:"organization"`
-	VotingTypes  VotingTypes        `json:"votingTypes" bson:"votingTypes"`
-	Features     Features           `json:"features" bson:"features"`
+type Plan struct {
+	ID           uint64      `json:"id" bson:"_id"`
+	Name         string      `json:"name" bson:"name"`
+	StripeID     string      `json:"stripeID" bson:"stripeID"`
+	Default      bool        `json:"default" bson:"default"`
+	Organization PlanLimits  `json:"organization" bson:"organization"`
+	VotingTypes  VotingTypes `json:"votingTypes" bson:"votingTypes"`
+	Features     Features    `json:"features" bson:"features"`
 }
 
 type OrganizationSubscription struct {
-	SubscriptionID uint64    `bson:"subscriptionID"`
-	StartDate      time.Time `bson:"startDate"`
-	EndDate        time.Time `bson:"endDate"`
-	RenewalDate    time.Time `bson:"renewalDate"`
-	Active         bool      `bson:"active"`
-	MaxCensusSize  int       `bson:"maxCensusSize"`
+	PlanID        uint64    `bson:"planID"`
+	StartDate     time.Time `bson:"startDate"`
+	EndDate       time.Time `bson:"endDate"`
+	RenewalDate   time.Time `bson:"renewalDate"`
+	Active        bool      `bson:"active"`
+	MaxCensusSize int       `bson:"maxCensusSize"`
 }
 
 type OrganizationCounters struct {

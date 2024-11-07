@@ -17,16 +17,16 @@ import (
 
 // MongoStorage uses an external MongoDB service for stoting the user data and election details.
 type MongoStorage struct {
-	database          string
-	client            *mongo.Client
-	keysLock          sync.RWMutex
-	subscriptionsFile string
+	database  string
+	client    *mongo.Client
+	keysLock  sync.RWMutex
+	plansFile string
 
 	users               *mongo.Collection
 	verifications       *mongo.Collection
 	organizations       *mongo.Collection
 	organizationInvites *mongo.Collection
-	subscriptions       *mongo.Collection
+	plans               *mongo.Collection
 }
 
 type Options struct {
@@ -34,7 +34,7 @@ type Options struct {
 	Database string
 }
 
-func New(url, database, subscriptionsFile string) (*MongoStorage, error) {
+func New(url, database, plansFile string) (*MongoStorage, error) {
 	var err error
 	ms := &MongoStorage{}
 	if url == "" {
@@ -67,7 +67,7 @@ func New(url, database, subscriptionsFile string) (*MongoStorage, error) {
 	// init the database client
 	ms.client = client
 	ms.database = database
-	ms.subscriptionsFile = subscriptionsFile
+	ms.plansFile = plansFile
 	// init the collections
 	if err := ms.initCollections(ms.database); err != nil {
 		return nil, err
@@ -116,7 +116,7 @@ func (ms *MongoStorage) Reset() error {
 		return err
 	}
 	// drop subscriptions collection
-	if err := ms.subscriptions.Drop(ctx); err != nil {
+	if err := ms.plans.Drop(ctx); err != nil {
 		return err
 	}
 	// init the collections

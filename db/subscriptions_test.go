@@ -6,7 +6,7 @@ import (
 	qt "github.com/frankban/quicktest"
 )
 
-func TestSetSubscription(t *testing.T) {
+func TestSetPlan(t *testing.T) {
 	defer func() {
 		if err := db.Reset(); err != nil {
 			t.Error(err)
@@ -14,59 +14,59 @@ func TestSetSubscription(t *testing.T) {
 	}()
 	c := qt.New(t)
 
-	subscription := &Subscription{
-		Name:     "Test Subscription",
+	plan := &Plan{
+		Name:     "Test Plan",
 		StripeID: "stripeID",
 	}
-	_, err := db.SetSubscription(subscription)
+	_, err := db.SetPlan(plan)
 	c.Assert(err, qt.IsNil)
 }
 
-func TestSubscription(t *testing.T) {
+func TestPlan(t *testing.T) {
 	defer func() {
 		if err := db.Reset(); err != nil {
 			t.Error(err)
 		}
 	}()
 	c := qt.New(t) // Create a new quicktest instance
-	subscriptionID := uint64(123)
-	// Test not found subscription
-	subscription, err := db.Subscription(subscriptionID)
+	planID := uint64(123)
+	// Test not found plan
+	plan, err := db.Plan(planID)
 	c.Assert(err, qt.Equals, ErrNotFound)
-	c.Assert(subscription, qt.IsNil)
-	subscription = &Subscription{
-		Name:     "Test Subscription",
+	c.Assert(plan, qt.IsNil)
+	plan = &Plan{
+		Name:     "Test Plan",
 		StripeID: "stripeID",
 	}
-	subscriptionID, err = db.SetSubscription(subscription)
+	planID, err = db.SetPlan(plan)
 	if err != nil {
 		t.Error(err)
 	}
-	// Test found subscription
-	subscriptionDB, err := db.Subscription(subscriptionID)
+	// Test found plan
+	planDB, err := db.Plan(planID)
 	c.Assert(err, qt.IsNil)
-	c.Assert(subscriptionDB, qt.Not(qt.IsNil))
-	c.Assert(subscriptionDB.ID, qt.Equals, subscription.ID)
+	c.Assert(planDB, qt.Not(qt.IsNil))
+	c.Assert(planDB.ID, qt.Equals, plan.ID)
 }
 
-func TestDelSubscription(t *testing.T) {
+func TestDelPlan(t *testing.T) {
 	defer func() {
 		if err := db.Reset(); err != nil {
 			t.Error(err)
 		}
 	}()
 	c := qt.New(t)
-	// Create a new subscription and delete it
-	subscription := &Subscription{
-		Name:     "Test Subscription",
+	// Create a new plan and delete it
+	plan := &Plan{
+		Name:     "Test Plan",
 		StripeID: "stripeID",
 	}
-	id, err := db.SetSubscription(subscription)
+	id, err := db.SetPlan(plan)
 	c.Assert(err, qt.IsNil)
-	err = db.DelSubscription(subscription)
+	err = db.DelPlan(plan)
 	c.Assert(err, qt.IsNil)
 
-	// Test not found subscription
-	_, err = db.Subscription(id)
+	// Test not found plan
+	_, err = db.Plan(id)
 	c.Assert(err, qt.Equals, ErrNotFound)
 }
