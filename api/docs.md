@@ -31,8 +31,9 @@
   - [🤝 Accept organization invitation](#-accept-organization-invitation)
   - [🤠 Available organization members roles](#-available-organization-members-roles)
   - [🏛️ Available organization types](#-available-organization-types)
-- [💳 Subscriptions](#-subscriptions)
-  - [Get Available Subscritptions](#-get-subscriptions)
+- [💳 Plans](#-plans)
+  - [Get Available Plans](#-get-plans)
+  - [Get Plan Info](#-get-plan-info)
 
 </details>
 
@@ -318,7 +319,15 @@ This endpoint only returns the addresses of the organizations where the current 
         "active": true,
         "parent": {
             "...": "..."
-        }
+        },
+        "subscription":{
+            "PlanID":3,
+            "StartDate":"2024-11-07T15:25:49.218Z",
+            "EndDate":"0001-01-01T00:00:00Z",
+            "RenewalDate":"0001-01-01T00:00:00Z",
+            "Active":true,
+            "MaxCensusSize":10
+        },
       }
     }
   ]
@@ -757,17 +766,36 @@ Only the following parameters can be changed. Every parameter is optional.
 }
 ```
 
-## 💳 Subscriptions
+## 💳 Plans
 
+### Get Plans
 
-### Get Subscriptions
-* * **Path** `/subscriptions`
+* **Path** `/plans`
 * **Method** `GET`
 * **Response**
 ```json
 {
-  "subscriptions": [
-    [{"id":1,"name":"Basic","stripeID":"stripe_123","organization":{"memberships":1,"subOrgs":1},"votingTypes":{"approval":true,"ranked":true,"weighted":true},"features":{"personalization":false,"emailReminder":true,"smsNotification":false}}]
+  "plans": [
+    {
+      "id":1,
+      "name":"Basic",
+      "stripeID":"stripe_123",
+      "organization":{
+        "memberships":1,
+        "subOrgs":1
+      },
+      "votingTypes":{
+        "approval":true,
+        "ranked":true,
+        "weighted":true
+      },
+      "features":{
+        "personalization":false,
+        "emailReminder":true,
+        "smsNotification":false
+      }
+    },
+    ...
   ]
 }
 ```
@@ -776,4 +804,39 @@ Only the following parameters can be changed. Every parameter is optional.
 
 | HTTP Status | Error code | Message |
 |:---:|:---:|:---|
+| `500` | `50002` | `internal server error` |
+
+### Get Plan info
+
+* **Path** `/plans/{planID}`
+* **Method** `GET`
+* **Response**
+```json
+{
+  "id":1,
+  "name":"Basic",
+  "stripeID":"stripe_123",
+  "organization":{
+    "memberships":1,
+    "subOrgs":1
+  },
+  "votingTypes":{
+    "approval":true,
+    "ranked":true,
+    "weighted":true
+  },
+  "features":{
+    "personalization":false,
+    "emailReminder":true,
+    "smsNotification":false
+  }
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `400` | `40010` | `malformed URL parameter` |
+| `400` | `40023` | `plan not found` |
 | `500` | `50002` | `internal server error` |

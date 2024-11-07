@@ -49,7 +49,7 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		dbSubscription, err := a.db.SubscriptionByStripeId(subscription.Items.Data[0].Plan.Product.ID)
+		dbSubscription, err := a.db.PlanByStripeId(subscription.Items.Data[0].Plan.Product.ID)
 		if err != nil || dbSubscription == nil {
 			log.Warnf("Could not update subscription %s, a corresponding subscription was not found.",
 				subscription.ID)
@@ -62,12 +62,12 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		renewalDate := time.Unix(subscription.BillingCycleAnchor, 0)
 
 		organizationSubscription := &db.OrganizationSubscription{
-			SubscriptionID: dbSubscription.ID,
-			StartDate:      startDate,
-			EndDate:        endDate,
-			RenewalDate:    renewalDate,
-			Active:         subscription.Status == "active",
-			MaxCensusSize:  int(subscription.Items.Data[0].Quantity),
+			PlanID:        dbSubscription.ID,
+			StartDate:     startDate,
+			EndDate:       endDate,
+			RenewalDate:   renewalDate,
+			Active:        subscription.Status == "active",
+			MaxCensusSize: int(subscription.Items.Data[0].Quantity),
 		}
 
 		// TODO will only worked for new subscriptions

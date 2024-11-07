@@ -183,11 +183,6 @@ func (a *API) initRouter() http.Handler {
 		// get organization members
 		log.Infow("new route", "method", "GET", "path", organizationMembersEndpoint)
 		r.Get(organizationMembersEndpoint, a.organizationMembersHandler)
-		// get subscriptions
-		log.Infow("new route", "method", "GET", "path", subscriptionsEndpoint)
-		r.Get(subscriptionsEndpoint, a.getSubscriptionsHandler)
-		log.Infow("new route", "method", "POST", "path", subscriptionsWebhook)
-		r.Post(subscriptionsWebhook, a.handleWebhook)
 		// accept organization invitation
 		log.Infow("new route", "method", "POST", "path", organizationAcceptMemberEndpoint)
 		r.Post(organizationAcceptMemberEndpoint, a.acceptOrganizationMemberInvitationHandler)
@@ -197,6 +192,14 @@ func (a *API) initRouter() http.Handler {
 		// get organization types
 		log.Infow("new route", "method", "GET", "path", organizationTypesEndpoint)
 		r.Get(organizationTypesEndpoint, a.organizationsTypesHandler)
+		// get subscriptions
+		log.Infow("new route", "method", "GET", "path", plansEndpoint)
+		r.Get(plansEndpoint, a.getPlansHandler)
+		// get subscription info
+		log.Infow("new route", "method", "GET", "path", planInfoEndpoint)
+		r.Get(planInfoEndpoint, a.planInfoHandler)
+		log.Infow("new route", "method", "POST", "path", subscriptionsWebhook)
+		r.Post(subscriptionsWebhook, a.handleWebhook)
 	})
 	a.router = r
 	return r

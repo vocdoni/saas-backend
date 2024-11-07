@@ -191,7 +191,7 @@ func (ms *MongoStorage) OrganizationsMembers(address string) ([]User, error) {
 // the given address. If an error occurs, it returns the error. This method must
 // be called with the keysLock held.
 func (ms *MongoStorage) AddSubscriptionToOrganization(address string, orgSubscription *OrganizationSubscription) error {
-	if _, err := ms.Subscription(orgSubscription.SubscriptionID); err != nil {
+	if _, err := ms.Plan(orgSubscription.PlanID); err != nil {
 		return ErrInvalidData
 	}
 	ms.keysLock.Lock()

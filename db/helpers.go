@@ -26,8 +26,8 @@ func (ms *MongoStorage) initCollections(database string) error {
 		return err
 	}
 	log.Infow("current collections", "collections", currentCollections)
-	log.Infow("reading subscriptions from file %s", ms.subscriptionsFile)
-	loadedSubscriptions, err := readSubscriptionJSON(ms.subscriptionsFile)
+	log.Infow("reading plans from file %s", ms.plansFile)
+	loadedPlans, err := readPlanJSON(ms.plansFile)
 	if err != nil {
 		return err
 	}
@@ -51,7 +51,7 @@ func (ms *MongoStorage) initCollections(database string) error {
 					return nil, fmt.Errorf("failed to update collection validator: %w", err)
 				}
 			}
-			if name == "subscriptions" {
+			if name == "plans" {
 				// clear subscriptions collection and update the DB with the new ones
 				if _, err := ms.client.Database(database).Collection(name).DeleteMany(ctx, bson.D{}); err != nil {
 					return nil, err
@@ -68,14 +68,14 @@ func (ms *MongoStorage) initCollections(database string) error {
 				return nil, err
 			}
 		}
-		if name == "subscriptions" {
-			var subscriptions []interface{}
-			for _, sub := range loadedSubscriptions {
-				subscriptions = append(subscriptions, sub)
+		if name == "plans" {
+			var plans []interface{}
+			for _, plan := range loadedPlans {
+				plans = append(plans, plan)
 			}
-			count, err := ms.client.Database(database).Collection(name).InsertMany(ctx, subscriptions)
-			if err != nil || len(count.InsertedIDs) != len(loadedSubscriptions) {
-				return nil, fmt.Errorf("failed to insert subscriptions: %w", err)
+			count, err := ms.client.Database(database).Collection(name).InsertMany(ctx, plans)
+			if err != nil || len(count.InsertedIDs) != len(loadedPlans) {
+				return nil, fmt.Errorf("failed to insert plans: %w", err)
 			}
 		}
 		// return the collection
@@ -98,7 +98,7 @@ func (ms *MongoStorage) initCollections(database string) error {
 		return err
 	}
 	// subscriptions collection
-	if ms.subscriptions, err = getCollection("subscriptions"); err != nil {
+	if ms.plans, err = getCollection("plans"); err != nil {
 		return err
 	}
 	return nil
@@ -222,15 +222,15 @@ func dynamicUpdateDocument(item interface{}, alwaysUpdateTags []string) (bson.M,
 	return bson.M{"$set": update}, nil
 }
 
-// readSubscriptionJSON reads a JSON file with an array of subscritpions
-// and return it as a Subscription array
-func readSubscriptionJSON(subscriptionsFile string) ([]*Subscription, error) {
-	log.Warnf("Reading subscriptions from %s", subscriptionsFile)
-	file, err := root.Assets.Open(fmt.Sprintf("assets/%s", subscriptionsFile))
+// readPlanJSON reads a JSON file with an array of subscritpions
+// and return it as a Plan array
+func readPlanJSON(plansFile string) ([]*Plan, error) {
+	log.Warnf("Reading subscriptions from %s", plansFile)
+	file, err := root.Assets.Open(fmt.Sprintf("assets/%s", plansFile))
 	if err != nil {
 		return nil, err
 	}
-	// file, err := os.Open(subscriptionsFile)
+	// file, err := os.Open(plansFile)
 	// if err != nil {
 	// 	return nil, err
 	// }
@@ -243,14 +243,14 @@ func readSubscriptionJSON(subscriptionsFile string) ([]*Subscription, error) {
 	// Create a JSON decoder
 	decoder := json.NewDecoder(file)
 
-	var subscriptions []*Subscription
-	err = decoder.Decode(&subscriptions)
+	var plans []*Plan
+	err = decoder.Decode(&plans)
 	if err != nil {
 		return nil, err
 	}
-	// print subscriptions
-	for _, sub := range subscriptions {
+	// print plans
+	for _, sub := range plans {
 		fmt.Println(sub)
 	}
-	return subscriptions, nil
+	return plans, nil
 }

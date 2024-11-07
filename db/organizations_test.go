@@ -181,7 +181,7 @@ func TestOrganizationsMembers(t *testing.T) {
 	c.Assert(singleMember.Email, qt.Equals, testUserEmail)
 }
 
-func TestAddOrganizationSubscription(t *testing.T) {
+func TestAddOrganizationPlan(t *testing.T) {
 	defer func() {
 		if err := db.Reset(); err != nil {
 			t.Error(err)
@@ -189,12 +189,12 @@ func TestAddOrganizationSubscription(t *testing.T) {
 	}()
 	c := qt.New(t)
 	// create a new organization
-	address := "orgToAddSubscription"
+	address := "orgToAddPlan"
 	c.Assert(db.SetOrganization(&Organization{
 		Address: address,
 	}), qt.IsNil)
 	// add a subscription to the organization
-	subscriptionName := "testSubscription"
+	subscriptionName := "testPlan"
 	startDate := time.Now()
 	endDate := startDate.AddDate(1, 0, 0)
 	active := true
@@ -206,14 +206,14 @@ func TestAddOrganizationSubscription(t *testing.T) {
 	}
 	// using a non existing subscription should fail
 	c.Assert(db.AddSubscriptionToOrganization(address, orgSubscription), qt.IsNotNil)
-	subscriptionID, err := db.SetSubscription(&Subscription{
+	subscriptionID, err := db.SetPlan(&Plan{
 		Name:     subscriptionName,
 		StripeID: stripeID,
 	})
 	if err != nil {
 		t.Error(err)
 	}
-	orgSubscription.SubscriptionID = subscriptionID
+	orgSubscription.PlanID = subscriptionID
 	c.Assert(db.AddSubscriptionToOrganization(address, orgSubscription), qt.IsNil)
 	// retrieve the organization and check the subscription details
 	org, _, err := db.Organization(address, false)

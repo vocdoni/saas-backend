@@ -12,8 +12,8 @@ type OrganizationCollection struct {
 	Organizations []Organization `json:"organizations" bson:"organizations"`
 }
 
-type SubscriptionCollection struct {
-	Subscriptions []Subscription `json:"subscriptions" bson:"subscriptions"`
+type PlanCollection struct {
+	Plans []Plan `json:"plans" bson:"plans"`
 }
 
 type OrganizationInvitesCollection struct {

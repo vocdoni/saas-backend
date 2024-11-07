@@ -69,16 +69,16 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		parentOrg = orgInfo.Parent.Address
 	}
 	// find default plan
-	defaultPlan, err := a.db.DefaultSubscription()
+	defaultPlan, err := a.db.DefaultPlan()
 	if err != nil || defaultPlan == nil {
 		ErrNoDefaultPLan.WithErr((err)).Write(w)
 		return
 	}
 	subscription := &db.OrganizationSubscription{
-		SubscriptionID: defaultPlan.ID,
-		StartDate:      time.Now(),
-		Active:         true,
-		MaxCensusSize:  defaultPlan.Organization.CensusSize,
+		PlanID:        defaultPlan.ID,
+		StartDate:     time.Now(),
+		Active:        true,
+		MaxCensusSize: defaultPlan.Organization.CensusSize,
 	}
 	// create the organization
 	if err := a.db.SetOrganization(&db.Organization{
@@ -485,7 +485,7 @@ func (a *API) getOrganizationSubscriptionHandler(w http.ResponseWriter, r *http.
 		return
 	}
 	// get the subscription from the database
-	plan, err := a.db.Subscription(org.Subscription.SubscriptionID)
+	plan, err := a.db.Plan(org.Subscription.PlanID)
 	if err != nil {
 		ErrGenericInternalServerError.Withf("could not get subscription: %v", err).Write(w)
 		return
