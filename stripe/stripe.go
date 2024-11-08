@@ -3,9 +3,9 @@ package stripe
 import (
 	"encoding/json"
 
-	"github.com/stripe/stripe-go/v80"
-	"github.com/stripe/stripe-go/v80/customer"
-	"github.com/stripe/stripe-go/v80/webhook"
+	"github.com/stripe/stripe-go/v81"
+	"github.com/stripe/stripe-go/v81/customer"
+	"github.com/stripe/stripe-go/v81/webhook"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -27,15 +27,14 @@ func New(apiSecret, webhookSecret string) *StripeClient {
 // DecodeEvent decodes a Stripe webhook event from the given payload and signature header.
 func (s *StripeClient) DecodeEvent(payload []byte, signatureHeader string) (*stripe.Event, error) {
 	event := stripe.Event{}
-
 	if err := json.Unmarshal(payload, &event); err != nil {
-		log.Warnw("stripe webhook: error while parsing basic request. %s\n", err.Error())
+		log.Errorf("stripe webhook: error while parsing basic request. %s\n", err.Error())
 		return nil, err
 	}
 
 	event, err := webhook.ConstructEvent(payload, signatureHeader, s.webhookSecret)
 	if err != nil {
-		log.Warnw("stripe webhook: webhook signature verification failed. %s\n", err.Error())
+		log.Errorf("stripe webhook: webhook signature verification failed. %s\n", err.Error())
 		return nil, err
 	}
 	return &event, nil
@@ -46,15 +45,14 @@ func (s *StripeClient) GetInfoFromEvent(event stripe.Event) (*stripe.Customer, *
 	var subscription stripe.Subscription
 	err := json.Unmarshal(event.Data.Raw, &subscription)
 	if err != nil {
-		log.Warnf("error parsing webhook JSON: %s\n", err.Error())
+		log.Errorf("error parsing webhook JSON: %s\n", err.Error())
 		return nil, nil, err
 	}
 
-	log.Debugf("Subscription created for %s and plan %s", subscription.ID, subscription.Customer.ID)
 	params := &stripe.CustomerParams{}
 	customer, err := customer.Get(subscription.Customer.ID, params)
 	if err != nil || customer == nil {
-		log.Warnf("could not update subscription %s, stripe internal error getting customer", subscription.ID)
+		log.Errorf("could not update subscription %s, stripe internal error getting customer", subscription.ID)
 		return nil, nil, err
 	}
 	return customer, &subscription, nil

@@ -2,7 +2,7 @@
     {
         "ID": 1,
         "Name": "Basic",
-        "StripeID": "prod_R2CnSIL0Yf9CQr",
+        "StripeID": "prod_R3LTVsjklmuQAL",
         "Default": false,
         "Organization": {
             "Memberships": 5,
@@ -22,7 +22,7 @@
     {
         "ID": 2,
         "Name": "Pro",
-        "StripeID": "prod_R3Ix2En2xeK1Dq",
+        "StripeID": "prod_R0kTryoMNl8I19",
         "Default": false,
         "Organization": {
             "Memberships": 10,
