@@ -128,6 +128,9 @@ func (a *API) initRouter() http.Handler {
 		// update the organization
 		log.Infow("new route", "method", "PUT", "path", organizationEndpoint)
 		r.Put(organizationEndpoint, a.updateOrganizationHandler)
+		// get organization members
+		log.Infow("new route", "method", "GET", "path", organizationMembersEndpoint)
+		r.Get(organizationMembersEndpoint, a.organizationMembersHandler)
 		// invite a new admin member to the organization
 		log.Infow("new route", "method", "POST", "path", organizationAddMemberEndpoint)
 		r.Post(organizationAddMemberEndpoint, a.inviteOrganizationMemberHandler)
@@ -167,9 +170,6 @@ func (a *API) initRouter() http.Handler {
 		// get organization information
 		log.Infow("new route", "method", "GET", "path", organizationEndpoint)
 		r.Get(organizationEndpoint, a.organizationInfoHandler)
-		// get organization members
-		log.Infow("new route", "method", "GET", "path", organizationMembersEndpoint)
-		r.Get(organizationMembersEndpoint, a.organizationMembersHandler)
 		// accept organization invitation
 		log.Infow("new route", "method", "POST", "path", organizationAcceptMemberEndpoint)
 		r.Post(organizationAcceptMemberEndpoint, a.acceptOrganizationMemberInvitationHandler)
