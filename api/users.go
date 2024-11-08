@@ -456,22 +456,21 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 	user, err := a.db.UserByEmail(userInfo.Email)
 	if err != nil {
 		if err == db.ErrNotFound {
-			ErrUnauthorized.Write(w)
+			// do not return an error if the user is not found to avoid
+			// information leakage
+			httpWriteOK(w)
 			return
 		}
 		ErrGenericInternalServerError.Write(w)
 		return
 	}
-	// check the user is verified
-	if !user.Verified {
-		ErrUserNoVerified.Write(w)
-		return
-	}
-	// generate a new verification code
-	if err := a.sendUserCode(r.Context(), user, db.CodeTypePasswordReset); err != nil {
-		log.Warnw("could not send verification code", "error", err)
-		ErrGenericInternalServerError.Write(w)
-		return
+	// if the user is verified generate a new verification code and send it
+	if user.Verified {
+		if err := a.sendUserCode(r.Context(), user, db.CodeTypePasswordReset); err != nil {
+			log.Warnw("could not send verification code", "error", err)
+			ErrGenericInternalServerError.Write(w)
+			return
+		}
 	}
 	httpWriteOK(w)
 }

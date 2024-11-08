@@ -399,9 +399,7 @@ This method invalidates any previous JWT token for the user, so it returns a new
 
 | HTTP Status | Error code | Message |
 |:---:|:---:|:---|
-| `401` | `40001` | `user not authorized` |
 | `400` | `40004` | `malformed JSON body` |
-| `401` | `40014` | `user account not verified` |
 | `500` | `50002` | `internal server error` |
 
 ### 🔗 Reset user password
