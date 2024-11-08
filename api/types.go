@@ -149,11 +149,6 @@ type MessageSignature struct {
 	Signature types.HexBytes `json:"signature,omitempty"`
 }
 
-type StripeConfig struct {
-	ApiKey     string
-	WebhookKey string
-}
-
 // organizationFromDB converts a db.Organization to an OrganizationInfo, if the parent
 // organization is provided it will be included in the response.
 func organizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
@@ -181,6 +176,8 @@ func organizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 	}
 }
 
+// OrganizationSubscriptionInfo is the struct used to provide detailed information
+// regaridng the subscription of an organization.
 type OrganizationSubscriptionInfo struct {
 	SubcriptionDetails *db.OrganizationSubscription `json:"subscriptionDetails"`
 	Usage              *db.OrganizationCounters     `json:"usage"`

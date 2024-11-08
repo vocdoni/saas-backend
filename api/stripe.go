@@ -20,7 +20,7 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	payload, err := io.ReadAll(r.Body)
 	if err != nil {
 
-		log.Warnw("Stripe Webhook: Error reading request body: %v\n", err)
+		log.Warnw("stripe webhook: Error reading request body: %v\n", err)
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
@@ -28,7 +28,7 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	signatureHeader := r.Header.Get("Stripe-Signature")
 	event, err := a.stripe.DecodeEvent(payload, signatureHeader)
 	if err != nil {
-		log.Warnw("Stripe Webhook: Error decoding event: %v\n", err)
+		log.Warnw("stripe Webhook: error decoding event: %v\n", err)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -37,23 +37,23 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	case "customer.subscription.created":
 		customer, subscription, err := a.stripe.GetInfoFromEvent(*event)
 		if err != nil {
-			log.Warnw("Stripe Webhook: Error getting info from event: %v\n", err)
+			log.Warnw("stripe webhook: error getting info from event: %v\n", err)
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 		org, _, err := a.db.OrganizationByCreatorEmail(customer.Email, false)
 		if err != nil || org == nil {
-			log.Warnf("Could not update subscription %s, a corresponding organization was not found.", subscription.ID)
+			log.Warnf("could not update subscription %s, a corresponding organization was not found.", subscription.ID)
 
-			log.Warnf("Please do manually for creator %s \n Error:  %s", customer.Email, err.Error())
+			log.Warnf("please do manually for creator %s \n Error:  %s", customer.Email, err.Error())
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 		dbSubscription, err := a.db.PlanByStripeId(subscription.Items.Data[0].Plan.Product.ID)
 		if err != nil || dbSubscription == nil {
-			log.Warnf("Could not update subscription %s, a corresponding subscription was not found.",
+			log.Warnf("could not update subscription %s, a corresponding subscription was not found.",
 				subscription.ID)
-			log.Warnf("Please do manually: %s", err.Error())
+			log.Warnf("please do manually: %s", err.Error())
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -71,8 +71,8 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// TODO will only worked for new subscriptions
-		if err := a.db.AddSubscriptionToOrganization(org.Address, organizationSubscription); err != nil {
-			log.Warnf("Could not update subscription %s for organization %s: %s", subscription.ID, org.Address, err.Error())
+		if err := a.db.SetOrganizationSubscription(org.Address, organizationSubscription); err != nil {
+			log.Warnf("could not update subscription %s for organization %s: %s", subscription.ID, org.Address, err.Error())
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}

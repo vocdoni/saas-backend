@@ -29,12 +29,12 @@
   - [🧑‍💼 Invite organization member](#-invite-organization-member)
   - [⏳ List pending invitations](#-list-pending-invitations)
   - [🤝 Accept organization invitation](#-accept-organization-invitation)
-  - [👥 Organization Subscription Info](#-organization_subscription-info)
+  - [💸 Organization Subscription Info](#-organization-subscription-info)
   - [🤠 Available organization members roles](#-available-organization-members-roles)
   - [🏛️ Available organization types](#-available-organization-types)
-- [💳 Plans](#-plans)
-  - [Get Available Plans](#-get-plans)
-  - [Get Plan Info](#-get-plan-info)
+- [🏦 Plans](#-plans)
+  - [🛒 Get Available Plans](#-get-plans)
+  - [🛍️ Get Plan Info](#-get-plan-info)
 
 </details>
 
@@ -674,7 +674,7 @@ Only the following parameters can be changed. Every parameter is optional.
 | `409` | `40901` | `duplicate conflict` |
 | `500` | `50002` | `internal server error` |
 
-### 👥 Organization subscription info
+### 💸 Organization subscription info
 
 * **Path** `/organizations/{address}/subscription`
 * **Method** `GET`
@@ -822,9 +822,9 @@ This request can be made only by organization admins.
 }
 ```
 
-## 💳 Plans
+## 🏦 Plans
 
-### Get Plans
+### 🛒 Get Plans
 
 * **Path** `/plans`
 * **Method** `GET`
@@ -862,7 +862,7 @@ This request can be made only by organization admins.
 |:---:|:---:|:---|
 | `500` | `50002` | `internal server error` |
 
-### Get Plan info
+### 🛍️ Get Plan info
 
 * **Path** `/plans/{planID}`
 * **Method** `GET`

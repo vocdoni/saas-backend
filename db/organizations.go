@@ -187,31 +187,12 @@ func (ms *MongoStorage) OrganizationsMembers(address string) ([]User, error) {
 	return users, nil
 }
 
-// addSubscriptionToOrganization internal method adds the subscription to the organiation with
-// the given address. If an error occurs, it returns the error. This method must
-// be called with the keysLock held.
-func (ms *MongoStorage) AddSubscriptionToOrganization(address string, orgSubscription *OrganizationSubscription) error {
+// SetOrganizationSubscription method adds the provided subscription to
+// the organization with the given address
+func (ms *MongoStorage) SetOrganizationSubscription(address string, orgSubscription *OrganizationSubscription) error {
 	if _, err := ms.Plan(orgSubscription.PlanID); err != nil {
 		return ErrInvalidData
 	}
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	// prepare the document to be updated in the database
-	filter := bson.M{"_id": address}
-	updateDoc := bson.M{"$set": bson.M{"subscription": orgSubscription}}
-	// update the organization in the database
-	if _, err := ms.organizations.UpdateOne(ctx, filter, updateDoc); err != nil {
-		return err
-	}
-	return nil
-}
-
-// Implement update subscription method and ensuere that only members
-// with adequate role can update the subscription
-func (ms *MongoStorage) UpdateOrganizationSubscritpion(address string, orgSubscription *OrganizationSubscription) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout

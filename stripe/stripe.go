@@ -29,13 +29,13 @@ func (s *StripeClient) DecodeEvent(payload []byte, signatureHeader string) (*str
 	event := stripe.Event{}
 
 	if err := json.Unmarshal(payload, &event); err != nil {
-		log.Warnw("Stripe Webhook: error while parsing basic request. %s\n", err.Error())
+		log.Warnw("stripe webhook: error while parsing basic request. %s\n", err.Error())
 		return nil, err
 	}
 
 	event, err := webhook.ConstructEvent(payload, signatureHeader, s.webhookSecret)
 	if err != nil {
-		log.Warnw("Stripe Webhook: Webhook signature verification failed. %s\n", err.Error())
+		log.Warnw("stripe webhook: webhook signature verification failed. %s\n", err.Error())
 		return nil, err
 	}
 	return &event, nil
@@ -46,7 +46,7 @@ func (s *StripeClient) GetInfoFromEvent(event stripe.Event) (*stripe.Customer, *
 	var subscription stripe.Subscription
 	err := json.Unmarshal(event.Data.Raw, &subscription)
 	if err != nil {
-		log.Warnf("Error parsing webhook JSON: %s\n", err.Error())
+		log.Warnf("error parsing webhook JSON: %s\n", err.Error())
 		return nil, nil, err
 	}
 
@@ -54,7 +54,7 @@ func (s *StripeClient) GetInfoFromEvent(event stripe.Event) (*stripe.Customer, *
 	params := &stripe.CustomerParams{}
 	customer, err := customer.Get(subscription.Customer.ID, params)
 	if err != nil || customer == nil {
-		log.Warnf("Could not update subscription %s, stripe internal error getting customer", subscription.ID)
+		log.Warnf("could not update subscription %s, stripe internal error getting customer", subscription.ID)
 		return nil, nil, err
 	}
 	return customer, &subscription, nil

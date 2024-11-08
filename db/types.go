@@ -60,6 +60,7 @@ type Organization struct {
 	Subscription    OrganizationSubscription `json:"subscription" bson:"subscription"`
 	Counters        OrganizationCounters     `json:"counters" bson:"counters"`
 }
+
 type PlanLimits struct {
 	Memberships int `json:"memberships" bson:"memberships"`
 	SubOrgs     int `json:"subOrgs" bson:"subOrgs"`

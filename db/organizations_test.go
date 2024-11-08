@@ -205,7 +205,7 @@ func TestAddOrganizationPlan(t *testing.T) {
 		Active:    true,
 	}
 	// using a non existing subscription should fail
-	c.Assert(db.AddSubscriptionToOrganization(address, orgSubscription), qt.IsNotNil)
+	c.Assert(db.SetOrganizationSubscription(address, orgSubscription), qt.IsNotNil)
 	subscriptionID, err := db.SetPlan(&Plan{
 		Name:     subscriptionName,
 		StripeID: stripeID,
@@ -214,7 +214,7 @@ func TestAddOrganizationPlan(t *testing.T) {
 		t.Error(err)
 	}
 	orgSubscription.PlanID = subscriptionID
-	c.Assert(db.AddSubscriptionToOrganization(address, orgSubscription), qt.IsNil)
+	c.Assert(db.SetOrganizationSubscription(address, orgSubscription), qt.IsNil)
 	// retrieve the organization and check the subscription details
 	org, _, err := db.Organization(address, false)
 	c.Assert(err, qt.IsNil)
