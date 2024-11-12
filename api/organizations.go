@@ -68,6 +68,18 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		parentOrg = orgInfo.Parent.Address
 	}
+	// find default plan
+	defaultPlan, err := a.db.DefaultPlan()
+	if err != nil || defaultPlan == nil {
+		ErrNoDefaultPLan.WithErr((err)).Write(w)
+		return
+	}
+	subscription := &db.OrganizationSubscription{
+		PlanID:        defaultPlan.ID,
+		StartDate:     time.Now(),
+		Active:        true,
+		MaxCensusSize: defaultPlan.Organization.CensusSize,
+	}
 	// create the organization
 	if err := a.db.SetOrganization(&db.Organization{
 		Address:         signer.AddressString(),
@@ -83,6 +95,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		TokensPurchased: 0,
 		TokensRemaining: 0,
 		Parent:          parentOrg,
+		Subscription:    *subscription,
 	}); err != nil {
 		if err == db.ErrAlreadyExists {
 			ErrInvalidOrganizationData.WithErr(err).Write(w)
@@ -451,4 +464,46 @@ func (a *API) organizationsTypesHandler(w http.ResponseWriter, _ *http.Request) 
 		})
 	}
 	httpWriteJSON(w, &OrganizationTypeList{Types: organizationTypes})
+}
+
+// getOrganizationSubscriptionHandler handles the request to get the subscription of an organization.
+// It returns the subscription with its information.
+func (a *API) getOrganizationSubscriptionHandler(w http.ResponseWriter, r *http.Request) {
+	// get the user from the request context
+	user, ok := userFromContext(r.Context())
+	if !ok {
+		ErrUnauthorized.Write(w)
+		return
+	}
+	// get the organization info from the request context
+	org, _, ok := a.organizationFromRequest(r)
+	if !ok {
+		ErrNoOrganizationProvided.Write(w)
+		return
+	}
+	if !user.HasRoleFor(org.Address, db.AdminRole) {
+		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		return
+	}
+	if org.Subscription == (db.OrganizationSubscription{}) {
+		ErrNoOrganizationSubscription.Write(w)
+		return
+	}
+	if !org.Subscription.Active ||
+		(org.Subscription.EndDate.After(time.Now()) && org.Subscription.StartDate.Before(time.Now())) {
+		ErrOganizationSubscriptionIncative.Write(w)
+		return
+	}
+	// get the subscription from the database
+	plan, err := a.db.Plan(org.Subscription.PlanID)
+	if err != nil {
+		ErrGenericInternalServerError.Withf("could not get subscription: %v", err).Write(w)
+		return
+	}
+	info := &OrganizationSubscriptionInfo{
+		SubcriptionDetails: &org.Subscription,
+		Usage:              &org.Counters,
+		Plan:               plan,
+	}
+	httpWriteJSON(w, info)
 }

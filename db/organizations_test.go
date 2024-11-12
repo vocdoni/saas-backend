@@ -2,6 +2,7 @@ package db
 
 import (
 	"testing"
+	"time"
 
 	qt "github.com/frankban/quicktest"
 )
@@ -22,8 +23,9 @@ func TestOrganization(t *testing.T) {
 	// create a new organization with the address and a not found parent
 	parentAddress := "parentOrgToGet"
 	c.Assert(db.SetOrganization(&Organization{
-		Address: address,
-		Parent:  parentAddress,
+		Address:      address,
+		Parent:       parentAddress,
+		Subscription: OrganizationSubscription{},
 	}), qt.IsNil)
 	// test not found parent organization
 	_, parentOrg, err := db.Organization(address, true)
@@ -177,4 +179,46 @@ func TestOrganizationsMembers(t *testing.T) {
 	c.Assert(members, qt.HasLen, 1)
 	singleMember := members[0]
 	c.Assert(singleMember.Email, qt.Equals, testUserEmail)
+}
+
+func TestAddOrganizationPlan(t *testing.T) {
+	defer func() {
+		if err := db.Reset(); err != nil {
+			t.Error(err)
+		}
+	}()
+	c := qt.New(t)
+	// create a new organization
+	address := "orgToAddPlan"
+	c.Assert(db.SetOrganization(&Organization{
+		Address: address,
+	}), qt.IsNil)
+	// add a subscription to the organization
+	subscriptionName := "testPlan"
+	startDate := time.Now()
+	endDate := startDate.AddDate(1, 0, 0)
+	active := true
+	stripeID := "stripeID"
+	orgSubscription := &OrganizationSubscription{
+		StartDate: startDate,
+		EndDate:   endDate,
+		Active:    true,
+	}
+	// using a non existing subscription should fail
+	c.Assert(db.SetOrganizationSubscription(address, orgSubscription), qt.IsNotNil)
+	subscriptionID, err := db.SetPlan(&Plan{
+		Name:     subscriptionName,
+		StripeID: stripeID,
+	})
+	if err != nil {
+		t.Error(err)
+	}
+	orgSubscription.PlanID = subscriptionID
+	c.Assert(db.SetOrganizationSubscription(address, orgSubscription), qt.IsNil)
+	// retrieve the organization and check the subscription details
+	org, _, err := db.Organization(address, false)
+	c.Assert(err, qt.IsNil)
+	c.Assert(org, qt.Not(qt.IsNil))
+	c.Assert(org.Address, qt.Equals, address)
+	c.Assert(org.Subscription.Active, qt.Equals, active)
 }

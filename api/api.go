@@ -12,6 +12,8 @@ import (
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/notifications"
+	"github.com/vocdoni/saas-backend/stripe"
+	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 )
@@ -33,6 +35,10 @@ type APIConfig struct {
 	// FullTransparentMode if true allows signing all transactions and does not
 	// modify any of them.
 	FullTransparentMode bool
+	// Stripe secrets
+	StripeClient *stripe.StripeClient
+	// Subscriptions permissions manager
+	Subscriptions *subscriptions.Subscriptions
 }
 
 // API type represents the API HTTP server with JWT authentication capabilities.
@@ -47,6 +53,8 @@ type API struct {
 	mail            notifications.NotificationService
 	secret          string
 	transparentMode bool
+	stripe          *stripe.StripeClient
+	subscriptions   *subscriptions.Subscriptions
 }
 
 // New creates a new API HTTP server. It does not start the server. Use Start() for that.
@@ -64,6 +72,8 @@ func New(conf *APIConfig) *API {
 		mail:            conf.MailService,
 		secret:          conf.Secret,
 		transparentMode: conf.FullTransparentMode,
+		stripe:          conf.StripeClient,
+		subscriptions:   conf.Subscriptions,
 	}
 }
 
@@ -128,6 +138,9 @@ func (a *API) initRouter() http.Handler {
 		// update the organization
 		log.Infow("new route", "method", "PUT", "path", organizationEndpoint)
 		r.Put(organizationEndpoint, a.updateOrganizationHandler)
+		// get organization subscription
+		log.Infow("new route", "method", "GET", "path", organizationSubscriptionEndpoint)
+		r.Get(organizationSubscriptionEndpoint, a.getOrganizationSubscriptionHandler)
 		// invite a new admin member to the organization
 		log.Infow("new route", "method", "POST", "path", organizationAddMemberEndpoint)
 		r.Post(organizationAddMemberEndpoint, a.inviteOrganizationMemberHandler)
@@ -179,6 +192,14 @@ func (a *API) initRouter() http.Handler {
 		// get organization types
 		log.Infow("new route", "method", "GET", "path", organizationTypesEndpoint)
 		r.Get(organizationTypesEndpoint, a.organizationsTypesHandler)
+		// get subscriptions
+		log.Infow("new route", "method", "GET", "path", plansEndpoint)
+		r.Get(plansEndpoint, a.getPlansHandler)
+		// get subscription info
+		log.Infow("new route", "method", "GET", "path", planInfoEndpoint)
+		r.Get(planInfoEndpoint, a.planInfoHandler)
+		log.Infow("new route", "method", "POST", "path", subscriptionsWebhook)
+		r.Post(subscriptionsWebhook, a.handleWebhook)
 	})
 	a.router = r
 	return r
