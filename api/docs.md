@@ -648,7 +648,6 @@ Only the following parameters can be changed. Every parameter is optional.
 {
   "code": "a3f3b5",
   "user": { // only if the invited user is not already registered
-    "email": "my@email.me",
     "firstName": "Steve",
     "lastName": "Urkel",
     "password": "secretpass1234"
