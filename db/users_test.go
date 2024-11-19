@@ -14,12 +14,13 @@ const (
 )
 
 func TestUserByEmail(t *testing.T) {
+	c := qt.New(t)
 	defer func() {
 		if err := db.Reset(); err != nil {
 			t.Error(err)
 		}
 	}()
-	c := qt.New(t)
+
 	// test not found user
 	user, err := db.UserByEmail(testUserEmail)
 	c.Assert(user, qt.IsNil)
@@ -44,12 +45,13 @@ func TestUserByEmail(t *testing.T) {
 }
 
 func TestUser(t *testing.T) {
+	c := qt.New(t)
 	defer func() {
 		if err := db.Reset(); err != nil {
 			t.Error(err)
 		}
 	}()
-	c := qt.New(t)
+
 	// test not found user
 	id := uint64(100)
 	user, err := db.User(id)
@@ -79,12 +81,13 @@ func TestUser(t *testing.T) {
 }
 
 func TestSetUser(t *testing.T) {
+	c := qt.New(t)
 	defer func() {
 		if err := db.Reset(); err != nil {
 			t.Error(err)
 		}
 	}()
-	c := qt.New(t)
+
 	// trying to create a new user with invalid email
 	user := &User{
 		Email:     "invalid-email",
@@ -121,12 +124,13 @@ func TestSetUser(t *testing.T) {
 }
 
 func TestDelUser(t *testing.T) {
+	c := qt.New(t)
 	defer func() {
 		if err := db.Reset(); err != nil {
 			t.Error(err)
 		}
 	}()
-	c := qt.New(t)
+
 	// create a new user
 	user := &User{
 		Email:     testUserEmail,
@@ -159,12 +163,13 @@ func TestDelUser(t *testing.T) {
 }
 
 func TestIsMemberOf(t *testing.T) {
+	c := qt.New(t)
 	defer func() {
 		if err := db.Reset(); err != nil {
 			t.Error(err)
 		}
 	}()
-	c := qt.New(t)
+
 	// create a new user with some organizations
 	user := &User{
 		Email:     testUserEmail,
@@ -200,12 +205,12 @@ func TestIsMemberOf(t *testing.T) {
 }
 
 func TestVerifyUser(t *testing.T) {
+	c := qt.New(t)
 	defer func() {
 		if err := db.Reset(); err != nil {
 			t.Error(err)
 		}
 	}()
-	c := qt.New(t)
 
 	nonExistingUserID := uint64(100)
 	c.Assert(db.VerifyUserAccount(&User{ID: nonExistingUserID}), qt.Equals, ErrNotFound)

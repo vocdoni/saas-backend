@@ -1,0 +1,63 @@
+[
+    {
+        "ID": 1,
+        "Name": "Basic",
+        "StripeID": "prod_R3LTVsjklmuQAL",
+        "Default": false,
+        "Organization": {
+            "Memberships": 5,
+            "SubOrgs": 1
+        },
+        "VotingTypes": {
+            "Approval": true,
+            "Ranked": true,
+            "Weighted": true
+        },
+        "Features": {
+            "Personalization": false,
+            "EmailReminder": false,
+            "SmsNotification": false
+        }
+    },
+    {
+        "ID": 2,
+        "Name": "Pro",
+        "StripeID": "prod_R0kTryoMNl8I19",
+        "Default": false,
+        "Organization": {
+            "Memberships": 10,
+            "SubOrgs": 5
+        },
+        "VotingTypes": {
+            "Approval": true,
+            "Ranked": true,
+            "Weighted": true
+        },
+        "Features": {
+            "Personalization": true,
+            "EmailReminder": true,
+            "SmsNotification": true
+        }
+    },
+    {
+        "ID": 3,
+        "Name": "free",
+        "Default": true,
+        "StripeID": "stripe_789",
+        "Organization": {
+            "Memberships": 10,
+            "SubOrgs": 5,
+            "CensusSize": 10
+        },
+        "VotingTypes": {
+            "Approval": false,
+            "Ranked": false,
+            "Weighted": true
+        },
+        "Features": {
+            "Personalization": false,
+            "EmailReminder": false,
+            "SmsNotification": false
+        }
+    }
+]

@@ -46,4 +46,24 @@ const (
 	organizationEndpoint = "/organizations/{address}"
 	// GET /organizations/{address}/members to get the organization members
 	organizationMembersEndpoint = "/organizations/{address}/members"
+	// POST /organizations/{address}/members/invite to add a new member
+	organizationAddMemberEndpoint = "/organizations/{address}/members"
+	// POST /organizations/{address}/members/invite/accept to accept the invitation
+	organizationAcceptMemberEndpoint = "/organizations/{address}/members/accept"
+	// GET /organizations/{address}/members/pending to get the pending members
+	organizationPendingMembersEndpoint = "/organizations/{address}/members/pending"
+	// GET /organizations/roles to get the available organization member roles
+	organizationRolesEndpoint = "/organizations/roles"
+	// GET /organizations/types to get the available organization types
+	organizationTypesEndpoint = "/organizations/types"
+	// GET /organizations/{address}/subscription to get the organization subscription
+	organizationSubscriptionEndpoint = "/organizations/{address}/subscription"
+
+	// subscription routes
+	// GET /subscriptions to get the subscriptions of an organization
+	plansEndpoint = "/plans"
+	// GET /subscriptions/{planID} to get the plan information
+	planInfoEndpoint = "/plans/{planID}"
+	// POST /subscriptions/webhook to receive the subscription webhook from stripe
+	subscriptionsWebhook = "/subscriptions/webhook"
 )

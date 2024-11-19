@@ -8,11 +8,13 @@ import (
 	"regexp"
 )
 
-var regexpEmail = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+const EmailRegexTemplate = `^[\w.\+\.\-]+@([\w\-]+\.)+[\w]{2,}$`
+
+var emailRegex = regexp.MustCompile(EmailRegexTemplate)
 
 // ValidEmail helper function allows to validate an email address.
 func ValidEmail(email string) bool {
-	return regexpEmail.MatchString(email)
+	return emailRegex.MatchString(email)
 }
 
 // RandomBytes helper function allows to generate a random byte slice of n bytes.

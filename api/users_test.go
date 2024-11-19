@@ -51,8 +51,8 @@ func TestRegisterHandler(t *testing.T) {
 				FirstName: "first",
 				LastName:  "last",
 			}),
-			expectedStatus: http.StatusInternalServerError,
-			expectedBody:   mustMarshal(ErrGenericInternalServerError),
+			expectedStatus: http.StatusConflict,
+			expectedBody:   mustMarshal(ErrDuplicateConflict.With("user already exists")),
 		},
 		{
 			uri:    registerURL,
@@ -138,7 +138,6 @@ func TestRegisterHandler(t *testing.T) {
 				c.Errorf("error closing response body: %v", err)
 			}
 		}()
-
 		c.Assert(resp.StatusCode, qt.Equals, testCase.expectedStatus)
 		if testCase.expectedBody != nil {
 			body, err := io.ReadAll(resp.Body)
@@ -266,7 +265,7 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	resp, err = http.DefaultClient.Do(req)
 	c.Assert(err, qt.IsNil)
-	c.Assert(resp.StatusCode, qt.Equals, http.StatusUnauthorized)
+	c.Assert(resp.StatusCode, qt.Equals, http.StatusOK)
 	c.Assert(resp.Body.Close(), qt.IsNil)
 	// get the verification code from the email
 	mailBody, err := testMailService.FindEmail(context.Background(), testEmail)
@@ -274,7 +273,6 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	// create a regex to find the verification code in the email
 	mailCodeRgx := regexp.MustCompile(fmt.Sprintf(`%s(.{%d})`, VerificationCodeTextBody, VerificationCodeLength*2))
 	verifyMailCode := mailCodeRgx.FindStringSubmatch(mailBody)
-	c.Log(verifyMailCode[1])
 	// verify the user
 	verification := mustMarshal(&UserVerification{
 		Email: testEmail,

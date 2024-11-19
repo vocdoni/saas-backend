@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -103,27 +104,6 @@ func (ms *MongoStorage) UserByEmail(email string) (*User, error) {
 	return user, nil
 }
 
-// UserByPhone method returns the user with the given phone number. If the user
-// doesn't exist, it returns a specific error. If other errors occur, it returns
-// the error.
-func (ms *MongoStorage) UserByPhone(phone string) (*User, error) {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	result := ms.users.FindOne(ctx, bson.M{"phone": phone})
-	user := &User{}
-	if err := result.Decode(user); err != nil {
-		if err == mongo.ErrNoDocuments {
-			return nil, ErrNotFound
-		}
-		return nil, err
-	}
-	return user, nil
-}
-
 // SetUser method creates or updates the user in the database. If the user
 // already exists, it updates the fields that have changed. If the user doesn't
 // exist, it creates it. If an error occurs, it returns the error.
@@ -160,6 +140,9 @@ func (ms *MongoStorage) SetUser(user *User) (uint64, error) {
 		// if the user doesn't exist, create it setting the ID first
 		user.ID = nextID
 		if _, err := ms.users.InsertOne(ctx, user); err != nil {
+			if strings.Contains(err.Error(), "duplicate key error") {
+				return 0, ErrAlreadyExists
+			}
 			return 0, err
 		}
 	}

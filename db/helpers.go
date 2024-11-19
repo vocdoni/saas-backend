@@ -2,10 +2,12 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"time"
 
+	root "github.com/vocdoni/saas-backend"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -20,6 +22,12 @@ func (ms *MongoStorage) initCollections(database string) error {
 	defer cancel()
 	// get the current collections names to create only the missing ones
 	currentCollections, err := ms.collectionNames(ctx, database)
+	if err != nil {
+		return err
+	}
+	log.Infow("current collections", "collections", currentCollections)
+	log.Infow("reading plans from file %s", ms.plansFile)
+	loadedPlans, err := readPlanJSON(ms.plansFile)
 	if err != nil {
 		return err
 	}
@@ -43,6 +51,12 @@ func (ms *MongoStorage) initCollections(database string) error {
 					return nil, fmt.Errorf("failed to update collection validator: %w", err)
 				}
 			}
+			if name == "plans" {
+				// clear subscriptions collection and update the DB with the new ones
+				if _, err := ms.client.Database(database).Collection(name).DeleteMany(ctx, bson.D{}); err != nil {
+					return nil, err
+				}
+			}
 		} else {
 			// if the collection has a validator create it with it
 			opts := options.CreateCollection()
@@ -54,6 +68,16 @@ func (ms *MongoStorage) initCollections(database string) error {
 				return nil, err
 			}
 		}
+		if name == "plans" {
+			var plans []interface{}
+			for _, plan := range loadedPlans {
+				plans = append(plans, plan)
+			}
+			count, err := ms.client.Database(database).Collection(name).InsertMany(ctx, plans)
+			if err != nil || len(count.InsertedIDs) != len(loadedPlans) {
+				return nil, fmt.Errorf("failed to insert plans: %w", err)
+			}
+		}
 		// return the collection
 		return ms.client.Database(database).Collection(name), nil
 	}
@@ -61,12 +85,20 @@ func (ms *MongoStorage) initCollections(database string) error {
 	if ms.users, err = getCollection("users"); err != nil {
 		return err
 	}
+	// verifications collection
+	if ms.verifications, err = getCollection("verifications"); err != nil {
+		return err
+	}
 	// organizations collection
 	if ms.organizations, err = getCollection("organizations"); err != nil {
 		return err
 	}
-	// verifications collection
-	if ms.verifications, err = getCollection("verifications"); err != nil {
+	// organizationInvites collection
+	if ms.organizationInvites, err = getCollection("organizationInvites"); err != nil {
+		return err
+	}
+	// subscriptions collection
+	if ms.plans, err = getCollection("plans"); err != nil {
 		return err
 	}
 	return nil
@@ -111,23 +143,7 @@ func (ms *MongoStorage) createIndexes() error {
 		Options: options.Index().SetUnique(true),
 	}
 	if _, err := ms.users.Indexes().CreateOne(ctx, userEmailIndex); err != nil {
-		return fmt.Errorf("failed to create index on addresses for users: %w", err)
-	}
-	// create an index for the 'phone' field on users
-	userPhoneIndex := mongo.IndexModel{
-		Keys:    bson.D{{Key: "phone", Value: 1}}, // 1 for ascending order
-		Options: options.Index().SetUnique(true),
-	}
-	if _, err := ms.users.Indexes().CreateOne(ctx, userPhoneIndex); err != nil {
-		return fmt.Errorf("failed to create index on phone for users: %w", err)
-	}
-	// create an index for the 'name' field on organizations (must be unique)
-	organizationNameIndex := mongo.IndexModel{
-		Keys:    bson.D{{Key: "name", Value: 1}}, // 1 for ascending order
-		Options: options.Index().SetUnique(true),
-	}
-	if _, err := ms.organizations.Indexes().CreateOne(ctx, organizationNameIndex); err != nil {
-		return fmt.Errorf("failed to create index on name for organizations: %w", err)
+		return fmt.Errorf("failed to create index on email for users: %w", err)
 	}
 	// create an index for the ('code', 'type') tuple on user verifications (must be unique)
 	verificationCodeIndex := mongo.IndexModel{
@@ -139,6 +155,31 @@ func (ms *MongoStorage) createIndexes() error {
 	}
 	if _, err := ms.verifications.Indexes().CreateOne(ctx, verificationCodeIndex); err != nil {
 		return fmt.Errorf("failed to create index on code for verifications: %w", err)
+	}
+	// create an index for the 'invitationCode' field on organization invites (must be unique)
+	organizationInviteIndex := mongo.IndexModel{
+		Keys:    bson.D{{Key: "invitationCode", Value: 1}}, // 1 for ascending order
+		Options: options.Index().SetUnique(true),
+	}
+	// create a ttl index for the 'expiration' field on organization invites
+	organizationInviteExpirationIndex := mongo.IndexModel{
+		Keys:    bson.D{{Key: "expiration", Value: 1}}, // 1 for ascending order
+		Options: options.Index().SetExpireAfterSeconds(0),
+	}
+	// create an index to ensure that the tuple ('organizationAddress', 'newUserEmail') is unique
+	organizationInviteUniqueIndex := mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "organizationAddress", Value: 1}, // 1 for ascending order
+			{Key: "newUserEmail", Value: 1},        // 1 for ascending order
+		},
+		Options: options.Index().SetUnique(true),
+	}
+	if _, err := ms.organizationInvites.Indexes().CreateMany(ctx, []mongo.IndexModel{
+		organizationInviteIndex,
+		organizationInviteExpirationIndex,
+		organizationInviteUniqueIndex,
+	}); err != nil {
+		return fmt.Errorf("failed to create index on invitationCode for organization invites: %w", err)
 	}
 	return nil
 }
@@ -179,4 +220,37 @@ func dynamicUpdateDocument(item interface{}, alwaysUpdateTags []string) (bson.M,
 		}
 	}
 	return bson.M{"$set": update}, nil
+}
+
+// readPlanJSON reads a JSON file with an array of subscritpions
+// and return it as a Plan array
+func readPlanJSON(plansFile string) ([]*Plan, error) {
+	log.Warnf("Reading subscriptions from %s", plansFile)
+	file, err := root.Assets.Open(fmt.Sprintf("assets/%s", plansFile))
+	if err != nil {
+		return nil, err
+	}
+	// file, err := os.Open(plansFile)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// defer func() {
+	// 	if err := file.Close(); err != nil {
+	// 		log.Warnw("failed to close subscriptions file", "error", err)
+	// 	}
+	// }()
+
+	// Create a JSON decoder
+	decoder := json.NewDecoder(file)
+
+	var plans []*Plan
+	err = decoder.Decode(&plans)
+	if err != nil {
+		return nil, err
+	}
+	// print plans
+	for _, sub := range plans {
+		fmt.Println(sub)
+	}
+	return plans, nil
 }

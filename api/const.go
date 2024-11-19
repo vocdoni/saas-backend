@@ -8,7 +8,7 @@ import (
 
 // VerificationCodeExpiration is the duration of the verification code
 // before it is invalidated
-var VerificationCodeExpiration = 2 * time.Minute
+var VerificationCodeExpiration = 3 * time.Minute
 
 const (
 	// VerificationCodeLength is the length of the verification code in bytes
@@ -28,4 +28,10 @@ const (
 	// template. It must be also the name of the file in the email templates
 	// directory.
 	PasswordResetTemplate notifications.MailTemplate = "password_reset"
+	// InvitationEmailSubject is the subject of the invitation email
+	InvitationEmailSubject = "Vocdoni organization invitation"
+	// InvitationTextBody is the body of the invitation email
+	InvitationTextBody = "You code to join to '%s' organization is: %s"
+	// InvitationExpiration is the duration of the invitation code before it is invalidated
+	InvitationExpiration = 5 * 24 * time.Hour // 5 days
 )

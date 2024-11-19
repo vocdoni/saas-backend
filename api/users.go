@@ -33,7 +33,7 @@ func (a *API) sendUserCode(ctx context.Context, user *db.User, codeType db.CodeT
 	// the verification code will not be sent but stored in the database
 	// generated with just the user email to mock the verification process
 	var code string
-	if a.mail != nil || a.sms != nil {
+	if a.mail != nil {
 		code = util.RandomHex(VerificationCodeLength)
 	}
 	// store the verification code in the database
@@ -76,14 +76,6 @@ func (a *API) sendUserCode(ctx context.Context, user *db.User, codeType db.CodeT
 			notification.Body = buf.String()
 		}
 		if err := a.mail.SendNotification(ctx, notification); err != nil {
-			return err
-		}
-	} else if a.sms != nil {
-		// send the verification code via SMS if the SMS service is available
-		if err := a.sms.SendNotification(ctx, &notifications.Notification{
-			ToNumber: user.Phone,
-			Body:     VerificationCodeTextBody + code,
-		}); err != nil {
 			return err
 		}
 	}
@@ -133,11 +125,11 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if err == db.ErrAlreadyExists {
-			ErrMalformedBody.WithErr(err).Write(w)
+			ErrDuplicateConflict.With("user already exists").Write(w)
 			return
 		}
 		log.Warnw("could not create user", "error", err)
-		ErrGenericInternalServerError.Write(w)
+		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 	// compose the new user and send the verification code
@@ -150,7 +142,7 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 	if err := a.sendUserCode(r.Context(), newUser, db.CodeTypeAccountVerification,
 		VerificationAccountTemplate); err != nil {
 		log.Warnw("could not send verification code", "error", err)
-		ErrGenericInternalServerError.Write(w)
+		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 	// send the token back to the user
@@ -172,8 +164,10 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 		ErrMalformedBody.Write(w)
 		return
 	}
-	// check the email and verification code are not empty
-	if verification.Email == "" || verification.Code == "" {
+
+	// check the email and verification code are not empty only if the mail
+	// service is available
+	if a.mail != nil && (verification.Code == "" || verification.Email == "") {
 		ErrInvalidUserData.With("no verification code or email provided").Write(w)
 		return
 	}
@@ -230,30 +224,24 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 
 // userVerificationCodeInfoHandler handles the request to get the verification
 // code information of a user. It requires the user email to be provided. It
-// returns the user email, the verification code, the phone number, the code
-// expiration and if the code is valid (not expired and has not reached the
-// maximum number of attempts). If the user is already verified, an error is
-// returned. If the user is not found, an error is returned. If the
-// verification code is not found, an error is returned. If any other error
-// occurs, a generic error is returned.
+// returns the user email, the verification code, the code expiration and if
+// the code is valid (not expired and has not reached the maximum number of
+// attempts). If the user is already verified, an error is returned. If the
+// user is not found, an error is returned. If the verification code is not
+// found, an error is returned. If any other error occurs, a generic error is
+// returned.
 func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Request) {
-	// get the user email or the phone number of the user from the request query
+	// get the user email of the user from the request query
 	userEmail := r.URL.Query().Get("email")
-	userPhone := r.URL.Query().Get("phone")
-	// check the email or the phone number is not empty
-	if userEmail == "" && userPhone == "" {
-		ErrInvalidUserData.With("no email or phone number provided").Write(w)
+	// check the email is not empty
+	if userEmail == "" {
+		ErrInvalidUserData.With("no email provided").Write(w)
 		return
 	}
 	var err error
 	var user *db.User
-	// get the user information from the database by email or phone
-	if userEmail != "" {
-		user, err = a.db.UserByEmail(userEmail)
-	} else {
-		user, err = a.db.UserByPhone(userPhone)
-	}
-	// check the error getting the user information
+	// get the user information from the database by email
+	user, err = a.db.UserByEmail(userEmail)
 	if err != nil {
 		if err == db.ErrNotFound {
 			ErrUserNotFound.Write(w)
@@ -279,7 +267,6 @@ func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Req
 	// return the verification code information
 	httpWriteJSON(w, UserVerification{
 		Email:      user.Email,
-		Phone:      user.Phone,
 		Expiration: code.Expiration,
 		Valid:      code.Expiration.After(time.Now()),
 	})
@@ -297,20 +284,13 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 		ErrMalformedBody.Write(w)
 		return
 	}
-	// check the email or the phone number is not empty
-	if verification.Email == "" && verification.Phone == "" {
-		ErrInvalidUserData.With("no email or phone number provided").Write(w)
+	// check the email is not empty
+	if verification.Email == "" {
+		ErrInvalidUserData.With("no email provided").Write(w)
 		return
 	}
-	var err error
-	var user *db.User
-	// get the user information from the database by email or phone
-	if verification.Email != "" {
-		user, err = a.db.UserByEmail(verification.Email)
-	} else {
-		user, err = a.db.UserByPhone(verification.Phone)
-	}
-	// check the error getting the user information
+	// get the user information from the database by email
+	user, err := a.db.UserByEmail(verification.Email)
 	if err != nil {
 		if err == db.ErrNotFound {
 			ErrUnauthorized.Write(w)
@@ -505,23 +485,23 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 	user, err := a.db.UserByEmail(userInfo.Email)
 	if err != nil {
 		if err == db.ErrNotFound {
-			ErrUnauthorized.Write(w)
+			// do not return an error if the user is not found to avoid
+			// information leakage
+			httpWriteOK(w)
 			return
 		}
 		ErrGenericInternalServerError.Write(w)
 		return
 	}
 	// check the user is verified
-	if !user.Verified {
-		ErrUserNoVerified.Write(w)
-		return
-	}
-	// generate a new verification code
-	if err := a.sendUserCode(r.Context(), user, db.CodeTypePasswordReset,
-		PasswordResetTemplate); err != nil {
-		log.Warnw("could not send verification code", "error", err)
-		ErrGenericInternalServerError.Write(w)
-		return
+	if user.Verified {
+		// generate a new verification code
+		if err := a.sendUserCode(r.Context(), user, db.CodeTypePasswordReset,
+			PasswordResetTemplate); err != nil {
+			log.Warnw("could not send verification code", "error", err)
+			ErrGenericInternalServerError.Write(w)
+			return
+		}
 	}
 	httpWriteOK(w)
 }

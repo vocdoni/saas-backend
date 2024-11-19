@@ -9,22 +9,19 @@ import (
 
 // Organization is the struct that represents an organization in the API
 type OrganizationInfo struct {
-	Address     string            `json:"address"`
-	Name        string            `json:"name"`
-	Website     string            `json:"website"`
-	CreatedAt   string            `json:"createdAt"`
-	Type        string            `json:"type"`
-	Description string            `json:"description"`
-	Size        string            `json:"size"`
-	Color       string            `json:"color"`
-	Logo        string            `json:"logo"`
-	Header      string            `json:"header"`
-	Subdomain   string            `json:"subdomain"`
-	Country     string            `json:"country"`
-	Timezone    string            `json:"timezone"`
-	Language    string            `json:"language"`
-	Active      bool              `json:"active"`
-	Parent      *OrganizationInfo `json:"parent"`
+	Address      string                       `json:"address"`
+	Website      string                       `json:"website"`
+	CreatedAt    string                       `json:"createdAt"`
+	Type         string                       `json:"type"`
+	Size         string                       `json:"size"`
+	Color        string                       `json:"color"`
+	Subdomain    string                       `json:"subdomain"`
+	Country      string                       `json:"country"`
+	Timezone     string                       `json:"timezone"`
+	Active       bool                         `json:"active"`
+	Parent       *OrganizationInfo            `json:"parent"`
+	Subscription *db.OrganizationSubscription `json:"subscription"`
+	Counters     *db.OrganizationCounters     `json:"counters"`
 }
 
 // OrganizationMembers is the struct that represents a list of members of
@@ -53,15 +50,62 @@ type UserOrganization struct {
 	Organization *OrganizationInfo `json:"organization"`
 }
 
+// OrganizationRole is the struct that represents the role of an organization
+// member in the API.
+type OrganizationRole struct {
+	Role            string `json:"role"`
+	Name            string `json:"name"`
+	WritePermission bool   `json:"writePermission"`
+}
+
+// OrganizationRoleList is the struct that represents a list of roles of an
+// organization member in the API.
+type OrganizationRoleList struct {
+	Roles []*OrganizationRole `json:"roles"`
+}
+
+// OrganizationType is the struct that represents the type of an organization in
+// the API.
+type OrganizationType struct {
+	Type string `json:"type"`
+	Name string `json:"name"`
+}
+
+// OrganizationTypeList is the struct that represents a list of types of
+// organizations in the API.
+type OrganizationTypeList struct {
+	Types []*OrganizationType `json:"types"`
+}
+
 // UserInfo is the request to register a new user.
 type UserInfo struct {
 	Email         string              `json:"email,omitempty"`
-	Phone         string              `json:"phone,omitempty"`
 	Password      string              `json:"password,omitempty"`
 	FirstName     string              `json:"firstName,omitempty"`
 	LastName      string              `json:"lastName,omitempty"`
 	Verified      bool                `json:"verified,omitempty"`
 	Organizations []*UserOrganization `json:"organizations"`
+}
+
+// OrganizationInvite is the struct that represents an invitation to an
+// organization in the API.
+type OrganizationInvite struct {
+	Email      string    `json:"email"`
+	Role       string    `json:"role"`
+	Expiration time.Time `json:"expiration"`
+}
+
+// OrganizationInviteList is the struct that represents a list of invitations to
+// organizations in the API.
+type OrganizationInviteList struct {
+	Invites []*OrganizationInvite `json:"pending"`
+}
+
+// AcceptOrganizationInvitation is the request to accept an invitation to an
+// organization.
+type AcceptOrganizationInvitation struct {
+	Code string    `json:"code"`
+	User *UserInfo `json:"user"`
 }
 
 // UserPasswordUpdate is the request to update the password of a user.
@@ -74,7 +118,6 @@ type UserPasswordUpdate struct {
 type UserVerification struct {
 	Email      string    `json:"email,omitempty"`
 	Code       string    `json:"code,omitempty"`
-	Phone      string    `json:"phone,omitempty"`
 	Expiration time.Time `json:"expiration,omitempty"`
 	Valid      bool      `json:"valid"`
 }
@@ -117,21 +160,26 @@ func organizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 		parentOrg = organizationFromDB(parent, nil)
 	}
 	return &OrganizationInfo{
-		Address:     dbOrg.Address,
-		Name:        dbOrg.Name,
-		Website:     dbOrg.Website,
-		CreatedAt:   dbOrg.CreatedAt.Format(time.RFC3339),
-		Type:        string(dbOrg.Type),
-		Description: dbOrg.Description,
-		Size:        dbOrg.Size,
-		Color:       dbOrg.Color,
-		Logo:        dbOrg.Logo,
-		Header:      dbOrg.Header,
-		Subdomain:   dbOrg.Subdomain,
-		Country:     dbOrg.Country,
-		Timezone:    dbOrg.Timezone,
-		Language:    dbOrg.Language,
-		Active:      dbOrg.Active,
-		Parent:      parentOrg,
+		Address:      dbOrg.Address,
+		Website:      dbOrg.Website,
+		CreatedAt:    dbOrg.CreatedAt.Format(time.RFC3339),
+		Type:         string(dbOrg.Type),
+		Size:         dbOrg.Size,
+		Color:        dbOrg.Color,
+		Subdomain:    dbOrg.Subdomain,
+		Country:      dbOrg.Country,
+		Timezone:     dbOrg.Timezone,
+		Active:       dbOrg.Active,
+		Parent:       parentOrg,
+		Subscription: &dbOrg.Subscription,
+		Counters:     &dbOrg.Counters,
 	}
+}
+
+// OrganizationSubscriptionInfo is the struct used to provide detailed information
+// regaridng the subscription of an organization.
+type OrganizationSubscriptionInfo struct {
+	SubcriptionDetails *db.OrganizationSubscription `json:"subscriptionDetails"`
+	Usage              *db.OrganizationCounters     `json:"usage"`
+	Plan               *db.Plan                     `json:"plan"`
 }

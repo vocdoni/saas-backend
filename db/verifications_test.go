@@ -8,12 +8,12 @@ import (
 )
 
 func TestUserVerificationCode(t *testing.T) {
+	c := qt.New(t)
 	defer func() {
 		if err := db.Reset(); err != nil {
 			t.Error(err)
 		}
 	}()
-	c := qt.New(t)
 
 	userID, err := db.SetUser(&User{
 		Email:     testUserEmail,
@@ -39,12 +39,12 @@ func TestUserVerificationCode(t *testing.T) {
 }
 
 func TestSetVerificationCode(t *testing.T) {
+	c := qt.New(t)
 	defer func() {
 		if err := db.Reset(); err != nil {
 			t.Error(err)
 		}
 	}()
-	c := qt.New(t)
 
 	nonExistingUserID := uint64(100)
 	err := db.SetVerificationCode(&User{ID: nonExistingUserID}, "testCode", CodeTypeAccountVerification, time.Now())
