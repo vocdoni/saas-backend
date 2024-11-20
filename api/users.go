@@ -1,34 +1,23 @@
 package api
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
-	"html/template"
 	"io"
 	"net/http"
 	"time"
 
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
-	"github.com/vocdoni/saas-backend/notifications"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/dvote/util"
 )
 
-// sendUserCode method allows to send a code to the user via email or SMS. It
-// generates a verification code and stores it in the database associated to
-// the user email. If the mail service is available, it sends the verification
-// code via email. If the SMS service is available, it sends the verification
-// code via SMS. The code is generated associated a the type of code received,
-// that can be either a verification code or a password reset code. Other types
-// of codes can be added in the future. If neither the mail service nor the SMS
-// service are available, the verification code will be empty but stored in the
-// database to mock the verification process in any case.
-func (a *API) sendUserCode(ctx context.Context, user *db.User, codeType db.CodeType,
-	temp notifications.MailTemplate,
-) error {
+// generateVerificationCode method generates and stores in the database a new
+// verification code for the user and verification code type provided. Both
+// parameters are required. It returns the generated verification code and an
+// error if the verification code could not be generated or stored in the database.
+func (a *API) generateVerificationCode(user *db.User, codeType db.CodeType) (string, error) {
 	// generate verification code if the mail service is available, if not
 	// the verification code will not be sent but stored in the database
 	// generated with just the user email to mock the verification process
@@ -40,46 +29,9 @@ func (a *API) sendUserCode(ctx context.Context, user *db.User, codeType db.CodeT
 	hashCode := internal.HashVerificationCode(user.Email, code)
 	exp := time.Now().Add(VerificationCodeExpiration)
 	if err := a.db.SetVerificationCode(&db.User{ID: user.ID}, hashCode, codeType, exp); err != nil {
-		return err
+		return "", err
 	}
-	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
-	defer cancel()
-	// send the verification code via email if the mail service is available
-	if a.mail != nil {
-		ctx, cancel := context.WithTimeout(ctx, time.Second*10)
-		defer cancel()
-		// create the notification with the verification code
-		notification := &notifications.Notification{
-			ToName:    fmt.Sprintf("%s %s", user.FirstName, user.LastName),
-			ToAddress: user.Email,
-			Subject:   VerificationCodeEmailSubject,
-			PlainBody: VerificationCodeTextBody + code,
-			Body:      VerificationCodeTextBody + code,
-		}
-		// compose de verification link
-		// check if the mail template is available
-		if templatePath, ok := a.mailTemplates[temp]; ok {
-			tmpl, err := template.ParseFiles(templatePath)
-			if err != nil {
-				return err
-			}
-			buf := new(bytes.Buffer)
-			if err := tmpl.Execute(buf, struct {
-				Code string
-				Link string
-			}{
-				Code: code,
-				Link: fmt.Sprintf(a.webAppURL+VerificationURI, user.Email, code),
-			}); err != nil {
-				return err
-			}
-			notification.Body = buf.String()
-		}
-		if err := a.mail.SendNotification(ctx, notification); err != nil {
-			return err
-		}
-	}
-	return nil
+	return code, nil
 }
 
 // registerHandler handles the register request. It creates a new user in the database.
@@ -139,10 +91,26 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		FirstName: userInfo.FirstName,
 		LastName:  userInfo.LastName,
 	}
-	if err := a.sendUserCode(r.Context(), newUser, db.CodeTypeAccountVerification,
-		VerificationAccountTemplate); err != nil {
+	// generate a new verification code
+	code, err := a.generateVerificationCode(newUser, db.CodeTypeAccountVerification)
+	if err != nil {
+		log.Warnw("could not generate verification code", "error", err)
+		ErrGenericInternalServerError.Write(w)
+		return
+	}
+	// send the new verification code to the user email
+	userName := fmt.Sprintf("%s %s", userInfo.FirstName, userInfo.LastName)
+	if err := a.sendNotification(r.Context(), userInfo.Email, userName, VerificationCodeEmailSubject,
+		VerificationCodeTextBody+code, VerificationAccountTemplate, struct {
+			Code string
+			Link string
+		}{
+			Code: code,
+			Link: fmt.Sprintf(a.webAppURL+VerificationURI, newUser.Email, code),
+		},
+	); err != nil {
 		log.Warnw("could not send verification code", "error", err)
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		ErrGenericInternalServerError.Write(w)
 		return
 	}
 	// send the token back to the user
@@ -318,8 +286,24 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 		ErrVerificationCodeValid.Write(w)
 		return
 	}
-	// set a new code and send it
-	if err := a.sendUserCode(r.Context(), user, db.CodeTypeAccountVerification, ""); err != nil {
+	// generate a new verification code
+	newCode, err := a.generateVerificationCode(user, db.CodeTypeAccountVerification)
+	if err != nil {
+		log.Warnw("could not generate verification code", "error", err)
+		ErrGenericInternalServerError.Write(w)
+		return
+	}
+	// send the new verification code to the user email
+	userName := fmt.Sprintf("%s %s", user.FirstName, user.LastName)
+	if err := a.sendNotification(r.Context(), user.Email, userName, VerificationCodeEmailSubject,
+		VerificationCodeTextBody+newCode, VerificationAccountTemplate, struct {
+			Code string
+			Link string
+		}{
+			Code: newCode,
+			Link: fmt.Sprintf(a.webAppURL+VerificationURI, user.Email, newCode),
+		},
+	); err != nil {
 		log.Warnw("could not send verification code", "error", err)
 		ErrGenericInternalServerError.Write(w)
 		return
@@ -496,8 +480,23 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 	// check the user is verified
 	if user.Verified {
 		// generate a new verification code
-		if err := a.sendUserCode(r.Context(), user, db.CodeTypePasswordReset,
-			PasswordResetTemplate); err != nil {
+		code, err := a.generateVerificationCode(user, db.CodeTypePasswordReset)
+		if err != nil {
+			log.Warnw("could not generate verification code", "error", err)
+			ErrGenericInternalServerError.Write(w)
+			return
+		}
+		// send the verification code to the user email
+		userName := fmt.Sprintf("%s %s", user.FirstName, user.LastName)
+		if err := a.sendNotification(r.Context(), user.Email, userName, PasswordResetEmailSubject,
+			PasswordResetTextBody+code, PasswordResetTemplate, struct {
+				Code string
+				Link string
+			}{
+				Code: code,
+				Link: fmt.Sprintf(a.webAppURL+PasswordResetURI, user.Email, code),
+			},
+		); err != nil {
 			log.Warnw("could not send verification code", "error", err)
 			ErrGenericInternalServerError.Write(w)
 			return

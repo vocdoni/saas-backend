@@ -11,6 +11,7 @@ import (
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/vocdoni/saas-backend/notifications/smtp"
 	"github.com/vocdoni/saas-backend/stripe"
 	"github.com/vocdoni/saas-backend/subscriptions"
@@ -24,11 +25,12 @@ func main() {
 	flag.IntP("port", "p", 8080, "listen port")
 	flag.StringP("secret", "s", "", "API secret")
 	flag.StringP("vocdoniApi", "v", "https://api-dev.vocdoni.net/v2", "vocdoni node remote API URL")
-	flag.StringP("webURL", "w", "https://saas-dev.vocdoni.app/account/verify", "The URL of the web application")
+	flag.StringP("webURL", "w", "https://saas-dev.vocdoni.app", "The URL of the web application")
 	flag.StringP("mongoURL", "m", "", "The URL of the MongoDB server")
 	flag.StringP("mongoDB", "d", "saasdb", "The name of the MongoDB database")
 	flag.StringP("privateKey", "k", "", "private key for the Vocdoni account")
 	flag.BoolP("fullTransparentMode", "a", false, "allow all transactions and do not modify any of them")
+	flag.String("emailTemplatesPath", "./assets", "path to the email templates")
 	flag.String("plansFile", "subscriptions.json", "JSON file that contains the subscriptions info")
 	flag.String("smtpServer", "", "SMTP server")
 	flag.Int("smtpPort", 587, "SMTP port")
@@ -60,6 +62,7 @@ func main() {
 	mongoDB := viper.GetString("mongoDB")
 	plansFile := viper.GetString("plansFile")
 	// email vars
+	emailTemplatesPath := viper.GetString("emailTemplatesPath")
 	smtpServer := viper.GetString("smtpServer")
 	smtpPort := viper.GetInt("smtpPort")
 	smtpUsername := viper.GetString("smtpUsername")
@@ -121,6 +124,13 @@ func main() {
 			SMTPPassword: smtpPassword,
 		}); err != nil {
 			log.Fatalf("could not create the email service: %v", err)
+		}
+		// load email templates
+		if emailTemplatesPath != "" {
+			apiConf.MailTemplates, err = notifications.GetMailTemplates(emailTemplatesPath)
+			if err != nil {
+				log.Fatalf("could not load email templates: %v", err)
+			}
 		}
 		log.Infow("email service created", "from", fmt.Sprintf("%s <%s>", emailFromName, emailFromAddress))
 	}

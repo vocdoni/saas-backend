@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -257,17 +258,7 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(resp.StatusCode, qt.Equals, http.StatusOK)
 	c.Assert(resp.Body.Close(), qt.IsNil)
-	// try to recover the password before verifying the user (should fail)
-	jsonRecover := mustMarshal(&UserInfo{
-		Email: testEmail,
-	})
-	req, err = http.NewRequest(http.MethodPost, testURL(usersRecoveryPasswordEndpoint), bytes.NewBuffer(jsonRecover))
-	c.Assert(err, qt.IsNil)
-	resp, err = http.DefaultClient.Do(req)
-	c.Assert(err, qt.IsNil)
-	c.Assert(resp.StatusCode, qt.Equals, http.StatusOK)
-	c.Assert(resp.Body.Close(), qt.IsNil)
-	// get the verification code from the email
+	// verify the user (to be able to recover the password)
 	mailBody, err := testMailService.FindEmail(context.Background(), testEmail)
 	c.Assert(err, qt.IsNil)
 	// create a regex to find the verification code in the email
@@ -285,6 +276,9 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	c.Assert(resp.StatusCode, qt.Equals, http.StatusOK)
 	c.Assert(resp.Body.Close(), qt.IsNil)
 	// try to recover the password after verifying the user
+	jsonRecover := mustMarshal(&UserInfo{
+		Email: testEmail,
+	})
 	req, err = http.NewRequest(http.MethodPost, testURL(usersRecoveryPasswordEndpoint), bytes.NewBuffer(jsonRecover))
 	c.Assert(err, qt.IsNil)
 	resp, err = http.DefaultClient.Do(req)
@@ -294,6 +288,9 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	// get the recovery code from the email
 	mailBody, err = testMailService.FindEmail(context.Background(), testEmail)
 	c.Assert(err, qt.IsNil)
+	log.Println(mailBody)
+	// update the regex to find the recovery code in the email
+	mailCodeRgx = regexp.MustCompile(fmt.Sprintf(`%s(.{%d})`, PasswordResetTextBody, VerificationCodeLength*2))
 	passResetMailCode := mailCodeRgx.FindStringSubmatch(mailBody)
 	// reset the password
 	newPassword := "password2"

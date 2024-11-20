@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,7 +9,6 @@ import (
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
-	"github.com/vocdoni/saas-backend/notifications"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -289,20 +287,22 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		ErrGenericInternalServerError.Withf("could not create invitation: %v", err).Write(w)
 		return
 	}
-	// send the invitation email
-	ctx, cancel := context.WithTimeout(r.Context(), time.Second*10)
-	defer cancel()
-	// send the verification code via email if the mail service is available
-	if a.mail != nil {
-		if err := a.mail.SendNotification(ctx, &notifications.Notification{
-			ToName:    fmt.Sprintf("%s %s", user.FirstName, user.LastName),
-			ToAddress: invite.Email,
-			Subject:   InvitationEmailSubject,
-			Body:      fmt.Sprintf(InvitationTextBody, org.Address, inviteCode),
-		}); err != nil {
-			ErrGenericInternalServerError.Withf("could not send verification code: %v", err).Write(w)
-			return
-		}
+	// send the invitation verification code to the user email
+	if err := a.sendNotification(r.Context(), invite.Email, invite.Email, InvitationEmailSubject,
+		fmt.Sprintf(InvitationTextBody, org.Address, inviteCode), InviteAdminTemplate,
+		struct {
+			Organization string
+			Code         string
+			Link         string
+		}{
+			Organization: org.Address,
+			Code:         inviteCode,
+			Link:         fmt.Sprintf(a.webAppURL+InvitationURI, invite.Email, inviteCode, org.Address),
+		},
+	); err != nil {
+		log.Warnw("could not send verification code", "error", err)
+		ErrGenericInternalServerError.Write(w)
+		return
 	}
 	httpWriteOK(w)
 }
