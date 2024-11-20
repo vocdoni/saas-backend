@@ -114,6 +114,16 @@ func (s *StripeClient) GetPlans() ([]*db.Plan, error) {
 			if len(price.Tiers) > 0 {
 				startingPrice = price.Tiers[0].FlatAmount
 			}
+			var tiers []db.PlanTier
+			for _, tier := range price.Tiers {
+				if tier.UpTo == 0 {
+					continue
+				}
+				tiers = append(tiers, db.PlanTier{
+					Amount: tier.FlatAmount,
+					UpTo:   tier.UpTo,
+				})
+			}
 			plans = append(plans, &db.Plan{
 				ID:            uint64(i),
 				Name:          price.Nickname,
@@ -135,6 +145,7 @@ func (s *StripeClient) GetPlans() ([]*db.Plan, error) {
 					EmailReminder:   featuresData["EmailReminder"],
 					SmsNotification: featuresData["SmsNotification"],
 				},
+				CensusSizeTiers: tiers,
 			})
 		}
 	}
