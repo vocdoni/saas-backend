@@ -123,10 +123,20 @@ func (a *API) organizationInfoHandler(w http.ResponseWriter, r *http.Request) {
 // organization. It returns the list of members with their role in the
 // organization with the address provided in the request.
 func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request) {
+	// get the user from the request context
+	user, ok := userFromContext(r.Context())
+	if !ok {
+		ErrUnauthorized.Write(w)
+		return
+	}
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)
 	if !ok {
 		ErrNoOrganizationProvided.Write(w)
+		return
+	}
+	if !user.HasRoleFor(org.Address, db.AdminRole) {
+		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
 	// send the organization back to the user
