@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -14,6 +13,8 @@ import (
 
 	qt "github.com/frankban/quicktest"
 )
+
+var codeRgx = fmt.Sprintf("(.{%d})", VerificationCodeLength*2)
 
 func TestRegisterHandler(t *testing.T) {
 	c := qt.New(t)
@@ -185,7 +186,8 @@ func TestVerifyAccountHandler(t *testing.T) {
 	mailBody, err := testMailService.FindEmail(context.Background(), testEmail)
 	c.Assert(err, qt.IsNil)
 	// create a regex to find the verification code in the email
-	mailCodeRgx := regexp.MustCompile(fmt.Sprintf(`%s(.{%d})`, VerificationCodeTextBody, VerificationCodeLength*2))
+	mailTemplate := strings.Split(VerificationCodeTextBody, "\n")[0]
+	mailCodeRgx := regexp.MustCompile(fmt.Sprintf(mailTemplate, codeRgx))
 	mailCode := mailCodeRgx.FindStringSubmatch(mailBody)
 	// verify the user
 	verification := mustMarshal(&UserVerification{
@@ -262,7 +264,8 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	mailBody, err := testMailService.FindEmail(context.Background(), testEmail)
 	c.Assert(err, qt.IsNil)
 	// create a regex to find the verification code in the email
-	mailCodeRgx := regexp.MustCompile(fmt.Sprintf(`%s(.{%d})`, VerificationCodeTextBody, VerificationCodeLength*2))
+	mailTemplate := strings.Split(VerificationCodeTextBody, "\n")[0]
+	mailCodeRgx := regexp.MustCompile(fmt.Sprintf(mailTemplate, codeRgx))
 	verifyMailCode := mailCodeRgx.FindStringSubmatch(mailBody)
 	// verify the user
 	verification := mustMarshal(&UserVerification{
@@ -288,9 +291,9 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	// get the recovery code from the email
 	mailBody, err = testMailService.FindEmail(context.Background(), testEmail)
 	c.Assert(err, qt.IsNil)
-	log.Println(mailBody)
 	// update the regex to find the recovery code in the email
-	mailCodeRgx = regexp.MustCompile(fmt.Sprintf(`%s(.{%d})`, PasswordResetTextBody, VerificationCodeLength*2))
+	mailTemplate = strings.Split(PasswordResetTextBody, "\n")[0]
+	mailCodeRgx = regexp.MustCompile(fmt.Sprintf(mailTemplate, codeRgx))
 	passResetMailCode := mailCodeRgx.FindStringSubmatch(mailBody)
 	// reset the password
 	newPassword := "password2"

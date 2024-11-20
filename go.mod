@@ -1,6 +1,6 @@
 module github.com/vocdoni/saas-backend
 
-go 1.22.5
+go 1.23.3
 
 require (
 	github.com/docker/go-connections v0.5.0

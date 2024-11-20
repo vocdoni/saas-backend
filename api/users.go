@@ -100,14 +100,13 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// send the new verification code to the user email
 	userName := fmt.Sprintf("%s %s", userInfo.FirstName, userInfo.LastName)
-	if err := a.sendNotification(r.Context(), userInfo.Email, userName, VerificationCodeEmailSubject,
-		VerificationCodeTextBody+code, VerificationAccountTemplate, struct {
+	verificationLink := fmt.Sprintf(a.webAppURL+VerificationURI, newUser.Email, code)
+	plainBody := fmt.Sprintf(VerificationCodeTextBody, code, verificationLink)
+	if err := a.sendNotification(r.Context(), userInfo.Email, userName,
+		VerificationCodeEmailSubject, plainBody, VerificationAccountTemplate, struct {
 			Code string
 			Link string
-		}{
-			Code: code,
-			Link: fmt.Sprintf(a.webAppURL+VerificationURI, newUser.Email, code),
-		},
+		}{code, verificationLink},
 	); err != nil {
 		log.Warnw("could not send verification code", "error", err)
 		ErrGenericInternalServerError.Write(w)
@@ -295,14 +294,13 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 	}
 	// send the new verification code to the user email
 	userName := fmt.Sprintf("%s %s", user.FirstName, user.LastName)
+	verificationLink := fmt.Sprintf(a.webAppURL+VerificationURI, user.Email, newCode)
+	plainBody := fmt.Sprintf(VerificationCodeTextBody, newCode, verificationLink)
 	if err := a.sendNotification(r.Context(), user.Email, userName, VerificationCodeEmailSubject,
-		VerificationCodeTextBody+newCode, VerificationAccountTemplate, struct {
+		plainBody, VerificationAccountTemplate, struct {
 			Code string
 			Link string
-		}{
-			Code: newCode,
-			Link: fmt.Sprintf(a.webAppURL+VerificationURI, user.Email, newCode),
-		},
+		}{newCode, verificationLink},
 	); err != nil {
 		log.Warnw("could not send verification code", "error", err)
 		ErrGenericInternalServerError.Write(w)
@@ -488,14 +486,13 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 		}
 		// send the verification code to the user email
 		userName := fmt.Sprintf("%s %s", user.FirstName, user.LastName)
-		if err := a.sendNotification(r.Context(), user.Email, userName, PasswordResetEmailSubject,
-			PasswordResetTextBody+code, PasswordResetTemplate, struct {
+		resetLink := fmt.Sprintf(a.webAppURL+PasswordResetURI, user.Email, code)
+		plainBody := fmt.Sprintf(PasswordResetTextBody, code, resetLink)
+		if err := a.sendNotification(r.Context(), user.Email, userName,
+			PasswordResetEmailSubject, plainBody, PasswordResetTemplate, struct {
 				Code string
 				Link string
-			}{
-				Code: code,
-				Link: fmt.Sprintf(a.webAppURL+PasswordResetURI, user.Email, code),
-			},
+			}{code, resetLink},
 		); err != nil {
 			log.Warnw("could not send verification code", "error", err)
 			ErrGenericInternalServerError.Write(w)
