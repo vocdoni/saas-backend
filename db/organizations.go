@@ -16,7 +16,7 @@ func (ms *MongoStorage) organization(ctx context.Context, address string) (*Orga
 	// find the organization in the database by its address (case insensitive)
 	filter := bson.M{"_id": bson.M{"$regex": address, "$options": "i"}}
 	result := ms.organizations.FindOne(ctx, filter)
-	org := &Organization{}
+	org := &Organization{Subscription: OrganizationSubscription{}}
 	if err := result.Decode(org); err != nil {
 		// if the organization doesn't exist return a specific error
 		if err == mongo.ErrNoDocuments {
@@ -154,4 +154,25 @@ func (ms *MongoStorage) OrganizationsMembers(address string) ([]User, error) {
 		return nil, err
 	}
 	return users, nil
+}
+
+// SetOrganizationSubscription method adds the provided subscription to
+// the organization with the given address
+func (ms *MongoStorage) SetOrganizationSubscription(address string, orgSubscription *OrganizationSubscription) error {
+	if _, err := ms.Plan(orgSubscription.PlanID); err != nil {
+		return ErrInvalidData
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// prepare the document to be updated in the database
+	filter := bson.M{"_id": address}
+	updateDoc := bson.M{"$set": bson.M{"subscription": orgSubscription}}
+	// update the organization in the database
+	if _, err := ms.organizations.UpdateOne(ctx, filter, updateDoc); err != nil {
+		return err
+	}
+	return nil
 }

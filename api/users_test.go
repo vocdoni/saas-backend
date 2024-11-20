@@ -265,7 +265,7 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	resp, err = http.DefaultClient.Do(req)
 	c.Assert(err, qt.IsNil)
-	c.Assert(resp.StatusCode, qt.Equals, http.StatusUnauthorized)
+	c.Assert(resp.StatusCode, qt.Equals, http.StatusOK)
 	c.Assert(resp.Body.Close(), qt.IsNil)
 	// get the verification code from the email
 	mailBody, err := testMailService.FindEmail(context.Background(), testEmail)

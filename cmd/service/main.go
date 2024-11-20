@@ -12,12 +12,13 @@ import (
 	"github.com/vocdoni/saas-backend/api"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/notifications/smtp"
+	"github.com/vocdoni/saas-backend/stripe"
+	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 )
 
 func main() {
-	log.Init("debug", "stdout", nil)
 	// define flags
 	flag.StringP("host", "h", "0.0.0.0", "listen address")
 	flag.IntP("port", "p", 8080, "listen port")
@@ -27,12 +28,15 @@ func main() {
 	flag.StringP("vocdoniApi", "v", "https://api-dev.vocdoni.net/v2", "vocdoni node remote API URL")
 	flag.StringP("privateKey", "k", "", "private key for the Vocdoni account")
 	flag.BoolP("fullTransparentMode", "a", false, "allow all transactions and do not modify any of them")
+	flag.String("plansFile", "subscriptions.json", "JSON file that contains the subscriptions info")
 	flag.String("smtpServer", "", "SMTP server")
 	flag.Int("smtpPort", 587, "SMTP port")
 	flag.String("smtpUsername", "", "SMTP username")
 	flag.String("smtpPassword", "", "SMTP password")
 	flag.String("emailFromAddress", "", "Email service from address")
 	flag.String("emailFromName", "Vocdoni", "Email service from name")
+	flag.String("stripeApiSecret", "", "Stripe API secret")
+	flag.String("stripeWebhookSecret", "", "Stripe Webhook secret")
 	// parse flags
 	flag.Parse()
 	// initialize Viper
@@ -51,6 +55,7 @@ func main() {
 	}
 	mongoURL := viper.GetString("mongoURL")
 	mongoDB := viper.GetString("mongoDB")
+	plansFile := viper.GetString("plansFile")
 	// email vars
 	smtpServer := viper.GetString("smtpServer")
 	smtpPort := viper.GetInt("smtpPort")
@@ -58,8 +63,13 @@ func main() {
 	smtpPassword := viper.GetString("smtpPassword")
 	emailFromAddress := viper.GetString("emailFromAddress")
 	emailFromName := viper.GetString("emailFromName")
+	// stripe vars
+	stripeApiSecret := viper.GetString("stripeApiSecret")
+	stripeWebhookSecret := viper.GetString("stripeWebhookSecret")
+
+	log.Init("debug", "stdout", os.Stderr)
 	// initialize the MongoDB database
-	database, err := db.New(mongoURL, mongoDB)
+	database, err := db.New(mongoURL, mongoDB, plansFile)
 	if err != nil {
 		log.Fatalf("could not create the MongoDB database: %v", err)
 	}
@@ -110,6 +120,16 @@ func main() {
 		}
 		log.Infow("email service created", "from", fmt.Sprintf("%s <%s>", emailFromName, emailFromAddress))
 	}
+	// create Stripe client and include it in the API configuration
+	if stripeApiSecret != "" || stripeWebhookSecret != "" {
+		apiConf.StripeClient = stripe.New(stripeApiSecret, stripeWebhookSecret)
+	} else {
+		log.Fatalf("stripeApiSecret and stripeWebhookSecret are required")
+	}
+	subscriptions := subscriptions.New(&subscriptions.SubscriptionsConfig{
+		DB: database,
+	})
+	apiConf.Subscriptions = subscriptions
 	// create the local API server
 	api.New(apiConf).Start()
 	log.Infow("server started", "host", host, "port", port)

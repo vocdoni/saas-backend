@@ -69,6 +69,7 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// check if the api is not in transparent mode
 	if !a.transparentMode {
+		// get subscription plan
 		switch tx.Payload.(type) {
 		case *models.Tx_SetAccount:
 			txSetAccount := tx.GetSetAccount()
@@ -110,13 +111,19 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 		case *models.Tx_NewProcess:
 			txNewProcess := tx.GetNewProcess()
 			// check the tx fields
-			if txNewProcess == nil || txNewProcess.Process == nil || txNewProcess.Nonce == 0 {
+			if txNewProcess == nil || txNewProcess.Process == nil {
+				// if txNewProcess == nil || txNewProcess.Process == nil || txNewProcess.Nonce == 0 {
 				ErrInvalidTxFormat.With("missing fields").Write(w)
+				return
+			}
+			if hasPermission, err := a.subscriptions.HasPermission(tx, txNewProcess.Txtype, org); !hasPermission || err != nil {
+				ErrUnauthorized.Withf("user does not have permission to sign transactions: %v", err).Write(w)
 				return
 			}
 			// check the tx subtype
 			switch txNewProcess.Txtype {
 			case models.TxType_NEW_PROCESS:
+
 				// generate a new faucet package if it's not present and include it in the tx
 				if txNewProcess.FaucetPackage == nil {
 					// get the tx cost for the tx type
@@ -160,6 +167,10 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 			amount, ok := a.account.TxCosts[txSetProcess.Txtype]
 			if !ok {
 				ErrInvalidTxFormat.With("invalid tx type").Write(w)
+				return
+			}
+			if hasPermission, err := a.subscriptions.HasPermission(tx, txSetProcess.Txtype, org); !hasPermission || err != nil {
+				ErrUnauthorized.Withf("user does not have permission to sign transactions: %v", err).Write(w)
 				return
 			}
 			// check the tx subtype

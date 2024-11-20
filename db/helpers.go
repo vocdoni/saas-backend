@@ -2,10 +2,12 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"time"
 
+	root "github.com/vocdoni/saas-backend"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -20,6 +22,12 @@ func (ms *MongoStorage) initCollections(database string) error {
 	defer cancel()
 	// get the current collections names to create only the missing ones
 	currentCollections, err := ms.collectionNames(ctx, database)
+	if err != nil {
+		return err
+	}
+	log.Infow("current collections", "collections", currentCollections)
+	log.Infow("reading plans from file %s", ms.plansFile)
+	loadedPlans, err := readPlanJSON(ms.plansFile)
 	if err != nil {
 		return err
 	}
@@ -43,6 +51,12 @@ func (ms *MongoStorage) initCollections(database string) error {
 					return nil, fmt.Errorf("failed to update collection validator: %w", err)
 				}
 			}
+			if name == "plans" {
+				// clear subscriptions collection and update the DB with the new ones
+				if _, err := ms.client.Database(database).Collection(name).DeleteMany(ctx, bson.D{}); err != nil {
+					return nil, err
+				}
+			}
 		} else {
 			// if the collection has a validator create it with it
 			opts := options.CreateCollection()
@@ -52,6 +66,16 @@ func (ms *MongoStorage) initCollections(database string) error {
 			// create the collection
 			if err := ms.client.Database(database).CreateCollection(ctx, name, opts); err != nil {
 				return nil, err
+			}
+		}
+		if name == "plans" {
+			var plans []interface{}
+			for _, plan := range loadedPlans {
+				plans = append(plans, plan)
+			}
+			count, err := ms.client.Database(database).Collection(name).InsertMany(ctx, plans)
+			if err != nil || len(count.InsertedIDs) != len(loadedPlans) {
+				return nil, fmt.Errorf("failed to insert plans: %w", err)
 			}
 		}
 		// return the collection
@@ -71,6 +95,10 @@ func (ms *MongoStorage) initCollections(database string) error {
 	}
 	// organizationInvites collection
 	if ms.organizationInvites, err = getCollection("organizationInvites"); err != nil {
+		return err
+	}
+	// subscriptions collection
+	if ms.plans, err = getCollection("plans"); err != nil {
 		return err
 	}
 	return nil
@@ -192,4 +220,37 @@ func dynamicUpdateDocument(item interface{}, alwaysUpdateTags []string) (bson.M,
 		}
 	}
 	return bson.M{"$set": update}, nil
+}
+
+// readPlanJSON reads a JSON file with an array of subscritpions
+// and return it as a Plan array
+func readPlanJSON(plansFile string) ([]*Plan, error) {
+	log.Warnf("Reading subscriptions from %s", plansFile)
+	file, err := root.Assets.Open(fmt.Sprintf("assets/%s", plansFile))
+	if err != nil {
+		return nil, err
+	}
+	// file, err := os.Open(plansFile)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// defer func() {
+	// 	if err := file.Close(); err != nil {
+	// 		log.Warnw("failed to close subscriptions file", "error", err)
+	// 	}
+	// }()
+
+	// Create a JSON decoder
+	decoder := json.NewDecoder(file)
+
+	var plans []*Plan
+	err = decoder.Decode(&plans)
+	if err != nil {
+		return nil, err
+	}
+	// print plans
+	for _, sub := range plans {
+		fmt.Println(sub)
+	}
+	return plans, nil
 }

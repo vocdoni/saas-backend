@@ -56,4 +56,14 @@ const (
 	organizationRolesEndpoint = "/organizations/roles"
 	// GET /organizations/types to get the available organization types
 	organizationTypesEndpoint = "/organizations/types"
+	// GET /organizations/{address}/subscription to get the organization subscription
+	organizationSubscriptionEndpoint = "/organizations/{address}/subscription"
+
+	// subscription routes
+	// GET /subscriptions to get the subscriptions of an organization
+	plansEndpoint = "/plans"
+	// GET /subscriptions/{planID} to get the plan information
+	planInfoEndpoint = "/plans/{planID}"
+	// POST /subscriptions/webhook to receive the subscription webhook from stripe
+	subscriptionsWebhook = "/subscriptions/webhook"
 )

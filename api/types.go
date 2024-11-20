@@ -9,17 +9,19 @@ import (
 
 // Organization is the struct that represents an organization in the API
 type OrganizationInfo struct {
-	Address   string            `json:"address"`
-	Website   string            `json:"website"`
-	CreatedAt string            `json:"createdAt"`
-	Type      string            `json:"type"`
-	Size      string            `json:"size"`
-	Color     string            `json:"color"`
-	Subdomain string            `json:"subdomain"`
-	Country   string            `json:"country"`
-	Timezone  string            `json:"timezone"`
-	Active    bool              `json:"active"`
-	Parent    *OrganizationInfo `json:"parent"`
+	Address      string                       `json:"address"`
+	Website      string                       `json:"website"`
+	CreatedAt    string                       `json:"createdAt"`
+	Type         string                       `json:"type"`
+	Size         string                       `json:"size"`
+	Color        string                       `json:"color"`
+	Subdomain    string                       `json:"subdomain"`
+	Country      string                       `json:"country"`
+	Timezone     string                       `json:"timezone"`
+	Active       bool                         `json:"active"`
+	Parent       *OrganizationInfo            `json:"parent"`
+	Subscription *db.OrganizationSubscription `json:"subscription"`
+	Counters     *db.OrganizationCounters     `json:"counters"`
 }
 
 // OrganizationMembers is the struct that represents a list of members of
@@ -158,16 +160,26 @@ func organizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 		parentOrg = organizationFromDB(parent, nil)
 	}
 	return &OrganizationInfo{
-		Address:   dbOrg.Address,
-		Website:   dbOrg.Website,
-		CreatedAt: dbOrg.CreatedAt.Format(time.RFC3339),
-		Type:      string(dbOrg.Type),
-		Size:      dbOrg.Size,
-		Color:     dbOrg.Color,
-		Subdomain: dbOrg.Subdomain,
-		Country:   dbOrg.Country,
-		Timezone:  dbOrg.Timezone,
-		Active:    dbOrg.Active,
-		Parent:    parentOrg,
+		Address:      dbOrg.Address,
+		Website:      dbOrg.Website,
+		CreatedAt:    dbOrg.CreatedAt.Format(time.RFC3339),
+		Type:         string(dbOrg.Type),
+		Size:         dbOrg.Size,
+		Color:        dbOrg.Color,
+		Subdomain:    dbOrg.Subdomain,
+		Country:      dbOrg.Country,
+		Timezone:     dbOrg.Timezone,
+		Active:       dbOrg.Active,
+		Parent:       parentOrg,
+		Subscription: &dbOrg.Subscription,
+		Counters:     &dbOrg.Counters,
 	}
+}
+
+// OrganizationSubscriptionInfo is the struct used to provide detailed information
+// regaridng the subscription of an organization.
+type OrganizationSubscriptionInfo struct {
+	SubcriptionDetails *db.OrganizationSubscription `json:"subscriptionDetails"`
+	Usage              *db.OrganizationCounters     `json:"usage"`
+	Plan               *db.Plan                     `json:"plan"`
 }
