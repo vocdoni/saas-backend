@@ -12,9 +12,39 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/notifications"
 )
 
-var codeRgx = fmt.Sprintf("(.{%d})", VerificationCodeLength*2)
+var verificationCodeRgx, passwordResetRgx *regexp.Regexp
+
+func init() {
+	codeRgx := fmt.Sprintf(`(.{%d})`, VerificationCodeLength*2)
+	// compose notification with the verification code regex needle
+	verifyNotification := &notifications.Notification{
+		PlainBody: VerifyAccountNotification.Notification.PlainBody,
+	}
+	if err := verifyNotification.ExecTemplate("", struct {
+		Code string
+		Link string
+	}{codeRgx, ""}); err != nil {
+		panic(err)
+	}
+	// clean the notification body to get only the verification code and
+	// compile the regex
+	verificationCodeRgx = regexp.MustCompile(strings.Split(verifyNotification.PlainBody, "\n")[0])
+	// compose notification with the password reset code regex needle
+	passwordResetNotification := &notifications.Notification{
+		PlainBody: PasswordResetNotification.Notification.PlainBody,
+	}
+	if err := passwordResetNotification.ExecTemplate("", struct {
+		Code string
+		Link string
+	}{codeRgx, ""}); err != nil {
+		panic(err)
+	}
+	// clean the notification body to get only the password reset code and
+	passwordResetRgx = regexp.MustCompile(strings.Split(passwordResetNotification.PlainBody, "\n")[0])
+}
 
 func TestRegisterHandler(t *testing.T) {
 	c := qt.New(t)
@@ -185,10 +215,8 @@ func TestVerifyAccountHandler(t *testing.T) {
 	// get the verification code from the email
 	mailBody, err := testMailService.FindEmail(context.Background(), testEmail)
 	c.Assert(err, qt.IsNil)
-	// create a regex to find the verification code in the email
-	mailTemplate := strings.Split(VerificationCodeTextBody, "\n")[0]
-	mailCodeRgx := regexp.MustCompile(fmt.Sprintf(mailTemplate, codeRgx))
-	mailCode := mailCodeRgx.FindStringSubmatch(mailBody)
+	// get the verification code from the email using the regex
+	mailCode := verificationCodeRgx.FindStringSubmatch(mailBody)
 	// verify the user
 	verification := mustMarshal(&UserVerification{
 		Email: testEmail,
@@ -212,7 +240,7 @@ func TestVerifyAccountHandler(t *testing.T) {
 	// get the verification code from the email
 	mailBody, err = testMailService.FindEmail(context.Background(), testEmail)
 	c.Assert(err, qt.IsNil)
-	mailCode = mailCodeRgx.FindStringSubmatch(mailBody)
+	mailCode = verificationCodeRgx.FindStringSubmatch(mailBody)
 	// verify the user
 	verification = mustMarshal(&UserVerification{
 		Email: testEmail,
@@ -264,9 +292,7 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	mailBody, err := testMailService.FindEmail(context.Background(), testEmail)
 	c.Assert(err, qt.IsNil)
 	// create a regex to find the verification code in the email
-	mailTemplate := strings.Split(VerificationCodeTextBody, "\n")[0]
-	mailCodeRgx := regexp.MustCompile(fmt.Sprintf(mailTemplate, codeRgx))
-	verifyMailCode := mailCodeRgx.FindStringSubmatch(mailBody)
+	verifyMailCode := passwordResetRgx.FindStringSubmatch(mailBody)
 	// verify the user
 	verification := mustMarshal(&UserVerification{
 		Email: testEmail,
@@ -292,9 +318,7 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	mailBody, err = testMailService.FindEmail(context.Background(), testEmail)
 	c.Assert(err, qt.IsNil)
 	// update the regex to find the recovery code in the email
-	mailTemplate = strings.Split(PasswordResetTextBody, "\n")[0]
-	mailCodeRgx = regexp.MustCompile(fmt.Sprintf(mailTemplate, codeRgx))
-	passResetMailCode := mailCodeRgx.FindStringSubmatch(mailBody)
+	passResetMailCode := passwordResetRgx.FindStringSubmatch(mailBody)
 	// reset the password
 	newPassword := "password2"
 	resetPass := mustMarshal(&UserPasswordReset{

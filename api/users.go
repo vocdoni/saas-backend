@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -99,16 +98,15 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// send the new verification code to the user email
-	userName := fmt.Sprintf("%s %s", userInfo.FirstName, userInfo.LastName)
-	verificationLink, err := a.buildWebAppURL(VerificationURI, map[string]any{"email": newUser.Email, "code": code})
+	verificationLink, err := a.buildWebAppURL(VerifyAccountNotification.LinkPath,
+		map[string]any{"email": newUser.Email, "code": code})
 	if err != nil {
 		log.Warnw("could not build verification link", "error", err)
 		ErrGenericInternalServerError.Write(w)
 		return
 	}
-	plainBody := fmt.Sprintf(VerificationCodeTextBody, code, verificationLink)
-	if err := a.sendNotification(r.Context(), userInfo.Email, userName,
-		VerificationCodeEmailSubject, plainBody, VerificationAccountTemplate, struct {
+	if err := a.sendNotification(r.Context(), userInfo.Email, VerifyAccountNotification,
+		struct {
 			Code string
 			Link string
 		}{code, verificationLink},
@@ -298,16 +296,15 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 	// send the new verification code to the user email
-	userName := fmt.Sprintf("%s %s", user.FirstName, user.LastName)
-	verificationLink, err := a.buildWebAppURL(VerificationURI, map[string]any{"email": user.Email, "code": newCode})
+	verificationLink, err := a.buildWebAppURL(VerifyAccountNotification.LinkPath,
+		map[string]any{"email": user.Email, "code": newCode})
 	if err != nil {
 		log.Warnw("could not build verification link", "error", err)
 		ErrGenericInternalServerError.Write(w)
 		return
 	}
-	plainBody := fmt.Sprintf(VerificationCodeTextBody, newCode, verificationLink)
-	if err := a.sendNotification(r.Context(), user.Email, userName, VerificationCodeEmailSubject,
-		plainBody, VerificationAccountTemplate, struct {
+	if err := a.sendNotification(r.Context(), user.Email, VerifyAccountNotification,
+		struct {
 			Code string
 			Link string
 		}{newCode, verificationLink},
@@ -495,16 +492,15 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		// send the password reset code to the user email
-		userName := fmt.Sprintf("%s %s", user.FirstName, user.LastName)
-		resetLink, err := a.buildWebAppURL(PasswordResetURI, map[string]any{"email": user.Email, "code": code})
+		resetLink, err := a.buildWebAppURL(PasswordResetNotification.LinkPath,
+			map[string]any{"email": user.Email, "code": code})
 		if err != nil {
 			log.Warnw("could not build verification link", "error", err)
 			ErrGenericInternalServerError.Write(w)
 			return
 		}
-		plainBody := fmt.Sprintf(PasswordResetTextBody, code, resetLink)
-		if err := a.sendNotification(r.Context(), user.Email, userName,
-			PasswordResetEmailSubject, plainBody, PasswordResetTemplate, struct {
+		if err := a.sendNotification(r.Context(), user.Email, PasswordResetNotification,
+			struct {
 				Code string
 				Link string
 			}{code, resetLink},

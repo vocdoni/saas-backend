@@ -11,42 +11,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/vocdoni/saas-backend/db"
-	"github.com/vocdoni/saas-backend/notifications"
 	"go.vocdoni.io/dvote/log"
 )
-
-// sendNotification method sends a notification to the email provided. It
-// requires the email, the name of the recipient, the subject, the plain body,
-// the mail template and the data to fill the template. It returns an error if
-// the mail service is available and the notification could not be sent. If the
-// mail service is not available, the notification is not sent but the function
-// returns nil.
-func (a *API) sendNotification(ctx context.Context, email, name, subject,
-	plainbody string, temp notifications.MailTemplate, data any,
-) error {
-	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
-	defer cancel()
-	// send the verification code via email if the mail service is available
-	if a.mail != nil {
-		// create the notification with the verification code
-		notification := &notifications.Notification{
-			ToName:    name,
-			ToAddress: email,
-			Subject:   subject,
-			PlainBody: plainbody,
-			Body:      plainbody,
-		}
-		// execute the template with the data provided
-		if err := notification.ExecTemplate(a.mailTemplates[temp], data); err != nil {
-			return err
-		}
-		// send the notification
-		if err := a.mail.SendNotification(ctx, notification); err != nil {
-			return err
-		}
-	}
-	return nil
-}
 
 // organizationFromRequest helper function allows to get the organization info
 // related to the request provided. It gets the organization address from the

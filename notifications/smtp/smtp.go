@@ -118,7 +118,9 @@ func (se *SMTPEmail) composeBody(notification *notifications.Notification) ([]by
 		"Content-Type":              {"text/plain; charset=\"UTF-8\""},
 		"Content-Transfer-Encoding": {"7bit"},
 	})
-	textPart.Write([]byte(notification.PlainBody))
+	if _, err := textPart.Write([]byte(notification.PlainBody)); err != nil {
+		return nil, fmt.Errorf("could not write plain text part: %v", err)
+	}
 	// HTML part
 	htmlPart, _ := writer.CreatePart(textproto.MIMEHeader{
 		"Content-Type":              {"text/html; charset=\"UTF-8\""},

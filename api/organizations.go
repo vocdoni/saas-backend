@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -298,20 +297,18 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	// send the invitation verification code to the user email
-	inviteLink, err := a.buildWebAppURL(InvitationURI, map[string]any{"email": invite.Email, "code": inviteCode, "address": org.Address})
+	inviteLink, err := a.buildWebAppURL(InviteAdminNotification.LinkPath,
+		map[string]any{"email": invite.Email, "code": inviteCode, "address": org.Address})
 	if err != nil {
 		log.Warnw("could not build verification link", "error", err)
 		ErrGenericInternalServerError.Write(w)
 		return
 	}
-	plainBody := fmt.Sprintf(InvitationTextBody, org.Address, inviteCode, inviteLink)
-	if err := a.sendNotification(r.Context(), invite.Email, invite.Email,
-		InvitationEmailSubject, plainBody, InviteAdminTemplate, struct {
-			Organization string
-			Code         string
-			Link         string
-		}{org.Address, inviteCode, inviteLink},
-	); err != nil {
+	if err := a.sendNotification(r.Context(), invite.Email, InviteAdminNotification, struct {
+		Organization string
+		Code         string
+		Link         string
+	}{org.Address, inviteCode, inviteLink}); err != nil {
 		log.Warnw("could not send verification code", "error", err)
 		ErrGenericInternalServerError.Write(w)
 		return
