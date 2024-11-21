@@ -68,10 +68,9 @@ func (s *StripeClient) GetInfoFromEvent(event stripe.Event) (*stripe.Customer, *
 }
 
 func (s *StripeClient) GetPriceByID(priceID string) *stripe.Price {
-	query := fmt.Sprintf("active:'true' AND lookup_key:'%s'", priceID)
 	params := &stripe.PriceSearchParams{
 		SearchParams: stripe.SearchParams{
-			Query: query,
+			Query: fmt.Sprintf("active:'true' AND lookup_key:'%s'", priceID),
 		},
 	}
 	params.AddExpand("data.tiers")
@@ -85,8 +84,7 @@ func (s *StripeClient) GetPriceByID(priceID string) *stripe.Price {
 func (s *StripeClient) GetPrices(priceIDs []string) []*stripe.Price {
 	var prices []*stripe.Price
 	for _, priceID := range priceIDs {
-		price := s.GetPriceByID(priceID)
-		if price != nil {
+		if price := s.GetPriceByID(priceID); price != nil {
 			prices = append(prices, price)
 		}
 	}
@@ -96,17 +94,16 @@ func (s *StripeClient) GetPrices(priceIDs []string) []*stripe.Price {
 func (s *StripeClient) GetPlans() ([]*db.Plan, error) {
 	var plans []*db.Plan
 	for i, priceID := range PricesLookupKeys {
-		price := s.GetPriceByID(priceID)
-		if price != nil {
-			var organizationData map[string]int
+		if price := s.GetPriceByID(priceID); price != nil {
+			var organizationData db.PlanLimits
 			if err := json.Unmarshal([]byte(price.Metadata["Organization"]), &organizationData); err != nil {
 				return nil, fmt.Errorf("error parsing plan organization metadata JSON: %s\n", err.Error())
 			}
-			var votingTypesData map[string]bool
+			var votingTypesData db.VotingTypes
 			if err := json.Unmarshal([]byte(price.Metadata["VotingTypes"]), &votingTypesData); err != nil {
 				return nil, fmt.Errorf("error parsing plan voting types metadata JSON: %s\n", err.Error())
 			}
-			var featuresData map[string]bool
+			var featuresData db.Features
 			if err := json.Unmarshal([]byte(price.Metadata["Features"]), &featuresData); err != nil {
 				return nil, fmt.Errorf("error parsing plan features metadata JSON: %s\n", err.Error())
 			}
@@ -125,26 +122,14 @@ func (s *StripeClient) GetPlans() ([]*db.Plan, error) {
 				})
 			}
 			plans = append(plans, &db.Plan{
-				ID:            uint64(i),
-				Name:          price.Nickname,
-				StartingPrice: startingPrice,
-				StripeID:      price.ID,
-				Default:       price.Metadata["Default"] == "true",
-				Organization: db.PlanLimits{
-					Memberships: organizationData["Memberships"],
-					SubOrgs:     organizationData["SubOrgs"],
-					CensusSize:  organizationData["CensusSize"],
-				},
-				VotingTypes: db.VotingTypes{
-					Approval: votingTypesData["Approval"],
-					Ranked:   votingTypesData["Ranked"],
-					Weighted: votingTypesData["Weighted"],
-				},
-				Features: db.Features{
-					Personalization: featuresData["Personalization"],
-					EmailReminder:   featuresData["EmailReminder"],
-					SmsNotification: featuresData["SmsNotification"],
-				},
+				ID:              uint64(i),
+				Name:            price.Nickname,
+				StartingPrice:   startingPrice,
+				StripeID:        price.ID,
+				Default:         price.Metadata["Default"] == "true",
+				Organization:    organizationData,
+				VotingTypes:     votingTypesData,
+				Features:        featuresData,
 				CensusSizeTiers: tiers,
 			})
 		}
