@@ -92,7 +92,7 @@ type Plan struct {
 }
 
 type PlanTier struct {
-	Amount int64 `json:"Amount" bson:"Amount"`
+	Amount int64 `json:"amount" bson:"amount"`
 	UpTo   int64 `json:"upTo" bson:"upTo"`
 }
 
