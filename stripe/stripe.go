@@ -74,8 +74,7 @@ func (s *StripeClient) GetPriceByID(priceID string) *stripe.Price {
 		},
 	}
 	params.AddExpand("data.tiers")
-	results := price.Search(params)
-	if results.Next() {
+	if results := price.Search(params); results.Next() {
 		return results.Price()
 	}
 	return nil
