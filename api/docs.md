@@ -833,6 +833,7 @@ This request can be made only by organization admins.
       "id":1,
       "name":"Basic",
       "stripeID":"stripe_123",
+      "startingPrice": "9900",
       "organization":{
         "memberships":1,
         "subOrgs":1
@@ -879,6 +880,7 @@ This request can be made only by organization admins.
   "id":1,
   "name":"Basic",
   "stripeID":"stripe_123",
+  "startingPrice": "9900",
   "organization":{
     "memberships":1,
     "subOrgs":1
