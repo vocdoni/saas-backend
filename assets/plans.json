@@ -1,12 +1,14 @@
 [
     {
         "ID": 1,
-        "Name": "Basic",
-        "StripeID": "prod_R3LTVsjklmuQAL",
+        "Name": "Essential Annual Plan",
+        "StripeID": "price_1QBEmzDW6VLep8WGpkwjynXV",
+        "StartingPrice": 9900,
         "Default": false,
         "Organization": {
             "Memberships": 5,
-            "SubOrgs": 1
+            "SubOrgs": 1,
+            "CensusSize": 0
         },
         "VotingTypes": {
             "Approval": true,
@@ -21,12 +23,14 @@
     },
     {
         "ID": 2,
-        "Name": "Pro",
-        "StripeID": "prod_R0kTryoMNl8I19",
+        "Name": "Premium Annual Plan",
+        "StripeID": "price_1Q8iyUDW6VLep8WGWXdjC78r",
+        "StartingPrice": 30000,
         "Default": false,
         "Organization": {
             "Memberships": 10,
-            "SubOrgs": 5
+            "SubOrgs": 5,
+            "CensusSize": 0
         },
         "VotingTypes": {
             "Approval": true,
@@ -41,9 +45,10 @@
     },
     {
         "ID": 3,
-        "Name": "free",
+        "Name": "Free Plan",
+        "StripeID": "price_1QMtoJDW6VLep8WGC2vsJ2CV",
+        "StartingPrice": 0,
         "Default": true,
-        "StripeID": "stripe_789",
         "Organization": {
             "Memberships": 10,
             "SubOrgs": 5,

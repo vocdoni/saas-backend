@@ -848,6 +848,16 @@ This request can be made only by organization admins.
         "smsNotification":false
       }
     },
+     "censusSizeTiers": [
+    {
+     "flatAmount":9900,
+     "upTo":100
+    },
+    {
+     "flatAmount":79900,
+     "upTo":1500
+    }
+  ],
     ...
   ]
 }
@@ -882,7 +892,17 @@ This request can be made only by organization admins.
     "personalization":false,
     "emailReminder":true,
     "smsNotification":false
-  }
+  },
+  "censusSizeTiers": [
+    {
+     "flatAmount":9900,
+     "upTo":100
+    },
+    {
+     "flatAmount":79900,
+     "upTo":1500
+    }
+  ],
 }
 ```
 
