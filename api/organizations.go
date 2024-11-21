@@ -298,7 +298,12 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	// send the invitation verification code to the user email
-	inviteLink := fmt.Sprintf(a.webAppURL+InvitationURI, invite.Email, inviteCode, org.Address)
+	inviteLink, err := a.buildWebAppURL(InvitationURI, map[string]any{"email": invite.Email, "code": inviteCode, "address": org.Address})
+	if err != nil {
+		log.Warnw("could not build verification link", "error", err)
+		ErrGenericInternalServerError.Write(w)
+		return
+	}
 	plainBody := fmt.Sprintf(InvitationTextBody, org.Address, inviteCode, inviteLink)
 	if err := a.sendNotification(r.Context(), invite.Email, invite.Email,
 		InvitationEmailSubject, plainBody, InviteAdminTemplate, struct {

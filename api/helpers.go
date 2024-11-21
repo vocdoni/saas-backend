@@ -3,7 +3,9 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -82,6 +84,27 @@ func (a *API) buildLoginResponse(id string) (*LoginResponse, error) {
 	}
 	_, lr.Token, _ = a.auth.Encode(jmap)
 	return &lr, nil
+}
+
+// buildWebAppURL method allows to build a URL for the web application using
+// the path and the parameters provided. It returns the URL as a string and an
+// error if the URL could not be built. It encodes the parameters in the query
+// string of the URL to prevent any issues with special characters. It returns
+// the URL as a string and an error if the URL could not be built.
+func (a *API) buildWebAppURL(path string, params map[string]any) (string, error) {
+	// parse the web app URL with the path provided
+	url, err := url.Parse(a.webAppURL + path)
+	if err != nil {
+		return "", err
+	}
+	// encode the parameters in the query string of the URL
+	q := url.Query()
+	for k, v := range params {
+		q.Set(k, fmt.Sprint(v))
+	}
+	// include the encoded query string in the URL
+	url.RawQuery = q.Encode()
+	return url.String(), nil
 }
 
 // httpWriteJSON helper function allows to write a JSON response.
