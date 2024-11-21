@@ -109,7 +109,12 @@ func TestMain(m *testing.M) {
 	// set reset db env var to true
 	_ = os.Setenv("VOCDONI_MONGO_RESET_DB", "true")
 	// create a new MongoDB connection with the test database
-	if testDB, err = db.New(mongoURI, test.RandomDatabaseName(), "subscriptions.json"); err != nil {
+	// create a new MongoDB connection with the test database
+	plans, err := db.ReadPlanJSON()
+	if err != nil {
+		panic(err)
+	}
+	if testDB, err = db.New(mongoURI, test.RandomDatabaseName(), plans); err != nil {
 		panic(err)
 	}
 	defer testDB.Close()

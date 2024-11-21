@@ -26,11 +26,6 @@ func (ms *MongoStorage) initCollections(database string) error {
 		return err
 	}
 	log.Infow("current collections", "collections", currentCollections)
-	log.Infow("reading plans from file %s", ms.plansFile)
-	loadedPlans, err := readPlanJSON(ms.plansFile)
-	if err != nil {
-		return err
-	}
 	// aux method to get a collection if it exists, or create it if it doesn't
 	getCollection := func(name string) (*mongo.Collection, error) {
 		alreadyCreated := false
@@ -70,11 +65,11 @@ func (ms *MongoStorage) initCollections(database string) error {
 		}
 		if name == "plans" {
 			var plans []interface{}
-			for _, plan := range loadedPlans {
+			for _, plan := range ms.stripePlans {
 				plans = append(plans, plan)
 			}
 			count, err := ms.client.Database(database).Collection(name).InsertMany(ctx, plans)
-			if err != nil || len(count.InsertedIDs) != len(loadedPlans) {
+			if err != nil || len(count.InsertedIDs) != len(ms.stripePlans) {
 				return nil, fmt.Errorf("failed to insert plans: %w", err)
 			}
 		}
@@ -224,21 +219,11 @@ func dynamicUpdateDocument(item interface{}, alwaysUpdateTags []string) (bson.M,
 
 // readPlanJSON reads a JSON file with an array of subscritpions
 // and return it as a Plan array
-func readPlanJSON(plansFile string) ([]*Plan, error) {
-	log.Warnf("Reading subscriptions from %s", plansFile)
-	file, err := root.Assets.Open(fmt.Sprintf("assets/%s", plansFile))
+func ReadPlanJSON() ([]*Plan, error) {
+	file, err := root.Assets.Open("assets/plans.json")
 	if err != nil {
 		return nil, err
 	}
-	// file, err := os.Open(plansFile)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// defer func() {
-	// 	if err := file.Close(); err != nil {
-	// 		log.Warnw("failed to close subscriptions file", "error", err)
-	// 	}
-	// }()
 
 	// Create a JSON decoder
 	decoder := json.NewDecoder(file)

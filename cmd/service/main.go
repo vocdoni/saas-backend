@@ -31,7 +31,6 @@ func main() {
 	flag.StringP("privateKey", "k", "", "private key for the Vocdoni account")
 	flag.BoolP("fullTransparentMode", "a", false, "allow all transactions and do not modify any of them")
 	flag.String("emailTemplatesPath", "./assets", "path to the email templates")
-	flag.String("plansFile", "subscriptions.json", "JSON file that contains the subscriptions info")
 	flag.String("smtpServer", "", "SMTP server")
 	flag.Int("smtpPort", 587, "SMTP port")
 	flag.String("smtpUsername", "", "SMTP username")
@@ -60,7 +59,6 @@ func main() {
 	// MongoDB vars
 	mongoURL := viper.GetString("mongoURL")
 	mongoDB := viper.GetString("mongoDB")
-	plansFile := viper.GetString("plansFile")
 	// email vars
 	emailTemplatesPath := viper.GetString("emailTemplatesPath")
 	smtpServer := viper.GetString("smtpServer")
@@ -74,8 +72,20 @@ func main() {
 	stripeWebhookSecret := viper.GetString("stripeWebhookSecret")
 
 	log.Init("debug", "stdout", os.Stderr)
+	// create Stripe client and include it in the API configuration
+	var stripeClient *stripe.StripeClient
+	if stripeApiSecret != "" || stripeWebhookSecret != "" {
+		stripeClient = stripe.New(stripeApiSecret, stripeWebhookSecret)
+	} else {
+		log.Fatalf("stripeApiSecret and stripeWebhookSecret are required")
+	}
+	availablePlans, err := stripeClient.GetPlans()
+	if err != nil || len(availablePlans) == 0 {
+		log.Fatalf("could not get the available plans: %v", err)
+	}
+
 	// initialize the MongoDB database
-	database, err := db.New(mongoURL, mongoDB, plansFile)
+	database, err := db.New(mongoURL, mongoDB, availablePlans)
 	if err != nil {
 		log.Fatalf("could not create the MongoDB database: %v", err)
 	}
@@ -107,6 +117,7 @@ func main() {
 		Account:             acc,
 		WebAppURL:           webURL,
 		FullTransparentMode: fullTransparentMode,
+		StripeClient:        stripeClient,
 	}
 	// overwrite the email notifications service with the SMTP service if the
 	// required parameters are set and include it in the API configuration
@@ -133,12 +144,6 @@ func main() {
 			}
 		}
 		log.Infow("email service created", "from", fmt.Sprintf("%s <%s>", emailFromName, emailFromAddress))
-	}
-	// create Stripe client and include it in the API configuration
-	if stripeApiSecret != "" || stripeWebhookSecret != "" {
-		apiConf.StripeClient = stripe.New(stripeApiSecret, stripeWebhookSecret)
-	} else {
-		log.Fatalf("stripeApiSecret and stripeWebhookSecret are required")
 	}
 	subscriptions := subscriptions.New(&subscriptions.SubscriptionsConfig{
 		DB: database,
