@@ -1,10 +1,8 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"html/template"
 	"net/http"
 	"time"
 
@@ -28,8 +26,6 @@ func (a *API) sendNotification(ctx context.Context, email, name, subject,
 	defer cancel()
 	// send the verification code via email if the mail service is available
 	if a.mail != nil {
-		ctx, cancel := context.WithTimeout(ctx, time.Second*10)
-		defer cancel()
 		// create the notification with the verification code
 		notification := &notifications.Notification{
 			ToName:    name,
@@ -38,19 +34,11 @@ func (a *API) sendNotification(ctx context.Context, email, name, subject,
 			PlainBody: plainbody,
 			Body:      plainbody,
 		}
-		// compose de verification link
-		// check if the mail template is available
-		if templatePath, ok := a.mailTemplates[temp]; ok {
-			tmpl, err := template.ParseFiles(templatePath)
-			if err != nil {
-				return err
-			}
-			buf := new(bytes.Buffer)
-			if err := tmpl.Execute(buf, data); err != nil {
-				return err
-			}
-			notification.Body = buf.String()
+		// execute the template with the data provided
+		if err := notification.ExecTemplate(a.mailTemplates[temp], data); err != nil {
+			return err
 		}
+		// send the notification
 		if err := a.mail.SendNotification(ctx, notification); err != nil {
 			return err
 		}
