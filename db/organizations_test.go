@@ -200,6 +200,7 @@ func TestAddOrganizationPlan(t *testing.T) {
 	active := true
 	stripeID := "stripeID"
 	orgSubscription := &OrganizationSubscription{
+		PlanID:    100,
 		StartDate: startDate,
 		EndDate:   endDate,
 		Active:    true,
