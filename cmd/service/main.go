@@ -11,7 +11,7 @@ import (
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api"
 	"github.com/vocdoni/saas-backend/db"
-	"github.com/vocdoni/saas-backend/notifications"
+	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"github.com/vocdoni/saas-backend/notifications/smtp"
 	"github.com/vocdoni/saas-backend/stripe"
 	"github.com/vocdoni/saas-backend/subscriptions"
@@ -136,12 +136,14 @@ func main() {
 		}); err != nil {
 			log.Fatalf("could not create the email service: %v", err)
 		}
-		// load email templates
+		// load email templates if the path is set
 		if emailTemplatesPath != "" {
-			apiConf.MailTemplates, err = notifications.GetMailTemplates(emailTemplatesPath)
-			if err != nil {
+			if err := mailtemplates.Load(emailTemplatesPath); err != nil {
 				log.Fatalf("could not load email templates: %v", err)
 			}
+			log.Infow("email templates loaded",
+				"path", emailTemplatesPath,
+				"templates", len(mailtemplates.AvailableTemplates))
 		}
 		log.Infow("email service created", "from", fmt.Sprintf("%s <%s>", emailFromName, emailFromAddress))
 	}

@@ -13,33 +13,41 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/notifications"
+	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 )
 
 var verificationCodeRgx, passwordResetRgx *regexp.Regexp
 
 func init() {
+	// create a regex to find the verification code in the email
 	codeRgx := fmt.Sprintf(`(.{%d})`, VerificationCodeLength*2)
-	// compose notification with the verification code regex needle
-	verifyNotification := &notifications.Notification{
-		PlainBody: VerifyAccountNotification.Notification.PlainBody,
+	// load the email templates
+	mailtemplates.Load("../assets")
+	// wrap the mail template execution to force plain body and set the regex
+	// needle as the verification code
+	testTemplateExec := func(mt mailtemplates.MailTemplate) (*notifications.Notification, error) {
+		n, err := mt.ExecTemplate(struct {
+			Code string
+			Link string
+		}{codeRgx, ""})
+		if err != nil {
+			return nil, err
+		}
+		// force plain body
+		n.Body = n.PlainBody
+		return n, nil
 	}
-	if err := verifyNotification.ExecTemplate("", struct {
-		Code string
-		Link string
-	}{codeRgx, ""}); err != nil {
+	// compose notification with the verification code regex needle
+	verifyNotification, err := testTemplateExec(mailtemplates.VerifyAccountNotification)
+	if err != nil {
 		panic(err)
 	}
 	// clean the notification body to get only the verification code and
 	// compile the regex
 	verificationCodeRgx = regexp.MustCompile(strings.Split(verifyNotification.PlainBody, "\n")[0])
 	// compose notification with the password reset code regex needle
-	passwordResetNotification := &notifications.Notification{
-		PlainBody: PasswordResetNotification.Notification.PlainBody,
-	}
-	if err := passwordResetNotification.ExecTemplate("", struct {
-		Code string
-		Link string
-	}{codeRgx, ""}); err != nil {
+	passwordResetNotification, err := testTemplateExec(mailtemplates.PasswordResetNotification)
+	if err != nil {
 		panic(err)
 	}
 	// clean the notification body to get only the password reset code and

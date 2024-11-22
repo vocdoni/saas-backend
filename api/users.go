@@ -8,6 +8,7 @@ import (
 
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
+	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/dvote/util"
 )
@@ -98,15 +99,17 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// send the new verification code to the user email
-	verificationLink, err := a.buildWebAppURL(VerifyAccountNotification.LinkPath,
+	verificationLink, err := a.buildWebAppURL(mailtemplates.VerifyAccountNotification.WebAppURI,
 		map[string]any{"email": newUser.Email, "code": code})
 	if err != nil {
 		log.Warnw("could not build verification link", "error", err)
 		ErrGenericInternalServerError.Write(w)
 		return
 	}
-	if err := a.sendNotification(r.Context(), userInfo.Email, VerifyAccountNotification,
-		struct {
+	// send the verification mail to the user email with the verification code
+	// and the verification link
+	if err := a.sendMail(r.Context(), userInfo.Email,
+		mailtemplates.VerifyAccountNotification, struct {
 			Code string
 			Link string
 		}{code, verificationLink},
@@ -134,7 +137,6 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 		ErrMalformedBody.Write(w)
 		return
 	}
-
 	// check the email and verification code are not empty only if the mail
 	// service is available
 	if a.mail != nil && (verification.Code == "" || verification.Email == "") {
@@ -296,14 +298,19 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 	// send the new verification code to the user email
-	verificationLink, err := a.buildWebAppURL(VerifyAccountNotification.LinkPath,
-		map[string]any{"email": user.Email, "code": newCode})
+	verificationLink, err := a.buildWebAppURL(mailtemplates.VerifyAccountNotification.WebAppURI,
+		map[string]any{
+			"email": user.Email,
+			"code":  newCode,
+		})
 	if err != nil {
 		log.Warnw("could not build verification link", "error", err)
 		ErrGenericInternalServerError.Write(w)
 		return
 	}
-	if err := a.sendNotification(r.Context(), user.Email, VerifyAccountNotification,
+	// send the verification mail to the user email with the verification code
+	// and the verification link
+	if err := a.sendMail(r.Context(), user.Email, mailtemplates.VerifyAccountNotification,
 		struct {
 			Code string
 			Link string
@@ -492,14 +499,19 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		// send the password reset code to the user email
-		resetLink, err := a.buildWebAppURL(PasswordResetNotification.LinkPath,
-			map[string]any{"email": user.Email, "code": code})
+		resetLink, err := a.buildWebAppURL(mailtemplates.PasswordResetNotification.WebAppURI,
+			map[string]any{
+				"email": user.Email,
+				"code":  code,
+			})
 		if err != nil {
 			log.Warnw("could not build verification link", "error", err)
 			ErrGenericInternalServerError.Write(w)
 			return
 		}
-		if err := a.sendNotification(r.Context(), user.Email, PasswordResetNotification,
+		// send the password reset mail to the user email with the verification
+		// code and the verification link
+		if err := a.sendMail(r.Context(), user.Email, mailtemplates.PasswordResetNotification,
 			struct {
 				Code string
 				Link string

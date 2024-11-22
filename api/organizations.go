@@ -8,6 +8,7 @@ import (
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
+	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -297,19 +298,27 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	// send the invitation verification code to the user email
-	inviteLink, err := a.buildWebAppURL(InviteAdminNotification.LinkPath,
-		map[string]any{"email": invite.Email, "code": inviteCode, "address": org.Address})
+	inviteLink, err := a.buildWebAppURL(mailtemplates.InviteNotification.WebAppURI,
+		map[string]any{
+			"email":   invite.Email,
+			"code":    inviteCode,
+			"address": org.Address,
+		})
 	if err != nil {
 		log.Warnw("could not build verification link", "error", err)
 		ErrGenericInternalServerError.Write(w)
 		return
 	}
-	if err := a.sendNotification(r.Context(), invite.Email, InviteAdminNotification, struct {
-		Organization string
-		Code         string
-		Link         string
-	}{org.Address, inviteCode, inviteLink}); err != nil {
-		log.Warnw("could not send verification code", "error", err)
+	// send the invitation mail to invited user email with the invite code and
+	// the invite link
+	if err := a.sendMail(r.Context(), invite.Email, mailtemplates.InviteNotification,
+		struct {
+			Organization string
+			Code         string
+			Link         string
+		}{org.Address, inviteCode, inviteLink},
+	); err != nil {
+		log.Warnw("could not send verification code email", "error", err)
 		ErrGenericInternalServerError.Write(w)
 		return
 	}

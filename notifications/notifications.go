@@ -1,11 +1,6 @@
 package notifications
 
-import (
-	"bytes"
-	"context"
-	htmltemplate "html/template"
-	texttemplate "text/template"
-)
+import "context"
 
 // Notification represents a notification to be sent, it can be an email or an
 // SMS. It contains the recipient's name, address, number, the subject and the
@@ -21,45 +16,6 @@ type Notification struct {
 	Body           string
 	PlainBody      string
 	EnableTracking bool
-}
-
-// ExecTemplate method fills the plain body and the body of the notification
-// with the data provided. It executes the plain body template first and only
-// if it is not empty. Then, it executes the template with the path provided
-// and the data. The path is the absolute path to the template file. If the
-// path is empty, the method skips the template execution. It returns an error
-// if the plain body or the template could not be executed.
-func (n *Notification) ExecTemplate(path string, data any) error {
-	// if the plain body is not empty, execute the template with the data
-	// provided
-	if n.PlainBody != "" {
-		tmpl, err := texttemplate.New("plain").Parse(n.PlainBody)
-		if err != nil {
-			return err
-		}
-		buf := new(bytes.Buffer)
-		if err := tmpl.Execute(buf, data); err != nil {
-			return err
-		}
-		n.PlainBody = buf.String()
-		n.Body = n.PlainBody
-	}
-	// if the path is not empty, execute the template with the data provided
-	if path != "" {
-		// parse the template
-		tmpl, err := htmltemplate.ParseFiles(path)
-		if err != nil {
-			return err
-		}
-		// inflate the template with the data
-		buf := new(bytes.Buffer)
-		if err := tmpl.Execute(buf, data); err != nil {
-			return err
-		}
-		// set the body of the notification
-		n.Body = buf.String()
-	}
-	return nil
 }
 
 // NotificationService is the interface that must be implemented by any
