@@ -73,13 +73,14 @@ func (mt MailTemplate) ExecTemplate(data any) (*notifications.Notification, erro
 	if !ok {
 		return nil, fmt.Errorf("template not found")
 	}
-	// create a new notification with the subject and plain body of the
-	// template placeholder
-	n := &notifications.Notification{
-		Subject:   mt.Placeholder.Subject,
-		PlainBody: mt.Placeholder.PlainBody,
+	// create a notification with the plain body placeholder inflated
+	n, err := mt.ExecPlain(data)
+	if err != nil {
+		return nil, err
 	}
-	// execute the template with the data provided parse the template
+	// set the mail subject
+	n.Subject = mt.Placeholder.Subject
+	// parse the html template file
 	tmpl, err := htmltemplate.ParseFiles(path)
 	if err != nil {
 		return nil, err
@@ -91,17 +92,31 @@ func (mt MailTemplate) ExecTemplate(data any) (*notifications.Notification, erro
 	}
 	// set the body of the notification
 	n.Body = buf.String()
-	// if the plain body is not empty, execute the template with the data
-	// provided
-	if n.PlainBody != "" {
-		tmpl, err := texttemplate.New("plain").Parse(n.PlainBody)
+	return n, nil
+}
+
+// ExecPlain method executes the plain body placeholder template with the data
+// provided. If the placeholder plain body is not empty, it executes the plain
+// text template with the data provided. If it is empty, just returns an empty
+// notification. It resulting notification and an error if the defined template
+// could not be executed.
+//
+// This method also allows to notifications services that do not support HTML
+// emails to use a mail template.
+func (mt MailTemplate) ExecPlain(data any) (*notifications.Notification, error) {
+	n := &notifications.Notification{}
+	if mt.Placeholder.PlainBody != "" {
+		// parse the placeholder plain body template
+		tmpl, err := texttemplate.New("plain").Parse(mt.Placeholder.PlainBody)
 		if err != nil {
 			return nil, err
 		}
+		// inflate the template with the data
 		buf := new(bytes.Buffer)
 		if err := tmpl.Execute(buf, data); err != nil {
 			return nil, err
 		}
+		// return the notification with the plain body filled with the data
 		n.PlainBody = buf.String()
 	}
 	return n, nil
