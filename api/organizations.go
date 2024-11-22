@@ -281,32 +281,20 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	// create new invitation
-	inviteCode := internal.RandomHex(VerificationCodeLength)
-	if err := a.db.CreateInvitation(&db.OrganizationInvite{
-		InvitationCode:      inviteCode,
+	orgInvite := &db.OrganizationInvite{
 		OrganizationAddress: org.Address,
 		NewUserEmail:        invite.Email,
 		Role:                db.UserRole(invite.Role),
 		CurrentUserID:       user.ID,
-		Expiration:          time.Now().Add(InvitationExpiration),
-	}); err != nil {
+	}
+	// generate the verification code and the verification link
+	code, link, err := a.generateVerificationCodeAndLink(orgInvite, db.CodeTypeOrgInvite)
+	if err != nil {
 		if err == db.ErrAlreadyExists {
 			ErrDuplicateConflict.With("user is already invited to the organization").Write(w)
 			return
 		}
-		ErrGenericInternalServerError.Withf("could not create invitation: %v", err).Write(w)
-		return
-	}
-	// send the invitation verification code to the user email
-	inviteLink, err := a.buildWebAppURL(mailtemplates.InviteNotification.WebAppURI,
-		map[string]any{
-			"email":   invite.Email,
-			"code":    inviteCode,
-			"address": org.Address,
-		})
-	if err != nil {
-		log.Warnw("could not build verification link", "error", err)
-		ErrGenericInternalServerError.Write(w)
+		ErrGenericInternalServerError.Withf("could not create the invite: %v", err).Write(w)
 		return
 	}
 	// send the invitation mail to invited user email with the invite code and
@@ -316,7 +304,7 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 			Organization string
 			Code         string
 			Link         string
-		}{org.Address, inviteCode, inviteLink},
+		}{org.Address, code, link},
 	); err != nil {
 		log.Warnw("could not send verification code email", "error", err)
 		ErrGenericInternalServerError.Write(w)

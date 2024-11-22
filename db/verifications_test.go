@@ -23,18 +23,18 @@ func TestUserVerificationCode(t *testing.T) {
 	})
 	c.Assert(err, qt.IsNil)
 
-	_, err = db.UserVerificationCode(&User{ID: userID}, CodeTypeAccountVerification)
+	_, err = db.UserVerificationCode(&User{ID: userID}, CodeTypeVerifyAccount)
 	c.Assert(err, qt.Equals, ErrNotFound)
 
 	testCode := "testCode"
-	c.Assert(db.SetVerificationCode(&User{ID: userID}, testCode, CodeTypeAccountVerification, time.Now()), qt.IsNil)
+	c.Assert(db.SetVerificationCode(&User{ID: userID}, testCode, CodeTypeVerifyAccount, time.Now()), qt.IsNil)
 
-	code, err := db.UserVerificationCode(&User{ID: userID}, CodeTypeAccountVerification)
+	code, err := db.UserVerificationCode(&User{ID: userID}, CodeTypeVerifyAccount)
 	c.Assert(err, qt.IsNil)
 	c.Assert(code.Code, qt.Equals, testCode)
 
 	c.Assert(db.VerifyUserAccount(&User{ID: userID}), qt.IsNil)
-	_, err = db.UserVerificationCode(&User{ID: userID}, CodeTypeAccountVerification)
+	_, err = db.UserVerificationCode(&User{ID: userID}, CodeTypeVerifyAccount)
 	c.Assert(err, qt.Equals, ErrNotFound)
 }
 
@@ -47,7 +47,7 @@ func TestSetVerificationCode(t *testing.T) {
 	}()
 
 	nonExistingUserID := uint64(100)
-	err := db.SetVerificationCode(&User{ID: nonExistingUserID}, "testCode", CodeTypeAccountVerification, time.Now())
+	err := db.SetVerificationCode(&User{ID: nonExistingUserID}, "testCode", CodeTypeVerifyAccount, time.Now())
 	c.Assert(err, qt.Equals, ErrNotFound)
 
 	userID, err := db.SetUser(&User{
@@ -59,16 +59,16 @@ func TestSetVerificationCode(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 
 	testCode := "testCode"
-	c.Assert(db.SetVerificationCode(&User{ID: userID}, testCode, CodeTypeAccountVerification, time.Now()), qt.IsNil)
+	c.Assert(db.SetVerificationCode(&User{ID: userID}, testCode, CodeTypeVerifyAccount, time.Now()), qt.IsNil)
 
-	code, err := db.UserVerificationCode(&User{ID: userID}, CodeTypeAccountVerification)
+	code, err := db.UserVerificationCode(&User{ID: userID}, CodeTypeVerifyAccount)
 	c.Assert(err, qt.IsNil)
 	c.Assert(code.Code, qt.Equals, testCode)
 
 	testCode = "testCode2"
-	c.Assert(db.SetVerificationCode(&User{ID: userID}, testCode, CodeTypeAccountVerification, time.Now()), qt.IsNil)
+	c.Assert(db.SetVerificationCode(&User{ID: userID}, testCode, CodeTypeVerifyAccount, time.Now()), qt.IsNil)
 
-	code, err = db.UserVerificationCode(&User{ID: userID}, CodeTypeAccountVerification)
+	code, err = db.UserVerificationCode(&User{ID: userID}, CodeTypeVerifyAccount)
 	c.Assert(err, qt.IsNil)
 	c.Assert(code.Code, qt.Equals, testCode)
 }

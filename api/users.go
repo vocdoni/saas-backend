@@ -10,29 +10,7 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"go.vocdoni.io/dvote/log"
-	"go.vocdoni.io/dvote/util"
 )
-
-// generateVerificationCode method generates and stores in the database a new
-// verification code for the user and verification code type provided. Both
-// parameters are required. It returns the generated verification code and an
-// error if the verification code could not be generated or stored in the database.
-func (a *API) generateVerificationCode(user *db.User, codeType db.CodeType) (string, error) {
-	// generate verification code if the mail service is available, if not
-	// the verification code will not be sent but stored in the database
-	// generated with just the user email to mock the verification process
-	var code string
-	if a.mail != nil {
-		code = util.RandomHex(VerificationCodeLength)
-	}
-	// store the verification code in the database
-	hashCode := internal.HashVerificationCode(user.Email, code)
-	exp := time.Now().Add(VerificationCodeExpiration)
-	if err := a.db.SetVerificationCode(&db.User{ID: user.ID}, hashCode, codeType, exp); err != nil {
-		return "", err
-	}
-	return code, nil
-}
 
 // registerHandler handles the register request. It creates a new user in the database.
 func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
@@ -92,17 +70,9 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		LastName:  userInfo.LastName,
 	}
 	// generate a new verification code
-	code, err := a.generateVerificationCode(newUser, db.CodeTypeAccountVerification)
+	code, link, err := a.generateVerificationCodeAndLink(newUser, db.CodeTypeVerifyAccount)
 	if err != nil {
 		log.Warnw("could not generate verification code", "error", err)
-		ErrGenericInternalServerError.Write(w)
-		return
-	}
-	// send the new verification code to the user email
-	verificationLink, err := a.buildWebAppURL(mailtemplates.VerifyAccountNotification.WebAppURI,
-		map[string]any{"email": newUser.Email, "code": code})
-	if err != nil {
-		log.Warnw("could not build verification link", "error", err)
 		ErrGenericInternalServerError.Write(w)
 		return
 	}
@@ -112,7 +82,7 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		mailtemplates.VerifyAccountNotification, struct {
 			Code string
 			Link string
-		}{code, verificationLink},
+		}{code, link},
 	); err != nil {
 		log.Warnw("could not send verification code", "error", err)
 		ErrGenericInternalServerError.Write(w)
@@ -159,7 +129,7 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// get the verification code from the database
-	code, err := a.db.UserVerificationCode(user, db.CodeTypeAccountVerification)
+	code, err := a.db.UserVerificationCode(user, db.CodeTypeVerifyAccount)
 	if err != nil {
 		if err != db.ErrNotFound {
 			log.Warnw("could not get verification code", "error", err)
@@ -228,7 +198,7 @@ func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	// get the verification code from the database
-	code, err := a.db.UserVerificationCode(user, db.CodeTypeAccountVerification)
+	code, err := a.db.UserVerificationCode(user, db.CodeTypeVerifyAccount)
 	if err != nil {
 		if err != db.ErrNotFound {
 			log.Warnw("could not get verification code", "error", err)
@@ -277,7 +247,7 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 	// get the verification code from the database
-	code, err := a.db.UserVerificationCode(user, db.CodeTypeAccountVerification)
+	code, err := a.db.UserVerificationCode(user, db.CodeTypeVerifyAccount)
 	if err != nil {
 		if err != db.ErrNotFound {
 			log.Warnw("could not get verification code", "error", err)
@@ -291,20 +261,9 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 	// generate a new verification code
-	newCode, err := a.generateVerificationCode(user, db.CodeTypeAccountVerification)
+	newCode, link, err := a.generateVerificationCodeAndLink(user, db.CodeTypeVerifyAccount)
 	if err != nil {
 		log.Warnw("could not generate verification code", "error", err)
-		ErrGenericInternalServerError.Write(w)
-		return
-	}
-	// send the new verification code to the user email
-	verificationLink, err := a.buildWebAppURL(mailtemplates.VerifyAccountNotification.WebAppURI,
-		map[string]any{
-			"email": user.Email,
-			"code":  newCode,
-		})
-	if err != nil {
-		log.Warnw("could not build verification link", "error", err)
 		ErrGenericInternalServerError.Write(w)
 		return
 	}
@@ -314,7 +273,7 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 		struct {
 			Code string
 			Link string
-		}{newCode, verificationLink},
+		}{newCode, link},
 	); err != nil {
 		log.Warnw("could not send verification code", "error", err)
 		ErrGenericInternalServerError.Write(w)
@@ -492,20 +451,9 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 	// check the user is verified
 	if user.Verified {
 		// generate a new verification code
-		code, err := a.generateVerificationCode(user, db.CodeTypePasswordReset)
+		code, link, err := a.generateVerificationCodeAndLink(user, db.CodeTypePasswordReset)
 		if err != nil {
 			log.Warnw("could not generate verification code", "error", err)
-			ErrGenericInternalServerError.Write(w)
-			return
-		}
-		// send the password reset code to the user email
-		resetLink, err := a.buildWebAppURL(mailtemplates.PasswordResetNotification.WebAppURI,
-			map[string]any{
-				"email": user.Email,
-				"code":  code,
-			})
-		if err != nil {
-			log.Warnw("could not build verification link", "error", err)
 			ErrGenericInternalServerError.Write(w)
 			return
 		}
@@ -515,7 +463,7 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 			struct {
 				Code string
 				Link string
-			}{code, resetLink},
+			}{code, link},
 		); err != nil {
 			log.Warnw("could not send reset passworod code", "error", err)
 			ErrGenericInternalServerError.Write(w)

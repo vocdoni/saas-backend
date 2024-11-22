@@ -21,8 +21,9 @@ const (
 	ProfessionalCollegeType    OrganizationType = "professional_college"
 	OthersType                 OrganizationType = "others"
 	// verification code types
-	CodeTypeAccountVerification CodeType = "account"
-	CodeTypePasswordReset       CodeType = "password"
+	CodeTypeVerifyAccount CodeType = "verify_account"
+	CodeTypePasswordReset CodeType = "password_reset"
+	CodeTypeOrgInvite     CodeType = "organization_invite"
 )
 
 // writableRoles is a map that contains if the role is writable or not

@@ -22,7 +22,9 @@ func init() {
 	// create a regex to find the verification code in the email
 	codeRgx := fmt.Sprintf(`(.{%d})`, VerificationCodeLength*2)
 	// load the email templates
-	mailtemplates.Load("../assets")
+	if err := mailtemplates.Load("../assets"); err != nil {
+		panic(err)
+	}
 	// wrap the mail template execution to force plain body and set the regex
 	// needle as the verification code
 	testTemplateExec := func(mt mailtemplates.MailTemplate) (*notifications.Notification, error) {
