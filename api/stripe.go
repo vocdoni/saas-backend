@@ -74,6 +74,7 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			RenewalDate:   renewalDate,
 			Active:        subscription.Status == "active",
 			MaxCensusSize: int(subscription.Items.Data[0].Quantity),
+			Email:         customer.Email,
 		}
 
 		// TODO will only worked for new subscriptions

@@ -103,6 +103,7 @@ type OrganizationSubscription struct {
 	RenewalDate   time.Time `json:"renewalDate" bson:"renewalDate"`
 	Active        bool      `json:"active" bson:"active"`
 	MaxCensusSize int       `json:"maxCensusSize" bson:"maxCensusSize"`
+	Email         string    `json:"email" bson:"email"`
 }
 
 type OrganizationCounters struct {

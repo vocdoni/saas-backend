@@ -684,6 +684,7 @@ Only the following parameters can be changed. Every parameter is optional.
     "endDate":"0001-01-01T00:00:00Z",
     "renewalDate":"0001-01-01T00:00:00Z",
     "active":true,
+    "email": "test@test.com",
     "maxCensusSize":10
   },
   "usage":{
