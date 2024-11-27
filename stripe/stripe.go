@@ -15,6 +15,7 @@ import (
 var PricesLookupKeys = []string{
 	"essential_annual_plan",
 	"premium_annual_plan",
+	"custom_annual_plan",
 	"free_plan",
 }
 
