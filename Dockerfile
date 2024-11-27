@@ -26,4 +26,7 @@ RUN apt-get update && \
 WORKDIR /app
 COPY --from=builder /src/backend ./
 
+# Include the assets folder
+COPY --from=builder /src/assets ./assets
+
 ENTRYPOINT ["/app/backend"]
