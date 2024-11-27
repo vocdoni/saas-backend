@@ -4,17 +4,16 @@ import (
 	"bytes"
 	"fmt"
 	htmltemplate "html/template"
-	"os"
-	"path/filepath"
 	"strings"
 	texttemplate "text/template"
 
+	root "github.com/vocdoni/saas-backend"
 	"github.com/vocdoni/saas-backend/notifications"
 )
 
-// AvailableTemplates is a map that stores the filename and the absolute path
+// availableTemplates is a map that stores the filename and the absolute path
 // of the email templates. The filename is the key and the path is the value.
-var AvailableTemplates map[TemplateFile]string
+var availableTemplates map[TemplateFile]string
 
 // TemplateFile represents an email template key. Every email template should
 // have a key that identifies it, which is the filename without the extension.
@@ -31,34 +30,33 @@ type MailTemplate struct {
 	WebAppURI   string
 }
 
+// Available function returns the available email templates. It returns a map
+// with the filename and the absolute path of the email templates. The filename
+// is the key and the path is the value.
+func Available() map[TemplateFile]string {
+	return availableTemplates
+}
+
 // Load function reads the email templates from the specified directory.
 // Returns a map with the filename and file absolute path. The filename is
 // the key and the path is the value.
-func Load(path string) error {
-	// create a map to store the filename and file content
-	htmlFiles := make(map[TemplateFile]string)
-	// walk through the directory and read each file
-	if err := filepath.Walk(path, func(fPath string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		// only process regular files and files with a ".html" extension
-		if !info.IsDir() && strings.HasSuffix(info.Name(), ".html") {
-			// get the absolute path of the file
-			absPath, err := filepath.Abs(fPath)
-			if err != nil {
-				return err
-			}
-			// remove the ".html" extension from the filename
-			filename := strings.TrimSuffix(info.Name(), ".html")
-			// store the filename and content in the map
-			htmlFiles[TemplateFile(filename)] = absPath
-		}
-		return nil
-	}); err != nil {
+func Load() error {
+	// reset the map to store the filename and file paths
+	availableTemplates = make(map[TemplateFile]string)
+	// read files from embedded assets
+	entries, err := root.Assets.ReadDir("assets")
+	if err != nil {
 		return err
 	}
-	AvailableTemplates = htmlFiles
+	// walk through the directory and read each file
+	for _, entry := range entries {
+		// only process regular files and files with a ".html" extension
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".html") {
+			// store the filename and the path in the map
+			name := strings.TrimSuffix(entry.Name(), ".html")
+			availableTemplates[TemplateFile(name)] = "assets/" + entry.Name()
+		}
+	}
 	return nil
 }
 
@@ -69,7 +67,7 @@ func Load(path string) error {
 // data provided. It returns the notification with the body and plain body
 // filled with the data provided.
 func (mt MailTemplate) ExecTemplate(data any) (*notifications.Notification, error) {
-	path, ok := AvailableTemplates[mt.File]
+	path, ok := availableTemplates[mt.File]
 	if !ok {
 		return nil, fmt.Errorf("template not found")
 	}
@@ -81,7 +79,11 @@ func (mt MailTemplate) ExecTemplate(data any) (*notifications.Notification, erro
 	// set the mail subject
 	n.Subject = mt.Placeholder.Subject
 	// parse the html template file
-	tmpl, err := htmltemplate.ParseFiles(path)
+	content, err := root.Assets.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	tmpl, err := htmltemplate.New(string(mt.File)).Parse(string(content))
 	if err != nil {
 		return nil, err
 	}
