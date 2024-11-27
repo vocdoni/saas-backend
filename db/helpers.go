@@ -233,9 +233,5 @@ func ReadPlanJSON() ([]*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	// print plans
-	for _, sub := range plans {
-		fmt.Println(sub)
-	}
 	return plans, nil
 }

@@ -12,7 +12,49 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/notifications"
+	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 )
+
+var verificationCodeRgx, passwordResetRgx *regexp.Regexp
+
+func init() {
+	// create a regex to find the verification code in the email
+	codeRgx := fmt.Sprintf(`(.{%d})`, VerificationCodeLength*2)
+	// load the email templates
+	if err := mailtemplates.Load("../assets"); err != nil {
+		panic(err)
+	}
+	// wrap the mail template execution to force plain body and set the regex
+	// needle as the verification code
+	testTemplateExec := func(mt mailtemplates.MailTemplate) (*notifications.Notification, error) {
+		n, err := mt.ExecTemplate(struct {
+			Code string
+			Link string
+		}{codeRgx, ""})
+		if err != nil {
+			return nil, err
+		}
+		// force plain body
+		n.Body = n.PlainBody
+		return n, nil
+	}
+	// compose notification with the verification code regex needle
+	verifyNotification, err := testTemplateExec(mailtemplates.VerifyAccountNotification)
+	if err != nil {
+		panic(err)
+	}
+	// clean the notification body to get only the verification code and
+	// compile the regex
+	verificationCodeRgx = regexp.MustCompile(strings.Split(verifyNotification.PlainBody, "\n")[0])
+	// compose notification with the password reset code regex needle
+	passwordResetNotification, err := testTemplateExec(mailtemplates.PasswordResetNotification)
+	if err != nil {
+		panic(err)
+	}
+	// clean the notification body to get only the password reset code and
+	passwordResetRgx = regexp.MustCompile(strings.Split(passwordResetNotification.PlainBody, "\n")[0])
+}
 
 func TestRegisterHandler(t *testing.T) {
 	c := qt.New(t)
@@ -183,9 +225,8 @@ func TestVerifyAccountHandler(t *testing.T) {
 	// get the verification code from the email
 	mailBody, err := testMailService.FindEmail(context.Background(), testEmail)
 	c.Assert(err, qt.IsNil)
-	// create a regex to find the verification code in the email
-	mailCodeRgx := regexp.MustCompile(fmt.Sprintf(`%s(.{%d})`, VerificationCodeTextBody, VerificationCodeLength*2))
-	mailCode := mailCodeRgx.FindStringSubmatch(mailBody)
+	// get the verification code from the email using the regex
+	mailCode := verificationCodeRgx.FindStringSubmatch(mailBody)
 	// verify the user
 	verification := mustMarshal(&UserVerification{
 		Email: testEmail,
@@ -209,7 +250,7 @@ func TestVerifyAccountHandler(t *testing.T) {
 	// get the verification code from the email
 	mailBody, err = testMailService.FindEmail(context.Background(), testEmail)
 	c.Assert(err, qt.IsNil)
-	mailCode = mailCodeRgx.FindStringSubmatch(mailBody)
+	mailCode = verificationCodeRgx.FindStringSubmatch(mailBody)
 	// verify the user
 	verification = mustMarshal(&UserVerification{
 		Email: testEmail,
@@ -257,22 +298,11 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(resp.StatusCode, qt.Equals, http.StatusOK)
 	c.Assert(resp.Body.Close(), qt.IsNil)
-	// try to recover the password before verifying the user (should fail)
-	jsonRecover := mustMarshal(&UserInfo{
-		Email: testEmail,
-	})
-	req, err = http.NewRequest(http.MethodPost, testURL(usersRecoveryPasswordEndpoint), bytes.NewBuffer(jsonRecover))
-	c.Assert(err, qt.IsNil)
-	resp, err = http.DefaultClient.Do(req)
-	c.Assert(err, qt.IsNil)
-	c.Assert(resp.StatusCode, qt.Equals, http.StatusOK)
-	c.Assert(resp.Body.Close(), qt.IsNil)
-	// get the verification code from the email
+	// verify the user (to be able to recover the password)
 	mailBody, err := testMailService.FindEmail(context.Background(), testEmail)
 	c.Assert(err, qt.IsNil)
 	// create a regex to find the verification code in the email
-	mailCodeRgx := regexp.MustCompile(fmt.Sprintf(`%s(.{%d})`, VerificationCodeTextBody, VerificationCodeLength*2))
-	verifyMailCode := mailCodeRgx.FindStringSubmatch(mailBody)
+	verifyMailCode := passwordResetRgx.FindStringSubmatch(mailBody)
 	// verify the user
 	verification := mustMarshal(&UserVerification{
 		Email: testEmail,
@@ -285,6 +315,9 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	c.Assert(resp.StatusCode, qt.Equals, http.StatusOK)
 	c.Assert(resp.Body.Close(), qt.IsNil)
 	// try to recover the password after verifying the user
+	jsonRecover := mustMarshal(&UserInfo{
+		Email: testEmail,
+	})
 	req, err = http.NewRequest(http.MethodPost, testURL(usersRecoveryPasswordEndpoint), bytes.NewBuffer(jsonRecover))
 	c.Assert(err, qt.IsNil)
 	resp, err = http.DefaultClient.Do(req)
@@ -294,7 +327,8 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	// get the recovery code from the email
 	mailBody, err = testMailService.FindEmail(context.Background(), testEmail)
 	c.Assert(err, qt.IsNil)
-	passResetMailCode := mailCodeRgx.FindStringSubmatch(mailBody)
+	// update the regex to find the recovery code in the email
+	passResetMailCode := passwordResetRgx.FindStringSubmatch(mailBody)
 	// reset the password
 	newPassword := "password2"
 	resetPass := mustMarshal(&UserPasswordReset{

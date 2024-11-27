@@ -1,16 +1,14 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
-	"github.com/vocdoni/saas-backend/notifications"
+	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -283,36 +281,34 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	// create new invitation
-	inviteCode := internal.RandomHex(VerificationCodeLength)
-	if err := a.db.CreateInvitation(&db.OrganizationInvite{
-		InvitationCode:      inviteCode,
+	orgInvite := &db.OrganizationInvite{
 		OrganizationAddress: org.Address,
 		NewUserEmail:        invite.Email,
 		Role:                db.UserRole(invite.Role),
 		CurrentUserID:       user.ID,
-		Expiration:          time.Now().Add(InvitationExpiration),
-	}); err != nil {
+	}
+	// generate the verification code and the verification link
+	code, link, err := a.generateVerificationCodeAndLink(orgInvite, db.CodeTypeOrgInvite)
+	if err != nil {
 		if err == db.ErrAlreadyExists {
 			ErrDuplicateConflict.With("user is already invited to the organization").Write(w)
 			return
 		}
-		ErrGenericInternalServerError.Withf("could not create invitation: %v", err).Write(w)
+		ErrGenericInternalServerError.Withf("could not create the invite: %v", err).Write(w)
 		return
 	}
-	// send the invitation email
-	ctx, cancel := context.WithTimeout(r.Context(), time.Second*10)
-	defer cancel()
-	// send the verification code via email if the mail service is available
-	if a.mail != nil {
-		if err := a.mail.SendNotification(ctx, &notifications.Notification{
-			ToName:    fmt.Sprintf("%s %s", user.FirstName, user.LastName),
-			ToAddress: invite.Email,
-			Subject:   InvitationEmailSubject,
-			Body:      fmt.Sprintf(InvitationTextBody, org.Address, inviteCode),
-		}); err != nil {
-			ErrGenericInternalServerError.Withf("could not send verification code: %v", err).Write(w)
-			return
-		}
+	// send the invitation mail to invited user email with the invite code and
+	// the invite link
+	if err := a.sendMail(r.Context(), invite.Email, mailtemplates.InviteNotification,
+		struct {
+			Organization string
+			Code         string
+			Link         string
+		}{org.Address, code, link},
+	); err != nil {
+		log.Warnw("could not send verification code email", "error", err)
+		ErrGenericInternalServerError.Write(w)
+		return
 	}
 	httpWriteOK(w)
 }

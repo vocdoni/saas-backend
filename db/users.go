@@ -188,7 +188,7 @@ func (ms *MongoStorage) VerifyUserAccount(user *User) error {
 		return err
 	}
 	// remove the verification code
-	return ms.delVerificationCode(ctx, user.ID, CodeTypeAccountVerification)
+	return ms.delVerificationCode(ctx, user.ID, CodeTypeVerifyAccount)
 }
 
 // IsMemberOf method checks if the user with the given email is a member of the

@@ -11,6 +11,7 @@ import (
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"github.com/vocdoni/saas-backend/notifications/smtp"
 	"github.com/vocdoni/saas-backend/stripe"
 	"github.com/vocdoni/saas-backend/subscriptions"
@@ -23,11 +24,13 @@ func main() {
 	flag.StringP("host", "h", "0.0.0.0", "listen address")
 	flag.IntP("port", "p", 8080, "listen port")
 	flag.StringP("secret", "s", "", "API secret")
+	flag.StringP("vocdoniApi", "v", "https://api-dev.vocdoni.net/v2", "vocdoni node remote API URL")
+	flag.StringP("webURL", "w", "https://saas-dev.vocdoni.app", "The URL of the web application")
 	flag.StringP("mongoURL", "m", "", "The URL of the MongoDB server")
 	flag.StringP("mongoDB", "d", "saasdb", "The name of the MongoDB database")
-	flag.StringP("vocdoniApi", "v", "https://api-dev.vocdoni.net/v2", "vocdoni node remote API URL")
 	flag.StringP("privateKey", "k", "", "private key for the Vocdoni account")
 	flag.BoolP("fullTransparentMode", "a", false, "allow all transactions and do not modify any of them")
+	flag.String("emailTemplatesPath", "./assets", "path to the email templates")
 	flag.String("smtpServer", "", "SMTP server")
 	flag.Int("smtpPort", 587, "SMTP port")
 	flag.String("smtpUsername", "", "SMTP username")
@@ -48,13 +51,16 @@ func main() {
 	host := viper.GetString("host")
 	port := viper.GetInt("port")
 	apiEndpoint := viper.GetString("vocdoniApi")
+	webURL := viper.GetString("webURL")
 	secret := viper.GetString("secret")
 	if secret == "" {
 		log.Fatal("secret is required")
 	}
+	// MongoDB vars
 	mongoURL := viper.GetString("mongoURL")
 	mongoDB := viper.GetString("mongoDB")
 	// email vars
+	emailTemplatesPath := viper.GetString("emailTemplatesPath")
 	smtpServer := viper.GetString("smtpServer")
 	smtpPort := viper.GetInt("smtpPort")
 	smtpUsername := viper.GetString("smtpUsername")
@@ -109,6 +115,7 @@ func main() {
 		DB:                  database,
 		Client:              apiClient,
 		Account:             acc,
+		WebAppURL:           webURL,
 		FullTransparentMode: fullTransparentMode,
 		StripeClient:        stripeClient,
 	}
@@ -128,6 +135,15 @@ func main() {
 			SMTPPassword: smtpPassword,
 		}); err != nil {
 			log.Fatalf("could not create the email service: %v", err)
+		}
+		// load email templates if the path is set
+		if emailTemplatesPath != "" {
+			if err := mailtemplates.Load(emailTemplatesPath); err != nil {
+				log.Fatalf("could not load email templates: %v", err)
+			}
+			log.Infow("email templates loaded",
+				"path", emailTemplatesPath,
+				"templates", len(mailtemplates.AvailableTemplates))
 		}
 		log.Infow("email service created", "from", fmt.Sprintf("%s <%s>", emailFromName, emailFromAddress))
 	}

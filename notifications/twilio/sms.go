@@ -65,7 +65,7 @@ func (tsms *TwilioSMS) SendNotification(ctx context.Context, notification *notif
 	params := &api.CreateMessageParams{}
 	params.SetTo(notification.ToNumber)
 	params.SetFrom(tsms.config.FromNumber)
-	params.SetBody(notification.Body)
+	params.SetBody(notification.PlainBody)
 	// create a channel to handle errors
 	errCh := make(chan error, 1)
 	go func() {

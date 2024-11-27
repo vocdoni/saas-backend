@@ -12,6 +12,8 @@ import (
 	"github.com/vocdoni/saas-backend/notifications"
 )
 
+var disableTrackingFilter = []byte(`{"filters":{"clicktrack":{"settings":{"enable":0,"enable_text":false}}}}`)
+
 // SMTPConfig represents the configuration for the SMTP email service. It
 // contains the sender's name, address, SMTP username, password, server and
 // port. The TestAPIPort is used to define the port of the API service used
@@ -99,6 +101,9 @@ func (se *SMTPEmail) composeBody(notification *notifications.Notification) ([]by
 	headers.WriteString(fmt.Sprintf("From: %s\r\n", se.config.FromAddress))
 	headers.WriteString(fmt.Sprintf("To: %s\r\n", to.String()))
 	headers.WriteString(fmt.Sprintf("Subject: %s\r\n", notification.Subject))
+	if !notification.EnableTracking {
+		headers.WriteString(fmt.Sprintf("X-SMTPAPI: %s\r\n", disableTrackingFilter))
+	}
 	headers.WriteString("MIME-Version: 1.0\r\n")
 	headers.WriteString(fmt.Sprintf("Content-Type: multipart/alternative; boundary=\"%s\"\r\n", boundary))
 	headers.WriteString("\r\n") // blank line between headers and body
@@ -108,12 +113,14 @@ func (se *SMTPEmail) composeBody(notification *notifications.Notification) ([]by
 	if err := writer.SetBoundary(boundary); err != nil {
 		return nil, fmt.Errorf("could not set boundary: %v", err)
 	}
-	// TODO: plain text part
-	// textPart, _ := writer.CreatePart(textproto.MIMEHeader{
-	// 	"Content-Type":              {"text/plain; charset=\"UTF-8\""},
-	// 	"Content-Transfer-Encoding": {"7bit"},
-	// })
-	// textPart.Write([]byte(notification.PlainBody))
+	// plain text part
+	textPart, _ := writer.CreatePart(textproto.MIMEHeader{
+		"Content-Type":              {"text/plain; charset=\"UTF-8\""},
+		"Content-Transfer-Encoding": {"7bit"},
+	})
+	if _, err := textPart.Write([]byte(notification.PlainBody)); err != nil {
+		return nil, fmt.Errorf("could not write plain text part: %v", err)
+	}
 	// HTML part
 	htmlPart, _ := writer.CreatePart(textproto.MIMEHeader{
 		"Content-Type":              {"text/html; charset=\"UTF-8\""},

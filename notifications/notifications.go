@@ -5,13 +5,17 @@ import "context"
 // Notification represents a notification to be sent, it can be an email or an
 // SMS. It contains the recipient's name, address, number, the subject and the
 // body of the message. The recipient's name and address are used for emails,
-// while the recipient's number is used for SMS.
+// while the recipient's number is used for SMS. The EnableTracking flag
+// indicates if the links that the notification contains should be tracked or
+// not.
 type Notification struct {
-	ToName    string
-	ToAddress string
-	ToNumber  string
-	Subject   string
-	Body      string
+	ToName         string
+	ToAddress      string
+	ToNumber       string
+	Subject        string
+	Body           string
+	PlainBody      string
+	EnableTracking bool
 }
 
 // NotificationService is the interface that must be implemented by any
