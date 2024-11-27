@@ -37,9 +37,10 @@ func Available() map[TemplateFile]string {
 	return availableTemplates
 }
 
-// Load function reads the email templates from the specified directory.
-// Returns a map with the filename and file absolute path. The filename is
-// the key and the path is the value.
+// Load function reads the email templates from embedded assets. It reads the
+// html files from the "assets" directory and stores the filename and the file
+// path in the availableTemplates map. It returns an error if the directory
+// could not be read or if the files could not be read.
 func Load() error {
 	// reset the map to store the filename and file paths
 	availableTemplates = make(map[TemplateFile]string)
