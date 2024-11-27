@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -30,7 +29,6 @@ func main() {
 	flag.StringP("mongoDB", "d", "saasdb", "The name of the MongoDB database")
 	flag.StringP("privateKey", "k", "", "private key for the Vocdoni account")
 	flag.BoolP("fullTransparentMode", "a", false, "allow all transactions and do not modify any of them")
-	flag.String("emailTemplatesPath", "./assets", "path to the email templates")
 	flag.String("smtpServer", "", "SMTP server")
 	flag.Int("smtpPort", 587, "SMTP port")
 	flag.String("smtpUsername", "", "SMTP username")
@@ -60,7 +58,6 @@ func main() {
 	mongoURL := viper.GetString("mongoURL")
 	mongoDB := viper.GetString("mongoDB")
 	// email vars
-	emailTemplatesPath := viper.GetString("emailTemplatesPath")
 	smtpServer := viper.GetString("smtpServer")
 	smtpPort := viper.GetInt("smtpPort")
 	smtpUsername := viper.GetString("smtpUsername")
@@ -136,16 +133,12 @@ func main() {
 		}); err != nil {
 			log.Fatalf("could not create the email service: %v", err)
 		}
-		// load email templates if the path is set
-		if emailTemplatesPath != "" {
-			if err := mailtemplates.Load(emailTemplatesPath); err != nil {
-				log.Fatalf("could not load email templates: %v", err)
-			}
-			log.Infow("email templates loaded",
-				"path", emailTemplatesPath,
-				"templates", len(mailtemplates.AvailableTemplates))
+		// load email templates
+		if err := mailtemplates.Load(); err != nil {
+			log.Fatalf("could not load email templates: %v", err)
 		}
-		log.Infow("email service created", "from", fmt.Sprintf("%s <%s>", emailFromName, emailFromAddress))
+		log.Infow("email templates loaded",
+			"templates", len(mailtemplates.Available()))
 	}
 	subscriptions := subscriptions.New(&subscriptions.SubscriptionsConfig{
 		DB: database,
