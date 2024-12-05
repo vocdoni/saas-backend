@@ -66,4 +66,8 @@ const (
 	planInfoEndpoint = "/plans/{planID}"
 	// POST /subscriptions/webhook to receive the subscription webhook from stripe
 	subscriptionsWebhook = "/subscriptions/webhook"
+	// POST /subscriptions/checkout to create a new subscription
+	subscriptionsCheckout = "/subscriptions/checkout"
+	// GET /subscriptions/checkout/{sessionID} to get the checkout session information
+	subscriptionsCheckoutSession = "/subscriptions/checkout/{sessionID}"
 )

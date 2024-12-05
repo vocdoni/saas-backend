@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/stripe/stripe-go/v81"
+	"github.com/stripe/stripe-go/v81/checkout/session"
 	"github.com/stripe/stripe-go/v81/customer"
 	"github.com/stripe/stripe-go/v81/price"
 	"github.com/stripe/stripe-go/v81/webhook"
@@ -17,6 +18,12 @@ var PricesLookupKeys = []string{
 	"premium_annual_plan",
 	"free_plan",
 	"custom_annual_plan",
+}
+
+type ReturnStatus struct {
+	Status             string `json:"status"`
+	CustomerEmail      string `json:"customer_email"`
+	SubscriptionStatus string `json:"subscription_status"`
 }
 
 // StripeClient is a client for interacting with the Stripe API.
@@ -135,4 +142,57 @@ func (s *StripeClient) GetPlans() ([]*db.Plan, error) {
 		}
 	}
 	return plans, nil
+}
+
+func (s *StripeClient) CreateSubscriptionCheckoutSession(planLookupKey, returnURL string) (*stripe.CheckoutSession, error) {
+	params := &stripe.PriceListParams{
+		LookupKeys: stripe.StringSlice([]string{
+			planLookupKey,
+		}),
+	}
+	i := price.List(params)
+	// if !i.Next() {
+	// 	return nil, fmt.Errorf(">>>>>>>>>>>>>>>>>>>>>>>>>>> Add a price lookup key to checkout.html line 27 for the demo <<<<<<<<<<<<<<<<<<<<<<<<")
+	// }
+	var price *stripe.Price
+	for i.Next() {
+		p := i.Price()
+		price = p
+	}
+	checkoutParams := &stripe.CheckoutSessionParams{
+		Mode: stripe.String(string(stripe.CheckoutSessionModeSubscription)),
+		LineItems: []*stripe.CheckoutSessionLineItemParams{
+			&stripe.CheckoutSessionLineItemParams{
+				Price:    stripe.String(price.ID),
+				Quantity: stripe.Int64(1),
+			},
+		},
+		SuccessURL: stripe.String(returnURL + "?success=true&session_id={CHECKOUT_SESSION_ID}"),
+		CancelURL:  stripe.String(returnURL + "?canceled=true"),
+	}
+	session, err := session.New(checkoutParams)
+	if err != nil {
+		return nil, err
+	}
+
+	return session, nil
+}
+
+// RetrieveCheckoutSession retrieves a checkout session from Stripe by session ID.
+// It returns a ReturnStatus object and an error if any.
+// The ReturnStatus object contains information about the session status, customer email,
+// faucet package, recipient, and quantity.
+func (s *StripeClient) RetrieveCheckoutSession(sessionID string) (*ReturnStatus, error) {
+	params := &stripe.CheckoutSessionParams{}
+	params.AddExpand("line_items")
+	sess, err := session.Get(sessionID, params)
+	if err != nil {
+		return nil, err
+	}
+	data := &ReturnStatus{
+		Status:             string(sess.Status),
+		CustomerEmail:      sess.CustomerDetails.Email,
+		SubscriptionStatus: string(sess.Subscription.Status),
+	}
+	return data, nil
 }

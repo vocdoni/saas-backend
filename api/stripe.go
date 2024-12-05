@@ -1,10 +1,12 @@
 package api
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/db"
 	"go.vocdoni.io/dvote/log"
 )
@@ -86,4 +88,35 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		log.Debugf("stripe webhook: subscription %s for organization %s processed successfully", subscription.ID, org.Address)
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.Request) {
+	checkout := &SubscriptionCheckout{}
+	if err := json.NewDecoder(r.Body).Decode(checkout); err != nil {
+		ErrMalformedBody.Write(w)
+		return
+	}
+
+	session, err := a.stripe.CreateSubscriptionCheckoutSession(checkout.LookupKey, checkout.ReturnURL)
+
+	if err != nil {
+		ErrStripeError.Withf("Cannot create session: %v", err).Write(w)
+		return
+	}
+
+	http.Redirect(w, r, session.URL, http.StatusSeeOther)
+}
+
+func (a *API) checkoutSessionHandler(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionID")
+	if sessionID == "" {
+		ErrMalformedURLParam.Withf("sessionID is required").Write(w)
+		return
+	}
+	status, err := a.stripe.RetrieveCheckoutSession(sessionID)
+	if err != nil {
+		ErrStripeError.Withf("Cannot get session: %v", err)
+	}
+
+	httpWriteJSON(w, status)
 }

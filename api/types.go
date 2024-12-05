@@ -183,3 +183,8 @@ type OrganizationSubscriptionInfo struct {
 	Usage              *db.OrganizationCounters     `json:"usage"`
 	Plan               *db.Plan                     `json:"plan"`
 }
+
+type SubscriptionCheckout struct {
+	LookupKey string `json:"lookupKey"`
+	ReturnURL string `json:"returnURL"`
+}
