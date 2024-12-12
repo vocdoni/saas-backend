@@ -76,7 +76,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		PlanID:        defaultPlan.ID,
 		StartDate:     time.Now(),
 		Active:        true,
-		MaxCensusSize: defaultPlan.Organization.CensusSize,
+		MaxCensusSize: defaultPlan.Organization.MaxCensus,
 	}
 	// create the organization
 	if err := a.db.SetOrganization(&db.Organization{
