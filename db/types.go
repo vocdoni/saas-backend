@@ -62,21 +62,34 @@ type Organization struct {
 }
 
 type PlanLimits struct {
-	Memberships int `json:"memberships" bson:"memberships"`
-	SubOrgs     int `json:"subOrgs" bson:"subOrgs"`
-	CensusSize  int `json:"censusSize" bson:"censusSize"`
+	Members      int    `json:"members" bson:"members"`
+	SubOrgs      int    `json:"subOrgs" bson:"subOrgs"`
+	CensusSize   int    `json:"censusSize" bson:"censusSize"`
+	MaxProcesses int    `json:"maxProcesses" bson:"maxProcesses"`
+	MaxCensus    int    `json:"maxCensus" bson:"maxCensus"`
+	MaxDuration  string `json:"maxDuration" bson:"maxDuration"`
+	CustomURL    bool   `json:"customURL" bson:"customURL"`
+	Drafts       int    `json:"drafts" bson:"drafts"`
 }
 
 type VotingTypes struct {
-	Approval bool `json:"approval" bson:"approval"`
-	Ranked   bool `json:"ranked" bson:"ranked"`
-	Weighted bool `json:"weighted" bson:"weighted"`
+	Single     bool `json:"single" bson:"single"`
+	Multiple   bool `json:"multiple" bson:"multiple"`
+	Approval   bool `json:"approval" bson:"approval"`
+	Cumulative bool `json:"cumulative" bson:"cumulative"`
+	Ranked     bool `json:"ranked" bson:"ranked"`
+	Weighted   bool `json:"weighted" bson:"weighted"`
 }
 
 type Features struct {
+	Anonymous       bool `json:"anonymous" bson:"anonymous"`
+	Overwrite       bool `json:"overwrite" bson:"overwrite"`
+	LiveResults     bool `json:"liveResults" bson:"liveResults"`
 	Personalization bool `json:"personalization" bson:"personalization"`
 	EmailReminder   bool `json:"emailReminder" bson:"emailReminder"`
 	SmsNotification bool `json:"smsNotification" bson:"smsNotification"`
+	WhiteLabel      bool `json:"whiteLabel" bson:"whiteLabel"`
+	LiveStreaming   bool `json:"liveStreaming" bson:"liveStreaming"`
 }
 
 type Plan struct {

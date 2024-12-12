@@ -7,16 +7,17 @@ import (
 	"github.com/stripe/stripe-go/v81"
 	"github.com/stripe/stripe-go/v81/customer"
 	"github.com/stripe/stripe-go/v81/price"
+	"github.com/stripe/stripe-go/v81/product"
 	"github.com/stripe/stripe-go/v81/webhook"
 	"github.com/vocdoni/saas-backend/db"
 	"go.vocdoni.io/dvote/log"
 )
 
-var PricesLookupKeys = []string{
-	"essential_annual_plan",
-	"premium_annual_plan",
-	"free_plan",
-	"custom_annual_plan",
+var ProductsIDs = []string{
+	"prod_R3LTVsjklmuQAL", // Essential
+	"prod_R0kTryoMNl8I19", // Premium
+	"prod_RFObcbvED7MYbz", // Free
+	"prod_RHurAb3OjkgJRy", // Custom
 }
 
 // StripeClient is a client for interacting with the Stripe API.
@@ -81,6 +82,17 @@ func (s *StripeClient) GetPriceByID(priceID string) *stripe.Price {
 	return nil
 }
 
+func (s *StripeClient) GetProductByID(productID string) (*stripe.Product, error) {
+	params := &stripe.ProductParams{}
+	params.AddExpand("default_price")
+	params.AddExpand("default_price.tiers")
+	product, err := product.Get(productID, params)
+	if err != nil {
+		return nil, err
+	}
+	return product, nil
+}
+
 func (s *StripeClient) GetPrices(priceIDs []string) []*stripe.Price {
 	var prices []*stripe.Price
 	for _, priceID := range priceIDs {
@@ -93,20 +105,21 @@ func (s *StripeClient) GetPrices(priceIDs []string) []*stripe.Price {
 
 func (s *StripeClient) GetPlans() ([]*db.Plan, error) {
 	var plans []*db.Plan
-	for i, priceID := range PricesLookupKeys {
-		if price := s.GetPriceByID(priceID); price != nil {
+	for i, productID := range ProductsIDs {
+		if product, err := s.GetProductByID(productID); product != nil && err == nil {
 			var organizationData db.PlanLimits
-			if err := json.Unmarshal([]byte(price.Metadata["Organization"]), &organizationData); err != nil {
+			if err := json.Unmarshal([]byte(product.Metadata["organization"]), &organizationData); err != nil {
 				return nil, fmt.Errorf("error parsing plan organization metadata JSON: %s\n", err.Error())
 			}
 			var votingTypesData db.VotingTypes
-			if err := json.Unmarshal([]byte(price.Metadata["VotingTypes"]), &votingTypesData); err != nil {
+			if err := json.Unmarshal([]byte(product.Metadata["votingTypes"]), &votingTypesData); err != nil {
 				return nil, fmt.Errorf("error parsing plan voting types metadata JSON: %s\n", err.Error())
 			}
 			var featuresData db.Features
-			if err := json.Unmarshal([]byte(price.Metadata["Features"]), &featuresData); err != nil {
+			if err := json.Unmarshal([]byte(product.Metadata["features"]), &featuresData); err != nil {
 				return nil, fmt.Errorf("error parsing plan features metadata JSON: %s\n", err.Error())
 			}
+			price := product.DefaultPrice
 			startingPrice := price.UnitAmount
 			if len(price.Tiers) > 0 {
 				startingPrice = price.Tiers[0].FlatAmount
@@ -123,7 +136,7 @@ func (s *StripeClient) GetPlans() ([]*db.Plan, error) {
 			}
 			plans = append(plans, &db.Plan{
 				ID:              uint64(i),
-				Name:            price.Nickname,
+				Name:            product.Name,
 				StartingPrice:   startingPrice,
 				StripeID:        price.ID,
 				Default:         price.Metadata["Default"] == "true",
@@ -132,6 +145,8 @@ func (s *StripeClient) GetPlans() ([]*db.Plan, error) {
 				Features:        featuresData,
 				CensusSizeTiers: tiers,
 			})
+		} else {
+			return nil, fmt.Errorf("error getting product %s: %s", productID, err.Error())
 		}
 	}
 	return plans, nil
