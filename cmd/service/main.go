@@ -12,6 +12,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"github.com/vocdoni/saas-backend/notifications/smtp"
+	"github.com/vocdoni/saas-backend/objectstorage"
 	"github.com/vocdoni/saas-backend/stripe"
 	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.vocdoni.io/dvote/apiclient"
@@ -37,6 +38,11 @@ func main() {
 	flag.String("emailFromName", "Vocdoni", "Email service from name")
 	flag.String("stripeApiSecret", "", "Stripe API secret")
 	flag.String("stripeWebhookSecret", "", "Stripe Webhook secret")
+	flag.String("storageApiKey", "", "Object storage API key")
+	flag.String("storageApiSecret", "", "Object storage API secret")
+	flag.String("storageApiEndpoint", "", "Object storage API endpoint")
+	flag.String("storageApiRegion", "", "Object storage API region name")
+	flag.String("storageApiBucket", "", "Object storage API bucket name")
 	// parse flags
 	flag.Parse()
 	// initialize Viper
@@ -67,6 +73,12 @@ func main() {
 	// stripe vars
 	stripeApiSecret := viper.GetString("stripeApiSecret")
 	stripeWebhookSecret := viper.GetString("stripeWebhookSecret")
+	// object storage vars
+	storageApiKey := viper.GetString("storageApiKey")
+	storageApiSecret := viper.GetString("storageApiSecret")
+	storageApiEndpoint := viper.GetString("storageApiEndpoint")
+	storageApiRegion := viper.GetString("storageApiRegion")
+	storageApiBucket := viper.GetString("storageApiBucket")
 
 	log.Init("debug", "stdout", os.Stderr)
 	// create Stripe client and include it in the API configuration
@@ -144,6 +156,12 @@ func main() {
 		DB: database,
 	})
 	apiConf.Subscriptions = subscriptions
+	// initialize the s3 like  object storage
+	if apiConf.ObjectStorage, err = objectstorage.New(
+		storageApiKey, storageApiSecret, storageApiEndpoint, storageApiRegion, storageApiBucket,
+	); err != nil {
+		log.Fatalf("could not create the object storage: %v", err)
+	}
 	// create the local API server
 	api.New(apiConf).Start()
 	log.Infow("server started", "host", host, "port", port)
