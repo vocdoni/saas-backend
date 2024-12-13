@@ -12,6 +12,7 @@ import (
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/notifications"
+	"github.com/vocdoni/saas-backend/objectstorage"
 	"github.com/vocdoni/saas-backend/stripe"
 	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.vocdoni.io/dvote/apiclient"
@@ -40,6 +41,8 @@ type APIConfig struct {
 	StripeClient *stripe.StripeClient
 	// Subscriptions permissions manager
 	Subscriptions *subscriptions.Subscriptions
+	// Object storage
+	ObjectStorage *objectstorage.ObjectStorageClient
 }
 
 // API type represents the API HTTP server with JWT authentication capabilities.
@@ -57,6 +60,7 @@ type API struct {
 	transparentMode bool
 	stripe          *stripe.StripeClient
 	subscriptions   *subscriptions.Subscriptions
+	objectStorage   *objectstorage.ObjectStorageClient
 }
 
 // New creates a new API HTTP server. It does not start the server. Use Start() for that.
@@ -77,6 +81,7 @@ func New(conf *APIConfig) *API {
 		transparentMode: conf.FullTransparentMode,
 		stripe:          conf.StripeClient,
 		subscriptions:   conf.Subscriptions,
+		objectStorage:   conf.ObjectStorage,
 	}
 }
 
@@ -153,6 +158,9 @@ func (a *API) initRouter() http.Handler {
 		// pending organization invitations
 		log.Infow("new route", "method", "GET", "path", organizationPendingMembersEndpoint)
 		r.Get(organizationPendingMembersEndpoint, a.pendingOrganizationMembersHandler)
+		// upload an image to the object storage
+		log.Infow("new route", "method", "POST", "path", objectStorageUploadTypedEndpoint)
+		r.Post(objectStorageUploadTypedEndpoint, a.uploadObjectStorageWithOriginHandler)
 	})
 
 	// Public routes

@@ -66,4 +66,8 @@ const (
 	planInfoEndpoint = "/plans/{planID}"
 	// POST /subscriptions/webhook to receive the subscription webhook from stripe
 	subscriptionsWebhook = "/subscriptions/webhook"
+
+	// object storage routes
+	// POST /storage/{origin}
+	objectStorageUploadTypedEndpoint = "/storage/{origin}"
 )
