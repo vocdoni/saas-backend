@@ -1,10 +1,13 @@
 package api
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/db"
 	"go.vocdoni.io/dvote/log"
 )
@@ -84,6 +87,115 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.Debugf("stripe webhook: subscription %s for organization %s processed successfully", subscription.ID, org.Address)
+	case "customer.subscription.updated", "customer.subscription.deleted":
+		customer, subscription, err := a.stripe.GetInfoFromEvent(*event)
+		if err != nil {
+			log.Errorf("stripe webhook: error getting info from event: %s\n", err.Error())
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		address := subscription.Metadata["address"]
+		if len(address) == 0 {
+			log.Errorf("subscription %s does not contain an address in metadata", subscription.ID)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		org, _, err := a.db.Organization(address, false)
+		if err != nil || org == nil {
+			log.Errorf("could not update subscription %s, a corresponding organization with address %s was not found.",
+				subscription.ID, address)
+			log.Errorf("please do manually for creator %s \n  Error:  %s", customer.Email, err.Error())
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if subscription.Status == "canceled" && org.Subscription.Active {
+			// replace organization subscription with the default plan
+			defaultPlan, err := a.db.DefaultPlan()
+			if err != nil || defaultPlan == nil {
+				ErrNoDefaultPLan.WithErr((err)).Write(w)
+				return
+			}
+			orgSubscription := &db.OrganizationSubscription{
+				PlanID:        defaultPlan.ID,
+				StartDate:     time.Now(),
+				Active:        true,
+				MaxCensusSize: defaultPlan.Organization.MaxCensus,
+			}
+			if err := a.db.SetOrganizationSubscription(org.Address, orgSubscription); err != nil {
+				log.Errorf("could not cancel subscription %s for organization %s: %s", subscription.ID, org.Address, err.Error())
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+		} else if subscription.Status == "active" && !org.Subscription.Active {
+			org.Subscription.Active = true
+			if err := a.db.SetOrganization(org); err != nil {
+				log.Errorf("could activate organizations  %s subscription to active: %s", org.Address, err.Error())
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+		}
+		log.Debugf("stripe webhook: subscription %s for organization %s processed as %s successfully",
+			subscription.ID, org.Address, subscription.Status)
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.Request) {
+	checkout := &SubscriptionCheckout{}
+	if err := json.NewDecoder(r.Body).Decode(checkout); err != nil {
+		ErrMalformedBody.Write(w)
+		return
+	}
+
+	if checkout.LookupKey == "" || checkout.ReturnURL == "" ||
+		checkout.Amount == "" || checkout.Address == "" {
+		ErrMalformedBody.Withf("Missing required fields").Write(w)
+		return
+	}
+
+	lookupKey, err := strconv.ParseUint(checkout.LookupKey, 10, 64)
+	if err != nil {
+		ErrMalformedURLParam.Withf("Invalid plan lookup key: %v", err).Write(w)
+		return
+	}
+
+	amount, err := strconv.ParseInt(checkout.Amount, 10, 64)
+	if err != nil {
+		ErrMalformedURLParam.Withf("Invalid census amount: %v", err).Write(w)
+		return
+	}
+
+	plan, err := a.db.Plan(lookupKey)
+	if err != nil {
+		ErrMalformedURLParam.Withf("Plan not found: %v", err).Write(w)
+		return
+	}
+
+	session, err := a.stripe.CreateSubscriptionCheckoutSession(plan.StripePriceID, checkout.ReturnURL, checkout.Address, amount)
+	if err != nil {
+		ErrStripeError.Withf("Cannot create session: %v", err).Write(w)
+		return
+	}
+
+	data := &struct {
+		ClientSecret string `json:"clientSecret"`
+	}{
+		ClientSecret: session.ClientSecret,
+	}
+	httpWriteJSON(w, data)
+}
+
+func (a *API) checkoutSessionHandler(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionID")
+	if sessionID == "" {
+		ErrMalformedURLParam.Withf("sessionID is required").Write(w)
+		return
+	}
+	status, err := a.stripe.RetrieveCheckoutSession(sessionID)
+	if err != nil {
+		ErrStripeError.Withf("Cannot get session: %v", err).Write(w)
+		return
+	}
+
+	httpWriteJSON(w, status)
 }

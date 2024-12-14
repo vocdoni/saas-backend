@@ -35,6 +35,9 @@
 - [🏦 Plans](#-plans)
   - [🛒 Get Available Plans](#-get-plans)
   - [🛍️ Get Plan Info](#-get-plan-info)
+- [Stripe](#-stripe)
+  - []
+  - []
 
 </details>
 

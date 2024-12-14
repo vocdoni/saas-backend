@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/stripe/stripe-go/v81"
+	"github.com/stripe/stripe-go/v81/checkout/session"
 	"github.com/stripe/stripe-go/v81/customer"
 	"github.com/stripe/stripe-go/v81/price"
 	"github.com/stripe/stripe-go/v81/product"
@@ -18,6 +19,12 @@ var ProductsIDs = []string{
 	"prod_R0kTryoMNl8I19", // Premium
 	"prod_RFObcbvED7MYbz", // Free
 	"prod_RHurAb3OjkgJRy", // Custom
+}
+
+type ReturnStatus struct {
+	Status             string `json:"status"`
+	CustomerEmail      string `json:"customer_email"`
+	SubscriptionStatus string `json:"subscription_status"`
 }
 
 // StripeClient is a client for interacting with the Stripe API.
@@ -138,7 +145,8 @@ func (s *StripeClient) GetPlans() ([]*db.Plan, error) {
 				ID:              uint64(i),
 				Name:            product.Name,
 				StartingPrice:   startingPrice,
-				StripeID:        price.ID,
+				StripeID:        productID,
+				StripePriceID:   price.ID,
 				Default:         price.Metadata["Default"] == "true",
 				Organization:    organizationData,
 				VotingTypes:     votingTypesData,
@@ -150,4 +158,58 @@ func (s *StripeClient) GetPlans() ([]*db.Plan, error) {
 		}
 	}
 	return plans, nil
+}
+
+func (s *StripeClient) CreateSubscriptionCheckoutSession(
+	priceID, returnURL, address string, amount int64,
+) (*stripe.CheckoutSession, error) {
+	checkoutParams := &stripe.CheckoutSessionParams{
+		Mode: stripe.String(string(stripe.CheckoutSessionModeSubscription)),
+		LineItems: []*stripe.CheckoutSessionLineItemParams{
+			{
+				Price: stripe.String(priceID),
+				AdjustableQuantity: &stripe.CheckoutSessionLineItemAdjustableQuantityParams{
+					Enabled: stripe.Bool(true),
+					Minimum: stripe.Int64(1),
+					Maximum: stripe.Int64(1000),
+				},
+				Quantity: stripe.Int64(amount),
+			},
+		},
+		UIMode:    stripe.String(string(stripe.CheckoutSessionUIModeEmbedded)),
+		ReturnURL: stripe.String(returnURL + "/{CHECKOUT_SESSION_ID}"),
+		AutomaticTax: &stripe.CheckoutSessionAutomaticTaxParams{
+			Enabled: stripe.Bool(true),
+		},
+		SubscriptionData: &stripe.CheckoutSessionSubscriptionDataParams{
+			Metadata: map[string]string{
+				"address": address,
+			},
+		},
+	}
+	session, err := session.New(checkoutParams)
+	if err != nil {
+		return nil, err
+	}
+
+	return session, nil
+}
+
+// RetrieveCheckoutSession retrieves a checkout session from Stripe by session ID.
+// It returns a ReturnStatus object and an error if any.
+// The ReturnStatus object contains information about the session status, customer email,
+// faucet package, recipient, and quantity.
+func (s *StripeClient) RetrieveCheckoutSession(sessionID string) (*ReturnStatus, error) {
+	params := &stripe.CheckoutSessionParams{}
+	params.AddExpand("line_items")
+	sess, err := session.Get(sessionID, params)
+	if err != nil {
+		return nil, err
+	}
+	data := &ReturnStatus{
+		Status:             string(sess.Status),
+		CustomerEmail:      sess.CustomerDetails.Email,
+		SubscriptionStatus: string(sess.Subscription.Status),
+	}
+	return data, nil
 }

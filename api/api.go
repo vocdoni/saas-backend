@@ -201,8 +201,15 @@ func (a *API) initRouter() http.Handler {
 		// get subscription info
 		log.Infow("new route", "method", "GET", "path", planInfoEndpoint)
 		r.Get(planInfoEndpoint, a.planInfoHandler)
+		// handle stripe webhook
 		log.Infow("new route", "method", "POST", "path", subscriptionsWebhook)
 		r.Post(subscriptionsWebhook, a.handleWebhook)
+		// handle stripe checkout session
+		log.Infow("new route", "method", "POST", "path", subscriptionsCheckout)
+		r.Post(subscriptionsCheckout, a.createSubscriptionCheckoutHandler)
+		// get stripe checkout session info
+		log.Infow("new route", "method", "GET", "path", subscriptionsCheckoutSession)
+		r.Get(subscriptionsCheckoutSession, a.checkoutSessionHandler)
 	})
 	a.router = r
 	return r

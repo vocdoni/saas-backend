@@ -497,7 +497,7 @@ func (a *API) getOrganizationSubscriptionHandler(w http.ResponseWriter, r *http.
 		return
 	}
 	if !org.Subscription.Active ||
-		(org.Subscription.EndDate.After(time.Now()) && org.Subscription.StartDate.Before(time.Now())) {
+		org.Subscription.EndDate.Before(time.Now()) || org.Subscription.StartDate.After(time.Now()) {
 		ErrOganizationSubscriptionIncative.Write(w)
 		return
 	}
