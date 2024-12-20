@@ -54,4 +54,5 @@ var (
 	ErrGenericInternalServerError  = Error{Code: 50002, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("internal server error")}
 	ErrCouldNotCreateFaucetPackage = Error{Code: 50003, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("could not create faucet package")}
 	ErrVochainRequestFailed        = Error{Code: 50004, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("vochain request failed")}
+	ErrStripeError                 = Error{Code: 50005, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("stripe error")}
 )

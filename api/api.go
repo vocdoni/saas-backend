@@ -153,6 +153,12 @@ func (a *API) initRouter() http.Handler {
 		// pending organization invitations
 		log.Infow("new route", "method", "GET", "path", organizationPendingMembersEndpoint)
 		r.Get(organizationPendingMembersEndpoint, a.pendingOrganizationMembersHandler)
+		// handle stripe checkout session
+		log.Infow("new route", "method", "POST", "path", subscriptionsCheckout)
+		r.Post(subscriptionsCheckout, a.createSubscriptionCheckoutHandler)
+		// get stripe checkout session info
+		log.Infow("new route", "method", "GET", "path", subscriptionsCheckoutSession)
+		r.Get(subscriptionsCheckoutSession, a.checkoutSessionHandler)
 	})
 
 	// Public routes
@@ -201,6 +207,7 @@ func (a *API) initRouter() http.Handler {
 		// get subscription info
 		log.Infow("new route", "method", "GET", "path", planInfoEndpoint)
 		r.Get(planInfoEndpoint, a.planInfoHandler)
+		// handle stripe webhook
 		log.Infow("new route", "method", "POST", "path", subscriptionsWebhook)
 		r.Post(subscriptionsWebhook, a.handleWebhook)
 	})

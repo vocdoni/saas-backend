@@ -496,11 +496,6 @@ func (a *API) getOrganizationSubscriptionHandler(w http.ResponseWriter, r *http.
 		ErrNoOrganizationSubscription.Write(w)
 		return
 	}
-	if !org.Subscription.Active ||
-		(org.Subscription.EndDate.After(time.Now()) && org.Subscription.StartDate.Before(time.Now())) {
-		ErrOganizationSubscriptionIncative.Write(w)
-		return
-	}
 	// get the subscription from the database
 	plan, err := a.db.Plan(org.Subscription.PlanID)
 	if err != nil {
