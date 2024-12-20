@@ -96,6 +96,7 @@ type Plan struct {
 	ID              uint64      `json:"id" bson:"_id"`
 	Name            string      `json:"name" bson:"name"`
 	StripeID        string      `json:"stripeID" bson:"stripeID"`
+	StripePriceID   string      `json:"stripePriceID" bson:"stripePriceID"`
 	StartingPrice   int64       `json:"startingPrice" bson:"startingPrice"`
 	Default         bool        `json:"default" bson:"default"`
 	Organization    PlanLimits  `json:"organization" bson:"organization"`
@@ -112,7 +113,6 @@ type PlanTier struct {
 type OrganizationSubscription struct {
 	PlanID        uint64    `json:"planID" bson:"planID"`
 	StartDate     time.Time `json:"startDate" bson:"startDate"`
-	EndDate       time.Time `json:"endDate" bson:"endDate"`
 	RenewalDate   time.Time `json:"renewalDate" bson:"renewalDate"`
 	Active        bool      `json:"active" bson:"active"`
 	MaxCensusSize int       `json:"maxCensusSize" bson:"maxCensusSize"`

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/stripe/stripe-go/v81"
+	"github.com/stripe/stripe-go/v81/checkout/session"
 	"github.com/stripe/stripe-go/v81/customer"
 	"github.com/stripe/stripe-go/v81/price"
 	"github.com/stripe/stripe-go/v81/product"
@@ -13,11 +14,19 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
+// ProductsIDs contains the Stripe product IDs for different subscription tiers
 var ProductsIDs = []string{
 	"prod_R3LTVsjklmuQAL", // Essential
 	"prod_R0kTryoMNl8I19", // Premium
 	"prod_RFObcbvED7MYbz", // Free
 	"prod_RHurAb3OjkgJRy", // Custom
+}
+
+// ReturnStatus represents the response structure for checkout session status
+type ReturnStatus struct {
+	Status             string `json:"status"`
+	CustomerEmail      string `json:"customer_email"`
+	SubscriptionStatus string `json:"subscription_status"`
 }
 
 // StripeClient is a client for interacting with the Stripe API.
@@ -36,6 +45,7 @@ func New(apiSecret, webhookSecret string) *StripeClient {
 }
 
 // DecodeEvent decodes a Stripe webhook event from the given payload and signature header.
+// It verifies the webhook signature and returns the decoded event or an error if validation fails.
 func (s *StripeClient) DecodeEvent(payload []byte, signatureHeader string) (*stripe.Event, error) {
 	event := stripe.Event{}
 	if err := json.Unmarshal(payload, &event); err != nil {
@@ -52,6 +62,8 @@ func (s *StripeClient) DecodeEvent(payload []byte, signatureHeader string) (*str
 }
 
 // GetInfoFromEvent processes a Stripe event to extract customer and subscription information.
+// It unmarshals the event data and retrieves the associated customer details.
+// Returns the customer and subscription objects, or an error if processing fails.
 func (s *StripeClient) GetInfoFromEvent(event stripe.Event) (*stripe.Customer, *stripe.Subscription, error) {
 	var subscription stripe.Subscription
 	err := json.Unmarshal(event.Data.Raw, &subscription)
@@ -69,6 +81,9 @@ func (s *StripeClient) GetInfoFromEvent(event stripe.Event) (*stripe.Customer, *
 	return customer, &subscription, nil
 }
 
+// GetPriceByID retrieves a Stripe price object by its ID.
+// It searches for an active price with the given lookup key.
+// Returns nil if no matching price is found.
 func (s *StripeClient) GetPriceByID(priceID string) *stripe.Price {
 	params := &stripe.PriceSearchParams{
 		SearchParams: stripe.SearchParams{
@@ -82,6 +97,9 @@ func (s *StripeClient) GetPriceByID(priceID string) *stripe.Price {
 	return nil
 }
 
+// GetProductByID retrieves a Stripe product by its ID.
+// It expands the default price and its tiers in the response.
+// Returns the product object and any error encountered.
 func (s *StripeClient) GetProductByID(productID string) (*stripe.Product, error) {
 	params := &stripe.ProductParams{}
 	params.AddExpand("default_price")
@@ -93,6 +111,9 @@ func (s *StripeClient) GetProductByID(productID string) (*stripe.Product, error)
 	return product, nil
 }
 
+// GetPrices retrieves multiple Stripe prices by their IDs.
+// It returns a slice of Price objects for all valid price IDs.
+// Invalid or non-existent price IDs are silently skipped.
 func (s *StripeClient) GetPrices(priceIDs []string) []*stripe.Price {
 	var prices []*stripe.Price
 	for _, priceID := range priceIDs {
@@ -103,6 +124,9 @@ func (s *StripeClient) GetPrices(priceIDs []string) []*stripe.Price {
 	return prices
 }
 
+// GetPlans retrieves and constructs a list of subscription plans from Stripe products.
+// It processes product metadata to extract organization limits, voting types, and features.
+// Returns a slice of Plan objects and any error encountered during processing.
 func (s *StripeClient) GetPlans() ([]*db.Plan, error) {
 	var plans []*db.Plan
 	for i, productID := range ProductsIDs {
@@ -138,7 +162,8 @@ func (s *StripeClient) GetPlans() ([]*db.Plan, error) {
 				ID:              uint64(i),
 				Name:            product.Name,
 				StartingPrice:   startingPrice,
-				StripeID:        price.ID,
+				StripeID:        productID,
+				StripePriceID:   price.ID,
 				Default:         price.Metadata["Default"] == "true",
 				Organization:    organizationData,
 				VotingTypes:     votingTypesData,
@@ -150,4 +175,64 @@ func (s *StripeClient) GetPlans() ([]*db.Plan, error) {
 		}
 	}
 	return plans, nil
+}
+
+// CreateSubscriptionCheckoutSession creates a new Stripe checkout session for a subscription.
+// It configures the session with the specified price, return URL, and subscription metadata.
+// Returns the created checkout session and any error encountered.
+func (s *StripeClient) CreateSubscriptionCheckoutSession(
+	priceID, returnURL, address, locale string, amount int64,
+) (*stripe.CheckoutSession, error) {
+	if len(locale) == 0 {
+		locale = "auto"
+	}
+	checkoutParams := &stripe.CheckoutSessionParams{
+		Mode: stripe.String(string(stripe.CheckoutSessionModeSubscription)),
+		LineItems: []*stripe.CheckoutSessionLineItemParams{
+			{
+				Price:    stripe.String(priceID),
+				Quantity: stripe.Int64(amount),
+			},
+		},
+		UIMode: stripe.String(string(stripe.CheckoutSessionUIModeEmbedded)),
+		AutomaticTax: &stripe.CheckoutSessionAutomaticTaxParams{
+			Enabled: stripe.Bool(true),
+		},
+		SubscriptionData: &stripe.CheckoutSessionSubscriptionDataParams{
+			Metadata: map[string]string{
+				"address": address,
+			},
+		},
+		Locale: stripe.String(locale),
+	}
+	if len(returnURL) > 0 {
+		checkoutParams.ReturnURL = stripe.String(returnURL + "/{CHECKOUT_SESSION_ID}")
+	} else {
+		checkoutParams.RedirectOnCompletion = stripe.String("never")
+	}
+	session, err := session.New(checkoutParams)
+	if err != nil {
+		return nil, err
+	}
+
+	return session, nil
+}
+
+// RetrieveCheckoutSession retrieves a checkout session from Stripe by session ID.
+// It returns a ReturnStatus object and an error if any.
+// The ReturnStatus object contains information about the session status,
+// customer email, and subscription status.
+func (s *StripeClient) RetrieveCheckoutSession(sessionID string) (*ReturnStatus, error) {
+	params := &stripe.CheckoutSessionParams{}
+	params.AddExpand("line_items")
+	sess, err := session.Get(sessionID, params)
+	if err != nil {
+		return nil, err
+	}
+	data := &ReturnStatus{
+		Status:             string(sess.Status),
+		CustomerEmail:      sess.CustomerDetails.Email,
+		SubscriptionStatus: string(sess.Subscription.Status),
+	}
+	return data, nil
 }
