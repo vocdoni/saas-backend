@@ -12,14 +12,18 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"github.com/vocdoni/saas-backend/notifications/smtp"
+	"github.com/vocdoni/saas-backend/objectstorage"
 	"github.com/vocdoni/saas-backend/stripe"
 	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 )
 
+var serverURL = "http://localhost:8080"
+
 func main() {
 	// define flags
+	flag.String("server", serverURL, "The full URL of the server (http or https)")
 	flag.StringP("host", "h", "0.0.0.0", "listen address")
 	flag.IntP("port", "p", 8080, "listen port")
 	flag.StringP("secret", "s", "", "API secret")
@@ -46,6 +50,7 @@ func main() {
 	}
 	viper.AutomaticEnv()
 	// read the configuration
+	server := viper.GetString("server")
 	host := viper.GetString("host")
 	port := viper.GetInt("port")
 	apiEndpoint := viper.GetString("vocdoniApi")
@@ -144,6 +149,11 @@ func main() {
 		DB: database,
 	})
 	apiConf.Subscriptions = subscriptions
+	// initialize the s3 like  object storage
+	apiConf.ObjectStorage = objectstorage.New(&objectstorage.ObjectStorageConfig{
+		DB:        database,
+		ServerURL: server,
+	})
 	// create the local API server
 	api.New(apiConf).Start()
 	log.Infow("server started", "host", host, "port", port)
