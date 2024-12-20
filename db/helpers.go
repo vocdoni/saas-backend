@@ -96,6 +96,10 @@ func (ms *MongoStorage) initCollections(database string) error {
 	if ms.plans, err = getCollection("plans"); err != nil {
 		return err
 	}
+	// objects collection
+	if ms.objects, err = getCollection("objects"); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -176,6 +180,14 @@ func (ms *MongoStorage) createIndexes() error {
 	}); err != nil {
 		return fmt.Errorf("failed to create index on invitationCode for organization invites: %w", err)
 	}
+	// add objectID index to objects collection
+	// objectIDIndex := mongo.IndexModel{
+	// 	Keys:    bson.D{{Key: "_id", Value: 1}}, // 1 for ascending order
+	// 	Options: options.Index().SetUnique(true),
+	// }
+	// if _, err := ms.objects.Indexes().CreateOne(ctx, objectIDIndex); err != nil {
+	// 	return fmt.Errorf("failed to create index on _id for objects: %w", err)
+	// }
 	return nil
 }
 

@@ -134,3 +134,14 @@ type OrganizationInvite struct {
 	Role                UserRole  `json:"role" bson:"role"`
 	Expiration          time.Time `json:"expiration" bson:"expiration"`
 }
+
+// Object represents a user uploaded object Includes user defined ID and the data
+// as a byte array.
+type Object struct {
+	ID          string    `json:"id" bson:"_id"`
+	Name        string    `json:"name" bson:"name"`
+	Data        []byte    `json:"data" bson:"data"`
+	CreatedAt   time.Time `json:"createdAt" bson:"createdAt"`
+	UserID      string    `json:"userId" bson:"userId"`
+	ContentType string    `json:"contentType" bson:"contentType"`
+}
