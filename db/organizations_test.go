@@ -196,13 +196,11 @@ func TestAddOrganizationPlan(t *testing.T) {
 	// add a subscription to the organization
 	subscriptionName := "testPlan"
 	startDate := time.Now()
-	endDate := startDate.AddDate(1, 0, 0)
 	active := true
 	stripeID := "stripeID"
 	orgSubscription := &OrganizationSubscription{
 		PlanID:    100,
 		StartDate: startDate,
-		EndDate:   endDate,
 		Active:    true,
 	}
 	// using a non existing subscription should fail

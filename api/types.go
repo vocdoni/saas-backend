@@ -183,3 +183,12 @@ type OrganizationSubscriptionInfo struct {
 	Usage              *db.OrganizationCounters     `json:"usage"`
 	Plan               *db.Plan                     `json:"plan"`
 }
+
+// SubscriptionCheckout represents the details required for a subscription checkout process.
+type SubscriptionCheckout struct {
+	LookupKey uint64 `json:"lookupKey"`
+	ReturnURL string `json:"returnURL"`
+	Amount    int64  `json:"amount"`
+	Address   string `json:"address"`
+	Locale    string `json:"locale"`
+}

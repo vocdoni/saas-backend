@@ -33,8 +33,11 @@
   - [🤠 Available organization members roles](#-available-organization-members-roles)
   - [🏛️ Available organization types](#-available-organization-types)
 - [🏦 Plans](#-plans)
-  - [🛒 Get Available Plans](#-get-plans)
-  - [🛍️ Get Plan Info](#-get-plan-info)
+  - [📋 Get Available Plans](#-get-plans)
+  - [📄 Get Plan Info](#-get-plan-info)
+- [🔰 Subscriptions](#-subscriptions)
+  - [🛒 Create Checkout session](#-create-checkout-session)
+  - [🛍️ Get Checkout session info](#-get-checkout-session-info)
 
 </details>
 
@@ -324,8 +327,7 @@ This endpoint only returns the addresses of the organizations where the current 
         "subscription":{
             "PlanID":3,
             "StartDate":"2024-11-07T15:25:49.218Z",
-            "EndDate":"0001-01-01T00:00:00Z",
-            "RenewalDate":"0001-01-01T00:00:00Z",
+            "RenewalDate":"2025-11-07T15:25:49.218Z",
             "Active":true,
             "MaxCensusSize":10
         },
@@ -913,6 +915,60 @@ This request can be made only by organization admins.
 
 | HTTP Status | Error code | Message |
 |:---:|:---:|:---|
+| `400` | `40004` | `malformed JSON body` |
+| `404` | `40009` | `plan not found` |
+| `500` | `50001` | `internal server error` |
+
+
+## 🔰 Subscriptions
+
+### 🛒 Create Checkout session
+
+* **Path** `/subscriptions/checkout/`
+* **Method** `POST`
+* **Request Body** 
+```json
+{
+  "lookupKey": 1, // PLan's corresponging DB ID
+  "returnURL": "https://example.com/return",
+  "address": "user@mail.com",
+  "amount": 1000, // The desired maxCensusSize
+}
+```
+
+* **Response**
+```json
+{
+  "id": "cs_test_a1b2c3d4e5f6g7h8i9j0",
+   // ... rest of stripe session attributes
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
 | `400` | `40010` | `malformed URL parameter` |
 | `400` | `40023` | `plan not found` |
+| `500` | `50002` | `internal server error` |
+
+### 🛍️ Get Checkout session info
+
+* **Path** `/subscriptions/checkout/{sessionID}`
+* **Method** `GET`
+* **Response**
+```json
+{
+  "status": "complete", // session status
+  "customer_email": "customer@example.com",
+  "subscription_status": "active"
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `400` | `40010` | `malformed URL parameter` |
+| `400` | `40023` | `session not found` |
 | `500` | `50002` | `internal server error` |

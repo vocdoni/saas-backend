@@ -1,25 +1,32 @@
 package api
 
 import (
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/stripe/stripe-go/v81"
 	"github.com/vocdoni/saas-backend/db"
+	stripeService "github.com/vocdoni/saas-backend/stripe"
 	"go.vocdoni.io/dvote/log"
 )
 
 // handleWebhook handles the incoming webhook event from Stripe.
-// It takes the API data and signature as input parameters and returns the session ID and an error (if any).
-// The request body and Stripe-Signature header are passed to ConstructEvent, along with the webhook signing key.
-// If the event type is "customer.subscription.created", it unmarshals the event data into a CheckoutSession struct
-// and returns the session ID. Otherwise, it returns an empty string.
+// It processes various subscription-related events (created, updated, deleted)
+// and updates the organization's subscription status accordingly.
+// The webhook verifies the Stripe signature and handles different event types:
+// - customer.subscription.created: Creates a new subscription for an organization
+// - customer.subscription.updated: Updates an existing subscription
+// - customer.subscription.deleted: Reverts to the default plan
+// If any error occurs during processing, it returns an appropriate HTTP status code.
 func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	const MaxBodyBytes = int64(65536)
 	r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
 	payload, err := io.ReadAll(r.Body)
 	if err != nil {
-
 		log.Errorf("stripe webhook: Error reading request body: %s\n", err.Error())
 		w.WriteHeader(http.StatusBadRequest)
 		return
@@ -35,55 +42,186 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	// Unmarshal the event data into an appropriate struct depending on its Type
 	switch event.Type {
 	case "customer.subscription.created":
-		customer, subscription, err := a.stripe.GetInfoFromEvent(*event)
+		log.Infof("received stripe event Type: %s", event.Type)
+		stripeSubscriptionInfo, org, err := a.getSubscriptionOrgInfo(event)
 		if err != nil {
-			log.Errorf("stripe webhook: error getting info from event: %s\n", err.Error())
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		address := subscription.Metadata["address"]
-		if len(address) == 0 {
-			log.Errorf("subscription %s does not contain an address in metadata", subscription.ID)
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		org, _, err := a.db.Organization(address, false)
-		if err != nil || org == nil {
 			log.Errorf("could not update subscription %s, a corresponding organization with address %s was not found.",
-				subscription.ID, address)
-			log.Errorf("please do manually for creator %s \n  Error:  %s", customer.Email, err.Error())
+				stripeSubscriptionInfo.ID, stripeSubscriptionInfo.OrganizationAddress)
+			log.Errorf("please do manually for creator %s \n  Error:  %s", stripeSubscriptionInfo.CustomerEmail, err.Error())
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		dbSubscription, err := a.db.PlanByStripeId(subscription.Items.Data[0].Plan.Product.ID)
+		dbSubscription, err := a.db.PlanByStripeId(stripeSubscriptionInfo.ProductID)
 		if err != nil || dbSubscription == nil {
 			log.Errorf("could not update subscription %s, a corresponding subscription was not found.",
-				subscription.ID)
+				stripeSubscriptionInfo.ID)
 			log.Errorf("please do manually: %s", err.Error())
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		startDate := time.Unix(subscription.CurrentPeriodStart, 0)
-		endDate := time.Unix(subscription.CurrentPeriodEnd, 0)
-		renewalDate := time.Unix(subscription.BillingCycleAnchor, 0)
 
 		organizationSubscription := &db.OrganizationSubscription{
 			PlanID:        dbSubscription.ID,
-			StartDate:     startDate,
-			EndDate:       endDate,
-			RenewalDate:   renewalDate,
-			Active:        subscription.Status == "active",
-			MaxCensusSize: int(subscription.Items.Data[0].Quantity),
-			Email:         customer.Email,
+			StartDate:     stripeSubscriptionInfo.StartDate,
+			RenewalDate:   stripeSubscriptionInfo.EndDate,
+			Active:        stripeSubscriptionInfo.Status == "active",
+			MaxCensusSize: stripeSubscriptionInfo.Quantity,
+			Email:         stripeSubscriptionInfo.CustomerEmail,
 		}
 
 		// TODO will only worked for new subscriptions
 		if err := a.db.SetOrganizationSubscription(org.Address, organizationSubscription); err != nil {
-			log.Errorf("could not update subscription %s for organization %s: %s", subscription.ID, org.Address, err.Error())
+			log.Errorf("could not update subscription %s for organization %s: %s", stripeSubscriptionInfo.ID, org.Address, err.Error())
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		log.Debugf("stripe webhook: subscription %s for organization %s processed successfully", subscription.ID, org.Address)
+		log.Infof("stripe webhook: subscription %s for organization %s processed successfully", stripeSubscriptionInfo.ID, org.Address)
+	case "customer.subscription.updated", "customer.subscription.deleted":
+		log.Infof("received stripe event Type: %s", event.Type)
+		stripeSubscriptionInfo, org, err := a.getSubscriptionOrgInfo(event)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		orgPlan, err := a.db.Plan(org.Subscription.PlanID)
+		if err != nil || orgPlan == nil {
+			log.Errorf("could not update subscription %s", stripeSubscriptionInfo.ID)
+			log.Errorf("a corresponding plan with id %d for organization with address %s was not found",
+				org.Subscription.PlanID, stripeSubscriptionInfo.OrganizationAddress)
+			log.Errorf("please do manually for creator %s \n  Error:  %s", stripeSubscriptionInfo.CustomerEmail, err.Error())
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if stripeSubscriptionInfo.Status == "canceled" && stripeSubscriptionInfo.ProductID == orgPlan.StripeID {
+			// replace organization subscription with the default plan
+			defaultPlan, err := a.db.DefaultPlan()
+			if err != nil || defaultPlan == nil {
+				ErrNoDefaultPLan.WithErr((err)).Write(w)
+				return
+			}
+			orgSubscription := &db.OrganizationSubscription{
+				PlanID:        defaultPlan.ID,
+				StartDate:     time.Now(),
+				Active:        true,
+				MaxCensusSize: defaultPlan.Organization.MaxCensus,
+			}
+			if err := a.db.SetOrganizationSubscription(org.Address, orgSubscription); err != nil {
+				log.Errorf("could not cancel subscription %s for organization %s: %s", stripeSubscriptionInfo.ID, org.Address, err.Error())
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+		} else if stripeSubscriptionInfo.Status == "active" && !org.Subscription.Active {
+			org.Subscription.Active = true
+			if err := a.db.SetOrganization(org); err != nil {
+				log.Errorf("could not activate organizations  %s subscription to active: %s", org.Address, err.Error())
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+		}
+		log.Infof("stripe webhook: subscription %s for organization %s processed as %s successfully",
+			stripeSubscriptionInfo.ID, org.Address, stripeSubscriptionInfo.Status)
+	default:
+		log.Infof("received stripe event Type: %s", event.Type)
+		customer, subscription, err := a.stripe.GetInfoFromEvent(*event)
+		if err != nil {
+			log.Errorf("could not decode event for customer with email with address %s was not found. "+
+				"Error: %s", customer.Email, err.Error())
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if subscription != nil {
+			stripeSubscriptionInfo, err := a.stripe.GetSubscriptionInfoFromEvent(*event)
+			if err != nil {
+				log.Errorf("could not decode event for subscription %s for customer %s. Error: %s",
+					stripeSubscriptionInfo.ID, customer.Email, err.Error())
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			log.Infof("stripe webhook: event  subscription %s for organization %s and customer %s received",
+				stripeSubscriptionInfo.ID, stripeSubscriptionInfo.OrganizationAddress, customer.Email)
+
+		} else {
+			log.Infof("stripe webhook: subscription %s for customer %s received  as %s successfully",
+				subscription.ID, customer.Email, subscription.Status)
+		}
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// createSubscriptionCheckoutHandler handles requests to create a new Stripe checkout session
+// for subscription purchases.
+func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.Request) {
+	checkout := &SubscriptionCheckout{}
+	if err := json.NewDecoder(r.Body).Decode(checkout); err != nil {
+		ErrMalformedBody.Write(w)
+		return
+	}
+
+	if checkout.Amount == 0 || checkout.Address == "" {
+		ErrMalformedBody.Withf("Missing required fields").Write(w)
+		return
+	}
+
+	// TODO check if the user has another active paid subscription
+
+	plan, err := a.db.Plan(checkout.LookupKey)
+	if err != nil {
+		ErrMalformedURLParam.Withf("Plan not found: %v", err).Write(w)
+		return
+	}
+
+	session, err := a.stripe.CreateSubscriptionCheckoutSession(
+		plan.StripePriceID, checkout.ReturnURL, checkout.Address, checkout.Locale, checkout.Amount)
+	if err != nil {
+		ErrStripeError.Withf("Cannot create session: %v", err).Write(w)
+		return
+	}
+
+	data := &struct {
+		ClientSecret string `json:"clientSecret"`
+		SessionID    string `json:"sessionID"`
+	}{
+		ClientSecret: session.ClientSecret,
+		SessionID:    session.ID,
+	}
+	httpWriteJSON(w, data)
+}
+
+// checkoutSessionHandler retrieves the status of a Stripe checkout session.
+func (a *API) checkoutSessionHandler(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionID")
+	if sessionID == "" {
+		ErrMalformedURLParam.Withf("sessionID is required").Write(w)
+		return
+	}
+	status, err := a.stripe.RetrieveCheckoutSession(sessionID)
+	if err != nil {
+		ErrStripeError.Withf("Cannot get session: %v", err).Write(w)
+		return
+	}
+
+	httpWriteJSON(w, status)
+}
+
+// getSubscriptionOrgInfo is a helper function that retrieves the subscription information from
+// the subscription event and the Organization information from the database.
+func (a *API) getSubscriptionOrgInfo(event *stripe.Event) (*stripeService.StripeSubscriptionInfo, *db.Organization, error) {
+	stripeSubscriptionInfo, err := a.stripe.GetSubscriptionInfoFromEvent(*event)
+	if err != nil {
+		return nil, nil, fmt.Errorf("could not decode event for subscription: %s", err.Error())
+	}
+	org, _, err := a.db.Organization(stripeSubscriptionInfo.CustomerEmail, false)
+	if err != nil || org == nil {
+		log.Errorf("could not update subscription %s, a corresponding organization with address %s was not found.",
+			stripeSubscriptionInfo.ID, stripeSubscriptionInfo.OrganizationAddress)
+		log.Errorf("please do manually for creator %s \n  Error:  %s", stripeSubscriptionInfo.CustomerEmail, err.Error())
+		if org == nil {
+			return nil, nil, fmt.Errorf("no organization found with address %s", stripeSubscriptionInfo.OrganizationAddress)
+		} else {
+			return nil, nil, fmt.Errorf("could not retrieve organization with address %s: %s",
+				stripeSubscriptionInfo.OrganizationAddress, err.Error())
+		}
+	}
+
+	return stripeSubscriptionInfo, org, nil
 }
