@@ -231,6 +231,9 @@ func (s *StripeClient) CreateSubscriptionCheckoutSession(
 	if len(locale) == 0 {
 		locale = "auto"
 	}
+	if locale == "ca" {
+		locale = "es"
+	}
 	checkoutParams := &stripe.CheckoutSessionParams{
 		// Subscription mode
 		Mode: stripe.String(string(stripe.CheckoutSessionModeSubscription)),
