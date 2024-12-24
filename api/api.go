@@ -159,6 +159,9 @@ func (a *API) initRouter() http.Handler {
 		// get stripe checkout session info
 		log.Infow("new route", "method", "GET", "path", subscriptionsCheckoutSession)
 		r.Get(subscriptionsCheckoutSession, a.checkoutSessionHandler)
+		// get stripe subscription portal session info
+		log.Infow("new route", "method", "GET", "path", subscriptionsPortal)
+		r.Get(subscriptionsPortal, a.createSubscriptionPortalSessionHandler)
 	})
 
 	// Public routes

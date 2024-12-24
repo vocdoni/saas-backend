@@ -70,4 +70,6 @@ const (
 	subscriptionsCheckout = "/subscriptions/checkout"
 	// GET /subscriptions/checkout/{sessionID} to get the checkout session information
 	subscriptionsCheckoutSession = "/subscriptions/checkout/{sessionID}"
+	// GET /subscriptions/portal to get the stripe subscription portal URL
+	subscriptionsPortal = "/subscriptions/{address}/portal/"
 )

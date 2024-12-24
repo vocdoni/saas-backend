@@ -234,3 +234,36 @@ func (a *API) getSubscriptionOrgInfo(event *stripe.Event) (*stripeService.Stripe
 
 	return stripeSubscriptionInfo, org, nil
 }
+
+// createSubscriptionPortalSessionHandler handles the creation of a Stripe customer portal session
+// based on the organization creator email..
+// It requires the user to be authenticated and to have admin role for the organization.
+func (a *API) createSubscriptionPortalSessionHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := userFromContext(r.Context())
+	if !ok {
+		ErrUnauthorized.Write(w)
+		return
+	}
+	// get the organization info from the request context
+	org, _, ok := a.organizationFromRequest(r)
+	if !ok {
+		ErrNoOrganizationProvided.Write(w)
+		return
+	}
+	if !user.HasRoleFor(org.Address, db.AdminRole) {
+		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		return
+	}
+	session, err := a.stripe.CreatePortalSession(org.Creator)
+	if err != nil {
+		ErrStripeError.Withf("Cannot create customer portal session: %v", err).Write(w)
+		return
+	}
+
+	data := &struct {
+		PortalURL string `json:"portalURL"`
+	}{
+		PortalURL: session.URL,
+	}
+	httpWriteJSON(w, data)
+}

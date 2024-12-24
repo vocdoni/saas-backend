@@ -38,6 +38,7 @@
 - [🔰 Subscriptions](#-subscriptions)
   - [🛒 Create Checkout session](#-create-checkout-session)
   - [🛍️ Get Checkout session info](#-get-checkout-session-info)
+  - [🔗 Create Subscription Portal Session](#-create-subscription-portal-session)
 
 </details>
 
@@ -971,4 +972,26 @@ This request can be made only by organization admins.
 |:---:|:---:|:---|
 | `400` | `40010` | `malformed URL parameter` |
 | `400` | `40023` | `session not found` |
+| `500` | `50002` | `internal server error` |
+
+### 🔗 Create Subscription Portal Session
+
+* **Path** `/subscriptions/{orgAddress}/portal`
+* **Method** `GET`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+
+* **Response**
+```json
+{
+  "portalURL": "https://portal.stripe.com/session/..."
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40011` | `no organization provided` |
 | `500` | `50002` | `internal server error` |

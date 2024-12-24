@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stripe/stripe-go/v81"
+	portalSession "github.com/stripe/stripe-go/v81/billingportal/session"
 	"github.com/stripe/stripe-go/v81/checkout/session"
 	"github.com/stripe/stripe-go/v81/customer"
 	"github.com/stripe/stripe-go/v81/price"
@@ -290,4 +291,23 @@ func (s *StripeClient) RetrieveCheckoutSession(sessionID string) (*ReturnStatus,
 		SubscriptionStatus: string(sess.Subscription.Status),
 	}
 	return data, nil
+}
+
+// CreatePortalSession creates a new billing portal session for a customer based on an email address.
+func (s *StripeClient) CreatePortalSession(customerEmail string) (*stripe.BillingPortalSession, error) {
+	// get stripe customer based on provided email
+	customerParams := &stripe.CustomerListParams{
+		Email: stripe.String(customerEmail),
+	}
+	var customerID string
+	if customers := customer.List(customerParams); customers.Next() {
+		customerID = customers.Customer().ID
+	} else {
+		return nil, fmt.Errorf("could not find customer with email %s", customerEmail)
+	}
+
+	params := &stripe.BillingPortalSessionParams{
+		Customer: &customerID,
+	}
+	return portalSession.New(params)
 }
