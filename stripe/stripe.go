@@ -222,12 +222,13 @@ func (s *StripeClient) GetPlans() ([]*db.Plan, error) {
 
 // CreateSubscriptionCheckoutSession creates a new Stripe checkout session for a subscription.
 // It configures the session with the specified price, amount return URL, and subscription metadata.
+// The email provided is used in order to uniquely distinguish the customer on the Stripe side.
 // The priceID is that is provided corrsponds to the subscription tier selected by the user.
 // Returns the created checkout session and any error encountered.
 // Overview of stripe checkout mechanics: https://docs.stripe.com/checkout/custom/quickstart
 // API description https://docs.stripe.com/api/checkout/sessions
 func (s *StripeClient) CreateSubscriptionCheckoutSession(
-	priceID, returnURL, address, locale string, amount int64,
+	priceID, returnURL, address, email, locale string, amount int64,
 ) (*stripe.CheckoutSession, error) {
 	if len(locale) == 0 {
 		locale = "auto"

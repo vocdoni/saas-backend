@@ -171,7 +171,16 @@ func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.R
 		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
-	// TODO check if the user has another active paid subscription
+
+	org, _, err := a.db.Organization(checkout.Address, false)
+	if err != nil {
+		ErrOrganizationNotFound.Withf("Error retrieving organization: %v", err).Write(w)
+		return
+	}
+	if org == nil {
+		ErrOrganizationNotFound.Withf("Organization not found: %v", err).Write(w)
+		return
+	}
 
 	plan, err := a.db.Plan(checkout.LookupKey)
 	if err != nil {
@@ -180,7 +189,7 @@ func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.R
 	}
 
 	session, err := a.stripe.CreateSubscriptionCheckoutSession(
-		plan.StripePriceID, checkout.ReturnURL, checkout.Address, checkout.Locale, checkout.Amount)
+		plan.StripePriceID, checkout.ReturnURL, checkout.Address, org.Creator, checkout.Locale, checkout.Amount)
 	if err != nil {
 		ErrStripeError.Withf("Cannot create session: %v", err).Write(w)
 		return
