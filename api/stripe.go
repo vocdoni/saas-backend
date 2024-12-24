@@ -151,6 +151,11 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 // createSubscriptionCheckoutHandler handles requests to create a new Stripe checkout session
 // for subscription purchases.
 func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := userFromContext(r.Context())
+	if !ok {
+		ErrUnauthorized.Write(w)
+		return
+	}
 	checkout := &SubscriptionCheckout{}
 	if err := json.NewDecoder(r.Body).Decode(checkout); err != nil {
 		ErrMalformedBody.Write(w)
@@ -162,6 +167,10 @@ func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	if !user.HasRoleFor(checkout.Address, db.AdminRole) {
+		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		return
+	}
 	// TODO check if the user has another active paid subscription
 
 	plan, err := a.db.Plan(checkout.LookupKey)
