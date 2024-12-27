@@ -228,7 +228,7 @@ func (a *API) getSubscriptionOrgInfo(event *stripe.Event) (*stripeService.Stripe
 	if err != nil {
 		return nil, nil, fmt.Errorf("could not decode event for subscription: %s", err.Error())
 	}
-	org, _, err := a.db.Organization(stripeSubscriptionInfo.CustomerEmail, false)
+	org, _, err := a.db.Organization(stripeSubscriptionInfo.OrganizationAddress, false)
 	if err != nil || org == nil {
 		log.Errorf("could not update subscription %s, a corresponding organization with address %s was not found.",
 			stripeSubscriptionInfo.ID, stripeSubscriptionInfo.OrganizationAddress)
