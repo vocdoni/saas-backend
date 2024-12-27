@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -13,6 +14,8 @@ import (
 	stripeService "github.com/vocdoni/saas-backend/stripe"
 	"go.vocdoni.io/dvote/log"
 )
+
+var mu sync.Mutex
 
 // handleWebhook handles the incoming webhook event from Stripe.
 // It processes various subscription-related events (created, updated, deleted)
@@ -23,6 +26,8 @@ import (
 // - customer.subscription.deleted: Reverts to the default plan
 // If any error occurs during processing, it returns an appropriate HTTP status code.
 func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
+	mu.Lock()
+	defer mu.Unlock()
 	const MaxBodyBytes = int64(65536)
 	r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
 	payload, err := io.ReadAll(r.Body)
@@ -76,6 +81,7 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.Infof("stripe webhook: subscription %s for organization %s processed successfully", stripeSubscriptionInfo.ID, org.Address)
+
 	case "customer.subscription.updated", "customer.subscription.deleted":
 		log.Infof("received stripe event Type: %s", event.Type)
 		stripeSubscriptionInfo, org, err := a.getSubscriptionOrgInfo(event)
