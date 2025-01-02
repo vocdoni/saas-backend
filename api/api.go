@@ -12,6 +12,7 @@ import (
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/notifications"
+	"github.com/vocdoni/saas-backend/objectstorage"
 	"github.com/vocdoni/saas-backend/stripe"
 	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.vocdoni.io/dvote/apiclient"
@@ -33,6 +34,7 @@ type APIConfig struct {
 	Account     *account.Account
 	MailService notifications.NotificationService
 	WebAppURL   string
+	ServerURL   string
 	// FullTransparentMode if true allows signing all transactions and does not
 	// modify any of them.
 	FullTransparentMode bool
@@ -40,6 +42,8 @@ type APIConfig struct {
 	StripeClient *stripe.StripeClient
 	// Subscriptions permissions manager
 	Subscriptions *subscriptions.Subscriptions
+	// Object storage
+	ObjectStorage *objectstorage.ObjectStorageClient
 }
 
 // API type represents the API HTTP server with JWT authentication capabilities.
@@ -54,9 +58,11 @@ type API struct {
 	mail            notifications.NotificationService
 	secret          string
 	webAppURL       string
+	serverURL       string
 	transparentMode bool
 	stripe          *stripe.StripeClient
 	subscriptions   *subscriptions.Subscriptions
+	objectStorage   *objectstorage.ObjectStorageClient
 }
 
 // New creates a new API HTTP server. It does not start the server. Use Start() for that.
@@ -74,9 +80,11 @@ func New(conf *APIConfig) *API {
 		mail:            conf.MailService,
 		secret:          conf.Secret,
 		webAppURL:       conf.WebAppURL,
+		serverURL:       conf.ServerURL,
 		transparentMode: conf.FullTransparentMode,
 		stripe:          conf.StripeClient,
 		subscriptions:   conf.Subscriptions,
+		objectStorage:   conf.ObjectStorage,
 	}
 }
 
@@ -162,6 +170,9 @@ func (a *API) initRouter() http.Handler {
 		// get stripe subscription portal session info
 		log.Infow("new route", "method", "GET", "path", subscriptionsPortal)
 		r.Get(subscriptionsPortal, a.createSubscriptionPortalSessionHandler)
+		// upload an image to the object storage
+		log.Infow("new route", "method", "POST", "path", objectStorageUploadTypedEndpoint)
+		r.Post(objectStorageUploadTypedEndpoint, a.uploadImageWithFormHandler)
 	})
 
 	// Public routes
@@ -213,6 +224,9 @@ func (a *API) initRouter() http.Handler {
 		// handle stripe webhook
 		log.Infow("new route", "method", "POST", "path", subscriptionsWebhook)
 		r.Post(subscriptionsWebhook, a.handleWebhook)
+		// upload an image to the object storage
+		log.Infow("new route", "method", "GET", "path", objectStorageDownloadTypedEndpoint)
+		r.Get(objectStorageDownloadTypedEndpoint, a.downloadImageInlineHandler)
 	})
 	a.router = r
 	return r

@@ -27,6 +27,7 @@ type MongoStorage struct {
 	organizations       *mongo.Collection
 	organizationInvites *mongo.Collection
 	plans               *mongo.Collection
+	objects             *mongo.Collection
 }
 
 type Options struct {
@@ -117,6 +118,10 @@ func (ms *MongoStorage) Reset() error {
 	}
 	// drop subscriptions collection
 	if err := ms.plans.Drop(ctx); err != nil {
+		return err
+	}
+	// drop the objects collection
+	if err := ms.objects.Drop(ctx); err != nil {
 		return err
 	}
 	// init the collections
