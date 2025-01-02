@@ -49,10 +49,12 @@ var (
 	ErrOganizationSubscriptionIncative = Error{Code: 40021, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("organization subscription not active")}
 	ErrNoDefaultPLan                   = Error{Code: 40022, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("did not found default plan for organization")}
 	ErPlanNotFound                     = Error{Code: 40023, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("plan not found")}
+	ErrStorageInvalidObject            = Error{Code: 40024, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("the obejct/parameters provided are invalid")}
 
 	ErrMarshalingServerJSONFailed  = Error{Code: 50001, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("marshaling (server-side) JSON failed")}
 	ErrGenericInternalServerError  = Error{Code: 50002, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("internal server error")}
 	ErrCouldNotCreateFaucetPackage = Error{Code: 50003, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("could not create faucet package")}
 	ErrVochainRequestFailed        = Error{Code: 50004, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("vochain request failed")}
 	ErrStripeError                 = Error{Code: 50005, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("stripe error")}
+	ErrInternalStorageError        = Error{Code: 50006, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("internal storage error")}
 )

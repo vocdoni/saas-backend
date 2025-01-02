@@ -39,6 +39,10 @@
   - [🛒 Create Checkout session](#-create-checkout-session)
   - [🛍️ Get Checkout session info](#-get-checkout-session-info)
   - [🔗 Create Subscription Portal Session](#-create-subscription-portal-session)
+- [📦 Storage](#-storage)
+  - [ 🌄 Upload image](#-upload-image)
+  - [ 📄 Get object](#-get-object)
+  
 
 </details>
 
@@ -995,3 +999,52 @@ This request can be made only by organization admins.
 | `401` | `40001` | `user not authorized` |
 | `400` | `40011` | `no organization provided` |
 | `500` | `50002` | `internal server error` |
+
+## 📦 Storage
+
+### 🌄 Upload image
+
+* **Path** `/storage`
+* **Method** `POST`
+
+Accepting files uploaded by forms as such:
+```html
+<form action="http://localhost:8000" method="post" enctype="multipart/form-data">
+  <p><input type="text" name="text" value="text default">
+  <p><input type="file" name="file1">
+  <p><input type="file" name="file2">
+  <p><button type="submit">Submit</button>
+</form>
+```
+
+* **Response**
+
+```json
+{
+  "urls": ["https://file1.store.com","https://file1.store.com"]
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40024` | `the obejct/parameters provided are invalid` |
+| `500` | `50002` | `internal server error` |
+| `500` | `50006` | `internal storage error` |
+
+
+### 📄 Get object
+This method return if exists, in inline mode. the image/file of the provided by the obectID
+
+* **Path** `/storage/{objectID}`
+* **Method** `GET`
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `400` | `40024` | `the obejct/parameters provided are invalid` |
+| `500` | `50002` | `internal server error` |
+| `500` | `50006` | `internal storage error` |

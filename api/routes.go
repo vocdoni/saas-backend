@@ -72,4 +72,9 @@ const (
 	subscriptionsCheckoutSession = "/subscriptions/checkout/{sessionID}"
 	// GET /subscriptions/portal to get the stripe subscription portal URL
 	subscriptionsPortal = "/subscriptions/{address}/portal"
+	// object storage routes
+	// POST /storage/{origin} to upload an image to the object storage
+	objectStorageUploadTypedEndpoint = "/storage"
+	// GET /storage/{origin}/{filename} to download an image from the object storage
+	objectStorageDownloadTypedEndpoint = "/storage/{objectName}"
 )

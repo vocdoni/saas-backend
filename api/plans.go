@@ -3,6 +3,8 @@ package api
 import (
 	"net/http"
 	"strconv"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // getSubscriptionsHandler handles the request to get the subscriptions of an organization.
@@ -20,7 +22,7 @@ func (a *API) getPlansHandler(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) planInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// get the plan ID from the URL
-	planID := r.URL.Query().Get("planID")
+	planID := chi.URLParam(r, "planID")
 	// check the the planID is not empty
 	if planID == "" {
 		ErrMalformedURLParam.Withf("planID is required").Write(w)

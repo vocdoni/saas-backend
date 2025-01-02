@@ -96,6 +96,10 @@ func (ms *MongoStorage) initCollections(database string) error {
 	if ms.plans, err = getCollection("plans"); err != nil {
 		return err
 	}
+	// objects collection
+	if ms.objects, err = getCollection("objects"); err != nil {
+		return err
+	}
 	return nil
 }
 

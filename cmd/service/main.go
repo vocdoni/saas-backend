@@ -12,6 +12,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"github.com/vocdoni/saas-backend/notifications/smtp"
+	"github.com/vocdoni/saas-backend/objectstorage"
 	"github.com/vocdoni/saas-backend/stripe"
 	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.vocdoni.io/dvote/apiclient"
@@ -20,6 +21,7 @@ import (
 
 func main() {
 	// define flags
+	flag.String("server", "http://localhost:8080", "The full URL of the server (http or https)")
 	flag.StringP("host", "h", "0.0.0.0", "listen address")
 	flag.IntP("port", "p", 8080, "listen port")
 	flag.StringP("secret", "s", "", "API secret")
@@ -46,6 +48,7 @@ func main() {
 	}
 	viper.AutomaticEnv()
 	// read the configuration
+	server := viper.GetString("server")
 	host := viper.GetString("host")
 	port := viper.GetInt("port")
 	apiEndpoint := viper.GetString("vocdoniApi")
@@ -113,6 +116,7 @@ func main() {
 		Client:              apiClient,
 		Account:             acc,
 		WebAppURL:           webURL,
+		ServerURL:           server,
 		FullTransparentMode: fullTransparentMode,
 		StripeClient:        stripeClient,
 	}
@@ -144,6 +148,10 @@ func main() {
 		DB: database,
 	})
 	apiConf.Subscriptions = subscriptions
+	// initialize the s3 like  object storage
+	apiConf.ObjectStorage = objectstorage.New(&objectstorage.ObjectStorageConfig{
+		DB: database,
+	})
 	// create the local API server
 	api.New(apiConf).Start()
 	log.Infow("server started", "host", host, "port", port)
