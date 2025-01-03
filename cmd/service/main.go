@@ -21,7 +21,7 @@ import (
 
 func main() {
 	// define flags
-	flag.String("server", "http://localhost:8080", "The full URL of the server (http or https)")
+	flag.String("serverURL", "http://localhost:8080", "The full URL of the server (http or https)")
 	flag.StringP("host", "h", "0.0.0.0", "listen address")
 	flag.IntP("port", "p", 8080, "listen port")
 	flag.StringP("secret", "s", "", "API secret")
@@ -48,7 +48,7 @@ func main() {
 	}
 	viper.AutomaticEnv()
 	// read the configuration
-	server := viper.GetString("server")
+	server := viper.GetString("serverURL")
 	host := viper.GetString("host")
 	port := viper.GetInt("port")
 	apiEndpoint := viper.GetString("vocdoniApi")
