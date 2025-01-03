@@ -238,7 +238,8 @@ func (s *StripeClient) CreateSubscriptionCheckoutSession(
 	}
 	checkoutParams := &stripe.CheckoutSessionParams{
 		// Subscription mode
-		Mode: stripe.String(string(stripe.CheckoutSessionModeSubscription)),
+		Mode:          stripe.String(string(stripe.CheckoutSessionModeSubscription)),
+		CustomerEmail: &email,
 		LineItems: []*stripe.CheckoutSessionLineItemParams{
 			{
 				Price:    stripe.String(priceID),
