@@ -106,10 +106,11 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			orgSubscription := &db.OrganizationSubscription{
-				PlanID:        defaultPlan.ID,
-				StartDate:     time.Now(),
-				Active:        true,
-				MaxCensusSize: defaultPlan.Organization.MaxCensus,
+				PlanID:          defaultPlan.ID,
+				StartDate:       time.Now(),
+				LastPaymentDate: org.Subscription.LastPaymentDate,
+				Active:          true,
+				MaxCensusSize:   defaultPlan.Organization.MaxCensus,
 			}
 			if err := a.db.SetOrganizationSubscription(org.Address, orgSubscription); err != nil {
 				log.Errorf("could not cancel subscription %s for organization %s: %s", stripeSubscriptionInfo.ID, org.Address, err.Error())
@@ -126,30 +127,27 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 		log.Infof("stripe webhook: subscription %s for organization %s processed as %s successfully",
 			stripeSubscriptionInfo.ID, org.Address, stripeSubscriptionInfo.Status)
-	default:
-		log.Infof("received stripe event Type: %s", event.Type)
-		customer, subscription, err := a.stripe.GetInfoFromEvent(*event)
+	case "invoice.payment_succeeded":
+		paymentTime, orgAddress, err := a.stripe.GetInvoiceInfoFromEvent(*event)
 		if err != nil {
-			log.Errorf("could not decode event for customer with email with address %s was not found. "+
-				"Error: %s", customer.Email, err.Error())
+			log.Errorf("could not update payment from event: %s \tEvent Type:%s \tError: %v", event.ID, event.Type, err)
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		if subscription != nil {
-			stripeSubscriptionInfo, err := a.stripe.GetSubscriptionInfoFromEvent(*event)
-			if err != nil {
-				log.Errorf("could not decode event for subscription %s for customer %s. Error: %s",
-					stripeSubscriptionInfo.ID, customer.Email, err.Error())
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			log.Infof("stripe webhook: event  subscription %s for organization %s and customer %s received",
-				stripeSubscriptionInfo.ID, stripeSubscriptionInfo.OrganizationAddress, customer.Email)
-
-		} else {
-			log.Infof("stripe webhook: subscription %s for customer %s received  as %s successfully",
-				subscription.ID, customer.Email, subscription.Status)
+		org, _, err := a.db.Organization(orgAddress, false)
+		if err != nil || org == nil {
+			log.Errorf("could not update payment from event because could not retrieve organization: %s \tEvent Type:%s",
+				event.ID, event.Type)
 		}
+		org.Subscription.LastPaymentDate = paymentTime
+		if err := a.db.SetOrganization(org); err != nil {
+			log.Errorf("could not update payment from event: %s \tEvent Type:%s \tError: %v", event.ID, event.Type, err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		log.Infof("stripe webhook: payment %s for organization %s processed successfully", event.ID, org.Address)
+	default:
+		log.Infof("received stripe event: %s with type: %s", event.ID, event.Type)
 	}
 	w.WriteHeader(http.StatusOK)
 }

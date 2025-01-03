@@ -76,32 +76,37 @@ func (s *StripeClient) DecodeEvent(payload []byte, signatureHeader string) (*str
 	return &event, nil
 }
 
-// GetInfoFromEvent processes a Stripe event to extract customer and subscription information.
-// It unmarshals the event data and retrieves the associated customer details.
-// Returns the customer and subscription objects, or an error if processing fails.
-func (s *StripeClient) GetInfoFromEvent(event stripe.Event) (*stripe.Customer, *stripe.Subscription, error) {
-	var subscription stripe.Subscription
-	err := json.Unmarshal(event.Data.Raw, &subscription)
+func (s *StripeClient) GetInvoiceInfoFromEvent(event stripe.Event) (time.Time, string, error) {
+	var invoice stripe.Invoice
+	err := json.Unmarshal(event.Data.Raw, &invoice)
 	if err != nil {
-		log.Errorf("error parsing webhook JSON: %s\n", err.Error())
-		return nil, nil, err
+		return time.Time{}, "", fmt.Errorf("error parsing webhook JSON: %v\n", err)
 	}
-
-	params := &stripe.CustomerParams{}
-	customer, err := customer.Get(subscription.Customer.ID, params)
-	if err != nil || customer == nil {
-		log.Errorf("could not update subscription %s, stripe internal error getting customer", subscription.ID)
-		return nil, nil, err
+	if invoice.EffectiveAt == 0 {
+		return time.Time{}, "", fmt.Errorf("invoice %s does not contain an effective date", invoice.ID)
 	}
-	return customer, &subscription, nil
+	if invoice.SubscriptionDetails == nil {
+		return time.Time{}, "", fmt.Errorf("invoice %s does not contain subscription details", invoice.ID)
+	}
+	return time.Unix(invoice.EffectiveAt, 0), invoice.SubscriptionDetails.Metadata["address"], nil
 }
 
 // GetSubscriptionInfoFromEvent processes a Stripe event to extract subscription information.
 // It unmarshals the event data and retrieves the associated customer and subscription details.
 func (s *StripeClient) GetSubscriptionInfoFromEvent(event stripe.Event) (*StripeSubscriptionInfo, error) {
-	customer, subscription, err := s.GetInfoFromEvent(event)
+	var subscription stripe.Subscription
+	err := json.Unmarshal(event.Data.Raw, &subscription)
 	if err != nil {
-		return &StripeSubscriptionInfo{}, fmt.Errorf("error getting info from event: %s\n", err.Error())
+		return &StripeSubscriptionInfo{}, fmt.Errorf("error parsing webhook JSON: %v\n", err)
+	}
+
+	params := &stripe.CustomerParams{}
+	customer, err := customer.Get(subscription.Customer.ID, params)
+	if err != nil || customer == nil {
+		return &StripeSubscriptionInfo{}, fmt.Errorf(
+			"could not update subscription %s, stripe internal error getting customer",
+			subscription.ID,
+		)
 	}
 	address := subscription.Metadata["address"]
 	if len(address) == 0 {

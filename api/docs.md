@@ -690,6 +690,7 @@ Only the following parameters can be changed. Every parameter is optional.
     "startDate":"2024-11-07T15:25:49.218Z",
     "endDate":"0001-01-01T00:00:00Z",
     "renewalDate":"0001-01-01T00:00:00Z",
+    "lastPaymentDate":"0001-01-01T00:00:00Z",
     "active":true,
     "email": "test@test.com",
     "maxCensusSize":10

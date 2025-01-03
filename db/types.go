@@ -111,12 +111,13 @@ type PlanTier struct {
 }
 
 type OrganizationSubscription struct {
-	PlanID        uint64    `json:"planID" bson:"planID"`
-	StartDate     time.Time `json:"startDate" bson:"startDate"`
-	RenewalDate   time.Time `json:"renewalDate" bson:"renewalDate"`
-	Active        bool      `json:"active" bson:"active"`
-	MaxCensusSize int       `json:"maxCensusSize" bson:"maxCensusSize"`
-	Email         string    `json:"email" bson:"email"`
+	PlanID          uint64    `json:"planID" bson:"planID"`
+	StartDate       time.Time `json:"startDate" bson:"startDate"`
+	RenewalDate     time.Time `json:"renewalDate" bson:"renewalDate"`
+	LastPaymentDate time.Time `json:"lastPaymentDate" bson:"lastPaymentDate"`
+	Active          bool      `json:"active" bson:"active"`
+	MaxCensusSize   int       `json:"maxCensusSize" bson:"maxCensusSize"`
+	Email           string    `json:"email" bson:"email"`
 }
 
 type OrganizationCounters struct {
