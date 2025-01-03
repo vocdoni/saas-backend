@@ -30,7 +30,7 @@ func (a *API) uploadImageWithFormHandler(w http.ResponseWriter, r *http.Request)
 
 	// Get a reference to the fileHeaders.
 	// They are accessible only after ParseMultipartForm is called
-	// files := r.MultipartForm.File["file"]
+	filesFound := false
 	var returnURLs []string
 	for _, fileHeaders := range r.MultipartForm.File {
 		for _, fileHeader := range fileHeaders {
@@ -48,6 +48,7 @@ func (a *API) uploadImageWithFormHandler(w http.ResponseWriter, r *http.Request)
 			}()
 			// upload the file using the object storage client
 			// and get the URL of the uploaded file
+			filesFound = true
 			storedFileID, err := a.objectStorage.Put(file, fileHeader.Size, user.Email)
 			if err != nil {
 				ErrInternalStorageError.With(err.Error()).Write(w)
@@ -55,6 +56,10 @@ func (a *API) uploadImageWithFormHandler(w http.ResponseWriter, r *http.Request)
 			}
 			returnURLs = append(returnURLs, objectURL(a.serverURL, storedFileID))
 		}
+	}
+	if !filesFound {
+		ErrStorageInvalidObject.With("no files found").Write(w)
+		return
 	}
 	httpWriteJSON(w, map[string][]string{"urls": returnURLs})
 }
