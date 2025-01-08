@@ -37,12 +37,12 @@ func (a *API) uploadImageWithFormHandler(w http.ResponseWriter, r *http.Request)
 			// Open the file
 			file, err := fileHeader.Open()
 			if err != nil {
-				ErrStorageInvalidObject.Withf("cannot open file %v", err).Write(w)
-				break
+				ErrStorageInvalidObject.Withf("cannot open file %s %v", fileHeader.Filename, err).Write(w)
+				return
 			}
 			defer func() {
 				if err := file.Close(); err != nil {
-					ErrStorageInvalidObject.Withf("cannot close file %v", err).Write(w)
+					ErrStorageInvalidObject.Withf("cannot close file %s  %v", fileHeader.Filename, err).Write(w)
 					return
 				}
 			}()
@@ -51,8 +51,8 @@ func (a *API) uploadImageWithFormHandler(w http.ResponseWriter, r *http.Request)
 			filesFound = true
 			storedFileID, err := a.objectStorage.Put(file, fileHeader.Size, user.Email)
 			if err != nil {
-				ErrInternalStorageError.With(err.Error()).Write(w)
-				break
+				ErrInternalStorageError.Withf("%s %v", fileHeader.Filename, err).Write(w)
+				return
 			}
 			returnURLs = append(returnURLs, objectURL(a.serverURL, storedFileID))
 		}
