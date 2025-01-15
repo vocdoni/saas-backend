@@ -466,7 +466,8 @@ This method invalidates any previous JWT token for the user, so it returns a new
   "subdomain": "mysubdomain",
   "country": "Germany",
   "timezone": "GMT+2",
-  "language": "EN"
+  "language": "EN",
+  "communication": true
 }
 ```
 By default, the organization is created with `activated: true`.
@@ -513,7 +514,8 @@ Only the following parameters can be changed. Every parameter is optional.
   "country": "Germany",
   "timezone": "GMT+2",
   "Language": "EN",
-  "active": true
+  "active": true,
+  "communication": false
 }
 ```
 
@@ -548,6 +550,7 @@ Only the following parameters can be changed. Every parameter is optional.
   "timezone": "GMT+2",
   "Language": "EN",
   "active": true,
+  "communications": true,
   "parent": {
     "...": "..."
   }

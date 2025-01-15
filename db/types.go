@@ -54,6 +54,7 @@ type Organization struct {
 	Country         string                   `json:"country" bson:"country"`
 	Timezone        string                   `json:"timezone" bson:"timezone"`
 	Active          bool                     `json:"active" bson:"active"`
+	Communications  bool                     `json:"communications" bson:"communications"`
 	TokensPurchased uint64                   `json:"tokensPurchased" bson:"tokensPurchased"`
 	TokensRemaining uint64                   `json:"tokensRemaining" bson:"tokensRemaining"`
 	Parent          string                   `json:"parent" bson:"parent"`
