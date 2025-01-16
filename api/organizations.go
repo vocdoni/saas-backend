@@ -41,8 +41,9 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	parentOrg := ""
+	var dbParentOrg *db.Organization
 	if orgInfo.Parent != nil {
-		dbParentOrg, _, err := a.db.Organization(orgInfo.Parent.Address, false)
+		dbParentOrg, _, err = a.db.Organization(orgInfo.Parent.Address, false)
 		if err != nil {
 			if err == db.ErrNotFound {
 				ErrOrganizationNotFound.Withf("parent organization not found").Write(w)
@@ -79,7 +80,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		MaxCensusSize: defaultPlan.Organization.MaxCensus,
 	}
 	// create the organization
-	if err := a.db.SetOrganization(&db.Organization{
+	dbOrg := &db.Organization{
 		Address:         signer.AddressString(),
 		Creator:         user.Email,
 		CreatedAt:       time.Now(),
@@ -96,7 +97,8 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		TokensRemaining: 0,
 		Parent:          parentOrg,
 		Subscription:    *subscription,
-	}); err != nil {
+	}
+	if err := a.db.SetOrganization(dbOrg); err != nil {
 		if err == db.ErrAlreadyExists {
 			ErrInvalidOrganizationData.WithErr(err).Write(w)
 			return
@@ -105,7 +107,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// send the organization back to the user
-	httpWriteOK(w)
+	httpWriteJSON(w, organizationFromDB(dbOrg, dbParentOrg))
 }
 
 // organizationInfoHandler handles the request to get the information of an
