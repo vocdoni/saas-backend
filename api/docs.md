@@ -317,7 +317,8 @@ This endpoint only returns the addresses of the organizations where the current 
       "role": "admin",
       "organization": {
         "address": "0x...",
-        "name": "Test Organization",
+        "website": "",
+        "createdAt": "2025-01-16T11:56:04Z",
         "type": "community",
         "description": "My amazing testing organization",
         "size": 10,
@@ -326,16 +327,25 @@ This endpoint only returns the addresses of the organizations where the current 
         "subdomain": "mysubdomain",
         "timezone": "GMT+2",
         "active": true,
+        "communications": false,
         "parent": {
-            "...": "..."
+          "...": "..."
         },
-        "subscription":{
-            "PlanID":3,
-            "StartDate":"2024-11-07T15:25:49.218Z",
-            "RenewalDate":"2025-11-07T15:25:49.218Z",
-            "Active":true,
-            "MaxCensusSize":10
+        "subscription": {
+          "planID": 2,
+          "startDate": "2025-01-16T11:56:04.079Z",
+          "renewalDate": "0001-01-01T00:00:00Z",
+          "lastPaymentDate": "0001-01-01T00:00:00Z",
+          "active": true,
+          "maxCensusSize": 50,
+          "email": ""
         },
+        "counters": {
+          "sentSMS": 0,
+          "sentEmails": 0,
+          "subOrgs": 0,
+          "members": 0
+        }
       }
     }
   ]
@@ -481,6 +491,41 @@ If the user want to create a sub org, the address of the root organization must 
 }
 ```
 
+* **Response**
+```json
+{
+  "address": "0x23eE5d3ECE54a275FD75cF25E77C3bBeCe3CF3f7",
+  "website": "",
+  "createdAt": "2025-01-16T11:56:04Z",
+  "type": "community",
+  "size": "10",
+  "color": "#ff0000",
+  "subdomain": "mysubdomain",
+  "country": "Spain",
+  "timezone": "GMT+2",
+  "active": true,
+  "communications": false,
+  "parent": {
+    "...": {}
+  },
+  "subscription": {
+    "planID": 2,
+    "startDate": "2025-01-16T11:56:04.079Z",
+    "renewalDate": "0001-01-01T00:00:00Z",
+    "lastPaymentDate": "0001-01-01T00:00:00Z",
+    "active": true,
+    "maxCensusSize": 50,
+    "email": ""
+  },
+  "counters": {
+    "sentSMS": 0,
+    "sentEmails": 0,
+    "subOrgs": 0,
+    "members": 0
+  }
+}
+```
+
 * **Errors**
 
 | HTTP Status | Error code | Message |
@@ -536,23 +581,34 @@ Only the following parameters can be changed. Every parameter is optional.
 * **Response**
 ```json
 {
-  "address": "0x1234",
-  "name": "Test Organization",
-  "website": "https://[...].com",
+  "address": "0x23eE5d3ECE54a275FD75cF25E77C3bBeCe3CF3f7",
+  "website": "",
+  "createdAt": "2025-01-16T11:56:04Z",
   "type": "community",
-  "description": "My amazing testing organization",
   "size": "10",
   "color": "#ff0000",
-  "logo": "https://[...].png",
-  "header": "https://[...].png",
   "subdomain": "mysubdomain",
-  "country": "Germany",
+  "country": "Spain",
   "timezone": "GMT+2",
-  "Language": "EN",
   "active": true,
-  "communications": true,
+  "communications": false,
   "parent": {
-    "...": "..."
+    "...": {}
+  },
+  "subscription": {
+    "planID": 2,
+    "startDate": "2025-01-16T11:56:04.079Z",
+    "renewalDate": "0001-01-01T00:00:00Z",
+    "lastPaymentDate": "0001-01-01T00:00:00Z",
+    "active": true,
+    "maxCensusSize": 50,
+    "email": ""
+  },
+  "counters": {
+    "sentSMS": 0,
+    "sentEmails": 0,
+    "subOrgs": 0,
+    "members": 0
   }
 }
 ```
