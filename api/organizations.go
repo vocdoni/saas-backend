@@ -82,6 +82,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	// create the organization
 	dbOrg := &db.Organization{
 		Address:         signer.AddressString(),
+		Website:         orgInfo.Website,
 		Creator:         user.Email,
 		CreatedAt:       time.Now(),
 		Nonce:           nonce,
