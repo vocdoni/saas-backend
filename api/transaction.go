@@ -28,9 +28,9 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 		ErrMalformedBody.Withf("could not decode request body: %v", err).Write(w)
 		return
 	}
-	// check if the user has the admin role for the organization
-	if !user.HasRoleFor(signReq.Address, db.AdminRole) {
-		ErrUnauthorized.With("user does not have admin role").Write(w)
+	// check if the user is a member of the organization
+	if !user.IsMemberOf(signReq.Address) {
+		ErrUnauthorized.With("user is not an organization member").Write(w)
 		return
 	}
 	// get the organization info from the database with the address provided in
@@ -67,6 +67,9 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 		ErrInvalidTxFormat.Write(w)
 		return
 	}
+	// flag to know if the TX is New Process
+	isNewProcess := false
+
 	// check if the api is not in transparent mode
 	if !a.transparentMode {
 		// get subscription plan
@@ -81,6 +84,10 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 			// check the account is the same as the user
 			if !bytes.Equal(txSetAccount.GetAccount(), organizationSigner.Address().Bytes()) {
 				ErrUnauthorized.With("invalid account").Write(w)
+				return
+			}
+			if hasPermission, err := a.subscriptions.HasTxPermission(tx, txSetAccount.Txtype, org, user); !hasPermission || err != nil {
+				ErrUnauthorized.Withf("user does not have permission to sign transactions: %v", err).Write(w)
 				return
 			}
 			// check the tx subtype
@@ -107,6 +114,29 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 						},
 					}
 				}
+			case models.TxType_SET_ACCOUNT_INFO_URI:
+				// generate a new faucet package if it's not present and include it in the tx
+				if txSetAccount.FaucetPackage == nil {
+					// get the tx cost for the tx type
+					amount, ok := a.account.TxCosts[models.TxType_SET_ACCOUNT_INFO_URI]
+					if !ok {
+						panic("invalid tx type")
+					}
+					// generate the faucet package with the calculated amount
+					faucetPkg, err := a.account.FaucetPackage(organizationSigner.AddressString(), amount)
+					if err != nil {
+						ErrCouldNotCreateFaucetPackage.WithErr(err).Write(w)
+						return
+					}
+					// include the faucet package in the tx
+					txSetAccount.FaucetPackage = faucetPkg
+					tx = &models.Tx{
+						Payload: &models.Tx_SetAccount{
+							SetAccount: txSetAccount,
+						},
+					}
+				}
+
 			}
 		case *models.Tx_NewProcess:
 			txNewProcess := tx.GetNewProcess()
@@ -116,14 +146,14 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 				ErrInvalidTxFormat.With("missing fields").Write(w)
 				return
 			}
-			if hasPermission, err := a.subscriptions.HasPermission(tx, txNewProcess.Txtype, org); !hasPermission || err != nil {
+			if hasPermission, err := a.subscriptions.HasTxPermission(tx, txNewProcess.Txtype, org, user); !hasPermission || err != nil {
 				ErrUnauthorized.Withf("user does not have permission to sign transactions: %v", err).Write(w)
 				return
 			}
 			// check the tx subtype
 			switch txNewProcess.Txtype {
 			case models.TxType_NEW_PROCESS:
-
+				isNewProcess = true
 				// generate a new faucet package if it's not present and include it in the tx
 				if txNewProcess.FaucetPackage == nil {
 					// get the tx cost for the tx type
@@ -169,7 +199,7 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 				ErrInvalidTxFormat.With("invalid tx type").Write(w)
 				return
 			}
-			if hasPermission, err := a.subscriptions.HasPermission(tx, txSetProcess.Txtype, org); !hasPermission || err != nil {
+			if hasPermission, err := a.subscriptions.HasTxPermission(tx, txSetProcess.Txtype, org, user); !hasPermission || err != nil {
 				ErrUnauthorized.Withf("user does not have permission to sign transactions: %v", err).Write(w)
 				return
 			}
@@ -315,6 +345,16 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 		ErrCouldNotSignTransaction.WithErr(err).Write(w)
 		return
 	}
+
+	// If isNewProcess and everything went well so far update the organization process counter
+	if isNewProcess {
+		org.Counters.Processes++
+		if err := a.db.SetOrganization(org); err != nil {
+			ErrGenericInternalServerError.Withf("could not update organization process counter: %v", err).Write(w)
+			return
+		}
+	}
+
 	// return the signed tx payload
 	httpWriteJSON(w, &TransactionData{
 		TxPayload: base64.StdEncoding.EncodeToString(stx),
