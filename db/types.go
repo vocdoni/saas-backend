@@ -25,7 +25,9 @@ type UserVerification struct {
 
 func (u *User) HasRoleFor(address string, role UserRole) bool {
 	for _, org := range u.Organizations {
-		if org.Address == address && string(org.Role) == string(role) {
+		if org.Address == address &&
+			// Check if the role is "any: or if the role matches the organization role
+			(string(role) == string(AnyRole) || string(org.Role) == string(role)) {
 			return true
 		}
 	}
@@ -63,14 +65,14 @@ type Organization struct {
 }
 
 type PlanLimits struct {
-	Members      int    `json:"members" bson:"members"`
-	SubOrgs      int    `json:"subOrgs" bson:"subOrgs"`
-	CensusSize   int    `json:"censusSize" bson:"censusSize"`
-	MaxProcesses int    `json:"maxProcesses" bson:"maxProcesses"`
-	MaxCensus    int    `json:"maxCensus" bson:"maxCensus"`
-	MaxDuration  string `json:"maxDuration" bson:"maxDuration"`
-	CustomURL    bool   `json:"customURL" bson:"customURL"`
-	Drafts       int    `json:"drafts" bson:"drafts"`
+	Members      int `json:"members" bson:"members"`
+	SubOrgs      int `json:"subOrgs" bson:"subOrgs"`
+	MaxProcesses int `json:"maxProcesses" bson:"maxProcesses"`
+	MaxCensus    int `json:"maxCensus" bson:"maxCensus"`
+	// Max process duration in days
+	MaxDuration string `json:"maxDuration" bson:"maxDuration"`
+	CustomURL   bool   `json:"customURL" bson:"customURL"`
+	Drafts      int    `json:"drafts" bson:"drafts"`
 }
 
 type VotingTypes struct {
@@ -126,6 +128,7 @@ type OrganizationCounters struct {
 	SentEmails int `json:"sentEmails" bson:"sentEmails"`
 	SubOrgs    int `json:"subOrgs" bson:"subOrgs"`
 	Members    int `json:"members" bson:"members"`
+	Processes  int `json:"processes" bson:"processes"`
 }
 
 type OrganizationInvite struct {

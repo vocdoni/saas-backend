@@ -9,6 +9,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
+	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -43,6 +44,13 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	parentOrg := ""
 	var dbParentOrg *db.Organization
 	if orgInfo.Parent != nil {
+		// check if the org has permission to create suborganizations
+		hasPermission, err := a.subscriptions.HasDBPersmission(user.Email, orgInfo.Parent.Address, subscriptions.CreateSubOrg)
+		if !hasPermission || err != nil {
+			ErrUnauthorized.Withf("user does not have permission to create suborganizations: %v", err).Write(w)
+			return
+		}
+
 		dbParentOrg, _, err = a.db.Organization(orgInfo.Parent.Address, false)
 		if err != nil {
 			if err == db.ErrNotFound {
@@ -106,6 +114,15 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		ErrGenericInternalServerError.Write(w)
 		return
+	}
+
+	// update the parent organization counter
+	if orgInfo.Parent != nil {
+		dbParentOrg.Counters.SubOrgs++
+		if err := a.db.SetOrganization(dbParentOrg); err != nil {
+			ErrGenericInternalServerError.Withf("could not update parent organization: %v", err).Write(w)
+			return
+		}
 	}
 	// send the organization back to the user
 	httpWriteJSON(w, organizationFromDB(dbOrg, dbParentOrg))
@@ -260,8 +277,11 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		ErrNoOrganizationProvided.Write(w)
 		return
 	}
-	if !user.HasRoleFor(org.Address, db.AdminRole) {
-		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+
+	// check if the user/org has permission to invite members
+	hasPermission, err := a.subscriptions.HasDBPersmission(user.Email, org.Address, subscriptions.InviteMember)
+	if !hasPermission || err != nil {
+		ErrUnauthorized.Withf("user does not have permission to sign transactions: %v", err).Write(w)
 		return
 	}
 	// get new admin info from the request body
@@ -313,6 +333,13 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 	); err != nil {
 		log.Warnw("could not send verification code email", "error", err)
 		ErrGenericInternalServerError.Write(w)
+		return
+	}
+
+	// update the org members counter
+	org.Counters.Members++
+	if err := a.db.SetOrganization(org); err != nil {
+		ErrGenericInternalServerError.Withf("could not update organization: %v", err).Write(w)
 		return
 	}
 	httpWriteOK(w)
