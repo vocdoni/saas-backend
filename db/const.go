@@ -84,7 +84,7 @@ var validRoles = map[UserRole]bool{
 	AdminRole:   true,
 	ManagerRole: true,
 	ViewerRole:  true,
-	AnyRole:     true,
+	AnyRole:     false,
 }
 
 // IsValidUserRole function checks if the user role is valid
