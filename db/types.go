@@ -25,16 +25,9 @@ type UserVerification struct {
 
 func (u *User) HasRoleFor(address string, role UserRole) bool {
 	for _, org := range u.Organizations {
-		if org.Address == address && string(org.Role) == string(role) {
-			return true
-		}
-	}
-	return false
-}
-
-func (u *User) IsMemberOf(address string) bool {
-	for _, org := range u.Organizations {
-		if org.Address == address {
+		if org.Address == address &&
+			// Check if the role is "any: or if the role matches the organization role
+			(string(role) == string(AnyRole) || string(org.Role) == string(role)) {
 			return true
 		}
 	}

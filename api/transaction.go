@@ -29,7 +29,7 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// check if the user is a member of the organization
-	if !user.IsMemberOf(signReq.Address) {
+	if !user.HasRoleFor(signReq.Address, db.AnyRole) {
 		ErrUnauthorized.With("user is not an organization member").Write(w)
 		return
 	}
