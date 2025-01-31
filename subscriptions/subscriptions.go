@@ -2,7 +2,6 @@ package subscriptions
 
 import (
 	"fmt"
-	"strconv"
 
 	"github.com/vocdoni/saas-backend/db"
 	"go.vocdoni.io/proto/build/go/models"
@@ -74,11 +73,8 @@ func (p *Subscriptions) hasElectionMetadataPermissions(process *models.NewProces
 	}
 
 	// check PROCESS DURATION
-	duration, err := daysDurationToSeconds(plan.Organization.MaxDuration)
-	if err != nil {
-		return false, fmt.Errorf("could not convert duration to seconds: %v", err)
-	}
-	if process.Process.Duration > duration {
+	duration := plan.Organization.MaxDuration * 24 * 60 * 60
+	if process.Process.Duration > uint32(duration) {
 		return false, fmt.Errorf("duration is greater than the allowed")
 	}
 
@@ -176,13 +172,4 @@ func (p *Subscriptions) HasDBPersmission(userEmail, orgAddress string, permissio
 		return true, nil
 	}
 	return false, fmt.Errorf("permission not found")
-}
-
-// In the plan the duration is given in a string
-func daysDurationToSeconds(duration string) (uint32, error) {
-	num, err := strconv.ParseUint(duration, 10, 32)
-	if err != nil {
-		return 0, err
-	}
-	return uint32(num * 24 * 60 * 60), nil
 }
