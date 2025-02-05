@@ -135,6 +135,17 @@ type LoginResponse struct {
 	Expirity time.Time `json:"expirity"`
 }
 
+type OauthLogin struct {
+	Email              string `json:"email"`
+	OauthSignature     string `json:"oauthSignature"`
+	UserOauthSignature string `json:"userOauthSignature"`
+	Address            string `json:"address"`
+}
+
+type OauthServiceResposne struct {
+	Address string `json:"address"`
+}
+
 // TransactionData is the struct that contains the data of a transaction to
 // be signed, but also is used to return the signed transaction.
 type TransactionData struct {

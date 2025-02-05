@@ -185,6 +185,9 @@ func (a *API) initRouter() http.Handler {
 		// login
 		log.Infow("new route", "method", "POST", "path", authLoginEndpoint)
 		r.Post(authLoginEndpoint, a.authLoginHandler)
+		// oauth login
+		log.Infow("new route", "method", "POST", "path", oauthLoginEndpoint)
+		r.Post(oauthLoginEndpoint, a.oauthLoginHandler)
 		// register user
 		log.Infow("new route", "method", "POST", "path", usersEndpoint)
 		r.Post(usersEndpoint, a.registerHandler)

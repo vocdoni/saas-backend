@@ -14,4 +14,5 @@ const (
 	// InvitationExpiration is the duration of the invitation code before it is
 	// invalidated
 	InvitationExpiration = 5 * 24 * time.Hour // 5 days
+	OauthServiceURL      = "http://localhost:8082/api/info"
 )
