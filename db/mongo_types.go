@@ -20,6 +20,14 @@ type OrganizationInvitesCollection struct {
 	OrganizationInvites []OrganizationInvite `json:"organizationInvites" bson:"organizationInvites"`
 }
 
+type CensusCollection struct {
+	Census []Census `json:"census" bson:"census"`
+}
+
+type CensusParticipantCollection struct {
+	CensusParticipants []CensusParticipant `json:"censusParticipants" bson:"censusParticipants"`
+}
+
 type Collection struct {
 	UserCollection
 	UserVerifications

@@ -2,6 +2,8 @@ package db
 
 import (
 	"time"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 type User struct {
@@ -150,3 +152,59 @@ type Object struct {
 	UserID      string    `json:"userId" bson:"userId"`
 	ContentType string    `json:"contentType" bson:"contentType"`
 }
+
+// CensusType defines the type of census.
+type CensusType string
+
+const (
+	// CensusTypeMail is used when the organizer uploads a list of names, participantIDs and e‑mails.
+	CensusTypePass      CensusType = "pass"
+	CensusTypeMail      CensusType = "mail"
+	CensusTypeSMS       CensusType = "sms"
+	CensusTypeSMSorMail CensusType = "sms_or_mail"
+)
+
+// Census represents the information of a set of census participants
+type Census struct {
+	ID         primitive.ObjectID `json:"id" bson:"_id"`
+	OrgAddress string             `json:"orgAddress" bson:"orgAddress"`
+	Type       CensusType         `json:"type" bson:"type"`
+	Processes  [][]byte           `json:"processes" bson:"processes"`
+	CreatedAt  time.Time          `json:"createdAt" bson:"createdAt"`
+	UpdatedAt  time.Time          `json:"updatedAt" bson:"updatedAt"`
+}
+
+type CensusParticipant struct {
+	ID primitive.ObjectID `json:"id" bson:"_id"`
+	// TODO talk with PM that this can increase infinitely
+	CensusID      primitive.ObjectID     `json:"censusId" bson:"censusId"`
+	Email         string                 `json:"email" bson:"email"`
+	HashedEmail   []byte                 `json:"hashedEmail" bson:"hashedEmail"`
+	Phone         string                 `json:"phone" bson:"phone"`
+	HashedPhone   []byte                 `json:"hashedPhone" bson:"hashedPhone"`
+	ParticipantID string                 `json:"participantId" bson:"participantId"`
+	Name          string                 `json:"name" bson:"name"`
+	Password      string                 `json:"password" bson:"password"`
+	HashedPass    []byte                 `json:"pass" bson:"pass"`
+	Other         map[string]interface{} `json:"other" bson:"other"`
+	CreatedAt     time.Time              `json:"createdAt" bson:"createdAt"`
+	UpdatedAt     time.Time              `json:"updatedAt" bson:"updatedAt"`
+}
+
+// The following is only necessary in case the census is published by the saas
+type PublishedCensus struct {
+	ID        []byte    `json:"id" bson:"_id"`
+	Census    Census    `json:"census" bson:"census"`
+	URI       string    `json:"uri" bson:"uri"`
+	Root      []byte    `json:"root" bson:"root"`
+	CreatedAt time.Time `json:"createdAt" bson:"createdAt"`
+}
+
+type Process struct {
+	ID              []byte          `json:"id" bson:"_id"`
+	OrgID           string          `json:"orgID" bson:"orgID"`
+	PublishedCensus PublishedCensus `json:"publishedCensus" bson:"publishedCensus"`
+	Metadata        []byte          `json:"metadata" bson:"metadata"`
+}
+
+// Utilizar non-salted key

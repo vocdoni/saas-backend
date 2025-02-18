@@ -28,6 +28,10 @@ type MongoStorage struct {
 	organizationInvites *mongo.Collection
 	plans               *mongo.Collection
 	objects             *mongo.Collection
+	censusParticipants  *mongo.Collection
+	censuses            *mongo.Collection
+	publishedCensuses   *mongo.Collection
+	processes           *mongo.Collection
 }
 
 type Options struct {
@@ -68,7 +72,9 @@ func New(url, database string, plans []*Plan) (*MongoStorage, error) {
 	// init the database client
 	ms.client = client
 	ms.database = database
-	ms.stripePlans = plans
+	if len(plans) > 0 {
+		ms.stripePlans = plans
+	}
 	// init the collections
 	if err := ms.initCollections(ms.database); err != nil {
 		return nil, err

@@ -77,4 +77,26 @@ const (
 	objectStorageUploadTypedEndpoint = "/storage"
 	// GET /storage/{origin}/{filename} to download an image from the object storage
 	objectStorageDownloadTypedEndpoint = "/storage/{objectName}"
+
+	// census routes
+	// POST /census to create a new census
+	censusEndpoint = "/census"
+	// GET /census/{id} to get census information
+	// POST /census/{id} to add participants to census
+	censusIDEndpoint = "/census/{id}"
+	// POST /census/{id}/publish to publish a census
+	censusPublishEndpoint = "/census/{id}/publish"
+
+	// process routes
+	// POST /process/{processId} to create a new process
+	// GET /process/{processId} to get process information
+	processEndpoint = "/process/{processId}"
+
+	// census auth routes (currently not implemented)
+	// POST /process/{processId}/auth/0 to initiate auth
+	processAuthInitEndpoint = "/process/{processId}/auth/0"
+	// POST /process/{processId}/auth/1 to verify auth code
+	processAuthVerifyEndpoint = "/process/{processId}/auth/1"
+	// POST /process/{processId}/proof to generate proof
+	processProofEndpoint = "/process/{processId}/proof"
 )

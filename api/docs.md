@@ -42,7 +42,14 @@
 - [📦 Storage](#-storage)
   - [ 🌄 Upload image](#-upload-image)
   - [ 📄 Get object](#-get-object)
-  
+- [📊 Census](#-census)
+  - [📝 Create Census](#-create-census)
+  - [ℹ️ Get Census Info](#%EF%B8%8F-get-census-info)
+  - [👥 Add Participants](#-add-participants)
+  - [📢 Publish Census](#-publish-census)
+  - [📋 Get Published Census Info](#-get-published-census-info)
+  - [🔄 Create Process](#-create-process)
+  - [📈 Get Process Info](#-get-process-info)
 
 </details>
 
@@ -1093,6 +1100,213 @@ Accepting files uploaded by forms as such:
 | `400` | `40024` | `the obejct/parameters provided are invalid` |
 | `500` | `50002` | `internal server error` |
 | `500` | `50006` | `internal storage error` |
+
+## 📊 Census
+
+### 📝 Create Census
+
+* **Path** `/census`
+* **Method** `POST`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Request body**
+```json
+{
+  "type": "sms_or_mail",
+  "orgAddress": "0x..."
+}
+```
+
+* **Response**
+Returns the census ID
+```json
+"census_id_string"
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40004` | `malformed JSON body` |
+| `500` | `50002` | `internal server error` |
+
+### ℹ️ Get Census Info
+
+* **Path** `/census/{id}`
+* **Method** `GET`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+
+* **Response**
+```json
+{
+  "id": "census_id",
+  "type": "sms_or_mail",
+  "orgAddress": "0x...",
+  "createdAt": "2025-02-18T17:12:00Z"
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `400` | `40010` | `malformed URL parameter` |
+| `500` | `50002` | `internal server error` |
+
+### 👥 Add Participants
+
+* **Path** `/census/{id}`
+* **Method** `POST`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Request body**
+```json
+{
+  "participants": [
+    {
+      "id": "participant_id",
+      "email": "participant@example.com",
+      "phone": "+1234567890"
+    }
+  ]
+}
+```
+
+* **Response**
+Returns the number of participants added
+```json
+{
+  "participantsNo": 1
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40010` | `malformed URL parameter` |
+| `500` | `50002` | `internal server error` |
+| `500` | `50004` | `internal storage error` |
+
+### 📢 Publish Census
+
+* **Path** `/census/{id}/publish`
+* **Method** `POST`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+
+* **Response**
+```json
+{
+  "census": {
+    "id": "census_id",
+    "type": "sms_or_mail",
+    "orgAddress": "0x...",
+    "createdAt": "2025-02-18T17:12:00Z"
+  },
+  "uri": "https://example.com/csp/",
+  "root": "public_key"
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40010` | `malformed URL parameter` |
+| `500` | `50002` | `internal server error` |
+
+### 📋 Get Published Census Info
+
+* **Path** `/census/{id}/publish`
+* **Method** `GET`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+
+* **Response**
+```json
+{
+  "census": {
+    "id": "census_id",
+    "type": "sms_or_mail",
+    "orgAddress": "0x...",
+    "createdAt": "2025-02-18T17:12:00Z"
+  },
+  "uri": "https://example.com/csp/",
+  "root": "public_key"
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `400` | `40010` | `malformed URL parameter` |
+| `500` | `50002` | `internal server error` |
+
+### 🔄 Create Process
+
+* **Path** `/process/{processId}`
+* **Method** `POST`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Request body**
+```json
+{
+  "censusID": "published_census_id",
+  "metadata": "base64_encoded_metadata"
+}
+```
+
+* **Response**
+Returns 201 Created on success
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40010` | `malformed URL parameter` |
+| `500` | `50002` | `internal server error` |
+
+### 📈 Get Process Info
+
+* **Path** `/process/{processId}`
+* **Method** `GET`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+
+* **Response**
+```json
+{
+  "id": "process_id",
+  "publishedCensus": {
+    "census": {
+      "id": "census_id",
+      "type": "sms_or_mail",
+      "orgAddress": "0x...",
+      "createdAt": "2025-02-18T17:12:00Z"
+    },
+    "uri": "https://example.com/csp/",
+    "root": "public_key"
+  },
+  "metadata": "base64_encoded_metadata",
+  "orgID": "0x..."
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `400` | `40010` | `malformed URL parameter` |
+| `500` | `50002` | `internal server error` |
 
 
 ### 📄 Get object

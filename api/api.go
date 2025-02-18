@@ -173,6 +173,19 @@ func (a *API) initRouter() http.Handler {
 		// upload an image to the object storage
 		log.Infow("new route", "method", "POST", "path", objectStorageUploadTypedEndpoint)
 		r.Post(objectStorageUploadTypedEndpoint, a.uploadImageWithFormHandler)
+		// CENSUS ROUTES
+		// create census
+		log.Infow("new route", "method", "POST", "path", censusEndpoint)
+		r.Post(censusEndpoint, a.createCensusHandler)
+		// add census participants
+		log.Infow("new route", "method", "POST", "path", censusIDEndpoint)
+		r.Post(censusIDEndpoint, a.addParticipantsHandler)
+		// publish census
+		log.Infow("new route", "method", "POST", "path", censusPublishEndpoint)
+		r.Post(censusPublishEndpoint, a.publishCensusHandler)
+		// PROCESS ROUTES
+		log.Infow("new route", "method", "POST", "path", processEndpoint)
+		r.Post(processEndpoint, a.createProcessHandler)
 	})
 
 	// Public routes
@@ -227,6 +240,26 @@ func (a *API) initRouter() http.Handler {
 		// upload an image to the object storage
 		log.Infow("new route", "method", "GET", "path", objectStorageDownloadTypedEndpoint)
 		r.Get(objectStorageDownloadTypedEndpoint, a.downloadImageInlineHandler)
+		// get census info
+		log.Infow("new route", "method", "GET", "path", censusIDEndpoint)
+		r.Get(censusIDEndpoint, a.censusInfoHandler)
+		// get published census info
+		log.Infow("new route", "method", "GET", "path", censusPublishEndpoint)
+		r.Get(censusPublishEndpoint, a.publishedCensusInfoHandler)
+		// PROCESS HANDLERS
+		// process info handler
+		log.Infow("new route", "method", "GET", "path", processEndpoint)
+		r.Get(processEndpoint, a.processInfoHandler)
+		// process auth routes (currently not implemented)
+		// process auth step 0
+		// log.Infow("new route", "method", "POST", "path", processAuthInitEndpoint)
+		// r.Post(processAuthInitEndpoint, a.initiateAuthHandler)
+		// process auth step 1
+		// log.Infow("new route", "method", "POST", "path", processAuthVerifyEndpoint)
+		// r.Post(processAuthVerifyEndpoint, a.verifyAuthCodeHandler)
+		// get process proof
+		// log.Infow("new route", "method", "POST", "path", processProofEndpoint)
+		// r.Post(processProofEndpoint, a.generateProofHandler)
 	})
 	a.router = r
 	return r

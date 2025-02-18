@@ -63,7 +63,7 @@ func (ms *MongoStorage) initCollections(database string) error {
 				return nil, err
 			}
 		}
-		if name == "plans" {
+		if name == "plans" && len(ms.stripePlans) > 0 {
 			var plans []interface{}
 			for _, plan := range ms.stripePlans {
 				plans = append(plans, plan)
@@ -98,6 +98,23 @@ func (ms *MongoStorage) initCollections(database string) error {
 	}
 	// objects collection
 	if ms.objects, err = getCollection("objects"); err != nil {
+		return err
+	}
+	// census collection
+	if ms.censuses, err = getCollection("census"); err != nil {
+		return err
+	}
+	// censusParticipants collection
+	if ms.censusParticipants, err = getCollection("censusParticipants"); err != nil {
+		return err
+	}
+
+	if ms.publishedCensuses, err = getCollection("publishedCensuses"); err != nil {
+		return err
+	}
+
+	// processes collection
+	if ms.processes, err = getCollection("processes"); err != nil {
 		return err
 	}
 	return nil
@@ -179,6 +196,17 @@ func (ms *MongoStorage) createIndexes() error {
 		organizationInviteUniqueIndex,
 	}); err != nil {
 		return fmt.Errorf("failed to create index on invitationCode for organization invites: %w", err)
+	}
+	// create an index for the tuple CensusParticipant:ID and CensusID
+	censusParticipantIndex := mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "censusID", Value: 1},      // 1 for ascending order
+			{Key: "participantId", Value: 1}, // 1 for ascending order
+		},
+		Options: options.Index().SetUnique(true),
+	}
+	if _, err := ms.censusParticipants.Indexes().CreateOne(ctx, censusParticipantIndex); err != nil {
+		return fmt.Errorf("failed to create index on censusID for censusParticipants: %w", err)
 	}
 	return nil
 }
