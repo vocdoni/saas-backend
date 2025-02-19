@@ -45,6 +45,7 @@ func (a *API) sendMail(ctx context.Context, to string, mail mailtemplates.MailTe
 // notigication. It returns an error if the SMS service is available and the
 // notification could not be sent or the phone number is invalid. If the SMS
 // service is not available, it does nothing.
+// nolint:unused
 func (a *API) sendSMS(ctx context.Context, to string, mail mailtemplates.MailTemplate, data any) error {
 	if a.sms != nil {
 		ctx, cancel := context.WithTimeout(ctx, time.Second*10)
