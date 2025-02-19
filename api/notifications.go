@@ -37,3 +37,33 @@ func (a *API) sendMail(ctx context.Context, to string, mail mailtemplates.MailTe
 	}
 	return nil
 }
+
+// sendSMS method sends a notification to the phone number provided. It requires
+// the email template and the data to fill it. It executes the mail template
+// with the data to get the notification and sends it with the recipient phone
+// number provided, but it only uses the plain content of the resulting
+// notigication. It returns an error if the SMS service is available and the
+// notification could not be sent or the phone number is invalid. If the SMS
+// service is not available, it does nothing.
+func (a *API) sendSMS(ctx context.Context, to string, mail mailtemplates.MailTemplate, data any) error {
+	if a.sms != nil {
+		ctx, cancel := context.WithTimeout(ctx, time.Second*10)
+		defer cancel()
+		// check if the phone number is valid
+		if !internal.ValidPhoneNumber(to) {
+			return fmt.Errorf("invalid email address")
+		}
+		// execute the mail template to get the notification
+		notification, err := mail.ExecPlain(data)
+		if err != nil {
+			return err
+		}
+		// set the recipient phone number
+		notification.ToNumber = to
+		// send the mail notification
+		if err := a.sms.SendNotification(ctx, notification); err != nil {
+			return err
+		}
+	}
+	return nil
+}

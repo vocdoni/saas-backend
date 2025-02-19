@@ -8,13 +8,24 @@ import (
 	"regexp"
 )
 
-const EmailRegexTemplate = `^[\w.\+\.\-]+@([\w\-]+\.)+[\w]{2,}$`
+const (
+	EmailRegexTemplate       = `^[\w.\+\.\-]+@([\w\-]+\.)+[\w]{2,}$`
+	PhoneNumberRegexTemplate = `^(?:\+|00)([1-9]\d{0,3})(?:[ -]?\d){4,14}$`
+)
 
-var emailRegex = regexp.MustCompile(EmailRegexTemplate)
+var (
+	emailRegex       = regexp.MustCompile(EmailRegexTemplate)
+	phoneNumberRegex = regexp.MustCompile(PhoneNumberRegexTemplate)
+)
 
 // ValidEmail helper function allows to validate an email address.
 func ValidEmail(email string) bool {
 	return emailRegex.MatchString(email)
+}
+
+// ValidPhoneNumber helper function allows to validate a phone number.
+func ValidPhoneNumber(phoneNumber string) bool {
+	return phoneNumberRegex.MatchString(phoneNumber)
 }
 
 // RandomBytes helper function allows to generate a random byte slice of n bytes.
