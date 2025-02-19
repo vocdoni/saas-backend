@@ -33,6 +33,7 @@ type APIConfig struct {
 	Client      *apiclient.HTTPclient
 	Account     *account.Account
 	MailService notifications.NotificationService
+	SMSService  notifications.NotificationService
 	WebAppURL   string
 	ServerURL   string
 	// FullTransparentMode if true allows signing all transactions and does not
