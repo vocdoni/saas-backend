@@ -1,0 +1,313 @@
+### 🔐 Auth
+
+### Login
+POST http://localhost:8080/auth/login
+Content-Type: application/json
+
+{
+    "email": "my@email.me",
+    "password": "secretpass1234"
+}
+
+### Refresh token
+POST http://localhost:8080/auth/refresh
+Authorization: Bearer <user_token>
+
+### Get user writable organizations addresses
+GET http://localhost:8080/auth/addresses
+Authorization: Bearer <user_token>
+
+### 🧾 Transactions
+
+### Sign transaction
+POST http://localhost:8080/transactions
+Authorization: Bearer <user_token>
+Content-Type: application/json
+
+{
+  "address": "0x...",
+  "txPayload": "<base64_encoded_protobuf>"
+}
+
+### Sign message
+POST http://localhost:8080/transactions/message
+Authorization: Bearer <user_token>
+Content-Type: application/json
+
+{
+  "address": "0x...",
+  "payload": "<payload_to_sign>"
+}
+
+### 👥 Users
+
+### Register user
+POST http://localhost:8080/users
+Content-Type: application/json
+
+{
+    "email": "manos+10@vocdoni.org",
+    "firstName": "Steve",
+    "lastName": "Urkel",
+    "password": "secretpass1234"
+}
+
+### Verify user
+POST http://localhost:8080/users/verify
+Content-Type: application/json
+
+{
+  "email": "manos+10@vocdoni.org",
+  "code": "d737d7"
+}
+
+### Get verification code info
+GET http://localhost:8080/users/verify/code?email=user@email.com
+
+### Resend verification code
+POST http://localhost:8080/users/verify/code
+Content-Type: application/json
+
+{
+  "email": "manos+10@vocdoni.org"
+}
+
+### Get current user info
+GET http://localhost:8080/users/me
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NDEyMTE2MDc5OTUyOTc2MzgsInVzZXJJZCI6Im1hbm9zKzEwQHZvY2Rvbmkub3JnIn0.Y2DimdC7irK4pdUsI2KmHJ6jijfWTSXuDQ7qVZicxVI
+
+### Update current user info
+PUT http://localhost:8080/users/me
+Authorization: Bearer <user_token>
+Content-Type: application/json
+
+{
+    "email": "my@email.me",
+    "firstName": "Steve",
+    "lastName": "Urkel"
+}
+
+### Update current user password
+PUT http://localhost:8080/users/password
+Authorization: Bearer <user_token>
+Content-Type: application/json
+
+{
+  "oldPassword": "secretpass1234",
+  "newPassword": "secretpass0987"
+}
+
+### Request password recovery
+POST http://localhost:8080/users/password/recovery
+Content-Type: application/json
+
+{
+  "email": "user@test.com"
+}
+
+### Reset user password
+POST http://localhost:8080/users/password/reset
+Content-Type: application/json
+
+{
+  "email": "user@test.com",
+  "code": "******",
+  "newPassword": "newpassword123"
+}
+
+### 🏤 Organizations
+
+### Create organization
+POST http://localhost:8080/organizations
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NDEyMTE2MDc5OTUyOTc2MzgsInVzZXJJZCI6Im1hbm9zKzEwQHZvY2Rvbmkub3JnIn0.Y2DimdC7irK4pdUsI2KmHJ6jijfWTSXuDQ7qVZicxVI
+Content-Type: application/json
+
+{
+  "name": "Test Organization",
+  "website": "https://[...].com",
+  "type": "community",
+  "description": "My amazing testing organization",
+  "size": "10",
+  "color": "#ff0000",
+  "logo": "https://[...].png",
+  "header": "https://[...].png",
+  "subdomain": "mysubdomain",
+  "country": "Germany",
+  "timezone": "GMT+2",
+  "language": "EN",
+  "communication": true
+}
+
+### Update organization
+PUT http://localhost:8080/organizations/{address}
+Authorization: Bearer <user_token>
+Content-Type: application/json
+
+{
+  "name": "Test Organization",
+  "website": "https://[...].com",
+  "type": "community",
+  "description": "My amazing testing organization",
+  "size": "10",
+  "color": "#ff0000",
+  "logo": "https://[...].png",
+  "header": "https://[...].png",
+  "subdomain": "mysubdomain",
+  "country": "Germany",
+  "timezone": "GMT+2",
+  "Language": "EN",
+  "active": true,
+  "communication": false
+}
+
+### Get organization info
+GET http://localhost:8080/organizations/0xbB77d65d95308866Ebf2cEf68c16C8bff1859509
+
+### Get organization members
+GET http://localhost:8080/organizations/{address}/members
+
+### Invite organization member
+POST http://localhost:8080/organizations/{address}/members
+Authorization: Bearer <user_token>
+Content-Type: application/json
+
+{
+  "role": "admin",
+  "email": "newadmin@email.com"
+}
+
+### List pending invitations
+GET http://localhost:8080/organizations/{address}/members/pending
+Authorization: Bearer <user_token>
+
+### Accept organization invitation
+POST http://localhost:8080/organizations/{address}/members/accept
+Content-Type: application/json
+
+{
+  "code": "a3f3b5",
+  "user": {
+    "firstName": "Steve",
+    "lastName": "Urkel",
+    "password": "secretpass1234"
+  }
+}
+
+### Get organization subscription info
+GET http://localhost:8080/organizations/{address}/subscription
+
+### Get available organization roles
+GET http://localhost:8080/organizations/roles
+
+### Get available organization types
+GET http://localhost:8080/organizations/types
+
+### 🏦 Plans
+
+### Get all plans
+GET http://localhost:8080/plans
+
+### Get plan info
+GET http://localhost:8080/plans/{planID}
+
+### 🔰 Subscriptions
+
+### Create checkout session
+POST http://localhost:8080/subscriptions/checkout
+Content-Type: application/json
+
+{
+  "lookupKey": 1,
+  "returnURL": "https://example.com/return",
+  "address": "user@mail.com",
+  "amount": 1000
+}
+
+### Get checkout session info
+GET http://localhost:8080/subscriptions/checkout/{sessionID}
+
+### Create subscription portal session
+GET http://localhost:8080/subscriptions/{orgAddress}/portal
+Authorization: Bearer <user_token>
+
+### 📦 Storage
+
+### Upload image
+POST http://localhost:8080/storage
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW
+
+------WebKitFormBoundary7MA4YWxkTrZu0gW
+Content-Disposition: form-data; name="file1"; filename="example.jpg"
+Content-Type: image/jpeg
+
+< ./example.jpg
+------WebKitFormBoundary7MA4YWxkTrZu0gW--
+
+### Get object
+GET http://localhost:8080/storage/{objectID}
+
+### 📊 Census
+
+### Create census
+POST http://localhost:8080/census
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NDEyMTE2MDc5OTUyOTc2MzgsInVzZXJJZCI6Im1hbm9zKzEwQHZvY2Rvbmkub3JnIn0.Y2DimdC7irK4pdUsI2KmHJ6jijfWTSXuDQ7qVZicxVI
+Content-Type: application/json
+
+{
+  "type": "sms_or_mail",
+  "orgAddress": "0xbB77d65d95308866Ebf2cEf68c16C8bff1859509"
+}
+
+### Get census info
+GET http://localhost:8080/census/{id}
+Authorization: Bearer <user_token>
+
+### Add participants
+POST http://localhost:8080/census/{id}
+Authorization: Bearer <user_token>
+Content-Type: application/json
+
+{
+  "participants": [
+    {
+      "id": "participant_id",
+      "email": "participant@example.com",
+      "phone": "+1234567890",
+      "password": "secretpass1234"
+    }
+  ]
+}
+
+### Publish census
+POST http://localhost:8080/census/{id}/publish
+Authorization: Bearer <user_token>
+
+### Get published census info
+GET http://localhost:8080/census/{id}/publish
+Authorization: Bearer <user_token>
+
+### Create process
+POST http://localhost:8080/process/{processId}
+Authorization: Bearer <user_token>
+Content-Type: application/json
+
+{
+  "censusRoot": "published_census_root",
+  "censusUri": "published_census_uri",
+  "metadata": "base64_encoded_metadata"
+}
+
+### Get process info
+GET http://localhost:8080/process/{processId}
+Authorization: Bearer <user_token>
+
+### Process authentication
+POST http://localhost:8080/process/{processId}/auth
+Content-Type: application/json
+
+{
+  "participantNo": "participant_id",
+  "email": "participant@example.com",
+  "phone": "+1234567890",
+  "password": "secretpass1234"
+}

@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/notifications"
 	"go.vocdoni.io/dvote/types"
 )
 
@@ -193,4 +194,11 @@ type SubscriptionCheckout struct {
 	Amount    int64  `json:"amount"`
 	Address   string `json:"address"`
 	Locale    string `json:"locale"`
+}
+
+type ParticipantNotification struct {
+	ProcessID    []byte                     `json:"processID"`
+	Notification notifications.Notification `json:"notification"`
+	Sent         bool                       `json:"sent"`
+	SentAt       time.Time                  `json:"sentAt"`
 }
