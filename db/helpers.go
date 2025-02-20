@@ -63,7 +63,7 @@ func (ms *MongoStorage) initCollections(database string) error {
 				return nil, err
 			}
 		}
-		if name == "plans" {
+		if name == "plans" && len(ms.stripePlans) > 0 {
 			var plans []interface{}
 			for _, plan := range ms.stripePlans {
 				plans = append(plans, plan)
@@ -98,6 +98,28 @@ func (ms *MongoStorage) initCollections(database string) error {
 	}
 	// objects collection
 	if ms.objects, err = getCollection("objects"); err != nil {
+		return err
+	}
+	// census collection
+	if ms.censuses, err = getCollection("census"); err != nil {
+		return err
+	}
+	// orgParticipants collection
+	if ms.orgParticipants, err = getCollection("orgParticipants"); err != nil {
+		return err
+	}
+	// censusMemberships collection
+	if ms.censusMemberships, err = getCollection("censusMemberships"); err != nil {
+		return err
+	}
+
+	// publishedCensuses collection
+	if ms.publishedCensuses, err = getCollection("publishedCensuses"); err != nil {
+		return err
+	}
+
+	// processes collection
+	if ms.processes, err = getCollection("processes"); err != nil {
 		return err
 	}
 	return nil
@@ -179,6 +201,42 @@ func (ms *MongoStorage) createIndexes() error {
 		organizationInviteUniqueIndex,
 	}); err != nil {
 		return fmt.Errorf("failed to create index on invitationCode for organization invites: %w", err)
+	}
+	// create an index for the tuple OrgParticipant:ID and CensusID
+	orgParticipantNoIndex := mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "orgAddress", Value: 1},    // 1 for ascending order
+			{Key: "participantNo", Value: 1}, // 1 for ascending order
+		},
+		Options: options.Index().SetUnique(true),
+	}
+	if _, err := ms.orgParticipants.Indexes().CreateOne(ctx, orgParticipantNoIndex); err != nil {
+		return fmt.Errorf("failed to create index on orgAddress and participantNo for orgParticipants: %w", err)
+	}
+
+	// create an index for the tuple OrgParticipant:ID and CensusID
+	orgParticipantMailPhoneIndex := mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "orgAddress", Value: 1},  // 1 for ascending order
+			{Key: "hashedEmail", Value: 1}, // 1 for ascending order
+			{Key: "hashedPhone", Value: 1}, // 1 for ascending order
+		},
+		Options: options.Index().SetUnique(true),
+	}
+	if _, err := ms.orgParticipants.Indexes().CreateOne(ctx, orgParticipantMailPhoneIndex); err != nil {
+		return fmt.Errorf("failed to create index on orgAddress and participantNo for orgParticipants: %w", err)
+	}
+
+	// index for the censusID and participantNo tuple
+	censusMembershipIndex := mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "censusId", Value: 1},      // 1 for ascending order
+			{Key: "participantNo", Value: 1}, // 1 for ascending order
+		},
+		Options: options.Index().SetUnique(true),
+	}
+	if _, err := ms.censusMemberships.Indexes().CreateOne(ctx, censusMembershipIndex); err != nil {
+		return fmt.Errorf("failed to create index on censusID for censusMemberships: %w", err)
 	}
 	return nil
 }

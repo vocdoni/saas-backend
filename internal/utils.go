@@ -48,3 +48,7 @@ func HexHashPassword(salt, password string) string {
 func HashVerificationCode(userEmail, code string) string {
 	return hex.EncodeToString(sha256.New().Sum([]byte(userEmail + code)))
 }
+
+func HashOrgData(orgAddress, data string) []byte {
+	return sha256.New().Sum([]byte(orgAddress + data))
+}

@@ -20,9 +20,34 @@ type OrganizationInvitesCollection struct {
 	OrganizationInvites []OrganizationInvite `json:"organizationInvites" bson:"organizationInvites"`
 }
 
+type CensusCollection struct {
+	Censuses []Census `json:"census" bson:"census"`
+}
+
+type OrgParticipantsCollection struct {
+	OrgParticipants []OrgParticipant `json:"orgParticipants" bson:"orgParticipants"`
+}
+
+type CensusMembershipsCollection struct {
+	CensusMemberships []CensusMembership `json:"censusMemberships" bson:"censusMemberships"`
+}
+
+type PublishedCensusesCollection struct {
+	PublishedCensuses []PublishedCensus `json:"publishedCensuses" bson:"publishedCensuses"`
+}
+
+type ProcessesCollection struct {
+	Processes []Process `json:"processes" bson:"processes"`
+}
+
 type Collection struct {
 	UserCollection
 	UserVerifications
 	OrganizationCollection
 	OrganizationInvitesCollection
+	CensusCollection
+	OrgParticipantsCollection
+	CensusMembershipsCollection
+	PublishedCensusesCollection
+	ProcessesCollection
 }
