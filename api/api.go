@@ -33,6 +33,7 @@ type APIConfig struct {
 	Client      *apiclient.HTTPclient
 	Account     *account.Account
 	MailService notifications.NotificationService
+	SMSService  notifications.NotificationService
 	WebAppURL   string
 	ServerURL   string
 	// FullTransparentMode if true allows signing all transactions and does not
@@ -56,6 +57,7 @@ type API struct {
 	client          *apiclient.HTTPclient
 	account         *account.Account
 	mail            notifications.NotificationService
+	sms             notifications.NotificationService
 	secret          string
 	webAppURL       string
 	serverURL       string
@@ -78,6 +80,7 @@ func New(conf *APIConfig) *API {
 		client:          conf.Client,
 		account:         conf.Account,
 		mail:            conf.MailService,
+		sms:             conf.SMSService,
 		secret:          conf.Secret,
 		webAppURL:       conf.WebAppURL,
 		serverURL:       conf.ServerURL,

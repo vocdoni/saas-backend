@@ -302,7 +302,7 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	mailBody, err := testMailService.FindEmail(context.Background(), testEmail)
 	c.Assert(err, qt.IsNil)
 	// create a regex to find the verification code in the email
-	verifyMailCode := passwordResetRgx.FindStringSubmatch(mailBody)
+	verifyMailCode := verificationCodeRgx.FindStringSubmatch(mailBody)
 	// verify the user
 	verification := mustMarshal(&UserVerification{
 		Email: testEmail,

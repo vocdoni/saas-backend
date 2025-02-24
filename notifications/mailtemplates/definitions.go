@@ -8,9 +8,9 @@ var VerifyAccountNotification = MailTemplate{
 	File: "verification_account",
 	Placeholder: notifications.Notification{
 		Subject: "Vocdoni verification code",
-		PlainBody: `Your Vocdoni password reset code is: {{.Code}}
+		PlainBody: `Your Vocdoni verification code is: {{.Code}}
 
-You can also use this link to reset your password: {{.Link}}`,
+You can also use this link to verify your account: {{.Link}}`,
 	},
 	WebAppURI: "/account/verify",
 }
