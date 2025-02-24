@@ -17,11 +17,7 @@ var (
 
 func TestCreateInvitation(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 	// non existing organization
 	testInvite := &OrganizationInvite{
 		InvitationCode:      invitationCode,
@@ -75,11 +71,7 @@ func TestCreateInvitation(t *testing.T) {
 
 func TestInvitation(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 
 	_, err := db.Invitation(invitationCode)
 	c.Assert(err, qt.ErrorIs, ErrNotFound)
@@ -117,11 +109,7 @@ func TestInvitation(t *testing.T) {
 
 func TestPendingInvitations(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 	// list invitations expecting none
 	invitations, err := db.PendingInvitations(orgAddress)
 	c.Assert(err, qt.IsNil)
@@ -170,11 +158,7 @@ func TestPendingInvitations(t *testing.T) {
 
 func TestDeleteInvitation(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 
 	// non existing invitation does not return an error on delete attempt
 	c.Assert(db.DeleteInvitation(invitationCode), qt.IsNil)

@@ -8,9 +8,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-const (
-	testMembershipParticipantNo = "participant123"
-)
+const testMembershipParticipantNo = "participant123"
 
 func setupTestPrerequisites(c *qt.C) (*Census, string) {
 	// Create test organization
@@ -48,11 +46,7 @@ func setupTestPrerequisites(c *qt.C) (*Census, string) {
 
 func TestSetCensusMembership(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 
 	// Setup prerequisites
 	_, censusID := setupTestPrerequisites(c)
@@ -122,11 +116,7 @@ func TestSetCensusMembership(t *testing.T) {
 
 func TestCensusMembership(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 
 	// Setup prerequisites
 	_, censusID := setupTestPrerequisites(c)
@@ -161,11 +151,7 @@ func TestCensusMembership(t *testing.T) {
 
 func TestDelCensusMembership(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 
 	// Setup prerequisites
 	_, censusID := setupTestPrerequisites(c)
@@ -200,11 +186,7 @@ func TestDelCensusMembership(t *testing.T) {
 
 func TestSetBulkCensusMembership(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 
 	// Setup prerequisites
 	_, censusID := setupTestPrerequisites(c)

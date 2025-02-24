@@ -25,6 +25,14 @@ func (ms *MongoStorage) SetCensusMembership(membership *CensusMembership) error 
 	if err != nil {
 		return fmt.Errorf("failed to get published census: %w", err)
 	}
+	// check that the org exists
+	_, _, err = ms.Organization(census.OrgAddress, false)
+	if err != nil {
+		if err == ErrNotFound {
+			return ErrInvalidData
+		}
+		return fmt.Errorf("organization not found: %w", err)
+	}
 	// check that the participant exists
 	if _, err := ms.OrgParticipantByNo(census.OrgAddress, membership.ParticipantNo); err != nil {
 		return fmt.Errorf("failed to get org participant: %w", err)
@@ -127,7 +135,6 @@ func (ms *MongoStorage) DelCensusMembership(censusId, participantNo string) erro
 // SetBulkCensusMembership creates or updates an org Participant and a census membership in the database.
 // If the membership already exists (same participantNo and censusID), it updates it.
 // If it doesn't exist, it creates a new one.
-
 func (ms *MongoStorage) SetBulkCensusMembership(
 	salt, censusId string, orgParticipants []OrgParticipant,
 ) (*mongo.BulkWriteResult, error) {

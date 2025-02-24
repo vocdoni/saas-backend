@@ -7,6 +7,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // CreateCensus creates a new census for an organization
@@ -15,43 +16,42 @@ func (ms *MongoStorage) SetCensus(census *Census) (string, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	var oid primitive.ObjectID
 
 	if census.OrgAddress == "" {
 		return "", ErrInvalidData
 	}
 	// check that the org exists
-	result := ms.organizations.FindOne(ctx, bson.M{"_id": census.OrgAddress})
-	if result.Err() != nil {
-		return "", fmt.Errorf("organization not found: %w", result.Err())
+	_, _, err := ms.Organization(census.OrgAddress, false)
+	if err != nil {
+		if err == ErrNotFound {
+			return "", ErrInvalidData
+		}
+		return "", fmt.Errorf("organization not found: %w", err)
 	}
-
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
 
 	if census.ID != primitive.NilObjectID {
-		oid = census.ID
-		census.UpdatedAt = time.Now()
 		// if the census exists, update it with the new data
-		updateDoc, err := dynamicUpdateDocument(census, nil)
-		if err != nil {
-			return "", err
-		}
-		_, err = ms.censuses.UpdateOne(ctx, bson.M{"_id": census.ID}, updateDoc)
-		if err != nil {
-			return "", err
-		}
+		census.UpdatedAt = time.Now()
 	} else {
-		// if the census doesn't exist, create it
+		// if the census doesn't exist, create its id
+		census.ID = primitive.NewObjectID()
 		census.CreatedAt = time.Now()
-		result, err := ms.censuses.InsertOne(ctx, census)
-		if err != nil {
-			return "", fmt.Errorf("failed to create census: %w", err)
-		}
-		oid = result.InsertedID.(primitive.ObjectID)
 	}
 
-	return oid.Hex(), nil
+	updateDoc, err := dynamicUpdateDocument(census, nil)
+	if err != nil {
+		return "", err
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	filter := bson.M{"_id": census.ID}
+	opts := options.Update().SetUpsert(true)
+	_, err = ms.censuses.UpdateOne(ctx, filter, updateDoc, opts)
+	if err != nil {
+		return "", err
+	}
+
+	return census.ID.Hex(), nil
 }
 
 // DeleteCensus removes a census and all its participants

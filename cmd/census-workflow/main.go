@@ -92,12 +92,9 @@ func generateParticipants(n int) []db.OrgParticipant {
 	participants := make([]db.OrgParticipant, n)
 	for i := 0; i < n; i++ {
 		participants[i] = db.OrgParticipant{
-			ID:    primitive.NewObjectID(),
-			Email: fmt.Sprintf("user%d@example.com", i+1),
-			Phone: fmt.Sprintf("+%d%d%d%d%d%d%d%d%d%d",
-				rand.Intn(10), rand.Intn(10), rand.Intn(10), rand.Intn(10),
-				rand.Intn(10), rand.Intn(10), rand.Intn(10), rand.Intn(10),
-				rand.Intn(10), rand.Intn(10)),
+			ID:            primitive.NewObjectID(),
+			Email:         fmt.Sprintf("user%d@example.com", i+1),
+			Phone:         fmt.Sprintf("+%010d", rand.Int63n(10000000000)),
 			ParticipantNo: fmt.Sprintf("participant_%d", i+1),
 			Name:          fmt.Sprintf("User %d", i+1),
 			CreatedAt:     time.Now(),

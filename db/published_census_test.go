@@ -25,11 +25,7 @@ func setupTestOrganization(c *qt.C) {
 
 func TestPublishedCensus(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 
 	// test not found census
 	census, err := db.PublishedCensus(testRoot, testURI)
@@ -89,11 +85,7 @@ func TestPublishedCensus(t *testing.T) {
 
 func TestSetPublishedCensusInvalid(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 
 	// Create organization first
 	setupTestOrganization(c)
@@ -143,11 +135,7 @@ func TestSetPublishedCensusInvalid(t *testing.T) {
 
 func TestDelPublishedCensus(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 
 	// Create organization first
 	setupTestOrganization(c)
@@ -198,11 +186,7 @@ func TestDelPublishedCensus(t *testing.T) {
 
 func TestPublishedCensusInvalid(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 
 	// test get with invalid parameters
 	retrieved, err := db.PublishedCensus(nil, testURI)

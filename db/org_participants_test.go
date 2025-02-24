@@ -19,11 +19,7 @@ const (
 
 func TestSetOrgParticipant(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 
 	// create org
 	organization := &Organization{
@@ -102,11 +98,7 @@ func TestSetOrgParticipant(t *testing.T) {
 
 func TestDelOrgParticipant(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 
 	// create org
 	organization := &Organization{
@@ -142,11 +134,7 @@ func TestDelOrgParticipant(t *testing.T) {
 
 func TestOrgParticipant(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 
 	// create org
 	organization := &Organization{
@@ -187,11 +175,7 @@ func TestOrgParticipant(t *testing.T) {
 
 func TestBulkUpsertOrgParticipants(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 
 	// create org
 	organization := &Organization{

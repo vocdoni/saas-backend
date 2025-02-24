@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/test"
 )
 
@@ -39,4 +40,8 @@ func TestMain(m *testing.M) {
 	defer db.Close()
 	// run the tests
 	os.Exit(m.Run())
+}
+
+func resetDB(c *qt.C) {
+	c.Assert(db.Reset(), qt.IsNil)
 }

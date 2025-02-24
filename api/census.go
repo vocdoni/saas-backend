@@ -9,24 +9,6 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 )
 
-// Request types for census operations
-
-// CreateCensusRequest defines the payload for creating a new census
-type CreateCensusRequest struct {
-	Type       db.CensusType `json:"type"`
-	OrgAddress string        `json:"orgAddress"`
-}
-
-// AddParticipantsRequest defines the payload for adding participants to a census
-type AddParticipantsRequest struct {
-	Participants []db.OrgParticipant `json:"participants"`
-}
-
-// AddParticipantsResponse defines the response for successful participant addition
-type AddParticipantsResponse struct {
-	ParticipantsNo uint32 `json:"participantsNo"`
-}
-
 // createCensusHandler creates a new census for an organization.
 // Requires Manager/Admin role. Returns census ID on success.
 func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {

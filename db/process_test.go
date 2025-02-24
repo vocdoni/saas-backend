@@ -52,11 +52,7 @@ func setupTestPrerequisites1(c *qt.C) *PublishedCensus {
 
 func TestSetAndGetProcess(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 
 	// test not found process
 	process, err := db.Process(testProcessID)
@@ -133,11 +129,7 @@ func TestSetAndGetProcess(t *testing.T) {
 
 func TestSetProcessValidation(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 
 	// Setup prerequisites
 	publishedCensus := setupTestPrerequisites1(c)
@@ -175,11 +167,7 @@ func TestSetProcessValidation(t *testing.T) {
 
 func TestDeleteProcess(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 
 	// Setup prerequisites
 	publishedCensus := setupTestPrerequisites1(c)

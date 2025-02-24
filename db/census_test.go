@@ -8,17 +8,11 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-const (
-	testOrgAddress = "0x123456789"
-)
+const testOrgAddress = "0x123456789"
 
 func TestSetCensus(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 
 	// Test with non-existent organization
 	nonExistentCensus := &Census{
@@ -27,7 +21,7 @@ func TestSetCensus(t *testing.T) {
 	}
 	_, err := db.SetCensus(nonExistentCensus)
 	c.Assert(err, qt.Not(qt.IsNil))
-	c.Assert(err.Error(), qt.Contains, "organization not found")
+	c.Assert(err.Error(), qt.Contains, "invalid data provided")
 
 	// Create test organization first
 	org := &Organization{
@@ -85,12 +79,7 @@ func TestSetCensus(t *testing.T) {
 
 func TestDelCensus(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
-
+	defer resetDB(c)
 	// Create test organization first
 	org := &Organization{
 		Address:   testOrgAddress,
@@ -128,12 +117,7 @@ func TestDelCensus(t *testing.T) {
 
 func TestCensus(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
-
+	defer resetDB(c)
 	// Create test organization first
 	org := &Organization{
 		Address:   testOrgAddress,

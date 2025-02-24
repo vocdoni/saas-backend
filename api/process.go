@@ -11,35 +11,6 @@ import (
 	"go.vocdoni.io/dvote/util"
 )
 
-// Request types for process operations
-
-// CreateProcessRequest defines the payload for creating a new voting process
-type CreateProcessRequest struct {
-	PublishedCensusRoot string `json:"censusRoot"`
-	PublishedCensusURI  string `json:"censusUri"`
-	Metadata            []byte `json:"metadata"`
-}
-
-// InitiateAuthRequest defines the payload for participant authentication
-type InitiateAuthRequest struct {
-	ParticipantNo string `json:"participantNo"`
-	Email         string `json:"email,omitempty"`
-	Phone         string `json:"phone,omitempty"`
-	Password      string `json:"password,omitempty"`
-}
-
-// VerifyAuthRequest defines the payload for auth code verification
-type VerifyAuthRequest struct {
-	Token string `json:"token"`
-	Code  string `json:"code"`
-}
-
-// GenerateProofRequest defines the payload for generating voting proof
-type GenerateProofRequest struct {
-	Token          string `json:"token"`
-	BlindedAddress []byte `json:"blindedAddress"`
-}
-
 // createProcessHandler creates a new voting process.
 // Requires Manager/Admin role. Returns 201 on success.
 func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {

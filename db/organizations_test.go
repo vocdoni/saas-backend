@@ -9,11 +9,7 @@ import (
 
 func TestOrganization(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 
 	// test not found organization
 	address := "childOrgToGet"
@@ -46,11 +42,7 @@ func TestOrganization(t *testing.T) {
 
 func TestSetOrganization(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 
 	// create a new organization
 	address := "orgToSet"
@@ -91,11 +83,7 @@ func TestSetOrganization(t *testing.T) {
 
 func TestDeleteOrganization(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 
 	// create a new organization and delete it
 	address := "orgToDelete"
@@ -116,11 +104,7 @@ func TestDeleteOrganization(t *testing.T) {
 
 func TestReplaceCreatorEmail(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 
 	// create a new organization with a creator
 	address := "orgToReplaceCreator"
@@ -152,11 +136,7 @@ func TestReplaceCreatorEmail(t *testing.T) {
 
 func TestOrganizationsMembers(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer resetDB(c)
 
 	// create a new organization with a creator
 	address := "orgToReplaceCreator"
@@ -182,12 +162,8 @@ func TestOrganizationsMembers(t *testing.T) {
 }
 
 func TestAddOrganizationPlan(t *testing.T) {
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
 	c := qt.New(t)
+	defer resetDB(c)
 	// create a new organization
 	address := "orgToAddPlan"
 	c.Assert(db.SetOrganization(&Organization{

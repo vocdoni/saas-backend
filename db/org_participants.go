@@ -9,13 +9,12 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // CreateOrgParticipants creates a new orgParticipants for an organization
 // reqires an existing organization
 func (ms *MongoStorage) SetOrgParticipant(salt string, orgParticipant *OrgParticipant) (string, error) {
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -24,12 +23,15 @@ func (ms *MongoStorage) SetOrgParticipant(salt string, orgParticipant *OrgPartic
 		return "", ErrInvalidData
 	}
 
-	result := ms.organizations.FindOne(ctx, bson.M{"_id": orgParticipant.OrgAddress})
-	if result.Err() != nil {
-		return "", fmt.Errorf("organization not found: %w", result.Err())
+	// check that the org exists
+	_, _, err := ms.Organization(orgParticipant.OrgAddress, false)
+	if err != nil {
+		if err == ErrNotFound {
+			return "", ErrInvalidData
+		}
+		return "", fmt.Errorf("organization not found: %w", err)
 	}
 
-	var oid primitive.ObjectID
 	if orgParticipant.Email != "" {
 		// store only the hashed email
 		orgParticipant.HashedEmail = internal.HashOrgData(orgParticipant.OrgAddress, orgParticipant.Email)
@@ -47,29 +49,27 @@ func (ms *MongoStorage) SetOrgParticipant(salt string, orgParticipant *OrgPartic
 	}
 
 	if orgParticipant.ID != primitive.NilObjectID {
-		oid = orgParticipant.ID
-		orgParticipant.UpdatedAt = time.Now()
-
 		// if the orgParticipant exists, update it with the new data
-		updateDoc, err := dynamicUpdateDocument(orgParticipant, nil)
-		if err != nil {
-			return "", err
-		}
-		_, err = ms.orgParticipants.UpdateOne(ctx, bson.M{"_id": orgParticipant.ID}, updateDoc)
-		if err != nil {
-			return "", err
-		}
+		orgParticipant.UpdatedAt = time.Now()
 	} else {
-		// if the orgParticipant doesn't exist, create it
+		// if the orgParticipant doesn't exist, create the corresponding id
+		orgParticipant.ID = primitive.NewObjectID()
 		orgParticipant.CreatedAt = time.Now()
-		result, err := ms.orgParticipants.InsertOne(ctx, orgParticipant)
-		if err != nil {
-			return "", fmt.Errorf("failed to create orgParticipant: %w", err)
-		}
-		oid = result.InsertedID.(primitive.ObjectID)
+	}
+	updateDoc, err := dynamicUpdateDocument(orgParticipant, nil)
+	if err != nil {
+		return "", err
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	filter := bson.M{"_id": orgParticipant.ID}
+	opts := options.Update().SetUpsert(true)
+	_, err = ms.orgParticipants.UpdateOne(ctx, filter, updateDoc, opts)
+	if err != nil {
+		return "", err
 	}
 
-	return oid.Hex(), nil
+	return orgParticipant.ID.Hex(), nil
 }
 
 // DeleteOrgParticipants removes a orgParticipants and all its participants
