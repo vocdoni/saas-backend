@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/notifications"
 	"go.vocdoni.io/dvote/types"
 )
 
@@ -193,4 +194,58 @@ type SubscriptionCheckout struct {
 	Amount    int64  `json:"amount"`
 	Address   string `json:"address"`
 	Locale    string `json:"locale"`
+}
+
+type ParticipantNotification struct {
+	ProcessID    []byte                     `json:"processID"`
+	Notification notifications.Notification `json:"notification"`
+	Sent         bool                       `json:"sent"`
+	SentAt       time.Time                  `json:"sentAt"`
+}
+
+// Request types for census operations
+
+// CreateCensusRequest defines the payload for creating a new census
+type CreateCensusRequest struct {
+	Type       db.CensusType `json:"type"`
+	OrgAddress string        `json:"orgAddress"`
+}
+
+// AddParticipantsRequest defines the payload for adding participants to a census
+type AddParticipantsRequest struct {
+	Participants []db.OrgParticipant `json:"participants"`
+}
+
+// AddParticipantsResponse defines the response for successful participant addition
+type AddParticipantsResponse struct {
+	ParticipantsNo uint32 `json:"participantsNo"`
+}
+
+// Request types for process operations
+
+// CreateProcessRequest defines the payload for creating a new voting process
+type CreateProcessRequest struct {
+	PublishedCensusRoot string `json:"censusRoot"`
+	PublishedCensusURI  string `json:"censusUri"`
+	Metadata            []byte `json:"metadata"`
+}
+
+// InitiateAuthRequest defines the payload for participant authentication
+type InitiateAuthRequest struct {
+	ParticipantNo string `json:"participantNo"`
+	Email         string `json:"email,omitempty"`
+	Phone         string `json:"phone,omitempty"`
+	Password      string `json:"password,omitempty"`
+}
+
+// VerifyAuthRequest defines the payload for auth code verification
+type VerifyAuthRequest struct {
+	Token string `json:"token"`
+	Code  string `json:"code"`
+}
+
+// GenerateProofRequest defines the payload for generating voting proof
+type GenerateProofRequest struct {
+	Token          string `json:"token"`
+	BlindedAddress []byte `json:"blindedAddress"`
 }

@@ -20,6 +20,7 @@ type Account struct {
 	client *apiclient.HTTPclient
 	signer *ethereum.SignKeys
 
+	PubKey            []byte
 	TxCosts           map[models.TxType]uint64
 	ElectionPriceCalc *electionprice.Calculator
 }
@@ -66,6 +67,7 @@ func New(privateKey string, apiEndpoint string) (*Account, error) {
 	return &Account{
 		client:            apiClient,
 		signer:            &signer,
+		PubKey:            signer.PublicKey(),
 		TxCosts:           txCosts,
 		ElectionPriceCalc: electionPriceCalc,
 	}, nil

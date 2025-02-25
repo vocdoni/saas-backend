@@ -42,7 +42,16 @@
 - [📦 Storage](#-storage)
   - [ 🌄 Upload image](#-upload-image)
   - [ 📄 Get object](#-get-object)
-  
+- [📊 Census](#-census)
+  - [📝 Create Census](#-create-census)
+  - [ℹ️ Get Census Info](#-get-census-info)
+  - [👥 Add Participants](#-add-participants)
+  - [📢 Publish Census](#-publish-census)
+  - [📋 Get Published Census Info](#-get-published-census-info)
+- [🔄 Process](#-process)
+  - [🆕 Create Process](#-create-process)
+  - [ℹ️ Get Process Info](#-get-process-info)
+  - [🔐 Process Authentication](#-process-authentication)
 
 </details>
 
@@ -1093,6 +1102,258 @@ Accepting files uploaded by forms as such:
 | `400` | `40024` | `the obejct/parameters provided are invalid` |
 | `500` | `50002` | `internal server error` |
 | `500` | `50006` | `internal storage error` |
+
+## 📊 Census
+
+### 📝 Create Census
+
+* **Path** `/census`
+* **Method** `POST`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Request body**
+```json
+{
+  "type": "sms_or_mail",
+  "orgAddress": "0x..."
+}
+```
+
+* **Response**
+Returns the census ID
+```json
+"census_id_string"
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40004` | `malformed JSON body` |
+| `500` | `50002` | `internal server error` |
+
+### ℹ️ Get Census Info
+
+* **Path** `/census/{id}`
+* **Method** `GET`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+
+* **Response**
+```json
+{
+  "id": "census_id",
+  "type": "sms_or_mail",
+  "orgAddress": "0x...",
+  "createdAt": "2025-02-18T17:12:00Z"
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `400` | `40010` | `malformed URL parameter` |
+| `500` | `50002` | `internal server error` |
+
+### 👥 Add Participants
+
+* **Path** `/census/{id}`
+* **Method** `POST`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Request body**
+```json
+{
+  "participants": [
+    {
+      "id": "participant_id",
+      "email": "participant@example.com",
+      "phone": "+1234567890"
+    }
+  ]
+}
+```
+
+* **Response**
+Returns the number of participants successfully added
+```json
+42
+```
+
+* **Description**
+Adds multiple participants to a census in bulk. Requires Manager or Admin role for the organization that owns the census. If the request contains no participants or if the participants array is empty, returns 0.
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `401` | `40001` | `user is not admin of organization` |
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40010` | `malformed URL parameter` |
+| `400` | `40010` | `census not found` |
+| `500` | `50002` | `internal server error` |
+| `500` | `50004` | `not all participants were added` |
+
+### 📢 Publish Census
+
+* **Path** `/census/{id}/publish`
+* **Method** `POST`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+
+* **Description**
+Publishes a census, making it available for voting. Requires Manager or Admin role for the organization that owns the census. Currently only supports census type "sms_or_mail". The published census includes credentials necessary for the voting process.
+
+* **Response**
+```json
+{
+  "census": {
+    "id": "census_id",
+    "type": "sms_or_mail",
+    "orgAddress": "0x...",
+    "createdAt": "2025-02-18T17:12:00Z"
+  },
+  "uri": "https://example.com/csp/",
+  "root": "public_key"
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `401` | `40001` | `user is not admin of organization` |
+| `400` | `40010` | `malformed URL parameter` |
+| `400` | `40010` | `missing census ID` |
+| `500` | `50002` | `internal server error` |
+
+### 📋 Get Published Census Info
+
+* **Path** `/census/{id}/publish`
+* **Method** `GET`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+
+* **Response**
+```json
+{
+  "census": {
+    "id": "census_id",
+    "type": "sms_or_mail",
+    "orgAddress": "0x...",
+    "createdAt": "2025-02-18T17:12:00Z"
+  },
+  "uri": "https://example.com/csp/",
+  "root": "public_key"
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `400` | `40010` | `malformed URL parameter` |
+| `500` | `50002` | `internal server error` |
+
+## 🔄 Process
+
+### 🆕 Create Process
+
+* **Path** `/process/{processId}`
+* **Method** `POST`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Request body**
+```json
+{
+  "censusID": "published_census_id",
+  "metadata": "base64_encoded_metadata"
+}
+```
+
+* **Response**
+Returns 201 Created on success
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40010` | `malformed URL parameter` |
+| `500` | `50002` | `internal server error` |
+
+### 📈 Get Process Info
+
+* **Path** `/process/{processId}`
+* **Method** `GET`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+
+* **Response**
+```json
+{
+  "id": "process_id",
+  "publishedCensus": {
+    "census": {
+      "id": "census_id",
+      "type": "sms_or_mail",
+      "orgAddress": "0x...",
+      "createdAt": "2025-02-18T17:12:00Z"
+    },
+    "uri": "https://example.com/csp/",
+    "root": "public_key"
+  },
+  "metadata": "base64_encoded_metadata",
+  "orgID": "0x..."
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `400` | `40010` | `malformed URL parameter` |
+| `500` | `50002` | `internal server error` |
+
+### 🔐 Process Authentication
+
+* **Path** `/process/{processId}/auth`
+* **Method** `POST`
+* **Request Body**
+```json
+{
+  "participantNo": "participant_id",
+  "email": "participant@example.com",  // Optional: Required if using email authentication
+  "phone": "+1234567890",             // Optional: Required if using phone authentication
+  "password": "secretpass1234"        // Optional: Required if using password authentication
+}
+```
+
+* **Response**
+```json
+{
+  "ok": true
+}
+```
+
+* **Description**
+Validates a participant's authentication for a process. The participant must exist in both the organization and the published census. Authentication can be done via email, phone number, or password. At least one authentication method must be provided.
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40010` | `malformed URL parameter` |
+| `401` | `40001` | `participant not found` |
+| `401` | `40001` | `participant not found in census` |
+| `401` | `40001` | `invalid user data` |
+| `500` | `50002` | `internal server error` |
 
 
 ### 📄 Get object

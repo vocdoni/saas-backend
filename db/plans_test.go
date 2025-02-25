@@ -7,12 +7,8 @@ import (
 )
 
 func TestSetPlan(t *testing.T) {
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
 	c := qt.New(t)
+	defer resetDB(c)
 
 	plan := &Plan{
 		Name:     "Test Plan",
@@ -23,12 +19,8 @@ func TestSetPlan(t *testing.T) {
 }
 
 func TestPlan(t *testing.T) {
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
 	c := qt.New(t) // Create a new quicktest instance
+	defer resetDB(c)
 	planID := uint64(123)
 	// Test not found plan
 	plan, err := db.Plan(planID)
@@ -50,12 +42,8 @@ func TestPlan(t *testing.T) {
 }
 
 func TestDelPlan(t *testing.T) {
-	defer func() {
-		if err := db.Reset(); err != nil {
-			t.Error(err)
-		}
-	}()
 	c := qt.New(t)
+	defer resetDB(c)
 	// Create a new plan and delete it
 	plan := &Plan{
 		Name:     "Test Plan",

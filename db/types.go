@@ -2,6 +2,8 @@ package db
 
 import (
 	"time"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 type User struct {
@@ -150,3 +152,73 @@ type Object struct {
 	UserID      string    `json:"userId" bson:"userId"`
 	ContentType string    `json:"contentType" bson:"contentType"`
 }
+
+// CensusType defines the type of census.
+type CensusType string
+
+const (
+	// CensusTypeMail is used when the organizer uploads a list of names, participantNos and e‑mails.
+	CensusTypePass      CensusType = "pass"
+	CensusTypeMail      CensusType = "mail"
+	CensusTypeSMS       CensusType = "sms"
+	CensusTypeSMSorMail CensusType = "sms_or_mail"
+)
+
+// Census represents the information of a set of census participants
+type Census struct {
+	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	OrgAddress string             `json:"orgAddress" bson:"orgAddress"`
+	Type       CensusType         `json:"type" bson:"type"`
+	CreatedAt  time.Time          `json:"createdAt" bson:"createdAt"`
+	UpdatedAt  time.Time          `json:"updatedAt" bson:"updatedAt"`
+}
+
+// An org participant is a member of the organization and her details that will be
+// used for verification and/or authentication
+// A participant is tied to an organization by the orgAddress
+type OrgParticipant struct {
+	ID primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	// OrgAddress can be used for future sharding
+	OrgAddress    string                 `json:"orgAddress" bson:"orgAddress"`
+	Email         string                 `json:"email" bson:"email"`
+	HashedEmail   []byte                 `json:"hashedEmail" bson:"hashedEmail"`
+	Phone         string                 `json:"phone" bson:"phone"`
+	HashedPhone   []byte                 `json:"hashedPhone" bson:"hashedPhone"`
+	ParticipantNo string                 `json:"participantNo" bson:"participantNo"`
+	Name          string                 `json:"name" bson:"name"`
+	Password      string                 `json:"password" bson:"password"`
+	HashedPass    []byte                 `json:"pass" bson:"pass"`
+	Other         map[string]interface{} `json:"other" bson:"other"`
+	CreatedAt     time.Time              `json:"createdAt" bson:"createdAt"`
+	UpdatedAt     time.Time              `json:"updatedAt" bson:"updatedAt"`
+}
+
+// Relates an OrgParticipant to a Census
+// The censID is the hex format in string of the objectID
+type CensusMembership struct {
+	ParticipantNo string    `json:"participantNo" bson:"participantNo"`
+	CensusID      string    `json:"censusId" bson:"censusId"`
+	CreatedAt     time.Time `json:"createdAt" bson:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt" bson:"updatedAt"`
+}
+
+// Represents a published census as a census is represented in the vochain
+// The publishedCensus is tied to a Census
+type PublishedCensus struct {
+	URI       string    `json:"uri" bson:"uri"`
+	Root      []byte    `json:"root" bson:"root"`
+	Census    Census    `json:"census" bson:"census"`
+	CreatedAt time.Time `json:"createdAt" bson:"createdAt"`
+}
+
+// Process represents a voting process in the vochain
+// A process is tied to an organization by the orgAddress
+// and to a publishedCensus
+type Process struct {
+	ID              []byte          `json:"id" bson:"_id"`
+	OrgAddress      string          `json:"orgAdress" bson:"orgAddress"`
+	PublishedCensus PublishedCensus `json:"publishedCensus" bson:"publishedCensus"`
+	Metadata        []byte          `json:"metadata" bson:"metadata"`
+}
+
+// Utilizar non-salted key
