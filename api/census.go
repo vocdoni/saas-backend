@@ -76,7 +76,6 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 	participantsInfo := &AddParticipantsRequest{}
 	if err := json.NewDecoder(r.Body).Decode(&participantsInfo); err != nil {
 		ErrMalformedBody.Withf("missing participants").Write(w)
-		httpWriteJSON(w, &AddParticipantsResponse{ParticipantsNo: 0})
 		return
 	}
 
