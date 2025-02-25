@@ -388,8 +388,3 @@ func (js *JSONstorage) String() string {
 func signKey2key(u HexBytes) []byte {
 	return append([]byte(signkeyPrefix), u...)
 }
-
-func key2singKey(key []byte) (u HexBytes) {
-	_ = u.FromString(fmt.Sprintf("%x", key[len(signkeyPrefix):]))
-	return u
-}

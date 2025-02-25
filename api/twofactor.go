@@ -3,13 +3,17 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
+	"github.com/vocdoni/saas-backend/notifications"
+	"github.com/vocdoni/saas-backend/twofactor"
 	"go.vocdoni.io/dvote/util"
 )
 
@@ -63,7 +67,7 @@ func (a *API) twofactorAuthHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		authResp := a.twofactor.Auth(processId, req.AuthToken, req.AuthData)
 		if !authResp.Success {
-			ErrUnauthorized.Withf(authResp.Error).Write(w)
+			ErrUnauthorized.WithErr(errors.New(authResp.Error)).Write(w)
 			return
 		}
 		httpWriteOK(w)
@@ -88,7 +92,7 @@ func (a *API) twofactorSignHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	signResp := a.twofactor.Sign(processId, req.Payload, req.TokenR, req.Address)
 	if !signResp.Success {
-		ErrUnauthorized.Withf(signResp.Error).Write(w)
+		ErrUnauthorized.WithErr(errors.New(signResp.Error)).Write(w)
 		return
 	}
 	httpWriteJSON(w, &twofactorResponse{Signature: signResp.Signature})
@@ -111,6 +115,13 @@ func (a *API) initiateAuthRequest(r *http.Request, processId []byte) (*uuid.UUID
 	if process.PublishedCensus.Census.OrgAddress != process.OrgAddress {
 		return &uuid.Nil, ErrInvalidOrganizationData
 	}
+
+	// TODO enable only password censuses
+	censusType := process.PublishedCensus.Census.Type
+	if censusType != db.CensusTypeMail && censusType != db.CensusTypeSMSorMail &&
+		censusType != db.CensusTypeSMS {
+		return &uuid.Nil, ErrInvalidOrganizationData.Withf("invalid census type")
+	}
 	// retrieve memership info
 	if _, err = a.db.CensusMembership(process.PublishedCensus.Census.ID.Hex(), req.ParticipantNo); err != nil {
 		return &uuid.Nil, ErrUnauthorized.Withf("participant not found in census")
@@ -121,19 +132,34 @@ func (a *API) initiateAuthRequest(r *http.Request, processId []byte) (*uuid.UUID
 		return &uuid.Nil, ErrUnauthorized.Withf("participant not found")
 	}
 
-	// verify participant info
-	if req.Email != "" && !bytes.Equal(internal.HashOrgData(process.OrgAddress, req.Email), participant.HashedEmail) {
-		return &uuid.Nil, ErrUnauthorized.Withf("invalid user data")
-	}
-	if req.Phone != "" && !bytes.Equal(internal.HashOrgData(process.OrgAddress, req.Phone), participant.HashedPhone) {
-		return &uuid.Nil, ErrUnauthorized.Withf("invalid user data")
-	}
+	// first verify password
 	if req.Password != "" && !bytes.Equal(internal.HashPassword(passwordSalt, req.Password), participant.HashedPass) {
 		return &uuid.Nil, ErrUnauthorized.Withf("invalid user data")
 	}
-	authResp := a.twofactor.InitiateAuth(processId, participant.ParticipantNo)
+
+	var authResp twofactor.AuthResponse
+	if censusType == db.CensusTypeMail || censusType == db.CensusTypeSMSorMail {
+		if req.Email == "" {
+			return &uuid.Nil, ErrUnauthorized.Withf("missing email")
+		}
+		if !bytes.Equal(internal.HashOrgData(process.OrgAddress, req.Email), participant.HashedEmail) {
+			return &uuid.Nil, ErrUnauthorized.Withf("invalid user data")
+		}
+		authResp = a.twofactor.InitiateAuth(processId, participant.ParticipantNo, req.Email, notifications.Email)
+	} else if censusType == db.CensusTypeSMS || censusType == db.CensusTypeSMSorMail {
+		if req.Phone == "" {
+			return &uuid.Nil, ErrUnauthorized.Withf("missing phone")
+		}
+		if !bytes.Equal(internal.HashOrgData(process.OrgAddress, req.Phone), participant.HashedPhone) {
+			return &uuid.Nil, ErrUnauthorized.Withf("invalid user data")
+		}
+		authResp = a.twofactor.InitiateAuth(processId, participant.ParticipantNo, req.Phone, notifications.SMS)
+	} else {
+		return &uuid.Nil, ErrUnauthorized.Withf("invalid census type")
+	}
+
 	if !authResp.Success {
-		return &uuid.Nil, fmt.Errorf(authResp.Error)
+		return &uuid.Nil, errors.New(authResp.Error)
 	}
 	if authResp.AuthToken == nil {
 		return &uuid.Nil, fmt.Errorf("auth token is nil")

@@ -260,6 +260,11 @@ func (a *API) initRouter() http.Handler {
 		// process auth handler
 		log.Infow("new route", "method", "POST", "path", processAuthEndpoint)
 		r.Post(processAuthEndpoint, a.processAuthHandler)
+		// two-factor auth handlers
+		log.Infow("new route", "method", "POST", "path", twofactorAuthEndpoint)
+		r.Post(twofactorAuthEndpoint, a.twofactorAuthHandler)
+		log.Infow("new route", "method", "POST", "path", twofactorSignEndpoint)
+		r.Post(twofactorSignEndpoint, a.twofactorSignHandler)
 		// process auth routes (currently not implemented)
 		// process auth step 0
 		// log.Infow("new route", "method", "POST", "path", processAuthInitEndpoint)

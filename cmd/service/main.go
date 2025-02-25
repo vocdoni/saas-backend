@@ -148,7 +148,7 @@ func main() {
 		}); err != nil {
 			log.Fatalf("could not create the email service: %v", err)
 		}
-		twofactorConf.NotificationServices = append(twofactorConf.NotificationServices, &apiConf.MailService)
+		twofactorConf.NotificationServices.Mail = apiConf.MailService
 		// load email templates
 		if err := mailtemplates.Load(); err != nil {
 			log.Fatalf("could not load email templates: %v", err)
@@ -167,7 +167,7 @@ func main() {
 		}); err != nil {
 			log.Fatalf("could not create the SMS service: %v", err)
 		}
-		twofactorConf.NotificationServices = append(twofactorConf.NotificationServices, &apiConf.SMSService)
+		twofactorConf.NotificationServices.SMS = apiConf.SMSService
 		log.Infow("SMS service created", "from", twilioFromNumber)
 	}
 

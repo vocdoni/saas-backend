@@ -1,13 +1,13 @@
 package twofactor
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strconv"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/nyaruka/phonenumbers"
 	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/xlzd/gotp"
 	"go.vocdoni.io/dvote/log"
@@ -29,8 +29,13 @@ const (
 	DefaultPhoneCountry = "ES"
 )
 
+type NotifServices struct {
+	SMS  notifications.NotificationService
+	Mail notifications.NotificationService
+}
+
 type TwofactorConfig struct {
-	NotificationServices []*notifications.NotificationService
+	NotificationServices NotifServices
 	MaxAttempts          int
 	CoolDownTime         time.Duration
 	ThrottleTime         time.Duration
@@ -40,24 +45,47 @@ type TwofactorConfig struct {
 
 type Twofactor struct {
 	stg                  *JSONstorage
-	notificationServices []*notifications.NotificationService
+	notificationServices NotifServices
 	maxAttempts          int
 	coolDownTime         time.Duration
 	throttleTime         time.Duration
 	maxRetries           int
-	queue                Queue
+	smsQueue             *Queue
+	mailQueue            *Queue
 	otpSalt              string
 	signer               *SaltedKey
 }
 
 // SendChallengeFunc is the function that sends the SMS challenge to a phone number.
-type SendChallengeFunc func(phone *phonenumbers.PhoneNumber, challenge string) error
+type SendChallengeFunc func(contact string, challenge string) error
+
+func (tf *Twofactor) SendChallengeMail(contact string, challenge string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	notif := &notifications.Notification{
+		ToAddress: contact,
+		Subject:   "Vocdoni authentication code",
+		Body:      fmt.Sprintf("Your authentication code is %s", challenge),
+	}
+	return tf.notificationServices.Mail.SendNotification(ctx, notif)
+}
+
+func (tf *Twofactor) SendChallengeSMS(contact string, challenge string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	notif := &notifications.Notification{
+		ToNumber: contact,
+		Subject:  "Vocdoni authentication code",
+		Body:     fmt.Sprintf("Your authentication code is %s", challenge),
+	}
+	return tf.notificationServices.Mail.SendNotification(ctx, notif)
+}
 
 func (tf *Twofactor) New(conf *TwofactorConfig) (*Twofactor, error) {
 	if conf == nil {
 		return nil, nil
 	}
-	if len(conf.NotificationServices) == 0 {
+	if conf.NotificationServices.Mail == nil || conf.NotificationServices.SMS == nil {
 		return nil, fmt.Errorf("no notification services defined")
 	}
 	maxAttempts := DefaultMaxSMSattempts
@@ -91,8 +119,21 @@ func (tf *Twofactor) New(conf *TwofactorConfig) (*Twofactor, error) {
 		return nil, err
 	}
 
-	go tf.queue.run()
-	go tf.queueController()
+	tf.smsQueue = newQueue(
+		coolDownTime,
+		throttleTime,
+		[]SendChallengeFunc{tf.SendChallengeMail},
+	)
+	go tf.smsQueue.run()
+	go tf.queueController(tf.smsQueue)
+
+	tf.mailQueue = newQueue(
+		coolDownTime,
+		throttleTime,
+		[]SendChallengeFunc{tf.SendChallengeSMS},
+	)
+	go tf.mailQueue.run()
+	go tf.queueController(tf.mailQueue)
 
 	tf.notificationServices = conf.NotificationServices
 	tf.maxAttempts = maxAttempts
@@ -110,9 +151,9 @@ func (tf *Twofactor) New(conf *TwofactorConfig) (*Twofactor, error) {
 // Third is the SMS cooldown time in milliseconds (optional).
 // Fourth is the SMS throttle time in milliseconds (optional).
 
-func (tf *Twofactor) queueController() {
+func (tf *Twofactor) queueController(queue *Queue) {
 	for {
-		r := <-tf.queue.response
+		r := <-queue.response
 		if r.success {
 			if err := tf.stg.SetAttempts(r.userID, r.electionID, -1); err != nil {
 				log.Warnf("challenge cannot be sent: %v", err)
@@ -124,67 +165,6 @@ func (tf *Twofactor) queueController() {
 		}
 	}
 }
-
-// // CSV file must follow the format:
-// // userId, phone, extraInfo, electionID1, electionID2, ..., electionIDn
-// func (tf *Twofactor) importCSVfile(filepath string) {
-// 	log.Infof("importing CSV file %s", filepath)
-// 	f, err := os.Open(filepath)
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-// 	defer func() {
-// 		if err := f.Close(); err != nil {
-// 			panic(err)
-// 		}
-// 	}()
-
-// 	// read csv values using csv.Reader
-// 	csvReader := csv.NewReader(f)
-// 	data, err := csvReader.ReadAll()
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-// 	for i, line := range data {
-// 		if len(line) < 4 {
-// 			log.Warnf("wrong CSV entry (missing fields): %s", line)
-// 			continue
-// 		}
-// 		userID := HexBytes{}
-// 		if err := userID.FromString(line[0]); err != nil {
-// 			log.Warnf("wrong data field at line %d", i)
-// 			continue
-// 		}
-
-// 		electionIDs := []HexBytes{}
-// 		for _, eid := range line[3:] {
-// 			eidh := HexBytes{}
-// 			if err := eidh.FromString(eid); err != nil {
-// 				log.Warnf("wrong electionID at line %d", i)
-// 				continue
-// 			}
-// 			electionIDs = append(electionIDs, eidh)
-// 		}
-
-// 		if err := tf.stg.AddUser(userID, electionIDs, line[1], line[2]); err != nil {
-// 			log.Warnf("cannot add user from line %d", i)
-// 		}
-// 	}
-// 	log.Debug(tf.stg.String())
-// }
-
-// // Info returns the handler options and information.
-// func (tf *Twofactor) Info() *Message {
-// 	return &Message{
-// 		Title:    "SMS code handler",
-// 		AuthType: "auth",
-// 		SignType: []string{SignatureTypeBlind},
-// 		AuthSteps: []*AuthField{
-// 			{Title: "UserId", Type: "text"},
-// 			{Title: "Code", Type: "int4"},
-// 		},
-// 	}
-// }
 
 // Indexer takes a unique user identifier and returns the list of processIDs where
 // the user is elegible for participation. This is a helper function that might not
@@ -218,7 +198,12 @@ func (tf *Twofactor) Indexer(userID HexBytes) []Election {
 	return indexerElections
 }
 
-func (tf *Twofactor) InitiateAuth(electionID []byte, userId string) AuthResponse {
+func (tf *Twofactor) InitiateAuth(
+	electionID []byte,
+	userId string,
+	contact string,
+	notifType notifications.NotificationType,
+) AuthResponse {
 	// If first step, build new challenge
 	if len(userId) == 0 {
 		return AuthResponse{Error: "incorrect auth data fields"}
@@ -244,11 +229,21 @@ func (tf *Twofactor) InitiateAuth(electionID []byte, userId string) AuthResponse
 	}
 	// Enqueue to send the SMS challenge
 	challenge := gotp.NewDefaultHOTP(challengeSecret).At(attemptNo)
-	if err := tf.queue.add(userID, electionID, phone, challenge); err != nil {
-		log.Errorf("cannot enqueue challenge: %v", err)
-		return AuthResponse{Error: "problem with SMS challenge system"}
+	if notifType == notifications.Email {
+		if err := tf.mailQueue.add(userID, electionID, contact, challenge); err != nil {
+			log.Errorf("cannot enqueue challenge: %v", err)
+			return AuthResponse{Error: "problem with Email challenge system"}
+		}
+		log.Infof("user %s challenged with %s at contact %s", userID.String(), challenge, contact)
+	} else if notifType == notifications.SMS {
+		if err := tf.smsQueue.add(userID, electionID, contact, challenge); err != nil {
+			log.Errorf("cannot enqueue challenge: %v", err)
+			return AuthResponse{Error: "problem with SMS challenge system"}
+		}
+		log.Infof("user %s challenged with %s at contact %s", userID.String(), challenge, contact)
+	} else {
+		return AuthResponse{Error: "invalid notification type"}
 	}
-	log.Infof("user %s challenged with %s at contact %d", userID.String(), challenge, phone.GetNationalNumber())
 
 	// Build success reply
 	phoneStr := strconv.FormatUint(phone.GetNationalNumber(), 10)

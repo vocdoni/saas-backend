@@ -8,6 +8,14 @@ import "context"
 // while the recipient's number is used for SMS. The EnableTracking flag
 // indicates if the links that the notification contains should be tracked or
 // not.
+
+type NotificationType string
+
+const (
+	Email NotificationType = "email"
+	SMS   NotificationType = "sms"
+)
+
 type Notification struct {
 	ToName         string `json:"toName"`
 	ToAddress      string `json:"toAddress"`

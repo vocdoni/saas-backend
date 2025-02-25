@@ -96,6 +96,12 @@ const (
 	// POST /process/{processId}/auth to check if the voter is authorized
 	processAuthEndpoint = "/process/{processId}/auth"
 
+	// two-factor auth routes
+	// POST /process/{processId}/2fa/{step} to handle two-factor authentication
+	twofactorAuthEndpoint = "/process/{processId}/auth/{step}"
+	// POST /process/{processId}/2fa/sign to sign with two-factor authentication
+	twofactorSignEndpoint = "/process/{processId}/auth/sign"
+
 	// // census auth routes (currently not implemented)
 	// // POST /process/{processId}/auth/0 to initiate auth
 	// processAuthInitEndpoint = "/process/{processId}/auth/0"
