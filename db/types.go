@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.vocdoni.io/dvote/util"
 )
 
 type User struct {
@@ -27,7 +28,7 @@ type UserVerification struct {
 
 func (u *User) HasRoleFor(address string, role UserRole) bool {
 	for _, org := range u.Organizations {
-		if org.Address == address &&
+		if util.TrimHex(org.Address) == util.TrimHex(address) &&
 			// Check if the role is "any: or if the role matches the organization role
 			(string(role) == string(AnyRole) || string(org.Role) == string(role)) {
 			return true
