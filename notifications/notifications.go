@@ -9,13 +9,13 @@ import "context"
 // indicates if the links that the notification contains should be tracked or
 // not.
 type Notification struct {
-	ToName         string
-	ToAddress      string
-	ToNumber       string
-	Subject        string
-	Body           string
-	PlainBody      string
-	EnableTracking bool
+	ToName         string `json:"toName"`
+	ToAddress      string `json:"toAddress"`
+	ToNumber       string `json:"toNumber"`
+	Subject        string `json:"subject"`
+	Body           string `json:"body"`
+	PlainBody      string `json:"plainBody"`
+	EnableTracking bool   `json:"enableTracking"`
 }
 
 // NotificationService is the interface that must be implemented by any

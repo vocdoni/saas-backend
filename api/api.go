@@ -15,6 +15,7 @@ import (
 	"github.com/vocdoni/saas-backend/objectstorage"
 	"github.com/vocdoni/saas-backend/stripe"
 	"github.com/vocdoni/saas-backend/subscriptions"
+	"github.com/vocdoni/saas-backend/twofactor"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 )
@@ -45,6 +46,7 @@ type APIConfig struct {
 	Subscriptions *subscriptions.Subscriptions
 	// Object storage
 	ObjectStorage *objectstorage.ObjectStorageClient
+	Twofactor     *twofactor.Twofactor
 }
 
 // API type represents the API HTTP server with JWT authentication capabilities.
@@ -65,6 +67,7 @@ type API struct {
 	stripe          *stripe.StripeClient
 	subscriptions   *subscriptions.Subscriptions
 	objectStorage   *objectstorage.ObjectStorageClient
+	twofactor       *twofactor.Twofactor
 }
 
 // New creates a new API HTTP server. It does not start the server. Use Start() for that.
@@ -88,6 +91,7 @@ func New(conf *APIConfig) *API {
 		stripe:          conf.StripeClient,
 		subscriptions:   conf.Subscriptions,
 		objectStorage:   conf.ObjectStorage,
+		twofactor:       conf.Twofactor,
 	}
 }
 
