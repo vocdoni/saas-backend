@@ -1,6 +1,7 @@
 package db
 
 import (
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -28,7 +29,7 @@ type UserVerification struct {
 
 func (u *User) HasRoleFor(address string, role UserRole) bool {
 	for _, org := range u.Organizations {
-		if util.TrimHex(org.Address) == util.TrimHex(address) &&
+		if util.TrimHex(strings.ToLower(org.Address)) == util.TrimHex(strings.ToLower(address)) &&
 			// Check if the role is "any: or if the role matches the organization role
 			(string(role) == string(AnyRole) || string(org.Role) == string(role)) {
 			return true
