@@ -5,14 +5,13 @@ import (
 	"time"
 
 	"github.com/enriquebris/goconcurrentqueue"
-	"github.com/nyaruka/phonenumbers"
 	"go.vocdoni.io/dvote/log"
 )
 
 type challengeData struct {
 	userID     HexBytes
 	electionID HexBytes
-	phone      *phonenumbers.PhoneNumber
+	contact    string
 	challenge  string
 	startTime  time.Time
 	retries    int
@@ -20,7 +19,7 @@ type challengeData struct {
 }
 
 func (c challengeData) String() string {
-	return fmt.Sprintf("%d[%s]", c.phone.GetNationalNumber(), c.challenge)
+	return fmt.Sprintf("%s[%s]", c.contact, c.challenge)
 }
 
 type Queue struct {
@@ -31,7 +30,7 @@ type Queue struct {
 	response      chan (challengeData)
 }
 
-func newSmsQueue(ttl, throttle time.Duration, sChFns []SendChallengeFunc) *Queue {
+func newQueue(ttl, throttle time.Duration, sChFns []SendChallengeFunc) *Queue {
 	return &Queue{
 		queue:         goconcurrentqueue.NewFIFO(),
 		response:      make(chan challengeData, 1),
@@ -41,11 +40,11 @@ func newSmsQueue(ttl, throttle time.Duration, sChFns []SendChallengeFunc) *Queue
 	}
 }
 
-func (sq *Queue) add(userID, electionID HexBytes, phone *phonenumbers.PhoneNumber, challenge string) error {
+func (sq *Queue) add(userID, electionID HexBytes, contact string, challenge string) error {
 	c := challengeData{
 		userID:     userID,
 		electionID: electionID,
-		phone:      phone,
+		contact:    contact,
 		challenge:  challenge,
 		startTime:  time.Now(),
 		retries:    0,
@@ -66,11 +65,11 @@ func (sq *Queue) run() {
 		// if multiple providers are defined, use them in round-robin
 		// (try #0 will use first provider, retry #1 second provider, retry #2 first provider again)
 		sendChallenge := sq.sendChallenge[challenge.retries%2]
-		if err := sendChallenge(challenge.phone, challenge.challenge); err != nil {
+		if err := sendChallenge(challenge.contact, challenge.challenge); err != nil {
 			// Fail
-			log.Warnf("%s: failed to send sms: %v", challenge, err)
+			log.Warnf("%s: failed to send notification: %v", challenge, err)
 			if err := sq.reenqueue(challenge); err != nil {
-				log.Warnf("%s: removed from sms queue: %v", challenge, err)
+				log.Warnf("%s: removed from notification queue: %v", challenge, err)
 				// Send a signal (channel) to let the caller know we are removing this element
 				challenge.success = false
 				sq.response <- challenge
