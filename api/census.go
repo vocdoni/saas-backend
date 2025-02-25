@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/db"
+	"go.vocdoni.io/dvote/log"
 )
 
 // createCensusHandler creates a new census for an organization.
@@ -37,13 +38,12 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 		OrgAddress: censusInfo.OrgAddress,
 		CreatedAt:  time.Now(),
 	}
-	censusId, err := a.db.SetCensus(census)
+	censusID, err := a.db.SetCensus(census)
 	if err != nil {
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-
-	httpWriteJSON(w, censusId)
+	httpWriteJSON(w, CreateCensusResponse{ID: censusID})
 }
 
 // censusInfoHandler retrieves census information by ID.
@@ -73,17 +73,6 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	participantsInfo := &AddParticipantsRequest{}
-	if err := json.NewDecoder(r.Body).Decode(&participantsInfo); err != nil {
-		ErrMalformedBody.Withf("missing participants").Write(w)
-		return
-	}
-
-	if len(participantsInfo.Participants) == 0 {
-		httpWriteJSON(w, &AddParticipantsResponse{ParticipantsNo: 0})
-		return
-	}
-
 	// get the user from the request context
 	user, ok := userFromContext(r.Context())
 	if !ok {
@@ -105,6 +94,18 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 	// check the user has the necessary permissions
 	if !user.HasRoleFor(census.OrgAddress, db.ManagerRole) && !user.HasRoleFor(census.OrgAddress, db.AdminRole) {
 		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		return
+	}
+
+	participantsInfo := &AddParticipantsRequest{}
+	if err := json.NewDecoder(r.Body).Decode(participantsInfo); err != nil {
+		log.Error(err)
+		ErrMalformedBody.Withf("missing participants").Write(w)
+		return
+	}
+
+	if len(participantsInfo.Participants) == 0 {
+		httpWriteJSON(w, &AddParticipantsResponse{ParticipantsNo: 0})
 		return
 	}
 

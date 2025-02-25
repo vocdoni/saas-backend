@@ -211,6 +211,12 @@ type CreateCensusRequest struct {
 	OrgAddress string        `json:"orgAddress"`
 }
 
+// CreateCensusResponse defines the response for successful census creation
+// and includes the census ID of the new census
+type CreateCensusResponse struct {
+	ID string `json:"censuID"`
+}
+
 // AddParticipantsRequest defines the payload for adding participants to a census
 type AddParticipantsRequest struct {
 	Participants []db.OrgParticipant `json:"participants"`

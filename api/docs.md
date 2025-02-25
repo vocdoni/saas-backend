@@ -1122,7 +1122,9 @@ Accepting files uploaded by forms as such:
 * **Response**
 Returns the census ID
 ```json
-"census_id_string"
+{
+  "censusID": "67bdfcfaeeb24a44660ec461"
+}
 ```
 
 * **Errors**
@@ -1168,7 +1170,6 @@ Returns the census ID
 {
   "participants": [
     {
-      "id": "participant_id",
       "email": "participant@example.com",
       "phone": "+1234567890"
     }
