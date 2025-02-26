@@ -214,7 +214,7 @@ type CreateCensusRequest struct {
 // CreateCensusResponse defines the response for successful census creation
 // and includes the census ID of the new census
 type CreateCensusResponse struct {
-	ID string `json:"censuID"`
+	ID string `json:"censusID"`
 }
 
 // AddParticipantsRequest defines the payload for adding participants to a census
