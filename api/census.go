@@ -60,7 +60,6 @@ func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-
 	httpWriteJSON(w, census)
 }
 
@@ -72,14 +71,12 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 		ErrMalformedURLParam.Withf("missing census ID").Write(w)
 		return
 	}
-
 	// get the user from the request context
 	user, ok := userFromContext(r.Context())
 	if !ok {
 		ErrUnauthorized.Write(w)
 		return
 	}
-
 	// retrieve census
 	census, err := a.db.Census(censusID)
 	if err != nil {
@@ -90,34 +87,31 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-
 	// check the user has the necessary permissions
 	if !user.HasRoleFor(census.OrgAddress, db.ManagerRole) && !user.HasRoleFor(census.OrgAddress, db.AdminRole) {
 		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
-
-	participantsInfo := &AddParticipantsRequest{}
-	if err := json.NewDecoder(r.Body).Decode(participantsInfo); err != nil {
+	// decode the participants from the request body
+	participants := &AddParticipantsRequest{}
+	if err := json.NewDecoder(r.Body).Decode(participants); err != nil {
 		log.Error(err)
 		ErrMalformedBody.Withf("missing participants").Write(w)
 		return
 	}
-
-	if len(participantsInfo.Participants) == 0 {
+	// check if there are participants to add
+	if len(participants.Participants) == 0 {
 		httpWriteJSON(w, &AddParticipantsResponse{ParticipantsNo: 0})
 		return
 	}
-
-	// add the org participants where necessary
-	no, err := a.db.SetBulkCensusMembership(passwordSalt, censusID, participantsInfo.Participants)
+	// add the org participants to the census in the database
+	no, err := a.db.SetBulkCensusMembership(passwordSalt, censusID, participants.dbOrgParticipants(census.OrgAddress))
 	if err != nil {
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	// attach them to the census
-
-	if len(participantsInfo.Participants) != int(no.UpsertedCount) {
+	// check if all participants were added
+	if len(participants.Participants) != int(no.UpsertedCount) {
 		ErrInternalStorageError.Withf("not all participants were added").Write(w)
 		return
 	}

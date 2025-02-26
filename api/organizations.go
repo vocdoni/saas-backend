@@ -535,9 +535,9 @@ func (a *API) getOrganizationSubscriptionHandler(w http.ResponseWriter, r *http.
 		return
 	}
 	info := &OrganizationSubscriptionInfo{
-		SubcriptionDetails: &org.Subscription,
-		Usage:              &org.Counters,
-		Plan:               plan,
+		SubcriptionDetails: subscriptionDetailsFromDB(&org.Subscription),
+		Usage:              subscriptionUsageFromDB(&org.Counters),
+		Plan:               subscriptionPlanFromDB(plan),
 	}
 	httpWriteJSON(w, info)
 }
