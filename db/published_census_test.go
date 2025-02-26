@@ -10,7 +10,7 @@ import (
 
 var (
 	testURI  = "test_uri"
-	testRoot = []byte("test_root")
+	testRoot = "test_root"
 )
 
 func setupTestOrganization(c *qt.C) {
@@ -164,7 +164,7 @@ func TestDelPublishedCensus(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 
 	// test deleting with invalid parameters
-	err = db.DelPublishedCensus(nil, testURI)
+	err = db.DelPublishedCensus("", testURI)
 	c.Assert(err, qt.Equals, ErrInvalidData)
 
 	err = db.DelPublishedCensus(testRoot, "")
@@ -189,7 +189,7 @@ func TestPublishedCensusInvalid(t *testing.T) {
 	defer resetDB(c)
 
 	// test get with invalid parameters
-	retrieved, err := db.PublishedCensus(nil, testURI)
+	retrieved, err := db.PublishedCensus("nil", testURI)
 	c.Assert(retrieved, qt.IsNil)
 	c.Assert(err, qt.Equals, ErrInvalidData)
 

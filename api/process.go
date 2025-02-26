@@ -33,7 +33,7 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pubCensus, err := a.db.PublishedCensus([]byte(processInfo.PublishedCensusRoot), processInfo.PublishedCensusURI)
+	pubCensus, err := a.db.PublishedCensus(util.TrimHex(processInfo.PublishedCensusRoot), processInfo.PublishedCensusURI)
 	if err != nil {
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return

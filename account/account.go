@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/vocdoni/saas-backend/internal"
 	vocdoniapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/crypto/ethereum"
@@ -20,7 +21,7 @@ type Account struct {
 	client *apiclient.HTTPclient
 	signer *ethereum.SignKeys
 
-	PubKey            []byte
+	PubKey            internal.HexBytes
 	TxCosts           map[models.TxType]uint64
 	ElectionPriceCalc *electionprice.Calculator
 }
@@ -67,7 +68,7 @@ func New(privateKey string, apiEndpoint string) (*Account, error) {
 	return &Account{
 		client:            apiClient,
 		signer:            &signer,
-		PubKey:            signer.PublicKey(),
+		PubKey:            internal.HexBytes(signer.PublicKey()),
 		TxCosts:           txCosts,
 		ElectionPriceCalc: electionPriceCalc,
 	}, nil

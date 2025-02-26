@@ -10,7 +10,7 @@ import (
 
 var (
 	testProcessID       = []byte("test_process_id")
-	testProcessRoot     = []byte("test_process_root")
+	testProcessRoot     = "test_process_root"
 	testProcessURI      = "test_process_uri"
 	testProcessMetadata = []byte("test_metadata")
 )
@@ -106,7 +106,7 @@ func TestSetAndGetProcess(t *testing.T) {
 	// Test with non-existent published census (should create it)
 	newPublishedCensus := PublishedCensus{
 		URI:  "new-uri",
-		Root: []byte("new-root"),
+		Root: "new-root",
 		Census: Census{
 			ID:         publishedCensus.Census.ID,
 			OrgAddress: testOrgAddress,
@@ -122,7 +122,7 @@ func TestSetAndGetProcess(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 
 	// Verify the published census was created
-	createdPublishedCensus, err := db.PublishedCensus([]byte("new-root"), "new-uri")
+	createdPublishedCensus, err := db.PublishedCensus("new-root", "new-uri")
 	c.Assert(err, qt.IsNil)
 	c.Assert(createdPublishedCensus, qt.Not(qt.IsNil))
 }

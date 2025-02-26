@@ -26,6 +26,7 @@ func (ms *MongoStorage) SetPublishedCensus(publishedCensus *PublishedCensus) err
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	// TODO do no recreate the publishedCensus if it already exists
 	publishedCensus.CreatedAt = time.Now()
 	if _, err := ms.publishedCensuses.InsertOne(ctx, publishedCensus); err != nil {
 		return fmt.Errorf("failed to create publishedCensus: %w", err)
@@ -35,7 +36,7 @@ func (ms *MongoStorage) SetPublishedCensus(publishedCensus *PublishedCensus) err
 }
 
 // DeletePublishedCensus removes a publishedCensus and all its participants
-func (ms *MongoStorage) DelPublishedCensus(root []byte, uri string) error {
+func (ms *MongoStorage) DelPublishedCensus(root, uri string) error {
 	if len(uri) == 0 || len(root) == 0 {
 		return ErrInvalidData
 	}
@@ -53,7 +54,7 @@ func (ms *MongoStorage) DelPublishedCensus(root []byte, uri string) error {
 }
 
 // PublishedCensus retrieves a publishedCensus from the DB based on it ID
-func (ms *MongoStorage) PublishedCensus(root []byte, uri string) (*PublishedCensus, error) {
+func (ms *MongoStorage) PublishedCensus(root, uri string) (*PublishedCensus, error) {
 	if len(uri) == 0 || len(root) == 0 {
 		return nil, ErrInvalidData
 	}

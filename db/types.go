@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.vocdoni.io/dvote/util"
 )
@@ -208,7 +209,7 @@ type CensusMembership struct {
 // The publishedCensus is tied to a Census
 type PublishedCensus struct {
 	URI       string    `json:"uri" bson:"uri"`
-	Root      []byte    `json:"root" bson:"root"`
+	Root      string    `json:"root" bson:"root"`
 	Census    Census    `json:"census" bson:"census"`
 	CreatedAt time.Time `json:"createdAt" bson:"createdAt"`
 }
@@ -217,10 +218,8 @@ type PublishedCensus struct {
 // A process is tied to an organization by the orgAddress
 // and to a publishedCensus
 type Process struct {
-	ID              []byte          `json:"id" bson:"_id"`
-	OrgAddress      string          `json:"orgAdress" bson:"orgAddress"`
-	PublishedCensus PublishedCensus `json:"publishedCensus" bson:"publishedCensus"`
-	Metadata        []byte          `json:"metadata" bson:"metadata"`
+	ID              internal.HexBytes `json:"id" bson:"_id"`
+	OrgAddress      string            `json:"orgAdress" bson:"orgAddress"`
+	PublishedCensus PublishedCensus   `json:"publishedCensus" bson:"publishedCensus"`
+	Metadata        []byte            `json:"metadata,omitempty"  bson:"metadata"`
 }
-
-// Utilizar non-salted key
