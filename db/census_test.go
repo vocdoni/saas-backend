@@ -156,3 +156,65 @@ func TestCensus(t *testing.T) {
 	_, err = db.Census(nonExistentID)
 	c.Assert(err, qt.Not(qt.IsNil))
 }
+
+func TestCensusesByOrg(t *testing.T) {
+	c := qt.New(t)
+	defer resetDB(c)
+	// try to get censuses for non-existent organization
+	_, err := db.CensusesByOrg(testOrgAddress)
+	c.Assert(err, qt.Equals, ErrInvalidData)
+	// create test organization
+	org := &Organization{
+		Address:   testOrgAddress,
+		Active:    true,
+		CreatedAt: time.Now(),
+	}
+	err = db.SetOrganization(org)
+	c.Assert(err, qt.IsNil)
+	// get censuses for the organization
+	noCensuses, err := db.CensusesByOrg(testOrgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(noCensuses, qt.HasLen, 0)
+	// create a census for the organization
+	firstCensus := &Census{
+		OrgAddress: testOrgAddress,
+		Type:       CensusTypeMail,
+	}
+	firstCensusID, err := db.SetCensus(firstCensus)
+	c.Assert(err, qt.IsNil)
+	// get censuses for the organization
+	censuses, err := db.CensusesByOrg(testOrgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(censuses, qt.HasLen, 1)
+	c.Assert(censuses[0].ID.Hex(), qt.Equals, firstCensusID)
+	c.Assert(censuses[0].OrgAddress, qt.Equals, testOrgAddress)
+	c.Assert(censuses[0].Type, qt.Equals, CensusTypeMail)
+	// create another census for the organization
+	// create a census for the organization
+	secondCensus := &Census{
+		OrgAddress: testOrgAddress,
+		Type:       CensusTypeSMS,
+	}
+	secondCensusID, err := db.SetCensus(secondCensus)
+	c.Assert(err, qt.IsNil)
+	// get censuses for the organization
+	censuses, err = db.CensusesByOrg(testOrgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(censuses, qt.HasLen, 2)
+	c.Assert(censuses[0].ID.Hex(), qt.Equals, firstCensusID)
+	c.Assert(censuses[0].OrgAddress, qt.Equals, testOrgAddress)
+	c.Assert(censuses[0].Type, qt.Equals, CensusTypeMail)
+	c.Assert(censuses[1].ID.Hex(), qt.Equals, secondCensusID)
+	c.Assert(censuses[1].OrgAddress, qt.Equals, testOrgAddress)
+	c.Assert(censuses[1].Type, qt.Equals, CensusTypeSMS)
+	// remove the first census
+	err = db.DelCensus(firstCensusID)
+	c.Assert(err, qt.IsNil)
+	// get censuses for the organization
+	censuses, err = db.CensusesByOrg(testOrgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(censuses, qt.HasLen, 1)
+	c.Assert(censuses[0].ID.Hex(), qt.Equals, secondCensusID)
+	c.Assert(censuses[0].OrgAddress, qt.Equals, testOrgAddress)
+	c.Assert(censuses[0].Type, qt.Equals, CensusTypeSMS)
+}

@@ -13,7 +13,6 @@ import (
 
 	"github.com/vocdoni/saas-backend/api"
 	"github.com/vocdoni/saas-backend/db"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // Config holds the script configuration
@@ -88,17 +87,14 @@ func (c *Client) makeRequest(method, path string, body interface{}, target inter
 	return nil
 }
 
-func generateParticipants(n int) []db.OrgParticipant {
-	participants := make([]db.OrgParticipant, n)
-	for i := 0; i < n; i++ {
-		participants[i] = db.OrgParticipant{
-			ID:            primitive.NewObjectID(),
+func generateParticipants(n int) []api.OrgParticipant {
+	participants := make([]api.OrgParticipant, n)
+	for i := range n {
+		participants[i] = api.OrgParticipant{
 			Email:         fmt.Sprintf("user%d@example.com", i+1),
 			Phone:         fmt.Sprintf("+%010d", rand.Int63n(10000000000)),
 			ParticipantNo: fmt.Sprintf("participant_%d", i+1),
 			Name:          fmt.Sprintf("User %d", i+1),
-			CreatedAt:     time.Now(),
-			UpdatedAt:     time.Now(),
 		}
 	}
 	return participants
@@ -156,7 +152,7 @@ func main() {
 	// 2. Create census
 	fmt.Println("\n2. Creating census...")
 	var censusID string
-	err = client.makeRequest("POST", "/census", api.CreateCensusRequest{
+	err = client.makeRequest("POST", "/census", api.OrganizationCensus{
 		Type:       db.CensusTypeSMSorMail,
 		OrgAddress: config.OrgAddress,
 	}, &censusID)

@@ -535,9 +535,48 @@ func (a *API) getOrganizationSubscriptionHandler(w http.ResponseWriter, r *http.
 		return
 	}
 	info := &OrganizationSubscriptionInfo{
-		SubcriptionDetails: &org.Subscription,
-		Usage:              &org.Counters,
-		Plan:               plan,
+		SubcriptionDetails: subscriptionDetailsFromDB(&org.Subscription),
+		Usage:              subscriptionUsageFromDB(&org.Counters),
+		Plan:               subscriptionPlanFromDB(plan),
 	}
 	httpWriteJSON(w, info)
+}
+
+// organizationCensusesHandler handles the request to get censuses of an
+// organization.
+func (a *API) organizationCensusesHandler(w http.ResponseWriter, r *http.Request) {
+	// get the user from the request context
+	user, ok := userFromContext(r.Context())
+	if !ok {
+		ErrUnauthorized.Write(w)
+		return
+	}
+	// get the organization info from the request context
+	org, _, ok := a.organizationFromRequest(r)
+	if !ok {
+		ErrNoOrganizationProvided.Write(w)
+		return
+	}
+	if !user.HasRoleFor(org.Address, db.AdminRole) {
+		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		return
+	}
+	// get the censuses from the database
+	censuses, err := a.db.CensusesByOrg(org.Address)
+	if err != nil {
+		if err == db.ErrNotFound {
+			ErrOrganizationNotFound.Write(w)
+			return
+		}
+		ErrGenericInternalServerError.Withf("could not get censuses: %v", err).Write(w)
+		return
+	}
+	// decode the censuses from the database
+	result := OrganizationCensuses{
+		Censuses: []OrganizationCensus{},
+	}
+	for _, census := range censuses {
+		result.Censuses = append(result.Censuses, organizationCensusFromDB(census))
+	}
+	httpWriteJSON(w, result)
 }
