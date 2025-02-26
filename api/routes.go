@@ -58,6 +58,8 @@ const (
 	organizationTypesEndpoint = "/organizations/types"
 	// GET /organizations/{address}/subscription to get the organization subscription
 	organizationSubscriptionEndpoint = "/organizations/{address}/subscription"
+	// GET /organizations/{address}/censuses to get the organization censuses
+	organizationCensusesEndpoint = "/organizations/{address}/censuses"
 
 	// subscription routes
 	// GET /subscriptions to get the subscriptions of an organization

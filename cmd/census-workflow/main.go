@@ -152,7 +152,7 @@ func main() {
 	// 2. Create census
 	fmt.Println("\n2. Creating census...")
 	var censusID string
-	err = client.makeRequest("POST", "/census", api.CreateCensusRequest{
+	err = client.makeRequest("POST", "/census", api.OrganizationCensus{
 		Type:       db.CensusTypeSMSorMail,
 		OrgAddress: config.OrgAddress,
 	}, &censusID)

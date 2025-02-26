@@ -8,6 +8,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.vocdoni.io/dvote/log"
 )
 
 // CreateCensus creates a new census for an organization
@@ -93,4 +94,37 @@ func (ms *MongoStorage) Census(censusID string) (*Census, error) {
 	}
 
 	return census, nil
+}
+
+// CensusesByOrg retrieves all the censuses for an organization based on its
+// address. It checks that the organization exists and returns an error if it
+// doesn't. If the organization exists, it returns the censuses.
+func (ms *MongoStorage) CensusesByOrg(orgAddress string) ([]*Census, error) {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if _, err := ms.organization(ctx, orgAddress); err != nil {
+		if err == ErrNotFound {
+			return nil, ErrInvalidData
+		}
+		return nil, fmt.Errorf("organization not found: %w", err)
+	}
+	// find the censuses in the database
+	censuses := []*Census{}
+	cursor, err := ms.censuses.Find(ctx, bson.M{"orgAddress": orgAddress})
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("error closing cursor", "error", err)
+		}
+	}()
+	if err := cursor.All(ctx, &censuses); err != nil {
+		return nil, err
+	}
+	return censuses, nil
 }

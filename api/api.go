@@ -161,6 +161,9 @@ func (a *API) initRouter() http.Handler {
 		// invite a new admin member to the organization
 		log.Infow("new route", "method", "POST", "path", organizationAddMemberEndpoint)
 		r.Post(organizationAddMemberEndpoint, a.inviteOrganizationMemberHandler)
+		// get organization censuses
+		log.Infow("new route", "method", "GET", "path", organizationCensusesEndpoint)
+		r.Get(organizationCensusesEndpoint, a.organizationCensusesHandler)
 		// pending organization invitations
 		log.Infow("new route", "method", "GET", "path", organizationPendingMembersEndpoint)
 		r.Get(organizationPendingMembersEndpoint, a.pendingOrganizationMembersHandler)

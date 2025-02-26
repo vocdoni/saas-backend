@@ -341,16 +341,29 @@ type ParticipantNotification struct {
 	SentAt       time.Time                  `json:"sentAt"`
 }
 
-// CreateCensusRequest defines the payload for creating a new census
-type CreateCensusRequest struct {
+// OrganizationCensus is the struct that represents a census of an organization
+// in the API. It is the mirror struct of db.Census.
+type OrganizationCensus struct {
+	ID         string        `json:"censuID"`
 	Type       db.CensusType `json:"type"`
 	OrgAddress string        `json:"orgAddress"`
 }
 
-// CreateCensusResponse defines the response for successful census creation
-// and includes the census ID of the new census
-type CreateCensusResponse struct {
-	ID string `json:"censuID"`
+// OrganizationCensuses is the struct to wrap a list of censuses of an
+// organization in the API.
+type OrganizationCensuses struct {
+	Censuses []OrganizationCensus `json:"censuses"`
+}
+
+func organizationCensusFromDB(census *db.Census) OrganizationCensus {
+	if census == nil {
+		return OrganizationCensus{}
+	}
+	return OrganizationCensus{
+		ID:         census.ID.Hex(),
+		Type:       census.Type,
+		OrgAddress: census.OrgAddress,
+	}
 }
 
 // AddParticipantsRequest defines the payload for adding participants to a census

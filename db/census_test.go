@@ -156,3 +156,8 @@ func TestCensus(t *testing.T) {
 	_, err = db.Census(nonExistentID)
 	c.Assert(err, qt.Not(qt.IsNil))
 }
+
+func TestCensusesByOrg(t *testing.T) {
+	t.Skip("Not implemented")
+	// TODO
+}

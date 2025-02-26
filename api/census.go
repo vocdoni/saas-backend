@@ -14,7 +14,7 @@ import (
 // Requires Manager/Admin role. Returns census ID on success.
 func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse request
-	censusInfo := &CreateCensusRequest{}
+	censusInfo := &OrganizationCensus{}
 	if err := json.NewDecoder(r.Body).Decode(&censusInfo); err != nil {
 		ErrMalformedBody.Write(w)
 		return
@@ -43,7 +43,11 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	httpWriteJSON(w, CreateCensusResponse{ID: censusID})
+	httpWriteJSON(w, OrganizationCensus{
+		ID:         censusID,
+		Type:       census.Type,
+		OrgAddress: census.OrgAddress,
+	})
 }
 
 // censusInfoHandler retrieves census information by ID.
@@ -54,13 +58,12 @@ func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 		ErrMalformedURLParam.Withf("missing census ID").Write(w)
 		return
 	}
-
 	census, err := a.db.Census(censusID)
 	if err != nil {
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	httpWriteJSON(w, census)
+	httpWriteJSON(w, organizationCensusFromDB(census))
 }
 
 // addParticipantsHandler adds multiple participants to a census.
