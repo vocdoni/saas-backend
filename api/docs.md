@@ -30,6 +30,7 @@
   - [⏳ List pending invitations](#-list-pending-invitations)
   - [🤝 Accept organization invitation](#-accept-organization-invitation)
   - [💸 Organization Subscription Info](#-organization-subscription-info)
+  - [📊 Organization Censuses](#-organization-censuses)
   - [🤠 Available organization members roles](#-available-organization-members-roles)
   - [🏛️ Available organization types](#-available-organization-types)
 - [🏦 Plans](#-plans)
@@ -44,7 +45,7 @@
   - [ 📄 Get object](#-get-object)
 - [📊 Census](#-census)
   - [📝 Create Census](#-create-census)
-  - [ℹ️ Get Census Info](#-get-census-info)
+  - [ℹ️ Get Census Info](#ℹ%EF%B8%8F-get-census-info)
   - [👥 Add Participants](#-add-participants)
   - [📢 Publish Census](#-publish-census)
   - [📋 Get Published Census Info](#-get-published-census-info)
@@ -793,6 +794,36 @@ Only the following parameters can be changed. Every parameter is optional.
 }
 ```
 This request can be made only by organization admins.
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40009` | `organization not found` |
+| `400` | `40011` | `no organization provided` |
+| `500` | `50002` | `internal server error` |
+
+### 📊 Organization censuses
+* **Path** `/organizations/{address}/censuses`
+* **Method** `GET`
+* **Response**
+```json
+{
+  "censuses": [
+    {
+      "censusID": "<censusID>",
+      "type": "<censusType>",
+      "orgAddress": "<orgAddress>"
+    },
+    {
+      "censusID": "<censusID>",
+      "type": "<censusType>",
+      "orgAddress": "<orgAddress>"
+    }
+  ]
+}
+```
 
 * **Errors**
 

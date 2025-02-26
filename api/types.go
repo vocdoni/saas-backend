@@ -344,7 +344,7 @@ type ParticipantNotification struct {
 // OrganizationCensus is the struct that represents a census of an organization
 // in the API. It is the mirror struct of db.Census.
 type OrganizationCensus struct {
-	ID         string        `json:"censuID"`
+	ID         string        `json:"censusID"`
 	Type       db.CensusType `json:"type"`
 	OrgAddress string        `json:"orgAddress"`
 }
