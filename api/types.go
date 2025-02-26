@@ -349,12 +349,6 @@ type OrganizationCensus struct {
 	OrgAddress string        `json:"orgAddress"`
 }
 
-// OrganizationCensuses is the struct to wrap a list of censuses of an
-// organization in the API.
-type OrganizationCensuses struct {
-	Censuses []OrganizationCensus `json:"censuses"`
-}
-
 func organizationCensusFromDB(census *db.Census) OrganizationCensus {
 	if census == nil {
 		return OrganizationCensus{}
@@ -364,6 +358,12 @@ func organizationCensusFromDB(census *db.Census) OrganizationCensus {
 		Type:       census.Type,
 		OrgAddress: census.OrgAddress,
 	}
+}
+
+// OrganizationCensuses is the struct to wrap a list of censuses of an
+// organization in the API.
+type OrganizationCensuses struct {
+	Censuses []OrganizationCensus `json:"censuses"`
 }
 
 // AddParticipantsRequest defines the payload for adding participants to a census

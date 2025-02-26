@@ -154,9 +154,8 @@ func (ms *MongoStorage) SetBulkCensusMembership(
 		return nil, fmt.Errorf("failed to get published census: %w", err)
 	}
 
-	org := ms.organizations.FindOne(ctx, bson.M{"_id": census.OrgAddress})
-	if org.Err() != nil {
-		return nil, ErrNotFound
+	if _, _, err := ms.Organization(census.OrgAddress, false); err != nil {
+		return nil, err
 	}
 
 	time := time.Now()
