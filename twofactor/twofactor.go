@@ -3,7 +3,8 @@ package twofactor
 import (
 	"context"
 	"fmt"
-	"path/filepath"
+	"os"
+	"path"
 	"strconv"
 	"time"
 
@@ -111,8 +112,18 @@ func (tf *Twofactor) New(conf *TwofactorConfig) (*Twofactor, error) {
 		return nil, err
 	}
 
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("cannot get user home directory: %v", err)
+	}
+	dataDir := path.Join(home, ".saas-backend")
+	err = os.MkdirAll(dataDir, os.ModePerm)
+	if err != nil {
+		panic(fmt.Sprintf("cannot create data directory: %v", err))
+	}
+	tf.stg = new(JSONstorage)
 	if err := tf.stg.Init(
-		filepath.Join(".", "storage"),
+		path.Join(dataDir, "storage"),
 		maxAttempts,
 		coolDownTime,
 	); err != nil {
