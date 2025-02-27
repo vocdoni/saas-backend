@@ -246,3 +246,25 @@ func (ms *MongoStorage) OrgParticipantsPaginated(orgAddress string, limit, offse
 	}
 	return participants, nil
 }
+
+// CountOrgParticipants returns the number of participants of an organization
+// based on the orgAddress. It also checks that the organization exists.
+func (ms *MongoStorage) CountOrgParticipants(orgAddress string) (int64, error) {
+	// check that the org exists
+	if _, _, err := ms.Organization(orgAddress, false); err != nil {
+		if err == ErrNotFound {
+			return 0, ErrInvalidData
+		}
+		return 0, err
+	}
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// define the filter to get the participants of the organization
+	filter := bson.M{"orgAddress": orgAddress}
+	// lock the database
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	// count the participants of the organization
+	return ms.orgParticipants.CountDocuments(ctx, filter)
+}
