@@ -2,12 +2,19 @@ package api
 
 import (
 	"bytes"
+	"crypto"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
+	"github.com/vocdoni/saas-backend/notifications"
+	"github.com/vocdoni/saas-backend/twofactor"
 	"go.vocdoni.io/dvote/util"
 )
 
@@ -19,6 +26,7 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 		ErrMalformedURLParam.Withf("missing census ID").Write(w)
 		return
 	}
+	processID = util.TrimHex(processID)
 
 	processInfo := &CreateProcessRequest{}
 	if err := json.NewDecoder(r.Body).Decode(&processInfo); err != nil {
@@ -56,8 +64,25 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
+	orgParticipants, err := a.db.OrgParticipantsMemberships(pubCensus.Census.OrgAddress, pubCensus.Census.ID.Hex(), processID)
+	if err != nil {
+		ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	type participant struct {
+		ParticipantNo string
+		Email         string
+		Phone         string
+		ElectionID    string
+	}
+	if pubCensus.Census.Type == db.CensusTypeSMSorMail || pubCensus.Census.Type == db.CensusTypeMail || pubCensus.Census.Type == db.CensusTypeSMS {
+		if err := a.twofactor.AddProcess(process.ID, pubCensus.Census.Type, orgParticipants); err != nil {
+			ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+	}
 
-	w.WriteHeader(http.StatusCreated)
+	httpWriteOK(w)
 }
 
 // processInfoHandler retrieves voting process information by ID.
@@ -78,118 +103,156 @@ func (a *API) processInfoHandler(w http.ResponseWriter, r *http.Request) {
 	httpWriteJSON(w, process)
 }
 
-// processAuthHandler validates participant authentication for a voting process.
-// Supports email, phone, or password authentication.
-func (a *API) processAuthHandler(w http.ResponseWriter, r *http.Request) {
-	processID := chi.URLParam(r, "processId")
-	if len(processID) == 0 {
+type AuthRequest struct {
+	AuthToken *uuid.UUID `json:"authToken,omitempty"`
+	AuthData  []string   `json:"authData,omitempty"` // reserved for the auth handler
+}
+
+type SignRequest struct {
+	TokenR  []byte `json:"tokenR,omitempty"`
+	Address string `json:"address,omitempty"`
+	Payload []byte `json:"payload,omitempty"`
+}
+
+type twofactorResponse struct {
+	AuthToken *uuid.UUID `json:"authToken,omitempty"`
+	TokenR    []byte     `json:"tokenR,omitempty"`
+	Signature []byte     `json:"signature,omitempty"`
+}
+
+// getSubscriptionsHandler handles the request to get the subscriptions of an organization.
+// It returns the list of subscriptions with their information.
+func (a *API) twofactorAuthHandler(w http.ResponseWriter, r *http.Request) {
+	urlProcessId := chi.URLParam(r, "processId")
+	if len(urlProcessId) == 0 {
 		ErrMalformedURLParam.Withf("missing process ID").Write(w)
 		return
 	}
 
-	var req InitiateAuthRequest
+	stepString := chi.URLParam(r, "step")
+	step, err := strconv.Atoi(stepString)
+	if err != nil || (step != 0 && step != 1) {
+		ErrMalformedURLParam.Withf("wrong step ID").Write(w)
+		return
+	}
+	processId := []byte(util.TrimHex(urlProcessId))
+	switch step {
+	case 0:
+		authToken, err := a.initiateAuthRequest(r, processId)
+		if err != nil {
+			ErrUnauthorized.WithErr(err).Write(w)
+			return
+		}
+		httpWriteJSON(w, &twofactorResponse{AuthToken: authToken})
+		return
+	case 1:
+		var req AuthRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			ErrMalformedBody.Write(w)
+			return
+		}
+		authResp := a.twofactor.Auth(processId, req.AuthToken, req.AuthData)
+		if !authResp.Success {
+			ErrUnauthorized.WithErr(errors.New(authResp.Error)).Write(w)
+			return
+		}
+		httpWriteOK(w)
+		return
+	}
+}
+
+// getSubscriptionsHandler handles the request to get the subscriptions of an organization.
+// It returns the list of subscriptions with their information.
+func (a *API) twofactorSignHandler(w http.ResponseWriter, r *http.Request) {
+	urlProcessId := chi.URLParam(r, "processId")
+	if len(urlProcessId) == 0 {
+		ErrMalformedURLParam.Withf("missing process ID").Write(w)
+		return
+	}
+	processId := []byte(util.TrimHex(urlProcessId))
+
+	var req SignRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		ErrMalformedBody.Write(w)
 		return
 	}
-	if len(req.ParticipantNo) == 0 {
-		ErrMalformedBody.Withf("missing participant number").Write(w)
+	signResp := a.twofactor.Sign(processId, req.Payload, req.TokenR, req.Address)
+	if !signResp.Success {
+		ErrUnauthorized.WithErr(errors.New(signResp.Error)).Write(w)
 		return
+	}
+	httpWriteJSON(w, &twofactorResponse{Signature: signResp.Signature})
+}
+
+func (a *API) initiateAuthRequest(r *http.Request, processId []byte) (*uuid.UUID, error) {
+	var req InitiateAuthRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return &uuid.Nil, ErrMalformedBody
+	}
+	if len(req.ParticipantNo) == 0 {
+		return &uuid.Nil, ErrMalformedBody.Withf("missing participant number")
 	}
 
 	// retrieve process info
-	process, err := a.db.Process([]byte(util.TrimHex(processID)))
+	process, err := a.db.Process(processId)
 	if err != nil {
-		ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
+		return &uuid.Nil, ErrGenericInternalServerError.WithErr(err)
 	}
 	if process.PublishedCensus.Census.OrgAddress != process.OrgAddress {
-		ErrInvalidOrganizationData.Write(w)
-		return
+		return &uuid.Nil, ErrInvalidOrganizationData
+	}
+
+	// TODO enable only password censuses
+	censusType := process.PublishedCensus.Census.Type
+	if censusType != db.CensusTypeMail && censusType != db.CensusTypeSMSorMail &&
+		censusType != db.CensusTypeSMS {
+		return &uuid.Nil, ErrInvalidOrganizationData.Withf("invalid census type")
 	}
 	// retrieve memership info
 	if _, err = a.db.CensusMembership(process.PublishedCensus.Census.ID.Hex(), req.ParticipantNo); err != nil {
-		ErrUnauthorized.Withf("participant not found in census").Write(w)
-		return
+		return &uuid.Nil, ErrUnauthorized.Withf("participant not found in census")
 	}
 	// retrieve participant info
 	participant, err := a.db.OrgParticipantByNo(process.OrgAddress, req.ParticipantNo)
 	if err != nil {
-		ErrUnauthorized.Withf("participant not found").Write(w)
-		return
+		return &uuid.Nil, ErrUnauthorized.Withf("participant not found")
 	}
 
-	// verify participant info
-	if req.Email != "" && !bytes.Equal(internal.HashOrgData(process.OrgAddress, req.Email), participant.HashedEmail) {
-		ErrUnauthorized.Withf("invalid user data").Write(w)
-		return
-	}
-	if req.Phone != "" && !bytes.Equal(internal.HashOrgData(process.OrgAddress, req.Phone), participant.HashedPhone) {
-		ErrUnauthorized.Withf("invalid user data").Write(w)
-		return
-	}
+	// first verify password
 	if req.Password != "" && !bytes.Equal(internal.HashPassword(passwordSalt, req.Password), participant.HashedPass) {
-		ErrUnauthorized.Withf("invalid user data").Write(w)
-		return
+		return &uuid.Nil, ErrUnauthorized.Withf("invalid user data")
 	}
 
-	httpWriteJSON(w, map[string]bool{"ok": true})
+	// create sha of participantNo
+	sha := crypto.SHA256.New()
+	sha.Write([]byte(participant.ParticipantNo))
+	participantNoHash := sha.Sum(nil)
+	var authResp twofactor.AuthResponse
+	if censusType == db.CensusTypeMail || censusType == db.CensusTypeSMSorMail {
+		if req.Email == "" {
+			return &uuid.Nil, ErrUnauthorized.Withf("missing email")
+		}
+		if !bytes.Equal(internal.HashOrgData(process.OrgAddress, req.Email), participant.HashedEmail) {
+			return &uuid.Nil, ErrUnauthorized.Withf("invalid user data")
+		}
+		authResp = a.twofactor.InitiateAuth(processId, participantNoHash, req.Email, notifications.Email)
+	} else if censusType == db.CensusTypeSMS || censusType == db.CensusTypeSMSorMail {
+		if req.Phone == "" {
+			return &uuid.Nil, ErrUnauthorized.Withf("missing phone")
+		}
+		if !bytes.Equal(internal.HashOrgData(process.OrgAddress, req.Phone), participant.HashedPhone) {
+			return &uuid.Nil, ErrUnauthorized.Withf("invalid user data")
+		}
+		authResp = a.twofactor.InitiateAuth(processId, participantNoHash, req.Phone, notifications.SMS)
+	} else {
+		return &uuid.Nil, ErrUnauthorized.Withf("invalid census type")
+	}
+
+	if !authResp.Success {
+		return &uuid.Nil, errors.New(authResp.Error)
+	}
+	if authResp.AuthToken == nil {
+		return &uuid.Nil, fmt.Errorf("auth token is nil")
+	}
+	return authResp.AuthToken, nil
 }
-
-// // initiateAuthHandler starts 2FA process and returns auth token.
-// // Not currently implemented.
-// func (a *API) initiateAuthHandler(w http.ResponseWriter, r *http.Request) {
-// 	processID := chi.URLParam(r, "processId")
-
-// 	var req InitiateAuthRequest
-// 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-// 		ErrMalformedJSON.Write(w)
-// 		return
-// 	}
-
-// 	token, err := a.db.CreateAuthToken([]byte(processID), req.ParticipantNo)
-// 	if err != nil {
-// 		ErrGenericInternalServerError.WithError(err).Write(w)
-// 		return
-// 	}
-
-// 	// TODO: Send 2FA code via email/SMS based on census type
-
-// 	httpWriteJSON(w, map[string]string{"token": token.Token})
-// }
-
-// // verifyAuthCodeHandler validates 2FA code.
-// // Not currently implemented.
-// func (a *API) verifyAuthCodeHandler(w http.ResponseWriter, r *http.Request) {
-// 	var req VerifyAuthRequest
-// 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-// 		ErrMalformedJSON.Write(w)
-// 		return
-// 	}
-
-// 	err := a.db.VerifyAuthToken(req.Token, req.Code)
-// 	if err != nil {
-// 		ErrGenericInternalServerError.WithError(err).Write(w)
-// 		return
-// 	}
-
-// 	w.WriteHeader(http.StatusOK)
-// }
-
-// // generateProofHandler creates blind signature proof for voting.
-// // Not currently implemented.
-// func (a *API) generateProofHandler(w http.ResponseWriter, r *http.Request) {
-// 	var req GenerateProofRequest
-// 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-// 		ErrMalformedJSON.Write(w)
-// 		return
-// 	}
-
-// 	proof, err := a.db.GenerateProof(req.Token, req.BlindedAddress)
-// 	if err != nil {
-// 		ErrGenericInternalServerError.WithError(err).Write(w)
-// 		return
-// 	}
-
-// 	httpWriteJSON(w, map[string][]byte{"proof": proof})
-// }

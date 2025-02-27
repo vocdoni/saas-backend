@@ -94,7 +94,7 @@ const (
 	// GET /process/{processId} to get process information
 	processEndpoint = "/process/{processId}"
 	// POST /process/{processId}/auth to check if the voter is authorized
-	processAuthEndpoint = "/process/{processId}/auth"
+	// processAuthEndpoint = "/process/{processId}/auth"
 
 	// two-factor auth routes
 	// POST /process/{processId}/2fa/{step} to handle two-factor authentication

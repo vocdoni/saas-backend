@@ -223,3 +223,11 @@ type Process struct {
 	PublishedCensus PublishedCensus   `json:"publishedCensus" bson:"publishedCensus"`
 	Metadata        []byte            `json:"metadata,omitempty"  bson:"metadata"`
 }
+
+// Mix of the Membership and the Participant
+type CensusMembershipParticipant struct {
+	ParticipantNo string `json:"participantNo" bson:"participantNo"`
+	HashedEmail   string `json:"hashedEmail" bson:"hashedEmail"`
+	HashedPhone   string `json:"hashedPhone" bson:"hashedPhone"`
+	ElectionID    string `json:"electionId" bson:"electionId"`
+}

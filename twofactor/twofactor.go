@@ -2,6 +2,7 @@ package twofactor
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/xlzd/gotp"
 	"go.vocdoni.io/dvote/log"
@@ -209,9 +211,32 @@ func (tf *Twofactor) Indexer(userID HexBytes) []Election {
 	return indexerElections
 }
 
+func (tf *Twofactor) AddProcess(
+	processId []byte,
+	pubCensusType db.CensusType,
+	orgParticipants []db.CensusMembershipParticipant,
+) error {
+	for i, participant := range orgParticipants {
+		userID := make(HexBytes, hex.EncodedLen(len(participant.ParticipantNo)))
+		hex.Encode(userID, []byte(participant.ParticipantNo))
+
+		electionId := HexBytes{}
+		if err := electionId.FromString(participant.ElectionID); err != nil {
+			return fmt.Errorf("wrong electionID at participant %d", i)
+		}
+		electionIDs := []HexBytes{electionId}
+
+		if err := tf.stg.AddUser(userID, electionIDs, participant.HashedPhone, participant.HashedEmail); err != nil {
+			log.Warnf("cannot add user from line %d", i)
+		}
+	}
+	log.Debug(tf.stg.String())
+	return nil
+}
+
 func (tf *Twofactor) InitiateAuth(
 	electionID []byte,
-	userId string,
+	userId []byte,
 	contact string,
 	notifType notifications.NotificationType,
 ) AuthResponse {
@@ -219,10 +244,11 @@ func (tf *Twofactor) InitiateAuth(
 	if len(userId) == 0 {
 		return AuthResponse{Error: "incorrect auth data fields"}
 	}
-	var userID HexBytes
-	if err := userID.FromString(userId); err != nil {
-		return AuthResponse{Error: "incorrect format for userId"}
-	}
+	// var userID HexBytes
+	// if err := userID (userId); err != nil {
+	// 	return AuthResponse{Error: "incorrect format for userId"}
+	// }
+	userID := HexBytes(userId)
 
 	// Generate challenge and authentication token
 	challengeSecret := userID.String() + tf.otpSalt

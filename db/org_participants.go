@@ -207,3 +207,73 @@ func (ms *MongoStorage) BulkUpsertOrgParticipants(
 
 	return result, nil
 }
+
+// OrgParticipants retrieves a orgParticipants from the DB based on it ID
+func (ms *MongoStorage) OrgParticipants(orgAddress string) ([]OrgParticipant, error) {
+	if len(orgAddress) == 0 {
+		return nil, ErrInvalidData
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cursor, err := ms.orgParticipants.Find(ctx, bson.M{"orgAddress": orgAddress})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get orgParticipants: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	var orgParticipants []OrgParticipant
+	if err = cursor.All(ctx, &orgParticipants); err != nil {
+		return nil, fmt.Errorf("failed to get orgParticipants: %w", err)
+	}
+
+	return orgParticipants, nil
+}
+
+func (ms *MongoStorage) OrgParticipantsMemberships(orgAddress, censusId, electionId string) ([]CensusMembershipParticipant, error) {
+	if len(orgAddress) == 0 || len(censusId) == 0 {
+		return nil, ErrInvalidData
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Optimized aggregation pipeline
+	pipeline := mongo.Pipeline{
+		{{"$match", bson.D{{"orgAddress", orgAddress}}}},
+		{{"$lookup", bson.D{
+			{"from", "censusMemberships"},
+			{"localField", "participantNo"},
+			{"foreignField", "participantNo"},
+			{"as", "membership"},
+		}}},
+		{{"$unwind", bson.D{{"path", "$membership"}}}},
+		{{"$match", bson.D{{"membership.censusId", censusId}}}},
+		{{"$addFields", bson.D{{"electionId", electionId}}}},
+		{{"$project", bson.D{
+			{"hashedEmail", 1},
+			{"hashedPhone", 1},
+			{"participantNo", 1},
+			{"electionId", 1},
+		}}},
+	}
+
+	cursor, err := ms.orgParticipants.Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get orgParticipants: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	// Convert cursor to slice of OrgParticipants
+	var participants []CensusMembershipParticipant
+	if err := cursor.All(ctx, &participants); err != nil {
+		return nil, fmt.Errorf("failed to get orgParticipants: %w", err)
+	}
+
+	return participants, nil
+}
