@@ -1273,13 +1273,7 @@ Publishes a census, making it available for voting. Requires Manager or Admin ro
 * **Response**
 ```json
 {
-  "census": {
-    "id": "census_id",
-    "type": "sms_or_mail",
-    "orgAddress": "0x...",
-    "createdAt": "2025-02-18T17:12:00Z"
-  },
-  "uri": "https://example.com/csp/",
+  "uri": "https://example.com/process/",
   "root": "public_key"
 }
 ```
@@ -1302,8 +1296,11 @@ Publishes a census, making it available for voting. Requires Manager or Admin ro
 * **Request body**
 ```json
 {
-  "censusID": "published_census_id",
-  "metadata": "base64_encoded_metadata"
+  "censusRoot": "published_census_root",
+  "censusUri": "published_census_uri",
+  "censusId": "used-census-id",
+  "metadata": "base64_encoded_metadata" // optional
+
 }
 ```
 

@@ -12,8 +12,9 @@ import (
 )
 
 type PublishedCensusResponse struct {
-	URI  string `json:"uri" bson:"uri"`
-	Root string `json:"root" bson:"root"`
+	URI      string `json:"uri" bson:"uri"`
+	Root     string `json:"root" bson:"root"`
+	CensusID string `json:"censusId" bson:"censusId"`
 }
 
 // createCensusHandler creates a new census for an organization.

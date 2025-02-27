@@ -413,6 +413,7 @@ type AddParticipantsResponse struct {
 type CreateProcessRequest struct {
 	PublishedCensusRoot string `json:"censusRoot"`
 	PublishedCensusURI  string `json:"censusUri"`
+	CensusID            string `json:"censusID"`
 	Metadata            []byte `json:"metadata,omitempty"`
 }
 

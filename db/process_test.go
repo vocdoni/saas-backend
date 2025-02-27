@@ -122,7 +122,7 @@ func TestSetAndGetProcess(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 
 	// Verify the published census was created
-	createdPublishedCensus, err := db.PublishedCensus("new-root", "new-uri")
+	createdPublishedCensus, err := db.PublishedCensus("new-root", "new-uri", publishedCensus.Census.ID.Hex())
 	c.Assert(err, qt.IsNil)
 	c.Assert(createdPublishedCensus, qt.Not(qt.IsNil))
 }

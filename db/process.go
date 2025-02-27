@@ -19,7 +19,7 @@ func (ms *MongoStorage) SetProcess(process *Process) error {
 		return fmt.Errorf("failed to get organization: %w", err)
 	}
 	// check that the publishedCensus and if not create it
-	if _, err := ms.PublishedCensus(process.PublishedCensus.Root, process.PublishedCensus.URI); err != nil {
+	if _, err := ms.PublishedCensus(process.PublishedCensus.Root, process.PublishedCensus.URI, process.PublishedCensus.Census.ID.Hex()); err != nil {
 		if err != ErrNotFound {
 			return fmt.Errorf("failed to get publishedCensus: %w", err)
 		}

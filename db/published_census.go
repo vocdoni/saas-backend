@@ -54,7 +54,7 @@ func (ms *MongoStorage) DelPublishedCensus(root, uri string) error {
 }
 
 // PublishedCensus retrieves a publishedCensus from the DB based on it ID
-func (ms *MongoStorage) PublishedCensus(root, uri string) (*PublishedCensus, error) {
+func (ms *MongoStorage) PublishedCensus(root, uri, censusId string) (*PublishedCensus, error) {
 	if len(uri) == 0 || len(root) == 0 {
 		return nil, ErrInvalidData
 	}
@@ -66,7 +66,12 @@ func (ms *MongoStorage) PublishedCensus(root, uri string) (*PublishedCensus, err
 	defer cancel()
 
 	publishedCensus := &PublishedCensus{}
-	if err := ms.publishedCensuses.FindOne(ctx, bson.M{"root": root, "uri": uri}).Decode(publishedCensus); err != nil {
+	censusOID, err := primitive.ObjectIDFromHex(censusId)
+	if err != nil {
+		return nil, ErrInvalidData
+	}
+	filter := bson.M{"root": root, "uri": uri, "census._id": censusOID}
+	if err := ms.publishedCensuses.FindOne(ctx, filter).Decode(publishedCensus); err != nil {
 		return nil, ErrNotFound
 	}
 

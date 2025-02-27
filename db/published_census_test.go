@@ -28,7 +28,7 @@ func TestPublishedCensus(t *testing.T) {
 	defer resetDB(c)
 
 	// test not found census
-	census, err := db.PublishedCensus(testRoot, testURI)
+	census, err := db.PublishedCensus(testRoot, testURI, primitive.NewObjectID().Hex())
 	c.Assert(census, qt.IsNil)
 	c.Assert(err, qt.Equals, ErrNotFound)
 
@@ -62,7 +62,7 @@ func TestPublishedCensus(t *testing.T) {
 	c.Assert(publishedCensus.CreatedAt.IsZero(), qt.IsFalse)
 
 	// test retrieving the published census
-	retrieved, err := db.PublishedCensus(testRoot, testURI)
+	retrieved, err := db.PublishedCensus(testRoot, testURI, publishedCensus.Census.ID.Hex())
 	c.Assert(err, qt.IsNil)
 	c.Assert(retrieved, qt.Not(qt.IsNil))
 	c.Assert(retrieved.URI, qt.Equals, testURI)
@@ -78,7 +78,7 @@ func TestPublishedCensus(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 
 	// Verify the published census was updated correctly
-	updatedCensus, err := db.PublishedCensus(testRoot, testURI)
+	updatedCensus, err := db.PublishedCensus(testRoot, testURI, publishedCensus.Census.ID.Hex())
 	c.Assert(err, qt.IsNil)
 	c.Assert(updatedCensus.CreatedAt, qt.Equals, retrieved.CreatedAt)
 }
@@ -175,7 +175,7 @@ func TestDelPublishedCensus(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 
 	// verify it's deleted
-	retrieved, err := db.PublishedCensus(testRoot, testURI)
+	retrieved, err := db.PublishedCensus(testRoot, testURI, publishedCensus.Census.ID.Hex())
 	c.Assert(retrieved, qt.IsNil)
 	c.Assert(err, qt.Equals, ErrNotFound)
 
@@ -189,16 +189,16 @@ func TestPublishedCensusInvalid(t *testing.T) {
 	defer resetDB(c)
 
 	// test get with invalid parameters
-	retrieved, err := db.PublishedCensus("nil", testURI)
+	retrieved, err := db.PublishedCensus("nil", "nil", "nil")
 	c.Assert(retrieved, qt.IsNil)
 	c.Assert(err, qt.Equals, ErrInvalidData)
 
-	retrieved, err = db.PublishedCensus(testRoot, "")
+	retrieved, err = db.PublishedCensus(testRoot, "", "")
 	c.Assert(retrieved, qt.IsNil)
 	c.Assert(err, qt.Equals, ErrInvalidData)
 
 	// test getting non-existent published census
-	retrieved, err = db.PublishedCensus(testRoot, testURI)
+	retrieved, err = db.PublishedCensus(testRoot, testURI, primitive.NewObjectID().Hex())
 	c.Assert(retrieved, qt.IsNil)
 	c.Assert(err, qt.Equals, ErrNotFound)
 }

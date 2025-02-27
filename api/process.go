@@ -2,7 +2,7 @@ package api
 
 import (
 	"bytes"
-	"crypto"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,7 +23,7 @@ import (
 func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 	processID := chi.URLParam(r, "processId")
 	if processID == "" {
-		ErrMalformedURLParam.Withf("missing census ID").Write(w)
+		ErrMalformedURLParam.Withf("missing process ID").Write(w)
 		return
 	}
 	processID = util.TrimHex(processID)
@@ -41,7 +41,11 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pubCensus, err := a.db.PublishedCensus(util.TrimHex(processInfo.PublishedCensusRoot), processInfo.PublishedCensusURI)
+	pubCensus, err := a.db.PublishedCensus(
+		util.TrimHex(processInfo.PublishedCensusRoot),
+		processInfo.PublishedCensusURI,
+		processInfo.CensusID,
+	)
 	if err != nil {
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
@@ -220,9 +224,8 @@ func (a *API) initiateAuthRequest(r *http.Request, processId []byte) (*uuid.UUID
 	}
 
 	// create sha of participantNo
-	sha := crypto.SHA256.New()
-	sha.Write([]byte(participant.ParticipantNo))
-	participantNoHash := sha.Sum(nil)
+	userID := make(internal.HexBytes, hex.EncodedLen(len(participant.ParticipantNo)))
+	hex.Encode(userID, []byte(participant.ParticipantNo))
 	var authResp twofactor.AuthResponse
 	if censusType == db.CensusTypeMail || censusType == db.CensusTypeSMSorMail {
 		if req.Email == "" {
@@ -231,7 +234,7 @@ func (a *API) initiateAuthRequest(r *http.Request, processId []byte) (*uuid.UUID
 		if !bytes.Equal(internal.HashOrgData(process.OrgAddress, req.Email), participant.HashedEmail) {
 			return nil, ErrUnauthorized.Withf("invalid user data")
 		}
-		authResp = a.twofactor.InitiateAuth(processId, participantNoHash, req.Email, notifications.Email)
+		authResp = a.twofactor.InitiateAuth(processId, userID, req.Email, notifications.Email)
 	} else if censusType == db.CensusTypeSMS || censusType == db.CensusTypeSMSorMail {
 		if req.Phone == "" {
 			return nil, ErrUnauthorized.Withf("missing phone")
@@ -239,7 +242,7 @@ func (a *API) initiateAuthRequest(r *http.Request, processId []byte) (*uuid.UUID
 		if !bytes.Equal(internal.HashOrgData(process.OrgAddress, req.Phone), participant.HashedPhone) {
 			return nil, ErrUnauthorized.Withf("invalid user data")
 		}
-		authResp = a.twofactor.InitiateAuth(processId, participantNoHash, req.Phone, notifications.SMS)
+		authResp = a.twofactor.InitiateAuth(processId, userID, req.Phone, notifications.SMS)
 	} else {
 		return nil, ErrUnauthorized.Withf("invalid census type")
 	}
