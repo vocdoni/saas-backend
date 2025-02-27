@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/nyaruka/phonenumbers"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/xlzd/gotp"
 	"go.vocdoni.io/dvote/db"
@@ -69,12 +68,12 @@ func key2userID(key []byte) (u internal.HexBytes) {
 }
 
 func (js *JSONstorage) AddUser(userID internal.HexBytes, processIDs []internal.HexBytes,
-	phone, extra string,
+	contact, extra string,
 ) error {
-	phoneNum, err := phonenumbers.Parse(phone, DefaultPhoneCountry)
-	if err != nil {
-		return err
-	}
+	// phoneNum, err := phonenumbers.Parse(phone, DefaultPhoneCountry)
+	// if err != nil {
+	// 	return err
+	// }
 	js.keysLock.Lock()
 	defer js.keysLock.Unlock()
 	tx := js.kv.WriteTx()
@@ -86,7 +85,7 @@ func (js *JSONstorage) AddUser(userID internal.HexBytes, processIDs []internal.H
 	// }
 	user := UserData{
 		ExtraData: extra,
-		Phone:     phoneNum,
+		Contact:   contact,
 	}
 	user.Elections = make(map[string]UserElection, len(processIDs))
 	for _, e := range HexBytesToElection(processIDs, js.maxSmsAttempts) {
@@ -189,34 +188,34 @@ func (js *JSONstorage) SetAttempts(userID, electionID internal.HexBytes, delta i
 
 func (js *JSONstorage) NewAttempt(userID, electionID internal.HexBytes,
 	challengeSecret string, token *uuid.UUID,
-) (*phonenumbers.PhoneNumber, int, error) {
+) (string, int, error) {
 	js.keysLock.Lock()
 	defer js.keysLock.Unlock()
 	tx := js.kv.WriteTx()
 	defer tx.Discard()
 	userData, err := tx.Get(userIDkey(userID))
 	if err != nil {
-		return nil, 0, err
+		return "", 0, err
 	}
 	var user UserData
 	if err := json.Unmarshal(userData, &user); err != nil {
-		return nil, 0, err
+		return "", 0, err
 	}
 	election, ok := user.Elections[electionID.String()]
 	if !ok {
-		return nil, 0, ErrUserNotBelongsToElection
+		return "", 0, ErrUserNotBelongsToElection
 	}
 	attemptNo := js.maxSmsAttempts - election.RemainingAttempts
 	if election.Consumed {
-		return nil, attemptNo, ErrUserAlreadyVerified
+		return "", attemptNo, ErrUserAlreadyVerified
 	}
 	if election.LastAttempt != nil {
 		if time.Now().Before(election.LastAttempt.Add(js.coolDownTime)) {
-			return nil, attemptNo, ErrAttemptCoolDownTime
+			return "", attemptNo, ErrAttemptCoolDownTime
 		}
 	}
 	if election.RemainingAttempts < 1 {
-		return nil, attemptNo, ErrTooManyAttempts
+		return "", attemptNo, ErrTooManyAttempts
 	}
 	election.AuthToken = token
 	election.ChallengeSecret = challengeSecret
@@ -225,18 +224,18 @@ func (js *JSONstorage) NewAttempt(userID, electionID internal.HexBytes,
 	user.Elections[electionID.String()] = election
 	userData, err = json.Marshal(user)
 	if err != nil {
-		return nil, attemptNo, err
+		return "", attemptNo, err
 	}
 	// Save the user data
 	if err := tx.Set(userIDkey(userID), userData); err != nil {
-		return nil, attemptNo, err
+		return "", attemptNo, err
 	}
 	// Save the token as index for finding the userID
 	if err := tx.Set([]byte(authTokenIndexPrefix+token.String()), userID); err != nil {
-		return nil, attemptNo, err
+		return "", attemptNo, err
 	}
 
-	return user.Phone, attemptNo, tx.Commit()
+	return user.Contact, attemptNo, tx.Commit()
 }
 
 func (js *JSONstorage) Exists(userID internal.HexBytes) bool {

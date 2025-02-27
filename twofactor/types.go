@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/nyaruka/phonenumbers"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/log"
 )
@@ -36,10 +35,10 @@ type Users struct {
 
 // UserData represents a user of the SMS handler.
 type UserData struct {
-	UserID    internal.HexBytes         `json:"userID,omitempty" bson:"_id"`
-	Elections map[string]UserElection   `json:"elections,omitempty" bson:"elections,omitempty"`
-	ExtraData string                    `json:"extraData,omitempty" bson:"extradata,omitempty"`
-	Phone     *phonenumbers.PhoneNumber `json:"phone,omitempty" bson:"phone,omitempty"`
+	UserID    internal.HexBytes       `json:"userID,omitempty" bson:"_id"`
+	Elections map[string]UserElection `json:"elections,omitempty" bson:"elections,omitempty"`
+	ExtraData string                  `json:"extraData,omitempty" bson:"extradata,omitempty"`
+	Contact   string                  `json:"contact,omitempty" bson:"contact,omitempty"`
 }
 
 // UserElection represents an election and its details owned by a user (UserData).

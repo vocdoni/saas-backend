@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path"
-	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -190,13 +189,12 @@ func (tf *Twofactor) Indexer(userID internal.HexBytes) []Election {
 		return nil
 	}
 	// Get the last two digits of the phone and return them as extraData
-	phoneStr := ""
-	if user.Phone != nil {
-		phoneStr = strconv.FormatUint(user.Phone.GetNationalNumber(), 10)
-		if len(phoneStr) < 3 {
-			phoneStr = ""
+	contact := ""
+	if user.Contact != "" {
+		if len(contact) < 3 {
+			contact = ""
 		} else {
-			phoneStr = phoneStr[len(phoneStr)-2:]
+			contact = contact[len(contact)-2:]
 		}
 	}
 	indexerElections := []Election{}
@@ -205,7 +203,7 @@ func (tf *Twofactor) Indexer(userID internal.HexBytes) []Election {
 			RemainingAttempts: e.RemainingAttempts,
 			Consumed:          e.Consumed,
 			ElectionID:        e.ElectionID,
-			ExtraData:         []string{phoneStr},
+			ExtraData:         []string{contact},
 		}
 		indexerElections = append(indexerElections, ie)
 	}
@@ -256,12 +254,12 @@ func (tf *Twofactor) InitiateAuth(
 	atoken := uuid.New()
 
 	// Get the phone number. This methods checks for electionID and user verification status.
-	phone, attemptNo, err := tf.stg.NewAttempt(userID, electionID, challengeSecret, &atoken)
+	contact, attemptNo, err := tf.stg.NewAttempt(userID, electionID, challengeSecret, &atoken)
 	if err != nil {
 		log.Warnf("new attempt for user %s failed: %v", userID, err)
 		return AuthResponse{Error: err.Error()}
 	}
-	if phone == nil {
+	if contact == "" {
 		log.Warnf("phone is nil for user %s", userID)
 		return AuthResponse{Error: "no phone for this user data"}
 	}
@@ -284,14 +282,14 @@ func (tf *Twofactor) InitiateAuth(
 	}
 
 	// Build success reply
-	phoneStr := strconv.FormatUint(phone.GetNationalNumber(), 10)
-	if len(phoneStr) < 3 {
-		return AuthResponse{Error: "error parsing the phone number"}
-	}
+	// phoneStr := strconv.FormatUint(phone.GetNationalNumber(), 10)
+	// if len(phoneStr) < 3 {
+	// 	return AuthResponse{Error: "error parsing the phone number"}
+	// }
 	return AuthResponse{
 		Success:   true,
 		AuthToken: &atoken,
-		Response:  []string{phoneStr[len(phoneStr)-2:]},
+		Response:  []string{contact[len(contact)-2:]},
 	}
 }
 
