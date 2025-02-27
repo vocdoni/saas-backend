@@ -57,8 +57,14 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	id, err := hex.DecodeString(processID)
+	if err != nil {
+		ErrMalformedURLParam.Withf("invalid process ID").Write(w)
+		return
+	}
+
 	process := &db.Process{
-		ID:              []byte(util.TrimHex(processID)),
+		ID:              id,
 		PublishedCensus: *pubCensus,
 		Metadata:        processInfo.Metadata,
 		OrgAddress:      pubCensus.Census.OrgAddress,
@@ -135,7 +141,11 @@ func (a *API) twofactorAuthHandler(w http.ResponseWriter, r *http.Request) {
 		ErrMalformedURLParam.Withf("wrong step ID").Write(w)
 		return
 	}
-	processId := []byte(util.TrimHex(urlProcessId))
+	processId, err := hex.DecodeString(urlProcessId)
+	if err != nil {
+		ErrMalformedURLParam.Withf("invalid process ID").Write(w)
+		return
+	}
 	switch step {
 	case 0:
 		authToken, err := a.initiateAuthRequest(r, processId)

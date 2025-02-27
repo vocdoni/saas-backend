@@ -135,7 +135,7 @@ func (tf *Twofactor) New(conf *TwofactorConfig) (*Twofactor, error) {
 	tf.smsQueue = newQueue(
 		coolDownTime,
 		throttleTime,
-		[]SendChallengeFunc{tf.SendChallengeMail},
+		[]SendChallengeFunc{tf.SendChallengeSMS},
 	)
 	go tf.smsQueue.run()
 	go tf.queueController(tf.smsQueue)
@@ -143,7 +143,7 @@ func (tf *Twofactor) New(conf *TwofactorConfig) (*Twofactor, error) {
 	tf.mailQueue = newQueue(
 		coolDownTime,
 		throttleTime,
-		[]SendChallengeFunc{tf.SendChallengeSMS},
+		[]SendChallengeFunc{tf.SendChallengeMail},
 	)
 	go tf.mailQueue.run()
 	go tf.queueController(tf.mailQueue)
@@ -203,7 +203,7 @@ func (tf *Twofactor) Indexer(userID internal.HexBytes) []Election {
 			RemainingAttempts: e.RemainingAttempts,
 			Consumed:          e.Consumed,
 			ElectionID:        e.ElectionID,
-			ExtraData:         []string{contact},
+			ExtraData:         []string{user.ExtraData, contact},
 		}
 		indexerElections = append(indexerElections, ie)
 	}
@@ -225,7 +225,7 @@ func (tf *Twofactor) AddProcess(
 		}
 		electionIDs := []internal.HexBytes{electionId}
 
-		if err := tf.stg.AddUser(userID, electionIDs, participant.HashedPhone, participant.HashedEmail); err != nil {
+		if err := tf.stg.AddUser(userID, electionIDs, participant.HashedEmail, participant.HashedPhone, ""); err != nil {
 			log.Warnf("cannot add user from line %d", i)
 		}
 	}
@@ -250,11 +250,14 @@ func (tf *Twofactor) InitiateAuth(
 	userID := internal.HexBytes(userId)
 
 	// Generate challenge and authentication token
-	challengeSecret := userID.String() + tf.otpSalt
+	// We need to ensure the challenge secret is a valid base32-encoded string
+	// Instead of concatenating userID.String() (hex) with otpSalt (base32),
+	// we'll use a different approach to create a unique secret per user
+	challengeSecret := gotp.RandomSecret(16) // Use a fresh random secret
 	atoken := uuid.New()
 
 	// Get the phone number. This methods checks for electionID and user verification status.
-	contact, attemptNo, err := tf.stg.NewAttempt(userID, electionID, challengeSecret, &atoken)
+	_, _, attemptNo, err := tf.stg.NewAttempt(userID, electionID, challengeSecret, &atoken)
 	if err != nil {
 		log.Warnf("new attempt for user %s failed: %v", userID, err)
 		return AuthResponse{Error: err.Error()}
@@ -263,20 +266,23 @@ func (tf *Twofactor) InitiateAuth(
 		log.Warnf("phone is nil for user %s", userID)
 		return AuthResponse{Error: "no phone for this user data"}
 	}
-	// Enqueue to send the SMS challenge
-	challenge := gotp.NewDefaultHOTP(challengeSecret).At(attemptNo)
+	// Enqueue to send the challenge
+	challenge := gotp.NewDefaultHOTP(challengeSecret)
+	// Generate the OTP code using the attempt number
+	otpCode := challenge.At(attemptNo)
+
 	if notifType == notifications.Email {
-		if err := tf.mailQueue.add(userID, electionID, contact, challenge); err != nil {
+		if err := tf.mailQueue.add(userID, electionID, contact, otpCode); err != nil {
 			log.Errorf("cannot enqueue challenge: %v", err)
 			return AuthResponse{Error: "problem with Email challenge system"}
 		}
-		log.Infof("user %s challenged with %s at contact %s", userID.String(), challenge, contact)
+		log.Infof("user %s challenged with %s at contact %s", userID.String(), otpCode, contact)
 	} else if notifType == notifications.SMS {
-		if err := tf.smsQueue.add(userID, electionID, contact, challenge); err != nil {
+		if err := tf.smsQueue.add(userID, electionID, contact, otpCode); err != nil {
 			log.Errorf("cannot enqueue challenge: %v", err)
 			return AuthResponse{Error: "problem with SMS challenge system"}
 		}
-		log.Infof("user %s challenged with %s at contact %s", userID.String(), challenge, contact)
+		log.Infof("user %s challenged with %s at contact %s", userID.String(), otpCode, contact)
 	} else {
 		return AuthResponse{Error: "invalid notification type"}
 	}

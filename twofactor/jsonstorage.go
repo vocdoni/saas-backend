@@ -1,6 +1,7 @@
 package twofactor
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -68,7 +69,7 @@ func key2userID(key []byte) (u internal.HexBytes) {
 }
 
 func (js *JSONstorage) AddUser(userID internal.HexBytes, processIDs []internal.HexBytes,
-	contact, extra string,
+	mail, phone, extra string,
 ) error {
 	// phoneNum, err := phonenumbers.Parse(phone, DefaultPhoneCountry)
 	// if err != nil {
@@ -85,7 +86,8 @@ func (js *JSONstorage) AddUser(userID internal.HexBytes, processIDs []internal.H
 	// }
 	user := UserData{
 		ExtraData: extra,
-		Contact:   contact,
+		Mail:      mail,
+		Phone:     phone,
 	}
 	user.Elections = make(map[string]UserElection, len(processIDs))
 	for _, e := range HexBytesToElection(processIDs, js.maxSmsAttempts) {
@@ -188,34 +190,35 @@ func (js *JSONstorage) SetAttempts(userID, electionID internal.HexBytes, delta i
 
 func (js *JSONstorage) NewAttempt(userID, electionID internal.HexBytes,
 	challengeSecret string, token *uuid.UUID,
-) (string, int, error) {
+) (string, string, int, error) {
 	js.keysLock.Lock()
 	defer js.keysLock.Unlock()
 	tx := js.kv.WriteTx()
 	defer tx.Discard()
 	userData, err := tx.Get(userIDkey(userID))
 	if err != nil {
-		return "", 0, err
+		return "", "", 0, err
 	}
 	var user UserData
 	if err := json.Unmarshal(userData, &user); err != nil {
-		return "", 0, err
+		return "", "", 0, err
 	}
-	election, ok := user.Elections[electionID.String()]
+	tmpElectionID := hex.EncodeToString(electionID)
+	election, ok := user.Elections[tmpElectionID]
 	if !ok {
-		return "", 0, ErrUserNotBelongsToElection
+		return "", "", 0, ErrUserNotBelongsToElection
 	}
 	attemptNo := js.maxSmsAttempts - election.RemainingAttempts
 	if election.Consumed {
-		return "", attemptNo, ErrUserAlreadyVerified
+		return "", "", attemptNo, ErrUserAlreadyVerified
 	}
 	if election.LastAttempt != nil {
 		if time.Now().Before(election.LastAttempt.Add(js.coolDownTime)) {
-			return "", attemptNo, ErrAttemptCoolDownTime
+			return "", "", attemptNo, ErrAttemptCoolDownTime
 		}
 	}
 	if election.RemainingAttempts < 1 {
-		return "", attemptNo, ErrTooManyAttempts
+		return "", "", attemptNo, ErrTooManyAttempts
 	}
 	election.AuthToken = token
 	election.ChallengeSecret = challengeSecret
@@ -224,18 +227,18 @@ func (js *JSONstorage) NewAttempt(userID, electionID internal.HexBytes,
 	user.Elections[electionID.String()] = election
 	userData, err = json.Marshal(user)
 	if err != nil {
-		return "", attemptNo, err
+		return "", "", attemptNo, err
 	}
 	// Save the user data
 	if err := tx.Set(userIDkey(userID), userData); err != nil {
-		return "", attemptNo, err
+		return "", "", attemptNo, err
 	}
 	// Save the token as index for finding the userID
 	if err := tx.Set([]byte(authTokenIndexPrefix+token.String()), userID); err != nil {
-		return "", attemptNo, err
+		return "", "", attemptNo, err
 	}
 
-	return user.Contact, attemptNo, tx.Commit()
+	return user.Phone, user.Mail, attemptNo, tx.Commit()
 }
 
 func (js *JSONstorage) Exists(userID internal.HexBytes) bool {
@@ -309,7 +312,10 @@ func (js *JSONstorage) VerifyChallenge(electionID internal.HexBytes,
 	}
 
 	attemptNo := js.maxSmsAttempts - election.RemainingAttempts
-	challengeData := gotp.NewDefaultHOTP(election.ChallengeSecret).At(attemptNo)
+	// Use the stored challenge secret to generate the OTP
+	hotp := gotp.NewDefaultHOTP(election.ChallengeSecret)
+	challengeData := hotp.At(attemptNo)
+
 	// set consumed to true or false depending on the challenge solution
 	election.Consumed = challengeData == solution
 

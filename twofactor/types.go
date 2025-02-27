@@ -38,6 +38,8 @@ type UserData struct {
 	UserID    internal.HexBytes       `json:"userID,omitempty" bson:"_id"`
 	Elections map[string]UserElection `json:"elections,omitempty" bson:"elections,omitempty"`
 	ExtraData string                  `json:"extraData,omitempty" bson:"extradata,omitempty"`
+	Mail      string                  `json:"mail,omitempty" bson:"mail,omitempty"`
+	Phone     string                  `json:"phone,omitempty" bson:"phone,omitempty"`
 	Contact   string                  `json:"contact,omitempty" bson:"contact,omitempty"`
 }
 
