@@ -9,6 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.vocdoni.io/dvote/log"
 )
 
 // SetCensusMembership creates or updates a census membership in the database.
@@ -262,8 +263,11 @@ func (ms *MongoStorage) CensusMemberships(censusId string) ([]CensusMembership, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get census memberships: %w", err)
 	}
-	defer cursor.Close(ctx)
-
+	defer func() {
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("error closing cursor", "error", err)
+		}
+	}()
 	var memberships []CensusMembership
 	if err := cursor.All(ctx, &memberships); err != nil {
 		return nil, fmt.Errorf("failed to get census memberships: %w", err)

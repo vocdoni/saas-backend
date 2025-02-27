@@ -1,7 +1,6 @@
 package twofactor
 
 import (
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -9,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/nyaruka/phonenumbers"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -31,12 +31,12 @@ var (
 
 // Users is the list of smshandler users.
 type Users struct {
-	Users []HexBytes `json:"users"`
+	Users []internal.HexBytes `json:"users"`
 }
 
 // UserData represents a user of the SMS handler.
 type UserData struct {
-	UserID    HexBytes                  `json:"userID,omitempty" bson:"_id"`
+	UserID    internal.HexBytes         `json:"userID,omitempty" bson:"_id"`
 	Elections map[string]UserElection   `json:"elections,omitempty" bson:"elections,omitempty"`
 	ExtraData string                    `json:"extraData,omitempty" bson:"extradata,omitempty"`
 	Phone     *phonenumbers.PhoneNumber `json:"phone,omitempty" bson:"phone,omitempty"`
@@ -44,18 +44,18 @@ type UserData struct {
 
 // UserElection represents an election and its details owned by a user (UserData).
 type UserElection struct {
-	ElectionID        HexBytes   `json:"electionId" bson:"_id"`
-	RemainingAttempts int        `json:"remainingAttempts" bson:"remainingattempts"`
-	LastAttempt       *time.Time `json:"lastAttempt,omitempty" bson:"lastattempt,omitempty"`
-	Consumed          bool       `json:"consumed" bson:"consumed"`
-	AuthToken         *uuid.UUID `json:"authToken,omitempty" bson:"authtoken,omitempty"`
-	ChallengeSecret   string     `json:"challenge,omitempty" bson:"challenge,omitempty"`
+	ElectionID        internal.HexBytes `json:"electionId" bson:"_id"`
+	RemainingAttempts int               `json:"remainingAttempts" bson:"remainingattempts"`
+	LastAttempt       *time.Time        `json:"lastAttempt,omitempty" bson:"lastattempt,omitempty"`
+	Consumed          bool              `json:"consumed" bson:"consumed"`
+	AuthToken         *uuid.UUID        `json:"authToken,omitempty" bson:"authtoken,omitempty"`
+	ChallengeSecret   string            `json:"challenge,omitempty" bson:"challenge,omitempty"`
 }
 
 // AuthTokenIndex is used by the storage to index a token with its userID (from UserData).
 type AuthTokenIndex struct {
-	AuthToken *uuid.UUID `json:"authToken" bson:"_id"`
-	UserID    HexBytes   `json:"userID" bson:"userid"`
+	AuthToken *uuid.UUID        `json:"authToken" bson:"_id"`
+	UserID    internal.HexBytes `json:"userID" bson:"userid"`
 }
 
 // UserCollection is a dataset containing several users (used for dump and import).
@@ -63,9 +63,9 @@ type UserCollection struct {
 	Users []UserData `json:"users" bson:"users"`
 }
 
-// HexBytesToElection transforms a slice of HexBytes to []Election.
+// internal.HexBytesToElection transforms a slice of internal.HexBytes to []Election.
 // All entries are set with RemainingAttempts = attempts.
-func HexBytesToElection(electionIDs []HexBytes, attempts int) []UserElection {
+func HexBytesToElection(electionIDs []internal.HexBytes, attempts int) []UserElection {
 	elections := []UserElection{}
 
 	for _, e := range electionIDs {
@@ -79,19 +79,19 @@ func HexBytesToElection(electionIDs []HexBytes, attempts int) []UserElection {
 
 // Message is the JSON API body message used by the CSP and the client
 type Message struct {
-	Error     string       `json:"error,omitempty"`
-	TokenR    HexBytes     `json:"token,omitempty"`
-	AuthToken *uuid.UUID   `json:"authToken,omitempty"`
-	Payload   HexBytes     `json:"payload,omitempty"`
-	Signature HexBytes     `json:"signature,omitempty"`
-	SharedKey HexBytes     `json:"sharedkey,omitempty"`
-	Title     string       `json:"title,omitempty"`         // reserved for the info handler
-	SignType  []string     `json:"signatureType,omitempty"` // reserver for the info handler
-	AuthType  string       `json:"authType,omitempty"`      // reserved for the info handler
-	AuthSteps []*AuthField `json:"authSteps,omitempty"`     // reserved for the info handler
-	AuthData  []string     `json:"authData,omitempty"`      // reserved for the auth handler
-	Response  []string     `json:"response,omitempty"`      // reserved for the handlers
-	Elections []Election   `json:"elections,omitempty"`     // reserved for the indexer handler
+	Error     string            `json:"error,omitempty"`
+	TokenR    internal.HexBytes `json:"token,omitempty"`
+	AuthToken *uuid.UUID        `json:"authToken,omitempty"`
+	Payload   internal.HexBytes `json:"payload,omitempty"`
+	Signature internal.HexBytes `json:"signature,omitempty"`
+	SharedKey internal.HexBytes `json:"sharedkey,omitempty"`
+	Title     string            `json:"title,omitempty"`         // reserved for the info handler
+	SignType  []string          `json:"signatureType,omitempty"` // reserver for the info handler
+	AuthType  string            `json:"authType,omitempty"`      // reserved for the info handler
+	AuthSteps []*AuthField      `json:"authSteps,omitempty"`     // reserved for the info handler
+	AuthData  []string          `json:"authData,omitempty"`      // reserved for the auth handler
+	Response  []string          `json:"response,omitempty"`      // reserved for the handlers
+	Elections []Election        `json:"elections,omitempty"`     // reserved for the indexer handler
 }
 
 func (m *Message) Marshal() []byte {
@@ -106,56 +106,13 @@ func (m *Message) Unmarshal(data []byte) error {
 	return json.Unmarshal(data, m)
 }
 
-// HexBytes is a []byte which encodes as hexadecimal in json, as opposed to the
-// base64 default.
-type HexBytes []byte
-
-func (b HexBytes) String() string {
-	return hex.EncodeToString(b)
-}
-
-func (b *HexBytes) FromString(str string) error {
-	var err error
-	(*b), err = hex.DecodeString(str)
-	return err
-}
-
-func (b HexBytes) MarshalJSON() ([]byte, error) {
-	enc := make([]byte, hex.EncodedLen(len(b))+2)
-	enc[0] = '"'
-	hex.Encode(enc[1:], b)
-	enc[len(enc)-1] = '"'
-	return enc, nil
-}
-
-func (b *HexBytes) UnmarshalJSON(data []byte) error {
-	if len(data) < 2 || data[0] != '"' || data[len(data)-1] != '"' {
-		return fmt.Errorf("invalid JSON string: %q", data)
-	}
-	data = data[1 : len(data)-1]
-
-	// Strip a leading "0x" prefix, for backwards compatibility.
-	if len(data) >= 2 && data[0] == '0' && (data[1] == 'x' || data[1] == 'X') {
-		data = data[2:]
-	}
-
-	decLen := hex.DecodedLen(len(data))
-	if cap(*b) < decLen {
-		*b = make([]byte, decLen)
-	}
-	if _, err := hex.Decode(*b, data); err != nil {
-		return err
-	}
-	return nil
-}
-
 // Election represents a process voting election which might be available for
 // CSP signature or not (already used).
 type Election struct {
-	ElectionID        HexBytes `json:"electionId"`
-	RemainingAttempts int      `json:"remainingAttempts"`
-	Consumed          bool     `json:"consumed"`
-	ExtraData         []string `json:"extra"`
+	ElectionID        internal.HexBytes `json:"electionId"`
+	RemainingAttempts int               `json:"remainingAttempts"`
+	Consumed          bool              `json:"consumed"`
+	ExtraData         []string          `json:"extra"`
 }
 
 // AuthField is the type used by the Info method for returning the description of the
@@ -169,12 +126,12 @@ type AuthField struct {
 // If success true and AuthToken is nil, authentication process is considered finished,
 // and the CSP signature is provided to the user.
 type AuthResponse struct {
-	Success   bool       // Either the authentication step is success or not
-	Response  []string   // Response can be used by the handler to provide arbitrary data to the client
-	AuthToken *uuid.UUID // Only if there is a next step
-	TokenR    HexBytes   // TokenR is the random token generated for the client
-	Signature HexBytes   // Signature is the CSP signature
-	Error     string     // Error is used to provide an error message to the client
+	Success   bool              // Either the authentication step is success or not
+	Response  []string          // Response can be used by the handler to provide arbitrary data to the client
+	AuthToken *uuid.UUID        // Only if there is a next step
+	TokenR    internal.HexBytes // TokenR is the random token generated for the client
+	Signature internal.HexBytes // Signature is the CSP signature
+	Error     string            // Error is used to provide an error message to the client
 }
 
 func (a *AuthResponse) String() string {

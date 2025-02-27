@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/xlzd/gotp"
 	"go.vocdoni.io/dvote/log"
@@ -182,7 +183,7 @@ func (tf *Twofactor) queueController(queue *Queue) {
 // Indexer takes a unique user identifier and returns the list of processIDs where
 // the user is elegible for participation. This is a helper function that might not
 // be implemented (depends on the handler use case).
-func (tf *Twofactor) Indexer(userID HexBytes) []Election {
+func (tf *Twofactor) Indexer(userID internal.HexBytes) []Election {
 	user, err := tf.stg.User(userID)
 	if err != nil {
 		log.Warnf("cannot get indexer elections: %v", err)
@@ -217,14 +218,14 @@ func (tf *Twofactor) AddProcess(
 	orgParticipants []db.CensusMembershipParticipant,
 ) error {
 	for i, participant := range orgParticipants {
-		userID := make(HexBytes, hex.EncodedLen(len(participant.ParticipantNo)))
+		userID := make(internal.HexBytes, hex.EncodedLen(len(participant.ParticipantNo)))
 		hex.Encode(userID, []byte(participant.ParticipantNo))
 
-		electionId := HexBytes{}
+		electionId := internal.HexBytes{}
 		if err := electionId.FromString(participant.ElectionID); err != nil {
 			return fmt.Errorf("wrong electionID at participant %d", i)
 		}
-		electionIDs := []HexBytes{electionId}
+		electionIDs := []internal.HexBytes{electionId}
 
 		if err := tf.stg.AddUser(userID, electionIDs, participant.HashedPhone, participant.HashedEmail); err != nil {
 			log.Warnf("cannot add user from line %d", i)
@@ -244,11 +245,11 @@ func (tf *Twofactor) InitiateAuth(
 	if len(userId) == 0 {
 		return AuthResponse{Error: "incorrect auth data fields"}
 	}
-	// var userID HexBytes
+	// var userID internal.HexBytes
 	// if err := userID (userId); err != nil {
 	// 	return AuthResponse{Error: "incorrect format for userId"}
 	// }
-	userID := HexBytes(userId)
+	userID := internal.HexBytes(userId)
 
 	// Generate challenge and authentication token
 	challengeSecret := userID.String() + tf.otpSalt
@@ -313,7 +314,7 @@ func (tf *Twofactor) Auth(electionID []byte, authToken *uuid.UUID, authData []st
 	}
 }
 
-func (tf *Twofactor) Sign(electionID, payload, tokenR HexBytes, address string) AuthResponse {
+func (tf *Twofactor) Sign(electionID, payload, tokenR internal.HexBytes, address string) AuthResponse {
 	signature, err := tf.SignECDSA(tokenR, payload, electionID)
 	if err != nil {
 		return AuthResponse{

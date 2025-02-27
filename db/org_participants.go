@@ -10,6 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.vocdoni.io/dvote/log"
 )
 
 // CreateOrgParticipants creates a new orgParticipants for an organization
@@ -223,7 +224,11 @@ func (ms *MongoStorage) OrgParticipants(orgAddress string) ([]OrgParticipant, er
 	if err != nil {
 		return nil, fmt.Errorf("failed to get orgParticipants: %w", err)
 	}
-	defer cursor.Close(ctx)
+	defer func() {
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("error closing cursor", "error", err)
+		}
+	}()
 
 	var orgParticipants []OrgParticipant
 	if err = cursor.All(ctx, &orgParticipants); err != nil {
@@ -233,7 +238,9 @@ func (ms *MongoStorage) OrgParticipants(orgAddress string) ([]OrgParticipant, er
 	return orgParticipants, nil
 }
 
-func (ms *MongoStorage) OrgParticipantsMemberships(orgAddress, censusId, electionId string) ([]CensusMembershipParticipant, error) {
+func (ms *MongoStorage) OrgParticipantsMemberships(
+	orgAddress, censusId, electionId string,
+) ([]CensusMembershipParticipant, error) {
 	if len(orgAddress) == 0 || len(censusId) == 0 {
 		return nil, ErrInvalidData
 	}
@@ -245,21 +252,21 @@ func (ms *MongoStorage) OrgParticipantsMemberships(orgAddress, censusId, electio
 
 	// Optimized aggregation pipeline
 	pipeline := mongo.Pipeline{
-		{{"$match", bson.D{{"orgAddress", orgAddress}}}},
-		{{"$lookup", bson.D{
-			{"from", "censusMemberships"},
-			{"localField", "participantNo"},
-			{"foreignField", "participantNo"},
-			{"as", "membership"},
+		{primitive.E{Key: "$match", Value: bson.D{{Key: "orgAddress", Value: orgAddress}}}},
+		{primitive.E{Key: "$lookup", Value: bson.D{
+			{Key: "from", Value: "censusMemberships"},
+			{Key: "localField", Value: "participantNo"},
+			{Key: "foreignField", Value: "participantNo"},
+			{Key: "as", Value: "membership"},
 		}}},
-		{{"$unwind", bson.D{{"path", "$membership"}}}},
-		{{"$match", bson.D{{"membership.censusId", censusId}}}},
-		{{"$addFields", bson.D{{"electionId", electionId}}}},
-		{{"$project", bson.D{
-			{"hashedEmail", 1},
-			{"hashedPhone", 1},
-			{"participantNo", 1},
-			{"electionId", 1},
+		{primitive.E{Key: "$unwind", Value: bson.D{{Key: "path", Value: "$membership"}}}},
+		{primitive.E{Key: "$match", Value: bson.D{{Key: "membership.censusId", Value: censusId}}}},
+		{primitive.E{Key: "$addFields", Value: bson.D{{Key: "electionId", Value: electionId}}}},
+		{primitive.E{Key: "$project", Value: bson.D{
+			{Key: "hashedEmail", Value: 1},
+			{Key: "hashedPhone", Value: 1},
+			{Key: "participantNo", Value: 1},
+			{Key: "electionId", Value: 1},
 		}}},
 	}
 
@@ -267,7 +274,11 @@ func (ms *MongoStorage) OrgParticipantsMemberships(orgAddress, censusId, electio
 	if err != nil {
 		return nil, fmt.Errorf("failed to get orgParticipants: %w", err)
 	}
-	defer cursor.Close(ctx)
+	defer func() {
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("error closing cursor", "error", err)
+		}
+	}()
 
 	// Convert cursor to slice of OrgParticipants
 	var participants []CensusMembershipParticipant

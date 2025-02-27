@@ -5,12 +5,13 @@ import (
 	"time"
 
 	"github.com/enriquebris/goconcurrentqueue"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/log"
 )
 
 type challengeData struct {
-	userID     HexBytes
-	electionID HexBytes
+	userID     internal.HexBytes
+	electionID internal.HexBytes
 	contact    string
 	challenge  string
 	startTime  time.Time
@@ -40,7 +41,7 @@ func newQueue(ttl, throttle time.Duration, sChFns []SendChallengeFunc) *Queue {
 	}
 }
 
-func (sq *Queue) add(userID, electionID HexBytes, contact string, challenge string) error {
+func (sq *Queue) add(userID, electionID internal.HexBytes, contact string, challenge string) error {
 	c := challengeData{
 		userID:     userID,
 		electionID: electionID,

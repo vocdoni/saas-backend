@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/nyaruka/phonenumbers"
+	"github.com/vocdoni/saas-backend/internal"
 	"github.com/xlzd/gotp"
 	"go.vocdoni.io/dvote/db"
 	"go.vocdoni.io/dvote/db/metadb"
@@ -58,16 +59,16 @@ func (js *JSONstorage) Users() (*Users, error) {
 	return &us, nil
 }
 
-func userIDkey(u HexBytes) []byte {
+func userIDkey(u internal.HexBytes) []byte {
 	return append([]byte(userPrefix), u...)
 }
 
-func key2userID(key []byte) (u HexBytes) {
+func key2userID(key []byte) (u internal.HexBytes) {
 	_ = u.FromString(fmt.Sprintf("%x", key[len(userPrefix):]))
 	return u
 }
 
-func (js *JSONstorage) AddUser(userID HexBytes, processIDs []HexBytes,
+func (js *JSONstorage) AddUser(userID internal.HexBytes, processIDs []internal.HexBytes,
 	phone, extra string,
 ) error {
 	phoneNum, err := phonenumbers.Parse(phone, DefaultPhoneCountry)
@@ -108,7 +109,7 @@ func (js *JSONstorage) MaxAttempts() int {
 	return js.maxSmsAttempts
 }
 
-func (js *JSONstorage) User(userID HexBytes) (*UserData, error) {
+func (js *JSONstorage) User(userID internal.HexBytes) (*UserData, error) {
 	js.keysLock.RLock()
 	defer js.keysLock.RUnlock()
 	userData, err := js.kv.Get(userIDkey(userID))
@@ -140,8 +141,8 @@ func (js *JSONstorage) UpdateUser(udata *UserData) error {
 	return tx.Commit()
 }
 
-func (js *JSONstorage) BelongsToElection(userID HexBytes,
-	electionID HexBytes,
+func (js *JSONstorage) BelongsToElection(userID internal.HexBytes,
+	electionID internal.HexBytes,
 ) (bool, error) {
 	js.keysLock.RLock()
 	defer js.keysLock.RUnlock()
@@ -157,7 +158,7 @@ func (js *JSONstorage) BelongsToElection(userID HexBytes,
 	return ok, nil
 }
 
-func (js *JSONstorage) SetAttempts(userID, electionID HexBytes, delta int) error {
+func (js *JSONstorage) SetAttempts(userID, electionID internal.HexBytes, delta int) error {
 	js.keysLock.Lock()
 	defer js.keysLock.Unlock()
 	tx := js.kv.WriteTx()
@@ -186,7 +187,7 @@ func (js *JSONstorage) SetAttempts(userID, electionID HexBytes, delta int) error
 	return tx.Commit()
 }
 
-func (js *JSONstorage) NewAttempt(userID, electionID HexBytes,
+func (js *JSONstorage) NewAttempt(userID, electionID internal.HexBytes,
 	challengeSecret string, token *uuid.UUID,
 ) (*phonenumbers.PhoneNumber, int, error) {
 	js.keysLock.Lock()
@@ -238,14 +239,14 @@ func (js *JSONstorage) NewAttempt(userID, electionID HexBytes,
 	return user.Phone, attemptNo, tx.Commit()
 }
 
-func (js *JSONstorage) Exists(userID HexBytes) bool {
+func (js *JSONstorage) Exists(userID internal.HexBytes) bool {
 	js.keysLock.RLock()
 	defer js.keysLock.RUnlock()
 	_, err := js.kv.Get(userIDkey(userID))
 	return err == nil
 }
 
-func (js *JSONstorage) Verified(userID, electionID HexBytes) (bool, error) {
+func (js *JSONstorage) Verified(userID, electionID internal.HexBytes) (bool, error) {
 	js.keysLock.RLock()
 	defer js.keysLock.RUnlock()
 	userData, err := js.kv.Get(userIDkey(userID))
@@ -263,7 +264,7 @@ func (js *JSONstorage) Verified(userID, electionID HexBytes) (bool, error) {
 	return election.Consumed, nil
 }
 
-func (js *JSONstorage) VerifyChallenge(electionID HexBytes,
+func (js *JSONstorage) VerifyChallenge(electionID internal.HexBytes,
 	token *uuid.UUID, solution string,
 ) error {
 	js.keysLock.Lock()
@@ -333,7 +334,7 @@ func (js *JSONstorage) VerifyChallenge(electionID HexBytes,
 	return nil
 }
 
-func (js *JSONstorage) DelUser(userID HexBytes) error {
+func (js *JSONstorage) DelUser(userID internal.HexBytes) error {
 	js.keysLock.Lock()
 	defer js.keysLock.Unlock()
 	tx := js.kv.WriteTx()
@@ -371,7 +372,8 @@ func (js *JSONstorage) String() string {
 			log.Warn(err)
 		}
 		// nolint[:ineffassign]
-		output[key2userID(key).String()] = data
+		userID := key2userID(key)
+		output[userID.String()] = data
 		return true
 	}); err != nil {
 		log.Warn(err)
@@ -385,6 +387,6 @@ func (js *JSONstorage) String() string {
 	return string(outputData)
 }
 
-func signKey2key(u HexBytes) []byte {
+func signKey2key(u internal.HexBytes) []byte {
 	return append([]byte(signkeyPrefix), u...)
 }
