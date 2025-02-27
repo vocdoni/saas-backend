@@ -207,3 +207,42 @@ func (ms *MongoStorage) BulkUpsertOrgParticipants(
 
 	return result, nil
 }
+
+// OrgParticipantsPaginated retrieves a list of orgParticipants from the DB
+// based on the orgAddress, sorted by createdAt in descending order starting
+// from the offset and limited by the limit parameter. It also checks that the
+// organization exists.
+func (ms *MongoStorage) OrgParticipantsPaginated(orgAddress string, limit, offset int) ([]OrgParticipant, error) {
+	// check that the org exists
+	if _, _, err := ms.Organization(orgAddress, false); err != nil {
+		if err == ErrNotFound {
+			return nil, ErrInvalidData
+		}
+		return nil, err
+	}
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// define the filter to get the participants of the organization and
+	// the options to get the paginated result
+	filter := bson.M{"orgAddress": orgAddress}
+	opts := options.Find().
+		SetLimit(int64(limit)).          // set the limit of the result set
+		SetSkip(int64(offset)).          // set the offset of the result set
+		SetSort(bson.M{"createdAt": -1}) // sort by createdAt in descending order
+	// lock the database
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	// create a cursor to get the participants of the organization
+	cursor, err := ms.orgParticipants.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+	// decode the participants from the cursor
+	var participants []OrgParticipant
+	if err = cursor.All(ctx, &participants); err != nil {
+		return nil, err
+	}
+	return participants, nil
+}
