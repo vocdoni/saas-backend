@@ -14,11 +14,11 @@ import (
 // If processID is not nil, returns the salted public key.
 func (tf *Twofactor) PubKeyBlind(processID []byte) string {
 	if processID == nil {
-		return fmt.Sprintf("%x", tf.signer.BlindPubKey())
+		return fmt.Sprintf("%x", tf.Signer.BlindPubKey())
 	}
 	var salt [SaltSize]byte
 	copy(salt[:], processID[:SaltSize])
-	pk, err := SaltBlindPubKey(tf.signer.BlindPubKey(), salt)
+	pk, err := SaltBlindPubKey(tf.Signer.BlindPubKey(), salt)
 	if err != nil {
 		return ""
 	}
@@ -29,7 +29,7 @@ func (tf *Twofactor) PubKeyBlind(processID []byte) string {
 // If processID is nil, returns the root public key.
 // If processID is not nil, returns the salted public key.
 func (tf *Twofactor) PubKeyECDSA(processID []byte) string {
-	k, err := tf.signer.ECDSAPubKey()
+	k, err := tf.Signer.ECDSAPubKey()
 	if err != nil {
 		return ""
 	}
@@ -92,7 +92,7 @@ func (tf *Twofactor) SignECDSA(token, msg []byte, processID []byte) ([]byte, err
 	}()
 	var salt [SaltSize]byte
 	copy(salt[:], processID[:SaltSize])
-	return tf.signer.SignECDSA(salt, msg)
+	return tf.Signer.SignECDSA(salt, msg)
 }
 
 // SignBlind performs a blind signature over hash. Also checks if R point is valid
@@ -103,9 +103,16 @@ func (tf *Twofactor) SignBlind(signerR *blind.Point, hash, processID []byte) ([]
 	if k == nil || err != nil {
 		return nil, fmt.Errorf("unknown R point")
 	}
-	var salt [SaltSize]byte
-	copy(salt[:], processID[:SaltSize])
-	signature, err := tf.signer.SignBlind(salt, hash, k)
+
+	var signature []byte
+	if processID == nil {
+		signature, err = tf.Signer.SignBlind(nil, hash, k)
+	} else {
+		var salt [SaltSize]byte
+		copy(salt[:], processID[:SaltSize])
+		signature, err = tf.Signer.SignBlind(salt[:], hash, k)
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -120,38 +127,38 @@ func (tf *Twofactor) SignBlind(signerR *blind.Point, hash, processID []byte) ([]
 func (tf *Twofactor) SharedKey(processID []byte) ([]byte, error) {
 	var salt [SaltSize]byte
 	copy(salt[:], processID[:SaltSize])
-	return tf.signer.SignECDSA(salt, processID)
+	return tf.Signer.SignECDSA(salt, processID)
 }
 
 // SyncMap helpers
 func (tf *Twofactor) addKey(index string, point *big.Int) error {
-	tf.stg.keysLock.Lock()
-	defer tf.stg.keysLock.Unlock()
-	tx := tf.stg.kv.WriteTx()
+	tf.keysLock.Lock()
+	defer tf.keysLock.Unlock()
+	tx := tf.keys.WriteTx()
 	defer tx.Discard()
-	if err := tx.Set(signKey2key([]byte(index)), point.Bytes()); err != nil {
+	if err := tx.Set([]byte(index), point.Bytes()); err != nil {
 		log.Error(err)
 	}
 	return tx.Commit()
 }
 
 func (tf *Twofactor) delKey(index string) error {
-	tf.stg.keysLock.Lock()
-	defer tf.stg.keysLock.Unlock()
-	tx := tf.stg.kv.WriteTx()
+	tf.keysLock.Lock()
+	defer tf.keysLock.Unlock()
+	tx := tf.keys.WriteTx()
 	defer tx.Discard()
-	if err := tx.Delete(signKey2key([]byte(index))); err != nil {
+	if err := tx.Delete([]byte(index)); err != nil {
 		log.Error(err)
 	}
 	return tx.Commit()
 }
 
 func (tf *Twofactor) getKey(index string) (*big.Int, error) {
-	tf.stg.keysLock.RLock()
-	defer tf.stg.keysLock.RUnlock()
-	tx := tf.stg.kv.WriteTx()
+	tf.keysLock.RLock()
+	defer tf.keysLock.RUnlock()
+	tx := tf.keys.WriteTx()
 	defer tx.Discard()
-	p, err := tx.Get(signKey2key([]byte(index)))
+	p, err := tx.Get([]byte(index))
 	if err != nil {
 		return nil, err
 	}

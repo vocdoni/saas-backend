@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -156,6 +157,7 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	rootBytes := a.twofactor.Signer.BlindPubKey().Bytes()
 	var pubCensus *db.PublishedCensus
 	switch census.Type {
 	case "sms_or_mail":
@@ -163,7 +165,7 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 		pubCensus = &db.PublishedCensus{
 			Census: *census,
 			URI:    a.serverURL + "/process",
-			Root:   a.account.PubKey.String(),
+			Root:   hex.EncodeToString(rootBytes),
 		}
 	}
 

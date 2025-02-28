@@ -6,13 +6,17 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"sync"
 	"time"
 
+	"github.com/arnaucube/go-blindsecp256k1"
 	"github.com/google/uuid"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/xlzd/gotp"
+	dvotedb "go.vocdoni.io/dvote/db"
+	"go.vocdoni.io/dvote/db/metadb"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -56,7 +60,9 @@ type Twofactor struct {
 	smsQueue             *Queue
 	mailQueue            *Queue
 	otpSalt              string
-	signer               *SaltedKey
+	Signer               *SaltedKey
+	keys                 dvotedb.Database
+	keysLock             sync.RWMutex
 }
 
 // SendChallengeFunc is the function that sends the SMS challenge to a phone number.
@@ -137,7 +143,7 @@ func (tf *Twofactor) New(conf *TwofactorConfig) (*Twofactor, error) {
 
 	// ECDSA/Blind signer
 	var err error
-	if tf.signer, err = NewSaltedKey(conf.PrivKey); err != nil {
+	if tf.Signer, err = NewSaltedKey(conf.PrivKey); err != nil {
 		return nil, err
 	}
 
@@ -150,6 +156,12 @@ func (tf *Twofactor) New(conf *TwofactorConfig) (*Twofactor, error) {
 	if err != nil {
 		panic(fmt.Sprintf("cannot create data directory: %v", err))
 	}
+
+	tf.keys, err = metadb.New(dvotedb.TypePebble, dataDir)
+	if err != nil {
+		return nil, fmt.Errorf("cannot create the database: %v", err)
+	}
+
 	tf.stg = new(JSONstorage)
 	if err := tf.stg.Init(
 		path.Join(dataDir, "storage"),
@@ -336,17 +348,29 @@ func (tf *Twofactor) Auth(electionID []byte, authToken *uuid.UUID, authData []st
 		log.Warnf("verify challenge %s failed: %v", solution, err)
 		return AuthResponse{Error: "challenge not completed:" + err.Error()}
 	}
+	r, err := tf.NewBlindRequestKey()
+	if err != nil {
+		return AuthResponse{Error: "error getting new blind token:" + err.Error()}
+	}
+	tokenR := r.BytesUncompressed()
 
 	log.Infof("new user registered, challenge resolved %s", authData[0])
 	return AuthResponse{
 		Response: []string{"challenge resolved"},
 		Success:  true,
-		TokenR:   tf.NewRequestKey(),
+		TokenR:   tokenR,
 	}
 }
 
 func (tf *Twofactor) Sign(electionID, payload, tokenR internal.HexBytes, address string) AuthResponse {
-	signature, err := tf.SignECDSA(tokenR, payload, electionID)
+	r, err := blindsecp256k1.NewPointFromBytesUncompressed(tokenR)
+	if err != nil {
+		return AuthResponse{
+			Success: false,
+			Error:   err.Error(),
+		}
+	}
+	signature, err := tf.SignBlind(r, payload, nil)
 	if err != nil {
 		return AuthResponse{
 			Success: false,

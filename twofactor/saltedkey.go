@@ -68,7 +68,7 @@ func (sk *SaltedKey) SignECDSA(salt [SaltSize]byte,
 
 // SignBlind returns the signature payload of a blinded message using the provided Salt.
 // The Secretk number needs to be also provided.
-func (sk *SaltedKey) SignBlind(salt [SaltSize]byte, msgBlinded []byte,
+func (sk *SaltedKey) SignBlind(salt []byte, msgBlinded []byte,
 	secretK *big.Int,
 ) ([]byte, error) {
 	if secretK == nil {

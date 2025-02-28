@@ -392,6 +392,6 @@ func (js *JSONstorage) String() string {
 	return string(outputData)
 }
 
-func signKey2key(u internal.HexBytes) []byte {
-	return append([]byte(signkeyPrefix), u...)
-}
+// func signKey2key(u internal.HexBytes) []byte {
+// 	return append([]byte(signkeyPrefix), u...)
+// }
