@@ -1427,7 +1427,7 @@ This method return if exists, in inline mode. the image/file of the provided by 
   "authData": ["verification-code-or-other-auth-data"]
 }
 ```
-* **Response (Setp 0)**
+* **Response (Step 1)**
 ```json
 {
   "tokenR": "base64-encoded-date"

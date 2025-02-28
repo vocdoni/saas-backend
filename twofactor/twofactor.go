@@ -93,6 +93,7 @@ func (mf *MailNotification) SendChallenge(mail string, challenge string) error {
 		ToAddress: mail,
 		Subject:   "Vocdoni verification code",
 		PlainBody: fmt.Sprintf("Your authentication code is %s", challenge),
+		Body:      fmt.Sprintf("Your authentication code is %s", challenge),
 	}
 	// return tf.notificationServices.Mail.SendNotification(ctx, notif)
 	return mf.MailNotificationService.SendNotification(ctx, notif)

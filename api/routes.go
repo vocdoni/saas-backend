@@ -98,9 +98,11 @@ const (
 
 	// two-factor auth routes
 	// POST /process/{processId}/2fa/{step} to handle two-factor authentication
-	twofactorAuthEndpoint = "/process/{processId}/auth/{step}"
+	twofactorAuthEndpoint          = "/process/{processId}/auth/{step}"
+	twofactorAuthEndpointBackwards = "/process/auth/elections/{processId}/blind/2fa/{step}"
 	// POST /process/{processId}/2fa/sign to sign with two-factor authentication
-	twofactorSignEndpoint = "/process/{processId}/sign"
+	twofactorSignEndpoint          = "/process/{processId}/sign"
+	twofactorSignEndpointBackwards = "/process/auth/elections/{processId}/blind/sign"
 
 	// // census auth routes (currently not implemented)
 	// // POST /process/{processId}/auth/0 to initiate auth
