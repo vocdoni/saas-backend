@@ -62,26 +62,52 @@ type Twofactor struct {
 // SendChallengeFunc is the function that sends the SMS challenge to a phone number.
 type SendChallengeFunc func(contact string, challenge string) error
 
-func (tf *Twofactor) SendChallengeMail(contact string, challenge string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	notif := &notifications.Notification{
-		ToAddress: contact,
-		Subject:   "Vocdoni authentication code",
-		Body:      fmt.Sprintf("Your authentication code is %s", challenge),
-	}
-	return tf.notificationServices.Mail.SendNotification(ctx, notif)
+type MailNotification struct {
+	MailNotificationService notifications.NotificationService
+	ToAddress               string
+	Subject                 string
+	Body                    string
 }
 
-func (tf *Twofactor) SendChallengeSMS(contact string, challenge string) error {
+type SmsNotification struct {
+	SmsNotificationService notifications.NotificationService
+	ToNumber               string
+	Subject                string
+	Body                   string
+}
+
+func NewMailNotifcation(notifService notifications.NotificationService) *MailNotification {
+	MailNotificationService := notifService
+	return &MailNotification{MailNotificationService, "", "", ""}
+}
+
+func NewSmsNotifcation(notifService notifications.NotificationService) *SmsNotification {
+	SmsNotificationService := notifService
+	return &SmsNotification{SmsNotificationService, "", "", ""}
+}
+
+func (mf *MailNotification) SendChallenge(mail string, challenge string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	notif := &notifications.Notification{
-		ToNumber: contact,
-		Subject:  "Vocdoni authentication code",
-		Body:     fmt.Sprintf("Your authentication code is %s", challenge),
+		ToAddress: mail,
+		Subject:   "Vocdoni verification code",
+		PlainBody: fmt.Sprintf("Your authentication code is %s", challenge),
 	}
-	return tf.notificationServices.Mail.SendNotification(ctx, notif)
+	// return tf.notificationServices.Mail.SendNotification(ctx, notif)
+	return mf.MailNotificationService.SendNotification(ctx, notif)
+}
+
+func (sn *SmsNotification) SendChallenge(phone string, challenge string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	notif := &notifications.Notification{
+		ToNumber:  phone,
+		Subject:   "Vocdoni verification code",
+		PlainBody: fmt.Sprintf("Your authentication code is %s", challenge),
+	}
+	// return tf.notificationServices.Mail.SendNotification(ctx, notif)
+	return sn.SmsNotificationService.SendNotification(ctx, notif)
 }
 
 func (tf *Twofactor) New(conf *TwofactorConfig) (*Twofactor, error) {
@@ -135,7 +161,7 @@ func (tf *Twofactor) New(conf *TwofactorConfig) (*Twofactor, error) {
 	tf.smsQueue = newQueue(
 		coolDownTime,
 		throttleTime,
-		[]SendChallengeFunc{tf.SendChallengeSMS},
+		[]SendChallengeFunc{NewSmsNotifcation(conf.NotificationServices.SMS).SendChallenge},
 	)
 	go tf.smsQueue.run()
 	go tf.queueController(tf.smsQueue)
@@ -143,7 +169,7 @@ func (tf *Twofactor) New(conf *TwofactorConfig) (*Twofactor, error) {
 	tf.mailQueue = newQueue(
 		coolDownTime,
 		throttleTime,
-		[]SendChallengeFunc{tf.SendChallengeMail},
+		[]SendChallengeFunc{NewMailNotifcation(conf.NotificationServices.Mail).SendChallenge},
 	)
 	go tf.mailQueue.run()
 	go tf.queueController(tf.mailQueue)
@@ -307,7 +333,7 @@ func (tf *Twofactor) Auth(electionID []byte, authToken *uuid.UUID, authData []st
 	// Verify the challenge solution
 	if err := tf.stg.VerifyChallenge(electionID, authToken, solution); err != nil {
 		log.Warnf("verify challenge %s failed: %v", solution, err)
-		return AuthResponse{Error: "challenge not completed"}
+		return AuthResponse{Error: "challenge not completed:" + err.Error()}
 	}
 
 	log.Infof("new user registered, challenge resolved %s", authData[0])

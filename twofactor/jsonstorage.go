@@ -311,7 +311,7 @@ func (js *JSONstorage) VerifyChallenge(electionID internal.HexBytes,
 		return err
 	}
 
-	attemptNo := js.maxSmsAttempts - election.RemainingAttempts
+	attemptNo := js.maxSmsAttempts - election.RemainingAttempts - 1
 	// Use the stored challenge secret to generate the OTP
 	hotp := gotp.NewDefaultHOTP(election.ChallengeSecret)
 	challengeData := hotp.At(attemptNo)

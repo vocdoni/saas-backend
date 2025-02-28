@@ -166,7 +166,7 @@ func (a *API) twofactorAuthHandler(w http.ResponseWriter, r *http.Request) {
 			ErrUnauthorized.WithErr(errors.New(authResp.Error)).Write(w)
 			return
 		}
-		httpWriteOK(w)
+		httpWriteJSON(w, &twofactorResponse{TokenR: authResp.TokenR})
 		return
 	}
 }
@@ -203,6 +203,10 @@ func (a *API) initiateAuthRequest(r *http.Request, processId []byte) (*uuid.UUID
 		return nil, ErrMalformedBody.Withf("missing participant number")
 	}
 
+	if len(req.Email) == 0 && len(req.Phone) == 0 {
+		return nil, ErrMalformedBody.Withf("missing auth data")
+	}
+
 	// retrieve process info
 	process, err := a.db.Process(processId)
 	if err != nil {
@@ -237,7 +241,8 @@ func (a *API) initiateAuthRequest(r *http.Request, processId []byte) (*uuid.UUID
 	userID := make(internal.HexBytes, hex.EncodedLen(len(participant.ParticipantNo)))
 	hex.Encode(userID, []byte(participant.ParticipantNo))
 	var authResp twofactor.AuthResponse
-	if censusType == db.CensusTypeMail || censusType == db.CensusTypeSMSorMail {
+	switch censusType {
+	case db.CensusTypeMail:
 		if req.Email == "" {
 			return nil, ErrUnauthorized.Withf("missing email")
 		}
@@ -245,7 +250,7 @@ func (a *API) initiateAuthRequest(r *http.Request, processId []byte) (*uuid.UUID
 			return nil, ErrUnauthorized.Withf("invalid user data")
 		}
 		authResp = a.twofactor.InitiateAuth(processId, userID, req.Email, notifications.Email)
-	} else if censusType == db.CensusTypeSMS || censusType == db.CensusTypeSMSorMail {
+	case db.CensusTypeSMS:
 		if req.Phone == "" {
 			return nil, ErrUnauthorized.Withf("missing phone")
 		}
@@ -253,7 +258,21 @@ func (a *API) initiateAuthRequest(r *http.Request, processId []byte) (*uuid.UUID
 			return nil, ErrUnauthorized.Withf("invalid user data")
 		}
 		authResp = a.twofactor.InitiateAuth(processId, userID, req.Phone, notifications.SMS)
-	} else {
+	case db.CensusTypeSMSorMail:
+		if req.Email != "" {
+			if !bytes.Equal(internal.HashOrgData(process.OrgAddress, req.Email), participant.HashedEmail) {
+				return nil, ErrUnauthorized.Withf("invalid user data")
+			}
+			authResp = a.twofactor.InitiateAuth(processId, userID, req.Email, notifications.Email)
+		} else if req.Phone != "" {
+			if !bytes.Equal(internal.HashOrgData(process.OrgAddress, req.Phone), participant.HashedPhone) {
+				return nil, ErrUnauthorized.Withf("invalid user data")
+			}
+			authResp = a.twofactor.InitiateAuth(processId, userID, req.Phone, notifications.SMS)
+		} else {
+			return nil, ErrUnauthorized.Withf("missing email or phone")
+		}
+	default:
 		return nil, ErrUnauthorized.Withf("invalid census type")
 	}
 
