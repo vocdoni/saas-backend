@@ -115,9 +115,9 @@ type AuthRequest struct {
 }
 
 type SignRequest struct {
-	TokenR  internal.HexBytes `json:"tokenR"`
+	TokenR  internal.HexBytes `json:"token"`
 	Address string            `json:"address,omitempty"`
-	Payload internal.HexBytes `json:"payload,omitempty"`
+	Payload internal.HexBytes `json:"payload"`
 }
 
 type twofactorResponse struct {

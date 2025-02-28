@@ -1453,8 +1453,7 @@ Two-step authentication process for voters. Step 0 initiates the authentication 
 * **Request Body** 
 ```json
 {
-  "tokenR": "base64-encoded-token",
-  "address": "0x...",
+  "token": "base64-encoded-token",
   "payload": "base64-encoded-payload"
 }
 ```
