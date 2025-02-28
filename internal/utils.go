@@ -61,5 +61,7 @@ func HashVerificationCode(userEmail, code string) string {
 }
 
 func HashOrgData(orgAddress, data string) []byte {
-	return sha256.New().Sum([]byte(orgAddress + data))
+	h := sha256.New()
+	h.Write([]byte(orgAddress + data))
+	return h.Sum(nil)
 }

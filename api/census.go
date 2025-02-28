@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -8,7 +9,14 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/db"
 	"go.vocdoni.io/dvote/log"
+	"go.vocdoni.io/dvote/util"
 )
+
+type PublishedCensusResponse struct {
+	URI      string `json:"uri" bson:"uri"`
+	Root     string `json:"root" bson:"root"`
+	CensusID string `json:"censusId" bson:"censusId"`
+}
 
 // createCensusHandler creates a new census for an organization.
 // Requires Manager/Admin role. Returns census ID on success.
@@ -35,7 +43,7 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 
 	census := &db.Census{
 		Type:       censusInfo.Type,
-		OrgAddress: censusInfo.OrgAddress,
+		OrgAddress: util.TrimHex(censusInfo.OrgAddress),
 		CreatedAt:  time.Now(),
 	}
 	censusID, err := a.db.SetCensus(census)
@@ -149,14 +157,15 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	rootBytes := a.twofactor.Signer.BlindPubKey().Bytes()
 	var pubCensus *db.PublishedCensus
 	switch census.Type {
 	case "sms_or_mail":
 		// TODO send sms or mail
 		pubCensus = &db.PublishedCensus{
 			Census: *census,
-			URI:    a.serverURL + "/csp/",
-			Root:   a.account.PubKey,
+			URI:    a.serverURL + "/process",
+			Root:   hex.EncodeToString(rootBytes),
 		}
 	}
 
@@ -165,5 +174,8 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpWriteJSON(w, pubCensus)
+	httpWriteJSON(w, &PublishedCensusResponse{
+		URI:  pubCensus.URI,
+		Root: pubCensus.Root,
+	})
 }

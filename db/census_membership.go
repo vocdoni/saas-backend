@@ -9,6 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.vocdoni.io/dvote/log"
 )
 
 // SetCensusMembership creates or updates a census membership in the database.
@@ -237,4 +238,40 @@ func (ms *MongoStorage) SetBulkCensusMembership(
 	}
 
 	return resultMemb, nil
+}
+
+// CensusMemberships retrieves all the census memberships for a given census.
+func (ms *MongoStorage) CensusMemberships(censusId string) ([]CensusMembership, error) {
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// validate input
+	if len(censusId) == 0 {
+		return nil, ErrInvalidData
+	}
+
+	// prepare filter for upsert
+	filter := bson.M{
+		"censusId": censusId,
+	}
+
+	// find the membership
+	cursor, err := ms.censusMemberships.Find(ctx, filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get census memberships: %w", err)
+	}
+	defer func() {
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("error closing cursor", "error", err)
+		}
+	}()
+	var memberships []CensusMembership
+	if err := cursor.All(ctx, &memberships); err != nil {
+		return nil, fmt.Errorf("failed to get census memberships: %w", err)
+	}
+
+	return memberships, nil
 }

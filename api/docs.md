@@ -53,6 +53,8 @@
   - [🆕 Create Process](#-create-process)
   - [ℹ️ Get Process Info](#-get-process-info)
   - [🔐 Process Authentication](#-process-authentication)
+  - [🔒 Two-Factor Authentication](#-two-factor-authentication)
+  - [✍️ Two-Factor Signing](#-two-factor-signing)
 
 </details>
 
@@ -941,8 +943,6 @@ This request can be made only by organization admins.
       "id":1,
       "name":"Basic",
       "stripeID":"stripe_123",
-      "startingPrice": "9900",
-      "organization":{
         "memberships":1,
         "subOrgs":1
       },
@@ -1273,13 +1273,7 @@ Publishes a census, making it available for voting. Requires Manager or Admin ro
 * **Response**
 ```json
 {
-  "census": {
-    "id": "census_id",
-    "type": "sms_or_mail",
-    "orgAddress": "0x...",
-    "createdAt": "2025-02-18T17:12:00Z"
-  },
-  "uri": "https://example.com/csp/",
+  "uri": "https://example.com/process/",
   "root": "public_key"
 }
 ```
@@ -1302,8 +1296,11 @@ Publishes a census, making it available for voting. Requires Manager or Admin ro
 * **Request body**
 ```json
 {
-  "censusID": "published_census_id",
-  "metadata": "base64_encoded_metadata"
+  "censusRoot": "published_census_root",
+  "censusUri": "published_census_uri",
+  "censusId": "used-census-id",
+  "metadata": "base64_encoded_metadata" // optional
+
 }
 ```
 
@@ -1401,3 +1398,81 @@ This method return if exists, in inline mode. the image/file of the provided by 
 | `400` | `40024` | `the obejct/parameters provided are invalid` |
 | `500` | `50002` | `internal server error` |
 | `500` | `50006` | `internal storage error` |
+
+### 🔒 Two-Factor Authentication
+
+* **Path** `/process/{processId}/auth/{step}`
+* **Method** `POST`
+* **Request Body (Step 0)** 
+```json
+{
+  "participantNo": "participant_id",
+  "email": "participant@example.com",  // Optional: Required if using email authentication
+  "phone": "+1234567890",             // Optional: Required if using phone authentication
+  "password": "secretpass1234"        // Optional: Required if using password authentication
+}
+```
+
+* **Response (Step 0)**
+```json
+{
+  "authToken": "uuid-string"
+}
+```
+
+* **Request Body (Step 1)** 
+```json
+{
+  "authToken": "uuid-string",
+  "authData": ["verification-code-or-other-auth-data"]
+}
+```
+* **Response (Step 1)**
+```json
+{
+  "tokenR": "base64-encoded-date"
+}
+```
+
+* **Description**
+Two-step authentication process for voters. Step 0 initiates the authentication process and returns an auth token. Step 1 completes the authentication by providing the verification code or other authentication data.
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40010` | `malformed URL parameter` |
+| `401` | `40001` | `user not authorized` |
+| `500` | `50002` | `internal server error` |
+
+### ✍️ Two-Factor Signing
+
+* **Path** `/process/{processId}/sign`
+* **Method** `POST`
+* **Request Body** 
+```json
+{
+  "token": "base64-encoded-token",
+  "payload": "base64-encoded-payload"
+}
+```
+
+* **Response**
+```json
+{
+  "signature": "base64-encoded-signature"
+}
+```
+
+* **Description**
+Signs a payload using two-factor authentication. Requires a valid tokenR obtained from the two-factor authentication process.
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40010` | `malformed URL parameter` |
+| `401` | `40001` | `user not authorized` |
+| `500` | `50002` | `internal server error` |

@@ -71,3 +71,9 @@ func (b *HexBytes) UnmarshalJSON(data []byte) error {
 	}
 	return nil
 }
+
+func (b *HexBytes) FromString(str string) error {
+	var err error
+	(*b), err = hex.DecodeString(str)
+	return err
+}
