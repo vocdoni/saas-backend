@@ -5,11 +5,12 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 var (
-	testProcessID       = []byte("test_process_id")
+	testProcessID       = internal.HexBytes("test_process_id")
 	testProcessRoot     = "test_process_root"
 	testProcessURI      = "test_process_uri"
 	testProcessMetadata = []byte("test_metadata")
@@ -114,7 +115,7 @@ func TestSetAndGetProcess(t *testing.T) {
 		},
 	}
 	newProcess := &Process{
-		ID:              []byte("new-process"),
+		ID:              internal.HexBytes("new-process"),
 		OrgAddress:      testOrgAddress,
 		PublishedCensus: newPublishedCensus,
 	}
@@ -191,6 +192,7 @@ func TestDeleteProcess(t *testing.T) {
 	c.Assert(err, qt.Not(qt.IsNil))
 
 	// test delete with empty ID
-	err = db.DelProcess(nil)
+	var emptyID internal.HexBytes
+	err = db.DelProcess(emptyID)
 	c.Assert(err, qt.Equals, ErrInvalidData)
 }
