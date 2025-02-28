@@ -115,15 +115,15 @@ type AuthRequest struct {
 }
 
 type SignRequest struct {
-	TokenR  []byte `json:"tokenR,omitempty"`
-	Address string `json:"address,omitempty"`
-	Payload []byte `json:"payload,omitempty"`
+	TokenR  internal.HexBytes `json:"tokenR,omitempty"`
+	Address string            `json:"address,omitempty"`
+	Payload internal.HexBytes `json:"payload,omitempty"`
 }
 
 type twofactorResponse struct {
-	AuthToken *uuid.UUID `json:"authToken,omitempty"`
-	TokenR    []byte     `json:"tokenR,omitempty"`
-	Signature []byte     `json:"signature,omitempty"`
+	AuthToken *uuid.UUID        `json:"authToken,omitempty"`
+	TokenR    internal.HexBytes `json:"tokenR,omitempty"`
+	Signature internal.HexBytes `json:"signature,omitempty"`
 }
 
 // getSubscriptionsHandler handles the request to get the subscriptions of an organization.

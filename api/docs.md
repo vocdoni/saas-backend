@@ -1430,7 +1430,7 @@ This method return if exists, in inline mode. the image/file of the provided by 
 * **Response (Setp 0)**
 ```json
 {
-  "tokenR": "hex-string"
+  "tokenR": "base64-encoded-date"
 }
 ```
 
@@ -1448,7 +1448,7 @@ Two-step authentication process for voters. Step 0 initiates the authentication 
 
 ### ✍️ Two-Factor Signing
 
-* **Path** `/process/{processId}/auth/sign`
+* **Path** `/process/{processId}/sign`
 * **Method** `POST`
 * **Request Body** 
 ```json

@@ -100,7 +100,7 @@ const (
 	// POST /process/{processId}/2fa/{step} to handle two-factor authentication
 	twofactorAuthEndpoint = "/process/{processId}/auth/{step}"
 	// POST /process/{processId}/2fa/sign to sign with two-factor authentication
-	twofactorSignEndpoint = "/process/{processId}/auth/sign"
+	twofactorSignEndpoint = "/process/{processId}/sign"
 
 	// // census auth routes (currently not implemented)
 	// // POST /process/{processId}/auth/0 to initiate auth
