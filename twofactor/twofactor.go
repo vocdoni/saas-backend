@@ -350,17 +350,18 @@ func (tf *Twofactor) Auth(electionID []byte, authToken *uuid.UUID, authData []st
 		log.Warnf("verify challenge %s failed: %v", solution, err)
 		return AuthResponse{Error: "challenge not completed:" + err.Error()}
 	}
-	r, err := tf.NewBlindRequestKey()
-	if err != nil {
-		return AuthResponse{Error: "error getting new blind token:" + err.Error()}
-	}
-	tokenR := r.BytesUncompressed()
+	token := tf.NewRequestKey()
+	// token, err := tf.stg.NewBlindRequestKey(token)
+	// if err != nil {
+	// 	return AuthResponse{Error: "error getting new token:" + err.Error()}
+	// }
+	// tokenR := r.BytesUncompressed()
 
 	log.Infof("new user registered, challenge resolved %s", authData[0])
 	return AuthResponse{
 		Response: []string{"challenge resolved"},
 		Success:  true,
-		TokenR:   tokenR,
+		TokenR:   token,
 	}
 }
 
