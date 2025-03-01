@@ -122,6 +122,11 @@ func (ms *MongoStorage) initCollections(database string) error {
 	if ms.processes, err = getCollection("processes"); err != nil {
 		return err
 	}
+
+	// processBundles collection
+	if ms.processBundles, err = getCollection("processBundles"); err != nil {
+		return err
+	}
 	return nil
 }
 

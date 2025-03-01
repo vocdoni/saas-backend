@@ -51,7 +51,7 @@ func NewSaltedKey(privKey string) (*SaltedKey, error) {
 
 // SignECDSA returns the signature payload of message (which will be hashed)
 // using the provided Salt.
-func (sk *SaltedKey) SignECDSA(salt [SaltSize]byte,
+func (sk *SaltedKey) SignECDSA(salt []byte,
 	msg []byte,
 ) ([]byte, error) {
 	esk := new(vocdonicrypto.SignKeys)

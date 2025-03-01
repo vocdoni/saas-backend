@@ -90,9 +90,13 @@ func (tf *Twofactor) SignECDSA(token, msg []byte, processID []byte) ([]byte, err
 			log.Warn(err)
 		}
 	}()
+	if processID == nil {
+		return tf.Signer.SignECDSA(nil, msg)
+	}
+
 	var salt [SaltSize]byte
 	copy(salt[:], processID[:SaltSize])
-	return tf.Signer.SignECDSA(salt, msg)
+	return tf.Signer.SignECDSA(salt[:], msg)
 }
 
 // SignBlind performs a blind signature over hash. Also checks if R point is valid
@@ -127,7 +131,7 @@ func (tf *Twofactor) SignBlind(signerR *blind.Point, hash, processID []byte) ([]
 func (tf *Twofactor) SharedKey(processID []byte) ([]byte, error) {
 	var salt [SaltSize]byte
 	copy(salt[:], processID[:SaltSize])
-	return tf.Signer.SignECDSA(salt, processID)
+	return tf.Signer.SignECDSA(salt[:], processID)
 }
 
 // SyncMap helpers

@@ -82,7 +82,7 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 	if pubCensus.Census.Type == db.CensusTypeSMSorMail ||
 		pubCensus.Census.Type == db.CensusTypeMail ||
 		pubCensus.Census.Type == db.CensusTypeSMS {
-		if err := a.twofactor.AddProcess(process.ID, pubCensus.Census.Type, orgParticipants); err != nil {
+		if err := a.twofactor.AddProcess(pubCensus.Census.Type, orgParticipants); err != nil {
 			ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
@@ -117,7 +117,7 @@ type AuthRequest struct {
 type SignRequest struct {
 	TokenR  internal.HexBytes `json:"token"`
 	Address string            `json:"address,omitempty"`
-	Payload internal.HexBytes `json:"payload"`
+	Payload internal.HexBytes `json:"payload,omitempty"`
 }
 
 type twofactorResponse struct {
@@ -186,7 +186,7 @@ func (a *API) twofactorSignHandler(w http.ResponseWriter, r *http.Request) {
 		ErrMalformedBody.Write(w)
 		return
 	}
-	signResp := a.twofactor.Sign(processId, req.Payload, req.TokenR, req.Address)
+	signResp := a.twofactor.Sign(req.TokenR, req.Payload, processId, "ecdsa")
 	if !signResp.Success {
 		ErrUnauthorized.WithErr(errors.New(signResp.Error)).Write(w)
 		return

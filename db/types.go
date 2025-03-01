@@ -224,6 +224,14 @@ type Process struct {
 	Metadata        []byte            `json:"metadata,omitempty"  bson:"metadata"`
 }
 
+type ProcessesBundle struct {
+	ID         primitive.ObjectID  `json:"id" bson:"_id,omitempty"`
+	Census     Census              `json:"census" bson:"census"`
+	CensusRoot string              `json:"censusRoot" bson:"censusRoot"`
+	OrgAddress string              `json:"orgAddress" bson:"orgAddress"`
+	Processes  []internal.HexBytes `json:"processes" bson:"processes"`
+}
+
 // Mix of the Membership and the Participant
 type CensusMembershipParticipant struct {
 	ParticipantNo string `json:"participantNo" bson:"participantNo"`

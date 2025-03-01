@@ -18,6 +18,8 @@ import (
 	dvotedb "go.vocdoni.io/dvote/db"
 	"go.vocdoni.io/dvote/db/metadb"
 	"go.vocdoni.io/dvote/log"
+	"go.vocdoni.io/proto/build/go/models"
+	"google.golang.org/protobuf/proto"
 )
 
 // The twofactor service is responsible for managing the two-factor authentication
@@ -250,7 +252,6 @@ func (tf *Twofactor) Indexer(userID internal.HexBytes) []Election {
 }
 
 func (tf *Twofactor) AddProcess(
-	processId []byte,
 	pubCensusType db.CensusType,
 	orgParticipants []db.CensusMembershipParticipant,
 ) error {
@@ -267,8 +268,9 @@ func (tf *Twofactor) AddProcess(
 		if err := tf.stg.AddUser(userID, electionIDs, participant.HashedEmail, participant.HashedPhone, ""); err != nil {
 			log.Warnf("cannot add user from line %d", i)
 		}
+		log.Debugf("user %s added to process %s", userID, electionIDs)
 	}
-	log.Debug(tf.stg.String())
+	// log.Debug(tf.stg.String())
 	return nil
 }
 
@@ -362,23 +364,54 @@ func (tf *Twofactor) Auth(electionID []byte, authToken *uuid.UUID, authData []st
 	}
 }
 
-func (tf *Twofactor) Sign(electionID, payload, tokenR internal.HexBytes, address string) AuthResponse {
-	r, err := blindsecp256k1.NewPointFromBytesUncompressed(tokenR)
-	if err != nil {
+func (tf *Twofactor) Sign(token, msg, electionID internal.HexBytes, sigType string) AuthResponse {
+	switch sigType {
+	case SignatureTypeBlind:
+		r, err := blindsecp256k1.NewPointFromBytesUncompressed(token)
+		if err != nil {
+			return AuthResponse{
+				Success: false,
+				Error:   err.Error(),
+			}
+		}
+		signature, err := tf.SignBlind(r, msg, nil)
+		if err != nil {
+			return AuthResponse{
+				Success: false,
+				Error:   err.Error(),
+			}
+		}
+		return AuthResponse{
+			Success:   true,
+			Signature: signature,
+		}
+	case SignatureTypeEthereum:
+		caBundle := &models.CAbundle{
+			ProcessId: electionID,
+			Address:   msg,
+		}
+		caBundleBytes, err := proto.Marshal(caBundle)
+		if err != nil {
+			return AuthResponse{
+				Success: false,
+				Error:   err.Error(),
+			}
+		}
+		signature, err := tf.SignECDSA(token, caBundleBytes, nil)
+		if err != nil {
+			return AuthResponse{
+				Success: false,
+				Error:   err.Error(),
+			}
+		}
+		return AuthResponse{
+			Success:   true,
+			Signature: signature,
+		}
+	default:
 		return AuthResponse{
 			Success: false,
-			Error:   err.Error(),
+			Error:   "invalid signature type",
 		}
-	}
-	signature, err := tf.SignBlind(r, payload, nil)
-	if err != nil {
-		return AuthResponse{
-			Success: false,
-			Error:   err.Error(),
-		}
-	}
-	return AuthResponse{
-		Success:   true,
-		Signature: signature,
 	}
 }

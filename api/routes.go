@@ -104,6 +104,18 @@ const (
 	twofactorSignEndpoint          = "/process/{processId}/sign"
 	twofactorSignEndpointBackwards = "/process/auth/elections/{processId}/blind/sign"
 
+	// two-factor process bundle routes
+	// POST /process/bundle to create a new bundle
+	processBundleEndpoint = "/process/bundle"
+	// PUT /process/bundle/{bundleId} to add new processes to the bundle
+	processBundleUpdateEndpoint = "/process/bundle/{bundleId}"
+	// GET /process/bundle/{bundleId} to get the bundle information
+	processBundleInfoEndpoint = "/process/bundle/{bundleId}"
+	// POST /process/bundle/{bundleId}/auth/{step} to check if the voter is authorized
+	processBundleAuthEndpoint = "/process/bundle/{bundleId}/auth/{step}"
+	// POST /process/bundle/{bundleId}/sign to sign with two-factor authentication
+	processBundleSignEndpoint = "/process/bundle/{bundleId}/sign"
+
 	// // census auth routes (currently not implemented)
 	// // POST /process/{processId}/auth/0 to initiate auth
 	// processAuthInitEndpoint = "/process/{processId}/auth/0"

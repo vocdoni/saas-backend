@@ -196,6 +196,11 @@ func (a *API) initRouter() http.Handler {
 		// PROCESS ROUTES
 		log.Infow("new route", "method", "POST", "path", processEndpoint)
 		r.Post(processEndpoint, a.createProcessHandler)
+		// PROCESS BUNDLE ROUTES (private)
+		log.Infow("new route", "method", "POST", "path", processBundleEndpoint)
+		r.Post(processBundleEndpoint, a.createProcessBundleHandler)
+		log.Infow("new route", "method", "PUT", "path", processBundleUpdateEndpoint)
+		r.Put(processBundleUpdateEndpoint, a.updateProcessBundleHandler)
 	})
 
 	// Public routes
@@ -257,9 +262,6 @@ func (a *API) initRouter() http.Handler {
 		// process info handler
 		log.Infow("new route", "method", "GET", "path", processEndpoint)
 		r.Get(processEndpoint, a.processInfoHandler)
-		// process auth handler
-		// log.Infow("new route", "method", "POST", "path", processAuthEndpoint)
-		// r.Post(processAuthEndpoint, a.processAuthHandler)
 		// two-factor auth handlers
 		log.Infow("new route", "method", "POST", "path", twofactorAuthEndpoint)
 		r.Post(twofactorAuthEndpoint, a.twofactorAuthHandler)
@@ -269,16 +271,13 @@ func (a *API) initRouter() http.Handler {
 		r.Post(twofactorSignEndpoint, a.twofactorSignHandler)
 		log.Infow("new route", "method", "POST", "path", twofactorSignEndpointBackwards)
 		r.Post(twofactorSignEndpointBackwards, a.twofactorSignHandler)
-		// process auth routes (currently not implemented)
-		// process auth step 0
-		// log.Infow("new route", "method", "POST", "path", processAuthInitEndpoint)
-		// r.Post(processAuthInitEndpoint, a.initiateAuthHandler)
-		// process auth step 1
-		// log.Infow("new route", "method", "POST", "path", processAuthVerifyEndpoint)
-		// r.Post(processAuthVerifyEndpoint, a.verifyAuthCodeHandler)
-		// get process proof
-		// log.Infow("new route", "method", "POST", "path", processProofEndpoint)
-		// r.Post(processProofEndpoint, a.generateProofHandler)
+		// PROCESS BUNDLE ROUTES (public)
+		log.Infow("new route", "method", "GET", "path", processBundleInfoEndpoint)
+		r.Get(processBundleInfoEndpoint, a.processBundleInfoHandler)
+		log.Infow("new route", "method", "POST", "path", processBundleAuthEndpoint)
+		r.Post(processBundleAuthEndpoint, a.processBundleAuthHandler)
+		log.Infow("new route", "method", "POST", "path", processBundleSignEndpoint)
+		r.Post(processBundleSignEndpoint, a.processBundleSignHandler)
 	})
 	a.router = r
 	return r
