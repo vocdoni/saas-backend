@@ -117,7 +117,7 @@ type AuthRequest struct {
 type SignRequest struct {
 	TokenR  internal.HexBytes `json:"token"`
 	Address string            `json:"address,omitempty"`
-	Payload internal.HexBytes `json:"payload,omitempty"`
+	Payload string            `json:"payload,omitempty"`
 }
 
 type twofactorResponse struct {
@@ -186,7 +186,12 @@ func (a *API) twofactorSignHandler(w http.ResponseWriter, r *http.Request) {
 		ErrMalformedBody.Write(w)
 		return
 	}
-	signResp := a.twofactor.Sign(req.TokenR, req.Payload, processId, "ecdsa")
+	payload, err := hex.DecodeString(util.TrimHex(req.Payload))
+	if err != nil {
+		ErrMalformedBody.WithErr(err).Write(w)
+		return
+	}
+	signResp := a.twofactor.Sign(req.TokenR, payload, processId, "ecdsa")
 	if !signResp.Success {
 		ErrUnauthorized.WithErr(errors.New(signResp.Error)).Write(w)
 		return

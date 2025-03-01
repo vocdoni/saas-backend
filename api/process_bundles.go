@@ -368,7 +368,12 @@ func (a *API) processBundleSignHandler(w http.ResponseWriter, r *http.Request) {
 		ErrMalformedBody.Write(w)
 		return
 	}
-	signResp := a.twofactor.Sign(req.TokenR, req.Payload, processID, "ecdsa")
+	payload, err := hex.DecodeString(util.TrimHex(req.Payload))
+	if err != nil {
+		ErrMalformedBody.WithErr(err).Write(w)
+		return
+	}
+	signResp := a.twofactor.Sign(req.TokenR, payload, processID, "ecdsa")
 	if !signResp.Success {
 		ErrUnauthorized.WithErr(errors.New(signResp.Error)).Write(w)
 		return

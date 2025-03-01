@@ -59,9 +59,11 @@ func (sk *SaltedKey) SignECDSA(salt []byte,
 		return nil, fmt.Errorf("cannot sign ECDSA salted: %w", err)
 	}
 	// get the bigNumber from salt
-	s := new(big.Int).SetBytes(salt[:])
-	// add it to the current key, so now we have a new private key (currentPrivKey + n)
-	esk.Private.D.Add(esk.Private.D, s)
+	if salt != nil {
+		s := new(big.Int).SetBytes(salt[:])
+		// add it to the current key, so now we have a new private key (currentPrivKey + n)
+		esk.Private.D.Add(esk.Private.D, s)
+	}
 	// return the signature
 	return esk.SignEthereum(msg)
 }
