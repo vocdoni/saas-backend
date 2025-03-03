@@ -238,3 +238,71 @@ func (ms *MongoStorage) SetBulkCensusMembership(
 
 	return resultMemb, nil
 }
+
+// CensusParticipantsPaginated retrieves a list of orgParticipants from the DB
+// based on the censusId, sorted by createdAt in descending order starting
+// from the offset and limited by the limit parameter. It also checks that the
+// organization exists.
+func (ms *MongoStorage) CensusParticipantsPaginated(censusId string, limit, offset int) ([]OrgParticipant, error) {
+	// check that the census exists
+	census, err := ms.Census(censusId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get the census: %w", err)
+	}
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	// define the filter to get the participants of the organization and
+	// the options to get the paginated result
+	filter := bson.M{"censusId": censusId}
+	opts := options.Find().
+		SetLimit(int64(limit)).          // set the limit of the result set
+		SetSkip(int64(offset)).          // set the offset of the result set
+		SetSort(bson.M{"createdAt": -1}) // sort by createdAt in descending order
+	// lock the database
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	// create a cursor to get the participants of the organization
+	cursor, err := ms.censusMemberships.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+	// decode the participants from the cursor
+	var participants []OrgParticipant
+	for cursor.Next(ctx) {
+		var membership CensusMembership
+		if err := cursor.Decode(&membership); err != nil {
+			return nil, err
+		}
+		participant, err := ms.orgParticipantByNo(ctx, census.OrgAddress, membership.ParticipantNo)
+		if err != nil {
+			return nil, err
+		}
+		participants = append(participants, *participant)
+	}
+	return participants, nil
+}
+
+// CountOrgParticipants returns the number of participants of an organization
+// based on the orgAddress. It also checks that the organization exists.
+func (ms *MongoStorage) CountCensusParticipants(censusId string) (int, error) {
+	// check that the census exists
+	if _, err := ms.Census(censusId); err != nil {
+		return 0, fmt.Errorf("failed to get the census: %w", err)
+	}
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// define the filter to get the participants of the organization
+	filter := bson.M{"censusId": censusId}
+	// lock the database
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	// count the participants of the organization
+	count, err := ms.censusMemberships.CountDocuments(ctx, filter)
+	if err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}

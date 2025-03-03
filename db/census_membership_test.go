@@ -5,6 +5,7 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -273,4 +274,84 @@ func TestSetBulkCensusMembership(t *testing.T) {
 		c.Assert(participant.Phone, qt.Equals, "")
 		c.Assert(participant.HashedPhone, qt.Not(qt.Equals), "")
 	}
+}
+
+func TestCensusParticipantsPaginatedAndCount(t *testing.T) {
+	c := qt.New(t)
+	defer resetDB(c)
+	// create org
+	organization := &Organization{
+		Address: testOrgAddress,
+	}
+	err := db.SetOrganization(organization)
+	c.Assert(err, qt.IsNil)
+	// generate and add test participants to the org
+	nParticipants := 100000
+	testParticipants, testBulkParticipants := randOrgParticipantsForTest(nParticipants)
+	// create test census
+	censusId, err := db.SetCensus(&Census{
+		OrgAddress: testOrgAddress,
+		Type:       CensusTypeMail,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	})
+	c.Assert(err, qt.IsNil)
+	// test empty census participants page
+	emptyParticipants, err := db.CensusParticipantsPaginated(censusId, 100, 0)
+	c.Assert(err, qt.IsNil)
+	c.Assert(len(emptyParticipants), qt.Equals, 0)
+	// add the org participants to the census
+	setCensusPartipantsRes, err := db.SetBulkCensusMembership("test_salt", censusId, testBulkParticipants)
+	c.Assert(err, qt.IsNil)
+	c.Assert(setCensusPartipantsRes, qt.Not(qt.IsNil))
+	c.Assert(setCensusPartipantsRes.UpsertedCount, qt.Equals, int64(nParticipants))
+	// test count census participants
+	count, err := db.CountCensusParticipants(censusId)
+	c.Assert(err, qt.IsNil)
+	c.Assert(count, qt.Equals, nParticipants)
+	// test top 100 census participants
+	top100Participants, err := db.CensusParticipantsPaginated(censusId, 100, 0)
+	c.Assert(err, qt.IsNil)
+	c.Assert(len(top100Participants), qt.Equals, 100)
+	// check the received participants
+	for _, p := range top100Participants {
+		c.Assert(p.HashedEmail, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testParticipants[p.ParticipantNo].Email))
+		c.Assert(p.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testParticipants[p.ParticipantNo].Phone))
+		c.Assert(p.Name, qt.Equals, testParticipants[p.ParticipantNo].Name)
+	}
+	// test next 100 census participants
+	next100Participants, err := db.CensusParticipantsPaginated(censusId, 100, 100)
+	c.Assert(err, qt.IsNil)
+	c.Assert(len(next100Participants), qt.Equals, 100)
+	// check the received participants
+	for _, p := range next100Participants {
+		c.Assert(p.HashedEmail, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testParticipants[p.ParticipantNo].Email))
+		c.Assert(p.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testParticipants[p.ParticipantNo].Phone))
+		c.Assert(p.Name, qt.Equals, testParticipants[p.ParticipantNo].Name)
+	}
+	// test last 100 census participants
+	last100Participants, err := db.CensusParticipantsPaginated(censusId, 100, nParticipants-100)
+	c.Assert(err, qt.IsNil)
+	c.Assert(len(last100Participants), qt.Equals, 100)
+	// check the received participants
+	for _, p := range last100Participants {
+		c.Assert(p.HashedEmail, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testParticipants[p.ParticipantNo].Email))
+		c.Assert(p.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testParticipants[p.ParticipantNo].Phone))
+		c.Assert(p.Name, qt.Equals, testParticipants[p.ParticipantNo].Name)
+	}
+	// test last 50 census participants with limit 100
+	last50Participants, err := db.CensusParticipantsPaginated(censusId, 100, nParticipants-50)
+	c.Assert(err, qt.IsNil)
+	c.Assert(len(last50Participants), qt.Equals, 50)
+	// check the received participants
+	for _, p := range last50Participants {
+		c.Assert(p.HashedEmail, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testParticipants[p.ParticipantNo].Email))
+		c.Assert(p.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testParticipants[p.ParticipantNo].Phone))
+		c.Assert(p.Name, qt.Equals, testParticipants[p.ParticipantNo].Name)
+	}
+	// test no-valid census participants page
+	// test last 50 census participants with limit 100
+	noParticipants, err := db.CensusParticipantsPaginated(censusId, 100, nParticipants)
+	c.Assert(err, qt.IsNil)
+	c.Assert(len(noParticipants), qt.Equals, 0)
 }

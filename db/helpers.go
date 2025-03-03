@@ -202,9 +202,15 @@ func (ms *MongoStorage) createIndexes() error {
 	}); err != nil {
 		return fmt.Errorf("failed to create index on invitationCode for organization invites: %w", err)
 	}
+	// create an index for the OrgParticipant:participantNo field
+	orgParticipantNoIndex := mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "participantNo", Value: 1}, // 1 for ascending order
+		},
+	}
 	// create an index for the tuple OrgParticipant:OrgAddress and
 	// OrgParticipant:participantNo
-	orgParticipantNoIndex := mongo.IndexModel{
+	orgAddressParticipantNoIndex := mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "orgAddress", Value: 1},    // 1 for ascending order
 			{Key: "participantNo", Value: 1}, // 1 for ascending order
@@ -228,10 +234,10 @@ func (ms *MongoStorage) createIndexes() error {
 			{Key: "orgAddress", Value: 1}, // 1 for ascending order
 			{Key: "createdAt", Value: -1}, // 1 for descending order
 		},
-		Options: options.Index().SetUnique(true),
 	}
 	if _, err := ms.orgParticipants.Indexes().CreateMany(ctx, []mongo.IndexModel{
 		orgParticipantNoIndex,
+		orgAddressParticipantNoIndex,
 		orgParticipantMailPhoneIndex,
 		orgParticipantCreatedAt,
 	}); err != nil {
@@ -245,8 +251,18 @@ func (ms *MongoStorage) createIndexes() error {
 		},
 		Options: options.Index().SetUnique(true),
 	}
-	if _, err := ms.censusMemberships.Indexes().CreateOne(ctx, censusMembershipIndex); err != nil {
-		return fmt.Errorf("failed to create index on censusID for censusMemberships: %w", err)
+	// index for the membership:censusId and membership:createdAt tuple
+	censusMembershipCreatedAt := mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "censusId", Value: 1},   // 1 for ascending order
+			{Key: "createdAt", Value: -1}, // 1 for descending order
+		},
+	}
+	if _, err := ms.censusMemberships.Indexes().CreateMany(ctx, []mongo.IndexModel{
+		censusMembershipIndex,
+		censusMembershipCreatedAt,
+	}); err != nil {
+		return fmt.Errorf("failed to create index on census memberships: %w", err)
 	}
 	return nil
 }

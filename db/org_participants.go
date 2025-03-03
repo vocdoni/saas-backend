@@ -112,6 +112,19 @@ func (ms *MongoStorage) OrgParticipant(id string) (*OrgParticipant, error) {
 	return orgParticipant, nil
 }
 
+// orgParticipantByNo retrieves a orgParticipants from the DB based on it ID
+// without locking the database, it should be called from a function that
+// already locks the database
+func (ms *MongoStorage) orgParticipantByNo(ctx context.Context, orgAddress, participantNo string) (*OrgParticipant, error) {
+	orgParticipant := &OrgParticipant{}
+	if err := ms.orgParticipants.FindOne(
+		ctx, bson.M{"orgAddress": orgAddress, "participantNo": participantNo},
+	).Decode(orgParticipant); err != nil {
+		return nil, fmt.Errorf("failed to get orgParticipants: %w", err)
+	}
+	return orgParticipant, nil
+}
+
 // OrgParticipants retrieves a orgParticipants from the DB based on it ID
 func (ms *MongoStorage) OrgParticipantByNo(orgAddress, participantNo string) (*OrgParticipant, error) {
 	if len(participantNo) == 0 {
@@ -122,15 +135,7 @@ func (ms *MongoStorage) OrgParticipantByNo(orgAddress, participantNo string) (*O
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
-	orgParticipant := &OrgParticipant{}
-	if err := ms.orgParticipants.FindOne(
-		ctx, bson.M{"orgAddress": orgAddress, "participantNo": participantNo},
-	).Decode(orgParticipant); err != nil {
-		return nil, fmt.Errorf("failed to get orgParticipants: %w", err)
-	}
-
-	return orgParticipant, nil
+	return ms.orgParticipantByNo(ctx, orgAddress, participantNo)
 }
 
 // BulkAddOrgParticipants adds multiple census participants to the database in a single operation
@@ -249,7 +254,7 @@ func (ms *MongoStorage) OrgParticipantsPaginated(orgAddress string, limit, offse
 
 // CountOrgParticipants returns the number of participants of an organization
 // based on the orgAddress. It also checks that the organization exists.
-func (ms *MongoStorage) CountOrgParticipants(orgAddress string) (int64, error) {
+func (ms *MongoStorage) CountOrgParticipants(orgAddress string) (int, error) {
 	// check that the org exists
 	if _, _, err := ms.Organization(orgAddress, false); err != nil {
 		if err == ErrNotFound {
@@ -266,5 +271,9 @@ func (ms *MongoStorage) CountOrgParticipants(orgAddress string) (int64, error) {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// count the participants of the organization
-	return ms.orgParticipants.CountDocuments(ctx, filter)
+	count, err := ms.orgParticipants.CountDocuments(ctx, filter)
+	if err != nil {
+		return 0, err
+	}
+	return int(count), nil
 }

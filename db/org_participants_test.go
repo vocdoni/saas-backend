@@ -1,6 +1,8 @@
 package db
 
 import (
+	"fmt"
+	"math/rand"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
@@ -244,4 +246,83 @@ func TestBulkUpsertOrgParticipants(t *testing.T) {
 	// Test with empty organization address
 	_, err = db.BulkUpsertOrgParticipants("", testSalt, participants)
 	c.Assert(err, qt.Not(qt.IsNil))
+}
+
+func TestOrgParticipantsPaginatedAndCount(t *testing.T) {
+	c := qt.New(t)
+	defer resetDB(c)
+	// create org
+	organization := &Organization{
+		Address: testOrgAddress,
+	}
+	err := db.SetOrganization(organization)
+	c.Assert(err, qt.IsNil)
+	// test empty participants count
+	count, err := db.CountOrgParticipants(testOrgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(count, qt.Equals, int64(0))
+	// test empty participants paginated
+	participants, err := db.OrgParticipantsPaginated(testOrgAddress, 100, 0)
+	c.Assert(err, qt.IsNil)
+	c.Assert(len(participants), qt.Equals, 0)
+	// generate and add test participants to the org
+	nParticipants := 100000
+	testParticipants, testBulkParticipants := randOrgParticipantsForTest(nParticipants)
+	result, err := db.BulkUpsertOrgParticipants(testOrgAddress, testSalt, testBulkParticipants)
+	c.Assert(err, qt.IsNil)
+	c.Assert(result.UpsertedCount, qt.Equals, int64(nParticipants))
+	// test participants count
+	count, err = db.CountOrgParticipants(testOrgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(count, qt.Equals, int64(nParticipants))
+	// test first page with a limit of 100
+	top100Participants, err := db.OrgParticipantsPaginated(testOrgAddress, 100, 0)
+	c.Assert(err, qt.IsNil)
+	c.Assert(len(top100Participants), qt.Equals, 100)
+	// check the received participants
+	for _, p := range top100Participants {
+		c.Assert(p.HashedEmail, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testParticipants[p.ParticipantNo].Email))
+		c.Assert(p.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testParticipants[p.ParticipantNo].Phone))
+		c.Assert(p.Name, qt.Equals, testParticipants[p.ParticipantNo].Name)
+	}
+	// test second page with a limit of 100
+	next100Participants, err := db.OrgParticipantsPaginated(testOrgAddress, 100, 100)
+	c.Assert(err, qt.IsNil)
+	c.Assert(len(next100Participants), qt.Equals, 100)
+	// check the received participants
+	for _, p := range next100Participants {
+		c.Assert(p.HashedEmail, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testParticipants[p.ParticipantNo].Email))
+		c.Assert(p.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testParticipants[p.ParticipantNo].Phone))
+		c.Assert(p.Name, qt.Equals, testParticipants[p.ParticipantNo].Name)
+	}
+	// test non-existent page
+	nonExistentParticipants, err := db.OrgParticipantsPaginated(testOrgAddress, 100, nParticipants)
+	c.Assert(err, qt.IsNil)
+	c.Assert(len(nonExistentParticipants), qt.Equals, 0)
+	// test a page with less participants than the limit
+	lessParticipants, err := db.OrgParticipantsPaginated(testOrgAddress, 100, nParticipants-50)
+	c.Assert(err, qt.IsNil)
+	c.Assert(len(lessParticipants), qt.Equals, 50)
+	// check the received participants
+	for _, p := range lessParticipants {
+		c.Assert(p.HashedEmail, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testParticipants[p.ParticipantNo].Email))
+		c.Assert(p.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testParticipants[p.ParticipantNo].Phone))
+		c.Assert(p.Name, qt.Equals, testParticipants[p.ParticipantNo].Name)
+	}
+}
+
+func randOrgParticipantsForTest(n int) (map[string]OrgParticipant, []OrgParticipant) {
+	mapParticipants := make(map[string]OrgParticipant)
+	participants := make([]OrgParticipant, n)
+	for i := range participants {
+		// generate random id
+		participants[i] = OrgParticipant{
+			Email:         fmt.Sprintf("user%d@example.com", i+1),
+			Phone:         fmt.Sprintf("+%010d", rand.Int63n(10000000000)),
+			ParticipantNo: fmt.Sprintf("participant_%d", i+1),
+			Name:          fmt.Sprintf("User %d", i+1),
+		}
+		mapParticipants[participants[i].ParticipantNo] = participants[i]
+	}
+	return mapParticipants, participants
 }

@@ -167,3 +167,56 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 
 	httpWriteJSON(w, pubCensus)
 }
+
+func (a *API) censusParticipantsHandler(w http.ResponseWriter, r *http.Request) {
+	censusID := chi.URLParam(r, "id")
+	if censusID == "" {
+		ErrMalformedURLParam.Withf("missing census ID").Write(w)
+		return
+	}
+	// get the user from the request context
+	user, ok := userFromContext(r.Context())
+	if !ok {
+		ErrUnauthorized.Write(w)
+		return
+	}
+	// retrieve census
+	census, err := a.db.Census(censusID)
+	if err != nil {
+		if err == db.ErrNotFound {
+			ErrMalformedURLParam.Withf("census not found").Write(w)
+			return
+		}
+		ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	// check the user has the necessary permissions
+	if !user.HasRoleFor(census.OrgAddress, db.ManagerRole) && !user.HasRoleFor(census.OrgAddress, db.AdminRole) {
+		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		return
+	}
+	// get the participants from the database based on the limit and offset
+	// values provided in the request
+	limit, offset := limitOffsetFromRequest(r, 50, 0)
+	dbParticipants, err := a.db.CensusParticipantsPaginated(censusID, limit, offset)
+	if err != nil {
+		ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	totalNumberOfParticipants, err := a.db.CountCensusParticipants(censusID)
+	if err != nil {
+		ErrGenericInternalServerError.WithErr(err).Write(w)
+	}
+	apiParticipants := []Participant{}
+	for _, p := range dbParticipants {
+		apiParticipants = append(apiParticipants, participantFromDB(&p))
+	}
+	httpWriteJSON(w, &PaginatedParticipants{
+		Participants: apiParticipants,
+		Pagination: Pagination{
+			Total:  totalNumberOfParticipants,
+			Limit:  limit,
+			Offset: offset,
+		},
+	})
+}
