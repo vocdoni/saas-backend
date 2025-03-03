@@ -19,24 +19,29 @@ import (
 	"go.vocdoni.io/dvote/util"
 )
 
-// CreateProcessBundleRequest represents the request body for creating a process bundle
+// CreateProcessBundleRequest represents the request body for creating a process bundle.
+// It contains the census ID and an optional array of process IDs to include in the bundle.
 type CreateProcessBundleRequest struct {
 	CensusID  string   `json:"censusId"`
 	Processes []string `json:"processIds"` // Array of process creation requests
 }
 
+// CreateProcessBundleResponse represents the response returned after successfully creating a process bundle.
+// It includes the URI to access the bundle and the census root public key.
 type CreateProcessBundleResponse struct {
-	URI  string `json:"uri"`
-	Root string `json:"root"`
+	URI  string `json:"uri"`  // The URI to access the bundle
+	Root string `json:"root"` // The census root public key
 }
 
-// AddProcessesToBundleRequest represents the request body for adding processes to a bundle
+// AddProcessesToBundleRequest represents the request body for adding processes to an existing bundle.
+// It contains an array of process IDs to add to the bundle.
 type AddProcessesToBundleRequest struct {
 	Processes []string `json:"processes"` // Array of process creation requests to add
 }
 
-// createProcessBundleHandler creates a new process bundle.
-// Requires Manager/Admin role. Returns 201 on success.
+// createProcessBundleHandler creates a new process bundle with the specified census and optional list of processes.
+// Requires Manager/Admin role for the organization that owns the census. Returns 201 on success.
+// The census root will be the same as the account's public key.
 func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request) {
 	var req CreateProcessBundleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -69,23 +74,8 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	censusRoot := a.account.PubKey.String()
 
 	if len(req.Processes) == 0 {
-		// Create the process bundle
-		bundle := &db.ProcessesBundle{
-			ID:         bundleID,
-			CensusRoot: censusRoot,
-			OrgAddress: census.OrgAddress,
-			Census:     *census,
-		}
-		_, err = a.db.SetProcessBundle(bundle)
-		if err != nil {
-			ErrGenericInternalServerError.WithErr(err).Write(w)
-			return
-		}
-
-		httpWriteJSON(w, CreateProcessBundleResponse{
-			URI:  a.serverURL + "/process/bundle/" + bundleID.Hex(),
-			Root: censusRoot,
-		})
+		// Return an error if no processes are provided
+		ErrMalformedBody.Withf("no processes provided").Write(w)
 		return
 	}
 
@@ -145,8 +135,9 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// updateProcessBundleHandler adds processes to an existing bundle.
-// Requires Manager/Admin role. Returns 200 on success.
+// updateProcessBundleHandler adds additional processes to an existing bundle.
+// Requires Manager/Admin role for the organization that owns the bundle. Returns 200 on success.
+// The processes array in the request must not be empty.
 func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request) {
 	bundleIDStr := chi.URLParam(r, "bundleId")
 	if bundleIDStr == "" {
@@ -245,7 +236,7 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 }
 
 // processBundleInfoHandler retrieves process bundle information by ID.
-// Returns bundle details including all processes.
+// Returns bundle details including the associated census, census root, organization address, and list of processes.
 func (a *API) processBundleInfoHandler(w http.ResponseWriter, r *http.Request) {
 	bundleIDStr := chi.URLParam(r, "bundleId")
 	if bundleIDStr == "" {
@@ -268,8 +259,9 @@ func (a *API) processBundleInfoHandler(w http.ResponseWriter, r *http.Request) {
 	httpWriteJSON(w, bundle)
 }
 
-// processBundleAuthHandler handles the authentication for a process bundle.
-// Similar to twofactorAuthHandler but for bundles.
+// processBundleAuthHandler handles the two-step authentication process for voters participating in a bundle of processes.
+// Similar to twofactorAuthHandler but for bundles. Step 0 initiates the authentication process and returns an auth token.
+// Step 1 completes the authentication by providing the verification code or other authentication data.
 func (a *API) processBundleAuthHandler(w http.ResponseWriter, r *http.Request) {
 	bundleIDStr := chi.URLParam(r, "bundleId")
 	if bundleIDStr == "" {
@@ -334,8 +326,9 @@ func (a *API) processBundleAuthHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// processBundleSignHandler handles the signing for a process bundle.
-// Similar to twofactorSignHandler but for bundles.
+// processBundleSignHandler handles the signing of a payload for a process bundle using two-factor authentication.
+// Similar to twofactorSignHandler but for bundles. Requires a valid tokenR obtained from the process bundle authentication.
+// The signing uses the first process in the bundle for the signature.
 func (a *API) processBundleSignHandler(w http.ResponseWriter, r *http.Request) {
 	bundleIDStr := chi.URLParam(r, "bundleId")
 	if bundleIDStr == "" {
@@ -381,6 +374,9 @@ func (a *API) processBundleSignHandler(w http.ResponseWriter, r *http.Request) {
 	httpWriteJSON(w, &twofactorResponse{Signature: signResp.Signature})
 }
 
+// initiateBundleAuthRequest initiates the authentication process for a bundle.
+// It validates the participant's credentials against the census and returns an auth token if successful.
+// Authentication can be done via email, phone number, or password depending on the census type.
 func (a *API) initiateBundleAuthRequest(r *http.Request, bundleId []byte, censusID string) (*uuid.UUID, error) {
 	var req InitiateAuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

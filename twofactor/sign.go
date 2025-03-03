@@ -12,6 +12,7 @@ import (
 // PubKeyBlind returns the public key of the blind CSP signer.
 // If processID is nil, returns the root public key.
 // If processID is not nil, returns the salted public key.
+// For process bundles, processID should be the bundle ID or the first process ID in the bundle.
 func (tf *Twofactor) PubKeyBlind(processID []byte) string {
 	if processID == nil {
 		return fmt.Sprintf("%x", tf.Signer.BlindPubKey())
@@ -25,9 +26,10 @@ func (tf *Twofactor) PubKeyBlind(processID []byte) string {
 	return fmt.Sprintf("%x", pk.Bytes())
 }
 
-// PubKeyECDSA returns the public key of the plain CSP signer
+// PubKeyECDSA returns the public key of the plain CSP signer.
 // If processID is nil, returns the root public key.
 // If processID is not nil, returns the salted public key.
+// For process bundles, processID should be the bundle ID or the first process ID in the bundle.
 func (tf *Twofactor) PubKeyECDSA(processID []byte) string {
 	k, err := tf.Signer.ECDSAPubKey()
 	if err != nil {
@@ -45,8 +47,9 @@ func (tf *Twofactor) PubKeyECDSA(processID []byte) string {
 	return fmt.Sprintf("%x", pk)
 }
 
-// NewBlindRequestKey generates a new request key for blinding a content on the client side.
-// It returns SignerR and SignerQ values.
+// NewBlindRequestKey generates a new request key for blinding content on the client side.
+// It returns SignerR and SignerQ values. This is used in the authentication process
+// for both individual processes and process bundles.
 func (tf *Twofactor) NewBlindRequestKey() (*blind.Point, error) {
 	k, signerR, err := blind.NewRequestParameters()
 	if err != nil {
@@ -64,8 +67,9 @@ func (tf *Twofactor) NewBlindRequestKey() (*blind.Point, error) {
 	return signerR, nil
 }
 
-// NewRequestKey generates a new request key for blinding a content on the client side.
-// It returns SignerR and SignerQ values.
+// NewRequestKey generates a new request key for authentication on the client side.
+// It returns a token that can be used for signing. This is used in the authentication process
+// for both individual processes and process bundles.
 func (tf *Twofactor) NewRequestKey() []byte {
 	b := make([]byte, 32)
 	_, err := rand.Read(b)
@@ -79,8 +83,9 @@ func (tf *Twofactor) NewRequestKey() []byte {
 	return b
 }
 
-// SignECDSA performs a blind signature over hash(msg). Also checks if token is valid
-// and removes it from the local storage.
+// SignECDSA performs an ECDSA signature over hash(msg). It also checks if the token is valid
+// and removes it from local storage after use. This can be used for signing in both
+// individual processes and process bundles, where processID can be either a process ID or a bundle ID.
 func (tf *Twofactor) SignECDSA(token, msg []byte, processID []byte) ([]byte, error) {
 	if k, err := tf.getKey(string(token)); err != nil || k == nil {
 		return nil, fmt.Errorf("token not found")
@@ -99,8 +104,9 @@ func (tf *Twofactor) SignECDSA(token, msg []byte, processID []byte) ([]byte, err
 	return tf.Signer.SignECDSA(salt[:], msg)
 }
 
-// SignBlind performs a blind signature over hash. Also checks if R point is valid
-// and removes it from the local storage if err=nil.
+// SignBlind performs a blind signature over hash. It also checks if the R point is valid
+// and removes it from local storage if successful. This can be used for signing in both
+// individual processes and process bundles, where processID can be either a process ID or a bundle ID.
 func (tf *Twofactor) SignBlind(signerR *blind.Point, hash, processID []byte) ([]byte, error) {
 	key := signerR.X.String() + signerR.Y.String()
 	k, err := tf.getKey(key)
@@ -126,8 +132,9 @@ func (tf *Twofactor) SignBlind(signerR *blind.Point, hash, processID []byte) ([]
 	return signature, nil
 }
 
-// SharedKey performs a signature over processId which might be used as shared key
-// for all users belonging to the same process.
+// SharedKey performs a signature over processID which can be used as a shared key
+// for all users belonging to the same process or process bundle. For process bundles,
+// processID should be the bundle ID.
 func (tf *Twofactor) SharedKey(processID []byte) ([]byte, error) {
 	var salt [SaltSize]byte
 	copy(salt[:], processID[:SaltSize])

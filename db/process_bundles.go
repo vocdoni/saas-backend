@@ -12,10 +12,17 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// SetProcessBundle creates a new process bundle or updates an existing one
+// SetProcessBundle creates a new process bundle or updates an existing one.
+// It validates that the organization and census exist before creating or updating the bundle.
+// Returns the bundle ID as a hex string on success.
 func (ms *MongoStorage) SetProcessBundle(bundle *ProcessesBundle) (string, error) {
 	if bundle.ID.IsZero() {
 		bundle.ID = primitive.NewObjectID()
+	}
+
+	// Validate that the processes array is not empty
+	if len(bundle.Processes) == 0 {
+		return "", ErrInvalidData
 	}
 
 	// Check that the org exists
@@ -54,7 +61,8 @@ func (ms *MongoStorage) SetProcessBundle(bundle *ProcessesBundle) (string, error
 	return bundle.ID.Hex(), nil
 }
 
-// DelProcessBundle removes a process bundle by ID
+// DelProcessBundle removes a process bundle by ID.
+// Returns ErrInvalidData if the bundleID is zero, or ErrNotFound if no bundle with the given ID exists.
 func (ms *MongoStorage) DelProcessBundle(bundleID primitive.ObjectID) error {
 	if bundleID.IsZero() {
 		return ErrInvalidData
@@ -80,7 +88,8 @@ func (ms *MongoStorage) DelProcessBundle(bundleID primitive.ObjectID) error {
 	return nil
 }
 
-// ProcessBundle retrieves a process bundle from the DB based on its ID
+// ProcessBundle retrieves a process bundle from the database based on its ID.
+// Returns the bundle with all its associated data including census information and processes.
 func (ms *MongoStorage) ProcessBundle(bundleID primitive.ObjectID) (*ProcessesBundle, error) {
 	if bundleID.IsZero() {
 		return nil, ErrInvalidData
@@ -100,7 +109,8 @@ func (ms *MongoStorage) ProcessBundle(bundleID primitive.ObjectID) (*ProcessesBu
 	return bundle, nil
 }
 
-// ProcessBundles retrieves all process bundles
+// ProcessBundles retrieves all process bundles from the database.
+// Returns a slice of all process bundles with their complete information.
 func (ms *MongoStorage) ProcessBundles() ([]*ProcessesBundle, error) {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
@@ -127,7 +137,8 @@ func (ms *MongoStorage) ProcessBundles() ([]*ProcessesBundle, error) {
 	return bundles, nil
 }
 
-// ProcessBundlesByProcess retrieves process bundles that contain a specific process ID
+// ProcessBundlesByProcess retrieves process bundles that contain a specific process ID.
+// This allows finding all bundles that include a particular process.
 func (ms *MongoStorage) ProcessBundlesByProcess(processID []byte) ([]*ProcessesBundle, error) {
 	if len(processID) == 0 {
 		return nil, ErrInvalidData
@@ -140,7 +151,7 @@ func (ms *MongoStorage) ProcessBundlesByProcess(processID []byte) ([]*ProcessesB
 	defer cancel()
 
 	// Find bundles where the processes array contains a process with the given ID
-	filter := bson.M{"processes._id": processID}
+	filter := bson.M{"processes": processID}
 	cursor, err := ms.processBundles.Find(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find process bundles by process ID: %w", err)
@@ -160,7 +171,8 @@ func (ms *MongoStorage) ProcessBundlesByProcess(processID []byte) ([]*ProcessesB
 	return bundles, nil
 }
 
-// ProcessBundlesByOrg retrieves process bundles that belong to a specific organization
+// ProcessBundlesByOrg retrieves process bundles that belong to a specific organization.
+// This allows finding all bundles created by a particular organization.
 func (ms *MongoStorage) ProcessBundlesByOrg(orgAddress string) ([]*ProcessesBundle, error) {
 	if len(orgAddress) == 0 {
 		return nil, ErrInvalidData
@@ -193,7 +205,8 @@ func (ms *MongoStorage) ProcessBundlesByOrg(orgAddress string) ([]*ProcessesBund
 	return bundles, nil
 }
 
-// AddProcessesToBundle adds processes to an existing bundle if they don't already exist
+// AddProcessesToBundle adds processes to an existing bundle if they don't already exist.
+// It checks each process to avoid duplicates and only updates the database if new processes were added.
 func (ms *MongoStorage) AddProcessesToBundle(bundleID primitive.ObjectID, processes []internal.HexBytes) error {
 	if bundleID.IsZero() || len(processes) == 0 {
 		return ErrInvalidData
@@ -245,6 +258,8 @@ func (ms *MongoStorage) AddProcessesToBundle(bundleID primitive.ObjectID, proces
 	return nil
 }
 
+// NewBundleID generates a new unique ObjectID for a process bundle.
+// This is used when creating a new bundle to ensure it has a unique identifier.
 func (ms *MongoStorage) NewBundleID() primitive.ObjectID {
 	return primitive.NewObjectID()
 }

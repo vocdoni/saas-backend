@@ -79,6 +79,16 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
+	switch pubCensus.Census.Type {
+	case db.CensusTypeSMSorMail, db.CensusTypeMail, db.CensusTypeSMS:
+		if err := a.twofactor.AddProcess(pubCensus.Census.Type, orgParticipants); err != nil {
+			ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+	default:
+		ErrNotSupported.Withf("census type not supported").Write(w)
+		return
+	}
 	if pubCensus.Census.Type == db.CensusTypeSMSorMail ||
 		pubCensus.Census.Type == db.CensusTypeMail ||
 		pubCensus.Census.Type == db.CensusTypeSMS {

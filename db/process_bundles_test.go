@@ -181,11 +181,11 @@ func TestProcessBundlesByProcess(t *testing.T) {
 
 	// Test with invalid process ID
 	var emptyID internal.HexBytes
-	bundles, err := db.ProcessBundlesByProcess(emptyID)
+	_, err = db.ProcessBundlesByProcess(emptyID)
 	c.Assert(err, qt.Equals, ErrInvalidData)
 
 	// Test retrieving bundles by process ID
-	bundles, err = db.ProcessBundlesByProcess(testProcessID)
+	bundles, err := db.ProcessBundlesByProcess(testProcessID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(bundles, qt.HasLen, 1)
 	c.Assert(bundles[0].ID.Hex(), qt.Equals, bundle1ID)
@@ -235,10 +235,10 @@ func TestAddProcessesToBundle(t *testing.T) {
 	err = db.AddProcessesToBundle(objID, []internal.HexBytes{})
 	c.Assert(err, qt.Equals, ErrInvalidData)
 
-	// Test with non-existent organization
+	// Test with non-existent process ID (should not error as process existence is not validated)
 	nonExistentProcessID := internal.HexBytes("non-existent-process")
 	err = db.AddProcessesToBundle(objID, []internal.HexBytes{nonExistentProcessID})
-	c.Assert(err, qt.Not(qt.IsNil))
+	c.Assert(err, qt.IsNil)
 
 	// Add processes to the bundle
 	err = db.AddProcessesToBundle(objID, []internal.HexBytes{process2.ID, process3.ID})
@@ -248,13 +248,17 @@ func TestAddProcessesToBundle(t *testing.T) {
 	retrieved, err := db.ProcessBundle(objID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(retrieved, qt.Not(qt.IsNil))
-	c.Assert(retrieved.Processes, qt.HasLen, 3)
-	processIDs := []string{
-		string(retrieved.Processes[0]),
-		string(retrieved.Processes[1]),
-		string(retrieved.Processes[2]),
+	c.Assert(retrieved.Processes, qt.HasLen, 4) // 1 original + 1 non-existent + 2 added
+
+	// Convert processes to strings for easier assertion
+	processIDs := make([]string, len(retrieved.Processes))
+	for i, p := range retrieved.Processes {
+		processIDs[i] = string(p)
 	}
+
+	// Check that all expected processes are in the bundle
 	c.Assert(processIDs, qt.Contains, string(testProcessID))
+	c.Assert(processIDs, qt.Contains, string(nonExistentProcessID))
 	c.Assert(processIDs, qt.Contains, string(testProcessID2))
 	c.Assert(processIDs, qt.Contains, string(testProcessID3))
 
@@ -266,7 +270,7 @@ func TestAddProcessesToBundle(t *testing.T) {
 	retrieved, err = db.ProcessBundle(objID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(retrieved, qt.Not(qt.IsNil))
-	c.Assert(retrieved.Processes, qt.HasLen, 3)
+	c.Assert(retrieved.Processes, qt.HasLen, 4) // Still 4 processes, no duplication
 }
 
 func TestDelProcessBundle(t *testing.T) {

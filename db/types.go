@@ -224,12 +224,14 @@ type Process struct {
 	Metadata        []byte            `json:"metadata,omitempty"  bson:"metadata"`
 }
 
+// ProcessesBundle represents a group of voting processes that share a common census.
+// This allows users to participate in multiple voting processes using the same authentication mechanism.
 type ProcessesBundle struct {
-	ID         primitive.ObjectID  `json:"id" bson:"_id,omitempty"`
-	Census     Census              `json:"census" bson:"census"`
-	CensusRoot string              `json:"censusRoot" bson:"censusRoot"`
-	OrgAddress string              `json:"orgAddress" bson:"orgAddress"`
-	Processes  []internal.HexBytes `json:"processes" bson:"processes"`
+	ID         primitive.ObjectID  `json:"id" bson:"_id,omitempty"`      // Unique identifier for the bundle
+	Census     Census              `json:"census" bson:"census"`         // The census associated with this bundle
+	CensusRoot string              `json:"censusRoot" bson:"censusRoot"` // The census root public key
+	OrgAddress string              `json:"orgAddress" bson:"orgAddress"` // The organization that owns this bundle
+	Processes  []internal.HexBytes `json:"processes" bson:"processes"`   // Array of process IDs included in this bundle
 }
 
 // Mix of the Membership and the Participant

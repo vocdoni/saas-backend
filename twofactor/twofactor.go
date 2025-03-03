@@ -23,7 +23,9 @@ import (
 )
 
 // The twofactor service is responsible for managing the two-factor authentication
-// using any of the supported notification services.
+// using any of the supported notification services. It supports authentication for
+// both individual processes and process bundles, allowing users to authenticate once
+// for multiple voting processes.
 
 const (
 	// DefaultMaxSMSattempts defines the default maximum number of SMS allowed attempts.
@@ -38,62 +40,70 @@ const (
 	DefaultPhoneCountry = "ES"
 )
 
+// NotifServices holds the notification services used for two-factor authentication.
 type NotifServices struct {
-	SMS  notifications.NotificationService
-	Mail notifications.NotificationService
+	SMS  notifications.NotificationService // Service for sending SMS notifications
+	Mail notifications.NotificationService // Service for sending email notifications
 }
 
+// TwofactorConfig contains the configuration parameters for the two-factor authentication service.
 type TwofactorConfig struct {
-	NotificationServices NotifServices
-	MaxAttempts          int
-	CoolDownTime         time.Duration
-	ThrottleTime         time.Duration
-	MaxRetries           int
-	PrivKey              string
+	NotificationServices NotifServices // Services for sending notifications
+	MaxAttempts          int           // Maximum number of authentication attempts allowed
+	CoolDownTime         time.Duration // Time to wait between authentication attempts
+	ThrottleTime         time.Duration // Time to throttle notification sending
+	MaxRetries           int           // Maximum number of retries for failed notification deliveries
+	PrivKey              string        // Private key for signing
 }
 
+// Twofactor is the main service that handles two-factor authentication for processes and process bundles.
 type Twofactor struct {
-	stg                  *JSONstorage
-	notificationServices NotifServices
-	maxAttempts          int
-	coolDownTime         time.Duration
-	throttleTime         time.Duration
-	maxRetries           int
-	smsQueue             *Queue
-	mailQueue            *Queue
-	otpSalt              string
-	Signer               *SaltedKey
-	keys                 dvotedb.Database
-	keysLock             sync.RWMutex
+	stg                  *JSONstorage     // Storage for authentication data
+	notificationServices NotifServices    // Services for sending notifications
+	maxAttempts          int              // Maximum number of authentication attempts allowed
+	coolDownTime         time.Duration    // Time to wait between authentication attempts
+	throttleTime         time.Duration    // Time to throttle notification sending
+	maxRetries           int              // Maximum number of retries for failed notification deliveries
+	smsQueue             *Queue           // Queue for SMS notifications
+	mailQueue            *Queue           // Queue for email notifications
+	otpSalt              string           // Salt for OTP generation
+	Signer               *SaltedKey       // Signer for authentication tokens
+	keys                 dvotedb.Database // Database for storing keys
+	keysLock             sync.RWMutex     // Lock for concurrent access to keys
 }
 
-// SendChallengeFunc is the function that sends the SMS challenge to a phone number.
+// SendChallengeFunc is the function that sends the authentication challenge to a contact (phone number or email).
 type SendChallengeFunc func(contact string, challenge string) error
 
+// MailNotification handles sending email notifications for two-factor authentication.
 type MailNotification struct {
-	MailNotificationService notifications.NotificationService
-	ToAddress               string
-	Subject                 string
-	Body                    string
+	MailNotificationService notifications.NotificationService // Service for sending email notifications
+	ToAddress               string                            // Recipient email address
+	Subject                 string                            // Email subject
+	Body                    string                            // Email body
 }
 
+// SmsNotification handles sending SMS notifications for two-factor authentication.
 type SmsNotification struct {
-	SmsNotificationService notifications.NotificationService
-	ToNumber               string
-	Subject                string
-	Body                   string
+	SmsNotificationService notifications.NotificationService // Service for sending SMS notifications
+	ToNumber               string                            // Recipient phone number
+	Subject                string                            // SMS subject
+	Body                   string                            // SMS body
 }
 
+// NewMailNotifcation creates a new MailNotification instance with the provided notification service.
 func NewMailNotifcation(notifService notifications.NotificationService) *MailNotification {
 	MailNotificationService := notifService
 	return &MailNotification{MailNotificationService, "", "", ""}
 }
 
+// NewSmsNotifcation creates a new SmsNotification instance with the provided notification service.
 func NewSmsNotifcation(notifService notifications.NotificationService) *SmsNotification {
 	SmsNotificationService := notifService
 	return &SmsNotification{SmsNotificationService, "", "", ""}
 }
 
+// SendChallenge sends an authentication challenge to the specified email address.
 func (mf *MailNotification) SendChallenge(mail string, challenge string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -107,6 +117,7 @@ func (mf *MailNotification) SendChallenge(mail string, challenge string) error {
 	return mf.MailNotificationService.SendNotification(ctx, notif)
 }
 
+// SendChallenge sends an authentication challenge to the specified phone number.
 func (sn *SmsNotification) SendChallenge(phone string, challenge string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -119,6 +130,8 @@ func (sn *SmsNotification) SendChallenge(phone string, challenge string) error {
 	return sn.SmsNotificationService.SendNotification(ctx, notif)
 }
 
+// New creates and initializes a new Twofactor service with the provided configuration.
+// It sets up the notification services, database, and queues for handling authentication requests.
 func (tf *Twofactor) New(conf *TwofactorConfig) (*Twofactor, error) {
 	if conf == nil {
 		return nil, nil
@@ -204,7 +217,10 @@ func (tf *Twofactor) New(conf *TwofactorConfig) (*Twofactor, error) {
 // Second is the data directory (mandatory).
 // Third is the SMS cooldown time in milliseconds (optional).
 // Fourth is the SMS throttle time in milliseconds (optional).
+// This function is deprecated in favor of New.
 
+// queueController handles the response queue for notification delivery.
+// It processes responses from the notification service and updates the storage accordingly.
 func (tf *Twofactor) queueController(queue *Queue) {
 	for {
 		r := <-queue.response
@@ -221,8 +237,8 @@ func (tf *Twofactor) queueController(queue *Queue) {
 }
 
 // Indexer takes a unique user identifier and returns the list of processIDs where
-// the user is elegible for participation. This is a helper function that might not
-// be implemented (depends on the handler use case).
+// the user is eligible for participation. This includes both individual processes and
+// process bundles. This is a helper function that might not be implemented in all cases.
 func (tf *Twofactor) Indexer(userID internal.HexBytes) []Election {
 	user, err := tf.stg.User(userID)
 	if err != nil {
@@ -251,6 +267,9 @@ func (tf *Twofactor) Indexer(userID internal.HexBytes) []Election {
 	return indexerElections
 }
 
+// AddProcess adds a process or process bundle to the two-factor authentication service.
+// It registers all participants from the provided census to enable them to authenticate
+// for the process or process bundle.
 func (tf *Twofactor) AddProcess(
 	pubCensusType db.CensusType,
 	orgParticipants []db.CensusMembershipParticipant,
@@ -274,6 +293,10 @@ func (tf *Twofactor) AddProcess(
 	return nil
 }
 
+// InitiateAuth initiates the authentication process for a user.
+// It generates a challenge and sends it to the user's contact (email or phone)
+// via the specified notification type. This works for both individual processes
+// and process bundles, where electionID can be either a process ID or a bundle ID.
 func (tf *Twofactor) InitiateAuth(
 	electionID []byte,
 	userId []byte,
@@ -340,6 +363,9 @@ func (tf *Twofactor) InitiateAuth(
 	}
 }
 
+// Auth verifies the authentication challenge response from a user.
+// If successful, it returns a token that can be used for signing.
+// This works for both individual processes and process bundles.
 func (tf *Twofactor) Auth(electionID []byte, authToken *uuid.UUID, authData []string) AuthResponse {
 	if authToken == nil || len(authData) != 1 {
 		return AuthResponse{Error: "auth token not provided or missing auth data"}
@@ -365,6 +391,9 @@ func (tf *Twofactor) Auth(electionID []byte, authToken *uuid.UUID, authData []st
 	}
 }
 
+// Sign creates a cryptographic signature for the provided message using the specified signature type.
+// It requires a valid token obtained from a successful authentication.
+// For process bundles, the electionID should be the bundle ID or the first process ID in the bundle.
 func (tf *Twofactor) Sign(token, msg, electionID internal.HexBytes, sigType string) AuthResponse {
 	switch sigType {
 	case SignatureTypeBlind:
