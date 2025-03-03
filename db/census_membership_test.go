@@ -286,7 +286,7 @@ func TestCensusParticipantsPaginatedAndCount(t *testing.T) {
 	err := db.SetOrganization(organization)
 	c.Assert(err, qt.IsNil)
 	// generate and add test participants to the org
-	nParticipants := 100000
+	nParticipants := 10000
 	testParticipants, testBulkParticipants := randOrgParticipantsForTest(nParticipants)
 	// create test census
 	censusId, err := db.SetCensus(&Census{

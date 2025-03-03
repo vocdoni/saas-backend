@@ -243,7 +243,9 @@ func (ms *MongoStorage) OrgParticipantsPaginated(orgAddress string, limit, offse
 	if err != nil {
 		return nil, err
 	}
-	defer cursor.Close(ctx)
+	defer func() {
+		_ = cursor.Close(ctx)
+	}()
 	// decode the participants from the cursor
 	var participants []OrgParticipant
 	if err = cursor.All(ctx, &participants); err != nil {

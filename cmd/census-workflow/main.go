@@ -87,10 +87,10 @@ func (c *Client) makeRequest(method, path string, body interface{}, target inter
 	return nil
 }
 
-func generateParticipants(n int) []api.OrgParticipant {
-	participants := make([]api.OrgParticipant, n)
+func generateParticipants(n int) []api.Participant {
+	participants := make([]api.Participant, n)
 	for i := range n {
-		participants[i] = api.OrgParticipant{
+		participants[i] = api.Participant{
 			Email:         fmt.Sprintf("user%d@example.com", i+1),
 			Phone:         fmt.Sprintf("+%010d", rand.Int63n(10000000000)),
 			ParticipantNo: fmt.Sprintf("participant_%d", i+1),

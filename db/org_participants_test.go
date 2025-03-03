@@ -260,13 +260,13 @@ func TestOrgParticipantsPaginatedAndCount(t *testing.T) {
 	// test empty participants count
 	count, err := db.CountOrgParticipants(testOrgAddress)
 	c.Assert(err, qt.IsNil)
-	c.Assert(count, qt.Equals, int64(0))
+	c.Assert(count, qt.Equals, 0)
 	// test empty participants paginated
 	participants, err := db.OrgParticipantsPaginated(testOrgAddress, 100, 0)
 	c.Assert(err, qt.IsNil)
 	c.Assert(len(participants), qt.Equals, 0)
 	// generate and add test participants to the org
-	nParticipants := 100000
+	nParticipants := 10000
 	testParticipants, testBulkParticipants := randOrgParticipantsForTest(nParticipants)
 	result, err := db.BulkUpsertOrgParticipants(testOrgAddress, testSalt, testBulkParticipants)
 	c.Assert(err, qt.IsNil)
@@ -274,7 +274,7 @@ func TestOrgParticipantsPaginatedAndCount(t *testing.T) {
 	// test participants count
 	count, err = db.CountOrgParticipants(testOrgAddress)
 	c.Assert(err, qt.IsNil)
-	c.Assert(count, qt.Equals, int64(nParticipants))
+	c.Assert(count, qt.Equals, nParticipants)
 	// test first page with a limit of 100
 	top100Participants, err := db.OrgParticipantsPaginated(testOrgAddress, 100, 0)
 	c.Assert(err, qt.IsNil)

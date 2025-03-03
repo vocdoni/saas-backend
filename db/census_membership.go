@@ -267,7 +267,9 @@ func (ms *MongoStorage) CensusParticipantsPaginated(censusId string, limit, offs
 	if err != nil {
 		return nil, err
 	}
-	defer cursor.Close(ctx)
+	defer func() {
+		_ = cursor.Close(ctx)
+	}()
 	// decode the participants from the cursor
 	var participants []OrgParticipant
 	for cursor.Next(ctx) {
