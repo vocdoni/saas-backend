@@ -57,7 +57,8 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, err := hex.DecodeString(processID)
+	id := internal.HexBytes{}
+	err = id.FromString(processID)
 	if err != nil {
 		ErrMalformedURLParam.Withf("invalid process ID").Write(w)
 		return
@@ -74,7 +75,12 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	orgParticipants, err := a.db.OrgParticipantsMemberships(pubCensus.Census.OrgAddress, pubCensus.Census.ID.Hex(), processID)
+	orgParticipants, err := a.db.OrgParticipantsMemberships(
+		pubCensus.Census.OrgAddress,
+		pubCensus.Census.ID.Hex(),
+		"",
+		[]internal.HexBytes{id},
+	)
 	if err != nil {
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
@@ -125,14 +131,16 @@ type AuthRequest struct {
 }
 
 type SignRequest struct {
-	TokenR  internal.HexBytes `json:"token"`
-	Address string            `json:"address,omitempty"`
-	Payload string            `json:"payload,omitempty"`
+	TokenR     internal.HexBytes `json:"tokenR"`
+	AuthToken  *uuid.UUID        `json:"authToken"`
+	Address    string            `json:"address,omitempty"`
+	Payload    string            `json:"payload,omitempty"`
+	ElectionId internal.HexBytes `json:"electionId,omitempty"`
 }
 
 type twofactorResponse struct {
 	AuthToken *uuid.UUID        `json:"authToken,omitempty"`
-	TokenR    internal.HexBytes `json:"tokenR,omitempty"`
+	Token     *uuid.UUID        `json:"token,omitempty"`
 	Signature internal.HexBytes `json:"signature,omitempty"`
 }
 
@@ -151,14 +159,10 @@ func (a *API) twofactorAuthHandler(w http.ResponseWriter, r *http.Request) {
 		ErrMalformedURLParam.Withf("wrong step ID").Write(w)
 		return
 	}
-	processId, err := hex.DecodeString(urlProcessId)
-	if err != nil {
-		ErrMalformedURLParam.Withf("invalid process ID").Write(w)
-		return
-	}
+
 	switch step {
 	case 0:
-		authToken, err := a.initiateAuthRequest(r, processId)
+		authToken, err := a.initiateAuthRequest(r, urlProcessId)
 		if err != nil {
 			ErrUnauthorized.WithErr(err).Write(w)
 			return
@@ -171,12 +175,12 @@ func (a *API) twofactorAuthHandler(w http.ResponseWriter, r *http.Request) {
 			ErrMalformedBody.Write(w)
 			return
 		}
-		authResp := a.twofactor.Auth(processId, req.AuthToken, req.AuthData)
+		authResp := a.twofactor.Auth(urlProcessId, req.AuthToken, req.AuthData)
 		if !authResp.Success {
 			ErrUnauthorized.WithErr(errors.New(authResp.Error)).Write(w)
 			return
 		}
-		httpWriteJSON(w, &twofactorResponse{TokenR: authResp.TokenR})
+		httpWriteJSON(w, &twofactorResponse{AuthToken: authResp.AuthToken})
 		return
 	}
 }
@@ -201,7 +205,7 @@ func (a *API) twofactorSignHandler(w http.ResponseWriter, r *http.Request) {
 		ErrMalformedBody.WithErr(err).Write(w)
 		return
 	}
-	signResp := a.twofactor.Sign(req.TokenR, payload, processId, "ecdsa")
+	signResp := a.twofactor.Sign(*req.AuthToken, nil, payload, processId, "ecdsa")
 	if !signResp.Success {
 		ErrUnauthorized.WithErr(errors.New(signResp.Error)).Write(w)
 		return
@@ -209,7 +213,7 @@ func (a *API) twofactorSignHandler(w http.ResponseWriter, r *http.Request) {
 	httpWriteJSON(w, &twofactorResponse{Signature: signResp.Signature})
 }
 
-func (a *API) initiateAuthRequest(r *http.Request, processId []byte) (*uuid.UUID, error) {
+func (a *API) initiateAuthRequest(r *http.Request, processId string) (*uuid.UUID, error) {
 	var req InitiateAuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return nil, ErrMalformedBody
@@ -222,8 +226,13 @@ func (a *API) initiateAuthRequest(r *http.Request, processId []byte) (*uuid.UUID
 		return nil, ErrMalformedBody.Withf("missing auth data")
 	}
 
+	processIdBytes, err := hex.DecodeString(processId)
+	if err != nil {
+		return nil, ErrMalformedURLParam.Withf("invalid process ID")
+	}
+
 	// retrieve process info
-	process, err := a.db.Process(processId)
+	process, err := a.db.Process(processIdBytes)
 	if err != nil {
 		return nil, ErrGenericInternalServerError.WithErr(err)
 	}
@@ -252,9 +261,6 @@ func (a *API) initiateAuthRequest(r *http.Request, processId []byte) (*uuid.UUID
 		return nil, ErrUnauthorized.Withf("invalid user data")
 	}
 
-	// create sha of participantNo
-	userID := make(internal.HexBytes, hex.EncodedLen(len(participant.ParticipantNo)))
-	hex.Encode(userID, []byte(participant.ParticipantNo))
 	var authResp twofactor.AuthResponse
 	switch censusType {
 	case db.CensusTypeMail:
@@ -264,7 +270,7 @@ func (a *API) initiateAuthRequest(r *http.Request, processId []byte) (*uuid.UUID
 		if !bytes.Equal(internal.HashOrgData(process.OrgAddress, req.Email), participant.HashedEmail) {
 			return nil, ErrUnauthorized.Withf("invalid user data")
 		}
-		authResp = a.twofactor.InitiateAuth(processId, userID, req.Email, notifications.Email)
+		authResp = a.twofactor.InitiateAuth(processId, participant.ParticipantNo, req.Email, notifications.Email)
 	case db.CensusTypeSMS:
 		if req.Phone == "" {
 			return nil, ErrUnauthorized.Withf("missing phone")
@@ -272,18 +278,18 @@ func (a *API) initiateAuthRequest(r *http.Request, processId []byte) (*uuid.UUID
 		if !bytes.Equal(internal.HashOrgData(process.OrgAddress, req.Phone), participant.HashedPhone) {
 			return nil, ErrUnauthorized.Withf("invalid user data")
 		}
-		authResp = a.twofactor.InitiateAuth(processId, userID, req.Phone, notifications.SMS)
+		authResp = a.twofactor.InitiateAuth(processId, participant.ParticipantNo, req.Phone, notifications.SMS)
 	case db.CensusTypeSMSorMail:
 		if req.Email != "" {
 			if !bytes.Equal(internal.HashOrgData(process.OrgAddress, req.Email), participant.HashedEmail) {
 				return nil, ErrUnauthorized.Withf("invalid user data")
 			}
-			authResp = a.twofactor.InitiateAuth(processId, userID, req.Email, notifications.Email)
+			authResp = a.twofactor.InitiateAuth(processId, participant.ParticipantNo, req.Email, notifications.Email)
 		} else if req.Phone != "" {
 			if !bytes.Equal(internal.HashOrgData(process.OrgAddress, req.Phone), participant.HashedPhone) {
 				return nil, ErrUnauthorized.Withf("invalid user data")
 			}
-			authResp = a.twofactor.InitiateAuth(processId, userID, req.Phone, notifications.SMS)
+			authResp = a.twofactor.InitiateAuth(processId, participant.ParticipantNo, req.Phone, notifications.SMS)
 		} else {
 			return nil, ErrUnauthorized.Withf("missing email or phone")
 		}

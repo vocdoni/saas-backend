@@ -1648,7 +1648,8 @@ Two-step authentication process for voters participating in a bundle of processe
 ```json
 {
   "tokenR": "base64-encoded-token",
-  "payload": "base64-encoded-payload"
+  "payload": "base64-encoded-payload",
+  "electionId": "hex-string"
 }
 ```
 

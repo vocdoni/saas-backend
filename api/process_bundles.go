@@ -112,7 +112,7 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Find the census participants and get them associated to the bundle
-	orgParticipants, err := a.db.OrgParticipantsMemberships(census.OrgAddress, census.ID.Hex(), bundleID.Hex())
+	orgParticipants, err := a.db.OrgParticipantsMemberships(census.OrgAddress, census.ID.Hex(), bundleID.Hex(), processes)
 	if err != nil {
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
@@ -225,7 +225,7 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Find the census participants
-	orgParticipants, err := a.db.OrgParticipantsMemberships(census.OrgAddress, census.ID.Hex(), bundleIDStr)
+	orgParticipants, err := a.db.OrgParticipantsMemberships(census.OrgAddress, census.ID.Hex(), bundleIDStr, processesToAdd)
 	if err != nil {
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
@@ -311,17 +311,10 @@ func (a *API) processBundleAuthHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert the bundle ID to a hex string that is our id for the twofactor service
-	hexBundle, err := hex.DecodeString(bundle.ID.Hex())
-	if err != nil {
-		ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-
 	switch step {
 	case 0:
 
-		authToken, err := a.initiateBundleAuthRequest(r, hexBundle, bundle.Census.ID.Hex())
+		authToken, err := a.initiateBundleAuthRequest(r, bundleID.Hex(), bundle.Census.ID.Hex())
 		if err != nil {
 			ErrUnauthorized.WithErr(err).Write(w)
 			return
@@ -334,12 +327,12 @@ func (a *API) processBundleAuthHandler(w http.ResponseWriter, r *http.Request) {
 			ErrMalformedBody.Write(w)
 			return
 		}
-		authResp := a.twofactor.Auth(hexBundle, req.AuthToken, req.AuthData)
+		authResp := a.twofactor.Auth(bundleID.Hex(), req.AuthToken, req.AuthData)
 		if !authResp.Success {
 			ErrUnauthorized.WithErr(errors.New(authResp.Error)).Write(w)
 			return
 		}
-		httpWriteJSON(w, &twofactorResponse{TokenR: authResp.TokenR})
+		httpWriteJSON(w, &twofactorResponse{AuthToken: authResp.AuthToken})
 		return
 	}
 }
@@ -371,20 +364,32 @@ func (a *API) processBundleSignHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Use the first process for signing
-	processID := bundle.Processes[0]
-
 	var req SignRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		ErrMalformedBody.Write(w)
 		return
 	}
+
+	// check that the received process is part of the bundle processes
+	var procId internal.HexBytes
+	for _, processID := range bundle.Processes {
+		if bytes.Equal(processID, req.ElectionId) {
+			// process found
+			procId = processID
+			break
+		}
+	}
+	if len(procId) == 0 {
+		ErrUnauthorized.Withf("process not found in bundle").Write(w)
+		return
+	}
+
 	payload, err := hex.DecodeString(util.TrimHex(req.Payload))
 	if err != nil {
 		ErrMalformedBody.WithErr(err).Write(w)
 		return
 	}
-	signResp := a.twofactor.Sign(req.TokenR, payload, processID, "ecdsa")
+	signResp := a.twofactor.Sign(*req.AuthToken, req.TokenR, payload, procId, "ecdsa")
 	if !signResp.Success {
 		ErrUnauthorized.WithErr(errors.New(signResp.Error)).Write(w)
 		return
@@ -395,7 +400,7 @@ func (a *API) processBundleSignHandler(w http.ResponseWriter, r *http.Request) {
 // initiateBundleAuthRequest initiates the authentication process for a bundle.
 // It validates the participant's credentials against the census and returns an auth token if successful.
 // Authentication can be done via email, phone number, or password depending on the census type.
-func (a *API) initiateBundleAuthRequest(r *http.Request, bundleId []byte, censusID string) (*uuid.UUID, error) {
+func (a *API) initiateBundleAuthRequest(r *http.Request, bundleId string, censusID string) (*uuid.UUID, error) {
 	var req InitiateAuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return nil, ErrMalformedBody
@@ -435,8 +440,8 @@ func (a *API) initiateBundleAuthRequest(r *http.Request, bundleId []byte, census
 	}
 
 	// create sha of participantNo
-	userID := make(internal.HexBytes, hex.EncodedLen(len(participant.ParticipantNo)))
-	hex.Encode(userID, []byte(participant.ParticipantNo))
+	// userID := make(internal.HexBytes, hex.EncodedLen(len(participant.ParticipantNo)))
+	// hex.Encode(userID, []byte(participant.ParticipantNo))
 	var authResp twofactor.AuthResponse
 	switch censusType {
 	case db.CensusTypeMail:
@@ -446,7 +451,7 @@ func (a *API) initiateBundleAuthRequest(r *http.Request, bundleId []byte, census
 		if !bytes.Equal(internal.HashOrgData(census.OrgAddress, req.Email), participant.HashedEmail) {
 			return nil, ErrUnauthorized.Withf("invalid user data")
 		}
-		authResp = a.twofactor.InitiateAuth(bundleId, userID, req.Email, notifications.Email)
+		authResp = a.twofactor.InitiateAuth(bundleId, participant.ParticipantNo, req.Email, notifications.Email)
 	case db.CensusTypeSMS:
 		if req.Phone == "" {
 			return nil, ErrUnauthorized.Withf("missing phone")
@@ -454,18 +459,18 @@ func (a *API) initiateBundleAuthRequest(r *http.Request, bundleId []byte, census
 		if !bytes.Equal(internal.HashOrgData(census.OrgAddress, req.Phone), participant.HashedPhone) {
 			return nil, ErrUnauthorized.Withf("invalid user data")
 		}
-		authResp = a.twofactor.InitiateAuth(bundleId, userID, req.Phone, notifications.SMS)
+		authResp = a.twofactor.InitiateAuth(bundleId, participant.ParticipantNo, req.Phone, notifications.SMS)
 	case db.CensusTypeSMSorMail:
 		if req.Email != "" {
 			if !bytes.Equal(internal.HashOrgData(census.OrgAddress, req.Email), participant.HashedEmail) {
 				return nil, ErrUnauthorized.Withf("invalid user data")
 			}
-			authResp = a.twofactor.InitiateAuth(bundleId, userID, req.Email, notifications.Email)
+			authResp = a.twofactor.InitiateAuth(bundleId, participant.ParticipantNo, req.Email, notifications.Email)
 		} else if req.Phone != "" {
 			if !bytes.Equal(internal.HashOrgData(census.OrgAddress, req.Phone), participant.HashedPhone) {
 				return nil, ErrUnauthorized.Withf("invalid user data")
 			}
-			authResp = a.twofactor.InitiateAuth(bundleId, userID, req.Phone, notifications.SMS)
+			authResp = a.twofactor.InitiateAuth(bundleId, participant.ParticipantNo, req.Phone, notifications.SMS)
 		} else {
 			return nil, ErrUnauthorized.Withf("missing email or phone")
 		}

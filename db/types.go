@@ -236,8 +236,9 @@ type ProcessesBundle struct {
 
 // Mix of the Membership and the Participant
 type CensusMembershipParticipant struct {
-	ParticipantNo string `json:"participantNo" bson:"participantNo"`
-	HashedEmail   string `json:"hashedEmail" bson:"hashedEmail"`
-	HashedPhone   string `json:"hashedPhone" bson:"hashedPhone"`
-	ElectionID    string `json:"electionId" bson:"electionId"`
+	ParticipantNo string              `json:"participantNo" bson:"participantNo"`
+	HashedEmail   string              `json:"hashedEmail" bson:"hashedEmail"`
+	HashedPhone   string              `json:"hashedPhone" bson:"hashedPhone"`
+	BundleId      string              `json:"bundleId" bson:"bundleId"`
+	ElectionIds   []internal.HexBytes `json:"electionIds" bson:"electionIds"`
 }

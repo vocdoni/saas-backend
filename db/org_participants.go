@@ -239,7 +239,7 @@ func (ms *MongoStorage) OrgParticipants(orgAddress string) ([]OrgParticipant, er
 }
 
 func (ms *MongoStorage) OrgParticipantsMemberships(
-	orgAddress, censusId, electionId string,
+	orgAddress, censusId, bundleId string, electionIds []internal.HexBytes,
 ) ([]CensusMembershipParticipant, error) {
 	if len(orgAddress) == 0 || len(censusId) == 0 {
 		return nil, ErrInvalidData
@@ -261,12 +261,16 @@ func (ms *MongoStorage) OrgParticipantsMemberships(
 		}}},
 		{primitive.E{Key: "$unwind", Value: bson.D{{Key: "path", Value: "$membership"}}}},
 		{primitive.E{Key: "$match", Value: bson.D{{Key: "membership.censusId", Value: censusId}}}},
-		{primitive.E{Key: "$addFields", Value: bson.D{{Key: "electionId", Value: electionId}}}},
+		{primitive.E{Key: "$addFields", Value: bson.D{
+			{Key: "bundleId", Value: bundleId},
+			{Key: "electionIds", Value: electionIds}, // Store extra fields as an array
+		}}},
 		{primitive.E{Key: "$project", Value: bson.D{
 			{Key: "hashedEmail", Value: 1},
 			{Key: "hashedPhone", Value: 1},
 			{Key: "participantNo", Value: 1},
-			{Key: "electionId", Value: 1},
+			{Key: "bundleId", Value: 1},
+			{Key: "electionIds", Value: 1},
 		}}},
 	}
 

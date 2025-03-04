@@ -266,6 +266,28 @@ func (js *JSONstorage) Verified(userID, electionID internal.HexBytes) (bool, err
 	return election.Consumed, nil
 }
 
+func (js *JSONstorage) GetUserFromToken(token *uuid.UUID) (*UserData, error) {
+	js.keysLock.RLock()
+	defer js.keysLock.RUnlock()
+
+	// fetch the user ID by token
+	userID, err := js.kv.Get([]byte(authTokenIndexPrefix + token.String()))
+	if err != nil {
+		return nil, ErrInvalidAuthToken
+	}
+
+	// with the user ID fetch the user data
+	userData, err := js.kv.Get(userIDkey(userID))
+	if err != nil {
+		return nil, err
+	}
+	var user UserData
+	if err := json.Unmarshal(userData, &user); err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
 func (js *JSONstorage) VerifyChallenge(electionID internal.HexBytes,
 	token *uuid.UUID, solution string,
 ) error {
@@ -395,3 +417,7 @@ func (js *JSONstorage) String() string {
 // func signKey2key(u internal.HexBytes) []byte {
 // 	return append([]byte(signkeyPrefix), u...)
 // }
+
+func (js *JSONstorage) Import(data []byte) error {
+	return nil
+}

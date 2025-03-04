@@ -172,6 +172,7 @@ func main() {
 	}
 
 	twofactorConf.PrivKey = privKey
+	twofactorConf.MongoURI = mongoURL
 	// create the twofactor service and include it in the API configuration
 	twofactorService := new(twofactor.Twofactor)
 	apiConf.Twofactor, err = twofactorService.New(twofactorConf)

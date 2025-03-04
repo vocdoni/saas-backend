@@ -2,81 +2,12 @@ package twofactor
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/log"
 )
-
-var (
-	// ErrTooManyAttempts is returned when no more SMS attempts available for a user.
-	ErrTooManyAttempts = fmt.Errorf("too many SMS attempts")
-	// ErrUserUnknown is returned if the userID is not found in the database.
-	ErrUserUnknown = fmt.Errorf("user is unknown")
-	// ErrUserAlreadyVerified is returned if the user is already verified when trying to verify it.
-	ErrUserAlreadyVerified = fmt.Errorf("user is already verified")
-	// ErrUserNotBelongsToElection is returned if the user does not has participation rights.
-	ErrUserNotBelongsToElection = fmt.Errorf("user does not belong to election")
-	// ErrInvalidAuthToken is returned if the authtoken does not match with the election.
-	ErrInvalidAuthToken = fmt.Errorf("invalid authentication token")
-	// ErrChallengeCodeFailure is returned when the challenge code does not match.
-	ErrChallengeCodeFailure = fmt.Errorf("challenge code do not match")
-	// ErrAttemptCoolDownTime is returned if the cooldown time for a challenge attempt is not reached.
-	ErrAttemptCoolDownTime = fmt.Errorf("attempt cooldown time not reached")
-)
-
-// Users is the list of smshandler users.
-type Users struct {
-	Users []internal.HexBytes `json:"users"`
-}
-
-// UserData represents a user of the SMS handler.
-type UserData struct {
-	UserID    internal.HexBytes       `json:"userID,omitempty" bson:"_id"`
-	Elections map[string]UserElection `json:"elections,omitempty" bson:"elections,omitempty"`
-	ExtraData string                  `json:"extraData,omitempty" bson:"extradata,omitempty"`
-	Mail      string                  `json:"mail,omitempty" bson:"mail,omitempty"`
-	Phone     string                  `json:"phone,omitempty" bson:"phone,omitempty"`
-	Contact   string                  `json:"contact,omitempty" bson:"contact,omitempty"`
-}
-
-// UserElection represents an election and its details owned by a user (UserData).
-type UserElection struct {
-	ElectionID        internal.HexBytes `json:"electionId" bson:"_id"`
-	RemainingAttempts int               `json:"remainingAttempts" bson:"remainingattempts"`
-	LastAttempt       *time.Time        `json:"lastAttempt,omitempty" bson:"lastattempt,omitempty"`
-	Consumed          bool              `json:"consumed" bson:"consumed"`
-	AuthToken         *uuid.UUID        `json:"authToken,omitempty" bson:"authtoken,omitempty"`
-	ChallengeSecret   string            `json:"challenge,omitempty" bson:"challenge,omitempty"`
-}
-
-// AuthTokenIndex is used by the storage to index a token with its userID (from UserData).
-type AuthTokenIndex struct {
-	AuthToken *uuid.UUID        `json:"authToken" bson:"_id"`
-	UserID    internal.HexBytes `json:"userID" bson:"userid"`
-}
-
-// UserCollection is a dataset containing several users (used for dump and import).
-type UserCollection struct {
-	Users []UserData `json:"users" bson:"users"`
-}
-
-// internal.HexBytesToElection transforms a slice of internal.HexBytes to []Election.
-// All entries are set with RemainingAttempts = attempts.
-func HexBytesToElection(electionIDs []internal.HexBytes, attempts int) []UserElection {
-	elections := []UserElection{}
-
-	for _, e := range electionIDs {
-		ue := UserElection{}
-		ue.ElectionID = e
-		ue.RemainingAttempts = attempts
-		elections = append(elections, ue)
-	}
-	return elections
-}
 
 // Message is the JSON API body message used by the CSP and the client
 type Message struct {

@@ -54,11 +54,12 @@ type TwofactorConfig struct {
 	ThrottleTime         time.Duration // Time to throttle notification sending
 	MaxRetries           int           // Maximum number of retries for failed notification deliveries
 	PrivKey              string        // Private key for signing
+	MongoURI             string        // MongoDB URI
 }
 
 // Twofactor is the main service that handles two-factor authentication for processes and process bundles.
 type Twofactor struct {
-	stg                  *JSONstorage     // Storage for authentication data
+	stg                  Storage          // Storage for authentication data
 	notificationServices NotifServices    // Services for sending notifications
 	maxAttempts          int              // Maximum number of authentication attempts allowed
 	coolDownTime         time.Duration    // Time to wait between authentication attempts
@@ -177,13 +178,24 @@ func (tf *Twofactor) New(conf *TwofactorConfig) (*Twofactor, error) {
 		return nil, fmt.Errorf("cannot create the database: %v", err)
 	}
 
-	tf.stg = new(JSONstorage)
-	if err := tf.stg.Init(
-		path.Join(dataDir, "storage"),
-		maxAttempts,
-		coolDownTime,
-	); err != nil {
-		return nil, err
+	if conf.MongoURI != "" {
+		tf.stg = new(MongoStorage)
+		if err := tf.stg.Init(
+			conf.MongoURI,
+			maxAttempts,
+			coolDownTime,
+		); err != nil {
+			return nil, err
+		}
+	} else {
+		tf.stg = new(JSONstorage)
+		if err := tf.stg.Init(
+			path.Join(dataDir, "storage"),
+			maxAttempts,
+			coolDownTime,
+		); err != nil {
+			return nil, err
+		}
 	}
 
 	tf.smsQueue = newQueue(
@@ -246,8 +258,11 @@ func (tf *Twofactor) Indexer(userID internal.HexBytes) []Election {
 		return nil
 	}
 	// Get the last two digits of the phone and return them as extraData
-	contact := ""
-	if user.Contact != "" {
+	contact := user.Mail
+	if contact == "" {
+		contact = user.Phone
+	}
+	if contact != "" {
 		if len(contact) < 3 {
 			contact = ""
 		} else {
@@ -274,20 +289,25 @@ func (tf *Twofactor) AddProcess(
 	pubCensusType db.CensusType,
 	orgParticipants []db.CensusMembershipParticipant,
 ) error {
+	// TODO add bundleID to userID
+	var userID internal.HexBytes
 	for i, participant := range orgParticipants {
-		userID := make(internal.HexBytes, hex.EncodedLen(len(participant.ParticipantNo)))
-		hex.Encode(userID, []byte(participant.ParticipantNo))
-
-		electionId := internal.HexBytes{}
-		if err := electionId.FromString(participant.ElectionID); err != nil {
-			return fmt.Errorf("wrong electionID at participant %d", i)
+		if len(participant.BundleId) == 0 {
+			userID = make(internal.HexBytes, hex.EncodedLen(len(participant.ParticipantNo+participant.ElectionIds[0].String())))
+			hex.Encode(userID, []byte(participant.ParticipantNo+participant.ElectionIds[0].String()))
+		} else {
+			userID = make(internal.HexBytes, hex.EncodedLen(len(participant.ParticipantNo)+len(participant.BundleId)))
+			hex.Encode(userID, []byte(participant.ParticipantNo+participant.BundleId))
 		}
-		electionIDs := []internal.HexBytes{electionId}
 
-		if err := tf.stg.AddUser(userID, electionIDs, participant.HashedEmail, participant.HashedPhone, ""); err != nil {
+		bundleElectionId := internal.HexBytes{}
+		bundleElectionId.SetString(participant.BundleId)
+		participant.ElectionIds = append(participant.ElectionIds, bundleElectionId)
+
+		if err := tf.stg.AddUser(userID, participant.ElectionIds, participant.HashedEmail, participant.HashedPhone, ""); err != nil {
 			log.Warnf("cannot add user from line %d", i)
 		}
-		log.Debugf("user %s added to process %s", userID, electionIDs)
+		log.Debugf("user %s added to process %s", userID, participant.ElectionIds)
 	}
 	// log.Debug(tf.stg.String())
 	return nil
@@ -298,20 +318,19 @@ func (tf *Twofactor) AddProcess(
 // via the specified notification type. This works for both individual processes
 // and process bundles, where electionID can be either a process ID or a bundle ID.
 func (tf *Twofactor) InitiateAuth(
-	electionID []byte,
-	userId []byte,
+	bundleId string,
+	userId string,
 	contact string,
 	notifType notifications.NotificationType,
 ) AuthResponse {
 	// If first step, build new challenge
-	if len(userId) == 0 {
+	if len(userId) == 0 || len(bundleId) == 0 {
 		return AuthResponse{Error: "incorrect auth data fields"}
 	}
-	// var userID internal.HexBytes
-	// if err := userID (userId); err != nil {
-	// 	return AuthResponse{Error: "incorrect format for userId"}
-	// }
-	userID := internal.HexBytes(userId)
+	userID := make(internal.HexBytes, hex.EncodedLen(len(userId)+len(bundleId)))
+	hex.Encode(userID, []byte(userId+bundleId))
+	bundleIdBytes := internal.HexBytes{}
+	bundleIdBytes.SetString(bundleId)
 
 	// Generate challenge and authentication token
 	// We need to ensure the challenge secret is a valid base32-encoded string
@@ -320,8 +339,8 @@ func (tf *Twofactor) InitiateAuth(
 	challengeSecret := gotp.RandomSecret(16) // Use a fresh random secret
 	atoken := uuid.New()
 
-	// Get the phone number. This methods checks for electionID and user verification status.
-	_, _, attemptNo, err := tf.stg.NewAttempt(userID, electionID, challengeSecret, &atoken)
+	// Get the phone number. This methods checks for bundleId and user verification status.
+	_, _, attemptNo, err := tf.stg.NewAttempt(userID, bundleIdBytes, challengeSecret, &atoken)
 	if err != nil {
 		log.Warnf("new attempt for user %s failed: %v", userID, err)
 		return AuthResponse{Error: err.Error()}
@@ -336,13 +355,13 @@ func (tf *Twofactor) InitiateAuth(
 	otpCode := challenge.At(attemptNo)
 
 	if notifType == notifications.Email {
-		if err := tf.mailQueue.add(userID, electionID, contact, otpCode); err != nil {
+		if err := tf.mailQueue.add(userID, bundleIdBytes, contact, otpCode); err != nil {
 			log.Errorf("cannot enqueue challenge: %v", err)
 			return AuthResponse{Error: "problem with Email challenge system"}
 		}
 		log.Infof("user %s challenged with %s at contact %s", userID.String(), otpCode, contact)
 	} else if notifType == notifications.SMS {
-		if err := tf.smsQueue.add(userID, electionID, contact, otpCode); err != nil {
+		if err := tf.smsQueue.add(userID, bundleIdBytes, contact, otpCode); err != nil {
 			log.Errorf("cannot enqueue challenge: %v", err)
 			return AuthResponse{Error: "problem with SMS challenge system"}
 		}
@@ -351,11 +370,6 @@ func (tf *Twofactor) InitiateAuth(
 		return AuthResponse{Error: "invalid notification type"}
 	}
 
-	// Build success reply
-	// phoneStr := strconv.FormatUint(phone.GetNationalNumber(), 10)
-	// if len(phoneStr) < 3 {
-	// 	return AuthResponse{Error: "error parsing the phone number"}
-	// }
 	return AuthResponse{
 		Success:   true,
 		AuthToken: &atoken,
@@ -366,17 +380,23 @@ func (tf *Twofactor) InitiateAuth(
 // Auth verifies the authentication challenge response from a user.
 // If successful, it returns a token that can be used for signing.
 // This works for both individual processes and process bundles.
-func (tf *Twofactor) Auth(electionID []byte, authToken *uuid.UUID, authData []string) AuthResponse {
+func (tf *Twofactor) Auth(bundleId string, authToken *uuid.UUID, authData []string) AuthResponse {
 	if authToken == nil || len(authData) != 1 {
 		return AuthResponse{Error: "auth token not provided or missing auth data"}
 	}
 	solution := authData[0]
+
+	bundleIdBytes := internal.HexBytes{}
+	bundleIdBytes.SetString(bundleId)
 	// Verify the challenge solution
-	if err := tf.stg.VerifyChallenge(electionID, authToken, solution); err != nil {
+	if err := tf.stg.VerifyChallenge(bundleIdBytes, authToken, solution); err != nil {
 		log.Warnf("verify challenge %s failed: %v", solution, err)
 		return AuthResponse{Error: "challenge not completed:" + err.Error()}
 	}
-	token := tf.NewRequestKey()
+
+	// for salted ECDSA
+	// token := tf.NewRequestKey()
+	// for salted blind
 	// token, err := tf.stg.NewBlindRequestKey(token)
 	// if err != nil {
 	// 	return AuthResponse{Error: "error getting new token:" + err.Error()}
@@ -385,16 +405,16 @@ func (tf *Twofactor) Auth(electionID []byte, authToken *uuid.UUID, authData []st
 
 	log.Infof("new user registered, challenge resolved %s", authData[0])
 	return AuthResponse{
-		Response: []string{"challenge resolved"},
-		Success:  true,
-		TokenR:   token,
+		Response:  []string{"challenge resolved"},
+		AuthToken: authToken,
+		Success:   true,
 	}
 }
 
 // Sign creates a cryptographic signature for the provided message using the specified signature type.
 // It requires a valid token obtained from a successful authentication.
 // For process bundles, the electionID should be the bundle ID or the first process ID in the bundle.
-func (tf *Twofactor) Sign(token, msg, electionID internal.HexBytes, sigType string) AuthResponse {
+func (tf *Twofactor) Sign(authToken uuid.UUID, token, msg, electionID internal.HexBytes, sigType string) AuthResponse {
 	switch sigType {
 	case SignatureTypeBlind:
 		r, err := blindsecp256k1.NewPointFromBytesUncompressed(token)
@@ -416,6 +436,29 @@ func (tf *Twofactor) Sign(token, msg, electionID internal.HexBytes, sigType stri
 			Signature: signature,
 		}
 	case SignatureTypeEthereum:
+		user, err := tf.stg.GetUserFromToken(&authToken)
+		if err != nil {
+			return AuthResponse{
+				Success: false,
+				Error:   err.Error(),
+			}
+		}
+		// find the election and check the solution
+		election, ok := user.Elections[electionID.String()]
+		if !ok {
+			return AuthResponse{
+				Success: false,
+				Error:   ErrUserNotBelongsToElection.Error(),
+			}
+		}
+
+		if election.Voted != nil {
+			return AuthResponse{
+				Success: false,
+				Error:   "user already voted",
+			}
+		}
+
 		caBundle := &models.CAbundle{
 			ProcessId: electionID,
 			Address:   msg,
@@ -427,13 +470,24 @@ func (tf *Twofactor) Sign(token, msg, electionID internal.HexBytes, sigType stri
 				Error:   err.Error(),
 			}
 		}
-		signature, err := tf.SignECDSA(token, caBundleBytes, nil)
+		// when Salted key is being used use the sign.go signature function instead
+		signature, err := tf.Signer.SignECDSA(nil, caBundleBytes)
 		if err != nil {
 			return AuthResponse{
 				Success: false,
 				Error:   err.Error(),
 			}
 		}
+		// Mark the user as voted
+		election.Voted = msg
+		user.Elections[electionID.String()] = election
+		if err := tf.stg.UpdateUser(user); err != nil {
+			return AuthResponse{
+				Success: false,
+				Error:   err.Error(),
+			}
+		}
+
 		return AuthResponse{
 			Success:   true,
 			Signature: signature,
