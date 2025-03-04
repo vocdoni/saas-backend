@@ -74,8 +74,23 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	censusRoot := a.account.PubKey.String()
 
 	if len(req.Processes) == 0 {
-		// Return an error if no processes are provided
-		ErrMalformedBody.Withf("no processes provided").Write(w)
+		// Create the process bundle
+		bundle := &db.ProcessesBundle{
+			ID:         bundleID,
+			CensusRoot: censusRoot,
+			OrgAddress: census.OrgAddress,
+			Census:     *census,
+		}
+		_, err = a.db.SetProcessBundle(bundle)
+		if err != nil {
+			ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+
+		httpWriteJSON(w, CreateProcessBundleResponse{
+			URI:  a.serverURL + "/process/bundle/" + bundleID.Hex(),
+			Root: censusRoot,
+		})
 		return
 	}
 
@@ -157,11 +172,6 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if len(req.Processes) == 0 {
-		ErrMalformedBody.Withf("no processes provided").Write(w)
-		return
-	}
-
 	// Get the user from the request context
 	user, ok := userFromContext(r.Context())
 	if !ok {
@@ -173,6 +183,14 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	bundle, err := a.db.ProcessBundle(bundleID)
 	if err != nil {
 		ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
+	if len(req.Processes) == 0 {
+		httpWriteJSON(w, CreateProcessBundleResponse{
+			URI:  "/process/bundle/" + bundleIDStr,
+			Root: bundle.CensusRoot,
+		})
 		return
 	}
 

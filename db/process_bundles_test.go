@@ -37,15 +37,16 @@ func TestSetAndGetProcessBundle(t *testing.T) {
 	process1 := createTestProcess(c, testProcessID, publishedCensus)
 	process2 := createTestProcess(c, testProcessID2, publishedCensus)
 
-	// Test with empty processes array
+	// Test with empty processes array - should be valid now
 	emptyBundle := &ProcessesBundle{
 		OrgAddress: testOrgAddress,
 		Census:     publishedCensus.Census,
 		CensusRoot: publishedCensus.Root,
 		Processes:  []internal.HexBytes{},
 	}
-	_, err := db.SetProcessBundle(emptyBundle)
-	c.Assert(err, qt.Equals, ErrInvalidData)
+	emptyBundleID, err := db.SetProcessBundle(emptyBundle)
+	c.Assert(err, qt.IsNil)
+	c.Assert(emptyBundleID, qt.Not(qt.Equals), "")
 
 	// Test with non-existent organization
 	nonExistentBundle := &ProcessesBundle{

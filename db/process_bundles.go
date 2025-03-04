@@ -20,11 +20,6 @@ func (ms *MongoStorage) SetProcessBundle(bundle *ProcessesBundle) (string, error
 		bundle.ID = primitive.NewObjectID()
 	}
 
-	// Validate that the processes array is not empty
-	if len(bundle.Processes) == 0 {
-		return "", ErrInvalidData
-	}
-
 	// Check that the org exists
 	if _, _, err := ms.Organization(bundle.OrgAddress, false); err != nil {
 		return "", fmt.Errorf("failed to get organization: %w", err)
