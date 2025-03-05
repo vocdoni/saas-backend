@@ -54,12 +54,26 @@ func (s *MongoDBStorage) Initialize(dataDir string, maxAttempts int, cooldownPer
 
 	log.Infof("connecting to mongodb %s (database: %s)", mongoURI, database)
 
+	// Configure MongoDB client options with increased timeouts and better connection handling
 	opts := options.Client()
-	timeout := time.Second * 10
-	opts.ConnectTimeout = &timeout
+	connectTimeout := time.Second * 30
+	socketTimeout := time.Second * 30
+	serverSelectionTimeout := time.Second * 30
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	client, err := mongo.Connect(ctx, opts.ApplyURI(mongoURI).SetMaxConnecting(20))
+	// Apply all options
+	opts.ApplyURI(mongoURI).
+		SetConnectTimeout(connectTimeout).
+		SetSocketTimeout(socketTimeout).
+		SetServerSelectionTimeout(serverSelectionTimeout).
+		SetMaxConnecting(30).
+		SetMaxPoolSize(100).
+		SetMinPoolSize(10).
+		SetRetryWrites(true).
+		SetRetryReads(true)
+
+	// Create a context with a longer timeout for the initial connection
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	client, err := mongo.Connect(ctx, opts)
 	defer cancel()
 	if err != nil {
 		return fmt.Errorf("failed to connect to MongoDB: %w", err)
@@ -79,7 +93,8 @@ func (s *MongoDBStorage) Initialize(dataDir string, maxAttempts int, cooldownPer
 		cancel()
 	}()
 
-	ctx, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	// Use a longer timeout for the ping operation
+	ctx, cancel2 := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel2()
 	err = client.Ping(ctx, readpref.Primary())
 	if err != nil {
@@ -112,7 +127,7 @@ func (s *MongoDBStorage) Initialize(dataDir string, maxAttempts int, cooldownPer
 // createIndexes creates the necessary indexes for the MongoDB collections
 func (s *MongoDBStorage) createIndexes() error {
 	// Create text index on `extraData` for finding user data
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	index := mongo.IndexModel{
@@ -133,7 +148,7 @@ func (s *MongoDBStorage) createIndexes() error {
 func (s *MongoDBStorage) Reset() error {
 	log.Infof("resetting database")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	if err := s.users.Drop(ctx); err != nil {
@@ -178,7 +193,7 @@ func (s *MongoDBStorage) AddUser(
 		user.Elections[electionID.String()] = election
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	_, err := s.users.InsertOne(ctx, user)
@@ -194,7 +209,7 @@ func (s *MongoDBStorage) GetUser(userID internal.UserID) (*internal.User, error)
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	result := s.users.FindOne(ctx, bson.M{"_id": userID})
@@ -215,7 +230,7 @@ func (s *MongoDBStorage) UpdateUser(user *internal.User) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	opts := options.ReplaceOptions{}
@@ -238,8 +253,8 @@ func (s *MongoDBStorage) BulkAddUser(users []*internal.User) error {
 		return nil
 	}
 
-	// Process users in batches of 1000
-	const batchSize = 1000
+	// Process users in batches of 500 (reduced from 1000 to avoid potential issues)
+	const batchSize = 500
 	totalUsers := len(users)
 	totalBatches := (totalUsers + batchSize - 1) / batchSize // Ceiling division
 
@@ -275,8 +290,8 @@ func (s *MongoDBStorage) BulkAddUser(users []*internal.User) error {
 			documents = append(documents, user)
 		}
 
-		// Perform bulk insert for this batch
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		// Perform bulk insert for this batch with a longer timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		_, err := s.users.InsertMany(ctx, documents)
 		cancel()
 
@@ -300,7 +315,7 @@ func (s *MongoDBStorage) DeleteUser(userID internal.UserID) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	_, err := s.users.DeleteOne(ctx, bson.M{"_id": userID})
@@ -319,7 +334,7 @@ func (s *MongoDBStorage) ListUsers() ([]internal.UserID, error) {
 	opts := options.FindOptions{}
 	opts.SetProjection(bson.M{"_id": true})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	cursor, err := s.users.Find(ctx, bson.M{}, &opts)
@@ -328,7 +343,7 @@ func (s *MongoDBStorage) ListUsers() ([]internal.UserID, error) {
 	}
 
 	var users []internal.UserID
-	ctx, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel2 := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel2()
 
 	for cursor.Next(ctx) {
@@ -353,7 +368,7 @@ func (s *MongoDBStorage) SearchUsers(term string) ([]internal.UserID, error) {
 
 	filter := bson.M{"$text": bson.M{"$search": term}}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	cursor, err := s.users.Find(ctx, filter, &opts)
@@ -362,7 +377,7 @@ func (s *MongoDBStorage) SearchUsers(term string) ([]internal.UserID, error) {
 	}
 
 	var users []internal.UserID
-	ctx, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel2 := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel2()
 
 	for cursor.Next(ctx) {
@@ -482,7 +497,7 @@ func (s *MongoDBStorage) CreateChallenge(
 		UserID:    user.ID,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	_, err = s.tokenIndex.InsertOne(ctx, atindex)
@@ -499,7 +514,7 @@ func (s *MongoDBStorage) VerifyChallenge(electionID internal.ElectionID, token i
 	defer s.mutex.Unlock()
 
 	// Fetch the user ID by token
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	result := s.tokenIndex.FindOne(ctx, bson.M{"_id": token})
@@ -538,7 +553,7 @@ func (s *MongoDBStorage) VerifyChallenge(electionID internal.ElectionID, token i
 
 	// Clean token data (we only allow 1 chance)
 	election.AuthToken = nil
-	ctx, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel2()
 
 	if _, err := s.tokenIndex.DeleteOne(ctx, bson.M{"_id": token}); err != nil {
@@ -572,7 +587,7 @@ func (s *MongoDBStorage) GetUserByToken(token internal.AuthToken) (*internal.Use
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	result := s.tokenIndex.FindOne(ctx, bson.M{"_id": token})
@@ -618,7 +633,7 @@ func (s *MongoDBStorage) ExportData() ([]byte, error) {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	cursor, err := s.users.Find(ctx, bson.D{{}})
@@ -627,7 +642,7 @@ func (s *MongoDBStorage) ExportData() ([]byte, error) {
 	}
 
 	users := make(map[string]internal.User)
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel2()
 
 	for cursor.Next(ctx2) {
