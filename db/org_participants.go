@@ -134,79 +134,119 @@ func (ms *MongoStorage) OrgParticipantByNo(orgAddress, participantNo string) (*O
 	return orgParticipant, nil
 }
 
-// BulkAddOrgParticipants adds multiple census participants to the database in a single operation
+// BulkAddOrgParticipants adds multiple census participants to the database in batches of 1000 entries
 // and updates already existing participants (decided by combination of participantNo and the censusID)
 // reqires an existing organization
 func (ms *MongoStorage) BulkUpsertOrgParticipants(
 	orgAddress, salt string,
 	orgParticipants []OrgParticipant,
 ) (*mongo.BulkWriteResult, error) {
-	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
 	if len(orgParticipants) == 0 {
 		return nil, nil
 	}
 	if len(orgAddress) == 0 {
 		return nil, ErrInvalidData
 	}
+
+	// Create a context with a timeout for checking organization existence
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Check that the organization exists
 	org := ms.organizations.FindOne(ctx, bson.M{"_id": orgAddress})
 	if org.Err() != nil {
 		return nil, ErrNotFound
 	}
 
-	time := time.Now()
+	// Timestamp for all participants
+	currentTime := time.Now()
 
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-	var bulkOps []mongo.WriteModel
 
-	for _, participant := range orgParticipants {
-		filter := bson.M{
-			"participantNo": participant.ParticipantNo,
-			"orgAddress":    orgAddress,
-		}
-		participant.OrgAddress = orgAddress
-		participant.CreatedAt = time
-		if participant.Email != "" {
-			// store only the hashed email
-			participant.HashedEmail = internal.HashOrgData(orgAddress, participant.Email)
-			participant.Email = ""
-		}
-		if participant.Phone != "" {
-			// store only the hashed phone
-			participant.HashedPhone = internal.HashOrgData(orgAddress, participant.Phone)
-			participant.Phone = ""
-		}
-		if participant.Password != "" {
-			participant.HashedPass = internal.HashPassword(salt, participant.Password)
-			participant.Password = ""
+	// Process participants in batches of 1000
+	batchSize := 1000
+	var finalResult *mongo.BulkWriteResult
+
+	for i := 0; i < len(orgParticipants); i += batchSize {
+		// Calculate end index for current batch
+		end := i + batchSize
+		if end > len(orgParticipants) {
+			end = len(orgParticipants)
 		}
 
-		// Create the update document for the participant
-		updateDoc, err := dynamicUpdateDocument(participant, nil)
+		// Create a new context for each batch
+		batchCtx, batchCancel := context.WithTimeout(context.Background(), 10*time.Second)
+
+		// Prepare bulk operations for this batch
+		var bulkOps []mongo.WriteModel
+
+		// Process current batch
+		for _, participant := range orgParticipants[i:end] {
+			filter := bson.M{
+				"participantNo": participant.ParticipantNo,
+				"orgAddress":    orgAddress,
+			}
+			participant.OrgAddress = orgAddress
+			participant.CreatedAt = currentTime
+			if participant.Email != "" {
+				// store only the hashed email
+				participant.HashedEmail = internal.HashOrgData(orgAddress, participant.Email)
+				participant.Email = ""
+			}
+			if participant.Phone != "" {
+				// store only the hashed phone
+				participant.HashedPhone = internal.HashOrgData(orgAddress, participant.Phone)
+				participant.Phone = ""
+			}
+			if participant.Password != "" {
+				participant.HashedPass = internal.HashPassword(salt, participant.Password)
+				participant.Password = ""
+			}
+
+			// Create the update document for the participant
+			updateDoc, err := dynamicUpdateDocument(participant, nil)
+			if err != nil {
+				batchCancel()
+				return nil, err
+			}
+
+			// Create the upsert model for the bulk operation
+			upsertModel := mongo.NewUpdateOneModel().
+				SetFilter(filter).    // AND condition filter
+				SetUpdate(updateDoc). // Update document
+				SetUpsert(true)       // Ensure upsert behavior
+
+			// Add the operation to the bulkOps array
+			bulkOps = append(bulkOps, upsertModel)
+		}
+
+		// Execute the bulk write operation for this batch
+		result, err := ms.orgParticipants.BulkWrite(batchCtx, bulkOps)
+		batchCancel()
+
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to perform bulk operation: %w", err)
 		}
 
-		// Create the upsert model for the bulk operation
-		upsertModel := mongo.NewUpdateOneModel().
-			SetFilter(filter).    // AND condition filter
-			SetUpdate(updateDoc). // Update document
-			SetUpsert(true)       // Ensure upsert behavior
+		// Merge results if this is not the first batch
+		if finalResult == nil {
+			finalResult = result
+		} else {
+			finalResult.InsertedCount += result.InsertedCount
+			finalResult.MatchedCount += result.MatchedCount
+			finalResult.ModifiedCount += result.ModifiedCount
+			finalResult.DeletedCount += result.DeletedCount
+			finalResult.UpsertedCount += result.UpsertedCount
 
-		// Add the operation to the bulkOps array
-		bulkOps = append(bulkOps, upsertModel)
+			// Merge the upserted IDs
+			for k, v := range result.UpsertedIDs {
+				finalResult.UpsertedIDs[k] = v
+			}
+		}
 	}
 
-	// Execute the bulk write operation
-	result, err := ms.orgParticipants.BulkWrite(ctx, bulkOps)
-	if err != nil {
-		return nil, fmt.Errorf("failed to perform bulk operation: %w", err)
-	}
-
-	return result, nil
+	return finalResult, nil
 }
 
 // OrgParticipants retrieves a orgParticipants from the DB based on it ID

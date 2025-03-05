@@ -176,7 +176,7 @@ func (ms *MongoStorage) AddUser(userID internal.HexBytes, processIDs []internal.
 	return err
 }
 
-// BulkAddUser adds multiple users to the storage in a single operation
+// BulkAddUser adds multiple users to the storage in batches of 1000 entries
 func (ms *MongoStorage) BulkAddUser(users []UserData) error {
 	if len(users) == 0 {
 		return nil // Nothing to do
@@ -185,18 +185,32 @@ func (ms *MongoStorage) BulkAddUser(users []UserData) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
-	// Create documents for bulk insert
-	documents := make([]interface{}, len(users))
-	for i, user := range users {
-		documents[i] = user
+	// Process users in batches of 1000
+	batchSize := 1000
+	for i := 0; i < len(users); i += batchSize {
+		// Calculate end index for current batch
+		end := i + batchSize
+		if end > len(users) {
+			end = len(users)
+		}
+
+		// Create documents for this batch
+		batchDocuments := make([]interface{}, end-i)
+		for j, user := range users[i:end] {
+			batchDocuments[j] = user
+		}
+
+		// Insert this batch
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		_, err := ms.users.InsertMany(ctx, batchDocuments)
+		cancel()
+
+		if err != nil {
+			return err
+		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	// Use InsertMany for bulk insertion
-	_, err := ms.users.InsertMany(ctx, documents)
-	return err
+	return nil
 }
 
 func (ms *MongoStorage) User(userID internal.HexBytes) (*UserData, error) {

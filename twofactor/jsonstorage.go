@@ -426,20 +426,38 @@ func (js *JSONstorage) BulkAddUser(users []UserData) error {
 	js.keysLock.Lock()
 	defer js.keysLock.Unlock()
 
-	tx := js.kv.WriteTx()
-	defer tx.Discard()
-
-	for _, user := range users {
-		userData, err := json.Marshal(user)
-		if err != nil {
-			return err
+	// Process users in batches of 1000
+	batchSize := 1000
+	for i := 0; i < len(users); i += batchSize {
+		// Calculate end index for current batch
+		end := i + batchSize
+		if end > len(users) {
+			end = len(users)
 		}
-		if err := tx.Set(userIDkey(user.UserID), userData); err != nil {
+
+		// Create a transaction for this batch
+		tx := js.kv.WriteTx()
+
+		// Process current batch
+		for _, user := range users[i:end] {
+			userData, err := json.Marshal(user)
+			if err != nil {
+				tx.Discard()
+				return err
+			}
+			if err := tx.Set(userIDkey(user.UserID), userData); err != nil {
+				tx.Discard()
+				return err
+			}
+		}
+
+		// Commit this batch
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 func (js *JSONstorage) Import(data []byte) error {
