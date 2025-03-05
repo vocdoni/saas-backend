@@ -13,7 +13,7 @@ func TestJSONStorageBulkAddUser(t *testing.T) {
 	// Create a temporary directory for the test
 	tempDir, err := os.MkdirTemp("", "twofactor-test-*")
 	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
+	defer os.RemoveAll(tempDir) // nolint: errcheck
 
 	// Initialize the storage
 	js := &JSONstorage{}
