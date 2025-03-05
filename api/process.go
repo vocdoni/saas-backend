@@ -275,10 +275,14 @@ func (a *API) initiateAuthRequest(r *http.Request, processId string) (*uuid.UUID
 		if req.Phone == "" {
 			return nil, ErrUnauthorized.Withf("missing phone")
 		}
-		if !bytes.Equal(internal.HashOrgData(process.OrgAddress, req.Phone), participant.HashedPhone) {
+		pn, err := internal.SanitizeAndVerifyPhoneNumber(req.Phone)
+		if err != nil {
+			return nil, ErrUnauthorized.Withf("invalid phone number")
+		}
+		if !bytes.Equal(internal.HashOrgData(process.OrgAddress, pn), participant.HashedPhone) {
 			return nil, ErrUnauthorized.Withf("invalid user data")
 		}
-		authResp = a.twofactor.InitiateAuth(processId, participant.ParticipantNo, req.Phone, notifications.SMS)
+		authResp = a.twofactor.InitiateAuth(processId, participant.ParticipantNo, pn, notifications.SMS)
 	case db.CensusTypeSMSorMail:
 		if req.Email != "" {
 			if !bytes.Equal(internal.HashOrgData(process.OrgAddress, req.Email), participant.HashedEmail) {
@@ -286,10 +290,14 @@ func (a *API) initiateAuthRequest(r *http.Request, processId string) (*uuid.UUID
 			}
 			authResp = a.twofactor.InitiateAuth(processId, participant.ParticipantNo, req.Email, notifications.Email)
 		} else if req.Phone != "" {
-			if !bytes.Equal(internal.HashOrgData(process.OrgAddress, req.Phone), participant.HashedPhone) {
+			pn, err := internal.SanitizeAndVerifyPhoneNumber(req.Phone)
+			if err != nil {
+				return nil, ErrUnauthorized.Withf("invalid phone number")
+			}
+			if !bytes.Equal(internal.HashOrgData(process.OrgAddress, pn), participant.HashedPhone) {
 				return nil, ErrUnauthorized.Withf("invalid user data")
 			}
-			authResp = a.twofactor.InitiateAuth(processId, participant.ParticipantNo, req.Phone, notifications.SMS)
+			authResp = a.twofactor.InitiateAuth(processId, participant.ParticipantNo, pn, notifications.SMS)
 		} else {
 			return nil, ErrUnauthorized.Withf("missing email or phone")
 		}
