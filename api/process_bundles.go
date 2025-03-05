@@ -16,6 +16,7 @@ import (
 	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/vocdoni/saas-backend/twofactor"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/dvote/util"
 )
 
@@ -370,6 +371,11 @@ func (a *API) processBundleSignHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.AuthToken == nil {
+		ErrUnauthorized.Withf("missing auth token").Write(w)
+		return
+	}
+
 	// check that the received process is part of the bundle processes
 	var procId internal.HexBytes
 	for _, processID := range bundle.Processes {
@@ -384,12 +390,14 @@ func (a *API) processBundleSignHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload, err := hex.DecodeString(util.TrimHex(req.Payload))
+	address, err := hex.DecodeString(util.TrimHex(req.Payload))
 	if err != nil {
 		ErrMalformedBody.WithErr(err).Write(w)
 		return
 	}
-	signResp := a.twofactor.Sign(*req.AuthToken, req.TokenR, payload, procId, "ecdsa")
+
+	log.Debugw("new CSP sign request", "address", address, "procId", procId)
+	signResp := a.twofactor.Sign(*req.AuthToken, req.TokenR, address, procId, "ecdsa")
 	if !signResp.Success {
 		ErrUnauthorized.WithErr(errors.New(signResp.Error)).Write(w)
 		return
