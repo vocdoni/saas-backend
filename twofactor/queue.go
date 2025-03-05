@@ -50,7 +50,7 @@ func (sq *Queue) add(userID, electionID internal.HexBytes, contact string, chall
 		startTime:  time.Now(),
 		retries:    0,
 	}
-	defer log.Debugf("%s: enqueued new sms with challenge", c)
+	defer log.Debugw("enqueued new sms with challenge", "challenge", c.String())
 	return sq.queue.Enqueue(c)
 }
 
@@ -59,7 +59,7 @@ func (sq *Queue) run() {
 		time.Sleep(sq.throttle)
 		c, err := sq.queue.DequeueOrWaitForNextElement()
 		if err != nil {
-			log.Warn(err)
+			log.Warnw("queue error", "error", err)
 			continue
 		}
 		challenge := c.(challengeData)
@@ -68,9 +68,9 @@ func (sq *Queue) run() {
 		sendChallenge := sq.sendChallenge[challenge.retries%2]
 		if err := sendChallenge(challenge.contact, challenge.challenge); err != nil {
 			// Fail
-			log.Warnf("%s: failed to send notification: %v", challenge, err)
+			log.Warnw("failed to send notification", "challenge", challenge.String(), "error", err)
 			if err := sq.reenqueue(challenge); err != nil {
-				log.Warnf("%s: removed from notification queue: %v", challenge, err)
+				log.Warnw("removed from notification queue", "challenge", challenge.String(), "error", err)
 				// Send a signal (channel) to let the caller know we are removing this element
 				challenge.success = false
 				sq.response <- challenge
@@ -78,7 +78,7 @@ func (sq *Queue) run() {
 			continue
 		}
 		// Success
-		log.Debugf("%s: sms with challenge successfully sent", challenge)
+		log.Debugw("sms with challenge successfully sent", "challenge", challenge.String())
 		// Send a signal (channel) to let the caller know we succeed
 		challenge.success = true
 		sq.response <- challenge
@@ -95,6 +95,6 @@ func (sq *Queue) reenqueue(challenge challengeData) error {
 	if err := sq.queue.Enqueue(challenge); err != nil {
 		return fmt.Errorf("cannot enqueue sms: %w", err)
 	}
-	log.Infof("%s: re-enqueued sms, retry #%d", challenge, challenge.retries)
+	log.Infow("re-enqueued sms", "challenge", challenge.String(), "retry", challenge.retries)
 	return nil
 }

@@ -53,12 +53,12 @@ func (tf *Twofactor) PubKeyECDSA(processID []byte) string {
 func (tf *Twofactor) NewBlindRequestKey() (*blind.Point, error) {
 	k, signerR, err := blind.NewRequestParameters()
 	if err != nil {
-		log.Warn(err)
+		log.Warnw("new request parameters error", "error", err)
 		return nil, err
 	}
 	index := signerR.X.String() + signerR.Y.String()
 	if err := tf.addKey(index, k); err != nil {
-		log.Warn(err)
+		log.Warnw("add key error", "error", err)
 		return nil, err
 	}
 	if k.Uint64() == 0 {
@@ -77,7 +77,7 @@ func (tf *Twofactor) NewRequestKey() []byte {
 		panic(err)
 	}
 	if err := tf.addKey(string(b), new(big.Int).SetUint64(0)); err != nil {
-		log.Warn(err)
+		log.Warnw("add key error", "error", err)
 		return nil
 	}
 	return b
@@ -92,7 +92,7 @@ func (tf *Twofactor) SignECDSA(token, msg []byte, processID []byte) ([]byte, err
 	}
 	defer func() {
 		if err := tf.delKey(string(token)); err != nil {
-			log.Warn(err)
+			log.Warnw("delete key error", "error", err)
 		}
 	}()
 	if processID == nil {
@@ -148,7 +148,7 @@ func (tf *Twofactor) addKey(index string, point *big.Int) error {
 	tx := tf.keys.WriteTx()
 	defer tx.Discard()
 	if err := tx.Set([]byte(index), point.Bytes()); err != nil {
-		log.Error(err)
+		log.Warnw("set key error", "error", err)
 	}
 	return tx.Commit()
 }
@@ -159,7 +159,7 @@ func (tf *Twofactor) delKey(index string) error {
 	tx := tf.keys.WriteTx()
 	defer tx.Discard()
 	if err := tx.Delete([]byte(index)); err != nil {
-		log.Error(err)
+		log.Warnw("delete key error", "error", err)
 	}
 	return tx.Commit()
 }

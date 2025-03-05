@@ -238,12 +238,12 @@ func (tf *Twofactor) queueController(queue *Queue) {
 		r := <-queue.response
 		if r.success {
 			if err := tf.stg.SetAttempts(r.userID, r.electionID, -1); err != nil {
-				log.Warnf("challenge cannot be sent: %v", err)
+				log.Warnw("challenge cannot be sent", "error", err)
 			} else {
-				log.Infof("%s: challenge successfully sent to user %s", r, r.userID.String())
+				log.Infow("challenge successfully sent", "challenge", r.String(), "userID", r.userID.String())
 			}
 		} else {
-			log.Warnf("%s: challenge sending failed", r)
+			log.Warnw("challenge sending failed", "challenge", r.String())
 		}
 	}
 }
@@ -254,7 +254,7 @@ func (tf *Twofactor) queueController(queue *Queue) {
 func (tf *Twofactor) Indexer(userID internal.HexBytes) []Election {
 	user, err := tf.stg.User(userID)
 	if err != nil {
-		log.Warnf("cannot get indexer elections: %v", err)
+		log.Warnw("cannot get indexer elections", "error", err)
 		return nil
 	}
 	// Get the last two digits of the phone and return them as extraData
@@ -305,9 +305,9 @@ func (tf *Twofactor) AddProcess(
 		participant.ElectionIds = append(participant.ElectionIds, bundleElectionId)
 
 		if err := tf.stg.AddUser(userID, participant.ElectionIds, participant.HashedEmail, participant.HashedPhone, ""); err != nil {
-			log.Warnf("cannot add user from line %d", i)
+			log.Warnw("cannot add user", "line", i)
 		}
-		log.Debugf("user %s added to process %s", userID.String(), formatElectionIds(participant.ElectionIds))
+		log.Debugw("user added to process", "userID", userID.String(), "electionIDs", formatElectionIds(participant.ElectionIds))
 	}
 	// log.Debug(tf.stg.String())
 	return nil
@@ -342,11 +342,11 @@ func (tf *Twofactor) InitiateAuth(
 	// Get the phone number. This methods checks for bundleId and user verification status.
 	_, _, attemptNo, err := tf.stg.NewAttempt(userID, bundleIdBytes, challengeSecret, &atoken)
 	if err != nil {
-		log.Warnf("new attempt for user %s failed: %v", userID.String(), err)
+		log.Warnw("new attempt for user failed", "userID", userID.String(), "error", err)
 		return AuthResponse{Error: err.Error()}
 	}
 	if contact == "" {
-		log.Warnf("phone is nil for user %s", userID.String())
+		log.Warnw("phone is nil for user", "userID", userID.String())
 		return AuthResponse{Error: "no phone for this user data"}
 	}
 	// Enqueue to send the challenge
@@ -356,16 +356,16 @@ func (tf *Twofactor) InitiateAuth(
 
 	if notifType == notifications.Email {
 		if err := tf.mailQueue.add(userID, bundleIdBytes, contact, otpCode); err != nil {
-			log.Errorf("cannot enqueue challenge: %v", err)
+			log.Warnw("cannot enqueue challenge", "error", err)
 			return AuthResponse{Error: "problem with Email challenge system"}
 		}
-		log.Infof("user %s challenged with %s at contact %s", userID.String(), otpCode, contact)
+		log.Infow("user challenged", "userID", userID.String(), "otpCode", otpCode, "contact", contact)
 	} else if notifType == notifications.SMS {
 		if err := tf.smsQueue.add(userID, bundleIdBytes, contact, otpCode); err != nil {
-			log.Errorf("cannot enqueue challenge: %v", err)
+			log.Warnw("cannot enqueue challenge", "error", err)
 			return AuthResponse{Error: "problem with SMS challenge system"}
 		}
-		log.Infof("user %s challenged with %s at contact %s", userID.String(), otpCode, contact)
+		log.Infow("user challenged", "userID", userID.String(), "otpCode", otpCode, "contact", contact)
 	} else {
 		return AuthResponse{Error: "invalid notification type"}
 	}
@@ -390,7 +390,7 @@ func (tf *Twofactor) Auth(bundleId string, authToken *uuid.UUID, authData []stri
 	bundleIdBytes.SetString(bundleId)
 	// Verify the challenge solution
 	if err := tf.stg.VerifyChallenge(bundleIdBytes, authToken, solution); err != nil {
-		log.Warnf("verify challenge %s failed: %v", solution, err)
+		log.Warnw("verify challenge failed", "solution", solution, "error", err)
 		return AuthResponse{Error: "challenge not completed:" + err.Error()}
 	}
 
@@ -403,7 +403,7 @@ func (tf *Twofactor) Auth(bundleId string, authToken *uuid.UUID, authData []stri
 	// }
 	// tokenR := r.BytesUncompressed()
 
-	log.Infof("new user registered, challenge resolved %s", authData[0])
+	log.Infow("new user registered", "challenge", authData[0])
 	return AuthResponse{
 		Response:  []string{"challenge resolved"},
 		AuthToken: authToken,
