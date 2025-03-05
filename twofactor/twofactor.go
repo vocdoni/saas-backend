@@ -2,7 +2,6 @@ package twofactor
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path"
@@ -258,16 +257,26 @@ func (tf *Twofactor) Indexer(participantId, bundleId, electionId string) []Elect
 		log.Warnw("no participant ID provided")
 		return nil
 	}
+
+	// create userID either based on bundleId or electionId
 	var userID internal.HexBytes
-	if len(bundleId) != 0 {
-		userID = make(internal.HexBytes, hex.EncodedLen(len(participantId)+len(bundleId)))
-		hex.Encode(userID, []byte(participantId+bundleId))
-	} else if len(electionId) != 0 {
-		userID = make(internal.HexBytes, hex.EncodedLen(len(participantId+electionId)))
-		hex.Encode(userID, []byte(participantId+electionId))
-	} else {
+	switch {
+	case len(bundleId) != 0:
+		bundleIDBytes := internal.HexBytes{}
+		if err := bundleIDBytes.FromString(bundleId); err != nil {
+			return nil
+		}
+		userID = buildUserID(participantId, bundleIDBytes)
+	case len(electionId) != 0:
+		electionIDBytes := internal.HexBytes{}
+		if err := electionIDBytes.FromString(electionId); err != nil {
+			return nil
+		}
+		userID = buildUserID(participantId, electionIDBytes)
+	default:
 		return nil
 	}
+
 	user, err := tf.stg.User(userID)
 	if err != nil {
 		log.Warnw("cannot get indexer elections", "error", err)
@@ -306,19 +315,18 @@ func (tf *Twofactor) AddProcess(
 	pubCensusType db.CensusType,
 	orgParticipants []db.CensusMembershipParticipant,
 ) error {
-	// TODO add bundleID to userID
 	var userID internal.HexBytes
 	for i, participant := range orgParticipants {
-		if len(participant.BundleId) == 0 {
-			userID = make(internal.HexBytes, hex.EncodedLen(len(participant.ParticipantNo+participant.ElectionIds[0].String())))
-			hex.Encode(userID, []byte(participant.ParticipantNo+participant.ElectionIds[0].String()))
-		} else {
-			userID = make(internal.HexBytes, hex.EncodedLen(len(participant.ParticipantNo)+len(participant.BundleId)))
-			hex.Encode(userID, []byte(participant.ParticipantNo+participant.BundleId))
-		}
-
 		bundleElectionId := internal.HexBytes{}
-		bundleElectionId.SetString(participant.BundleId)
+		if err := bundleElectionId.FromString(participant.BundleId); err != nil {
+			log.Warnw("invalid bundleId format", "line", i, "bundleId", participant.BundleId)
+			continue
+		}
+		if len(participant.BundleId) == 0 {
+			userID = buildUserID(participant.ParticipantNo, participant.ElectionIds[0])
+		} else {
+			userID = buildUserID(participant.ParticipantNo, bundleElectionId)
+		}
 		participant.ElectionIds = append(participant.ElectionIds, bundleElectionId)
 
 		if err := tf.stg.AddUser(userID, participant.ElectionIds, participant.HashedEmail, participant.HashedPhone, ""); err != nil {
@@ -335,18 +343,19 @@ func (tf *Twofactor) AddProcess(
 // and process bundles, where electionID can be either a process ID or a bundle ID.
 func (tf *Twofactor) InitiateAuth(
 	bundleId string,
-	userId string,
+	participantId string,
 	contact string,
 	notifType notifications.NotificationType,
 ) AuthResponse {
 	// If first step, build new challenge
-	if len(userId) == 0 || len(bundleId) == 0 {
+	if len(participantId) == 0 || len(bundleId) == 0 {
 		return AuthResponse{Error: "incorrect auth data fields"}
 	}
-	userID := make(internal.HexBytes, hex.EncodedLen(len(userId)+len(bundleId)))
-	hex.Encode(userID, []byte(userId+bundleId))
-	bundleIdBytes := internal.HexBytes{}
-	bundleIdBytes.SetString(bundleId)
+	bundleIDBytes := internal.HexBytes{}
+	if err := bundleIDBytes.FromString(bundleId); err != nil {
+		return AuthResponse{Error: "invalid bundleId format"}
+	}
+	userID := buildUserID(participantId, bundleIDBytes)
 
 	// Generate challenge and authentication token
 	// We need to ensure the challenge secret is a valid base32-encoded string
@@ -356,7 +365,7 @@ func (tf *Twofactor) InitiateAuth(
 	atoken := uuid.New()
 
 	// Get the phone number. This methods checks for bundleId and user verification status.
-	_, _, attemptNo, err := tf.stg.NewAttempt(userID, bundleIdBytes, challengeSecret, &atoken)
+	_, _, attemptNo, err := tf.stg.NewAttempt(userID, bundleIDBytes, challengeSecret, &atoken)
 	if err != nil {
 		log.Warnw("new attempt for user failed", "userID", userID.String(), "error", err)
 		return AuthResponse{Error: err.Error()}
@@ -371,13 +380,13 @@ func (tf *Twofactor) InitiateAuth(
 	otpCode := challenge.At(attemptNo)
 
 	if notifType == notifications.Email {
-		if err := tf.mailQueue.add(userID, bundleIdBytes, contact, otpCode); err != nil {
+		if err := tf.mailQueue.add(userID, bundleIDBytes, contact, otpCode); err != nil {
 			log.Warnw("cannot enqueue challenge", "error", err)
 			return AuthResponse{Error: "problem with Email challenge system"}
 		}
 		log.Infow("user challenged", "userID", userID.String(), "otpCode", otpCode, "contact", contact)
 	} else if notifType == notifications.SMS {
-		if err := tf.smsQueue.add(userID, bundleIdBytes, contact, otpCode); err != nil {
+		if err := tf.smsQueue.add(userID, bundleIDBytes, contact, otpCode); err != nil {
 			log.Warnw("cannot enqueue challenge", "error", err)
 			return AuthResponse{Error: "problem with SMS challenge system"}
 		}
