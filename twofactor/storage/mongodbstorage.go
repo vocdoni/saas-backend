@@ -204,11 +204,9 @@ func (s *MongoDBStorage) AddUser(
 	return nil
 }
 
-// GetUser retrieves a user from the storage
-func (s *MongoDBStorage) GetUser(userID internal.UserID) (*internal.User, error) {
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
-
+// getUserData retrieves a user from the storage without acquiring a lock
+// This is a helper method for internal use only
+func (s *MongoDBStorage) getUserData(userID internal.UserID) (*internal.User, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -223,6 +221,14 @@ func (s *MongoDBStorage) GetUser(userID internal.UserID) (*internal.User, error)
 	}
 
 	return &user, nil
+}
+
+// GetUser retrieves a user from the storage
+func (s *MongoDBStorage) GetUser(userID internal.UserID) (*internal.User, error) {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	return s.getUserData(userID)
 }
 
 // UpdateUser updates a user in the storage
@@ -397,7 +403,7 @@ func (s *MongoDBStorage) IsUserInElection(userID internal.UserID, electionID int
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
 
-	user, err := s.GetUser(userID)
+	user, err := s.getUserData(userID)
 	if err != nil {
 		return false, err
 	}
@@ -411,7 +417,7 @@ func (s *MongoDBStorage) IsUserVerified(userID internal.UserID, electionID inter
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
 
-	user, err := s.GetUser(userID)
+	user, err := s.getUserData(userID)
 	if err != nil {
 		return false, err
 	}
@@ -424,12 +430,29 @@ func (s *MongoDBStorage) IsUserVerified(userID internal.UserID, electionID inter
 	return election.Verified, nil
 }
 
+// updateUserData updates a user in the storage without acquiring a lock
+// This is a helper method for internal use only
+func (s *MongoDBStorage) updateUserData(user *internal.User) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	opts := options.ReplaceOptions{}
+	opts.SetUpsert(true)
+
+	_, err := s.users.ReplaceOne(ctx, bson.M{"_id": user.ID}, user, &opts)
+	if err != nil {
+		return fmt.Errorf("failed to update user: %w", err)
+	}
+
+	return nil
+}
+
 // UpdateAttempts updates the remaining attempts for a user in an election
 func (s *MongoDBStorage) UpdateAttempts(userID internal.UserID, electionID internal.ElectionID, delta int) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	user, err := s.GetUser(userID)
+	user, err := s.getUserData(userID)
 	if err != nil {
 		return err
 	}
@@ -442,7 +465,27 @@ func (s *MongoDBStorage) UpdateAttempts(userID internal.UserID, electionID inter
 	election.RemainingAttempts += delta
 	user.Elections[electionID.String()] = election
 
-	return s.UpdateUser(user)
+	return s.updateUserData(user)
+}
+
+// getUserByTokenData retrieves a user by an authentication token without acquiring a lock
+// This is a helper method for internal use only
+func (s *MongoDBStorage) getUserByTokenData(token internal.AuthToken) (*internal.User, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	result := s.tokenIndex.FindOne(ctx, bson.M{"_id": token})
+	if result.Err() != nil {
+		return nil, internal.ErrInvalidToken
+	}
+
+	var atIndex AuthTokenIndex
+	if err := result.Decode(&atIndex); err != nil {
+		return nil, fmt.Errorf("failed to decode token index: %w", err)
+	}
+
+	// With the user ID fetch the user data
+	return s.getUserData(atIndex.UserID)
 }
 
 // CreateChallenge creates a new challenge for a user in an election
@@ -455,7 +498,7 @@ func (s *MongoDBStorage) CreateChallenge(
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	user, err := s.GetUser(userID)
+	user, err := s.getUserData(userID)
 	if err != nil {
 		return "", "", 0, err
 	}
@@ -487,7 +530,7 @@ func (s *MongoDBStorage) CreateChallenge(
 	election.LastAttempt = &now
 	user.Elections[electionID.String()] = election
 
-	if err := s.UpdateUser(user); err != nil {
+	if err := s.updateUserData(user); err != nil {
 		return "", "", attemptNo, err
 	}
 
@@ -513,22 +556,8 @@ func (s *MongoDBStorage) VerifyChallenge(electionID internal.ElectionID, token i
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	// Fetch the user ID by token
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	result := s.tokenIndex.FindOne(ctx, bson.M{"_id": token})
-	if result.Err() != nil {
-		return internal.ErrInvalidToken
-	}
-
-	var atIndex AuthTokenIndex
-	if err := result.Decode(&atIndex); err != nil {
-		return fmt.Errorf("failed to decode token index: %w", err)
-	}
-
-	// With the user ID fetch the user data
-	user, err := s.GetUser(atIndex.UserID)
+	// Fetch the user by token
+	user, err := s.getUserByTokenData(token)
 	if err != nil {
 		return err
 	}
@@ -553,8 +582,8 @@ func (s *MongoDBStorage) VerifyChallenge(electionID internal.ElectionID, token i
 
 	// Clean token data (we only allow 1 chance)
 	election.AuthToken = nil
-	ctx, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel2()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
 	if _, err := s.tokenIndex.DeleteOne(ctx, bson.M{"_id": token}); err != nil {
 		return fmt.Errorf("failed to delete token index: %w", err)
@@ -570,7 +599,7 @@ func (s *MongoDBStorage) VerifyChallenge(electionID internal.ElectionID, token i
 
 	// Save the user data
 	user.Elections[electionID.String()] = election
-	if err := s.UpdateUser(user); err != nil {
+	if err := s.updateUserData(user); err != nil {
 		return err
 	}
 
@@ -587,26 +616,7 @@ func (s *MongoDBStorage) GetUserByToken(token internal.AuthToken) (*internal.Use
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	result := s.tokenIndex.FindOne(ctx, bson.M{"_id": token})
-	if result.Err() != nil {
-		return nil, internal.ErrInvalidToken
-	}
-
-	var atIndex AuthTokenIndex
-	if err := result.Decode(&atIndex); err != nil {
-		return nil, fmt.Errorf("failed to decode token index: %w", err)
-	}
-
-	// With the user ID fetch the user data
-	user, err := s.GetUser(atIndex.UserID)
-	if err != nil {
-		return nil, err
-	}
-
-	return user, nil
+	return s.getUserByTokenData(token)
 }
 
 // ImportData imports data into the storage
@@ -620,7 +630,7 @@ func (s *MongoDBStorage) ImportData(data []byte) error {
 	}
 
 	for _, user := range users {
-		if err := s.UpdateUser(&user); err != nil {
+		if err := s.updateUserData(&user); err != nil {
 			log.Warnf("failed to update user %s: %v", user.ID, err)
 		}
 	}

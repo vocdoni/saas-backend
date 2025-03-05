@@ -161,7 +161,6 @@ func (a *DefaultAuthenticator) AddProcess(censusType db.CensusType, participants
 		}
 
 		users = append(users, user)
-		log.Debugw("user prepared for process", "userID", userID.String(), "electionIDs", formatElectionIDs(electionIDs))
 	}
 
 	// Bulk add all users
@@ -174,23 +173,6 @@ func (a *DefaultAuthenticator) AddProcess(censusType db.CensusType, participants
 	}
 
 	return nil
-}
-
-// formatElectionIDs formats a slice of election IDs for logging
-func formatElectionIDs(ids []internal.ElectionID) string {
-	if len(ids) == 0 {
-		return "[]"
-	}
-
-	result := "["
-	for i, id := range ids {
-		if i > 0 {
-			result += ", "
-		}
-		result += id.String()
-	}
-	result += "]"
-	return result
 }
 
 // StartAuthentication initiates the authentication process
