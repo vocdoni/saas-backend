@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -165,6 +166,9 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 			URI:    a.serverURL + "/process",
 			Root:   a.account.PubKey.String(),
 		}
+	default:
+		ErrGenericInternalServerError.WithErr(fmt.Errorf("unsupported census type")).Write(w)
+		return
 	}
 
 	if err := a.db.SetPublishedCensus(pubCensus); err != nil {

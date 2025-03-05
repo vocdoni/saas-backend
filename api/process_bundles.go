@@ -448,6 +448,9 @@ func (a *API) initiateBundleAuthRequest(r *http.Request, bundleId string, census
 		if req.Email == "" {
 			return nil, ErrUnauthorized.Withf("missing email")
 		}
+		if !internal.ValidEmail(req.Email) {
+			return nil, ErrUnauthorized.Withf("invalid email")
+		}
 		if !bytes.Equal(internal.HashOrgData(census.OrgAddress, req.Email), participant.HashedEmail) {
 			return nil, ErrUnauthorized.Withf("invalid user data")
 		}
@@ -456,21 +459,29 @@ func (a *API) initiateBundleAuthRequest(r *http.Request, bundleId string, census
 		if req.Phone == "" {
 			return nil, ErrUnauthorized.Withf("missing phone")
 		}
+		pn, err := internal.SanitizeAndVerifyPhoneNumber(req.Phone)
+		if err != nil {
+			return nil, ErrUnauthorized.Withf("invalid phone number: %v", err)
+		}
 		if !bytes.Equal(internal.HashOrgData(census.OrgAddress, req.Phone), participant.HashedPhone) {
 			return nil, ErrUnauthorized.Withf("invalid user data")
 		}
-		authResp = a.twofactor.InitiateAuth(bundleId, participant.ParticipantNo, req.Phone, notifications.SMS)
+		authResp = a.twofactor.InitiateAuth(bundleId, participant.ParticipantNo, pn, notifications.SMS)
 	case db.CensusTypeSMSorMail:
-		if req.Email != "" {
+		if internal.ValidEmail(req.Email) {
 			if !bytes.Equal(internal.HashOrgData(census.OrgAddress, req.Email), participant.HashedEmail) {
 				return nil, ErrUnauthorized.Withf("invalid user data")
 			}
 			authResp = a.twofactor.InitiateAuth(bundleId, participant.ParticipantNo, req.Email, notifications.Email)
 		} else if req.Phone != "" {
+			pn, err := internal.SanitizeAndVerifyPhoneNumber(req.Phone)
+			if err != nil {
+				return nil, ErrUnauthorized.Withf("invalid phone number: %v", err)
+			}
 			if !bytes.Equal(internal.HashOrgData(census.OrgAddress, req.Phone), participant.HashedPhone) {
 				return nil, ErrUnauthorized.Withf("invalid user data")
 			}
-			authResp = a.twofactor.InitiateAuth(bundleId, participant.ParticipantNo, req.Phone, notifications.SMS)
+			authResp = a.twofactor.InitiateAuth(bundleId, participant.ParticipantNo, pn, notifications.SMS)
 		} else {
 			return nil, ErrUnauthorized.Withf("missing email or phone")
 		}

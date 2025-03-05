@@ -51,8 +51,9 @@ func (a *API) sendSMS(ctx context.Context, to string, mail mailtemplates.MailTem
 		ctx, cancel := context.WithTimeout(ctx, time.Second*10)
 		defer cancel()
 		// check if the phone number is valid
-		if !internal.ValidPhoneNumber(to) {
-			return fmt.Errorf("invalid email address")
+		recipient, err := internal.SanitizeAndVerifyPhoneNumber(to)
+		if err != nil {
+			return err
 		}
 		// execute the mail template to get the notification
 		notification, err := mail.ExecPlain(data)
@@ -60,7 +61,7 @@ func (a *API) sendSMS(ctx context.Context, to string, mail mailtemplates.MailTem
 			return err
 		}
 		// set the recipient phone number
-		notification.ToNumber = to
+		notification.ToNumber = recipient
 		// send the mail notification
 		if err := a.sms.SendNotification(ctx, notification); err != nil {
 			return err
