@@ -176,6 +176,29 @@ func (ms *MongoStorage) AddUser(userID internal.HexBytes, processIDs []internal.
 	return err
 }
 
+// BulkAddUser adds multiple users to the storage in a single operation
+func (ms *MongoStorage) BulkAddUser(users []UserData) error {
+	if len(users) == 0 {
+		return nil // Nothing to do
+	}
+
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+
+	// Create documents for bulk insert
+	documents := make([]interface{}, len(users))
+	for i, user := range users {
+		documents[i] = user
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Use InsertMany for bulk insertion
+	_, err := ms.users.InsertMany(ctx, documents)
+	return err
+}
+
 func (ms *MongoStorage) User(userID internal.HexBytes) (*UserData, error) {
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()

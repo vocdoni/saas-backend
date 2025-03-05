@@ -84,6 +84,8 @@ type Storage interface {
 	Reset() (err error)
 	// AddUser adds a new user to the storage
 	AddUser(userID internal.HexBytes, processIDs []internal.HexBytes, mail, phone, extra string) (err error)
+	// BulkAddUser adds multiple users to the storage in a single operation
+	BulkAddUser(users []UserData) (err error)
 	// Users returns the list of users
 	Users() (users *Users, err error)
 	// User returns the full information of a user, including the election list.

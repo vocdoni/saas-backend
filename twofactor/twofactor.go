@@ -315,6 +315,7 @@ func (tf *Twofactor) AddProcess(
 	pubCensusType db.CensusType,
 	orgParticipants []db.CensusMembershipParticipant,
 ) error {
+	users := make([]UserData, len(orgParticipants))
 	var userID internal.HexBytes
 	for i, participant := range orgParticipants {
 		bundleElectionId := internal.HexBytes{}
@@ -322,17 +323,30 @@ func (tf *Twofactor) AddProcess(
 			log.Warnw("invalid bundleId format", "line", i, "bundleId", participant.BundleId)
 			continue
 		}
-		if len(participant.BundleId) == 0 {
+		if len(participant.BundleId) != 0 {
+			userID = buildUserID(participant.ParticipantNo, bundleElectionId)
+		} else if len(participant.ElectionIds) != 0 && len(participant.ElectionIds[0]) != 0 {
 			userID = buildUserID(participant.ParticipantNo, participant.ElectionIds[0])
 		} else {
-			userID = buildUserID(participant.ParticipantNo, bundleElectionId)
+			log.Warnw("invalid electionId format", "line", i, "electionId", participant.ElectionIds)
+			continue
 		}
 		participant.ElectionIds = append(participant.ElectionIds, bundleElectionId)
-
-		if err := tf.stg.AddUser(userID, participant.ElectionIds, participant.HashedEmail, participant.HashedPhone, ""); err != nil {
-			log.Warnw("cannot add user", "line", i)
+		user := UserData{
+			UserID: userID,
+			Phone:  participant.HashedPhone,
+			Mail:   participant.HashedEmail,
 		}
+		user.Elections = make(map[string]UserElection, len(participant.ElectionIds))
+		for _, e := range HexBytesToElection(participant.ElectionIds, tf.stg.MaxAttempts()) {
+			user.Elections[e.ElectionID.String()] = e
+		}
+		users[i] = user
 		log.Debugw("user added to process", "userID", userID.String(), "electionIDs", formatElectionIds(participant.ElectionIds))
+	}
+	if err := tf.stg.BulkAddUser(users); err != nil {
+		log.Warnw("cannot bulk add users", "error", err)
+		return fmt.Errorf("cannot bulk add users: %w", err)
 	}
 	return nil
 }

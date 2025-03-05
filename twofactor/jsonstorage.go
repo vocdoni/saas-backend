@@ -418,6 +418,30 @@ func (js *JSONstorage) String() string {
 // 	return append([]byte(signkeyPrefix), u...)
 // }
 
+func (js *JSONstorage) BulkAddUser(users []UserData) error {
+	if len(users) == 0 {
+		return nil // Nothing to do
+	}
+
+	js.keysLock.Lock()
+	defer js.keysLock.Unlock()
+
+	tx := js.kv.WriteTx()
+	defer tx.Discard()
+
+	for _, user := range users {
+		userData, err := json.Marshal(user)
+		if err != nil {
+			return err
+		}
+		if err := tx.Set(userIDkey(user.UserID), userData); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
 func (js *JSONstorage) Import(data []byte) error {
 	return nil
 }
