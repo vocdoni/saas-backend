@@ -13,6 +13,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications"
+	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"github.com/xlzd/gotp"
 	dvotedb "go.vocdoni.io/dvote/db"
 	"go.vocdoni.io/dvote/db/metadb"
@@ -103,15 +104,15 @@ func NewSmsNotifcation(notifService notifications.NotificationService) *SmsNotif
 
 // SendChallenge sends an authentication challenge to the specified email address.
 func (mf *MailNotification) SendChallenge(mail string, challenge string) error {
+	notif, err := mailtemplates.VerifyOTPCodeNotification.ExecTemplate(struct {
+		Code string
+	}{challenge})
+	if err != nil {
+		return err
+	}
+	notif.ToAddress = mail
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	notif := &notifications.Notification{
-		ToAddress: mail,
-		Subject:   "Vocdoni verification code",
-		PlainBody: fmt.Sprintf("Your authentication code is %s", challenge),
-		Body:      fmt.Sprintf("Your authentication code is %s", challenge),
-	}
-	// return tf.notificationServices.Mail.SendNotification(ctx, notif)
 	return mf.MailNotificationService.SendNotification(ctx, notif)
 }
 
@@ -123,11 +124,13 @@ func (sn *SmsNotification) SendChallenge(phone string, challenge string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	notif := &notifications.Notification{
-		ToNumber:  to,
-		Subject:   "Vocdoni verification code",
-		PlainBody: fmt.Sprintf("Your authentication code is %s", challenge),
+	notif, err := mailtemplates.VerifyOTPCodeNotification.ExecTemplate(struct {
+		Code string
+	}{challenge})
+	if err != nil {
+		return err
 	}
+	notif.ToNumber = to
 	// return tf.notificationServices.Mail.SendNotification(ctx, notif)
 	return sn.SmsNotificationService.SendNotification(ctx, notif)
 }
