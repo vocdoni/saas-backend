@@ -97,6 +97,9 @@ func (a *DefaultAuthenticator) Initialize(config *internal.Config) error {
 
 // AddProcess adds a process or process bundle to the authenticator
 func (a *DefaultAuthenticator) AddProcess(censusType db.CensusType, participants []db.CensusMembershipParticipant) error {
+	// Create a slice to hold all users for bulk insertion
+	users := make([]*internal.User, 0, len(participants))
+
 	for i, participant := range participants {
 		var bundleID internal.ElectionID
 		if err := bundleID.FromString(participant.BundleId); err != nil {
@@ -136,11 +139,38 @@ func (a *DefaultAuthenticator) AddProcess(censusType db.CensusType, participants
 			}
 		}
 
-		if err := a.storage.AddUser(userID, electionIDs, participant.HashedEmail, participant.HashedPhone, ""); err != nil {
-			log.Warnw("cannot add user", "line", i, "error", err)
+		// Create user object
+		user := &internal.User{
+			ID:        userID,
+			Email:     participant.HashedEmail,
+			Phone:     participant.HashedPhone,
+			ExtraData: "",
+			Elections: make(map[string]internal.Election),
 		}
-		log.Debugw("user added to process", "userID", userID.String(), "electionIDs", formatElectionIDs(electionIDs))
+
+		// Add elections to the user
+		for _, electionID := range electionIDs {
+			election := internal.Election{
+				ID:                electionID,
+				RemainingAttempts: a.maxAttempts,
+				Verified:          false,
+			}
+			user.Elections[electionID.String()] = election
+		}
+
+		users = append(users, user)
+		log.Debugw("user prepared for process", "userID", userID.String(), "electionIDs", formatElectionIDs(electionIDs))
 	}
+
+	// Bulk add all users
+	if len(users) > 0 {
+		if err := a.storage.BulkAddUser(users); err != nil {
+			log.Warnw("failed to bulk add users", "error", err)
+			return err
+		}
+		log.Infow("bulk added users to process", "count", len(users))
+	}
+
 	return nil
 }
 

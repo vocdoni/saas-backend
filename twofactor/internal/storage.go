@@ -14,6 +14,7 @@ type Storage interface {
 
 	// User operations
 	AddUser(userID UserID, electionIDs []ElectionID, email, phone, extraData string) error
+	BulkAddUser(users []*User) error
 	GetUser(userID UserID) (*User, error)
 	UpdateUser(user *User) error
 	DeleteUser(userID UserID) error

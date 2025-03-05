@@ -140,6 +140,42 @@ func (s *JSONStorage) UpdateUser(user *internal.User) error {
 	return tx.Commit()
 }
 
+// BulkAddUser adds multiple users to the storage in a single transaction
+func (s *JSONStorage) BulkAddUser(users []*internal.User) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	tx := s.db.WriteTx()
+	defer tx.Discard()
+
+	for _, user := range users {
+		// Ensure the user has elections map initialized
+		if user.Elections == nil {
+			user.Elections = make(map[string]internal.Election)
+		}
+
+		// Set default remaining attempts for each election
+		for id, election := range user.Elections {
+			if election.RemainingAttempts == 0 {
+				election.RemainingAttempts = s.maxAttempts
+				user.Elections[id] = election
+			}
+		}
+
+		// Serialize and store the user
+		userData, err := json.Marshal(user)
+		if err != nil {
+			return fmt.Errorf("failed to marshal user data: %w", err)
+		}
+
+		if err := tx.Set(userKey(user.ID), userData); err != nil {
+			return fmt.Errorf("failed to store user data: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
 // DeleteUser removes a user from the storage
 func (s *JSONStorage) DeleteUser(userID internal.UserID) error {
 	s.mutex.Lock()

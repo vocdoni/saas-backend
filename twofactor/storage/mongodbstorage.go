@@ -222,6 +222,72 @@ func (s *MongoDBStorage) UpdateUser(user *internal.User) error {
 	return nil
 }
 
+// BulkAddUser adds multiple users to the storage in batches
+func (s *MongoDBStorage) BulkAddUser(users []*internal.User) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if len(users) == 0 {
+		return nil
+	}
+
+	// Process users in batches of 10,000
+	const batchSize = 10000
+	totalUsers := len(users)
+	totalBatches := (totalUsers + batchSize - 1) / batchSize // Ceiling division
+
+	log.Infow("starting bulk user insertion", "totalUsers", totalUsers, "batchSize", batchSize, "totalBatches", totalBatches)
+
+	for batchIndex := 0; batchIndex < totalBatches; batchIndex++ {
+		// Calculate start and end indices for this batch
+		startIdx := batchIndex * batchSize
+		endIdx := startIdx + batchSize
+		if endIdx > totalUsers {
+			endIdx = totalUsers
+		}
+
+		batchUsers := users[startIdx:endIdx]
+		log.Infow("processing user batch", "batchIndex", batchIndex+1, "batchSize", len(batchUsers))
+
+		// Prepare documents for bulk insert
+		documents := make([]any, 0, len(batchUsers))
+		for _, user := range batchUsers {
+			// Ensure the user has elections map initialized
+			if user.Elections == nil {
+				user.Elections = make(map[string]internal.Election)
+			}
+
+			// Set default remaining attempts for each election
+			for id, election := range user.Elections {
+				if election.RemainingAttempts == 0 {
+					election.RemainingAttempts = s.maxAttempts
+					user.Elections[id] = election
+				}
+			}
+
+			documents = append(documents, user)
+		}
+
+		// Perform bulk insert for this batch
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		_, err := s.users.InsertMany(ctx, documents)
+		cancel()
+
+		if err != nil {
+			return fmt.Errorf("failed to bulk insert users batch %d/%d: %w",
+				batchIndex+1, totalBatches, err)
+		}
+
+		log.Infow("successfully inserted user batch",
+			"batchIndex", batchIndex+1,
+			"totalBatches", totalBatches,
+			"usersInserted", len(batchUsers))
+	}
+
+	log.Infow("completed bulk user insertion", "totalUsers", totalUsers)
+	return nil
+}
+
 // DeleteUser removes a user from the storage
 func (s *MongoDBStorage) DeleteUser(userID internal.UserID) error {
 	s.mutex.Lock()
