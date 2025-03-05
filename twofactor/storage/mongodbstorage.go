@@ -240,8 +240,8 @@ func (s *MongoDBStorage) BulkAddUser(users []*internal.User) error {
 		return nil
 	}
 
-	// Process users in batches of 10,000
-	const batchSize = 10000
+	// Process users in batches of 1000
+	const batchSize = 1000
 	totalUsers := len(users)
 	totalBatches := (totalUsers + batchSize - 1) / batchSize // Ceiling division
 
