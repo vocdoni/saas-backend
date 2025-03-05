@@ -55,13 +55,11 @@ func (s *MongoDBStorage) Initialize(dataDir string, maxAttempts int, cooldownPer
 	log.Infof("connecting to mongodb %s (database: %s)", mongoURI, database)
 
 	opts := options.Client()
-	opts.ApplyURI(mongoURI)
-	opts.SetMaxConnecting(20)
 	timeout := time.Second * 10
 	opts.ConnectTimeout = &timeout
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	client, err := mongo.Connect(ctx, opts)
+	client, err := mongo.Connect(ctx, opts.ApplyURI(mongoURI).SetMaxConnecting(20))
 	defer cancel()
 	if err != nil {
 		return fmt.Errorf("failed to connect to MongoDB: %w", err)
