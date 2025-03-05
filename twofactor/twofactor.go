@@ -434,7 +434,7 @@ func formatElectionIds(ids []internal.HexBytes) string {
 // Sign creates a cryptographic signature for the provided message using the specified signature type.
 // It requires a valid token obtained from a successful authentication.
 // For process bundles, the electionID should be the bundle ID or the first process ID in the bundle.
-func (tf *Twofactor) Sign(authToken uuid.UUID, token, msg, electionID internal.HexBytes, sigType string) AuthResponse {
+func (tf *Twofactor) Sign(authToken uuid.UUID, token, msg, electionID internal.HexBytes, bundleId, sigType string) AuthResponse {
 	switch sigType {
 	case SignatureTypeBlind:
 		r, err := blindsecp256k1.NewPointFromBytesUncompressed(token)
@@ -464,7 +464,11 @@ func (tf *Twofactor) Sign(authToken uuid.UUID, token, msg, electionID internal.H
 			}
 		}
 		// find the election and check the solution
-		election, ok := user.Elections[electionID.String()]
+		procID := electionID.String()
+		if bundleId != "" {
+			procID = bundleId
+		}
+		election, ok := user.Elections[procID]
 		if !ok {
 			return AuthResponse{
 				Success: false,

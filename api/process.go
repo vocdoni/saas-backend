@@ -205,7 +205,7 @@ func (a *API) twofactorSignHandler(w http.ResponseWriter, r *http.Request) {
 		ErrMalformedBody.WithErr(err).Write(w)
 		return
 	}
-	signResp := a.twofactor.Sign(*req.AuthToken, nil, payload, processId, "ecdsa")
+	signResp := a.twofactor.Sign(*req.AuthToken, nil, payload, processId, "", "ecdsa")
 	if !signResp.Success {
 		ErrUnauthorized.WithErr(errors.New(signResp.Error)).Write(w)
 		return

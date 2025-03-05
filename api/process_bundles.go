@@ -397,7 +397,7 @@ func (a *API) processBundleSignHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Debugw("new CSP sign request", "address", fmt.Sprintf("%x", address), "procId", procId.String())
-	signResp := a.twofactor.Sign(*req.AuthToken, req.TokenR, address, procId, "ecdsa")
+	signResp := a.twofactor.Sign(*req.AuthToken, req.TokenR, address, procId, bundleIDStr, "ecdsa")
 	if !signResp.Success {
 		ErrUnauthorized.WithErr(errors.New(signResp.Error)).Write(w)
 		return
