@@ -50,6 +50,7 @@ var (
 	ErrNoDefaultPLan                   = Error{Code: 40022, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("did not found default plan for organization")}
 	ErPlanNotFound                     = Error{Code: 40023, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("plan not found")}
 	ErrStorageInvalidObject            = Error{Code: 40024, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("the obejct/parameters provided are invalid")}
+	ErrNotSupported                    = Error{Code: 40025, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("this feature is not supported")}
 
 	ErrMarshalingServerJSONFailed  = Error{Code: 50001, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("marshaling (server-side) JSON failed")}
 	ErrGenericInternalServerError  = Error{Code: 50002, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("internal server error")}

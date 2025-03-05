@@ -53,6 +53,14 @@
   - [🆕 Create Process](#-create-process)
   - [ℹ️ Get Process Info](#-get-process-info)
   - [🔐 Process Authentication](#-process-authentication)
+  - [🔒 Two-Factor Authentication](#-two-factor-authentication)
+  - [✍️ Two-Factor Signing](#-two-factor-signing)
+- [📦 Process Bundles](#-process-bundles)
+  - [🆕 Create Process Bundle](#-create-process-bundle)
+  - [➕ Add Processes to Bundle](#-add-processes-to-bundle)
+  - [ℹ️ Get Process Bundle Info](#ℹ️-get-process-bundle-info)
+  - [🔐 Process Bundle Authentication](#-process-bundle-authentication)
+  - [✍️ Process Bundle Signing](#-process-bundle-signing)
 
 </details>
 
@@ -941,8 +949,6 @@ This request can be made only by organization admins.
       "id":1,
       "name":"Basic",
       "stripeID":"stripe_123",
-      "startingPrice": "9900",
-      "organization":{
         "memberships":1,
         "subOrgs":1
       },
@@ -1273,13 +1279,7 @@ Publishes a census, making it available for voting. Requires Manager or Admin ro
 * **Response**
 ```json
 {
-  "census": {
-    "id": "census_id",
-    "type": "sms_or_mail",
-    "orgAddress": "0x...",
-    "createdAt": "2025-02-18T17:12:00Z"
-  },
-  "uri": "https://example.com/csp/",
+  "uri": "https://example.com/process/",
   "root": "public_key"
 }
 ```
@@ -1302,8 +1302,11 @@ Publishes a census, making it available for voting. Requires Manager or Admin ro
 * **Request body**
 ```json
 {
-  "censusID": "published_census_id",
-  "metadata": "base64_encoded_metadata"
+  "censusRoot": "published_census_root",
+  "censusUri": "published_census_uri",
+  "censusId": "used-census-id",
+  "metadata": "base64_encoded_metadata" // optional
+
 }
 ```
 
@@ -1401,3 +1404,272 @@ This method return if exists, in inline mode. the image/file of the provided by 
 | `400` | `40024` | `the obejct/parameters provided are invalid` |
 | `500` | `50002` | `internal server error` |
 | `500` | `50006` | `internal storage error` |
+
+### 🔒 Two-Factor Authentication
+
+* **Path** `/process/{processId}/auth/{step}`
+* **Method** `POST`
+* **Request Body (Step 0)** 
+```json
+{
+  "participantNo": "participant_id",
+  "email": "participant@example.com",  // Optional: Required if using email authentication
+  "phone": "+1234567890",             // Optional: Required if using phone authentication
+  "password": "secretpass1234"        // Optional: Required if using password authentication
+}
+```
+
+* **Response (Step 0)**
+```json
+{
+  "authToken": "uuid-string"
+}
+```
+
+* **Request Body (Step 1)** 
+```json
+{
+  "authToken": "uuid-string",
+  "authData": ["verification-code-or-other-auth-data"]
+}
+```
+* **Response (Step 1)**
+```json
+{
+  "tokenR": "base64-encoded-date"
+}
+```
+
+* **Description**
+Two-step authentication process for voters. Step 0 initiates the authentication process and returns an auth token. Step 1 completes the authentication by providing the verification code or other authentication data.
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40010` | `malformed URL parameter` |
+| `401` | `40001` | `user not authorized` |
+| `500` | `50002` | `internal server error` |
+
+### ✍️ Two-Factor Signing
+
+* **Path** `/process/{processId}/sign`
+* **Method** `POST`
+* **Request Body** 
+```json
+{
+  "token": "base64-encoded-token",
+  "payload": "base64-encoded-payload"
+}
+```
+
+* **Response**
+```json
+{
+  "signature": "base64-encoded-signature"
+}
+```
+
+* **Description**
+Signs a payload using two-factor authentication. Requires a valid tokenR obtained from the two-factor authentication process.
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40010` | `malformed URL parameter` |
+| `401` | `40001` | `user not authorized` |
+| `500` | `50002` | `internal server error` |
+
+## 📦 Process Bundles
+
+Process bundles allow grouping multiple processes together with a single census, enabling users to participate in multiple voting processes using the same authentication mechanism.
+
+### 🆕 Create Process Bundle
+
+* **Path** `/process/bundle`
+* **Method** `POST`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Request body**
+```json
+{
+  "censusId": "census_id_string",
+  "processIds": ["process_id_1", "process_id_2", "..."]
+}
+```
+
+* **Response**
+```json
+{
+  "uri": "https://example.com/process/bundle/bundle_id",
+  "root": "census_root_public_key"
+}
+```
+
+* **Description**
+Creates a new process bundle with the specified census and optional list of processes. Requires Manager or Admin role for the organization that owns the census. The census root will be the same as the account's public key.
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40006` | `missing process ID` |
+| `400` | `40007` | `invalid process ID` |
+| `500` | `50002` | `internal server error` |
+
+### ➕ Add Processes to Bundle
+
+* **Path** `/process/bundle/{bundleId}`
+* **Method** `PUT`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Request body**
+```json
+{
+  "processes": ["process_id_1", "process_id_2", "..."]
+}
+```
+
+* **Response**
+```json
+{
+  "uri": "/process/bundle/bundle_id",
+  "root": "census_root_public_key"
+}
+```
+
+* **Description**
+Adds additional processes to an existing bundle. Requires Manager or Admin role for the organization that owns the bundle. The processes array must not be empty.
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40006` | `missing process ID` |
+| `400` | `40007` | `invalid process ID` |
+| `400` | `40010` | `malformed URL parameter` |
+| `400` | `40011` | `no processes provided` |
+| `500` | `50002` | `internal server error` |
+
+### ℹ️ Get Process Bundle Info
+
+* **Path** `/process/bundle/{bundleId}`
+* **Method** `GET`
+* **Response**
+```json
+{
+  "id": "bundle_id",
+  "census": {
+    "id": "census_id",
+    "type": "sms_or_mail",
+    "orgAddress": "0x...",
+    "createdAt": "2025-02-18T17:12:00Z"
+  },
+  "censusRoot": "census_root_public_key",
+  "orgAddress": "0x...",
+  "processes": ["process_id_1", "process_id_2", "..."]
+}
+```
+
+* **Description**
+Retrieves information about a process bundle by its ID, including the associated census and list of processes.
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `400` | `40010` | `malformed URL parameter` |
+| `400` | `40011` | `missing bundle ID` |
+| `500` | `50002` | `internal server error` |
+
+### 🔐 Process Bundle Authentication
+
+* **Path** `/process/bundle/{bundleId}/auth/{step}`
+* **Method** `POST`
+* **Request Body (Step 0)** 
+```json
+{
+  "participantNo": "participant_id",
+  "email": "participant@example.com",  // Optional: Required if using email authentication
+  "phone": "+1234567890",             // Optional: Required if using phone authentication
+  "password": "secretpass1234"        // Optional: Required if using password authentication
+}
+```
+
+* **Response (Step 0)**
+```json
+{
+  "authToken": "uuid-string"
+}
+```
+
+* **Request Body (Step 1)** 
+```json
+{
+  "authToken": "uuid-string",
+  "authData": ["verification-code-or-other-auth-data"]
+}
+```
+
+* **Response (Step 1)**
+```json
+{
+  "tokenR": "base64-encoded-token"
+}
+```
+
+* **Description**
+Two-step authentication process for voters participating in a bundle of processes. Similar to the regular two-factor authentication but for bundles. Step 0 initiates the authentication process and returns an auth token. Step 1 completes the authentication by providing the verification code or other authentication data.
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40010` | `malformed URL parameter` |
+| `400` | `40011` | `missing bundle ID` |
+| `400` | `40012` | `wrong step ID` |
+| `401` | `40001` | `user not authorized` |
+| `400` | `40013` | `bundle has no processes` |
+| `500` | `50002` | `internal server error` |
+
+### ✍️ Process Bundle Signing
+
+* **Path** `/process/bundle/{bundleId}/sign`
+* **Method** `POST`
+* **Request Body** 
+```json
+{
+  "tokenR": "base64-encoded-token",
+  "payload": "base64-encoded-payload",
+  "electionId": "hex-string"
+}
+```
+
+* **Response**
+```json
+{
+  "signature": "base64-encoded-signature"
+}
+```
+
+* **Description**
+Signs a payload for a process bundle using two-factor authentication. Requires a valid tokenR obtained from the process bundle authentication. The signing uses the first process in the bundle for the signature.
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40010` | `malformed URL parameter` |
+| `400` | `40011` | `missing bundle ID` |
+| `400` | `40013` | `bundle has no processes` |
+| `401` | `40001` | `user not authorized` |
+| `500` | `50002` | `internal server error` |

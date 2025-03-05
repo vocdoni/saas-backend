@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -199,7 +198,7 @@ func main() {
 	processID := fmt.Sprintf("test_process_%d", time.Now().Unix())
 	metadata := generateMetadata()
 	err = client.makeRequest("POST", fmt.Sprintf("/process/%s", processID), api.CreateProcessRequest{
-		PublishedCensusRoot: base64.StdEncoding.EncodeToString(publishedCensus.Root),
+		PublishedCensusRoot: publishedCensus.Root,
 		Metadata:            metadata,
 	}, nil)
 	if err != nil {

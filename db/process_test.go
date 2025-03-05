@@ -5,12 +5,13 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 var (
-	testProcessID       = []byte("test_process_id")
-	testProcessRoot     = []byte("test_process_root")
+	testProcessID       = internal.HexBytes("test_process_id")
+	testProcessRoot     = "test_process_root"
 	testProcessURI      = "test_process_uri"
 	testProcessMetadata = []byte("test_metadata")
 )
@@ -106,7 +107,7 @@ func TestSetAndGetProcess(t *testing.T) {
 	// Test with non-existent published census (should create it)
 	newPublishedCensus := PublishedCensus{
 		URI:  "new-uri",
-		Root: []byte("new-root"),
+		Root: "new-root",
 		Census: Census{
 			ID:         publishedCensus.Census.ID,
 			OrgAddress: testOrgAddress,
@@ -114,7 +115,7 @@ func TestSetAndGetProcess(t *testing.T) {
 		},
 	}
 	newProcess := &Process{
-		ID:              []byte("new-process"),
+		ID:              internal.HexBytes("new-process"),
 		OrgAddress:      testOrgAddress,
 		PublishedCensus: newPublishedCensus,
 	}
@@ -122,7 +123,7 @@ func TestSetAndGetProcess(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 
 	// Verify the published census was created
-	createdPublishedCensus, err := db.PublishedCensus([]byte("new-root"), "new-uri")
+	createdPublishedCensus, err := db.PublishedCensus("new-root", "new-uri", publishedCensus.Census.ID.Hex())
 	c.Assert(err, qt.IsNil)
 	c.Assert(createdPublishedCensus, qt.Not(qt.IsNil))
 }
@@ -191,6 +192,7 @@ func TestDeleteProcess(t *testing.T) {
 	c.Assert(err, qt.Not(qt.IsNil))
 
 	// test delete with empty ID
-	err = db.DelProcess(nil)
+	var emptyID internal.HexBytes
+	err = db.DelProcess(emptyID)
 	c.Assert(err, qt.Equals, ErrInvalidData)
 }

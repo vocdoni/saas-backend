@@ -15,6 +15,7 @@ import (
 	"github.com/vocdoni/saas-backend/objectstorage"
 	"github.com/vocdoni/saas-backend/stripe"
 	"github.com/vocdoni/saas-backend/subscriptions"
+	"github.com/vocdoni/saas-backend/twofactor"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 )
@@ -45,6 +46,7 @@ type APIConfig struct {
 	Subscriptions *subscriptions.Subscriptions
 	// Object storage
 	ObjectStorage *objectstorage.ObjectStorageClient
+	Twofactor     *twofactor.Twofactor
 }
 
 // API type represents the API HTTP server with JWT authentication capabilities.
@@ -65,6 +67,7 @@ type API struct {
 	stripe          *stripe.StripeClient
 	subscriptions   *subscriptions.Subscriptions
 	objectStorage   *objectstorage.ObjectStorageClient
+	twofactor       *twofactor.Twofactor
 }
 
 // New creates a new API HTTP server. It does not start the server. Use Start() for that.
@@ -88,6 +91,7 @@ func New(conf *APIConfig) *API {
 		stripe:          conf.StripeClient,
 		subscriptions:   conf.Subscriptions,
 		objectStorage:   conf.ObjectStorage,
+		twofactor:       conf.Twofactor,
 	}
 }
 
@@ -192,6 +196,11 @@ func (a *API) initRouter() http.Handler {
 		// PROCESS ROUTES
 		log.Infow("new route", "method", "POST", "path", processEndpoint)
 		r.Post(processEndpoint, a.createProcessHandler)
+		// PROCESS BUNDLE ROUTES (private)
+		log.Infow("new route", "method", "POST", "path", processBundleEndpoint)
+		r.Post(processBundleEndpoint, a.createProcessBundleHandler)
+		log.Infow("new route", "method", "PUT", "path", processBundleUpdateEndpoint)
+		r.Put(processBundleUpdateEndpoint, a.updateProcessBundleHandler)
 	})
 
 	// Public routes
@@ -253,19 +262,22 @@ func (a *API) initRouter() http.Handler {
 		// process info handler
 		log.Infow("new route", "method", "GET", "path", processEndpoint)
 		r.Get(processEndpoint, a.processInfoHandler)
-		// process auth handler
-		log.Infow("new route", "method", "POST", "path", processAuthEndpoint)
-		r.Post(processAuthEndpoint, a.processAuthHandler)
-		// process auth routes (currently not implemented)
-		// process auth step 0
-		// log.Infow("new route", "method", "POST", "path", processAuthInitEndpoint)
-		// r.Post(processAuthInitEndpoint, a.initiateAuthHandler)
-		// process auth step 1
-		// log.Infow("new route", "method", "POST", "path", processAuthVerifyEndpoint)
-		// r.Post(processAuthVerifyEndpoint, a.verifyAuthCodeHandler)
-		// get process proof
-		// log.Infow("new route", "method", "POST", "path", processProofEndpoint)
-		// r.Post(processProofEndpoint, a.generateProofHandler)
+		// two-factor auth handlers
+		log.Infow("new route", "method", "POST", "path", twofactorAuthEndpoint)
+		r.Post(twofactorAuthEndpoint, a.twofactorAuthHandler)
+		log.Infow("new route", "method", "POST", "path", twofactorAuthEndpointBackwards)
+		r.Post(twofactorAuthEndpointBackwards, a.twofactorAuthHandler)
+		log.Infow("new route", "method", "POST", "path", twofactorSignEndpoint)
+		r.Post(twofactorSignEndpoint, a.twofactorSignHandler)
+		log.Infow("new route", "method", "POST", "path", twofactorSignEndpointBackwards)
+		r.Post(twofactorSignEndpointBackwards, a.twofactorSignHandler)
+		// PROCESS BUNDLE ROUTES (public)
+		log.Infow("new route", "method", "GET", "path", processBundleInfoEndpoint)
+		r.Get(processBundleInfoEndpoint, a.processBundleInfoHandler)
+		log.Infow("new route", "method", "POST", "path", processBundleAuthEndpoint)
+		r.Post(processBundleAuthEndpoint, a.processBundleAuthHandler)
+		log.Infow("new route", "method", "POST", "path", processBundleSignEndpoint)
+		r.Post(processBundleSignEndpoint, a.processBundleSignHandler)
 	})
 	a.router = r
 	return r

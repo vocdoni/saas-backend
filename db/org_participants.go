@@ -10,6 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.vocdoni.io/dvote/log"
 )
 
 // CreateOrgParticipants creates a new orgParticipants for an organization
@@ -206,4 +207,88 @@ func (ms *MongoStorage) BulkUpsertOrgParticipants(
 	}
 
 	return result, nil
+}
+
+// OrgParticipants retrieves a orgParticipants from the DB based on it ID
+func (ms *MongoStorage) OrgParticipants(orgAddress string) ([]OrgParticipant, error) {
+	if len(orgAddress) == 0 {
+		return nil, ErrInvalidData
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cursor, err := ms.orgParticipants.Find(ctx, bson.M{"orgAddress": orgAddress})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get orgParticipants: %w", err)
+	}
+	defer func() {
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("error closing cursor", "error", err)
+		}
+	}()
+
+	var orgParticipants []OrgParticipant
+	if err = cursor.All(ctx, &orgParticipants); err != nil {
+		return nil, fmt.Errorf("failed to get orgParticipants: %w", err)
+	}
+
+	return orgParticipants, nil
+}
+
+func (ms *MongoStorage) OrgParticipantsMemberships(
+	orgAddress, censusId, bundleId string, electionIds []internal.HexBytes,
+) ([]CensusMembershipParticipant, error) {
+	if len(orgAddress) == 0 || len(censusId) == 0 {
+		return nil, ErrInvalidData
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Optimized aggregation pipeline
+	pipeline := mongo.Pipeline{
+		{primitive.E{Key: "$match", Value: bson.D{{Key: "orgAddress", Value: orgAddress}}}},
+		{primitive.E{Key: "$lookup", Value: bson.D{
+			{Key: "from", Value: "censusMemberships"},
+			{Key: "localField", Value: "participantNo"},
+			{Key: "foreignField", Value: "participantNo"},
+			{Key: "as", Value: "membership"},
+		}}},
+		{primitive.E{Key: "$unwind", Value: bson.D{{Key: "path", Value: "$membership"}}}},
+		{primitive.E{Key: "$match", Value: bson.D{{Key: "membership.censusId", Value: censusId}}}},
+		{primitive.E{Key: "$addFields", Value: bson.D{
+			{Key: "bundleId", Value: bundleId},
+			{Key: "electionIds", Value: electionIds}, // Store extra fields as an array
+		}}},
+		{primitive.E{Key: "$project", Value: bson.D{
+			{Key: "hashedEmail", Value: 1},
+			{Key: "hashedPhone", Value: 1},
+			{Key: "participantNo", Value: 1},
+			{Key: "bundleId", Value: 1},
+			{Key: "electionIds", Value: 1},
+		}}},
+	}
+
+	cursor, err := ms.orgParticipants.Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get orgParticipants: %w", err)
+	}
+	defer func() {
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("error closing cursor", "error", err)
+		}
+	}()
+
+	// Convert cursor to slice of OrgParticipants
+	var participants []CensusMembershipParticipant
+	if err := cursor.All(ctx, &participants); err != nil {
+		return nil, fmt.Errorf("failed to get orgParticipants: %w", err)
+	}
+
+	return participants, nil
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/vocdoni/saas-backend/objectstorage"
 	"github.com/vocdoni/saas-backend/stripe"
 	"github.com/vocdoni/saas-backend/subscriptions"
+	"github.com/vocdoni/saas-backend/twofactor"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 )
@@ -128,6 +129,8 @@ func main() {
 		FullTransparentMode: fullTransparentMode,
 		StripeClient:        stripeClient,
 	}
+
+	twofactorConf := &twofactor.TwofactorConfig{}
 	// overwrite the email notifications service with the SMTP service if the
 	// required parameters are set and include it in the API configuration
 	if smtpServer != "" && smtpUsername != "" && smtpPassword != "" {
@@ -145,6 +148,7 @@ func main() {
 		}); err != nil {
 			log.Fatalf("could not create the email service: %v", err)
 		}
+		twofactorConf.NotificationServices.Mail = apiConf.MailService
 		// load email templates
 		if err := mailtemplates.Load(); err != nil {
 			log.Fatalf("could not load email templates: %v", err)
@@ -163,8 +167,19 @@ func main() {
 		}); err != nil {
 			log.Fatalf("could not create the SMS service: %v", err)
 		}
+		twofactorConf.NotificationServices.SMS = apiConf.SMSService
 		log.Infow("SMS service created", "from", twilioFromNumber)
 	}
+
+	twofactorConf.PrivKey = privKey
+	twofactorConf.MongoURI = mongoURL
+	// create the twofactor service and include it in the API configuration
+	twofactorService := new(twofactor.Twofactor)
+	apiConf.Twofactor, err = twofactorService.New(twofactorConf)
+	if err != nil {
+		log.Fatalf("could not create the twofactor service: %v", err)
+	}
+
 	subscriptions := subscriptions.New(&subscriptions.SubscriptionsConfig{
 		DB: database,
 	})

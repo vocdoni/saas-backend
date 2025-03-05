@@ -33,6 +33,7 @@ type MongoStorage struct {
 	censuses            *mongo.Collection
 	publishedCensuses   *mongo.Collection
 	processes           *mongo.Collection
+	processBundles      *mongo.Collection
 }
 
 type Options struct {
@@ -149,6 +150,10 @@ func (ms *MongoStorage) Reset() error {
 	}
 	// drop the processes collection
 	if err := ms.processes.Drop(ctx); err != nil {
+		return err
+	}
+	// drop the processBundles collection
+	if err := ms.processBundles.Drop(ctx); err != nil {
 		return err
 	}
 	// init the collections
