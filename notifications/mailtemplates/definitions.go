@@ -20,8 +20,8 @@ You can also use this link to verify your account: {{.Link}}`,
 var VerifyOTPCodeNotification = MailTemplate{
 	File: "verification_code_otp",
 	Placeholder: notifications.Notification{
-		Subject:   "Vocdoni verification code",
-		PlainBody: `Your Vocdoni verification code is: {{.Code}}`,
+		Subject:   "Codi de Verificació - Vocdoni",
+		PlainBody: `El teu codi de verificació és: {{.Code}}`,
 	},
 }
 
