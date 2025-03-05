@@ -121,11 +121,6 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	// check if all participants were added
-	if len(participants.Participants) != int(no.UpsertedCount) {
-		ErrInternalStorageError.Withf("not all participants were added").Write(w)
-		return
-	}
 	httpWriteJSON(w, int(no.UpsertedCount))
 }
 

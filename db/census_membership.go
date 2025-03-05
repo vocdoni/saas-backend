@@ -182,11 +182,12 @@ func (ms *MongoStorage) SetBulkCensusMembership(
 			pn, err := internal.SanitizeAndVerifyPhoneNumber(participant.Phone)
 			if err != nil {
 				log.Warnw("invalid phone number", "phone", participant.Phone)
-				continue
+				participant.Phone = ""
+			} else {
+				// store only the hashed phone
+				participant.HashedPhone = internal.HashOrgData(census.OrgAddress, pn)
+				participant.Phone = ""
 			}
-			// store only the hashed phone
-			participant.HashedPhone = internal.HashOrgData(census.OrgAddress, pn)
-			participant.Phone = ""
 		}
 		if participant.Password != "" {
 			participant.HashedPass = internal.HashPassword(salt, participant.Password)
