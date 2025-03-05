@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -144,6 +145,22 @@ func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) 
 	// and the link parameters
 	verificationLink, err := a.buildWebAppURL(webAppURI, linkParams)
 	return code, verificationLink, err
+}
+
+// limitOffsetFromRequest helper function allows to get the limit and offset
+// values from the request provided. It gets the limit and offset values from
+// the URL query parameters and returns them as integers. If the limit or
+// offset values are not provided, it returns the default values provided.
+func limitOffsetFromRequest(r *http.Request, defaultLimit, defaultOffset int) (int, int) {
+	limit := defaultLimit
+	if iLimit, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil {
+		limit = iLimit
+	}
+	offset := defaultOffset
+	if iOffset, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil {
+		offset = iOffset
+	}
+	return limit, offset
 }
 
 // httpWriteJSON helper function allows to write a JSON response.

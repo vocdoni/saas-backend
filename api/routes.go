@@ -60,6 +60,9 @@ const (
 	organizationSubscriptionEndpoint = "/organizations/{address}/subscription"
 	// GET /organizations/{address}/censuses to get the organization censuses
 	organizationCensusesEndpoint = "/organizations/{address}/censuses"
+	// GET /organizations/{address}/participants?limit=50&offset=0 to list the
+	// organization participants
+	organizationParticipantsEndpoint = "/organizations/{address}/participants"
 
 	// subscription routes
 	// GET /subscriptions to get the subscriptions of an organization
@@ -88,6 +91,9 @@ const (
 	censusIDEndpoint = "/census/{id}"
 	// POST /census/{id}/publish to publish a census
 	censusPublishEndpoint = "/census/{id}/publish"
+	// GET /census/{id}/participants?limit=50&offset=0 to list census
+	// participants paginated
+	censusParticipantsEndpoint = "/census/{id}/participants"
 
 	// process routes
 	// POST /process/{processId} to create a new process

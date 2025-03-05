@@ -164,6 +164,9 @@ func (a *API) initRouter() http.Handler {
 		// get organization censuses
 		log.Infow("new route", "method", "GET", "path", organizationCensusesEndpoint)
 		r.Get(organizationCensusesEndpoint, a.organizationCensusesHandler)
+		// get organization participants
+		log.Infow("new route", "method", "GET", "path", organizationParticipantsEndpoint)
+		r.Get(organizationParticipantsEndpoint, a.organizationParticipantsHandler)
 		// pending organization invitations
 		log.Infow("new route", "method", "GET", "path", organizationPendingMembersEndpoint)
 		r.Get(organizationPendingMembersEndpoint, a.pendingOrganizationMembersHandler)
@@ -189,6 +192,9 @@ func (a *API) initRouter() http.Handler {
 		// publish census
 		log.Infow("new route", "method", "POST", "path", censusPublishEndpoint)
 		r.Post(censusPublishEndpoint, a.publishCensusHandler)
+		// census participants
+		log.Infow("new route", "method", "GET", "path", censusParticipantsEndpoint)
+		r.Get(censusParticipantsEndpoint, a.censusParticipantsHandler)
 		// PROCESS ROUTES
 		log.Infow("new route", "method", "POST", "path", processEndpoint)
 		r.Post(processEndpoint, a.createProcessHandler)

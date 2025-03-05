@@ -580,3 +580,50 @@ func (a *API) organizationCensusesHandler(w http.ResponseWriter, r *http.Request
 	}
 	httpWriteJSON(w, result)
 }
+
+// organizationParticipantsHandler handles the request to get the participants
+// of an organization. It returns the list of participants with their
+// information.
+func (a *API) organizationParticipantsHandler(w http.ResponseWriter, r *http.Request) {
+	// get the user from the request context
+	user, ok := userFromContext(r.Context())
+	if !ok {
+		ErrUnauthorized.Write(w)
+		return
+	}
+	// get the organization info from the request context
+	org, _, ok := a.organizationFromRequest(r)
+	if !ok {
+		ErrNoOrganizationProvided.Write(w)
+		return
+	}
+	// check the user has the necessary permissions
+	if !user.HasRoleFor(org.Address, db.ManagerRole) && !user.HasRoleFor(org.Address, db.AdminRole) {
+		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		return
+	}
+	// get the participants from the database based on the limit and offset
+	// values provided in the request
+	limit, offset := limitOffsetFromRequest(r, 50, 0)
+	dbParticipants, err := a.db.OrgParticipantsPaginated(org.Address, limit, offset)
+	if err != nil {
+		ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	totalNumberOfParticipants, err := a.db.CountOrgParticipants(org.Address)
+	if err != nil {
+		ErrGenericInternalServerError.WithErr(err).Write(w)
+	}
+	apiParticipants := []Participant{}
+	for _, p := range dbParticipants {
+		apiParticipants = append(apiParticipants, participantFromDB(&p))
+	}
+	httpWriteJSON(w, &PaginatedParticipants{
+		Participants: apiParticipants,
+		Pagination: Pagination{
+			Total:  totalNumberOfParticipants,
+			Limit:  limit,
+			Offset: offset,
+		},
+	})
+}
