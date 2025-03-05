@@ -45,6 +45,7 @@ type Election struct {
 	RemainingAttempts int               `json:"remainingAttempts"`
 	Consumed          bool              `json:"consumed"`
 	ExtraData         []string          `json:"extra"`
+	Voted             internal.HexBytes `json:"voted,omitempty"`
 }
 
 // AuthField is the type used by the Info method for returning the description of the

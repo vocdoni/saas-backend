@@ -278,6 +278,8 @@ func (a *API) initRouter() http.Handler {
 		r.Post(processBundleAuthEndpoint, a.processBundleAuthHandler)
 		log.Infow("new route", "method", "POST", "path", processBundleSignEndpoint)
 		r.Post(processBundleSignEndpoint, a.processBundleSignHandler)
+		log.Infow("new route", "method", "GET", "path", processBundleParticipantEndpoint)
+		r.Get(processBundleParticipantEndpoint, a.processBundleParticipantInfoHandler)
 	})
 	a.router = r
 	return r

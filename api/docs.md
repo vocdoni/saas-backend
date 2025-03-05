@@ -1673,3 +1673,40 @@ Signs a payload for a process bundle using two-factor authentication. Requires a
 | `400` | `40013` | `bundle has no processes` |
 | `401` | `40001` | `user not authorized` |
 | `500` | `50002` | `internal server error` |
+
+### 📋 Get Process Bundle Participant Info
+
+* **Path** `/process/bundle/{bundleId}/{participantId}`
+* **Method** `GET`
+* **Response**
+```json
+[
+  {
+    "electionId": "1234567890abcdef1234567890abcdef1234567890abcdef",
+    "remainingAttempts": 3,
+    "consumed": false,
+    "extra": ["Additional information", "More details"],
+    "voted": "abcdef1234567890abcdef1234567890abcdef1234"
+  },
+  {
+    "electionId": "abcdef1234567890abcdef1234567890abcdef1234567890",
+    "remainingAttempts": 0,
+    "consumed": true,
+    "extra": ["Process completed"],
+    "voted": "1234567890abcdef1234567890abcdef1234567890"
+  }
+]
+```
+
+* **Description**
+Retrieves process information for a specific participant in a process bundle. Returns an array of election objects containing details such as the election ID, remaining voting attempts, consumption status, and additional metadata. If no elections are found for the participant, returns an empty array.
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `400` | `40010` | `malformed URL parameter` |
+| `400` | `40010` | `missing bundle ID` |
+| `400` | `40010` | `invalid bundle ID` |
+| `400` | `40010` | `missing participant ID` |
+| `500` | `50002` | `internal server error` |

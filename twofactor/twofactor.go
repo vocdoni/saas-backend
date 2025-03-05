@@ -253,7 +253,21 @@ func (tf *Twofactor) queueController(queue *Queue) {
 // Indexer takes a unique user identifier and returns the list of processIDs where
 // the user is eligible for participation. This includes both individual processes and
 // process bundles. This is a helper function that might not be implemented in all cases.
-func (tf *Twofactor) Indexer(userID internal.HexBytes) []Election {
+func (tf *Twofactor) Indexer(participantId, bundleId, electionId string) []Election {
+	if len(participantId) == 0 {
+		log.Warnw("no participant ID provided")
+		return nil
+	}
+	var userID internal.HexBytes
+	if len(bundleId) != 0 {
+		userID = make(internal.HexBytes, hex.EncodedLen(len(participantId)+len(bundleId)))
+		hex.Encode(userID, []byte(participantId+bundleId))
+	} else if len(electionId) != 0 {
+		userID = make(internal.HexBytes, hex.EncodedLen(len(participantId+electionId)))
+		hex.Encode(userID, []byte(participantId+electionId))
+	} else {
+		return nil
+	}
 	user, err := tf.stg.User(userID)
 	if err != nil {
 		log.Warnw("cannot get indexer elections", "error", err)
@@ -278,6 +292,7 @@ func (tf *Twofactor) Indexer(userID internal.HexBytes) []Election {
 			Consumed:          e.Consumed,
 			ElectionID:        e.ElectionID,
 			ExtraData:         []string{user.ExtraData, contact},
+			Voted:             e.Voted,
 		}
 		indexerElections = append(indexerElections, ie)
 	}
@@ -311,7 +326,6 @@ func (tf *Twofactor) AddProcess(
 		}
 		log.Debugw("user added to process", "userID", userID.String(), "electionIDs", formatElectionIds(participant.ElectionIds))
 	}
-	// log.Debug(tf.stg.String())
 	return nil
 }
 

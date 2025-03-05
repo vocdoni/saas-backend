@@ -278,6 +278,42 @@ func (a *API) processBundleInfoHandler(w http.ResponseWriter, r *http.Request) {
 	httpWriteJSON(w, bundle)
 }
 
+// processBundleParticipantInfoHandler retrieves process information for a participant in a process bundle.
+// Returns process details including the census and metadata.
+func (a *API) processBundleParticipantInfoHandler(w http.ResponseWriter, r *http.Request) {
+	bundleIDStr := chi.URLParam(r, "bundleId")
+	if bundleIDStr == "" {
+		ErrMalformedURLParam.Withf("missing bundle ID").Write(w)
+		return
+	}
+
+	bundleID, err := primitive.ObjectIDFromHex(bundleIDStr)
+	if err != nil {
+		ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
+		return
+	}
+
+	_, err = a.db.ProcessBundle(bundleID)
+	if err != nil {
+		ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
+	participantID := chi.URLParam(r, "participantId")
+	if participantID == "" {
+		ErrMalformedURLParam.Withf("missing participant ID").Write(w)
+		return
+	}
+
+	elections := a.twofactor.Indexer(participantID, bundleIDStr, "")
+	if len(elections) == 0 {
+		httpWriteJSON(w, []twofactor.Election{})
+		return
+	}
+
+	httpWriteJSON(w, elections)
+}
+
 // processBundleAuthHandler handles the two-step authentication process for voters participating in a bundle of processes.
 // Similar to twofactorAuthHandler but for bundles. Step 0 initiates the authentication process and returns an auth token.
 // Step 1 completes the authentication by providing the verification code or other authentication data.
