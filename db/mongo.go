@@ -465,7 +465,7 @@ func (ms *MongoStorage) Import(jsonData []byte) error {
 		opts := options.Update().SetUpsert(true)
 		_, err := ms.processes.UpdateOne(ctx, filter, update, opts)
 		if err != nil {
-			log.Warnw("error upserting process", "err", err, "process", process.ID)
+			log.Warnw("error upserting process", "err", err, "process", process.ID.String())
 		}
 	}
 	return nil

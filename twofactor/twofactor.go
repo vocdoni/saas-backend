@@ -240,7 +240,7 @@ func (tf *Twofactor) queueController(queue *Queue) {
 			if err := tf.stg.SetAttempts(r.userID, r.electionID, -1); err != nil {
 				log.Warnf("challenge cannot be sent: %v", err)
 			} else {
-				log.Infof("%s: challenge successfully sent to user %s", r, r.userID)
+				log.Infof("%s: challenge successfully sent to user %s", r, r.userID.String())
 			}
 		} else {
 			log.Warnf("%s: challenge sending failed", r)
@@ -307,7 +307,7 @@ func (tf *Twofactor) AddProcess(
 		if err := tf.stg.AddUser(userID, participant.ElectionIds, participant.HashedEmail, participant.HashedPhone, ""); err != nil {
 			log.Warnf("cannot add user from line %d", i)
 		}
-		log.Debugf("user %s added to process %s", userID, participant.ElectionIds)
+		log.Debugf("user %s added to process %s", userID.String(), formatElectionIds(participant.ElectionIds))
 	}
 	// log.Debug(tf.stg.String())
 	return nil
@@ -342,11 +342,11 @@ func (tf *Twofactor) InitiateAuth(
 	// Get the phone number. This methods checks for bundleId and user verification status.
 	_, _, attemptNo, err := tf.stg.NewAttempt(userID, bundleIdBytes, challengeSecret, &atoken)
 	if err != nil {
-		log.Warnf("new attempt for user %s failed: %v", userID, err)
+		log.Warnf("new attempt for user %s failed: %v", userID.String(), err)
 		return AuthResponse{Error: err.Error()}
 	}
 	if contact == "" {
-		log.Warnf("phone is nil for user %s", userID)
+		log.Warnf("phone is nil for user %s", userID.String())
 		return AuthResponse{Error: "no phone for this user data"}
 	}
 	// Enqueue to send the challenge
@@ -409,6 +409,24 @@ func (tf *Twofactor) Auth(bundleId string, authToken *uuid.UUID, authData []stri
 		AuthToken: authToken,
 		Success:   true,
 	}
+}
+
+// formatElectionIds converts a slice of internal.HexBytes to a string representation
+// for proper logging of binary data.
+func formatElectionIds(ids []internal.HexBytes) string {
+	if len(ids) == 0 {
+		return "[]"
+	}
+
+	result := "["
+	for i, id := range ids {
+		if i > 0 {
+			result += ", "
+		}
+		result += id.String()
+	}
+	result += "]"
+	return result
 }
 
 // Sign creates a cryptographic signature for the provided message using the specified signature type.
