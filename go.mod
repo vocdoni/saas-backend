@@ -13,6 +13,7 @@ require (
 	github.com/go-chi/jwtauth/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/lestrrat-go/jwx/v2 v2.0.20
+	github.com/nyaruka/phonenumbers v1.5.0
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.18.2
 	github.com/stripe/stripe-go/v81 v81.0.0

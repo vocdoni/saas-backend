@@ -173,14 +173,19 @@ func (ms *MongoStorage) SetBulkCensusMembership(
 		}
 		participant.OrgAddress = census.OrgAddress
 		participant.CreatedAt = time
-		if participant.Email != "" {
+		if participant.Email != "" && internal.ValidEmail(participant.Email) {
 			// store only the hashed email
 			participant.HashedEmail = internal.HashOrgData(census.OrgAddress, participant.Email)
 			participant.Email = ""
 		}
 		if participant.Phone != "" {
+			pn, err := internal.SanitizeAndVerifyPhoneNumber(participant.Phone)
+			if err != nil {
+				log.Warnw("invalid phone number", "phone", participant.Phone)
+				continue
+			}
 			// store only the hashed phone
-			participant.HashedPhone = internal.HashOrgData(census.OrgAddress, participant.Phone)
+			participant.HashedPhone = internal.HashOrgData(census.OrgAddress, pn)
 			participant.Phone = ""
 		}
 		if participant.Password != "" {

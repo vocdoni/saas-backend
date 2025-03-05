@@ -36,8 +36,6 @@ const (
 	DefaultSMSthrottleTime = time.Millisecond * 500
 	// DefaultSMSqueueMaxRetries is how many times to retry delivering an SMS in case upstream provider returns an error
 	DefaultSMSqueueMaxRetries = 10
-	// DefaultPhoneCountry defines the default country code for phone numbers.
-	DefaultPhoneCountry = "ES"
 )
 
 // NotifServices holds the notification services used for two-factor authentication.
@@ -120,10 +118,14 @@ func (mf *MailNotification) SendChallenge(mail string, challenge string) error {
 
 // SendChallenge sends an authentication challenge to the specified phone number.
 func (sn *SmsNotification) SendChallenge(phone string, challenge string) error {
+	to, err := internal.SanitizeAndVerifyPhoneNumber(phone)
+	if err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	notif := &notifications.Notification{
-		ToNumber:  phone,
+		ToNumber:  to,
 		Subject:   "Vocdoni verification code",
 		PlainBody: fmt.Sprintf("Your authentication code is %s", challenge),
 	}
