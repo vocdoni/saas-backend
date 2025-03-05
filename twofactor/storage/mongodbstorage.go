@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -43,16 +44,24 @@ func NewMongoDBStorage() *MongoDBStorage {
 // Initialize initializes the storage
 func (s *MongoDBStorage) Initialize(dataDir string, maxAttempts int, cooldownPeriod time.Duration) error {
 	database := "twofactor"
-	log.Infof("connecting to mongodb %s@%s", dataDir, database)
+
+	// Ensure the MongoDB URI has the proper scheme
+	mongoURI := dataDir
+	if !strings.HasPrefix(mongoURI, "mongodb://") && !strings.HasPrefix(mongoURI, "mongodb+srv://") {
+		// If no scheme is provided, assume mongodb://
+		mongoURI = "mongodb://" + mongoURI
+	}
+
+	log.Infof("connecting to mongodb %s (database: %s)", mongoURI, database)
 
 	opts := options.Client()
-	opts.ApplyURI(dataDir)
+	opts.ApplyURI(mongoURI)
 	opts.SetMaxConnecting(20)
 	timeout := time.Second * 10
 	opts.ConnectTimeout = &timeout
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(dataDir))
+	client, err := mongo.Connect(ctx, opts)
 	defer cancel()
 	if err != nil {
 		return fmt.Errorf("failed to connect to MongoDB: %w", err)

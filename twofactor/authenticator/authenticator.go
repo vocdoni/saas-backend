@@ -42,14 +42,16 @@ func (a *DefaultAuthenticator) Initialize(config *internal.Config) error {
 	defer a.mutex.Unlock()
 
 	// Initialize storage
+	dataDirOrURI := config.Storage.DataDir
 	if config.Storage.MongoURI != "" {
 		a.storage = storage.NewMongoDBStorage()
+		dataDirOrURI = config.Storage.MongoURI
 	} else {
 		a.storage = storage.NewJSONStorage()
 	}
 
 	if err := a.storage.Initialize(
-		config.Storage.DataDir,
+		dataDirOrURI,
 		config.Storage.MaxAttempts,
 		config.Storage.CooldownPeriod,
 	); err != nil {
