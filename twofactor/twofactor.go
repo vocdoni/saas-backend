@@ -471,6 +471,12 @@ func (tf *Twofactor) Sign(authToken uuid.UUID, token, msg, electionID internal.H
 				Error:   ErrUserNotBelongsToElection.Error(),
 			}
 		}
+		if !election.Consumed {
+			return AuthResponse{
+				Success: false,
+				Error:   "user has not completed the challenge",
+			}
+		}
 
 		if election.Voted != nil {
 			return AuthResponse{
