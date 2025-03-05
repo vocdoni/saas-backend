@@ -1,6 +1,7 @@
 package twofactor
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"strings"
 
@@ -92,3 +93,9 @@ const (
 
 // AllSignatures is a helper list that includes all available CSP signature schemes.
 var AllSignatures = []string{SignatureTypeBlind, SignatureTypeEthereum, SignatureTypeSharedKey}
+
+// buildUserID returns the userID for a given participant and bundle
+func buildUserID(participantId string, bundleId []byte) internal.HexBytes {
+	hash := sha256.Sum256(append([]byte(participantId), []byte(bundleId)...))
+	return internal.HexBytes(hash[:])
+}
