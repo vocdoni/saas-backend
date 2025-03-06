@@ -16,7 +16,7 @@ const (
 	testDBLastName       = "User"
 	testParticipantNo    = "participant123"
 	testParticipantEmail = "participant@test.com"
-	testPhone            = "+1234567890"
+	testPhone            = "+34678909090"
 	testName             = "Test Participant"
 	testPassword         = "testpass123"
 	testSalt             = "testSalt"
