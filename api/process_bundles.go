@@ -52,6 +52,10 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 
 	census, err := a.db.Census(req.CensusID)
 	if err != nil {
+		if err == db.ErrNotFound {
+			ErrMalformedURLParam.Withf("census not found").Write(w)
+			return
+		}
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
@@ -183,6 +187,10 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	// Get the existing bundle
 	bundle, err := a.db.ProcessBundle(bundleID)
 	if err != nil {
+		if err == db.ErrNotFound {
+			ErrMalformedURLParam.Withf("bundle not found").Write(w)
+			return
+		}
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
@@ -204,6 +212,10 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	// Get the census for this bundle
 	census, err := a.db.Census(bundle.Census.ID.Hex())
 	if err != nil {
+		if err == db.ErrNotFound {
+			ErrMalformedURLParam.Withf("census not found").Write(w)
+			return
+		}
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
@@ -271,6 +283,10 @@ func (a *API) processBundleInfoHandler(w http.ResponseWriter, r *http.Request) {
 
 	bundle, err := a.db.ProcessBundle(bundleID)
 	if err != nil {
+		if err == db.ErrNotFound {
+			ErrMalformedURLParam.Withf("bundle not found").Write(w)
+			return
+		}
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
@@ -295,6 +311,10 @@ func (a *API) processBundleParticipantInfoHandler(w http.ResponseWriter, r *http
 
 	_, err = a.db.ProcessBundle(bundleID)
 	if err != nil {
+		if err == db.ErrNotFound {
+			ErrMalformedURLParam.Withf("bundle not found").Write(w)
+			return
+		}
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
@@ -339,6 +359,10 @@ func (a *API) processBundleAuthHandler(w http.ResponseWriter, r *http.Request) {
 
 	bundle, err := a.db.ProcessBundle(bundleID)
 	if err != nil {
+		if err == db.ErrNotFound {
+			ErrMalformedURLParam.Withf("bundle not found").Write(w)
+			return
+		}
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
@@ -350,7 +374,6 @@ func (a *API) processBundleAuthHandler(w http.ResponseWriter, r *http.Request) {
 
 	switch step {
 	case 0:
-
 		authToken, err := a.initiateBundleAuthRequest(r, bundleID.Hex(), bundle.Census.ID.Hex())
 		if err != nil {
 			ErrUnauthorized.WithErr(err).Write(w)
@@ -392,6 +415,10 @@ func (a *API) processBundleSignHandler(w http.ResponseWriter, r *http.Request) {
 
 	bundle, err := a.db.ProcessBundle(bundleID)
 	if err != nil {
+		if err == db.ErrNotFound {
+			ErrMalformedURLParam.Withf("bundle not found").Write(w)
+			return
+		}
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
@@ -459,6 +486,9 @@ func (a *API) initiateBundleAuthRequest(r *http.Request, bundleId string, census
 
 	census, err := a.db.Census(censusID)
 	if err != nil {
+		if err == db.ErrNotFound {
+			return nil, ErrMalformedURLParam.Withf("census not found")
+		}
 		return nil, ErrGenericInternalServerError.WithErr(err)
 	}
 

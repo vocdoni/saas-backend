@@ -47,6 +47,10 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 		processInfo.CensusID,
 	)
 	if err != nil {
+		if err == db.ErrNotFound {
+			ErrMalformedURLParam.Withf("published census not found").Write(w)
+			return
+		}
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
@@ -118,6 +122,10 @@ func (a *API) processInfoHandler(w http.ResponseWriter, r *http.Request) {
 
 	process, err := a.db.Process([]byte(processID))
 	if err != nil {
+		if err == db.ErrNotFound {
+			ErrMalformedURLParam.Withf("process not found").Write(w)
+			return
+		}
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
@@ -234,6 +242,9 @@ func (a *API) initiateAuthRequest(r *http.Request, processId string) (*uuid.UUID
 	// retrieve process info
 	process, err := a.db.Process(processIdBytes)
 	if err != nil {
+		if err == db.ErrNotFound {
+			return nil, ErrMalformedURLParam.Withf("process not found")
+		}
 		return nil, ErrGenericInternalServerError.WithErr(err)
 	}
 	if process.PublishedCensus.Census.OrgAddress != process.OrgAddress {
