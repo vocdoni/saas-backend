@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 
 	"go.vocdoni.io/dvote/api"
@@ -102,13 +104,26 @@ func vochainTxCosts(vochainURI string) (map[models.TxType]uint64, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
+	log.Debugf("received tx costs: %s", resp.Body)
 	var strTxCosts api.Transaction
 	if err := json.NewDecoder(resp.Body).Decode(&strTxCosts); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
+
+	extraCostStr := os.Getenv("VOCDONI_FAUCET_TX_EXTRA_COST") // extra cost for faucet transactions, for testing purposes
+	extraCost := uint64(0)
+	if extraCostStr != "" {
+		if cost, err := strconv.ParseUint(extraCostStr, 10, 64); err == nil {
+			extraCost = cost
+			log.Infow("using extra cost for faucet transactions", "cost", extraCost)
+		} else {
+			log.Errorw(err, "failed to parse extra cost for faucet transactions")
+		}
+	}
+
 	txCosts := make(map[models.TxType]uint64)
 	for strType, cost := range strTxCosts.Costs {
-		txCosts[genesis.TxCostNameToTxType(strType)] = cost
+		txCosts[genesis.TxCostNameToTxType(strType)] = cost + extraCost
 	}
 	return txCosts, nil
 }
