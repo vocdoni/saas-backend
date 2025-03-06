@@ -57,6 +57,7 @@ func TestCensusMembership(t *testing.T) {
 	db := startTestDB(t)
 
 	t.Run("SetCensusMembership", func(t *testing.T) {
+		c.Assert(db.Reset(), qt.IsNil)
 		// Setup prerequisites
 		_, censusID := setupTestCensusMembershipPrerequisites(t, db, "_set")
 
@@ -131,6 +132,7 @@ func TestCensusMembership(t *testing.T) {
 	})
 
 	t.Run("GetCensusMembership", func(t *testing.T) {
+		c.Assert(db.Reset(), qt.IsNil)
 		// Setup prerequisites
 		_, censusID := setupTestCensusMembershipPrerequisites(t, db, "_get")
 		participantNo := testMembershipParticipantNo + "_get"
@@ -170,6 +172,7 @@ func TestCensusMembership(t *testing.T) {
 	})
 
 	t.Run("DeleteCensusMembership", func(t *testing.T) {
+		c.Assert(db.Reset(), qt.IsNil)
 		// Setup prerequisites
 		_, censusID := setupTestCensusMembershipPrerequisites(t, db, "_delete")
 		participantNo := testMembershipParticipantNo + "_delete"
@@ -209,6 +212,7 @@ func TestCensusMembership(t *testing.T) {
 	})
 
 	t.Run("BulkCensusMembership", func(t *testing.T) {
+		c.Assert(db.Reset(), qt.IsNil)
 		// Setup prerequisites
 		_, censusID := setupTestCensusMembershipPrerequisites(t, db, "_bulk")
 

@@ -16,7 +16,7 @@ var (
 	testProcessMetadata = []byte("test_metadata")
 )
 
-func setupTestPrerequisites1(c *qt.C) *PublishedCensus {
+func setupTestPrerequisites1(c *qt.C, db *MongoStorage) *PublishedCensus {
 	// Create test organization
 	org := &Organization{
 		Address:   testOrgAddress,
@@ -51,148 +51,147 @@ func setupTestPrerequisites1(c *qt.C) *PublishedCensus {
 	return publishedCensus
 }
 
-func TestSetAndGetProcess(t *testing.T) {
+func TestProcess(t *testing.T) {
 	c := qt.New(t)
-	defer resetDB(c)
+	db := startTestDB(t)
 
-	// test not found process
-	process, err := db.Process(testProcessID)
-	c.Assert(process, qt.IsNil)
-	c.Assert(err, qt.Not(qt.IsNil))
+	t.Run("TestSetAndGetProcess", func(t *testing.T) {
+		c.Assert(db.Reset(), qt.IsNil)
+		// test not found process
+		process, err := db.Process(testProcessID)
+		c.Assert(process, qt.IsNil)
+		c.Assert(err, qt.Not(qt.IsNil))
 
-	// Test with non-existent organization
-	nonExistentProcess := &Process{
-		ID:         testProcessID,
-		OrgAddress: "non-existent-org",
-		PublishedCensus: PublishedCensus{
-			URI:  testProcessURI,
-			Root: testProcessRoot,
+		// Test with non-existent organization
+		nonExistentProcess := &Process{
+			ID:         testProcessID,
+			OrgAddress: "non-existent-org",
+			PublishedCensus: PublishedCensus{
+				URI:  testProcessURI,
+				Root: testProcessRoot,
+				Census: Census{
+					ID:         primitive.NewObjectID(),
+					OrgAddress: "non-existent-org",
+					Type:       CensusTypeMail,
+				},
+			},
+		}
+		err = db.SetProcess(nonExistentProcess)
+		c.Assert(err, qt.Not(qt.IsNil))
+		c.Assert(err.Error(), qt.Contains, "failed to get organization")
+
+		// Setup prerequisites
+		publishedCensus := setupTestPrerequisites1(c, db)
+
+		// create a new process
+		process = &Process{
+			ID:              testProcessID,
+			OrgAddress:      testOrgAddress,
+			PublishedCensus: *publishedCensus,
+			Metadata:        testProcessMetadata,
+		}
+
+		// test setting the process
+		err = db.SetProcess(process)
+		c.Assert(err, qt.IsNil)
+
+		// test retrieving the process
+		retrieved, err := db.Process(testProcessID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(retrieved, qt.Not(qt.IsNil))
+		c.Assert(retrieved.ID, qt.DeepEquals, testProcessID)
+		c.Assert(retrieved.OrgAddress, qt.Equals, testOrgAddress)
+		c.Assert(retrieved.PublishedCensus.URI, qt.Equals, testProcessURI)
+		c.Assert(retrieved.PublishedCensus.Root, qt.DeepEquals, testProcessRoot)
+		c.Assert(retrieved.PublishedCensus.Census.ID, qt.Equals, publishedCensus.Census.ID)
+		c.Assert(retrieved.Metadata, qt.DeepEquals, testProcessMetadata)
+
+		// Test with non-existent published census (should create it)
+		newPublishedCensus := PublishedCensus{
+			URI:  "new-uri",
+			Root: "new-root",
 			Census: Census{
-				ID:         primitive.NewObjectID(),
-				OrgAddress: "non-existent-org",
+				ID:         publishedCensus.Census.ID,
+				OrgAddress: testOrgAddress,
 				Type:       CensusTypeMail,
 			},
-		},
-	}
-	err = db.SetProcess(nonExistentProcess)
-	c.Assert(err, qt.Not(qt.IsNil))
-	c.Assert(err.Error(), qt.Contains, "failed to get organization")
+		}
+		newProcess := &Process{
+			ID:              internal.HexBytes("new-process"),
+			OrgAddress:      testOrgAddress,
+			PublishedCensus: newPublishedCensus,
+		}
+		err = db.SetProcess(newProcess)
+		c.Assert(err, qt.IsNil)
 
-	// Setup prerequisites
-	publishedCensus := setupTestPrerequisites1(c)
+		// Verify the published census was created
+		createdPublishedCensus, err := db.PublishedCensus("new-root", "new-uri", publishedCensus.Census.ID.Hex())
+		c.Assert(err, qt.IsNil)
+		c.Assert(createdPublishedCensus, qt.Not(qt.IsNil))
+	})
 
-	// create a new process
-	process = &Process{
-		ID:              testProcessID,
-		OrgAddress:      testOrgAddress,
-		PublishedCensus: *publishedCensus,
-		Metadata:        testProcessMetadata,
-	}
+	t.Run("TestSetProcessValidation", func(t *testing.T) {
+		c.Assert(db.Reset(), qt.IsNil)
+		// Setup prerequisites
+		publishedCensus := setupTestPrerequisites1(c, db)
 
-	// test setting the process
-	err = db.SetProcess(process)
-	c.Assert(err, qt.IsNil)
+		// test with empty ID
+		invalidProcess := &Process{
+			OrgAddress:      testOrgAddress,
+			PublishedCensus: *publishedCensus,
+		}
+		err := db.SetProcess(invalidProcess)
+		c.Assert(err, qt.Equals, ErrInvalidData)
 
-	// test retrieving the process
-	retrieved, err := db.Process(testProcessID)
-	c.Assert(err, qt.IsNil)
-	c.Assert(retrieved, qt.Not(qt.IsNil))
-	c.Assert(retrieved.ID, qt.DeepEquals, testProcessID)
-	c.Assert(retrieved.OrgAddress, qt.Equals, testOrgAddress)
-	c.Assert(retrieved.PublishedCensus.URI, qt.Equals, testProcessURI)
-	c.Assert(retrieved.PublishedCensus.Root, qt.DeepEquals, testProcessRoot)
-	c.Assert(retrieved.PublishedCensus.Census.ID, qt.Equals, publishedCensus.Census.ID)
-	c.Assert(retrieved.Metadata, qt.DeepEquals, testProcessMetadata)
+		// test with empty OrgAddress
+		invalidProcess = &Process{
+			ID:              testProcessID,
+			PublishedCensus: *publishedCensus,
+		}
+		err = db.SetProcess(invalidProcess)
+		c.Assert(err, qt.Equals, ErrInvalidData)
 
-	// Test with non-existent published census (should create it)
-	newPublishedCensus := PublishedCensus{
-		URI:  "new-uri",
-		Root: "new-root",
-		Census: Census{
-			ID:         publishedCensus.Census.ID,
+		// test with empty PublishedCensus Root
+		invalidProcess = &Process{
+			ID:         testProcessID,
 			OrgAddress: testOrgAddress,
-			Type:       CensusTypeMail,
-		},
-	}
-	newProcess := &Process{
-		ID:              internal.HexBytes("new-process"),
-		OrgAddress:      testOrgAddress,
-		PublishedCensus: newPublishedCensus,
-	}
-	err = db.SetProcess(newProcess)
-	c.Assert(err, qt.IsNil)
-
-	// Verify the published census was created
-	createdPublishedCensus, err := db.PublishedCensus("new-root", "new-uri", publishedCensus.Census.ID.Hex())
-	c.Assert(err, qt.IsNil)
-	c.Assert(createdPublishedCensus, qt.Not(qt.IsNil))
-}
-
-func TestSetProcessValidation(t *testing.T) {
-	c := qt.New(t)
-	defer resetDB(c)
-
-	// Setup prerequisites
-	publishedCensus := setupTestPrerequisites1(c)
-
-	// test with empty ID
-	invalidProcess := &Process{
-		OrgAddress:      testOrgAddress,
-		PublishedCensus: *publishedCensus,
-	}
-	err := db.SetProcess(invalidProcess)
-	c.Assert(err, qt.Equals, ErrInvalidData)
-
-	// test with empty OrgAddress
-	invalidProcess = &Process{
-		ID:              testProcessID,
-		PublishedCensus: *publishedCensus,
-	}
-	err = db.SetProcess(invalidProcess)
-	c.Assert(err, qt.Equals, ErrInvalidData)
-
-	// test with empty PublishedCensus Root
-	invalidProcess = &Process{
-		ID:         testProcessID,
-		OrgAddress: testOrgAddress,
-		PublishedCensus: PublishedCensus{
-			URI: testProcessURI,
-			Census: Census{
-				ID: publishedCensus.Census.ID,
+			PublishedCensus: PublishedCensus{
+				URI: testProcessURI,
+				Census: Census{
+					ID: publishedCensus.Census.ID,
+				},
 			},
-		},
-	}
-	err = db.SetProcess(invalidProcess)
-	c.Assert(err, qt.Equals, ErrInvalidData)
-}
+		}
+		err = db.SetProcess(invalidProcess)
+		c.Assert(err, qt.Equals, ErrInvalidData)
+	})
 
-func TestDeleteProcess(t *testing.T) {
-	c := qt.New(t)
-	defer resetDB(c)
+	t.Run("TestDeleteProcess", func(t *testing.T) {
+		c.Assert(db.Reset(), qt.IsNil)
+		// Setup prerequisites
+		publishedCensus := setupTestPrerequisites1(c, db)
 
-	// Setup prerequisites
-	publishedCensus := setupTestPrerequisites1(c)
+		// create a process
+		process := &Process{
+			ID:              testProcessID,
+			OrgAddress:      testOrgAddress,
+			PublishedCensus: *publishedCensus,
+		}
+		err := db.SetProcess(process)
+		c.Assert(err, qt.IsNil)
 
-	// create a process
-	process := &Process{
-		ID:              testProcessID,
-		OrgAddress:      testOrgAddress,
-		PublishedCensus: *publishedCensus,
-	}
-	err := db.SetProcess(process)
-	c.Assert(err, qt.IsNil)
+		// test deleting the process
+		err = db.DelProcess(testProcessID)
+		c.Assert(err, qt.IsNil)
 
-	// test deleting the process
-	err = db.DelProcess(testProcessID)
-	c.Assert(err, qt.IsNil)
+		// verify it's deleted
+		retrieved, err := db.Process(testProcessID)
+		c.Assert(retrieved, qt.IsNil)
+		c.Assert(err, qt.Not(qt.IsNil))
 
-	// verify it's deleted
-	retrieved, err := db.Process(testProcessID)
-	c.Assert(retrieved, qt.IsNil)
-	c.Assert(err, qt.Not(qt.IsNil))
-
-	// test delete with empty ID
-	var emptyID internal.HexBytes
-	err = db.DelProcess(emptyID)
-	c.Assert(err, qt.Equals, ErrInvalidData)
+		// test delete with empty ID
+		var emptyID internal.HexBytes
+		err = db.DelProcess(emptyID)
+		c.Assert(err, qt.Equals, ErrInvalidData)
+	})
 }

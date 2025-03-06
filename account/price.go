@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"go.vocdoni.io/dvote/api"
+	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/dvote/vochain/genesis"
 	"go.vocdoni.io/dvote/vochain/state/electionprice"
 	"go.vocdoni.io/proto/build/go/models"
@@ -33,6 +34,17 @@ func InitElectionPriceCalculator(vochainURI string) (*electionprice.Calculator, 
 	electionPriceCalc := electionprice.NewElectionPriceCalculator(factors)
 	electionPriceCalc.SetBasePrice(basePrice)
 	electionPriceCalc.SetCapacity(capacity)
+	log.Infow("Election price calculator initialized",
+		"basePrice", basePrice,
+		"capacity", capacity,
+		"K1", factors.K1,
+		"K2", factors.K2,
+		"K3", factors.K3,
+		"K4", factors.K4,
+		"K5", factors.K5,
+		"K6", factors.K6,
+		"K7", factors.K7,
+	)
 	return electionPriceCalc, nil
 }
 

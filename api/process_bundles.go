@@ -567,7 +567,7 @@ func (a *API) initiateBundleAuthRequest(r *http.Request, bundleId string, census
 		return nil, ErrUnauthorized.Withf("%s", authResp.Error)
 	}
 	if authResp.AuthToken == nil {
-		return nil, fmt.Errorf("auth token is nil")
+		return nil, ErrGenericInternalServerError.Withf("auth token is nil")
 	}
 	return authResp.AuthToken, nil
 }
