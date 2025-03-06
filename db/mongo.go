@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
+	"go.mongodb.org/mongo-driver/x/mongo/driver/connstring"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -47,8 +49,31 @@ func New(url, database string, plans []*Plan) (*MongoStorage, error) {
 	if url == "" {
 		return nil, fmt.Errorf("mongo URL is not defined")
 	}
-
-	log.Infow("connecting to mongodb", "url", url, "database", database)
+	cs, err := connstring.ParseAndValidate(url)
+	if err != nil {
+		return nil, fmt.Errorf("cannot parse the connection string: %w", err)
+	}
+	// set the database name if it is not empty, if it is empty, try to parse it
+	// from the URL
+	switch {
+	case cs.Database == "" && database == "":
+		return nil, fmt.Errorf("database name is not defined")
+	case database != "":
+		cs.Database = database
+		ms.database = database
+	default:
+		ms.database = cs.Database
+	}
+	// if the auth source is not set, set it to admin (append the param or
+	// create it if no other params are present)
+	if !cs.AuthSourceSet {
+		if strings.Contains(url, "?") {
+			url = fmt.Sprintf("%s&authSource=admin", url)
+		} else {
+			url = fmt.Sprintf("%s?authSource=admin", url)
+		}
+	}
+	log.Infow("connecting to mongodb", "url", url)
 	// preparing connection
 	opts := options.Client()
 	opts.ApplyURI(url)
@@ -65,16 +90,12 @@ func New(url, database string, plans []*Plan) (*MongoStorage, error) {
 	// check if the connection is successful
 	ctx, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel2()
-	err = client.Ping(ctx, readpref.Primary())
-	if err != nil {
-		return nil, fmt.Errorf("cannot connect to mongodb: %w", err)
+	// try to ping the database
+	if err = client.Ping(ctx, readpref.Primary()); err != nil {
+		return nil, fmt.Errorf("cannot ping to mongodb: %w", err)
 	}
 	// init the database client
 	ms.DBClient = client
-	// set the database name if it is not empty
-	if database != "" {
-		ms.database = database
-	}
 	if len(plans) > 0 {
 		ms.stripePlans = plans
 	}

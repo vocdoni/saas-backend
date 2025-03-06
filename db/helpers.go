@@ -12,6 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.vocdoni.io/dvote/log"
+	"slices"
 )
 
 // initCollections creates the collections in the MongoDB database if they
@@ -23,18 +24,12 @@ func (ms *MongoStorage) initCollections(database string) error {
 	// get the current collections names to create only the missing ones
 	currentCollections, err := ms.collectionNames(ctx, database)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get current collections: %w", err)
 	}
 	log.Infow("current collections", "collections", currentCollections)
 	// aux method to get a collection if it exists, or create it if it doesn't
 	getCollection := func(name string) (*mongo.Collection, error) {
-		alreadyCreated := false
-		for _, c := range currentCollections {
-			if c == name {
-				alreadyCreated = true
-				break
-			}
-		}
+		alreadyCreated := slices.Contains(currentCollections, name)
 		// if the collection doesn't exist, create it
 		if alreadyCreated {
 			if validator, ok := collectionsValidators[name]; ok {
@@ -64,7 +59,7 @@ func (ms *MongoStorage) initCollections(database string) error {
 			}
 		}
 		if name == "plans" && len(ms.stripePlans) > 0 {
-			var plans []interface{}
+			var plans []any
 			for _, plan := range ms.stripePlans {
 				plans = append(plans, plan)
 			}
