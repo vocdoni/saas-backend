@@ -18,7 +18,7 @@ import (
 // MongoStorage uses an external MongoDB service for stoting the user data and election details.
 type MongoStorage struct {
 	database    string
-	client      *mongo.Client
+	DBClient    *mongo.Client
 	keysLock    sync.RWMutex
 	stripePlans []*Plan
 
@@ -47,9 +47,7 @@ func New(url, database string, plans []*Plan) (*MongoStorage, error) {
 	if url == "" {
 		return nil, fmt.Errorf("mongo URL is not defined")
 	}
-	if database == "" {
-		return nil, fmt.Errorf("mongo database is not defined")
-	}
+
 	log.Infow("connecting to mongodb", "url", url, "database", database)
 	// preparing connection
 	opts := options.Client()
@@ -72,8 +70,11 @@ func New(url, database string, plans []*Plan) (*MongoStorage, error) {
 		return nil, fmt.Errorf("cannot connect to mongodb: %w", err)
 	}
 	// init the database client
-	ms.client = client
-	ms.database = database
+	ms.DBClient = client
+	// set the database name if it is not empty
+	if database != "" {
+		ms.database = database
+	}
 	if len(plans) > 0 {
 		ms.stripePlans = plans
 	}
@@ -99,7 +100,7 @@ func New(url, database string, plans []*Plan) (*MongoStorage, error) {
 func (ms *MongoStorage) Close() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := ms.client.Disconnect(ctx); err != nil {
+	if err := ms.DBClient.Disconnect(ctx); err != nil {
 		log.Warnw("disconnect error", "error", err)
 	}
 }

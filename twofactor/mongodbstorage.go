@@ -33,21 +33,15 @@ type MongoStorage struct {
 	coolDownTime   time.Duration
 }
 
-func (ms *MongoStorage) Init(dataDir string, maxAttempts int, coolDownTime time.Duration) error {
+func (ms *MongoStorage) Init(rawClient any, maxAttempts int, coolDownTime time.Duration) error {
+	client, ok := rawClient.(*mongo.Client)
+	if !ok {
+		return fmt.Errorf("invalid mongo client provided")
+	}
+
 	var err error
 	database := "twofactor"
-	log.Infof("connecting to mongodb %s@%s", dataDir, database)
-	opts := options.Client()
-	opts.ApplyURI(dataDir)
-	opts.SetMaxConnecting(20)
-	timeout := time.Second * 10
-	opts.ConnectTimeout = &timeout
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(dataDir))
-	defer cancel()
-	if err != nil {
-		return err
-	}
+	log.Infof("connecting to mongodb database: %s", database)
 	// Shutdown database connection when SIGTERM received
 	go func() {
 		c := make(chan os.Signal, 1)
@@ -62,8 +56,8 @@ func (ms *MongoStorage) Init(dataDir string, maxAttempts int, coolDownTime time.
 		cancel()
 	}()
 
-	ctx, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel2()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	err = client.Ping(ctx, readpref.Primary())
 	if err != nil {
 		return fmt.Errorf("cannot connect to mongodb: %w", err)

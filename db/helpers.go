@@ -38,7 +38,7 @@ func (ms *MongoStorage) initCollections(database string) error {
 		// if the collection doesn't exist, create it
 		if alreadyCreated {
 			if validator, ok := collectionsValidators[name]; ok {
-				err := ms.client.Database(database).RunCommand(ctx, bson.D{
+				err := ms.DBClient.Database(database).RunCommand(ctx, bson.D{
 					{Key: "collMod", Value: name},
 					{Key: "validator", Value: validator},
 				}).Err()
@@ -48,7 +48,7 @@ func (ms *MongoStorage) initCollections(database string) error {
 			}
 			if name == "plans" {
 				// clear subscriptions collection and update the DB with the new ones
-				if _, err := ms.client.Database(database).Collection(name).DeleteMany(ctx, bson.D{}); err != nil {
+				if _, err := ms.DBClient.Database(database).Collection(name).DeleteMany(ctx, bson.D{}); err != nil {
 					return nil, err
 				}
 			}
@@ -59,7 +59,7 @@ func (ms *MongoStorage) initCollections(database string) error {
 				opts = opts.SetValidator(validator).SetValidationLevel("strict").SetValidationAction("error")
 			}
 			// create the collection
-			if err := ms.client.Database(database).CreateCollection(ctx, name, opts); err != nil {
+			if err := ms.DBClient.Database(database).CreateCollection(ctx, name, opts); err != nil {
 				return nil, err
 			}
 		}
@@ -68,13 +68,13 @@ func (ms *MongoStorage) initCollections(database string) error {
 			for _, plan := range ms.stripePlans {
 				plans = append(plans, plan)
 			}
-			count, err := ms.client.Database(database).Collection(name).InsertMany(ctx, plans)
+			count, err := ms.DBClient.Database(database).Collection(name).InsertMany(ctx, plans)
 			if err != nil || len(count.InsertedIDs) != len(ms.stripePlans) {
 				return nil, fmt.Errorf("failed to insert plans: %w", err)
 			}
 		}
 		// return the collection
-		return ms.client.Database(database).Collection(name), nil
+		return ms.DBClient.Database(database).Collection(name), nil
 	}
 	// users collection
 	if ms.users, err = getCollection("users"); err != nil {
@@ -134,7 +134,7 @@ func (ms *MongoStorage) initCollections(database string) error {
 // It uses the ListCollections method of the MongoDB client to get the
 // collections info and decode the names from the result.
 func (ms *MongoStorage) collectionNames(ctx context.Context, database string) ([]string, error) {
-	collectionsCursor, err := ms.client.Database(database).ListCollections(ctx, bson.D{})
+	collectionsCursor, err := ms.DBClient.Database(database).ListCollections(ctx, bson.D{})
 	if err != nil {
 		return nil, err
 	}
