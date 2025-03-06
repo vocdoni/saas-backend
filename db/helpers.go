@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"time"
 
 	root "github.com/vocdoni/saas-backend"
@@ -12,7 +13,6 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.vocdoni.io/dvote/log"
-	"slices"
 )
 
 // initCollections creates the collections in the MongoDB database if they
@@ -230,19 +230,6 @@ func (ms *MongoStorage) createIndexes() error {
 		Options: options.Index().SetUnique(true),
 	}
 	if _, err := ms.orgParticipants.Indexes().CreateOne(ctx, orgParticipantdAddresNoIndex); err != nil {
-		return fmt.Errorf("failed to create index on orgAddress and participantNo for orgParticipants: %w", err)
-	}
-
-	// create an index for the tuple OrgParticipant:ID and CensusID
-	orgParticipantMailPhoneIndex := mongo.IndexModel{
-		Keys: bson.D{
-			{Key: "orgAddress", Value: 1},  // 1 for ascending order
-			{Key: "hashedEmail", Value: 1}, // 1 for ascending order
-			{Key: "hashedPhone", Value: 1}, // 1 for ascending order
-		},
-		Options: options.Index().SetUnique(true),
-	}
-	if _, err := ms.orgParticipants.Indexes().CreateOne(ctx, orgParticipantMailPhoneIndex); err != nil {
 		return fmt.Errorf("failed to create index on orgAddress and participantNo for orgParticipants: %w", err)
 	}
 
