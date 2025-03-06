@@ -67,11 +67,18 @@ func New(url, database string, plans []*Plan) (*MongoStorage, error) {
 	// if the auth source is not set, set it to admin (append the param or
 	// create it if no other params are present)
 	if !cs.AuthSourceSet {
+		var sb strings.Builder
+		params := "authSource=admin"
+		sb.WriteString(url)
 		if strings.Contains(url, "?") {
-			url = fmt.Sprintf("%s&authSource=admin", url)
+			sb.WriteString("&")
+		} else if strings.HasSuffix(url, "/") {
+			sb.WriteString("?")
 		} else {
-			url = fmt.Sprintf("%s?authSource=admin", url)
+			sb.WriteString("/?")
 		}
+		sb.WriteString(params)
+		url = sb.String()
 	}
 	log.Infow("connecting to mongodb", "url", url)
 	// preparing connection
