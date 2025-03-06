@@ -39,8 +39,11 @@ func (ms *MongoStorage) SetOrgParticipant(salt string, orgParticipant *OrgPartic
 		orgParticipant.Email = ""
 	}
 	if orgParticipant.Phone != "" {
-		// store only the hashed phone
-		orgParticipant.HashedPhone = internal.HashOrgData(orgParticipant.OrgAddress, orgParticipant.Phone)
+		// normalize and store only the hashed phone
+		normalizedPhone, err := internal.SanitizeAndVerifyPhoneNumber(orgParticipant.Phone)
+		if err == nil {
+			orgParticipant.HashedPhone = internal.HashOrgData(orgParticipant.OrgAddress, normalizedPhone)
+		}
 		orgParticipant.Phone = ""
 	}
 	if orgParticipant.Password != "" {
@@ -195,8 +198,11 @@ func (ms *MongoStorage) BulkUpsertOrgParticipants(
 				participant.Email = ""
 			}
 			if participant.Phone != "" {
-				// store only the hashed phone
-				participant.HashedPhone = internal.HashOrgData(orgAddress, participant.Phone)
+				// normalize and store only the hashed phone
+				normalizedPhone, err := internal.SanitizeAndVerifyPhoneNumber(participant.Phone)
+				if err == nil {
+					participant.HashedPhone = internal.HashOrgData(orgAddress, normalizedPhone)
+				}
 				participant.Phone = ""
 			}
 			if participant.Password != "" {
