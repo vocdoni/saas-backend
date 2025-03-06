@@ -7,33 +7,30 @@ import (
 	"testing"
 	"time"
 
+	qt "github.com/frankban/quicktest"
 	"github.com/google/uuid"
-	"github.com/stretchr/testify/require"
 	"github.com/vocdoni/saas-backend/test"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func TestJSONStorageBulkAddUser(t *testing.T) {
+	c := qt.New(t)
 	// Create a temporary directory for the test
 	tempDir, err := os.MkdirTemp("", "twofactor-test-*")
-	require.NoError(t, err)
+	c.Assert(err, qt.IsNil)
 	defer os.RemoveAll(tempDir) // nolint: errcheck
-
 	// Initialize the storage
 	js := &JSONstorage{}
 	err = js.Init(filepath.Join(tempDir, "jsonstorage"), DefaultMaxSMSattempts, DefaultSMScoolDownTime)
-	require.NoError(t, err)
-
+	c.Assert(err, qt.IsNil)
 	// Create a large number of users (more than 1000 to test batching)
 	numUsers := 2500
 	users := make([]UserData, numUsers)
-
-	for i := 0; i < numUsers; i++ {
+	for i := range numUsers {
 		userID := make([]byte, 32)
 		// Create a unique user ID for each user
 		copy(userID, []byte(uuid.New().String()))
-
 		// Create a user with some test data
 		users[i] = UserData{
 			UserID:    userID,
@@ -49,19 +46,16 @@ func TestJSONStorageBulkAddUser(t *testing.T) {
 			},
 		}
 	}
-
 	// Add users in bulk
-	err = js.BulkAddUser(users)
-	require.NoError(t, err)
-
+	c.Assert(js.BulkAddUser(users), qt.IsNil)
 	// Verify that all users were added
-	for i := 0; i < numUsers; i++ {
-		exists := js.Exists(users[i].UserID)
-		require.True(t, exists, "User %d should exist", i)
+	for i := range numUsers {
+		c.Assert(js.Exists(users[i].UserID), qt.IsTrue, qt.Commentf("User %d should exist", i))
 	}
 }
 
 func TestMongoStorageBulkAddUser(t *testing.T) {
+	c := qt.New(t)
 	// Skip this test if no MongoDB connection is available
 	mongoURI := os.Getenv("MONGO_URI")
 	if mongoURI == "" {
@@ -79,7 +73,6 @@ func TestMongoStorageBulkAddUser(t *testing.T) {
 			t.Skip("MongoDB container not available")
 		}
 	}
-
 	opts := options.Client()
 	opts.ApplyURI(mongoURI)
 	opts.SetMaxConnecting(200)
@@ -89,25 +82,21 @@ func TestMongoStorageBulkAddUser(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	client, err := mongo.Connect(ctx, opts)
-	require.NoError(t, err)
-	client.Database("twofactor").Drop(ctx)
-
+	c.Assert(err, qt.IsNil)
+	err = client.Database("twofactor").Drop(ctx)
+	c.Assert(err, qt.IsNil)
 	// Initialize the storage
 	ms := &MongoStorage{}
 	err = ms.Init(client, DefaultMaxSMSattempts, DefaultSMScoolDownTime)
-	require.NoError(t, err)
-
+	c.Assert(err, qt.IsNil)
 	// Create a unique collection name for this test
 	testID, _ := uuid.NewRandom()
-
 	// Create a large number of users (more than 1000 to test batching)
 	numUsers := 2500
 	users := make([]UserData, numUsers)
-
 	for i := range numUsers {
 		// Create a unique user ID for each user
 		randUUID, _ := uuid.NewRandom()
-
 		// Create a user with some test data
 		users[i] = UserData{
 			UserID:    append(testID[:], randUUID[:]...),
@@ -123,20 +112,15 @@ func TestMongoStorageBulkAddUser(t *testing.T) {
 			},
 		}
 	}
-
 	// Add users in bulk
 	err = ms.BulkAddUser(users)
-	require.NoError(t, err)
-
+	c.Assert(err, qt.IsNil)
 	// Verify that all users were added
 	for i := range numUsers {
-		exists := ms.Exists(users[i].UserID)
-		require.True(t, exists, "User %d should exist", i)
+		c.Assert(ms.Exists(users[i].UserID), qt.IsTrue, qt.Commentf("User %d should exist", i))
 	}
-
 	// Clean up - delete all test users
 	for i := range numUsers {
-		err = ms.DelUser(users[i].UserID)
-		require.NoError(t, err)
+		c.Assert(ms.DelUser(users[i].UserID), qt.IsNil)
 	}
 }
