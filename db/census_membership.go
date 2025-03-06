@@ -253,15 +253,17 @@ func (ms *MongoStorage) SetBulkCensusMembership(
 		// Execute the bulk write operations for this batch
 		_, err = ms.orgParticipants.BulkWrite(batchCtx, bulkParticipantsOps)
 		if err != nil {
-			batchCancel()
-			return nil, fmt.Errorf("failed to perform bulk operation on participants: %w", err)
+			log.Warnw("failed to perform bulk operation on participants", "error", err)
+			// batchCancel()
+			// return nil, fmt.Errorf("failed to perform bulk operation on participants: %w", err)
 		}
 
 		result, err := ms.censusMemberships.BulkWrite(batchCtx, bulkMembershipOps)
 		batchCancel()
 
 		if err != nil {
-			return nil, fmt.Errorf("failed to perform bulk operation on memberships: %w", err)
+			log.Warnw("failed to perform bulk operation on memberships", "error", err)
+			// return nil, fmt.Errorf("failed to perform bulk operation on memberships: %w", err)
 		}
 
 		// Merge results if this is not the first batch
