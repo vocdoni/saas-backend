@@ -25,37 +25,49 @@ import (
 // Do note that HTTPstatus 204 No Content implies the response body will be empty,
 // so the Code and Message will actually be discarded, never sent to the client
 var (
-	ErrUnauthorized                    = Error{Code: 40001, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("user not authorized")}
-	ErrEmailMalformed                  = Error{Code: 40002, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("email malformed")}
-	ErrPasswordTooShort                = Error{Code: 40003, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("password too short")}
-	ErrMalformedBody                   = Error{Code: 40004, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("malformed JSON body")}
-	ErrDuplicateConflict               = Error{Code: 40901, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("duplicate conflict")}
-	ErrInvalidUserData                 = Error{Code: 40005, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid user data")}
-	ErrCouldNotSignTransaction         = Error{Code: 40006, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("could not sign transaction")}
-	ErrInvalidTxFormat                 = Error{Code: 40007, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid transaction format")}
-	ErrTxTypeNotAllowed                = Error{Code: 40008, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("transaction type not allowed")}
-	ErrOrganizationNotFound            = Error{Code: 40009, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("organization not found")}
-	ErrMalformedURLParam               = Error{Code: 40010, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("malformed URL parameter")}
-	ErrNoOrganizationProvided          = Error{Code: 40011, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("no organization provided")}
-	ErrNoOrganizations                 = Error{Code: 40012, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("this user has not been assigned to any organization")}
-	ErrInvalidOrganizationData         = Error{Code: 40013, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid organization data")}
-	ErrUserNoVerified                  = Error{Code: 40014, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("user account not verified")}
-	ErrUserAlreadyVerified             = Error{Code: 40015, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("user account already verified")}
-	ErrVerificationCodeExpired         = Error{Code: 40016, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("verification code expired")}
-	ErrVerificationCodeValid           = Error{Code: 40017, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("last verification code still valid")}
-	ErrUserNotFound                    = Error{Code: 40018, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("user not found")}
-	ErrInvitationExpired               = Error{Code: 40019, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("inviation code expired")}
-	ErrNoOrganizationSubscription      = Error{Code: 40020, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("organization subscription not found")}
-	ErrOganizationSubscriptionIncative = Error{Code: 40021, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("organization subscription not active")}
-	ErrNoDefaultPLan                   = Error{Code: 40022, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("did not found default plan for organization")}
-	ErPlanNotFound                     = Error{Code: 40023, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("plan not found")}
-	ErrStorageInvalidObject            = Error{Code: 40024, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("the obejct/parameters provided are invalid")}
-	ErrNotSupported                    = Error{Code: 40025, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("this feature is not supported")}
+	// Authentication errors (401)
+	ErrUnauthorized            = Error{Code: 40001, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("authentication required"), LogLevel: "info"}
+	ErrUserNoVerified          = Error{Code: 40014, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("account email not verified"), LogLevel: "info"}
+	ErrVerificationCodeExpired = Error{Code: 40016, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("verification code has expired"), LogLevel: "info"}
+	ErrInvitationExpired       = Error{Code: 40019, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invitation code has expired"), LogLevel: "info"}
 
-	ErrMarshalingServerJSONFailed  = Error{Code: 50001, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("marshaling (server-side) JSON failed")}
-	ErrGenericInternalServerError  = Error{Code: 50002, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("internal server error")}
-	ErrCouldNotCreateFaucetPackage = Error{Code: 50003, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("could not create faucet package")}
-	ErrVochainRequestFailed        = Error{Code: 50004, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("vochain request failed")}
-	ErrStripeError                 = Error{Code: 50005, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("stripe error")}
-	ErrInternalStorageError        = Error{Code: 50006, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("internal storage error")}
+	// Validation errors (400)
+	ErrEmailMalformed          = Error{Code: 40002, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid email format")}
+	ErrPasswordTooShort        = Error{Code: 40003, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("password must be at least 8 characters")}
+	ErrMalformedBody           = Error{Code: 40004, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid JSON request body")}
+	ErrInvalidUserData         = Error{Code: 40005, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid user information provided")}
+	ErrMalformedURLParam       = Error{Code: 40010, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid URL parameter")}
+	ErrNoOrganizationProvided  = Error{Code: 40011, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("organization address is required")}
+	ErrInvalidOrganizationData = Error{Code: 40013, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid organization information provided")}
+	ErrUserAlreadyVerified     = Error{Code: 40015, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("user account is already verified")}
+	ErrVerificationCodeValid   = Error{Code: 40017, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("verification code is still valid")}
+	ErrStorageInvalidObject    = Error{Code: 40024, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid storage object or parameters")}
+	ErrNotSupported            = Error{Code: 40025, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("feature not supported")}
+
+	// Transaction errors (400)
+	ErrCouldNotSignTransaction = Error{Code: 40006, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("transaction signing failed")}
+	ErrInvalidTxFormat         = Error{Code: 40007, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid transaction format")}
+	ErrTxTypeNotAllowed        = Error{Code: 40008, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("transaction type not allowed")}
+
+	// Not found errors (404)
+	ErrOrganizationNotFound       = Error{Code: 40009, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("organization not found")}
+	ErrNoOrganizations            = Error{Code: 40012, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("user has no organizations")}
+	ErrUserNotFound               = Error{Code: 40018, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("user not found")}
+	ErrNoOrganizationSubscription = Error{Code: 40020, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("organization has no subscription")}
+	ErrPlanNotFound               = Error{Code: 40023, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("subscription plan not found")}
+
+	// Conflict errors (409)
+	ErrDuplicateConflict = Error{Code: 40901, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("resource already exists")}
+
+	// Subscription errors (400)
+	ErrOrganizationSubscriptionInactive = Error{Code: 40021, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("organization subscription is not active")}
+	ErrNoDefaultPlan                    = Error{Code: 40022, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("no default plan available")}
+
+	// Server errors (500) - These should be used sparingly and only for true internal errors
+	ErrMarshalingServerJSONFailed  = Error{Code: 50001, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("server error: failed to process response"), LogLevel: "error"}
+	ErrGenericInternalServerError  = Error{Code: 50002, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("server error: operation failed"), LogLevel: "error"}
+	ErrCouldNotCreateFaucetPackage = Error{Code: 50003, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("server error: faucet package creation failed"), LogLevel: "error"}
+	ErrVochainRequestFailed        = Error{Code: 50004, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("server error: blockchain request failed"), LogLevel: "error"}
+	ErrStripeError                 = Error{Code: 50005, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("server error: payment processing failed"), LogLevel: "error"}
+	ErrInternalStorageError        = Error{Code: 50006, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("server error: storage operation failed"), LogLevel: "error"}
 )

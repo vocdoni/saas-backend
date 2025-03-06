@@ -102,7 +102,7 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			// replace organization subscription with the default plan
 			defaultPlan, err := a.db.DefaultPlan()
 			if err != nil || defaultPlan == nil {
-				ErrNoDefaultPLan.WithErr((err)).Write(w)
+				ErrNoDefaultPlan.WithErr((err)).Write(w)
 				return
 			}
 			orgSubscription := &db.OrganizationSubscription{
