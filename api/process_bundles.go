@@ -537,7 +537,7 @@ func (a *API) initiateBundleAuthRequest(r *http.Request, bundleId string, census
 		if err != nil {
 			return nil, ErrUnauthorized.Withf("invalid phone number: %v", err)
 		}
-		if !bytes.Equal(internal.HashOrgData(census.OrgAddress, req.Phone), participant.HashedPhone) {
+		if !bytes.Equal(internal.HashOrgData(census.OrgAddress, pn), participant.HashedPhone) {
 			return nil, ErrUnauthorized.Withf("invalid user data")
 		}
 		authResp = a.twofactor.InitiateAuth(bundleId, participant.ParticipantNo, pn, notifications.SMS)
@@ -552,7 +552,7 @@ func (a *API) initiateBundleAuthRequest(r *http.Request, bundleId string, census
 			if err != nil {
 				return nil, ErrUnauthorized.Withf("invalid phone number: %v", err)
 			}
-			if !bytes.Equal(internal.HashOrgData(census.OrgAddress, req.Phone), participant.HashedPhone) {
+			if !bytes.Equal(internal.HashOrgData(census.OrgAddress, pn), participant.HashedPhone) {
 				return nil, ErrUnauthorized.Withf("invalid user data")
 			}
 			authResp = a.twofactor.InitiateAuth(bundleId, participant.ParticipantNo, pn, notifications.SMS)
