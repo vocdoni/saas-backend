@@ -30,7 +30,7 @@ func main() {
 	flag.StringP("vocdoniApi", "v", "https://api-dev.vocdoni.net/v2", "vocdoni node remote API URL")
 	flag.StringP("webURL", "w", "https://saas-dev.vocdoni.app", "The URL of the web application")
 	flag.StringP("mongoURL", "m", "", "The URL of the MongoDB server")
-	flag.StringP("mongoDB", "d", "saasdb", "The name of the MongoDB database")
+	flag.StringP("mongoDB", "d", "", "The name of the MongoDB database")
 	flag.StringP("privateKey", "k", "", "private key for the Vocdoni account")
 	flag.BoolP("fullTransparentMode", "a", false, "allow all transactions and do not modify any of them")
 	flag.String("smtpServer", "", "SMTP server")
@@ -172,7 +172,7 @@ func main() {
 	}
 
 	twofactorConf.PrivKey = privKey
-	twofactorConf.MongoURI = mongoURL
+	twofactorConf.MongoClient = database.DBClient
 	// create the twofactor service and include it in the API configuration
 	twofactorService := new(twofactor.Twofactor)
 	apiConf.Twofactor, err = twofactorService.New(twofactorConf)

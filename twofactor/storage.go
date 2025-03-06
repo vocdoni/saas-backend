@@ -79,7 +79,7 @@ func HexBytesToElection(electionIDs []internal.HexBytes, attempts int) []UserEle
 type Storage interface {
 	// Init initializes the storage, maxAttempts is used to set the default maximum SMS attempts.
 	// CoolDownTime is the time period on which attempts are allowed.
-	Init(dataDir string, maxAttempts int, coolDownTime time.Duration) (err error)
+	Init(clientOrUri any, maxAttempts int, coolDownTime time.Duration) (err error)
 	// Reset clears the storage content
 	Reset() (err error)
 	// AddUser adds a new user to the storage

@@ -15,6 +15,7 @@ import (
 	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"github.com/xlzd/gotp"
+	"go.mongodb.org/mongo-driver/mongo"
 	dvotedb "go.vocdoni.io/dvote/db"
 	"go.vocdoni.io/dvote/db/metadb"
 	"go.vocdoni.io/dvote/log"
@@ -52,7 +53,7 @@ type TwofactorConfig struct {
 	ThrottleTime         time.Duration // Time to throttle notification sending
 	MaxRetries           int           // Maximum number of retries for failed notification deliveries
 	PrivKey              string        // Private key for signing
-	MongoURI             string        // MongoDB URI
+	MongoClient          *mongo.Client // MongoDB client to connect to the database
 }
 
 // Twofactor is the main service that handles two-factor authentication for processes and process bundles.
@@ -182,10 +183,10 @@ func (tf *Twofactor) New(conf *TwofactorConfig) (*Twofactor, error) {
 		return nil, fmt.Errorf("cannot create the database: %v", err)
 	}
 
-	if conf.MongoURI != "" {
+	if conf.MongoClient != nil {
 		tf.stg = new(MongoStorage)
 		if err := tf.stg.Init(
-			conf.MongoURI,
+			conf.MongoClient,
 			maxAttempts,
 			coolDownTime,
 		); err != nil {

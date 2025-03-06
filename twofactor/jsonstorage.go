@@ -32,7 +32,11 @@ type JSONstorage struct {
 	coolDownTime   time.Duration
 }
 
-func (js *JSONstorage) Init(dataDir string, maxAttempts int, coolDownTime time.Duration) error {
+func (js *JSONstorage) Init(rawDataDir any, maxAttempts int, coolDownTime time.Duration) error {
+	dataDir, ok := rawDataDir.(string)
+	if !ok {
+		return fmt.Errorf("invalid data directory")
+	}
 	var err error
 	js.kv, err = metadb.New(db.TypePebble, filepath.Clean(dataDir))
 	if err != nil {
