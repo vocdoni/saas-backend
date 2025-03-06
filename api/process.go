@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -223,103 +224,103 @@ func (a *API) twofactorSignHandler(w http.ResponseWriter, r *http.Request) {
 func (a *API) initiateAuthRequest(r *http.Request, processId string) (*uuid.UUID, error) {
 	var req InitiateAuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		return nil, ErrMalformedBody
+		return nil, fmt.Errorf("malformed body")
 	}
 	if len(req.ParticipantNo) == 0 {
-		return nil, ErrMalformedBody.Withf("missing participant number")
+		return nil, fmt.Errorf("missing participant number")
 	}
 
 	if len(req.Email) == 0 && len(req.Phone) == 0 {
-		return nil, ErrMalformedBody.Withf("missing auth data")
+		return nil, fmt.Errorf("missing auth data")
 	}
 
 	processIdBytes, err := hex.DecodeString(processId)
 	if err != nil {
-		return nil, ErrMalformedURLParam.Withf("invalid process ID")
+		return nil, fmt.Errorf("invalid process ID")
 	}
 
 	// retrieve process info
 	process, err := a.db.Process(processIdBytes)
 	if err != nil {
 		if err == db.ErrNotFound {
-			return nil, ErrMalformedURLParam.Withf("process not found")
+			return nil, fmt.Errorf("process not found")
 		}
-		return nil, ErrGenericInternalServerError.WithErr(err)
+		return nil, fmt.Errorf("internal server error: %v", err)
 	}
 	if process.PublishedCensus.Census.OrgAddress != process.OrgAddress {
-		return nil, ErrInvalidOrganizationData
+		return nil, fmt.Errorf("invalid organization data")
 	}
 
 	// TODO enable only password censuses
 	censusType := process.PublishedCensus.Census.Type
 	if censusType != db.CensusTypeMail && censusType != db.CensusTypeSMSorMail &&
 		censusType != db.CensusTypeSMS {
-		return nil, ErrInvalidOrganizationData.Withf("invalid census type")
+		return nil, fmt.Errorf("invalid census type")
 	}
-	// retrieve memership info
+	// retrieve membership info
 	if _, err = a.db.CensusMembership(process.PublishedCensus.Census.ID.Hex(), req.ParticipantNo); err != nil {
-		return nil, ErrUnauthorized.Withf("participant not found in census")
+		return nil, fmt.Errorf("participant not found")
 	}
 	// retrieve participant info
 	participant, err := a.db.OrgParticipantByNo(process.OrgAddress, req.ParticipantNo)
 	if err != nil {
-		return nil, ErrUnauthorized.Withf("participant not found")
+		return nil, fmt.Errorf("participant not found")
 	}
 
 	// first verify password
 	if req.Password != "" && !bytes.Equal(internal.HashPassword(passwordSalt, req.Password), participant.HashedPass) {
-		return nil, ErrUnauthorized.Withf("invalid user data")
+		return nil, fmt.Errorf("invalid user data")
 	}
 
 	var authResp twofactor.AuthResponse
 	switch censusType {
 	case db.CensusTypeMail:
 		if req.Email == "" {
-			return nil, ErrUnauthorized.Withf("missing email")
+			return nil, fmt.Errorf("missing email")
 		}
 		if !bytes.Equal(internal.HashOrgData(process.OrgAddress, req.Email), participant.HashedEmail) {
-			return nil, ErrUnauthorized.Withf("invalid user data")
+			return nil, fmt.Errorf("invalid user data")
 		}
 		authResp = a.twofactor.InitiateAuth(processId, participant.ParticipantNo, req.Email, notifications.Email)
 	case db.CensusTypeSMS:
 		if req.Phone == "" {
-			return nil, ErrUnauthorized.Withf("missing phone")
+			return nil, fmt.Errorf("missing phone")
 		}
 		pn, err := internal.SanitizeAndVerifyPhoneNumber(req.Phone)
 		if err != nil {
-			return nil, ErrUnauthorized.Withf("invalid phone number")
+			return nil, fmt.Errorf("invalid phone number")
 		}
 		if !bytes.Equal(internal.HashOrgData(process.OrgAddress, pn), participant.HashedPhone) {
-			return nil, ErrUnauthorized.Withf("invalid user data")
+			return nil, fmt.Errorf("invalid user data")
 		}
 		authResp = a.twofactor.InitiateAuth(processId, participant.ParticipantNo, pn, notifications.SMS)
 	case db.CensusTypeSMSorMail:
 		if req.Email != "" {
 			if !bytes.Equal(internal.HashOrgData(process.OrgAddress, req.Email), participant.HashedEmail) {
-				return nil, ErrUnauthorized.Withf("invalid user data")
+				return nil, fmt.Errorf("invalid user data")
 			}
 			authResp = a.twofactor.InitiateAuth(processId, participant.ParticipantNo, req.Email, notifications.Email)
 		} else if req.Phone != "" {
 			pn, err := internal.SanitizeAndVerifyPhoneNumber(req.Phone)
 			if err != nil {
-				return nil, ErrUnauthorized.Withf("invalid phone number")
+				return nil, fmt.Errorf("invalid phone number")
 			}
 			if !bytes.Equal(internal.HashOrgData(process.OrgAddress, pn), participant.HashedPhone) {
-				return nil, ErrUnauthorized.Withf("invalid user data")
+				return nil, fmt.Errorf("invalid user data")
 			}
 			authResp = a.twofactor.InitiateAuth(processId, participant.ParticipantNo, pn, notifications.SMS)
 		} else {
-			return nil, ErrUnauthorized.Withf("missing email or phone")
+			return nil, fmt.Errorf("missing email or phone")
 		}
 	default:
-		return nil, ErrUnauthorized.Withf("invalid census type")
+		return nil, fmt.Errorf("invalid census type")
 	}
 
 	if !authResp.Success {
-		return nil, ErrUnauthorized.Withf("%s", authResp.Error)
+		return nil, fmt.Errorf("unauthorized: %s", authResp.Error)
 	}
 	if authResp.AuthToken == nil {
-		return nil, ErrGenericInternalServerError.Withf("auth token is nil")
+		return nil, fmt.Errorf("internal server error: auth token is nil")
 	}
 	return authResp.AuthToken, nil
 }
