@@ -76,6 +76,10 @@ func New(privateKey string, apiEndpoint string) (*Account, error) {
 
 // FaucetPackage generates a faucet package for the given address and amount.
 func (a *Account) FaucetPackage(toAddr string, amount uint64) (*models.FaucetPackage, error) {
+	log.Infow("generating faucet package",
+		"toAddr", toAddr,
+		"amount", amount,
+	)
 	return vochain.GenerateFaucetPackage(a.signer, common.HexToAddress(toAddr), amount)
 }
 

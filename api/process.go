@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 
@@ -320,7 +319,7 @@ func (a *API) initiateAuthRequest(r *http.Request, processId string) (*uuid.UUID
 		return nil, ErrUnauthorized.Withf("%s", authResp.Error)
 	}
 	if authResp.AuthToken == nil {
-		return nil, fmt.Errorf("auth token is nil")
+		return nil, ErrGenericInternalServerError.Withf("auth token is nil")
 	}
 	return authResp.AuthToken, nil
 }
