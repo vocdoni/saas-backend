@@ -104,11 +104,11 @@ func vochainTxCosts(vochainURI string) (map[models.TxType]uint64, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
-	log.Debugf("received tx costs: %s", resp.Body)
 	var strTxCosts api.Transaction
 	if err := json.NewDecoder(resp.Body).Decode(&strTxCosts); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
+	log.Debugf("received tx costs: %v", strTxCosts.Costs)
 
 	extraCostStr := os.Getenv("VOCDONI_FAUCET_TX_EXTRA_COST") // extra cost for faucet transactions, for testing purposes
 	extraCost := uint64(0)
