@@ -31,7 +31,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// create the organization signer to store the address and the nonce
-	signer, nonce, err := account.NewSigner(a.secret, user.Email)
+	signer, nonce, err := account.NewSigner(a.secret, user.Email) // TODO: replace email with something else such as user ID
 	if err != nil {
 		ErrGenericInternalServerError.Withf("could not create organization signer: %v", err).Write(w)
 		return

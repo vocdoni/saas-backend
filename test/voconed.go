@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/go-connections/nat"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -18,14 +19,10 @@ const (
 	VoconedFundedAccount  = "0x032FaEf5d0F2c76bbD804215e822A5203e83385d"
 	VoconedFoundedPrivKey = "d52a488fa1511a07778cc94ed9d8130fb255537783ea7c669f38292b4f53ac4f"
 	VoconedFunds          = 100000000
-	// faucet
-	VocfaucetPort       = 8080
-	VocfaucetAmounts    = 800
-	VocfaucetDatadir    = "/app/data/faucet"
-	VocfaucetDBType     = "pebble"
-	VocfaucetBaseRoute  = "/v2"
-	VocfaucetAuth       = "open"
-	VocfaucetWaitPeriod = "10m"
+	VoconedVolumeName     = "voconed-data-test"
+	VoconedDataDir        = "/app/data"
+	VocfaucetBaseRoute    = "/v2"
+	VocfaucetAmounts      = 5
 )
 
 func VoconedAPIURL(base string) string {
@@ -39,11 +36,15 @@ func VoconedAPIURL(base string) string {
 func StartVoconedContainer(ctx context.Context) (testcontainers.Container, error) {
 	exposedPort := fmt.Sprintf("%d/tcp", VoconedPort)
 	voconedCmd := []string{
+		"--logLevel=debug",
+		fmt.Sprintf("--dir=%s", VoconedDataDir),
 		"--setTxCosts", fmt.Sprintf("--txCosts=%d", VoconedTxCosts),
 		fmt.Sprintf("--fundedAccounts=%s:%d", VoconedFundedAccount, VoconedFunds),
 		fmt.Sprintf("--port=%d", VoconedPort),
+		fmt.Sprintf("--enableFaucet=%d", VocfaucetAmounts),
+		"--blockPeriod=2",
 	}
-	return testcontainers.GenericContainer(ctx,
+	c, err := testcontainers.GenericContainer(ctx,
 		testcontainers.GenericContainerRequest{
 			ContainerRequest: testcontainers.ContainerRequest{
 				Image:         "ghcr.io/vocdoni/vocdoni-node:main",
@@ -52,33 +53,17 @@ func StartVoconedContainer(ctx context.Context) (testcontainers.Container, error
 				ImagePlatform: "linux/amd64",
 				ExposedPorts:  []string{exposedPort},
 				WaitingFor:    wait.ForListeningPort(nat.Port(exposedPort)),
+				Mounts: testcontainers.ContainerMounts{
+					testcontainers.VolumeMount(VoconedVolumeName, VoconedDataDir),
+				},
+				HostConfigModifier: func(hc *container.HostConfig) {
+					hc.AutoRemove = false
+				},
 			},
 			Started: true,
 		})
-}
-
-func StartVocfaucetContainer(ctx context.Context) (testcontainers.Container, error) {
-	exposedPort := fmt.Sprintf("%d/tcp", VocfaucetPort)
-	vocfaucetCmd := []string{
-		fmt.Sprintf("--amounts=%d", VocfaucetAmounts),
-		fmt.Sprintf("--listenPort=%d", VocfaucetPort),
-		fmt.Sprintf("--dataDir=%s", VocfaucetDatadir),
-		fmt.Sprintf("--waitPeriod=%s", VocfaucetWaitPeriod),
-		fmt.Sprintf("--dbType=%s", VocfaucetDBType),
-		fmt.Sprintf("--baseRoute=%s", VocfaucetBaseRoute),
-		fmt.Sprintf("--auth=%s", VocfaucetAuth),
-		fmt.Sprintf("--privKey=%s", VoconedFoundedPrivKey),
+	if err != nil {
+		return nil, err
 	}
-
-	return testcontainers.GenericContainer(ctx,
-		testcontainers.GenericContainerRequest{
-			ContainerRequest: testcontainers.ContainerRequest{
-				Image:         "ghcr.io/vocdoni/vocfaucet:main",
-				Cmd:           vocfaucetCmd,
-				ImagePlatform: "linux/amd64",
-				ExposedPorts:  []string{exposedPort},
-				WaitingFor:    wait.ForListeningPort(nat.Port(exposedPort)),
-			},
-			Started: true,
-		})
+	return c, nil
 }

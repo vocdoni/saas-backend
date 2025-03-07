@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"math/big"
 	"regexp"
 
 	"github.com/nyaruka/phonenumbers"
@@ -33,6 +34,15 @@ func SanitizeAndVerifyPhoneNumber(phone string) (string, error) {
 	}
 	// Build the phone number string
 	return fmt.Sprintf("+%d%d", pn.GetCountryCode(), pn.GetNationalNumber()), nil
+}
+
+// RandomInt returns a secure random integer in the range [0, max).
+func RandomInt(max int) int {
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(max)))
+	if err != nil {
+		panic(err)
+	}
+	return int(n.Int64())
 }
 
 // RandomBytes helper function allows to generate a random byte slice of n bytes.
