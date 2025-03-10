@@ -336,6 +336,12 @@ func testNewVocdoniClient(t *testing.T) *apiclient.HTTPclient {
 	return client
 }
 
+func fetchVocdoniAccountNonce(t *testing.T, client *apiclient.HTTPclient, address internal.HexBytes) uint32 {
+	account, err := client.Account(address.String())
+	qt.Assert(t, err, qt.IsNil)
+	return account.Nonce
+}
+
 // sendVocdoniTx sends a transaction to the Voconed API and waits for it to be mined.
 // Returns the response data if any.
 func sendVocdoniTx(t *testing.T, tx *models.Tx, token string, vocdoniClient *apiclient.HTTPclient, orgAddress internal.HexBytes) []byte {
