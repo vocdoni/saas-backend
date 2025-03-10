@@ -49,8 +49,10 @@ func TestOrgParticipants(t *testing.T) {
 		c.Assert(createdParticipant.CreatedAt, qt.Not(qt.IsNil))
 
 		// Test updating an existing participant
-		createdParticipant.Name = "Updated Name"
-		createdParticipant.Phone = "+9876543210"
+		newName := "Updated Name"
+		newPhone := "+34655432100"
+		createdParticipant.Name = newName
+		createdParticipant.Phone = newPhone
 
 		// Update participant
 		updatedID, err := db.SetOrgParticipant(testSalt, createdParticipant)
@@ -60,8 +62,8 @@ func TestOrgParticipants(t *testing.T) {
 		// Verify the participant was updated correctly
 		updatedParticipant, err := db.OrgParticipant(updatedID)
 		c.Assert(err, qt.IsNil)
-		c.Assert(updatedParticipant.Name, qt.Equals, "Updated Name")
-		c.Assert(updatedParticipant.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, "+9876543210"))
+		c.Assert(updatedParticipant.Name, qt.Equals, newName)
+		c.Assert(updatedParticipant.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, newPhone))
 		c.Assert(updatedParticipant.CreatedAt, qt.Equals, createdParticipant.CreatedAt)
 
 		// Test duplicate entries
@@ -184,7 +186,7 @@ func TestOrgParticipants(t *testing.T) {
 			},
 			{
 				Email:         "participant2@test.com",
-				Phone:         "+0987654321",
+				Phone:         "+34678678978",
 				ParticipantNo: "participant456",
 				Name:          "Test Participant 2",
 				Password:      "testpass456",
@@ -203,15 +205,15 @@ func TestOrgParticipants(t *testing.T) {
 		c.Assert(participant1.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testPhone))
 		c.Assert(participant1.HashedPass, qt.DeepEquals, internal.HashPassword(testSalt, testPassword))
 
-		participant2, err := db.OrgParticipantByNo(testOrgAddress, "participant456")
+		participant2, err := db.OrgParticipantByNo(testOrgAddress, participants[1].ParticipantNo)
 		c.Assert(err, qt.IsNil)
-		c.Assert(participant2.HashedEmail, qt.DeepEquals, internal.HashOrgData(testOrgAddress, "participant2@test.com"))
-		c.Assert(participant2.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, "+0987654321"))
-		c.Assert(participant2.HashedPass, qt.DeepEquals, internal.HashPassword(testSalt, "testpass456"))
+		c.Assert(participant2.HashedEmail, qt.DeepEquals, internal.HashOrgData(testOrgAddress, participants[1].Email))
+		c.Assert(participant2.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, participants[1].Phone))
+		c.Assert(participant2.HashedPass, qt.DeepEquals, internal.HashPassword(testSalt, participants[1].Password))
 
 		// Test updating existing participants
 		participants[0].Name = "Updated Name"
-		participants[1].Phone = "+1111111111"
+		participants[1].Phone = "+34678678971"
 
 		// Perform bulk upsert again
 		result, err = db.BulkUpsertOrgParticipants(testOrgAddress, testSalt, participants)
@@ -227,7 +229,7 @@ func TestOrgParticipants(t *testing.T) {
 
 		updatedParticipant2, err := db.OrgParticipantByNo(testOrgAddress, "participant456")
 		c.Assert(err, qt.IsNil)
-		c.Assert(updatedParticipant2.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, "+1111111111"))
+		c.Assert(updatedParticipant2.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, participants[1].Phone))
 		c.Assert(updatedParticipant2.Name, qt.Equals, "Test Participant 2")
 
 		// Test with empty organization address

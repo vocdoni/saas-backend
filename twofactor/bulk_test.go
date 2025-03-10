@@ -35,7 +35,7 @@ func TestJSONStorageBulkAddUser(t *testing.T) {
 		users[i] = UserData{
 			UserID:    userID,
 			ExtraData: "test data",
-			Phone:     "+1234567890",
+			Phone:     "+34645678909",
 			Mail:      "test@example.com",
 			Elections: map[string]UserElection{
 				"election1": {
@@ -101,7 +101,7 @@ func TestMongoStorageBulkAddUser(t *testing.T) {
 		users[i] = UserData{
 			UserID:    append(testID[:], randUUID[:]...),
 			ExtraData: "test data",
-			Phone:     "+1234567890",
+			Phone:     "+34645678909",
 			Mail:      "test@example.com",
 			Elections: map[string]UserElection{
 				"election1": {
