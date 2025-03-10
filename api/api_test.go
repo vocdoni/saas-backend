@@ -23,6 +23,8 @@ import (
 	"github.com/vocdoni/saas-backend/test"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
+	"go.vocdoni.io/proto/build/go/models"
+	"google.golang.org/protobuf/proto"
 )
 
 type apiTestCase struct {
@@ -56,6 +58,9 @@ var testDB *db.MongoStorage
 // testMailService is the test mail service for the tests. Make it global so it
 // can be accessed by the tests directly.
 var testMailService *smtp.SMTPEmail
+
+// testAPIEndpoint is the Voconed API endpoint for the tests. Make it global so it can be accessed by the tests directly.
+var testAPIEndpoint string
 
 func init() {
 	// set the test port
@@ -146,7 +151,8 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	testAPIEndpoint := test.VoconedAPIURL(apiEndpoint)
+	// set the test API endpoint global variable
+	testAPIEndpoint = test.VoconedAPIURL(apiEndpoint)
 	// start test mail server
 	testMailServer, err := test.StartMailService(ctx)
 	if err != nil {
@@ -202,13 +208,14 @@ func TestMain(m *testing.M) {
 		Client:              testAPIClient,
 		Account:             testAccount,
 		MailService:         testMailService,
-		FullTransparentMode: true, // Use transparent mode for tests
+		FullTransparentMode: false,
 		Subscriptions:       subscriptionsService,
 	}).Start()
 	// wait for the API to start
 	if err := pingAPI(testURL(pingEndpoint), 5); err != nil {
 		panic(err)
 	}
+	log.Infow("API server started", "host", testHost, "port", testPort)
 	// run the tests
 	os.Exit(m.Run())
 }
@@ -321,4 +328,36 @@ func testCreateOrganization(t *testing.T, jwt string) string {
 	qt.Assert(t, orgResp.Address, qt.Not(qt.Equals), "")
 
 	return orgResp.Address
+}
+
+func testNewVocdoniClient(t *testing.T) *apiclient.HTTPclient {
+	client, err := apiclient.New(testAPIEndpoint)
+	qt.Assert(t, err, qt.IsNil)
+	return client
+}
+
+// sendVocdoniTx sends a transaction to the Voconed API and waits for it to be mined.
+// Returns the response data if any.
+func sendVocdoniTx(t *testing.T, tx *models.Tx, token string, vocdoniClient *apiclient.HTTPclient, orgAddress internal.HexBytes) []byte {
+	c := qt.New(t)
+	txBytes, err := proto.Marshal(tx)
+	c.Assert(err, qt.IsNil)
+	td := &TransactionData{
+		Address:   orgAddress,
+		TxPayload: txBytes,
+	}
+
+	// sign the transaction using the remote signer from the API
+	resp, code := testRequest(t, http.MethodPost, token, td, signTxEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+	c.Assert(json.Unmarshal(resp, td), qt.IsNil)
+
+	// submit the transaction
+	hash, data, err := vocdoniClient.SendTx(td.TxPayload)
+	c.Assert(err, qt.IsNil)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err = vocdoniClient.WaitUntilTxIsMined(ctx, hash)
+	c.Assert(err, qt.IsNil)
+	return data
 }

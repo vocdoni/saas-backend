@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/base64"
 	"fmt"
 	"net/http"
 	"testing"
@@ -9,44 +8,46 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/proto/build/go/models"
-	"google.golang.org/protobuf/proto"
 )
 
 func TestTransaction(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "superpassword123")
-	t.Logf("fetched token %s\n", token)
+
+	// get the user to verify the token works
 	resp, code := testRequest(t, http.MethodGet, token, nil, usersMeEndpoint)
 	c.Assert(code, qt.Equals, http.StatusOK)
 	t.Logf("%s\n", resp)
 
-	orgAddress := testCreateOrganization(t, token)
-	t.Logf("fetched org address %s\n", orgAddress)
+	// create a new vocdoni client
+	vocdoniClient := testNewVocdoniClient(t)
 
-	orgAddressBytes := new(internal.HexBytes).SetString(orgAddress)
+	// create an organization
+
+	orgAddress := new(internal.HexBytes).SetString(testCreateOrganization(t, token))
+	t.Logf("fetched org address %s\n", orgAddress.String())
 
 	orgName := fmt.Sprintf("testorg-%d", internal.RandomInt(1000))
 	orgInfoUri := fmt.Sprintf("https://example.com/%d", internal.RandomInt(1000))
 
+	// build the create account transaction
 	tx := models.Tx{
 		Payload: &models.Tx_SetAccount{
 			SetAccount: &models.SetAccountTx{
 				Txtype:  models.TxType_CREATE_ACCOUNT,
-				Account: orgAddressBytes.Bytes(),
+				Account: orgAddress.Bytes(),
 				Name:    &orgName,
 				InfoURI: &orgInfoUri,
 			},
 		},
 	}
 
-	txBytes, err := proto.Marshal(&tx)
-	c.Assert(err, qt.IsNil)
+	// send the transaction
+	sendVocdoniTx(t, &tx, token, vocdoniClient, *orgAddress)
 
-	td := &TransactionData{
-		Address:   orgAddress,
-		TxPayload: base64.StdEncoding.EncodeToString(txBytes), // TODO: this should be []bytes directly
-	}
-
-	resp, code = testRequest(t, http.MethodPost, token, td, signTxEndpoint)
+	// get the organization
+	resp, code = testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String())
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+	t.Logf("%s\n", resp)
+
 }

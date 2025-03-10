@@ -1,8 +1,8 @@
 module github.com/vocdoni/saas-backend
 
-go 1.23.5
+go 1.24.0
 
-toolchain go1.23.6
+toolchain go1.24.1
 
 require (
 	github.com/arnaucube/go-blindsecp256k1 v0.0.0-20211204171003-644e7408753f
@@ -24,9 +24,9 @@ require (
 	github.com/twilio/twilio-go v1.23.0
 	github.com/xlzd/gotp v0.1.0
 	go.mongodb.org/mongo-driver v1.14.0
-	go.vocdoni.io/dvote v1.10.2-0.20250211224900-db31f07b943c
+	go.vocdoni.io/dvote v1.10.2-0.20250310134826-f66f9ec5b2ac
 	go.vocdoni.io/proto v1.15.10
-	golang.org/x/crypto v0.32.0
+	golang.org/x/crypto v0.36.0
 	google.golang.org/protobuf v1.36.4
 )
 
@@ -364,11 +364,11 @@ require (
 	go4.org v0.0.0-20230225012048-214862532bf5 // indirect
 	golang.org/x/exp v0.0.0-20241009180824-f66d83c29e7c // indirect
 	golang.org/x/mod v0.21.0 // indirect
-	golang.org/x/net v0.34.0 // indirect
+	golang.org/x/net v0.37.0 // indirect
 	golang.org/x/oauth2 v0.24.0 // indirect
-	golang.org/x/sync v0.10.0 // indirect
-	golang.org/x/sys v0.29.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
+	golang.org/x/sync v0.12.0 // indirect
+	golang.org/x/sys v0.31.0 // indirect
+	golang.org/x/text v0.23.0 // indirect
 	golang.org/x/tools v0.26.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
 	gonum.org/v1/gonum v0.15.1 // indirect
