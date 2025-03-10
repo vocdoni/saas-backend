@@ -2,7 +2,6 @@ package api
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -29,13 +28,13 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// check if the user is a member of the organization
-	if !user.HasRoleFor(signReq.Address, db.AnyRole) {
+	if !user.HasRoleFor(signReq.Address.String(), db.AnyRole) {
 		ErrUnauthorized.With("user is not an organization member").Write(w)
 		return
 	}
 	// get the organization info from the database with the address provided in
 	// the request
-	org, _, err := a.db.Organization(signReq.Address, false)
+	org, _, err := a.db.Organization(signReq.Address.String(), false)
 	if err != nil {
 		if err == db.ErrNotFound {
 			ErrOrganizationNotFound.Withf("organization not found").Write(w)
@@ -51,24 +50,20 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// check if the request includes a payload to sign
-	if signReq.TxPayload == "" {
+	if signReq.TxPayload == nil {
 		ErrMalformedBody.Withf("missing data field in request body").Write(w)
-		return
-	}
-	// decode the transaction data from the request (base64 encoding)
-	txData, err := base64.StdEncoding.DecodeString(signReq.TxPayload)
-	if err != nil {
-		ErrMalformedBody.Withf("could not decode the base64 data from the body").Write(w)
 		return
 	}
 	// unmarshal the tx with the protobuf model
 	tx := &models.Tx{}
-	if err := proto.Unmarshal(txData, tx); err != nil {
+	if err := proto.Unmarshal(signReq.TxPayload, tx); err != nil {
 		ErrInvalidTxFormat.Write(w)
 		return
 	}
 	// flag to know if the TX is New Process
 	isNewProcess := false
+
+	log.Debugw("signing transaction", "user", user.Email, "type", fmt.Sprintf("%T", tx.Payload))
 
 	// check if the api is not in transparent mode
 	if !a.transparentMode {
@@ -357,7 +352,7 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 
 	// return the signed tx payload
 	httpWriteJSON(w, &TransactionData{
-		TxPayload: base64.StdEncoding.EncodeToString(stx),
+		TxPayload: stx,
 	})
 }
 
