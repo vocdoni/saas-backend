@@ -308,7 +308,7 @@ func randOrgParticipantsForTest(n int) (map[string]OrgParticipant, []OrgParticip
 		// generate random id
 		participants[i] = OrgParticipant{
 			Email:         fmt.Sprintf("user%d@example.com", i+1),
-			Phone:         fmt.Sprintf("+%010d", rand.Int63n(10000000000)),
+			Phone:         fmt.Sprintf("+346%08d", rand.Int63n(10000000)),
 			ParticipantNo: fmt.Sprintf("participant_%d", i+1),
 			Name:          fmt.Sprintf("User %d", i+1),
 		}
