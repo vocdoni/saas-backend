@@ -8,6 +8,14 @@ import (
 	"go.vocdoni.io/dvote/types"
 )
 
+// Pagination is the struct that represents the pagination of a list of items in
+// the API. It is used include the current position in a list of items responses.
+type Pagination struct {
+	Limit  int `json:"limit"`
+	Offset int `json:"offset"`
+	Total  int `json:"total"`
+}
+
 // Organization is the struct that represents an organization in the API
 type OrganizationInfo struct {
 	Address        string               `json:"address"`
@@ -368,7 +376,7 @@ type OrganizationCensuses struct {
 
 // AddParticipantsRequest defines the payload for adding participants to a census
 type AddParticipantsRequest struct {
-	Participants []OrgParticipant `json:"participants"`
+	Participants []Participant `json:"participants"`
 }
 
 func (r *AddParticipantsRequest) dbOrgParticipants(orgAddress string) []db.OrgParticipant {
@@ -381,16 +389,16 @@ func (r *AddParticipantsRequest) dbOrgParticipants(orgAddress string) []db.OrgPa
 
 // OrgParticipant defines the structure of a participant in the API. It is the
 // mirror struct of db.OrgParticipant.
-type OrgParticipant struct {
+type Participant struct {
 	ParticipantNo string         `json:"participantNo"`
 	Name          string         `json:"name"`
-	Email         string         `json:"email"`
-	Phone         string         `json:"phone"`
-	Password      string         `json:"password"`
+	Email         string         `json:"email,omitempty"`
+	Phone         string         `json:"phone,omitempty"`
+	Password      string         `json:"password,omitempty"`
 	Other         map[string]any `json:"other"`
 }
 
-func (p *OrgParticipant) toDB(orgAddress string) db.OrgParticipant {
+func (p *Participant) toDB(orgAddress string) db.OrgParticipant {
 	return db.OrgParticipant{
 		OrgAddress:    orgAddress,
 		ParticipantNo: p.ParticipantNo,
@@ -400,6 +408,26 @@ func (p *OrgParticipant) toDB(orgAddress string) db.OrgParticipant {
 		Password:      p.Password,
 		Other:         p.Other,
 	}
+}
+
+// participantFromDB converts a db.OrgParticipant to an OrgParticipant. The
+// email, phone and password fields are not included in the response.
+func participantFromDB(participant *db.OrgParticipant) Participant {
+	if participant == nil {
+		return Participant{}
+	}
+	return Participant{
+		ParticipantNo: participant.ParticipantNo,
+		Name:          participant.Name,
+		Other:         participant.Other,
+	}
+}
+
+// PaginatedOrgParticipants defines the structure of a paginated list of
+// participants in the API for an organization.
+type PaginatedParticipants struct {
+	Participants []Participant `json:"participants"`
+	Pagination   Pagination    `json:"pagination"`
 }
 
 // AddParticipantsResponse defines the response for successful participant addition

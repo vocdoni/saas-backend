@@ -116,6 +116,19 @@ func (ms *MongoStorage) OrgParticipant(id string) (*OrgParticipant, error) {
 	return orgParticipant, nil
 }
 
+// orgParticipantByNo retrieves a orgParticipants from the DB based on it ID
+// without locking the database, it should be called from a function that
+// already locks the database
+func (ms *MongoStorage) orgParticipantByNo(ctx context.Context, orgAddress, participantNo string) (*OrgParticipant, error) {
+	orgParticipant := &OrgParticipant{}
+	if err := ms.orgParticipants.FindOne(
+		ctx, bson.M{"orgAddress": orgAddress, "participantNo": participantNo},
+	).Decode(orgParticipant); err != nil {
+		return nil, fmt.Errorf("failed to get orgParticipants: %w", err)
+	}
+	return orgParticipant, nil
+}
+
 // OrgParticipants retrieves a orgParticipants from the DB based on it ID
 func (ms *MongoStorage) OrgParticipantByNo(orgAddress, participantNo string) (*OrgParticipant, error) {
 	if len(participantNo) == 0 {
@@ -126,15 +139,7 @@ func (ms *MongoStorage) OrgParticipantByNo(orgAddress, participantNo string) (*O
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
-	orgParticipant := &OrgParticipant{}
-	if err := ms.orgParticipants.FindOne(
-		ctx, bson.M{"orgAddress": orgAddress, "participantNo": participantNo},
-	).Decode(orgParticipant); err != nil {
-		return nil, fmt.Errorf("failed to get orgParticipants: %w", err)
-	}
-
-	return orgParticipant, nil
+	return ms.orgParticipantByNo(ctx, orgAddress, participantNo)
 }
 
 // BulkAddOrgParticipants adds multiple census participants to the database in batches of 1000 entries
@@ -337,4 +342,71 @@ func (ms *MongoStorage) OrgParticipantsMemberships(
 	}
 
 	return participants, nil
+}
+
+// OrgParticipantsPaginated retrieves a list of orgParticipants from the DB
+// based on the orgAddress, sorted by createdAt in descending order starting
+// from the offset and limited by the limit parameter. It also checks that the
+// organization exists.
+func (ms *MongoStorage) OrgParticipantsPaginated(orgAddress string, limit, offset int) ([]OrgParticipant, error) {
+	// check that the org exists
+	if _, _, err := ms.Organization(orgAddress, false); err != nil {
+		if err == ErrNotFound {
+			return nil, ErrInvalidData
+		}
+		return nil, err
+	}
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// define the filter to get the participants of the organization and
+	// the options to get the paginated result
+	filter := bson.M{"orgAddress": orgAddress}
+	opts := options.Find().
+		SetLimit(int64(limit)).          // set the limit of the result set
+		SetSkip(int64(offset)).          // set the offset of the result set
+		SetSort(bson.M{"createdAt": -1}) // sort by createdAt in descending order
+	// lock the database
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	// create a cursor to get the participants of the organization
+	cursor, err := ms.orgParticipants.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = cursor.Close(ctx)
+	}()
+	// decode the participants from the cursor
+	var participants []OrgParticipant
+	if err = cursor.All(ctx, &participants); err != nil {
+		return nil, err
+	}
+	return participants, nil
+}
+
+// CountOrgParticipants returns the number of participants of an organization
+// based on the orgAddress. It also checks that the organization exists.
+func (ms *MongoStorage) CountOrgParticipants(orgAddress string) (int, error) {
+	// check that the org exists
+	if _, _, err := ms.Organization(orgAddress, false); err != nil {
+		if err == ErrNotFound {
+			return 0, ErrInvalidData
+		}
+		return 0, err
+	}
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// define the filter to get the participants of the organization
+	filter := bson.M{"orgAddress": orgAddress}
+	// lock the database
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	// count the participants of the organization
+	count, err := ms.orgParticipants.CountDocuments(ctx, filter)
+	if err != nil {
+		return 0, err
+	}
+	return int(count), nil
 }

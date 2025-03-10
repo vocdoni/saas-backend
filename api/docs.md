@@ -32,7 +32,8 @@
   - [💸 Organization Subscription Info](#-organization-subscription-info)
   - [📊 Organization Censuses](#-organization-censuses)
   - [🤠 Available organization members roles](#-available-organization-members-roles)
-  - [🏛️ Available organization types](#-available-organization-types)
+  - [🏛️ Available organization types](#%EF%B8%8F-available-organization-types)
+  - [🕵🏻‍♂️ Get Organization Participants](#%EF%B8%8F-get-organization-participants)
 - [🏦 Plans](#-plans)
   - [📋 Get Available Plans](#-get-plans)
   - [📄 Get Plan Info](#-get-plan-info)
@@ -49,6 +50,7 @@
   - [👥 Add Participants](#-add-participants)
   - [📢 Publish Census](#-publish-census)
   - [📋 Get Published Census Info](#-get-published-census-info)
+  - [🕵🏻‍♂️ Get Census Participants](#%EF%B8%8F-get-census-participants)
 - [🔄 Process](#-process)
   - [🆕 Create Process](#-create-process)
   - [ℹ️ Get Process Info](#-get-process-info)
@@ -935,6 +937,43 @@ This request can be made only by organization admins.
 }
 ```
 
+### 🕵🏻‍♂️ Get Organization Participants
+
+* **Path** `/organizations/{address}/participants?limit=100&offset=200`
+  * `limit` specifies the maximum number of results that the response will contain.
+  * `offset` specifies the number of valid results to skip to get the desired results.
+* **Method** `GET`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+
+* **Response**
+```json
+{
+  "participants": [
+    {
+      "participantNo": "myID",
+      "name": "myName",
+      "other": {
+        "some": "metadata"
+      }
+    }
+  ],
+  "pagination": {
+    "total": 1000,
+    "limit": 100,
+    "offset": 200
+  }
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `400` | `40010` | `invalid URL parameter` |
+| `401` | `40001` | `authentication required` |
+| `500` | `50002` | `internal server error` |
+
 ## 🏦 Plans
 
 ### 🛒 Get Plans
@@ -1289,6 +1328,43 @@ Publishes a census, making it available for voting. Requires Manager or Admin ro
 | HTTP Status | Error code | Message |
 |:---:|:---:|:---|
 | `400` | `40010` | `malformed URL parameter` |
+| `500` | `50002` | `internal server error` |
+
+### 🕵🏻‍♂️ Get Census Participants
+
+* **Path** `/census/{id}/participants?limit=100&offset=200`
+  * `limit` specifies the maximum number of results that the response will contain.
+  * `offset` specifies the number of valid results to skip to get the desired results.
+* **Method** `GET`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+
+* **Response**
+```json
+{
+  "participants": [
+    {
+      "participantNo": "myID",
+      "name": "myName",
+      "other": {
+        "some": "metadata"
+      }
+    }
+  ],
+  "pagination": {
+    "total": 1000,
+    "limit": 100,
+    "offset": 200
+  }
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `400` | `40010` | `invalid URL parameter` |
+| `401` | `40001` | `authentication required` |
 | `500` | `50002` | `internal server error` |
 
 ## 🔄 Process
