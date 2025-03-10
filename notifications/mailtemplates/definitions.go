@@ -15,6 +15,16 @@ You can also use this link to verify your account: {{.Link}}`,
 	WebAppURI: "/account/verify",
 }
 
+// VerifyOTPCodeNotification is the notification to be sent when a user wants
+// to login using OTP code.
+var VerifyOTPCodeNotification = MailTemplate{
+	File: "verification_code_otp",
+	Placeholder: notifications.Notification{
+		Subject:   "Codi de Verificació - Vocdoni",
+		PlainBody: `El teu codi de verificació és: {{.Code}}`,
+	},
+}
+
 // PasswordResetNotification is the notification to be sent when a user requests
 // a password reset.
 var PasswordResetNotification = MailTemplate{

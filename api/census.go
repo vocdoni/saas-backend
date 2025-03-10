@@ -2,13 +2,21 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/db"
 	"go.vocdoni.io/dvote/log"
+	"go.vocdoni.io/dvote/util"
 )
+
+type PublishedCensusResponse struct {
+	URI      string `json:"uri" bson:"uri"`
+	Root     string `json:"root" bson:"root"`
+	CensusID string `json:"censusId" bson:"censusId"`
+}
 
 // createCensusHandler creates a new census for an organization.
 // Requires Manager/Admin role. Returns census ID on success.
@@ -35,7 +43,7 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 
 	census := &db.Census{
 		Type:       censusInfo.Type,
-		OrgAddress: censusInfo.OrgAddress,
+		OrgAddress: util.TrimHex(censusInfo.OrgAddress),
 		CreatedAt:  time.Now(),
 	}
 	censusID, err := a.db.SetCensus(census)
@@ -113,11 +121,6 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 		ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	// check if all participants were added
-	if len(participants.Participants) != int(no.UpsertedCount) {
-		ErrInternalStorageError.Withf("not all participants were added").Write(w)
-		return
-	}
 	httpWriteJSON(w, int(no.UpsertedCount))
 }
 
@@ -155,9 +158,12 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 		// TODO send sms or mail
 		pubCensus = &db.PublishedCensus{
 			Census: *census,
-			URI:    a.serverURL + "/csp/",
-			Root:   a.account.PubKey,
+			URI:    a.serverURL + "/process",
+			Root:   a.account.PubKey.String(),
 		}
+	default:
+		ErrGenericInternalServerError.WithErr(fmt.Errorf("unsupported census type")).Write(w)
+		return
 	}
 
 	if err := a.db.SetPublishedCensus(pubCensus); err != nil {
@@ -165,7 +171,10 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpWriteJSON(w, pubCensus)
+	httpWriteJSON(w, &PublishedCensusResponse{
+		URI:  pubCensus.URI,
+		Root: pubCensus.Root,
+	})
 }
 
 func (a *API) censusParticipantsHandler(w http.ResponseWriter, r *http.Request) {

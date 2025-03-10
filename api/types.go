@@ -441,7 +441,8 @@ type AddParticipantsResponse struct {
 type CreateProcessRequest struct {
 	PublishedCensusRoot string `json:"censusRoot"`
 	PublishedCensusURI  string `json:"censusUri"`
-	Metadata            []byte `json:"metadata"`
+	CensusID            string `json:"censusID"`
+	Metadata            []byte `json:"metadata,omitempty"`
 }
 
 // InitiateAuthRequest defines the payload for participant authentication

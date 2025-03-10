@@ -36,7 +36,7 @@ func (a *API) planInfoHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	plan, err := a.db.Plan(planIDUint)
 	if err != nil {
-		ErPlanNotFound.Withf("could not get plan: %v", err).Write(w)
+		ErrPlanNotFound.Withf("could not get plan: %v", err).Write(w)
 		return
 	}
 	// send the plan back to the user

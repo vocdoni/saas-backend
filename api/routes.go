@@ -100,7 +100,29 @@ const (
 	// GET /process/{processId} to get process information
 	processEndpoint = "/process/{processId}"
 	// POST /process/{processId}/auth to check if the voter is authorized
-	processAuthEndpoint = "/process/{processId}/auth"
+	// processAuthEndpoint = "/process/{processId}/auth"
+
+	// two-factor auth routes
+	// POST /process/{processId}/2fa/{step} to handle two-factor authentication
+	twofactorAuthEndpoint          = "/process/{processId}/auth/{step}"
+	twofactorAuthEndpointBackwards = "/process/auth/elections/{processId}/blind/2fa/{step}"
+	// POST /process/{processId}/2fa/sign to sign with two-factor authentication
+	twofactorSignEndpoint          = "/process/{processId}/sign"
+	twofactorSignEndpointBackwards = "/process/auth/elections/{processId}/blind/sign"
+
+	// two-factor process bundle routes
+	// POST /process/bundle to create a new bundle
+	processBundleEndpoint = "/process/bundle"
+	// PUT /process/bundle/{bundleId} to add new processes to the bundle
+	processBundleUpdateEndpoint = "/process/bundle/{bundleId}"
+	// GET /process/bundle/{bundleId} to get the bundle information
+	processBundleInfoEndpoint = "/process/bundle/{bundleId}"
+	// POST /process/bundle/{bundleId}/auth/{step} to check if the voter is authorized
+	processBundleAuthEndpoint = "/process/bundle/{bundleId}/auth/{step}"
+	// POST /process/bundle/{bundleId}/sign to sign with two-factor authentication
+	processBundleSignEndpoint = "/process/bundle/{bundleId}/sign"
+	// GET /process/bundle/{bundleId}/{participantId} to get the process information
+	processBundleParticipantEndpoint = "/process/bundle/{bundleId}/{participantId}"
 
 	// // census auth routes (currently not implemented)
 	// // POST /process/{processId}/auth/0 to initiate auth

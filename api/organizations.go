@@ -78,7 +78,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	// find default plan
 	defaultPlan, err := a.db.DefaultPlan()
 	if err != nil || defaultPlan == nil {
-		ErrNoDefaultPLan.WithErr((err)).Write(w)
+		ErrNoDefaultPlan.WithErr((err)).Write(w)
 		return
 	}
 	subscription := &db.OrganizationSubscription{

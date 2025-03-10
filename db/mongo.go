@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,13 +13,14 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
+	"go.mongodb.org/mongo-driver/x/mongo/driver/connstring"
 	"go.vocdoni.io/dvote/log"
 )
 
 // MongoStorage uses an external MongoDB service for stoting the user data and election details.
 type MongoStorage struct {
 	database    string
-	client      *mongo.Client
+	DBClient    *mongo.Client
 	keysLock    sync.RWMutex
 	stripePlans []*Plan
 
@@ -33,6 +35,7 @@ type MongoStorage struct {
 	censuses            *mongo.Collection
 	publishedCensuses   *mongo.Collection
 	processes           *mongo.Collection
+	processBundles      *mongo.Collection
 }
 
 type Options struct {
@@ -46,10 +49,31 @@ func New(url, database string, plans []*Plan) (*MongoStorage, error) {
 	if url == "" {
 		return nil, fmt.Errorf("mongo URL is not defined")
 	}
-	if database == "" {
-		return nil, fmt.Errorf("mongo database is not defined")
+	cs, err := connstring.ParseAndValidate(url)
+	if err != nil {
+		return nil, fmt.Errorf("cannot parse the connection string: %w", err)
 	}
-	log.Infow("connecting to mongodb", "url", url, "database", database)
+	// set the database name if it is not empty, if it is empty, try to parse it
+	// from the URL
+	switch {
+	case cs.Database == "" && database == "":
+		return nil, fmt.Errorf("database name is not defined")
+	case database != "":
+		cs.Database = database
+		ms.database = database
+	default:
+		ms.database = cs.Database
+	}
+	// if the auth source is not set, set it to admin (append the param or
+	// create it if no other params are present)
+	if !cs.AuthSourceSet {
+		if strings.Contains(url, "?") {
+			url = fmt.Sprintf("%s&authSource=admin", url)
+		} else {
+			url = fmt.Sprintf("%s?authSource=admin", url)
+		}
+	}
+	log.Infow("connecting to mongodb", "url", url)
 	// preparing connection
 	opts := options.Client()
 	opts.ApplyURI(url)
@@ -66,13 +90,12 @@ func New(url, database string, plans []*Plan) (*MongoStorage, error) {
 	// check if the connection is successful
 	ctx, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel2()
-	err = client.Ping(ctx, readpref.Primary())
-	if err != nil {
-		return nil, fmt.Errorf("cannot connect to mongodb: %w", err)
+	// try to ping the database
+	if err = client.Ping(ctx, readpref.Primary()); err != nil {
+		return nil, fmt.Errorf("cannot ping to mongodb: %w", err)
 	}
 	// init the database client
-	ms.client = client
-	ms.database = database
+	ms.DBClient = client
 	if len(plans) > 0 {
 		ms.stripePlans = plans
 	}
@@ -98,13 +121,13 @@ func New(url, database string, plans []*Plan) (*MongoStorage, error) {
 func (ms *MongoStorage) Close() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := ms.client.Disconnect(ctx); err != nil {
-		log.Warn(err)
+	if err := ms.DBClient.Disconnect(ctx); err != nil {
+		log.Warnw("disconnect error", "error", err)
 	}
 }
 
 func (ms *MongoStorage) Reset() error {
-	log.Infof("resetting database")
+	log.Infow("resetting database")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	// drop users collection
@@ -151,6 +174,10 @@ func (ms *MongoStorage) Reset() error {
 	if err := ms.processes.Drop(ctx); err != nil {
 		return err
 	}
+	// drop the processBundles collection
+	if err := ms.processBundles.Drop(ctx); err != nil {
+		return err
+	}
 	// init the collections
 	if err := ms.initCollections(ms.database); err != nil {
 		return err
@@ -171,7 +198,7 @@ func (ms *MongoStorage) String() string {
 	defer cancel()
 	userCur, err := ms.users.Find(ctx, bson.D{{}})
 	if err != nil {
-		log.Warn(err)
+		log.Warnw("error decoding user", "error", err)
 		return "{}"
 	}
 	// append all users to the export data
@@ -182,7 +209,7 @@ func (ms *MongoStorage) String() string {
 		var user User
 		err := userCur.Decode(&user)
 		if err != nil {
-			log.Warn(err)
+			log.Warnw("error finding users", "error", err)
 		}
 		users.Users = append(users.Users, user)
 	}
@@ -191,7 +218,7 @@ func (ms *MongoStorage) String() string {
 	defer cancel3()
 	verCur, err := ms.verifications.Find(ctx, bson.D{{}})
 	if err != nil {
-		log.Warn(err)
+		log.Warnw("error decoding verification", "error", err)
 		return "{}"
 	}
 	// append all user verifications to the export data
@@ -202,7 +229,7 @@ func (ms *MongoStorage) String() string {
 		var ver UserVerification
 		err := verCur.Decode(&ver)
 		if err != nil {
-			log.Warn(err)
+			log.Warnw("error finding verifications", "error", err)
 		}
 		verifications.Verifications = append(verifications.Verifications, ver)
 	}
@@ -211,7 +238,7 @@ func (ms *MongoStorage) String() string {
 	defer cancel5()
 	orgCur, err := ms.organizations.Find(ctx, bson.D{{}})
 	if err != nil {
-		log.Warn(err)
+		log.Warnw("error decoding organization", "error", err)
 		return "{}"
 	}
 	// append all organizations to the export data
@@ -222,7 +249,7 @@ func (ms *MongoStorage) String() string {
 		var org Organization
 		err := orgCur.Decode(&org)
 		if err != nil {
-			log.Warn(err)
+			log.Warnw("error finding organizations", "error", err)
 		}
 		organizations.Organizations = append(organizations.Organizations, org)
 	}
@@ -232,7 +259,7 @@ func (ms *MongoStorage) String() string {
 	defer cancel7()
 	censusCur, err := ms.censuses.Find(ctx, bson.D{{}})
 	if err != nil {
-		log.Warn(err)
+		log.Warnw("error decoding census", "error", err)
 		return "{}"
 	}
 	// append all censuses to the export data
@@ -243,7 +270,7 @@ func (ms *MongoStorage) String() string {
 		var census Census
 		err := censusCur.Decode(&census)
 		if err != nil {
-			log.Warn(err)
+			log.Warnw("error finding censuses", "error", err)
 		}
 		censuses.Censuses = append(censuses.Censuses, census)
 	}
@@ -253,7 +280,7 @@ func (ms *MongoStorage) String() string {
 	defer cancel9()
 	censusPartCur, err := ms.orgParticipants.Find(ctx, bson.D{{}})
 	if err != nil {
-		log.Warn(err)
+		log.Warnw("error decoding census participant", "error", err)
 		return "{}"
 	}
 	// append all census participants to the export data
@@ -264,7 +291,7 @@ func (ms *MongoStorage) String() string {
 		var censusPart OrgParticipant
 		err := censusPartCur.Decode(&censusPart)
 		if err != nil {
-			log.Warn(err)
+			log.Warnw("error finding census participants", "error", err)
 		}
 		orgParticipants.OrgParticipants = append(orgParticipants.OrgParticipants, censusPart)
 	}
@@ -274,7 +301,7 @@ func (ms *MongoStorage) String() string {
 	defer cancel11()
 	censusMemCur, err := ms.censusMemberships.Find(ctx, bson.D{{}})
 	if err != nil {
-		log.Warn(err)
+		log.Warnw("error decoding census membership", "error", err)
 		return "{}"
 	}
 	// append all census memberships to the export data
@@ -285,7 +312,7 @@ func (ms *MongoStorage) String() string {
 		var censusMem CensusMembership
 		err := censusMemCur.Decode(&censusMem)
 		if err != nil {
-			log.Warn(err)
+			log.Warnw("error finding census memberships", "error", err)
 		}
 		censusMemberships.CensusMemberships = append(censusMemberships.CensusMemberships, censusMem)
 	}
@@ -295,7 +322,7 @@ func (ms *MongoStorage) String() string {
 	defer cancel13()
 	pubCensusCur, err := ms.publishedCensuses.Find(ctx, bson.D{{}})
 	if err != nil {
-		log.Warn(err)
+		log.Warnw("error decoding published census", "error", err)
 		return "{}"
 	}
 	// append all published censuses to the export data
@@ -306,7 +333,7 @@ func (ms *MongoStorage) String() string {
 		var pubCensus PublishedCensus
 		err := pubCensusCur.Decode(&pubCensus)
 		if err != nil {
-			log.Warn(err)
+			log.Warnw("error finding published censuses", "error", err)
 		}
 		publishedCensuses.PublishedCensuses = append(publishedCensuses.PublishedCensuses, pubCensus)
 	}
@@ -316,7 +343,7 @@ func (ms *MongoStorage) String() string {
 	defer cancel15()
 	processCur, err := ms.processes.Find(ctx, bson.D{{}})
 	if err != nil {
-		log.Warn(err)
+		log.Warnw("error decoding process", "error", err)
 		return "{}"
 	}
 	// append all processes to the export data
@@ -327,7 +354,7 @@ func (ms *MongoStorage) String() string {
 		var process Process
 		err := processCur.Decode(&process)
 		if err != nil {
-			log.Warn(err)
+			log.Warnw("error finding processes", "error", err)
 		}
 		processes.Processes = append(processes.Processes, process)
 	}
@@ -336,7 +363,7 @@ func (ms *MongoStorage) String() string {
 	defer cancel17()
 	invCur, err := ms.organizationInvites.Find(ctx, bson.D{{}})
 	if err != nil {
-		log.Warn(err)
+		log.Warnw("error decoding organization invite", "error", err)
 		return "{}"
 	}
 	// append all organization invites to the export data
@@ -347,7 +374,7 @@ func (ms *MongoStorage) String() string {
 		var inv OrganizationInvite
 		err := invCur.Decode(&inv)
 		if err != nil {
-			log.Warn(err)
+			log.Warnw("error finding organization invites", "error", err)
 		}
 		organizationInvites.OrganizationInvites = append(organizationInvites.OrganizationInvites, inv)
 	}
@@ -358,7 +385,7 @@ func (ms *MongoStorage) String() string {
 		orgParticipants, censusMemberships, publishedCensuses, processes,
 	})
 	if err != nil {
-		log.Warn(err)
+		log.Warnw("error marshaling data", "error", err)
 	}
 	return string(data)
 }
@@ -368,7 +395,7 @@ func (ms *MongoStorage) Import(jsonData []byte) error {
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
 	// decode import data
-	log.Infof("importing database")
+	log.Infow("importing database")
 	var collection Collection
 	err := json.Unmarshal(jsonData, &collection)
 	if err != nil {
@@ -385,7 +412,7 @@ func (ms *MongoStorage) Import(jsonData []byte) error {
 		opts := options.Update().SetUpsert(true)
 		_, err := ms.users.UpdateOne(ctx, filter, update, opts)
 		if err != nil {
-			log.Warnw("error upserting user", "err", err, "user", user.ID)
+			log.Warnw("error upserting user", "error", err, "user", user.ID)
 		}
 	}
 	// upsert organizations collection
@@ -396,10 +423,10 @@ func (ms *MongoStorage) Import(jsonData []byte) error {
 		opts := options.Update().SetUpsert(true)
 		_, err := ms.organizations.UpdateOne(ctx, filter, update, opts)
 		if err != nil {
-			log.Warnw("error upserting organization", "err", err, "organization", org.Address)
+			log.Warnw("error upserting organization", "error", err, "organization", org.Address)
 		}
 	}
-	log.Infof("imported database!")
+	log.Infow("imported database")
 
 	// upsert censuses collection
 	log.Infow("importing censuses", "count", len(collection.Censuses))
@@ -409,7 +436,7 @@ func (ms *MongoStorage) Import(jsonData []byte) error {
 		opts := options.Update().SetUpsert(true)
 		_, err := ms.censuses.UpdateOne(ctx, filter, update, opts)
 		if err != nil {
-			log.Warnw("error upserting census", "err", err, "census", census.ID)
+			log.Warnw("error upserting census", "error", err, "census", census.ID)
 		}
 	}
 
@@ -421,7 +448,7 @@ func (ms *MongoStorage) Import(jsonData []byte) error {
 		opts := options.Update().SetUpsert(true)
 		_, err := ms.orgParticipants.UpdateOne(ctx, filter, update, opts)
 		if err != nil {
-			log.Warnw("error upserting census participant", "err", err, "orgParticipant", censusPart.ID)
+			log.Warnw("error upserting census participant", "error", err, "orgParticipant", censusPart.ID)
 		}
 	}
 
@@ -436,7 +463,7 @@ func (ms *MongoStorage) Import(jsonData []byte) error {
 		opts := options.Update().SetUpsert(true)
 		_, err := ms.censusMemberships.UpdateOne(ctx, filter, update, opts)
 		if err != nil {
-			log.Warnw("error upserting census membership", "err", err, "censusMembership", censusMem.ParticipantNo)
+			log.Warnw("error upserting census membership", "error", err, "censusMembership", censusMem.ParticipantNo)
 		}
 	}
 
@@ -448,7 +475,7 @@ func (ms *MongoStorage) Import(jsonData []byte) error {
 		opts := options.Update().SetUpsert(true)
 		_, err := ms.publishedCensuses.UpdateOne(ctx, filter, update, opts)
 		if err != nil {
-			log.Warnw("error upserting published census", "err", err, "publishedCensus", pubCensus.Root)
+			log.Warnw("error upserting published census", "error", err, "publishedCensus", pubCensus.Root)
 		}
 	}
 
@@ -460,7 +487,7 @@ func (ms *MongoStorage) Import(jsonData []byte) error {
 		opts := options.Update().SetUpsert(true)
 		_, err := ms.processes.UpdateOne(ctx, filter, update, opts)
 		if err != nil {
-			log.Warnw("error upserting process", "err", err, "process", process.ID)
+			log.Warnw("error upserting process", "error", err, "process", process.ID.String())
 		}
 	}
 	return nil

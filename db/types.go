@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.vocdoni.io/dvote/util"
 )
@@ -208,7 +209,7 @@ type CensusMembership struct {
 // The publishedCensus is tied to a Census
 type PublishedCensus struct {
 	URI       string    `json:"uri" bson:"uri"`
-	Root      []byte    `json:"root" bson:"root"`
+	Root      string    `json:"root" bson:"root"`
 	Census    Census    `json:"census" bson:"census"`
 	CreatedAt time.Time `json:"createdAt" bson:"createdAt"`
 }
@@ -217,10 +218,27 @@ type PublishedCensus struct {
 // A process is tied to an organization by the orgAddress
 // and to a publishedCensus
 type Process struct {
-	ID              []byte          `json:"id" bson:"_id"`
-	OrgAddress      string          `json:"orgAdress" bson:"orgAddress"`
-	PublishedCensus PublishedCensus `json:"publishedCensus" bson:"publishedCensus"`
-	Metadata        []byte          `json:"metadata" bson:"metadata"`
+	ID              internal.HexBytes `json:"id" bson:"_id"`
+	OrgAddress      string            `json:"orgAdress" bson:"orgAddress"`
+	PublishedCensus PublishedCensus   `json:"publishedCensus" bson:"publishedCensus"`
+	Metadata        []byte            `json:"metadata,omitempty"  bson:"metadata"`
 }
 
-// Utilizar non-salted key
+// ProcessesBundle represents a group of voting processes that share a common census.
+// This allows users to participate in multiple voting processes using the same authentication mechanism.
+type ProcessesBundle struct {
+	ID         primitive.ObjectID  `json:"id" bson:"_id,omitempty"`      // Unique identifier for the bundle
+	Census     Census              `json:"census" bson:"census"`         // The census associated with this bundle
+	CensusRoot string              `json:"censusRoot" bson:"censusRoot"` // The census root public key
+	OrgAddress string              `json:"orgAddress" bson:"orgAddress"` // The organization that owns this bundle
+	Processes  []internal.HexBytes `json:"processes" bson:"processes"`   // Array of process IDs included in this bundle
+}
+
+// Mix of the Membership and the Participant
+type CensusMembershipParticipant struct {
+	ParticipantNo string              `json:"participantNo" bson:"participantNo"`
+	HashedEmail   string              `json:"hashedEmail" bson:"hashedEmail"`
+	HashedPhone   string              `json:"hashedPhone" bson:"hashedPhone"`
+	BundleId      string              `json:"bundleId" bson:"bundleId"`
+	ElectionIds   []internal.HexBytes `json:"electionIds" bson:"electionIds"`
+}

@@ -11,26 +11,32 @@ import (
 
 const testMembershipParticipantNo = "participant123"
 
-func setupTestPrerequisites(c *qt.C) (*Census, string) {
+func setupTestCensusMembershipPrerequisites(t *testing.T, db *MongoStorage, participantSuffix string) (*Census, string) {
 	// Create test organization
 	org := &Organization{
 		Address:   testOrgAddress,
 		Active:    true,
 		CreatedAt: time.Now(),
 	}
-	err := db.SetOrganization(org)
-	c.Assert(err, qt.IsNil)
 
-	// Create test participant
+	err := db.SetOrganization(org)
+	if err != nil {
+		t.Fatalf("failed to set organization: %v", err)
+	}
+
+	// Create test participant with unique ID
+	participantNo := testMembershipParticipantNo + participantSuffix
 	participant := &OrgParticipant{
 		OrgAddress:    testOrgAddress,
-		ParticipantNo: testMembershipParticipantNo,
-		Email:         "test@example.com",
+		ParticipantNo: participantNo,
+		Email:         "test" + participantSuffix + "@example.com",
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
 	}
 	_, err = db.SetOrgParticipant("test_salt", participant)
-	c.Assert(err, qt.IsNil)
+	if err != nil {
+		t.Fatalf("failed to set organization participant: %v", err)
+	}
 
 	// Create test census
 	census := &Census{
@@ -40,240 +46,299 @@ func setupTestPrerequisites(c *qt.C) (*Census, string) {
 		UpdatedAt:  time.Now(),
 	}
 	censusID, err := db.SetCensus(census)
-	c.Assert(err, qt.IsNil)
+	if err != nil {
+		t.Fatalf("failed to set census: %v", err)
+	}
 
 	return census, censusID
 }
 
-func TestSetCensusMembership(t *testing.T) {
-	c := qt.New(t)
-	defer resetDB(c)
-
-	// Setup prerequisites
-	_, censusID := setupTestPrerequisites(c)
-
-	// Test creating a new membership
-	membership := &CensusMembership{
-		ParticipantNo: testMembershipParticipantNo,
-		CensusID:      censusID,
-	}
-
-	// Test with invalid data
-	invalidMembership := &CensusMembership{
-		ParticipantNo: "",
-		CensusID:      censusID,
-	}
-	err := db.SetCensusMembership(invalidMembership)
-	c.Assert(err, qt.Equals, ErrInvalidData)
-
-	invalidMembership = &CensusMembership{
-		ParticipantNo: testMembershipParticipantNo,
-		CensusID:      "",
-	}
-	err = db.SetCensusMembership(invalidMembership)
-	c.Assert(err, qt.Equals, ErrInvalidData)
-
-	// Test with non-existent census
-	nonExistentMembership := &CensusMembership{
-		ParticipantNo: testMembershipParticipantNo,
-		CensusID:      primitive.NewObjectID().Hex(),
-	}
-	err = db.SetCensusMembership(nonExistentMembership)
-	c.Assert(err, qt.Not(qt.IsNil))
-
-	// Test with non-existent participant
-	nonExistentParticipantMembership := &CensusMembership{
-		ParticipantNo: "non-existent",
-		CensusID:      censusID,
-	}
-	err = db.SetCensusMembership(nonExistentParticipantMembership)
-	c.Assert(err, qt.Not(qt.IsNil))
-
-	// Create new membership
-	err = db.SetCensusMembership(membership)
-	c.Assert(err, qt.IsNil)
-
-	// Verify the membership was created correctly
-	createdMembership, err := db.CensusMembership(censusID, testMembershipParticipantNo)
-	c.Assert(err, qt.IsNil)
-	c.Assert(createdMembership.ParticipantNo, qt.Equals, testMembershipParticipantNo)
-	c.Assert(createdMembership.CensusID, qt.Equals, censusID)
-	c.Assert(createdMembership.CreatedAt.IsZero(), qt.IsFalse)
-	c.Assert(createdMembership.UpdatedAt.IsZero(), qt.IsFalse)
-
-	// Test updating an existing membership
-	time.Sleep(time.Millisecond) // Ensure different UpdatedAt timestamp
-	err = db.SetCensusMembership(membership)
-	c.Assert(err, qt.IsNil)
-
-	// Verify the membership was updated correctly
-	updatedMembership, err := db.CensusMembership(censusID, testMembershipParticipantNo)
-	c.Assert(err, qt.IsNil)
-	c.Assert(updatedMembership.ParticipantNo, qt.Equals, testMembershipParticipantNo)
-	c.Assert(updatedMembership.CensusID, qt.Equals, censusID)
-	c.Assert(updatedMembership.CreatedAt, qt.Equals, createdMembership.CreatedAt)
-	c.Assert(updatedMembership.UpdatedAt.After(createdMembership.UpdatedAt), qt.IsTrue)
-}
-
 func TestCensusMembership(t *testing.T) {
 	c := qt.New(t)
-	defer resetDB(c)
+	db := startTestDB(t)
 
-	// Setup prerequisites
-	_, censusID := setupTestPrerequisites(c)
+	t.Run("SetCensusMembership", func(t *testing.T) {
+		c.Assert(db.Reset(), qt.IsNil)
+		// Setup prerequisites
+		_, censusID := setupTestCensusMembershipPrerequisites(t, db, "_set")
 
-	// Test getting membership with invalid data
-	_, err := db.CensusMembership("", testMembershipParticipantNo)
-	c.Assert(err, qt.Equals, ErrInvalidData)
+		// Test creating a new membership
+		participantNo := testMembershipParticipantNo + "_set"
+		membership := &CensusMembership{
+			ParticipantNo: participantNo,
+			CensusID:      censusID,
+		}
 
-	_, err = db.CensusMembership(censusID, "")
-	c.Assert(err, qt.Equals, ErrInvalidData)
+		// Test with invalid data
+		t.Run("InvalidData", func(t *testing.T) {
+			invalidMembership := &CensusMembership{
+				ParticipantNo: "",
+				CensusID:      censusID,
+			}
+			err := db.SetCensusMembership(invalidMembership)
+			c.Assert(err, qt.Equals, ErrInvalidData)
 
-	// Test getting non-existent membership
-	_, err = db.CensusMembership(censusID, testMembershipParticipantNo)
-	c.Assert(err, qt.Equals, ErrNotFound)
+			invalidMembership = &CensusMembership{
+				ParticipantNo: testMembershipParticipantNo,
+				CensusID:      "",
+			}
+			err = db.SetCensusMembership(invalidMembership)
+			c.Assert(err, qt.Equals, ErrInvalidData)
+		})
 
-	// Create a membership to retrieve
-	membership := &CensusMembership{
-		ParticipantNo: testMembershipParticipantNo,
-		CensusID:      censusID,
-	}
-	err = db.SetCensusMembership(membership)
-	c.Assert(err, qt.IsNil)
+		t.Run("NonExistentCensus", func(t *testing.T) {
+			nonExistentMembership := &CensusMembership{
+				ParticipantNo: testMembershipParticipantNo,
+				CensusID:      primitive.NewObjectID().Hex(),
+			}
+			err := db.SetCensusMembership(nonExistentMembership)
+			c.Assert(err, qt.Not(qt.IsNil))
+		})
 
-	// Test getting existing membership
-	retrievedMembership, err := db.CensusMembership(censusID, testMembershipParticipantNo)
-	c.Assert(err, qt.IsNil)
-	c.Assert(retrievedMembership.ParticipantNo, qt.Equals, testMembershipParticipantNo)
-	c.Assert(retrievedMembership.CensusID, qt.Equals, censusID)
-	c.Assert(retrievedMembership.CreatedAt.IsZero(), qt.IsFalse)
-	c.Assert(retrievedMembership.UpdatedAt.IsZero(), qt.IsFalse)
-}
+		t.Run("NonExistentParticipant", func(t *testing.T) {
+			nonExistentParticipantMembership := &CensusMembership{
+				ParticipantNo: "non-existent",
+				CensusID:      censusID,
+			}
+			err := db.SetCensusMembership(nonExistentParticipantMembership)
+			c.Assert(err, qt.Not(qt.IsNil))
+		})
 
-func TestDelCensusMembership(t *testing.T) {
-	c := qt.New(t)
-	defer resetDB(c)
+		t.Run("CreateAndUpdate", func(t *testing.T) {
+			// Create new membership
+			err := db.SetCensusMembership(membership)
+			c.Assert(err, qt.IsNil)
 
-	// Setup prerequisites
-	_, censusID := setupTestPrerequisites(c)
+			// Verify the membership was created correctly
+			createdMembership, err := db.CensusMembership(censusID, participantNo)
+			c.Assert(err, qt.IsNil)
+			c.Assert(createdMembership.ParticipantNo, qt.Equals, participantNo)
+			c.Assert(createdMembership.CensusID, qt.Equals, censusID)
+			c.Assert(createdMembership.CreatedAt.IsZero(), qt.IsFalse)
+			c.Assert(createdMembership.UpdatedAt.IsZero(), qt.IsFalse)
 
-	// Test deleting with invalid data
-	err := db.DelCensusMembership("", testMembershipParticipantNo)
-	c.Assert(err, qt.Equals, ErrInvalidData)
+			// Test updating an existing membership
+			time.Sleep(time.Millisecond) // Ensure different UpdatedAt timestamp
+			err = db.SetCensusMembership(membership)
+			c.Assert(err, qt.IsNil)
 
-	err = db.DelCensusMembership(censusID, "")
-	c.Assert(err, qt.Equals, ErrInvalidData)
+			// Verify the membership was updated correctly
+			updatedMembership, err := db.CensusMembership(censusID, participantNo)
+			c.Assert(err, qt.IsNil)
+			c.Assert(updatedMembership.ParticipantNo, qt.Equals, participantNo)
+			c.Assert(updatedMembership.CensusID, qt.Equals, censusID)
+			c.Assert(updatedMembership.CreatedAt, qt.Equals, createdMembership.CreatedAt)
+			c.Assert(updatedMembership.UpdatedAt.After(createdMembership.UpdatedAt), qt.IsTrue)
+		})
+	})
 
-	// Create a membership to delete
-	membership := &CensusMembership{
-		ParticipantNo: testMembershipParticipantNo,
-		CensusID:      censusID,
-	}
-	err = db.SetCensusMembership(membership)
-	c.Assert(err, qt.IsNil)
+	t.Run("GetCensusMembership", func(t *testing.T) {
+		c.Assert(db.Reset(), qt.IsNil)
+		// Setup prerequisites
+		_, censusID := setupTestCensusMembershipPrerequisites(t, db, "_get")
+		participantNo := testMembershipParticipantNo + "_get"
 
-	// Test deleting existing membership
-	err = db.DelCensusMembership(censusID, testMembershipParticipantNo)
-	c.Assert(err, qt.IsNil)
+		t.Run("InvalidData", func(t *testing.T) {
+			// Test getting membership with invalid data
+			_, err := db.CensusMembership("", participantNo)
+			c.Assert(err, qt.Equals, ErrInvalidData)
 
-	// Verify the membership was deleted
-	_, err = db.CensusMembership(censusID, testMembershipParticipantNo)
-	c.Assert(err, qt.Equals, ErrNotFound)
+			_, err = db.CensusMembership(censusID, "")
+			c.Assert(err, qt.Equals, ErrInvalidData)
+		})
 
-	// Test deleting non-existent membership (should not error)
-	err = db.DelCensusMembership(censusID, testMembershipParticipantNo)
-	c.Assert(err, qt.IsNil)
-}
+		t.Run("NonExistentMembership", func(t *testing.T) {
+			// Test getting non-existent membership
+			_, err := db.CensusMembership(censusID, participantNo)
+			c.Assert(err, qt.Equals, ErrNotFound)
+		})
 
-func TestSetBulkCensusMembership(t *testing.T) {
-	c := qt.New(t)
-	defer resetDB(c)
+		t.Run("ExistingMembership", func(t *testing.T) {
+			// Create a membership to retrieve
+			membership := &CensusMembership{
+				ParticipantNo: participantNo,
+				CensusID:      censusID,
+			}
+			err := db.SetCensusMembership(membership)
+			c.Assert(err, qt.IsNil)
 
-	// Setup prerequisites
-	_, censusID := setupTestPrerequisites(c)
+			// Test getting existing membership
+			retrievedMembership, err := db.CensusMembership(censusID, participantNo)
+			c.Assert(err, qt.IsNil)
+			c.Assert(retrievedMembership.ParticipantNo, qt.Equals, participantNo)
+			c.Assert(retrievedMembership.CensusID, qt.Equals, censusID)
+			c.Assert(retrievedMembership.CreatedAt.IsZero(), qt.IsFalse)
+			c.Assert(retrievedMembership.UpdatedAt.IsZero(), qt.IsFalse)
+		})
+	})
 
-	// Test with empty participants
-	result, err := db.SetBulkCensusMembership("test_salt", censusID, nil)
-	c.Assert(err, qt.IsNil)
-	c.Assert(result, qt.IsNil)
+	t.Run("DeleteCensusMembership", func(t *testing.T) {
+		c.Assert(db.Reset(), qt.IsNil)
+		// Setup prerequisites
+		_, censusID := setupTestCensusMembershipPrerequisites(t, db, "_delete")
+		participantNo := testMembershipParticipantNo + "_delete"
 
-	// Test with empty census ID
-	participants := []OrgParticipant{
-		{
-			ParticipantNo: "test1",
-			Email:         "test1@example.com",
-			Phone:         "1234567890",
-			Password:      "password1",
-		},
-	}
-	result, err = db.SetBulkCensusMembership("test_salt", "", participants)
-	c.Assert(err, qt.Equals, ErrInvalidData)
-	c.Assert(result, qt.IsNil)
+		t.Run("InvalidData", func(t *testing.T) {
+			// Test deleting with invalid data
+			err := db.DelCensusMembership("", participantNo)
+			c.Assert(err, qt.Equals, ErrInvalidData)
 
-	// Test with non-existent census
-	result, err = db.SetBulkCensusMembership("test_salt", primitive.NewObjectID().Hex(), participants)
-	c.Assert(err, qt.Not(qt.IsNil))
-	c.Assert(result, qt.IsNil)
+			err = db.DelCensusMembership(censusID, "")
+			c.Assert(err, qt.Equals, ErrInvalidData)
+		})
 
-	// Test successful bulk creation
-	participants = []OrgParticipant{
-		{
-			ParticipantNo: "test1",
-			Email:         "test1@example.com",
-			Phone:         "1234567890",
-			Password:      "password1",
-		},
-		{
-			ParticipantNo: "test2",
-			Email:         "test2@example.com",
-			Phone:         "0987654321",
-			Password:      "password2",
-		},
-	}
+		t.Run("ExistingMembership", func(t *testing.T) {
+			// Create a membership to delete
+			membership := &CensusMembership{
+				ParticipantNo: participantNo,
+				CensusID:      censusID,
+			}
+			err := db.SetCensusMembership(membership)
+			c.Assert(err, qt.IsNil)
 
-	result, err = db.SetBulkCensusMembership("test_salt", censusID, participants)
-	c.Assert(err, qt.IsNil)
-	c.Assert(result, qt.Not(qt.IsNil))
-	c.Assert(result.UpsertedCount, qt.Equals, int64(2))
+			// Test deleting existing membership
+			err = db.DelCensusMembership(censusID, participantNo)
+			c.Assert(err, qt.IsNil)
 
-	// Verify participants were created with hashed data
-	for _, p := range participants {
-		participant, err := db.OrgParticipantByNo(testOrgAddress, p.ParticipantNo)
-		c.Assert(err, qt.IsNil)
-		c.Assert(participant.Email, qt.Equals, "")
-		c.Assert(participant.HashedEmail, qt.Not(qt.Equals), "")
-		c.Assert(participant.Phone, qt.Equals, "")
-		c.Assert(participant.HashedPhone, qt.Not(qt.Equals), "")
-		c.Assert(participant.Password, qt.Equals, "")
-		c.Assert(participant.HashedPass, qt.Not(qt.Equals), "")
-		c.Assert(participant.CreatedAt.IsZero(), qt.IsFalse)
+			// Verify the membership was deleted
+			_, err = db.CensusMembership(censusID, participantNo)
+			c.Assert(err, qt.Equals, ErrNotFound)
+		})
 
-		// Verify memberships were created
-		membership, err := db.CensusMembership(censusID, p.ParticipantNo)
-		c.Assert(err, qt.IsNil)
-		c.Assert(membership.ParticipantNo, qt.Equals, p.ParticipantNo)
-		c.Assert(membership.CensusID, qt.Equals, censusID)
-		c.Assert(membership.CreatedAt.IsZero(), qt.IsFalse)
-	}
+		t.Run("NonExistentMembership", func(t *testing.T) {
+			// Test deleting non-existent membership (should not error)
+			err := db.DelCensusMembership(censusID, participantNo)
+			c.Assert(err, qt.IsNil)
+		})
+	})
 
-	// Test updating existing participants and memberships
-	participants[0].Email = "updated1@example.com"
-	participants[1].Phone = "1111111111"
+	t.Run("BulkCensusMembership", func(t *testing.T) {
+		c.Assert(db.Reset(), qt.IsNil)
+		// Setup prerequisites
+		_, censusID := setupTestCensusMembershipPrerequisites(t, db, "_bulk")
 
-	result, err = db.SetBulkCensusMembership("test_salt", censusID, participants)
-	c.Assert(err, qt.IsNil)
-	c.Assert(result, qt.Not(qt.IsNil))
-	c.Assert(result.ModifiedCount, qt.Equals, int64(2))
+		t.Run("EmptyParticipants", func(t *testing.T) {
+			// Test with empty participants
+			result, err := db.SetBulkCensusMembership("test_salt", censusID, nil)
+			c.Assert(err, qt.IsNil)
+			c.Assert(result, qt.IsNil)
+		})
 
-	// Verify updates
-	for _, p := range participants {
-		participant, err := db.OrgParticipantByNo(testOrgAddress, p.ParticipantNo)
-		c.Assert(err, qt.IsNil)
-		c.Assert(participant.Email, qt.Equals, "")
-		c.Assert(participant.HashedEmail, qt.Not(qt.Equals), "")
-		c.Assert(participant.Phone, qt.Equals, "")
-		c.Assert(participant.HashedPhone, qt.Not(qt.Equals), "")
-	}
+		t.Run("InvalidData", func(t *testing.T) {
+			// Test with empty census ID
+			participants := []OrgParticipant{
+				{
+					ParticipantNo: "test1",
+					Email:         "test1@example.com",
+					Phone:         "1234567890",
+					Password:      "password1",
+				},
+			}
+			result, err := db.SetBulkCensusMembership("test_salt", "", participants)
+			c.Assert(err, qt.Equals, ErrInvalidData)
+			c.Assert(result, qt.IsNil)
+		})
+
+		t.Run("NonExistentCensus", func(t *testing.T) {
+			participants := []OrgParticipant{
+				{
+					ParticipantNo: "test1",
+					Email:         "test1@example.com",
+					Phone:         "1234567890",
+					Password:      "password1",
+				},
+			}
+			// Test with non-existent census
+			result, err := db.SetBulkCensusMembership("test_salt", primitive.NewObjectID().Hex(), participants)
+			c.Assert(err, qt.Not(qt.IsNil))
+			c.Assert(result, qt.IsNil)
+		})
+
+		t.Run("SuccessfulBulkCreation", func(t *testing.T) {
+			// Test successful bulk creation
+			participants := []OrgParticipant{
+				{
+					ParticipantNo: "test1",
+					Email:         "test1@example.com",
+					Phone:         "1234567890",
+					Password:      "password1",
+				},
+				{
+					ParticipantNo: "test2",
+					Email:         "test2@example.com",
+					Phone:         "0987654321",
+					Password:      "password2",
+				},
+			}
+
+			result, err := db.SetBulkCensusMembership("test_salt", censusID, participants)
+			c.Assert(err, qt.IsNil)
+			c.Assert(result, qt.Not(qt.IsNil))
+			c.Assert(result.UpsertedCount, qt.Equals, int64(2))
+
+			// Verify participants were created with hashed data
+			for _, p := range participants {
+				participant, err := db.OrgParticipantByNo(testOrgAddress, p.ParticipantNo)
+				c.Assert(err, qt.IsNil)
+				c.Assert(participant.Email, qt.Equals, "")
+				c.Assert(participant.HashedEmail, qt.Not(qt.Equals), "")
+				c.Assert(participant.Phone, qt.Equals, "")
+				c.Assert(participant.HashedPhone, qt.Not(qt.Equals), "")
+				c.Assert(participant.Password, qt.Equals, "")
+				c.Assert(participant.HashedPass, qt.Not(qt.Equals), "")
+				c.Assert(participant.CreatedAt.IsZero(), qt.IsFalse)
+
+				// Verify memberships were created
+				membership, err := db.CensusMembership(censusID, p.ParticipantNo)
+				c.Assert(err, qt.IsNil)
+				c.Assert(membership.ParticipantNo, qt.Equals, p.ParticipantNo)
+				c.Assert(membership.CensusID, qt.Equals, censusID)
+				c.Assert(membership.CreatedAt.IsZero(), qt.IsFalse)
+			}
+		})
+
+		t.Run("UpdateExistingParticipants", func(t *testing.T) {
+			// Create participants first
+			participants := []OrgParticipant{
+				{
+					ParticipantNo: "update1",
+					Email:         "update1@example.com",
+					Phone:         "1234567890",
+					Password:      "password1",
+				},
+				{
+					ParticipantNo: "update2",
+					Email:         "update2@example.com",
+					Phone:         "0987654321",
+					Password:      "password2",
+				},
+			}
+
+			// Create initial participants
+			result, err := db.SetBulkCensusMembership("test_salt", censusID, participants)
+			c.Assert(err, qt.IsNil)
+			c.Assert(result, qt.Not(qt.IsNil))
+
+			// Test updating existing participants and memberships
+			participants[0].Email = "updated1@example.com"
+			participants[1].Phone = "1111111111"
+
+			result, err = db.SetBulkCensusMembership("test_salt", censusID, participants)
+			c.Assert(err, qt.IsNil)
+			c.Assert(result, qt.Not(qt.IsNil))
+			c.Assert(result.ModifiedCount, qt.Equals, int64(2))
+
+			// Verify updates
+			for _, p := range participants {
+				participant, err := db.OrgParticipantByNo(testOrgAddress, p.ParticipantNo)
+				c.Assert(err, qt.IsNil)
+				c.Assert(participant.Email, qt.Equals, "")
+				c.Assert(participant.HashedEmail, qt.Not(qt.Equals), "")
+				c.Assert(participant.Phone, qt.Equals, "")
+				c.Assert(participant.HashedPhone, qt.Not(qt.Equals), "")
+			}
+		})
+	})
 }
 
 func TestCensusParticipantsPaginatedAndCount(t *testing.T) {

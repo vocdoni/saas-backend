@@ -6,26 +6,33 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
+
+	"github.com/nyaruka/phonenumbers"
 )
 
 const (
-	EmailRegexTemplate       = `^[\w.\+\.\-]+@([\w\-]+\.)+[\w]{2,}$`
-	PhoneNumberRegexTemplate = `^(?:\+|00)([1-9]\d{0,3})(?:[ -]?\d){4,14}$`
+	EmailRegexTemplate  = `^[\w.\+\.\-]+@([\w\-]+\.)+[\w]{2,}$`
+	DefaultPhoneCountry = "ES"
 )
 
-var (
-	emailRegex       = regexp.MustCompile(EmailRegexTemplate)
-	phoneNumberRegex = regexp.MustCompile(PhoneNumberRegexTemplate)
-)
+var emailRegex = regexp.MustCompile(EmailRegexTemplate)
 
 // ValidEmail helper function allows to validate an email address.
 func ValidEmail(email string) bool {
 	return emailRegex.MatchString(email)
 }
 
-// ValidPhoneNumber helper function allows to validate a phone number.
-func ValidPhoneNumber(phoneNumber string) bool {
-	return phoneNumberRegex.MatchString(phoneNumber)
+// SanitizeAndVerifyEmail helper function allows to sanitize and verify a phone number.
+func SanitizeAndVerifyPhoneNumber(phone string) (string, error) {
+	pn, err := phonenumbers.Parse(phone, DefaultPhoneCountry)
+	if err != nil {
+		return "", fmt.Errorf("invalid phone number %s: %w", phone, err)
+	}
+	if !phonenumbers.IsValidNumber(pn) {
+		return "", fmt.Errorf("invalid phone number %s", phone)
+	}
+	// Build the phone number string
+	return fmt.Sprintf("+%d%d", pn.GetCountryCode(), pn.GetNationalNumber()), nil
 }
 
 // RandomBytes helper function allows to generate a random byte slice of n bytes.
@@ -61,5 +68,7 @@ func HashVerificationCode(userEmail, code string) string {
 }
 
 func HashOrgData(orgAddress, data string) []byte {
-	return sha256.New().Sum([]byte(orgAddress + data))
+	h := sha256.New()
+	h.Write([]byte(orgAddress + data))
+	return h.Sum(nil)
 }
