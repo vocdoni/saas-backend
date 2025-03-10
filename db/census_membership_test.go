@@ -343,7 +343,7 @@ func TestCensusMembership(t *testing.T) {
 
 func TestCensusParticipantsPaginatedAndCount(t *testing.T) {
 	c := qt.New(t)
-	defer resetDB(c)
+	db := startTestDB(t)
 	// create org
 	organization := &Organization{
 		Address: testOrgAddress,

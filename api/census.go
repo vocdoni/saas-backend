@@ -177,6 +177,8 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// censusParticipantsHandler retrieves participants of a census with pagination.
+// Requires Manager/Admin role. Returns participants with pagination info.
 func (a *API) censusParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 	censusID := chi.URLParam(r, "id")
 	if censusID == "" {
@@ -205,7 +207,8 @@ func (a *API) censusParticipantsHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// get the participants from the database based on the limit and offset
-	// values provided in the request
+	// values provided in the request, by default the limit is 50 and the
+	// offset is 0
 	limit, offset := limitOffsetFromRequest(r, 50, 0)
 	dbParticipants, err := a.db.CensusParticipantsPaginated(censusID, limit, offset)
 	if err != nil {

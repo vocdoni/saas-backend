@@ -214,12 +214,6 @@ func (ms *MongoStorage) createIndexes() error {
 			{Key: "participantNo", Value: 1}, // 1 for ascending order
 		},
 	}
-	// create an index for the tuple OrgParticipant:ID and CensusID
-	orgParticipantdAddresNoIndex := mongo.IndexModel{
-		Keys: bson.D{
-			{Key: "participantNo", Value: 1}, // 1 for ascending order
-		},
-	}
 	// create an index for the tuple OrgParticipant:OrgAddress and
 	// OrgParticipant:participantNo
 	orgAddressParticipantNoIndex := mongo.IndexModel{
@@ -251,7 +245,6 @@ func (ms *MongoStorage) createIndexes() error {
 		orgParticipantdNoIndex,
 		orgAddressParticipantNoIndex,
 		orgParticipantdAddresIndex,
-		orgParticipantdAddresNoIndex,
 		orgParticipantMailPhoneIndex,
 		orgParticipantCreatedAt,
 	}); err != nil {

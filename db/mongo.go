@@ -70,6 +70,9 @@ func New(url, database string, plans []*Plan) (*MongoStorage, error) {
 		if strings.Contains(url, "?") {
 			url = fmt.Sprintf("%s&authSource=admin", url)
 		} else {
+			if !strings.HasSuffix(url, "/") {
+				url = fmt.Sprintf("%s/", url)
+			}
 			url = fmt.Sprintf("%s?authSource=admin", url)
 		}
 	}

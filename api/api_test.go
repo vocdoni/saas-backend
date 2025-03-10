@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"testing"
@@ -74,7 +75,7 @@ func pingAPI(endpoint string, retries int) error {
 	}
 	// try to ping the API
 	var pingErr error
-	for i := 0; i < retries; i++ {
+	for range retries {
 		var resp *http.Response
 		if resp, pingErr = http.DefaultClient.Do(req); pingErr == nil {
 			if resp.StatusCode == http.StatusOK {
@@ -116,7 +117,12 @@ func TestMain(m *testing.M) {
 	if testDB, err = db.New(mongoURI, test.RandomDatabaseName(), plans); err != nil {
 		panic(err)
 	}
-	defer testDB.Close()
+	defer func() {
+		if err := testDB.Reset(); err != nil {
+			log.Println(err)
+		}
+		testDB.Close()
+	}()
 	// start the faucet container
 	faucetContainer, err := test.StartVocfaucetContainer(ctx)
 	if err != nil {

@@ -238,7 +238,7 @@ func TestOrgParticipants(t *testing.T) {
 
 func TestOrgParticipantsPaginatedAndCount(t *testing.T) {
 	c := qt.New(t)
-	defer resetDB(c)
+	db := startTestDB(t)
 	// create org
 	organization := &Organization{
 		Address: testOrgAddress,
