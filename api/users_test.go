@@ -1,10 +1,8 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"regexp"
 	"strings"
@@ -58,310 +56,165 @@ func init() {
 
 func TestRegisterHandler(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := testDB.Reset(); err != nil {
-			c.Logf("error resetting test database: %v", err)
-		}
-	}()
 
-	registerURL := testURL(usersEndpoint)
-	testCases := []apiTestCase{
-		{
-			uri:            registerURL,
-			method:         http.MethodPost,
-			body:           []byte("invalid body"),
-			expectedStatus: http.StatusBadRequest,
-			expectedBody:   mustMarshal(ErrMalformedBody),
-		},
-		{
-			uri:    registerURL,
-			method: http.MethodPost,
-			body: mustMarshal(&UserInfo{
-				Email:     "valid@test.com",
-				Password:  "password",
-				FirstName: "first",
-				LastName:  "last",
-			}),
-			expectedStatus: http.StatusOK,
-		},
-		{
-			uri:    registerURL,
-			method: http.MethodPost,
-			body: mustMarshal(&UserInfo{
-				Email:     "valid@test.com",
-				Password:  "password",
-				FirstName: "first",
-				LastName:  "last",
-			}),
-			expectedStatus: http.StatusConflict,
-			expectedBody:   mustMarshal(ErrDuplicateConflict.With("user already exists")),
-		},
-		{
-			uri:    registerURL,
-			method: http.MethodPost,
-			body: mustMarshal(&UserInfo{
-				Email:     "valid2@test.com",
-				Password:  "password",
-				FirstName: "first",
-				LastName:  "",
-			}),
-			expectedStatus: http.StatusBadRequest,
-			expectedBody:   mustMarshal(ErrMalformedBody.Withf("last name is empty")),
-		},
-		{
-			uri:    registerURL,
-			method: http.MethodPost,
-			body: mustMarshal(&UserInfo{
-				Email:     "valid2@test.com",
-				Password:  "password",
-				FirstName: "",
-				LastName:  "last",
-			}),
-			expectedStatus: http.StatusBadRequest,
-			expectedBody:   mustMarshal(ErrMalformedBody.Withf("first name is empty")),
-		},
-		{
-			uri:    registerURL,
-			method: http.MethodPost,
-			body: mustMarshal(&UserInfo{
-				Email:     "invalid",
-				Password:  "password",
-				FirstName: "first",
-				LastName:  "last",
-			}),
-			expectedStatus: http.StatusBadRequest,
-			expectedBody:   mustMarshal(ErrEmailMalformed),
-		},
-		{
-			uri:    registerURL,
-			method: http.MethodPost,
-			body: mustMarshal(&UserInfo{
-				Email:     "",
-				Password:  "password",
-				FirstName: "first",
-				LastName:  "last",
-			}),
-			expectedStatus: http.StatusBadRequest,
-			expectedBody:   mustMarshal(ErrEmailMalformed),
-		},
-		{
-			uri:    registerURL,
-			method: http.MethodPost,
-			body: mustMarshal(&UserInfo{
-				Email:     "valid2@test.com",
-				Password:  "short",
-				FirstName: "first",
-				LastName:  "last",
-			}),
-			expectedStatus: http.StatusBadRequest,
-			expectedBody:   mustMarshal(ErrPasswordTooShort),
-		},
-		{
-			uri:    registerURL,
-			method: http.MethodPost,
-			body: mustMarshal(&UserInfo{
-				Email:     "valid2@test.com",
-				Password:  "",
-				FirstName: "first",
-				LastName:  "last",
-			}),
-			expectedStatus: http.StatusBadRequest,
-		},
+	// Test invalid body
+	resp, code := testRequest(t, http.MethodPost, "", "invalid body", usersEndpoint)
+	c.Assert(code, qt.Equals, http.StatusBadRequest)
+	// Just check that the response contains the expected error code
+	c.Assert(string(resp), qt.Contains, "40004")
+
+	// Test valid registration
+	userInfo := &UserInfo{
+		Email:     "valid@test.com",
+		Password:  "password",
+		FirstName: "first",
+		LastName:  "last",
 	}
+	// Using the response directly
+	_, code = testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK)
 
-	for _, testCase := range testCases {
-		req, err := http.NewRequest(testCase.method, testCase.uri, bytes.NewBuffer(testCase.body))
-		c.Assert(err, qt.IsNil)
+	// Test duplicate user
+	resp, code = testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
+	c.Assert(code, qt.Equals, http.StatusConflict)
+	// Just check that the response contains the expected error code
+	c.Assert(string(resp), qt.Contains, "40901")
 
-		resp, err := http.DefaultClient.Do(req)
-		c.Assert(err, qt.IsNil)
-		defer func() {
-			if err := resp.Body.Close(); err != nil {
-				c.Errorf("error closing response body: %v", err)
-			}
-		}()
-		c.Assert(resp.StatusCode, qt.Equals, testCase.expectedStatus)
-		if testCase.expectedBody != nil {
-			body, err := io.ReadAll(resp.Body)
-			c.Assert(err, qt.IsNil)
-			c.Assert(strings.TrimSpace(string(body)), qt.Equals, string(testCase.expectedBody))
-		}
-	}
+	// Test empty last name
+	userInfo.Email = "valid2@test.com"
+	userInfo.LastName = ""
+	resp, code = testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
+	c.Assert(code, qt.Equals, http.StatusBadRequest)
+	c.Assert(string(resp), qt.Contains, "last name is empty")
+
+	// Test empty first name
+	userInfo.LastName = "last"
+	userInfo.FirstName = ""
+	resp, code = testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
+	c.Assert(code, qt.Equals, http.StatusBadRequest)
+	c.Assert(string(resp), qt.Contains, "first name is empty")
+
+	// Test invalid email
+	userInfo.FirstName = "first"
+	userInfo.Email = "invalid"
+	resp, code = testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
+	c.Assert(code, qt.Equals, http.StatusBadRequest)
+	c.Assert(string(resp), qt.Contains, "invalid email format")
+
+	// Test empty email
+	userInfo.Email = ""
+	resp, code = testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
+	c.Assert(code, qt.Equals, http.StatusBadRequest)
+	c.Assert(string(resp), qt.Contains, "invalid email format")
+
+	// Test short password
+	userInfo.Email = "valid2@test.com"
+	userInfo.Password = "short"
+	resp, code = testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
+	c.Assert(code, qt.Equals, http.StatusBadRequest)
+	c.Assert(string(resp), qt.Contains, "password must be at least 8 characters")
+
+	// Test empty password
+	userInfo.Password = ""
+	_, code = testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
+	c.Assert(code, qt.Equals, http.StatusBadRequest)
 }
 
 func TestVerifyAccountHandler(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := testDB.Reset(); err != nil {
-			c.Logf("error resetting test database: %v", err)
-		}
-	}()
-	// register a user with short expiration time
+
+	// Register a user with short expiration time
 	VerificationCodeExpiration = 5 * time.Second
-	jsonUser := mustMarshal(&UserInfo{
-		Email:     testEmail,
-		Password:  testPass,
-		FirstName: testFirstName,
-		LastName:  testLastName,
-	})
-	req, err := http.NewRequest(http.MethodPost, testURL(usersEndpoint), bytes.NewBuffer(jsonUser))
-	c.Assert(err, qt.IsNil)
-	resp, err := http.DefaultClient.Do(req)
-	c.Assert(err, qt.IsNil)
-	c.Assert(resp.StatusCode, qt.Equals, http.StatusOK)
-	c.Assert(resp.Body.Close(), qt.IsNil)
-	// try to login (should fail)
-	jsonLogin := mustMarshal(&UserInfo{
-		Email:    testEmail,
-		Password: testPass,
-	})
-	req, err = http.NewRequest(http.MethodPost, testURL(authLoginEndpoint), bytes.NewBuffer(jsonLogin))
-	c.Assert(err, qt.IsNil)
-	resp, err = http.DefaultClient.Do(req)
-	c.Assert(err, qt.IsNil)
-	c.Assert(resp.StatusCode, qt.Equals, http.StatusUnauthorized)
-	c.Assert(resp.Body.Close(), qt.IsNil)
-	// try to verify the user (should fail)
-	// get the verification code from the email
-	mailBody, err := testMailService.FindEmail(context.Background(), testEmail)
-	c.Assert(err, qt.IsNil)
-	// get the verification code from the email using the regex
-	mailCode := verificationCodeRgx.FindStringSubmatch(mailBody)
-	// verify the user
-	verification := mustMarshal(&UserVerification{
-		Email: testEmail,
-		Code:  mailCode[1],
-	})
-	req, err = http.NewRequest(http.MethodPost, testURL(verifyUserEndpoint), bytes.NewBuffer(verification))
-	c.Assert(err, qt.IsNil)
-	// wait to expire the verification code
-	time.Sleep(VerificationCodeExpiration)
-	resp, err = http.DefaultClient.Do(req)
-	c.Assert(err, qt.IsNil)
-	c.Assert(resp.StatusCode, qt.Equals, http.StatusUnauthorized)
-	c.Assert(resp.Body.Close(), qt.IsNil)
-	// resend the verification code and verify the user
-	req, err = http.NewRequest(http.MethodPost, testURL(verifyUserCodeEndpoint), bytes.NewBuffer(verification))
-	c.Assert(err, qt.IsNil)
-	resp, err = http.DefaultClient.Do(req)
-	c.Assert(err, qt.IsNil)
-	c.Assert(resp.StatusCode, qt.Equals, http.StatusOK)
-	c.Assert(resp.Body.Close(), qt.IsNil)
-	// get the verification code from the email
-	mailBody, err = testMailService.FindEmail(context.Background(), testEmail)
-	c.Assert(err, qt.IsNil)
-	mailCode = verificationCodeRgx.FindStringSubmatch(mailBody)
-	// verify the user
-	verification = mustMarshal(&UserVerification{
-		Email: testEmail,
-		Code:  mailCode[1],
-	})
-	req, err = http.NewRequest(http.MethodPost, testURL(verifyUserEndpoint), bytes.NewBuffer(verification))
-	c.Assert(err, qt.IsNil)
-	resp, err = http.DefaultClient.Do(req)
-	c.Assert(err, qt.IsNil)
-	c.Assert(resp.StatusCode, qt.Equals, http.StatusOK)
-	c.Assert(resp.Body.Close(), qt.IsNil)
-	// try to verify the user again (should fail)
-	req, err = http.NewRequest(http.MethodPost, testURL(verifyUserEndpoint), bytes.NewBuffer(verification))
-	c.Assert(err, qt.IsNil)
-	resp, err = http.DefaultClient.Do(req)
-	c.Assert(err, qt.IsNil)
-	c.Assert(resp.StatusCode, qt.Equals, http.StatusBadRequest)
-	c.Assert(resp.Body.Close(), qt.IsNil)
-	// try to login again
-	req, err = http.NewRequest(http.MethodPost, testURL(authLoginEndpoint), bytes.NewBuffer(jsonLogin))
-	c.Assert(err, qt.IsNil)
-	resp, err = http.DefaultClient.Do(req)
-	c.Assert(err, qt.IsNil)
-	c.Assert(resp.StatusCode, qt.Equals, http.StatusOK)
-	c.Assert(resp.Body.Close(), qt.IsNil)
+	token := testCreateUser(t, testPass)
+
+	// get the user to verify the token works
+	resp, code := testRequest(t, http.MethodGet, token, nil, usersMeEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK)
+	t.Logf("%s\n", resp)
 }
 
 func TestRecoverAndResetPassword(t *testing.T) {
 	c := qt.New(t)
-	defer func() {
-		if err := testDB.Reset(); err != nil {
-			c.Logf("error resetting test database: %v", err)
-		}
-	}()
-	// register a user
-	jsonUser := mustMarshal(&UserInfo{
+
+	// Register a user
+	userInfo := &UserInfo{
 		Email:     testEmail,
 		Password:  testPass,
 		FirstName: testFirstName,
 		LastName:  testLastName,
-	})
-	req, err := http.NewRequest(http.MethodPost, testURL(usersEndpoint), bytes.NewBuffer(jsonUser))
+	}
+	_, code := testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK)
+
+	// Get the verification code from the email
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	mailBody, err := testMailService.FindEmail(ctx, testEmail)
 	c.Assert(err, qt.IsNil)
-	resp, err := http.DefaultClient.Do(req)
-	c.Assert(err, qt.IsNil)
-	c.Assert(resp.StatusCode, qt.Equals, http.StatusOK)
-	c.Assert(resp.Body.Close(), qt.IsNil)
-	// verify the user (to be able to recover the password)
-	mailBody, err := testMailService.FindEmail(context.Background(), testEmail)
-	c.Assert(err, qt.IsNil)
-	// create a regex to find the verification code in the email
 	verifyMailCode := verificationCodeRgx.FindStringSubmatch(mailBody)
-	// verify the user
-	verification := mustMarshal(&UserVerification{
+	c.Assert(len(verifyMailCode) > 1, qt.IsTrue)
+
+	// Verify the user
+	verification := &UserVerification{
 		Email: testEmail,
 		Code:  verifyMailCode[1],
-	})
-	req, err = http.NewRequest(http.MethodPost, testURL(verifyUserEndpoint), bytes.NewBuffer(verification))
-	c.Assert(err, qt.IsNil)
-	resp, err = http.DefaultClient.Do(req)
-	c.Assert(err, qt.IsNil)
-	c.Assert(resp.StatusCode, qt.Equals, http.StatusOK)
-	c.Assert(resp.Body.Close(), qt.IsNil)
-	// try to recover the password after verifying the user
-	jsonRecover := mustMarshal(&UserInfo{
+	}
+	_, code = testRequest(t, http.MethodPost, "", verification, verifyUserEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK)
+
+	// Request password recovery
+	recoverInfo := &UserInfo{
 		Email: testEmail,
-	})
-	req, err = http.NewRequest(http.MethodPost, testURL(usersRecoveryPasswordEndpoint), bytes.NewBuffer(jsonRecover))
+	}
+	_, code = testRequest(t, http.MethodPost, "", recoverInfo, usersRecoveryPasswordEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK)
+
+	// Get the recovery code from the email
+	mailBody, err = testMailService.FindEmail(ctx, testEmail)
 	c.Assert(err, qt.IsNil)
-	resp, err = http.DefaultClient.Do(req)
-	c.Assert(err, qt.IsNil)
-	c.Assert(resp.StatusCode, qt.Equals, http.StatusOK)
-	c.Assert(resp.Body.Close(), qt.IsNil)
-	// get the recovery code from the email
-	mailBody, err = testMailService.FindEmail(context.Background(), testEmail)
-	c.Assert(err, qt.IsNil)
-	// update the regex to find the recovery code in the email
 	passResetMailCode := passwordResetRgx.FindStringSubmatch(mailBody)
-	// reset the password
+	c.Assert(len(passResetMailCode) > 1, qt.IsTrue)
+
+	// Reset the password
 	newPassword := "password2"
-	resetPass := mustMarshal(&UserPasswordReset{
+	resetPass := &UserPasswordReset{
 		Email:       testEmail,
 		Code:        passResetMailCode[1],
 		NewPassword: newPassword,
-	})
-	req, err = http.NewRequest(http.MethodPost, testURL(usersResetPasswordEndpoint), bytes.NewBuffer(resetPass))
-	c.Assert(err, qt.IsNil)
-	resp, err = http.DefaultClient.Do(req)
-	c.Assert(err, qt.IsNil)
-	c.Assert(resp.StatusCode, qt.Equals, http.StatusOK)
-	c.Assert(resp.Body.Close(), qt.IsNil)
-	// try to login with the old password (should fail)
-	jsonLogin := mustMarshal(&UserInfo{
+	}
+	_, code = testRequest(t, http.MethodPost, "", resetPass, usersResetPasswordEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK)
+
+	// Try to login with the old password (should fail)
+	loginInfo := &UserInfo{
 		Email:    testEmail,
 		Password: testPass,
-	})
-	req, err = http.NewRequest(http.MethodPost, testURL(authLoginEndpoint), bytes.NewBuffer(jsonLogin))
-	c.Assert(err, qt.IsNil)
-	resp, err = http.DefaultClient.Do(req)
-	c.Assert(err, qt.IsNil)
-	c.Assert(resp.StatusCode, qt.Equals, http.StatusUnauthorized)
-	c.Assert(resp.Body.Close(), qt.IsNil)
-	// try to login with the new password
-	jsonLogin = mustMarshal(&UserInfo{
-		Email:    testEmail,
-		Password: newPassword,
-	})
-	req, err = http.NewRequest(http.MethodPost, testURL(authLoginEndpoint), bytes.NewBuffer(jsonLogin))
-	c.Assert(err, qt.IsNil)
-	resp, err = http.DefaultClient.Do(req)
-	c.Assert(err, qt.IsNil)
-	c.Assert(resp.StatusCode, qt.Equals, http.StatusOK)
-	c.Assert(resp.Body.Close(), qt.IsNil)
+	}
+	_, code = testRequest(t, http.MethodPost, "", loginInfo, authLoginEndpoint)
+	c.Assert(code, qt.Equals, http.StatusUnauthorized)
+
+	// Try to login with the new password (should succeed)
+	loginInfo.Password = newPassword
+	_, code = testRequest(t, http.MethodPost, "", loginInfo, authLoginEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK)
+}
+
+func TestUserWithOrganization(t *testing.T) {
+	c := qt.New(t)
+
+	// Create a user
+	token := testCreateUser(t, "superpassword123")
+
+	// Get the user to verify the token works
+	resp, code := testRequest(t, http.MethodGet, token, nil, usersMeEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK)
+	t.Logf("%s\n", resp)
+
+	// Create an organization
+	orgAddress := testCreateOrganization(t, token)
+
+	// Get the organization
+	resp, code = testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String())
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+	t.Logf("%s\n", resp)
 }

@@ -5,9 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"math/big"
 	"regexp"
 
 	"github.com/nyaruka/phonenumbers"
+	"go.vocdoni.io/dvote/log"
+	"golang.org/x/crypto/argon2"
 )
 
 const (
@@ -35,6 +38,15 @@ func SanitizeAndVerifyPhoneNumber(phone string) (string, error) {
 	return fmt.Sprintf("+%d%d", pn.GetCountryCode(), pn.GetNationalNumber()), nil
 }
 
+// RandomInt returns a secure random integer in the range [0, max).
+func RandomInt(max int) int {
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(max)))
+	if err != nil {
+		panic(err)
+	}
+	return int(n.Int64())
+}
+
 // RandomBytes helper function allows to generate a random byte slice of n bytes.
 func RandomBytes(n int) []byte {
 	b := make([]byte, n)
@@ -52,7 +64,7 @@ func RandomHex(n int) string {
 
 // HashPassword helper function allows to hash a password using a salt.
 func HashPassword(salt, password string) []byte {
-	return sha256.New().Sum([]byte(salt + password))
+	return argon2hash([]byte(password), []byte(salt))
 }
 
 // HexHashPassword helper function allows to hash a password using a salt and
@@ -68,7 +80,23 @@ func HashVerificationCode(userEmail, code string) string {
 }
 
 func HashOrgData(orgAddress, data string) []byte {
-	h := sha256.New()
-	h.Write([]byte(orgAddress + data))
-	return h.Sum(nil)
+	var salt []byte
+	hb := HexBytes{}
+	if err := hb.FromString(orgAddress); err != nil {
+		// This should never happened but if it does, let's try to keep going
+		log.Warnw("invalid org address for hashing", "address", orgAddress)
+		salt = []byte(orgAddress)
+	} else {
+		salt = hb.Bytes()
+	}
+
+	return argon2hash([]byte(data), salt)
+}
+
+func argon2hash(data, salt []byte) []byte {
+	// Argon2 parameters for hashing, if modified, the current hashes will be invalidated
+	memory := uint32(64 * 1024)
+	argonTime := uint32(4)
+	argonThreads := uint8(8)
+	return argon2.IDKey([]byte(data), []byte(salt), argonTime, memory, argonThreads, 32)
 }

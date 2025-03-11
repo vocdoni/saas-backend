@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/stripe/stripe-go/v81"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	stripeService "github.com/vocdoni/saas-backend/stripe"
 	"go.vocdoni.io/dvote/log"
 )
@@ -102,7 +103,7 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			// replace organization subscription with the default plan
 			defaultPlan, err := a.db.DefaultPlan()
 			if err != nil || defaultPlan == nil {
-				ErrNoDefaultPlan.WithErr((err)).Write(w)
+				errors.ErrNoDefaultPlan.WithErr((err)).Write(w)
 				return
 			}
 			orgSubscription := &db.OrganizationSubscription{
@@ -157,45 +158,45 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := userFromContext(r.Context())
 	if !ok {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	checkout := &SubscriptionCheckout{}
 	if err := json.NewDecoder(r.Body).Decode(checkout); err != nil {
-		ErrMalformedBody.Write(w)
+		errors.ErrMalformedBody.Write(w)
 		return
 	}
 
 	if checkout.Amount == 0 || checkout.Address == "" {
-		ErrMalformedBody.Withf("Missing required fields").Write(w)
+		errors.ErrMalformedBody.Withf("Missing required fields").Write(w)
 		return
 	}
 
 	if !user.HasRoleFor(checkout.Address, db.AdminRole) {
-		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
 
 	org, _, err := a.db.Organization(checkout.Address, false)
 	if err != nil {
-		ErrOrganizationNotFound.Withf("Error retrieving organization: %v", err).Write(w)
+		errors.ErrOrganizationNotFound.Withf("Error retrieving organization: %v", err).Write(w)
 		return
 	}
 	if org == nil {
-		ErrOrganizationNotFound.Withf("Organization not found: %v", err).Write(w)
+		errors.ErrOrganizationNotFound.Withf("Organization not found: %v", err).Write(w)
 		return
 	}
 
 	plan, err := a.db.Plan(checkout.LookupKey)
 	if err != nil {
-		ErrMalformedURLParam.Withf("Plan not found: %v", err).Write(w)
+		errors.ErrMalformedURLParam.Withf("Plan not found: %v", err).Write(w)
 		return
 	}
 
 	session, err := a.stripe.CreateSubscriptionCheckoutSession(
 		plan.StripePriceID, checkout.ReturnURL, checkout.Address, org.Creator, checkout.Locale, checkout.Amount)
 	if err != nil {
-		ErrStripeError.Withf("Cannot create session: %v", err).Write(w)
+		errors.ErrStripeError.Withf("Cannot create session: %v", err).Write(w)
 		return
 	}
 
@@ -213,12 +214,12 @@ func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.R
 func (a *API) checkoutSessionHandler(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionID")
 	if sessionID == "" {
-		ErrMalformedURLParam.Withf("sessionID is required").Write(w)
+		errors.ErrMalformedURLParam.Withf("sessionID is required").Write(w)
 		return
 	}
 	status, err := a.stripe.RetrieveCheckoutSession(sessionID)
 	if err != nil {
-		ErrStripeError.Withf("Cannot get session: %v", err).Write(w)
+		errors.ErrStripeError.Withf("Cannot get session: %v", err).Write(w)
 		return
 	}
 
@@ -254,22 +255,22 @@ func (a *API) getSubscriptionOrgInfo(event *stripe.Event) (*stripeService.Stripe
 func (a *API) createSubscriptionPortalSessionHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := userFromContext(r.Context())
 	if !ok {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)
 	if !ok {
-		ErrNoOrganizationProvided.Write(w)
+		errors.ErrNoOrganizationProvided.Write(w)
 		return
 	}
 	if !user.HasRoleFor(org.Address, db.AdminRole) {
-		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
 	session, err := a.stripe.CreatePortalSession(org.Creator)
 	if err != nil {
-		ErrStripeError.Withf("Cannot create customer portal session: %v", err).Write(w)
+		errors.ErrStripeError.Withf("Cannot create customer portal session: %v", err).Write(w)
 		return
 	}
 

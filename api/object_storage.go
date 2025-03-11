@@ -6,6 +6,7 @@ import (
 	"regexp"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/vocdoni/saas-backend/errors"
 )
 
 // isObjectNameRgx is a regular expression to match object names.
@@ -18,13 +19,13 @@ func (a *API) uploadImageWithFormHandler(w http.ResponseWriter, r *http.Request)
 	// get the user from the request context
 	user, ok := userFromContext(r.Context())
 	if !ok {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 
 	// 32 MB is the default used by FormFile() function
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		ErrStorageInvalidObject.Withf("could not parse form: %v", err).Write(w)
+		errors.ErrStorageInvalidObject.Withf("could not parse form: %v", err).Write(w)
 		return
 	}
 
@@ -37,12 +38,12 @@ func (a *API) uploadImageWithFormHandler(w http.ResponseWriter, r *http.Request)
 			// Open the file
 			file, err := fileHeader.Open()
 			if err != nil {
-				ErrStorageInvalidObject.Withf("cannot open file %s %v", fileHeader.Filename, err).Write(w)
+				errors.ErrStorageInvalidObject.Withf("cannot open file %s %v", fileHeader.Filename, err).Write(w)
 				return
 			}
 			defer func() {
 				if err := file.Close(); err != nil {
-					ErrStorageInvalidObject.Withf("cannot close file %s  %v", fileHeader.Filename, err).Write(w)
+					errors.ErrStorageInvalidObject.Withf("cannot close file %s  %v", fileHeader.Filename, err).Write(w)
 					return
 				}
 			}()
@@ -51,14 +52,14 @@ func (a *API) uploadImageWithFormHandler(w http.ResponseWriter, r *http.Request)
 			filesFound = true
 			storedFileID, err := a.objectStorage.Put(file, fileHeader.Size, user.Email)
 			if err != nil {
-				ErrInternalStorageError.Withf("%s %v", fileHeader.Filename, err).Write(w)
+				errors.ErrInternalStorageError.Withf("%s %v", fileHeader.Filename, err).Write(w)
 				return
 			}
 			returnURLs = append(returnURLs, objectURL(a.serverURL, storedFileID))
 		}
 	}
 	if !filesFound {
-		ErrStorageInvalidObject.With("no files found").Write(w)
+		errors.ErrStorageInvalidObject.With("no files found").Write(w)
 		return
 	}
 	httpWriteJSON(w, map[string][]string{"urls": returnURLs})
@@ -71,18 +72,18 @@ func (a *API) uploadImageWithFormHandler(w http.ResponseWriter, r *http.Request)
 func (a *API) downloadImageInlineHandler(w http.ResponseWriter, r *http.Request) {
 	objectName := chi.URLParam(r, "objectName")
 	if objectName == "" {
-		ErrMalformedURLParam.With("objectName is required").Write(w)
+		errors.ErrMalformedURLParam.With("objectName is required").Write(w)
 		return
 	}
 	objectID, ok := objectIDfromName(objectName)
 	if !ok {
-		ErrStorageInvalidObject.With("invalid objectName").Write(w)
+		errors.ErrStorageInvalidObject.With("invalid objectName").Write(w)
 		return
 	}
 	// get the object from the object storage client
 	object, err := a.objectStorage.Get(objectID)
 	if err != nil {
-		ErrStorageInvalidObject.Withf("cannot get object %v", err).Write(w)
+		errors.ErrStorageInvalidObject.Withf("cannot get object %v", err).Write(w)
 		return
 	}
 	// write the object to the response
@@ -90,7 +91,7 @@ func (a *API) downloadImageInlineHandler(w http.ResponseWriter, r *http.Request)
 	// w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 	w.Header().Set("Content-Disposition", "inline")
 	if _, err := w.Write(object.Data); err != nil {
-		ErrInternalStorageError.Withf("cannot write object %v", err).Write(w)
+		errors.ErrInternalStorageError.Withf("cannot write object %v", err).Write(w)
 		return
 	}
 }

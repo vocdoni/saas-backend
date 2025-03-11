@@ -33,7 +33,6 @@ func BenchmarkArgon2(b *testing.B) {
 	argonTime := uint32(4)
 	argonThreads := uint8(8)
 
-	// Argon2 parameters: 1 iteration, 64MiB memory, 4 threads, ouxtput 32 bytes.
 	hash := argon2.IDKey([]byte(phone), salt, argonTime, memory, argonThreads, 32)
 	b.Logf("Hashed phone number in %s", time.Since(startTime))
 
@@ -66,7 +65,8 @@ func BenchmarkArgon2(b *testing.B) {
 				// Calculate expected seconds for average-case (half the search space)
 				expectedSeconds := (maxAttempts / 2.0) / hashesPerSec
 				expectedDays := expectedSeconds / 86400.0
-				b.Logf("Progress: %d attempts in %s (%.2f hashes/sec) - expected average time: %.2f days", attempts, elapsed, hashesPerSec, expectedDays)
+				b.Logf("Progress: %d attempts in %s (%.2f hashes/sec) - expected average time: %.2f days",
+					attempts, elapsed, hashesPerSec, expectedDays)
 			case <-ctx.Done():
 				return
 			}

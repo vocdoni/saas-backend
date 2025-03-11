@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
+	stderrors "errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/vocdoni/saas-backend/twofactor"
@@ -46,30 +47,30 @@ type AddProcessesToBundleRequest struct {
 func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request) {
 	var req CreateProcessBundleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		ErrMalformedBody.Write(w)
+		errors.ErrMalformedBody.Write(w)
 		return
 	}
 
 	census, err := a.db.Census(req.CensusID)
 	if err != nil {
 		if err == db.ErrNotFound {
-			ErrMalformedURLParam.Withf("census not found").Write(w)
+			errors.ErrMalformedURLParam.Withf("census not found").Write(w)
 			return
 		}
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 
 	// Get the user from the request context
 	user, ok := userFromContext(r.Context())
 	if !ok {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 
 	// Check if the user has the necessary permissions for the organization
 	if !user.HasRoleFor(census.OrgAddress, db.ManagerRole) && !user.HasRoleFor(census.OrgAddress, db.AdminRole) {
-		ErrUnauthorized.Withf("user is not admin or manager of organization").Write(w)
+		errors.ErrUnauthorized.Withf("user is not admin or manager of organization").Write(w)
 		return
 	}
 
@@ -88,7 +89,7 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		}
 		_, err = a.db.SetProcessBundle(bundle)
 		if err != nil {
-			ErrGenericInternalServerError.WithErr(err).Write(w)
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
 
@@ -104,12 +105,12 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 
 	for _, processReq := range req.Processes {
 		if len(processReq) == 0 {
-			ErrMalformedBody.Withf("missing process ID").Write(w)
+			errors.ErrMalformedBody.Withf("missing process ID").Write(w)
 			return
 		}
 		processID, err := hex.DecodeString(util.TrimHex(processReq))
 		if err != nil {
-			ErrMalformedBody.Withf("invalid process ID").Write(w)
+			errors.ErrMalformedBody.Withf("invalid process ID").Write(w)
 			return
 		}
 
@@ -119,7 +120,7 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	// Find the census participants and get them associated to the bundle
 	orgParticipants, err := a.db.OrgParticipantsMemberships(census.OrgAddress, census.ID.Hex(), bundleID.Hex(), processes)
 	if err != nil {
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 
@@ -128,7 +129,7 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		census.Type == db.CensusTypeMail ||
 		census.Type == db.CensusTypeSMS {
 		if err := a.twofactor.AddProcess(census.Type, orgParticipants); err != nil {
-			ErrGenericInternalServerError.WithErr(err).Write(w)
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
 	}
@@ -145,7 +146,7 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 
 	_, err = a.db.SetProcessBundle(bundle)
 	if err != nil {
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 
@@ -161,26 +162,26 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request) {
 	bundleIDStr := chi.URLParam(r, "bundleId")
 	if bundleIDStr == "" {
-		ErrMalformedURLParam.Withf("missing bundle ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("missing bundle ID").Write(w)
 		return
 	}
 
 	bundleID, err := primitive.ObjectIDFromHex(bundleIDStr)
 	if err != nil {
-		ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
 		return
 	}
 
 	var req AddProcessesToBundleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		ErrMalformedBody.Write(w)
+		errors.ErrMalformedBody.Write(w)
 		return
 	}
 
 	// Get the user from the request context
 	user, ok := userFromContext(r.Context())
 	if !ok {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 
@@ -188,10 +189,10 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	bundle, err := a.db.ProcessBundle(bundleID)
 	if err != nil {
 		if err == db.ErrNotFound {
-			ErrMalformedURLParam.Withf("bundle not found").Write(w)
+			errors.ErrMalformedURLParam.Withf("bundle not found").Write(w)
 			return
 		}
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 
@@ -205,7 +206,7 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 
 	// Check if the user has the necessary permissions for the organization
 	if !user.HasRoleFor(bundle.OrgAddress, db.ManagerRole) && !user.HasRoleFor(bundle.OrgAddress, db.AdminRole) {
-		ErrUnauthorized.Withf("user is not admin or manager of organization").Write(w)
+		errors.ErrUnauthorized.Withf("user is not admin or manager of organization").Write(w)
 		return
 	}
 
@@ -213,10 +214,10 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	census, err := a.db.Census(bundle.Census.ID.Hex())
 	if err != nil {
 		if err == db.ErrNotFound {
-			ErrMalformedURLParam.Withf("census not found").Write(w)
+			errors.ErrMalformedURLParam.Withf("census not found").Write(w)
 			return
 		}
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 
@@ -225,12 +226,12 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 
 	for _, processReq := range req.Processes {
 		if len(processReq) == 0 {
-			ErrMalformedBody.Withf("missing process ID").Write(w)
+			errors.ErrMalformedBody.Withf("missing process ID").Write(w)
 			return
 		}
 		processID, err := hex.DecodeString(util.TrimHex(processReq))
 		if err != nil {
-			ErrMalformedBody.Withf("invalid process ID").Write(w)
+			errors.ErrMalformedBody.Withf("invalid process ID").Write(w)
 			return
 		}
 
@@ -240,7 +241,7 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	// Find the census participants
 	orgParticipants, err := a.db.OrgParticipantsMemberships(census.OrgAddress, census.ID.Hex(), bundleIDStr, processesToAdd)
 	if err != nil {
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 
@@ -249,14 +250,14 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		census.Type == db.CensusTypeMail ||
 		census.Type == db.CensusTypeSMS {
 		if err := a.twofactor.AddProcess(census.Type, orgParticipants); err != nil {
-			ErrGenericInternalServerError.WithErr(err).Write(w)
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
 	}
 
 	// Add processes to the bundle
 	if err := a.db.AddProcessesToBundle(bundleID, processesToAdd); err != nil {
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 
@@ -271,23 +272,23 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 func (a *API) processBundleInfoHandler(w http.ResponseWriter, r *http.Request) {
 	bundleIDStr := chi.URLParam(r, "bundleId")
 	if bundleIDStr == "" {
-		ErrMalformedURLParam.Withf("missing bundle ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("missing bundle ID").Write(w)
 		return
 	}
 
 	bundleID, err := primitive.ObjectIDFromHex(bundleIDStr)
 	if err != nil {
-		ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
 		return
 	}
 
 	bundle, err := a.db.ProcessBundle(bundleID)
 	if err != nil {
 		if err == db.ErrNotFound {
-			ErrMalformedURLParam.Withf("bundle not found").Write(w)
+			errors.ErrMalformedURLParam.Withf("bundle not found").Write(w)
 			return
 		}
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 
@@ -299,29 +300,29 @@ func (a *API) processBundleInfoHandler(w http.ResponseWriter, r *http.Request) {
 func (a *API) processBundleParticipantInfoHandler(w http.ResponseWriter, r *http.Request) {
 	bundleIDStr := chi.URLParam(r, "bundleId")
 	if bundleIDStr == "" {
-		ErrMalformedURLParam.Withf("missing bundle ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("missing bundle ID").Write(w)
 		return
 	}
 
 	bundleID, err := primitive.ObjectIDFromHex(bundleIDStr)
 	if err != nil {
-		ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
 		return
 	}
 
 	_, err = a.db.ProcessBundle(bundleID)
 	if err != nil {
 		if err == db.ErrNotFound {
-			ErrMalformedURLParam.Withf("bundle not found").Write(w)
+			errors.ErrMalformedURLParam.Withf("bundle not found").Write(w)
 			return
 		}
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 
 	participantID := chi.URLParam(r, "participantId")
 	if participantID == "" {
-		ErrMalformedURLParam.Withf("missing participant ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("missing participant ID").Write(w)
 		return
 	}
 
@@ -340,35 +341,35 @@ func (a *API) processBundleParticipantInfoHandler(w http.ResponseWriter, r *http
 func (a *API) processBundleAuthHandler(w http.ResponseWriter, r *http.Request) {
 	bundleIDStr := chi.URLParam(r, "bundleId")
 	if bundleIDStr == "" {
-		ErrMalformedURLParam.Withf("missing bundle ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("missing bundle ID").Write(w)
 		return
 	}
 
 	bundleID, err := primitive.ObjectIDFromHex(bundleIDStr)
 	if err != nil {
-		ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
 		return
 	}
 
 	stepString := chi.URLParam(r, "step")
 	step, err := strconv.Atoi(stepString)
 	if err != nil || (step != 0 && step != 1) {
-		ErrMalformedURLParam.Withf("wrong step ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("wrong step ID").Write(w)
 		return
 	}
 
 	bundle, err := a.db.ProcessBundle(bundleID)
 	if err != nil {
 		if err == db.ErrNotFound {
-			ErrMalformedURLParam.Withf("bundle not found").Write(w)
+			errors.ErrMalformedURLParam.Withf("bundle not found").Write(w)
 			return
 		}
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 
 	if len(bundle.Processes) == 0 {
-		ErrInvalidOrganizationData.Withf("bundle has no processes").Write(w)
+		errors.ErrInvalidOrganizationData.Withf("bundle has no processes").Write(w)
 		return
 	}
 
@@ -376,7 +377,7 @@ func (a *API) processBundleAuthHandler(w http.ResponseWriter, r *http.Request) {
 	case 0:
 		authToken, err := a.initiateBundleAuthRequest(r, bundleID.Hex(), bundle.Census.ID.Hex())
 		if err != nil {
-			ErrUnauthorized.WithErr(err).Write(w)
+			errors.ErrUnauthorized.WithErr(err).Write(w)
 			return
 		}
 		httpWriteJSON(w, &twofactorResponse{AuthToken: authToken})
@@ -384,12 +385,12 @@ func (a *API) processBundleAuthHandler(w http.ResponseWriter, r *http.Request) {
 	case 1:
 		var req AuthRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			ErrMalformedBody.Write(w)
+			errors.ErrMalformedBody.Write(w)
 			return
 		}
 		authResp := a.twofactor.Auth(bundleID.Hex(), req.AuthToken, req.AuthData)
 		if !authResp.Success {
-			ErrUnauthorized.WithErr(errors.New(authResp.Error)).Write(w)
+			errors.ErrUnauthorized.WithErr(stderrors.New(authResp.Error)).Write(w)
 			return
 		}
 		httpWriteJSON(w, &twofactorResponse{AuthToken: authResp.AuthToken})
@@ -403,39 +404,39 @@ func (a *API) processBundleAuthHandler(w http.ResponseWriter, r *http.Request) {
 func (a *API) processBundleSignHandler(w http.ResponseWriter, r *http.Request) {
 	bundleIDStr := chi.URLParam(r, "bundleId")
 	if bundleIDStr == "" {
-		ErrMalformedURLParam.Withf("missing bundle ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("missing bundle ID").Write(w)
 		return
 	}
 
 	bundleID, err := primitive.ObjectIDFromHex(bundleIDStr)
 	if err != nil {
-		ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
 		return
 	}
 
 	bundle, err := a.db.ProcessBundle(bundleID)
 	if err != nil {
 		if err == db.ErrNotFound {
-			ErrMalformedURLParam.Withf("bundle not found").Write(w)
+			errors.ErrMalformedURLParam.Withf("bundle not found").Write(w)
 			return
 		}
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 
 	if len(bundle.Processes) == 0 {
-		ErrInvalidOrganizationData.Withf("bundle has no processes").Write(w)
+		errors.ErrInvalidOrganizationData.Withf("bundle has no processes").Write(w)
 		return
 	}
 
 	var req SignRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		ErrMalformedBody.Write(w)
+		errors.ErrMalformedBody.Write(w)
 		return
 	}
 
 	if req.AuthToken == nil {
-		ErrUnauthorized.Withf("missing auth token").Write(w)
+		errors.ErrUnauthorized.Withf("missing auth token").Write(w)
 		return
 	}
 
@@ -449,20 +450,20 @@ func (a *API) processBundleSignHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(procId) == 0 {
-		ErrUnauthorized.Withf("process not found in bundle").Write(w)
+		errors.ErrUnauthorized.Withf("process not found in bundle").Write(w)
 		return
 	}
 
 	address, err := hex.DecodeString(util.TrimHex(req.Payload))
 	if err != nil {
-		ErrMalformedBody.WithErr(err).Write(w)
+		errors.ErrMalformedBody.WithErr(err).Write(w)
 		return
 	}
 
 	log.Debugw("new CSP sign request", "address", fmt.Sprintf("%x", address), "procId", procId.String())
 	signResp := a.twofactor.Sign(*req.AuthToken, req.TokenR, address, procId, bundleIDStr, "ecdsa")
 	if !signResp.Success {
-		ErrUnauthorized.WithErr(errors.New(signResp.Error)).Write(w)
+		errors.ErrUnauthorized.WithErr(stderrors.New(signResp.Error)).Write(w)
 		return
 	}
 	httpWriteJSON(w, &twofactorResponse{Signature: signResp.Signature})

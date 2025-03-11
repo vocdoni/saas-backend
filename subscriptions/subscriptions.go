@@ -39,10 +39,17 @@ func (p DBPermission) String() string {
 	}
 }
 
+// DBInterface defines the database methods required by the Subscriptions service
+type DBInterface interface {
+	Plan(id uint64) (*db.Plan, error)
+	UserByEmail(email string) (*db.User, error)
+	Organization(address string, parent bool) (*db.Organization, *db.Organization, error)
+}
+
 // Subscriptions is the service that manages the organization permissions based on
 // the subscription plans.
 type Subscriptions struct {
-	db *db.MongoStorage
+	db DBInterface
 }
 
 // New creates a new Subscriptions service with the given configuration.
@@ -91,6 +98,15 @@ func (p *Subscriptions) HasTxPermission(
 	org *db.Organization,
 	user *db.User,
 ) (bool, error) {
+	if org == nil {
+		return false, fmt.Errorf("organization is nil")
+	}
+
+	// Check if the organization has a subscription
+	if org.Subscription.PlanID == 0 {
+		return false, fmt.Errorf("organization has no subscription plan")
+	}
+
 	plan, err := p.db.Plan(org.Subscription.PlanID)
 	if err != nil {
 		return false, fmt.Errorf("could not get organization plan: %v", err)
@@ -141,6 +157,12 @@ func (p *Subscriptions) HasDBPersmission(userEmail, orgAddress string, permissio
 	if err != nil {
 		return false, fmt.Errorf("could not get organization: %v", err)
 	}
+
+	// Check if the organization has a subscription
+	if org.Subscription.PlanID == 0 {
+		return false, fmt.Errorf("organization has no subscription plan")
+	}
+
 	plan, err := p.db.Plan(org.Subscription.PlanID)
 	if err != nil {
 		return false, fmt.Errorf("could not get organization plan: %v", err)

@@ -3,6 +3,8 @@ package internal
 import (
 	"encoding/hex"
 	"fmt"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // HexBytes is a []byte which encodes as hexadecimal in json, as opposed to the
@@ -72,8 +74,14 @@ func (b *HexBytes) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// FromString decodes a hex string into the HexBytes.
 func (b *HexBytes) FromString(str string) error {
 	var err error
 	(*b), err = hex.DecodeString(str)
 	return err
+}
+
+// Address returns the Ethereum Address of the HexBytes.
+func (b *HexBytes) Address() common.Address {
+	return common.BytesToAddress(*b)
 }

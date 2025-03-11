@@ -7,6 +7,7 @@ import (
 
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"github.com/vocdoni/saas-backend/subscriptions"
@@ -21,24 +22,24 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	// get the user from the request context
 	user, ok := userFromContext(r.Context())
 	if !ok {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	// get the organization info from the request body
 	orgInfo := &OrganizationInfo{}
 	if err := json.NewDecoder(r.Body).Decode(orgInfo); err != nil {
-		ErrMalformedBody.Write(w)
+		errors.ErrMalformedBody.Write(w)
 		return
 	}
 	// create the organization signer to store the address and the nonce
-	signer, nonce, err := account.NewSigner(a.secret, user.Email)
+	signer, nonce, err := account.NewSigner(a.secret, user.Email) // TODO: replace email with something else such as user ID
 	if err != nil {
-		ErrGenericInternalServerError.Withf("could not create organization signer: %v", err).Write(w)
+		errors.ErrGenericInternalServerError.Withf("could not create organization signer: %v", err).Write(w)
 		return
 	}
 	// check if the organization type is valid
 	if !db.IsOrganizationTypeValid(orgInfo.Type) {
-		ErrMalformedBody.Withf("invalid organization type").Write(w)
+		errors.ErrMalformedBody.Withf("invalid organization type").Write(w)
 		return
 	}
 	parentOrg := ""
@@ -47,30 +48,30 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		// check if the org has permission to create suborganizations
 		hasPermission, err := a.subscriptions.HasDBPersmission(user.Email, orgInfo.Parent.Address, subscriptions.CreateSubOrg)
 		if !hasPermission || err != nil {
-			ErrUnauthorized.Withf("user does not have permission to create suborganizations: %v", err).Write(w)
+			errors.ErrUnauthorized.Withf("user does not have permission to create suborganizations: %v", err).Write(w)
 			return
 		}
 
 		dbParentOrg, _, err = a.db.Organization(orgInfo.Parent.Address, false)
 		if err != nil {
 			if err == db.ErrNotFound {
-				ErrOrganizationNotFound.Withf("parent organization not found").Write(w)
+				errors.ErrOrganizationNotFound.Withf("parent organization not found").Write(w)
 				return
 			}
-			ErrGenericInternalServerError.Withf("could not get parent organization: %v", err).Write(w)
+			errors.ErrGenericInternalServerError.Withf("could not get parent organization: %v", err).Write(w)
 			return
 		}
 		if dbParentOrg.Parent != "" {
-			ErrMalformedBody.Withf("parent organization is already a suborganization").Write(w)
+			errors.ErrMalformedBody.Withf("parent organization is already a suborganization").Write(w)
 			return
 		}
 		isAdmin, err := a.db.IsMemberOf(user.Email, dbParentOrg.Address, db.AdminRole)
 		if err != nil {
-			ErrGenericInternalServerError.Withf("could not check if user is admin of parent organization: %v", err).Write(w)
+			errors.ErrGenericInternalServerError.Withf("could not check if user is admin of parent organization: %v", err).Write(w)
 			return
 		}
 		if !isAdmin {
-			ErrUnauthorized.Withf("user is not admin of parent organization").Write(w)
+			errors.ErrUnauthorized.Withf("user is not admin of parent organization").Write(w)
 			return
 		}
 		parentOrg = orgInfo.Parent.Address
@@ -78,7 +79,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	// find default plan
 	defaultPlan, err := a.db.DefaultPlan()
 	if err != nil || defaultPlan == nil {
-		ErrNoDefaultPlan.WithErr((err)).Write(w)
+		errors.ErrNoDefaultPlan.WithErr((err)).Write(w)
 		return
 	}
 	subscription := &db.OrganizationSubscription{
@@ -109,10 +110,10 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	if err := a.db.SetOrganization(dbOrg); err != nil {
 		if err == db.ErrAlreadyExists {
-			ErrInvalidOrganizationData.WithErr(err).Write(w)
+			errors.ErrInvalidOrganizationData.WithErr(err).Write(w)
 			return
 		}
-		ErrGenericInternalServerError.Write(w)
+		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
 
@@ -120,7 +121,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	if orgInfo.Parent != nil {
 		dbParentOrg.Counters.SubOrgs++
 		if err := a.db.SetOrganization(dbParentOrg); err != nil {
-			ErrGenericInternalServerError.Withf("could not update parent organization: %v", err).Write(w)
+			errors.ErrGenericInternalServerError.Withf("could not update parent organization: %v", err).Write(w)
 			return
 		}
 	}
@@ -134,7 +135,7 @@ func (a *API) organizationInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
 	org, parent, ok := a.organizationFromRequest(r)
 	if !ok {
-		ErrNoOrganizationProvided.Write(w)
+		errors.ErrNoOrganizationProvided.Write(w)
 		return
 	}
 	// send the organization back to the user
@@ -148,23 +149,23 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 	// get the user from the request context
 	user, ok := userFromContext(r.Context())
 	if !ok {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)
 	if !ok {
-		ErrNoOrganizationProvided.Write(w)
+		errors.ErrNoOrganizationProvided.Write(w)
 		return
 	}
 	if !user.HasRoleFor(org.Address, db.AdminRole) {
-		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
 	// send the organization back to the user
 	members, err := a.db.OrganizationsMembers(org.Address)
 	if err != nil {
-		ErrGenericInternalServerError.Withf("could not get organization members: %v", err).Write(w)
+		errors.ErrGenericInternalServerError.Withf("could not get organization members: %v", err).Write(w)
 		return
 	}
 	orgMembers := OrganizationMembers{
@@ -201,23 +202,23 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	// get the user from the request context
 	user, ok := userFromContext(r.Context())
 	if !ok {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)
 	if !ok {
-		ErrNoOrganizationProvided.Write(w)
+		errors.ErrNoOrganizationProvided.Write(w)
 		return
 	}
 	if !user.HasRoleFor(org.Address, db.AdminRole) {
-		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
 	// get the organization info from the request body
 	newOrgInfo := &OrganizationInfo{}
 	if err := json.NewDecoder(r.Body).Decode(newOrgInfo); err != nil {
-		ErrMalformedBody.Write(w)
+		errors.ErrMalformedBody.Write(w)
 		return
 	}
 	// update just the fields that can be updated and are not empty
@@ -253,7 +254,7 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	// update the organization if any field was changed
 	if updateOrg {
 		if err := a.db.SetOrganization(org); err != nil {
-			ErrGenericInternalServerError.Withf("could not update organization: %v", err).Write(w)
+			errors.ErrGenericInternalServerError.Withf("could not update organization: %v", err).Write(w)
 			return
 		}
 	}
@@ -268,41 +269,41 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 	// get the user from the request context
 	user, ok := userFromContext(r.Context())
 	if !ok {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)
 	if !ok {
-		ErrNoOrganizationProvided.Write(w)
+		errors.ErrNoOrganizationProvided.Write(w)
 		return
 	}
 
 	// check if the user/org has permission to invite members
 	hasPermission, err := a.subscriptions.HasDBPersmission(user.Email, org.Address, subscriptions.InviteMember)
 	if !hasPermission || err != nil {
-		ErrUnauthorized.Withf("user does not have permission to sign transactions: %v", err).Write(w)
+		errors.ErrUnauthorized.Withf("user does not have permission to sign transactions: %v", err).Write(w)
 		return
 	}
 	// get new admin info from the request body
 	invite := &OrganizationInvite{}
 	if err := json.NewDecoder(r.Body).Decode(invite); err != nil {
-		ErrMalformedBody.Write(w)
+		errors.ErrMalformedBody.Write(w)
 		return
 	}
 	// check the email is correct format
 	if !internal.ValidEmail(invite.Email) {
-		ErrEmailMalformed.Write(w)
+		errors.ErrEmailMalformed.Write(w)
 		return
 	}
 	// check the role is valid
 	if valid := db.IsValidUserRole(db.UserRole(invite.Role)); !valid {
-		ErrInvalidUserData.Withf("invalid role").Write(w)
+		errors.ErrInvalidUserData.Withf("invalid role").Write(w)
 		return
 	}
 	// check if the new user is already a member of the organization
 	if _, err := a.db.IsMemberOf(invite.Email, org.Address, db.AdminRole); err == nil {
-		ErrDuplicateConflict.With("user is already admin of organization").Write(w)
+		errors.ErrDuplicateConflict.With("user is already admin of organization").Write(w)
 		return
 	}
 	// create new invitation
@@ -316,10 +317,10 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 	code, link, err := a.generateVerificationCodeAndLink(orgInvite, db.CodeTypeOrgInvite)
 	if err != nil {
 		if err == db.ErrAlreadyExists {
-			ErrDuplicateConflict.With("user is already invited to the organization").Write(w)
+			errors.ErrDuplicateConflict.With("user is already invited to the organization").Write(w)
 			return
 		}
-		ErrGenericInternalServerError.Withf("could not create the invite: %v", err).Write(w)
+		errors.ErrGenericInternalServerError.Withf("could not create the invite: %v", err).Write(w)
 		return
 	}
 	// send the invitation mail to invited user email with the invite code and
@@ -332,14 +333,14 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		}{org.Address, code, link},
 	); err != nil {
 		log.Warnw("could not send verification code email", "error", err)
-		ErrGenericInternalServerError.Write(w)
+		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
 
 	// update the org members counter
 	org.Counters.Members++
 	if err := a.db.SetOrganization(org); err != nil {
-		ErrGenericInternalServerError.Withf("could not update organization: %v", err).Write(w)
+		errors.ErrGenericInternalServerError.Withf("could not update organization: %v", err).Write(w)
 		return
 	}
 	httpWriteOK(w)
@@ -355,24 +356,24 @@ func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)
 	if !ok {
-		ErrNoOrganizationProvided.Write(w)
+		errors.ErrNoOrganizationProvided.Write(w)
 		return
 	}
 	// get new member info from the request body
 	invitationReq := &AcceptOrganizationInvitation{}
 	if err := json.NewDecoder(r.Body).Decode(invitationReq); err != nil {
-		ErrMalformedBody.Write(w)
+		errors.ErrMalformedBody.Write(w)
 		return
 	}
 	// get the invitation from the database
 	invitation, err := a.db.Invitation(invitationReq.Code)
 	if err != nil {
-		ErrUnauthorized.Withf("could not get invitation: %v", err).Write(w)
+		errors.ErrUnauthorized.Withf("could not get invitation: %v", err).Write(w)
 		return
 	}
 	// check if the organization is correct
 	if invitation.OrganizationAddress != org.Address {
-		ErrUnauthorized.Withf("invitation is not for this organization").Write(w)
+		errors.ErrUnauthorized.Withf("invitation is not for this organization").Write(w)
 		return
 	}
 	// create a helper function to remove the invitation from the database in
@@ -385,7 +386,7 @@ func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r
 	// check if the invitation is expired
 	if invitation.Expiration.Before(time.Now()) {
 		go removeInvitation()
-		ErrInvitationExpired.Write(w)
+		errors.ErrInvitationExpired.Write(w)
 		return
 	}
 	// try to get the user from the database
@@ -394,14 +395,14 @@ func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r
 		// if the error is different from not found, return the error, if not,
 		// continue to try to create the user
 		if err != db.ErrNotFound {
-			ErrGenericInternalServerError.Withf("could not get user: %v", err).Write(w)
+			errors.ErrGenericInternalServerError.Withf("could not get user: %v", err).Write(w)
 			return
 		}
 		// check if the user info is provided, at least the first name, last
 		// name and the password, the email is already checked in the invitation
 		if invitationReq.User == nil || invitationReq.User.FirstName == "" ||
 			invitationReq.User.LastName == "" || invitationReq.User.Password == "" {
-			ErrMalformedBody.With("user info not provided").Write(w)
+			errors.ErrMalformedBody.With("user info not provided").Write(w)
 			return
 		}
 		// create the new user and move on to include the organization, the user
@@ -419,13 +420,13 @@ func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r
 	} else {
 		// if it does, check if the user is already verified
 		if !dbUser.Verified {
-			ErrUserNoVerified.With("user already exists but is not verified").Write(w)
+			errors.ErrUserNoVerified.With("user already exists but is not verified").Write(w)
 			return
 		}
 		// check if the user is already a member of the organization
 		if _, err := a.db.IsMemberOf(invitation.NewUserEmail, org.Address, invitation.Role); err == nil {
 			go removeInvitation()
-			ErrDuplicateConflict.With("user is already admin of organization").Write(w)
+			errors.ErrDuplicateConflict.With("user is already admin of organization").Write(w)
 			return
 		}
 	}
@@ -436,7 +437,7 @@ func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r
 	})
 	// set the user in the database
 	if _, err := a.db.SetUser(dbUser); err != nil {
-		ErrGenericInternalServerError.Withf("could not set user: %v", err).Write(w)
+		errors.ErrGenericInternalServerError.Withf("could not set user: %v", err).Write(w)
 		return
 	}
 	// delete the invitation
@@ -448,23 +449,23 @@ func (a *API) pendingOrganizationMembersHandler(w http.ResponseWriter, r *http.R
 	// get the user from the request context
 	user, ok := userFromContext(r.Context())
 	if !ok {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)
 	if !ok {
-		ErrNoOrganizationProvided.Write(w)
+		errors.ErrNoOrganizationProvided.Write(w)
 		return
 	}
 	if !user.HasRoleFor(org.Address, db.AdminRole) {
-		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
 	// get the pending invitations
 	invitations, err := a.db.PendingInvitations(org.Address)
 	if err != nil {
-		ErrGenericInternalServerError.Withf("could not get pending invitations: %v", err).Write(w)
+		errors.ErrGenericInternalServerError.Withf("could not get pending invitations: %v", err).Write(w)
 		return
 	}
 	invitationsList := make([]*OrganizationInvite, 0, len(invitations))
@@ -511,27 +512,27 @@ func (a *API) getOrganizationSubscriptionHandler(w http.ResponseWriter, r *http.
 	// get the user from the request context
 	user, ok := userFromContext(r.Context())
 	if !ok {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)
 	if !ok {
-		ErrNoOrganizationProvided.Write(w)
+		errors.ErrNoOrganizationProvided.Write(w)
 		return
 	}
 	if !user.HasRoleFor(org.Address, db.AdminRole) {
-		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
 	if org.Subscription == (db.OrganizationSubscription{}) {
-		ErrNoOrganizationSubscription.Write(w)
+		errors.ErrNoOrganizationSubscription.Write(w)
 		return
 	}
 	// get the subscription from the database
 	plan, err := a.db.Plan(org.Subscription.PlanID)
 	if err != nil {
-		ErrGenericInternalServerError.Withf("could not get subscription: %v", err).Write(w)
+		errors.ErrGenericInternalServerError.Withf("could not get subscription: %v", err).Write(w)
 		return
 	}
 	info := &OrganizationSubscriptionInfo{
@@ -548,27 +549,27 @@ func (a *API) organizationCensusesHandler(w http.ResponseWriter, r *http.Request
 	// get the user from the request context
 	user, ok := userFromContext(r.Context())
 	if !ok {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)
 	if !ok {
-		ErrNoOrganizationProvided.Write(w)
+		errors.ErrNoOrganizationProvided.Write(w)
 		return
 	}
 	if !user.HasRoleFor(org.Address, db.AdminRole) {
-		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
 	// get the censuses from the database
 	censuses, err := a.db.CensusesByOrg(org.Address)
 	if err != nil {
 		if err == db.ErrNotFound {
-			ErrOrganizationNotFound.Write(w)
+			errors.ErrOrganizationNotFound.Write(w)
 			return
 		}
-		ErrGenericInternalServerError.Withf("could not get censuses: %v", err).Write(w)
+		errors.ErrGenericInternalServerError.Withf("could not get censuses: %v", err).Write(w)
 		return
 	}
 	// decode the censuses from the database

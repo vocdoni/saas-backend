@@ -4,8 +4,8 @@ import (
 	"time"
 
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications"
-	"go.vocdoni.io/dvote/types"
 )
 
 // Organization is the struct that represents an organization in the API
@@ -140,16 +140,16 @@ type LoginResponse struct {
 // TransactionData is the struct that contains the data of a transaction to
 // be signed, but also is used to return the signed transaction.
 type TransactionData struct {
-	Address   string `json:"address"`
-	TxPayload string `json:"txPayload"`
+	Address   internal.HexBytes `json:"address"`
+	TxPayload []byte            `json:"txPayload"`
 }
 
 // MessageSignature is the struct that contains the payload and the signature.
 // Its used to receive and return a signed message.
 type MessageSignature struct {
-	Address   string         `json:"address"`
-	Payload   []byte         `json:"payload,omitempty"`
-	Signature types.HexBytes `json:"signature,omitempty"`
+	Address   string            `json:"address"`
+	Payload   []byte            `json:"payload,omitempty"`
+	Signature internal.HexBytes `json:"signature,omitempty"`
 }
 
 // organizationFromDB converts a db.Organization to an OrganizationInfo, if the parent
@@ -404,7 +404,8 @@ func (p *OrgParticipant) toDB(orgAddress string) db.OrgParticipant {
 
 // AddParticipantsResponse defines the response for successful participant addition
 type AddParticipantsResponse struct {
-	ParticipantsNo uint32 `json:"participantsNo"`
+	ParticipantsNo uint32            `json:"participantsNo"`
+	JobID          internal.HexBytes `json:"jobID"`
 }
 
 // Request types for process operations

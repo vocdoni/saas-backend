@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/dvote/util"
 )
@@ -18,26 +21,30 @@ type PublishedCensusResponse struct {
 	CensusID string `json:"censusId" bson:"censusId"`
 }
 
+// addParticipantsToCensusWorkers is a map of job identifiers to the progress of adding participants to a census.
+// This is used to check the progress of the job.
+var addParticipantsToCensusWorkers sync.Map
+
 // createCensusHandler creates a new census for an organization.
 // Requires Manager/Admin role. Returns census ID on success.
 func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse request
 	censusInfo := &OrganizationCensus{}
 	if err := json.NewDecoder(r.Body).Decode(&censusInfo); err != nil {
-		ErrMalformedBody.Write(w)
+		errors.ErrMalformedBody.Write(w)
 		return
 	}
 
 	// get the user from the request context
 	user, ok := userFromContext(r.Context())
 	if !ok {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 
 	// check the user has the necessary permissions
 	if !user.HasRoleFor(censusInfo.OrgAddress, db.ManagerRole) && !user.HasRoleFor(censusInfo.OrgAddress, db.AdminRole) {
-		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
 
@@ -48,7 +55,7 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	censusID, err := a.db.SetCensus(census)
 	if err != nil {
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 	httpWriteJSON(w, OrganizationCensus{
@@ -63,12 +70,12 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 	censusID := chi.URLParam(r, "id")
 	if censusID == "" {
-		ErrMalformedURLParam.Withf("missing census ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("missing census ID").Write(w)
 		return
 	}
 	census, err := a.db.Census(censusID)
 	if err != nil {
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 	httpWriteJSON(w, organizationCensusFromDB(census))
@@ -79,35 +86,40 @@ func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 	censusID := chi.URLParam(r, "id")
 	if censusID == "" {
-		ErrMalformedURLParam.Withf("missing census ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("missing census ID").Write(w)
 		return
 	}
 	// get the user from the request context
 	user, ok := userFromContext(r.Context())
 	if !ok {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
+	}
+	// get the async flag
+	async := false
+	if r.URL.Query().Get("async") == "true" {
+		async = true
 	}
 	// retrieve census
 	census, err := a.db.Census(censusID)
 	if err != nil {
 		if err == db.ErrNotFound {
-			ErrMalformedURLParam.Withf("census not found").Write(w)
+			errors.ErrMalformedURLParam.Withf("census not found").Write(w)
 			return
 		}
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 	// check the user has the necessary permissions
 	if !user.HasRoleFor(census.OrgAddress, db.ManagerRole) && !user.HasRoleFor(census.OrgAddress, db.AdminRole) {
-		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
 	// decode the participants from the request body
 	participants := &AddParticipantsRequest{}
 	if err := json.NewDecoder(r.Body).Decode(participants); err != nil {
 		log.Error(err)
-		ErrMalformedBody.Withf("missing participants").Write(w)
+		errors.ErrMalformedBody.Withf("missing participants").Write(w)
 		return
 	}
 	// check if there are participants to add
@@ -116,12 +128,66 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// add the org participants to the census in the database
-	no, err := a.db.SetBulkCensusMembership(passwordSalt, censusID, participants.dbOrgParticipants(census.OrgAddress))
+	progressChan, err := a.db.SetBulkCensusMembership(passwordSalt, censusID, participants.dbOrgParticipants(census.OrgAddress))
 	if err != nil {
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	httpWriteJSON(w, int(no.UpsertedCount))
+
+	if !async {
+		// Wait for the channel to be closed (100% completion)
+		var lastProgress *db.BulkCensusMembershipStatus
+		for p := range progressChan {
+			lastProgress = p
+			// Just drain the channel until it's closed
+			log.Debugw("census add participants",
+				"census", censusID,
+				"org", census.OrgAddress,
+				"progress", p.Progress,
+				"added", p.Added,
+				"total", p.Total)
+		}
+		// Return the number of participants added
+		httpWriteJSON(w, &AddParticipantsResponse{ParticipantsNo: uint32(lastProgress.Added)})
+		return
+	}
+
+	// if async create a new job identifier
+	jobID := internal.HexBytes(util.RandomBytes(16))
+	go func() {
+		for p := range progressChan {
+			// We need to drain the channel to avoid blocking
+			addParticipantsToCensusWorkers.Store(jobID.String(), p)
+		}
+	}()
+
+	httpWriteJSON(w, &AddParticipantsResponse{JobID: jobID})
+}
+
+// addParticipantsJobCheckHandler checks the progress of a job to add participants to a census.
+// Returns the progress of the job. If the job is completed, the job is deleted.
+func (a *API) addParticipantsJobCheckHandler(w http.ResponseWriter, r *http.Request) {
+	jobIDstr := chi.URLParam(r, "jobid")
+	if jobIDstr == "" {
+		errors.ErrMalformedURLParam.Withf("missing job ID").Write(w)
+		return
+	}
+	jobID := internal.HexBytes{}
+	if err := jobID.FromString(jobIDstr); err != nil {
+		errors.ErrMalformedURLParam.Withf("invalid job ID").Write(w)
+		return
+	}
+
+	if v, ok := addParticipantsToCensusWorkers.Load(jobID.String()); ok {
+		p := v.(*db.BulkCensusMembershipStatus)
+		if p.Progress == 100 {
+			addParticipantsToCensusWorkers.Delete(jobID.String())
+		}
+		httpWriteJSON(w, p)
+		return
+	}
+
+	errors.ErrJobNotFound.Write(w)
 }
 
 // publishCensusHandler publishes a census for voting.
@@ -129,26 +195,26 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 	censusID := chi.URLParam(r, "id")
 	if censusID == "" {
-		ErrMalformedURLParam.Withf("missing census ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("missing census ID").Write(w)
 		return
 	}
 
 	// get the user from the request context
 	user, ok := userFromContext(r.Context())
 	if !ok {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 
 	census, err := a.db.Census(censusID)
 	if err != nil {
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 
 	// check the user has the necessary permissions
 	if !user.HasRoleFor(census.OrgAddress, db.ManagerRole) && !user.HasRoleFor(census.OrgAddress, db.AdminRole) {
-		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
 
@@ -162,12 +228,12 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 			Root:   a.account.PubKey.String(),
 		}
 	default:
-		ErrGenericInternalServerError.WithErr(fmt.Errorf("unsupported census type")).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(fmt.Errorf("unsupported census type")).Write(w)
 		return
 	}
 
 	if err := a.db.SetPublishedCensus(pubCensus); err != nil {
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 

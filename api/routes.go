@@ -86,6 +86,8 @@ const (
 	// GET /census/{id} to get census information
 	// POST /census/{id} to add participants to census
 	censusIDEndpoint = "/census/{id}"
+	// GET /census/check/{jobid} to check the status of the add participants job
+	censusAddParticipantsCheckEndpoint = "/census/check/{jobid}"
 	// POST /census/{id}/publish to publish a census
 	censusPublishEndpoint = "/census/{id}/publish"
 
