@@ -73,6 +73,7 @@ func New(ctx context.Context, config *CSPConfig) (*CSP, error) {
 			}
 		}
 	}()
+	go queue.Start()
 	return &CSP{
 		storage:                  stg,
 		notifyQueue:              queue,

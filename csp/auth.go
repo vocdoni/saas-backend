@@ -81,7 +81,7 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 		return nil, ErrNotificationFailure
 	}
 	// push the challenge to the queue to be sent
-	if err := c.notifyQueue.Push(*ch); err != nil {
+	if err := c.notifyQueue.Push(ch); err != nil {
 		log.Warnw("error pushing notification challenge",
 			"error", err,
 			"userID", uID,

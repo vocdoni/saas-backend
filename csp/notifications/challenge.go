@@ -46,6 +46,18 @@ type NotificationChallenge struct {
 	Success      bool
 }
 
+// Valid methid checks if the notification challenge is valid. A valid
+// notification challenge must have a user ID, a bundle ID, a valid type and
+// a notification.
+func (nc *NotificationChallenge) Valid() bool {
+	validType := false
+	switch nc.Type {
+	case SMSChallenge, EmailChallenge:
+		validType = true
+	}
+	return nc.UserID != nil && nc.BundleID != nil && validType && nc.Notification != nil
+}
+
 // Send sends the notification challenge using the provided notification
 // service. It returns an error if the notification could not be sent.
 func (nc *NotificationChallenge) Send(ctx context.Context, service notifications.NotificationService) error {
