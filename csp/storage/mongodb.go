@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"reflect"
 	"sync"
 	"syscall"
 	"time"
@@ -125,6 +124,9 @@ func (ms *MongoStorage) Reset() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := ms.users.Drop(ctx); err != nil {
+		return err
+	}
+	if err := ms.tokenIndex.Drop(ctx); err != nil {
 		return err
 	}
 	if err := ms.createIndexes(); err != nil {
@@ -295,10 +297,11 @@ func (ms *MongoStorage) createIndexes() error {
 	}
 	tokenBundleUserIdx := mongo.IndexModel{
 		Keys: bson.D{
-			{Key: "userid"},
-			{Key: "bundleid"},
-			{Key: "authtoken"},
+			{Key: "userid", Value: 1},
+			{Key: "bundleid", Value: 1},
+			{Key: "authtoken", Value: 1},
 		},
+		Options: options.Index().SetUnique(true),
 	}
 	_, err = ms.tokenIndex.Indexes().CreateOne(ctx, tokenBundleUserIdx)
 	if err != nil {
@@ -327,56 +330,15 @@ func (ms *MongoStorage) userByID(userID internal.HexBytes) (*UserData, error) {
 // setUser updates the user data in the database. It does not lock the keysLock,
 // so it should be called from a function that already has the lock.
 func (ms *MongoStorage) setUser(user UserData) error {
-	updateUser, err := dynamicUpdateDocument(user, nil)
-	if err != nil {
-		return errors.Join(ErrPrepareUser, err)
-	}
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	filter := bson.M{"_id": user.ID}
+	update := bson.M{"$set": user}
 	opts := options.Update().SetUpsert(true)
-	if _, err := ms.users.UpdateOne(ctx, bson.M{"_id": user.ID}, updateUser, opts); err != nil {
+	_, err := ms.users.UpdateOne(ctx, filter, update, opts)
+	if err != nil {
 		return errors.Join(ErrUpdateUser, err)
 	}
 	return nil
-}
-
-// dynamicUpdateDocument creates a BSON update document from a struct, including only non-zero fields.
-// It uses reflection to iterate over the struct fields and create the update document.
-// The struct fields must have a bson tag to be included in the update document.
-// The _id field is skipped.
-func dynamicUpdateDocument(item any, alwaysUpdateTags []string) (bson.M, error) {
-	val := reflect.ValueOf(item)
-	if val.Kind() == reflect.Ptr {
-		val = val.Elem()
-	}
-	if !val.IsValid() || val.Kind() != reflect.Struct {
-		return nil, fmt.Errorf("input must be a valid struct")
-	}
-	update := bson.M{}
-	typ := val.Type()
-	// create a map for quick lookup
-	alwaysUpdateMap := make(map[string]bool, len(alwaysUpdateTags))
-	for _, tag := range alwaysUpdateTags {
-		alwaysUpdateMap[tag] = true
-	}
-	for i := range val.NumField() {
-		field := val.Field(i)
-		if !field.CanInterface() {
-			continue
-		}
-		fieldType := typ.Field(i)
-		tag := fieldType.Tag.Get("bson")
-		if tag == "" || tag == "-" || tag == "_id" {
-			continue
-		}
-		// check if the field should always be updated or is not the zero value
-		_, alwaysUpdate := alwaysUpdateMap[tag]
-		if alwaysUpdate || !reflect.DeepEqual(field.Interface(), reflect.Zero(field.Type()).Interface()) {
-			update[tag] = field.Interface()
-		}
-	}
-	return bson.M{"$set": update}, nil
 }
