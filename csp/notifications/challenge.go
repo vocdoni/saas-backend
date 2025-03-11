@@ -2,6 +2,7 @@ package notifications
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -13,8 +14,22 @@ import (
 type ChallengeType string
 
 const (
-	SMSChallenge   ChallengeType = "sms"
+	// SMSChallenge is a challenge to be sent by SMS.
+	SMSChallenge ChallengeType = "sms"
+	// EmailChallenge is a challenge to be sent by email.
 	EmailChallenge ChallengeType = "email"
+)
+
+var (
+	// ErrInvalidNotificationInputs is returned when the notification challenge
+	// is trying to be created with invalid parameters.
+	ErrInvalidNotificationInputs = fmt.Errorf("missing required parameters")
+	// ErrInvalidNotificationType is returned when the notification challenge
+	// is trying to be created with an invalid type.
+	ErrInvalidNotificationType = fmt.Errorf("invalid notification type")
+	// ErrCreateNotification is returned when the notification challenge could
+	// not be created.
+	ErrCreateNotification = fmt.Errorf("error creating notification")
 )
 
 // NotificationChallenge represents a challenge to be sent to a user for
@@ -47,30 +62,30 @@ func (nc *NotificationChallenge) Send(ctx context.Context, service notifications
 // NewNotificationChallenge creates a new notification challenge based on the
 // provided parameters. It returns an error if the notification could not be
 // created.
-func NewNotificationChallenge(challengeType ChallengeType, uID, bID internal.HexBytes, to, code string) (
+func NewNotificationChallenge(cType ChallengeType, uID, bID internal.HexBytes, to, code string) (
 	*NotificationChallenge, error,
 ) {
 	if uID == nil || bID == nil || to == "" || code == "" {
-		return nil, fmt.Errorf("missing required parameters")
+		return nil, ErrInvalidNotificationInputs
 	}
 	n, err := mailtemplates.VerifyOTPCodeNotification.ExecTemplate(struct {
 		Code string
 	}{code})
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(ErrCreateNotification, err)
 	}
-	switch challengeType {
+	switch cType {
 	case EmailChallenge:
 		n.ToAddress = to
 	case SMSChallenge:
 		n.ToNumber = to
 	default:
-		return nil, fmt.Errorf("invalid notification type")
+		return nil, ErrInvalidNotificationType
 	}
 	return &NotificationChallenge{
 		UserID:       uID,
 		BundleID:     bID,
 		Notification: n,
-		Type:         challengeType,
+		Type:         cType,
 	}, nil
 }

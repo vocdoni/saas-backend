@@ -34,4 +34,5 @@ type AuthToken struct {
 	UserID    internal.HexBytes `json:"userID" bson:"userid"`
 	BundleID  internal.HexBytes `json:"bundleID" bson:"bundleid"`
 	CreatedAt time.Time         `json:"createdAt" bson:"createdat"`
+	Verified  bool              `json:"verified" bson:"verified"`
 }

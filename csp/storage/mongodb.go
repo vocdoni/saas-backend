@@ -265,6 +265,20 @@ func (ms *MongoStorage) UserAuthToken(token *uuid.UUID) (*AuthToken, *UserData, 
 	return authToken, user, nil
 }
 
+func (ms *MongoStorage) VerifyAuthToken(token *uuid.UUID) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	// create the context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	// update the token as verified
+	update := bson.M{"$set": bson.M{"verified": true}}
+	if _, err := ms.tokenIndex.UpdateOne(ctx, bson.M{"_id": token}, update); err != nil {
+		return errors.Join(ErrIndexToken, err)
+	}
+	return nil
+}
+
 // createIndexes creates the necessary indexes in the MongoDB database.
 func (ms *MongoStorage) createIndexes() error {
 	// Create text index on `extraData` for finding user data

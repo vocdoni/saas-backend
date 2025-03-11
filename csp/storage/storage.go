@@ -20,5 +20,8 @@ type Storage interface {
 	AddUsers(users []UserData) error
 	// IndexAuthToken sets the token for a user
 	IndexAuthToken(uID, bID internal.HexBytes, token *uuid.UUID) error
+	// UserAuthToken returns the token and user data for a given token
 	UserAuthToken(token *uuid.UUID) (*AuthToken, *UserData, error)
+	// VerifyAuthToken verifies the token and sets it as verified
+	VerifyAuthToken(token *uuid.UUID) error
 }

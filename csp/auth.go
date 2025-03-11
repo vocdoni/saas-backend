@@ -163,6 +163,15 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 			"solution", solution)
 		return ErrChallengeCodeFailure
 	}
+	// set the token as verified
+	if err := c.storage.VerifyAuthToken(uuidToken); err != nil {
+		log.Warnw("error verifying token",
+			"error", err,
+			"token", token,
+			"bundleID", authToken.BundleID,
+			"userID", userData.ID)
+		return ErrStorageFailure
+	}
 	return nil
 }
 
