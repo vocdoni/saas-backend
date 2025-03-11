@@ -226,9 +226,6 @@ func (ms *MongoStorage) SetBulkCensusMembership(
 				end = totalParticipants
 			}
 
-			// Create a new context for each batch
-			batchCtx, batchCancel := context.WithTimeout(context.Background(), 10*time.Second)
-
 			// Prepare bulk operations for this batch
 			var bulkParticipantsOps []mongo.WriteModel
 			var bulkMembershipOps []mongo.WriteModel
@@ -304,6 +301,9 @@ func (ms *MongoStorage) SetBulkCensusMembership(
 
 			// Only lock the mutex during the actual database operations
 			ms.keysLock.Lock()
+
+			// Create a new context for each batch
+			batchCtx, batchCancel := context.WithTimeout(context.Background(), 20*time.Second)
 
 			// Execute the bulk write operations for this batch
 			_, err = ms.orgParticipants.BulkWrite(batchCtx, bulkParticipantsOps)
