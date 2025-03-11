@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 )
 
 func TestCensus(t *testing.T) {
@@ -84,7 +86,7 @@ func TestCensus(t *testing.T) {
 				ParticipantNo: "P001",
 				Name:          "John Doe",
 				Email:         "john.doe@example.com",
-				Phone:         "+1234567890",
+				Phone:         "+34612345678",
 				Password:      "password123",
 				Other: map[string]any{
 					"department": "Engineering",
@@ -95,7 +97,7 @@ func TestCensus(t *testing.T) {
 				ParticipantNo: "P002",
 				Name:          "Jane Smith",
 				Email:         "jane.smith@example.com",
-				Phone:         "+0987654321",
+				Phone:         "+34698765432",
 				Password:      "password456",
 				Other: map[string]any{
 					"department": "Marketing",
@@ -128,6 +130,88 @@ func TestCensus(t *testing.T) {
 	}
 	_, code = testRequest(t, http.MethodPost, adminToken, emptyParticipants, censusEndpoint, censusID)
 	c.Assert(code, qt.Equals, http.StatusOK)
+
+	// Test 3.5: Test with async=true flag
+	asyncParticipants := &AddParticipantsRequest{
+		Participants: []OrgParticipant{
+			{
+				ParticipantNo: "P003",
+				Name:          "Bob Johnson",
+				Email:         "bob.johnson@example.com",
+				Phone:         "+34611223344",
+				Password:      "password789",
+				Other: map[string]any{
+					"department": "Sales",
+					"age":        35,
+				},
+			},
+			{
+				ParticipantNo: "P004",
+				Name:          "Alice Brown",
+				Email:         "alice.brown@example.com",
+				Phone:         "+34655443322",
+				Password:      "passwordabc",
+				Other: map[string]any{
+					"department": "HR",
+					"age":        42,
+				},
+			},
+		},
+	}
+
+	// Make the request with async=true
+	resp, code = testRequest(t, http.MethodPost, adminToken, asyncParticipants, censusEndpoint, censusID+"?async=true")
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+	// Verify the response contains a job ID
+	var asyncResponse AddParticipantsResponse
+	err = parseJSON(resp, &asyncResponse)
+	c.Assert(err, qt.IsNil)
+	c.Assert(asyncResponse.JobID, qt.Not(qt.IsNil))
+	c.Assert(len(asyncResponse.JobID), qt.Equals, 16) // JobID should be 16 bytes
+
+	// Convert the job ID to a hex string for the API call
+	var jobIDHex internal.HexBytes
+	jobIDHex.SetBytes(asyncResponse.JobID)
+	t.Logf("Async job ID: %s\n", jobIDHex.String())
+
+	// Check the job progress
+	var (
+		jobStatus   *db.BulkCensusMembershipStatus
+		maxAttempts = 10
+		attempts    = 0
+		completed   = false
+	)
+
+	// Poll the job status until it's complete or max attempts reached
+	for attempts < maxAttempts && !completed {
+		resp, code = testRequest(t, http.MethodPost, adminToken, nil, "census", "check", jobIDHex.String())
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+		err = json.Unmarshal(resp, &jobStatus)
+		c.Assert(err, qt.IsNil)
+
+		t.Logf("Job progress: %d%%, Added: %d, Total: %d\n",
+			jobStatus.Progress, jobStatus.Added, jobStatus.Total)
+
+		if jobStatus.Progress == 100 {
+			completed = true
+		} else {
+			attempts++
+			time.Sleep(100 * time.Millisecond) // Wait a bit before checking again
+		}
+	}
+
+	// Verify the job completed successfully
+	c.Assert(completed, qt.Equals, true, qt.Commentf("Job did not complete within expected time"))
+	c.Assert(jobStatus.Added, qt.Equals, 2) // We added 2 participants
+	c.Assert(jobStatus.Total, qt.Equals, 2)
+	c.Assert(jobStatus.Progress, qt.Equals, 100)
+
+	// Verify that the entry is removed from the sync.Map after reading progress=100
+	// Make another request to check that the job is no longer found
+	_, code = testRequest(t, http.MethodPost, adminToken, nil, "census", "check", jobIDHex.String())
+	c.Assert(code, qt.Equals, http.StatusNotFound, qt.Commentf("Job should be removed after completion"))
 
 	// Test 4: Publish census
 	// Test 4.1: Test with valid data

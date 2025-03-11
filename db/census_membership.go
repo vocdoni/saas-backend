@@ -145,6 +145,7 @@ type BulkCensusMembershipStatus struct {
 // If it doesn't exist, it creates a new one.
 // Processes participants in batches of 200 entries.
 // Returns a channel that sends the percentage of participants processed every 10 seconds.
+// This function must be called in a goroutine.
 func (ms *MongoStorage) SetBulkCensusMembership(
 	salt, censusId string, orgParticipants []OrgParticipant,
 ) (chan *BulkCensusMembershipStatus, error) {

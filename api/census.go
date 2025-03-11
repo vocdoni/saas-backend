@@ -153,11 +153,11 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// if async create a new job identifier
-	jobID := util.RandomBytes(16)
+	jobID := internal.HexBytes(util.RandomBytes(16))
 	go func() {
 		for p := range progressChan {
 			// We need to drain the channel to avoid blocking
-			addParticipantsToCensusWorkers.Store(jobID, p)
+			addParticipantsToCensusWorkers.Store(jobID.String(), p)
 		}
 	}()
 
@@ -178,10 +178,10 @@ func (a *API) addParticipantsJobCheckHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if v, ok := addParticipantsToCensusWorkers.Load(jobID.Bytes()); ok {
+	if v, ok := addParticipantsToCensusWorkers.Load(jobID.String()); ok {
 		p := v.(*db.BulkCensusMembershipStatus)
 		if p.Progress == 100 {
-			addParticipantsToCensusWorkers.Delete(jobID.Bytes())
+			addParticipantsToCensusWorkers.Delete(jobID.String())
 		}
 		httpWriteJSON(w, p)
 		return
