@@ -404,7 +404,8 @@ func (p *OrgParticipant) toDB(orgAddress string) db.OrgParticipant {
 
 // AddParticipantsResponse defines the response for successful participant addition
 type AddParticipantsResponse struct {
-	ParticipantsNo uint32 `json:"participantsNo"`
+	ParticipantsNo uint32            `json:"participantsNo"`
+	JobID          internal.HexBytes `json:"jobID"`
 }
 
 // Request types for process operations
