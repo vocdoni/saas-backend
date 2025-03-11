@@ -27,13 +27,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-type apiTestCase struct {
-	uri            string
-	method         string
-	body           []byte
-	expectedStatus int
-	expectedBody   []byte
-}
+// Removed unused type
 
 const (
 	testSecret    = "super-secret"
@@ -73,15 +67,7 @@ func testURL(path string) string {
 	return fmt.Sprintf("http://%s:%d%s", testHost, testPort, path)
 }
 
-// mustMarshal helper function marshalls the input interface into a byte slice.
-// It panics if the marshalling fails.
-func mustMarshal(i any) []byte {
-	b, err := json.Marshal(i)
-	if err != nil {
-		panic(err)
-	}
-	return b
-}
+// Removed unused function
 
 // pingAPI helper function pings the API endpoint and retries the request
 // if it fails until the retries limit is reached. It returns an error if the
@@ -337,15 +323,13 @@ func testNewVocdoniClient(t *testing.T) *apiclient.HTTPclient {
 	return client
 }
 
-func fetchVocdoniAccountNonce(t *testing.T, client *apiclient.HTTPclient, address internal.HexBytes) uint32 {
-	account, err := client.Account(address.String())
-	qt.Assert(t, err, qt.IsNil)
-	return account.Nonce
-}
+// Removed unused function
 
 // sendVocdoniTx sends a transaction to the Voconed API and waits for it to be mined.
 // Returns the response data if any.
-func sendVocdoniTx(t *testing.T, tx *models.Tx, token string, vocdoniClient *apiclient.HTTPclient, orgAddress internal.HexBytes) []byte {
+func sendVocdoniTx(t *testing.T, tx *models.Tx, token string, vocdoniClient *apiclient.HTTPclient,
+	orgAddress internal.HexBytes,
+) []byte {
 	c := qt.New(t)
 	txBytes, err := proto.Marshal(tx)
 	c.Assert(err, qt.IsNil)

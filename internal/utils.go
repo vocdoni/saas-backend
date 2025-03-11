@@ -83,7 +83,7 @@ func HashOrgData(orgAddress, data string) []byte {
 	var salt []byte
 	hb := HexBytes{}
 	if err := hb.FromString(orgAddress); err != nil {
-		// This should never happend but if it does, let's try to keep going
+		// This should never happened but if it does, let's try to keep going
 		log.Warnw("invalid org address for hashing", "address", orgAddress)
 		salt = []byte(orgAddress)
 	} else {

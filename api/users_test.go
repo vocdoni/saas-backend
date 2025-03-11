@@ -70,6 +70,7 @@ func TestRegisterHandler(t *testing.T) {
 		FirstName: "first",
 		LastName:  "last",
 	}
+	// Using the response directly
 	_, code = testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
 	c.Assert(code, qt.Equals, http.StatusOK)
 
@@ -115,7 +116,7 @@ func TestRegisterHandler(t *testing.T) {
 
 	// Test empty password
 	userInfo.Password = ""
-	resp, code = testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
+	_, code = testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
 	c.Assert(code, qt.Equals, http.StatusBadRequest)
 }
 

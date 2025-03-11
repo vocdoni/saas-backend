@@ -49,7 +49,7 @@ func TestCensus(t *testing.T) {
 	t.Logf("Created census with ID: %s\n", censusID)
 
 	// Test 1.2: Test with no authentication
-	resp, code = testRequest(t, http.MethodPost, "", censusInfo, censusEndpoint)
+	_, code = testRequest(t, http.MethodPost, "", censusInfo, censusEndpoint)
 	c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
 	// Test 1.3: Test with invalid organization address
@@ -57,7 +57,7 @@ func TestCensus(t *testing.T) {
 		Type:       db.CensusTypeSMSorMail,
 		OrgAddress: "invalid-address",
 	}
-	resp, code = testRequest(t, http.MethodPost, adminToken, invalidCensusInfo, censusEndpoint)
+	_, code = testRequest(t, http.MethodPost, adminToken, invalidCensusInfo, censusEndpoint)
 	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
 
 	// Test 2: Get census information
@@ -73,7 +73,7 @@ func TestCensus(t *testing.T) {
 	c.Assert(retrievedCensus.OrgAddress, qt.Equals, orgAddress.String())
 
 	// Test 2.2: Test with invalid census ID
-	resp, code = testRequest(t, http.MethodGet, adminToken, nil, censusEndpoint, "invalid-id")
+	_, code = testRequest(t, http.MethodGet, adminToken, nil, censusEndpoint, "invalid-id")
 	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
 
 	// Test 3: Add participants to census
@@ -115,18 +115,18 @@ func TestCensus(t *testing.T) {
 	c.Assert(addedResponse.ParticipantsNo, qt.Equals, uint32(2))
 
 	// Test 3.2: Test with no authentication
-	resp, code = testRequest(t, http.MethodPost, "", participants, censusEndpoint, censusID)
+	_, code = testRequest(t, http.MethodPost, "", participants, censusEndpoint, censusID)
 	c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
 	// Test 3.3: Test with invalid census ID
-	resp, code = testRequest(t, http.MethodPost, adminToken, participants, censusEndpoint, "invalid-id")
+	_, code = testRequest(t, http.MethodPost, adminToken, participants, censusEndpoint, "invalid-id")
 	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
 
 	// Test 3.4: Test with empty participants list
 	emptyParticipants := &AddParticipantsRequest{
 		Participants: []OrgParticipant{},
 	}
-	resp, code = testRequest(t, http.MethodPost, adminToken, emptyParticipants, censusEndpoint, censusID)
+	_, code = testRequest(t, http.MethodPost, adminToken, emptyParticipants, censusEndpoint, censusID)
 	c.Assert(code, qt.Equals, http.StatusOK)
 
 	// Test 4: Publish census
@@ -141,11 +141,11 @@ func TestCensus(t *testing.T) {
 	c.Assert(publishedCensus.Root, qt.Not(qt.Equals), "")
 
 	// Test 4.2: Test with no authentication
-	resp, code = testRequest(t, http.MethodPost, "", nil, censusEndpoint, censusID, "publish")
+	_, code = testRequest(t, http.MethodPost, "", nil, censusEndpoint, censusID, "publish")
 	c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
 	// Test 4.3: Test with invalid census ID
-	resp, code = testRequest(t, http.MethodPost, adminToken, nil, censusEndpoint, "invalid-id", "publish")
+	_, code = testRequest(t, http.MethodPost, adminToken, nil, censusEndpoint, "invalid-id", "publish")
 	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
 
 	// Test 5: Create a user with manager role and test permissions
