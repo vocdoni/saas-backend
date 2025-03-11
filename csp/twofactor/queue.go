@@ -26,22 +26,32 @@ const (
 // to store the notifications and a channel to send the response back to the
 // caller.
 type Queue struct {
+	NotificationsSent chan NotificationChallenge
+	ctx               context.Context
 	items             *goconcurrentqueue.FIFO
 	ttl               time.Duration
 	throttle          time.Duration
-	NotificationsSent chan NotificationChallenge
 	smsService        notifications.NotificationService
 	mailService       notifications.NotificationService
 }
 
 // NewQueue creates a new queue with the provided TTL and throttle time.
-func NewQueue(ttl, throttle time.Duration) *Queue {
+func NewQueue(ctx context.Context, ttl, throttle time.Duration,
+	mailSrv, smsSrv notifications.NotificationService,
+) *Queue {
 	return &Queue{
 		NotificationsSent: make(chan NotificationChallenge, 1),
+		ctx:               ctx,
 		items:             goconcurrentqueue.NewFIFO(),
 		ttl:               ttl,
 		throttle:          throttle,
+		smsService:        smsSrv,
+		mailService:       mailSrv,
 	}
+}
+
+func (sq *Queue) Push(challenge NotificationChallenge) error {
+	return sq.items.Enqueue(challenge)
 }
 
 // Start starts the queue processing loop. It will dequeue elements from the
@@ -71,7 +81,7 @@ func (sq *Queue) Start(ctx context.Context) {
 				notifyService = sq.mailService
 			}
 			// try to send the notification, if it fails, try to re-enqueue it
-			if err := challenge.Send(notifyService); err != nil {
+			if err := challenge.Send(sq.ctx, notifyService); err != nil {
 				log.Warnw("failed to send notification",
 					"challenge", challenge.String(),
 					"error", err)

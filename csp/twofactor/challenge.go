@@ -24,7 +24,8 @@ const (
 type NotificationChallenge struct {
 	Type         ChallengeType
 	UserID       internal.HexBytes
-	ElectionID   internal.HexBytes
+	BundleID     internal.HexBytes
+	ProcessID    internal.HexBytes
 	Notification *notifications.Notification
 	CreatedAt    time.Time
 	Retries      int
@@ -42,10 +43,10 @@ func (nc *NotificationChallenge) String() string {
 
 // Send sends the notification challenge using the provided notification
 // service. It returns an error if the notification could not be sent.
-func (nc *NotificationChallenge) Send(service notifications.NotificationService) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (nc *NotificationChallenge) Send(ctx context.Context, service notifications.NotificationService) error {
+	internalCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if err := service.SendNotification(ctx, nc.Notification); err != nil {
+	if err := service.SendNotification(internalCtx, nc.Notification); err != nil {
 		return err
 	}
 	nc.Success = true
@@ -55,24 +56,30 @@ func (nc *NotificationChallenge) Send(service notifications.NotificationService)
 // NewNotificationChallenge creates a new notification challenge based on the
 // provided parameters. It returns an error if the notification could not be
 // created.
-func NewNotificationChallenge(challengeType ChallengeType, userID, electionID internal.HexBytes, contact, optCode string) (*NotificationChallenge, error) {
+func NewNotificationChallenge(challengeType ChallengeType, uID, bID, pID internal.HexBytes, to, code string) (
+	*NotificationChallenge, error,
+) {
+	if uID == nil || pID == nil || to == "" || code == "" {
+		return nil, fmt.Errorf("missing required parameters")
+	}
 	n, err := mailtemplates.VerifyOTPCodeNotification.ExecTemplate(struct {
 		Code string
-	}{optCode})
+	}{code})
 	if err != nil {
 		return nil, err
 	}
 	switch challengeType {
 	case EmailChallenge:
-		n.ToAddress = contact
+		n.ToAddress = to
 	case SMSChallenge:
-		n.ToNumber = contact
+		n.ToNumber = to
 	default:
 		return nil, fmt.Errorf("invalid notification type")
 	}
 	return &NotificationChallenge{
-		UserID:       userID,
-		ElectionID:   electionID,
+		UserID:       uID,
+		BundleID:     bID,
+		ProcessID:    pID,
 		Notification: n,
 		Type:         challengeType,
 	}, nil

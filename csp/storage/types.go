@@ -14,17 +14,22 @@ type Users struct {
 
 // UserData represents a user of the SMS handler.
 type UserData struct {
-	UserID    internal.HexBytes       `json:"userID,omitempty" bson:"_id"`
-	Elections map[string]UserElection `json:"elections,omitempty" bson:"elections,omitempty"`
-	ExtraData string                  `json:"extraData,omitempty" bson:"extradata,omitempty"`
-	Phone     string                  `json:"phone,omitempty" bson:"phone,omitempty"`
-	Mail      string                  `json:"mail,omitempty" bson:"mail,omitempty"`
+	ID        internal.HexBytes      `json:"userID,omitempty" bson:"_id"`
+	Processes map[string]UserProcess `json:"processes,omitempty" bson:"processes,omitempty"`
+	Bundles   map[string]UserBundle  `json:"bundles,omitempty" bson:"bundles,omitempty"`
+	ExtraData string                 `json:"extraData,omitempty" bson:"extradata,omitempty"`
+	Phone     string                 `json:"phone,omitempty" bson:"phone,omitempty"`
+	Mail      string                 `json:"mail,omitempty" bson:"mail,omitempty"`
+}
+type UserBundle struct {
+	ID        internal.HexBytes      `json:"bundleId" bson:"_id"`
+	Processes map[string]UserProcess `json:"processes" bson:"processes"`
 }
 
-// UserElection represents an election and its details owned by a user
+// UserProcess represents an election and its details owned by a user
 // (UserData).
-type UserElection struct {
-	ElectionID        internal.HexBytes `json:"electionId" bson:"_id"`
+type UserProcess struct {
+	ID                internal.HexBytes `json:"processId" bson:"_id"`
 	RemainingAttempts int               `json:"remainingAttempts" bson:"remainingattempts"`
 	LastAttempt       *time.Time        `json:"lastAttempt,omitempty" bson:"lastattempt,omitempty"`
 	Consumed          bool              `json:"consumed" bson:"consumed"`
@@ -38,24 +43,4 @@ type UserElection struct {
 type AuthTokenIndex struct {
 	AuthToken *uuid.UUID        `json:"authToken" bson:"_id"`
 	UserID    internal.HexBytes `json:"userID" bson:"userid"`
-}
-
-// UserCollection is a dataset containing several users (used for dump and
-// import).
-type UserCollection struct {
-	Users []UserData `json:"users" bson:"users"`
-}
-
-// HexBytesToElection transforms a slice of HexBytes to []Election. All entries
-// are set with RemainingAttempts = attempts.
-func HexBytesToElection(electionIDs []internal.HexBytes, attempts int) []UserElection {
-	elections := []UserElection{}
-
-	for _, e := range electionIDs {
-		ue := UserElection{}
-		ue.ElectionID = e
-		ue.RemainingAttempts = attempts
-		elections = append(elections, ue)
-	}
-	return elections
 }
