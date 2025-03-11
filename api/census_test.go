@@ -109,10 +109,10 @@ func TestCensus(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Verify the response contains the number of participants added
-	var addedCount int
-	err = parseJSON(resp, &addedCount)
+	var addedResponse AddParticipantsResponse
+	err = parseJSON(resp, &addedResponse)
 	c.Assert(err, qt.IsNil)
-	c.Assert(addedCount, qt.Equals, 2)
+	c.Assert(addedResponse.ParticipantsNo, qt.Equals, uint32(2))
 
 	// Test 3.2: Test with no authentication
 	resp, code = testRequest(t, http.MethodPost, "", participants, censusEndpoint, censusID)
