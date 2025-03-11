@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
+	stderrors "errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/vocdoni/saas-backend/twofactor"
@@ -23,21 +24,21 @@ import (
 func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 	processID := chi.URLParam(r, "processId")
 	if processID == "" {
-		ErrMalformedURLParam.Withf("missing process ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("missing process ID").Write(w)
 		return
 	}
 	processID = util.TrimHex(processID)
 
 	processInfo := &CreateProcessRequest{}
 	if err := json.NewDecoder(r.Body).Decode(&processInfo); err != nil {
-		ErrMalformedBody.Write(w)
+		errors.ErrMalformedBody.Write(w)
 		return
 	}
 
 	// get the user from the request context
 	user, ok := userFromContext(r.Context())
 	if !ok {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 
@@ -48,23 +49,23 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		if err == db.ErrNotFound {
-			ErrMalformedURLParam.Withf("published census not found").Write(w)
+			errors.ErrMalformedURLParam.Withf("published census not found").Write(w)
 			return
 		}
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 
 	// check the user has the necessary permissions
 	if !user.HasRoleFor(pubCensus.Census.OrgAddress, db.ManagerRole) && !user.HasRoleFor(pubCensus.Census.OrgAddress, db.AdminRole) {
-		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
 
 	id := internal.HexBytes{}
 	err = id.FromString(processID)
 	if err != nil {
-		ErrMalformedURLParam.Withf("invalid process ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("invalid process ID").Write(w)
 		return
 	}
 
@@ -76,7 +77,7 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := a.db.SetProcess(process); err != nil {
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 	orgParticipants, err := a.db.OrgParticipantsMemberships(
@@ -86,24 +87,24 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 		[]internal.HexBytes{id},
 	)
 	if err != nil {
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 	switch pubCensus.Census.Type {
 	case db.CensusTypeSMSorMail, db.CensusTypeMail, db.CensusTypeSMS:
 		if err := a.twofactor.AddProcess(pubCensus.Census.Type, orgParticipants); err != nil {
-			ErrGenericInternalServerError.WithErr(err).Write(w)
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
 	default:
-		ErrNotSupported.Withf("census type not supported").Write(w)
+		errors.ErrNotSupported.Withf("census type not supported").Write(w)
 		return
 	}
 	if pubCensus.Census.Type == db.CensusTypeSMSorMail ||
 		pubCensus.Census.Type == db.CensusTypeMail ||
 		pubCensus.Census.Type == db.CensusTypeSMS {
 		if err := a.twofactor.AddProcess(pubCensus.Census.Type, orgParticipants); err != nil {
-			ErrGenericInternalServerError.WithErr(err).Write(w)
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
 	}
@@ -116,17 +117,17 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 func (a *API) processInfoHandler(w http.ResponseWriter, r *http.Request) {
 	processID := chi.URLParam(r, "processId")
 	if len(processID) == 0 {
-		ErrMalformedURLParam.Withf("missing process ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("missing process ID").Write(w)
 		return
 	}
 
 	process, err := a.db.Process([]byte(processID))
 	if err != nil {
 		if err == db.ErrNotFound {
-			ErrMalformedURLParam.Withf("process not found").Write(w)
+			errors.ErrMalformedURLParam.Withf("process not found").Write(w)
 			return
 		}
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 
@@ -157,14 +158,14 @@ type twofactorResponse struct {
 func (a *API) twofactorAuthHandler(w http.ResponseWriter, r *http.Request) {
 	urlProcessId := chi.URLParam(r, "processId")
 	if len(urlProcessId) == 0 {
-		ErrMalformedURLParam.Withf("missing process ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("missing process ID").Write(w)
 		return
 	}
 
 	stepString := chi.URLParam(r, "step")
 	step, err := strconv.Atoi(stepString)
 	if err != nil || (step != 0 && step != 1) {
-		ErrMalformedURLParam.Withf("wrong step ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("wrong step ID").Write(w)
 		return
 	}
 
@@ -172,7 +173,7 @@ func (a *API) twofactorAuthHandler(w http.ResponseWriter, r *http.Request) {
 	case 0:
 		authToken, err := a.initiateAuthRequest(r, urlProcessId)
 		if err != nil {
-			ErrUnauthorized.WithErr(err).Write(w)
+			errors.ErrUnauthorized.WithErr(err).Write(w)
 			return
 		}
 		httpWriteJSON(w, &twofactorResponse{AuthToken: authToken})
@@ -180,12 +181,12 @@ func (a *API) twofactorAuthHandler(w http.ResponseWriter, r *http.Request) {
 	case 1:
 		var req AuthRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			ErrMalformedBody.Write(w)
+			errors.ErrMalformedBody.Write(w)
 			return
 		}
 		authResp := a.twofactor.Auth(urlProcessId, req.AuthToken, req.AuthData)
 		if !authResp.Success {
-			ErrUnauthorized.WithErr(errors.New(authResp.Error)).Write(w)
+			errors.ErrUnauthorized.WithErr(stderrors.New(authResp.Error)).Write(w)
 			return
 		}
 		httpWriteJSON(w, &twofactorResponse{AuthToken: authResp.AuthToken})
@@ -198,24 +199,24 @@ func (a *API) twofactorAuthHandler(w http.ResponseWriter, r *http.Request) {
 func (a *API) twofactorSignHandler(w http.ResponseWriter, r *http.Request) {
 	urlProcessId := chi.URLParam(r, "processId")
 	if len(urlProcessId) == 0 {
-		ErrMalformedURLParam.Withf("missing process ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("missing process ID").Write(w)
 		return
 	}
 	processId := []byte(util.TrimHex(urlProcessId))
 
 	var req SignRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		ErrMalformedBody.Write(w)
+		errors.ErrMalformedBody.Write(w)
 		return
 	}
 	payload, err := hex.DecodeString(util.TrimHex(req.Payload))
 	if err != nil {
-		ErrMalformedBody.WithErr(err).Write(w)
+		errors.ErrMalformedBody.WithErr(err).Write(w)
 		return
 	}
 	signResp := a.twofactor.Sign(*req.AuthToken, nil, payload, processId, "", "ecdsa")
 	if !signResp.Success {
-		ErrUnauthorized.WithErr(errors.New(signResp.Error)).Write(w)
+		errors.ErrUnauthorized.WithErr(stderrors.New(signResp.Error)).Write(w)
 		return
 	}
 	httpWriteJSON(w, &twofactorResponse{Signature: signResp.Signature})
