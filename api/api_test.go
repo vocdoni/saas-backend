@@ -313,7 +313,7 @@ func testCreateUser(t *testing.T, password string) string {
 }
 
 // testCreateOrganization creates a new organization and returns the address.
-func testCreateOrganization(t *testing.T, jwt string) string {
+func testCreateOrganization(t *testing.T, jwt string) internal.HexBytes {
 	orgName := fmt.Sprintf("org-%d", internal.RandomInt(10000))
 	orgInfo := &OrganizationInfo{
 		Type:    string(db.CompanyType),
@@ -327,7 +327,8 @@ func testCreateOrganization(t *testing.T, jwt string) string {
 	qt.Assert(t, err, qt.IsNil)
 	qt.Assert(t, orgResp.Address, qt.Not(qt.Equals), "")
 
-	return orgResp.Address
+	addr := new(internal.HexBytes).SetString(orgResp.Address)
+	return *addr
 }
 
 func testNewVocdoniClient(t *testing.T) *apiclient.HTTPclient {

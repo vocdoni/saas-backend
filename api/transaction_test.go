@@ -26,7 +26,7 @@ func TestTransaction(t *testing.T) {
 	vocdoniClient := testNewVocdoniClient(t)
 
 	// create an organization
-	orgAddress := new(internal.HexBytes).SetString(testCreateOrganization(t, token))
+	orgAddress := testCreateOrganization(t, token)
 	t.Logf("fetched org address %s\n", orgAddress.String())
 
 	// subscribe the organization to a plan
@@ -35,7 +35,7 @@ func TestTransaction(t *testing.T) {
 	c.Assert(len(plans), qt.Not(qt.Equals), 0)
 
 	err = testDB.SetOrganizationSubscription(orgAddress.String(), &db.OrganizationSubscription{
-		PlanID:          plans[len(plans)-1].ID,
+		PlanID:          plans[0].ID,
 		StartDate:       time.Now(),
 		RenewalDate:     time.Now().Add(time.Hour * 24),
 		LastPaymentDate: time.Now(),
@@ -62,7 +62,7 @@ func TestTransaction(t *testing.T) {
 	}
 
 	// send the transaction
-	sendVocdoniTx(t, &tx, token, vocdoniClient, *orgAddress)
+	sendVocdoniTx(t, &tx, token, vocdoniClient, orgAddress)
 
 	// get the organization
 	resp, code = testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String())
@@ -70,7 +70,7 @@ func TestTransaction(t *testing.T) {
 	t.Logf("%s\n", resp)
 
 	// create a process
-	nonce = fetchVocdoniAccountNonce(t, vocdoniClient, *orgAddress)
+	nonce = fetchVocdoniAccountNonce(t, vocdoniClient, orgAddress)
 	tx = models.Tx{
 		Payload: &models.Tx_NewProcess{
 			NewProcess: &models.NewProcessTx{
@@ -96,5 +96,6 @@ func TestTransaction(t *testing.T) {
 	}
 
 	// send the transaction
-	sendVocdoniTx(t, &tx, token, vocdoniClient, *orgAddress)
+	sendVocdoniTx(t, &tx, token, vocdoniClient, orgAddress)
+
 }
