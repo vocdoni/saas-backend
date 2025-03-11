@@ -11,11 +11,11 @@ import (
 // Organization is the struct that represents an organization in the API
 type OrganizationInfo struct {
 	Address        string               `json:"address"`
-	Website        string               `json:"website"`
+	Website        string               `json:"website" validate:"omitempty,url"`
 	CreatedAt      string               `json:"createdAt"`
-	Type           string               `json:"type"`
+	Type           string               `json:"type" validate:"required"`
 	Size           string               `json:"size"`
-	Color          string               `json:"color"`
+	Color          string               `json:"color" validate:"omitempty,hexcolor"`
 	Subdomain      string               `json:"subdomain"`
 	Country        string               `json:"country"`
 	Timezone       string               `json:"timezone"`
@@ -81,10 +81,10 @@ type OrganizationTypeList struct {
 
 // UserInfo is the request to register a new user.
 type UserInfo struct {
-	Email         string              `json:"email,omitempty"`
-	Password      string              `json:"password,omitempty"`
-	FirstName     string              `json:"firstName,omitempty"`
-	LastName      string              `json:"lastName,omitempty"`
+	Email         string              `json:"email,omitempty" validate:"required,email"`
+	Password      string              `json:"password,omitempty" validate:"required,min=8"`
+	FirstName     string              `json:"firstName,omitempty" validate:"required"`
+	LastName      string              `json:"lastName,omitempty" validate:"required"`
 	Verified      bool                `json:"verified,omitempty"`
 	Organizations []*UserOrganization `json:"organizations"`
 }
@@ -92,8 +92,8 @@ type UserInfo struct {
 // OrganizationInvite is the struct that represents an invitation to an
 // organization in the API.
 type OrganizationInvite struct {
-	Email      string    `json:"email"`
-	Role       string    `json:"role"`
+	Email      string    `json:"email" validate:"required,email"`
+	Role       string    `json:"role" validate:"required"`
 	Expiration time.Time `json:"expiration"`
 }
 
@@ -106,29 +106,29 @@ type OrganizationInviteList struct {
 // AcceptOrganizationInvitation is the request to accept an invitation to an
 // organization.
 type AcceptOrganizationInvitation struct {
-	Code string    `json:"code"`
+	Code string    `json:"code" validate:"required"`
 	User *UserInfo `json:"user"`
 }
 
 // UserPasswordUpdate is the request to update the password of a user.
 type UserPasswordUpdate struct {
-	OldPassword string `json:"oldPassword"`
-	NewPassword string `json:"newPassword"`
+	OldPassword string `json:"oldPassword" validate:"required"`
+	NewPassword string `json:"newPassword" validate:"required,min=8"`
 }
 
 // UserVerificationRequest is the request to verify a user.
 type UserVerification struct {
-	Email      string    `json:"email,omitempty"`
-	Code       string    `json:"code,omitempty"`
+	Email      string    `json:"email,omitempty" validate:"required,email"`
+	Code       string    `json:"code,omitempty" validate:"required"`
 	Expiration time.Time `json:"expiration,omitempty"`
 	Valid      bool      `json:"valid"`
 }
 
 // UserPasswordReset is the request to reset the password of a user.
 type UserPasswordReset struct {
-	Email       string `json:"email"`
-	Code        string `json:"code"`
-	NewPassword string `json:"newPassword"`
+	Email       string `json:"email" validate:"required,email"`
+	Code        string `json:"code" validate:"required"`
+	NewPassword string `json:"newPassword" validate:"required,min=8"`
 }
 
 // LoginResponse is the response of the login request which includes the JWT token
@@ -140,15 +140,15 @@ type LoginResponse struct {
 // TransactionData is the struct that contains the data of a transaction to
 // be signed, but also is used to return the signed transaction.
 type TransactionData struct {
-	Address   internal.HexBytes `json:"address"`
-	TxPayload []byte            `json:"txPayload"`
+	Address   internal.HexBytes `json:"address" validate:"required"`
+	TxPayload []byte            `json:"txPayload" validate:"required"`
 }
 
 // MessageSignature is the struct that contains the payload and the signature.
 // Its used to receive and return a signed message.
 type MessageSignature struct {
-	Address   string            `json:"address"`
-	Payload   []byte            `json:"payload,omitempty"`
+	Address   string            `json:"address" validate:"required"`
+	Payload   []byte            `json:"payload,omitempty" validate:"required"`
 	Signature internal.HexBytes `json:"signature,omitempty"`
 }
 
@@ -325,10 +325,10 @@ func subscriptionUsageFromDB(usage *db.OrganizationCounters) SubscriptionUsage {
 
 // SubscriptionCheckout represents the details required for a subscription checkout process.
 type SubscriptionCheckout struct {
-	LookupKey uint64 `json:"lookupKey"`
-	ReturnURL string `json:"returnURL"`
-	Amount    int64  `json:"amount"`
-	Address   string `json:"address"`
+	LookupKey uint64 `json:"lookupKey" validate:"required"`
+	ReturnURL string `json:"returnURL" validate:"required,url"`
+	Amount    int64  `json:"amount" validate:"required"`
+	Address   string `json:"address" validate:"required"`
 	Locale    string `json:"locale"`
 }
 
@@ -345,8 +345,8 @@ type ParticipantNotification struct {
 // in the API. It is the mirror struct of db.Census.
 type OrganizationCensus struct {
 	ID         string        `json:"censusID"`
-	Type       db.CensusType `json:"type"`
-	OrgAddress string        `json:"orgAddress"`
+	Type       db.CensusType `json:"type" validate:"required"`
+	OrgAddress string        `json:"orgAddress" validate:"required"`
 }
 
 func organizationCensusFromDB(census *db.Census) OrganizationCensus {
@@ -368,7 +368,7 @@ type OrganizationCensuses struct {
 
 // AddParticipantsRequest defines the payload for adding participants to a census
 type AddParticipantsRequest struct {
-	Participants []OrgParticipant `json:"participants"`
+	Participants []OrgParticipant `json:"participants" validate:"required"`
 }
 
 func (r *AddParticipantsRequest) dbOrgParticipants(orgAddress string) []db.OrgParticipant {
@@ -382,10 +382,10 @@ func (r *AddParticipantsRequest) dbOrgParticipants(orgAddress string) []db.OrgPa
 // OrgParticipant defines the structure of a participant in the API. It is the
 // mirror struct of db.OrgParticipant.
 type OrgParticipant struct {
-	ParticipantNo string         `json:"participantNo"`
-	Name          string         `json:"name"`
-	Email         string         `json:"email"`
-	Phone         string         `json:"phone"`
+	ParticipantNo string         `json:"participantNo" validate:"required"`
+	Name          string         `json:"name" validate:"required"`
+	Email         string         `json:"email" validate:"email"`
+	Phone         string         `json:"phone" validate:"phone"`
 	Password      string         `json:"password"`
 	Other         map[string]any `json:"other"`
 }
@@ -412,28 +412,28 @@ type AddParticipantsResponse struct {
 
 // CreateProcessRequest defines the payload for creating a new voting process
 type CreateProcessRequest struct {
-	PublishedCensusRoot string `json:"censusRoot"`
-	PublishedCensusURI  string `json:"censusUri"`
-	CensusID            string `json:"censusID"`
+	PublishedCensusRoot string `json:"censusRoot" validate:"required"`
+	PublishedCensusURI  string `json:"censusUri" validate:"required"`
+	CensusID            string `json:"censusID" validate:"required"`
 	Metadata            []byte `json:"metadata,omitempty"`
 }
 
 // InitiateAuthRequest defines the payload for participant authentication
 type InitiateAuthRequest struct {
-	ParticipantNo string `json:"participantNo"`
-	Email         string `json:"email,omitempty"`
-	Phone         string `json:"phone,omitempty"`
+	ParticipantNo string `json:"participantNo" validate:"required"`
+	Email         string `json:"email,omitempty" validate:"omitempty,email"`
+	Phone         string `json:"phone,omitempty" validate:"omitempty,phone"`
 	Password      string `json:"password,omitempty"`
 }
 
 // VerifyAuthRequest defines the payload for auth code verification
 type VerifyAuthRequest struct {
-	Token string `json:"token"`
-	Code  string `json:"code"`
+	Token string `json:"token" validate:"required"`
+	Code  string `json:"code" validate:"required"`
 }
 
 // GenerateProofRequest defines the payload for generating voting proof
 type GenerateProofRequest struct {
-	Token          string `json:"token"`
-	BlindedAddress []byte `json:"blindedAddress"`
+	Token          string `json:"token" validate:"required"`
+	BlindedAddress []byte `json:"blindedAddress" validate:"required"`
 }

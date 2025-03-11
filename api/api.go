@@ -16,6 +16,7 @@ import (
 	"github.com/vocdoni/saas-backend/stripe"
 	"github.com/vocdoni/saas-backend/subscriptions"
 	"github.com/vocdoni/saas-backend/twofactor"
+	"github.com/vocdoni/saas-backend/validator"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 )
@@ -68,6 +69,7 @@ type API struct {
 	subscriptions   *subscriptions.Subscriptions
 	objectStorage   *objectstorage.ObjectStorageClient
 	twofactor       *twofactor.Twofactor
+	validator       *validator.Validator
 }
 
 // New creates a new API HTTP server. It does not start the server. Use Start() for that.
@@ -92,6 +94,7 @@ func New(conf *APIConfig) *API {
 		subscriptions:   conf.Subscriptions,
 		objectStorage:   conf.ObjectStorage,
 		twofactor:       conf.Twofactor,
+		validator:       validator.New(),
 	}
 }
 
@@ -120,6 +123,7 @@ func (a *API) initRouter() http.Handler {
 	r.Use(middleware.Throttle(100))
 	r.Use(middleware.ThrottleBacklog(5000, 40000, 60*time.Second))
 	r.Use(middleware.Timeout(45 * time.Second))
+	r.Use(a.InputValidator)
 
 	// protected routes
 	r.Group(func(r chi.Router) {
@@ -138,24 +142,24 @@ func (a *API) initRouter() http.Handler {
 		r.Get(usersMeEndpoint, a.userInfoHandler)
 		// update user information
 		log.Infow("new route", "method", "PUT", "path", usersMeEndpoint)
-		r.Put(usersMeEndpoint, a.updateUserInfoHandler)
+		r.With(a.validateInputModel(UserInfo{})).Put(usersMeEndpoint, a.updateUserInfoHandler)
 		// update user password
 		log.Infow("new route", "method", "PUT", "path", usersPasswordEndpoint)
-		r.Put(usersPasswordEndpoint, a.updateUserPasswordHandler)
+		r.With(a.validateInputModel(UserPasswordUpdate{})).Put(usersPasswordEndpoint, a.updateUserPasswordHandler)
 		// sign a payload
 		log.Infow("new route", "method", "POST", "path", signTxEndpoint)
-		r.Post(signTxEndpoint, a.signTxHandler)
+		r.With(a.validateInputModel(TransactionData{})).Post(signTxEndpoint, a.signTxHandler)
 		// sign a message
 		log.Infow("new route", "method", "POST", "path", signMessageEndpoint)
-		r.Post(signMessageEndpoint, a.signMessageHandler)
+		r.With(a.validateInputModel(MessageSignature{})).Post(signMessageEndpoint, a.signMessageHandler)
 		// create an organization
 		log.Infow("new route", "method", "POST", "path", organizationsEndpoint)
-		r.Post(organizationsEndpoint, a.createOrganizationHandler)
+		r.With(a.validateInputModel(OrganizationInfo{})).Post(organizationsEndpoint, a.createOrganizationHandler)
 		// create a route for those endpoints that include the organization
 		// address to get the organization data from the database
 		// update the organization
 		log.Infow("new route", "method", "PUT", "path", organizationEndpoint)
-		r.Put(organizationEndpoint, a.updateOrganizationHandler)
+		r.With(a.validateInputModel(OrganizationInfo{})).Put(organizationEndpoint, a.updateOrganizationHandler)
 		// get organization members
 		log.Infow("new route", "method", "GET", "path", organizationMembersEndpoint)
 		r.Get(organizationMembersEndpoint, a.organizationMembersHandler)
@@ -164,7 +168,7 @@ func (a *API) initRouter() http.Handler {
 		r.Get(organizationSubscriptionEndpoint, a.getOrganizationSubscriptionHandler)
 		// invite a new admin member to the organization
 		log.Infow("new route", "method", "POST", "path", organizationAddMemberEndpoint)
-		r.Post(organizationAddMemberEndpoint, a.inviteOrganizationMemberHandler)
+		r.With(a.validateInputModel(OrganizationInvite{})).Post(organizationAddMemberEndpoint, a.inviteOrganizationMemberHandler)
 		// get organization censuses
 		log.Infow("new route", "method", "GET", "path", organizationCensusesEndpoint)
 		r.Get(organizationCensusesEndpoint, a.organizationCensusesHandler)
@@ -173,7 +177,7 @@ func (a *API) initRouter() http.Handler {
 		r.Get(organizationPendingMembersEndpoint, a.pendingOrganizationMembersHandler)
 		// handle stripe checkout session
 		log.Infow("new route", "method", "POST", "path", subscriptionsCheckout)
-		r.Post(subscriptionsCheckout, a.createSubscriptionCheckoutHandler)
+		r.With(a.validateInputModel(SubscriptionCheckout{})).Post(subscriptionsCheckout, a.createSubscriptionCheckoutHandler)
 		// get stripe checkout session info
 		log.Infow("new route", "method", "GET", "path", subscriptionsCheckoutSession)
 		r.Get(subscriptionsCheckoutSession, a.checkoutSessionHandler)
@@ -186,10 +190,10 @@ func (a *API) initRouter() http.Handler {
 		// CENSUS ROUTES
 		// create census
 		log.Infow("new route", "method", "POST", "path", censusEndpoint)
-		r.Post(censusEndpoint, a.createCensusHandler)
+		r.With(a.validateInputModel(OrganizationCensus{})).Post(censusEndpoint, a.createCensusHandler)
 		// add census participants
 		log.Infow("new route", "method", "POST", "path", censusIDEndpoint)
-		r.Post(censusIDEndpoint, a.addParticipantsHandler)
+		r.With(a.validateInputModel(AddParticipantsRequest{})).Post(censusIDEndpoint, a.addParticipantsHandler)
 		// get census participants job
 		log.Infow("new route", "method", "GET", "path", censusAddParticipantsCheckEndpoint)
 		r.Post(censusAddParticipantsCheckEndpoint, a.addParticipantsJobCheckHandler)
@@ -198,12 +202,12 @@ func (a *API) initRouter() http.Handler {
 		r.Post(censusPublishEndpoint, a.publishCensusHandler)
 		// PROCESS ROUTES
 		log.Infow("new route", "method", "POST", "path", processEndpoint)
-		r.Post(processEndpoint, a.createProcessHandler)
+		r.With(a.validateInputModel(CreateProcessRequest{})).Post(processEndpoint, a.createProcessHandler)
 		// PROCESS BUNDLE ROUTES (private)
 		log.Infow("new route", "method", "POST", "path", processBundleEndpoint)
-		r.Post(processBundleEndpoint, a.createProcessBundleHandler)
+		r.With(a.validateInputModel(CreateProcessBundleRequest{})).Post(processBundleEndpoint, a.createProcessBundleHandler)
 		log.Infow("new route", "method", "PUT", "path", processBundleUpdateEndpoint)
-		r.Put(processBundleUpdateEndpoint, a.updateProcessBundleHandler)
+		r.With(a.validateInputModel(AddProcessesToBundleRequest{})).Put(processBundleUpdateEndpoint, a.updateProcessBundleHandler)
 	})
 
 	// Public routes
@@ -215,31 +219,31 @@ func (a *API) initRouter() http.Handler {
 		})
 		// login
 		log.Infow("new route", "method", "POST", "path", authLoginEndpoint)
-		r.Post(authLoginEndpoint, a.authLoginHandler)
+		r.With(a.validateInputModel(UserInfo{})).Post(authLoginEndpoint, a.authLoginHandler)
 		// register user
 		log.Infow("new route", "method", "POST", "path", usersEndpoint)
-		r.Post(usersEndpoint, a.registerHandler)
+		r.With(a.validateInputModel(UserInfo{})).Post(usersEndpoint, a.registerHandler)
 		// verify user
 		log.Infow("new route", "method", "POST", "path", verifyUserEndpoint)
-		r.Post(verifyUserEndpoint, a.verifyUserAccountHandler)
+		r.With(a.validateInputModel(UserVerification{})).Post(verifyUserEndpoint, a.verifyUserAccountHandler)
 		// get user verification code information
 		log.Infow("new route", "method", "GET", "path", verifyUserCodeEndpoint)
 		r.Get(verifyUserCodeEndpoint, a.userVerificationCodeInfoHandler)
 		// resend user verification code
 		log.Infow("new route", "method", "POST", "path", verifyUserCodeEndpoint)
-		r.Post(verifyUserCodeEndpoint, a.resendUserVerificationCodeHandler)
+		r.With(a.validateInputModel(UserVerification{})).Post(verifyUserCodeEndpoint, a.resendUserVerificationCodeHandler)
 		// request user password recovery
 		log.Infow("new route", "method", "POST", "path", usersRecoveryPasswordEndpoint)
-		r.Post(usersRecoveryPasswordEndpoint, a.recoverUserPasswordHandler)
+		r.With(a.validateInputModel(UserInfo{})).Post(usersRecoveryPasswordEndpoint, a.recoverUserPasswordHandler)
 		// reset user password
 		log.Infow("new route", "method", "POST", "path", usersResetPasswordEndpoint)
-		r.Post(usersResetPasswordEndpoint, a.resetUserPasswordHandler)
+		r.With(a.validateInputModel(UserPasswordReset{})).Post(usersResetPasswordEndpoint, a.resetUserPasswordHandler)
 		// get organization information
 		log.Infow("new route", "method", "GET", "path", organizationEndpoint)
 		r.Get(organizationEndpoint, a.organizationInfoHandler)
 		// accept organization invitation
 		log.Infow("new route", "method", "POST", "path", organizationAcceptMemberEndpoint)
-		r.Post(organizationAcceptMemberEndpoint, a.acceptOrganizationMemberInvitationHandler)
+		r.With(a.validateInputModel(AcceptOrganizationInvitation{})).Post(organizationAcceptMemberEndpoint, a.acceptOrganizationMemberInvitationHandler)
 		// get organization roles
 		log.Infow("new route", "method", "GET", "path", organizationRolesEndpoint)
 		r.Get(organizationRolesEndpoint, a.organizationsMembersRolesHandler)
@@ -267,20 +271,20 @@ func (a *API) initRouter() http.Handler {
 		r.Get(processEndpoint, a.processInfoHandler)
 		// two-factor auth handlers
 		log.Infow("new route", "method", "POST", "path", twofactorAuthEndpoint)
-		r.Post(twofactorAuthEndpoint, a.twofactorAuthHandler)
+		r.With(a.validateInputModel(AuthRequest{})).Post(twofactorAuthEndpoint, a.twofactorAuthHandler)
 		log.Infow("new route", "method", "POST", "path", twofactorAuthEndpointBackwards)
-		r.Post(twofactorAuthEndpointBackwards, a.twofactorAuthHandler)
+		r.With(a.validateInputModel(AuthRequest{})).Post(twofactorAuthEndpointBackwards, a.twofactorAuthHandler)
 		log.Infow("new route", "method", "POST", "path", twofactorSignEndpoint)
-		r.Post(twofactorSignEndpoint, a.twofactorSignHandler)
+		r.With(a.validateInputModel(SignRequest{})).Post(twofactorSignEndpoint, a.twofactorSignHandler)
 		log.Infow("new route", "method", "POST", "path", twofactorSignEndpointBackwards)
-		r.Post(twofactorSignEndpointBackwards, a.twofactorSignHandler)
+		r.With(a.validateInputModel(SignRequest{})).Post(twofactorSignEndpointBackwards, a.twofactorSignHandler)
 		// PROCESS BUNDLE ROUTES (public)
 		log.Infow("new route", "method", "GET", "path", processBundleInfoEndpoint)
 		r.Get(processBundleInfoEndpoint, a.processBundleInfoHandler)
 		log.Infow("new route", "method", "POST", "path", processBundleAuthEndpoint)
-		r.Post(processBundleAuthEndpoint, a.processBundleAuthHandler)
+		r.With(a.validateInputModel(AuthRequest{})).Post(processBundleAuthEndpoint, a.processBundleAuthHandler)
 		log.Infow("new route", "method", "POST", "path", processBundleSignEndpoint)
-		r.Post(processBundleSignEndpoint, a.processBundleSignHandler)
+		r.With(a.validateInputModel(SignRequest{})).Post(processBundleSignEndpoint, a.processBundleSignHandler)
 		log.Infow("new route", "method", "GET", "path", processBundleParticipantEndpoint)
 		r.Get(processBundleParticipantEndpoint, a.processBundleParticipantInfoHandler)
 	})

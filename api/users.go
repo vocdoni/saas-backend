@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"time"
 
@@ -11,41 +10,60 @@ import (
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
+	"github.com/vocdoni/saas-backend/validator"
 	"go.vocdoni.io/dvote/log"
 )
 
 // registerHandler handles the register request. It creates a new user in the database.
 func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
-	userInfo := &UserInfo{}
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
+	// Get the validated model from the context
+	model, ok := validator.GetValidatedModel(r.Context())
+	if !ok {
+		// Fall back to the old approach for backward compatibility with tests
+		userInfo := &UserInfo{}
+		if err := json.NewDecoder(r.Body).Decode(userInfo); err != nil {
+			errors.ErrMalformedBody.Write(w)
+			return
+		}
+
+		// Check the email is correct format
+		if !internal.ValidEmail(userInfo.Email) {
+			errors.ErrEmailMalformed.Write(w)
+			return
+		}
+		// Check the password is correct format
+		if len(userInfo.Password) < 8 {
+			errors.ErrPasswordTooShort.Write(w)
+			return
+		}
+		// Check the first name is not empty
+		if userInfo.FirstName == "" {
+			errors.ErrMalformedBody.Withf("first name is empty").Write(w)
+			return
+		}
+		// Check the last name is not empty
+		if userInfo.LastName == "" {
+			errors.ErrMalformedBody.Withf("last name is empty").Write(w)
+			return
+		}
+
+		// Continue with the registration process
+		a.processRegistration(w, r, userInfo)
+		return
+	}
+
+	userInfo, ok := model.(*UserInfo)
+	if !ok {
 		errors.ErrMalformedBody.Write(w)
 		return
 	}
-	if err := json.Unmarshal(body, userInfo); err != nil {
-		errors.ErrMalformedBody.Write(w)
-		return
-	}
-	// check the email is correct format
-	if !internal.ValidEmail(userInfo.Email) {
-		errors.ErrEmailMalformed.Write(w)
-		return
-	}
-	// check the password is correct format
-	if len(userInfo.Password) < 8 {
-		errors.ErrPasswordTooShort.Write(w)
-		return
-	}
-	// check the first name is not empty
-	if userInfo.FirstName == "" {
-		errors.ErrMalformedBody.Withf("first name is empty").Write(w)
-		return
-	}
-	// check the last name is not empty
-	if userInfo.LastName == "" {
-		errors.ErrMalformedBody.Withf("last name is empty").Write(w)
-		return
-	}
+
+	// Continue with the registration process
+	a.processRegistration(w, r, userInfo)
+}
+
+// processRegistration is a helper function that processes the registration request.
+func (a *API) processRegistration(w http.ResponseWriter, r *http.Request, userInfo *UserInfo) {
 	// hash the password
 	hPassword := internal.HexHashPassword(passwordSalt, userInfo.Password)
 	// add the user to the database
@@ -104,11 +122,25 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 // code is incorrect, an error is returned and the number of attempts to verify
 // it is increased. If any other error occurs, a generic error is returned.
 func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
-	verification := &UserVerification{}
-	if err := json.NewDecoder(r.Body).Decode(verification); err != nil {
+	// Get the validated model from the context
+	model, ok := validator.GetValidatedModel(r.Context())
+	if !ok {
 		errors.ErrMalformedBody.Write(w)
 		return
 	}
+
+	verification, ok := model.(*UserVerification)
+	if !ok {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+
+	// Continue with the verification process
+	a.processVerification(w, r, verification)
+}
+
+// processVerification is a helper function that processes the verification request.
+func (a *API) processVerification(w http.ResponseWriter, r *http.Request, verification *UserVerification) {
 	// check the email and verification code are not empty only if the mail
 	// service is available
 	if a.mail != nil && (verification.Code == "" || verification.Email == "") {
