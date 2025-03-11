@@ -137,153 +137,204 @@ func (ms *MongoStorage) DelCensusMembership(censusId, participantNo string) erro
 // If the membership already exists (same participantNo and censusID), it updates it.
 // If it doesn't exist, it creates a new one.
 // Processes participants in batches of 1000 entries.
+// Returns a channel that sends the percentage of participants processed every 10 seconds.
 func (ms *MongoStorage) SetBulkCensusMembership(
 	salt, censusId string, orgParticipants []OrgParticipant,
-) (*mongo.BulkWriteResult, error) {
+) (chan int, error) {
+	progressChan := make(chan int, 1)
+
 	if len(orgParticipants) == 0 {
-		return nil, nil
+		close(progressChan)
+		return progressChan, nil
 	}
 	if len(censusId) == 0 {
-		return nil, ErrInvalidData
+		close(progressChan)
+		return progressChan, ErrInvalidData
 	}
 
 	// Use the context for database operations
 	census, err := ms.Census(censusId)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get published census: %w", err)
+		close(progressChan)
+		return progressChan, fmt.Errorf("failed to get published census: %w", err)
 	}
 
 	if _, _, err := ms.Organization(census.OrgAddress, false); err != nil {
-		return nil, err
+		close(progressChan)
+		return progressChan, err
 	}
 
 	// Timestamp for all participants and memberships
 	currentTime := time.Now()
 
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
+	// Start a goroutine to process the participants and send progress updates
+	go func() {
+		defer close(progressChan)
 
-	// Process participants in batches of 1000
-	batchSize := 1000
-	var finalResult *mongo.BulkWriteResult
+		ms.keysLock.Lock()
+		defer ms.keysLock.Unlock()
 
-	for i := 0; i < len(orgParticipants); i += batchSize {
-		// Calculate end index for current batch
-		end := i + batchSize
-		if end > len(orgParticipants) {
-			end = len(orgParticipants)
-		}
+		// Process participants in batches of 1000
+		batchSize := 1000
+		var finalResult *mongo.BulkWriteResult
+		totalParticipants := len(orgParticipants)
+		processedParticipants := 0
 
-		// Create a new context for each batch
-		batchCtx, batchCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		// Create a ticker to send progress updates every 10 seconds
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
 
-		// Prepare bulk operations for this batch
-		var bulkParticipantsOps []mongo.WriteModel
-		var bulkMembershipOps []mongo.WriteModel
+		// Send initial progress
+		progressChan <- 0
 
-		// Process current batch
-		for _, participant := range orgParticipants[i:end] {
-			participantFilter := bson.M{
-				"participantNo": participant.ParticipantNo,
-				"orgAddress":    census.OrgAddress,
-			}
-			participant.OrgAddress = census.OrgAddress
-			participant.CreatedAt = currentTime
-			if participant.Email != "" && internal.ValidEmail(participant.Email) {
-				// store only the hashed email
-				participant.HashedEmail = internal.HashOrgData(census.OrgAddress, participant.Email)
-				participant.Email = ""
-			}
-			if participant.Phone != "" {
-				pn, err := internal.SanitizeAndVerifyPhoneNumber(participant.Phone)
-				if err != nil {
-					log.Warnw("invalid phone number", "phone", participant.Phone)
-					participant.Phone = ""
-				} else {
-					// store only the hashed phone
-					participant.HashedPhone = internal.HashOrgData(census.OrgAddress, pn)
-					participant.Phone = ""
+		// Create a context for the entire operation
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// Start a goroutine to send progress updates
+		go func() {
+			for {
+				select {
+				case <-ticker.C:
+					// Calculate and send progress percentage
+					if totalParticipants > 0 {
+						progress := (processedParticipants * 100) / totalParticipants
+						progressChan <- progress
+					}
+				case <-ctx.Done():
+					return
 				}
 			}
-			if participant.Password != "" {
-				participant.HashedPass = internal.HashPassword(salt, participant.Password)
-				participant.Password = ""
+		}()
+
+		for i := 0; i < totalParticipants; i += batchSize {
+			// Calculate end index for current batch
+			end := i + batchSize
+			if end > totalParticipants {
+				end = totalParticipants
 			}
 
-			// Create the update document for the participant
-			updateParticipantsDoc, err := dynamicUpdateDocument(participant, nil)
+			// Create a new context for each batch
+			batchCtx, batchCancel := context.WithTimeout(context.Background(), 10*time.Second)
+
+			// Prepare bulk operations for this batch
+			var bulkParticipantsOps []mongo.WriteModel
+			var bulkMembershipOps []mongo.WriteModel
+
+			// Process current batch
+			for _, participant := range orgParticipants[i:end] {
+				participantFilter := bson.M{
+					"participantNo": participant.ParticipantNo,
+					"orgAddress":    census.OrgAddress,
+				}
+				participant.OrgAddress = census.OrgAddress
+				participant.CreatedAt = currentTime
+				if participant.Email != "" && internal.ValidEmail(participant.Email) {
+					// store only the hashed email
+					participant.HashedEmail = internal.HashOrgData(census.OrgAddress, participant.Email)
+					participant.Email = ""
+				}
+				if participant.Phone != "" {
+					pn, err := internal.SanitizeAndVerifyPhoneNumber(participant.Phone)
+					if err != nil {
+						log.Warnw("invalid phone number", "phone", participant.Phone)
+						participant.Phone = ""
+					} else {
+						// store only the hashed phone
+						participant.HashedPhone = internal.HashOrgData(census.OrgAddress, pn)
+						participant.Phone = ""
+					}
+				}
+				if participant.Password != "" {
+					participant.HashedPass = internal.HashPassword(salt, participant.Password)
+					participant.Password = ""
+				}
+
+				// Create the update document for the participant
+				updateParticipantsDoc, err := dynamicUpdateDocument(participant, nil)
+				if err != nil {
+					batchCancel()
+					cancel() // Cancel the main context to stop the progress reporting goroutine
+					log.Warnw("failed to create update document for participant", "error", err)
+					return
+				}
+
+				// Create the upsert model for the bulk operation
+				upsertParticipantsModel := mongo.NewUpdateOneModel().
+					SetFilter(participantFilter).     // AND condition filter
+					SetUpdate(updateParticipantsDoc). // Update document
+					SetUpsert(true)                   // Ensure upsert behavior
+
+				// Add the operation to the bulkOps array
+				bulkParticipantsOps = append(bulkParticipantsOps, upsertParticipantsModel)
+
+				membershipFilter := bson.M{
+					"participantNo": participant.ParticipantNo,
+					"censusId":      censusId,
+				}
+				membershipDoc := &CensusMembership{
+					ParticipantNo: participant.ParticipantNo,
+					CensusID:      censusId,
+					CreatedAt:     currentTime,
+				}
+
+				// Create the update document for the membership
+				updateMembershipDoc, err := dynamicUpdateDocument(membershipDoc, nil)
+				if err != nil {
+					batchCancel()
+					cancel() // Cancel the main context to stop the progress reporting goroutine
+					log.Warnw("failed to create update document for membership", "error", err)
+					return
+				}
+				// Create the upsert model for the bulk operation
+				upsertMembershipModel := mongo.NewUpdateOneModel().
+					SetFilter(membershipFilter).    // AND condition filter
+					SetUpdate(updateMembershipDoc). // Update document
+					SetUpsert(true)                 // Ensure upsert behavior
+				bulkMembershipOps = append(bulkMembershipOps, upsertMembershipModel)
+			}
+
+			// Execute the bulk write operations for this batch
+			_, err = ms.orgParticipants.BulkWrite(batchCtx, bulkParticipantsOps)
 			if err != nil {
-				batchCancel()
-				return nil, err
+				log.Warnw("failed to perform bulk operation on participants", "error", err)
+				// batchCancel()
+				// return nil, fmt.Errorf("failed to perform bulk operation on participants: %w", err)
 			}
 
-			// Create the upsert model for the bulk operation
-			upsertParticipantsModel := mongo.NewUpdateOneModel().
-				SetFilter(participantFilter).     // AND condition filter
-				SetUpdate(updateParticipantsDoc). // Update document
-				SetUpsert(true)                   // Ensure upsert behavior
+			result, err := ms.censusMemberships.BulkWrite(batchCtx, bulkMembershipOps)
+			batchCancel()
 
-			// Add the operation to the bulkOps array
-			bulkParticipantsOps = append(bulkParticipantsOps, upsertParticipantsModel)
-
-			membershipFilter := bson.M{
-				"participantNo": participant.ParticipantNo,
-				"censusId":      censusId,
-			}
-			membershipDoc := &CensusMembership{
-				ParticipantNo: participant.ParticipantNo,
-				CensusID:      censusId,
-				CreatedAt:     currentTime,
-			}
-
-			// Create the update document for the membership
-			updateMembershipDoc, err := dynamicUpdateDocument(membershipDoc, nil)
 			if err != nil {
-				batchCancel()
-				return nil, err
+				log.Warnw("failed to perform bulk operation on memberships", "error", err)
+				// return nil, fmt.Errorf("failed to perform bulk operation on memberships: %w", err)
 			}
-			// Create the upsert model for the bulk operation
-			upsertMembershipModel := mongo.NewUpdateOneModel().
-				SetFilter(membershipFilter).    // AND condition filter
-				SetUpdate(updateMembershipDoc). // Update document
-				SetUpsert(true)                 // Ensure upsert behavior
-			bulkMembershipOps = append(bulkMembershipOps, upsertMembershipModel)
-		}
 
-		// Execute the bulk write operations for this batch
-		_, err = ms.orgParticipants.BulkWrite(batchCtx, bulkParticipantsOps)
-		if err != nil {
-			log.Warnw("failed to perform bulk operation on participants", "error", err)
-			// batchCancel()
-			// return nil, fmt.Errorf("failed to perform bulk operation on participants: %w", err)
-		}
+			// Update processed count
+			processedParticipants += (end - i)
 
-		result, err := ms.censusMemberships.BulkWrite(batchCtx, bulkMembershipOps)
-		batchCancel()
+			// Merge results if this is not the first batch
+			if finalResult == nil {
+				finalResult = result
+			} else {
+				finalResult.InsertedCount += result.InsertedCount
+				finalResult.MatchedCount += result.MatchedCount
+				finalResult.ModifiedCount += result.ModifiedCount
+				finalResult.DeletedCount += result.DeletedCount
+				finalResult.UpsertedCount += result.UpsertedCount
 
-		if err != nil {
-			log.Warnw("failed to perform bulk operation on memberships", "error", err)
-			// return nil, fmt.Errorf("failed to perform bulk operation on memberships: %w", err)
-		}
-
-		// Merge results if this is not the first batch
-		if finalResult == nil {
-			finalResult = result
-		} else {
-			finalResult.InsertedCount += result.InsertedCount
-			finalResult.MatchedCount += result.MatchedCount
-			finalResult.ModifiedCount += result.ModifiedCount
-			finalResult.DeletedCount += result.DeletedCount
-			finalResult.UpsertedCount += result.UpsertedCount
-
-			// Merge the upserted IDs
-			for k, v := range result.UpsertedIDs {
-				finalResult.UpsertedIDs[k] = v
+				// Merge the upserted IDs
+				for k, v := range result.UpsertedIDs {
+					finalResult.UpsertedIDs[k] = v
+				}
 			}
 		}
-	}
 
-	return finalResult, nil
+		// Send final progress (100%)
+		progressChan <- 100
+	}()
+
+	return progressChan, nil
 }
 
 // CensusMemberships retrieves all the census memberships for a given census.

@@ -218,9 +218,12 @@ func TestCensusMembership(t *testing.T) {
 
 		t.Run("EmptyParticipants", func(t *testing.T) {
 			// Test with empty participants
-			result, err := db.SetBulkCensusMembership("test_salt", censusID, nil)
+			progressChan, err := db.SetBulkCensusMembership("test_salt", censusID, nil)
 			c.Assert(err, qt.IsNil)
-			c.Assert(result, qt.IsNil)
+
+			// Channel should be closed immediately for empty participants
+			_, open := <-progressChan
+			c.Assert(open, qt.IsFalse)
 		})
 
 		t.Run("InvalidData", func(t *testing.T) {
@@ -233,9 +236,12 @@ func TestCensusMembership(t *testing.T) {
 					Password:      "password1",
 				},
 			}
-			result, err := db.SetBulkCensusMembership("test_salt", "", participants)
+			progressChan, err := db.SetBulkCensusMembership("test_salt", "", participants)
 			c.Assert(err, qt.Equals, ErrInvalidData)
-			c.Assert(result, qt.IsNil)
+
+			// Channel should be closed immediately for invalid data
+			_, open := <-progressChan
+			c.Assert(open, qt.IsFalse)
 		})
 
 		t.Run("NonExistentCensus", func(t *testing.T) {
@@ -248,9 +254,12 @@ func TestCensusMembership(t *testing.T) {
 				},
 			}
 			// Test with non-existent census
-			result, err := db.SetBulkCensusMembership("test_salt", primitive.NewObjectID().Hex(), participants)
+			progressChan, err := db.SetBulkCensusMembership("test_salt", primitive.NewObjectID().Hex(), participants)
 			c.Assert(err, qt.Not(qt.IsNil))
-			c.Assert(result, qt.IsNil)
+
+			// Channel should be closed immediately for non-existent census
+			_, open := <-progressChan
+			c.Assert(open, qt.IsFalse)
 		})
 
 		t.Run("SuccessfulBulkCreation", func(t *testing.T) {
@@ -270,10 +279,17 @@ func TestCensusMembership(t *testing.T) {
 				},
 			}
 
-			result, err := db.SetBulkCensusMembership("test_salt", censusID, participants)
+			progressChan, err := db.SetBulkCensusMembership("test_salt", censusID, participants)
 			c.Assert(err, qt.IsNil)
-			c.Assert(result, qt.Not(qt.IsNil))
-			c.Assert(result.UpsertedCount, qt.Equals, int64(2))
+			c.Assert(progressChan, qt.Not(qt.IsNil))
+
+			// Wait for the operation to complete by draining the channel
+			var lastProgress int
+			for progress := range progressChan {
+				lastProgress = progress
+			}
+			// Final progress should be 100%
+			c.Assert(lastProgress, qt.Equals, 100)
 
 			// Verify participants were created with hashed data
 			for _, p := range participants {
@@ -314,18 +330,30 @@ func TestCensusMembership(t *testing.T) {
 			}
 
 			// Create initial participants
-			result, err := db.SetBulkCensusMembership("test_salt", censusID, participants)
+			progressChan, err := db.SetBulkCensusMembership("test_salt", censusID, participants)
 			c.Assert(err, qt.IsNil)
-			c.Assert(result, qt.Not(qt.IsNil))
+			c.Assert(progressChan, qt.Not(qt.IsNil))
+
+			// Wait for the operation to complete
+			for range progressChan {
+				// Just drain the channel
+			}
 
 			// Test updating existing participants and memberships
 			participants[0].Email = "updated1@example.com"
 			participants[1].Phone = "1111111111"
 
-			result, err = db.SetBulkCensusMembership("test_salt", censusID, participants)
+			progressChan, err = db.SetBulkCensusMembership("test_salt", censusID, participants)
 			c.Assert(err, qt.IsNil)
-			c.Assert(result, qt.Not(qt.IsNil))
-			c.Assert(result.ModifiedCount, qt.Equals, int64(2))
+			c.Assert(progressChan, qt.Not(qt.IsNil))
+
+			// Wait for the operation to complete
+			var lastProgress int
+			for progress := range progressChan {
+				lastProgress = progress
+			}
+			// Final progress should be 100%
+			c.Assert(lastProgress, qt.Equals, 100)
 
 			// Verify updates
 			for _, p := range participants {

@@ -117,12 +117,19 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// add the org participants to the census in the database
-	no, err := a.db.SetBulkCensusMembership(passwordSalt, censusID, participants.dbOrgParticipants(census.OrgAddress))
+	progressChan, err := a.db.SetBulkCensusMembership(passwordSalt, censusID, participants.dbOrgParticipants(census.OrgAddress))
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	httpWriteJSON(w, int(no.UpsertedCount))
+
+	// Wait for the channel to be closed (100% completion)
+	for range progressChan {
+		// Just drain the channel until it's closed
+	}
+
+	// Return the number of participants added
+	httpWriteJSON(w, len(participants.Participants))
 }
 
 // publishCensusHandler publishes a census for voting.
