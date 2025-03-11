@@ -9,6 +9,7 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/google/uuid"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/test"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -27,6 +28,7 @@ var (
 	testUserExtraData = "extraData"
 	testUserPhone     = "+346787878"
 	testUserMail      = "test@user.com"
+	testToken         = uuid.New()
 )
 
 func TestMain(m *testing.M) {
@@ -86,8 +88,13 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+func resetDB(c *qt.C) {
+	c.Assert(testDB.Reset(), qt.IsNil)
+}
+
 func TestUserSetUser(t *testing.T) {
 	c := qt.New(t)
+	defer resetDB(c)
 
 	testUserData := UserData{
 		ID:        testUserID,
@@ -138,6 +145,7 @@ func TestUserSetUser(t *testing.T) {
 
 func TestSetUserBundle(t *testing.T) {
 	c := qt.New(t)
+	defer resetDB(c)
 	// try to add a bundle to a non-existing user
 	err := testDB.SetUserBundle(testUserID, testUserBundle.ID, testUserBundle.PIDs...)
 	c.Assert(err, qt.ErrorIs, ErrUserNotFound)
@@ -167,6 +175,7 @@ func TestSetUserBundle(t *testing.T) {
 
 func TestAddUsers(t *testing.T) {
 	c := qt.New(t)
+	defer resetDB(c)
 	users := testUsersBulk(10000)
 	err := testDB.AddUsers(users)
 	c.Assert(err, qt.IsNil)
@@ -191,4 +200,55 @@ func testUsersBulk(n int) []UserData {
 		}
 	}
 	return users
+}
+
+func TestUserAuthToken(t *testing.T) {
+	c := qt.New(t)
+	defer resetDB(c)
+	// get token of a non-existing token
+	_, _, err := testDB.UserAuthToken(&testToken)
+	c.Assert(err, qt.ErrorIs, ErrTokenNotFound)
+	// try to add the token to the index of a non-existing user
+	err = testDB.IndexAuthToken(testUserID, testUserBundle.ID, &testToken)
+	c.Assert(err, qt.ErrorIs, ErrUserNotFound)
+	// add user with no bundles
+	c.Assert(testDB.SetUser(UserData{
+		ID:        testUserID,
+		Bundles:   map[string]BundleData{},
+		ExtraData: testUserExtraData,
+		Phone:     testUserPhone,
+		Mail:      testUserMail,
+	}), qt.IsNil)
+	// try to add the token to the index of a non-existing bundle
+	err = testDB.IndexAuthToken(testUserID, testUserBundle.ID, &testToken)
+	c.Assert(err, qt.ErrorIs, ErrBundleNotFound)
+	// add bundle
+	c.Assert(testDB.SetUserBundle(testUserID, testUserBundle.ID, testUserBundle.PIDs...), qt.IsNil)
+	// add token
+	err = testDB.IndexAuthToken(testUserID, testUserBundle.ID, &testToken)
+	c.Assert(err, qt.IsNil)
+	// get token
+	token, userData, err := testDB.UserAuthToken(&testToken)
+	c.Assert(err, qt.IsNil)
+	c.Assert(token.Token.String(), qt.Equals, testToken.String())
+	c.Assert(token.UserID.Bytes(), qt.DeepEquals, testUserID)
+	c.Assert(token.BundleID.Bytes(), qt.DeepEquals, testUserBundle.ID.Bytes())
+	c.Assert(token.Verified, qt.Equals, false)
+	c.Assert(userData.ID.Bytes(), qt.DeepEquals, testUserID)
+	c.Assert(userData.Bundles, qt.HasLen, 1)
+	c.Assert([]byte(userData.Bundles[testUserBundle.ID.String()].ID), qt.DeepEquals, testUserBundle.ID.Bytes())
+	c.Assert(userData.Bundles[testUserBundle.ID.String()].PIDs, qt.HasLen, 1)
+	c.Assert(userData.Bundles[testUserBundle.ID.String()].PIDs[0], qt.DeepEquals, testUserBundle.PIDs[0])
+	c.Assert(userData.Bundles[testUserBundle.ID.String()].LastAttempt, qt.IsNil)
+	// verify token
+	err = testDB.VerifyAuthToken(&testToken)
+	c.Assert(err, qt.IsNil)
+	// get token
+	token, _, err = testDB.UserAuthToken(&testToken)
+	c.Assert(err, qt.IsNil)
+	c.Assert(token.Verified, qt.Equals, true)
+	// try to verify a non-existing token
+	nonExistingToken := uuid.New()
+	err = testDB.VerifyAuthToken(&nonExistingToken)
+	c.Assert(err, qt.ErrorIs, ErrTokenNotFound)
 }

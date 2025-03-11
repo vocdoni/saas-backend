@@ -31,6 +31,11 @@ var (
 	// ErrDecodeUser is returned if the user data cannot be decoded when it is
 	// retrieved from the database.
 	ErrDecodeUser = fmt.Errorf("cannot decode user data")
+	// ErrTokenNotFound is returned if the token is not found in the database.
+	ErrTokenNotFound = fmt.Errorf("token not found")
+	// ErrDecodeToken is returned if the token data cannot be decoded when it
+	// is retrieved from the database.
+	ErrDecodeToken = fmt.Errorf("cannot decode token data")
 	// ErrPrepareUser is returned if the update document cannot be created. It
 	// is a previous step before setting or updating the user data.
 	ErrPrepareUser = fmt.Errorf("cannot create update document")
@@ -226,6 +231,14 @@ func (ms *MongoStorage) AddUsers(users []UserData) error {
 func (ms *MongoStorage) IndexAuthToken(uID, bID internal.HexBytes, token *uuid.UUID) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
+	// check if the user already exists and has a bundle with the id provided
+	user, err := ms.userByID(uID)
+	if err != nil {
+		return err
+	}
+	if _, ok := user.Bundles[bID.String()]; !ok {
+		return ErrBundleNotFound
+	}
 	// create the context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -257,7 +270,10 @@ func (ms *MongoStorage) UserAuthToken(token *uuid.UUID) (*AuthToken, *UserData, 
 	// decode the auth token
 	authToken := new(AuthToken)
 	if err := result.Decode(authToken); err != nil {
-		return nil, nil, errors.Join(ErrDecodeUser, err)
+		if err == mongo.ErrNoDocuments {
+			return nil, nil, ErrTokenNotFound
+		}
+		return nil, nil, errors.Join(ErrDecodeToken, err)
 	}
 	// get the user data from the user ID
 	user, err := ms.userByID(authToken.UserID)
@@ -273,9 +289,21 @@ func (ms *MongoStorage) VerifyAuthToken(token *uuid.UUID) error {
 	// create the context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	// check if the token exists
+	filter := bson.M{"_id": token}
+	count, err := ms.tokenIndex.CountDocuments(ctx, filter)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return ErrTokenNotFound
+		}
+		return errors.Join(ErrDecodeToken, err)
+	}
+	if count == 0 {
+		return ErrTokenNotFound
+	}
 	// update the token as verified
 	update := bson.M{"$set": bson.M{"verified": true}}
-	if _, err := ms.tokenIndex.UpdateOne(ctx, bson.M{"_id": token}, update); err != nil {
+	if _, err := ms.tokenIndex.UpdateOne(ctx, filter, update); err != nil {
 		return errors.Join(ErrIndexToken, err)
 	}
 	return nil
