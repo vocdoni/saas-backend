@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
+	"path"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/go-connections/nat"
@@ -34,6 +36,7 @@ func VoconedAPIURL(base string) string {
 }
 
 func StartVoconedContainer(ctx context.Context) (testcontainers.Container, error) {
+	dataDir := path.Join(os.TempDir(), "voconed-test-datadir")
 	exposedPort := fmt.Sprintf("%d/tcp", VoconedPort)
 	voconedCmd := []string{
 		"--logLevel=debug",
@@ -47,17 +50,17 @@ func StartVoconedContainer(ctx context.Context) (testcontainers.Container, error
 	c, err := testcontainers.GenericContainer(ctx,
 		testcontainers.GenericContainerRequest{
 			ContainerRequest: testcontainers.ContainerRequest{
-				Image:         "ghcr.io/vocdoni/vocdoni-node:main",
-				Entrypoint:    []string{"/app/voconed"},
-				Cmd:           voconedCmd,
-				ImagePlatform: "linux/amd64",
-				ExposedPorts:  []string{exposedPort},
-				WaitingFor:    wait.ForListeningPort(nat.Port(exposedPort)),
-				Mounts: testcontainers.ContainerMounts{
-					testcontainers.VolumeMount(VoconedVolumeName, VoconedDataDir),
-				},
+				Image:           "ghcr.io/vocdoni/vocdoni-node:main",
+				Entrypoint:      []string{"/app/voconed"},
+				Cmd:             voconedCmd,
+				ImagePlatform:   "linux/amd64",
+				ExposedPorts:    []string{exposedPort},
+				WaitingFor:      wait.ForListeningPort(nat.Port(exposedPort)),
+				AlwaysPullImage: true,
 				HostConfigModifier: func(hc *container.HostConfig) {
 					hc.AutoRemove = false
+					// Set up a bind mount: hostPath:containerPath
+					hc.Binds = append(hc.Binds, fmt.Sprintf("%s:%s", dataDir, VoconedDataDir))
 				},
 			},
 			Started: true,

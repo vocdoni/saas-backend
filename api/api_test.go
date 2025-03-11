@@ -352,3 +352,9 @@ func sendVocdoniTx(t *testing.T, tx *models.Tx, token string, vocdoniClient *api
 	c.Assert(err, qt.IsNil)
 	return data
 }
+
+func fetchVocdoniAccountNonce(t *testing.T, client *apiclient.HTTPclient, address internal.HexBytes) uint32 {
+	account, err := client.Account(address.String())
+	qt.Assert(t, err, qt.IsNil)
+	return account.Nonce
+}
