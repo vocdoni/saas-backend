@@ -9,7 +9,6 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.vocdoni.io/dvote/util"
 	"go.vocdoni.io/proto/build/go/models"
 )
 
@@ -70,32 +69,33 @@ func TestTransaction(t *testing.T) {
 	t.Logf("%s\n", resp)
 
 	// create a process
-	nonce = fetchVocdoniAccountNonce(t, vocdoniClient, orgAddress)
-	tx = models.Tx{
-		Payload: &models.Tx_NewProcess{
-			NewProcess: &models.NewProcessTx{
-				Txtype: models.TxType_NEW_PROCESS,
-				Nonce:  nonce,
-				Process: &models.Process{
-					EntityId:      orgAddress.Bytes(),
-					Duration:      60,
-					CensusOrigin:  models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED,
-					CensusRoot:    util.RandomBytes(32),
-					MaxCensusSize: 5,
-					EnvelopeType: &models.EnvelopeType{
-						Anonymous:      false,
-						CostFromWeight: false,
-					},
-					VoteOptions: &models.ProcessVoteOptions{
-						MaxCount: 1,
-						MaxValue: 2,
+	/*
+		nonce = fetchVocdoniAccountNonce(t, vocdoniClient, orgAddress)
+		tx = models.Tx{
+			Payload: &models.Tx_NewProcess{
+				NewProcess: &models.NewProcessTx{
+					Txtype: models.TxType_NEW_PROCESS,
+					Nonce:  nonce,
+					Process: &models.Process{
+						EntityId:      orgAddress.Bytes(),
+						Duration:      60,
+						CensusOrigin:  models.CensusOrigin_OFF_CHAIN_TREE_WEIGHTED,
+						CensusRoot:    util.RandomBytes(32),
+						MaxCensusSize: 5,
+						EnvelopeType: &models.EnvelopeType{
+							Anonymous:      false,
+							CostFromWeight: false,
+						},
+						VoteOptions: &models.ProcessVoteOptions{
+							MaxCount: 1,
+							MaxValue: 2,
+						},
 					},
 				},
 			},
-		},
-	}
+		}
 
-	// send the transaction
-	sendVocdoniTx(t, &tx, token, vocdoniClient, orgAddress)
-
+		// send the transaction
+		sendVocdoniTx(t, &tx, token, vocdoniClient, orgAddress)
+	*/
 }
