@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"go.vocdoni.io/dvote/log"
@@ -18,31 +19,31 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 	userInfo := &UserInfo{}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		ErrMalformedBody.Write(w)
+		errors.ErrMalformedBody.Write(w)
 		return
 	}
 	if err := json.Unmarshal(body, userInfo); err != nil {
-		ErrMalformedBody.Write(w)
+		errors.ErrMalformedBody.Write(w)
 		return
 	}
 	// check the email is correct format
 	if !internal.ValidEmail(userInfo.Email) {
-		ErrEmailMalformed.Write(w)
+		errors.ErrEmailMalformed.Write(w)
 		return
 	}
 	// check the password is correct format
 	if len(userInfo.Password) < 8 {
-		ErrPasswordTooShort.Write(w)
+		errors.ErrPasswordTooShort.Write(w)
 		return
 	}
 	// check the first name is not empty
 	if userInfo.FirstName == "" {
-		ErrMalformedBody.Withf("first name is empty").Write(w)
+		errors.ErrMalformedBody.Withf("first name is empty").Write(w)
 		return
 	}
 	// check the last name is not empty
 	if userInfo.LastName == "" {
-		ErrMalformedBody.Withf("last name is empty").Write(w)
+		errors.ErrMalformedBody.Withf("last name is empty").Write(w)
 		return
 	}
 	// hash the password
@@ -56,11 +57,11 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if err == db.ErrAlreadyExists {
-			ErrDuplicateConflict.With("user already exists").Write(w)
+			errors.ErrDuplicateConflict.With("user already exists").Write(w)
 			return
 		}
 		log.Warnw("could not create user", "error", err)
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 	// compose the new user and send the verification code
@@ -74,7 +75,7 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 	code, link, err := a.generateVerificationCodeAndLink(newUser, db.CodeTypeVerifyAccount)
 	if err != nil {
 		log.Warnw("could not generate verification code", "error", err)
-		ErrGenericInternalServerError.Write(w)
+		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
 	// send the verification mail to the user email with the verification code
@@ -86,7 +87,7 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		}{code, link},
 	); err != nil {
 		log.Warnw("could not send verification code", "error", err)
-		ErrGenericInternalServerError.Write(w)
+		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
 	// send the token back to the user
@@ -105,28 +106,28 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 	verification := &UserVerification{}
 	if err := json.NewDecoder(r.Body).Decode(verification); err != nil {
-		ErrMalformedBody.Write(w)
+		errors.ErrMalformedBody.Write(w)
 		return
 	}
 	// check the email and verification code are not empty only if the mail
 	// service is available
 	if a.mail != nil && (verification.Code == "" || verification.Email == "") {
-		ErrInvalidUserData.With("no verification code or email provided").Write(w)
+		errors.ErrInvalidUserData.With("no verification code or email provided").Write(w)
 		return
 	}
 	// get the user information from the database by email
 	user, err := a.db.UserByEmail(verification.Email)
 	if err != nil {
 		if err == db.ErrNotFound {
-			ErrUnauthorized.Write(w)
+			errors.ErrUnauthorized.Write(w)
 			return
 		}
-		ErrGenericInternalServerError.Write(w)
+		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
 	// check the user is not already verified
 	if user.Verified {
-		ErrUserAlreadyVerified.Write(w)
+		errors.ErrUserAlreadyVerified.Write(w)
 		return
 	}
 	// get the verification code from the database
@@ -135,30 +136,30 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 		if err != db.ErrNotFound {
 			log.Warnw("could not get verification code", "error", err)
 		}
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	// check the verification code is not expired
 	if code.Expiration.Before(time.Now()) {
-		ErrVerificationCodeExpired.Write(w)
+		errors.ErrVerificationCodeExpired.Write(w)
 		return
 	}
 	// check the verification code is correct
 	hashCode := internal.HashVerificationCode(verification.Email, verification.Code)
 	if code.Code != hashCode {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	// verify the user account if the current verification code is valid and
 	// matches with the provided one
 	if err := a.db.VerifyUserAccount(user); err != nil {
-		ErrGenericInternalServerError.Write(w)
+		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
 	// generate a new token with the user name as the subject
 	res, err := a.buildLoginResponse(user.Email)
 	if err != nil {
-		ErrGenericInternalServerError.Write(w)
+		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
 	// send the token back to the user
@@ -178,7 +179,7 @@ func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Req
 	userEmail := chi.URLParam(r, "email")
 	// check the email is not empty
 	if userEmail == "" {
-		ErrInvalidUserData.With("no email provided").Write(w)
+		errors.ErrInvalidUserData.With("no email provided").Write(w)
 		return
 	}
 	var err error
@@ -187,15 +188,15 @@ func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Req
 	user, err = a.db.UserByEmail(userEmail)
 	if err != nil {
 		if err == db.ErrNotFound {
-			ErrUserNotFound.Write(w)
+			errors.ErrUserNotFound.Write(w)
 			return
 		}
-		ErrGenericInternalServerError.Write(w)
+		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
 	// check if the user is already verified
 	if user.Verified {
-		ErrUserAlreadyVerified.Write(w)
+		errors.ErrUserAlreadyVerified.Write(w)
 		return
 	}
 	// get the verification code from the database
@@ -204,7 +205,7 @@ func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Req
 		if err != db.ErrNotFound {
 			log.Warnw("could not get verification code", "error", err)
 		}
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	// return the verification code information
@@ -224,27 +225,27 @@ func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Req
 func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.Request) {
 	verification := &UserVerification{}
 	if err := json.NewDecoder(r.Body).Decode(verification); err != nil {
-		ErrMalformedBody.Write(w)
+		errors.ErrMalformedBody.Write(w)
 		return
 	}
 	// check the email is not empty
 	if verification.Email == "" {
-		ErrInvalidUserData.With("no email provided").Write(w)
+		errors.ErrInvalidUserData.With("no email provided").Write(w)
 		return
 	}
 	// get the user information from the database by email
 	user, err := a.db.UserByEmail(verification.Email)
 	if err != nil {
 		if err == db.ErrNotFound {
-			ErrUnauthorized.Write(w)
+			errors.ErrUnauthorized.Write(w)
 			return
 		}
-		ErrGenericInternalServerError.Write(w)
+		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
 	// check the user is not already verified
 	if user.Verified {
-		ErrUserAlreadyVerified.Write(w)
+		errors.ErrUserAlreadyVerified.Write(w)
 		return
 	}
 	// get the verification code from the database
@@ -253,19 +254,19 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 		if err != db.ErrNotFound {
 			log.Warnw("could not get verification code", "error", err)
 		}
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	// if the verification code is not expired, return an error
 	if code.Expiration.After(time.Now()) {
-		ErrVerificationCodeValid.Write(w)
+		errors.ErrVerificationCodeValid.Write(w)
 		return
 	}
 	// generate a new verification code
 	newCode, link, err := a.generateVerificationCodeAndLink(user, db.CodeTypeVerifyAccount)
 	if err != nil {
 		log.Warnw("could not generate verification code", "error", err)
-		ErrGenericInternalServerError.Write(w)
+		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
 	// send the verification mail to the user email with the verification code
@@ -277,7 +278,7 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 		}{newCode, link},
 	); err != nil {
 		log.Warnw("could not send verification code", "error", err)
-		ErrGenericInternalServerError.Write(w)
+		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
 	httpWriteOK(w)
@@ -288,7 +289,7 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := userFromContext(r.Context())
 	if !ok {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	// get the user organizations information from the database if any
@@ -299,7 +300,7 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 			if err == db.ErrNotFound {
 				continue
 			}
-			ErrGenericInternalServerError.Write(w)
+			errors.ErrGenericInternalServerError.Write(w)
 			return
 		}
 		userOrgs = append(userOrgs, &UserOrganization{
@@ -322,12 +323,12 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := userFromContext(r.Context())
 	if !ok {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	userInfo := &UserInfo{}
 	if err := json.NewDecoder(r.Body).Decode(userInfo); err != nil {
-		ErrMalformedBody.Write(w)
+		errors.ErrMalformedBody.Write(w)
 		return
 	}
 	// create a flag to check if the user information has changed and needs to
@@ -338,7 +339,7 @@ func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// check the email is correct format if it is not empty
 	if userInfo.Email != "" {
 		if !internal.ValidEmail(userInfo.Email) {
-			ErrEmailMalformed.Write(w)
+			errors.ErrEmailMalformed.Write(w)
 			return
 		}
 		// update the user email and set the flag to true to update the user
@@ -364,7 +365,7 @@ func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 	if updateUser {
 		if _, err := a.db.SetUser(user); err != nil {
 			log.Warnw("could not update user", "error", err)
-			ErrGenericInternalServerError.Write(w)
+			errors.ErrGenericInternalServerError.Write(w)
 			return
 		}
 		// if user email has changed, update the creator email in the
@@ -377,7 +378,7 @@ func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 					log.Warnw("could not revert user update", "error", err)
 				}
 				// return an error
-				ErrGenericInternalServerError.Write(w)
+				errors.ErrGenericInternalServerError.Write(w)
 				return
 			}
 		}
@@ -385,7 +386,7 @@ func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// generate a new token with the new user email as the subject
 	res, err := a.buildLoginResponse(user.Email)
 	if err != nil {
-		ErrGenericInternalServerError.Write(w)
+		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
 	httpWriteJSON(w, res)
@@ -397,30 +398,30 @@ func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := userFromContext(r.Context())
 	if !ok {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	userPasswords := &UserPasswordUpdate{}
 	if err := json.NewDecoder(r.Body).Decode(userPasswords); err != nil {
-		ErrMalformedBody.Write(w)
+		errors.ErrMalformedBody.Write(w)
 		return
 	}
 	// check the password is correct format
 	if len(userPasswords.NewPassword) < 8 {
-		ErrPasswordTooShort.Write(w)
+		errors.ErrPasswordTooShort.Write(w)
 		return
 	}
 	// hash the password the old password to compare it with the stored one
 	hOldPassword := internal.HexHashPassword(passwordSalt, userPasswords.OldPassword)
 	if hOldPassword != user.Password {
-		ErrUnauthorized.Withf("old password does not match").Write(w)
+		errors.ErrUnauthorized.Withf("old password does not match").Write(w)
 		return
 	}
 	// hash and update the new password
 	user.Password = internal.HexHashPassword(passwordSalt, userPasswords.NewPassword)
 	if _, err := a.db.SetUser(user); err != nil {
 		log.Warnw("could not update user password", "error", err)
-		ErrGenericInternalServerError.Write(w)
+		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
 	httpWriteOK(w)
@@ -434,7 +435,7 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 	// get the user info from the request body
 	userInfo := &UserInfo{}
 	if err := json.NewDecoder(r.Body).Decode(userInfo); err != nil {
-		ErrMalformedBody.Write(w)
+		errors.ErrMalformedBody.Write(w)
 		return
 	}
 	// get the user information from the database by email
@@ -446,7 +447,7 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 			httpWriteOK(w)
 			return
 		}
-		ErrGenericInternalServerError.Write(w)
+		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
 	// check the user is verified
@@ -455,7 +456,7 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 		code, link, err := a.generateVerificationCodeAndLink(user, db.CodeTypePasswordReset)
 		if err != nil {
 			log.Warnw("could not generate verification code", "error", err)
-			ErrGenericInternalServerError.Write(w)
+			errors.ErrGenericInternalServerError.Write(w)
 			return
 		}
 		// send the password reset mail to the user email with the verification
@@ -467,7 +468,7 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 			}{code, link},
 		); err != nil {
 			log.Warnw("could not send reset passworod code", "error", err)
-			ErrGenericInternalServerError.Write(w)
+			errors.ErrGenericInternalServerError.Write(w)
 			return
 		}
 	}
@@ -481,12 +482,12 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	userPasswords := &UserPasswordReset{}
 	if err := json.NewDecoder(r.Body).Decode(userPasswords); err != nil {
-		ErrMalformedBody.Write(w)
+		errors.ErrMalformedBody.Write(w)
 		return
 	}
 	// check the password is correct format
 	if len(userPasswords.NewPassword) < 8 {
-		ErrPasswordTooShort.Write(w)
+		errors.ErrPasswordTooShort.Write(w)
 		return
 	}
 	// get the user information from the database by the verification code
@@ -494,17 +495,17 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	user, err := a.db.UserByVerificationCode(hashCode, db.CodeTypePasswordReset)
 	if err != nil {
 		if err == db.ErrNotFound {
-			ErrUnauthorized.Write(w)
+			errors.ErrUnauthorized.Write(w)
 			return
 		}
-		ErrGenericInternalServerError.Write(w)
+		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
 	// hash and update the new password
 	user.Password = internal.HexHashPassword(passwordSalt, userPasswords.NewPassword)
 	if _, err := a.db.SetUser(user); err != nil {
 		log.Warnw("could not update user password", "error", err)
-		ErrGenericInternalServerError.Write(w)
+		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
 	httpWriteOK(w)

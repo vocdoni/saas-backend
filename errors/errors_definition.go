@@ -1,5 +1,5 @@
 //nolint:lll
-package api
+package errors
 
 import (
 	"fmt"

@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/dvote/util"
 )
@@ -24,20 +25,20 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse request
 	censusInfo := &OrganizationCensus{}
 	if err := json.NewDecoder(r.Body).Decode(&censusInfo); err != nil {
-		ErrMalformedBody.Write(w)
+		errors.ErrMalformedBody.Write(w)
 		return
 	}
 
 	// get the user from the request context
 	user, ok := userFromContext(r.Context())
 	if !ok {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 
 	// check the user has the necessary permissions
 	if !user.HasRoleFor(censusInfo.OrgAddress, db.ManagerRole) && !user.HasRoleFor(censusInfo.OrgAddress, db.AdminRole) {
-		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
 
@@ -48,7 +49,7 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	censusID, err := a.db.SetCensus(census)
 	if err != nil {
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 	httpWriteJSON(w, OrganizationCensus{
@@ -63,12 +64,12 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 	censusID := chi.URLParam(r, "id")
 	if censusID == "" {
-		ErrMalformedURLParam.Withf("missing census ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("missing census ID").Write(w)
 		return
 	}
 	census, err := a.db.Census(censusID)
 	if err != nil {
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 	httpWriteJSON(w, organizationCensusFromDB(census))
@@ -79,35 +80,35 @@ func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 	censusID := chi.URLParam(r, "id")
 	if censusID == "" {
-		ErrMalformedURLParam.Withf("missing census ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("missing census ID").Write(w)
 		return
 	}
 	// get the user from the request context
 	user, ok := userFromContext(r.Context())
 	if !ok {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	// retrieve census
 	census, err := a.db.Census(censusID)
 	if err != nil {
 		if err == db.ErrNotFound {
-			ErrMalformedURLParam.Withf("census not found").Write(w)
+			errors.ErrMalformedURLParam.Withf("census not found").Write(w)
 			return
 		}
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 	// check the user has the necessary permissions
 	if !user.HasRoleFor(census.OrgAddress, db.ManagerRole) && !user.HasRoleFor(census.OrgAddress, db.AdminRole) {
-		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
 	// decode the participants from the request body
 	participants := &AddParticipantsRequest{}
 	if err := json.NewDecoder(r.Body).Decode(participants); err != nil {
 		log.Error(err)
-		ErrMalformedBody.Withf("missing participants").Write(w)
+		errors.ErrMalformedBody.Withf("missing participants").Write(w)
 		return
 	}
 	// check if there are participants to add
@@ -118,7 +119,7 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 	// add the org participants to the census in the database
 	no, err := a.db.SetBulkCensusMembership(passwordSalt, censusID, participants.dbOrgParticipants(census.OrgAddress))
 	if err != nil {
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 	httpWriteJSON(w, int(no.UpsertedCount))
@@ -129,26 +130,26 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 	censusID := chi.URLParam(r, "id")
 	if censusID == "" {
-		ErrMalformedURLParam.Withf("missing census ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("missing census ID").Write(w)
 		return
 	}
 
 	// get the user from the request context
 	user, ok := userFromContext(r.Context())
 	if !ok {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 
 	census, err := a.db.Census(censusID)
 	if err != nil {
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 
 	// check the user has the necessary permissions
 	if !user.HasRoleFor(census.OrgAddress, db.ManagerRole) && !user.HasRoleFor(census.OrgAddress, db.AdminRole) {
-		ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
 
@@ -162,12 +163,12 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 			Root:   a.account.PubKey.String(),
 		}
 	default:
-		ErrGenericInternalServerError.WithErr(fmt.Errorf("unsupported census type")).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(fmt.Errorf("unsupported census type")).Write(w)
 		return
 	}
 
 	if err := a.db.SetPublishedCensus(pubCensus); err != nil {
-		ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 

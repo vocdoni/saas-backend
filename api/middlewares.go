@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/jwtauth/v5"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 )
 
 // MetadataKey is a type to define the key for the metadata stored in the
@@ -24,11 +25,11 @@ func (a *API) authenticator(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, claims, err := jwtauth.FromContext(r.Context())
 		if err != nil {
-			ErrUnauthorized.Write(w)
+			errors.ErrUnauthorized.Write(w)
 			return
 		}
 		if token == nil || jwt.Validate(token, jwt.WithRequiredClaim("userId")) != nil {
-			ErrUnauthorized.Withf("userId claim not found in JWT token").Write(w)
+			errors.ErrUnauthorized.Withf("userId claim not found in JWT token").Write(w)
 			return
 		}
 		// retrieve the `userId` from the claims and add it to the HTTP header
@@ -37,15 +38,15 @@ func (a *API) authenticator(next http.Handler) http.Handler {
 		user, err := a.db.UserByEmail(userEmail)
 		if err != nil {
 			if err == db.ErrNotFound {
-				ErrUnauthorized.Withf("user not found").Write(w)
+				errors.ErrUnauthorized.Withf("user not found").Write(w)
 				return
 			}
-			ErrGenericInternalServerError.Withf("could not retrieve user from database: %v", err).Write(w)
+			errors.ErrGenericInternalServerError.Withf("could not retrieve user from database: %v", err).Write(w)
 			return
 		}
 		// check if the user is already verified
 		if !user.Verified {
-			ErrUserNoVerified.With("user account not verified").Write(w)
+			errors.ErrUserNoVerified.With("user account not verified").Write(w)
 			return
 		}
 		// add the user to the context
