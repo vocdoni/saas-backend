@@ -65,7 +65,8 @@ func BenchmarkArgon2(b *testing.B) {
 				// Calculate expected seconds for average-case (half the search space)
 				expectedSeconds := (maxAttempts / 2.0) / hashesPerSec
 				expectedDays := expectedSeconds / 86400.0
-				b.Logf("Progress: %d attempts in %s (%.2f hashes/sec) - expected average time: %.2f days", attempts, elapsed, hashesPerSec, expectedDays)
+				b.Logf("Progress: %d attempts in %s (%.2f hashes/sec) - expected average time: %.2f days",
+					attempts, elapsed, hashesPerSec, expectedDays)
 			case <-ctx.Done():
 				return
 			}

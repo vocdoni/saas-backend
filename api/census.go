@@ -140,7 +140,12 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 		for p := range progressChan {
 			lastProgress = p
 			// Just drain the channel until it's closed
-			log.Debugw("census add participants", "census", censusID, "org", census.OrgAddress, "progress", p.Progress, "added", p.Added, "total", p.Total)
+			log.Debugw("census add participants",
+				"census", censusID,
+				"org", census.OrgAddress,
+				"progress", p.Progress,
+				"added", p.Added,
+				"total", p.Total)
 		}
 		// Return the number of participants added
 		httpWriteJSON(w, &AddParticipantsResponse{ParticipantsNo: uint32(lastProgress.Added)})
@@ -183,7 +188,6 @@ func (a *API) addParticipantsJobCheckHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	errors.ErrJobNotFound.Write(w)
-	return
 }
 
 // publishCensusHandler publishes a census for voting.

@@ -107,13 +107,13 @@ func TestHasDBPermission(t *testing.T) {
 			"0x123": {
 				Address: "0x123",
 				Subscription: db.OrganizationSubscription{
-					PlanID: 0, // No plan
+					PlanID: 0,
 				},
 			},
 			"0x456": {
 				Address: "0x456",
 				Subscription: db.OrganizationSubscription{
-					PlanID: 1, // Has a plan
+					PlanID: 1,
 				},
 				Counters: db.OrganizationCounters{
 					Members: 5,
