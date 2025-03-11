@@ -10,7 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -228,7 +227,7 @@ func (ms *MongoStorage) AddUsers(users []UserData) error {
 // IndexToken indexes a token with its associated user ID. This index is used
 // to quickly find the user data by token. It will create the index if it does
 // not exist or update it if it does.
-func (ms *MongoStorage) IndexAuthToken(uID, bID internal.HexBytes, token *uuid.UUID) error {
+func (ms *MongoStorage) IndexAuthToken(uID, bID, token internal.HexBytes) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// check if the user already exists and has a bundle with the id provided
@@ -260,7 +259,7 @@ func (ms *MongoStorage) IndexAuthToken(uID, bID internal.HexBytes, token *uuid.U
 // UserByToken returns the full information of a user, including the election
 // list, by using the token index. It returns an error if the user is not found
 // in the database.
-func (ms *MongoStorage) UserAuthToken(token *uuid.UUID) (*AuthToken, *UserData, error) {
+func (ms *MongoStorage) UserAuthToken(token internal.HexBytes) (*AuthToken, *UserData, error) {
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
 	// get the auth token from the token index
@@ -283,7 +282,7 @@ func (ms *MongoStorage) UserAuthToken(token *uuid.UUID) (*AuthToken, *UserData, 
 	return authToken, user, nil
 }
 
-func (ms *MongoStorage) VerifyAuthToken(token *uuid.UUID) error {
+func (ms *MongoStorage) VerifyAuthToken(token internal.HexBytes) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create the context with a timeout

@@ -1,9 +1,6 @@
 package storage
 
-import (
-	"github.com/google/uuid"
-	"github.com/vocdoni/saas-backend/internal"
-)
+import "github.com/vocdoni/saas-backend/internal"
 
 // Storage interface implements the storage layer for the smshandler
 type Storage interface {
@@ -19,9 +16,9 @@ type Storage interface {
 	// AddUsers adds multiple users to the storage in a single operation
 	AddUsers(users []UserData) error
 	// IndexAuthToken sets the token for a user
-	IndexAuthToken(uID, bID internal.HexBytes, token *uuid.UUID) error
+	IndexAuthToken(uID, bID, token internal.HexBytes) error
 	// UserAuthToken returns the token and user data for a given token
-	UserAuthToken(token *uuid.UUID) (*AuthToken, *UserData, error)
+	UserAuthToken(token internal.HexBytes) (*AuthToken, *UserData, error)
 	// VerifyAuthToken verifies the token and sets it as verified
-	VerifyAuthToken(token *uuid.UUID) error
+	VerifyAuthToken(token internal.HexBytes) error
 }

@@ -3,7 +3,6 @@ package storage
 import (
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/vocdoni/saas-backend/internal"
 )
 
@@ -30,7 +29,7 @@ type BundleData struct {
 // AuthToken is used by the storage to index a token with its userID
 // (from UserData).
 type AuthToken struct {
-	Token     *uuid.UUID        `json:"token" bson:"_id"`
+	Token     internal.HexBytes `json:"token" bson:"_id"`
 	UserID    internal.HexBytes `json:"userID" bson:"userid"`
 	BundleID  internal.HexBytes `json:"bundleID" bson:"bundleid"`
 	CreatedAt time.Time         `json:"createdAt" bson:"createdat"`

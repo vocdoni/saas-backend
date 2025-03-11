@@ -28,7 +28,7 @@ var (
 	testUserExtraData = "extraData"
 	testUserPhone     = "+346787878"
 	testUserMail      = "test@user.com"
-	testToken         = uuid.New()
+	testToken         = internal.HexBytes(uuid.New().String())
 )
 
 func TestMain(m *testing.M) {
@@ -206,10 +206,10 @@ func TestUserAuthToken(t *testing.T) {
 	c := qt.New(t)
 	defer resetDB(c)
 	// get token of a non-existing token
-	_, _, err := testDB.UserAuthToken(&testToken)
+	_, _, err := testDB.UserAuthToken(testToken)
 	c.Assert(err, qt.ErrorIs, ErrTokenNotFound)
 	// try to add the token to the index of a non-existing user
-	err = testDB.IndexAuthToken(testUserID, testUserBundle.ID, &testToken)
+	err = testDB.IndexAuthToken(testUserID, testUserBundle.ID, testToken)
 	c.Assert(err, qt.ErrorIs, ErrUserNotFound)
 	// add user with no bundles
 	c.Assert(testDB.SetUser(UserData{
@@ -220,15 +220,15 @@ func TestUserAuthToken(t *testing.T) {
 		Mail:      testUserMail,
 	}), qt.IsNil)
 	// try to add the token to the index of a non-existing bundle
-	err = testDB.IndexAuthToken(testUserID, testUserBundle.ID, &testToken)
+	err = testDB.IndexAuthToken(testUserID, testUserBundle.ID, testToken)
 	c.Assert(err, qt.ErrorIs, ErrBundleNotFound)
 	// add bundle
 	c.Assert(testDB.SetUserBundle(testUserID, testUserBundle.ID, testUserBundle.PIDs...), qt.IsNil)
 	// add token
-	err = testDB.IndexAuthToken(testUserID, testUserBundle.ID, &testToken)
+	err = testDB.IndexAuthToken(testUserID, testUserBundle.ID, testToken)
 	c.Assert(err, qt.IsNil)
 	// get token
-	token, userData, err := testDB.UserAuthToken(&testToken)
+	token, userData, err := testDB.UserAuthToken(testToken)
 	c.Assert(err, qt.IsNil)
 	c.Assert(token.Token.String(), qt.Equals, testToken.String())
 	c.Assert(token.UserID.Bytes(), qt.DeepEquals, testUserID)
@@ -241,14 +241,14 @@ func TestUserAuthToken(t *testing.T) {
 	c.Assert(userData.Bundles[testUserBundle.ID.String()].PIDs[0], qt.DeepEquals, testUserBundle.PIDs[0])
 	c.Assert(userData.Bundles[testUserBundle.ID.String()].LastAttempt, qt.IsNil)
 	// verify token
-	err = testDB.VerifyAuthToken(&testToken)
+	err = testDB.VerifyAuthToken(testToken)
 	c.Assert(err, qt.IsNil)
 	// get token
-	token, _, err = testDB.UserAuthToken(&testToken)
+	token, _, err = testDB.UserAuthToken(testToken)
 	c.Assert(err, qt.IsNil)
 	c.Assert(token.Verified, qt.Equals, true)
 	// try to verify a non-existing token
-	nonExistingToken := uuid.New()
-	err = testDB.VerifyAuthToken(&nonExistingToken)
+	nonExistingToken := internal.HexBytes(uuid.New().String())
+	err = testDB.VerifyAuthToken(nonExistingToken)
 	c.Assert(err, qt.ErrorIs, ErrTokenNotFound)
 }

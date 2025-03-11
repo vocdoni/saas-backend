@@ -30,6 +30,9 @@ var (
 	// ErrCreateNotification is returned when the notification challenge could
 	// not be created.
 	ErrCreateNotification = fmt.Errorf("error creating notification")
+	// ErrInvalidNotificationService is returned when the notification
+	// challenge is trying to be sent with an invalid service
+	ErrInvalidNotificationService = fmt.Errorf("invalid notification service")
 )
 
 // NotificationChallenge represents a challenge to be sent to a user for
@@ -61,6 +64,13 @@ func (nc *NotificationChallenge) Valid() bool {
 // Send sends the notification challenge using the provided notification
 // service. It returns an error if the notification could not be sent.
 func (nc *NotificationChallenge) Send(ctx context.Context, service notifications.NotificationService) error {
+	if nc == nil || !nc.Valid() {
+		return ErrInvalidNotificationInputs
+	}
+	if service == nil {
+		return ErrInvalidNotificationService
+	}
+
 	internalCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	if err := service.SendNotification(internalCtx, nc.Notification); err != nil {

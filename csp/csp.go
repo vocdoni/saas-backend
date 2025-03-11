@@ -56,8 +56,8 @@ func New(ctx context.Context, config *CSPConfig) (*CSP, error) {
 		ctx,
 		config.NotificationCoolDownTime,
 		config.NotificationThrottleTime,
-		config.SMSService,
 		config.MailService,
+		config.SMSService,
 	)
 	go func() {
 		for {
