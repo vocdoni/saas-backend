@@ -33,7 +33,6 @@ func BenchmarkArgon2(b *testing.B) {
 	argonTime := uint32(4)
 	argonThreads := uint8(8)
 
-	// Argon2 parameters: 1 iteration, 64MiB memory, 4 threads, ouxtput 32 bytes.
 	hash := argon2.IDKey([]byte(phone), salt, argonTime, memory, argonThreads, 32)
 	b.Logf("Hashed phone number in %s", time.Since(startTime))
 
