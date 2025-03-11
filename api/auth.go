@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 )
 
@@ -13,13 +14,13 @@ func (a *API) refreshTokenHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := userFromContext(r.Context())
 	if !ok {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	// generate a new token with the user name as the subject
 	res, err := a.buildLoginResponse(user.Email)
 	if err != nil {
-		ErrGenericInternalServerError.Write(w)
+		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
 	// send the token back to the user
@@ -31,33 +32,33 @@ func (a *API) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 	// het the user info from the request body
 	loginInfo := &UserInfo{}
 	if err := json.NewDecoder(r.Body).Decode(loginInfo); err != nil {
-		ErrMalformedBody.Write(w)
+		errors.ErrMalformedBody.Write(w)
 		return
 	}
 	// get the user information from the database by email
 	user, err := a.db.UserByEmail(loginInfo.Email)
 	if err != nil {
 		if err == db.ErrNotFound {
-			ErrUnauthorized.Write(w)
+			errors.ErrUnauthorized.Write(w)
 			return
 		}
-		ErrGenericInternalServerError.Write(w)
+		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
 	// check the password
 	if pass := internal.HexHashPassword(passwordSalt, loginInfo.Password); pass != user.Password {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	// check if the user is verified
 	if !user.Verified {
-		ErrUserNoVerified.Write(w)
+		errors.ErrUserNoVerified.Write(w)
 		return
 	}
 	// generate a new token with the user name as the subject
 	res, err := a.buildLoginResponse(loginInfo.Email)
 	if err != nil {
-		ErrGenericInternalServerError.Write(w)
+		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
 	// send the token back to the user
@@ -70,12 +71,12 @@ func (a *API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *htt
 	// get the user from the request context
 	user, ok := userFromContext(r.Context())
 	if !ok {
-		ErrUnauthorized.Write(w)
+		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	// check if the user has organizations
 	if len(user.Organizations) == 0 {
-		ErrNoOrganizations.Write(w)
+		errors.ErrNoOrganizations.Write(w)
 		return
 	}
 	// get the user organizations information from the database if any
