@@ -1,68 +1,142 @@
 [
     {
-        "ID": 0,
-        "Name": "Essential Annual Plan",
-        "StripeID": "price_1QBEmzDW6VLep8WGpkwjynXV",
-        "StartingPrice": 9900,
-        "Default": false,
-        "Organization": {
-            "Memberships": 5,
-            "SubOrgs": 1,
-            "CensusSize": 0
+        "id": 0,
+        "name": "Essential Annual Subscription Plan",
+        "stripeID": "prod_R3LTVsjklmuQAL",
+        "stripePriceID": "price_1QevgGDW6VLep8WGmICzD3mQ",
+        "startingPrice": 24900,
+        "default": false,
+        "organization": {
+            "members": 1,
+            "subOrgs": 0,
+            "maxProcesses": 10,
+            "maxCensus": 2500,
+            "maxDuration": 14,
+            "customURL": false,
+            "drafts": 1
         },
-        "VotingTypes": {
-            "Approval": true,
-            "Ranked": true,
-            "Weighted": true
+        "votingTypes": {
+            "single": true,
+            "multiple": true,
+            "approval": true,
+            "cumulative": true,
+            "ranked": false,
+            "weighted": true
         },
-        "Features": {
-            "Personalization": false,
-            "EmailReminder": false,
-            "SmsNotification": false
+        "features": {
+            "anonymous": true,
+            "overwrite": true,
+            "liveResults": true,
+            "personalization": false,
+            "emailReminder": false,
+            "smsNotification": false,
+            "whiteLabel": false,
+            "liveStreaming": false
         }
     },
     {
-        "ID": 1,
-        "Name": "Premium Annual Plan",
-        "StripeID": "price_1Q8iyUDW6VLep8WGWXdjC78r",
-        "StartingPrice": 30000,
-        "Default": false,
-        "Organization": {
-            "Memberships": 10,
-            "SubOrgs": 5,
-            "CensusSize": 0
+        "id": 1,
+        "name": "Premium Annual Subscription Plan",
+        "stripeID": "prod_R0kTryoMNl8I19",
+        "stripePriceID": "price_1QevTjDW6VLep8WGk9tevmL8",
+        "startingPrice": 49900,
+        "default": false,
+        "organization": {
+            "members": 5,
+            "subOrgs": 1,
+            "maxProcesses": 20,
+            "maxCensus": 10000,
+            "maxDuration": 90,
+            "customURL": false,
+            "drafts": 5
         },
-        "VotingTypes": {
-            "Approval": true,
-            "Ranked": true,
-            "Weighted": true
+        "votingTypes": {
+            "single": true,
+            "multiple": true,
+            "approval": true,
+            "cumulative": true,
+            "ranked": false,
+            "weighted": true
         },
-        "Features": {
-            "Personalization": true,
-            "EmailReminder": true,
-            "SmsNotification": true
+        "features": {
+            "anonymous": true,
+            "overwrite": true,
+            "liveResults": true,
+            "personalization": true,
+            "emailReminder": false,
+            "smsNotification": false,
+            "whiteLabel": true,
+            "liveStreaming": true
         }
     },
     {
-        "ID": 2,
-        "Name": "Free Plan",
-        "StripeID": "price_1QMtoJDW6VLep8WGC2vsJ2CV",
-        "StartingPrice": 0,
-        "Default": true,
-        "Organization": {
-            "Memberships": 10,
-            "SubOrgs": 5,
-            "CensusSize": 10
+        "id": 2,
+        "name": "Free Annual Subscripton Plan",
+        "stripeID": "prod_RFObcbvED7MYbz",
+        "stripePriceID": "price_1QMtoJDW6VLep8WGC2vsJ2CV",
+        "startingPrice": 0,
+        "default": true,
+        "organization": {
+            "members": 1,
+            "subOrgs": 0,
+            "maxProcesses": 10,
+            "maxCensus": 50,
+            "maxDuration": 7,
+            "customURL": false,
+            "drafts": 0
         },
-        "VotingTypes": {
-            "Approval": false,
-            "Ranked": false,
-            "Weighted": true
+        "votingTypes": {
+            "single": true,
+            "multiple": true,
+            "approval": true,
+            "cumulative": true,
+            "ranked": true,
+            "weighted": true
         },
-        "Features": {
-            "Personalization": false,
-            "EmailReminder": false,
-            "SmsNotification": false
+        "features": {
+            "anonymous": true,
+            "overwrite": true,
+            "liveResults": true,
+            "personalization": false,
+            "emailReminder": false,
+            "smsNotification": false,
+            "whiteLabel": false,
+            "liveStreaming": false
+        }
+    },
+    {
+        "id": 3,
+        "name": "Custom Annual Subscription Plan",
+        "stripeID": "prod_RHurAb3OjkgJRy",
+        "stripePriceID": "price_1QPL1VDW6VLep8WGKUf8A3BC",
+        "startingPrice": 99900,
+        "default": false,
+        "organization": {
+            "members": 10,
+            "subOrgs": 3,
+            "maxProcesses": 50,
+            "maxCensus": 10000,
+            "maxDuration": 365,
+            "customURL": true,
+            "drafts": 20
+        },
+        "votingTypes": {
+            "single": true,
+            "multiple": true,
+            "approval": true,
+            "cumulative": true,
+            "ranked": true,
+            "weighted": true
+        },
+        "features": {
+            "anonymous": true,
+            "overwrite": true,
+            "liveResults": true,
+            "personalization": true,
+            "emailReminder": true,
+            "smsNotification": true,
+            "whiteLabel": true,
+            "liveStreaming": true
         }
     }
 ]
