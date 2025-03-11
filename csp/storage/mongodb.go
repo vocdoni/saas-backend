@@ -141,28 +141,6 @@ func (ms *MongoStorage) User(userID internal.HexBytes) (*UserData, error) {
 	return ms.userByID(userID)
 }
 
-// UserByToken returns the full information of a user, including the election
-// list, by using the token index. It returns an error if the user is not found
-// in the database.
-func (ms *MongoStorage) UserByToken(token *uuid.UUID) (*UserData, error) {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
-	// get the user ID from the token index
-	var index AuthTokenIndex
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	result := ms.tokenIndex.FindOne(ctx, bson.M{"_id": token})
-	if err := result.Decode(&index); err != nil {
-		return nil, errors.Join(ErrDecodeUser, err)
-	}
-	// get the user data from the user ID
-	user, err := ms.userByID(index.UserID)
-	if err != nil {
-		return nil, err
-	}
-	return user, nil
-}
-
 // SetUser adds a new user to the storage or updates an existing one. It uses
 // the user ID as the primary key.
 func (ms *MongoStorage) SetUser(user UserData) error {
@@ -174,43 +152,10 @@ func (ms *MongoStorage) SetUser(user UserData) error {
 	return nil
 }
 
-// SetUserProcesses sets the list of processes for a user. It will create the
-// user if it does not exist. The attempts parameter is the number of attempts
-// allowed for each process.
-func (ms *MongoStorage) SetUserProcesses(userID internal.HexBytes, attempts int, pIDs ...internal.HexBytes) error {
-	// if there are no processes, do nothing
-	if len(pIDs) == 0 {
-		return nil
-	}
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-	// get user data from the storage
-	user, err := ms.userByID(userID)
-	if err != nil {
-		return err
-	}
-	// if the user has no elections, create the map
-	if user.Processes == nil {
-		user.Processes = make(map[string]UserProcess, len(pIDs))
-	}
-	// add the elections to the user data
-	for _, pid := range pIDs {
-		user.Processes[pid.String()] = UserProcess{
-			ID:                pid,
-			RemainingAttempts: attempts,
-		}
-	}
-	// set the user data back to the storage
-	if err := ms.setUser(*user); err != nil {
-		return err
-	}
-	return nil
-}
-
 // SetUserBundle sets the list of processes for a process bundle for a user.
 // It will create the user if it does not exist. The attempts parameter is the
 // number of attempts allowed for each process.
-func (ms *MongoStorage) SetUserBundle(userID, bundleID internal.HexBytes, attempts int, pIDs ...internal.HexBytes) error {
+func (ms *MongoStorage) SetUserBundle(userID, bundleID internal.HexBytes, pIDs ...internal.HexBytes) error {
 	// if there are no processes, do nothing
 	if len(pIDs) == 0 {
 		return nil
@@ -224,88 +169,24 @@ func (ms *MongoStorage) SetUserBundle(userID, bundleID internal.HexBytes, attemp
 	}
 	// if the user has no bundles, create the map
 	if user.Bundles == nil {
-		user.Bundles = make(map[string]UserBundle, 1)
+		user.Bundles = make(map[string]BundleData, 1)
 	}
 	// initialize the bundle in the user data if it does not exist
-	if _, ok := user.Bundles[bundleID.String()]; !ok {
-		user.Bundles[bundleID.String()] = UserBundle{
-			ID:        bundleID,
-			Processes: make(map[string]UserProcess, len(pIDs)),
+	if bundle, ok := user.Bundles[bundleID.String()]; !ok {
+		user.Bundles[bundleID.String()] = BundleData{
+			ID:   bundleID,
+			PIDs: pIDs,
 		}
-	}
-	// include the elections in the bundle
-	for _, pid := range pIDs {
-		user.Bundles[bundleID.String()].Processes[pid.String()] = UserProcess{
-			ID:                pid,
-			RemainingAttempts: attempts,
-		}
+	} else {
+		// update the processes in the bundle
+		bundle.PIDs = append(bundle.PIDs, pIDs...)
+		user.Bundles[bundleID.String()] = bundle
 	}
 	// set the user data back to the storage
 	if err := ms.setUser(*user); err != nil {
 		return err
 	}
 	return nil
-}
-
-// SetProcessAttempts sets the number of attempts for a process. It returns an
-// error if the user does not exists, the process has not been registered for
-// the user or something fails updating the data.
-func (ms *MongoStorage) SetProcessAttempts(userID, processID internal.HexBytes,
-	attempts int,
-) error {
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-	// get user data from the storage
-	user, err := ms.userByID(userID)
-	if err != nil {
-		return err
-	}
-	// if the user has no elections, create the map
-	if user.Processes == nil {
-		return ErrProcessNotFound
-	}
-	// set the attempts for the process
-	process, ok := user.Processes[processID.String()]
-	if !ok {
-		return ErrProcessNotFound
-	}
-	process.RemainingAttempts = attempts
-	user.Processes[processID.String()] = process
-	return ms.setUser(*user)
-}
-
-// SetBundleProcessAttempts sets the number of attempts for a process in a
-// bundle. It returns an error if the user does not exists, the bundle has not
-// been registered for the user, the process has not been registered in the
-// bundle or something fails updating the data.
-func (ms *MongoStorage) SetBundleProcessAttempts(userID, bundleID,
-	processID internal.HexBytes, attempts int,
-) error {
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-	// get user data from the storage
-	user, err := ms.userByID(userID)
-	if err != nil {
-		return err
-	}
-	// if the user has no bundles, create the map
-	if user.Bundles == nil {
-		return ErrBundleNotFound
-	}
-	// get the bundle from the user data
-	bundle, ok := user.Bundles[bundleID.String()]
-	if !ok {
-		return ErrBundleNotFound
-	}
-	// set the attempts for the process
-	process, ok := bundle.Processes[processID.String()]
-	if !ok {
-		return ErrProcessNotFound
-	}
-	process.RemainingAttempts = attempts
-	bundle.Processes[processID.String()] = process
-	user.Bundles[bundleID.String()] = bundle
-	return ms.setUser(*user)
 }
 
 // AddUsers adds multiple users to the storage in batches of 1000 entries.
@@ -340,22 +221,48 @@ func (ms *MongoStorage) AddUsers(users []UserData) error {
 // IndexToken indexes a token with its associated user ID. This index is used
 // to quickly find the user data by token. It will create the index if it does
 // not exist or update it if it does.
-func (ms *MongoStorage) IndexToken(userID internal.HexBytes, token *uuid.UUID) error {
+func (ms *MongoStorage) IndexAuthToken(uID, bID internal.HexBytes, token *uuid.UUID) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-	// create the index document
-	index := AuthTokenIndex{
-		UserID:    userID,
-		AuthToken: token,
-	}
-	// insert the index document
+	// create the context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	opts := options.Update().SetUpsert(true)
-	if _, err := ms.tokenIndex.UpdateOne(ctx, bson.M{"_id": token}, bson.M{"$set": index}, opts); err != nil {
+	// insert the token in the token index
+	if _, err := ms.tokenIndex.InsertOne(ctx, AuthToken{
+		Token:     token,
+		UserID:    uID,
+		BundleID:  bID,
+		CreatedAt: time.Now(),
+	}); err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return nil
+		}
 		return errors.Join(ErrIndexToken, err)
 	}
 	return nil
+}
+
+// UserByToken returns the full information of a user, including the election
+// list, by using the token index. It returns an error if the user is not found
+// in the database.
+func (ms *MongoStorage) UserAuthToken(token *uuid.UUID) (*AuthToken, *UserData, error) {
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
+	// get the auth token from the token index
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	result := ms.tokenIndex.FindOne(ctx, bson.M{"_id": token})
+	// decode the auth token
+	authToken := new(AuthToken)
+	if err := result.Decode(authToken); err != nil {
+		return nil, nil, errors.Join(ErrDecodeUser, err)
+	}
+	// get the user data from the user ID
+	user, err := ms.userByID(authToken.UserID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return authToken, user, nil
 }
 
 // createIndexes creates the necessary indexes in the MongoDB database.
@@ -363,12 +270,23 @@ func (ms *MongoStorage) createIndexes() error {
 	// Create text index on `extraData` for finding user data
 	ctx, cancel3 := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel3()
-	index := mongo.IndexModel{
+	userExtraDataIdx := mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "extradata", Value: "text"},
 		},
 	}
-	_, err := ms.users.Indexes().CreateOne(ctx, index)
+	_, err := ms.users.Indexes().CreateOne(ctx, userExtraDataIdx)
+	if err != nil {
+		return err
+	}
+	tokenBundleUserIdx := mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "userid"},
+			{Key: "bundleid"},
+			{Key: "authtoken"},
+		},
+	}
+	_, err = ms.tokenIndex.Indexes().CreateOne(ctx, tokenBundleUserIdx)
 	if err != nil {
 		return err
 	}
