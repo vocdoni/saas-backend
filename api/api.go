@@ -190,6 +190,9 @@ func (a *API) initRouter() http.Handler {
 		// add census participants
 		log.Infow("new route", "method", "POST", "path", censusIDEndpoint)
 		r.Post(censusIDEndpoint, a.addParticipantsHandler)
+		// get census participants job
+		log.Infow("new route", "method", "GET", "path", censusAddParticipantsCheckEndpoint)
+		r.Post(censusAddParticipantsCheckEndpoint, a.addParticipantsJobCheckHandler)
 		// publish census
 		log.Infow("new route", "method", "POST", "path", censusPublishEndpoint)
 		r.Post(censusPublishEndpoint, a.publishCensusHandler)

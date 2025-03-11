@@ -55,6 +55,7 @@ var (
 	ErrUserNotFound               = Error{Code: 40018, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("user not found")}
 	ErrNoOrganizationSubscription = Error{Code: 40020, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("organization has no subscription")}
 	ErrPlanNotFound               = Error{Code: 40023, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("subscription plan not found")}
+	ErrJobNotFound                = Error{Code: 40026, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("job not found")}
 
 	// Conflict errors (409)
 	ErrDuplicateConflict = Error{Code: 40901, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("resource already exists")}

@@ -284,12 +284,12 @@ func TestCensusMembership(t *testing.T) {
 			c.Assert(progressChan, qt.Not(qt.IsNil))
 
 			// Wait for the operation to complete by draining the channel
-			var lastProgress int
+			var lastProgress *BulkCensusMembershipStatus
 			for progress := range progressChan {
 				lastProgress = progress
 			}
 			// Final progress should be 100%
-			c.Assert(lastProgress, qt.Equals, 100)
+			c.Assert(lastProgress.Progress, qt.Equals, 100)
 
 			// Verify participants were created with hashed data
 			for _, p := range participants {
@@ -348,12 +348,12 @@ func TestCensusMembership(t *testing.T) {
 			c.Assert(progressChan, qt.Not(qt.IsNil))
 
 			// Wait for the operation to complete
-			var lastProgress int
+			var lastProgress *BulkCensusMembershipStatus
 			for progress := range progressChan {
 				lastProgress = progress
 			}
 			// Final progress should be 100%
-			c.Assert(lastProgress, qt.Equals, 100)
+			c.Assert(lastProgress.Progress, qt.Equals, 100)
 
 			// Verify updates
 			for _, p := range participants {

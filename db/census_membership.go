@@ -133,15 +133,22 @@ func (ms *MongoStorage) DelCensusMembership(censusId, participantNo string) erro
 	return nil
 }
 
+// BulkCensusMembershipStatus is returned by SetBylkCensusMembership to provide the output.
+type BulkCensusMembershipStatus struct {
+	Progress int
+	Total    int
+	Added    int
+}
+
 // SetBulkCensusMembership creates or updates an org Participant and a census membership in the database.
 // If the membership already exists (same participantNo and censusID), it updates it.
 // If it doesn't exist, it creates a new one.
-// Processes participants in batches of 1000 entries.
+// Processes participants in batches of 200 entries.
 // Returns a channel that sends the percentage of participants processed every 10 seconds.
 func (ms *MongoStorage) SetBulkCensusMembership(
 	salt, censusId string, orgParticipants []OrgParticipant,
-) (chan int, error) {
-	progressChan := make(chan int, 1)
+) (chan *BulkCensusMembershipStatus, error) {
+	progressChan := make(chan *BulkCensusMembershipStatus, 10)
 
 	if len(orgParticipants) == 0 {
 		close(progressChan)
@@ -171,21 +178,22 @@ func (ms *MongoStorage) SetBulkCensusMembership(
 	go func() {
 		defer close(progressChan)
 
-		ms.keysLock.Lock()
-		defer ms.keysLock.Unlock()
-
-		// Process participants in batches of 1000
-		batchSize := 1000
-		var finalResult *mongo.BulkWriteResult
+		// Process participants in batches of 200
+		batchSize := 200
 		totalParticipants := len(orgParticipants)
 		processedParticipants := 0
+		addedParticipants := 0
 
 		// Create a ticker to send progress updates every 10 seconds
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
 
 		// Send initial progress
-		progressChan <- 0
+		progressChan <- &BulkCensusMembershipStatus{
+			Progress: 0,
+			Total:    totalParticipants,
+			Added:    addedParticipants,
+		}
 
 		// Create a context for the entire operation
 		ctx, cancel := context.WithCancel(context.Background())
@@ -199,7 +207,11 @@ func (ms *MongoStorage) SetBulkCensusMembership(
 					// Calculate and send progress percentage
 					if totalParticipants > 0 {
 						progress := (processedParticipants * 100) / totalParticipants
-						progressChan <- progress
+						progressChan <- &BulkCensusMembershipStatus{
+							Progress: progress,
+							Total:    totalParticipants,
+							Added:    addedParticipants,
+						}
 					}
 				case <-ctx.Done():
 					return
@@ -253,10 +265,8 @@ func (ms *MongoStorage) SetBulkCensusMembership(
 				// Create the update document for the participant
 				updateParticipantsDoc, err := dynamicUpdateDocument(participant, nil)
 				if err != nil {
-					batchCancel()
-					cancel() // Cancel the main context to stop the progress reporting goroutine
-					log.Warnw("failed to create update document for participant", "error", err)
-					return
+					log.Warnw("failed to create update document for participant", "error", err, "participantNo", participant.ParticipantNo)
+					continue // Skip this participant but continue with others
 				}
 
 				// Create the upsert model for the bulk operation
@@ -281,10 +291,8 @@ func (ms *MongoStorage) SetBulkCensusMembership(
 				// Create the update document for the membership
 				updateMembershipDoc, err := dynamicUpdateDocument(membershipDoc, nil)
 				if err != nil {
-					batchCancel()
-					cancel() // Cancel the main context to stop the progress reporting goroutine
-					log.Warnw("failed to create update document for membership", "error", err)
-					return
+					log.Warnw("failed to create update document for membership", "error", err, "participantNo", participant.ParticipantNo)
+					continue // Skip this participant but continue with others
 				}
 				// Create the upsert model for the bulk operation
 				upsertMembershipModel := mongo.NewUpdateOneModel().
@@ -294,44 +302,39 @@ func (ms *MongoStorage) SetBulkCensusMembership(
 				bulkMembershipOps = append(bulkMembershipOps, upsertMembershipModel)
 			}
 
+			// Only lock the mutex during the actual database operations
+			ms.keysLock.Lock()
+
 			// Execute the bulk write operations for this batch
 			_, err = ms.orgParticipants.BulkWrite(batchCtx, bulkParticipantsOps)
 			if err != nil {
 				log.Warnw("failed to perform bulk operation on participants", "error", err)
-				// batchCancel()
-				// return nil, fmt.Errorf("failed to perform bulk operation on participants: %w", err)
+				// Continue anyway - we'll try to add the memberships
+			} else {
+				_, err := ms.censusMemberships.BulkWrite(batchCtx, bulkMembershipOps)
+				if err != nil {
+					log.Warnw("failed to perform bulk operation on memberships", "error", err)
+					// Continue anyway - we've already processed some participants
+				} else {
+					// Only sum to addedParticipants if everything worked
+					addedParticipants += len(bulkParticipantsOps)
+				}
 			}
+			// Release the lock as soon as possible
+			ms.keysLock.Unlock()
 
-			result, err := ms.censusMemberships.BulkWrite(batchCtx, bulkMembershipOps)
 			batchCancel()
-
-			if err != nil {
-				log.Warnw("failed to perform bulk operation on memberships", "error", err)
-				// return nil, fmt.Errorf("failed to perform bulk operation on memberships: %w", err)
-			}
 
 			// Update processed count
 			processedParticipants += (end - i)
-
-			// Merge results if this is not the first batch
-			if finalResult == nil {
-				finalResult = result
-			} else {
-				finalResult.InsertedCount += result.InsertedCount
-				finalResult.MatchedCount += result.MatchedCount
-				finalResult.ModifiedCount += result.ModifiedCount
-				finalResult.DeletedCount += result.DeletedCount
-				finalResult.UpsertedCount += result.UpsertedCount
-
-				// Merge the upserted IDs
-				for k, v := range result.UpsertedIDs {
-					finalResult.UpsertedIDs[k] = v
-				}
-			}
 		}
 
 		// Send final progress (100%)
-		progressChan <- 100
+		progressChan <- &BulkCensusMembershipStatus{
+			Progress: 100,
+			Total:    totalParticipants,
+			Added:    addedParticipants,
+		}
 	}()
 
 	return progressChan, nil

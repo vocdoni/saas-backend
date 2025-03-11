@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/dvote/util"
 )
@@ -18,6 +20,10 @@ type PublishedCensusResponse struct {
 	Root     string `json:"root" bson:"root"`
 	CensusID string `json:"censusId" bson:"censusId"`
 }
+
+// addParticipantsToCensusWorkers is a map of job identifiers to the progress of adding participants to a census.
+// This is used to check the progress of the job.
+var addParticipantsToCensusWorkers sync.Map
 
 // createCensusHandler creates a new census for an organization.
 // Requires Manager/Admin role. Returns census ID on success.
@@ -89,6 +95,11 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
+	// get the async flag
+	async := false
+	if r.URL.Query().Get("async") == "true" {
+		async = true
+	}
 	// retrieve census
 	census, err := a.db.Census(censusID)
 	if err != nil {
@@ -123,13 +134,56 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Wait for the channel to be closed (100% completion)
-	for range progressChan {
-		// Just drain the channel until it's closed
+	if !async {
+		// Wait for the channel to be closed (100% completion)
+		var lastProgress *db.BulkCensusMembershipStatus
+		for p := range progressChan {
+			lastProgress = p
+			// Just drain the channel until it's closed
+			log.Debugw("census add participants", "census", censusID, "org", census.OrgAddress, "progress", p.Progress, "added", p.Added, "total", p.Total)
+		}
+		// Return the number of participants added
+		httpWriteJSON(w, &AddParticipantsResponse{ParticipantsNo: uint32(lastProgress.Added)})
+		return
 	}
 
-	// Return the number of participants added
-	httpWriteJSON(w, len(participants.Participants))
+	// if async create a new job identifier
+	jobID := util.RandomBytes(16)
+	go func() {
+		for p := range progressChan {
+			// We need to drain the channel to avoid blocking
+			addParticipantsToCensusWorkers.Store(jobID, p)
+		}
+	}()
+
+	httpWriteJSON(w, &AddParticipantsResponse{JobID: jobID})
+}
+
+// addParticipantsJobCheckHandler checks the progress of a job to add participants to a census.
+// Returns the progress of the job. If the job is completed, the job is deleted.
+func (a *API) addParticipantsJobCheckHandler(w http.ResponseWriter, r *http.Request) {
+	jobIDstr := chi.URLParam(r, "jobid")
+	if jobIDstr == "" {
+		errors.ErrMalformedURLParam.Withf("missing job ID").Write(w)
+		return
+	}
+	jobID := internal.HexBytes{}
+	if err := jobID.FromString(jobIDstr); err != nil {
+		errors.ErrMalformedURLParam.Withf("invalid job ID").Write(w)
+		return
+	}
+
+	if v, ok := addParticipantsToCensusWorkers.Load(jobID.Bytes()); ok {
+		p := v.(*db.BulkCensusMembershipStatus)
+		if p.Progress == 100 {
+			addParticipantsToCensusWorkers.Delete(jobID.Bytes())
+		}
+		httpWriteJSON(w, p)
+		return
+	}
+
+	errors.ErrJobNotFound.Write(w)
+	return
 }
 
 // publishCensusHandler publishes a census for voting.
