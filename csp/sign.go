@@ -128,16 +128,16 @@ func (c *CSP) finishSignProcess(token, processID internal.HexBytes) error {
 
 func (c *CSP) lock(userID, processID internal.HexBytes) {
 	id := sha256.Sum256(append(userID, processID...))
-	c.signerLock.Store(id[:], struct{}{})
+	c.signerLock.Store(id, struct{}{})
 }
 
 func (c *CSP) isLocked(userID, processID internal.HexBytes) bool {
 	id := sha256.Sum256(append(userID, processID...))
-	_, ok := c.signerLock.Load(id[:])
+	_, ok := c.signerLock.Load(id)
 	return ok
 }
 
 func (c *CSP) unlock(userID, processID internal.HexBytes) {
 	id := sha256.Sum256(append(userID, processID...))
-	c.signerLock.Delete(id[:])
+	c.signerLock.Delete(id)
 }
