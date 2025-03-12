@@ -41,4 +41,6 @@ var (
 	ErrStorageFailure = fmt.Errorf("storage service failure")
 	// ErrNotificationFailure is returned when the notification service fails.
 	ErrNotificationFailure = fmt.Errorf("notification service failure")
+	// ErrInvalidSignerType is returned when the signer type is invalid.
+	ErrInvalidSignerType = fmt.Errorf("invalid signer type")
 )

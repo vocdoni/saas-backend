@@ -180,13 +180,27 @@ func (ms *MongoStorage) SetUserBundle(userID, bundleID internal.HexBytes, pIDs .
 	}
 	// initialize the bundle in the user data if it does not exist
 	if bundle, ok := user.Bundles[bundleID.String()]; !ok {
+		processes := make(map[string]ProcessData, len(pIDs))
+		for _, pID := range pIDs {
+			processes[pID.String()] = ProcessData{
+				ID:       pID,
+				Consumed: false,
+			}
+		}
 		user.Bundles[bundleID.String()] = BundleData{
-			ID:   bundleID,
-			PIDs: pIDs,
+			ID:        bundleID,
+			Processes: processes,
 		}
 	} else {
 		// update the processes in the bundle
-		bundle.PIDs = append(bundle.PIDs, pIDs...)
+		for _, pID := range pIDs {
+			if _, ok := bundle.Processes[pID.String()]; !ok {
+				bundle.Processes[pID.String()] = ProcessData{
+					ID:       pID,
+					Consumed: false,
+				}
+			}
+		}
 		user.Bundles[bundleID.String()] = bundle
 	}
 	// set the user data back to the storage

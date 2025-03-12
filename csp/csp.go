@@ -6,10 +6,12 @@ import (
 
 	"github.com/vocdoni/saas-backend/csp/notifications"
 	"github.com/vocdoni/saas-backend/csp/signers"
+	"github.com/vocdoni/saas-backend/csp/signers/ecdsa"
 	"github.com/vocdoni/saas-backend/csp/storage"
 	"github.com/vocdoni/saas-backend/internal"
 	saasNotifications "github.com/vocdoni/saas-backend/notifications"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.vocdoni.io/dvote/db"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -22,8 +24,9 @@ type CSPConfig struct {
 	DBName      string
 	MongoClient *mongo.Client
 	// signer stuff
-	Signer       signers.Signer
-	PasswordSalt string
+	PasswordSalt   string
+	KeysDB         db.Database
+	EthereumSigner signers.Signer
 	// notification stuff
 	NotificationCoolDownTime time.Duration
 	NotificationThrottleTime time.Duration
@@ -35,9 +38,9 @@ type CSPConfig struct {
 // notification queue, the maximum notification attempts, the notification
 // throttle time and the notification cooldown time.
 type CSP struct {
-	Signer       signers.Signer
 	Storage      storage.Storage
 	PasswordSalt string
+	EthSigner    signers.Signer
 	notifyQueue  *notifications.Queue
 
 	notificationThrottleTime time.Duration
@@ -51,6 +54,10 @@ type CSP struct {
 // creates a new notification queue with the notification cooldown time, the
 // notification throttle time, the SMS service and the mail service.
 func New(ctx context.Context, config *CSPConfig) (*CSP, error) {
+	ethSigner := new(ecdsa.EthereumSigner)
+	if err := ethSigner.Init(config.KeysDB); err != nil {
+		return nil, err
+	}
 	stg := new(storage.MongoStorage)
 	if err := stg.Init(&storage.MongoConfig{
 		DBName: config.DBName,
@@ -81,8 +88,8 @@ func New(ctx context.Context, config *CSPConfig) (*CSP, error) {
 	}()
 	go queue.Start()
 	return &CSP{
-		Signer:                   config.Signer,
 		Storage:                  stg,
+		EthSigner:                ethSigner,
 		notifyQueue:              queue,
 		notificationThrottleTime: config.NotificationThrottleTime,
 		notificationCoolDownTime: config.NotificationCoolDownTime,
@@ -111,9 +118,9 @@ func (c *CSP) NewUserForBundle(uID internal.HexBytes, phone, mail string,
 		Phone: phone,
 		Mail:  mail,
 	}
-	user.Bundles[bID.String()] = storage.BundleData{
-		ID:   bID,
-		PIDs: eIDs,
+	user.Bundles[bID.String()] = storage.BundleData{ID: bID}
+	for _, eID := range eIDs {
+		user.Bundles[bID.String()].Processes[eID.String()] = storage.ProcessData{ID: eID}
 	}
 	return user, nil
 }

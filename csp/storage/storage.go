@@ -21,4 +21,5 @@ type Storage interface {
 	UserAuthToken(token internal.HexBytes) (*AuthToken, *UserData, error)
 	// VerifyAuthToken verifies the token and sets it as verified
 	VerifyAuthToken(token internal.HexBytes) error
+	
 }

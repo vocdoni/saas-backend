@@ -21,7 +21,6 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
-	"go.vocdoni.io/dvote/log"
 )
 
 const (
@@ -194,8 +193,10 @@ func TestBundleAuthToken(t *testing.T) {
 			ID: testUserID,
 			Bundles: map[string]storage.BundleData{
 				bundleID.String(): {
-					ID:          testBundleID,
-					PIDs:        []internal.HexBytes{testPID},
+					ID: testBundleID,
+					Processes: map[string]storage.ProcessData{
+						testPID.String(): {ID: testPID},
+					},
 					LastAttempt: nil,
 				},
 			},
@@ -232,7 +233,6 @@ func TestBundleAuthToken(t *testing.T) {
 }
 
 func TestVerifyBundleAuthToken(t *testing.T) {
-	log.Init("debug", "stdout", os.Stderr)
 	c := qt.New(t)
 
 	ctx := context.Background()
@@ -275,8 +275,10 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 			ID: testUserID,
 			Bundles: map[string]storage.BundleData{
 				testBundleID.String(): {
-					ID:          testBundleID,
-					PIDs:        []internal.HexBytes{testPID},
+					ID: testBundleID,
+					Processes: map[string]storage.ProcessData{
+						testPID.String(): {ID: testPID},
+					},
 					LastAttempt: nil,
 				},
 			},
@@ -306,8 +308,10 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 			ID: testUserID,
 			Bundles: map[string]storage.BundleData{
 				testBundleID.String(): {
-					ID:          testBundleID,
-					PIDs:        []internal.HexBytes{testPID},
+					ID: testBundleID,
+					Processes: map[string]storage.ProcessData{
+						testPID.String(): {ID: testPID},
+					},
 					LastAttempt: nil,
 				},
 			},
@@ -333,8 +337,10 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 			ID: testUserID,
 			Bundles: map[string]storage.BundleData{
 				testBundleID.String(): {
-					ID:          testBundleID,
-					PIDs:        []internal.HexBytes{testPID},
+					ID: testBundleID,
+					Processes: map[string]storage.ProcessData{
+						testPID.String(): {ID: testPID},
+					},
 					LastAttempt: nil,
 				},
 			},
@@ -361,8 +367,10 @@ func TestGenerateToken(t *testing.T) {
 	c := qt.New(t)
 
 	testBundle := storage.BundleData{
-		ID:          testBundleID,
-		PIDs:        []internal.HexBytes{testPID},
+		ID: testBundleID,
+		Processes: map[string]storage.ProcessData{
+			testPID.String(): {ID: testPID},
+		},
 		LastAttempt: nil,
 	}
 	secret := otpSecret(testUserID, testBundleID)
