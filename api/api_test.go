@@ -16,6 +16,7 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/account"
+	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications/smtp"
@@ -200,6 +201,19 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 
+	rootKey := new(internal.HexBytes).SetString(test.VoconedFoundedPrivKey)
+	csp, err := csp.New(ctx, &csp.CSPConfig{
+		DBName:                   "apiTestCSP",
+		MongoClient:              testDB.DBClient,
+		MailService:              testMailService,
+		NotificationThrottleTime: time.Second,
+		NotificationCoolDownTime: time.Second * 5,
+		RootKey:                  *rootKey,
+	})
+	if err != nil {
+		panic(err)
+	}
+
 	// Initialize the subscriptions service
 	subscriptionsService := subscriptions.New(&subscriptions.SubscriptionsConfig{
 		DB: testDB,
@@ -217,6 +231,7 @@ func TestMain(m *testing.M) {
 		FullTransparentMode: false,
 		Subscriptions:       subscriptionsService,
 		Twofactor:           testTwofactor,
+		CSP:                 csp,
 	}).Start()
 	// wait for the API to start
 	if err := pingAPI(testURL(pingEndpoint), 5); err != nil {
