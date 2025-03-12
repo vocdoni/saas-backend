@@ -354,7 +354,10 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 		// index the token
 		c.Assert(csp.Storage.IndexAuthToken(testUserID, testBundleID, testToken), qt.IsNil)
 		// generate the code
-		_, code, err := csp.generateToken(testUserID, storage.BundleData{ID: testBundleID})
+		_, code, err := csp.generateToken(testUserID, storage.BundleData{
+			ID:        testBundleID,
+			Processes: make(map[string]storage.ProcessData),
+		})
 		c.Assert(err, qt.IsNil)
 		// try to verify an valid solution
 		err = csp.VerifyBundleAuthToken(testToken, code)

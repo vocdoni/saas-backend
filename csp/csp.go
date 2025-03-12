@@ -115,11 +115,15 @@ func NewUserForBundle(uID internal.HexBytes, phone, mail string,
 		return nil, ErrNoProcessID
 	}
 	user := &storage.UserData{
-		ID:    uID,
-		Phone: phone,
-		Mail:  mail,
+		ID:      uID,
+		Phone:   phone,
+		Mail:    mail,
+		Bundles: make(map[string]storage.BundleData),
 	}
-	user.Bundles[bID.String()] = storage.BundleData{ID: bID}
+	user.Bundles[bID.String()] = storage.BundleData{
+		ID:        bID,
+		Processes: make(map[string]storage.ProcessData),
+	}
 	for _, eID := range eIDs {
 		user.Bundles[bID.String()].Processes[eID.String()] = storage.ProcessData{ID: eID}
 	}

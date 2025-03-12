@@ -67,6 +67,9 @@ func (c *CSP) prepareEthereumSigner(token, address, processID internal.HexBytes)
 		return nil, nil, nil, ErrUserNotBelongsToBundle
 	}
 	// check if the user belongs to the process
+	if bundleData.Processes == nil {
+		return nil, nil, nil, ErrUserNotBelongsToProcess
+	}
 	processData, ok := bundleData.Processes[processID.String()]
 	if !ok {
 		return nil, nil, nil, ErrUserNotBelongsToProcess
@@ -100,6 +103,9 @@ func (c *CSP) finishSignProcess(token, processID internal.HexBytes) error {
 		return ErrUserNotBelongsToBundle
 	}
 	// check if the user belongs to the process
+	if bundleData.Processes == nil {
+		return ErrUserNotBelongsToProcess
+	}
 	processData, ok := bundleData.Processes[processID.String()]
 	if !ok {
 		return ErrUserNotBelongsToProcess

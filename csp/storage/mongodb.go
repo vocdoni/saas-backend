@@ -193,6 +193,10 @@ func (ms *MongoStorage) SetUserBundle(userID, bundleID internal.HexBytes, pIDs .
 		}
 	} else {
 		// update the processes in the bundle
+		// Initialize the Processes map if it's nil
+		if bundle.Processes == nil {
+			bundle.Processes = make(map[string]ProcessData)
+		}
 		for _, pID := range pIDs {
 			if _, ok := bundle.Processes[pID.String()]; !ok {
 				bundle.Processes[pID.String()] = ProcessData{
