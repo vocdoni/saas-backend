@@ -63,8 +63,7 @@ func (c *cspHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) 
 	case 0:
 		authToken, err := c.authFirstStep(r, *bundleID, bundle.Census.ID.Hex())
 		if err != nil {
-			apiErr := (err.(errors.Error))
-			apiErr.Write(w)
+			errors.ErrUnauthorized.WithErr(err).Write(w)
 			return
 		}
 		httpWriteJSON(w, &AuthResponse{AuthToken: authToken})
@@ -72,8 +71,7 @@ func (c *cspHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) 
 	case 1:
 		authToken, err := c.authSecondStep(r)
 		if err != nil {
-			apiErr := (err.(errors.Error))
-			apiErr.Write(w)
+			errors.ErrUnauthorized.WithErr(err).Write(w)
 			return
 		}
 		httpWriteJSON(w, &AuthResponse{AuthToken: authToken})
@@ -226,8 +224,8 @@ func (c *cspHandlers) authFirstStep(r *http.Request, bundleID internal.HexBytes,
 		return nil, errors.ErrNotSupported.Withf("invalid census type")
 	}
 	// parse the user ID and generate the token
-	userID := new(internal.HexBytes).SetString(participant.ID.Hex())
-	return c.csp.BundleAuthToken(bundleID, *userID, toDestinations, challengeType)
+	// userID := new(internal.HexBytes).SetString(participant.ParticipantNo)
+	return c.csp.BundleAuthToken(bundleID, internal.HexBytes(participant.ParticipantNo), toDestinations, challengeType)
 }
 
 func (c *cspHandlers) authSecondStep(r *http.Request) (internal.HexBytes, error) {
