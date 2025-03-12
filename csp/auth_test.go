@@ -35,6 +35,7 @@ const (
 var (
 	dbClient        *mongo.Client
 	testMailService *smtp.SMTPEmail
+	testRootKey     = new(internal.HexBytes).SetString("700e669712473377a92457f3ff2a4d8f6b17e139f127738018a80fe26983f410")
 	testUserID      = internal.HexBytes("userID")
 	testBundleID    = internal.HexBytes("bundleID")
 	testPID         = internal.HexBytes("processID")
@@ -130,6 +131,7 @@ func TestBundleAuthToken(t *testing.T) {
 		MailService:              testMailService,
 		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,
+		RootKey:                  *testRootKey,
 	})
 	c.Assert(error, qt.IsNil)
 
@@ -242,6 +244,7 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 		MailService:              testMailService,
 		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,
+		RootKey:                  *testRootKey,
 	})
 	c.Assert(error, qt.IsNil)
 
