@@ -22,16 +22,20 @@ import (
 // createProcessHandler creates a new voting process.
 // Requires Manager/Admin role. Returns 201 on success.
 func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
-	processID := chi.URLParam(r, "processId")
-	if processID == "" {
+	processID := internal.HexBytes{}
+	if err := processID.FromString(chi.URLParam(r, "processId")); err != nil {
 		errors.ErrMalformedURLParam.Withf("missing process ID").Write(w)
 		return
 	}
-	processID = util.TrimHex(processID)
 
 	processInfo := &CreateProcessRequest{}
 	if err := json.NewDecoder(r.Body).Decode(&processInfo); err != nil {
 		errors.ErrMalformedBody.Write(w)
+		return
+	}
+
+	if processInfo.PublishedCensusRoot == nil || processInfo.CensusID == nil {
+		errors.ErrMalformedBody.Withf("missing published census root or ID").Write(w)
 		return
 	}
 
@@ -43,9 +47,9 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pubCensus, err := a.db.PublishedCensus(
-		util.TrimHex(processInfo.PublishedCensusRoot),
+		processInfo.PublishedCensusRoot.String(),
 		processInfo.PublishedCensusURI,
-		processInfo.CensusID,
+		processInfo.CensusID.String(),
 	)
 	if err != nil {
 		if err == db.ErrNotFound {
@@ -62,34 +66,25 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := internal.HexBytes{}
-	err = id.FromString(processID)
-	if err != nil {
-		errors.ErrMalformedURLParam.Withf("invalid process ID").Write(w)
+	// check that the process does not exist
+	if _, err := a.db.Process(processID); err == nil {
+		errors.ErrDuplicateConflict.Withf("process already exists").Write(w)
 		return
 	}
 
-	process := &db.Process{
-		ID:              id,
-		PublishedCensus: *pubCensus,
-		Metadata:        processInfo.Metadata,
-		OrgAddress:      pubCensus.Census.OrgAddress,
-	}
-
-	if err := a.db.SetProcess(process); err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
+	// get the participants
 	orgParticipants, err := a.db.OrgParticipantsMemberships(
 		pubCensus.Census.OrgAddress,
 		pubCensus.Census.ID.Hex(),
 		"",
-		[]internal.HexBytes{id},
+		[]internal.HexBytes{processID},
 	)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
+
+	// check the census type
 	switch pubCensus.Census.Type {
 	case db.CensusTypeSMSorMail, db.CensusTypeMail, db.CensusTypeSMS:
 		if err := a.twofactor.AddProcess(pubCensus.Census.Type, orgParticipants); err != nil {
@@ -100,13 +95,18 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrNotSupported.Withf("census type not supported").Write(w)
 		return
 	}
-	if pubCensus.Census.Type == db.CensusTypeSMSorMail ||
-		pubCensus.Census.Type == db.CensusTypeMail ||
-		pubCensus.Census.Type == db.CensusTypeSMS {
-		if err := a.twofactor.AddProcess(pubCensus.Census.Type, orgParticipants); err != nil {
-			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-			return
-		}
+
+	// finally create the process
+	process := &db.Process{
+		ID:              processID,
+		PublishedCensus: *pubCensus,
+		Metadata:        processInfo.Metadata,
+		OrgAddress:      pubCensus.Census.OrgAddress,
+	}
+
+	if err := a.db.SetProcess(process); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
 	}
 
 	httpWriteOK(w)
@@ -134,31 +134,12 @@ func (a *API) processInfoHandler(w http.ResponseWriter, r *http.Request) {
 	httpWriteJSON(w, process)
 }
 
-type AuthRequest struct {
-	AuthToken *uuid.UUID `json:"authToken,omitempty"`
-	AuthData  []string   `json:"authData,omitempty"` // reserved for the auth handler
-}
-
-type SignRequest struct {
-	TokenR     internal.HexBytes `json:"tokenR"`
-	AuthToken  *uuid.UUID        `json:"authToken"`
-	Address    string            `json:"address,omitempty"`
-	Payload    string            `json:"payload,omitempty"`
-	ElectionId internal.HexBytes `json:"electionId,omitempty"`
-}
-
-type twofactorResponse struct {
-	AuthToken *uuid.UUID        `json:"authToken,omitempty"`
-	Token     *uuid.UUID        `json:"token,omitempty"`
-	Signature internal.HexBytes `json:"signature,omitempty"`
-}
-
 // getSubscriptionsHandler handles the request to get the subscriptions of an organization.
 // It returns the list of subscriptions with their information.
 func (a *API) twofactorAuthHandler(w http.ResponseWriter, r *http.Request) {
-	urlProcessId := chi.URLParam(r, "processId")
-	if len(urlProcessId) == 0 {
-		errors.ErrMalformedURLParam.Withf("missing process ID").Write(w)
+	processID := internal.HexBytes{}
+	if err := processID.FromString(chi.URLParam(r, "processId")); err != nil {
+		errors.ErrMalformedURLParam.Withf("wrong process ID").Write(w)
 		return
 	}
 
@@ -171,7 +152,20 @@ func (a *API) twofactorAuthHandler(w http.ResponseWriter, r *http.Request) {
 
 	switch step {
 	case 0:
-		authToken, err := a.initiateAuthRequest(r, urlProcessId)
+		var req InitiateAuthRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			errors.ErrMalformedBody.Withf("missing auth data").Write(w)
+			return
+		}
+		if len(req.ParticipantNo) == 0 {
+			errors.ErrMalformedBody.Withf("missing participant number").Write(w)
+			return
+		}
+		if len(req.Email) == 0 && len(req.Phone) == 0 {
+			errors.ErrMalformedBody.Withf("missing email or phone").Write(w)
+			return
+		}
+		authToken, err := a.initiateAuthRequest(&req, processID)
 		if err != nil {
 			errors.ErrUnauthorized.WithErr(err).Write(w)
 			return
@@ -184,7 +178,7 @@ func (a *API) twofactorAuthHandler(w http.ResponseWriter, r *http.Request) {
 			errors.ErrMalformedBody.Write(w)
 			return
 		}
-		authResp := a.twofactor.Auth(urlProcessId, req.AuthToken, req.AuthData)
+		authResp := a.twofactor.Auth(processID.String(), req.AuthToken, req.AuthData)
 		if !authResp.Success {
 			errors.ErrUnauthorized.WithErr(stderrors.New(authResp.Error)).Write(w)
 			return
@@ -222,26 +216,9 @@ func (a *API) twofactorSignHandler(w http.ResponseWriter, r *http.Request) {
 	httpWriteJSON(w, &twofactorResponse{Signature: signResp.Signature})
 }
 
-func (a *API) initiateAuthRequest(r *http.Request, processId string) (*uuid.UUID, error) {
-	var req InitiateAuthRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		return nil, fmt.Errorf("malformed body")
-	}
-	if len(req.ParticipantNo) == 0 {
-		return nil, fmt.Errorf("missing participant number")
-	}
-
-	if len(req.Email) == 0 && len(req.Phone) == 0 {
-		return nil, fmt.Errorf("missing auth data")
-	}
-
-	processIdBytes, err := hex.DecodeString(processId)
-	if err != nil {
-		return nil, fmt.Errorf("invalid process ID")
-	}
-
+func (a *API) initiateAuthRequest(req *InitiateAuthRequest, processID internal.HexBytes) (*uuid.UUID, error) {
 	// retrieve process info
-	process, err := a.db.Process(processIdBytes)
+	process, err := a.db.Process(processID)
 	if err != nil {
 		if err == db.ErrNotFound {
 			return nil, fmt.Errorf("process not found")
@@ -282,7 +259,7 @@ func (a *API) initiateAuthRequest(r *http.Request, processId string) (*uuid.UUID
 		if !bytes.Equal(internal.HashOrgData(process.OrgAddress, req.Email), participant.HashedEmail) {
 			return nil, fmt.Errorf("invalid user data")
 		}
-		authResp = a.twofactor.InitiateAuth(processId, participant.ParticipantNo, req.Email, notifications.Email)
+		authResp = a.twofactor.InitiateAuth(processID.String(), participant.ParticipantNo, req.Email, notifications.Email)
 	case db.CensusTypeSMS:
 		if req.Phone == "" {
 			return nil, fmt.Errorf("missing phone")
@@ -294,13 +271,13 @@ func (a *API) initiateAuthRequest(r *http.Request, processId string) (*uuid.UUID
 		if !bytes.Equal(internal.HashOrgData(process.OrgAddress, pn), participant.HashedPhone) {
 			return nil, fmt.Errorf("invalid user data")
 		}
-		authResp = a.twofactor.InitiateAuth(processId, participant.ParticipantNo, pn, notifications.SMS)
+		authResp = a.twofactor.InitiateAuth(processID.String(), participant.ParticipantNo, pn, notifications.SMS)
 	case db.CensusTypeSMSorMail:
 		if req.Email != "" {
 			if !bytes.Equal(internal.HashOrgData(process.OrgAddress, req.Email), participant.HashedEmail) {
 				return nil, fmt.Errorf("invalid user data")
 			}
-			authResp = a.twofactor.InitiateAuth(processId, participant.ParticipantNo, req.Email, notifications.Email)
+			authResp = a.twofactor.InitiateAuth(processID.String(), participant.ParticipantNo, req.Email, notifications.Email)
 		} else if req.Phone != "" {
 			pn, err := internal.SanitizeAndVerifyPhoneNumber(req.Phone)
 			if err != nil {
@@ -309,7 +286,7 @@ func (a *API) initiateAuthRequest(r *http.Request, processId string) (*uuid.UUID
 			if !bytes.Equal(internal.HashOrgData(process.OrgAddress, pn), participant.HashedPhone) {
 				return nil, fmt.Errorf("invalid user data")
 			}
-			authResp = a.twofactor.InitiateAuth(processId, participant.ParticipantNo, pn, notifications.SMS)
+			authResp = a.twofactor.InitiateAuth(processID.String(), participant.ParticipantNo, pn, notifications.SMS)
 		} else {
 			return nil, fmt.Errorf("missing email or phone")
 		}

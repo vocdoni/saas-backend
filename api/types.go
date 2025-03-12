@@ -3,6 +3,7 @@ package api
 import (
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications"
@@ -412,10 +413,10 @@ type AddParticipantsResponse struct {
 
 // CreateProcessRequest defines the payload for creating a new voting process
 type CreateProcessRequest struct {
-	PublishedCensusRoot string `json:"censusRoot"`
-	PublishedCensusURI  string `json:"censusUri"`
-	CensusID            string `json:"censusID"`
-	Metadata            []byte `json:"metadata,omitempty"`
+	PublishedCensusRoot internal.HexBytes `json:"censusRoot"`
+	PublishedCensusURI  string            `json:"censusUri"`
+	CensusID            internal.HexBytes `json:"censusID"`
+	Metadata            []byte            `json:"metadata,omitempty"`
 }
 
 // InitiateAuthRequest defines the payload for participant authentication
@@ -436,4 +437,28 @@ type VerifyAuthRequest struct {
 type GenerateProofRequest struct {
 	Token          string `json:"token"`
 	BlindedAddress []byte `json:"blindedAddress"`
+}
+
+// twofacctor types
+
+// AuthRequest defines the payload for requesting authentication
+type AuthRequest struct {
+	AuthToken *uuid.UUID `json:"authToken,omitempty"`
+	AuthData  []string   `json:"authData,omitempty"` // reserved for the auth handler
+}
+
+// SignRequest defines the payload for requesting a signature
+type SignRequest struct {
+	TokenR     internal.HexBytes `json:"tokenR"`
+	AuthToken  *uuid.UUID        `json:"authToken"`
+	Address    string            `json:"address,omitempty"`
+	Payload    string            `json:"payload,omitempty"`
+	ElectionId internal.HexBytes `json:"electionId,omitempty"`
+}
+
+// twofactorResponse defines the response for twofactor requests
+type twofactorResponse struct {
+	AuthToken *uuid.UUID        `json:"authToken,omitempty"`
+	Token     *uuid.UUID        `json:"token,omitempty"`
+	Signature internal.HexBytes `json:"signature,omitempty"`
 }
