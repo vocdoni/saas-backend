@@ -185,7 +185,7 @@ func TestCensus(t *testing.T) {
 
 	// Poll the job status until it's complete or max attempts reached
 	for attempts < maxAttempts && !completed {
-		resp, code = testRequest(t, http.MethodPost, adminToken, nil, "census", "check", jobIDHex.String())
+		resp, code = testRequest(t, http.MethodGet, adminToken, nil, "census", "check", jobIDHex.String())
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		err = json.Unmarshal(resp, &jobStatus)
@@ -210,7 +210,7 @@ func TestCensus(t *testing.T) {
 
 	// Verify that the entry is removed from the sync.Map after reading progress=100
 	// Make another request to check that the job is no longer found
-	_, code = testRequest(t, http.MethodPost, adminToken, nil, "census", "check", jobIDHex.String())
+	_, code = testRequest(t, http.MethodGet, adminToken, nil, "census", "check", jobIDHex.String())
 	c.Assert(code, qt.Equals, http.StatusNotFound, qt.Commentf("Job should be removed after completion"))
 
 	// Test 4: Publish census
