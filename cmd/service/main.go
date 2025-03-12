@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/signal"
 	"syscall"
@@ -9,6 +10,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api"
+	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"github.com/vocdoni/saas-backend/notifications/smtp"
@@ -131,6 +133,7 @@ func main() {
 	}
 
 	twofactorConf := &twofactor.TwofactorConfig{}
+	cspConf := &csp.CSPConfig{MongoClient: database.DBClient}
 	// overwrite the email notifications service with the SMTP service if the
 	// required parameters are set and include it in the API configuration
 	if smtpServer != "" && smtpUsername != "" && smtpPassword != "" {
@@ -149,6 +152,7 @@ func main() {
 			log.Fatalf("could not create the email service: %v", err)
 		}
 		twofactorConf.NotificationServices.Mail = apiConf.MailService
+		cspConf.MailService = apiConf.MailService
 		// load email templates
 		if err := mailtemplates.Load(); err != nil {
 			log.Fatalf("could not load email templates: %v", err)
@@ -168,6 +172,7 @@ func main() {
 			log.Fatalf("could not create the SMS service: %v", err)
 		}
 		twofactorConf.NotificationServices.SMS = apiConf.SMSService
+		cspConf.SMSService = apiConf.SMSService
 		log.Infow("SMS service created", "from", twilioFromNumber)
 	}
 
@@ -179,7 +184,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("could not create the twofactor service: %v", err)
 	}
-
+	// create the CSP service and include it in the API configuration
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if apiConf.CSP, err = csp.New(ctx, cspConf); err != nil {
+		log.Fatalf("could not create the CSP service: %v", err)
+		return
+	}
 	subscriptions := subscriptions.New(&subscriptions.SubscriptionsConfig{
 		DB: database,
 	})

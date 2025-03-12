@@ -31,7 +31,7 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 		return nil, ErrNoUserID
 	}
 	// get user data
-	userData, err := c.storage.User(uID)
+	userData, err := c.Storage.User(uID)
 	if err != nil {
 		log.Warnw("error getting user data",
 			"error", err,
@@ -58,14 +58,14 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 	// update the election and the bundle in the user data
 	userData.Bundles[bID.String()] = bundle
 	// update the user data in the storage and index the token
-	if err := c.storage.SetUser(*userData); err != nil {
+	if err := c.Storage.SetUser(*userData); err != nil {
 		log.Warnw("error updating user data",
 			"error", err,
 			"userID", uID,
 			"token", token)
 		return nil, ErrStorageFailure
 	}
-	if err := c.storage.IndexAuthToken(uID, bID, token); err != nil {
+	if err := c.Storage.IndexAuthToken(uID, bID, token); err != nil {
 		log.Warnw("error indexing token",
 			"error", err,
 			"userID", uID,
@@ -108,7 +108,7 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 		return ErrInvalidSolution
 	}
 	// get the user data from the token
-	authToken, userData, err := c.storage.UserAuthToken(token)
+	authToken, userData, err := c.Storage.UserAuthToken(token)
 	if err != nil {
 		log.Warnw("error getting user data by token",
 			"error", err,
@@ -129,7 +129,7 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 	bundle.LastAttempt = &t
 	userData.Bundles[authToken.BundleID.String()] = bundle
 	// update the user data in the storage
-	if err := c.storage.SetUser(*userData); err != nil {
+	if err := c.Storage.SetUser(*userData); err != nil {
 		log.Warnw("error updating user data",
 			"error", err,
 			"userID", userData.ID,
@@ -146,7 +146,7 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 		return ErrChallengeCodeFailure
 	}
 	// set the token as verified
-	if err := c.storage.VerifyAuthToken(token); err != nil {
+	if err := c.Storage.VerifyAuthToken(token); err != nil {
 		log.Warnw("error verifying token",
 			"error", err,
 			"token", token,

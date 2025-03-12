@@ -150,7 +150,7 @@ func TestBundleAuthToken(t *testing.T) {
 	})
 
 	c.Run("bundle not found in user data", func(c *qt.C) {
-		c.Cleanup(func() { _ = csp.storage.Reset() })
+		c.Cleanup(func() { _ = csp.Storage.Reset() })
 		// add user with no bundles and no mail
 		testUserData := storage.UserData{
 			ID:        testUserID,
@@ -159,14 +159,14 @@ func TestBundleAuthToken(t *testing.T) {
 			Phone:     testUserPhone,
 			Mail:      "",
 		}
-		c.Assert(csp.storage.SetUser(testUserData), qt.IsNil)
+		c.Assert(csp.Storage.SetUser(testUserData), qt.IsNil)
 		// test bundle is not found in user data
 		_, err := csp.BundleAuthToken(testBundleID, testUserID, testUserEmail, notifications.EmailChallenge)
 		c.Assert(err, qt.ErrorIs, ErrUserNotBelongsToBundle)
 	})
 
 	c.Run("update user data fails", func(c *qt.C) {
-		c.Cleanup(func() { _ = csp.storage.Reset() })
+		c.Cleanup(func() { _ = csp.Storage.Reset() })
 		// add user with no bundles and no mail
 		testUserData := storage.UserData{
 			ID:        testUserID,
@@ -175,22 +175,22 @@ func TestBundleAuthToken(t *testing.T) {
 			Phone:     testUserPhone,
 			Mail:      "",
 		}
-		c.Assert(csp.storage.SetUser(testUserData), qt.IsNil)
+		c.Assert(csp.Storage.SetUser(testUserData), qt.IsNil)
 		// add bundle to user
-		err := csp.storage.SetUserBundle(testUserID, testBundleID, testPID)
+		err := csp.Storage.SetUserBundle(testUserID, testBundleID, testPID)
 		c.Assert(err, qt.IsNil)
 		// test update user data fails (unreachable but testeable)
 		_, err = csp.BundleAuthToken(testBundleID, testUserID, "", notifications.EmailChallenge)
 		c.Assert(err, qt.ErrorIs, ErrNotificationFailure)
-		userResult, err := csp.storage.User(testUserID)
+		userResult, err := csp.Storage.User(testUserID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(userResult.Bundles[testBundleID.String()].LastAttempt, qt.Not(qt.IsNil))
 	})
 
 	c.Run("success test", func(c *qt.C) {
-		c.Cleanup(func() { _ = csp.storage.Reset() })
+		c.Cleanup(func() { _ = csp.Storage.Reset() })
 		bundleID := internal.HexBytes(testBundleID)
-		c.Assert(csp.storage.SetUser(storage.UserData{
+		c.Assert(csp.Storage.SetUser(storage.UserData{
 			ID: testUserID,
 			Bundles: map[string]storage.BundleData{
 				bundleID.String(): {
@@ -203,7 +203,7 @@ func TestBundleAuthToken(t *testing.T) {
 			Phone:     testUserPhone,
 			Mail:      testUserEmail,
 		}), qt.IsNil)
-		userResult, err := csp.storage.User(testUserID)
+		userResult, err := csp.Storage.User(testUserID)
 		c.Assert(err, qt.IsNil)
 		token, err := csp.BundleAuthToken(testBundleID, testUserID, testUserEmail, notifications.EmailChallenge)
 		c.Assert(err, qt.IsNil)
@@ -211,7 +211,7 @@ func TestBundleAuthToken(t *testing.T) {
 		// calculate expected code and token
 		_, expectedCode, err := csp.generateToken(testUserID, userResult.Bundles[bundleID.String()])
 		c.Assert(err, qt.IsNil)
-		authTokenResult, _, err := csp.storage.UserAuthToken(token)
+		authTokenResult, _, err := csp.Storage.UserAuthToken(token)
 		c.Assert(err, qt.IsNil)
 		c.Assert(authTokenResult.BundleID.Bytes(), qt.DeepEquals, bundleID.Bytes())
 		c.Assert(authTokenResult.UserID.Bytes(), qt.DeepEquals, testUserID.Bytes())
@@ -269,9 +269,9 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 	})
 
 	c.Run("token bundle not found in user data", func(c *qt.C) {
-		c.Cleanup(func() { _ = csp.storage.Reset() })
+		c.Cleanup(func() { _ = csp.Storage.Reset() })
 		// create user with the bundle
-		c.Assert(csp.storage.SetUser(storage.UserData{
+		c.Assert(csp.Storage.SetUser(storage.UserData{
 			ID: testUserID,
 			Bundles: map[string]storage.BundleData{
 				testBundleID.String(): {
@@ -285,9 +285,9 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 			Mail:      testUserEmail,
 		}), qt.IsNil)
 		// index the token
-		c.Assert(csp.storage.IndexAuthToken(testUserID, testBundleID, testToken), qt.IsNil)
+		c.Assert(csp.Storage.IndexAuthToken(testUserID, testBundleID, testToken), qt.IsNil)
 		// remove the bundle from the user data
-		c.Assert(csp.storage.SetUser(storage.UserData{
+		c.Assert(csp.Storage.SetUser(storage.UserData{
 			ID:        testUserID,
 			Bundles:   map[string]storage.BundleData{},
 			ExtraData: testUserExtraData,
@@ -300,9 +300,9 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 	})
 
 	c.Run("solution not match", func(c *qt.C) {
-		c.Cleanup(func() { _ = csp.storage.Reset() })
+		c.Cleanup(func() { _ = csp.Storage.Reset() })
 		// create user with the bundle
-		c.Assert(csp.storage.SetUser(storage.UserData{
+		c.Assert(csp.Storage.SetUser(storage.UserData{
 			ID: testUserID,
 			Bundles: map[string]storage.BundleData{
 				testBundleID.String(): {
@@ -316,20 +316,20 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 			Mail:      testUserEmail,
 		}), qt.IsNil)
 		// index the token
-		c.Assert(csp.storage.IndexAuthToken(testUserID, testBundleID, testToken), qt.IsNil)
+		c.Assert(csp.Storage.IndexAuthToken(testUserID, testBundleID, testToken), qt.IsNil)
 		// try to verify an invalid solution
 		err := csp.VerifyBundleAuthToken(testToken, "invalid")
 		c.Assert(err, qt.ErrorIs, ErrChallengeCodeFailure)
 		// check that the last attempt is updated
-		userResult, err := csp.storage.User(testUserID)
+		userResult, err := csp.Storage.User(testUserID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(userResult.Bundles[testBundleID.String()].LastAttempt, qt.Not(qt.IsNil))
 	})
 
 	c.Run("success", func(c *qt.C) {
-		c.Cleanup(func() { _ = csp.storage.Reset() })
+		c.Cleanup(func() { _ = csp.Storage.Reset() })
 		// create user with the bundle
-		c.Assert(csp.storage.SetUser(storage.UserData{
+		c.Assert(csp.Storage.SetUser(storage.UserData{
 			ID: testUserID,
 			Bundles: map[string]storage.BundleData{
 				testBundleID.String(): {
@@ -343,7 +343,7 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 			Mail:      testUserEmail,
 		}), qt.IsNil)
 		// index the token
-		c.Assert(csp.storage.IndexAuthToken(testUserID, testBundleID, testToken), qt.IsNil)
+		c.Assert(csp.Storage.IndexAuthToken(testUserID, testBundleID, testToken), qt.IsNil)
 		// generate the code
 		_, code, err := csp.generateToken(testUserID, storage.BundleData{ID: testBundleID})
 		c.Assert(err, qt.IsNil)
@@ -351,7 +351,7 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 		err = csp.VerifyBundleAuthToken(testToken, code)
 		c.Assert(err, qt.IsNil)
 		// check that the token is verified
-		authTokenResult, _, err := csp.storage.UserAuthToken(testToken)
+		authTokenResult, _, err := csp.Storage.UserAuthToken(testToken)
 		c.Assert(err, qt.IsNil)
 		c.Assert(authTokenResult.Verified, qt.IsTrue)
 	})

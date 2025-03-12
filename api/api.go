@@ -10,6 +10,8 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/go-chi/jwtauth/v5"
 	"github.com/vocdoni/saas-backend/account"
+	"github.com/vocdoni/saas-backend/csp"
+	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/vocdoni/saas-backend/objectstorage"
@@ -47,6 +49,7 @@ type APIConfig struct {
 	// Object storage
 	ObjectStorage *objectstorage.ObjectStorageClient
 	Twofactor     *twofactor.Twofactor
+	CSP           *csp.CSP
 }
 
 // API type represents the API HTTP server with JWT authentication capabilities.
@@ -68,6 +71,7 @@ type API struct {
 	subscriptions   *subscriptions.Subscriptions
 	objectStorage   *objectstorage.ObjectStorageClient
 	twofactor       *twofactor.Twofactor
+	csp             *csp.CSP
 }
 
 // New creates a new API HTTP server. It does not start the server. Use Start() for that.
@@ -92,6 +96,7 @@ func New(conf *APIConfig) *API {
 		subscriptions:   conf.Subscriptions,
 		objectStorage:   conf.ObjectStorage,
 		twofactor:       conf.Twofactor,
+		csp:             conf.CSP,
 	}
 }
 
@@ -120,6 +125,9 @@ func (a *API) initRouter() http.Handler {
 	r.Use(middleware.Throttle(100))
 	r.Use(middleware.ThrottleBacklog(5000, 40000, 60*time.Second))
 	r.Use(middleware.Timeout(45 * time.Second))
+
+	a.csp.PasswordSalt = passwordSalt
+	cspHandlers := handlers.New(a.csp, a.db)
 
 	// protected routes
 	r.Group(func(r chi.Router) {
@@ -269,7 +277,8 @@ func (a *API) initRouter() http.Handler {
 		r.Get(processBundleInfoEndpoint, a.processBundleInfoHandler)
 		// process bundle auth handler
 		log.Infow("new route", "method", "POST", "path", processBundleAuthEndpoint)
-		r.Post(processBundleAuthEndpoint, a.processBundleAuthHandler)
+		// r.Post(processBundleAuthEndpoint, a.processBundleAuthHandler)
+		r.Post(processBundleAuthEndpoint, cspHandlers.BundleAuthHandler)
 		// process bundle sign handler
 		log.Infow("new route", "method", "POST", "path", processBundleSignEndpoint)
 		r.Post(processBundleSignEndpoint, a.processBundleSignHandler)

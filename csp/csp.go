@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/vocdoni/saas-backend/csp/notifications"
+	"github.com/vocdoni/saas-backend/csp/signers"
 	"github.com/vocdoni/saas-backend/csp/storage"
 	"github.com/vocdoni/saas-backend/internal"
 	saasNotifications "github.com/vocdoni/saas-backend/notifications"
@@ -20,6 +21,9 @@ type CSPConfig struct {
 	// db stuff
 	DBName      string
 	MongoClient *mongo.Client
+	// signer stuff
+	Signer       signers.Signer
+	PasswordSalt string
 	// notification stuff
 	NotificationCoolDownTime time.Duration
 	NotificationThrottleTime time.Duration
@@ -31,8 +35,10 @@ type CSPConfig struct {
 // notification queue, the maximum notification attempts, the notification
 // throttle time and the notification cooldown time.
 type CSP struct {
-	storage     storage.Storage
-	notifyQueue *notifications.Queue
+	Signer       signers.Signer
+	Storage      storage.Storage
+	PasswordSalt string
+	notifyQueue  *notifications.Queue
 
 	notificationThrottleTime time.Duration
 	notificationCoolDownTime time.Duration
@@ -75,7 +81,8 @@ func New(ctx context.Context, config *CSPConfig) (*CSP, error) {
 	}()
 	go queue.Start()
 	return &CSP{
-		storage:                  stg,
+		Signer:                   config.Signer,
+		Storage:                  stg,
 		notifyQueue:              queue,
 		notificationThrottleTime: config.NotificationThrottleTime,
 		notificationCoolDownTime: config.NotificationCoolDownTime,
@@ -115,5 +122,5 @@ func (c *CSP) NewUserForBundle(uID internal.HexBytes, phone, mail string,
 // BultAddUser method with the list of users provided. The users should be
 // created with the NewUserData method.
 func (c *CSP) AddUsers(users []storage.UserData) error {
-	return c.storage.AddUsers(users)
+	return c.Storage.AddUsers(users)
 }
