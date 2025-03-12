@@ -80,6 +80,10 @@ func (b *HexBytes) UnmarshalJSON(data []byte) error {
 
 // ParseString decodes a hex string into the HexBytes.
 func (b *HexBytes) ParseString(str string) error {
+	// Strip a leading "0x" prefix, for backwards compatibility.
+	if len(str) >= 2 && str[0] == '0' && (str[1] == 'x' || str[1] == 'X') {
+		str = str[2:]
+	}
 	var err error
 	(*b), err = hex.DecodeString(str)
 	return err
