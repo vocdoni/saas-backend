@@ -16,7 +16,6 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/vocdoni/saas-backend/twofactor"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/dvote/util"
 )
@@ -166,8 +165,8 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	bundleID, err := primitive.ObjectIDFromHex(bundleIDStr)
-	if err != nil {
+	bundleID := new(internal.HexBytes)
+	if err := bundleID.ParseString(bundleIDStr); err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
 		return
 	}
@@ -186,7 +185,7 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Get the existing bundle
-	bundle, err := a.db.ProcessBundle(bundleID)
+	bundle, err := a.db.ProcessBundle(*bundleID)
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrMalformedURLParam.Withf("bundle not found").Write(w)
@@ -256,7 +255,7 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Add processes to the bundle
-	if err := a.db.AddProcessesToBundle(bundleID, processesToAdd); err != nil {
+	if err := a.db.AddProcessesToBundle(*bundleID, processesToAdd); err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
@@ -276,13 +275,13 @@ func (a *API) processBundleInfoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bundleID, err := primitive.ObjectIDFromHex(bundleIDStr)
-	if err != nil {
+	bundleID := new(internal.HexBytes)
+	if err := bundleID.ParseString(bundleIDStr); err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
 		return
 	}
 
-	bundle, err := a.db.ProcessBundle(bundleID)
+	bundle, err := a.db.ProcessBundle(*bundleID)
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrMalformedURLParam.Withf("bundle not found").Write(w)
@@ -304,13 +303,13 @@ func (a *API) processBundleParticipantInfoHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	bundleID, err := primitive.ObjectIDFromHex(bundleIDStr)
-	if err != nil {
+	bundleID := new(internal.HexBytes)
+	if err := bundleID.ParseString(bundleIDStr); err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
 		return
 	}
 
-	_, err = a.db.ProcessBundle(bundleID)
+	_, err := a.db.ProcessBundle(*bundleID)
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrMalformedURLParam.Withf("bundle not found").Write(w)
@@ -345,8 +344,8 @@ func (a *API) processBundleAuthHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bundleID, err := primitive.ObjectIDFromHex(bundleIDStr)
-	if err != nil {
+	bundleID := new(internal.HexBytes)
+	if err := bundleID.ParseString(bundleIDStr); err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
 		return
 	}
@@ -358,7 +357,7 @@ func (a *API) processBundleAuthHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bundle, err := a.db.ProcessBundle(bundleID)
+	bundle, err := a.db.ProcessBundle(*bundleID)
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrMalformedURLParam.Withf("bundle not found").Write(w)
@@ -375,7 +374,7 @@ func (a *API) processBundleAuthHandler(w http.ResponseWriter, r *http.Request) {
 
 	switch step {
 	case 0:
-		authToken, err := a.initiateBundleAuthRequest(r, bundleID.Hex(), bundle.Census.ID.Hex())
+		authToken, err := a.initiateBundleAuthRequest(r, bundleID.String(), bundle.Census.ID.Hex())
 		if err != nil {
 			errors.ErrUnauthorized.WithErr(err).Write(w)
 			return
@@ -388,7 +387,7 @@ func (a *API) processBundleAuthHandler(w http.ResponseWriter, r *http.Request) {
 			errors.ErrMalformedBody.Write(w)
 			return
 		}
-		authResp := a.twofactor.Auth(bundleID.Hex(), req.AuthToken, req.AuthData)
+		authResp := a.twofactor.Auth(bundleID.String(), req.AuthToken, req.AuthData)
 		if !authResp.Success {
 			errors.ErrUnauthorized.WithErr(stderrors.New(authResp.Error)).Write(w)
 			return
@@ -408,13 +407,13 @@ func (a *API) processBundleSignHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bundleID, err := primitive.ObjectIDFromHex(bundleIDStr)
-	if err != nil {
+	bundleID := new(internal.HexBytes)
+	if err := bundleID.ParseString(bundleIDStr); err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
 		return
 	}
 
-	bundle, err := a.db.ProcessBundle(bundleID)
+	bundle, err := a.db.ProcessBundle(*bundleID)
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrMalformedURLParam.Withf("bundle not found").Write(w)

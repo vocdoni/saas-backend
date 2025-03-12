@@ -76,15 +76,11 @@ func TestProcessBundles(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(bundleID, qt.Not(qt.Equals), "")
 
-		// Convert the bundle ID to ObjectID
-		objID, err := primitive.ObjectIDFromHex(bundleID)
-		c.Assert(err, qt.IsNil)
-
 		// Test retrieving the process bundle
-		retrieved, err := db.ProcessBundle(objID)
+		retrieved, err := db.ProcessBundle(bundleID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(retrieved, qt.Not(qt.IsNil))
-		c.Assert(retrieved.ID, qt.Equals, objID)
+		c.Assert(retrieved.ID.Hex(), qt.Equals, bundleID.String())
 		c.Assert(retrieved.Processes, qt.HasLen, 2)
 		c.Assert(retrieved.Processes[0], qt.DeepEquals, process1.ID)
 		c.Assert(retrieved.Processes[1], qt.DeepEquals, process2.ID)
@@ -94,10 +90,10 @@ func TestProcessBundles(t *testing.T) {
 		retrieved.Processes = append(retrieved.Processes, process3.ID)
 		updatedBundleID, err := db.SetProcessBundle(retrieved)
 		c.Assert(err, qt.IsNil)
-		c.Assert(updatedBundleID, qt.Equals, bundleID)
+		c.Assert(updatedBundleID, qt.DeepEquals, bundleID)
 
 		// Verify the update
-		updated, err := db.ProcessBundle(objID)
+		updated, err := db.ProcessBundle(bundleID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(updated, qt.Not(qt.IsNil))
 		c.Assert(updated.Processes, qt.HasLen, 3)
@@ -145,8 +141,8 @@ func TestProcessBundles(t *testing.T) {
 
 		// Verify the bundle IDs match
 		bundleIDs := []string{bundles[0].ID.Hex(), bundles[1].ID.Hex()}
-		c.Assert(bundleIDs, qt.Contains, bundle1ID)
-		c.Assert(bundleIDs, qt.Contains, bundle2ID)
+		c.Assert(bundleIDs, qt.Contains, bundle1ID.String())
+		c.Assert(bundleIDs, qt.Contains, bundle2ID.String())
 	})
 
 	t.Run("TestProcessBundlesByProcess", func(t *testing.T) {
@@ -187,19 +183,19 @@ func TestProcessBundles(t *testing.T) {
 		bundles, err := db.ProcessBundlesByProcess(testProcessID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(bundles, qt.HasLen, 1)
-		c.Assert(bundles[0].ID.Hex(), qt.Equals, bundle1ID)
+		c.Assert(bundles[0].ID.Hex(), qt.Equals, bundle1ID.String())
 
 		bundles, err = db.ProcessBundlesByProcess(testProcessID2)
 		c.Assert(err, qt.IsNil)
 		c.Assert(bundles, qt.HasLen, 2)
 		bundleIDs := []string{bundles[0].ID.Hex(), bundles[1].ID.Hex()}
-		c.Assert(bundleIDs, qt.Contains, bundle1ID)
-		c.Assert(bundleIDs, qt.Contains, bundle2ID)
+		c.Assert(bundleIDs, qt.Contains, bundle1ID.String())
+		c.Assert(bundleIDs, qt.Contains, bundle2ID.String())
 
 		bundles, err = db.ProcessBundlesByProcess(testProcessID3)
 		c.Assert(err, qt.IsNil)
 		c.Assert(bundles, qt.HasLen, 1)
-		c.Assert(bundles[0].ID.Hex(), qt.Equals, bundle2ID)
+		c.Assert(bundles[0].ID.Hex(), qt.Equals, bundle2ID.String())
 	})
 
 	t.Run("TestAddProcessesToBundle", func(t *testing.T) {
@@ -221,28 +217,26 @@ func TestProcessBundles(t *testing.T) {
 		}
 		bundleID, err := db.SetProcessBundle(bundle)
 		c.Assert(err, qt.IsNil)
-		objID, err := primitive.ObjectIDFromHex(bundleID)
-		c.Assert(err, qt.IsNil)
 
 		// Test with invalid bundle ID
-		err = db.AddProcessesToBundle(primitive.NilObjectID, []internal.HexBytes{process2.ID})
+		err = db.AddProcessesToBundle(nil, []internal.HexBytes{process2.ID})
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test with empty processes array
-		err = db.AddProcessesToBundle(objID, []internal.HexBytes{})
+		err = db.AddProcessesToBundle(bundleID, []internal.HexBytes{})
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test with non-existent process ID (should not error as process existence is not validated)
 		nonExistentProcessID := internal.HexBytes("non-existent-process")
-		err = db.AddProcessesToBundle(objID, []internal.HexBytes{nonExistentProcessID})
+		err = db.AddProcessesToBundle(bundleID, []internal.HexBytes{nonExistentProcessID})
 		c.Assert(err, qt.IsNil)
 
 		// Add processes to the bundle
-		err = db.AddProcessesToBundle(objID, []internal.HexBytes{process2.ID, process3.ID})
+		err = db.AddProcessesToBundle(bundleID, []internal.HexBytes{process2.ID, process3.ID})
 		c.Assert(err, qt.IsNil)
 
 		// Verify the processes were added
-		retrieved, err := db.ProcessBundle(objID)
+		retrieved, err := db.ProcessBundle(bundleID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(retrieved, qt.Not(qt.IsNil))
 		c.Assert(retrieved.Processes, qt.HasLen, 4) // 1 original + 1 non-existent + 2 added
@@ -260,11 +254,11 @@ func TestProcessBundles(t *testing.T) {
 		c.Assert(processIDs, qt.Contains, string(testProcessID3))
 
 		// Test adding a process that already exists in the bundle (should not duplicate)
-		err = db.AddProcessesToBundle(objID, []internal.HexBytes{process2.ID})
+		err = db.AddProcessesToBundle(bundleID, []internal.HexBytes{process2.ID})
 		c.Assert(err, qt.IsNil)
 
 		// Verify no duplication occurred
-		retrieved, err = db.ProcessBundle(objID)
+		retrieved, err = db.ProcessBundle(bundleID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(retrieved, qt.Not(qt.IsNil))
 		c.Assert(retrieved.Processes, qt.HasLen, 4) // Still 4 processes, no duplication
@@ -288,24 +282,22 @@ func TestProcessBundles(t *testing.T) {
 		}
 		bundleID, err := db.SetProcessBundle(bundle)
 		c.Assert(err, qt.IsNil)
-		objID, err := primitive.ObjectIDFromHex(bundleID)
-		c.Assert(err, qt.IsNil)
 
 		// Test with invalid bundle ID
-		err = db.DelProcessBundle(primitive.NilObjectID)
+		err = db.DelProcessBundle(nil)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test deleting the bundle
-		err = db.DelProcessBundle(objID)
+		err = db.DelProcessBundle(bundleID)
 		c.Assert(err, qt.IsNil)
 
 		// Verify the bundle is deleted
-		retrieved, err := db.ProcessBundle(objID)
+		retrieved, err := db.ProcessBundle(bundleID)
 		c.Assert(retrieved, qt.IsNil)
 		c.Assert(err, qt.Not(qt.IsNil))
 
 		// Test deleting a non-existent bundle
-		err = db.DelProcessBundle(objID)
+		err = db.DelProcessBundle(bundleID)
 		c.Assert(err, qt.Equals, ErrNotFound)
 	})
 }

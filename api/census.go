@@ -173,7 +173,7 @@ func (a *API) addParticipantsJobCheckHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	jobID := internal.HexBytes{}
-	if err := jobID.FromString(jobIDstr); err != nil {
+	if err := jobID.ParseString(jobIDstr); err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid job ID").Write(w)
 		return
 	}

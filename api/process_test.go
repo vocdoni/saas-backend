@@ -93,11 +93,11 @@ func TestProcess(t *testing.T) {
 
 	// Test 1.1: Test with valid data
 	censusRoot := internal.HexBytes{}
-	err = censusRoot.FromString(publishedCensus.Root)
+	err = censusRoot.ParseString(publishedCensus.Root)
 	c.Assert(err, qt.IsNil)
 
 	censusIDBytes := internal.HexBytes{}
-	err = censusIDBytes.FromString(censusID)
+	err = censusIDBytes.ParseString(censusID)
 	c.Assert(err, qt.IsNil)
 
 	processInfo := &CreateProcessRequest{

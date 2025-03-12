@@ -27,9 +27,13 @@ func (hb *HexBytes) Bytes() []byte {
 // or '0X' if found, for backwards compatibility. Panics if the string is not a
 // valid hex string.
 func (hb *HexBytes) SetString(s string) *HexBytes {
-	// Strip a leading "0x" prefix, for backwards compatibility.
+	// strip a leading "0x" prefix, for backwards compatibility.
 	if len(s) >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X') {
 		s = s[2:]
+	}
+	// pad the string with a leading zero if the length is odd
+	if len(s)%2 != 0 {
+		s = "0" + s
 	}
 	b, err := hex.DecodeString(s)
 	if err != nil {
@@ -74,8 +78,8 @@ func (b *HexBytes) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// FromString decodes a hex string into the HexBytes.
-func (b *HexBytes) FromString(str string) error {
+// ParseString decodes a hex string into the HexBytes.
+func (b *HexBytes) ParseString(str string) error {
 	var err error
 	(*b), err = hex.DecodeString(str)
 	return err

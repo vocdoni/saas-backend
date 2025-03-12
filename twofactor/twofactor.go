@@ -267,13 +267,13 @@ func (tf *Twofactor) Indexer(participantId, bundleId, electionId string) []Elect
 	switch {
 	case len(bundleId) != 0:
 		bundleIDBytes := internal.HexBytes{}
-		if err := bundleIDBytes.FromString(bundleId); err != nil {
+		if err := bundleIDBytes.ParseString(bundleId); err != nil {
 			return nil
 		}
 		userID = buildUserID(participantId, bundleIDBytes)
 	case len(electionId) != 0:
 		electionIDBytes := internal.HexBytes{}
-		if err := electionIDBytes.FromString(electionId); err != nil {
+		if err := electionIDBytes.ParseString(electionId); err != nil {
 			return nil
 		}
 		userID = buildUserID(participantId, electionIDBytes)
@@ -323,7 +323,7 @@ func (tf *Twofactor) AddProcess(
 	var userID internal.HexBytes
 	for i, participant := range orgParticipants {
 		bundleElectionId := internal.HexBytes{}
-		if err := bundleElectionId.FromString(participant.BundleId); err != nil {
+		if err := bundleElectionId.ParseString(participant.BundleId); err != nil {
 			log.Warnw("invalid bundleId format", "line", i, "bundleId", participant.BundleId)
 			continue
 		}
@@ -370,7 +370,7 @@ func (tf *Twofactor) InitiateAuth(
 		return AuthResponse{Error: "incorrect auth data fields"}
 	}
 	bundleIDBytes := internal.HexBytes{}
-	if err := bundleIDBytes.FromString(bundleId); err != nil {
+	if err := bundleIDBytes.ParseString(bundleId); err != nil {
 		return AuthResponse{Error: "invalid bundleId format"}
 	}
 	userID := buildUserID(participantId, bundleIDBytes)

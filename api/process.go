@@ -14,7 +14,7 @@ import (
 // Requires Manager/Admin role. Returns 201 on success.
 func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 	processID := internal.HexBytes{}
-	if err := processID.FromString(chi.URLParam(r, "processId")); err != nil {
+	if err := processID.ParseString(chi.URLParam(r, "processId")); err != nil {
 		errors.ErrMalformedURLParam.Withf("missing process ID").Write(w)
 		return
 	}
