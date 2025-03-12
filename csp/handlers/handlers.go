@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/notifications"
+	"github.com/vocdoni/saas-backend/csp/signers"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
@@ -78,6 +79,71 @@ func (c *cspHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) 
 		httpWriteJSON(w, &AuthResponse{AuthToken: authToken})
 		return
 	}
+}
+
+func (c *cspHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) {
+	// get the bundle ID from the URL parameters
+	bundleID := new(internal.HexBytes)
+	if err := bundleID.ParseString(chi.URLParam(r, "bundleId")); err != nil {
+		errors.ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
+		return
+	}
+	// get the bundle ID from the main database
+	bundle, err := c.mainDB.ProcessBundle(*bundleID)
+	if err != nil {
+		if err == db.ErrNotFound {
+			errors.ErrMalformedURLParam.Withf("bundle not found").Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	// check if the bundle has processes
+	if len(bundle.Processes) == 0 {
+		errors.ErrInvalidOrganizationData.Withf("bundle has no processes").Write(w)
+		return
+	}
+	// parse the request from the body
+	var req SignRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	// check that the request contains the auth
+	if req.AuthToken == nil {
+		errors.ErrUnauthorized.Withf("missing auth token").Write(w)
+		return
+	}
+	// check that the received process is part of the bundle processes
+	var processId internal.HexBytes
+	for _, pID := range bundle.Processes {
+		if bytes.Equal(pID, req.ProcessID) {
+			// process found
+			processId = pID
+			break
+		}
+	}
+	// check if the process is found in the bundle
+	if len(processId) == 0 {
+		errors.ErrUnauthorized.Withf("process not found in bundle").Write(w)
+		return
+	}
+	// get the address from the request payload
+	address := new(internal.HexBytes)
+	if err = address.ParseString(req.Payload); err != nil {
+		errors.ErrMalformedBody.WithErr(err).Write(w)
+		return
+	}
+	log.Debugw("new CSP sign request",
+		"address", address,
+		"procId", processId)
+	// sign the request
+	signature, err := c.csp.Sign(req.AuthToken, *address, processId, signers.SignerTypeEthereum)
+	if err != nil {
+		errors.ErrUnauthorized.WithErr(err).Write(w)
+		return
+	}
+	httpWriteJSON(w, &AuthResponse{Signature: signature})
 }
 
 func (c *cspHandlers) authFirstStep(r *http.Request, bundleID internal.HexBytes, censusID string) (internal.HexBytes, error) {

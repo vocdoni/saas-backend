@@ -150,7 +150,7 @@ func (ms *MongoStorage) User(userID internal.HexBytes) (*UserData, error) {
 
 // SetUser adds a new user to the storage or updates an existing one. It uses
 // the user ID as the primary key.
-func (ms *MongoStorage) SetUser(user UserData) error {
+func (ms *MongoStorage) SetUser(user *UserData) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	if err := ms.setUser(user); err != nil {
@@ -204,14 +204,14 @@ func (ms *MongoStorage) SetUserBundle(userID, bundleID internal.HexBytes, pIDs .
 		user.Bundles[bundleID.String()] = bundle
 	}
 	// set the user data back to the storage
-	if err := ms.setUser(*user); err != nil {
+	if err := ms.setUser(user); err != nil {
 		return err
 	}
 	return nil
 }
 
 // AddUsers adds multiple users to the storage in batches of 1000 entries.
-func (ms *MongoStorage) AddUsers(users []UserData) error {
+func (ms *MongoStorage) AddUsers(users []*UserData) error {
 	// if there are no users, do nothing
 	if len(users) == 0 {
 		return nil
@@ -371,7 +371,7 @@ func (ms *MongoStorage) userByID(userID internal.HexBytes) (*UserData, error) {
 
 // setUser updates the user data in the database. It does not lock the keysLock,
 // so it should be called from a function that already has the lock.
-func (ms *MongoStorage) setUser(user UserData) error {
+func (ms *MongoStorage) setUser(user *UserData) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

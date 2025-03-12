@@ -22,3 +22,10 @@ type AuthChallengeRequest struct {
 	AuthToken internal.HexBytes `json:"authToken,omitempty"`
 	AuthData  []string          `json:"authData,omitempty"` // reserved for the auth handler
 }
+
+type SignRequest struct {
+	TokenR    internal.HexBytes `json:"tokenR"`
+	AuthToken internal.HexBytes `json:"authToken"`
+	Payload   string            `json:"payload,omitempty"`
+	ProcessID internal.HexBytes `json:"electionId,omitempty"`
+}

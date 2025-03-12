@@ -101,7 +101,7 @@ func TestUserSetUser(t *testing.T) {
 	c := qt.New(t)
 	defer resetDB(c)
 
-	testUserData := UserData{
+	testUserData := &UserData{
 		ID:        testUserID,
 		Bundles:   map[string]BundleData{},
 		ExtraData: testUserExtraData,
@@ -155,7 +155,7 @@ func TestSetUserBundle(t *testing.T) {
 	err := testDB.SetUserBundle(testUserID, testUserBundle.ID, []internal.HexBytes{testProcessID}...)
 	c.Assert(err, qt.ErrorIs, ErrUserNotFound)
 	// add user
-	c.Assert(testDB.SetUser(UserData{
+	c.Assert(testDB.SetUser(&UserData{
 		ID:        testUserID,
 		Bundles:   map[string]BundleData{},
 		ExtraData: testUserExtraData,
@@ -193,10 +193,10 @@ func TestAddUsers(t *testing.T) {
 	}
 }
 
-func testUsersBulk(n int) []UserData {
-	users := make([]UserData, n)
+func testUsersBulk(n int) []*UserData {
+	users := make([]*UserData, n)
 	for i := 0; i < n; i++ {
-		users[i] = UserData{
+		users[i] = &UserData{
 			ID:        []byte(fmt.Sprintf("user%dID", i)),
 			Bundles:   map[string]BundleData{},
 			ExtraData: fmt.Sprintf("extraData%d", i),
@@ -217,7 +217,7 @@ func TestUserAuthToken(t *testing.T) {
 	err = testDB.IndexAuthToken(testUserID, testUserBundle.ID, testToken)
 	c.Assert(err, qt.ErrorIs, ErrUserNotFound)
 	// add user with no bundles
-	c.Assert(testDB.SetUser(UserData{
+	c.Assert(testDB.SetUser(&UserData{
 		ID:        testUserID,
 		Bundles:   map[string]BundleData{},
 		ExtraData: testUserExtraData,

@@ -11,6 +11,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/vocdoni/saas-backend/csp"
+	"github.com/vocdoni/saas-backend/csp/storage"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
@@ -127,7 +129,21 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	if census.Type == db.CensusTypeSMSorMail ||
 		census.Type == db.CensusTypeMail ||
 		census.Type == db.CensusTypeSMS {
-		if err := a.twofactor.AddProcess(census.Type, orgParticipants); err != nil {
+		// if err := a.twofactor.AddProcess(census.Type, orgParticipants); err != nil {
+		// 	errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		// 	return
+		// }
+		cspParticipants := []*storage.UserData{}
+		hbBundleID := new(internal.HexBytes).SetString(bundleID.Hex())
+		for _, p := range orgParticipants {
+			userData, err := csp.NewUserForBundle(internal.HexBytes(p.ParticipantNo), p.HashedPhone, p.HashedEmail, *hbBundleID, processes...)
+			if err != nil {
+				errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+				return
+			}
+			cspParticipants = append(cspParticipants, userData)
+		}
+		if err := a.csp.AddUsers(cspParticipants); err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
@@ -248,7 +264,20 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	if census.Type == db.CensusTypeSMSorMail ||
 		census.Type == db.CensusTypeMail ||
 		census.Type == db.CensusTypeSMS {
-		if err := a.twofactor.AddProcess(census.Type, orgParticipants); err != nil {
+		// if err := a.twofactor.AddProcess(census.Type, orgParticipants); err != nil {
+		// 	errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		// 	return
+		// }
+		cspParticipants := []*storage.UserData{}
+		for _, p := range orgParticipants {
+			userData, err := csp.NewUserForBundle(internal.HexBytes(p.ParticipantNo), p.HashedPhone, p.HashedEmail, *bundleID, processesToAdd...)
+			if err != nil {
+				errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+				return
+			}
+			cspParticipants = append(cspParticipants, userData)
+		}
+		if err := a.csp.AddUsers(cspParticipants); err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}

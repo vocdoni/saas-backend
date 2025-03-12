@@ -281,7 +281,8 @@ func (a *API) initRouter() http.Handler {
 		r.Post(processBundleAuthEndpoint, cspHandlers.BundleAuthHandler)
 		// process bundle sign handler
 		log.Infow("new route", "method", "POST", "path", processBundleSignEndpoint)
-		r.Post(processBundleSignEndpoint, a.processBundleSignHandler)
+		// r.Post(processBundleSignEndpoint, a.processBundleSignHandler)
+		r.Post(processBundleSignEndpoint, cspHandlers.BundleSignHandler)
 		// process bundle participant info handler
 		log.Infow("new route", "method", "GET", "path", processBundleParticipantEndpoint)
 		r.Get(processBundleParticipantEndpoint, a.processBundleParticipantInfoHandler)

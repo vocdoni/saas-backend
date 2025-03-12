@@ -58,7 +58,7 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 	// update the election and the bundle in the user data
 	userData.Bundles[bID.String()] = bundle
 	// update the user data in the storage and index the token
-	if err := c.Storage.SetUser(*userData); err != nil {
+	if err := c.Storage.SetUser(userData); err != nil {
 		log.Warnw("error updating user data",
 			"error", err,
 			"userID", uID,
@@ -129,7 +129,7 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 	bundle.LastAttempt = &t
 	userData.Bundles[authToken.BundleID.String()] = bundle
 	// update the user data in the storage
-	if err := c.Storage.SetUser(*userData); err != nil {
+	if err := c.Storage.SetUser(userData); err != nil {
 		log.Warnw("error updating user data",
 			"error", err,
 			"userID", userData.ID,

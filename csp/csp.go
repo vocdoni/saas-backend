@@ -2,6 +2,7 @@ package csp
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/vocdoni/saas-backend/csp/notifications"
@@ -11,7 +12,6 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 	saasNotifications "github.com/vocdoni/saas-backend/notifications"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.vocdoni.io/dvote/db"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -25,7 +25,7 @@ type CSPConfig struct {
 	MongoClient *mongo.Client
 	// signer stuff
 	PasswordSalt   string
-	KeysDB         db.Database
+	RootKey        internal.HexBytes
 	EthereumSigner signers.Signer
 	// notification stuff
 	NotificationCoolDownTime time.Duration
@@ -38,9 +38,10 @@ type CSPConfig struct {
 // notification queue, the maximum notification attempts, the notification
 // throttle time and the notification cooldown time.
 type CSP struct {
-	Storage      storage.Storage
 	PasswordSalt string
 	EthSigner    signers.Signer
+	Storage      storage.Storage
+	signerLock   sync.Map
 	notifyQueue  *notifications.Queue
 
 	notificationThrottleTime time.Duration
@@ -55,7 +56,7 @@ type CSP struct {
 // notification throttle time, the SMS service and the mail service.
 func New(ctx context.Context, config *CSPConfig) (*CSP, error) {
 	ethSigner := new(ecdsa.EthereumSigner)
-	if err := ethSigner.Init(config.KeysDB); err != nil {
+	if err := ethSigner.Init(nil, config.RootKey); err != nil {
 		return nil, err
 	}
 	stg := new(storage.MongoStorage)
@@ -101,7 +102,7 @@ func New(ctx context.Context, config *CSPConfig) (*CSP, error) {
 // It returns the user data created or an error if the user ID is not provided,
 // if the phone or email is not provided, if the bundle ID is not provided, if
 // the process ID is not provided or if there is no process ID.
-func (c *CSP) NewUserForBundle(uID internal.HexBytes, phone, mail string,
+func NewUserForBundle(uID internal.HexBytes, phone, mail string,
 	bID internal.HexBytes, eIDs ...internal.HexBytes,
 ) (*storage.UserData, error) {
 	if len(uID) == 0 {
@@ -128,6 +129,6 @@ func (c *CSP) NewUserForBundle(uID internal.HexBytes, phone, mail string,
 // AddUser method registers the users to the storage. It calls the storage
 // BultAddUser method with the list of users provided. The users should be
 // created with the NewUserData method.
-func (c *CSP) AddUsers(users []storage.UserData) error {
+func (c *CSP) AddUsers(users []*storage.UserData) error {
 	return c.Storage.AddUsers(users)
 }

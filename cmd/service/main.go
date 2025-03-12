@@ -12,6 +12,7 @@ import (
 	"github.com/vocdoni/saas-backend/api"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"github.com/vocdoni/saas-backend/notifications/smtp"
 	"github.com/vocdoni/saas-backend/notifications/twilio"
@@ -112,6 +113,10 @@ func main() {
 	if secret == "" || privKey == "" {
 		log.Fatal("secret and privateKey are required")
 	}
+	bPrivKey := internal.HexBytes{}
+	if err := bPrivKey.ParseString(privKey); err != nil {
+		log.Fatalf("could not parse the private key: %v", err)
+	}
 	// create the Vocdoni client account with the private key
 	acc, err := account.New(privKey, apiEndpoint)
 	if err != nil {
@@ -133,7 +138,10 @@ func main() {
 	}
 
 	twofactorConf := &twofactor.TwofactorConfig{}
-	cspConf := &csp.CSPConfig{MongoClient: database.DBClient}
+	cspConf := &csp.CSPConfig{
+		RootKey:     bPrivKey,
+		MongoClient: database.DBClient,
+	}
 	// overwrite the email notifications service with the SMTP service if the
 	// required parameters are set and include it in the API configuration
 	if smtpServer != "" && smtpUsername != "" && smtpPassword != "" {

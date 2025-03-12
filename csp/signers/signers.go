@@ -18,6 +18,6 @@ const (
 )
 
 type Signer interface {
-	Init(db db.Database) error
-	Sign(salt, msg internal.HexBytes) (internal.HexBytes, error)
+	Init(db db.Database, rootKey internal.HexBytes) error
+	Sign(token, salt, msg internal.HexBytes) (internal.HexBytes, error)
 }

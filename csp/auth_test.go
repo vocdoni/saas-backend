@@ -151,7 +151,7 @@ func TestBundleAuthToken(t *testing.T) {
 	c.Run("bundle not found in user data", func(c *qt.C) {
 		c.Cleanup(func() { _ = csp.Storage.Reset() })
 		// add user with no bundles and no mail
-		testUserData := storage.UserData{
+		testUserData := &storage.UserData{
 			ID:        testUserID,
 			Bundles:   map[string]storage.BundleData{},
 			ExtraData: testUserExtraData,
@@ -167,7 +167,7 @@ func TestBundleAuthToken(t *testing.T) {
 	c.Run("update user data fails", func(c *qt.C) {
 		c.Cleanup(func() { _ = csp.Storage.Reset() })
 		// add user with no bundles and no mail
-		testUserData := storage.UserData{
+		testUserData := &storage.UserData{
 			ID:        testUserID,
 			Bundles:   map[string]storage.BundleData{},
 			ExtraData: testUserExtraData,
@@ -189,7 +189,7 @@ func TestBundleAuthToken(t *testing.T) {
 	c.Run("success test", func(c *qt.C) {
 		c.Cleanup(func() { _ = csp.Storage.Reset() })
 		bundleID := internal.HexBytes(testBundleID)
-		c.Assert(csp.Storage.SetUser(storage.UserData{
+		c.Assert(csp.Storage.SetUser(&storage.UserData{
 			ID: testUserID,
 			Bundles: map[string]storage.BundleData{
 				bundleID.String(): {
@@ -271,7 +271,7 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 	c.Run("token bundle not found in user data", func(c *qt.C) {
 		c.Cleanup(func() { _ = csp.Storage.Reset() })
 		// create user with the bundle
-		c.Assert(csp.Storage.SetUser(storage.UserData{
+		c.Assert(csp.Storage.SetUser(&storage.UserData{
 			ID: testUserID,
 			Bundles: map[string]storage.BundleData{
 				testBundleID.String(): {
@@ -289,7 +289,7 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 		// index the token
 		c.Assert(csp.Storage.IndexAuthToken(testUserID, testBundleID, testToken), qt.IsNil)
 		// remove the bundle from the user data
-		c.Assert(csp.Storage.SetUser(storage.UserData{
+		c.Assert(csp.Storage.SetUser(&storage.UserData{
 			ID:        testUserID,
 			Bundles:   map[string]storage.BundleData{},
 			ExtraData: testUserExtraData,
@@ -304,7 +304,7 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 	c.Run("solution not match", func(c *qt.C) {
 		c.Cleanup(func() { _ = csp.Storage.Reset() })
 		// create user with the bundle
-		c.Assert(csp.Storage.SetUser(storage.UserData{
+		c.Assert(csp.Storage.SetUser(&storage.UserData{
 			ID: testUserID,
 			Bundles: map[string]storage.BundleData{
 				testBundleID.String(): {
@@ -333,7 +333,7 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 	c.Run("success", func(c *qt.C) {
 		c.Cleanup(func() { _ = csp.Storage.Reset() })
 		// create user with the bundle
-		c.Assert(csp.Storage.SetUser(storage.UserData{
+		c.Assert(csp.Storage.SetUser(&storage.UserData{
 			ID: testUserID,
 			Bundles: map[string]storage.BundleData{
 				testBundleID.String(): {
