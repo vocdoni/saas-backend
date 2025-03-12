@@ -174,7 +174,8 @@ func TestSetUserBundle(t *testing.T) {
 	c.Assert(user.Bundles, qt.HasLen, 1)
 	c.Assert(user.Bundles[testUserBundle.ID.String()].ID, qt.DeepEquals, testUserBundle.ID)
 	c.Assert(user.Bundles[testUserBundle.ID.String()].Processes, qt.HasLen, 1)
-	c.Assert(user.Bundles[testUserBundle.ID.String()].Processes[testProcessID.String()], qt.DeepEquals, testUserBundle.Processes[testProcessID.String()])
+	c.Assert(user.Bundles[testUserBundle.ID.String()].Processes[testProcessID.String()],
+		qt.DeepEquals, testUserBundle.Processes[testProcessID.String()])
 	c.Assert(user.Bundles[testUserBundle.ID.String()].LastAttempt, qt.IsNil)
 }
 
@@ -243,7 +244,8 @@ func TestUserAuthToken(t *testing.T) {
 	c.Assert(userData.Bundles, qt.HasLen, 1)
 	c.Assert([]byte(userData.Bundles[testUserBundle.ID.String()].ID), qt.DeepEquals, testUserBundle.ID.Bytes())
 	c.Assert(userData.Bundles[testUserBundle.ID.String()].Processes, qt.HasLen, 1)
-	c.Assert(userData.Bundles[testUserBundle.ID.String()].Processes[testProcessID.String()], qt.DeepEquals, testUserBundle.Processes[testProcessID.String()])
+	c.Assert(userData.Bundles[testUserBundle.ID.String()].Processes[testProcessID.String()],
+		qt.DeepEquals, testUserBundle.Processes[testProcessID.String()])
 	c.Assert(userData.Bundles[testUserBundle.ID.String()].LastAttempt, qt.IsNil)
 	// verify token
 	err = testDB.VerifyAuthToken(testToken)

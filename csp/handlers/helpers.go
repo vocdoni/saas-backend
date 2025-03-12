@@ -19,11 +19,3 @@ func httpWriteJSON(w http.ResponseWriter, data interface{}) {
 		log.Warnw("failed to write on response", "error", err)
 	}
 }
-
-// httpWriteOK helper function allows to write an OK response.
-func httpWriteOK(w http.ResponseWriter) {
-	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write([]byte("\n")); err != nil {
-		log.Warnw("failed to write on response", "error", err)
-	}
-}

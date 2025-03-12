@@ -41,9 +41,11 @@ func (c *CSP) Sign(token, address, processID internal.HexBytes, signType signers
 // - The user belongs to the bundle.
 // - The user belongs to the process.
 // - The process has not been consumed yet.
-// Then generates a bundle CA and encodes it to be signed. It returns the salt
-// as nil and the encoded CA as a message to sign.
-func (c *CSP) prepareEthereumSigner(token, address, processID internal.HexBytes) (internal.HexBytes, internal.HexBytes, internal.HexBytes, error) {
+// Then generates a bundle CA and encodes it to be signed. It returns userID,
+// the salt as nil and the encoded CA as a message to sign.
+func (c *CSP) prepareEthereumSigner(token, address, processID internal.HexBytes) (
+	internal.HexBytes, internal.HexBytes, internal.HexBytes, error,
+) {
 	// get the data of the auth token and the user from the storage
 	authTokenData, userData, err := c.Storage.UserAuthToken(token)
 	if err != nil {
