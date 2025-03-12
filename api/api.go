@@ -261,26 +261,19 @@ func (a *API) initRouter() http.Handler {
 		// get census info
 		log.Infow("new route", "method", "GET", "path", censusIDEndpoint)
 		r.Get(censusIDEndpoint, a.censusInfoHandler)
-		// PROCESS HANDLERS
 		// process info handler
 		log.Infow("new route", "method", "GET", "path", processEndpoint)
 		r.Get(processEndpoint, a.processInfoHandler)
-		// two-factor auth handlers
-		log.Infow("new route", "method", "POST", "path", twofactorAuthEndpoint)
-		r.Post(twofactorAuthEndpoint, a.twofactorAuthHandler)
-		log.Infow("new route", "method", "POST", "path", twofactorAuthEndpointBackwards)
-		r.Post(twofactorAuthEndpointBackwards, a.twofactorAuthHandler)
-		log.Infow("new route", "method", "POST", "path", twofactorSignEndpoint)
-		r.Post(twofactorSignEndpoint, a.twofactorSignHandler)
-		log.Infow("new route", "method", "POST", "path", twofactorSignEndpointBackwards)
-		r.Post(twofactorSignEndpointBackwards, a.twofactorSignHandler)
-		// PROCESS BUNDLE ROUTES (public)
+		// process bundle info handler
 		log.Infow("new route", "method", "GET", "path", processBundleInfoEndpoint)
 		r.Get(processBundleInfoEndpoint, a.processBundleInfoHandler)
+		// process bundle auth handler
 		log.Infow("new route", "method", "POST", "path", processBundleAuthEndpoint)
 		r.Post(processBundleAuthEndpoint, a.processBundleAuthHandler)
+		// process bundle sign handler
 		log.Infow("new route", "method", "POST", "path", processBundleSignEndpoint)
 		r.Post(processBundleSignEndpoint, a.processBundleSignHandler)
+		// process bundle participant info handler
 		log.Infow("new route", "method", "GET", "path", processBundleParticipantEndpoint)
 		r.Get(processBundleParticipantEndpoint, a.processBundleParticipantInfoHandler)
 	})
