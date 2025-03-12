@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -15,11 +14,10 @@ import (
 	"go.vocdoni.io/dvote/util"
 )
 
-type PublishedCensusResponse struct {
-	URI      string `json:"uri" bson:"uri"`
-	Root     string `json:"root" bson:"root"`
-	CensusID string `json:"censusId" bson:"censusId"`
-}
+const (
+	// CensusTypeSMSOrMail is the CSP based type of census that supports both SMS and mail.
+	CensusTypeSMSOrMail = "sms_or_mail"
+)
 
 // addParticipantsToCensusWorkers is a map of job identifiers to the progress of adding participants to a census.
 // This is used to check the progress of the job.
@@ -68,12 +66,12 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 // censusInfoHandler retrieves census information by ID.
 // Returns census type, organization address, and creation time.
 func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
-	censusID := chi.URLParam(r, "id")
-	if censusID == "" {
-		errors.ErrMalformedURLParam.Withf("missing census ID").Write(w)
+	censusID := internal.HexBytes{}
+	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
+		errors.ErrMalformedURLParam.Withf("wrong census ID").Write(w)
 		return
 	}
-	census, err := a.db.Census(censusID)
+	census, err := a.db.Census(censusID.String())
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
@@ -84,9 +82,9 @@ func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 // addParticipantsHandler adds multiple participants to a census.
 // Requires Manager/Admin role. Returns number of participants added.
 func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
-	censusID := chi.URLParam(r, "id")
-	if censusID == "" {
-		errors.ErrMalformedURLParam.Withf("missing census ID").Write(w)
+	censusID := internal.HexBytes{}
+	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
+		errors.ErrMalformedURLParam.Withf("wrong census ID").Write(w)
 		return
 	}
 	// get the user from the request context
@@ -96,12 +94,10 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// get the async flag
-	async := false
-	if r.URL.Query().Get("async") == "true" {
-		async = true
-	}
+	async := r.URL.Query().Get("async") == "true"
+
 	// retrieve census
-	census, err := a.db.Census(censusID)
+	census, err := a.db.Census(censusID.String())
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrMalformedURLParam.Withf("census not found").Write(w)
@@ -128,7 +124,11 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// add the org participants to the census in the database
-	progressChan, err := a.db.SetBulkCensusMembership(passwordSalt, censusID, participants.dbOrgParticipants(census.OrgAddress))
+	progressChan, err := a.db.SetBulkCensusMembership(
+		passwordSalt,
+		censusID.String(),
+		participants.dbOrgParticipants(census.OrgAddress),
+	)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
@@ -141,7 +141,7 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 			lastProgress = p
 			// Just drain the channel until it's closed
 			log.Debugw("census add participants",
-				"census", censusID,
+				"census", censusID.String(),
 				"org", census.OrgAddress,
 				"progress", p.Progress,
 				"added", p.Added,
@@ -167,13 +167,8 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 // addParticipantsJobCheckHandler checks the progress of a job to add participants to a census.
 // Returns the progress of the job. If the job is completed, the job is deleted.
 func (a *API) addParticipantsJobCheckHandler(w http.ResponseWriter, r *http.Request) {
-	jobIDstr := chi.URLParam(r, "jobid")
-	if jobIDstr == "" {
-		errors.ErrMalformedURLParam.Withf("missing job ID").Write(w)
-		return
-	}
 	jobID := internal.HexBytes{}
-	if err := jobID.ParseString(jobIDstr); err != nil {
+	if err := jobID.ParseString(chi.URLParam(r, "jobid")); err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid job ID").Write(w)
 		return
 	}
@@ -181,21 +176,25 @@ func (a *API) addParticipantsJobCheckHandler(w http.ResponseWriter, r *http.Requ
 	if v, ok := addParticipantsToCensusWorkers.Load(jobID.String()); ok {
 		p := v.(*db.BulkCensusMembershipStatus)
 		if p.Progress == 100 {
-			addParticipantsToCensusWorkers.Delete(jobID.String())
+			go func() {
+				// Schedule the deletion of the job after 60 seconds
+				time.Sleep(60 * time.Second)
+				addParticipantsToCensusWorkers.Delete(jobID.String())
+			}()
 		}
 		httpWriteJSON(w, p)
 		return
 	}
 
-	errors.ErrJobNotFound.Write(w)
+	errors.ErrJobNotFound.Withf("%s", jobID.String()).Write(w)
 }
 
 // publishCensusHandler publishes a census for voting.
 // Requires Manager/Admin role. Returns published census with credentials.
 func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
-	censusID := chi.URLParam(r, "id")
-	if censusID == "" {
-		errors.ErrMalformedURLParam.Withf("missing census ID").Write(w)
+	censusID := internal.HexBytes{}
+	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
+		errors.ErrMalformedURLParam.Withf("wrong census ID").Write(w)
 		return
 	}
 
@@ -206,9 +205,10 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	census, err := a.db.Census(censusID)
+	// retrieve census
+	census, err := a.db.Census(censusID.String())
 	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrCensusNotFound.Write(w)
 		return
 	}
 
@@ -218,17 +218,19 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// build the census and store it
+	cspSignerPubKey := a.account.PubKey // TODO: use a different key based on the censusID
 	var pubCensus *db.PublishedCensus
 	switch census.Type {
-	case "sms_or_mail":
-		// TODO send sms or mail
+	case CensusTypeSMSOrMail:
 		pubCensus = &db.PublishedCensus{
-			Census: *census,
-			URI:    a.serverURL + "/process",
-			Root:   a.account.PubKey.String(),
+			Census:    *census,
+			URI:       a.serverURL + "/process",
+			Root:      cspSignerPubKey.String(),
+			CreatedAt: time.Now(),
 		}
 	default:
-		errors.ErrGenericInternalServerError.WithErr(fmt.Errorf("unsupported census type")).Write(w)
+		errors.ErrCensusTypeNotFound.Write(w)
 		return
 	}
 
@@ -238,7 +240,8 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httpWriteJSON(w, &PublishedCensusResponse{
-		URI:  pubCensus.URI,
-		Root: pubCensus.Root,
+		URI:      pubCensus.URI,
+		Root:     cspSignerPubKey,
+		CensusID: censusID,
 	})
 }
