@@ -23,7 +23,7 @@ func TestProcess(t *testing.T) {
 
 	// Create an organization
 	orgAddress := testCreateOrganization(t, adminToken)
-	t.Logf("Created organization with address: %s\n", orgAddress)
+	t.Logf("Created organization with address: %s\n", orgAddress.String())
 
 	// Get the organization to verify it exists
 	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String())
@@ -92,8 +92,7 @@ func TestProcess(t *testing.T) {
 	t.Logf("Generated process ID: %s\n", processID.String())
 
 	// Test 1.1: Test with valid data
-	censusRoot := internal.HexBytes{}
-	err = censusRoot.FromString(publishedCensus.Root)
+	censusRoot := publishedCensus.Root
 	c.Assert(err, qt.IsNil)
 
 	censusIDBytes := internal.HexBytes{}

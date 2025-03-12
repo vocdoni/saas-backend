@@ -361,6 +361,13 @@ func organizationCensusFromDB(census *db.Census) OrganizationCensus {
 	}
 }
 
+// PublishedCensusResponse is the struct that represents a published census.
+type PublishedCensusResponse struct {
+	URI      string            `json:"uri" bson:"uri"`
+	Root     internal.HexBytes `json:"root" bson:"root"`
+	CensusID internal.HexBytes `json:"censusId" bson:"censusId"`
+}
+
 // OrganizationCensuses is the struct to wrap a list of censuses of an
 // organization in the API.
 type OrganizationCensuses struct {
