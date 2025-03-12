@@ -12,6 +12,7 @@ import (
 
 	"github.com/vocdoni/saas-backend/api"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 )
 
 // Config holds the script configuration
@@ -197,8 +198,9 @@ func main() {
 	fmt.Println("\n6. Creating process...")
 	processID := fmt.Sprintf("test_process_%d", time.Now().Unix())
 	metadata := generateMetadata()
+	root := new(internal.HexBytes).SetString(publishedCensus.Root)
 	err = client.makeRequest("POST", fmt.Sprintf("/process/%s", processID), api.CreateProcessRequest{
-		PublishedCensusRoot: publishedCensus.Root,
+		PublishedCensusRoot: *root,
 		Metadata:            metadata,
 	}, nil)
 	if err != nil {

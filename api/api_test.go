@@ -21,6 +21,7 @@ import (
 	"github.com/vocdoni/saas-backend/notifications/smtp"
 	"github.com/vocdoni/saas-backend/subscriptions"
 	"github.com/vocdoni/saas-backend/test"
+	"github.com/vocdoni/saas-backend/twofactor"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/proto/build/go/models"
@@ -52,6 +53,9 @@ var testDB *db.MongoStorage
 // testMailService is the test mail service for the tests. Make it global so it
 // can be accessed by the tests directly.
 var testMailService *smtp.SMTPEmail
+
+// testTwofactor is the twofactor service for the tests. Make it global so it can be accessed by the tests directly.
+var testTwofactor *twofactor.Twofactor
 
 // testAPIEndpoint is the Voconed API endpoint for the tests. Make it global so it can be accessed by the tests directly.
 var testAPIEndpoint string
@@ -180,6 +184,22 @@ func TestMain(m *testing.M) {
 	}); err != nil {
 		panic(err)
 	}
+
+	// Initialize the twofactor service
+	twofactorConf := &twofactor.TwofactorConfig{
+		NotificationServices: twofactor.NotifServices{
+			Mail: testMailService,
+			SMS:  testMailService, // Use mail service for SMS in tests
+		},
+		PrivKey:     test.VoconedFoundedPrivKey,
+		MongoClient: testDB.DBClient,
+	}
+	testTwofactor = new(twofactor.Twofactor)
+	testTwofactor, err = testTwofactor.New(twofactorConf)
+	if err != nil {
+		panic(err)
+	}
+
 	// Initialize the subscriptions service
 	subscriptionsService := subscriptions.New(&subscriptions.SubscriptionsConfig{
 		DB: testDB,
@@ -196,6 +216,7 @@ func TestMain(m *testing.M) {
 		MailService:         testMailService,
 		FullTransparentMode: false,
 		Subscriptions:       subscriptionsService,
+		Twofactor:           testTwofactor,
 	}).Start()
 	// wait for the API to start
 	if err := pingAPI(testURL(pingEndpoint), 5); err != nil {
