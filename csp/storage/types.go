@@ -14,16 +14,16 @@ type Users struct {
 // UserData represents a user of the SMS handler.
 type UserData struct {
 	ID        internal.HexBytes     `json:"userID,omitempty" bson:"_id"`
-	Bundles   map[string]BundleData `json:"bundles,omitempty" bson:"bundles,omitempty"`
-	ExtraData string                `json:"extraData,omitempty" bson:"extradata,omitempty"`
-	Phone     string                `json:"phone,omitempty" bson:"phone,omitempty"`
-	Mail      string                `json:"mail,omitempty" bson:"mail,omitempty"`
+	Bundles   map[string]BundleData `json:"bundles,omitempty" bson:"bundles"`
+	ExtraData string                `json:"extraData,omitempty" bson:"extradata"`
+	Phone     string                `json:"phone,omitempty" bson:"phone"`
+	Mail      string                `json:"mail,omitempty" bson:"mail"`
 }
 
 type BundleData struct {
 	ID          internal.HexBytes   `json:"bundleId" bson:"_id"`
 	PIDs        []internal.HexBytes `json:"processes" bson:"processes"`
-	LastAttempt *time.Time          `json:"lastAttempt,omitempty" bson:"lastattempt,omitempty"`
+	LastAttempt *time.Time          `json:"lastAttempt,omitempty" bson:"lastattempt"`
 }
 
 // AuthToken is used by the storage to index a token with its userID

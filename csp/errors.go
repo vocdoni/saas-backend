@@ -28,6 +28,9 @@ var (
 	// ErrInvalidAuthToken is returned if the authtoken does not match with the
 	// process.
 	ErrInvalidAuthToken = fmt.Errorf("invalid authentication token")
+	// ErrInvalidSolution is returned if the solution does not meet the
+	// requirements.
+	ErrInvalidSolution = fmt.Errorf("invalid solution")
 	// ErrChallengeCodeFailure is returned when the challenge code does not
 	// match.
 	ErrChallengeCodeFailure = fmt.Errorf("challenge code do not match")

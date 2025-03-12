@@ -101,6 +101,12 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 // match, if the solution is not correct or if there is an error updating the
 // user data.
 func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) error {
+	if len(token) == 0 {
+		return ErrInvalidAuthToken
+	}
+	if len(solution) == 0 {
+		return ErrInvalidSolution
+	}
 	// get the user data from the token
 	authToken, userData, err := c.storage.UserAuthToken(token)
 	if err != nil {
@@ -117,15 +123,6 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 			"token", token,
 			"userID", userData.ID)
 		return ErrUserNotBelongsToBundle
-	}
-	// if the process has no token or the token does not match, return an error
-	if authToken.Token == nil || authToken.Token.String() != token.String() {
-		log.Warnw("invalid authentication token",
-			"bundleID", authToken.BundleID,
-			"tokenProvided", token,
-			"tokenExpected", authToken.Token,
-			"userID", userData.ID)
-		return ErrInvalidAuthToken
 	}
 	// update the last attempt to the bundle in the user data
 	t := time.Now()

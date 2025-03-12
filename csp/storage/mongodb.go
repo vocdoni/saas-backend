@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"reflect"
 	"sync"
 	"syscall"
 	"time"
@@ -35,9 +36,9 @@ var (
 	// ErrDecodeToken is returned if the token data cannot be decoded when it
 	// is retrieved from the database.
 	ErrDecodeToken = fmt.Errorf("cannot decode token data")
-	// ErrPrepareUser is returned if the update document cannot be created. It
-	// is a previous step before setting or updating the user data.
-	ErrPrepareUser = fmt.Errorf("cannot create update document")
+	// ErrPrepareUpdate is returned if the update document cannot be created.
+	// It is a previous step before setting or updating the data.
+	ErrPrepareDocument = fmt.Errorf("cannot create update document")
 	// ErrIndexToken is returned if the token cannot be indexed. A token index
 	// is used to keep track of the user ID associated with a token.
 	ErrIndexToken = fmt.Errorf("cannot index token")
@@ -361,11 +362,75 @@ func (ms *MongoStorage) setUser(user UserData) error {
 	defer cancel()
 
 	filter := bson.M{"_id": user.ID}
-	update := bson.M{"$set": user}
+	// update := bson.M{"$set": user}
 	opts := options.Update().SetUpsert(true)
-	_, err := ms.users.UpdateOne(ctx, filter, update, opts)
+	// generate update document with $set and $unset handling
+	update, err := dynamicUpdateDocument(user, nil)
 	if err != nil {
+		return errors.Join(ErrPrepareDocument, err)
+	}
+	if _, err := ms.users.UpdateOne(ctx, filter, update, opts); err != nil {
 		return errors.Join(ErrUpdateUser, err)
 	}
 	return nil
+}
+
+// dynamicUpdateDocument creates a BSON update document from a struct,
+// including only non-zero fields. It uses reflection to iterate over the
+// struct fields and create the update document. The struct fields must have
+// a bson tag to be included in the update document. The _id field is skipped.
+func dynamicUpdateDocument(item any, alwaysUpdateTags []string) (bson.M, error) {
+	val := reflect.ValueOf(item)
+	if val.Kind() == reflect.Ptr {
+		val = val.Elem()
+	}
+	if !val.IsValid() || val.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("input must be a valid struct")
+	}
+	updateSet := bson.M{}
+	updateUnset := bson.M{}
+	typ := val.Type()
+	// Ensure quick lookup for always-updated fields
+	alwaysUpdateMap := make(map[string]bool, len(alwaysUpdateTags))
+	for _, tag := range alwaysUpdateTags {
+		alwaysUpdateMap[tag] = true
+	}
+	var _id any
+	for i := range val.NumField() {
+		field := val.Field(i)
+		if !field.CanInterface() {
+			continue
+		}
+		fieldType := typ.Field(i)
+		tag := fieldType.Tag.Get("bson")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		if tag == "_id" {
+			_id = field.Interface()
+			continue
+		}
+		// Handle nil values using $unset
+		if (field.Kind() == reflect.Ptr || field.Kind() == reflect.Slice || field.Kind() == reflect.Map) && field.IsNil() {
+			updateUnset[tag] = 1 // Explicitly remove the field
+		} else {
+			updateSet[tag] = field.Interface()
+		}
+	}
+	// Build the final update document
+	update := bson.M{}
+	// Always include at least an empty $set to ensure upsert triggers
+	if len(updateSet) == 0 {
+		updateSet["__forceUpsert"] = true // MongoDB ignores this key but processes the update
+	}
+	update["$set"] = updateSet
+	// Apply $unset if necessary
+	if len(updateUnset) > 0 {
+		update["$unset"] = updateUnset
+	}
+	// Ensure _id is set on insert
+	if _id != nil {
+		update["$setOnInsert"] = bson.M{"_id": _id}
+	}
+	return update, nil
 }
