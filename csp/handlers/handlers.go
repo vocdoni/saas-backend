@@ -196,7 +196,7 @@ func (c *cspHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Requ
 	// get the bundle ID from the URL parameters
 	processID := new(internal.HexBytes)
 	if err := processID.ParseString(chi.URLParam(r, "processId")); err != nil {
-		errors.ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
+		errors.ErrMalformedURLParam.WithErr(csp.ErrNoBundleID).Write(w)
 		return
 	}
 	// parse the request from the body
@@ -214,6 +214,11 @@ func (c *cspHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Requ
 		errors.ErrUnauthorized.WithErr(err).Write(w)
 		return
 	}
+	// check if the token is verified
+	if !authToken.Verified {
+		errors.ErrUnauthorized.WithErr(csp.ErrAuthTokenNotVerified).Write(w)
+		return
+	}
 	// get the bundle from the user data
 	bundle, ok := userData.Bundles[authToken.BundleID.String()]
 	if !ok {
@@ -221,7 +226,7 @@ func (c *cspHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Requ
 			"bundleID", authToken.BundleID,
 			"token", req.AuthToken,
 			"userID", userData.ID)
-		errors.ErrUnauthorized.Withf("bundle not found in user data").Write(w)
+		errors.ErrUnauthorized.WithErr(csp.ErrUserNotBelongsToBundle).Write(w)
 		return
 	}
 	// get the process from the bundle
@@ -232,13 +237,15 @@ func (c *cspHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Requ
 			"bundleID", authToken.BundleID,
 			"token", req.AuthToken,
 			"userID", userData.ID)
-		errors.ErrUnauthorized.Withf("process not found in bundle").Write(w)
+		errors.ErrUnauthorized.WithErr(csp.ErrUserNotBelongsToProcess).Write(w)
 		return
 	}
+	// check if the process has been consumed and return error if not
 	if !process.Consumed {
 		errors.ErrUserNoVoted.Write(w)
 		return
 	}
+	// return the address used to sign the process and the nullifier
 	httpWriteJSON(w, &ConsumedAddressResponse{
 		Address:   process.WithAddress,
 		Nullifier: state.GenerateNullifier(common.BytesToAddress(process.WithAddress), process.ID),
