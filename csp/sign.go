@@ -22,7 +22,7 @@ func (c *CSP) Sign(token, address, processID internal.HexBytes, signType signers
 		if err != nil {
 			return nil, err
 		}
-		signature, err := c.Signer.Sign(token, salt, message)
+		signature, err := c.Signer.SignECDSA(*salt, message)
 		if err != nil {
 			return nil, errors.Join(ErrSign, err)
 		}
@@ -30,6 +30,8 @@ func (c *CSP) Sign(token, address, processID internal.HexBytes, signType signers
 			return nil, err
 		}
 		return signature, nil
+	case signers.SignerTypeBlindSalted: // TODO: implement this signer
+		return nil, ErrInvalidSignerType
 	default:
 		return nil, ErrInvalidSignerType
 	}
@@ -44,7 +46,7 @@ func (c *CSP) Sign(token, address, processID internal.HexBytes, signType signers
 // Then generates a bundle CA and encodes it to be signed. It returns userID,
 // the salt as nil and the encoded CA as a message to sign.
 func (c *CSP) prepareEthereumSigner(token, address, processID internal.HexBytes) (
-	internal.HexBytes, internal.HexBytes, internal.HexBytes, error,
+	internal.HexBytes, *[20]byte, internal.HexBytes, error,
 ) {
 	// get the data of the auth token and the user from the storage
 	authTokenData, userData, err := c.Storage.UserAuthToken(token)
@@ -88,7 +90,11 @@ func (c *CSP) prepareEthereumSigner(token, address, processID internal.HexBytes)
 	if err != nil {
 		return nil, nil, nil, ErrPrepareSignature
 	}
-	return authTokenData.UserID, processID, signatureMsg, nil
+	// generate the salt
+	salt := [20]byte{}
+	copy(salt[:], processID)
+
+	return authTokenData.UserID, &salt, signatureMsg, nil
 }
 
 func (c *CSP) finishSignProcess(token, processID internal.HexBytes) error {

@@ -5,12 +5,13 @@ import (
 	"sync"
 	"time"
 
+	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/vocdoni/saas-backend/csp/notifications"
-	"github.com/vocdoni/saas-backend/csp/signers"
-	"github.com/vocdoni/saas-backend/csp/signers/ecdsa_salted"
+	"github.com/vocdoni/saas-backend/csp/signers/saltedkey"
 	"github.com/vocdoni/saas-backend/csp/storage"
 	"github.com/vocdoni/saas-backend/internal"
 	saasNotifications "github.com/vocdoni/saas-backend/notifications"
+
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.vocdoni.io/dvote/log"
 )
@@ -24,9 +25,8 @@ type CSPConfig struct {
 	DBName      string
 	MongoClient *mongo.Client
 	// signer stuff
-	PasswordSalt   string
-	RootKey        internal.HexBytes
-	EthereumSigner signers.Signer
+	PasswordSalt string
+	RootKey      internal.HexBytes
 	// notification stuff
 	NotificationCoolDownTime time.Duration
 	NotificationThrottleTime time.Duration
@@ -39,7 +39,7 @@ type CSPConfig struct {
 // throttle time and the notification cooldown time.
 type CSP struct {
 	PasswordSalt string
-	Signer       signers.Signer
+	Signer       *saltedkey.SaltedKey
 	Storage      storage.Storage
 	signerLock   sync.Map
 	notifyQueue  *notifications.Queue
@@ -55,8 +55,8 @@ type CSP struct {
 // creates a new notification queue with the notification cooldown time, the
 // notification throttle time, the SMS service and the mail service.
 func New(ctx context.Context, config *CSPConfig) (*CSP, error) {
-	s := &ecdsa_salted.SaltedECDSA{}
-	if err := s.Init(config.RootKey); err != nil {
+	s, err := saltedkey.NewSaltedKey(config.RootKey.String())
+	if err != nil {
 		return nil, err
 	}
 	stg := new(storage.MongoStorage)
@@ -136,4 +136,13 @@ func NewUserForBundle(uID internal.HexBytes, phone, mail string,
 // exist. It returns an error if the storage fails to set the users.
 func (c *CSP) SetUsers(users []*storage.UserData) error {
 	return c.Storage.SetUsers(users)
+}
+
+// PubKey method returns the root public key of the CSP.
+func (c *CSP) PubKey() (internal.HexBytes, error) {
+	pub, err := c.Signer.ECDSAPubKey()
+	if err != nil {
+		return nil, err
+	}
+	return ethcrypto.CompressPubkey(pub), nil
 }
