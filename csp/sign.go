@@ -27,7 +27,7 @@ func (c *CSP) Sign(token, address, processID internal.HexBytes, signType signers
 		if err != nil {
 			return nil, errors.Join(ErrSign, err)
 		}
-		if err := c.finishSignProcess(token, processID); err != nil {
+		if err := c.finishSignProcess(token, address, processID); err != nil {
 			return nil, err
 		}
 		return signature, nil
@@ -98,7 +98,7 @@ func (c *CSP) prepareEthereumSigner(token, address, processID internal.HexBytes)
 	return authTokenData.UserID, &salt, signatureMsg, nil
 }
 
-func (c *CSP) finishSignProcess(token, processID internal.HexBytes) error {
+func (c *CSP) finishSignProcess(token, address, processID internal.HexBytes) error {
 	// get the data of the auth token and the user from the storage
 	authTokenData, userData, err := c.Storage.UserAuthToken(token)
 	if err != nil {
@@ -122,6 +122,7 @@ func (c *CSP) finishSignProcess(token, processID internal.HexBytes) error {
 	processData.Consumed = true
 	processData.At = time.Now()
 	processData.WithToken = authTokenData.Token
+	processData.WithAddress = address
 	// update the process in the bundle
 	bundleData.Processes[processID.String()] = processData
 	// update the bundle in the user data

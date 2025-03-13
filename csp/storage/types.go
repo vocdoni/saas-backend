@@ -37,8 +37,9 @@ type AuthToken struct {
 }
 
 type ProcessData struct {
-	ID        internal.HexBytes `json:"processId" bson:"_id"`
-	Consumed  bool              `json:"consumed" bson:"consumed"`
-	WithToken internal.HexBytes `json:"withToken" bson:"withtoken"`
-	At        time.Time         `json:"at" bson:"at"`
+	ID          internal.HexBytes `json:"processId" bson:"_id"`
+	Consumed    bool              `json:"consumed" bson:"consumed"`
+	WithToken   internal.HexBytes `json:"withToken" bson:"withtoken"`
+	WithAddress internal.HexBytes `json:"withAddress" bson:"withaddress"`
+	At          time.Time         `json:"at" bson:"at"`
 }
