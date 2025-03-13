@@ -46,7 +46,6 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 			"userID", uID)
 		return nil, ErrUserNotBelongsToBundle
 	}
-
 	// generate a new token, secret and code from the attempt number
 	token, code, err := c.generateToken(uID, bundle)
 	if err != nil {
@@ -72,6 +71,10 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 			"token", token)
 		return nil, ErrStorageFailure
 	}
+	log.Debugw("new auth token stored",
+		"token", token,
+		"userID", uID,
+		"bundleID", bID)
 	// compose the notification challenge
 	ch, err := notifications.NewNotificationChallenge(ctype, uID, bID, to, code)
 	if err != nil {

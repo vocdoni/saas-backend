@@ -273,9 +273,6 @@ func (ms *MongoStorage) IndexAuthToken(uID, bID, token internal.HexBytes) error 
 		BundleID:  bID,
 		CreatedAt: time.Now(),
 	}); err != nil {
-		if mongo.IsDuplicateKeyError(err) {
-			return nil
-		}
 		return errors.Join(ErrIndexToken, err)
 	}
 	return nil
