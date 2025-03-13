@@ -23,7 +23,7 @@ type UserData struct {
 type BundleData struct {
 	ID          internal.HexBytes      `json:"bundleId" bson:"_id"`
 	Processes   map[string]ProcessData `json:"processes" bson:"processes"`
-	LastAttempt *time.Time             `json:"lastAttempt,omitempty" bson:"lastattempt"`
+	LastAttempt time.Time             `json:"lastAttempt,omitempty" bson:"lastattempt"`
 }
 
 // AuthToken is used by the storage to index a token with its userID

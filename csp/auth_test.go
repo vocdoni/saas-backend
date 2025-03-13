@@ -199,7 +199,6 @@ func TestBundleAuthToken(t *testing.T) {
 					Processes: map[string]storage.ProcessData{
 						testPID.String(): {ID: testPID},
 					},
-					LastAttempt: nil,
 				},
 			},
 			ExtraData: testUserExtraData,
@@ -282,7 +281,6 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 					Processes: map[string]storage.ProcessData{
 						testPID.String(): {ID: testPID},
 					},
-					LastAttempt: nil,
 				},
 			},
 			ExtraData: testUserExtraData,
@@ -315,7 +313,6 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 					Processes: map[string]storage.ProcessData{
 						testPID.String(): {ID: testPID},
 					},
-					LastAttempt: nil,
 				},
 			},
 			ExtraData: testUserExtraData,
@@ -344,7 +341,6 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 					Processes: map[string]storage.ProcessData{
 						testPID.String(): {ID: testPID},
 					},
-					LastAttempt: nil,
 				},
 			},
 			ExtraData: testUserExtraData,
@@ -377,7 +373,6 @@ func TestGenerateToken(t *testing.T) {
 		Processes: map[string]storage.ProcessData{
 			testPID.String(): {ID: testPID},
 		},
-		LastAttempt: nil,
 	}
 	secret := otpSecret(testUserID, testBundleID)
 	otp := gotp.NewDefaultHOTP(secret)

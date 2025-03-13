@@ -52,8 +52,7 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 		return nil, err
 	}
 	// set the new information in the process
-	now := time.Now()
-	bundle.LastAttempt = &now
+	bundle.LastAttempt = time.Now()
 	// update the election and the bundle in the user data
 	userData.Bundles[bID.String()] = bundle
 	// update the user data in the storage and index the token
@@ -128,8 +127,7 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 		return ErrUserNotBelongsToBundle
 	}
 	// update the last attempt to the bundle in the user data
-	t := time.Now()
-	bundle.LastAttempt = &t
+	bundle.LastAttempt = time.Now()
 	userData.Bundles[authToken.BundleID.String()] = bundle
 	// update the user data in the storage
 	if err := c.Storage.SetUser(userData); err != nil {
@@ -169,8 +167,8 @@ func (c *CSP) generateToken(uID internal.HexBytes, bundle storage.BundleData) (
 	internal.HexBytes, string, error,
 ) {
 	// if last attempt is found, check the cooldown time
-	if bundle.LastAttempt != nil {
-		elapsed := time.Since(*bundle.LastAttempt)
+	if bundle.LastAttempt.IsZero() == false {
+		elapsed := time.Since(bundle.LastAttempt)
 		if elapsed < c.notificationCoolDownTime {
 			log.Warnw("attempt cooldown time not reached",
 				"bundleID", bundle.ID,
