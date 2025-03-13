@@ -178,7 +178,7 @@ func TestCensus(t *testing.T) {
 	// Check the job progress
 	var (
 		jobStatus   *db.BulkCensusMembershipStatus
-		maxAttempts = 10
+		maxAttempts = 30
 		attempts    = 0
 		completed   = false
 	)

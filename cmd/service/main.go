@@ -192,9 +192,12 @@ func main() {
 	})
 	apiConf.Subscriptions = subscriptions
 	// initialize the s3 like  object storage
-	apiConf.ObjectStorage = objectstorage.New(&objectstorage.ObjectStorageConfig{
+	apiConf.ObjectStorage, err = objectstorage.New(&objectstorage.ObjectStorageConfig{
 		DB: database,
 	})
+	if err != nil {
+		log.Fatal(err)
+	}
 	// create the local API server
 	api.New(apiConf).Start()
 	log.Infow("server started", "host", host, "port", port)
