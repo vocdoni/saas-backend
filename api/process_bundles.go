@@ -121,10 +121,6 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	if census.Type == db.CensusTypeSMSorMail ||
 		census.Type == db.CensusTypeMail ||
 		census.Type == db.CensusTypeSMS {
-		// if err := a.twofactor.AddProcess(census.Type, orgParticipants); err != nil {
-		// 	errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		// 	return
-		// }
 		cspParticipants := []*storage.UserData{}
 		hbBundleID := new(internal.HexBytes).SetString(bundleID.Hex())
 		for _, p := range orgParticipants {
@@ -256,10 +252,6 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	if census.Type == db.CensusTypeSMSorMail ||
 		census.Type == db.CensusTypeMail ||
 		census.Type == db.CensusTypeSMS {
-		// if err := a.twofactor.AddProcess(census.Type, orgParticipants); err != nil {
-		// 	errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		// 	return
-		// }
 		cspParticipants := []*storage.UserData{}
 		for _, p := range orgParticipants {
 			userData, err := csp.NewUserForBundle(internal.HexBytes(p.ParticipantNo),

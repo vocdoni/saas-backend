@@ -87,6 +87,10 @@ func (c *cspHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) 
 	case 0:
 		authToken, err := c.authFirstStep(r, *bundleID, bundle.Census.ID.Hex())
 		if err != nil {
+			if apiErr, ok := err.(errors.Error); ok {
+				apiErr.Write(w)
+				return
+			}
 			errors.ErrUnauthorized.WithErr(err).Write(w)
 			return
 		}
@@ -95,6 +99,10 @@ func (c *cspHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) 
 	case 1:
 		authToken, err := c.authSecondStep(r)
 		if err != nil {
+			if apiErr, ok := err.(errors.Error); ok {
+				apiErr.Write(w)
+				return
+			}
 			errors.ErrUnauthorized.WithErr(err).Write(w)
 			return
 		}
