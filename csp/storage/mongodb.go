@@ -273,6 +273,9 @@ func (ms *MongoStorage) IndexAuthToken(uID, bID, token internal.HexBytes) error 
 		BundleID:  bID,
 		CreatedAt: time.Now(),
 	}); err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return nil
+		}
 		return errors.Join(ErrIndexToken, err)
 	}
 	return nil
@@ -346,9 +349,9 @@ func (ms *MongoStorage) createIndexes() error {
 	}
 	tokenBundleUserIdx := mongo.IndexModel{
 		Keys: bson.D{
+			{Key: "_id", Value: 1},
 			{Key: "userid", Value: 1},
 			{Key: "bundleid", Value: 1},
-			{Key: "authtoken", Value: 1},
 		},
 		Options: options.Index().SetUnique(true),
 	}
