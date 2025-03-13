@@ -116,8 +116,6 @@ func NewUserForBundle(uID internal.HexBytes, phone, mail string,
 	}
 	user := &storage.UserData{
 		ID:      uID,
-		Phone:   phone,
-		Mail:    mail,
 		Bundles: make(map[string]storage.BundleData),
 	}
 	user.Bundles[bID.String()] = storage.BundleData{
