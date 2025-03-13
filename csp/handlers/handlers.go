@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/notifications"
@@ -15,6 +16,7 @@ import (
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/log"
+	"go.vocdoni.io/dvote/vochain/state"
 )
 
 // cspHandlers is a struct that contains an instance of the CSP and the main
@@ -182,6 +184,66 @@ func (c *cspHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	httpWriteJSON(w, &AuthResponse{Signature: signature})
+}
+
+// ConsumedAddressHandler is the handler for the request to get the address
+// used to sign a process. It expects the process ID as a URL parameter and
+// the auth token as a JSON request. The server gets the user data from the
+// token and verifies the process ID and the bundle ID against it. If the data
+// is valid, the server returns the address used to sign the process, the
+// nullifier of the address, and the timestamp of the consumption.
+func (c *cspHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Request) {
+	// get the bundle ID from the URL parameters
+	processID := new(internal.HexBytes)
+	if err := processID.ParseString(chi.URLParam(r, "processId")); err != nil {
+		errors.ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
+		return
+	}
+	// parse the request from the body
+	var req ConsumedAddressRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	// get the user data from the token
+	authToken, userData, err := c.csp.Storage.UserAuthToken(req.AuthToken)
+	if err != nil {
+		log.Warnw("error getting user data by token",
+			"error", err,
+			"token", req.AuthToken)
+		errors.ErrUnauthorized.WithErr(err).Write(w)
+		return
+	}
+	// get the bundle from the user data
+	bundle, ok := userData.Bundles[authToken.BundleID.String()]
+	if !ok {
+		log.Warnw("bundle not found in user data",
+			"bundleID", authToken.BundleID,
+			"token", req.AuthToken,
+			"userID", userData.ID)
+		errors.ErrUnauthorized.Withf("bundle not found in user data").Write(w)
+		return
+	}
+	// get the process from the bundle
+	process, ok := bundle.Processes[processID.String()]
+	if !ok {
+		log.Warnw("process not found in bundle",
+			"processID", processID,
+			"bundleID", authToken.BundleID,
+			"token", req.AuthToken,
+			"userID", userData.ID)
+		errors.ErrUnauthorized.Withf("process not found in bundle").Write(w)
+		return
+	}
+	if !process.Consumed {
+		errors.ErrUserNoVoted.Write(w)
+		return
+	}
+	httpWriteJSON(w, &ConsumedAddressResponse{
+		Address:   process.WithAddress,
+		Nullifier: state.GenerateNullifier(common.BytesToAddress(process.WithAddress), process.ID),
+		At:        process.At,
+	})
 }
 
 // authFirstStep is the first step of the authentication process. It receives

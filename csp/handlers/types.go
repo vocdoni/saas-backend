@@ -1,6 +1,10 @@
 package handlers
 
-import "github.com/vocdoni/saas-backend/internal"
+import (
+	"time"
+
+	"github.com/vocdoni/saas-backend/internal"
+)
 
 // AuthRequest defines the payload for the authentication request. It includes
 // the participant number, the email, the phone, and the password. Not all
@@ -38,4 +42,21 @@ type SignRequest struct {
 	AuthToken internal.HexBytes `json:"authToken"`
 	Payload   string            `json:"payload,omitempty"`
 	ProcessID internal.HexBytes `json:"electionId,omitempty"`
+}
+
+// ConsumedAddressRequest defines the payload for the request to get the
+// if a token was consumed and which address was used. It includes the
+// authToken to query the information.
+type ConsumedAddressRequest struct {
+	AuthToken internal.HexBytes `json:"authToken"`
+}
+
+// ConsumedAddressResponse defines the payload for the response to the
+// request to get the if a token was consumed and which address was used.
+// It includes the address, the nullifier, and the timestamp of the
+// consumption.
+type ConsumedAddressResponse struct {
+	Address   internal.HexBytes `json:"authToken"`
+	Nullifier internal.HexBytes `json:"electionId"`
+	At        time.Time         `json:"at"`
 }

@@ -268,6 +268,9 @@ func (a *API) initRouter() http.Handler {
 		// process info handler
 		log.Infow("new route", "method", "GET", "path", processEndpoint)
 		r.Get(processEndpoint, a.processInfoHandler)
+		// process sign info handler
+		log.Infow("new route", "method", "POST", "path", processSignInfoEndpoint)
+		r.Post(processSignInfoEndpoint, cspHandlers.ConsumedAddressHandler)
 		// process bundle info handler
 		log.Infow("new route", "method", "GET", "path", processBundleInfoEndpoint)
 		r.Get(processBundleInfoEndpoint, a.processBundleInfoHandler)
