@@ -1,17 +1,39 @@
 package api
 
 import (
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"testing"
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/proto/build/go/models"
+	"google.golang.org/protobuf/proto"
 )
+
+// signAndMarshalTx signs a transaction with the given signer and marshals it to bytes.
+// This is a helper function for the test cases.
+func signAndMarshalTx(t *testing.T, tx *models.Tx, signer *ethereum.SignKeys) []byte {
+	c := qt.New(t)
+	txBytes, err := proto.Marshal(tx)
+	c.Assert(err, qt.IsNil)
+
+	// Sign the transaction
+	signature, err := signer.SignVocdoniTx(txBytes, "test")
+	c.Assert(err, qt.IsNil)
+
+	stx, err := proto.Marshal(&models.SignedTx{
+		Tx:        txBytes,
+		Signature: signature,
+	})
+	c.Assert(err, qt.IsNil)
+	return stx
+}
 
 // TestCSPVoting tests the complete flow of creating an organization, a process,
 // a census with participants, and a bundle, then authenticating a participant
@@ -95,18 +117,18 @@ func TestCSPVoting(t *testing.T) {
 						Nonce:  nonce,
 						Process: &models.Process{
 							EntityId:      orgAddress.Bytes(),
-							Duration:      60,
+							Duration:      120,
 							Status:        models.ProcessStatus_READY,
 							CensusOrigin:  models.CensusOrigin_OFF_CHAIN_CA,
 							CensusRoot:    cspPubKey,
-							MaxCensusSize: 5,
+							MaxCensusSize: 10,
 							EnvelopeType: &models.EnvelopeType{
 								Anonymous:      false,
 								CostFromWeight: false,
 							},
 							VoteOptions: &models.ProcessVoteOptions{
 								MaxCount: 1,
-								MaxValue: 2,
+								MaxValue: 5,
 							},
 							Mode: &models.ProcessMode{
 								AutoStart:     true,
@@ -127,11 +149,14 @@ func TestCSPVoting(t *testing.T) {
 				censusID := testCreateCensus(t, token, orgAddress, string(db.CensusTypeSMSorMail))
 
 				// Generate test participants
-				participants := testGenerateTestParticipants(2)
+				participants := testGenerateTestParticipants(5) // Increased to 5 participants for more test cases
 
 				// Override email for easier testing
 				participants[0].Email = "john.doe@example.com"
 				participants[1].Email = "jane.smith@example.com"
+				participants[2].Email = "alice.johnson@example.com"
+				participants[3].Email = "bob.williams@example.com"
+				participants[4].Email = "charlie.brown@example.com"
 
 				// Add participants to the census
 				testAddParticipantsToCensus(t, token, censusID, participants)
@@ -168,6 +193,171 @@ func TestCSPVoting(t *testing.T) {
 					votes, err := vocdoniClient.ElectionVoteCount(processID)
 					c.Assert(err, qt.IsNil)
 					c.Assert(votes, qt.Equals, uint32(1), qt.Commentf("expected 1 vote, got %d", votes))
+				})
+
+				// Test cases to try to break the authentication and voting mechanisms
+				t.Run("Authentication Attack Vectors", func(t *testing.T) {
+					// Test case 1: Try to authenticate with invalid participant ID
+					t.Run("Invalid Participant ID", func(t *testing.T) {
+						authReq := &handlers.AuthRequest{
+							ParticipantNo: "INVALID",
+							Email:         "john.doe@example.com",
+						}
+						resp, code := testRequest(t, http.MethodPost, "", authReq, "process", "bundle", bundleID, "auth", "0")
+						c.Assert(code, qt.Equals, http.StatusUnauthorized, qt.Commentf("expected unauthorized, got %d: %s", code, resp))
+					})
+
+					// Test case 2: Try to authenticate with valid participant ID but wrong email
+					t.Run("Wrong Email", func(t *testing.T) {
+						authReq := &handlers.AuthRequest{
+							ParticipantNo: "P001",
+							Email:         "wrong.email@example.com",
+						}
+						resp, code := testRequest(t, http.MethodPost, "", authReq, "process", "bundle", bundleID, "auth", "0")
+						c.Assert(code, qt.Equals, http.StatusUnauthorized, qt.Commentf("expected unauthorized, got %d: %s", code, resp))
+					})
+
+					// Test case 3: Try to verify with invalid OTP code
+					t.Run("Invalid OTP Code", func(t *testing.T) {
+						// First get a valid auth token
+						authToken := testCSPAuthenticate(t, bundleID, "P002", "jane.smith@example.com")
+
+						// Then try to verify with an invalid code
+						authChallengeReq := &handlers.AuthChallengeRequest{
+							AuthToken: authToken,
+							AuthData:  []string{"123456"}, // Invalid code
+						}
+						resp, code := testRequest(t, http.MethodPost, "", authChallengeReq, "process", "bundle", bundleID, "auth", "1")
+						c.Assert(code, qt.Equals, http.StatusUnauthorized, qt.Commentf("expected unauthorized, got %d: %s", code, resp))
+					})
+				})
+
+				t.Run("Voting Attack Vectors", func(t *testing.T) {
+					// Test case 4: Try to reuse an auth token for multiple processes
+					t.Run("Reuse Auth Token", func(t *testing.T) {
+						// Create a second user
+						user2 := ethereum.SignKeys{}
+						err = user2.Generate()
+						c.Assert(err, qt.IsNil)
+						user2Addr := user2.Address().Bytes()
+
+						// Authenticate user 3
+						authToken := testCSPAuthenticate(t, bundleID, "P003", "alice.johnson@example.com")
+
+						// Sign the voter's address with the CSP
+						signature := testCSPSign(t, bundleID, authToken, processID, user2Addr)
+
+						// Generate a vote proof with the signature
+						proof := testGenerateVoteProof(processID, user2Addr, signature)
+
+						// Cast a vote
+						votePackage := []byte("[\"2\"]") // Vote for option 2
+						nullifier := testCastVote(t, vocdoniClient, &user2, processID, proof, votePackage)
+						t.Logf("Vote cast successfully with nullifier: %x", nullifier)
+
+						// Try to sign again with the same token (should fail)
+						user3 := ethereum.SignKeys{}
+						err = user3.Generate()
+						c.Assert(err, qt.IsNil)
+						user3Addr := user3.Address().Bytes()
+
+						// Try to sign again with the same token
+						signReq := &handlers.SignRequest{
+							AuthToken: authToken,
+							ProcessID: processID,
+							Payload:   hex.EncodeToString(user3Addr),
+						}
+						resp, code := testRequest(t, http.MethodPost, "", signReq, "process", "bundle", bundleID, "sign")
+						c.Assert(code, qt.Equals, http.StatusUnauthorized,
+							qt.Commentf("expected unauthorized for reused token, got %d: %s", code, resp))
+					})
+
+					// Test case 5: Try to sign with a token from a different user
+					t.Run("Token From Different User", func(t *testing.T) {
+						// Authenticate user 4
+						authToken := testCSPAuthenticate(t, bundleID, "P004", "bob.williams@example.com")
+
+						// Create a user
+						user4 := ethereum.SignKeys{}
+						err = user4.Generate()
+						c.Assert(err, qt.IsNil)
+						user4Addr := user4.Address().Bytes()
+
+						// Sign the voter's address with the CSP
+						signature := testCSPSign(t, bundleID, authToken, processID, user4Addr)
+
+						// Generate a vote proof with the signature
+						proof := testGenerateVoteProof(processID, user4Addr, signature)
+
+						// Cast a vote
+						votePackage := []byte("[\"1\"]") // Vote for option 1
+						nullifier := testCastVote(t, vocdoniClient, &user4, processID, proof, votePackage)
+						t.Logf("Vote cast successfully with nullifier: %x", nullifier)
+
+						// Now authenticate user 5
+						authToken5 := testCSPAuthenticate(t, bundleID, "P005", "charlie.brown@example.com")
+
+						// Try to sign with user 5's token but for user 4's address
+						// Note: The signature will be the same because the CSP signs the same data (processID + address)
+						// regardless of which user is signing
+						signature5 := testCSPSign(t, bundleID, authToken5, processID, user4Addr)
+
+						// Try to use user 5's signature with user 4's key (should fail)
+						invalidProof := testGenerateVoteProof(processID, user4Addr, signature5)
+
+						// This should fail at the blockchain level because the signature doesn't match the address
+						user4Copy := ethereum.SignKeys{}
+						err = user4Copy.Generate()
+						c.Assert(err, qt.IsNil)
+						user4Copy.Private = user4.Private
+
+						// Try to cast a vote with the invalid proof
+						tx := models.Tx{
+							Payload: &models.Tx_Vote{
+								Vote: &models.VoteEnvelope{
+									ProcessId:   processID,
+									Nonce:       internal.RandomBytes(16),
+									Proof:       invalidProof,
+									VotePackage: []byte("[\"2\"]"),
+								},
+							},
+						}
+
+						// This should fail at the blockchain level
+						_, _, err = vocdoniClient.SendTx(signAndMarshalTx(t, &tx, &user4Copy))
+						c.Assert(err, qt.Not(qt.IsNil), qt.Commentf("expected error for invalid signature"))
+					})
+
+					// Test case 6: Try to vote with a forged signature (should fail)
+					t.Run("Forged Signature", func(t *testing.T) {
+						// Create a user
+						user6 := ethereum.SignKeys{}
+						err = user6.Generate()
+						c.Assert(err, qt.IsNil)
+						user6Addr := user6.Address().Bytes()
+
+						// Create a forged signature (just random bytes)
+						forgedSignature := internal.RandomBytes(65) // ECDSA signatures are 65 bytes
+
+						// Generate a vote proof with the forged signature
+						invalidProof := testGenerateVoteProof(processID, user6Addr, forgedSignature)
+
+						// Try to cast a vote with the invalid proof
+						tx := models.Tx{
+							Payload: &models.Tx_Vote{
+								Vote: &models.VoteEnvelope{
+									ProcessId:   processID,
+									Nonce:       internal.RandomBytes(16),
+									Proof:       invalidProof,
+									VotePackage: []byte("[\"1\"]"),
+								},
+							},
+						}
+
+						// This should fail at the blockchain level
+						_, _, err = vocdoniClient.SendTx(signAndMarshalTx(t, &tx, &user6))
+						c.Assert(err, qt.Not(qt.IsNil), qt.Commentf("expected error for forged signature"))
+					})
 				})
 			})
 		})

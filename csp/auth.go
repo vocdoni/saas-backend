@@ -167,7 +167,7 @@ func (c *CSP) generateToken(uID internal.HexBytes, bundle storage.BundleData) (
 	internal.HexBytes, string, error,
 ) {
 	// if last attempt is found, check the cooldown time
-	if bundle.LastAttempt.IsZero() == false {
+	if !bundle.LastAttempt.IsZero() {
 		elapsed := time.Since(bundle.LastAttempt)
 		if elapsed < c.notificationCoolDownTime {
 			log.Warnw("attempt cooldown time not reached",

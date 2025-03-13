@@ -45,7 +45,7 @@ func StartVoconedContainer(ctx context.Context) (testcontainers.Container, error
 		fmt.Sprintf("--fundedAccounts=%s:%d", VoconedFundedAccount, VoconedFunds),
 		fmt.Sprintf("--port=%d", VoconedPort),
 		fmt.Sprintf("--enableFaucet=%d", VocfaucetAmounts),
-		"--blockPeriod=2",
+		"--blockPeriod=1",
 	}
 	c, err := testcontainers.GenericContainer(ctx,
 		testcontainers.GenericContainerRequest{

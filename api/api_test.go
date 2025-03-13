@@ -368,7 +368,7 @@ func signRemoteSignerAndSendVocdoniTx(t *testing.T, tx *models.Tx, token string,
 	c.Assert(err, qt.IsNil)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, err = vocdoniClient.WaitUntilTxIsMined(ctx, hash)
+	err = waitUntilTxIsMined(ctx, hash, vocdoniClient)
 	c.Assert(err, qt.IsNil)
 	return data
 }
@@ -396,9 +396,30 @@ func signAndSendVocdoniTx(t *testing.T, tx *models.Tx, signer *ethereum.SignKeys
 	c.Assert(err, qt.IsNil)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, err = vocdoniClient.WaitUntilTxIsMined(ctx, hash)
+	err = waitUntilTxIsMined(ctx, hash, vocdoniClient)
 	c.Assert(err, qt.IsNil)
 	return data
+}
+
+// waitUntilTxIsMined waits until the given transaction is mined (included in a block)
+func waitUntilTxIsMined(ctx context.Context, txHash []byte, c *apiclient.HTTPclient) error {
+	startTime := time.Now()
+	for {
+		_, err := c.TransactionReference(txHash)
+		if err == nil {
+			time.Sleep(time.Second * 1) // wait a bit longer to make sure the tx is committed
+			log.Infow("transaction mined", "tx",
+				hex.EncodeToString(txHash), "duration", time.Since(startTime).String())
+			return nil
+		}
+		select {
+		case <-time.After(time.Second * 1):
+			continue
+		case <-ctx.Done():
+			return fmt.Errorf("transaction %s never mined after %s: %w",
+				hex.EncodeToString(txHash), time.Since(startTime).String(), ctx.Err())
+		}
+	}
 }
 
 func fetchVocdoniAccountNonce(t *testing.T, client *apiclient.HTTPclient, address internal.HexBytes) uint32 {
@@ -610,8 +631,8 @@ func testGenerateVoteProof(processID, voterAddr, signature internal.HexBytes) *m
 // testCastVote casts a vote with the given proof and process ID.
 // It returns the nullifier.
 func testCastVote(t *testing.T, vocdoniClient *apiclient.HTTPclient, signer *ethereum.SignKeys,
-	processID internal.HexBytes, proof *models.Proof, votePackage []byte) []byte {
-
+	processID internal.HexBytes, proof *models.Proof, votePackage []byte,
+) []byte {
 	// Create the vote transaction
 	tx := models.Tx{
 		Payload: &models.Tx_Vote{
