@@ -106,7 +106,7 @@ func (ms *MongoStorage) Init(rawConf any) error {
 	}
 	// set the config and collections
 	ms.conf = conf
-	ms.users = conf.Client.Database(conf.DBName).Collection("users")
+	ms.users = conf.Client.Database(conf.DBName).Collection("usersCSP")
 	ms.tokenIndex = conf.Client.Database(conf.DBName).Collection("tokenindex")
 	// if reset flag is enabled, drop the database documents and recreates
 	// indexes, otherwise just create the indexes
