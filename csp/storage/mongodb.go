@@ -326,13 +326,7 @@ func (ms *MongoStorage) VerifyAuthToken(token internal.HexBytes) error {
 		return ErrTokenNotFound
 	}
 	// update the token as verified
-	update, err := dynamicUpdateDocument(AuthToken{
-		Token:    token,
-		Verified: true,
-	}, nil)
-	if err != nil {
-		return errors.Join(ErrPrepareDocument, err)
-	}
+	update := bson.M{"$set": bson.M{"verified": true}}
 	if _, err := ms.tokenIndex.UpdateOne(ctx, filter, update); err != nil {
 		return errors.Join(ErrIndexToken, err)
 	}

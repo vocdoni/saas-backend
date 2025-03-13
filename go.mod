@@ -29,7 +29,7 @@ require (
 	google.golang.org/protobuf v1.36.4
 )
 
-require github.com/arnaucube/go-blindsecp256k1 v0.0.0-20211204171003-644e7408753f // indirect
+require github.com/arnaucube/go-blindsecp256k1 v0.0.0-20211204171003-644e7408753f
 
 require (
 	// keep bazil.org/fuse in the following version to ensure macOS
