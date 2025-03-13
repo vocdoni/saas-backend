@@ -104,7 +104,7 @@ func (c *cspHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 // BundleSignHandler is the handler for the signing of a bundle process. It
-// expectes the bundle ID as a URL parameter. It also expects the process ID,
+// expects the bundle ID as a URL parameter. It also expects the process ID,
 // a verified token and the address to sign as a JSON request. The server
 // gets the user data from the token and verifies the process ID and the
 // bundle ID against it. If the data is valid, the server signs the address

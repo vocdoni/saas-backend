@@ -1,52 +1,55 @@
 package signers
 
 import (
-	"math/big"
 	"sync"
 
+	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/db"
-	"go.vocdoni.io/dvote/log"
 )
 
+// KeyStore is a key-value store for internal use by the signers.
 type KeyStore struct {
 	db       db.Database
 	keysLock sync.RWMutex
 }
 
+// NewKeyStore creates a new key store with the given database.
 func NewKeyStore(db db.Database) *KeyStore {
 	return &KeyStore{db: db}
 }
 
-func (ks *KeyStore) Add(index string, point *big.Int) error {
+// Add adds a new key-value pair to the store. It returns an error if the key
+// cannot be added. It locks the store to avoid concurrent writes.
+func (ks *KeyStore) Add(key, value internal.HexBytes) error {
 	ks.keysLock.Lock()
 	defer ks.keysLock.Unlock()
 	tx := ks.db.WriteTx()
 	defer tx.Discard()
-	if err := tx.Set([]byte(index), point.Bytes()); err != nil {
-		log.Warnw("set key error", "error", err)
+	if err := tx.Set(key.Bytes(), value.Bytes()); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
 
-func (ks *KeyStore) Del(index string) error {
+// Del deletes a key from the store. It returns an error if the key cannot be
+// deleted. It locks the store to avoid concurrent writes.
+func (ks *KeyStore) Del(key internal.HexBytes) error {
 	ks.keysLock.Lock()
 	defer ks.keysLock.Unlock()
 	tx := ks.db.WriteTx()
 	defer tx.Discard()
-	if err := tx.Delete([]byte(index)); err != nil {
-		log.Warnw("delete key error", "error", err)
+	if err := tx.Delete(key.Bytes()); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
 
-func (ks *KeyStore) Get(index string) (*big.Int, error) {
+// Get returns the value of a key from the store. It returns an error if the
+// key cannot be found. It locks the store to avoid concurrent reads.
+func (ks *KeyStore) Get(key internal.HexBytes) (internal.HexBytes, error) {
 	ks.keysLock.RLock()
 	defer ks.keysLock.RUnlock()
 	tx := ks.db.WriteTx()
 	defer tx.Discard()
-	p, err := tx.Get([]byte(index))
-	if err != nil {
-		return nil, err
-	}
-	return new(big.Int).SetBytes(p), nil
+	return tx.Get(key.Bytes())
 }

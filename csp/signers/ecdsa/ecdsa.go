@@ -1,7 +1,7 @@
 package ecdsa
 
 import (
-	"fmt"
+	"errors"
 	"math/big"
 
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
@@ -26,7 +26,7 @@ type EthereumSigner struct {
 func (s *EthereumSigner) Init(_ *signers.KeyStore, rootKey internal.HexBytes) error {
 	// check if the root key is valid
 	if _, err := ethcrypto.ToECDSA(rootKey); err != nil {
-		return fmt.Errorf("invalid root key: %w", err)
+		return errors.Join(signers.ErrInvalidRootKey, err)
 	}
 	// set the key store and the root key
 	s.rootKey = rootKey
@@ -40,14 +40,14 @@ func (s *EthereumSigner) Init(_ *signers.KeyStore, rootKey internal.HexBytes) er
 func (s *EthereumSigner) Sign(_, salt, msg internal.HexBytes) (internal.HexBytes, error) {
 	signKeys := new(vocdonicrypto.SignKeys)
 	if err := signKeys.AddHexKey(s.rootKey.String()); err != nil {
-		return nil, fmt.Errorf("cannot add root key: %w", err)
+		return nil, errors.Join(signers.ErrInvalidRootKey, err)
 	}
 	if salt != nil {
 		signKeys.Private.D = new(big.Int).Add(signKeys.Private.D, salt.BigInt())
 	}
 	signature, err := signKeys.SignEthereum(msg)
 	if err != nil {
-		return nil, fmt.Errorf("cannot sign: %w", err)
+		return nil, errors.Join(signers.ErrSignOperation, err)
 	}
 	return signature, nil
 }

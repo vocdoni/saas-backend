@@ -1,6 +1,10 @@
 package signers
 
-import "github.com/vocdoni/saas-backend/internal"
+import (
+	"fmt"
+
+	"github.com/vocdoni/saas-backend/internal"
+)
 
 type SignerType string
 
@@ -12,6 +16,16 @@ const (
 	// SignerTypeSharedKey identifier the shared key (common for all users on
 	// the same processId)
 	SignerTypeSharedKey SignerType = "sharedkey"
+)
+
+var (
+	// ErrInvalidSignerType is returned when the signer type is not supported
+	ErrInvalidSignerType = fmt.Errorf("invalid signer type")
+	// ErrInvalidRootKey is returned when the root key provided is not valid
+	// for the signer type
+	ErrInvalidRootKey = fmt.Errorf("invalid root key")
+	// ErrSignOperation is returned when the signer cannot sign the message
+	ErrSignOperation = fmt.Errorf("cannot sign the message")
 )
 
 // Signer is the interface that must be implemented by all signers. A signer
