@@ -70,13 +70,17 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	// generate a new bundle ID
 	bundleID := a.db.NewBundleID()
 	// The cenus root will be the same as the account's public key
-	censusRoot := a.account.PubKey.String()
+	censusRoot, err := a.csp.PubKey()
+	if err != nil {
+		errors.ErrGenericInternalServerError.Withf("failed to get CSP public key").Write(w)
+		return
+	}
 
 	if len(req.Processes) == 0 {
 		// Create the process bundle
 		bundle := &db.ProcessesBundle{
 			ID:         bundleID,
-			CensusRoot: censusRoot,
+			CensusRoot: censusRoot.String(),
 			OrgAddress: census.OrgAddress,
 			Census:     *census,
 		}
@@ -88,7 +92,7 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 
 		httpWriteJSON(w, CreateProcessBundleResponse{
 			URI:  a.serverURL + "/process/bundle/" + bundleID.Hex(),
-			Root: censusRoot,
+			Root: censusRoot.String(),
 		})
 		return
 	}
@@ -139,10 +143,16 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Create the process bundle
+	cspPubKey, err := a.csp.PubKey()
+	if err != nil {
+		errors.ErrGenericInternalServerError.Withf("failed to get CSP public key").Write(w)
+		return
+	}
+
 	bundle := &db.ProcessesBundle{
 		ID:         bundleID,
 		Processes:  processes,
-		CensusRoot: censusRoot,
+		CensusRoot: cspPubKey.String(),
 		OrgAddress: census.OrgAddress,
 		Census:     *census,
 	}
@@ -155,7 +165,7 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 
 	httpWriteJSON(w, CreateProcessBundleResponse{
 		URI:  a.serverURL + "/process/bundle/" + bundleID.Hex(),
-		Root: censusRoot,
+		Root: cspPubKey.String(),
 	})
 }
 
