@@ -67,7 +67,7 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 // Returns census type, organization address, and creation time.
 func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 	censusID := internal.HexBytes{}
-	if err := censusID.FromString(chi.URLParam(r, "id")); err != nil {
+	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
 		errors.ErrMalformedURLParam.Withf("wrong census ID").Write(w)
 		return
 	}
@@ -83,7 +83,7 @@ func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 // Requires Manager/Admin role. Returns number of participants added.
 func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 	censusID := internal.HexBytes{}
-	if err := censusID.FromString(chi.URLParam(r, "id")); err != nil {
+	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
 		errors.ErrMalformedURLParam.Withf("wrong census ID").Write(w)
 		return
 	}
@@ -168,7 +168,7 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 // Returns the progress of the job. If the job is completed, the job is deleted.
 func (a *API) addParticipantsJobCheckHandler(w http.ResponseWriter, r *http.Request) {
 	jobID := internal.HexBytes{}
-	if err := jobID.FromString(chi.URLParam(r, "jobid")); err != nil {
+	if err := jobID.ParseString(chi.URLParam(r, "jobid")); err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid job ID").Write(w)
 		return
 	}
@@ -193,7 +193,7 @@ func (a *API) addParticipantsJobCheckHandler(w http.ResponseWriter, r *http.Requ
 // Requires Manager/Admin role. Returns published census with credentials.
 func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 	censusID := internal.HexBytes{}
-	if err := censusID.FromString(chi.URLParam(r, "id")); err != nil {
+	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
 		errors.ErrMalformedURLParam.Withf("wrong census ID").Write(w)
 		return
 	}

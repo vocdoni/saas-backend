@@ -3,6 +3,7 @@ package internal
 import (
 	"encoding/hex"
 	"fmt"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -23,13 +24,28 @@ func (hb *HexBytes) Bytes() []byte {
 	return *hb
 }
 
+// SetBigInt sets the HexBytes to the big-endian encoding of the big.Int.
+func (hb *HexBytes) SetBigInt(i *big.Int) *HexBytes {
+	*hb = i.Bytes()
+	return hb
+}
+
+// BigInt returns the big.Int representation of the HexBytes.
+func (hb *HexBytes) BigInt() *big.Int {
+	return new(big.Int).SetBytes(*hb)
+}
+
 // SetString decodes a hex string into the HexBytes. It strips a leading '0x'
 // or '0X' if found, for backwards compatibility. Panics if the string is not a
 // valid hex string.
 func (hb *HexBytes) SetString(s string) *HexBytes {
-	// Strip a leading "0x" prefix, for backwards compatibility.
+	// strip a leading "0x" prefix, for backwards compatibility.
 	if len(s) >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X') {
 		s = s[2:]
+	}
+	// pad the string with a leading zero if the length is odd
+	if len(s)%2 != 0 {
+		s = "0" + s
 	}
 	b, err := hex.DecodeString(s)
 	if err != nil {
@@ -74,8 +90,12 @@ func (b *HexBytes) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// FromString decodes a hex string into the HexBytes.
-func (b *HexBytes) FromString(str string) error {
+// ParseString decodes a hex string into the HexBytes.
+func (b *HexBytes) ParseString(str string) error {
+	// Strip a leading "0x" prefix, for backwards compatibility.
+	if len(str) >= 2 && str[0] == '0' && (str[1] == 'x' || str[1] == 'X') {
+		str = str[2:]
+	}
 	var err error
 	(*b), err = hex.DecodeString(str)
 	return err

@@ -106,7 +106,7 @@ func (ms *MongoStorage) Init(rawConf any) error {
 	}
 	// set the config and collections
 	ms.conf = conf
-	ms.users = conf.Client.Database(conf.DBName).Collection("users")
+	ms.users = conf.Client.Database(conf.DBName).Collection("usersCSP")
 	ms.tokenIndex = conf.Client.Database(conf.DBName).Collection("tokenindex")
 	// if reset flag is enabled, drop the database documents and recreates
 	// indexes, otherwise just create the indexes
@@ -150,7 +150,7 @@ func (ms *MongoStorage) User(userID internal.HexBytes) (*UserData, error) {
 
 // SetUser adds a new user to the storage or updates an existing one. It uses
 // the user ID as the primary key.
-func (ms *MongoStorage) SetUser(user UserData) error {
+func (ms *MongoStorage) SetUser(user *UserData) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	if err := ms.setUser(user); err != nil {
@@ -180,24 +180,42 @@ func (ms *MongoStorage) SetUserBundle(userID, bundleID internal.HexBytes, pIDs .
 	}
 	// initialize the bundle in the user data if it does not exist
 	if bundle, ok := user.Bundles[bundleID.String()]; !ok {
+		processes := make(map[string]ProcessData, len(pIDs))
+		for _, pID := range pIDs {
+			processes[pID.String()] = ProcessData{
+				ID:       pID,
+				Consumed: false,
+			}
+		}
 		user.Bundles[bundleID.String()] = BundleData{
-			ID:   bundleID,
-			PIDs: pIDs,
+			ID:        bundleID,
+			Processes: processes,
 		}
 	} else {
 		// update the processes in the bundle
-		bundle.PIDs = append(bundle.PIDs, pIDs...)
+		// Initialize the Processes map if it's nil
+		if bundle.Processes == nil {
+			bundle.Processes = make(map[string]ProcessData)
+		}
+		for _, pID := range pIDs {
+			if _, ok := bundle.Processes[pID.String()]; !ok {
+				bundle.Processes[pID.String()] = ProcessData{
+					ID:       pID,
+					Consumed: false,
+				}
+			}
+		}
 		user.Bundles[bundleID.String()] = bundle
 	}
 	// set the user data back to the storage
-	if err := ms.setUser(*user); err != nil {
+	if err := ms.setUser(user); err != nil {
 		return err
 	}
 	return nil
 }
 
 // AddUsers adds multiple users to the storage in batches of 1000 entries.
-func (ms *MongoStorage) AddUsers(users []UserData) error {
+func (ms *MongoStorage) AddUsers(users []*UserData) error {
 	// if there are no users, do nothing
 	if len(users) == 0 {
 		return nil
@@ -357,7 +375,7 @@ func (ms *MongoStorage) userByID(userID internal.HexBytes) (*UserData, error) {
 
 // setUser updates the user data in the database. It does not lock the keysLock,
 // so it should be called from a function that already has the lock.
-func (ms *MongoStorage) setUser(user UserData) error {
+func (ms *MongoStorage) setUser(user *UserData) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

@@ -21,9 +21,9 @@ type UserData struct {
 }
 
 type BundleData struct {
-	ID          internal.HexBytes   `json:"bundleId" bson:"_id"`
-	PIDs        []internal.HexBytes `json:"processes" bson:"processes"`
-	LastAttempt *time.Time          `json:"lastAttempt,omitempty" bson:"lastattempt"`
+	ID          internal.HexBytes      `json:"bundleId" bson:"_id"`
+	Processes   map[string]ProcessData `json:"processes" bson:"processes"`
+	LastAttempt *time.Time             `json:"lastAttempt,omitempty" bson:"lastattempt"`
 }
 
 // AuthToken is used by the storage to index a token with its userID
@@ -34,4 +34,11 @@ type AuthToken struct {
 	BundleID  internal.HexBytes `json:"bundleID" bson:"bundleid"`
 	CreatedAt time.Time         `json:"createdAt" bson:"createdat"`
 	Verified  bool              `json:"verified" bson:"verified"`
+}
+
+type ProcessData struct {
+	ID        internal.HexBytes `json:"processId" bson:"_id"`
+	Consumed  bool              `json:"consumed" bson:"consumed"`
+	WithToken internal.HexBytes `json:"withToken" bson:"withtoken"`
+	At        time.Time         `json:"at" bson:"at"`
 }

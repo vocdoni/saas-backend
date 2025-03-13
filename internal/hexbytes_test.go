@@ -3,6 +3,7 @@ package internal
 import (
 	"bytes"
 	"encoding/json"
+	"math/big"
 	"testing"
 )
 
@@ -67,5 +68,27 @@ func TestJSONMarshalUnmarshal(t *testing.T) {
 	}
 	if bytes.Equal(expectedHB.HB.Bytes(), decodeHB.HB.Bytes()) == false {
 		t.Error("JSON marshal/unmarshal failed")
+	}
+}
+
+func TestBigIntSetBigInt(t *testing.T) {
+	bigInt := big.NewInt(1234567890)
+
+	hb := new(HexBytes).SetBigInt(bigInt)
+	if hb.BigInt().Cmp(bigInt) != 0 {
+		t.Error("SetBigInt failed")
+	}
+
+	newBigInt := big.NewInt(9876543210)
+	hb.SetBigInt(newBigInt)
+	if hb.BigInt().Cmp(newBigInt) != 0 {
+		t.Error("SetBigInt failed")
+	}
+
+	hexHb := new(HexBytes).SetString("0x0102030405ff")
+	bigHb := hexHb.BigInt()
+	newHexHb := new(HexBytes).SetBigInt(bigHb)
+	if bytes.Equal(hexHb.Bytes(), newHexHb.Bytes()) == false {
+		t.Error("SetBigInt failed")
 	}
 }

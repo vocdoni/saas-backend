@@ -39,6 +39,12 @@ type Queue struct {
 func NewQueue(ctx context.Context, ttl, throttle time.Duration,
 	mailSrv, smsSrv notifications.NotificationService,
 ) *Queue {
+	if ttl == 0 {
+		ttl = DefaultSMScoolDownTime
+	}
+	if throttle == 0 {
+		throttle = DefaultSMSthrottleTime
+	}
 	return &Queue{
 		NotificationsSent: make(chan *NotificationChallenge, 1),
 		ctx:               ctx,

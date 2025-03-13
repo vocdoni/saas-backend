@@ -462,10 +462,3 @@ type SignRequest struct {
 	Payload    string            `json:"payload,omitempty"`
 	ElectionId internal.HexBytes `json:"electionId,omitempty"`
 }
-
-// twofactorResponse defines the response for twofactor requests
-type twofactorResponse struct {
-	AuthToken *uuid.UUID        `json:"authToken,omitempty"`
-	Token     *uuid.UUID        `json:"token,omitempty"`
-	Signature internal.HexBytes `json:"signature,omitempty"`
-}

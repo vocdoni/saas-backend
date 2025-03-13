@@ -41,4 +41,13 @@ var (
 	ErrStorageFailure = fmt.Errorf("storage service failure")
 	// ErrNotificationFailure is returned when the notification service fails.
 	ErrNotificationFailure = fmt.Errorf("notification service failure")
+	// ErrInvalidSignerType is returned when the signer type is invalid.
+	ErrInvalidSignerType = fmt.Errorf("invalid signer type")
+
+	ErrAuthTokenNotVerified   = fmt.Errorf("the token is not verified")
+	ErrProcessAlreadyConsumed = fmt.Errorf("the user is already identified in the process")
+	ErrProcessAlreadyVoted    = fmt.Errorf("the user has already voted in the process")
+	ErrPrepareSignature       = fmt.Errorf("error preparing the signature")
+	ErrSign                   = fmt.Errorf("error signing the message")
+	ErrUserAlreadySigning     = fmt.Errorf("the user is already signing")
 )

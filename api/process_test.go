@@ -96,7 +96,7 @@ func TestProcess(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 
 	censusIDBytes := internal.HexBytes{}
-	err = censusIDBytes.FromString(censusID)
+	err = censusIDBytes.ParseString(censusID)
 	c.Assert(err, qt.IsNil)
 
 	processInfo := &CreateProcessRequest{
