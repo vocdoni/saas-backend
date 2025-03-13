@@ -16,13 +16,13 @@ import (
 // or the signature fails.
 func (c *CSP) Sign(token, address, processID internal.HexBytes, signType signers.SignerType) (internal.HexBytes, error) {
 	switch signType {
-	case signers.SignerTypeEthereum:
+	case signers.SignerTypeECDSASalted:
 		userID, salt, message, err := c.prepareEthereumSigner(token, address, processID)
 		defer c.unlock(userID, processID)
 		if err != nil {
 			return nil, err
 		}
-		signature, err := c.EthSigner.Sign(token, salt, message)
+		signature, err := c.Signer.Sign(token, salt, message)
 		if err != nil {
 			return nil, errors.Join(ErrSign, err)
 		}
@@ -88,7 +88,7 @@ func (c *CSP) prepareEthereumSigner(token, address, processID internal.HexBytes)
 	if err != nil {
 		return nil, nil, nil, ErrPrepareSignature
 	}
-	return authTokenData.UserID, nil, signatureMsg, nil
+	return authTokenData.UserID, processID, signatureMsg, nil
 }
 
 func (c *CSP) finishSignProcess(token, processID internal.HexBytes) error {

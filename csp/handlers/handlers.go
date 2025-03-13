@@ -168,7 +168,7 @@ func (c *cspHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 		"address", address,
 		"procId", processId)
 	// sign the request
-	signature, err := c.csp.Sign(req.AuthToken, *address, processId, signers.SignerTypeEthereum)
+	signature, err := c.csp.Sign(req.AuthToken, *address, processId, signers.SignerTypeECDSASalted)
 	if err != nil {
 		errors.ErrUnauthorized.WithErr(err).Write(w)
 		return

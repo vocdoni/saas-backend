@@ -1,4 +1,4 @@
-package ecdsa
+package ecdsa_salted
 
 import (
 	"errors"
@@ -16,14 +16,14 @@ const SaltSize = 20
 // EthereumSigner is a signer that uses an an ethereum signature (ECDSA) to
 // sign a message. It needs a root key to sign the message. It implements
 // the Signer interface.
-type EthereumSigner struct {
+type SaltedECDSA struct {
 	rootKey internal.HexBytes
 }
 
 // Init initializes the signer with the root key. It returns an error if the
 // root key is invalid. The db.Database parameter is not used for this type
 // of signer.
-func (s *EthereumSigner) Init(_ *signers.KeyStore, rootKey internal.HexBytes) error {
+func (s *SaltedECDSA) Init(rootKey internal.HexBytes) error {
 	// check if the root key is valid
 	if _, err := ethcrypto.ToECDSA(rootKey); err != nil {
 		return errors.Join(signers.ErrInvalidRootKey, err)
@@ -37,7 +37,7 @@ func (s *EthereumSigner) Init(_ *signers.KeyStore, rootKey internal.HexBytes) er
 // signature of the message. It returns an error if the message cannot be
 // signed. If the salt is nil, it is not used. The token is not used for
 // this type of signer.
-func (s *EthereumSigner) Sign(_, salt, msg internal.HexBytes) (internal.HexBytes, error) {
+func (s *SaltedECDSA) Sign(_, salt, msg internal.HexBytes) (internal.HexBytes, error) {
 	signKeys := new(vocdonicrypto.SignKeys)
 	if err := signKeys.AddHexKey(s.rootKey.String()); err != nil {
 		return nil, errors.Join(signers.ErrInvalidRootKey, err)
@@ -50,4 +50,22 @@ func (s *EthereumSigner) Sign(_, salt, msg internal.HexBytes) (internal.HexBytes
 		return nil, errors.Join(signers.ErrSignOperation, err)
 	}
 	return signature, nil
+}
+
+// PubKey returns the public key of the signer.
+func (s *SaltedECDSA) PubKey(salt internal.HexBytes) (internal.HexBytes, error) {
+	signKeys := new(vocdonicrypto.SignKeys)
+	if err := signKeys.AddHexKey(s.rootKey.String()); err != nil {
+		return nil, errors.Join(signers.ErrInvalidRootKey, err)
+	}
+	if salt != nil {
+		signKeys.Private.D = new(big.Int).Add(signKeys.Private.D, salt.BigInt())
+	}
+	pb := internal.HexBytes(signKeys.PublicKey())
+	return pb, nil
+}
+
+// NewTokenRequest generates a new token request for the signer.
+func (s *SaltedECDSA) NewTokenRequest() internal.HexBytes {
+	return internal.RandomBytes(32)
 }

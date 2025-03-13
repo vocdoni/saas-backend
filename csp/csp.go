@@ -7,7 +7,7 @@ import (
 
 	"github.com/vocdoni/saas-backend/csp/notifications"
 	"github.com/vocdoni/saas-backend/csp/signers"
-	"github.com/vocdoni/saas-backend/csp/signers/ecdsa"
+	"github.com/vocdoni/saas-backend/csp/signers/ecdsa_salted"
 	"github.com/vocdoni/saas-backend/csp/storage"
 	"github.com/vocdoni/saas-backend/internal"
 	saasNotifications "github.com/vocdoni/saas-backend/notifications"
@@ -39,7 +39,7 @@ type CSPConfig struct {
 // throttle time and the notification cooldown time.
 type CSP struct {
 	PasswordSalt string
-	EthSigner    signers.Signer
+	Signer       signers.Signer
 	Storage      storage.Storage
 	signerLock   sync.Map
 	notifyQueue  *notifications.Queue
@@ -55,8 +55,8 @@ type CSP struct {
 // creates a new notification queue with the notification cooldown time, the
 // notification throttle time, the SMS service and the mail service.
 func New(ctx context.Context, config *CSPConfig) (*CSP, error) {
-	ethSigner := new(ecdsa.EthereumSigner)
-	if err := ethSigner.Init(nil, config.RootKey); err != nil {
+	s := &ecdsa_salted.SaltedECDSA{}
+	if err := s.Init(config.RootKey); err != nil {
 		return nil, err
 	}
 	stg := new(storage.MongoStorage)
@@ -90,7 +90,7 @@ func New(ctx context.Context, config *CSPConfig) (*CSP, error) {
 	go queue.Start()
 	return &CSP{
 		Storage:                  stg,
-		EthSigner:                ethSigner,
+		Signer:                   s,
 		notifyQueue:              queue,
 		notificationThrottleTime: config.NotificationThrottleTime,
 		notificationCoolDownTime: config.NotificationCoolDownTime,
