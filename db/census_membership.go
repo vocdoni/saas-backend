@@ -135,9 +135,9 @@ func (ms *MongoStorage) DelCensusMembership(censusId, participantNo string) erro
 
 // BulkCensusMembershipStatus is returned by SetBylkCensusMembership to provide the output.
 type BulkCensusMembershipStatus struct {
-	Progress int
-	Total    int
-	Added    int
+	Progress int `json:"progress"`
+	Total    int `json:"total"`
+	Added    int `json:"added"`
 }
 
 // SetBulkCensusMembership creates or updates an org Participant and a census membership in the database.
