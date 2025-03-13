@@ -97,6 +97,8 @@ const (
 	processEndpoint = "/process/{processId}"
 	// POST /process/{processId}/auth to check if the voter is authorized
 	// processAuthEndpoint = "/process/{processId}/auth"
+	// POST /process/{processId}/sign-info to get the sign info for the process
+	processSignInfoEndpoint = "/process/{processId}/sign-info"
 
 	// two-factor process bundle routes
 	// POST /process/bundle to create a new bundle
