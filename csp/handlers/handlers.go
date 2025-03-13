@@ -17,18 +17,42 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
+// cspHandlers is a struct that contains an instance of the CSP and the main
+// database (where the bundle and census data is stored). It is used to handle
+// the CSP API requests such as the authentication and signing of the bundle
+// processes.
 type cspHandlers struct {
 	csp    *csp.CSP
 	mainDB *db.MongoStorage
 }
 
-func New(c *csp.CSP, db *db.MongoStorage) *cspHandlers {
+// New creates a new instance of the CSP handlers instance. It receives the CSP
+// instance and the main database instance as parameters.
+func New(c *csp.CSP, mainDB *db.MongoStorage) *cspHandlers {
 	return &cspHandlers{
 		csp:    c,
-		mainDB: db,
+		mainDB: mainDB,
 	}
 }
 
+// BundleAuthHandler is the handler for the authentication of the bundle. It
+// expects the bundle ID and the step as URL parameters. There are two steps
+// in the authentication process:
+//   - Step 0: The user sends the participant number and the contact
+//     information (email or phone) to the server. The server checks the
+//     participant number and the contact information against the census data.
+//     If the data is valid, the server sends a challenge to the user (email
+//     or SMS) with a token.
+//   - Step 1: The user sends the token and the challenge solution (received
+//     via email or SMS) back to the server. The server verifies the token and
+//     the solution. If the data is valid, the token is marked as verified and
+//     returned again to the user.
+//
+// The user can generates as many tokens as needed, but there is a cooldown
+// period between each challenge request to void spamming. The user can verify
+// every token created, but the user only can use the token once per process.
+// Once the process is signed (consumed), it cannot be signed again with any
+// token (even the same token).
 func (c *cspHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) {
 	// get the bundle ID from the URL parameters
 	bundleID := new(internal.HexBytes)
@@ -79,6 +103,14 @@ func (c *cspHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+// BundleSignHandler is the handler for the signing of a bundle process. It
+// expectes the bundle ID as a URL parameter. It also expects the process ID,
+// a verified token and the address to sign as a JSON request. The server
+// gets the user data from the token and verifies the process ID and the
+// bundle ID against it. If the data is valid, the server signs the address
+// with the user data and returns the signature. Once the process is signed,
+// it is marked as consumed and cannot be signed again with any token (even
+// the same or another valid token).
 func (c *cspHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) {
 	// get the bundle ID from the URL parameters
 	bundleID := new(internal.HexBytes)
@@ -144,6 +176,14 @@ func (c *cspHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 	httpWriteJSON(w, &AuthResponse{Signature: signature})
 }
 
+// authFirstStep is the first step of the authentication process. It receives
+// the request, the bundle ID and the census ID as parameters. It checks the
+// request data (participant number, email and phone) against the census data.
+// If the data is valid, it generates a token with the bundle ID, the
+// participant number as the user ID, the contact information as the
+// destination and the challenge type. It returns the token and an error if
+// any. It sends the challenge to the user (email or SMS) to verify the user
+// token in the second step.
 func (c *cspHandlers) authFirstStep(r *http.Request, bundleID internal.HexBytes, censusID string) (internal.HexBytes, error) {
 	var req AuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -223,11 +263,18 @@ func (c *cspHandlers) authFirstStep(r *http.Request, bundleID internal.HexBytes,
 	default:
 		return nil, errors.ErrNotSupported.Withf("invalid census type")
 	}
-	// parse the user ID and generate the token
-	// userID := new(internal.HexBytes).SetString(participant.ParticipantNo)
+	// generate the token with the bundle ID, the participant number as the
+	// user ID, the contact information as the destination, and the challenge
+	// type
 	return c.csp.BundleAuthToken(bundleID, internal.HexBytes(participant.ParticipantNo), toDestinations, challengeType)
 }
 
+// authSecondStep is the second step of the authentication process. It
+// receives the request and checks the token and the challenge solution
+// against the server data. If the data is valid, it returns the token and
+// an error if any. It the solution is valid, the token is marked as verified
+// and returned to the user. The user can use the token to sign the bundle
+// processes.
 func (c *cspHandlers) authSecondStep(r *http.Request) (internal.HexBytes, error) {
 	var req AuthChallengeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

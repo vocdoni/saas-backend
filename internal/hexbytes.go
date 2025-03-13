@@ -3,6 +3,7 @@ package internal
 import (
 	"encoding/hex"
 	"fmt"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -21,6 +22,17 @@ func (hb *HexBytes) SetBytes(b []byte) *HexBytes {
 // Bytes returns the raw bytes of the HexBytes.
 func (hb *HexBytes) Bytes() []byte {
 	return *hb
+}
+
+// SetBigInt sets the HexBytes to the big-endian encoding of the big.Int.
+func (hb *HexBytes) SetBigInt(i *big.Int) *HexBytes {
+	*hb = i.Bytes()
+	return hb
+}
+
+// BigInt returns the big.Int representation of the HexBytes.
+func (hb *HexBytes) BigInt() *big.Int {
+	return new(big.Int).SetBytes(*hb)
 }
 
 // SetString decodes a hex string into the HexBytes. It strips a leading '0x'
