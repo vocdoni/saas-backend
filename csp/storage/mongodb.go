@@ -215,30 +215,36 @@ func (ms *MongoStorage) SetUserBundle(userID, bundleID internal.HexBytes, pIDs .
 }
 
 // AddUsers adds multiple users to the storage in batches of 1000 entries.
-func (ms *MongoStorage) AddUsers(users []*UserData) error {
+func (ms *MongoStorage) SetUsers(users []*UserData) error {
 	// if there are no users, do nothing
 	if len(users) == 0 {
 		return nil
 	}
+	// create a list of bulkWrite operations with each user
+	var operations []mongo.WriteModel
+	for _, user := range users {
+		// generate update document dynamically
+		updateDoc, err := dynamicUpdateDocument(user, nil)
+		if err != nil {
+			return errors.Join(ErrPrepareDocument, err)
+		}
+		// create an UpdateOneModel for bulkWrite
+		operations = append(operations, mongo.NewUpdateOneModel().
+			SetFilter(bson.M{"_id": user.ID}).
+			SetUpdate(updateDoc).
+			SetUpsert(true))
+	}
+	if len(operations) == 0 {
+		return nil
+	}
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-	// Process users in batches of 1000
-	batchSize := 1000
-	for i := 0; i < len(users); i += batchSize {
-		// Calculate end index for current batch
-		end := min(i+batchSize, len(users))
-		// Create documents for this batch
-		batchDocuments := make([]any, end-i)
-		for j, user := range users[i:end] {
-			batchDocuments[j] = user
-		}
-		// Insert this batch
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		_, err := ms.users.InsertMany(ctx, batchDocuments)
-		cancel()
-		if err != nil {
-			return errors.Join(ErrBulkInsert, err)
-		}
+	// execute bulkWrite for batch processing
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err := ms.users.BulkWrite(ctx, operations, options.BulkWrite().SetOrdered(false))
+	if err != nil {
+		return errors.Join(ErrBulkInsert, err)
 	}
 	return nil
 }

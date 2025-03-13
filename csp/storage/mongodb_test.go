@@ -179,11 +179,11 @@ func TestSetUserBundle(t *testing.T) {
 	c.Assert(user.Bundles[testUserBundle.ID.String()].LastAttempt, qt.IsNil)
 }
 
-func TestAddUsers(t *testing.T) {
+func TestSetUsers(t *testing.T) {
 	c := qt.New(t)
 	defer resetDB(c)
 	users := testUsersBulk(10000)
-	err := testDB.AddUsers(users)
+	err := testDB.SetUsers(users)
 	c.Assert(err, qt.IsNil)
 	for i := range len(users) {
 		user, err := testDB.User(users[i].ID)
@@ -192,13 +192,43 @@ func TestAddUsers(t *testing.T) {
 		c.Assert(user.Phone, qt.Equals, users[i].Phone)
 		c.Assert(user.Mail, qt.Equals, users[i].Mail)
 	}
+
+	// update some users and re-check
+	for i := range 100 {
+		users[i].ExtraData = fmt.Sprintf("extraDataUpdated%d", i)
+		users[i].Phone = fmt.Sprintf("+346%08d", rand.Int63n(10000000))
+		users[i].Mail = fmt.Sprintf("newEmail%d@test.com", i)
+		users[i].Bundles = map[string]BundleData{
+			testUserBundle.ID.String(): testUserBundle,
+		}
+	}
+
+	err = testDB.SetUsers(users)
+	c.Assert(err, qt.IsNil)
+	for i := range len(users) {
+		user, err := testDB.User(users[i].ID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(user.ExtraData, qt.Equals, users[i].ExtraData)
+		c.Assert(user.Phone, qt.Equals, users[i].Phone)
+		c.Assert(user.Mail, qt.Equals, users[i].Mail)
+		if i < 100 {
+			c.Assert(user.Bundles, qt.HasLen, 1)
+			c.Assert(user.Bundles[testUserBundle.ID.String()].ID, qt.DeepEquals, testUserBundle.ID)
+			c.Assert(user.Bundles[testUserBundle.ID.String()].Processes, qt.HasLen, 1)
+			c.Assert(user.Bundles[testUserBundle.ID.String()].Processes[testProcessID.String()],
+				qt.DeepEquals, testUserBundle.Processes[testProcessID.String()])
+			c.Assert(user.Bundles[testUserBundle.ID.String()].LastAttempt, qt.IsNil)
+		} else {
+			c.Assert(user.Bundles, qt.HasLen, 0)
+		}
+	}
 }
 
 func testUsersBulk(n int) []*UserData {
 	users := make([]*UserData, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		users[i] = &UserData{
-			ID:        []byte(fmt.Sprintf("user%dID", i)),
+			ID:        fmt.Appendf(nil, "user%dID", i),
 			Bundles:   map[string]BundleData{},
 			ExtraData: fmt.Sprintf("extraData%d", i),
 			Phone:     fmt.Sprintf("+346%08d", rand.Int63n(10000000)),

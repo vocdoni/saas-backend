@@ -136,14 +136,13 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 			}
 			cspParticipants = append(cspParticipants, userData)
 		}
-		if err := a.csp.AddUsers(cspParticipants); err != nil {
+		if err := a.csp.SetUsers(cspParticipants); err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
 	}
 
 	// Create the process bundle
-
 	bundle := &db.ProcessesBundle{
 		ID:         bundleID,
 		Processes:  processes,
@@ -271,7 +270,7 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 			}
 			cspParticipants = append(cspParticipants, userData)
 		}
-		if err := a.csp.AddUsers(cspParticipants); err != nil {
+		if err := a.csp.SetUsers(cspParticipants); err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}

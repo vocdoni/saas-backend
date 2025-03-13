@@ -13,8 +13,8 @@ type Storage interface {
 	SetUser(user *UserData) error
 	// SetUserBundle sets the list of processes for a process bundle for a user
 	SetUserBundle(uID internal.HexBytes, bID internal.HexBytes, pIDs ...internal.HexBytes) error
-	// AddUsers adds multiple users to the storage in a single operation
-	AddUsers(users []*UserData) error
+	// SetUsers adds multiple users to the storage in a single operation
+	SetUsers(users []*UserData) error
 	// IndexAuthToken sets the token for a user
 	IndexAuthToken(uID, bID, token internal.HexBytes) error
 	// UserAuthToken returns the token and user data for a given token

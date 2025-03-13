@@ -130,9 +130,10 @@ func NewUserForBundle(uID internal.HexBytes, phone, mail string,
 	return user, nil
 }
 
-// AddUser method registers the users to the storage. It calls the storage
-// BultAddUser method with the list of users provided. The users should be
-// created with the NewUserData method.
-func (c *CSP) AddUsers(users []*storage.UserData) error {
-	return c.Storage.AddUsers(users)
+// SetUsers method registers the users to the storage. It calls the storage
+// SetUsers method with the list of users provided. The users should be
+// created if they do not exist in the storage, or updated if they already
+// exist. It returns an error if the storage fails to set the users.
+func (c *CSP) SetUsers(users []*storage.UserData) error {
+	return c.Storage.SetUsers(users)
 }
