@@ -221,6 +221,52 @@ func TestSetUsers(t *testing.T) {
 			c.Assert(user.Bundles, qt.HasLen, 0)
 		}
 	}
+
+	// update again the same users
+	newBundleID := internal.HexBytes("bundleID2")
+	newProcessID := internal.HexBytes("processID2")
+	newBundle := BundleData{
+		ID: newBundleID,
+		Processes: map[string]ProcessData{
+			testProcessID.String(): {
+				ID: newProcessID,
+			},
+		},
+	}
+	for i := range 100 {
+		users[i].Bundles[testUserBundle.ID.String()].Processes[newProcessID.String()] = ProcessData{
+			ID: newProcessID,
+		}
+		users[i].Bundles[newBundleID.String()] = newBundle
+	}
+
+	err = testDB.SetUsers(users)
+	c.Assert(err, qt.IsNil)
+	// check the updated users
+	for i := range len(users) {
+		user, err := testDB.User(users[i].ID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(user.ExtraData, qt.Equals, users[i].ExtraData)
+		c.Assert(user.Phone, qt.Equals, users[i].Phone)
+		c.Assert(user.Mail, qt.Equals, users[i].Mail)
+		if i < 100 {
+			c.Assert(user.Bundles, qt.HasLen, 2)
+			c.Assert(user.Bundles[testUserBundle.ID.String()].ID, qt.DeepEquals, testUserBundle.ID)
+			c.Assert(user.Bundles[testUserBundle.ID.String()].Processes, qt.HasLen, 2)
+			c.Assert(user.Bundles[testUserBundle.ID.String()].Processes[testProcessID.String()],
+				qt.DeepEquals, testUserBundle.Processes[testProcessID.String()])
+			c.Assert(user.Bundles[testUserBundle.ID.String()].Processes[newProcessID.String()],
+				qt.DeepEquals, users[i].Bundles[testUserBundle.ID.String()].Processes[newProcessID.String()])
+			c.Assert(user.Bundles[testUserBundle.ID.String()].LastAttempt.IsZero(), qt.IsTrue)
+			c.Assert(user.Bundles[newBundleID.String()].ID, qt.DeepEquals, newBundleID)
+			c.Assert(user.Bundles[newBundleID.String()].Processes, qt.HasLen, 1)
+			c.Assert(user.Bundles[newBundleID.String()].Processes[newProcessID.String()],
+				qt.DeepEquals, newBundle.Processes[newProcessID.String()])
+			c.Assert(user.Bundles[newBundleID.String()].LastAttempt.IsZero(), qt.IsTrue)
+		} else {
+			c.Assert(user.Bundles, qt.HasLen, 0)
+		}
+	}
 }
 
 func testUsersBulk(n int) []*UserData {
