@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/vocdoni/saas-backend/csp/signers"
+	"github.com/vocdoni/saas-backend/csp/signers/saltedkey"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/proto/build/go/models"
 	"google.golang.org/protobuf/proto"
@@ -46,7 +47,7 @@ func (c *CSP) Sign(token, address, processID internal.HexBytes, signType signers
 // Then generates a bundle CA and encodes it to be signed. It returns userID,
 // the salt as nil and the encoded CA as a message to sign.
 func (c *CSP) prepareEthereumSigner(token, address, processID internal.HexBytes) (
-	internal.HexBytes, *[20]byte, internal.HexBytes, error,
+	internal.HexBytes, *[saltedkey.SaltSize]byte, internal.HexBytes, error,
 ) {
 	// get the data of the auth token and the user from the storage
 	authTokenData, userData, err := c.Storage.UserAuthToken(token)
@@ -91,8 +92,8 @@ func (c *CSP) prepareEthereumSigner(token, address, processID internal.HexBytes)
 		return nil, nil, nil, ErrPrepareSignature
 	}
 	// generate the salt
-	salt := [20]byte{}
-	copy(salt[:], processID)
+	salt := [saltedkey.SaltSize]byte{}
+	copy(salt[:], processID[:saltedkey.SaltSize])
 
 	return authTokenData.UserID, &salt, signatureMsg, nil
 }
