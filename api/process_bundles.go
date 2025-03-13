@@ -11,7 +11,6 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
-	"github.com/vocdoni/saas-backend/twofactor"
 	"go.vocdoni.io/dvote/util"
 )
 
@@ -349,11 +348,13 @@ func (a *API) processBundleParticipantInfoHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	elections := a.twofactor.Indexer(participantID, bundleIDStr, "")
-	if len(elections) == 0 {
-		httpWriteJSON(w, []twofactor.Election{})
-		return
-	}
+	// TODO
+	/*	elections := a.csp.Indexer(participantID, bundleIDStr, "")
+		if len(elections) == 0 {
+			httpWriteJSON(w, []twofactor.Election{})
+			return
+		}
+	*/
 
-	httpWriteJSON(w, elections)
+	httpWriteJSON(w, nil)
 }

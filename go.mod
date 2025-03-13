@@ -5,7 +5,6 @@ go 1.24.0
 toolchain go1.24.1
 
 require (
-	github.com/arnaucube/go-blindsecp256k1 v0.0.0-20211204171003-644e7408753f
 	github.com/docker/docker v27.1.1+incompatible
 	github.com/docker/go-connections v0.5.0
 	github.com/enriquebris/goconcurrentqueue v0.7.0
@@ -29,6 +28,8 @@ require (
 	golang.org/x/crypto v0.36.0
 	google.golang.org/protobuf v1.36.4
 )
+
+require github.com/arnaucube/go-blindsecp256k1 v0.0.0-20211204171003-644e7408753f // indirect
 
 require (
 	// keep bazil.org/fuse in the following version to ensure macOS

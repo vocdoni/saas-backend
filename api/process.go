@@ -63,29 +63,32 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// get the participants
-	orgParticipants, err := a.db.OrgParticipantsMemberships(
-		pubCensus.Census.OrgAddress,
-		pubCensus.Census.ID.Hex(),
-		"",
-		[]internal.HexBytes{processID},
-	)
-	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-
-	// check the census type
-	switch pubCensus.Census.Type {
-	case db.CensusTypeSMSorMail, db.CensusTypeMail, db.CensusTypeSMS:
-		if err := a.twofactor.AddProcess(pubCensus.Census.Type, orgParticipants); err != nil {
+	// TODO: lucas
+	/*
+		// get the participants
+		orgParticipants, err := a.db.OrgParticipantsMemberships(
+			pubCensus.Census.OrgAddress,
+			pubCensus.Census.ID.Hex(),
+			"",
+			[]internal.HexBytes{processID},
+		)
+		if err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
-	default:
-		errors.ErrNotSupported.Withf("census type not supported").Write(w)
-		return
-	}
+
+		// check the census type
+			switch pubCensus.Census.Type {
+			case db.CensusTypeSMSorMail, db.CensusTypeMail, db.CensusTypeSMS:
+				if err := a.twofactor.AddProcess(pubCensus.Census.Type, orgParticipants); err != nil {
+					errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+					return
+				}
+			default:
+				errors.ErrNotSupported.Withf("census type not supported").Write(w)
+				return
+			}
+	*/
 
 	// finally create the process
 	process := &db.Process{
