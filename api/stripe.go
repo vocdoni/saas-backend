@@ -19,14 +19,18 @@ import (
 
 var mu sync.Mutex
 
-// handleWebhook handles the incoming webhook event from Stripe.
-// It processes various subscription-related events (created, updated, deleted)
-// and updates the organization's subscription status accordingly.
-// The webhook verifies the Stripe signature and handles different event types:
-// - customer.subscription.created: Creates a new subscription for an organization
-// - customer.subscription.updated: Updates an existing subscription
-// - customer.subscription.deleted: Reverts to the default plan
-// If any error occurs during processing, it returns an appropriate HTTP status code.
+// handleWebhook godoc
+// @Summary Handle Stripe webhook events
+// @Description Process incoming webhook events from Stripe for subscription management. Handles subscription creation,
+// @Description updates, deletions, and payment events.
+// @Tags plans
+// @Accept json
+// @Produce json
+// @Param body body string true "Stripe webhook payload"
+// @Success 200 {string} string "OK"
+// @Failure 400 {string} string "Bad Request"
+// @Failure 500 {string} string "Internal Server Error"
+// @Router /subscriptions/webhook [post]
 func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -154,8 +158,20 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// createSubscriptionCheckoutHandler handles requests to create a new Stripe checkout session
-// for subscription purchases.
+// createSubscriptionCheckoutHandler godoc
+// @Summary Create a subscription checkout session
+// @Description Create a new Stripe checkout session for subscription purchases
+// @Tags plans
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body apicommon.SubscriptionCheckout true "Checkout information"
+// @Success 200 {object} map[string]string "Contains clientSecret and sessionID"
+// @Failure 400 {object} errors.Error "Invalid input data"
+// @Failure 401 {object} errors.Error "Unauthorized"
+// @Failure 404 {object} errors.Error "Organization or plan not found"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /subscriptions/checkout [post]
 func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
@@ -211,7 +227,17 @@ func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.R
 	apicommon.HttpWriteJSON(w, data)
 }
 
-// checkoutSessionHandler retrieves the status of a Stripe checkout session.
+// checkoutSessionHandler godoc
+// @Summary Get checkout session status
+// @Description Retrieve the status of a Stripe checkout session
+// @Tags plans
+// @Accept json
+// @Produce json
+// @Param sessionID path string true "Checkout session ID"
+// @Success 200 {object} stripe.CheckoutSession
+// @Failure 400 {object} errors.Error "Invalid session ID"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /subscriptions/checkout/{sessionID} [get]
 func (a *API) checkoutSessionHandler(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionID")
 	if sessionID == "" {
@@ -250,9 +276,20 @@ func (a *API) getSubscriptionOrgInfo(event *stripe.Event) (*stripeService.Stripe
 	return stripeSubscriptionInfo, org, nil
 }
 
-// createSubscriptionPortalSessionHandler handles the creation of a Stripe customer portal session
-// based on the organization creator email..
-// It requires the user to be authenticated and to have admin role for the organization.
+// createSubscriptionPortalSessionHandler godoc
+// @Summary Create a subscription portal session
+// @Description Create a Stripe customer portal session for managing subscriptions
+// @Tags plans
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param address path string true "Organization address"
+// @Success 200 {object} map[string]string "Contains portalURL"
+// @Failure 400 {object} errors.Error "Invalid input data"
+// @Failure 401 {object} errors.Error "Unauthorized"
+// @Failure 404 {object} errors.Error "Organization not found"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /subscriptions/{address}/portal [get]
 func (a *API) createSubscriptionPortalSessionHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {

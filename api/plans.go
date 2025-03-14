@@ -9,8 +9,15 @@ import (
 	"github.com/vocdoni/saas-backend/errors"
 )
 
-// getSubscriptionsHandler handles the request to get the subscriptions of an organization.
-// It returns the list of subscriptions with their information.
+// getPlansHandler godoc
+// @Summary Get all subscription plans
+// @Description Get the list of available subscription plans
+// @Tags plans
+// @Accept json
+// @Produce json
+// @Success 200 {array} db.Plan
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /plans [get]
 func (a *API) getPlansHandler(w http.ResponseWriter, r *http.Request) {
 	// get the subscritions from the database
 	plans, err := a.db.Plans()
@@ -22,6 +29,18 @@ func (a *API) getPlansHandler(w http.ResponseWriter, r *http.Request) {
 	apicommon.HttpWriteJSON(w, plans)
 }
 
+// planInfoHandler godoc
+// @Summary Get plan information
+// @Description Get detailed information about a specific subscription plan
+// @Tags plans
+// @Accept json
+// @Produce json
+// @Param planID path string true "Plan ID"
+// @Success 200 {object} db.Plan
+// @Failure 400 {object} errors.Error "Invalid plan ID"
+// @Failure 404 {object} errors.Error "Plan not found"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /plans/{planID} [get]
 func (a *API) planInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// get the plan ID from the URL
 	planID := chi.URLParam(r, "planID")
