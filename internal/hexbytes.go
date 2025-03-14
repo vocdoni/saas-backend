@@ -8,8 +8,11 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-// HexBytes is a []byte which encodes as hexadecimal in json, as opposed to the
-// base64 default.
+// HexBytes is a []byte that encodes as hexadecimal in JSON (instead of the default base64).
+// swaggertype: string
+// swagger:format hex
+// swagger:description A byte array represented as a hexadecimal string in JSON.
+// swagger:example deadbeef
 type HexBytes []byte
 
 // SetBytes sets the raw bytes of the HexBytes.
