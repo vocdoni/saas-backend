@@ -1,2161 +1,557 @@
-openapi: 3.0.0
+basePath: /
+definitions:
+  apicommon.LoginResponse:
+    properties:
+      expirity:
+        type: string
+      token:
+        type: string
+    type: object
+  apicommon.OrganizationAddresses:
+    properties:
+      addresses:
+        items:
+          type: string
+        type: array
+    type: object
+  apicommon.OrganizationInfo:
+    properties:
+      active:
+        type: boolean
+      address:
+        type: string
+      color:
+        type: string
+      communications:
+        type: boolean
+      counters:
+        $ref: '#/definitions/apicommon.SubscriptionUsage'
+      country:
+        type: string
+      createdAt:
+        type: string
+      parent:
+        $ref: '#/definitions/apicommon.OrganizationInfo'
+      size:
+        type: string
+      subdomain:
+        type: string
+      subscription:
+        $ref: '#/definitions/apicommon.SubscriptionDetails'
+      timezone:
+        type: string
+      type:
+        type: string
+      website:
+        type: string
+    type: object
+  apicommon.SubscriptionDetails:
+    properties:
+      active:
+        type: boolean
+      email:
+        type: string
+      lastPaymentDate:
+        type: string
+      maxCensusSize:
+        type: integer
+      planID:
+        type: integer
+      renewalDate:
+        type: string
+      startDate:
+        type: string
+    type: object
+  apicommon.SubscriptionUsage:
+    properties:
+      members:
+        type: integer
+      processes:
+        type: integer
+      sentEmails:
+        type: integer
+      sentSMS:
+        type: integer
+      subOrgs:
+        type: integer
+    type: object
+  apicommon.UserInfo:
+    properties:
+      email:
+        type: string
+      firstName:
+        type: string
+      lastName:
+        type: string
+      organizations:
+        items:
+          $ref: '#/definitions/apicommon.UserOrganization'
+        type: array
+      password:
+        type: string
+      verified:
+        type: boolean
+    type: object
+  apicommon.UserOrganization:
+    properties:
+      organization:
+        $ref: '#/definitions/apicommon.OrganizationInfo'
+      role:
+        type: string
+    type: object
+  apicommon.UserPasswordReset:
+    properties:
+      code:
+        type: string
+      email:
+        type: string
+      newPassword:
+        type: string
+    type: object
+  apicommon.UserPasswordUpdate:
+    properties:
+      newPassword:
+        type: string
+      oldPassword:
+        type: string
+    type: object
+  apicommon.UserVerification:
+    properties:
+      code:
+        type: string
+      email:
+        type: string
+      expiration:
+        type: string
+      valid:
+        type: boolean
+    type: object
+  errors.Error:
+    properties:
+      code:
+        description: Error code
+        type: integer
+      err:
+        description: Original error
+      httpstatus:
+        description: HTTP status code to return
+        type: integer
+      logLevel:
+        description: Log level for this error (defaults to "debug")
+        type: string
+    type: object
+host: localhost:8080
 info:
-  title: Vocdoni SaaS API
+  contact:
+    email: info@vocdoni.io
+    name: API Support
+    url: https://vocdoni.io
   description: API for Vocdoni SaaS Backend
-  version: 1.0.0
-servers:
-  - url: http://localhost:8080
-    description: Local development server
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: http://swagger.io/terms/
+  title: Vocdoni SaaS API
+  version: "1.0"
 paths:
-  /ping:
-    get:
-      summary: Check server status
-      description: Simple endpoint to check if the server is running
-      responses:
-        '200':
-          description: Server is running
-          content:
-            text/plain:
-              schema:
-                type: string
-                example: "."
-
-  # Auth routes
-  /auth/refresh:
-    post:
-      summary: Refresh JWT token
-      description: Refresh the JWT token for an authenticated user
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: Token refreshed successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/LoginResponse'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /auth/login:
-    post:
-      summary: Login to get a JWT token
-      description: Authenticate a user and get a JWT token
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - email
-                - password
-              properties:
-                email:
-                  type: string
-                  format: email
-                password:
-                  type: string
-                  format: password
-      responses:
-        '200':
-          description: Login successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/LoginResponse'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
   /auth/addresses:
     get:
-      summary: Get writable organization addresses
-      description: Get the list of organization addresses where the user has write access
-      security:
-        - bearerAuth: []
+      consumes:
+      - application/json
+      description: Get the list of organization addresses where the user has write
+        access
+      produces:
+      - application/json
       responses:
-        '200':
-          description: List of organization addresses
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OrganizationAddresses'
-        '401':
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.OrganizationAddresses'
+        "401":
           description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  # User routes
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: No organizations found
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get writable organization addresses
+      tags:
+      - auth
+  /auth/login:
+    post:
+      consumes:
+      - application/json
+      description: Authenticate a user and get a JWT token
+      parameters:
+      - description: Login credentials
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.UserInfo'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.LoginResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Login to get a JWT token
+      tags:
+      - auth
+  /auth/refresh:
+    post:
+      consumes:
+      - application/json
+      description: Refresh the JWT token for an authenticated user
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.LoginResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Refresh JWT token
+      tags:
+      - auth
   /users:
     post:
-      summary: Register a new user
+      consumes:
+      - application/json
       description: Register a new user with email, password, and personal information
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - email
-                - firstName
-                - lastName
-                - password
-              properties:
-                email:
-                  type: string
-                  format: email
-                firstName:
-                  type: string
-                lastName:
-                  type: string
-                password:
-                  type: string
-                  format: password
-                  minLength: 8
-      responses:
-        '200':
-          description: User registered successfully
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '409':
-          description: User already exists
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /users/verify:
-    post:
-      summary: Verify user account
-      description: Verify a user account with the verification code
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - email
-                - code
-              properties:
-                email:
-                  type: string
-                  format: email
-                code:
-                  type: string
-      responses:
-        '200':
-          description: User verified successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/LoginResponse'
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /users/verify/code:
-    get:
-      summary: Get verification code information
-      description: Get information about a user's verification code
       parameters:
-        - name: email
-          in: query
-          required: true
+      - description: User registration information
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.UserInfo'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
           schema:
             type: string
-            format: email
-      responses:
-        '200':
-          description: Verification code information
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UserVerification'
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: User not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-    post:
-      summary: Resend verification code
-      description: Resend the verification code to the user's email
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - email
-              properties:
-                email:
-                  type: string
-                  format: email
-      responses:
-        '200':
-          description: Verification code resent successfully
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: User already exists
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Register a new user
+      tags:
+      - users
   /users/me:
     get:
-      summary: Get current user information
-      description: Get information about the currently authenticated user
-      security:
-        - bearerAuth: []
+      consumes:
+      - application/json
+      description: Get information about the authenticated user
+      produces:
+      - application/json
       responses:
-        '200':
-          description: User information
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UserInfo'
-        '401':
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.UserInfo'
+        "401":
           description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get user information
+      tags:
+      - users
     put:
-      summary: Update current user information
-      description: Update information about the currently authenticated user
-      security:
-        - bearerAuth: []
-      requestBody:
+      consumes:
+      - application/json
+      description: Update information for the authenticated user
+      parameters:
+      - description: User information to update
+        in: body
+        name: request
         required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                email:
-                  type: string
-                  format: email
-                firstName:
-                  type: string
-                lastName:
-                  type: string
+        schema:
+          $ref: '#/definitions/apicommon.UserInfo'
+      produces:
+      - application/json
       responses:
-        '200':
-          description: User information updated successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/LoginResponse'
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.LoginResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
           description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Update user information
+      tags:
+      - users
   /users/password:
     put:
-      summary: Update current user password
-      description: Update the password of the currently authenticated user
-      security:
-        - bearerAuth: []
-      requestBody:
+      consumes:
+      - application/json
+      description: Update the password for the authenticated user
+      parameters:
+      - description: Password update information
+        in: body
+        name: request
         required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UserPasswordUpdate'
+        schema:
+          $ref: '#/definitions/apicommon.UserPasswordUpdate'
+      produces:
+      - application/json
       responses:
-        '200':
-          description: Password updated successfully
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /users/password/recovery:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized or old password does not match
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Update user password
+      tags:
+      - users
+  /users/recovery:
     post:
+      consumes:
+      - application/json
+      description: Request a password recovery code for a user
+      parameters:
+      - description: User email information
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.UserInfo'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
       summary: Recover user password
-      description: Request a password recovery for a user
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - email
-              properties:
-                email:
-                  type: string
-                  format: email
-      responses:
-        '200':
-          description: Password recovery request sent successfully
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /users/password/reset:
+      tags:
+      - users
+  /users/reset:
     post:
+      consumes:
+      - application/json
+      description: Reset a user's password using a verification code
+      parameters:
+      - description: Password reset information
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.UserPasswordReset'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized or invalid verification code
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
       summary: Reset user password
-      description: Reset a user's password with the recovery code
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UserPasswordReset'
-      responses:
-        '200':
-          description: Password reset successfully
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  # Transaction routes
-  /transactions:
+      tags:
+      - users
+  /users/verify:
     post:
-      summary: Sign a transaction
-      description: Sign a transaction with the organization's private key
-      security:
-        - bearerAuth: []
-      requestBody:
+      consumes:
+      - application/json
+      description: Verify a user account with the verification code
+      parameters:
+      - description: Verification information
+        in: body
+        name: request
         required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - address
-                - txPayload
-              properties:
-                address:
-                  type: string
-                  description: Organization address
-                txPayload:
-                  type: string
-                  format: byte
-                  description: Base64 encoded protobuf transaction
+        schema:
+          $ref: '#/definitions/apicommon.UserVerification'
+      produces:
+      - application/json
       responses:
-        '200':
-          description: Transaction signed successfully
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  txPayload:
-                    type: string
-                    format: byte
-                    description: Base64 encoded signed transaction
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /transactions/message:
-    post:
-      summary: Sign a message
-      description: Sign a message with the organization's private key
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - address
-                - payload
-              properties:
-                address:
-                  type: string
-                  description: Organization address
-                payload:
-                  type: string
-                  format: byte
-                  description: Payload to sign
-      responses:
-        '200':
-          description: Message signed successfully
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  signature:
-                    type: string
-                    format: byte
-                    description: Signature
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  # Organization routes
-  /organizations:
-    post:
-      summary: Create a new organization
-      description: Create a new organization with the current user as admin
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - name
-                - type
-              properties:
-                name:
-                  type: string
-                website:
-                  type: string
-                type:
-                  type: string
-                description:
-                  type: string
-                size:
-                  type: string
-                color:
-                  type: string
-                logo:
-                  type: string
-                header:
-                  type: string
-                subdomain:
-                  type: string
-                country:
-                  type: string
-                timezone:
-                  type: string
-                language:
-                  type: string
-                communication:
-                  type: boolean
-                parent:
-                  $ref: '#/components/schemas/OrganizationInfo'
-      responses:
-        '200':
-          description: Organization created successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OrganizationInfo'
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /organizations/{address}:
-    get:
-      summary: Get organization information
-      description: Get information about an organization
-      parameters:
-        - name: address
-          in: path
-          required: true
+        "200":
+          description: OK
           schema:
-            type: string
-      responses:
-        '200':
-          description: Organization information
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OrganizationInfo'
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Organization not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-    put:
-      summary: Update organization information
-      description: Update information about an organization
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: address
-          in: path
-          required: true
+            $ref: '#/definitions/apicommon.LoginResponse'
+        "400":
+          description: Invalid input data
           schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                name:
-                  type: string
-                website:
-                  type: string
-                type:
-                  type: string
-                description:
-                  type: string
-                size:
-                  type: string
-                color:
-                  type: string
-                logo:
-                  type: string
-                header:
-                  type: string
-                subdomain:
-                  type: string
-                country:
-                  type: string
-                timezone:
-                  type: string
-                language:
-                  type: string
-                active:
-                  type: boolean
-                communication:
-                  type: boolean
-      responses:
-        '200':
-          description: Organization updated successfully
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
+            $ref: '#/definitions/errors.Error'
+        "401":
           description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Organization not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /organizations/{address}/members:
-    get:
-      summary: Get organization members
-      description: Get the members of an organization
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: address
-          in: path
-          required: true
           schema:
-            type: string
-      responses:
-        '200':
-          description: Organization members
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OrganizationMembers'
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Organization not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-    post:
-      summary: Invite organization member
-      description: Invite a new member to an organization
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: address
-          in: path
-          required: true
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: User already verified
           schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - role
-                - email
-              properties:
-                role:
-                  type: string
-                email:
-                  type: string
-                  format: email
-      responses:
-        '200':
-          description: Member invited successfully
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Organization not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '409':
-          description: Member already exists
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /organizations/{address}/members/accept:
-    post:
-      summary: Accept organization invitation
-      description: Accept an invitation to join an organization
-      parameters:
-        - name: address
-          in: path
-          required: true
+            $ref: '#/definitions/errors.Error'
+        "410":
+          description: Verification code expired
           schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AcceptOrganizationInvitation'
-      responses:
-        '200':
-          description: Invitation accepted successfully
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Organization not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /organizations/{address}/members/pending:
-    get:
-      summary: Get pending organization members
-      description: Get the pending invitations for an organization
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: address
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Pending organization members
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OrganizationInviteList'
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Organization not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /organizations/roles:
-    get:
-      summary: Get available organization member roles
-      description: Get the available roles for organization members
-      responses:
-        '200':
-          description: Available organization member roles
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OrganizationRoleList'
-
-  /organizations/types:
-    get:
-      summary: Get available organization types
-      description: Get the available types for organizations
-      responses:
-        '200':
-          description: Available organization types
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OrganizationTypeList'
-
-  /organizations/{address}/subscription:
-    get:
-      summary: Get organization subscription
-      description: Get the subscription information for an organization
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: address
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Organization subscription
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OrganizationSubscriptionInfo'
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Organization not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /organizations/{address}/censuses:
-    get:
-      summary: Get organization censuses
-      description: Get the censuses for an organization
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: address
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Organization censuses
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OrganizationCensuses'
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Organization not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  # Subscription routes
-  /plans:
-    get:
-      summary: Get available plans
-      description: Get the available subscription plans
-      responses:
-        '200':
-          description: Available plans
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/SubscriptionPlan'
-        '500':
+            $ref: '#/definitions/errors.Error'
+        "500":
           description: Internal server error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /plans/{planID}:
-    get:
-      summary: Get plan information
-      description: Get information about a specific plan
-      parameters:
-        - name: planID
-          in: path
-          required: true
           schema:
-            type: string
-      responses:
-        '200':
-          description: Plan information
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SubscriptionPlan'
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Plan not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /subscriptions/webhook:
-    post:
-      summary: Stripe webhook
-      description: Webhook for Stripe subscription events
-      requestBody:
+            $ref: '#/definitions/errors.Error'
+      summary: Verify user account
+      tags:
+      - users
+  /users/verify/code:
+    get:
+      consumes:
+      - application/json
+      description: Get information about a user's verification code
+      parameters:
+      - description: User email
+        in: query
+        name: email
         required: true
-        content:
-          application/json:
-            schema:
-              type: object
+        type: string
+      produces:
+      - application/json
       responses:
-        '200':
-          description: Webhook processed successfully
-        '400':
-          description: Bad request
-        '500':
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.UserVerification'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: User already verified
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
           description: Internal server error
-
-  /subscriptions/checkout:
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Get verification code information
+      tags:
+      - users
     post:
-      summary: Create checkout session
-      description: Create a new Stripe checkout session for a subscription
-      security:
-        - bearerAuth: []
-      requestBody:
+      consumes:
+      - application/json
+      description: Resend a verification code to the user's email
+      parameters:
+      - description: User email information
+        in: body
+        name: request
         required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SubscriptionCheckout'
+        schema:
+          $ref: '#/definitions/apicommon.UserVerification'
+      produces:
+      - application/json
       responses:
-        '200':
-          description: Checkout session created successfully
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  clientSecret:
-                    type: string
-                  sessionID:
-                    type: string
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
           description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /subscriptions/checkout/{sessionID}:
-    get:
-      summary: Get checkout session information
-      description: Get information about a Stripe checkout session
-      parameters:
-        - name: sessionID
-          in: path
-          required: true
           schema:
-            type: string
-      responses:
-        '200':
-          description: Checkout session information
-          content:
-            application/json:
-              schema:
-                type: object
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /subscriptions/{address}/portal:
-    get:
-      summary: Get subscription portal URL
-      description: Get the URL for the Stripe subscription portal
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: address
-          in: path
-          required: true
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: User already verified or verification code still valid
           schema:
-            type: string
-      responses:
-        '200':
-          description: Subscription portal URL
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  portalURL:
-                    type: string
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  # Storage routes
-  /storage:
-    post:
-      summary: Upload image
-      description: Upload an image to the object storage
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              properties:
-                file:
-                  type: string
-                  format: binary
-      responses:
-        '200':
-          description: Image uploaded successfully
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  url:
-                    type: string
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /storage/{objectName}:
-    get:
-      summary: Download image
-      description: Download an image from the object storage
-      parameters:
-        - name: objectName
-          in: path
-          required: true
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
           schema:
-            type: string
-      responses:
-        '200':
-          description: Image
-          content:
-            image/*:
-              schema:
-                type: string
-                format: binary
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Image not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  # Census routes
-  /census:
-    post:
-      summary: Create census
-      description: Create a new census for an organization
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - type
-                - orgAddress
-              properties:
-                type:
-                  type: string
-                  enum: [sms_or_mail]
-                orgAddress:
-                  type: string
-      responses:
-        '200':
-          description: Census created successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OrganizationCensus'
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /census/{id}:
-    get:
-      summary: Get census information
-      description: Get information about a census
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Census information
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OrganizationCensus'
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Census not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-    post:
-      summary: Add participants to census
-      description: Add participants to a census
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: async
-          in: query
-          required: false
-          schema:
-            type: boolean
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AddParticipantsRequest'
-      responses:
-        '200':
-          description: Participants added successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AddParticipantsResponse'
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Census not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /census/check/{jobid}:
-    get:
-      summary: Check add participants job status
-      description: Check the status of a job to add participants to a census
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: jobid
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Job status
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  progress:
-                    type: integer
-                  added:
-                    type: integer
-                  total:
-                    type: integer
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Job not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /census/{id}/publish:
-    post:
-      summary: Publish census
-      description: Publish a census for voting
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Census published successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PublishedCensusResponse'
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Census not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  # Process routes
-  /process/{processId}:
-    post:
-      summary: Create process
-      description: Create a new voting process
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: processId
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateProcessRequest'
-      responses:
-        '200':
-          description: Process created successfully
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-    get:
-      summary: Get process information
-      description: Get information about a voting process
-      parameters:
-        - name: processId
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Process information
-          content:
-            application/json:
-              schema:
-                type: object
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Process not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /process/{processId}/sign-info:
-    post:
-      summary: Get sign info for process
-      description: Get the sign info for a process
-      parameters:
-        - name: processId
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Sign info
-          content:
-            application/json:
-              schema:
-                type: object
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Process not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  # Process Bundle routes
-  /process/bundle:
-    post:
-      summary: Create process bundle
-      description: Create a new process bundle
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateProcessBundleRequest'
-      responses:
-        '200':
-          description: Process bundle created successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CreateProcessBundleResponse'
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /process/bundle/{bundleId}:
-    put:
-      summary: Update process bundle
-      description: Add processes to an existing process bundle
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: bundleId
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                processes:
-                  type: array
-                  items:
-                    type: string
-      responses:
-        '200':
-          description: Process bundle updated successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CreateProcessBundleResponse'
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Process bundle not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-    get:
-      summary: Get process bundle information
-      description: Get information about a process bundle
-      parameters:
-        - name: bundleId
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Process bundle information
-          content:
-            application/json:
-              schema:
-                type: object
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Process bundle not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /process/bundle/{bundleId}/auth/{step}:
-    post:
-      summary: Process bundle authentication
-      description: Authenticate a voter for a process bundle
-      parameters:
-        - name: bundleId
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: step
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-      responses:
-        '200':
-          description: Authentication successful
-          content:
-            application/json:
-              schema:
-                type: object
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Process bundle not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /process/bundle/{bundleId}/sign:
-    post:
-      summary: Sign with two-factor authentication
-      description: Sign a process bundle with two-factor authentication
-      parameters:
-        - name: bundleId
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SignRequest'
-      responses:
-        '200':
-          description: Signing successful
-          content:
-            application/json:
-              schema:
-                type: object
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Process bundle not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /process/bundle/{bundleId}/{participantId}:
-    get:
-      summary: Get process bundle participant information
-      description: Get information about a participant in a process bundle
-      parameters:
-        - name: bundleId
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: participantId
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Process bundle participant information
-          content:
-            application/json:
-              schema:
-                type: object
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Process bundle or participant not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-components:
-  securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-
-  schemas:
-    Error:
-      type: object
-      properties:
-        error:
-          type: string
-        code:
-          type: integer
-
-    LoginResponse:
-      type: object
-      properties:
-        token:
-          type: string
-        expirity:
-          type: string
-          format: date-time
-
-    UserInfo:
-      type: object
-      properties:
-        email:
-          type: string
-          format: email
-        firstName:
-          type: string
-        lastName:
-          type: string
-        verified:
-          type: boolean
-        organizations:
-          type: array
-          items:
-            $ref: '#/components/schemas/UserOrganization'
-
-    UserOrganization:
-      type: object
-      properties:
-        role:
-          type: string
-        organization:
-          $ref: '#/components/schemas/OrganizationInfo'
-
-    UserVerification:
-      type: object
-      properties:
-        email:
-          type: string
-          format: email
-        code:
-          type: string
-        expiration:
-          type: string
-          format: date-time
-        valid:
-          type: boolean
-
-    UserPasswordUpdate:
-      type: object
-      required:
-        - oldPassword
-        - newPassword
-      properties:
-        oldPassword:
-          type: string
-          format: password
-        newPassword:
-          type: string
-          format: password
-          minLength: 8
-
-    UserPasswordReset:
-      type: object
-      required:
-        - email
-        - code
-        - newPassword
-      properties:
-        email:
-          type: string
-          format: email
-        code:
-          type: string
-        newPassword:
-          type: string
-          format: password
-          minLength: 8
-
-    OrganizationInfo:
-      type: object
-      properties:
-        address:
-          type: string
-        website:
-          type: string
-        createdAt:
-          type: string
-          format: date-time
-        type:
-          type: string
-        size:
-          type: string
-        color:
-          type: string
-        subdomain:
-          type: string
-        country:
-          type: string
-        timezone:
-          type: string
-        active:
-          type: boolean
-        communications:
-          type: boolean
-        subscription:
-          $ref: '#/components/schemas/SubscriptionDetails'
-        counters:
-          $ref: '#/components/schemas/SubscriptionUsage'
-        parent:
-          $ref: '#/components/schemas/OrganizationInfo'
-
-    OrganizationAddresses:
-      type: object
-      properties:
-        addresses:
-          type: array
-          items:
-            type: string
-
-    OrganizationMembers:
-      type: object
-      properties:
-        members:
-          type: array
-          items:
-            $ref: '#/components/schemas/OrganizationMember'
-
-    OrganizationMember:
-      type: object
-      properties:
-        info:
-          $ref: '#/components/schemas/UserInfo'
-        role:
-          type: string
-
-    OrganizationRole:
-      type: object
-      properties:
-        role:
-          type: string
-        name:
-          type: string
-        writePermission:
-          type: boolean
-
-    OrganizationRoleList:
-      type: object
-      properties:
-        roles:
-          type: array
-          items:
-            $ref: '#/components/schemas/OrganizationRole'
-
-    OrganizationType:
-      type: object
-      properties:
-        type:
-          type: string
-        name:
-          type: string
-
-    OrganizationTypeList:
-      type: object
-      properties:
-        types:
-          type: array
-          items:
-            $ref: '#/components/schemas/OrganizationType'
-
-    OrganizationInvite:
-      type: object
-      properties:
-        email:
-          type: string
-          format: email
-        role:
-          type: string
-        expiration:
-          type: string
-          format: date-time
-
-    OrganizationInviteList:
-      type: object
-      properties:
-        pending:
-          type: array
-          items:
-            $ref: '#/components/schemas/OrganizationInvite'
-
-    AcceptOrganizationInvitation:
-      type: object
-      required:
-        - code
-      properties:
-        code:
-          type: string
-        user:
-          $ref: '#/components/schemas/UserInfo'
-
-    SubscriptionPlan:
-      type: object
-      properties:
-        id:
-          type: integer
-          format: int64
-        name:
-          type: string
-        stripeID:
-          type: string
-        stripePriceID:
-          type: string
-        startingPrice:
-          type: integer
-          format: int64
-        default:
-          type: boolean
-        organization:
-          $ref: '#/components/schemas/SubscriptionPlanLimits'
-        votingTypes:
-          $ref: '#/components/schemas/SubscriptionVotingTypes'
-        features:
-          $ref: '#/components/schemas/SubscriptionFeatures'
-        censusSizeTiers:
-          type: array
-          items:
-            $ref: '#/components/schemas/SubscriptionPlanTier'
-
-    SubscriptionPlanLimits:
-      type: object
-      properties:
-        members:
-          type: integer
-        subOrgs:
-          type: integer
-        maxProcesses:
-          type: integer
-        maxCensus:
-          type: integer
-        maxDuration:
-          type: integer
-        customURL:
-          type: boolean
-        drafts:
-          type: integer
-
-    SubscriptionVotingTypes:
-      type: object
-      properties:
-        single:
-          type: boolean
-        multiple:
-          type: boolean
-        approval:
-          type: boolean
-        cumulative:
-          type: boolean
-        ranked:
-          type: boolean
-        weighted:
-          type: boolean
-
-    SubscriptionFeatures:
-      type: object
-      properties:
-        anonymous:
-          type: boolean
-        overwrite:
-          type: boolean
-        liveResults:
-          type: boolean
-        personalization:
-          type: boolean
-        emailReminder:
-          type: boolean
-        smsNotification:
-          type: boolean
-        whiteLabel:
-          type: boolean
-        liveStreaming:
-          type: boolean
-
-    SubscriptionPlanTier:
-      type: object
-      properties:
-        amount:
-          type: integer
-          format: int64
-        upTo:
-          type: integer
-          format: int64
-
-    SubscriptionDetails:
-      type: object
-      properties:
-        planID:
-          type: integer
-          format: int64
-        startDate:
-          type: string
-          format: date-time
-        renewalDate:
-          type: string
-          format: date-time
-        lastPaymentDate:
-          type: string
-          format: date-time
-        active:
-          type: boolean
-        maxCensusSize:
-          type: integer
-        email:
-          type: string
-          format: email
-
-    SubscriptionUsage:
-      type: object
-      properties:
-        sentSMS:
-          type: integer
-        sentEmails:
-          type: integer
-        subOrgs:
-          type: integer
-        members:
-          type: integer
-        processes:
-          type: integer
-
-    OrganizationSubscriptionInfo:
-      type: object
-      properties:
-        subscriptionDetails:
-          $ref: '#/components/schemas/SubscriptionDetails'
-        usage:
-          $ref: '#/components/schemas/SubscriptionUsage'
-        plan:
-          $ref: '#/components/schemas/SubscriptionPlan'
-
-    SubscriptionCheckout:
-      type: object
-      required:
-        - lookupKey
-        - returnURL
-        - address
-        - amount
-      properties:
-        lookupKey:
-          type: integer
-          format: int64
-        returnURL:
-          type: string
-        address:
-          type: string
-        amount:
-          type: integer
-          format: int64
-        locale:
-          type: string
-
-    OrganizationCensus:
-      type: object
-      properties:
-        censusID:
-          type: string
-        type:
-          type: string
-        orgAddress:
-          type: string
-
-    OrganizationCensuses:
-      type: object
-      properties:
-        censuses:
-          type: array
-          items:
-            $ref: '#/components/schemas/OrganizationCensus'
-
-    AddParticipantsRequest:
-      type: object
-      properties:
-        participants:
-          type: array
-          items:
-            $ref: '#/components/schemas/OrgParticipant'
-
-    OrgParticipant:
-      type: object
-      properties:
-        participantNo:
-          type: string
-        name:
-          type: string
-        email:
-          type: string
-          format: email
-        phone:
-          type: string
-        password:
-          type: string
-        other:
-          type: object
-
-    AddParticipantsResponse:
-      type: object
-      properties:
-        participantsNo:
-          type: integer
-          format: int32
-        jobID:
-          type: string
-          format: byte
-
-    PublishedCensusResponse:
-      type: object
-      properties:
-        uri:
-          type: string
-        root:
-          type: string
-          format: byte
-        censusId:
-          type: string
-          format: byte
-
-    CreateProcessRequest:
-      type: object
-      required:
-        - censusRoot
-        - censusUri
-        - censusID
-      properties:
-        censusRoot:
-          type: string
-          format: byte
-        censusUri:
-          type: string
-        censusID:
-          type: string
-          format: byte
-        metadata:
-          type: string
-          format: byte
-
-    CreateProcessBundleRequest:
-      type: object
-      required:
-        - censusID
-      properties:
-        censusID:
-          type: string
-        processes:
-          type: array
-          items:
-            type: string
-
-    CreateProcessBundleResponse:
-      type: object
-      properties:
-        uri:
-          type: string
-        root:
-          type: string
-          format: byte
-
-    SignRequest:
-      type: object
-      properties:
-        tokenR:
-          type: string
-          format: byte
-        authToken:
-          type: string
-          format: uuid
-        address:
-          type: string
-        payload:
-          type: string
-        electionId:
-          type: string
-          format: byte
+            $ref: '#/definitions/errors.Error'
+      summary: Resend verification code
+      tags:
+      - users
+schemes:
+- http
+- https
+securityDefinitions:
+  BearerAuth:
+    description: Type "Bearer" followed by a space and the JWT token.
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
