@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/util"
@@ -30,7 +31,7 @@ func TestProcess(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Create a census
-	censusInfo := &OrganizationCensus{
+	censusInfo := &apicommon.OrganizationCensus{
 		Type:       db.CensusTypeSMSorMail,
 		OrgAddress: orgAddress.String(),
 	}
@@ -38,7 +39,7 @@ func TestProcess(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Parse the response to get the census ID
-	var createdCensus OrganizationCensus
+	var createdCensus apicommon.OrganizationCensus
 	err := parseJSON(resp, &createdCensus)
 	c.Assert(err, qt.IsNil)
 	c.Assert(createdCensus.ID, qt.Not(qt.Equals), "")
@@ -46,8 +47,8 @@ func TestProcess(t *testing.T) {
 	t.Logf("Created census with ID: %s\n", censusID)
 
 	// Add participants to the census
-	participants := &AddParticipantsRequest{
-		Participants: []OrgParticipant{
+	participants := &apicommon.AddParticipantsRequest{
+		Participants: []apicommon.OrgParticipant{
 			{
 				ParticipantNo: "P001",
 				Name:          "John Doe",
@@ -80,7 +81,7 @@ func TestProcess(t *testing.T) {
 	resp, code = testRequest(t, http.MethodPost, adminToken, nil, censusEndpoint, censusID, "publish")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
-	var publishedCensus PublishedCensusResponse
+	var publishedCensus apicommon.PublishedCensusResponse
 	err = parseJSON(resp, &publishedCensus)
 	c.Assert(err, qt.IsNil)
 	c.Assert(publishedCensus.URI, qt.Not(qt.Equals), "")
@@ -99,7 +100,7 @@ func TestProcess(t *testing.T) {
 	err = censusIDBytes.ParseString(censusID)
 	c.Assert(err, qt.IsNil)
 
-	processInfo := &CreateProcessRequest{
+	processInfo := &apicommon.CreateProcessRequest{
 		PublishedCensusRoot: censusRoot,
 		PublishedCensusURI:  publishedCensus.URI,
 		CensusID:            censusIDBytes,
@@ -118,7 +119,7 @@ func TestProcess(t *testing.T) {
 	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
 
 	// Test 1.4: Test with missing census root/ID
-	invalidProcessInfo := &CreateProcessRequest{
+	invalidProcessInfo := &apicommon.CreateProcessRequest{
 		PublishedCensusURI: publishedCensus.URI,
 		Metadata:           []byte(`{"title":"Test Process","description":"This is a test process"}`),
 	}

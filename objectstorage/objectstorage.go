@@ -35,12 +35,14 @@ var DefaultSupportedFileTypes = map[ObjectFileType]bool{
 type ObjectStorageConfig struct {
 	DB             *db.MongoStorage
 	SupportedTypes []ObjectFileType
+	ServerURL      string
 }
 
 type ObjectStorageClient struct {
 	db             *db.MongoStorage
 	supportedTypes map[ObjectFileType]bool
 	cache          *lru.Cache[string, db.Object]
+	ServerURL      string
 }
 
 // New initializes a new ObjectStorageClient with the provided API credentials and configuration.
@@ -61,6 +63,7 @@ func New(conf *ObjectStorageConfig) (*ObjectStorageClient, error) {
 		db:             conf.DB,
 		supportedTypes: supportedTypes,
 		cache:          cache,
+		ServerURL:      conf.ServerURL,
 	}, nil
 }
 

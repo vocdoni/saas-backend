@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -10,10 +9,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
-	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/dvote/util"
 )
 
@@ -37,7 +36,7 @@ func (a *API) organizationFromRequest(r *http.Request) (*db.Organization, *db.Or
 // buildLoginResponse creates a JWT token for the given user identifier.
 // The token is signed with the API secret, following the JWT specification.
 // The token is valid for the period specified on jwtExpiration constant.
-func (a *API) buildLoginResponse(id string) (*LoginResponse, error) {
+func (a *API) buildLoginResponse(id string) (*apicommon.LoginResponse, error) {
 	j := jwt.New()
 	if err := j.Set("userId", id); err != nil {
 		return nil, err
@@ -45,7 +44,7 @@ func (a *API) buildLoginResponse(id string) (*LoginResponse, error) {
 	if err := j.Set(jwt.ExpirationKey, time.Now().Add(jwtExpiration).UnixNano()); err != nil {
 		return nil, err
 	}
-	lr := LoginResponse{}
+	lr := apicommon.LoginResponse{}
 	lr.Expirity = time.Now().Add(jwtExpiration)
 	jmap, err := j.AsMap(context.Background())
 	if err != nil {
@@ -89,7 +88,7 @@ func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) 
 	// generated with just the user email to mock the verification process
 	var code string
 	if a.mail != nil {
-		code = util.RandomHex(VerificationCodeLength)
+		code = util.RandomHex(apicommon.VerificationCodeLength)
 	}
 	var webAppURI string
 	var linkParams map[string]any
@@ -102,7 +101,7 @@ func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) 
 		}
 		// generate the verification code for the user and the expiration time
 		hashCode := internal.HashVerificationCode(user.Email, code)
-		exp := time.Now().Add(VerificationCodeExpiration)
+		exp := time.Now().Add(apicommon.VerificationCodeExpiration)
 		// store the verification code in the database
 		if err := a.db.SetVerificationCode(&db.User{ID: user.ID}, hashCode, codeType, exp); err != nil {
 			return "", "", err
@@ -125,7 +124,7 @@ func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) 
 		// set the verification code for the organization invite and the
 		// expiration time
 		invite.InvitationCode = code
-		invite.Expiration = time.Now().Add(InvitationExpiration)
+		invite.Expiration = time.Now().Add(apicommon.InvitationExpiration)
 		// store the organization invite in the database
 		if err := a.db.CreateInvitation(invite); err != nil {
 			return "", "", err
@@ -144,25 +143,4 @@ func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) 
 	// and the link parameters
 	verificationLink, err := a.buildWebAppURL(webAppURI, linkParams)
 	return code, verificationLink, err
-}
-
-// httpWriteJSON helper function allows to write a JSON response.
-func httpWriteJSON(w http.ResponseWriter, data interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return
-	}
-	if _, err := w.Write([]byte("\n")); err != nil {
-		log.Warnw("failed to write on response", "error", err)
-	}
-}
-
-// httpWriteOK helper function allows to write an OK response.
-func httpWriteOK(w http.ResponseWriter) {
-	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write([]byte("\n")); err != nil {
-		log.Warnw("failed to write on response", "error", err)
-	}
 }

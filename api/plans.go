@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/errors"
 )
 
@@ -18,7 +19,7 @@ func (a *API) getPlansHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// send the plans back to the user
-	httpWriteJSON(w, plans)
+	apicommon.HttpWriteJSON(w, plans)
 }
 
 func (a *API) planInfoHandler(w http.ResponseWriter, r *http.Request) {
@@ -41,5 +42,5 @@ func (a *API) planInfoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// send the plan back to the user
-	httpWriteJSON(w, plan)
+	apicommon.HttpWriteJSON(w, plan)
 }
