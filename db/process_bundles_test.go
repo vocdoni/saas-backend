@@ -28,16 +28,16 @@ func createTestProcess(c *qt.C, db *MongoStorage, processID internal.HexBytes, p
 
 func TestProcessBundles(t *testing.T) {
 	c := qt.New(t)
-	db := startTestDB(t)
+	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
 
 	t.Run("TestSetAndGetProcessBundle", func(t *testing.T) {
-		c.Assert(db.Reset(), qt.IsNil)
+		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
-		publishedCensus := setupTestPrerequisites1(c, db)
+		publishedCensus := setupTestPrerequisites1(c, testDB)
 
 		// Create test processes
-		process1 := createTestProcess(c, db, testProcessID, publishedCensus)
-		process2 := createTestProcess(c, db, testProcessID2, publishedCensus)
+		process1 := createTestProcess(c, testDB, testProcessID, publishedCensus)
+		process2 := createTestProcess(c, testDB, testProcessID2, publishedCensus)
 
 		// Test with empty processes array - should be valid now
 		emptyBundle := &ProcessesBundle{
@@ -46,7 +46,7 @@ func TestProcessBundles(t *testing.T) {
 			CensusRoot: publishedCensus.Root,
 			Processes:  []internal.HexBytes{},
 		}
-		emptyBundleID, err := db.SetProcessBundle(emptyBundle)
+		emptyBundleID, err := testDB.SetProcessBundle(emptyBundle)
 		c.Assert(err, qt.IsNil)
 		c.Assert(emptyBundleID, qt.Not(qt.Equals), "")
 
@@ -61,7 +61,7 @@ func TestProcessBundles(t *testing.T) {
 			CensusRoot: testProcessRoot,
 			Processes:  []internal.HexBytes{testProcessID3},
 		}
-		_, err = db.SetProcessBundle(nonExistentBundle)
+		_, err = testDB.SetProcessBundle(nonExistentBundle)
 		c.Assert(err, qt.Not(qt.IsNil))
 		c.Assert(err.Error(), qt.Contains, "failed to get organization")
 
@@ -72,12 +72,12 @@ func TestProcessBundles(t *testing.T) {
 			CensusRoot: publishedCensus.Root,
 			Processes:  []internal.HexBytes{process1.ID, process2.ID},
 		}
-		bundleID, err := db.SetProcessBundle(bundle)
+		bundleID, err := testDB.SetProcessBundle(bundle)
 		c.Assert(err, qt.IsNil)
 		c.Assert(bundleID, qt.Not(qt.Equals), "")
 
 		// Test retrieving the process bundle
-		retrieved, err := db.ProcessBundle(bundleID)
+		retrieved, err := testDB.ProcessBundle(bundleID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(retrieved, qt.Not(qt.IsNil))
 		c.Assert(retrieved.ID.Hex(), qt.Equals, bundleID.String())
@@ -86,14 +86,14 @@ func TestProcessBundles(t *testing.T) {
 		c.Assert(retrieved.Processes[1], qt.DeepEquals, process2.ID)
 
 		// Test updating an existing bundle
-		process3 := createTestProcess(c, db, testProcessID3, publishedCensus)
+		process3 := createTestProcess(c, testDB, testProcessID3, publishedCensus)
 		retrieved.Processes = append(retrieved.Processes, process3.ID)
-		updatedBundleID, err := db.SetProcessBundle(retrieved)
+		updatedBundleID, err := testDB.SetProcessBundle(retrieved)
 		c.Assert(err, qt.IsNil)
 		c.Assert(updatedBundleID, qt.DeepEquals, bundleID)
 
 		// Verify the update
-		updated, err := db.ProcessBundle(bundleID)
+		updated, err := testDB.ProcessBundle(bundleID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(updated, qt.Not(qt.IsNil))
 		c.Assert(updated.Processes, qt.HasLen, 3)
@@ -101,17 +101,17 @@ func TestProcessBundles(t *testing.T) {
 	})
 
 	t.Run("TestProcessBundlesList", func(t *testing.T) {
-		c.Assert(db.Reset(), qt.IsNil)
+		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
-		publishedCensus := setupTestPrerequisites1(c, db)
+		publishedCensus := setupTestPrerequisites1(c, testDB)
 
 		// Create test processes
-		process1 := createTestProcess(c, db, testProcessID, publishedCensus)
-		process2 := createTestProcess(c, db, testProcessID2, publishedCensus)
-		process3 := createTestProcess(c, db, testProcessID3, publishedCensus)
+		process1 := createTestProcess(c, testDB, testProcessID, publishedCensus)
+		process2 := createTestProcess(c, testDB, testProcessID2, publishedCensus)
+		process3 := createTestProcess(c, testDB, testProcessID3, publishedCensus)
 
 		// Initially there should be no bundles
-		bundles, err := db.ProcessBundles()
+		bundles, err := testDB.ProcessBundles()
 		c.Assert(err, qt.IsNil)
 		c.Assert(bundles, qt.HasLen, 0)
 
@@ -122,7 +122,7 @@ func TestProcessBundles(t *testing.T) {
 			CensusRoot: publishedCensus.Root,
 			Processes:  []internal.HexBytes{process1.ID, process2.ID},
 		}
-		bundle1ID, err := db.SetProcessBundle(bundle1)
+		bundle1ID, err := testDB.SetProcessBundle(bundle1)
 		c.Assert(err, qt.IsNil)
 
 		bundle2 := &ProcessesBundle{
@@ -131,11 +131,11 @@ func TestProcessBundles(t *testing.T) {
 			CensusRoot: publishedCensus.Root,
 			Processes:  []internal.HexBytes{process2.ID, process3.ID},
 		}
-		bundle2ID, err := db.SetProcessBundle(bundle2)
+		bundle2ID, err := testDB.SetProcessBundle(bundle2)
 		c.Assert(err, qt.IsNil)
 
 		// Test retrieving all process bundles
-		bundles, err = db.ProcessBundles()
+		bundles, err = testDB.ProcessBundles()
 		c.Assert(err, qt.IsNil)
 		c.Assert(bundles, qt.HasLen, 2)
 
@@ -146,14 +146,14 @@ func TestProcessBundles(t *testing.T) {
 	})
 
 	t.Run("TestProcessBundlesByProcess", func(t *testing.T) {
-		c.Assert(db.Reset(), qt.IsNil)
+		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
-		publishedCensus := setupTestPrerequisites1(c, db)
+		publishedCensus := setupTestPrerequisites1(c, testDB)
 
 		// Create test processes
-		process1 := createTestProcess(c, db, testProcessID, publishedCensus)
-		process2 := createTestProcess(c, db, testProcessID2, publishedCensus)
-		process3 := createTestProcess(c, db, testProcessID3, publishedCensus)
+		process1 := createTestProcess(c, testDB, testProcessID, publishedCensus)
+		process2 := createTestProcess(c, testDB, testProcessID2, publishedCensus)
+		process3 := createTestProcess(c, testDB, testProcessID3, publishedCensus)
 
 		// Create two process bundles
 		bundle1 := &ProcessesBundle{
@@ -162,7 +162,7 @@ func TestProcessBundles(t *testing.T) {
 			CensusRoot: publishedCensus.Root,
 			Processes:  []internal.HexBytes{process1.ID, process2.ID},
 		}
-		bundle1ID, err := db.SetProcessBundle(bundle1)
+		bundle1ID, err := testDB.SetProcessBundle(bundle1)
 		c.Assert(err, qt.IsNil)
 
 		bundle2 := &ProcessesBundle{
@@ -171,42 +171,42 @@ func TestProcessBundles(t *testing.T) {
 			CensusRoot: publishedCensus.Root,
 			Processes:  []internal.HexBytes{process2.ID, process3.ID},
 		}
-		bundle2ID, err := db.SetProcessBundle(bundle2)
+		bundle2ID, err := testDB.SetProcessBundle(bundle2)
 		c.Assert(err, qt.IsNil)
 
 		// Test with invalid process ID
 		var emptyID internal.HexBytes
-		_, err = db.ProcessBundlesByProcess(emptyID)
+		_, err = testDB.ProcessBundlesByProcess(emptyID)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test retrieving bundles by process ID
-		bundles, err := db.ProcessBundlesByProcess(testProcessID)
+		bundles, err := testDB.ProcessBundlesByProcess(testProcessID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(bundles, qt.HasLen, 1)
 		c.Assert(bundles[0].ID.Hex(), qt.Equals, bundle1ID.String())
 
-		bundles, err = db.ProcessBundlesByProcess(testProcessID2)
+		bundles, err = testDB.ProcessBundlesByProcess(testProcessID2)
 		c.Assert(err, qt.IsNil)
 		c.Assert(bundles, qt.HasLen, 2)
 		bundleIDs := []string{bundles[0].ID.Hex(), bundles[1].ID.Hex()}
 		c.Assert(bundleIDs, qt.Contains, bundle1ID.String())
 		c.Assert(bundleIDs, qt.Contains, bundle2ID.String())
 
-		bundles, err = db.ProcessBundlesByProcess(testProcessID3)
+		bundles, err = testDB.ProcessBundlesByProcess(testProcessID3)
 		c.Assert(err, qt.IsNil)
 		c.Assert(bundles, qt.HasLen, 1)
 		c.Assert(bundles[0].ID.Hex(), qt.Equals, bundle2ID.String())
 	})
 
 	t.Run("TestAddProcessesToBundle", func(t *testing.T) {
-		c.Assert(db.Reset(), qt.IsNil)
+		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
-		publishedCensus := setupTestPrerequisites1(c, db)
+		publishedCensus := setupTestPrerequisites1(c, testDB)
 
 		// Create test processes
-		process1 := createTestProcess(c, db, testProcessID, publishedCensus)
-		process2 := createTestProcess(c, db, testProcessID2, publishedCensus)
-		process3 := createTestProcess(c, db, testProcessID3, publishedCensus)
+		process1 := createTestProcess(c, testDB, testProcessID, publishedCensus)
+		process2 := createTestProcess(c, testDB, testProcessID2, publishedCensus)
+		process3 := createTestProcess(c, testDB, testProcessID3, publishedCensus)
 
 		// Create a process bundle with one process
 		bundle := &ProcessesBundle{
@@ -215,28 +215,28 @@ func TestProcessBundles(t *testing.T) {
 			CensusRoot: publishedCensus.Root,
 			Processes:  []internal.HexBytes{process1.ID},
 		}
-		bundleID, err := db.SetProcessBundle(bundle)
+		bundleID, err := testDB.SetProcessBundle(bundle)
 		c.Assert(err, qt.IsNil)
 
 		// Test with invalid bundle ID
-		err = db.AddProcessesToBundle(nil, []internal.HexBytes{process2.ID})
+		err = testDB.AddProcessesToBundle(nil, []internal.HexBytes{process2.ID})
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test with empty processes array
-		err = db.AddProcessesToBundle(bundleID, []internal.HexBytes{})
+		err = testDB.AddProcessesToBundle(bundleID, []internal.HexBytes{})
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test with non-existent process ID (should not error as process existence is not validated)
 		nonExistentProcessID := internal.HexBytes("non-existent-process")
-		err = db.AddProcessesToBundle(bundleID, []internal.HexBytes{nonExistentProcessID})
+		err = testDB.AddProcessesToBundle(bundleID, []internal.HexBytes{nonExistentProcessID})
 		c.Assert(err, qt.IsNil)
 
 		// Add processes to the bundle
-		err = db.AddProcessesToBundle(bundleID, []internal.HexBytes{process2.ID, process3.ID})
+		err = testDB.AddProcessesToBundle(bundleID, []internal.HexBytes{process2.ID, process3.ID})
 		c.Assert(err, qt.IsNil)
 
 		// Verify the processes were added
-		retrieved, err := db.ProcessBundle(bundleID)
+		retrieved, err := testDB.ProcessBundle(bundleID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(retrieved, qt.Not(qt.IsNil))
 		c.Assert(retrieved.Processes, qt.HasLen, 4) // 1 original + 1 non-existent + 2 added
@@ -254,24 +254,24 @@ func TestProcessBundles(t *testing.T) {
 		c.Assert(processIDs, qt.Contains, string(testProcessID3))
 
 		// Test adding a process that already exists in the bundle (should not duplicate)
-		err = db.AddProcessesToBundle(bundleID, []internal.HexBytes{process2.ID})
+		err = testDB.AddProcessesToBundle(bundleID, []internal.HexBytes{process2.ID})
 		c.Assert(err, qt.IsNil)
 
 		// Verify no duplication occurred
-		retrieved, err = db.ProcessBundle(bundleID)
+		retrieved, err = testDB.ProcessBundle(bundleID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(retrieved, qt.Not(qt.IsNil))
 		c.Assert(retrieved.Processes, qt.HasLen, 4) // Still 4 processes, no duplication
 	})
 
 	t.Run("TestDelProcessBundle", func(t *testing.T) {
-		c.Assert(db.Reset(), qt.IsNil)
+		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
-		publishedCensus := setupTestPrerequisites1(c, db)
+		publishedCensus := setupTestPrerequisites1(c, testDB)
 
 		// Create test processes
-		process1 := createTestProcess(c, db, testProcessID, publishedCensus)
-		process2 := createTestProcess(c, db, testProcessID2, publishedCensus)
+		process1 := createTestProcess(c, testDB, testProcessID, publishedCensus)
+		process2 := createTestProcess(c, testDB, testProcessID2, publishedCensus)
 
 		// Create a process bundle
 		bundle := &ProcessesBundle{
@@ -280,24 +280,24 @@ func TestProcessBundles(t *testing.T) {
 			CensusRoot: publishedCensus.Root,
 			Processes:  []internal.HexBytes{process1.ID, process2.ID},
 		}
-		bundleID, err := db.SetProcessBundle(bundle)
+		bundleID, err := testDB.SetProcessBundle(bundle)
 		c.Assert(err, qt.IsNil)
 
 		// Test with invalid bundle ID
-		err = db.DelProcessBundle(nil)
+		err = testDB.DelProcessBundle(nil)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test deleting the bundle
-		err = db.DelProcessBundle(bundleID)
+		err = testDB.DelProcessBundle(bundleID)
 		c.Assert(err, qt.IsNil)
 
 		// Verify the bundle is deleted
-		retrieved, err := db.ProcessBundle(bundleID)
+		retrieved, err := testDB.ProcessBundle(bundleID)
 		c.Assert(retrieved, qt.IsNil)
 		c.Assert(err, qt.Not(qt.IsNil))
 
 		// Test deleting a non-existent bundle
-		err = db.DelProcessBundle(bundleID)
+		err = testDB.DelProcessBundle(bundleID)
 		c.Assert(err, qt.Equals, ErrNotFound)
 	})
 }

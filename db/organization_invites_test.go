@@ -13,22 +13,22 @@ const (
 
 func TestOrganizationInvites(t *testing.T) {
 	c := qt.New(t)
-	db := startTestDB(t)
+	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
 	expires := time.Now().Add(time.Hour)
 
 	t.Run("GetInvitation", func(t *testing.T) {
-		c.Assert(db.Reset(), qt.IsNil)
+		c.Assert(testDB.Reset(), qt.IsNil)
 		// Test getting non-existent invitation
-		_, err := db.Invitation(invitationCode)
+		_, err := testDB.Invitation(invitationCode)
 		c.Assert(err, qt.ErrorIs, ErrNotFound)
 
 		// Create organization and user
-		err = db.SetOrganization(&Organization{
+		err = testDB.SetOrganization(&Organization{
 			Address: testOrgAddress,
 		})
 		c.Assert(err, qt.IsNil)
 
-		_, err = db.SetUser(&User{
+		_, err = testDB.SetUser(&User{
 			Email:     testUserEmail,
 			Password:  testUserPass,
 			FirstName: testUserFirstName,
@@ -40,7 +40,7 @@ func TestOrganizationInvites(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Create invitation
-		err = db.CreateInvitation(&OrganizationInvite{
+		err = testDB.CreateInvitation(&OrganizationInvite{
 			InvitationCode:      invitationCode,
 			OrganizationAddress: testOrgAddress,
 			CurrentUserID:       currentUserID,
@@ -51,7 +51,7 @@ func TestOrganizationInvites(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Get invitation
-		invitation, err := db.Invitation(invitationCode)
+		invitation, err := testDB.Invitation(invitationCode)
 		c.Assert(err, qt.IsNil)
 		c.Assert(invitation.InvitationCode, qt.Equals, invitationCode)
 		c.Assert(invitation.OrganizationAddress, qt.Equals, testOrgAddress)
@@ -63,19 +63,19 @@ func TestOrganizationInvites(t *testing.T) {
 	})
 
 	t.Run("PendingInvitations", func(t *testing.T) {
-		c.Assert(db.Reset(), qt.IsNil)
+		c.Assert(testDB.Reset(), qt.IsNil)
 		// List invitations expecting none
-		invitations, err := db.PendingInvitations(testOrgAddress)
+		invitations, err := testDB.PendingInvitations(testOrgAddress)
 		c.Assert(err, qt.IsNil)
 		c.Assert(invitations, qt.HasLen, 0)
 
 		// Create organization and user
-		err = db.SetOrganization(&Organization{
+		err = testDB.SetOrganization(&Organization{
 			Address: testOrgAddress,
 		})
 		c.Assert(err, qt.IsNil)
 
-		_, err = db.SetUser(&User{
+		_, err = testDB.SetUser(&User{
 			Email:     testUserEmail,
 			Password:  testUserPass,
 			FirstName: testUserFirstName,
@@ -87,7 +87,7 @@ func TestOrganizationInvites(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Create invitation
-		err = db.CreateInvitation(&OrganizationInvite{
+		err = testDB.CreateInvitation(&OrganizationInvite{
 			InvitationCode:      invitationCode,
 			OrganizationAddress: testOrgAddress,
 			CurrentUserID:       currentUserID,
@@ -98,7 +98,7 @@ func TestOrganizationInvites(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// List invitations expecting one
-		invitations, err = db.PendingInvitations(testOrgAddress)
+		invitations, err = testDB.PendingInvitations(testOrgAddress)
 		c.Assert(err, qt.IsNil)
 		c.Assert(invitations, qt.HasLen, 1)
 		c.Assert(invitations[0].InvitationCode, qt.Equals, invitationCode)
@@ -110,28 +110,28 @@ func TestOrganizationInvites(t *testing.T) {
 		c.Assert(invitations[0].Expiration.Truncate(time.Second).UTC(), qt.Equals, expires.Truncate(time.Second).UTC())
 
 		// Delete the invitation
-		err = db.DeleteInvitation(invitationCode)
+		err = testDB.DeleteInvitation(invitationCode)
 		c.Assert(err, qt.IsNil)
 
 		// List invitations expecting none
-		invitations, err = db.PendingInvitations(testOrgAddress)
+		invitations, err = testDB.PendingInvitations(testOrgAddress)
 		c.Assert(err, qt.IsNil)
 		c.Assert(invitations, qt.HasLen, 0)
 	})
 
 	t.Run("DeleteInvitation", func(t *testing.T) {
-		c.Assert(db.Reset(), qt.IsNil)
+		c.Assert(testDB.Reset(), qt.IsNil)
 		// Non existing invitation does not return an error on delete attempt
-		err := db.DeleteInvitation(invitationCode)
+		err := testDB.DeleteInvitation(invitationCode)
 		c.Assert(err, qt.IsNil)
 
 		// Create organization and user
-		err = db.SetOrganization(&Organization{
+		err = testDB.SetOrganization(&Organization{
 			Address: testOrgAddress,
 		})
 		c.Assert(err, qt.IsNil)
 
-		_, err = db.SetUser(&User{
+		_, err = testDB.SetUser(&User{
 			Email:     testUserEmail,
 			Password:  testUserPass,
 			FirstName: testUserFirstName,
@@ -143,7 +143,7 @@ func TestOrganizationInvites(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Create invitation
-		err = db.CreateInvitation(&OrganizationInvite{
+		err = testDB.CreateInvitation(&OrganizationInvite{
 			InvitationCode:      invitationCode,
 			OrganizationAddress: testOrgAddress,
 			CurrentUserID:       currentUserID,
@@ -154,15 +154,15 @@ func TestOrganizationInvites(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Verify invitation exists
-		_, err = db.Invitation(invitationCode)
+		_, err = testDB.Invitation(invitationCode)
 		c.Assert(err, qt.IsNil)
 
 		// Delete the invitation
-		err = db.DeleteInvitation(invitationCode)
+		err = testDB.DeleteInvitation(invitationCode)
 		c.Assert(err, qt.IsNil)
 
 		// Verify invitation is deleted
-		_, err = db.Invitation(invitationCode)
+		_, err = testDB.Invitation(invitationCode)
 		c.Assert(err, qt.ErrorIs, ErrNotFound)
 	})
 }
