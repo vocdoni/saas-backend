@@ -9,147 +9,244 @@ import (
 	"github.com/vocdoni/saas-backend/notifications"
 )
 
-// Organization is the struct that represents an organization in the API
+// OrganizationInfo represents an organization in the API.
+// swagger:model OrganizationInfo
 type OrganizationInfo struct {
-	Address        string               `json:"address"`
-	Website        string               `json:"website"`
-	CreatedAt      string               `json:"createdAt"`
-	Type           string               `json:"type"`
-	Size           string               `json:"size"`
-	Color          string               `json:"color"`
-	Subdomain      string               `json:"subdomain"`
-	Country        string               `json:"country"`
-	Timezone       string               `json:"timezone"`
-	Active         bool                 `json:"active"`
-	Communications bool                 `json:"communications"`
-	Subscription   *SubscriptionDetails `json:"subscription"`
-	Counters       *SubscriptionUsage   `json:"counters"`
-	Parent         *OrganizationInfo    `json:"parent"`
+	// The organization's blockchain address
+	Address string `json:"address"`
+
+	// The organization's website URL
+	Website string `json:"website"`
+
+	// Creation timestamp in RFC3339 format
+	CreatedAt string `json:"createdAt"`
+
+	// The type of organization
+	Type string `json:"type"`
+
+	// The size category of the organization
+	Size string `json:"size"`
+
+	// The organization's brand color in hex format
+	Color string `json:"color"`
+
+	// The organization's subdomain
+	Subdomain string `json:"subdomain"`
+
+	// The country where the organization is based
+	Country string `json:"country"`
+
+	// The organization's timezone
+	Timezone string `json:"timezone"`
+
+	// Whether the organization is active
+	Active bool `json:"active"`
+
+	// Whether the organization has enabled communications
+	Communications bool `json:"communications"`
+
+	// Subscription details for the organization
+	Subscription *SubscriptionDetails `json:"subscription"`
+
+	// Usage counters for the organization
+	Counters *SubscriptionUsage `json:"counters"`
+
+	// Parent organization if this is a sub-organization
+	Parent *OrganizationInfo `json:"parent"`
 }
 
-// OrganizationMembers is the struct that represents a list of members of
-// organizations in the API.
+// OrganizationMembers represents a list of members of an organization.
+// swagger:model OrganizationMembers
 type OrganizationMembers struct {
+	// List of organization members
 	Members []*OrganizationMember `json:"members"`
 }
 
-// OrganizationMember is the struct that represents a members of organizations
-// with his role in the API.
+// OrganizationMember represents a member of an organization with their role.
+// swagger:model OrganizationMember
 type OrganizationMember struct {
+	// User information
 	Info *UserInfo `json:"info"`
-	Role string    `json:"role"`
+
+	// The role of the member in the organization
+	Role string `json:"role"`
 }
 
-// OrganizationAddresses is the struct that represents a list of addresses of
-// organizations in the API.
+// OrganizationAddresses represents a list of blockchain addresses of organizations.
+// swagger:model OrganizationAddresses
 type OrganizationAddresses struct {
+	// List of organization blockchain addresses
 	Addresses []string `json:"addresses"`
 }
 
-// UserOrganization is the struct that represents the organization of a user in
-// the API, including the role of the user in the organization.
+// UserOrganization represents the organization of a user including their role.
+// swagger:model UserOrganization
 type UserOrganization struct {
-	Role         string            `json:"role"`
+	// The role of the user in the organization
+	Role string `json:"role"`
+
+	// Organization information
 	Organization *OrganizationInfo `json:"organization"`
 }
 
-// OrganizationRole is the struct that represents the role of an organization
-// member in the API.
+// OrganizationRole represents a role that can be assigned to organization members.
+// swagger:model OrganizationRole
 type OrganizationRole struct {
-	Role            string `json:"role"`
-	Name            string `json:"name"`
-	WritePermission bool   `json:"writePermission"`
+	// Role identifier
+	Role string `json:"role"`
+
+	// Human-readable name of the role
+	Name string `json:"name"`
+
+	// Whether this role has write permissions
+	WritePermission bool `json:"writePermission"`
 }
 
-// OrganizationRoleList is the struct that represents a list of roles of an
-// organization member in the API.
+// OrganizationRoleList represents a list of organization roles.
+// swagger:model OrganizationRoleList
 type OrganizationRoleList struct {
+	// List of organization roles
 	Roles []*OrganizationRole `json:"roles"`
 }
 
-// OrganizationType is the struct that represents the type of an organization in
-// the API.
+// OrganizationType represents a type of organization.
+// swagger:model OrganizationType
 type OrganizationType struct {
+	// Type identifier
 	Type string `json:"type"`
+
+	// Human-readable name of the type
 	Name string `json:"name"`
 }
 
-// OrganizationTypeList is the struct that represents a list of types of
-// organizations in the API.
+// OrganizationTypeList represents a list of organization types.
+// swagger:model OrganizationTypeList
 type OrganizationTypeList struct {
+	// List of organization types
 	Types []*OrganizationType `json:"types"`
 }
 
-// UserInfo is the request to register a new user.
+// UserInfo represents user information and is used for user registration.
+// swagger:model UserInfo
 type UserInfo struct {
-	Email         string              `json:"email,omitempty"`
-	Password      string              `json:"password,omitempty"`
-	FirstName     string              `json:"firstName,omitempty"`
-	LastName      string              `json:"lastName,omitempty"`
-	Verified      bool                `json:"verified,omitempty"`
+	// User's email address
+	Email string `json:"email,omitempty"`
+
+	// User's password (not returned in responses)
+	Password string `json:"password,omitempty"`
+
+	// User's first name
+	FirstName string `json:"firstName,omitempty"`
+
+	// User's last name
+	LastName string `json:"lastName,omitempty"`
+
+	// Whether the user's email is verified
+	Verified bool `json:"verified,omitempty"`
+
+	// Organizations the user belongs to
 	Organizations []*UserOrganization `json:"organizations"`
 }
 
-// OrganizationInvite is the struct that represents an invitation to an
-// organization in the API.
+// OrganizationInvite represents an invitation to join an organization.
+// swagger:model OrganizationInvite
 type OrganizationInvite struct {
-	Email      string    `json:"email"`
-	Role       string    `json:"role"`
+	// Email address of the invitee
+	Email string `json:"email"`
+
+	// Role to be assigned to the invitee
+	Role string `json:"role"`
+
+	// Expiration time of the invitation
 	Expiration time.Time `json:"expiration"`
 }
 
-// OrganizationInviteList is the struct that represents a list of invitations to
-// organizations in the API.
+// OrganizationInviteList represents a list of pending organization invitations.
+// swagger:model OrganizationInviteList
 type OrganizationInviteList struct {
+	// List of pending invitations
 	Invites []*OrganizationInvite `json:"pending"`
 }
 
-// AcceptOrganizationInvitation is the request to accept an invitation to an
-// organization.
+// AcceptOrganizationInvitation represents a request to accept an organization invitation.
+// swagger:model AcceptOrganizationInvitation
 type AcceptOrganizationInvitation struct {
-	Code string    `json:"code"`
+	// Invitation code
+	Code string `json:"code"`
+
+	// User information for registration or identification
 	User *UserInfo `json:"user"`
 }
 
-// UserPasswordUpdate is the request to update the password of a user.
+// UserPasswordUpdate represents a request to update a user's password.
+// swagger:model UserPasswordUpdate
 type UserPasswordUpdate struct {
+	// Current password
 	OldPassword string `json:"oldPassword"`
+
+	// New password
 	NewPassword string `json:"newPassword"`
 }
 
-// UserVerificationRequest is the request to verify a user.
+// UserVerification represents user verification information.
+// swagger:model UserVerification
 type UserVerification struct {
-	Email      string    `json:"email,omitempty"`
-	Code       string    `json:"code,omitempty"`
+	// User's email address
+	Email string `json:"email,omitempty"`
+
+	// Verification code
+	Code string `json:"code,omitempty"`
+
+	// Expiration time of the verification code
 	Expiration time.Time `json:"expiration,omitempty"`
-	Valid      bool      `json:"valid"`
+
+	// Whether the verification is valid
+	Valid bool `json:"valid"`
 }
 
-// UserPasswordReset is the request to reset the password of a user.
+// UserPasswordReset represents a request to reset a user's password.
+// swagger:model UserPasswordReset
 type UserPasswordReset struct {
-	Email       string `json:"email"`
-	Code        string `json:"code"`
+	// User's email address
+	Email string `json:"email"`
+
+	// Password reset code
+	Code string `json:"code"`
+
+	// New password
 	NewPassword string `json:"newPassword"`
 }
 
-// LoginResponse is the response of the login request which includes the JWT token
+// LoginResponse represents the response to a successful login request.
+// swagger:model LoginResponse
 type LoginResponse struct {
-	Token    string    `json:"token"`
+	// JWT authentication token
+	Token string `json:"token"`
+
+	// Token expiration time
 	Expirity time.Time `json:"expirity"`
 }
 
-// TransactionData is the struct that contains the data of a transaction to
-// be signed, but also is used to return the signed transaction.
+// TransactionData contains the data of a transaction to be signed or a signed transaction.
+// swagger:model TransactionData
 type TransactionData struct {
-	Address   internal.HexBytes `json:"address"`
-	TxPayload []byte            `json:"txPayload"`
+	// Blockchain address
+	Address internal.HexBytes `json:"address"`
+
+	// Transaction payload bytes
+	TxPayload []byte `json:"txPayload"`
 }
 
-// MessageSignature is the struct that contains the payload and the signature.
-// Its used to receive and return a signed message.
+// MessageSignature contains a payload and its signature.
+// swagger:model MessageSignature
 type MessageSignature struct {
-	Address   string            `json:"address"`
-	Payload   []byte            `json:"payload,omitempty"`
+	// Blockchain address
+	Address string `json:"address"`
+
+	// Message payload bytes
+	Payload []byte `json:"payload,omitempty"`
+
+	// Cryptographic signature
 	Signature internal.HexBytes `json:"signature,omitempty"`
 }
 
@@ -183,27 +280,52 @@ func OrganizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 	}
 }
 
-// OrganizationSubscriptionInfo is the struct used to provide detailed information
-// regaridng the subscription of an organization.
+// OrganizationSubscriptionInfo provides detailed information about an organization's subscription.
+// swagger:model OrganizationSubscriptionInfo
 type OrganizationSubscriptionInfo struct {
+	// Subscription details
 	SubcriptionDetails SubscriptionDetails `json:"subscriptionDetails"`
-	Usage              SubscriptionUsage   `json:"usage"`
-	Plan               SubscriptionPlan    `json:"plan"`
+
+	// Current usage metrics
+	Usage SubscriptionUsage `json:"usage"`
+
+	// Subscription plan details
+	Plan SubscriptionPlan `json:"plan"`
 }
 
-// SubscriptionPlan is the struct that represents a subscription plan in the
-// API. It is the mirror struct of db.Plan.
+// SubscriptionPlan represents a subscription plan in the API.
+// It is the mirror struct of db.Plan.
+// swagger:model SubscriptionPlan
 type SubscriptionPlan struct {
-	ID              uint64                  `json:"id"`
-	Name            string                  `json:"name"`
-	StripeID        string                  `json:"stripeID"`
-	StripePriceID   string                  `json:"stripePriceID"`
-	StartingPrice   int64                   `json:"startingPrice"`
-	Default         bool                    `json:"default"`
-	Organization    SubscriptionPlanLimits  `json:"organization"`
-	VotingTypes     SubscriptionVotingTypes `json:"votingTypes"`
-	Features        SubscriptionFeatures    `json:"features"`
-	CensusSizeTiers []SubscriptionPlanTier  `json:"censusSizeTiers"`
+	// Unique identifier for the plan
+	ID uint64 `json:"id"`
+
+	// Human-readable name of the plan
+	Name string `json:"name"`
+
+	// Stripe product ID
+	StripeID string `json:"stripeID"`
+
+	// Stripe price ID
+	StripePriceID string `json:"stripePriceID"`
+
+	// Starting price in cents
+	StartingPrice int64 `json:"startingPrice"`
+
+	// Whether this is the default plan
+	Default bool `json:"default"`
+
+	// Organization limits for this plan
+	Organization SubscriptionPlanLimits `json:"organization"`
+
+	// Voting types available in this plan
+	VotingTypes SubscriptionVotingTypes `json:"votingTypes"`
+
+	// Features available in this plan
+	Features SubscriptionFeatures `json:"features"`
+
+	// Census size tiers and pricing
+	CensusSizeTiers []SubscriptionPlanTier `json:"censusSizeTiers"`
 }
 
 func SubscriptionPlanFromDB(plan *db.Plan) SubscriptionPlan {
@@ -231,59 +353,119 @@ func SubscriptionPlanFromDB(plan *db.Plan) SubscriptionPlan {
 	}
 }
 
-// SubscriptionPlanLimits represents the limits of a subscription plan. It is
-// the mirror struct of db.PlanLimits.
+// SubscriptionPlanLimits represents the limits of a subscription plan.
+// It is the mirror struct of db.PlanLimits.
+// swagger:model SubscriptionPlanLimits
 type SubscriptionPlanLimits struct {
-	Members      int  `json:"members"`
-	SubOrgs      int  `json:"subOrgs"`
-	MaxProcesses int  `json:"maxProcesses"`
-	MaxCensus    int  `json:"maxCensus"`
-	MaxDuration  int  `json:"maxDuration"`
-	CustomURL    bool `json:"customURL"`
-	Drafts       int  `json:"drafts"`
+	// Maximum number of members allowed
+	Members int `json:"members"`
+
+	// Maximum number of sub-organizations allowed
+	SubOrgs int `json:"subOrgs"`
+
+	// Maximum number of voting processes allowed
+	MaxProcesses int `json:"maxProcesses"`
+
+	// Maximum number of census allowed
+	MaxCensus int `json:"maxCensus"`
+
+	// Maximum duration of voting processes in days
+	MaxDuration int `json:"maxDuration"`
+
+	// Whether custom URLs are allowed
+	CustomURL bool `json:"customURL"`
+
+	// Maximum number of draft processes allowed
+	Drafts int `json:"drafts"`
 }
 
-// SubscriptionVotingTypes represents the voting types of a subscription plan.
+// SubscriptionVotingTypes represents the voting types available in a subscription plan.
 // It is the mirror struct of db.VotingTypes.
+// swagger:model SubscriptionVotingTypes
 type SubscriptionVotingTypes struct {
-	Single     bool `json:"single"`
-	Multiple   bool `json:"multiple"`
-	Approval   bool `json:"approval"`
+	// Whether single choice voting is available
+	Single bool `json:"single"`
+
+	// Whether multiple choice voting is available
+	Multiple bool `json:"multiple"`
+
+	// Whether approval voting is available
+	Approval bool `json:"approval"`
+
+	// Whether cumulative voting is available
 	Cumulative bool `json:"cumulative"`
-	Ranked     bool `json:"ranked"`
-	Weighted   bool `json:"weighted"`
+
+	// Whether ranked choice voting is available
+	Ranked bool `json:"ranked"`
+
+	// Whether weighted voting is available
+	Weighted bool `json:"weighted"`
 }
 
-// SubscriptionFeatures represents the features of a subscription plan. It is
-// the mirror struct of db.Features.
+// SubscriptionFeatures represents the features available in a subscription plan.
+// It is the mirror struct of db.Features.
+// swagger:model SubscriptionFeatures
 type SubscriptionFeatures struct {
-	Anonymous       bool `json:"anonymous"`
-	Overwrite       bool `json:"overwrite"`
-	LiveResults     bool `json:"liveResults"`
+	// Whether anonymous voting is available
+	Anonymous bool `json:"anonymous"`
+
+	// Whether census overwrite is allowed
+	Overwrite bool `json:"overwrite"`
+
+	// Whether live results are available
+	LiveResults bool `json:"liveResults"`
+
+	// Whether UI personalization is available
 	Personalization bool `json:"personalization"`
-	EmailReminder   bool `json:"emailReminder"`
+
+	// Whether email reminders are available
+	EmailReminder bool `json:"emailReminder"`
+
+	// Whether SMS notifications are available
 	SmsNotification bool `json:"smsNotification"`
-	WhiteLabel      bool `json:"whiteLabel"`
-	LiveStreaming   bool `json:"liveStreaming"`
+
+	// Whether white labeling is available
+	WhiteLabel bool `json:"whiteLabel"`
+
+	// Whether live streaming is available
+	LiveStreaming bool `json:"liveStreaming"`
 }
 
-// SubscriptionPlanTier represents a tier of a subscription plan. It is the
-// mirror struct of db.PlanTier.
+// SubscriptionPlanTier represents a pricing tier of a subscription plan.
+// It is the mirror struct of db.PlanTier.
+// swagger:model SubscriptionPlanTier
 type SubscriptionPlanTier struct {
+	// Price amount in cents
 	Amount int64 `json:"amount"`
-	UpTo   int64 `json:"upTo"`
+
+	// Maximum census size for this tier
+	UpTo int64 `json:"upTo"`
 }
 
-// SubscriptionDetails represents the details of an organization subscription.
+// SubscriptionDetails represents the details of an organization's subscription.
 // It is the mirror struct of db.OrganizationSubscription.
+// swagger:model SubscriptionDetails
 type SubscriptionDetails struct {
-	PlanID          uint64    `json:"planID"`
-	StartDate       time.Time `json:"startDate"`
-	RenewalDate     time.Time `json:"renewalDate"`
+	// ID of the subscription plan
+	PlanID uint64 `json:"planID"`
+
+	// Date when the subscription started
+	StartDate time.Time `json:"startDate"`
+
+	// Date when the subscription will renew
+	RenewalDate time.Time `json:"renewalDate"`
+
+	// Date of the last payment
 	LastPaymentDate time.Time `json:"lastPaymentDate"`
-	Active          bool      `json:"active"`
-	MaxCensusSize   int       `json:"maxCensusSize"`
-	Email           string    `json:"email"`
+
+	// Whether the subscription is active
+	Active bool `json:"active"`
+
+	// Maximum census size allowed
+	MaxCensusSize int `json:"maxCensusSize"`
+
+	// Email associated with the subscription
+	Email string `json:"email"`
 }
 
 func SubscriptionDetailsFromDB(details *db.OrganizationSubscription) SubscriptionDetails {
@@ -301,14 +483,24 @@ func SubscriptionDetailsFromDB(details *db.OrganizationSubscription) Subscriptio
 	}
 }
 
-// SubscriptionUsage represents the usage of an organization subscription. It is
-// the mirror struct of db.OrganizationCounters.
+// SubscriptionUsage represents the usage metrics of an organization's subscription.
+// It is the mirror struct of db.OrganizationCounters.
+// swagger:model SubscriptionUsage
 type SubscriptionUsage struct {
-	SentSMS    int `json:"sentSMS"`
+	// Number of SMS messages sent
+	SentSMS int `json:"sentSMS"`
+
+	// Number of emails sent
 	SentEmails int `json:"sentEmails"`
-	SubOrgs    int `json:"subOrgs"`
-	Members    int `json:"members"`
-	Processes  int `json:"processes"`
+
+	// Number of sub-organizations created
+	SubOrgs int `json:"subOrgs"`
+
+	// Number of members in the organization
+	Members int `json:"members"`
+
+	// Number of voting processes created
+	Processes int `json:"processes"`
 }
 
 func SubscriptionUsageFromDB(usage *db.OrganizationCounters) SubscriptionUsage {
@@ -325,29 +517,52 @@ func SubscriptionUsageFromDB(usage *db.OrganizationCounters) SubscriptionUsage {
 }
 
 // SubscriptionCheckout represents the details required for a subscription checkout process.
+// swagger:model SubscriptionCheckout
 type SubscriptionCheckout struct {
+	// Plan lookup key
 	LookupKey uint64 `json:"lookupKey"`
+
+	// URL to return to after checkout
 	ReturnURL string `json:"returnURL"`
-	Amount    int64  `json:"amount"`
-	Address   string `json:"address"`
-	Locale    string `json:"locale"`
+
+	// Amount in cents
+	Amount int64 `json:"amount"`
+
+	// Organization address
+	Address string `json:"address"`
+
+	// Locale for the checkout page
+	Locale string `json:"locale"`
 }
 
-// ParticipantNotification is the struct that represents a notification for a
-// participant in the API.
+// ParticipantNotification represents a notification sent to a participant.
+// swagger:model ParticipantNotification
 type ParticipantNotification struct {
-	ProcessID    []byte                     `json:"processID"`
+	// ID of the voting process
+	ProcessID []byte `json:"processID"`
+
+	// Notification details
 	Notification notifications.Notification `json:"notification"`
-	Sent         bool                       `json:"sent"`
-	SentAt       time.Time                  `json:"sentAt"`
+
+	// Whether the notification was sent
+	Sent bool `json:"sent"`
+
+	// When the notification was sent
+	SentAt time.Time `json:"sentAt"`
 }
 
-// OrganizationCensus is the struct that represents a census of an organization
-// in the API. It is the mirror struct of db.Census.
+// OrganizationCensus represents a census of an organization.
+// It is the mirror struct of db.Census.
+// swagger:model OrganizationCensus
 type OrganizationCensus struct {
-	ID         string        `json:"censusID"`
-	Type       db.CensusType `json:"type"`
-	OrgAddress string        `json:"orgAddress"`
+	// Unique identifier for the census
+	ID string `json:"censusID"`
+
+	// Type of census
+	Type db.CensusType `json:"type"`
+
+	// Organization address
+	OrgAddress string `json:"orgAddress"`
 }
 
 func OrganizationCensusFromDB(census *db.Census) OrganizationCensus {
@@ -361,21 +576,30 @@ func OrganizationCensusFromDB(census *db.Census) OrganizationCensus {
 	}
 }
 
-// PublishedCensusResponse is the struct that represents a published census.
+// PublishedCensusResponse represents a published census.
+// swagger:model PublishedCensusResponse
 type PublishedCensusResponse struct {
-	URI      string            `json:"uri" bson:"uri"`
-	Root     internal.HexBytes `json:"root" bson:"root"`
+	// URI of the published census
+	URI string `json:"uri" bson:"uri"`
+
+	// Merkle root of the census
+	Root internal.HexBytes `json:"root" bson:"root"`
+
+	// Census ID
 	CensusID internal.HexBytes `json:"censusId" bson:"censusId"`
 }
 
-// OrganizationCensuses is the struct to wrap a list of censuses of an
-// organization in the API.
+// OrganizationCensuses wraps a list of censuses of an organization.
+// swagger:model OrganizationCensuses
 type OrganizationCensuses struct {
+	// List of organization censuses
 	Censuses []OrganizationCensus `json:"censuses"`
 }
 
-// AddParticipantsRequest defines the payload for adding participants to a census
+// AddParticipantsRequest defines the payload for adding participants to a census.
+// swagger:model AddParticipantsRequest
 type AddParticipantsRequest struct {
+	// List of participants to add
 	Participants []OrgParticipant `json:"participants"`
 }
 
@@ -387,15 +611,27 @@ func (r *AddParticipantsRequest) DbOrgParticipants(orgAddress string) []db.OrgPa
 	return participants
 }
 
-// OrgParticipant defines the structure of a participant in the API. It is the
-// mirror struct of db.OrgParticipant.
+// OrgParticipant defines the structure of a participant in the API.
+// It is the mirror struct of db.OrgParticipant.
+// swagger:model OrgParticipant
 type OrgParticipant struct {
-	ParticipantNo string         `json:"participantNo"`
-	Name          string         `json:"name"`
-	Email         string         `json:"email"`
-	Phone         string         `json:"phone"`
-	Password      string         `json:"password"`
-	Other         map[string]any `json:"other"`
+	// Unique participant number
+	ParticipantNo string `json:"participantNo"`
+
+	// Participant's name
+	Name string `json:"name"`
+
+	// Participant's email address
+	Email string `json:"email"`
+
+	// Participant's phone number
+	Phone string `json:"phone"`
+
+	// Participant's password (for authentication)
+	Password string `json:"password"`
+
+	// Additional custom fields
+	Other map[string]any `json:"other"`
 }
 
 func (p *OrgParticipant) ToDb(orgAddress string) db.OrgParticipant {
@@ -410,67 +646,118 @@ func (p *OrgParticipant) ToDb(orgAddress string) db.OrgParticipant {
 	}
 }
 
-// AddParticipantsResponse defines the response for successful participant addition
+// AddParticipantsResponse defines the response for successful participant addition.
+// swagger:model AddParticipantsResponse
 type AddParticipantsResponse struct {
-	ParticipantsNo uint32            `json:"participantsNo"`
-	JobID          internal.HexBytes `json:"jobID"`
+	// Number of participants added
+	ParticipantsNo uint32 `json:"participantsNo"`
+
+	// Job ID for tracking the addition process
+	JobID internal.HexBytes `json:"jobID"`
 }
 
 // Request types for process operations
 
-// CreateProcessRequest defines the payload for creating a new voting process
+// CreateProcessRequest defines the payload for creating a new voting process.
+// swagger:model CreateProcessRequest
 type CreateProcessRequest struct {
+	// Merkle root of the published census
 	PublishedCensusRoot internal.HexBytes `json:"censusRoot"`
-	PublishedCensusURI  string            `json:"censusUri"`
-	CensusID            internal.HexBytes `json:"censusID"`
-	Metadata            []byte            `json:"metadata,omitempty"`
+
+	// URI of the published census
+	PublishedCensusURI string `json:"censusUri"`
+
+	// Census ID
+	CensusID internal.HexBytes `json:"censusID"`
+
+	// Additional metadata for the process
+	// Can be any key-value pairs
+	Metadata []byte `json:"metadata,omitempty"`
 }
 
-// InitiateAuthRequest defines the payload for participant authentication
+// InitiateAuthRequest defines the payload for participant authentication.
+// swagger:model InitiateAuthRequest
 type InitiateAuthRequest struct {
+	// Unique participant number
 	ParticipantNo string `json:"participantNo"`
-	Email         string `json:"email,omitempty"`
-	Phone         string `json:"phone,omitempty"`
-	Password      string `json:"password,omitempty"`
+
+	// Participant's email address (optional)
+	Email string `json:"email,omitempty"`
+
+	// Participant's phone number (optional)
+	Phone string `json:"phone,omitempty"`
+
+	// Participant's password (optional)
+	Password string `json:"password,omitempty"`
 }
 
-// VerifyAuthRequest defines the payload for auth code verification
+// VerifyAuthRequest defines the payload for auth code verification.
+// swagger:model VerifyAuthRequest
 type VerifyAuthRequest struct {
+	// Authentication token
 	Token string `json:"token"`
-	Code  string `json:"code"`
+
+	// Verification code
+	Code string `json:"code"`
 }
 
-// GenerateProofRequest defines the payload for generating voting proof
+// GenerateProofRequest defines the payload for generating voting proof.
+// swagger:model GenerateProofRequest
 type GenerateProofRequest struct {
-	Token          string `json:"token"`
+	// Authentication token
+	Token string `json:"token"`
+
+	// Blinded address for proof generation
 	BlindedAddress []byte `json:"blindedAddress"`
 }
 
-// twofacctor types
+// Two-factor authentication types
 
-// AuthRequest defines the payload for requesting authentication
+// AuthRequest defines the payload for requesting authentication.
+// swagger:model AuthRequest
 type AuthRequest struct {
+	// Authentication token
 	AuthToken *uuid.UUID `json:"authToken,omitempty"`
-	AuthData  []string   `json:"authData,omitempty"` // reserved for the auth handler
+
+	// Authentication data (reserved for the auth handler)
+	AuthData []string `json:"authData,omitempty"`
 }
 
-// SignRequest defines the payload for requesting a signature
+// SignRequest defines the payload for requesting a signature.
+// swagger:model SignRequest
 type SignRequest struct {
-	TokenR     internal.HexBytes `json:"tokenR"`
-	AuthToken  *uuid.UUID        `json:"authToken"`
-	Address    string            `json:"address,omitempty"`
-	Payload    string            `json:"payload,omitempty"`
+	// Token R value
+	TokenR internal.HexBytes `json:"tokenR"`
+
+	// Authentication token
+	AuthToken *uuid.UUID `json:"authToken"`
+
+	// Blockchain address
+	Address string `json:"address,omitempty"`
+
+	// Payload to sign
+	Payload string `json:"payload,omitempty"`
+
+	// Election ID
 	ElectionId internal.HexBytes `json:"electionId,omitempty"`
 }
 
-// CreateProcessBundleRequest defines the payload for creating a new process bundle
+// CreateProcessBundleRequest defines the payload for creating a new process bundle.
+// swagger:model CreateProcessBundleRequest
 type CreateProcessBundleRequest struct {
-	CensusID  string   `json:"censusID"`
+	// Census ID
+	CensusID string `json:"censusID"`
+
+	// List of process IDs to include in the bundle
 	Processes []string `json:"processes"`
 }
 
-// CreateProcessBundleResponse defines the response for a successful process bundle creation
+// CreateProcessBundleResponse defines the response for a successful process bundle creation.
+// swagger:model CreateProcessBundleResponse
 type CreateProcessBundleResponse struct {
-	URI  string            `json:"uri"`
+	// URI of the created process bundle
+	URI string `json:"uri"`
+
+	// Merkle root of the process bundle
 	Root internal.HexBytes `json:"root"`
 }
