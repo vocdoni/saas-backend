@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
@@ -27,14 +28,14 @@ var addParticipantsToCensusWorkers sync.Map
 // Requires Manager/Admin role. Returns census ID on success.
 func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse request
-	censusInfo := &OrganizationCensus{}
+	censusInfo := &apicommon.OrganizationCensus{}
 	if err := json.NewDecoder(r.Body).Decode(&censusInfo); err != nil {
 		errors.ErrMalformedBody.Write(w)
 		return
 	}
 
 	// get the user from the request context
-	user, ok := userFromContext(r.Context())
+	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
@@ -56,7 +57,7 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	httpWriteJSON(w, OrganizationCensus{
+	apicommon.HttpWriteJSON(w, apicommon.OrganizationCensus{
 		ID:         censusID,
 		Type:       census.Type,
 		OrgAddress: census.OrgAddress,
@@ -76,7 +77,7 @@ func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	httpWriteJSON(w, organizationCensusFromDB(census))
+	apicommon.HttpWriteJSON(w, apicommon.OrganizationCensusFromDB(census))
 }
 
 // addParticipantsHandler adds multiple participants to a census.
@@ -88,7 +89,7 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// get the user from the request context
-	user, ok := userFromContext(r.Context())
+	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
@@ -112,7 +113,7 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// decode the participants from the request body
-	participants := &AddParticipantsRequest{}
+	participants := &apicommon.AddParticipantsRequest{}
 	if err := json.NewDecoder(r.Body).Decode(participants); err != nil {
 		log.Error(err)
 		errors.ErrMalformedBody.Withf("missing participants").Write(w)
@@ -120,14 +121,14 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// check if there are participants to add
 	if len(participants.Participants) == 0 {
-		httpWriteJSON(w, &AddParticipantsResponse{ParticipantsNo: 0})
+		apicommon.HttpWriteJSON(w, &apicommon.AddParticipantsResponse{ParticipantsNo: 0})
 		return
 	}
 	// add the org participants to the census in the database
 	progressChan, err := a.db.SetBulkCensusMembership(
 		passwordSalt,
 		censusID.String(),
-		participants.dbOrgParticipants(census.OrgAddress),
+		participants.DbOrgParticipants(census.OrgAddress),
 	)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -148,7 +149,7 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 				"total", p.Total)
 		}
 		// Return the number of participants added
-		httpWriteJSON(w, &AddParticipantsResponse{ParticipantsNo: uint32(lastProgress.Added)})
+		apicommon.HttpWriteJSON(w, &apicommon.AddParticipantsResponse{ParticipantsNo: uint32(lastProgress.Added)})
 		return
 	}
 
@@ -161,7 +162,7 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	httpWriteJSON(w, &AddParticipantsResponse{JobID: jobID})
+	apicommon.HttpWriteJSON(w, &apicommon.AddParticipantsResponse{JobID: jobID})
 }
 
 // addParticipantsJobCheckHandler checks the progress of a job to add participants to a census.
@@ -182,7 +183,7 @@ func (a *API) addParticipantsJobCheckHandler(w http.ResponseWriter, r *http.Requ
 				addParticipantsToCensusWorkers.Delete(jobID.String())
 			}()
 		}
-		httpWriteJSON(w, p)
+		apicommon.HttpWriteJSON(w, p)
 		return
 	}
 
@@ -199,7 +200,7 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// get the user from the request context
-	user, ok := userFromContext(r.Context())
+	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
@@ -239,7 +240,7 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpWriteJSON(w, &PublishedCensusResponse{
+	apicommon.HttpWriteJSON(w, &apicommon.PublishedCensusResponse{
 		URI:      pubCensus.URI,
 		Root:     cspSignerPubKey,
 		CensusID: censusID,

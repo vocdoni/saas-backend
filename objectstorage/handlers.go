@@ -1,4 +1,4 @@
-package api
+package objectstorage
 
 import (
 	"fmt"
@@ -6,18 +6,19 @@ import (
 	"regexp"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/errors"
 )
 
 // isObjectNameRgx is a regular expression to match object names.
 var isObjectNameRgx = regexp.MustCompile(`^([a-zA-Z0-9]+)\.(jpg|jpeg|png)`)
 
-// uploadImageWithFormHandler handles the uploading of images through a multipart form.
+// UploadImageWithFormHandler handles the uploading of images through a multipart form.
 // It expects the request to contain a "file" field with one or more files to be uploaded.
-func (a *API) uploadImageWithFormHandler(w http.ResponseWriter, r *http.Request) {
+func (osc *ObjectStorageClient) UploadImageWithFormHandler(w http.ResponseWriter, r *http.Request) {
 	// check if the user is authenticated
 	// get the user from the request context
-	user, ok := userFromContext(r.Context())
+	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
@@ -50,26 +51,26 @@ func (a *API) uploadImageWithFormHandler(w http.ResponseWriter, r *http.Request)
 			// upload the file using the object storage client
 			// and get the URL of the uploaded file
 			filesFound = true
-			storedFileID, err := a.objectStorage.Put(file, fileHeader.Size, user.Email)
+			storedFileID, err := osc.Put(file, fileHeader.Size, user.Email)
 			if err != nil {
 				errors.ErrInternalStorageError.Withf("%s %v", fileHeader.Filename, err).Write(w)
 				return
 			}
-			returnURLs = append(returnURLs, objectURL(a.serverURL, storedFileID))
+			returnURLs = append(returnURLs, objectURL(osc.ServerURL, storedFileID))
 		}
 	}
 	if !filesFound {
 		errors.ErrStorageInvalidObject.With("no files found").Write(w)
 		return
 	}
-	httpWriteJSON(w, map[string][]string{"urls": returnURLs})
+	apicommon.HttpWriteJSON(w, map[string][]string{"urls": returnURLs})
 }
 
-// downloadImageInlineHandler handles the HTTP request to download an image inline.
+// DownloadImageInlineHandler handles the HTTP request to download an image inline.
 // It retrieves the object ID from the URL parameters, fetches the object from the
 // object storage, and writes the object data to the HTTP response with appropriate
 // headers for inline display.
-func (a *API) downloadImageInlineHandler(w http.ResponseWriter, r *http.Request) {
+func (osc *ObjectStorageClient) DownloadImageInlineHandler(w http.ResponseWriter, r *http.Request) {
 	objectName := chi.URLParam(r, "objectName")
 	if objectName == "" {
 		errors.ErrMalformedURLParam.With("objectName is required").Write(w)
@@ -81,7 +82,7 @@ func (a *API) downloadImageInlineHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	// get the object from the object storage client
-	object, err := a.objectStorage.Get(objectID)
+	object, err := osc.Get(objectID)
 	if err != nil {
 		errors.ErrStorageInvalidObject.Withf("cannot get object %v", err).Write(w)
 		return

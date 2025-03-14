@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/vocdoni/saas-backend/account"
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
@@ -20,13 +21,13 @@ import (
 // If the parent organization is alread a suborganization, an error is returned.
 func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
-	user, ok := userFromContext(r.Context())
+	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	// get the organization info from the request body
-	orgInfo := &OrganizationInfo{}
+	orgInfo := &apicommon.OrganizationInfo{}
 	if err := json.NewDecoder(r.Body).Decode(orgInfo); err != nil {
 		errors.ErrMalformedBody.Write(w)
 		return
@@ -126,7 +127,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	// send the organization back to the user
-	httpWriteJSON(w, organizationFromDB(dbOrg, dbParentOrg))
+	apicommon.HttpWriteJSON(w, apicommon.OrganizationFromDB(dbOrg, dbParentOrg))
 }
 
 // organizationInfoHandler handles the request to get the information of an
@@ -139,7 +140,7 @@ func (a *API) organizationInfoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// send the organization back to the user
-	httpWriteJSON(w, organizationFromDB(org, parent))
+	apicommon.HttpWriteJSON(w, apicommon.OrganizationFromDB(org, parent))
 }
 
 // organizationMembersHandler handles the request to get the members of an
@@ -147,7 +148,7 @@ func (a *API) organizationInfoHandler(w http.ResponseWriter, r *http.Request) {
 // organization with the address provided in the request.
 func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
-	user, ok := userFromContext(r.Context())
+	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
@@ -168,8 +169,8 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrGenericInternalServerError.Withf("could not get organization members: %v", err).Write(w)
 		return
 	}
-	orgMembers := OrganizationMembers{
-		Members: make([]*OrganizationMember, 0, len(members)),
+	orgMembers := apicommon.OrganizationMembers{
+		Members: make([]*apicommon.OrganizationMember, 0, len(members)),
 	}
 	for _, member := range members {
 		var role string
@@ -182,8 +183,8 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 		if role == "" {
 			continue
 		}
-		orgMembers.Members = append(orgMembers.Members, &OrganizationMember{
-			Info: &UserInfo{
+		orgMembers.Members = append(orgMembers.Members, &apicommon.OrganizationMember{
+			Info: &apicommon.UserInfo{
 				Email:     member.Email,
 				FirstName: member.FirstName,
 				LastName:  member.LastName,
@@ -191,7 +192,7 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 			Role: role,
 		})
 	}
-	httpWriteJSON(w, orgMembers)
+	apicommon.HttpWriteJSON(w, orgMembers)
 }
 
 // updateOrganizationHandler handles the request to update the information of an
@@ -200,7 +201,7 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 // not empty.
 func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
-	user, ok := userFromContext(r.Context())
+	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
@@ -216,7 +217,7 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// get the organization info from the request body
-	newOrgInfo := &OrganizationInfo{}
+	newOrgInfo := &apicommon.OrganizationInfo{}
 	if err := json.NewDecoder(r.Body).Decode(newOrgInfo); err != nil {
 		errors.ErrMalformedBody.Write(w)
 		return
@@ -258,7 +259,7 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	httpWriteOK(w)
+	apicommon.HttpWriteOK(w)
 }
 
 // inviteOrganizationMemberHandler handles the request to invite a new admin
@@ -267,7 +268,7 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 // the new member with the invitation code.
 func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
-	user, ok := userFromContext(r.Context())
+	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
@@ -286,7 +287,7 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	// get new admin info from the request body
-	invite := &OrganizationInvite{}
+	invite := &apicommon.OrganizationInvite{}
 	if err := json.NewDecoder(r.Body).Decode(invite); err != nil {
 		errors.ErrMalformedBody.Write(w)
 		return
@@ -343,7 +344,7 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		errors.ErrGenericInternalServerError.Withf("could not update organization: %v", err).Write(w)
 		return
 	}
-	httpWriteOK(w)
+	apicommon.HttpWriteOK(w)
 }
 
 // acceptOrganizationMemberInvitationHandler handles the request to accept an
@@ -360,7 +361,7 @@ func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r
 		return
 	}
 	// get new member info from the request body
-	invitationReq := &AcceptOrganizationInvitation{}
+	invitationReq := &apicommon.AcceptOrganizationInvitation{}
 	if err := json.NewDecoder(r.Body).Decode(invitationReq); err != nil {
 		errors.ErrMalformedBody.Write(w)
 		return
@@ -442,12 +443,12 @@ func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r
 	}
 	// delete the invitation
 	go removeInvitation()
-	httpWriteOK(w)
+	apicommon.HttpWriteOK(w)
 }
 
 func (a *API) pendingOrganizationMembersHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
-	user, ok := userFromContext(r.Context())
+	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
@@ -468,49 +469,49 @@ func (a *API) pendingOrganizationMembersHandler(w http.ResponseWriter, r *http.R
 		errors.ErrGenericInternalServerError.Withf("could not get pending invitations: %v", err).Write(w)
 		return
 	}
-	invitationsList := make([]*OrganizationInvite, 0, len(invitations))
+	invitationsList := make([]*apicommon.OrganizationInvite, 0, len(invitations))
 	for _, invitation := range invitations {
-		invitationsList = append(invitationsList, &OrganizationInvite{
+		invitationsList = append(invitationsList, &apicommon.OrganizationInvite{
 			Email:      invitation.NewUserEmail,
 			Role:       string(invitation.Role),
 			Expiration: invitation.Expiration,
 		})
 	}
-	httpWriteJSON(w, &OrganizationInviteList{Invites: invitationsList})
+	apicommon.HttpWriteJSON(w, &apicommon.OrganizationInviteList{Invites: invitationsList})
 }
 
 // memberRolesHandler returns the available roles that can be assigned to a
 // member of an organization.
 func (a *API) organizationsMembersRolesHandler(w http.ResponseWriter, _ *http.Request) {
-	availableRoles := []*OrganizationRole{}
+	availableRoles := []*apicommon.OrganizationRole{}
 	for role, name := range db.UserRolesNames {
-		availableRoles = append(availableRoles, &OrganizationRole{
+		availableRoles = append(availableRoles, &apicommon.OrganizationRole{
 			Role:            string(role),
 			Name:            name,
 			WritePermission: db.HasWriteAccess(role),
 		})
 	}
-	httpWriteJSON(w, &OrganizationRoleList{Roles: availableRoles})
+	apicommon.HttpWriteJSON(w, &apicommon.OrganizationRoleList{Roles: availableRoles})
 }
 
 // organizationsTypesHandler returns the available organization types that can be
 // assigned to an organization.
 func (a *API) organizationsTypesHandler(w http.ResponseWriter, _ *http.Request) {
-	organizationTypes := []*OrganizationType{}
+	organizationTypes := []*apicommon.OrganizationType{}
 	for orgType, name := range db.OrganizationTypesNames {
-		organizationTypes = append(organizationTypes, &OrganizationType{
+		organizationTypes = append(organizationTypes, &apicommon.OrganizationType{
 			Type: string(orgType),
 			Name: name,
 		})
 	}
-	httpWriteJSON(w, &OrganizationTypeList{Types: organizationTypes})
+	apicommon.HttpWriteJSON(w, &apicommon.OrganizationTypeList{Types: organizationTypes})
 }
 
 // getOrganizationSubscriptionHandler handles the request to get the subscription of an organization.
 // It returns the subscription with its information.
 func (a *API) getOrganizationSubscriptionHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
-	user, ok := userFromContext(r.Context())
+	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
@@ -535,19 +536,19 @@ func (a *API) getOrganizationSubscriptionHandler(w http.ResponseWriter, r *http.
 		errors.ErrGenericInternalServerError.Withf("could not get subscription: %v", err).Write(w)
 		return
 	}
-	info := &OrganizationSubscriptionInfo{
-		SubcriptionDetails: subscriptionDetailsFromDB(&org.Subscription),
-		Usage:              subscriptionUsageFromDB(&org.Counters),
-		Plan:               subscriptionPlanFromDB(plan),
+	info := &apicommon.OrganizationSubscriptionInfo{
+		SubcriptionDetails: apicommon.SubscriptionDetailsFromDB(&org.Subscription),
+		Usage:              apicommon.SubscriptionUsageFromDB(&org.Counters),
+		Plan:               apicommon.SubscriptionPlanFromDB(plan),
 	}
-	httpWriteJSON(w, info)
+	apicommon.HttpWriteJSON(w, info)
 }
 
 // organizationCensusesHandler handles the request to get censuses of an
 // organization.
 func (a *API) organizationCensusesHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
-	user, ok := userFromContext(r.Context())
+	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
@@ -573,11 +574,11 @@ func (a *API) organizationCensusesHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	// decode the censuses from the database
-	result := OrganizationCensuses{
-		Censuses: []OrganizationCensus{},
+	result := apicommon.OrganizationCensuses{
+		Censuses: []apicommon.OrganizationCensus{},
 	}
 	for _, census := range censuses {
-		result.Censuses = append(result.Censuses, organizationCensusFromDB(census))
+		result.Censuses = append(result.Censuses, apicommon.OrganizationCensusFromDB(census))
 	}
-	httpWriteJSON(w, result)
+	apicommon.HttpWriteJSON(w, result)
 }

@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/storage"
 	"github.com/vocdoni/saas-backend/db"
@@ -14,19 +15,7 @@ import (
 	"go.vocdoni.io/dvote/util"
 )
 
-// CreateProcessBundleRequest represents the request body for creating a process bundle.
-// It contains the census ID and an optional array of process IDs to include in the bundle.
-type CreateProcessBundleRequest struct {
-	CensusID  string   `json:"censusId"`
-	Processes []string `json:"processIds"` // Array of process creation requests
-}
-
-// CreateProcessBundleResponse represents the response returned after successfully creating a process bundle.
-// It includes the URI to access the bundle and the census root public key.
-type CreateProcessBundleResponse struct {
-	URI  string `json:"uri"`  // The URI to access the bundle
-	Root string `json:"root"` // The census root public key
-}
+// Using types from apicommon package
 
 // AddProcessesToBundleRequest represents the request body for adding processes to an existing bundle.
 // It contains an array of process IDs to add to the bundle.
@@ -38,7 +27,7 @@ type AddProcessesToBundleRequest struct {
 // Requires Manager/Admin role for the organization that owns the census. Returns 201 on success.
 // The census root will be the same as the account's public key.
 func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request) {
-	var req CreateProcessBundleRequest
+	var req apicommon.CreateProcessBundleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		errors.ErrMalformedBody.Write(w)
 		return
@@ -55,7 +44,7 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Get the user from the request context
-	user, ok := userFromContext(r.Context())
+	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
@@ -90,9 +79,14 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 
-		httpWriteJSON(w, CreateProcessBundleResponse{
+		var rootHex internal.HexBytes
+		if err := rootHex.ParseString(censusRoot.String()); err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+		apicommon.HttpWriteJSON(w, apicommon.CreateProcessBundleResponse{
 			URI:  a.serverURL + "/process/bundle/" + bundleID.Hex(),
-			Root: censusRoot.String(),
+			Root: rootHex,
 		})
 		return
 	}
@@ -126,10 +120,14 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		census.Type == db.CensusTypeMail ||
 		census.Type == db.CensusTypeSMS {
 		cspParticipants := []*storage.UserData{}
-		hbBundleID := new(internal.HexBytes).SetString(bundleID.Hex())
+		var hbBundleID internal.HexBytes
+		if err := hbBundleID.ParseString(bundleID.Hex()); err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
 		for _, p := range orgParticipants {
 			userData, err := csp.NewUserForBundle(internal.HexBytes(p.ParticipantNo),
-				p.HashedPhone, p.HashedEmail, *hbBundleID, processes...)
+				p.HashedPhone, p.HashedEmail, hbBundleID, processes...)
 			if err != nil {
 				errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 				return
@@ -163,9 +161,14 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	httpWriteJSON(w, CreateProcessBundleResponse{
+	var rootHex internal.HexBytes
+	if err := rootHex.ParseString(cspPubKey.String()); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	apicommon.HttpWriteJSON(w, apicommon.CreateProcessBundleResponse{
 		URI:  a.serverURL + "/process/bundle/" + bundleID.Hex(),
-		Root: cspPubKey.String(),
+		Root: rootHex,
 	})
 }
 
@@ -179,7 +182,7 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	bundleID := new(internal.HexBytes)
+	var bundleID internal.HexBytes
 	if err := bundleID.ParseString(bundleIDStr); err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
 		return
@@ -192,14 +195,14 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Get the user from the request context
-	user, ok := userFromContext(r.Context())
+	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
 
 	// Get the existing bundle
-	bundle, err := a.db.ProcessBundle(*bundleID)
+	bundle, err := a.db.ProcessBundle(bundleID)
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrMalformedURLParam.Withf("bundle not found").Write(w)
@@ -210,9 +213,14 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	if len(req.Processes) == 0 {
-		httpWriteJSON(w, CreateProcessBundleResponse{
+		var rootHex internal.HexBytes
+		if err := rootHex.ParseString(bundle.CensusRoot); err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+		apicommon.HttpWriteJSON(w, apicommon.CreateProcessBundleResponse{
 			URI:  "/process/bundle/" + bundleIDStr,
-			Root: bundle.CensusRoot,
+			Root: rootHex,
 		})
 		return
 	}
@@ -265,7 +273,7 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		cspParticipants := []*storage.UserData{}
 		for _, p := range orgParticipants {
 			userData, err := csp.NewUserForBundle(internal.HexBytes(p.ParticipantNo),
-				p.HashedPhone, p.HashedEmail, *bundleID, processesToAdd...)
+				p.HashedPhone, p.HashedEmail, bundleID, processesToAdd...)
 			if err != nil {
 				errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 				return
@@ -279,14 +287,19 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Add processes to the bundle
-	if err := a.db.AddProcessesToBundle(*bundleID, processesToAdd); err != nil {
+	if err := a.db.AddProcessesToBundle(bundleID, processesToAdd); err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 
-	httpWriteJSON(w, CreateProcessBundleResponse{
+	var rootHex internal.HexBytes
+	if err := rootHex.ParseString(bundle.CensusRoot); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	apicommon.HttpWriteJSON(w, apicommon.CreateProcessBundleResponse{
 		URI:  "/process/bundle/" + bundleIDStr,
-		Root: bundle.CensusRoot,
+		Root: rootHex,
 	})
 }
 
@@ -299,13 +312,13 @@ func (a *API) processBundleInfoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bundleID := new(internal.HexBytes)
+	var bundleID internal.HexBytes
 	if err := bundleID.ParseString(bundleIDStr); err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
 		return
 	}
 
-	bundle, err := a.db.ProcessBundle(*bundleID)
+	bundle, err := a.db.ProcessBundle(bundleID)
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrMalformedURLParam.Withf("bundle not found").Write(w)
@@ -315,7 +328,7 @@ func (a *API) processBundleInfoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpWriteJSON(w, bundle)
+	apicommon.HttpWriteJSON(w, bundle)
 }
 
 // processBundleParticipantInfoHandler retrieves process information for a participant in a process bundle.
@@ -327,13 +340,13 @@ func (a *API) processBundleParticipantInfoHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	bundleID := new(internal.HexBytes)
+	var bundleID internal.HexBytes
 	if err := bundleID.ParseString(bundleIDStr); err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
 		return
 	}
 
-	_, err := a.db.ProcessBundle(*bundleID)
+	_, err := a.db.ProcessBundle(bundleID)
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrMalformedURLParam.Withf("bundle not found").Write(w)
@@ -357,5 +370,5 @@ func (a *API) processBundleParticipantInfoHandler(w http.ResponseWriter, r *http
 		}
 	*/
 
-	httpWriteJSON(w, nil)
+	apicommon.HttpWriteJSON(w, nil)
 }

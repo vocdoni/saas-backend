@@ -7,6 +7,7 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 )
@@ -32,7 +33,7 @@ func TestCensus(t *testing.T) {
 
 	// Test 1: Create a census
 	// Test 1.1: Test with valid data
-	censusInfo := &OrganizationCensus{
+	censusInfo := &apicommon.OrganizationCensus{
 		Type:       db.CensusTypeSMSorMail,
 		OrgAddress: orgAddress.String(),
 	}
@@ -40,7 +41,7 @@ func TestCensus(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Parse the response to get the census ID
-	var createdCensus OrganizationCensus
+	var createdCensus apicommon.OrganizationCensus
 	err := parseJSON(resp, &createdCensus)
 	c.Assert(err, qt.IsNil)
 	c.Assert(createdCensus.ID, qt.Not(qt.Equals), "")
@@ -55,7 +56,7 @@ func TestCensus(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
 	// Test 1.3: Test with invalid organization address
-	invalidCensusInfo := &OrganizationCensus{
+	invalidCensusInfo := &apicommon.OrganizationCensus{
 		Type:       db.CensusTypeSMSorMail,
 		OrgAddress: "invalid-address",
 	}
@@ -67,7 +68,7 @@ func TestCensus(t *testing.T) {
 	resp, code = testRequest(t, http.MethodGet, adminToken, nil, censusEndpoint, censusID)
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
-	var retrievedCensus OrganizationCensus
+	var retrievedCensus apicommon.OrganizationCensus
 	err = parseJSON(resp, &retrievedCensus)
 	c.Assert(err, qt.IsNil)
 	c.Assert(retrievedCensus.ID, qt.Equals, censusID)
@@ -80,8 +81,8 @@ func TestCensus(t *testing.T) {
 
 	// Test 3: Add participants to census
 	// Test 3.1: Test with valid data
-	participants := &AddParticipantsRequest{
-		Participants: []OrgParticipant{
+	participants := &apicommon.AddParticipantsRequest{
+		Participants: []apicommon.OrgParticipant{
 			{
 				ParticipantNo: "P001",
 				Name:          "John Doe",
@@ -111,7 +112,7 @@ func TestCensus(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Verify the response contains the number of participants added
-	var addedResponse AddParticipantsResponse
+	var addedResponse apicommon.AddParticipantsResponse
 	err = parseJSON(resp, &addedResponse)
 	c.Assert(err, qt.IsNil)
 	c.Assert(addedResponse.ParticipantsNo, qt.Equals, uint32(2))
@@ -125,15 +126,15 @@ func TestCensus(t *testing.T) {
 	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
 
 	// Test 3.4: Test with empty participants list
-	emptyParticipants := &AddParticipantsRequest{
-		Participants: []OrgParticipant{},
+	emptyParticipants := &apicommon.AddParticipantsRequest{
+		Participants: []apicommon.OrgParticipant{},
 	}
 	_, code = testRequest(t, http.MethodPost, adminToken, emptyParticipants, censusEndpoint, censusID)
 	c.Assert(code, qt.Equals, http.StatusOK)
 
 	// Test 3.5: Test with async=true flag
-	asyncParticipants := &AddParticipantsRequest{
-		Participants: []OrgParticipant{
+	asyncParticipants := &apicommon.AddParticipantsRequest{
+		Participants: []apicommon.OrgParticipant{
 			{
 				ParticipantNo: "P003",
 				Name:          "Bob Johnson",
@@ -164,7 +165,7 @@ func TestCensus(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Verify the response contains a job ID
-	var asyncResponse AddParticipantsResponse
+	var asyncResponse apicommon.AddParticipantsResponse
 	err = parseJSON(resp, &asyncResponse)
 	c.Assert(err, qt.IsNil)
 	c.Assert(asyncResponse.JobID, qt.Not(qt.IsNil))
@@ -213,7 +214,7 @@ func TestCensus(t *testing.T) {
 	resp, code = testRequest(t, http.MethodPost, adminToken, nil, censusEndpoint, censusID, "publish")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
-	var publishedCensus PublishedCensusResponse
+	var publishedCensus apicommon.PublishedCensusResponse
 	err = parseJSON(resp, &publishedCensus)
 	c.Assert(err, qt.IsNil)
 	c.Assert(publishedCensus.URI, qt.Not(qt.Equals), "")

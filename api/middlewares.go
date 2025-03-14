@@ -6,16 +6,10 @@ import (
 
 	"github.com/go-chi/jwtauth/v5"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 )
-
-// MetadataKey is a type to define the key for the metadata stored in the
-// context.
-type MetadataKey string
-
-// userMetadataKey is the key used to store the user in the context.
-const userMetadataKey MetadataKey = "user"
 
 // authenticator is a middleware that authenticates the user and returns a JWT
 // token. If successful, the decodes the user identifier (its email) from the
@@ -50,19 +44,9 @@ func (a *API) authenticator(next http.Handler) http.Handler {
 			return
 		}
 		// add the user to the context
-		ctx := context.WithValue(r.Context(), userMetadataKey, *user)
+		ctx := context.WithValue(r.Context(), apicommon.UserMetadataKey, *user)
 		// token is authenticated, pass it through with the new context with the
 		// user information
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
-}
-
-// userFromContext retrieves the user from the context provided, expected to be
-// the context of a request handled by the authenticator middleware.
-func userFromContext(ctx context.Context) (*db.User, bool) {
-	rawUser, ok := ctx.Value(userMetadataKey).(db.User)
-	if ok {
-		return &rawUser, ok
-	}
-	return nil, false
 }

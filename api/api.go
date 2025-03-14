@@ -76,6 +76,11 @@ func New(conf *APIConfig) *API {
 	if conf == nil {
 		return nil
 	}
+	// Set the ServerURL for the ObjectStorageClient
+	if conf.ObjectStorage != nil {
+		conf.ObjectStorage.ServerURL = conf.ServerURL
+	}
+
 	return &API{
 		db:              conf.DB,
 		auth:            jwtauth.New("HS256", []byte(conf.Secret), nil),
@@ -186,7 +191,7 @@ func (a *API) initRouter() http.Handler {
 		r.Get(subscriptionsPortal, a.createSubscriptionPortalSessionHandler)
 		// upload an image to the object storage
 		log.Infow("new route", "method", "POST", "path", objectStorageUploadTypedEndpoint)
-		r.Post(objectStorageUploadTypedEndpoint, a.uploadImageWithFormHandler)
+		r.Post(objectStorageUploadTypedEndpoint, a.objectStorage.UploadImageWithFormHandler)
 		// CENSUS ROUTES
 		// create census
 		log.Infow("new route", "method", "POST", "path", censusEndpoint)
@@ -261,7 +266,7 @@ func (a *API) initRouter() http.Handler {
 		r.Post(subscriptionsWebhook, a.handleWebhook)
 		// upload an image to the object storage
 		log.Infow("new route", "method", "GET", "path", objectStorageDownloadTypedEndpoint)
-		r.Get(objectStorageDownloadTypedEndpoint, a.downloadImageInlineHandler)
+		r.Get(objectStorageDownloadTypedEndpoint, a.objectStorage.DownloadImageInlineHandler)
 		// get census info
 		log.Infow("new route", "method", "GET", "path", censusIDEndpoint)
 		r.Get(censusIDEndpoint, a.censusInfoHandler)
