@@ -9,8 +9,6 @@ import (
 var (
 	// ErrNoUserID is returned when no user ID is provided.
 	ErrNoUserID = fmt.Errorf("no user ID provided for the user")
-	// ErrNoPhoneOrEmail is returned when no phone or email is provided.
-	ErrNoPhoneOrEmail = fmt.Errorf("no phone or email provided for the user")
 	// ErrNoBundleID is returned when no bundle ID is provided.
 	ErrNoBundleID = fmt.Errorf("no bundle ID provided")
 	// ErrNoProcessID is returned when no process ID is provided.

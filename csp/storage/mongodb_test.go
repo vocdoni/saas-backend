@@ -3,7 +3,6 @@ package storage
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"os"
 	"testing"
 	"time"
@@ -30,8 +29,6 @@ var (
 		},
 	}
 	testUserExtraData = "extraData"
-	testUserPhone     = "+346787878"
-	testUserMail      = "test@user.com"
 	testToken         = internal.HexBytes(uuid.New().String())
 )
 
@@ -104,8 +101,6 @@ func TestUserSetUser(t *testing.T) {
 		ID:        testUserID,
 		Bundles:   map[string]BundleData{},
 		ExtraData: testUserExtraData,
-		Phone:     testUserPhone,
-		Mail:      testUserMail,
 	}
 
 	// user not found
@@ -120,10 +115,8 @@ func TestUserSetUser(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(user.Bundles, qt.HasLen, 0)
 	c.Assert(user.ExtraData, qt.Equals, testUserData.ExtraData)
-	c.Assert(user.Phone, qt.Equals, testUserData.Phone)
-	c.Assert(user.Mail, qt.Equals, testUserData.Mail)
 	// update user phone
-	testUserData.Phone = "+346575757"
+	testUserData.ExtraData = "testNewData"
 	err = testDB.SetUser(testUserData)
 	c.Assert(err, qt.IsNil)
 	// get user
@@ -131,8 +124,6 @@ func TestUserSetUser(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(user.Bundles, qt.HasLen, 0)
 	c.Assert(user.ExtraData, qt.Equals, testUserData.ExtraData)
-	c.Assert(user.Phone, qt.Equals, testUserData.Phone)
-	c.Assert(user.Mail, qt.Equals, testUserData.Mail)
 	// add bundle
 	testUserData.Bundles[testUserBundle.ID.String()] = testUserBundle
 	err = testDB.SetUser(testUserData)
@@ -158,8 +149,6 @@ func TestSetUserBundle(t *testing.T) {
 		ID:        testUserID,
 		Bundles:   map[string]BundleData{},
 		ExtraData: testUserExtraData,
-		Phone:     testUserPhone,
-		Mail:      testUserMail,
 	}), qt.IsNil)
 	user, err := testDB.User(testUserID)
 	c.Assert(err, qt.IsNil)
@@ -188,15 +177,11 @@ func TestSetUsers(t *testing.T) {
 		user, err := testDB.User(users[i].ID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(user.ExtraData, qt.Equals, users[i].ExtraData)
-		c.Assert(user.Phone, qt.Equals, users[i].Phone)
-		c.Assert(user.Mail, qt.Equals, users[i].Mail)
 	}
 
 	// update some users and re-check
 	for i := range 100 {
 		users[i].ExtraData = fmt.Sprintf("extraDataUpdated%d", i)
-		users[i].Phone = fmt.Sprintf("+346%08d", rand.Int63n(10000000))
-		users[i].Mail = fmt.Sprintf("newEmail%d@test.com", i)
 		users[i].Bundles = map[string]BundleData{
 			testUserBundle.ID.String(): testUserBundle,
 		}
@@ -208,8 +193,6 @@ func TestSetUsers(t *testing.T) {
 		user, err := testDB.User(users[i].ID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(user.ExtraData, qt.Equals, users[i].ExtraData)
-		c.Assert(user.Phone, qt.Equals, users[i].Phone)
-		c.Assert(user.Mail, qt.Equals, users[i].Mail)
 		if i < 100 {
 			c.Assert(user.Bundles, qt.HasLen, 1)
 			c.Assert(user.Bundles[testUserBundle.ID.String()].ID, qt.DeepEquals, testUserBundle.ID)
@@ -247,8 +230,6 @@ func TestSetUsers(t *testing.T) {
 		user, err := testDB.User(users[i].ID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(user.ExtraData, qt.Equals, users[i].ExtraData)
-		c.Assert(user.Phone, qt.Equals, users[i].Phone)
-		c.Assert(user.Mail, qt.Equals, users[i].Mail)
 		if i < 100 {
 			c.Assert(user.Bundles, qt.HasLen, 2)
 			c.Assert(user.Bundles[testUserBundle.ID.String()].ID, qt.DeepEquals, testUserBundle.ID)
@@ -276,8 +257,6 @@ func testUsersBulk(n int) []*UserData {
 			ID:        fmt.Appendf(nil, "user%dID", i),
 			Bundles:   map[string]BundleData{},
 			ExtraData: fmt.Sprintf("extraData%d", i),
-			Phone:     fmt.Sprintf("+346%08d", rand.Int63n(10000000)),
-			Mail:      fmt.Sprintf("user%d@test.com", i),
 		}
 	}
 	return users
@@ -297,8 +276,6 @@ func TestUserAuthToken(t *testing.T) {
 		ID:        testUserID,
 		Bundles:   map[string]BundleData{},
 		ExtraData: testUserExtraData,
-		Phone:     testUserPhone,
-		Mail:      testUserMail,
 	}), qt.IsNil)
 	// try to add the token to the index of a non-existing bundle
 	err = testDB.IndexAuthToken(testUserID, testUserBundle.ID, testToken)

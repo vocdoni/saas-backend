@@ -53,12 +53,12 @@ func setupTestPrerequisites1(c *qt.C, db *MongoStorage) *PublishedCensus {
 
 func TestProcess(t *testing.T) {
 	c := qt.New(t)
-	db := startTestDB(t)
+	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
 
 	t.Run("TestSetAndGetProcess", func(t *testing.T) {
-		c.Assert(db.Reset(), qt.IsNil)
+		c.Assert(testDB.Reset(), qt.IsNil)
 		// test not found process
-		process, err := db.Process(testProcessID)
+		process, err := testDB.Process(testProcessID)
 		c.Assert(process, qt.IsNil)
 		c.Assert(err, qt.Not(qt.IsNil))
 
@@ -76,12 +76,12 @@ func TestProcess(t *testing.T) {
 				},
 			},
 		}
-		err = db.SetProcess(nonExistentProcess)
+		err = testDB.SetProcess(nonExistentProcess)
 		c.Assert(err, qt.Not(qt.IsNil))
 		c.Assert(err.Error(), qt.Contains, "failed to get organization")
 
 		// Setup prerequisites
-		publishedCensus := setupTestPrerequisites1(c, db)
+		publishedCensus := setupTestPrerequisites1(c, testDB)
 
 		// create a new process
 		process = &Process{
@@ -92,11 +92,11 @@ func TestProcess(t *testing.T) {
 		}
 
 		// test setting the process
-		err = db.SetProcess(process)
+		err = testDB.SetProcess(process)
 		c.Assert(err, qt.IsNil)
 
 		// test retrieving the process
-		retrieved, err := db.Process(testProcessID)
+		retrieved, err := testDB.Process(testProcessID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(retrieved, qt.Not(qt.IsNil))
 		c.Assert(retrieved.ID, qt.DeepEquals, testProcessID)
@@ -121,26 +121,26 @@ func TestProcess(t *testing.T) {
 			OrgAddress:      testOrgAddress,
 			PublishedCensus: newPublishedCensus,
 		}
-		err = db.SetProcess(newProcess)
+		err = testDB.SetProcess(newProcess)
 		c.Assert(err, qt.IsNil)
 
 		// Verify the published census was created
-		createdPublishedCensus, err := db.PublishedCensus("new-root", "new-uri", publishedCensus.Census.ID.Hex())
+		createdPublishedCensus, err := testDB.PublishedCensus("new-root", "new-uri", publishedCensus.Census.ID.Hex())
 		c.Assert(err, qt.IsNil)
 		c.Assert(createdPublishedCensus, qt.Not(qt.IsNil))
 	})
 
 	t.Run("TestSetProcessValidation", func(t *testing.T) {
-		c.Assert(db.Reset(), qt.IsNil)
+		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
-		publishedCensus := setupTestPrerequisites1(c, db)
+		publishedCensus := setupTestPrerequisites1(c, testDB)
 
 		// test with empty ID
 		invalidProcess := &Process{
 			OrgAddress:      testOrgAddress,
 			PublishedCensus: *publishedCensus,
 		}
-		err := db.SetProcess(invalidProcess)
+		err := testDB.SetProcess(invalidProcess)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// test with empty OrgAddress
@@ -148,7 +148,7 @@ func TestProcess(t *testing.T) {
 			ID:              testProcessID,
 			PublishedCensus: *publishedCensus,
 		}
-		err = db.SetProcess(invalidProcess)
+		err = testDB.SetProcess(invalidProcess)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// test with empty PublishedCensus Root
@@ -162,14 +162,14 @@ func TestProcess(t *testing.T) {
 				},
 			},
 		}
-		err = db.SetProcess(invalidProcess)
+		err = testDB.SetProcess(invalidProcess)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 	})
 
 	t.Run("TestDeleteProcess", func(t *testing.T) {
-		c.Assert(db.Reset(), qt.IsNil)
+		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
-		publishedCensus := setupTestPrerequisites1(c, db)
+		publishedCensus := setupTestPrerequisites1(c, testDB)
 
 		// create a process
 		process := &Process{
@@ -177,21 +177,21 @@ func TestProcess(t *testing.T) {
 			OrgAddress:      testOrgAddress,
 			PublishedCensus: *publishedCensus,
 		}
-		err := db.SetProcess(process)
+		err := testDB.SetProcess(process)
 		c.Assert(err, qt.IsNil)
 
 		// test deleting the process
-		err = db.DelProcess(testProcessID)
+		err = testDB.DelProcess(testProcessID)
 		c.Assert(err, qt.IsNil)
 
 		// verify it's deleted
-		retrieved, err := db.Process(testProcessID)
+		retrieved, err := testDB.Process(testProcessID)
 		c.Assert(retrieved, qt.IsNil)
 		c.Assert(err, qt.Not(qt.IsNil))
 
 		// test delete with empty ID
 		var emptyID internal.HexBytes
-		err = db.DelProcess(emptyID)
+		err = testDB.DelProcess(emptyID)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 	})
 }

@@ -16,8 +16,6 @@ type UserData struct {
 	ID        internal.HexBytes     `json:"userID,omitempty" bson:"_id"`
 	Bundles   map[string]BundleData `json:"bundles,omitempty" bson:"bundles"`
 	ExtraData string                `json:"extraData,omitempty" bson:"extradata"`
-	Phone     string                `json:"phone,omitempty" bson:"phone"`
-	Mail      string                `json:"mail,omitempty" bson:"mail"`
 }
 
 // BundleData represents a bundle of processes. It includes the bundle ID, the

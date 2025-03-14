@@ -2,10 +2,14 @@ package db
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"testing"
 
 	"github.com/vocdoni/saas-backend/test"
 )
+
+var testDB *MongoStorage
 
 // Common test constants
 const (
@@ -26,36 +30,39 @@ const (
 	testRoot             = "test_root"
 )
 
-// startTestDB starts a MongoDB container for testing and returns a new MongoStorage instance.
-func startTestDB(t *testing.T) *MongoStorage {
+func TestMain(m *testing.M) {
 	ctx := context.Background()
 	// start a MongoDB container for testing
 	dbContainer, err := test.StartMongoContainer(ctx)
 	if err != nil {
-		t.Fatalf("failed to start MongoDB container: %v", err)
+		panic(fmt.Sprintf("failed to start MongoDB container: %v", err))
 	}
-
-	// ensure the container is stopped when the test finishes
-	t.Cleanup(func() { _ = dbContainer.Terminate(ctx) })
 
 	// get the MongoDB connection string
 	mongoURI, err := dbContainer.Endpoint(ctx, "mongodb")
 	if err != nil {
-		t.Fatalf("failed to get MongoDB endpoint: %v", err)
+		panic(fmt.Sprintf("failed to get MongoDB endpoint: %v", err))
 	}
 
 	plans, err := ReadPlanJSON()
 	if err != nil {
-		t.Fatalf("failed to read plan JSON: %v", err)
+		panic(fmt.Sprintf("failed to read plan JSON: %v", err))
 	}
 
-	testDB, err := New(mongoURI, test.RandomDatabaseName(), plans)
+	testDB, err = New(mongoURI, test.RandomDatabaseName(), plans)
 	if err != nil {
-		t.Fatalf("failed to create new MongoDB connection: %v", err)
+		panic(fmt.Sprintf("failed to create new MongoDB connection: %v", err))
 	}
 
-	// ensure the database is closed when the test finishes
-	t.Cleanup(func() { testDB.Close() })
+	code := m.Run()
 
-	return testDB
+	// close the database connection
+	testDB.Close()
+
+	// stop the MongoDB container
+	if err := dbContainer.Terminate(ctx); err != nil {
+		panic(fmt.Sprintf("failed to stop MongoDB container: %v", err))
+	}
+
+	os.Exit(code)
 }

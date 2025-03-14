@@ -10,7 +10,7 @@ import (
 
 func TestPublishedCensus(t *testing.T) {
 	c := qt.New(t)
-	db := startTestDB(t)
+	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
 
 	// Helper function to create a test census
 	setupTestCensus := func(t *testing.T) (*Census, string) {
@@ -20,7 +20,7 @@ func TestPublishedCensus(t *testing.T) {
 			Active:    true,
 			CreatedAt: time.Now(),
 		}
-		err := db.SetOrganization(org)
+		err := testDB.SetOrganization(org)
 		if err != nil {
 			t.Fatalf("failed to set organization: %v", err)
 		}
@@ -34,7 +34,7 @@ func TestPublishedCensus(t *testing.T) {
 		}
 
 		// Set census
-		censusID, err := db.SetCensus(testCensus)
+		censusID, err := testDB.SetCensus(testCensus)
 		if err != nil {
 			t.Fatalf("failed to set census: %v", err)
 		}
@@ -48,9 +48,9 @@ func TestPublishedCensus(t *testing.T) {
 	}
 
 	t.Run("GetPublishedCensus", func(t *testing.T) {
-		c.Assert(db.Reset(), qt.IsNil)
+		c.Assert(testDB.Reset(), qt.IsNil)
 		// Test not found census
-		census, err := db.PublishedCensus(testRoot, testURI, primitive.NewObjectID().Hex())
+		census, err := testDB.PublishedCensus(testRoot, testURI, primitive.NewObjectID().Hex())
 		c.Assert(census, qt.IsNil)
 		c.Assert(err, qt.Equals, ErrNotFound)
 
@@ -65,12 +65,12 @@ func TestPublishedCensus(t *testing.T) {
 		}
 
 		// Test setting the published census
-		err = db.SetPublishedCensus(publishedCensus)
+		err = testDB.SetPublishedCensus(publishedCensus)
 		c.Assert(err, qt.IsNil)
 		c.Assert(publishedCensus.CreatedAt.IsZero(), qt.IsFalse)
 
 		// Test retrieving the published census
-		retrieved, err := db.PublishedCensus(testRoot, testURI, publishedCensus.Census.ID.Hex())
+		retrieved, err := testDB.PublishedCensus(testRoot, testURI, publishedCensus.Census.ID.Hex())
 		c.Assert(err, qt.IsNil)
 		c.Assert(retrieved, qt.Not(qt.IsNil))
 		c.Assert(retrieved.URI, qt.Equals, testURI)
@@ -82,17 +82,17 @@ func TestPublishedCensus(t *testing.T) {
 
 		// Test updating an existing published census
 		time.Sleep(time.Millisecond) // Ensure different UpdatedAt timestamp
-		err = db.SetPublishedCensus(publishedCensus)
+		err = testDB.SetPublishedCensus(publishedCensus)
 		c.Assert(err, qt.IsNil)
 
 		// Verify the published census was updated correctly
-		updatedCensus, err := db.PublishedCensus(testRoot, testURI, publishedCensus.Census.ID.Hex())
+		updatedCensus, err := testDB.PublishedCensus(testRoot, testURI, publishedCensus.Census.ID.Hex())
 		c.Assert(err, qt.IsNil)
 		c.Assert(updatedCensus.CreatedAt, qt.Equals, retrieved.CreatedAt)
 	})
 
 	t.Run("SetPublishedCensusInvalid", func(t *testing.T) {
-		c.Assert(db.Reset(), qt.IsNil)
+		c.Assert(testDB.Reset(), qt.IsNil)
 		// Test with empty URI
 		invalidCensus := &PublishedCensus{
 			Root: testRoot,
@@ -100,7 +100,7 @@ func TestPublishedCensus(t *testing.T) {
 				ID: primitive.NewObjectID(),
 			},
 		}
-		err := db.SetPublishedCensus(invalidCensus)
+		err := testDB.SetPublishedCensus(invalidCensus)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test with empty Root
@@ -110,7 +110,7 @@ func TestPublishedCensus(t *testing.T) {
 				ID: primitive.NewObjectID(),
 			},
 		}
-		err = db.SetPublishedCensus(invalidCensus)
+		err = testDB.SetPublishedCensus(invalidCensus)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test with nil Census ID
@@ -121,7 +121,7 @@ func TestPublishedCensus(t *testing.T) {
 				ID: primitive.NilObjectID,
 			},
 		}
-		err = db.SetPublishedCensus(invalidCensus)
+		err = testDB.SetPublishedCensus(invalidCensus)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test with non-existent Census ID
@@ -132,12 +132,12 @@ func TestPublishedCensus(t *testing.T) {
 				ID: primitive.NewObjectID(),
 			},
 		}
-		err = db.SetPublishedCensus(invalidCensus)
+		err = testDB.SetPublishedCensus(invalidCensus)
 		c.Assert(err, qt.Not(qt.IsNil))
 	})
 
 	t.Run("DelPublishedCensus", func(t *testing.T) {
-		c.Assert(db.Reset(), qt.IsNil)
+		c.Assert(testDB.Reset(), qt.IsNil)
 		// Create test census
 		testCensus, _ := setupTestCensus(t)
 
@@ -147,43 +147,43 @@ func TestPublishedCensus(t *testing.T) {
 			Root:   testRoot,
 			Census: *testCensus,
 		}
-		err := db.SetPublishedCensus(publishedCensus)
+		err := testDB.SetPublishedCensus(publishedCensus)
 		c.Assert(err, qt.IsNil)
 
 		// Test deleting with invalid parameters
-		err = db.DelPublishedCensus("", testURI)
+		err = testDB.DelPublishedCensus("", testURI)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
-		err = db.DelPublishedCensus(testRoot, "")
+		err = testDB.DelPublishedCensus(testRoot, "")
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test deleting the published census
-		err = db.DelPublishedCensus(testRoot, testURI)
+		err = testDB.DelPublishedCensus(testRoot, testURI)
 		c.Assert(err, qt.IsNil)
 
 		// Verify it's deleted
-		retrieved, err := db.PublishedCensus(testRoot, testURI, publishedCensus.Census.ID.Hex())
+		retrieved, err := testDB.PublishedCensus(testRoot, testURI, publishedCensus.Census.ID.Hex())
 		c.Assert(retrieved, qt.IsNil)
 		c.Assert(err, qt.Equals, ErrNotFound)
 
 		// Test deleting non-existent published census (should not error)
-		err = db.DelPublishedCensus(testRoot, testURI)
+		err = testDB.DelPublishedCensus(testRoot, testURI)
 		c.Assert(err, qt.IsNil)
 	})
 
 	t.Run("PublishedCensusInvalid", func(t *testing.T) {
-		c.Assert(db.Reset(), qt.IsNil)
+		c.Assert(testDB.Reset(), qt.IsNil)
 		// Test get with invalid parameters
-		retrieved, err := db.PublishedCensus("nil", "nil", "nil")
+		retrieved, err := testDB.PublishedCensus("nil", "nil", "nil")
 		c.Assert(retrieved, qt.IsNil)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
-		retrieved, err = db.PublishedCensus(testRoot, "", "")
+		retrieved, err = testDB.PublishedCensus(testRoot, "", "")
 		c.Assert(retrieved, qt.IsNil)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test getting non-existent published census
-		retrieved, err = db.PublishedCensus(testRoot, testURI, primitive.NewObjectID().Hex())
+		retrieved, err = testDB.PublishedCensus(testRoot, testURI, primitive.NewObjectID().Hex())
 		c.Assert(retrieved, qt.IsNil)
 		c.Assert(err, qt.Equals, ErrNotFound)
 	})

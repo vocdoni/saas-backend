@@ -102,22 +102,17 @@ func New(ctx context.Context, config *CSPConfig) (*CSP, error) {
 // It returns the user data created or an error if the user ID is not provided,
 // if the phone or email is not provided, if the bundle ID is not provided, if
 // the process ID is not provided or if there is no process ID.
-func NewUserForBundle(uID internal.HexBytes, phone, mail string,
-	bID internal.HexBytes, eIDs ...internal.HexBytes,
-) (*storage.UserData, error) {
+func NewUserForBundle(uID internal.HexBytes, bID internal.HexBytes, eIDs ...internal.HexBytes) (
+	*storage.UserData, error,
+) {
 	if len(uID) == 0 {
 		return nil, ErrNoUserID
-	}
-	if len(phone) == 0 && len(mail) == 0 {
-		return nil, ErrNoPhoneOrEmail
 	}
 	if len(eIDs) == 0 {
 		return nil, ErrNoProcessID
 	}
 	user := &storage.UserData{
 		ID:      uID,
-		Phone:   phone,
-		Mail:    mail,
 		Bundles: make(map[string]storage.BundleData),
 	}
 	user.Bundles[bID.String()] = storage.BundleData{

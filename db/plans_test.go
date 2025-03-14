@@ -8,24 +8,24 @@ import (
 
 func TestPlans(t *testing.T) {
 	c := qt.New(t)
-	db := startTestDB(t)
+	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
 	t.Run("SetPlan", func(t *testing.T) {
-		c.Assert(db.Reset(), qt.IsNil)
+		c.Assert(testDB.Reset(), qt.IsNil)
 
 		plan := &Plan{
 			Name:     "Test Plan",
 			StripeID: "stripeID",
 		}
-		_, err := db.SetPlan(plan)
+		_, err := testDB.SetPlan(plan)
 		c.Assert(err, qt.IsNil)
 	})
 
 	t.Run("GetPlan", func(t *testing.T) {
-		c.Assert(db.Reset(), qt.IsNil)
+		c.Assert(testDB.Reset(), qt.IsNil)
 
 		planID := uint64(123)
 		// Test not found plan
-		plan, err := db.Plan(planID)
+		plan, err := testDB.Plan(planID)
 		c.Assert(err, qt.Equals, ErrNotFound)
 		c.Assert(plan, qt.IsNil)
 
@@ -33,32 +33,32 @@ func TestPlans(t *testing.T) {
 			Name:     "Test Plan",
 			StripeID: "stripeID",
 		}
-		planID, err = db.SetPlan(plan)
+		planID, err = testDB.SetPlan(plan)
 		c.Assert(err, qt.IsNil)
 
 		// Test found plan
-		planDB, err := db.Plan(planID)
+		planDB, err := testDB.Plan(planID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(planDB, qt.Not(qt.IsNil))
 		c.Assert(planDB.ID, qt.Equals, plan.ID)
 	})
 
 	t.Run("DeletePlan", func(t *testing.T) {
-		c.Assert(db.Reset(), qt.IsNil)
+		c.Assert(testDB.Reset(), qt.IsNil)
 
 		// Create a new plan and delete it
 		plan := &Plan{
 			Name:     "Test Plan",
 			StripeID: "stripeID",
 		}
-		id, err := db.SetPlan(plan)
+		id, err := testDB.SetPlan(plan)
 		c.Assert(err, qt.IsNil)
 
-		err = db.DelPlan(plan)
+		err = testDB.DelPlan(plan)
 		c.Assert(err, qt.IsNil)
 
 		// Test not found plan
-		_, err = db.Plan(id)
+		_, err = testDB.Plan(id)
 		c.Assert(err, qt.Equals, ErrNotFound)
 	})
 }
