@@ -126,8 +126,7 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		for _, p := range orgParticipants {
-			userData, err := csp.NewUserForBundle(internal.HexBytes(p.ParticipantNo),
-				p.HashedPhone, p.HashedEmail, hbBundleID, processes...)
+			userData, err := csp.NewUserForBundle(internal.HexBytes(p.ParticipantNo), hbBundleID, processes...)
 			if err != nil {
 				errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 				return
@@ -272,8 +271,7 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		census.Type == db.CensusTypeSMS {
 		cspParticipants := []*storage.UserData{}
 		for _, p := range orgParticipants {
-			userData, err := csp.NewUserForBundle(internal.HexBytes(p.ParticipantNo),
-				p.HashedPhone, p.HashedEmail, bundleID, processesToAdd...)
+			userData, err := csp.NewUserForBundle(internal.HexBytes(p.ParticipantNo), bundleID, processesToAdd...)
 			if err != nil {
 				errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 				return
