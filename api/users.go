@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
@@ -16,7 +17,7 @@ import (
 
 // registerHandler handles the register request. It creates a new user in the database.
 func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
-	userInfo := &UserInfo{}
+	userInfo := &apicommon.UserInfo{}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		errors.ErrMalformedBody.Write(w)
@@ -91,7 +92,7 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// send the token back to the user
-	httpWriteOK(w)
+	apicommon.HttpWriteOK(w)
 }
 
 // verifyUserAccountHandler handles the request to verify the user account. It
@@ -104,7 +105,7 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 // code is incorrect, an error is returned and the number of attempts to verify
 // it is increased. If any other error occurs, a generic error is returned.
 func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
-	verification := &UserVerification{}
+	verification := &apicommon.UserVerification{}
 	if err := json.NewDecoder(r.Body).Decode(verification); err != nil {
 		errors.ErrMalformedBody.Write(w)
 		return
@@ -163,7 +164,7 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// send the token back to the user
-	httpWriteJSON(w, res)
+	apicommon.HttpWriteJSON(w, res)
 }
 
 // userVerificationCodeInfoHandler handles the request to get the verification
@@ -209,7 +210,7 @@ func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	// return the verification code information
-	httpWriteJSON(w, UserVerification{
+	apicommon.HttpWriteJSON(w, apicommon.UserVerification{
 		Email:      user.Email,
 		Expiration: code.Expiration,
 		Valid:      code.Expiration.After(time.Now()),
@@ -223,7 +224,7 @@ func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Req
 // the verification code is found and expired, a new verification code is sent
 // to the user email. If any other error occurs, a generic error is returned.
 func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.Request) {
-	verification := &UserVerification{}
+	verification := &apicommon.UserVerification{}
 	if err := json.NewDecoder(r.Body).Decode(verification); err != nil {
 		errors.ErrMalformedBody.Write(w)
 		return
@@ -281,19 +282,19 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
-	httpWriteOK(w)
+	apicommon.HttpWriteOK(w)
 }
 
 // userInfoHandler handles the request to get the information of the current
 // authenticated user.
 func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := userFromContext(r.Context())
+	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	// get the user organizations information from the database if any
-	userOrgs := make([]*UserOrganization, 0)
+	userOrgs := make([]*apicommon.UserOrganization, 0)
 	for _, orgInfo := range user.Organizations {
 		org, parent, err := a.db.Organization(orgInfo.Address, true)
 		if err != nil {
@@ -303,13 +304,13 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 			errors.ErrGenericInternalServerError.Write(w)
 			return
 		}
-		userOrgs = append(userOrgs, &UserOrganization{
+		userOrgs = append(userOrgs, &apicommon.UserOrganization{
 			Role:         string(orgInfo.Role),
-			Organization: organizationFromDB(org, parent),
+			Organization: apicommon.OrganizationFromDB(org, parent),
 		})
 	}
 	// return the user information
-	httpWriteJSON(w, UserInfo{
+	apicommon.HttpWriteJSON(w, apicommon.UserInfo{
 		Email:         user.Email,
 		FirstName:     user.FirstName,
 		LastName:      user.LastName,
@@ -321,12 +322,12 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 // updateUserInfoHandler handles the request to update the information of the
 // current authenticated user.
 func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := userFromContext(r.Context())
+	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
-	userInfo := &UserInfo{}
+	userInfo := &apicommon.UserInfo{}
 	if err := json.NewDecoder(r.Body).Decode(userInfo); err != nil {
 		errors.ErrMalformedBody.Write(w)
 		return
@@ -389,19 +390,19 @@ func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
-	httpWriteJSON(w, res)
+	apicommon.HttpWriteJSON(w, res)
 }
 
 // updateUserPasswordHandler handles the request to update the password of the
 // current authenticated user. It requires the old password to be provided to
 // compare it with the stored one before updating the password to the new one.
 func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := userFromContext(r.Context())
+	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
-	userPasswords := &UserPasswordUpdate{}
+	userPasswords := &apicommon.UserPasswordUpdate{}
 	if err := json.NewDecoder(r.Body).Decode(userPasswords); err != nil {
 		errors.ErrMalformedBody.Write(w)
 		return
@@ -424,7 +425,7 @@ func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) 
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
-	httpWriteOK(w)
+	apicommon.HttpWriteOK(w)
 }
 
 // recoveryUserPasswordHandler handles the request to recover the password of a
@@ -433,7 +434,7 @@ func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) 
 // is incorrect, an error is returned.
 func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user info from the request body
-	userInfo := &UserInfo{}
+	userInfo := &apicommon.UserInfo{}
 	if err := json.NewDecoder(r.Body).Decode(userInfo); err != nil {
 		errors.ErrMalformedBody.Write(w)
 		return
@@ -444,7 +445,7 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 		if err == db.ErrNotFound {
 			// do not return an error if the user is not found to avoid
 			// information leakage
-			httpWriteOK(w)
+			apicommon.HttpWriteOK(w)
 			return
 		}
 		errors.ErrGenericInternalServerError.Write(w)
@@ -472,7 +473,7 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	httpWriteOK(w)
+	apicommon.HttpWriteOK(w)
 }
 
 // resetUserPasswordHandler handles the request to reset the password of a user.
@@ -480,7 +481,7 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 // provided. If the verification code is correct, the user password is updated
 // to the new one. If the verification code is incorrect, an error is returned.
 func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
-	userPasswords := &UserPasswordReset{}
+	userPasswords := &apicommon.UserPasswordReset{}
 	if err := json.NewDecoder(r.Body).Decode(userPasswords); err != nil {
 		errors.ErrMalformedBody.Write(w)
 		return
@@ -508,5 +509,5 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
-	httpWriteOK(w)
+	apicommon.HttpWriteOK(w)
 }

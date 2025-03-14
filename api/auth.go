@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
@@ -12,7 +13,7 @@ import (
 // refresh handles the refresh request. It returns a new JWT token.
 func (a *API) refreshTokenHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
-	user, ok := userFromContext(r.Context())
+	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
@@ -24,13 +25,13 @@ func (a *API) refreshTokenHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// send the token back to the user
-	httpWriteJSON(w, res)
+	apicommon.HttpWriteJSON(w, res)
 }
 
 // login handles the login request. It returns a JWT token if the login is successful.
 func (a *API) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 	// het the user info from the request body
-	loginInfo := &UserInfo{}
+	loginInfo := &apicommon.UserInfo{}
 	if err := json.NewDecoder(r.Body).Decode(loginInfo); err != nil {
 		errors.ErrMalformedBody.Write(w)
 		return
@@ -62,14 +63,14 @@ func (a *API) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// send the token back to the user
-	httpWriteJSON(w, res)
+	apicommon.HttpWriteJSON(w, res)
 }
 
 // writableOrganizationAddressesHandler returns the list of addresses of the
 // organizations where the user has write access.
 func (a *API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
-	user, ok := userFromContext(r.Context())
+	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
@@ -80,7 +81,7 @@ func (a *API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *htt
 		return
 	}
 	// get the user organizations information from the database if any
-	userAddresses := &OrganizationAddresses{
+	userAddresses := &apicommon.OrganizationAddresses{
 		Addresses: []string{},
 	}
 	// get the addresses of the organizations where the user has write access
@@ -92,5 +93,5 @@ func (a *API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *htt
 		}
 	}
 	// write the response back to the user
-	httpWriteJSON(w, userAddresses)
+	apicommon.HttpWriteJSON(w, userAddresses)
 }

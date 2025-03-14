@@ -10,15 +10,20 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 )
 
-var verificationCodeRgx, passwordResetRgx *regexp.Regexp
+// These regexes are used to extract verification codes from emails
+var (
+	verificationCodeRgx *regexp.Regexp
+	passwordResetRgx    *regexp.Regexp
+)
 
 func init() {
 	// create a regex to find the verification code in the email
-	codeRgx := fmt.Sprintf(`(.{%d})`, VerificationCodeLength*2)
+	codeRgx := fmt.Sprintf(`(.{%d})`, apicommon.VerificationCodeLength*2)
 	// load the email templates
 	if err := mailtemplates.Load(); err != nil {
 		panic(err)
@@ -64,7 +69,7 @@ func TestRegisterHandler(t *testing.T) {
 	c.Assert(string(resp), qt.Contains, "40004")
 
 	// Test valid registration
-	userInfo := &UserInfo{
+	userInfo := &apicommon.UserInfo{
 		Email:     "valid@test.com",
 		Password:  "password",
 		FirstName: "first",
@@ -124,7 +129,7 @@ func TestVerifyAccountHandler(t *testing.T) {
 	c := qt.New(t)
 
 	// Register a user with short expiration time
-	VerificationCodeExpiration = 5 * time.Second
+	apicommon.VerificationCodeExpiration = 5 * time.Second
 	token := testCreateUser(t, testPass)
 
 	// get the user to verify the token works
@@ -137,7 +142,7 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	c := qt.New(t)
 
 	// Register a user
-	userInfo := &UserInfo{
+	userInfo := &apicommon.UserInfo{
 		Email:     testEmail,
 		Password:  testPass,
 		FirstName: testFirstName,
@@ -155,7 +160,7 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	c.Assert(len(verifyMailCode) > 1, qt.IsTrue)
 
 	// Verify the user
-	verification := &UserVerification{
+	verification := &apicommon.UserVerification{
 		Email: testEmail,
 		Code:  verifyMailCode[1],
 	}
@@ -163,7 +168,7 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK)
 
 	// Request password recovery
-	recoverInfo := &UserInfo{
+	recoverInfo := &apicommon.UserInfo{
 		Email: testEmail,
 	}
 	_, code = testRequest(t, http.MethodPost, "", recoverInfo, usersRecoveryPasswordEndpoint)
@@ -177,7 +182,7 @@ func TestRecoverAndResetPassword(t *testing.T) {
 
 	// Reset the password
 	newPassword := "password2"
-	resetPass := &UserPasswordReset{
+	resetPass := &apicommon.UserPasswordReset{
 		Email:       testEmail,
 		Code:        passResetMailCode[1],
 		NewPassword: newPassword,
@@ -186,7 +191,7 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK)
 
 	// Try to login with the old password (should fail)
-	loginInfo := &UserInfo{
+	loginInfo := &apicommon.UserInfo{
 		Email:    testEmail,
 		Password: testPass,
 	}

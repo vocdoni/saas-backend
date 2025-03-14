@@ -18,6 +18,7 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/account"
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
@@ -61,6 +62,9 @@ var testAPIEndpoint string
 
 // testCSP is the CSP service for the tests. Make it global so it can be accessed by the tests directly.
 var testCSP *csp.CSP
+
+// This regex is used in testCreateUser to extract verification codes from emails.
+var apiTestVerificationCodeRgx = regexp.MustCompile(`code=([a-zA-Z0-9]+)`)
 
 func init() {
 	// set the test port
@@ -275,7 +279,7 @@ func testCreateUser(t *testing.T, password string) string {
 	mail := fmt.Sprintf("%d%s", n, testEmail)
 
 	// Register a new user
-	userInfo := &UserInfo{
+	userInfo := &apicommon.UserInfo{
 		Email:     mail,
 		Password:  password,
 		FirstName: fmt.Sprintf("%d%s", n, testFirstName),
@@ -291,11 +295,11 @@ func testCreateUser(t *testing.T, password string) string {
 	qt.Assert(t, err, qt.IsNil)
 
 	// Extract the verification code using regex
-	mailCode := verificationCodeRgx.FindStringSubmatch(mailBody)
+	mailCode := apiTestVerificationCodeRgx.FindStringSubmatch(mailBody)
 	qt.Assert(t, len(mailCode) > 1, qt.IsTrue)
 
 	// Verify the user account
-	verification := &UserVerification{
+	verification := &apicommon.UserVerification{
 		Email: mail,
 		Code:  mailCode[1],
 	}
@@ -303,7 +307,7 @@ func testCreateUser(t *testing.T, password string) string {
 	qt.Assert(t, status, qt.Equals, http.StatusOK)
 
 	// Login to get the JWT token
-	loginInfo := &UserInfo{
+	loginInfo := &apicommon.UserInfo{
 		Email:    mail,
 		Password: password,
 	}
@@ -311,7 +315,7 @@ func testCreateUser(t *testing.T, password string) string {
 	qt.Assert(t, status, qt.Equals, http.StatusOK)
 
 	// Extract the token from the response
-	var loginResp LoginResponse
+	var loginResp apicommon.LoginResponse
 	err = json.Unmarshal(respBody, &loginResp)
 	qt.Assert(t, err, qt.IsNil)
 	qt.Assert(t, loginResp.Token, qt.Not(qt.Equals), "")
@@ -322,14 +326,14 @@ func testCreateUser(t *testing.T, password string) string {
 // testCreateOrganization creates a new organization and returns the address.
 func testCreateOrganization(t *testing.T, jwt string) internal.HexBytes {
 	orgName := fmt.Sprintf("org-%d", internal.RandomInt(10000))
-	orgInfo := &OrganizationInfo{
+	orgInfo := &apicommon.OrganizationInfo{
 		Type:    string(db.CompanyType),
 		Website: fmt.Sprintf("https://%s.com", orgName),
 	}
 	respBody, status := testRequest(t, http.MethodPost, jwt, orgInfo, organizationsEndpoint)
 	qt.Assert(t, status, qt.Equals, http.StatusOK)
 
-	var orgResp OrganizationInfo
+	var orgResp apicommon.OrganizationInfo
 	err := json.Unmarshal(respBody, &orgResp)
 	qt.Assert(t, err, qt.IsNil)
 	qt.Assert(t, orgResp.Address, qt.Not(qt.Equals), "")
@@ -353,7 +357,7 @@ func signRemoteSignerAndSendVocdoniTx(t *testing.T, tx *models.Tx, token string,
 	c := qt.New(t)
 	txBytes, err := proto.Marshal(tx)
 	c.Assert(err, qt.IsNil)
-	td := &TransactionData{
+	td := &apicommon.TransactionData{
 		Address:   orgAddress,
 		TxPayload: txBytes,
 	}
@@ -440,7 +444,7 @@ func testCreateCensus(t *testing.T, token string, orgAddress internal.HexBytes, 
 	c := qt.New(t)
 
 	// Create a new census
-	censusInfo := &OrganizationCensus{
+	censusInfo := &apicommon.OrganizationCensus{
 		Type:       db.CensusType(censusType),
 		OrgAddress: orgAddress.String(),
 	}
@@ -448,7 +452,7 @@ func testCreateCensus(t *testing.T, token string, orgAddress internal.HexBytes, 
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("failed to create census: %s", resp))
 
 	// Parse the response to get the census ID
-	var createdCensus OrganizationCensus
+	var createdCensus apicommon.OrganizationCensus
 	err := json.Unmarshal(resp, &createdCensus)
 	c.Assert(err, qt.IsNil)
 	c.Assert(createdCensus.ID, qt.Not(qt.Equals), "", qt.Commentf("census ID is empty"))
@@ -459,18 +463,18 @@ func testCreateCensus(t *testing.T, token string, orgAddress internal.HexBytes, 
 
 // testAddParticipantsToCensus adds participants to the given census.
 // It returns the number of participants added.
-func testAddParticipantsToCensus(t *testing.T, token, censusID string, participants []OrgParticipant) uint32 {
+func testAddParticipantsToCensus(t *testing.T, token, censusID string, participants []apicommon.OrgParticipant) uint32 {
 	c := qt.New(t)
 
 	// Add participants to the census
-	participantsReq := &AddParticipantsRequest{
+	participantsReq := &apicommon.AddParticipantsRequest{
 		Participants: participants,
 	}
 	resp, code := testRequest(t, http.MethodPost, token, participantsReq, censusEndpoint, censusID)
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("failed to add participants: %s", resp))
 
 	// Verify the response contains the number of participants added
-	var addedResponse AddParticipantsResponse
+	var addedResponse apicommon.AddParticipantsResponse
 	err := json.Unmarshal(resp, &addedResponse)
 	c.Assert(err, qt.IsNil)
 	c.Assert(addedResponse.ParticipantsNo, qt.Equals, uint32(len(participants)),
@@ -488,13 +492,13 @@ func testPublishCensus(t *testing.T, token, censusID string) (string, string) {
 	resp, code := testRequest(t, http.MethodPost, token, nil, censusEndpoint, censusID, "publish")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("failed to publish census: %s", resp))
 
-	var publishedCensus PublishedCensusResponse
+	var publishedCensus apicommon.PublishedCensusResponse
 	err := json.Unmarshal(resp, &publishedCensus)
 	c.Assert(err, qt.IsNil)
 	c.Assert(publishedCensus.URI, qt.Not(qt.Equals), "", qt.Commentf("published census URI is empty"))
 	c.Assert(publishedCensus.Root, qt.Not(qt.Equals), "", qt.Commentf("published census root is empty"))
 
-	t.Logf("Published census with URI: %s and Root: %s", publishedCensus.URI, publishedCensus.Root.String())
+	t.Logf("Published census with URI: %s and Root: %s", publishedCensus.URI, publishedCensus.Root)
 	return publishedCensus.URI, publishedCensus.Root.String()
 }
 
@@ -510,14 +514,14 @@ func testCreateBundle(t *testing.T, token, censusID string, processIDs [][]byte)
 	}
 
 	// Create a new bundle
-	bundleReq := &CreateProcessBundleRequest{
+	bundleReq := &apicommon.CreateProcessBundleRequest{
 		CensusID:  censusID,
 		Processes: hexProcessIDs,
 	}
 	resp, code := testRequest(t, http.MethodPost, token, bundleReq, "process", "bundle")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("failed to create bundle: %s", resp))
 
-	var bundleResp CreateProcessBundleResponse
+	var bundleResp apicommon.CreateProcessBundleResponse
 	err := json.Unmarshal(resp, &bundleResp)
 	c.Assert(err, qt.IsNil)
 	c.Assert(bundleResp.URI, qt.Not(qt.Equals), "", qt.Commentf("bundle URI is empty"))
@@ -528,7 +532,7 @@ func testCreateBundle(t *testing.T, token, censusID string, processIDs [][]byte)
 	bundleIDStr := bundleURI[len(bundleURI)-len(censusID):]
 
 	t.Logf("Created bundle with ID: %s and Root: %s", bundleIDStr, bundleResp.Root)
-	return bundleIDStr, bundleResp.Root
+	return bundleIDStr, bundleResp.Root.String()
 }
 
 // testCSPAuthenticate performs the CSP authentication flow for a participant.
@@ -663,11 +667,11 @@ func extractOTPFromEmail(mailBody string) string {
 
 // testGenerateTestParticipants generates a list of test participants.
 // It returns the list of participants.
-func testGenerateTestParticipants(count int) []OrgParticipant {
-	participants := make([]OrgParticipant, count)
+func testGenerateTestParticipants(count int) []apicommon.OrgParticipant {
+	participants := make([]apicommon.OrgParticipant, count)
 	for i := 0; i < count; i++ {
 		id := fmt.Sprintf("P%03d", i+1)
-		participants[i] = OrgParticipant{
+		participants[i] = apicommon.OrgParticipant{
 			ParticipantNo: id,
 			Name:          fmt.Sprintf("Test User %d", i+1),
 			Email:         fmt.Sprintf("%s@example.com", id),

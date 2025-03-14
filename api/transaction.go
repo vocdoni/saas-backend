@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/vocdoni/saas-backend/account"
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"go.vocdoni.io/proto/build/go/models"
@@ -13,13 +14,13 @@ import (
 
 func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
-	user, ok := userFromContext(r.Context())
+	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	// read the request body
-	signReq := &TransactionData{}
+	signReq := &apicommon.TransactionData{}
 	if err := json.NewDecoder(r.Body).Decode(signReq); err != nil {
 		errors.ErrMalformedBody.Withf("could not decode request body: %v", err).Write(w)
 		return
@@ -98,7 +99,7 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// return the signed tx payload
-	httpWriteJSON(w, &TransactionData{
+	apicommon.HttpWriteJSON(w, &apicommon.TransactionData{
 		TxPayload: stx,
 	})
 }
@@ -106,13 +107,13 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 // signMessageHandler signs a message with the user's private key. Only certain messages are allowed to be signed.
 func (a *API) signMessageHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
-	user, ok := userFromContext(r.Context())
+	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	// read the message from the request body
-	signReq := &MessageSignature{}
+	signReq := &apicommon.MessageSignature{}
 	if err := json.NewDecoder(r.Body).Decode(signReq); err != nil {
 		errors.ErrMalformedBody.Withf("could not decode request body: %v", err).Write(w)
 		return
@@ -151,7 +152,7 @@ func (a *API) signMessageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// return the signature
-	httpWriteJSON(w, &MessageSignature{
+	apicommon.HttpWriteJSON(w, &apicommon.MessageSignature{
 		Signature: signature,
 	})
 }

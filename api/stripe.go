@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stripe/stripe-go/v81"
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	stripeService "github.com/vocdoni/saas-backend/stripe"
@@ -156,12 +157,12 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 // createSubscriptionCheckoutHandler handles requests to create a new Stripe checkout session
 // for subscription purchases.
 func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := userFromContext(r.Context())
+	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
-	checkout := &SubscriptionCheckout{}
+	checkout := &apicommon.SubscriptionCheckout{}
 	if err := json.NewDecoder(r.Body).Decode(checkout); err != nil {
 		errors.ErrMalformedBody.Write(w)
 		return
@@ -207,7 +208,7 @@ func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.R
 		ClientSecret: session.ClientSecret,
 		SessionID:    session.ID,
 	}
-	httpWriteJSON(w, data)
+	apicommon.HttpWriteJSON(w, data)
 }
 
 // checkoutSessionHandler retrieves the status of a Stripe checkout session.
@@ -223,7 +224,7 @@ func (a *API) checkoutSessionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpWriteJSON(w, status)
+	apicommon.HttpWriteJSON(w, status)
 }
 
 // getSubscriptionOrgInfo is a helper function that retrieves the subscription information from
@@ -253,7 +254,7 @@ func (a *API) getSubscriptionOrgInfo(event *stripe.Event) (*stripeService.Stripe
 // based on the organization creator email..
 // It requires the user to be authenticated and to have admin role for the organization.
 func (a *API) createSubscriptionPortalSessionHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := userFromContext(r.Context())
+	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
@@ -279,5 +280,5 @@ func (a *API) createSubscriptionPortalSessionHandler(w http.ResponseWriter, r *h
 	}{
 		PortalURL: session.URL,
 	}
-	httpWriteJSON(w, data)
+	apicommon.HttpWriteJSON(w, data)
 }

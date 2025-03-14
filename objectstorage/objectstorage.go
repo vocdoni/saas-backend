@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/vocdoni/saas-backend/db"
 )
 
@@ -34,33 +35,47 @@ var DefaultSupportedFileTypes = map[ObjectFileType]bool{
 type ObjectStorageConfig struct {
 	DB             *db.MongoStorage
 	SupportedTypes []ObjectFileType
+	ServerURL      string
 }
 
 type ObjectStorageClient struct {
 	db             *db.MongoStorage
 	supportedTypes map[ObjectFileType]bool
+	cache          *lru.Cache[string, db.Object]
+	ServerURL      string
 }
 
 // New initializes a new ObjectStorageClient with the provided API credentials and configuration.
 // It sets up a MinIO client and verifies the existence of the specified bucket.
-func New(conf *ObjectStorageConfig) *ObjectStorageClient {
+func New(conf *ObjectStorageConfig) (*ObjectStorageClient, error) {
 	if conf == nil {
-		return nil
+		return nil, fmt.Errorf("invalid object storage configuration")
 	}
 	supportedTypes := DefaultSupportedFileTypes
 	for _, t := range conf.SupportedTypes {
 		supportedTypes[t] = true
 	}
+	cache, err := lru.New[string, db.Object](256)
+	if err != nil {
+		return nil, fmt.Errorf("cannot create cache: %w", err)
+	}
 	return &ObjectStorageClient{
 		db:             conf.DB,
 		supportedTypes: supportedTypes,
-	}
+		cache:          cache,
+		ServerURL:      conf.ServerURL,
+	}, nil
 }
 
 // key is set in a string and can have a directory like notation (for example "folder-path/hello-world.txt")
 func (osc *ObjectStorageClient) Get(objectID string) (*db.Object, error) {
 	if objectID == "" {
 		return nil, ErrorInvalidObjectID
+	}
+
+	// check if the object is in the cache
+	if object, ok := osc.cache.Get(objectID); ok {
+		return &object, nil
 	}
 
 	object, err := osc.db.Object(objectID)
@@ -70,6 +85,9 @@ func (osc *ObjectStorageClient) Get(objectID string) (*db.Object, error) {
 		}
 		return nil, fmt.Errorf("error retrieving object: %w", err)
 	}
+
+	// store the object in the cache
+	osc.cache.Add(objectID, *object)
 
 	return object, nil
 }

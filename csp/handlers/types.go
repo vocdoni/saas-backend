@@ -57,6 +57,6 @@ type ConsumedAddressRequest struct {
 // consumption.
 type ConsumedAddressResponse struct {
 	Address   internal.HexBytes `json:"authToken"`
-	Nullifier internal.HexBytes `json:"electionId"`
+	Nullifier internal.HexBytes `json:"nullifier"`
 	At        time.Time         `json:"at"`
 }

@@ -1,6 +1,10 @@
 package csp
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/vocdoni/saas-backend/csp/signers/saltedkey"
+)
 
 var (
 	// ErrNoUserID is returned when no user ID is provided.
@@ -43,11 +47,24 @@ var (
 	ErrNotificationFailure = fmt.Errorf("notification service failure")
 	// ErrInvalidSignerType is returned when the signer type is invalid.
 	ErrInvalidSignerType = fmt.Errorf("invalid signer type")
-
-	ErrAuthTokenNotVerified   = fmt.Errorf("the token is not verified")
+	// ErrAuthTokenNotVerified is returned when the token is not verified.
+	ErrAuthTokenNotVerified = fmt.Errorf("the token is not verified")
+	// ErrProcessAlreadyConsumed is returned when the user is already
+	// identified in the process.
 	ErrProcessAlreadyConsumed = fmt.Errorf("the user is already identified in the process")
-	ErrProcessAlreadyVoted    = fmt.Errorf("the user has already voted in the process")
-	ErrPrepareSignature       = fmt.Errorf("error preparing the signature")
-	ErrSign                   = fmt.Errorf("error signing the message")
-	ErrUserAlreadySigning     = fmt.Errorf("the user is already signing")
+	// ErrProcessAlreadyVoted is returned when the user has already voted in
+	// the process.
+	ErrProcessAlreadyVoted = fmt.Errorf("the user has already voted in the process")
+	// ErrPrepareSignature is returned when the signature preparation fails.
+	ErrPrepareSignature = fmt.Errorf("error preparing the signature")
+	// ErrSign is returned when the signature fails.
+	ErrSign = fmt.Errorf("error signing the message")
+	// ErrUserAlreadySigning is returned when the user is already signing and
+	// is not expected to be.
+	ErrUserAlreadySigning = fmt.Errorf("the user is already signing")
+	// ErrUserIsNotAlreadySigning is returned when the user is not signing and
+	// is expected to be.
+	ErrUserIsNotAlreadySigning = fmt.Errorf("the user is not signing")
+	// ErrInvalidSalt is returned when the salt is invalid.
+	ErrInvalidSalt = fmt.Errorf("invalid salt, length must be %d bytes", saltedkey.SaltSize)
 )

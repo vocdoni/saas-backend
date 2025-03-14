@@ -1,4 +1,4 @@
-package api
+package apicommon
 
 import (
 	"time"
@@ -153,18 +153,18 @@ type MessageSignature struct {
 	Signature internal.HexBytes `json:"signature,omitempty"`
 }
 
-// organizationFromDB converts a db.Organization to an OrganizationInfo, if the parent
+// OrganizationFromDB converts a db.Organization to an OrganizationInfo, if the parent
 // organization is provided it will be included in the response.
-func organizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
+func OrganizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 	if dbOrg == nil {
 		return nil
 	}
 	var parentOrg *OrganizationInfo
 	if parent != nil {
-		parentOrg = organizationFromDB(parent, nil)
+		parentOrg = OrganizationFromDB(parent, nil)
 	}
-	details := subscriptionDetailsFromDB(&dbOrg.Subscription)
-	usage := subscriptionUsageFromDB(&dbOrg.Counters)
+	details := SubscriptionDetailsFromDB(&dbOrg.Subscription)
+	usage := SubscriptionUsageFromDB(&dbOrg.Counters)
 	return &OrganizationInfo{
 		Address:        dbOrg.Address,
 		Website:        dbOrg.Website,
@@ -206,7 +206,7 @@ type SubscriptionPlan struct {
 	CensusSizeTiers []SubscriptionPlanTier  `json:"censusSizeTiers"`
 }
 
-func subscriptionPlanFromDB(plan *db.Plan) SubscriptionPlan {
+func SubscriptionPlanFromDB(plan *db.Plan) SubscriptionPlan {
 	if plan == nil {
 		return SubscriptionPlan{}
 	}
@@ -286,7 +286,7 @@ type SubscriptionDetails struct {
 	Email           string    `json:"email"`
 }
 
-func subscriptionDetailsFromDB(details *db.OrganizationSubscription) SubscriptionDetails {
+func SubscriptionDetailsFromDB(details *db.OrganizationSubscription) SubscriptionDetails {
 	if details == nil {
 		return SubscriptionDetails{}
 	}
@@ -311,7 +311,7 @@ type SubscriptionUsage struct {
 	Processes  int `json:"processes"`
 }
 
-func subscriptionUsageFromDB(usage *db.OrganizationCounters) SubscriptionUsage {
+func SubscriptionUsageFromDB(usage *db.OrganizationCounters) SubscriptionUsage {
 	if usage == nil {
 		return SubscriptionUsage{}
 	}
@@ -350,7 +350,7 @@ type OrganizationCensus struct {
 	OrgAddress string        `json:"orgAddress"`
 }
 
-func organizationCensusFromDB(census *db.Census) OrganizationCensus {
+func OrganizationCensusFromDB(census *db.Census) OrganizationCensus {
 	if census == nil {
 		return OrganizationCensus{}
 	}
@@ -379,10 +379,10 @@ type AddParticipantsRequest struct {
 	Participants []OrgParticipant `json:"participants"`
 }
 
-func (r *AddParticipantsRequest) dbOrgParticipants(orgAddress string) []db.OrgParticipant {
+func (r *AddParticipantsRequest) DbOrgParticipants(orgAddress string) []db.OrgParticipant {
 	participants := make([]db.OrgParticipant, 0, len(r.Participants))
 	for _, p := range r.Participants {
-		participants = append(participants, p.toDB(orgAddress))
+		participants = append(participants, p.ToDb(orgAddress))
 	}
 	return participants
 }
@@ -398,7 +398,7 @@ type OrgParticipant struct {
 	Other         map[string]any `json:"other"`
 }
 
-func (p *OrgParticipant) toDB(orgAddress string) db.OrgParticipant {
+func (p *OrgParticipant) ToDb(orgAddress string) db.OrgParticipant {
 	return db.OrgParticipant{
 		OrgAddress:    orgAddress,
 		ParticipantNo: p.ParticipantNo,
@@ -461,4 +461,16 @@ type SignRequest struct {
 	Address    string            `json:"address,omitempty"`
 	Payload    string            `json:"payload,omitempty"`
 	ElectionId internal.HexBytes `json:"electionId,omitempty"`
+}
+
+// CreateProcessBundleRequest defines the payload for creating a new process bundle
+type CreateProcessBundleRequest struct {
+	CensusID  string   `json:"censusID"`
+	Processes []string `json:"processes"`
+}
+
+// CreateProcessBundleResponse defines the response for a successful process bundle creation
+type CreateProcessBundleResponse struct {
+	URI  string            `json:"uri"`
+	Root internal.HexBytes `json:"root"`
 }

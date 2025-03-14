@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
@@ -19,7 +20,7 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	processInfo := &CreateProcessRequest{}
+	processInfo := &apicommon.CreateProcessRequest{}
 	if err := json.NewDecoder(r.Body).Decode(&processInfo); err != nil {
 		errors.ErrMalformedBody.Write(w)
 		return
@@ -31,7 +32,7 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// get the user from the request context
-	user, ok := userFromContext(r.Context())
+	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
@@ -76,7 +77,7 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpWriteOK(w)
+	apicommon.HttpWriteOK(w)
 }
 
 // processInfoHandler retrieves voting process information by ID.
@@ -98,5 +99,5 @@ func (a *API) processInfoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpWriteJSON(w, process)
+	apicommon.HttpWriteJSON(w, process)
 }

@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/vocdoni/saas-backend/api"
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 )
@@ -87,10 +87,10 @@ func (c *Client) makeRequest(method, path string, body interface{}, target inter
 	return nil
 }
 
-func generateParticipants(n int) []api.OrgParticipant {
-	participants := make([]api.OrgParticipant, n)
-	for i := range n {
-		participants[i] = api.OrgParticipant{
+func generateParticipants(n int) []apicommon.OrgParticipant {
+	participants := make([]apicommon.OrgParticipant, n)
+	for i := 0; i < n; i++ {
+		participants[i] = apicommon.OrgParticipant{
 			Email:         fmt.Sprintf("user%d@example.com", i+1),
 			Phone:         fmt.Sprintf("+%010d", rand.Int63n(10000000000)),
 			ParticipantNo: fmt.Sprintf("participant_%d", i+1),
@@ -137,7 +137,7 @@ func main() {
 
 	// 1. Login
 	fmt.Println("1. Logging in...")
-	var loginResp api.LoginResponse
+	var loginResp apicommon.LoginResponse
 	err := client.makeRequest("POST", "/auth/login", LoginRequest{
 		Email:    config.Email,
 		Password: config.Password,
@@ -152,7 +152,7 @@ func main() {
 	// 2. Create census
 	fmt.Println("\n2. Creating census...")
 	var censusID string
-	err = client.makeRequest("POST", "/census", api.OrganizationCensus{
+	err = client.makeRequest("POST", "/census", apicommon.OrganizationCensus{
 		Type:       db.CensusTypeSMSorMail,
 		OrgAddress: config.OrgAddress,
 	}, &censusID)
@@ -175,7 +175,7 @@ func main() {
 	// 4. Add participants
 	fmt.Println("\n4. Adding participants...")
 	participants := generateParticipants(10)
-	err = client.makeRequest("POST", fmt.Sprintf("/census/%s", censusID), api.AddParticipantsRequest{
+	err = client.makeRequest("POST", fmt.Sprintf("/census/%s", censusID), apicommon.AddParticipantsRequest{
 		Participants: participants,
 	}, nil)
 	if err != nil {
@@ -199,7 +199,7 @@ func main() {
 	processID := fmt.Sprintf("test_process_%d", time.Now().Unix())
 	metadata := generateMetadata()
 	root := new(internal.HexBytes).SetString(publishedCensus.Root)
-	err = client.makeRequest("POST", fmt.Sprintf("/process/%s", processID), api.CreateProcessRequest{
+	err = client.makeRequest("POST", fmt.Sprintf("/process/%s", processID), apicommon.CreateProcessRequest{
 		PublishedCensusRoot: *root,
 		Metadata:            metadata,
 	}, nil)

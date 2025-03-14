@@ -18,6 +18,8 @@ type UserData struct {
 	ExtraData string                `json:"extraData,omitempty" bson:"extradata"`
 }
 
+// BundleData represents a bundle of processes. It includes the bundle ID, the
+// processes, and the last attempt to sign.
 type BundleData struct {
 	ID          internal.HexBytes      `json:"bundleId" bson:"_id"`
 	Processes   map[string]ProcessData `json:"processes" bson:"processes"`
@@ -34,6 +36,9 @@ type AuthToken struct {
 	Verified  bool              `json:"verified" bson:"verified"`
 }
 
+// ProcessData represents a process of a bundle. It includes the process ID,
+// the consumed status, the token used, the address used, and the time of the
+// signature.
 type ProcessData struct {
 	ID          internal.HexBytes `json:"processId" bson:"_id"`
 	Consumed    bool              `json:"consumed" bson:"consumed"`
