@@ -9,6 +9,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/notifications"
 	"github.com/vocdoni/saas-backend/csp/signers"
@@ -96,7 +97,7 @@ func (c *cspHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) 
 			errors.ErrUnauthorized.WithErr(err).Write(w)
 			return
 		}
-		httpWriteJSON(w, &AuthResponse{AuthToken: authToken})
+		apicommon.HttpWriteJSON(w, &AuthResponse{AuthToken: authToken})
 		return
 	case 1:
 		authToken, err := c.authSecondStep(r)
@@ -108,7 +109,7 @@ func (c *cspHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) 
 			errors.ErrUnauthorized.WithErr(err).Write(w)
 			return
 		}
-		httpWriteJSON(w, &AuthResponse{AuthToken: authToken})
+		apicommon.HttpWriteJSON(w, &AuthResponse{AuthToken: authToken})
 		return
 	}
 }
@@ -183,7 +184,7 @@ func (c *cspHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 		errors.ErrUnauthorized.WithErr(err).Write(w)
 		return
 	}
-	httpWriteJSON(w, &AuthResponse{Signature: signature})
+	apicommon.HttpWriteJSON(w, &AuthResponse{Signature: signature})
 }
 
 // ConsumedAddressHandler is the handler for the request to get the address
@@ -246,7 +247,7 @@ func (c *cspHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	// return the address used to sign the process and the nullifier
-	httpWriteJSON(w, &ConsumedAddressResponse{
+	apicommon.HttpWriteJSON(w, &ConsumedAddressResponse{
 		Address:   process.WithAddress,
 		Nullifier: state.GenerateNullifier(common.BytesToAddress(process.WithAddress), process.ID),
 		At:        process.At,
