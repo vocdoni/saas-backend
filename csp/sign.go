@@ -18,7 +18,7 @@ import (
 func (c *CSP) Sign(token, address, processID internal.HexBytes, signType signers.SignerType) (internal.HexBytes, error) {
 	switch signType {
 	case signers.SignerTypeECDSASalted:
-		userID, salt, message, err := c.prepareEthereumSigner(token, address, processID)
+		userID, salt, message, err := c.prepareSaltedKeySigner(token, address, processID)
 		defer c.unlock(userID, processID)
 		if err != nil {
 			return nil, err
@@ -27,26 +27,24 @@ func (c *CSP) Sign(token, address, processID internal.HexBytes, signType signers
 		if err != nil {
 			return nil, errors.Join(ErrSign, err)
 		}
-		if err := c.finishSignProcess(token, address, processID); err != nil {
+		if err := c.finishSaltedKeySigner(token, address, processID); err != nil {
 			return nil, err
 		}
 		return signature, nil
-	case signers.SignerTypeBlindSalted: // TODO: implement this signer
-		return nil, ErrInvalidSignerType
 	default:
 		return nil, ErrInvalidSignerType
 	}
 }
 
-// prepareEthereumSigner method prepares the data for the Ethereum signer. It
-// ensures the following conditions:
+// prepareSaltedKeySigner method prepares the data for the Ethereum signer.
+// It ensures the following conditions:
 // - The auth token is valid and it is already verified.
 // - The user belongs to the bundle.
 // - The user belongs to the process.
 // - The process has not been consumed yet.
 // Then generates a bundle CA and encodes it to be signed. It returns userID,
 // the salt as nil and the encoded CA as a message to sign.
-func (c *CSP) prepareEthereumSigner(token, address, processID internal.HexBytes) (
+func (c *CSP) prepareSaltedKeySigner(token, address, processID internal.HexBytes) (
 	internal.HexBytes, *[saltedkey.SaltSize]byte, internal.HexBytes, error,
 ) {
 	// get the data of the auth token and the user from the storage
@@ -93,16 +91,25 @@ func (c *CSP) prepareEthereumSigner(token, address, processID internal.HexBytes)
 	}
 	// generate the salt
 	salt := [saltedkey.SaltSize]byte{}
+	if len(processID) < saltedkey.SaltSize {
+		return nil, nil, nil, ErrInvalidSalt
+	}
 	copy(salt[:], processID[:saltedkey.SaltSize])
-
 	return authTokenData.UserID, &salt, signatureMsg, nil
 }
 
-func (c *CSP) finishSignProcess(token, address, processID internal.HexBytes) error {
+func (c *CSP) finishSaltedKeySigner(token, address, processID internal.HexBytes) error {
 	// get the data of the auth token and the user from the storage
 	authTokenData, userData, err := c.Storage.UserAuthToken(token)
 	if err != nil {
 		return ErrInvalidAuthToken
+	}
+	// ensure that the auth token has been verified
+	if !authTokenData.Verified {
+		return ErrAuthTokenNotVerified
+	}
+	if !c.isLocked(userData.ID, processID) {
+		return ErrUserIsNotAlreadySigning
 	}
 	// check if the user belongs to the bundle
 	bundleData, ok := userData.Bundles[authTokenData.BundleID.String()]
