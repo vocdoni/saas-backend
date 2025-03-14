@@ -15,7 +15,18 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-// registerHandler handles the register request. It creates a new user in the database.
+// registerHandler godoc
+// @Summary Register a new user
+// @Description Register a new user with email, password, and personal information
+// @Tags users
+// @Accept json
+// @Produce json
+// @Param request body apicommon.UserInfo true "User registration information"
+// @Success 200 {string} string "OK"
+// @Failure 400 {object} errors.Error "Invalid input data"
+// @Failure 409 {object} errors.Error "User already exists"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /users [post]
 func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 	userInfo := &apicommon.UserInfo{}
 	body, err := io.ReadAll(r.Body)
@@ -95,15 +106,20 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 	apicommon.HttpWriteOK(w)
 }
 
-// verifyUserAccountHandler handles the request to verify the user account. It
-// requires the user email and the verification code to be provided. It checks
-// if the user has not been verified yet, if the verification code is not
-// expired and if the verification code is correct. If all the checks are
-// correct, the user account is verified and a new token is generated and sent
-// back to the user. If the user is already verified, an error is returned. If
-// the verification code is expired, an error is returned. If the verification
-// code is incorrect, an error is returned and the number of attempts to verify
-// it is increased. If any other error occurs, a generic error is returned.
+// verifyUserAccountHandler godoc
+// @Summary Verify user account
+// @Description Verify a user account with the verification code
+// @Tags users
+// @Accept json
+// @Produce json
+// @Param request body apicommon.UserVerification true "Verification information"
+// @Success 200 {object} apicommon.LoginResponse
+// @Failure 400 {object} errors.Error "Invalid input data"
+// @Failure 401 {object} errors.Error "Unauthorized"
+// @Failure 409 {object} errors.Error "User already verified"
+// @Failure 410 {object} errors.Error "Verification code expired"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /users/verify [post]
 func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 	verification := &apicommon.UserVerification{}
 	if err := json.NewDecoder(r.Body).Decode(verification); err != nil {
@@ -167,14 +183,20 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 	apicommon.HttpWriteJSON(w, res)
 }
 
-// userVerificationCodeInfoHandler handles the request to get the verification
-// code information of a user. It requires the user email to be provided. It
-// returns the user email, the verification code, the code expiration and if
-// the code is valid (not expired and has not reached the maximum number of
-// attempts). If the user is already verified, an error is returned. If the
-// user is not found, an error is returned. If the verification code is not
-// found, an error is returned. If any other error occurs, a generic error is
-// returned.
+// userVerificationCodeInfoHandler godoc
+// @Summary Get verification code information
+// @Description Get information about a user's verification code
+// @Tags users
+// @Accept json
+// @Produce json
+// @Param email query string true "User email"
+// @Success 200 {object} apicommon.UserVerification
+// @Failure 400 {object} errors.Error "Invalid input data"
+// @Failure 401 {object} errors.Error "Unauthorized"
+// @Failure 404 {object} errors.Error "User not found"
+// @Failure 409 {object} errors.Error "User already verified"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /users/verify/code [get]
 func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user email of the user from the request query
 	userEmail := chi.URLParam(r, "email")
@@ -217,12 +239,19 @@ func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Req
 	})
 }
 
-// resendUserVerificationCodeHandler handles the request to resend the user
-// verification code. It requires the user email to be provided. If the user is
-// not found, an error is returned. If the user is already verified, an error is
-// returned. If the verification code is not expired, an error is returned. If
-// the verification code is found and expired, a new verification code is sent
-// to the user email. If any other error occurs, a generic error is returned.
+// resendUserVerificationCodeHandler godoc
+// @Summary Resend verification code
+// @Description Resend a verification code to the user's email
+// @Tags users
+// @Accept json
+// @Produce json
+// @Param request body apicommon.UserVerification true "User email information"
+// @Success 200 {string} string "OK"
+// @Failure 400 {object} errors.Error "Invalid input data"
+// @Failure 401 {object} errors.Error "Unauthorized"
+// @Failure 409 {object} errors.Error "User already verified or verification code still valid"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /users/verify/code [post]
 func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.Request) {
 	verification := &apicommon.UserVerification{}
 	if err := json.NewDecoder(r.Body).Decode(verification); err != nil {
@@ -285,8 +314,17 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 	apicommon.HttpWriteOK(w)
 }
 
-// userInfoHandler handles the request to get the information of the current
-// authenticated user.
+// userInfoHandler godoc
+// @Summary Get user information
+// @Description Get information about the authenticated user
+// @Tags users
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} apicommon.UserInfo
+// @Failure 401 {object} errors.Error "Unauthorized"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /users/me [get]
 func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
@@ -319,8 +357,19 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// updateUserInfoHandler handles the request to update the information of the
-// current authenticated user.
+// updateUserInfoHandler godoc
+// @Summary Update user information
+// @Description Update information for the authenticated user
+// @Tags users
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body apicommon.UserInfo true "User information to update"
+// @Success 200 {object} apicommon.LoginResponse
+// @Failure 400 {object} errors.Error "Invalid input data"
+// @Failure 401 {object} errors.Error "Unauthorized"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /users/me [put]
 func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
@@ -393,9 +442,19 @@ func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 	apicommon.HttpWriteJSON(w, res)
 }
 
-// updateUserPasswordHandler handles the request to update the password of the
-// current authenticated user. It requires the old password to be provided to
-// compare it with the stored one before updating the password to the new one.
+// updateUserPasswordHandler godoc
+// @Summary Update user password
+// @Description Update the password for the authenticated user
+// @Tags users
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body apicommon.UserPasswordUpdate true "Password update information"
+// @Success 200 {string} string "OK"
+// @Failure 400 {object} errors.Error "Invalid input data"
+// @Failure 401 {object} errors.Error "Unauthorized or old password does not match"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /users/password [put]
 func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
@@ -428,10 +487,17 @@ func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) 
 	apicommon.HttpWriteOK(w)
 }
 
-// recoveryUserPasswordHandler handles the request to recover the password of a
-// user. It requires the user email to be provided. If the email is correct, a
-// new verification code is generated and sent to the user email. If the email
-// is incorrect, an error is returned.
+// recoverUserPasswordHandler godoc
+// @Summary Recover user password
+// @Description Request a password recovery code for a user
+// @Tags users
+// @Accept json
+// @Produce json
+// @Param request body apicommon.UserInfo true "User email information"
+// @Success 200 {string} string "OK"
+// @Failure 400 {object} errors.Error "Invalid input data"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /users/recovery [post]
 func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user info from the request body
 	userInfo := &apicommon.UserInfo{}
@@ -476,10 +542,18 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 	apicommon.HttpWriteOK(w)
 }
 
-// resetUserPasswordHandler handles the request to reset the password of a user.
-// It requires the user email, the verification code and the new password to be
-// provided. If the verification code is correct, the user password is updated
-// to the new one. If the verification code is incorrect, an error is returned.
+// resetUserPasswordHandler godoc
+// @Summary Reset user password
+// @Description Reset a user's password using a verification code
+// @Tags users
+// @Accept json
+// @Produce json
+// @Param request body apicommon.UserPasswordReset true "Password reset information"
+// @Success 200 {string} string "OK"
+// @Failure 400 {object} errors.Error "Invalid input data"
+// @Failure 401 {object} errors.Error "Unauthorized or invalid verification code"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /users/reset [post]
 func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	userPasswords := &apicommon.UserPasswordReset{}
 	if err := json.NewDecoder(r.Body).Decode(userPasswords); err != nil {

@@ -10,7 +10,16 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 )
 
-// refresh handles the refresh request. It returns a new JWT token.
+// refreshTokenHandler godoc
+// @Summary Refresh JWT token
+// @Description Refresh the JWT token for an authenticated user
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} apicommon.LoginResponse
+// @Failure 401 {object} errors.Error
+// @Router /auth/refresh [post]
 func (a *API) refreshTokenHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -28,7 +37,17 @@ func (a *API) refreshTokenHandler(w http.ResponseWriter, r *http.Request) {
 	apicommon.HttpWriteJSON(w, res)
 }
 
-// login handles the login request. It returns a JWT token if the login is successful.
+// authLoginHandler godoc
+// @Summary Login to get a JWT token
+// @Description Authenticate a user and get a JWT token
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param request body apicommon.UserInfo true "Login credentials"
+// @Success 200 {object} apicommon.LoginResponse
+// @Failure 400 {object} errors.Error
+// @Failure 401 {object} errors.Error
+// @Router /auth/login [post]
 func (a *API) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 	// het the user info from the request body
 	loginInfo := &apicommon.UserInfo{}
@@ -66,8 +85,17 @@ func (a *API) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 	apicommon.HttpWriteJSON(w, res)
 }
 
-// writableOrganizationAddressesHandler returns the list of addresses of the
-// organizations where the user has write access.
+// writableOrganizationAddressesHandler godoc
+// @Summary Get writable organization addresses
+// @Description Get the list of organization addresses where the user has write access
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} apicommon.OrganizationAddresses
+// @Failure 401 {object} errors.Error
+// @Failure 404 {object} errors.Error "No organizations found"
+// @Router /auth/addresses [get]
 func (a *API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
