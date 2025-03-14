@@ -14,7 +14,8 @@ rm -f docs/swagger.yaml
 
 # Generate Swagger documentation from code comments
 echo "Running swag..."
-swag init -g api/api.go -o docs --outputTypes yaml --parseDependency
+swag fmt -d ./
+swag init -g api/api.go -o docs --outputTypes yaml --parseDependency --parseInternal --parseDepth=4
 
 # Check if the swagger.yaml file was generated
 if [ -f docs/swagger.yaml ]; then

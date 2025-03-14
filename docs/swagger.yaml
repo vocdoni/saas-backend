@@ -11,13 +11,17 @@ definitions:
   apicommon.AcceptOrganizationInvitation:
     properties:
       code:
+        description: Invitation code
         type: string
       user:
-        $ref: '#/definitions/apicommon.UserInfo'
+        allOf:
+        - $ref: '#/definitions/apicommon.UserInfo'
+        description: User information for registration or identification
     type: object
   apicommon.AddParticipantsRequest:
     properties:
       participants:
+        description: List of participants to add
         items:
           $ref: '#/definitions/apicommon.OrgParticipant'
         type: array
@@ -25,17 +29,21 @@ definitions:
   apicommon.AddParticipantsResponse:
     properties:
       jobID:
+        description: Job ID for tracking the addition process
         items:
           type: integer
         type: array
       participantsNo:
+        description: Number of participants added
         type: integer
     type: object
   apicommon.CreateProcessBundleRequest:
     properties:
       censusID:
+        description: Census ID
         type: string
       processes:
+        description: List of process IDs to include in the bundle
         items:
           type: string
         type: array
@@ -43,25 +51,33 @@ definitions:
   apicommon.CreateProcessBundleResponse:
     properties:
       root:
+        description: Merkle root of the process bundle
         items:
           type: integer
         type: array
       uri:
+        description: URI of the created process bundle
         type: string
     type: object
   apicommon.CreateProcessRequest:
     properties:
       censusID:
+        description: Census ID
         items:
           type: integer
         type: array
       censusRoot:
+        description: Merkle root of the published census
         items:
           type: integer
         type: array
       censusUri:
+        description: URI of the published census
         type: string
       metadata:
+        description: |-
+          Additional metadata for the process
+          Can be any key-value pairs
         items:
           type: integer
         type: array
@@ -69,19 +85,24 @@ definitions:
   apicommon.LoginResponse:
     properties:
       expirity:
+        description: Token expiration time
         type: string
       token:
+        description: JWT authentication token
         type: string
     type: object
   apicommon.MessageSignature:
     properties:
       address:
+        description: Blockchain address
         type: string
       payload:
+        description: Message payload bytes
         items:
           type: integer
         type: array
       signature:
+        description: Cryptographic signature
         items:
           type: integer
         type: array
@@ -89,22 +110,29 @@ definitions:
   apicommon.OrgParticipant:
     properties:
       email:
+        description: Participant's email address
         type: string
       name:
+        description: Participant's name
         type: string
       other:
         additionalProperties: {}
+        description: Additional custom fields
         type: object
       participantNo:
+        description: Unique participant number
         type: string
       password:
+        description: Participant's password (for authentication)
         type: string
       phone:
+        description: Participant's phone number
         type: string
     type: object
   apicommon.OrganizationAddresses:
     properties:
       addresses:
+        description: List of organization blockchain addresses
         items:
           type: string
         type: array
@@ -112,15 +140,20 @@ definitions:
   apicommon.OrganizationCensus:
     properties:
       censusID:
+        description: Unique identifier for the census
         type: string
       orgAddress:
+        description: Organization address
         type: string
       type:
-        $ref: '#/definitions/db.CensusType'
+        allOf:
+        - $ref: '#/definitions/db.CensusType'
+        description: Type of census
     type: object
   apicommon.OrganizationCensuses:
     properties:
       censuses:
+        description: List of organization censuses
         items:
           $ref: '#/definitions/apicommon.OrganizationCensus'
         type: array
@@ -128,46 +161,67 @@ definitions:
   apicommon.OrganizationInfo:
     properties:
       active:
+        description: Whether the organization is active
         type: boolean
       address:
+        description: The organization's blockchain address
         type: string
       color:
+        description: The organization's brand color in hex format
         type: string
       communications:
+        description: Whether the organization has enabled communications
         type: boolean
       counters:
-        $ref: '#/definitions/apicommon.SubscriptionUsage'
+        allOf:
+        - $ref: '#/definitions/apicommon.SubscriptionUsage'
+        description: Usage counters for the organization
       country:
+        description: The country where the organization is based
         type: string
       createdAt:
+        description: Creation timestamp in RFC3339 format
         type: string
       parent:
-        $ref: '#/definitions/apicommon.OrganizationInfo'
+        allOf:
+        - $ref: '#/definitions/apicommon.OrganizationInfo'
+        description: Parent organization if this is a sub-organization
       size:
+        description: The size category of the organization
         type: string
       subdomain:
+        description: The organization's subdomain
         type: string
       subscription:
-        $ref: '#/definitions/apicommon.SubscriptionDetails'
+        allOf:
+        - $ref: '#/definitions/apicommon.SubscriptionDetails'
+        description: Subscription details for the organization
       timezone:
+        description: The organization's timezone
         type: string
       type:
+        description: The type of organization
         type: string
       website:
+        description: The organization's website URL
         type: string
     type: object
   apicommon.OrganizationInvite:
     properties:
       email:
+        description: Email address of the invitee
         type: string
       expiration:
+        description: Expiration time of the invitation
         type: string
       role:
+        description: Role to be assigned to the invitee
         type: string
     type: object
   apicommon.OrganizationInviteList:
     properties:
       pending:
+        description: List of pending invitations
         items:
           $ref: '#/definitions/apicommon.OrganizationInvite'
         type: array
@@ -175,13 +229,17 @@ definitions:
   apicommon.OrganizationMember:
     properties:
       info:
-        $ref: '#/definitions/apicommon.UserInfo'
+        allOf:
+        - $ref: '#/definitions/apicommon.UserInfo'
+        description: User information
       role:
+        description: The role of the member in the organization
         type: string
     type: object
   apicommon.OrganizationMembers:
     properties:
       members:
+        description: List of organization members
         items:
           $ref: '#/definitions/apicommon.OrganizationMember'
         type: array
@@ -189,15 +247,19 @@ definitions:
   apicommon.OrganizationRole:
     properties:
       name:
+        description: Human-readable name of the role
         type: string
       role:
+        description: Role identifier
         type: string
       writePermission:
+        description: Whether this role has write permissions
         type: boolean
     type: object
   apicommon.OrganizationRoleList:
     properties:
       roles:
+        description: List of organization roles
         items:
           $ref: '#/definitions/apicommon.OrganizationRole'
         type: array
@@ -205,22 +267,31 @@ definitions:
   apicommon.OrganizationSubscriptionInfo:
     properties:
       plan:
-        $ref: '#/definitions/apicommon.SubscriptionPlan'
+        allOf:
+        - $ref: '#/definitions/apicommon.SubscriptionPlan'
+        description: Subscription plan details
       subscriptionDetails:
-        $ref: '#/definitions/apicommon.SubscriptionDetails'
+        allOf:
+        - $ref: '#/definitions/apicommon.SubscriptionDetails'
+        description: Subscription details
       usage:
-        $ref: '#/definitions/apicommon.SubscriptionUsage'
+        allOf:
+        - $ref: '#/definitions/apicommon.SubscriptionUsage'
+        description: Current usage metrics
     type: object
   apicommon.OrganizationType:
     properties:
       name:
+        description: Human-readable name of the type
         type: string
       type:
+        description: Type identifier
         type: string
     type: object
   apicommon.OrganizationTypeList:
     properties:
       types:
+        description: List of organization types
         items:
           $ref: '#/definitions/apicommon.OrganizationType'
         type: array
@@ -228,149 +299,207 @@ definitions:
   apicommon.PublishedCensusResponse:
     properties:
       censusId:
+        description: Census ID
         items:
           type: integer
         type: array
       root:
+        description: Merkle root of the census
         items:
           type: integer
         type: array
       uri:
+        description: URI of the published census
         type: string
     type: object
   apicommon.SubscriptionCheckout:
     properties:
       address:
+        description: Organization address
         type: string
       amount:
+        description: Amount in cents
         type: integer
       locale:
+        description: Locale for the checkout page
         type: string
       lookupKey:
+        description: Plan lookup key
         type: integer
       returnURL:
+        description: URL to return to after checkout
         type: string
     type: object
   apicommon.SubscriptionDetails:
     properties:
       active:
+        description: Whether the subscription is active
         type: boolean
       email:
+        description: Email associated with the subscription
         type: string
       lastPaymentDate:
+        description: Date of the last payment
         type: string
       maxCensusSize:
+        description: Maximum census size allowed
         type: integer
       planID:
+        description: ID of the subscription plan
         type: integer
       renewalDate:
+        description: Date when the subscription will renew
         type: string
       startDate:
+        description: Date when the subscription started
         type: string
     type: object
   apicommon.SubscriptionFeatures:
     properties:
       anonymous:
+        description: Whether anonymous voting is available
         type: boolean
       emailReminder:
+        description: Whether email reminders are available
         type: boolean
       liveResults:
+        description: Whether live results are available
         type: boolean
       liveStreaming:
+        description: Whether live streaming is available
         type: boolean
       overwrite:
+        description: Whether census overwrite is allowed
         type: boolean
       personalization:
+        description: Whether UI personalization is available
         type: boolean
       smsNotification:
+        description: Whether SMS notifications are available
         type: boolean
       whiteLabel:
+        description: Whether white labeling is available
         type: boolean
     type: object
   apicommon.SubscriptionPlan:
     properties:
       censusSizeTiers:
+        description: Census size tiers and pricing
         items:
           $ref: '#/definitions/apicommon.SubscriptionPlanTier'
         type: array
       default:
+        description: Whether this is the default plan
         type: boolean
       features:
-        $ref: '#/definitions/apicommon.SubscriptionFeatures'
+        allOf:
+        - $ref: '#/definitions/apicommon.SubscriptionFeatures'
+        description: Features available in this plan
       id:
+        description: Unique identifier for the plan
         type: integer
       name:
+        description: Human-readable name of the plan
         type: string
       organization:
-        $ref: '#/definitions/apicommon.SubscriptionPlanLimits'
+        allOf:
+        - $ref: '#/definitions/apicommon.SubscriptionPlanLimits'
+        description: Organization limits for this plan
       startingPrice:
+        description: Starting price in cents
         type: integer
       stripeID:
+        description: Stripe product ID
         type: string
       stripePriceID:
+        description: Stripe price ID
         type: string
       votingTypes:
-        $ref: '#/definitions/apicommon.SubscriptionVotingTypes'
+        allOf:
+        - $ref: '#/definitions/apicommon.SubscriptionVotingTypes'
+        description: Voting types available in this plan
     type: object
   apicommon.SubscriptionPlanLimits:
     properties:
       customURL:
+        description: Whether custom URLs are allowed
         type: boolean
       drafts:
+        description: Maximum number of draft processes allowed
         type: integer
       maxCensus:
+        description: Maximum number of census allowed
         type: integer
       maxDuration:
+        description: Maximum duration of voting processes in days
         type: integer
       maxProcesses:
+        description: Maximum number of voting processes allowed
         type: integer
       members:
+        description: Maximum number of members allowed
         type: integer
       subOrgs:
+        description: Maximum number of sub-organizations allowed
         type: integer
     type: object
   apicommon.SubscriptionPlanTier:
     properties:
       amount:
+        description: Price amount in cents
         type: integer
       upTo:
+        description: Maximum census size for this tier
         type: integer
     type: object
   apicommon.SubscriptionUsage:
     properties:
       members:
+        description: Number of members in the organization
         type: integer
       processes:
+        description: Number of voting processes created
         type: integer
       sentEmails:
+        description: Number of emails sent
         type: integer
       sentSMS:
+        description: Number of SMS messages sent
         type: integer
       subOrgs:
+        description: Number of sub-organizations created
         type: integer
     type: object
   apicommon.SubscriptionVotingTypes:
     properties:
       approval:
+        description: Whether approval voting is available
         type: boolean
       cumulative:
+        description: Whether cumulative voting is available
         type: boolean
       multiple:
+        description: Whether multiple choice voting is available
         type: boolean
       ranked:
+        description: Whether ranked choice voting is available
         type: boolean
       single:
+        description: Whether single choice voting is available
         type: boolean
       weighted:
+        description: Whether weighted voting is available
         type: boolean
     type: object
   apicommon.TransactionData:
     properties:
       address:
+        description: Blockchain address
         items:
           type: integer
         type: array
       txPayload:
+        description: Transaction payload bytes
         items:
           type: integer
         type: array
@@ -378,52 +507,70 @@ definitions:
   apicommon.UserInfo:
     properties:
       email:
+        description: User's email address
         type: string
       firstName:
+        description: User's first name
         type: string
       lastName:
+        description: User's last name
         type: string
       organizations:
+        description: Organizations the user belongs to
         items:
           $ref: '#/definitions/apicommon.UserOrganization'
         type: array
       password:
+        description: User's password (not returned in responses)
         type: string
       verified:
+        description: Whether the user's email is verified
         type: boolean
     type: object
   apicommon.UserOrganization:
     properties:
       organization:
-        $ref: '#/definitions/apicommon.OrganizationInfo'
+        allOf:
+        - $ref: '#/definitions/apicommon.OrganizationInfo'
+        description: Organization information
       role:
+        description: The role of the user in the organization
         type: string
     type: object
   apicommon.UserPasswordReset:
     properties:
       code:
+        description: Password reset code
         type: string
       email:
+        description: User's email address
         type: string
       newPassword:
+        description: New password
         type: string
     type: object
   apicommon.UserPasswordUpdate:
     properties:
       newPassword:
+        description: New password
         type: string
       oldPassword:
+        description: Current password
         type: string
     type: object
   apicommon.UserVerification:
     properties:
       code:
+        description: Verification code
         type: string
       email:
+        description: User's email address
         type: string
       expiration:
+        description: Expiration time of the verification code
         type: string
       valid:
+        description: Whether the verification is valid
         type: boolean
     type: object
   db.BulkCensusMembershipStatus:

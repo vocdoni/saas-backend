@@ -1,48 +1,48 @@
 // Package api provides the HTTP API for the Vocdoni SaaS Backend
-// @title Vocdoni SaaS API
-// @version 1.0
-// @description API for Vocdoni SaaS Backend
-// @termsOfService http://swagger.io/terms/
+//	@title						Vocdoni SaaS API
+//	@version					1.0
+//	@description				API for Vocdoni SaaS Backend
+//	@termsOfService				http://swagger.io/terms/
 //
-// @contact.name API Support
-// @contact.url https://vocdoni.io
-// @contact.email info@vocdoni.io
+//	@contact.name				API Support
+//	@contact.url				https://vocdoni.io
+//	@contact.email				info@vocdoni.io
 //
-// @license.name Apache 2.0
-// @license.url http://www.apache.org/licenses/LICENSE-2.0.html
+//	@license.name				Apache 2.0
+//	@license.url				http://www.apache.org/licenses/LICENSE-2.0.html
 //
-// @host localhost:8080
-// @BasePath /
-// @schemes http https
+//	@host						localhost:8080
+//	@BasePath					/
+//	@schemes					http https
 //
-// @securityDefinitions.apikey BearerAuth
-// @in header
-// @name Authorization
-// @description Type "Bearer" followed by a space and the JWT token.
+//	@securityDefinitions.apikey	BearerAuth
+//	@in							header
+//	@name						Authorization
+//	@description				Type "Bearer" followed by a space and the JWT token.
 //
-// @tag.name auth
-// @tag.description Authentication operations
+//	@tag.name					auth
+//	@tag.description			Authentication operations
 //
-// @tag.name users
-// @tag.description User management operations
+//	@tag.name					users
+//	@tag.description			User management operations
 //
-// @tag.name organizations
-// @tag.description Organization management operations
+//	@tag.name					organizations
+//	@tag.description			Organization management operations
 //
-// @tag.name plans
-// @tag.description Subscription plans operations
+//	@tag.name					plans
+//	@tag.description			Subscription plans operations
 //
-// @tag.name census
-// @tag.description Census management operations
+//	@tag.name					census
+//	@tag.description			Census management operations
 //
-// @tag.name process
-// @tag.description Voting process operations
+//	@tag.name					process
+//	@tag.description			Voting process operations
 //
-// @tag.name storage
-// @tag.description Object storage operations
+//	@tag.name					storage
+//	@tag.description			Object storage operations
 //
-// @tag.name transactions
-// @tag.description Transaction signing operations
+//	@tag.name					transactions
+//	@tag.description			Transaction signing operations
 package api
 
 import (

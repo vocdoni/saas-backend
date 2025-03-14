@@ -20,17 +20,17 @@ import (
 var mu sync.Mutex
 
 // handleWebhook godoc
-// @Summary Handle Stripe webhook events
-// @Description Process incoming webhook events from Stripe for subscription management. Handles subscription creation,
-// @Description updates, deletions, and payment events.
-// @Tags plans
-// @Accept json
-// @Produce json
-// @Param body body string true "Stripe webhook payload"
-// @Success 200 {string} string "OK"
-// @Failure 400 {string} string "Bad Request"
-// @Failure 500 {string} string "Internal Server Error"
-// @Router /subscriptions/webhook [post]
+//	@Summary		Handle Stripe webhook events
+//	@Description	Process incoming webhook events from Stripe for subscription management. Handles subscription creation,
+//	@Description	updates, deletions, and payment events.
+//	@Tags			plans
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body		string	true	"Stripe webhook payload"
+//	@Success		200		{string}	string	"OK"
+//	@Failure		400		{string}	string	"Bad Request"
+//	@Failure		500		{string}	string	"Internal Server Error"
+//	@Router			/subscriptions/webhook [post]
 func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -159,19 +159,19 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 // createSubscriptionCheckoutHandler godoc
-// @Summary Create a subscription checkout session
-// @Description Create a new Stripe checkout session for subscription purchases
-// @Tags plans
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param request body apicommon.SubscriptionCheckout true "Checkout information"
-// @Success 200 {object} map[string]string "Contains clientSecret and sessionID"
-// @Failure 400 {object} errors.Error "Invalid input data"
-// @Failure 401 {object} errors.Error "Unauthorized"
-// @Failure 404 {object} errors.Error "Organization or plan not found"
-// @Failure 500 {object} errors.Error "Internal server error"
-// @Router /subscriptions/checkout [post]
+//	@Summary		Create a subscription checkout session
+//	@Description	Create a new Stripe checkout session for subscription purchases
+//	@Tags			plans
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			request	body		apicommon.SubscriptionCheckout	true	"Checkout information"
+//	@Success		200		{object}	map[string]string				"Contains clientSecret and sessionID"
+//	@Failure		400		{object}	errors.Error					"Invalid input data"
+//	@Failure		401		{object}	errors.Error					"Unauthorized"
+//	@Failure		404		{object}	errors.Error					"Organization or plan not found"
+//	@Failure		500		{object}	errors.Error					"Internal server error"
+//	@Router			/subscriptions/checkout [post]
 func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
@@ -228,16 +228,16 @@ func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.R
 }
 
 // checkoutSessionHandler godoc
-// @Summary Get checkout session status
-// @Description Retrieve the status of a Stripe checkout session
-// @Tags plans
-// @Accept json
-// @Produce json
-// @Param sessionID path string true "Checkout session ID"
-// @Success 200 {object} stripe.CheckoutSession
-// @Failure 400 {object} errors.Error "Invalid session ID"
-// @Failure 500 {object} errors.Error "Internal server error"
-// @Router /subscriptions/checkout/{sessionID} [get]
+//	@Summary		Get checkout session status
+//	@Description	Retrieve the status of a Stripe checkout session
+//	@Tags			plans
+//	@Accept			json
+//	@Produce		json
+//	@Param			sessionID	path		string	true	"Checkout session ID"
+//	@Success		200			{object}	stripe.CheckoutSession
+//	@Failure		400			{object}	errors.Error	"Invalid session ID"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/subscriptions/checkout/{sessionID} [get]
 func (a *API) checkoutSessionHandler(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionID")
 	if sessionID == "" {
@@ -277,19 +277,19 @@ func (a *API) getSubscriptionOrgInfo(event *stripe.Event) (*stripeService.Stripe
 }
 
 // createSubscriptionPortalSessionHandler godoc
-// @Summary Create a subscription portal session
-// @Description Create a Stripe customer portal session for managing subscriptions
-// @Tags plans
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param address path string true "Organization address"
-// @Success 200 {object} map[string]string "Contains portalURL"
-// @Failure 400 {object} errors.Error "Invalid input data"
-// @Failure 401 {object} errors.Error "Unauthorized"
-// @Failure 404 {object} errors.Error "Organization not found"
-// @Failure 500 {object} errors.Error "Internal server error"
-// @Router /subscriptions/{address}/portal [get]
+//	@Summary		Create a subscription portal session
+//	@Description	Create a Stripe customer portal session for managing subscriptions
+//	@Tags			plans
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			address	path		string				true	"Organization address"
+//	@Success		200		{object}	map[string]string	"Contains portalURL"
+//	@Failure		400		{object}	errors.Error		"Invalid input data"
+//	@Failure		401		{object}	errors.Error		"Unauthorized"
+//	@Failure		404		{object}	errors.Error		"Organization not found"
+//	@Failure		500		{object}	errors.Error		"Internal server error"
+//	@Router			/subscriptions/{address}/portal [get]
 func (a *API) createSubscriptionPortalSessionHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {

@@ -16,21 +16,21 @@ import (
 )
 
 // createOrganizationHandler godoc
-// @Summary Create a new organization
-// @Description Create a new organization. If the organization is a suborganization, the parent organization must be
-// @Description specified in the request body, and the user must be an admin of the parent. If the parent organization
-// @Description is already a suborganization, an error is returned.
-// @Tags organizations
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param request body apicommon.OrganizationInfo true "Organization information"
-// @Success 200 {object} apicommon.OrganizationInfo
-// @Failure 400 {object} errors.Error "Invalid input data"
-// @Failure 401 {object} errors.Error "Unauthorized"
-// @Failure 404 {object} errors.Error "Parent organization not found"
-// @Failure 500 {object} errors.Error "Internal server error"
-// @Router /organizations [post]
+//	@Summary		Create a new organization
+//	@Description	Create a new organization. If the organization is a suborganization, the parent organization must be
+//	@Description	specified in the request body, and the user must be an admin of the parent. If the parent organization
+//	@Description	is already a suborganization, an error is returned.
+//	@Tags			organizations
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			request	body		apicommon.OrganizationInfo	true	"Organization information"
+//	@Success		200		{object}	apicommon.OrganizationInfo
+//	@Failure		400		{object}	errors.Error	"Invalid input data"
+//	@Failure		401		{object}	errors.Error	"Unauthorized"
+//	@Failure		404		{object}	errors.Error	"Parent organization not found"
+//	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Router			/organizations [post]
 func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -143,17 +143,17 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 // organizationInfoHandler godoc
-// @Summary Get organization information
-// @Description Get information about an organization
-// @Tags organizations
-// @Accept json
-// @Produce json
-// @Param address path string true "Organization address"
-// @Success 200 {object} apicommon.OrganizationInfo
-// @Failure 400 {object} errors.Error "Invalid input data"
-// @Failure 404 {object} errors.Error "Organization not found"
-// @Failure 500 {object} errors.Error "Internal server error"
-// @Router /organizations/{address} [get]
+//	@Summary		Get organization information
+//	@Description	Get information about an organization
+//	@Tags			organizations
+//	@Accept			json
+//	@Produce		json
+//	@Param			address	path		string	true	"Organization address"
+//	@Success		200		{object}	apicommon.OrganizationInfo
+//	@Failure		400		{object}	errors.Error	"Invalid input data"
+//	@Failure		404		{object}	errors.Error	"Organization not found"
+//	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{address} [get]
 func (a *API) organizationInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
 	org, parent, ok := a.organizationFromRequest(r)
@@ -166,19 +166,19 @@ func (a *API) organizationInfoHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // organizationMembersHandler godoc
-// @Summary Get organization members
-// @Description Get the list of members with their roles in the organization
-// @Tags organizations
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param address path string true "Organization address"
-// @Success 200 {object} apicommon.OrganizationMembers
-// @Failure 400 {object} errors.Error "Invalid input data"
-// @Failure 401 {object} errors.Error "Unauthorized"
-// @Failure 404 {object} errors.Error "Organization not found"
-// @Failure 500 {object} errors.Error "Internal server error"
-// @Router /organizations/{address}/members [get]
+//	@Summary		Get organization members
+//	@Description	Get the list of members with their roles in the organization
+//	@Tags			organizations
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			address	path		string	true	"Organization address"
+//	@Success		200		{object}	apicommon.OrganizationMembers
+//	@Failure		400		{object}	errors.Error	"Invalid input data"
+//	@Failure		401		{object}	errors.Error	"Unauthorized"
+//	@Failure		404		{object}	errors.Error	"Organization not found"
+//	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{address}/members [get]
 func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -229,21 +229,21 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 }
 
 // updateOrganizationHandler godoc
-// @Summary Update organization information
-// @Description Update the information of an organization. Only the admin of the organization can update the information.
-// @Description Only certain fields can be updated, and they will be updated only if they are not empty.
-// @Tags organizations
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param address path string true "Organization address"
-// @Param request body apicommon.OrganizationInfo true "Organization information to update"
-// @Success 200 {string} string "OK"
-// @Failure 400 {object} errors.Error "Invalid input data"
-// @Failure 401 {object} errors.Error "Unauthorized"
-// @Failure 404 {object} errors.Error "Organization not found"
-// @Failure 500 {object} errors.Error "Internal server error"
-// @Router /organizations/{address} [put]
+//	@Summary		Update organization information
+//	@Description	Update the information of an organization. Only the admin of the organization can update the information.
+//	@Description	Only certain fields can be updated, and they will be updated only if they are not empty.
+//	@Tags			organizations
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			address	path		string						true	"Organization address"
+//	@Param			request	body		apicommon.OrganizationInfo	true	"Organization information to update"
+//	@Success		200		{string}	string						"OK"
+//	@Failure		400		{object}	errors.Error				"Invalid input data"
+//	@Failure		401		{object}	errors.Error				"Unauthorized"
+//	@Failure		404		{object}	errors.Error				"Organization not found"
+//	@Failure		500		{object}	errors.Error				"Internal server error"
+//	@Router			/organizations/{address} [put]
 func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -308,21 +308,21 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 // inviteOrganizationMemberHandler godoc
-// @Summary Invite a new member to an organization
-// @Description Invite a new member to an organization. Only the admin of the organization can invite a new member.
-// @Description It stores the invitation in the database and sends an email to the new member with the invitation code.
-// @Tags organizations
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param address path string true "Organization address"
-// @Param request body apicommon.OrganizationInvite true "Invitation information"
-// @Success 200 {string} string "OK"
-// @Failure 400 {object} errors.Error "Invalid input data"
-// @Failure 401 {object} errors.Error "Unauthorized"
-// @Failure 409 {object} errors.Error "User is already a member of the organization"
-// @Failure 500 {object} errors.Error "Internal server error"
-// @Router /organizations/{address}/members [post]
+//	@Summary		Invite a new member to an organization
+//	@Description	Invite a new member to an organization. Only the admin of the organization can invite a new member.
+//	@Description	It stores the invitation in the database and sends an email to the new member with the invitation code.
+//	@Tags			organizations
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			address	path		string							true	"Organization address"
+//	@Param			request	body		apicommon.OrganizationInvite	true	"Invitation information"
+//	@Success		200		{string}	string							"OK"
+//	@Failure		400		{object}	errors.Error					"Invalid input data"
+//	@Failure		401		{object}	errors.Error					"Unauthorized"
+//	@Failure		409		{object}	errors.Error					"User is already a member of the organization"
+//	@Failure		500		{object}	errors.Error					"Internal server error"
+//	@Router			/organizations/{address}/members [post]
 func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -405,22 +405,22 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 }
 
 // acceptOrganizationMemberInvitationHandler godoc
-// @Summary Accept an invitation to an organization
-// @Description Accept an invitation to an organization. It checks if the invitation is valid and not expired, and if the
-// @Description user is not already a member of the organization. If the user does not exist, it creates a new user with
-// @Description the provided information. If the user already exists and is verified, it adds the organization to the user.
-// @Tags organizations
-// @Accept json
-// @Produce json
-// @Param address path string true "Organization address"
-// @Param request body apicommon.AcceptOrganizationInvitation true "Invitation acceptance information"
-// @Success 200 {string} string "OK"
-// @Failure 400 {object} errors.Error "Invalid input data"
-// @Failure 401 {object} errors.Error "Unauthorized or invalid invitation"
-// @Failure 409 {object} errors.Error "User is already a member of the organization"
-// @Failure 410 {object} errors.Error "Invitation expired"
-// @Failure 500 {object} errors.Error "Internal server error"
-// @Router /organizations/{address}/members/accept [post]
+//	@Summary		Accept an invitation to an organization
+//	@Description	Accept an invitation to an organization. It checks if the invitation is valid and not expired, and if the
+//	@Description	user is not already a member of the organization. If the user does not exist, it creates a new user with
+//	@Description	the provided information. If the user already exists and is verified, it adds the organization to the user.
+//	@Tags			organizations
+//	@Accept			json
+//	@Produce		json
+//	@Param			address	path		string									true	"Organization address"
+//	@Param			request	body		apicommon.AcceptOrganizationInvitation	true	"Invitation acceptance information"
+//	@Success		200		{string}	string									"OK"
+//	@Failure		400		{object}	errors.Error							"Invalid input data"
+//	@Failure		401		{object}	errors.Error							"Unauthorized or invalid invitation"
+//	@Failure		409		{object}	errors.Error							"User is already a member of the organization"
+//	@Failure		410		{object}	errors.Error							"Invitation expired"
+//	@Failure		500		{object}	errors.Error							"Internal server error"
+//	@Router			/organizations/{address}/members/accept [post]
 func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)
@@ -515,19 +515,19 @@ func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r
 }
 
 // pendingOrganizationMembersHandler godoc
-// @Summary Get pending organization members
-// @Description Get the list of pending invitations for an organization
-// @Tags organizations
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param address path string true "Organization address"
-// @Success 200 {object} apicommon.OrganizationInviteList
-// @Failure 400 {object} errors.Error "Invalid input data"
-// @Failure 401 {object} errors.Error "Unauthorized"
-// @Failure 404 {object} errors.Error "Organization not found"
-// @Failure 500 {object} errors.Error "Internal server error"
-// @Router /organizations/{address}/members/pending [get]
+//	@Summary		Get pending organization members
+//	@Description	Get the list of pending invitations for an organization
+//	@Tags			organizations
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			address	path		string	true	"Organization address"
+//	@Success		200		{object}	apicommon.OrganizationInviteList
+//	@Failure		400		{object}	errors.Error	"Invalid input data"
+//	@Failure		401		{object}	errors.Error	"Unauthorized"
+//	@Failure		404		{object}	errors.Error	"Organization not found"
+//	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{address}/members/pending [get]
 func (a *API) pendingOrganizationMembersHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -563,13 +563,13 @@ func (a *API) pendingOrganizationMembersHandler(w http.ResponseWriter, r *http.R
 }
 
 // organizationsMembersRolesHandler godoc
-// @Summary Get available organization member roles
-// @Description Get the list of available roles that can be assigned to a member of an organization
-// @Tags organizations
-// @Accept json
-// @Produce json
-// @Success 200 {object} apicommon.OrganizationRoleList
-// @Router /organizations/roles [get]
+//	@Summary		Get available organization member roles
+//	@Description	Get the list of available roles that can be assigned to a member of an organization
+//	@Tags			organizations
+//	@Accept			json
+//	@Produce		json
+//	@Success		200	{object}	apicommon.OrganizationRoleList
+//	@Router			/organizations/roles [get]
 func (a *API) organizationsMembersRolesHandler(w http.ResponseWriter, _ *http.Request) {
 	availableRoles := []*apicommon.OrganizationRole{}
 	for role, name := range db.UserRolesNames {
@@ -583,13 +583,13 @@ func (a *API) organizationsMembersRolesHandler(w http.ResponseWriter, _ *http.Re
 }
 
 // organizationsTypesHandler godoc
-// @Summary Get available organization types
-// @Description Get the list of available organization types that can be assigned to an organization
-// @Tags organizations
-// @Accept json
-// @Produce json
-// @Success 200 {object} apicommon.OrganizationTypeList
-// @Router /organizations/types [get]
+//	@Summary		Get available organization types
+//	@Description	Get the list of available organization types that can be assigned to an organization
+//	@Tags			organizations
+//	@Accept			json
+//	@Produce		json
+//	@Success		200	{object}	apicommon.OrganizationTypeList
+//	@Router			/organizations/types [get]
 func (a *API) organizationsTypesHandler(w http.ResponseWriter, _ *http.Request) {
 	organizationTypes := []*apicommon.OrganizationType{}
 	for orgType, name := range db.OrganizationTypesNames {
@@ -602,19 +602,19 @@ func (a *API) organizationsTypesHandler(w http.ResponseWriter, _ *http.Request) 
 }
 
 // getOrganizationSubscriptionHandler godoc
-// @Summary Get organization subscription
-// @Description Get the subscription information for an organization
-// @Tags organizations
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param address path string true "Organization address"
-// @Success 200 {object} apicommon.OrganizationSubscriptionInfo
-// @Failure 400 {object} errors.Error "Invalid input data"
-// @Failure 401 {object} errors.Error "Unauthorized"
-// @Failure 404 {object} errors.Error "Organization not found or no subscription"
-// @Failure 500 {object} errors.Error "Internal server error"
-// @Router /organizations/{address}/subscription [get]
+//	@Summary		Get organization subscription
+//	@Description	Get the subscription information for an organization
+//	@Tags			organizations
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			address	path		string	true	"Organization address"
+//	@Success		200		{object}	apicommon.OrganizationSubscriptionInfo
+//	@Failure		400		{object}	errors.Error	"Invalid input data"
+//	@Failure		401		{object}	errors.Error	"Unauthorized"
+//	@Failure		404		{object}	errors.Error	"Organization not found or no subscription"
+//	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{address}/subscription [get]
 func (a *API) getOrganizationSubscriptionHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -651,19 +651,19 @@ func (a *API) getOrganizationSubscriptionHandler(w http.ResponseWriter, r *http.
 }
 
 // organizationCensusesHandler godoc
-// @Summary Get organization censuses
-// @Description Get the list of censuses for an organization
-// @Tags organizations
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param address path string true "Organization address"
-// @Success 200 {object} apicommon.OrganizationCensuses
-// @Failure 400 {object} errors.Error "Invalid input data"
-// @Failure 401 {object} errors.Error "Unauthorized"
-// @Failure 404 {object} errors.Error "Organization not found"
-// @Failure 500 {object} errors.Error "Internal server error"
-// @Router /organizations/{address}/censuses [get]
+//	@Summary		Get organization censuses
+//	@Description	Get the list of censuses for an organization
+//	@Tags			organizations
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			address	path		string	true	"Organization address"
+//	@Success		200		{object}	apicommon.OrganizationCensuses
+//	@Failure		400		{object}	errors.Error	"Invalid input data"
+//	@Failure		401		{object}	errors.Error	"Unauthorized"
+//	@Failure		404		{object}	errors.Error	"Organization not found"
+//	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{address}/censuses [get]
 func (a *API) organizationCensusesHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())

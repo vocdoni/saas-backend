@@ -25,18 +25,18 @@ const (
 var addParticipantsToCensusWorkers sync.Map
 
 // createCensusHandler godoc
-// @Summary Create a new census
-// @Description Create a new census for an organization. Requires Manager/Admin role.
-// @Tags census
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param request body apicommon.OrganizationCensus true "Census information"
-// @Success 200 {object} apicommon.OrganizationCensus
-// @Failure 400 {object} errors.Error "Invalid input data"
-// @Failure 401 {object} errors.Error "Unauthorized"
-// @Failure 500 {object} errors.Error "Internal server error"
-// @Router /census [post]
+//	@Summary		Create a new census
+//	@Description	Create a new census for an organization. Requires Manager/Admin role.
+//	@Tags			census
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			request	body		apicommon.OrganizationCensus	true	"Census information"
+//	@Success		200		{object}	apicommon.OrganizationCensus
+//	@Failure		400		{object}	errors.Error	"Invalid input data"
+//	@Failure		401		{object}	errors.Error	"Unauthorized"
+//	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Router			/census [post]
 func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse request
 	censusInfo := &apicommon.OrganizationCensus{}
@@ -76,17 +76,17 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // censusInfoHandler godoc
-// @Summary Get census information
-// @Description Retrieve census information by ID. Returns census type, organization address, and creation time.
-// @Tags census
-// @Accept json
-// @Produce json
-// @Param id path string true "Census ID"
-// @Success 200 {object} apicommon.OrganizationCensus
-// @Failure 400 {object} errors.Error "Invalid census ID"
-// @Failure 404 {object} errors.Error "Census not found"
-// @Failure 500 {object} errors.Error "Internal server error"
-// @Router /census/{id} [get]
+//	@Summary		Get census information
+//	@Description	Retrieve census information by ID. Returns census type, organization address, and creation time.
+//	@Tags			census
+//	@Accept			json
+//	@Produce		json
+//	@Param			id	path		string	true	"Census ID"
+//	@Success		200	{object}	apicommon.OrganizationCensus
+//	@Failure		400	{object}	errors.Error	"Invalid census ID"
+//	@Failure		404	{object}	errors.Error	"Census not found"
+//	@Failure		500	{object}	errors.Error	"Internal server error"
+//	@Router			/census/{id} [get]
 func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 	censusID := internal.HexBytes{}
 	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
@@ -102,21 +102,21 @@ func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // addParticipantsHandler godoc
-// @Summary Add participants to a census
-// @Description Add multiple participants to a census. Requires Manager/Admin role.
-// @Tags census
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param id path string true "Census ID"
-// @Param async query boolean false "Process asynchronously and return job ID"
-// @Param request body apicommon.AddParticipantsRequest true "Participants to add"
-// @Success 200 {object} apicommon.AddParticipantsResponse
-// @Failure 400 {object} errors.Error "Invalid input data"
-// @Failure 401 {object} errors.Error "Unauthorized"
-// @Failure 404 {object} errors.Error "Census not found"
-// @Failure 500 {object} errors.Error "Internal server error"
-// @Router /census/{id} [post]
+//	@Summary		Add participants to a census
+//	@Description	Add multiple participants to a census. Requires Manager/Admin role.
+//	@Tags			census
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id		path		string								true	"Census ID"
+//	@Param			async	query		boolean								false	"Process asynchronously and return job ID"
+//	@Param			request	body		apicommon.AddParticipantsRequest	true	"Participants to add"
+//	@Success		200		{object}	apicommon.AddParticipantsResponse
+//	@Failure		400		{object}	errors.Error	"Invalid input data"
+//	@Failure		401		{object}	errors.Error	"Unauthorized"
+//	@Failure		404		{object}	errors.Error	"Census not found"
+//	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Router			/census/{id} [post]
 func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 	censusID := internal.HexBytes{}
 	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
@@ -201,17 +201,17 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // addParticipantsJobCheckHandler godoc
-// @Summary Check the progress of adding participants
-// @Description Check the progress of a job to add participants to a census. Returns the progress of the job.
-// @Description If the job is completed, the job is deleted after 60 seconds.
-// @Tags census
-// @Accept json
-// @Produce json
-// @Param jobid path string true "Job ID"
-// @Success 200 {object} db.BulkCensusMembershipStatus
-// @Failure 400 {object} errors.Error "Invalid job ID"
-// @Failure 404 {object} errors.Error "Job not found"
-// @Router /census/check/{jobid} [get]
+//	@Summary		Check the progress of adding participants
+//	@Description	Check the progress of a job to add participants to a census. Returns the progress of the job.
+//	@Description	If the job is completed, the job is deleted after 60 seconds.
+//	@Tags			census
+//	@Accept			json
+//	@Produce		json
+//	@Param			jobid	path		string	true	"Job ID"
+//	@Success		200		{object}	db.BulkCensusMembershipStatus
+//	@Failure		400		{object}	errors.Error	"Invalid job ID"
+//	@Failure		404		{object}	errors.Error	"Job not found"
+//	@Router			/census/check/{jobid} [get]
 func (a *API) addParticipantsJobCheckHandler(w http.ResponseWriter, r *http.Request) {
 	jobID := internal.HexBytes{}
 	if err := jobID.ParseString(chi.URLParam(r, "jobid")); err != nil {
@@ -236,19 +236,19 @@ func (a *API) addParticipantsJobCheckHandler(w http.ResponseWriter, r *http.Requ
 }
 
 // publishCensusHandler godoc
-// @Summary Publish a census for voting
-// @Description Publish a census for voting. Requires Manager/Admin role. Returns published census with credentials.
-// @Tags census
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param id path string true "Census ID"
-// @Success 200 {object} apicommon.PublishedCensusResponse
-// @Failure 400 {object} errors.Error "Invalid census ID"
-// @Failure 401 {object} errors.Error "Unauthorized"
-// @Failure 404 {object} errors.Error "Census not found"
-// @Failure 500 {object} errors.Error "Internal server error"
-// @Router /census/{id}/publish [post]
+//	@Summary		Publish a census for voting
+//	@Description	Publish a census for voting. Requires Manager/Admin role. Returns published census with credentials.
+//	@Tags			census
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string	true	"Census ID"
+//	@Success		200	{object}	apicommon.PublishedCensusResponse
+//	@Failure		400	{object}	errors.Error	"Invalid census ID"
+//	@Failure		401	{object}	errors.Error	"Unauthorized"
+//	@Failure		404	{object}	errors.Error	"Census not found"
+//	@Failure		500	{object}	errors.Error	"Internal server error"
+//	@Router			/census/{id}/publish [post]
 func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 	censusID := internal.HexBytes{}
 	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
