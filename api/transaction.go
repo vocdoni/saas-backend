@@ -12,6 +12,20 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// signTxHandler godoc
+// @Summary Sign a transaction
+// @Description Sign a transaction with the organization's private key. The user must be a member of the organization.
+// @Tags transactions
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body apicommon.TransactionData true "Transaction data to sign"
+// @Success 200 {object} apicommon.TransactionData
+// @Failure 400 {object} errors.Error "Invalid input data"
+// @Failure 401 {object} errors.Error "Unauthorized"
+// @Failure 404 {object} errors.Error "Organization not found"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /transactions [post]
 func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -104,7 +118,20 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// signMessageHandler signs a message with the user's private key. Only certain messages are allowed to be signed.
+// signMessageHandler godoc
+// @Summary Sign a message
+// @Description Sign a message with the organization's private key. The user must have admin role for the organization.
+// @Tags transactions
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body apicommon.MessageSignature true "Message to sign"
+// @Success 200 {object} apicommon.MessageSignature
+// @Failure 400 {object} errors.Error "Invalid input data"
+// @Failure 401 {object} errors.Error "Unauthorized"
+// @Failure 404 {object} errors.Error "Organization not found"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /transactions/message [post]
 func (a *API) signMessageHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())

@@ -23,9 +23,22 @@ type AddProcessesToBundleRequest struct {
 	Processes []string `json:"processes"` // Array of process creation requests to add
 }
 
-// createProcessBundleHandler creates a new process bundle with the specified census and optional list of processes.
-// Requires Manager/Admin role for the organization that owns the census. Returns 201 on success.
-// The census root will be the same as the account's public key.
+// createProcessBundleHandler godoc
+// @Summary Create a new process bundle
+// @Description Create a new process bundle with the specified census and optional list of processes. Requires
+// @Description Manager/Admin role for the organization that owns the census. The census root will be the same as the
+// @Description account's public key.
+// @Tags process
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body apicommon.CreateProcessBundleRequest true "Process bundle creation information"
+// @Success 200 {object} apicommon.CreateProcessBundleResponse
+// @Failure 400 {object} errors.Error "Invalid input data"
+// @Failure 401 {object} errors.Error "Unauthorized"
+// @Failure 404 {object} errors.Error "Census not found"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /process/bundle [post]
 func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request) {
 	var req apicommon.CreateProcessBundleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -171,9 +184,22 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// updateProcessBundleHandler adds additional processes to an existing bundle.
-// Requires Manager/Admin role for the organization that owns the bundle. Returns 200 on success.
-// The processes array in the request must not be empty.
+// updateProcessBundleHandler godoc
+// @Summary Add processes to an existing bundle
+// @Description Add additional processes to an existing bundle. Requires Manager/Admin role for the organization
+// @Description that owns the bundle.
+// @Tags process
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param bundleId path string true "Bundle ID"
+// @Param request body AddProcessesToBundleRequest true "Processes to add"
+// @Success 200 {object} apicommon.CreateProcessBundleResponse
+// @Failure 400 {object} errors.Error "Invalid input data"
+// @Failure 401 {object} errors.Error "Unauthorized"
+// @Failure 404 {object} errors.Error "Bundle or census not found"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /process/bundle/{bundleId} [put]
 func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request) {
 	bundleIDStr := chi.URLParam(r, "bundleId")
 	if bundleIDStr == "" {
@@ -301,8 +327,19 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// processBundleInfoHandler retrieves process bundle information by ID.
-// Returns bundle details including the associated census, census root, organization address, and list of processes.
+// processBundleInfoHandler godoc
+// @Summary Get process bundle information
+// @Description Retrieve process bundle information by ID. Returns bundle details including the associated census,
+// @Description census root, organization address, and list of processes.
+// @Tags process
+// @Accept json
+// @Produce json
+// @Param bundleId path string true "Bundle ID"
+// @Success 200 {object} db.ProcessesBundle
+// @Failure 400 {object} errors.Error "Invalid bundle ID"
+// @Failure 404 {object} errors.Error "Bundle not found"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /process/bundle/{bundleId} [get]
 func (a *API) processBundleInfoHandler(w http.ResponseWriter, r *http.Request) {
 	bundleIDStr := chi.URLParam(r, "bundleId")
 	if bundleIDStr == "" {
@@ -329,8 +366,20 @@ func (a *API) processBundleInfoHandler(w http.ResponseWriter, r *http.Request) {
 	apicommon.HttpWriteJSON(w, bundle)
 }
 
-// processBundleParticipantInfoHandler retrieves process information for a participant in a process bundle.
-// Returns process details including the census and metadata.
+// processBundleParticipantInfoHandler godoc
+// @Summary Get participant information for a process bundle
+// @Description Retrieve process information for a participant in a process bundle. Returns process details including
+// @Description the census and metadata.
+// @Tags process
+// @Accept json
+// @Produce json
+// @Param bundleId path string true "Bundle ID"
+// @Param participantId path string true "Participant ID"
+// @Success 200 {object} interface{}
+// @Failure 400 {object} errors.Error "Invalid bundle ID or participant ID"
+// @Failure 404 {object} errors.Error "Bundle not found"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /process/bundle/{bundleId}/{participantId} [get]
 func (a *API) processBundleParticipantInfoHandler(w http.ResponseWriter, r *http.Request) {
 	bundleIDStr := chi.URLParam(r, "bundleId")
 	if bundleIDStr == "" {

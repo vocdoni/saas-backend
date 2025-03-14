@@ -11,8 +11,22 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 )
 
-// createProcessHandler creates a new voting process.
-// Requires Manager/Admin role. Returns 201 on success.
+// createProcessHandler godoc
+// @Summary Create a new voting process
+// @Description Create a new voting process. Requires Manager/Admin role.
+// @Tags process
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param processId path string true "Process ID"
+// @Param request body apicommon.CreateProcessRequest true "Process creation information"
+// @Success 200 {string} string "OK"
+// @Failure 400 {object} errors.Error "Invalid input data"
+// @Failure 401 {object} errors.Error "Unauthorized"
+// @Failure 404 {object} errors.Error "Published census not found"
+// @Failure 409 {object} errors.Error "Process already exists"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /process/{processId} [post]
 func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 	processID := internal.HexBytes{}
 	if err := processID.ParseString(chi.URLParam(r, "processId")); err != nil {
@@ -80,8 +94,18 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 	apicommon.HttpWriteOK(w)
 }
 
-// processInfoHandler retrieves voting process information by ID.
-// Returns process details including census and metadata.
+// processInfoHandler godoc
+// @Summary Get process information
+// @Description Retrieve voting process information by ID. Returns process details including census and metadata.
+// @Tags process
+// @Accept json
+// @Produce json
+// @Param processId path string true "Process ID"
+// @Success 200 {object} db.Process
+// @Failure 400 {object} errors.Error "Invalid process ID"
+// @Failure 404 {object} errors.Error "Process not found"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /process/{processId} [get]
 func (a *API) processInfoHandler(w http.ResponseWriter, r *http.Request) {
 	processID := chi.URLParam(r, "processId")
 	if len(processID) == 0 {

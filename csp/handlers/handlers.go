@@ -38,24 +38,25 @@ func New(c *csp.CSP, mainDB *db.MongoStorage) *cspHandlers {
 	}
 }
 
-// BundleAuthHandler is the handler for the authentication of the bundle. It
-// expects the bundle ID and the step as URL parameters. There are two steps
-// in the authentication process:
-//   - Step 0: The user sends the participant number and the contact
-//     information (email or phone) to the server. The server checks the
-//     participant number and the contact information against the census data.
-//     If the data is valid, the server sends a challenge to the user (email
-//     or SMS) with a token.
-//   - Step 1: The user sends the token and the challenge solution (received
-//     via email or SMS) back to the server. The server verifies the token and
-//     the solution. If the data is valid, the token is marked as verified and
-//     returned again to the user.
-//
-// The user can generates as many tokens as needed, but there is a cooldown
-// period between each challenge request to void spamming. The user can verify
-// every token created, but the user only can use the token once per process.
-// Once the process is signed (consumed), it cannot be signed again with any
-// token (even the same token).
+// BundleAuthHandler godoc
+// @Summary Authenticate for a process bundle
+// @Description Handle authentication for a process bundle. There are two steps in the authentication process:
+// @Description - Step 0: The user sends the participant number and contact information (email or phone).
+// @Description   If valid, the server sends a challenge to the user with a token.
+// @Description - Step 1: The user sends the token and challenge solution back to the server.
+// @Description   If valid, the token is marked as verified and returned.
+// @Tags process
+// @Accept json
+// @Produce json
+// @Param bundleId path string true "Bundle ID"
+// @Param step path string true "Authentication step (0 or 1)"
+// @Param request body interface{} true "Authentication request (varies by step)"
+// @Success 200 {object} handlers.AuthResponse
+// @Failure 400 {object} errors.Error "Invalid input data"
+// @Failure 401 {object} errors.Error "Unauthorized"
+// @Failure 404 {object} errors.Error "Bundle not found"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /process/bundle/{bundleId}/auth/{step} [post]
 func (c *cspHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) {
 	// get the bundle ID from the URL parameters
 	bundleID := new(internal.HexBytes)
@@ -114,14 +115,21 @@ func (c *cspHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// BundleSignHandler is the handler for the signing of a bundle process. It
-// expects the bundle ID as a URL parameter. It also expects the process ID,
-// a verified token and the address to sign as a JSON request. The server
-// gets the user data from the token and verifies the process ID and the
-// bundle ID against it. If the data is valid, the server signs the address
-// with the user data and returns the signature. Once the process is signed,
-// it is marked as consumed and cannot be signed again with any token (even
-// the same or another valid token).
+// BundleSignHandler godoc
+// @Summary Sign a process in a bundle
+// @Description Sign a process in a bundle. Requires a verified token. The server signs the address with the user data
+// @Description and returns the signature. Once signed, the process is marked as consumed and cannot be signed again.
+// @Tags process
+// @Accept json
+// @Produce json
+// @Param bundleId path string true "Bundle ID"
+// @Param request body handlers.SignRequest true "Sign request with process ID, auth token, and payload"
+// @Success 200 {object} handlers.AuthResponse
+// @Failure 400 {object} errors.Error "Invalid input data"
+// @Failure 401 {object} errors.Error "Unauthorized or invalid token"
+// @Failure 404 {object} errors.Error "Bundle not found"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /process/bundle/{bundleId}/sign [post]
 func (c *cspHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) {
 	// get the bundle ID from the URL parameters
 	bundleID := new(internal.HexBytes)
@@ -187,12 +195,21 @@ func (c *cspHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 	apicommon.HttpWriteJSON(w, &AuthResponse{Signature: signature})
 }
 
-// ConsumedAddressHandler is the handler for the request to get the address
-// used to sign a process. It expects the process ID as a URL parameter and
-// the auth token as a JSON request. The server gets the user data from the
-// token and verifies the process ID and the bundle ID against it. If the data
-// is valid, the server returns the address used to sign the process, the
-// nullifier of the address, and the timestamp of the consumption.
+// ConsumedAddressHandler godoc
+// @Summary Get the address used to sign a process
+// @Description Get the address used to sign a process. Requires a verified token. Returns the address, nullifier,
+// @Description and timestamp of the consumption.
+// @Tags process
+// @Accept json
+// @Produce json
+// @Param processId path string true "Process ID"
+// @Param request body handlers.ConsumedAddressRequest true "Request with auth token"
+// @Success 200 {object} handlers.ConsumedAddressResponse
+// @Failure 400 {object} errors.Error "Invalid input data"
+// @Failure 401 {object} errors.Error "Unauthorized or invalid token"
+// @Failure 404 {object} errors.Error "Process not found"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /process/{processId}/sign-info [post]
 func (c *cspHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Request) {
 	// get the bundle ID from the URL parameters
 	processID := new(internal.HexBytes)

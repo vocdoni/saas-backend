@@ -13,8 +13,20 @@ import (
 // isObjectNameRgx is a regular expression to match object names.
 var isObjectNameRgx = regexp.MustCompile(`^([a-zA-Z0-9]+)\.(jpg|jpeg|png)`)
 
-// UploadImageWithFormHandler handles the uploading of images through a multipart form.
-// It expects the request to contain a "file" field with one or more files to be uploaded.
+// UploadImageWithFormHandler godoc
+// @Summary Upload images
+// @Description Upload images through a multipart form. Expects the request to contain a "file" field with one or more
+// @Description files to be uploaded.
+// @Tags storage
+// @Accept multipart/form-data
+// @Produce json
+// @Security BearerAuth
+// @Param file formData file true "Image file(s) to upload"
+// @Success 200 {object} map[string][]string "URLs of uploaded images"
+// @Failure 400 {object} errors.Error "Invalid input data"
+// @Failure 401 {object} errors.Error "Unauthorized"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /storage [post]
 func (osc *ObjectStorageClient) UploadImageWithFormHandler(w http.ResponseWriter, r *http.Request) {
 	// check if the user is authenticated
 	// get the user from the request context
@@ -66,10 +78,17 @@ func (osc *ObjectStorageClient) UploadImageWithFormHandler(w http.ResponseWriter
 	apicommon.HttpWriteJSON(w, map[string][]string{"urls": returnURLs})
 }
 
-// DownloadImageInlineHandler handles the HTTP request to download an image inline.
-// It retrieves the object ID from the URL parameters, fetches the object from the
-// object storage, and writes the object data to the HTTP response with appropriate
-// headers for inline display.
+// DownloadImageInlineHandler godoc
+// @Summary Download an image
+// @Description Download an image inline. Retrieves the object from storage and displays it in the browser.
+// @Tags storage
+// @Produce image/jpeg,image/png
+// @Param objectName path string true "Object name"
+// @Success 200 {file} binary "Image file"
+// @Failure 400 {object} errors.Error "Invalid object name"
+// @Failure 404 {object} errors.Error "Object not found"
+// @Failure 500 {object} errors.Error "Internal server error"
+// @Router /storage/{objectName} [get]
 func (osc *ObjectStorageClient) DownloadImageInlineHandler(w http.ResponseWriter, r *http.Request) {
 	objectName := chi.URLParam(r, "objectName")
 	if objectName == "" {
