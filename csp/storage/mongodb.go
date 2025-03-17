@@ -50,6 +50,7 @@ var (
 	// ErrBundleNotFound is returned if the bundle is not found in the user
 	// data.
 	ErrBundleNotFound = fmt.Errorf("bundle not found")
+	ErrBadInputs      = fmt.Errorf("bad inputs")
 )
 
 type MongoConfig struct {
@@ -59,11 +60,14 @@ type MongoConfig struct {
 
 // MongoStorage uses an external MongoDB service for stoting the user data of the smshandler.
 type MongoStorage struct {
-	conf *MongoConfig
+	conf     *MongoConfig
+	keysLock sync.RWMutex
 
 	users      *mongo.Collection
 	tokenIndex *mongo.Collection
-	keysLock   sync.RWMutex
+	// new collections for refactored CSP
+	cspTokens       *mongo.Collection
+	cspTokensStatus *mongo.Collection
 }
 
 // Init initializes the MongoDB storage with the provided configuration.
@@ -108,6 +112,9 @@ func (ms *MongoStorage) Init(rawConf any) error {
 	ms.conf = conf
 	ms.users = conf.Client.Database(conf.DBName).Collection("usersCSP")
 	ms.tokenIndex = conf.Client.Database(conf.DBName).Collection("tokenindex")
+	// new collections for refactored CSP
+	ms.cspTokens = conf.Client.Database(conf.DBName).Collection("cspTokens")
+	ms.cspTokensStatus = conf.Client.Database(conf.DBName).Collection("cspTokensStatus")
 	// if reset flag is enabled, drop the database documents and recreates
 	// indexes, otherwise just create the indexes
 	if reset := os.Getenv("CSP_RESET_DB"); reset != "" {
@@ -132,6 +139,13 @@ func (ms *MongoStorage) Reset() error {
 		return err
 	}
 	if err := ms.tokenIndex.Drop(ctx); err != nil {
+		return err
+	}
+	// new collections for refactored CSP
+	if err := ms.cspTokens.Drop(ctx); err != nil {
+		return err
+	}
+	if err := ms.cspTokensStatus.Drop(ctx); err != nil {
 		return err
 	}
 	if err := ms.createIndexes(); err != nil {
@@ -336,17 +350,8 @@ func (ms *MongoStorage) VerifyAuthToken(token internal.HexBytes) error {
 // createIndexes creates the necessary indexes in the MongoDB database.
 func (ms *MongoStorage) createIndexes() error {
 	// Create text index on `extraData` for finding user data
-	ctx, cancel3 := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel3()
-	userExtraDataIdx := mongo.IndexModel{
-		Keys: bson.D{
-			{Key: "extradata", Value: "text"},
-		},
-	}
-	_, err := ms.users.Indexes().CreateOne(ctx, userExtraDataIdx)
-	if err != nil {
-		return err
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	tokenBundleUserIdx := mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "_id", Value: 1},
@@ -355,8 +360,17 @@ func (ms *MongoStorage) createIndexes() error {
 		},
 		Options: options.Index().SetUnique(true),
 	}
-	_, err = ms.tokenIndex.Indexes().CreateOne(ctx, tokenBundleUserIdx)
-	if err != nil {
+	if _, err := ms.tokenIndex.Indexes().CreateOne(ctx, tokenBundleUserIdx); err != nil {
+		return err
+	}
+	// new indexes for refactored CSP
+	if _, err := ms.cspTokensStatus.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "token", Value: 1},
+			{Key: "consumedPID", Value: 1},
+		},
+		Options: options.Index().SetUnique(true),
+	}); err != nil {
 		return err
 	}
 	return nil
@@ -386,7 +400,6 @@ func (ms *MongoStorage) setUser(user *UserData) error {
 	defer cancel()
 
 	filter := bson.M{"_id": user.ID}
-	// update := bson.M{"$set": user}
 	opts := options.Update().SetUpsert(true)
 	// generate update document with $set and $unset handling
 	update, err := dynamicUpdateDocument(user, nil)

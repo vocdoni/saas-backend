@@ -18,18 +18,15 @@ import (
 
 var (
 	testDB         *MongoStorage
-	testUserID     = []byte("userID")
-	testProcessID  = internal.HexBytes("processID")
 	testUserBundle = BundleData{
 		ID: []byte("bundleID"),
 		Processes: map[string]ProcessData{
-			testProcessID.String(): {
-				ID: testProcessID,
+			testCSPProcessID.String(): {
+				ID: testCSPProcessID,
 			},
 		},
 	}
-	testUserExtraData = "extraData"
-	testToken         = internal.HexBytes(uuid.New().String())
+	testToken = internal.HexBytes(uuid.New().String())
 )
 
 func TestMain(m *testing.M) {
@@ -98,9 +95,8 @@ func TestUserSetUser(t *testing.T) {
 	defer resetDB(c)
 
 	testUserData := &UserData{
-		ID:        testUserID,
-		Bundles:   map[string]BundleData{},
-		ExtraData: testUserExtraData,
+		ID:      testUserID,
+		Bundles: map[string]BundleData{},
 	}
 
 	// user not found
@@ -113,17 +109,8 @@ func TestUserSetUser(t *testing.T) {
 	// get user
 	user, err := testDB.User(testUserData.ID)
 	c.Assert(err, qt.IsNil)
+	c.Assert(user.ID, qt.DeepEquals, testUserData.ID)
 	c.Assert(user.Bundles, qt.HasLen, 0)
-	c.Assert(user.ExtraData, qt.Equals, testUserData.ExtraData)
-	// update user phone
-	testUserData.ExtraData = "testNewData"
-	err = testDB.SetUser(testUserData)
-	c.Assert(err, qt.IsNil)
-	// get user
-	user, err = testDB.User(testUserData.ID)
-	c.Assert(err, qt.IsNil)
-	c.Assert(user.Bundles, qt.HasLen, 0)
-	c.Assert(user.ExtraData, qt.Equals, testUserData.ExtraData)
 	// add bundle
 	testUserData.Bundles[testUserBundle.ID.String()] = testUserBundle
 	err = testDB.SetUser(testUserData)
@@ -134,7 +121,7 @@ func TestUserSetUser(t *testing.T) {
 	c.Assert(user.Bundles, qt.HasLen, 1)
 	c.Assert(user.Bundles[testUserBundle.ID.String()].ID, qt.DeepEquals, testUserBundle.ID)
 	c.Assert(user.Bundles[testUserBundle.ID.String()].Processes, qt.HasLen, 1)
-	c.Assert(user.Bundles[testUserBundle.ID.String()].Processes[testProcessID.String()].ID, qt.DeepEquals, testProcessID)
+	c.Assert(user.Bundles[testUserBundle.ID.String()].Processes[testCSPProcessID.String()].ID, qt.DeepEquals, testCSPProcessID)
 	c.Assert(user.Bundles[testUserBundle.ID.String()].LastAttempt.IsZero(), qt.IsTrue)
 }
 
@@ -142,19 +129,18 @@ func TestSetUserBundle(t *testing.T) {
 	c := qt.New(t)
 	defer resetDB(c)
 	// try to add a bundle to a non-existing user
-	err := testDB.SetUserBundle(testUserID, testUserBundle.ID, []internal.HexBytes{testProcessID}...)
+	err := testDB.SetUserBundle(testUserID, testUserBundle.ID, []internal.HexBytes{testCSPProcessID}...)
 	c.Assert(err, qt.ErrorIs, ErrUserNotFound)
 	// add user
 	c.Assert(testDB.SetUser(&UserData{
-		ID:        testUserID,
-		Bundles:   map[string]BundleData{},
-		ExtraData: testUserExtraData,
+		ID:      testUserID,
+		Bundles: map[string]BundleData{},
 	}), qt.IsNil)
 	user, err := testDB.User(testUserID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(user.Bundles, qt.HasLen, 0)
 	// add bundle
-	err = testDB.SetUserBundle(testUserID, testUserBundle.ID, []internal.HexBytes{testProcessID}...)
+	err = testDB.SetUserBundle(testUserID, testUserBundle.ID, []internal.HexBytes{testCSPProcessID}...)
 	c.Assert(err, qt.IsNil)
 	// get user bundles
 	user, err = testDB.User(testUserID)
@@ -162,8 +148,8 @@ func TestSetUserBundle(t *testing.T) {
 	c.Assert(user.Bundles, qt.HasLen, 1)
 	c.Assert(user.Bundles[testUserBundle.ID.String()].ID, qt.DeepEquals, testUserBundle.ID)
 	c.Assert(user.Bundles[testUserBundle.ID.String()].Processes, qt.HasLen, 1)
-	c.Assert(user.Bundles[testUserBundle.ID.String()].Processes[testProcessID.String()],
-		qt.DeepEquals, testUserBundle.Processes[testProcessID.String()])
+	c.Assert(user.Bundles[testUserBundle.ID.String()].Processes[testCSPProcessID.String()],
+		qt.DeepEquals, testUserBundle.Processes[testCSPProcessID.String()])
 	c.Assert(user.Bundles[testUserBundle.ID.String()].LastAttempt.IsZero(), qt.IsTrue)
 }
 
@@ -176,12 +162,12 @@ func TestSetUsers(t *testing.T) {
 	for i := range len(users) {
 		user, err := testDB.User(users[i].ID)
 		c.Assert(err, qt.IsNil)
-		c.Assert(user.ExtraData, qt.Equals, users[i].ExtraData)
+		c.Assert(user.Bundles, qt.HasLen, 0)
+		c.Assert(user.ID, qt.DeepEquals, users[i].ID)
 	}
 
 	// update some users and re-check
 	for i := range 100 {
-		users[i].ExtraData = fmt.Sprintf("extraDataUpdated%d", i)
 		users[i].Bundles = map[string]BundleData{
 			testUserBundle.ID.String(): testUserBundle,
 		}
@@ -192,13 +178,12 @@ func TestSetUsers(t *testing.T) {
 	for i := range len(users) {
 		user, err := testDB.User(users[i].ID)
 		c.Assert(err, qt.IsNil)
-		c.Assert(user.ExtraData, qt.Equals, users[i].ExtraData)
 		if i < 100 {
 			c.Assert(user.Bundles, qt.HasLen, 1)
 			c.Assert(user.Bundles[testUserBundle.ID.String()].ID, qt.DeepEquals, testUserBundle.ID)
 			c.Assert(user.Bundles[testUserBundle.ID.String()].Processes, qt.HasLen, 1)
-			c.Assert(user.Bundles[testUserBundle.ID.String()].Processes[testProcessID.String()],
-				qt.DeepEquals, testUserBundle.Processes[testProcessID.String()])
+			c.Assert(user.Bundles[testUserBundle.ID.String()].Processes[testCSPProcessID.String()],
+				qt.DeepEquals, testUserBundle.Processes[testCSPProcessID.String()])
 			c.Assert(user.Bundles[testUserBundle.ID.String()].LastAttempt.IsZero(), qt.IsTrue)
 		} else {
 			c.Assert(user.Bundles, qt.HasLen, 0)
@@ -211,7 +196,7 @@ func TestSetUsers(t *testing.T) {
 	newBundle := BundleData{
 		ID: newBundleID,
 		Processes: map[string]ProcessData{
-			testProcessID.String(): {
+			testCSPProcessID.String(): {
 				ID: newProcessID,
 			},
 		},
@@ -229,13 +214,12 @@ func TestSetUsers(t *testing.T) {
 	for i := range len(users) {
 		user, err := testDB.User(users[i].ID)
 		c.Assert(err, qt.IsNil)
-		c.Assert(user.ExtraData, qt.Equals, users[i].ExtraData)
 		if i < 100 {
 			c.Assert(user.Bundles, qt.HasLen, 2)
 			c.Assert(user.Bundles[testUserBundle.ID.String()].ID, qt.DeepEquals, testUserBundle.ID)
 			c.Assert(user.Bundles[testUserBundle.ID.String()].Processes, qt.HasLen, 2)
-			c.Assert(user.Bundles[testUserBundle.ID.String()].Processes[testProcessID.String()],
-				qt.DeepEquals, testUserBundle.Processes[testProcessID.String()])
+			c.Assert(user.Bundles[testUserBundle.ID.String()].Processes[testCSPProcessID.String()],
+				qt.DeepEquals, testUserBundle.Processes[testCSPProcessID.String()])
 			c.Assert(user.Bundles[testUserBundle.ID.String()].Processes[newProcessID.String()],
 				qt.DeepEquals, users[i].Bundles[testUserBundle.ID.String()].Processes[newProcessID.String()])
 			c.Assert(user.Bundles[testUserBundle.ID.String()].LastAttempt.IsZero(), qt.IsTrue)
@@ -254,9 +238,8 @@ func testUsersBulk(n int) []*UserData {
 	users := make([]*UserData, n)
 	for i := range n {
 		users[i] = &UserData{
-			ID:        fmt.Appendf(nil, "user%dID", i),
-			Bundles:   map[string]BundleData{},
-			ExtraData: fmt.Sprintf("extraData%d", i),
+			ID:      fmt.Appendf(nil, "user%dID", i),
+			Bundles: map[string]BundleData{},
 		}
 	}
 	return users
@@ -273,15 +256,14 @@ func TestUserAuthToken(t *testing.T) {
 	c.Assert(err, qt.ErrorIs, ErrUserNotFound)
 	// add user with no bundles
 	c.Assert(testDB.SetUser(&UserData{
-		ID:        testUserID,
-		Bundles:   map[string]BundleData{},
-		ExtraData: testUserExtraData,
+		ID:      testUserID,
+		Bundles: map[string]BundleData{},
 	}), qt.IsNil)
 	// try to add the token to the index of a non-existing bundle
 	err = testDB.IndexAuthToken(testUserID, testUserBundle.ID, testToken)
 	c.Assert(err, qt.ErrorIs, ErrBundleNotFound)
 	// add bundle
-	c.Assert(testDB.SetUserBundle(testUserID, testUserBundle.ID, []internal.HexBytes{testProcessID}...), qt.IsNil)
+	c.Assert(testDB.SetUserBundle(testUserID, testUserBundle.ID, []internal.HexBytes{testCSPProcessID}...), qt.IsNil)
 	// add token
 	err = testDB.IndexAuthToken(testUserID, testUserBundle.ID, testToken)
 	c.Assert(err, qt.IsNil)
@@ -296,8 +278,8 @@ func TestUserAuthToken(t *testing.T) {
 	c.Assert(userData.Bundles, qt.HasLen, 1)
 	c.Assert([]byte(userData.Bundles[testUserBundle.ID.String()].ID), qt.DeepEquals, testUserBundle.ID.Bytes())
 	c.Assert(userData.Bundles[testUserBundle.ID.String()].Processes, qt.HasLen, 1)
-	c.Assert(userData.Bundles[testUserBundle.ID.String()].Processes[testProcessID.String()],
-		qt.DeepEquals, testUserBundle.Processes[testProcessID.String()])
+	c.Assert(userData.Bundles[testUserBundle.ID.String()].Processes[testCSPProcessID.String()],
+		qt.DeepEquals, testUserBundle.Processes[testCSPProcessID.String()])
 	c.Assert(userData.Bundles[testUserBundle.ID.String()].LastAttempt.IsZero(), qt.IsTrue)
 	// verify token
 	err = testDB.VerifyAuthToken(testToken)

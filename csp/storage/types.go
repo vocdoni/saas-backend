@@ -6,16 +6,10 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 )
 
-// Users is the list of smshandler users.
-type Users struct {
-	Users []internal.HexBytes `json:"users"`
-}
-
 // UserData represents a user of the SMS handler.
 type UserData struct {
-	ID        internal.HexBytes     `json:"userID,omitempty" bson:"_id"`
-	Bundles   map[string]BundleData `json:"bundles,omitempty" bson:"bundles"`
-	ExtraData string                `json:"extraData,omitempty" bson:"extradata"`
+	ID      internal.HexBytes     `json:"userID,omitempty" bson:"_id"`
+	Bundles map[string]BundleData `json:"bundles,omitempty" bson:"bundles"`
 }
 
 // BundleData represents a bundle of processes. It includes the bundle ID, the
@@ -45,4 +39,22 @@ type ProcessData struct {
 	WithToken   internal.HexBytes `json:"withToken" bson:"withtoken"`
 	WithAddress internal.HexBytes `json:"withAddress" bson:"withaddress"`
 	At          time.Time         `json:"at" bson:"at"`
+}
+
+type CSPAuthToken struct {
+	Token      internal.HexBytes `json:"token" bson:"_id"`
+	UserID     internal.HexBytes `json:"userID" bson:"userid"`
+	BundleID   internal.HexBytes `json:"bundleID" bson:"bundleid"`
+	CreatedAt  time.Time         `json:"createdAt" bson:"createdat"`
+	Verified   bool              `json:"verified" bson:"verified"`
+	VerifiedAt time.Time         `json:"verifiedAt" bson:"verifiedat"`
+}
+
+type CSPAuthTokenStatus struct {
+	ID              internal.HexBytes `json:"id" bson:"_id"` // hash(token + pid)
+	Token           internal.HexBytes `json:"token" bson:"token"`
+	Consumed        bool              `json:"consumed" bson:"consumed"`
+	ConsumedAt      time.Time         `json:"consumedAt" bson:"consumedat"`
+	ConsumedPID     internal.HexBytes `json:"consumedPID" bson:"consumedpid"`
+	ConsumedAddress internal.HexBytes `json:"consumedAddress" bson:"consumedaddress"`
 }

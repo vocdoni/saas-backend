@@ -49,9 +49,8 @@ func TestBundleAuthToken(t *testing.T) {
 		c.Cleanup(func() { _ = csp.Storage.Reset() })
 		// add user with no bundles and no mail
 		testUserData := &storage.UserData{
-			ID:        testUserID,
-			Bundles:   map[string]storage.BundleData{},
-			ExtraData: testUserExtraData,
+			ID:      testUserID,
+			Bundles: map[string]storage.BundleData{},
 		}
 		c.Assert(csp.Storage.SetUser(testUserData), qt.IsNil)
 		// test bundle is not found in user data
@@ -63,9 +62,8 @@ func TestBundleAuthToken(t *testing.T) {
 		c.Cleanup(func() { _ = csp.Storage.Reset() })
 		// add user with no bundles and no mail
 		testUserData := &storage.UserData{
-			ID:        testUserID,
-			Bundles:   map[string]storage.BundleData{},
-			ExtraData: testUserExtraData,
+			ID:      testUserID,
+			Bundles: map[string]storage.BundleData{},
 		}
 		c.Assert(csp.Storage.SetUser(testUserData), qt.IsNil)
 		// add bundle to user
@@ -92,7 +90,6 @@ func TestBundleAuthToken(t *testing.T) {
 					},
 				},
 			},
-			ExtraData: testUserExtraData,
 		}), qt.IsNil)
 		userResult, err := csp.Storage.User(testUserID)
 		c.Assert(err, qt.IsNil)
@@ -172,15 +169,13 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 					},
 				},
 			},
-			ExtraData: testUserExtraData,
 		}), qt.IsNil)
 		// index the token
 		c.Assert(csp.Storage.IndexAuthToken(testUserID, testBundleID, testToken), qt.IsNil)
 		// remove the bundle from the user data
 		c.Assert(csp.Storage.SetUser(&storage.UserData{
-			ID:        testUserID,
-			Bundles:   map[string]storage.BundleData{},
-			ExtraData: testUserExtraData,
+			ID:      testUserID,
+			Bundles: map[string]storage.BundleData{},
 		}), qt.IsNil)
 		// verify the token
 		err := csp.VerifyBundleAuthToken(testToken, "invalid")
@@ -200,7 +195,6 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 					},
 				},
 			},
-			ExtraData: testUserExtraData,
 		}), qt.IsNil)
 		// index the token
 		c.Assert(csp.Storage.IndexAuthToken(testUserID, testBundleID, testToken), qt.IsNil)
@@ -226,7 +220,6 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 					},
 				},
 			},
-			ExtraData: testUserExtraData,
 		}), qt.IsNil)
 		// index the token
 		c.Assert(csp.Storage.IndexAuthToken(testUserID, testBundleID, testToken), qt.IsNil)
