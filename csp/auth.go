@@ -15,14 +15,11 @@ import (
 
 // BundleAuthToken method generates a new authentication token for a user in
 // a process of a bundle. It generates a new token, secret and code from the
-// attempt number. It updates the user data in the storage and indexes the
-// token. It composes the notification challenge and pushes it to the queue to
-// be sent. It returns the token as HexBytes.
+// attempt number. It composes the notification challenge and pushes it to
+// the queue to be sent. It returns the token as HexBytes.
 func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 	ctype notifications.ChallengeType,
-) (
-	internal.HexBytes, error,
-) {
+) (internal.HexBytes, error) {
 	// check the input parameters
 	if len(bID) == 0 {
 		return nil, ErrNoBundleID
@@ -30,65 +27,54 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 	if len(uID) == 0 {
 		return nil, ErrNoUserID
 	}
-	// get user data
-	userData, err := c.Storage.User(uID)
-	if err != nil {
-		log.Warnw("error getting user data",
-			"error", err,
-			"userID", uID)
-		return nil, ErrUserUnknown
-	}
-	// get the bundle from the user data
-	bundle, ok := userData.Bundles[bID.String()]
-	if !ok {
-		log.Warnw("bundle not found in user data",
+	// get last token for the user and bundle
+	lastToken, err := c.Storage.LastCSPAuth(uID, bID)
+	if err != nil && err != storage.ErrTokenNotFound {
+		log.Warnw("error getting last token",
+			"userID", uID,
 			"bundleID", bID,
-			"userID", uID)
-		return nil, ErrUserNotBelongsToBundle
+			"error", err)
+		return nil, ErrStorageFailure
+	}
+	// check if the last token was created less than the cooldown time
+	if lastToken != nil && time.Since(lastToken.CreatedAt) < c.notificationCoolDownTime {
+		log.Warnw("cooldown time not reached",
+			"userID", uID,
+			"bundleID", bID)
+		return nil, ErrAttemptCoolDownTime
 	}
 	// generate a new token, secret and code from the attempt number
-	token, code, err := c.generateToken(uID, bundle)
+	token, code, err := c.generateToken(uID, bID)
 	if err != nil {
 		return nil, err
 	}
-	// set the new information in the process
-	bundle.LastAttempt = time.Now()
-	// update the election and the bundle in the user data
-	userData.Bundles[bID.String()] = bundle
-	// update the user data in the storage and index the token
-	if err := c.Storage.SetUser(userData); err != nil {
-		log.Warnw("error updating user data",
-			"error", err,
+	// create the new token
+	if err := c.Storage.SetCSPAuth(token, uID, bID); err != nil {
+		log.Warnw("error setting new token",
 			"userID", uID,
-			"token", token)
-		return nil, ErrStorageFailure
-	}
-	if err := c.Storage.IndexAuthToken(uID, bID, token); err != nil {
-		log.Warnw("error indexing token",
-			"error", err,
-			"userID", uID,
-			"token", token)
+			"bundleID", bID,
+			"error", err)
 		return nil, ErrStorageFailure
 	}
 	log.Debugw("new auth token stored",
-		"token", token,
 		"userID", uID,
-		"bundleID", bID)
+		"bundleID", bID,
+		"token", token)
 	// compose the notification challenge
 	ch, err := notifications.NewNotificationChallenge(ctype, uID, bID, to, code)
 	if err != nil {
 		log.Warnw("error composing notification challenge",
-			"error", err,
 			"userID", uID,
-			"bundleID", bID)
+			"bundleID", bID,
+			"error", err)
 		return nil, ErrNotificationFailure
 	}
 	// push the challenge to the queue to be sent
 	if err := c.notifyQueue.Push(ch); err != nil {
 		log.Warnw("error pushing notification challenge",
-			"error", err,
 			"userID", uID,
-			"bundleID", bID)
+			"bundleID", bID,
+			"error", err)
 		return nil, ErrNotificationFailure
 	}
 	return token, nil
@@ -110,76 +96,44 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 		return ErrInvalidSolution
 	}
 	// get the user data from the token
-	authToken, userData, err := c.Storage.UserAuthToken(token)
+	authTokenData, err := c.Storage.CSPAuth(token)
 	if err != nil {
 		log.Warnw("error getting user data by token",
-			"error", err,
-			"token", token)
-		return ErrUserUnknown
-	}
-	// get the process from the user data
-	bundle, ok := userData.Bundles[authToken.BundleID.String()]
-	if !ok {
-		log.Warnw("bundle not found in user data",
-			"bundleID", authToken.BundleID,
 			"token", token,
-			"userID", userData.ID)
-		return ErrUserNotBelongsToBundle
-	}
-	// update the last attempt to the bundle in the user data
-	bundle.LastAttempt = time.Now()
-	userData.Bundles[authToken.BundleID.String()] = bundle
-	// update the user data in the storage
-	if err := c.Storage.SetUser(userData); err != nil {
-		log.Warnw("error updating user data",
-			"error", err,
-			"userID", userData.ID,
-			"bundleID", authToken.BundleID)
-		return ErrStorageFailure
+			"error", err)
+		return ErrInvalidAuthToken
 	}
 	// verify the solution, and if the solution is not correct, return an error
-	if !c.verifySolution(userData.ID, authToken.BundleID, solution) {
+	if !c.verifySolution(authTokenData.UserID, authTokenData.BundleID, solution) {
 		log.Warnw("challenge code do not match",
-			"bundleID", authToken.BundleID,
+			"userID", authTokenData.UserID,
+			"bundleID", authTokenData.BundleID,
 			"token", token,
-			"userID", userData.ID,
 			"solution", solution)
 		return ErrChallengeCodeFailure
 	}
 	// set the token as verified
-	if err := c.Storage.VerifyAuthToken(token); err != nil {
+	if err := c.Storage.VerifyCSPAuth(token); err != nil {
 		log.Warnw("error verifying token",
-			"error", err,
+			"userID", authTokenData.UserID,
+			"bundleID", authTokenData.BundleID,
 			"token", token,
-			"bundleID", authToken.BundleID,
-			"userID", userData.ID)
+			"error", err)
 		return ErrStorageFailure
 	}
 	return nil
 }
 
 // generateToken method generates a new authentication token for a user in a
-// process. It checks if the process is already consumed for this user, and
-// if the last attempt is found, checks the cooldown time. It generates a new
-// challenge secret, challenge token and OTP code for the secret and the
-// attempt number. It returns the token, the secret and the code respectively.
-func (c *CSP) generateToken(uID internal.HexBytes, bundle storage.BundleData) (
+// process. It checks if the process is already consumed for this user. It
+// generates a new challenge secret, challenge token and OTP code for the
+// secret and the attempt number. It returns the token, the secret and the
+// code respectively.
+func (c *CSP) generateToken(uID, bID internal.HexBytes) (
 	internal.HexBytes, string, error,
 ) {
-	// if last attempt is found, check the cooldown time
-	if !bundle.LastAttempt.IsZero() {
-		elapsed := time.Since(bundle.LastAttempt)
-		if elapsed < c.notificationCoolDownTime {
-			log.Warnw("attempt cooldown time not reached",
-				"bundleID", bundle.ID,
-				"userID", uID,
-				"elapsed", elapsed,
-				"cooldown", c.notificationCoolDownTime)
-			return nil, "", ErrAttemptCoolDownTime
-		}
-	}
 	// generate a new challenge secret and challenge token
-	secret := otpSecret(uID, bundle.ID)
+	secret := otpSecret(uID, bID)
 	// generate the OTP code for the secret and the attempt number
 	otp := gotp.NewDefaultHOTP(secret)
 	code := otp.At(0)
@@ -189,7 +143,7 @@ func (c *CSP) generateToken(uID internal.HexBytes, bundle storage.BundleData) (
 		log.Warnw("error marshalling token",
 			"error", err,
 			"userID", uID,
-			"bundleID", bundle.ID)
+			"bundleID", bID)
 		return nil, "", ErrInvalidAuthToken
 	}
 	return bToken, code, nil

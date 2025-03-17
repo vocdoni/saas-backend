@@ -14,6 +14,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
+	"go.vocdoni.io/dvote/util"
 )
 
 const (
@@ -31,7 +32,7 @@ var (
 	testRootKey     = new(internal.HexBytes).SetString("700e669712473377a92457f3ff2a4d8f6b17e139f127738018a80fe26983f410")
 	testUserID      = internal.HexBytes("userID")
 	testBundleID    = internal.HexBytes("bundleID")
-	testPID         = internal.HexBytes("processID")
+	testPID         = internal.HexBytes(util.RandomBytes(32))
 	testToken       = internal.HexBytes("token")
 	testAddress     = internal.HexBytes("address")
 )
