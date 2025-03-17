@@ -8,7 +8,6 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/csp/signers"
 	"github.com/vocdoni/saas-backend/csp/signers/saltedkey"
-	"github.com/vocdoni/saas-backend/csp/storage"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/util"
 	"go.vocdoni.io/proto/build/go/models"
@@ -37,22 +36,10 @@ func TestSign(t *testing.T) {
 	c.Run("ecdsa salted success", func(c *qt.C) {
 		pid := internal.HexBytes(util.RandomBytes(32))
 		c.Cleanup(func() { _ = csp.Storage.Reset() })
-		// create user with the bundles
-		c.Assert(csp.Storage.SetUser(&storage.UserData{
-			ID: testUserID,
-			Bundles: map[string]storage.BundleData{
-				testBundleID.String(): {
-					ID: testBundleID,
-					Processes: map[string]storage.ProcessData{
-						pid.String(): {ID: pid},
-					},
-				},
-			},
-		}), qt.IsNil)
 		// index the token
-		c.Assert(csp.Storage.IndexAuthToken(testUserID, testBundleID, testToken), qt.IsNil)
+		c.Assert(csp.Storage.SetCSPAuthToken(testToken, testUserID, testBundleID), qt.IsNil)
 		// verify the token
-		c.Assert(csp.Storage.VerifyAuthToken(testToken), qt.IsNil)
+		c.Assert(csp.Storage.VerifyCSPAuthToken(testToken), qt.IsNil)
 		sign, err := csp.Sign(testToken, testAddress, pid, signers.SignerTypeECDSASalted)
 		c.Assert(err, qt.IsNil)
 		c.Assert(sign, qt.Not(qt.IsNil))
@@ -75,6 +62,10 @@ func TestPrepareSaltedKeySigner(t *testing.T) {
 	c.Assert(error, qt.IsNil)
 
 	c.Run("not found token", func(c *qt.C) {
+		c.Cleanup(func() {
+			_ = csp.Storage.Reset()
+			csp.unlock(testUserID, testPID)
+		})
 		_, _, _, err := csp.prepareSaltedKeySigner(testToken, testAddress, testPID)
 		c.Assert(err, qt.ErrorIs, ErrInvalidAuthToken)
 	})
@@ -84,20 +75,9 @@ func TestPrepareSaltedKeySigner(t *testing.T) {
 			_ = csp.Storage.Reset()
 			csp.unlock(testUserID, testPID)
 		})
-		// create user with the bundle
-		c.Assert(csp.Storage.SetUser(&storage.UserData{
-			ID: testUserID,
-			Bundles: map[string]storage.BundleData{
-				testBundleID.String(): {
-					ID: testBundleID,
-					Processes: map[string]storage.ProcessData{
-						testPID.String(): {ID: testPID},
-					},
-				},
-			},
-		}), qt.IsNil)
-		// index the token
-		c.Assert(csp.Storage.IndexAuthToken(testUserID, testBundleID, testToken), qt.IsNil)
+		// store the token and verify it
+		c.Assert(csp.Storage.SetCSPAuthToken(testToken, testUserID, testBundleID), qt.IsNil)
+		c.Assert(csp.Storage.VerifyCSPAuthToken(testToken), qt.IsNil)
 		// lock the user
 		csp.lock(testUserID, testPID)
 		_, _, _, err := csp.prepareSaltedKeySigner(testToken, testAddress, testPID)
@@ -109,51 +89,12 @@ func TestPrepareSaltedKeySigner(t *testing.T) {
 			_ = csp.Storage.Reset()
 			csp.unlock(testUserID, testPID)
 		})
-		// create user with the bundle
-		c.Assert(csp.Storage.SetUser(&storage.UserData{
-			ID: testUserID,
-			Bundles: map[string]storage.BundleData{
-				testBundleID.String(): {
-					ID: testBundleID,
-					Processes: map[string]storage.ProcessData{
-						testPID.String(): {ID: testPID},
-					},
-				},
-			},
-		}), qt.IsNil)
-		// index the token
-		c.Assert(csp.Storage.IndexAuthToken(testUserID, testBundleID, testToken), qt.IsNil)
+		// store the token
+		c.Assert(csp.Storage.SetCSPAuthToken(testToken, testUserID, testBundleID), qt.IsNil)
+		// store the token status
+		c.Assert(csp.Storage.ConsumeCSPAuthToken(testToken, testPID, testAddress), qt.IsNil)
 		_, _, _, err := csp.prepareSaltedKeySigner(testToken, testAddress, testPID)
 		c.Assert(err, qt.ErrorIs, ErrAuthTokenNotVerified)
-	})
-
-	c.Run("user not in bundle", func(c *qt.C) {
-		c.Skip("not reachable")
-	})
-
-	c.Run("user not in process", func(c *qt.C) {
-		c.Cleanup(func() {
-			_ = csp.Storage.Reset()
-			csp.unlock(testUserID, testPID)
-		})
-		// create user with the bundle
-		c.Assert(csp.Storage.SetUser(&storage.UserData{
-			ID: testUserID,
-			Bundles: map[string]storage.BundleData{
-				testBundleID.String(): {
-					ID: testBundleID,
-					Processes: map[string]storage.ProcessData{
-						"otherProcess": {ID: testPID},
-					},
-				},
-			},
-		}), qt.IsNil)
-		// index the token
-		c.Assert(csp.Storage.IndexAuthToken(testUserID, testBundleID, testToken), qt.IsNil)
-		// verify the token
-		c.Assert(csp.Storage.VerifyAuthToken(testToken), qt.IsNil)
-		_, _, _, err := csp.prepareSaltedKeySigner(testToken, testAddress, testPID)
-		c.Assert(err, qt.ErrorIs, ErrUserNotBelongsToProcess)
 	})
 
 	c.Run("process already consumed", func(c *qt.C) {
@@ -161,22 +102,12 @@ func TestPrepareSaltedKeySigner(t *testing.T) {
 			_ = csp.Storage.Reset()
 			csp.unlock(testUserID, testPID)
 		})
-		// create user with the bundle
-		c.Assert(csp.Storage.SetUser(&storage.UserData{
-			ID: testUserID,
-			Bundles: map[string]storage.BundleData{
-				testBundleID.String(): {
-					ID: testBundleID,
-					Processes: map[string]storage.ProcessData{
-						testPID.String(): {ID: testPID, Consumed: true},
-					},
-				},
-			},
-		}), qt.IsNil)
-		// index the token
-		c.Assert(csp.Storage.IndexAuthToken(testUserID, testBundleID, testToken), qt.IsNil)
+		// store the token
+		c.Assert(csp.Storage.SetCSPAuthToken(testToken, testUserID, testBundleID), qt.IsNil)
 		// verify the token
-		c.Assert(csp.Storage.VerifyAuthToken(testToken), qt.IsNil)
+		c.Assert(csp.Storage.VerifyCSPAuthToken(testToken), qt.IsNil)
+		// consume the process
+		c.Assert(csp.Storage.ConsumeCSPAuthToken(testToken, testPID, testAddress), qt.IsNil)
 		_, _, _, err := csp.prepareSaltedKeySigner(testToken, testAddress, testPID)
 		c.Assert(err, qt.ErrorIs, ErrProcessAlreadyConsumed)
 	})
@@ -186,59 +117,34 @@ func TestPrepareSaltedKeySigner(t *testing.T) {
 			_ = csp.Storage.Reset()
 			csp.unlock(testUserID, testPID)
 		})
-		// create user with the bundle
-		c.Assert(csp.Storage.SetUser(&storage.UserData{
-			ID: testUserID,
-			Bundles: map[string]storage.BundleData{
-				testBundleID.String(): {
-					ID: testBundleID,
-					Processes: map[string]storage.ProcessData{
-						testPID.String(): {ID: testPID},
-					},
-				},
-			},
-		}), qt.IsNil)
 		// index the token
-		c.Assert(csp.Storage.IndexAuthToken(testUserID, testBundleID, testToken), qt.IsNil)
+		c.Assert(csp.Storage.SetCSPAuthToken(testToken, testUserID, testBundleID), qt.IsNil)
 		// verify the token
-		c.Assert(csp.Storage.VerifyAuthToken(testToken), qt.IsNil)
-		_, _, _, err := csp.prepareSaltedKeySigner(testToken, testAddress, testPID)
+		c.Assert(csp.Storage.VerifyCSPAuthToken(testToken), qt.IsNil)
+		_, _, _, err := csp.prepareSaltedKeySigner(testToken, testAddress, util.RandomBytes(saltedkey.SaltSize-1))
 		c.Assert(err, qt.ErrorIs, ErrInvalidSalt)
 	})
 
 	c.Run("success", func(c *qt.C) {
-		pid := internal.HexBytes(util.RandomBytes(32))
 		c.Cleanup(func() {
 			_ = csp.Storage.Reset()
 			csp.unlock(testUserID, testPID)
 		})
-		// create user with the bundle
-		c.Assert(csp.Storage.SetUser(&storage.UserData{
-			ID: testUserID,
-			Bundles: map[string]storage.BundleData{
-				testBundleID.String(): {
-					ID: testBundleID,
-					Processes: map[string]storage.ProcessData{
-						pid.String(): {ID: pid},
-					},
-				},
-			},
-		}), qt.IsNil)
 		// index the token
-		c.Assert(csp.Storage.IndexAuthToken(testUserID, testBundleID, testToken), qt.IsNil)
+		c.Assert(csp.Storage.SetCSPAuthToken(testToken, testUserID, testBundleID), qt.IsNil)
 		// verify the token
-		c.Assert(csp.Storage.VerifyAuthToken(testToken), qt.IsNil)
-		userID, salt, message, err := csp.prepareSaltedKeySigner(testToken, testAddress, pid)
+		c.Assert(csp.Storage.VerifyCSPAuthToken(testToken), qt.IsNil)
+		userID, salt, message, err := csp.prepareSaltedKeySigner(testToken, testAddress, testPID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(userID, qt.DeepEquals, testUserID)
-		c.Assert((*salt)[:], qt.DeepEquals, pid.Bytes()[:saltedkey.SaltSize])
+		c.Assert((*salt)[:], qt.DeepEquals, testPID.Bytes()[:saltedkey.SaltSize])
 		c.Assert(message, qt.Not(qt.IsNil))
 		var caBundle models.CAbundle
 		err = proto.Unmarshal(message, &caBundle)
 		c.Assert(err, qt.IsNil)
-		c.Assert(caBundle.ProcessId, qt.DeepEquals, pid.Bytes())
+		c.Assert(caBundle.ProcessId, qt.DeepEquals, testPID.Bytes())
 		c.Assert(caBundle.Address, qt.DeepEquals, testAddress.Bytes())
-		c.Assert(csp.isLocked(testUserID, pid), qt.IsTrue)
+		c.Assert(csp.isLocked(testUserID, testPID), qt.IsTrue)
 	})
 }
 
@@ -263,20 +169,8 @@ func TestFinishSaltedKeySigner(t *testing.T) {
 
 	c.Run("token not verified", func(c *qt.C) {
 		c.Cleanup(func() { _ = csp.Storage.Reset() })
-		// create user with the bundle
-		c.Assert(csp.Storage.SetUser(&storage.UserData{
-			ID: testUserID,
-			Bundles: map[string]storage.BundleData{
-				testBundleID.String(): {
-					ID: testBundleID,
-					Processes: map[string]storage.ProcessData{
-						testPID.String(): {ID: testPID},
-					},
-				},
-			},
-		}), qt.IsNil)
-		// index the token
-		c.Assert(csp.Storage.IndexAuthToken(testUserID, testBundleID, testToken), qt.IsNil)
+		// store the token
+		c.Assert(csp.Storage.SetCSPAuthToken(testToken, testUserID, testBundleID), qt.IsNil)
 		err := csp.finishSaltedKeySigner(testToken, testAddress, testPID)
 		c.Assert(err, qt.ErrorIs, ErrAuthTokenNotVerified)
 	})
@@ -286,91 +180,34 @@ func TestFinishSaltedKeySigner(t *testing.T) {
 			_ = csp.Storage.Reset()
 			defer csp.unlock(testUserID, testPID)
 		})
-		// create user with the bundle
-		c.Assert(csp.Storage.SetUser(&storage.UserData{
-			ID: testUserID,
-			Bundles: map[string]storage.BundleData{
-				testBundleID.String(): {
-					ID: testBundleID,
-					Processes: map[string]storage.ProcessData{
-						testPID.String(): {ID: testPID},
-					},
-				},
-			},
-		}), qt.IsNil)
-		// index the token
-		c.Assert(csp.Storage.IndexAuthToken(testUserID, testBundleID, testToken), qt.IsNil)
+		// store the token
+		c.Assert(csp.Storage.SetCSPAuthToken(testToken, testUserID, testBundleID), qt.IsNil)
 		// verify the token
-		c.Assert(csp.Storage.VerifyAuthToken(testToken), qt.IsNil)
+		c.Assert(csp.Storage.VerifyCSPAuthToken(testToken), qt.IsNil)
 		err := csp.finishSaltedKeySigner(testToken, testAddress, testPID)
 		c.Assert(err, qt.ErrorIs, ErrUserIsNotAlreadySigning)
 	})
 
-	c.Run("user not in bundle", func(c *qt.C) {
-		c.Skip("not reachable")
-	})
-
-	c.Run("user not in process", func(c *qt.C) {
-		c.Cleanup(func() {
-			_ = csp.Storage.Reset()
-			defer csp.unlock(testUserID, testPID)
-		})
-		// create user with the bundle
-		c.Assert(csp.Storage.SetUser(&storage.UserData{
-			ID: testUserID,
-			Bundles: map[string]storage.BundleData{
-				testBundleID.String(): {
-					ID: testBundleID,
-					Processes: map[string]storage.ProcessData{
-						"otherProcess": {ID: testPID},
-					},
-				},
-			},
-		}), qt.IsNil)
-		// index the token
-		c.Assert(csp.Storage.IndexAuthToken(testUserID, testBundleID, testToken), qt.IsNil)
-		// verify the token
-		c.Assert(csp.Storage.VerifyAuthToken(testToken), qt.IsNil)
-		// lock the user
-		csp.lock(testUserID, testPID)
-		err := csp.finishSaltedKeySigner(testToken, testAddress, testPID)
-		c.Assert(err, qt.ErrorIs, ErrUserNotBelongsToProcess)
-	})
-
 	c.Run("success", func(c *qt.C) {
-		pid := internal.HexBytes(util.RandomBytes(32))
 		c.Cleanup(func() {
 			_ = csp.Storage.Reset()
 			defer csp.unlock(testUserID, testPID)
 		})
-		// create user with the bundle
-		c.Assert(csp.Storage.SetUser(&storage.UserData{
-			ID: testUserID,
-			Bundles: map[string]storage.BundleData{
-				testBundleID.String(): {
-					ID: testBundleID,
-					Processes: map[string]storage.ProcessData{
-						pid.String(): {ID: pid},
-					},
-				},
-			},
-		}), qt.IsNil)
-		// index the token
-		c.Assert(csp.Storage.IndexAuthToken(testUserID, testBundleID, testToken), qt.IsNil)
+		// store the token
+		c.Assert(csp.Storage.SetCSPAuthToken(testToken, testUserID, testBundleID), qt.IsNil)
 		// verify the token
-		c.Assert(csp.Storage.VerifyAuthToken(testToken), qt.IsNil)
-		_, _, _, err := csp.prepareSaltedKeySigner(testToken, testAddress, pid)
+		c.Assert(csp.Storage.VerifyCSPAuthToken(testToken), qt.IsNil)
+		_, _, _, err := csp.prepareSaltedKeySigner(testToken, testAddress, testPID)
 		c.Assert(err, qt.IsNil)
-		err = csp.finishSaltedKeySigner(testToken, testAddress, pid)
+		err = csp.finishSaltedKeySigner(testToken, testAddress, testPID)
 		c.Assert(err, qt.IsNil)
-		userData, err := csp.Storage.User(testUserID)
+
+		status, err := csp.Storage.CSPAuthTokenStatus(testToken, testPID)
 		c.Assert(err, qt.IsNil)
-		c.Assert(userData.Bundles[testBundleID.String()].Processes[pid.String()].Consumed, qt.IsTrue)
-		c.Assert(userData.Bundles[testBundleID.String()].Processes[pid.String()].WithToken, qt.DeepEquals, testToken)
-		c.Assert(userData.Bundles[testBundleID.String()].Processes[pid.String()].WithAddress, qt.DeepEquals, testAddress)
-		c.Assert(userData.Bundles[testBundleID.String()].Processes[pid.String()].At.IsZero(), qt.IsFalse)
-		at := userData.Bundles[testBundleID.String()].Processes[pid.String()].At
-		c.Assert(at.IsZero(), qt.IsFalse)
-		c.Assert(at.After(time.Now().Add(-time.Second)), qt.IsTrue)
+		c.Assert(status.Consumed, qt.IsTrue)
+		c.Assert(status.ConsumedToken, qt.DeepEquals, testToken)
+		c.Assert(status.ConsumedAddress, qt.DeepEquals, testAddress)
+		c.Assert(status.ConsumedAt.IsZero(), qt.IsFalse)
+		c.Assert(status.ConsumedAt.After(time.Now().Add(-time.Second)), qt.IsTrue)
 	})
 }

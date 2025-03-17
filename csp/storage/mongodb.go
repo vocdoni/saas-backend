@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -11,7 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -24,33 +22,24 @@ import (
 const DefaultDatabase = "twofactor"
 
 var (
-	// ErrUserNotFound is returned if the userID is not found in the database.
-	ErrUserNotFound = fmt.Errorf("user is not found")
-	// ErrUpdateUser is returned if the user data cannot be updated.
-	ErrUpdateUser = fmt.Errorf("cannot update user data")
-	// ErrDecodeUser is returned if the user data cannot be decoded when it is
-	// retrieved from the database.
-	ErrDecodeUser = fmt.Errorf("cannot decode user data")
 	// ErrTokenNotFound is returned if the token is not found in the database.
 	ErrTokenNotFound = fmt.Errorf("token not found")
-	// ErrDecodeToken is returned if the token data cannot be decoded when it
-	// is retrieved from the database.
-	ErrDecodeToken = fmt.Errorf("cannot decode token data")
 	// ErrPrepareUpdate is returned if the update document cannot be created.
 	// It is a previous step before setting or updating the data.
 	ErrPrepareDocument = fmt.Errorf("cannot create update document")
-	// ErrIndexToken is returned if the token cannot be indexed. A token index
-	// is used to keep track of the user ID associated with a token.
-	ErrIndexToken = fmt.Errorf("cannot index token")
-	// ErrBulkInsert is returned if the bulk insert operation fails.
-	ErrBulkInsert = fmt.Errorf("cannot bulk insert users")
+	// ErrStoreToken is returned if the token cannot be created or updated.
+	ErrStoreToken = fmt.Errorf("cannot set token")
 	// ErrProcessNotFound is returned if the process is not found in the user
 	// data.
 	ErrProcessNotFound = fmt.Errorf("process not found")
-	// ErrBundleNotFound is returned if the bundle is not found in the user
-	// data.
-	ErrBundleNotFound = fmt.Errorf("bundle not found")
-	ErrBadInputs      = fmt.Errorf("bad inputs")
+	// ErrBadInputs is returned if the inputs provided to the function are
+	// invalid.
+	ErrBadInputs = fmt.Errorf("bad inputs")
+	// ErrProcessAlreadyConsumed is returned if the process has already been
+	// consumed by the user.
+	ErrProcessAlreadyConsumed = fmt.Errorf("token already consumed")
+	// ErrTokenNoVerified is returned if the token has not been verified.
+	ErrTokenNoVerified = fmt.Errorf("token not verified")
 )
 
 type MongoConfig struct {
@@ -63,8 +52,6 @@ type MongoStorage struct {
 	conf     *MongoConfig
 	keysLock sync.RWMutex
 
-	users      *mongo.Collection
-	tokenIndex *mongo.Collection
 	// new collections for refactored CSP
 	cspTokens       *mongo.Collection
 	cspTokensStatus *mongo.Collection
@@ -110,9 +97,6 @@ func (ms *MongoStorage) Init(rawConf any) error {
 	}
 	// set the config and collections
 	ms.conf = conf
-	ms.users = conf.Client.Database(conf.DBName).Collection("usersCSP")
-	ms.tokenIndex = conf.Client.Database(conf.DBName).Collection("tokenindex")
-	// new collections for refactored CSP
 	ms.cspTokens = conf.Client.Database(conf.DBName).Collection("cspTokens")
 	ms.cspTokensStatus = conf.Client.Database(conf.DBName).Collection("cspTokensStatus")
 	// if reset flag is enabled, drop the database documents and recreates
@@ -135,12 +119,6 @@ func (ms *MongoStorage) Reset() error {
 	log.Infof("resetting database")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := ms.users.Drop(ctx); err != nil {
-		return err
-	}
-	if err := ms.tokenIndex.Drop(ctx); err != nil {
-		return err
-	}
 	// new collections for refactored CSP
 	if err := ms.cspTokens.Drop(ctx); err != nil {
 		return err
@@ -154,260 +132,20 @@ func (ms *MongoStorage) Reset() error {
 	return nil
 }
 
-// User returns the full information of a user, including the election list.
-// It returns an error if the user is not found in the database.
-func (ms *MongoStorage) User(userID internal.HexBytes) (*UserData, error) {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
-	return ms.userByID(userID)
-}
-
-// SetUser adds a new user to the storage or updates an existing one. It uses
-// the user ID as the primary key.
-func (ms *MongoStorage) SetUser(user *UserData) error {
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-	if err := ms.setUser(user); err != nil {
-		return err
-	}
-	return nil
-}
-
-// SetUserBundle sets the list of processes for a process bundle for a user.
-// It will create the user if it does not exist. The attempts parameter is the
-// number of attempts allowed for each process.
-func (ms *MongoStorage) SetUserBundle(userID, bundleID internal.HexBytes, pIDs ...internal.HexBytes) error {
-	// if there are no processes, do nothing
-	if len(pIDs) == 0 {
-		return nil
-	}
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-	// get user data from the storage
-	user, err := ms.userByID(userID)
-	if err != nil {
-		return err
-	}
-	// if the user has no bundles, create the map
-	if user.Bundles == nil {
-		user.Bundles = make(map[string]BundleData, 1)
-	}
-	// initialize the bundle in the user data if it does not exist
-	if bundle, ok := user.Bundles[bundleID.String()]; !ok {
-		processes := make(map[string]ProcessData, len(pIDs))
-		for _, pID := range pIDs {
-			processes[pID.String()] = ProcessData{
-				ID:       pID,
-				Consumed: false,
-			}
-		}
-		user.Bundles[bundleID.String()] = BundleData{
-			ID:        bundleID,
-			Processes: processes,
-		}
-	} else {
-		// update the processes in the bundle
-		// Initialize the Processes map if it's nil
-		if bundle.Processes == nil {
-			bundle.Processes = make(map[string]ProcessData)
-		}
-		for _, pID := range pIDs {
-			if _, ok := bundle.Processes[pID.String()]; !ok {
-				bundle.Processes[pID.String()] = ProcessData{
-					ID:       pID,
-					Consumed: false,
-				}
-			}
-		}
-		user.Bundles[bundleID.String()] = bundle
-	}
-	// set the user data back to the storage
-	if err := ms.setUser(user); err != nil {
-		return err
-	}
-	return nil
-}
-
-// AddUsers adds multiple users to the storage in batches of 1000 entries.
-func (ms *MongoStorage) SetUsers(users []*UserData) error {
-	// if there are no users, do nothing
-	if len(users) == 0 {
-		return nil
-	}
-	// create a list of bulkWrite operations with each user
-	var operations []mongo.WriteModel
-	for _, user := range users {
-		// generate update document dynamically
-		updateDoc, err := dynamicUpdateDocument(user, nil)
-		if err != nil {
-			return errors.Join(ErrPrepareDocument, err)
-		}
-		// create an UpdateOneModel for bulkWrite
-		operations = append(operations, mongo.NewUpdateOneModel().
-			SetFilter(bson.M{"_id": user.ID}).
-			SetUpdate(updateDoc).
-			SetUpsert(true))
-	}
-	if len(operations) == 0 {
-		return nil
-	}
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-	// execute bulkWrite for batch processing
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	_, err := ms.users.BulkWrite(ctx, operations, options.BulkWrite().SetOrdered(false))
-	if err != nil {
-		return errors.Join(ErrBulkInsert, err)
-	}
-	return nil
-}
-
-// IndexToken indexes a token with its associated user ID. This index is used
-// to quickly find the user data by token. It will create the index if it does
-// not exist or update it if it does.
-func (ms *MongoStorage) IndexAuthToken(uID, bID, token internal.HexBytes) error {
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-	// check if the user already exists and has a bundle with the id provided
-	user, err := ms.userByID(uID)
-	if err != nil {
-		return err
-	}
-	if _, ok := user.Bundles[bID.String()]; !ok {
-		return ErrBundleNotFound
-	}
-	// create the context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	// insert the token in the token index
-	if _, err := ms.tokenIndex.InsertOne(ctx, AuthToken{
-		Token:     token,
-		UserID:    uID,
-		BundleID:  bID,
-		CreatedAt: time.Now(),
-	}); err != nil {
-		if mongo.IsDuplicateKeyError(err) {
-			return nil
-		}
-		return errors.Join(ErrIndexToken, err)
-	}
-	return nil
-}
-
-// UserByToken returns the full information of a user, including the election
-// list, by using the token index. It returns an error if the user is not found
-// in the database.
-func (ms *MongoStorage) UserAuthToken(token internal.HexBytes) (*AuthToken, *UserData, error) {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
-	// get the auth token from the token index
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	result := ms.tokenIndex.FindOne(ctx, bson.M{"_id": token})
-	// decode the auth token
-	authToken := new(AuthToken)
-	if err := result.Decode(authToken); err != nil {
-		if err == mongo.ErrNoDocuments {
-			return nil, nil, ErrTokenNotFound
-		}
-		return nil, nil, errors.Join(ErrDecodeToken, err)
-	}
-	// get the user data from the user ID
-	user, err := ms.userByID(authToken.UserID)
-	if err != nil {
-		return nil, nil, err
-	}
-	return authToken, user, nil
-}
-
-func (ms *MongoStorage) VerifyAuthToken(token internal.HexBytes) error {
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-	// create the context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	// check if the token exists
-	filter := bson.M{"_id": token}
-	count, err := ms.tokenIndex.CountDocuments(ctx, filter)
-	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			return ErrTokenNotFound
-		}
-		return errors.Join(ErrDecodeToken, err)
-	}
-	if count == 0 {
-		return ErrTokenNotFound
-	}
-	// update the token as verified
-	update := bson.M{"$set": bson.M{"verified": true}}
-	if _, err := ms.tokenIndex.UpdateOne(ctx, filter, update); err != nil {
-		return errors.Join(ErrIndexToken, err)
-	}
-	return nil
-}
-
 // createIndexes creates the necessary indexes in the MongoDB database.
 func (ms *MongoStorage) createIndexes() error {
 	// Create text index on `extraData` for finding user data
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	tokenBundleUserIdx := mongo.IndexModel{
-		Keys: bson.D{
-			{Key: "_id", Value: 1},
-			{Key: "userid", Value: 1},
-			{Key: "bundleid", Value: 1},
-		},
-		Options: options.Index().SetUnique(true),
-	}
-	if _, err := ms.tokenIndex.Indexes().CreateOne(ctx, tokenBundleUserIdx); err != nil {
-		return err
-	}
 	// new indexes for refactored CSP
 	if _, err := ms.cspTokensStatus.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{
-			{Key: "token", Value: 1},
-			{Key: "consumedPID", Value: 1},
+			{Key: "userid", Value: 1},
+			{Key: "processid", Value: 1},
 		},
 		Options: options.Index().SetUnique(true),
 	}); err != nil {
 		return err
-	}
-	return nil
-}
-
-// userByID retrieves the user data from the database by user ID. It does not
-// lock the keysLock, so it should be called from a function that already has
-// the lock.
-func (ms *MongoStorage) userByID(userID internal.HexBytes) (*UserData, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	result := ms.users.FindOne(ctx, bson.M{"_id": userID})
-	var user UserData
-	if err := result.Decode(&user); err != nil {
-		if err == mongo.ErrNoDocuments {
-			return nil, errors.Join(ErrUserNotFound, err)
-		}
-		return nil, errors.Join(ErrDecodeUser, err)
-	}
-	return &user, nil
-}
-
-// setUser updates the user data in the database. It does not lock the keysLock,
-// so it should be called from a function that already has the lock.
-func (ms *MongoStorage) setUser(user *UserData) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	filter := bson.M{"_id": user.ID}
-	opts := options.Update().SetUpsert(true)
-	// generate update document with $set and $unset handling
-	update, err := dynamicUpdateDocument(user, nil)
-	if err != nil {
-		return errors.Join(ErrPrepareDocument, err)
-	}
-	if _, err := ms.users.UpdateOne(ctx, filter, update, opts); err != nil {
-		return errors.Join(ErrUpdateUser, err)
 	}
 	return nil
 }

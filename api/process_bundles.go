@@ -7,8 +7,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/api/apicommon"
-	"github.com/vocdoni/saas-backend/csp"
-	"github.com/vocdoni/saas-backend/csp/storage"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
@@ -108,37 +106,6 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		processes = append(processes, processID)
 	}
 
-	// Find the census participants and get them associated to the bundle
-	orgParticipants, err := a.db.OrgParticipantsMemberships(census.OrgAddress, census.ID.Hex(), bundleID.Hex(), processes)
-	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-
-	// if a twofactor census add the process to the twofactor service
-	if census.Type == db.CensusTypeSMSorMail ||
-		census.Type == db.CensusTypeMail ||
-		census.Type == db.CensusTypeSMS {
-		cspParticipants := []*storage.UserData{}
-		var hbBundleID internal.HexBytes
-		if err := hbBundleID.ParseString(bundleID.Hex()); err != nil {
-			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-			return
-		}
-		for _, p := range orgParticipants {
-			userData, err := csp.NewUserForBundle(internal.HexBytes(p.ParticipantNo), hbBundleID, processes...)
-			if err != nil {
-				errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-				return
-			}
-			cspParticipants = append(cspParticipants, userData)
-		}
-		if err := a.csp.SetUsers(cspParticipants); err != nil {
-			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-			return
-		}
-	}
-
 	// Create the process bundle
 	cspPubKey, err := a.csp.PubKey()
 	if err != nil {
@@ -230,17 +197,6 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Get the census for this bundle
-	census, err := a.db.Census(bundle.Census.ID.Hex())
-	if err != nil {
-		if err == db.ErrNotFound {
-			errors.ErrMalformedURLParam.Withf("census not found").Write(w)
-			return
-		}
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-
 	// Collect all processes to add
 	var processesToAdd []internal.HexBytes
 
@@ -256,32 +212,6 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		}
 
 		processesToAdd = append(processesToAdd, processID)
-	}
-
-	// Find the census participants
-	orgParticipants, err := a.db.OrgParticipantsMemberships(census.OrgAddress, census.ID.Hex(), bundleIDStr, processesToAdd)
-	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-
-	// if a twofactor census add the process to the twofactor service
-	if census.Type == db.CensusTypeSMSorMail ||
-		census.Type == db.CensusTypeMail ||
-		census.Type == db.CensusTypeSMS {
-		cspParticipants := []*storage.UserData{}
-		for _, p := range orgParticipants {
-			userData, err := csp.NewUserForBundle(internal.HexBytes(p.ParticipantNo), bundleID, processesToAdd...)
-			if err != nil {
-				errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-				return
-			}
-			cspParticipants = append(cspParticipants, userData)
-		}
-		if err := a.csp.SetUsers(cspParticipants); err != nil {
-			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-			return
-		}
 	}
 
 	// Add processes to the bundle
