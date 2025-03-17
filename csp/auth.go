@@ -28,7 +28,7 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 		return nil, ErrNoUserID
 	}
 	// get last token for the user and bundle
-	lastToken, err := c.Storage.LastCSPAuthToken(uID, bID)
+	lastToken, err := c.Storage.LastCSPAuth(uID, bID)
 	if err != nil && err != storage.ErrTokenNotFound {
 		log.Warnw("error getting last token",
 			"userID", uID,
@@ -49,7 +49,7 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 		return nil, err
 	}
 	// create the new token
-	if err := c.Storage.SetCSPAuthToken(token, uID, bID); err != nil {
+	if err := c.Storage.SetCSPAuth(token, uID, bID); err != nil {
 		log.Warnw("error setting new token",
 			"userID", uID,
 			"bundleID", bID,
@@ -96,7 +96,7 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 		return ErrInvalidSolution
 	}
 	// get the user data from the token
-	authTokenData, err := c.Storage.CSPAuthToken(token)
+	authTokenData, err := c.Storage.CSPAuth(token)
 	if err != nil {
 		log.Warnw("error getting user data by token",
 			"token", token,
@@ -113,7 +113,7 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 		return ErrChallengeCodeFailure
 	}
 	// set the token as verified
-	if err := c.Storage.VerifyCSPAuthToken(token); err != nil {
+	if err := c.Storage.VerifyCSPAuth(token); err != nil {
 		log.Warnw("error verifying token",
 			"userID", authTokenData.UserID,
 			"bundleID", authTokenData.BundleID,

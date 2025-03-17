@@ -58,7 +58,7 @@ func TestBundleAuthToken(t *testing.T) {
 		// calculate expected code and token
 		_, expectedCode, err := csp.generateToken(testUserID, bundleID)
 		c.Assert(err, qt.IsNil)
-		authTokenResult, err := csp.Storage.CSPAuthToken(token)
+		authTokenResult, err := csp.Storage.CSPAuth(token)
 		c.Assert(err, qt.IsNil)
 		c.Assert(authTokenResult.BundleID.Bytes(), qt.DeepEquals, bundleID.Bytes())
 		c.Assert(authTokenResult.UserID.Bytes(), qt.DeepEquals, testUserID.Bytes())
@@ -110,7 +110,7 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 	c.Run("solution not match", func(c *qt.C) {
 		c.Cleanup(func() { _ = csp.Storage.Reset() })
 		// create the token
-		c.Assert(csp.Storage.SetCSPAuthToken(testToken, testUserID, testBundleID), qt.IsNil)
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID), qt.IsNil)
 		// try to verify an invalid solution
 		err := csp.VerifyBundleAuthToken(testToken, "invalid")
 		c.Assert(err, qt.ErrorIs, ErrChallengeCodeFailure)
@@ -119,7 +119,7 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 	c.Run("success", func(c *qt.C) {
 		c.Cleanup(func() { _ = csp.Storage.Reset() })
 		// create the token
-		c.Assert(csp.Storage.SetCSPAuthToken(testToken, testUserID, testBundleID), qt.IsNil)
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID), qt.IsNil)
 		// generate the code
 		_, code, err := csp.generateToken(testUserID, testBundleID)
 		c.Assert(err, qt.IsNil)
@@ -127,7 +127,7 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 		err = csp.VerifyBundleAuthToken(testToken, code)
 		c.Assert(err, qt.IsNil)
 		// check that the token is verified
-		authTokenResult, err := csp.Storage.CSPAuthToken(testToken)
+		authTokenResult, err := csp.Storage.CSPAuth(testToken)
 		c.Assert(err, qt.IsNil)
 		c.Assert(authTokenResult.Verified, qt.IsTrue)
 	})

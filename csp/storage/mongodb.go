@@ -51,8 +51,7 @@ type MongoConfig struct {
 type MongoStorage struct {
 	conf     *MongoConfig
 	keysLock sync.RWMutex
-
-	// new collections for refactored CSP
+	// collections
 	cspTokens       *mongo.Collection
 	cspTokensStatus *mongo.Collection
 }
@@ -137,7 +136,7 @@ func (ms *MongoStorage) createIndexes() error {
 	// Create text index on `extraData` for finding user data
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	// new indexes for refactored CSP
+	// unique index over userID and processID
 	if _, err := ms.cspTokensStatus.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "userid", Value: 1},

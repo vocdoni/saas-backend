@@ -50,7 +50,7 @@ func (c *CSP) prepareSaltedKeySigner(token, address, processID internal.HexBytes
 	internal.HexBytes, *[saltedkey.SaltSize]byte, internal.HexBytes, error,
 ) {
 	// get the data of the auth token and the user from the storage
-	authTokenData, err := c.Storage.CSPAuthToken(token)
+	authTokenData, err := c.Storage.CSPAuth(token)
 	if err != nil {
 		return nil, nil, nil, ErrInvalidAuthToken
 	}
@@ -59,7 +59,7 @@ func (c *CSP) prepareSaltedKeySigner(token, address, processID internal.HexBytes
 		return nil, nil, nil, ErrUserAlreadySigning
 	}
 	// check if the process is already consumed for this user
-	if consumed, err := c.Storage.IsPIDConsumedCSP(authTokenData.UserID, processID); err != nil {
+	if consumed, err := c.Storage.IsCSPProcessConsumed(authTokenData.UserID, processID); err != nil {
 		log.Warn(err)
 		switch err {
 		case storage.ErrTokenNoVerified:
@@ -97,7 +97,7 @@ func (c *CSP) prepareSaltedKeySigner(token, address, processID internal.HexBytes
 
 func (c *CSP) finishSaltedKeySigner(token, address, processID internal.HexBytes) error {
 	// get the data of the auth token and the user from the storage
-	authTokenData, err := c.Storage.CSPAuthToken(token)
+	authTokenData, err := c.Storage.CSPAuth(token)
 	if err != nil {
 		return ErrInvalidAuthToken
 	}
@@ -109,14 +109,14 @@ func (c *CSP) finishSaltedKeySigner(token, address, processID internal.HexBytes)
 		return ErrUserIsNotAlreadySigning
 	}
 	// check if the process is already consumed for this user
-	if consumed, err := c.Storage.IsPIDConsumedCSP(authTokenData.UserID, processID); err != nil {
+	if consumed, err := c.Storage.IsCSPProcessConsumed(authTokenData.UserID, processID); err != nil {
 		fmt.Println(err)
 		return ErrStorageFailure
 	} else if consumed {
 		return ErrProcessAlreadyConsumed
 	}
 	// update the process data to mark it as consumed, and set the token used
-	if err := c.Storage.ConsumeCSPAuthToken(token, processID, address); err != nil {
+	if err := c.Storage.ConsumeCSPProcess(token, processID, address); err != nil {
 		log.Warn(err)
 		return ErrStorageFailure
 	}

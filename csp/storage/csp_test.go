@@ -17,24 +17,24 @@ var (
 	testCSPProcessID = internal.HexBytes([]byte("processID"))
 )
 
-func TestSetGetCSPAuthToken(t *testing.T) {
+func TestSetGetCSPAuth(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
 
 	c.Run("nil token", func(c *qt.C) {
-		c.Assert(testDB.SetCSPAuthToken(nil, testUserID, testCSPBundleID), qt.ErrorIs, ErrBadInputs)
+		c.Assert(testDB.SetCSPAuth(nil, testUserID, testCSPBundleID), qt.ErrorIs, ErrBadInputs)
 	})
 	c.Run("nil userID", func(c *qt.C) {
-		c.Assert(testDB.SetCSPAuthToken(testAuthToken, nil, testCSPBundleID), qt.ErrorIs, ErrBadInputs)
+		c.Assert(testDB.SetCSPAuth(testAuthToken, nil, testCSPBundleID), qt.ErrorIs, ErrBadInputs)
 	})
 	c.Run("nil bundleID", func(c *qt.C) {
-		c.Assert(testDB.SetCSPAuthToken(testAuthToken, testUserID, nil), qt.ErrorIs, ErrBadInputs)
+		c.Assert(testDB.SetCSPAuth(testAuthToken, testUserID, nil), qt.ErrorIs, ErrBadInputs)
 	})
 	c.Run("valid token", func(c *qt.C) {
 		c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
 		// set the token and check it was set
-		c.Assert(testDB.SetCSPAuthToken(testAuthToken, testUserID, testCSPBundleID), qt.IsNil)
-		token, err := testDB.CSPAuthToken(testAuthToken)
+		c.Assert(testDB.SetCSPAuth(testAuthToken, testUserID, testCSPBundleID), qt.IsNil)
+		token, err := testDB.CSPAuth(testAuthToken)
 		c.Assert(err, qt.IsNil)
 		c.Assert(token.Token, qt.DeepEquals, testAuthToken)
 		c.Assert(token.UserID, qt.DeepEquals, testUserID)
@@ -44,13 +44,13 @@ func TestSetGetCSPAuthToken(t *testing.T) {
 	c.Run("last token", func(c *qt.C) {
 		c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
 		// get non existing last token
-		_, err := testDB.LastCSPAuthToken(testUserID, testCSPBundleID)
+		_, err := testDB.LastCSPAuth(testUserID, testCSPBundleID)
 		c.Assert(err, qt.ErrorIs, ErrTokenNotFound)
 		// set first token
 		firtstToken := internal.HexBytes(uuid.New().String())
-		c.Assert(testDB.SetCSPAuthToken(firtstToken, testUserID, testCSPBundleID), qt.IsNil)
+		c.Assert(testDB.SetCSPAuth(firtstToken, testUserID, testCSPBundleID), qt.IsNil)
 		// get last token
-		token, err := testDB.LastCSPAuthToken(testUserID, testCSPBundleID)
+		token, err := testDB.LastCSPAuth(testUserID, testCSPBundleID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(token.Token, qt.DeepEquals, firtstToken)
 		c.Assert(token.UserID, qt.DeepEquals, testUserID)
@@ -58,9 +58,9 @@ func TestSetGetCSPAuthToken(t *testing.T) {
 		c.Assert(token.Verified, qt.IsFalse)
 		// set second token
 		secondToken := internal.HexBytes(uuid.New().String())
-		c.Assert(testDB.SetCSPAuthToken(secondToken, testUserID, testCSPBundleID), qt.IsNil)
+		c.Assert(testDB.SetCSPAuth(secondToken, testUserID, testCSPBundleID), qt.IsNil)
 		// get last token
-		token, err = testDB.LastCSPAuthToken(testUserID, testCSPBundleID)
+		token, err = testDB.LastCSPAuth(testUserID, testCSPBundleID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(token.Token, qt.DeepEquals, secondToken)
 		c.Assert(token.UserID, qt.DeepEquals, testUserID)
@@ -69,58 +69,58 @@ func TestSetGetCSPAuthToken(t *testing.T) {
 	})
 	c.Run("non existing token", func(c *qt.C) {
 		// get a non-existing token
-		_, err := testDB.CSPAuthToken(invalidAuthToken)
+		_, err := testDB.CSPAuth(invalidAuthToken)
 		c.Assert(err, qt.ErrorIs, ErrTokenNotFound)
 	})
 }
 
-func TestVerifyCSPAuthToken(t *testing.T) {
+func TestVerifyCSPAuth(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
 
 	c.Run("nil token", func(c *qt.C) {
-		c.Assert(testDB.VerifyCSPAuthToken(nil), qt.ErrorIs, ErrBadInputs)
+		c.Assert(testDB.VerifyCSPAuth(nil), qt.ErrorIs, ErrBadInputs)
 	})
 	c.Run("non existing token", func(c *qt.C) {
-		c.Assert(testDB.VerifyCSPAuthToken(invalidAuthToken), qt.ErrorIs, ErrTokenNotFound)
+		c.Assert(testDB.VerifyCSPAuth(invalidAuthToken), qt.ErrorIs, ErrTokenNotFound)
 	})
 	c.Run("valid token", func(c *qt.C) {
 		// set the token and verify it
-		c.Assert(testDB.SetCSPAuthToken(testAuthToken, testUserID, testCSPBundleID), qt.IsNil)
-		c.Assert(testDB.VerifyCSPAuthToken(testAuthToken), qt.IsNil)
-		token, err := testDB.CSPAuthToken(testAuthToken)
+		c.Assert(testDB.SetCSPAuth(testAuthToken, testUserID, testCSPBundleID), qt.IsNil)
+		c.Assert(testDB.VerifyCSPAuth(testAuthToken), qt.IsNil)
+		token, err := testDB.CSPAuth(testAuthToken)
 		c.Assert(err, qt.IsNil)
 		c.Assert(token.Verified, qt.IsTrue)
 		c.Assert(token.VerifiedAt.IsZero(), qt.IsFalse)
 	})
 }
 
-func TestCSPAuthTokenStatus(t *testing.T) {
+func TestCSPProcess(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
 
 	c.Run("nil inputs", func(c *qt.C) {
-		c.Assert(testDB.ConsumeCSPAuthToken(nil, testCSPProcessID, testUserAddress), qt.ErrorIs, ErrBadInputs)
-		c.Assert(testDB.ConsumeCSPAuthToken(testAuthToken, nil, testUserAddress), qt.ErrorIs, ErrBadInputs)
-		c.Assert(testDB.ConsumeCSPAuthToken(testAuthToken, testCSPProcessID, nil), qt.ErrorIs, ErrBadInputs)
+		c.Assert(testDB.ConsumeCSPProcess(nil, testCSPProcessID, testUserAddress), qt.ErrorIs, ErrBadInputs)
+		c.Assert(testDB.ConsumeCSPProcess(testAuthToken, nil, testUserAddress), qt.ErrorIs, ErrBadInputs)
+		c.Assert(testDB.ConsumeCSPProcess(testAuthToken, testCSPProcessID, nil), qt.ErrorIs, ErrBadInputs)
 
-		_, err := testDB.CSPAuthTokenStatus(nil, testCSPProcessID)
+		_, err := testDB.CSPProcess(nil, testCSPProcessID)
 		c.Assert(err, qt.ErrorIs, ErrBadInputs)
-		_, err = testDB.CSPAuthTokenStatus(testAuthToken, nil)
+		_, err = testDB.CSPProcess(testAuthToken, nil)
 		c.Assert(err, qt.ErrorIs, ErrBadInputs)
 	})
 
 	c.Run("non existing token", func(c *qt.C) {
-		c.Assert(testDB.ConsumeCSPAuthToken(invalidAuthToken, testCSPProcessID, testUserAddress), qt.ErrorIs, ErrTokenNotFound)
-		_, err := testDB.CSPAuthTokenStatus(invalidAuthToken, testCSPProcessID)
+		c.Assert(testDB.ConsumeCSPProcess(invalidAuthToken, testCSPProcessID, testUserAddress), qt.ErrorIs, ErrTokenNotFound)
+		_, err := testDB.CSPProcess(invalidAuthToken, testCSPProcessID)
 		c.Assert(err, qt.ErrorIs, ErrTokenNotFound)
 	})
 
 	c.Run("consume token", func(c *qt.C) {
 		// set the token and consume it
-		c.Assert(testDB.SetCSPAuthToken(testAuthToken, testUserID, testCSPBundleID), qt.IsNil)
-		c.Assert(testDB.ConsumeCSPAuthToken(testAuthToken, testCSPProcessID, testUserAddress), qt.IsNil)
-		status, err := testDB.CSPAuthTokenStatus(testAuthToken, testCSPProcessID)
+		c.Assert(testDB.SetCSPAuth(testAuthToken, testUserID, testCSPBundleID), qt.IsNil)
+		c.Assert(testDB.ConsumeCSPProcess(testAuthToken, testCSPProcessID, testUserAddress), qt.IsNil)
+		status, err := testDB.CSPProcess(testAuthToken, testCSPProcessID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(status.ProcessID, qt.DeepEquals, testCSPProcessID)
 		c.Assert(status.Consumed, qt.IsTrue)
@@ -128,6 +128,6 @@ func TestCSPAuthTokenStatus(t *testing.T) {
 		c.Assert(status.ConsumedAddress, qt.DeepEquals, testUserAddress)
 		c.Assert(status.ConsumedAt.IsZero(), qt.IsFalse)
 		// try to consume it again to check it fails
-		c.Assert(testDB.ConsumeCSPAuthToken(testAuthToken, testCSPProcessID, testUserAddress), qt.ErrorIs, ErrProcessAlreadyConsumed)
+		c.Assert(testDB.ConsumeCSPProcess(testAuthToken, testCSPProcessID, testUserAddress), qt.ErrorIs, ErrProcessAlreadyConsumed)
 	})
 }
