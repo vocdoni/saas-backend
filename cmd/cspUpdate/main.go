@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"time"
 
@@ -110,7 +111,7 @@ func main() {
 	cspStorage := new(storage.MongoStorage)
 	if err := cspStorage.Init(&storage.MongoConfig{
 		Client: database.DBClient,
-		DBName: "saas-lts-csp",
+		DBName: fmt.Sprintf("%s-csp", mongoDB),
 	}); err != nil {
 		log.Fatalf("cannot initialize CSP storage: %v", err)
 	}
