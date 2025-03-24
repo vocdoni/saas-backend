@@ -3,11 +3,13 @@ package csp
 import (
 	"crypto/sha256"
 	"errors"
-	"time"
+	"fmt"
 
 	"github.com/vocdoni/saas-backend/csp/signers"
 	"github.com/vocdoni/saas-backend/csp/signers/saltedkey"
+	"github.com/vocdoni/saas-backend/csp/storage"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/proto/build/go/models"
 	"google.golang.org/protobuf/proto"
 )
@@ -48,36 +50,31 @@ func (c *CSP) prepareSaltedKeySigner(token, address, processID internal.HexBytes
 	internal.HexBytes, *[saltedkey.SaltSize]byte, internal.HexBytes, error,
 ) {
 	// get the data of the auth token and the user from the storage
-	authTokenData, userData, err := c.Storage.UserAuthToken(token)
+	authTokenData, err := c.Storage.CSPAuth(token)
 	if err != nil {
 		return nil, nil, nil, ErrInvalidAuthToken
 	}
 	// check if the user is already signing
-	if c.isLocked(userData.ID, processID) {
+	if c.isLocked(authTokenData.UserID, processID) {
 		return nil, nil, nil, ErrUserAlreadySigning
 	}
+	// check if the process is already consumed for this user
+	if consumed, err := c.Storage.IsCSPProcessConsumed(authTokenData.UserID, processID); err != nil {
+		log.Warn(err)
+		switch err {
+		case storage.ErrTokenNoVerified:
+			return nil, nil, nil, ErrAuthTokenNotVerified
+		default:
+			return nil, nil, nil, ErrStorageFailure
+		}
+	} else if consumed {
+		return nil, nil, nil, ErrProcessAlreadyConsumed
+	}
 	// lock the user data to avoid concurrent signing
-	c.lock(userData.ID, processID)
+	c.lock(authTokenData.UserID, processID)
 	// ensure that the auth token has been verified
 	if !authTokenData.Verified {
 		return nil, nil, nil, ErrAuthTokenNotVerified
-	}
-	// check if the user belongs to the bundle
-	bundleData, ok := userData.Bundles[authTokenData.BundleID.String()]
-	if !ok {
-		return nil, nil, nil, ErrUserNotBelongsToBundle
-	}
-	// check if the user belongs to the process
-	if bundleData.Processes == nil {
-		return nil, nil, nil, ErrUserNotBelongsToProcess
-	}
-	processData, ok := bundleData.Processes[processID.String()]
-	if !ok {
-		return nil, nil, nil, ErrUserNotBelongsToProcess
-	}
-	// check if the process has been consumed
-	if processData.Consumed {
-		return nil, nil, nil, ErrProcessAlreadyConsumed
 	}
 	// prepare the data for the signature
 	caBundle := &models.CAbundle{
@@ -100,7 +97,7 @@ func (c *CSP) prepareSaltedKeySigner(token, address, processID internal.HexBytes
 
 func (c *CSP) finishSaltedKeySigner(token, address, processID internal.HexBytes) error {
 	// get the data of the auth token and the user from the storage
-	authTokenData, userData, err := c.Storage.UserAuthToken(token)
+	authTokenData, err := c.Storage.CSPAuth(token)
 	if err != nil {
 		return ErrInvalidAuthToken
 	}
@@ -108,34 +105,19 @@ func (c *CSP) finishSaltedKeySigner(token, address, processID internal.HexBytes)
 	if !authTokenData.Verified {
 		return ErrAuthTokenNotVerified
 	}
-	if !c.isLocked(userData.ID, processID) {
+	if !c.isLocked(authTokenData.UserID, processID) {
 		return ErrUserIsNotAlreadySigning
 	}
-	// check if the user belongs to the bundle
-	bundleData, ok := userData.Bundles[authTokenData.BundleID.String()]
-	if !ok {
-		return ErrUserNotBelongsToBundle
+	// check if the process is already consumed for this user
+	if consumed, err := c.Storage.IsCSPProcessConsumed(authTokenData.UserID, processID); err != nil {
+		fmt.Println(err)
+		return ErrStorageFailure
+	} else if consumed {
+		return ErrProcessAlreadyConsumed
 	}
-	// check if the user belongs to the process
-	if bundleData.Processes == nil {
-		return ErrUserNotBelongsToProcess
-	}
-	processData, ok := bundleData.Processes[processID.String()]
-	if !ok {
-		return ErrUserNotBelongsToProcess
-	}
-	// update the process data to mark it as consumed, and set the
-	// token used and the time of the signature
-	processData.Consumed = true
-	processData.At = time.Now()
-	processData.WithToken = authTokenData.Token
-	processData.WithAddress = address
-	// update the process in the bundle
-	bundleData.Processes[processID.String()] = processData
-	// update the bundle in the user data
-	userData.Bundles[authTokenData.BundleID.String()] = bundleData
-	// update the user data in the storage
-	if err := c.Storage.SetUser(userData); err != nil {
+	// update the process data to mark it as consumed, and set the token used
+	if err := c.Storage.ConsumeCSPProcess(token, processID, address); err != nil {
+		log.Warn(err)
 		return ErrStorageFailure
 	}
 	return nil

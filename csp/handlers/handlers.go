@@ -163,6 +163,11 @@ func (c *cspHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 		errors.ErrUnauthorized.Withf("missing auth token").Write(w)
 		return
 	}
+	auth, err := c.csp.Storage.CSPAuth(req.AuthToken)
+	if err != nil {
+		errors.ErrUnauthorized.WithErr(err).Write(w)
+		return
+	}
 	// check that the received process is part of the bundle processes
 	var processId internal.HexBytes
 	for _, pID := range bundle.Processes {
@@ -171,6 +176,16 @@ func (c *cspHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 			processId = pID
 			break
 		}
+	}
+	// check the census membership of the participant
+	if _, err := c.mainDB.CensusMembership(bundle.Census.ID.Hex(), string(auth.UserID)); err != nil {
+		if err == db.ErrNotFound {
+			errors.ErrUnauthorized.Withf("participant not found in the census").Write(w)
+			return
+		}
+		log.Warnw("error getting census membership", "error", err)
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
 	}
 	// check if the process is found in the bundle
 	if len(processId) == 0 {
@@ -224,7 +239,7 @@ func (c *cspHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	// get the user data from the token
-	authToken, userData, err := c.csp.Storage.UserAuthToken(req.AuthToken)
+	auth, err := c.csp.Storage.CSPAuth(req.AuthToken)
 	if err != nil {
 		log.Warnw("error getting user data by token",
 			"error", err,
@@ -233,41 +248,28 @@ func (c *cspHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	// check if the token is verified
-	if !authToken.Verified {
+	if !auth.Verified {
 		errors.ErrUnauthorized.WithErr(csp.ErrAuthTokenNotVerified).Write(w)
 		return
 	}
-	// get the bundle from the user data
-	bundle, ok := userData.Bundles[authToken.BundleID.String()]
-	if !ok {
-		log.Warnw("bundle not found in user data",
-			"bundleID", authToken.BundleID,
-			"token", req.AuthToken,
-			"userID", userData.ID)
-		errors.ErrUnauthorized.WithErr(csp.ErrUserNotBelongsToBundle).Write(w)
-		return
-	}
-	// get the process from the bundle
-	process, ok := bundle.Processes[processID.String()]
-	if !ok {
-		log.Warnw("process not found in bundle",
-			"processID", processID,
-			"bundleID", authToken.BundleID,
-			"token", req.AuthToken,
-			"userID", userData.ID)
-		errors.ErrUnauthorized.WithErr(csp.ErrUserNotBelongsToProcess).Write(w)
+	cspProcess, err := c.csp.Storage.CSPProcess(auth.Token, *processID)
+	if err != nil {
+		log.Warnw("error getting user data by token",
+			"error", err,
+			"token", req.AuthToken)
+		errors.ErrUnauthorized.WithErr(err).Write(w)
 		return
 	}
 	// check if the process has been consumed and return error if not
-	if !process.Consumed {
+	if !cspProcess.Consumed {
 		errors.ErrUserNoVoted.Write(w)
 		return
 	}
 	// return the address used to sign the process and the nullifier
 	apicommon.HttpWriteJSON(w, &ConsumedAddressResponse{
-		Address:   process.WithAddress,
-		Nullifier: state.GenerateNullifier(common.BytesToAddress(process.WithAddress), process.ID),
-		At:        process.At,
+		Address:   cspProcess.ConsumedAddress,
+		Nullifier: state.GenerateNullifier(common.BytesToAddress(cspProcess.ConsumedAddress), *processID),
+		At:        cspProcess.ConsumedAt,
 	})
 }
 
