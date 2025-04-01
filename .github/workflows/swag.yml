@@ -1,0 +1,56 @@
+name: API Swagger Docs
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths:
+      - 'api/**/*'
+      - 'scripts/generate-swagger.sh'
+
+jobs:
+  api-swagger:
+    name: Generate vocdoni-api.yaml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+      - name: Make swagger.yaml
+        run: ./scripts/generate-swagger.sh
+
+      - name: Publish Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: swagger.yaml
+          path: docs/swagger.yaml
+
+      - name: Check if there is a difference
+        uses: mathiasvr/command-output@v2.0.0
+        id: diff
+        with:
+          run: git diff --no-color docs/swagger.yaml
+
+      - name: Mark previous comment as outdated if no diff
+        if: ${{ github.event_name == 'pull_request' && steps.diff.outputs.stdout == '' }}
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: diff
+          hide: true
+          hide_classify: "OUTDATED"
+
+      - name: Post comment with diff in original PR
+        if: ${{ github.event_name == 'pull_request' && steps.diff.outputs.stdout }}
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          header: diff
+          message: |
+            This PR introduces the following changes in the API documentation:
+            ```diff
+            ${{ steps.diff.outputs.stdout }}
+            ```
+
