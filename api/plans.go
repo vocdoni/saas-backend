@@ -19,7 +19,7 @@ import (
 //	@Success		200	{array}		db.Plan
 //	@Failure		500	{object}	errors.Error	"Internal server error"
 //	@Router			/plans [get]
-func (a *API) getPlansHandler(w http.ResponseWriter, r *http.Request) {
+func (a *API) getPlansHandler(w http.ResponseWriter, _ *http.Request) {
 	// get the subscritions from the database
 	plans, err := a.db.Plans()
 	if err != nil {
@@ -27,7 +27,7 @@ func (a *API) getPlansHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// send the plans back to the user
-	apicommon.HttpWriteJSON(w, plans)
+	apicommon.HTTPWriteJSON(w, plans)
 }
 
 // planInfoHandler godoc
@@ -63,5 +63,5 @@ func (a *API) planInfoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// send the plan back to the user
-	apicommon.HttpWriteJSON(w, plan)
+	apicommon.HTTPWriteJSON(w, plan)
 }

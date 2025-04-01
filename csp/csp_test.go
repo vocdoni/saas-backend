@@ -28,7 +28,7 @@ const (
 
 var (
 	dbClient        *mongo.Client
-	testMailService *smtp.SMTPEmail
+	testMailService *smtp.Email
 	testRootKey     = new(internal.HexBytes).SetString("700e669712473377a92457f3ff2a4d8f6b17e139f127738018a80fe26983f410")
 	testUserID      = internal.HexBytes("userID")
 	testBundleID    = internal.HexBytes("bundleID")
@@ -99,8 +99,8 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	// create test mail service
-	testMailService = new(smtp.SMTPEmail)
-	if err := testMailService.New(&smtp.SMTPConfig{
+	testMailService = new(smtp.Email)
+	if err := testMailService.New(&smtp.Config{
 		FromAddress:  adminEmail,
 		SMTPUsername: adminUser,
 		SMTPPassword: adminPass,

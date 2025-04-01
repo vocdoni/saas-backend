@@ -1,6 +1,18 @@
+// Package notifications provides functionality for sending notifications via different channels
+// such as email and SMS, with support for various notification services.
 package notifications
 
 import "context"
+
+// NotificationType represents the type of notification to be sent (email or SMS).
+type NotificationType string
+
+const (
+	// Email represents an email notification type.
+	Email NotificationType = "email"
+	// SMS represents an SMS notification type.
+	SMS NotificationType = "sms"
+)
 
 // Notification represents a notification to be sent, it can be an email or an
 // SMS. It contains the recipient's name, address, number, the subject and the
@@ -8,14 +20,6 @@ import "context"
 // while the recipient's number is used for SMS. The EnableTracking flag
 // indicates if the links that the notification contains should be tracked or
 // not.
-
-type NotificationType string
-
-const (
-	Email NotificationType = "email"
-	SMS   NotificationType = "sms"
-)
-
 type Notification struct {
 	ToName         string `json:"toName"`
 	ToAddress      string `json:"toAddress"`

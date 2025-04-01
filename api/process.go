@@ -92,7 +92,7 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	apicommon.HttpWriteOK(w)
+	apicommon.HTTPWriteOK(w)
 }
 
 // processInfoHandler godoc
@@ -125,5 +125,5 @@ func (a *API) processInfoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	apicommon.HttpWriteJSON(w, process)
+	apicommon.HTTPWriteJSON(w, process)
 }

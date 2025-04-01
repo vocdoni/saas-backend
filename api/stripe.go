@@ -39,7 +39,7 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
 	payload, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Errorf("stripe webhook: Error reading request body: %s\n", err.Error())
+		log.Errorf("stripe webhook: Error reading request body: %s", err.Error())
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -47,7 +47,7 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	signatureHeader := r.Header.Get("Stripe-Signature")
 	event, err := a.stripe.DecodeEvent(payload, signatureHeader)
 	if err != nil {
-		log.Errorf("stripe webhook: error decoding event: %s\n", err.Error())
+		log.Errorf("stripe webhook: error decoding event: %s", err.Error())
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -63,7 +63,7 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		dbSubscription, err := a.db.PlanByStripeId(stripeSubscriptionInfo.ProductID)
+		dbSubscription, err := a.db.PlanByStripeID(stripeSubscriptionInfo.ProductID)
 		if err != nil || dbSubscription == nil {
 			log.Errorf("could not update subscription %s, a corresponding subscription was not found.",
 				stripeSubscriptionInfo.ID)
@@ -226,7 +226,7 @@ func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.R
 		ClientSecret: session.ClientSecret,
 		SessionID:    session.ID,
 	}
-	apicommon.HttpWriteJSON(w, data)
+	apicommon.HTTPWriteJSON(w, data)
 }
 
 // checkoutSessionHandler godoc
@@ -253,12 +253,12 @@ func (a *API) checkoutSessionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	apicommon.HttpWriteJSON(w, status)
+	apicommon.HTTPWriteJSON(w, status)
 }
 
 // getSubscriptionOrgInfo is a helper function that retrieves the subscription information from
 // the subscription event and the Organization information from the database.
-func (a *API) getSubscriptionOrgInfo(event *stripe.Event) (*stripeService.StripeSubscriptionInfo, *db.Organization, error) {
+func (a *API) getSubscriptionOrgInfo(event *stripe.Event) (*stripeService.SubscriptionInfo, *db.Organization, error) {
 	stripeSubscriptionInfo, err := a.stripe.GetSubscriptionInfoFromEvent(*event)
 	if err != nil {
 		return nil, nil, fmt.Errorf("could not decode event for subscription: %s", err.Error())
@@ -270,10 +270,9 @@ func (a *API) getSubscriptionOrgInfo(event *stripe.Event) (*stripeService.Stripe
 		log.Errorf("please do manually for creator %s \n  Error:  %s", stripeSubscriptionInfo.CustomerEmail, err.Error())
 		if org == nil {
 			return nil, nil, fmt.Errorf("no organization found with address %s", stripeSubscriptionInfo.OrganizationAddress)
-		} else {
-			return nil, nil, fmt.Errorf("could not retrieve organization with address %s: %s",
-				stripeSubscriptionInfo.OrganizationAddress, err.Error())
 		}
+		return nil, nil, fmt.Errorf("could not retrieve organization with address %s: %s",
+			stripeSubscriptionInfo.OrganizationAddress, err.Error())
 	}
 
 	return stripeSubscriptionInfo, org, nil
@@ -321,5 +320,5 @@ func (a *API) createSubscriptionPortalSessionHandler(w http.ResponseWriter, r *h
 	}{
 		PortalURL: session.URL,
 	}
-	apicommon.HttpWriteJSON(w, data)
+	apicommon.HTTPWriteJSON(w, data)
 }

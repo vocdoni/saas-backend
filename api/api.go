@@ -72,7 +72,7 @@ const (
 	passwordSalt  = "vocdoni365"    // salt for password hashing
 )
 
-type APIConfig struct {
+type Config struct {
 	Host        string
 	Port        int
 	Secret      string
@@ -88,11 +88,11 @@ type APIConfig struct {
 	// modify any of them.
 	FullTransparentMode bool
 	// Stripe secrets
-	StripeClient *stripe.StripeClient
+	StripeClient *stripe.Client
 	// Subscriptions permissions manager
 	Subscriptions *subscriptions.Subscriptions
 	// Object storage
-	ObjectStorage *objectstorage.ObjectStorageClient
+	ObjectStorage *objectstorage.Client
 	CSP           *csp.CSP
 }
 
@@ -111,14 +111,14 @@ type API struct {
 	webAppURL       string
 	serverURL       string
 	transparentMode bool
-	stripe          *stripe.StripeClient
+	stripe          *stripe.Client
 	subscriptions   *subscriptions.Subscriptions
-	objectStorage   *objectstorage.ObjectStorageClient
+	objectStorage   *objectstorage.Client
 	csp             *csp.CSP
 }
 
 // New creates a new API HTTP server. It does not start the server. Use Start() for that.
-func New(conf *APIConfig) *API {
+func New(conf *Config) *API {
 	if conf == nil {
 		return nil
 	}
@@ -263,7 +263,7 @@ func (a *API) initRouter() http.Handler {
 
 	// Public routes
 	r.Group(func(r chi.Router) {
-		r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
+		r.Get("/ping", func(w http.ResponseWriter, _ *http.Request) {
 			if _, err := w.Write([]byte(".")); err != nil {
 				log.Warnw("failed to write ping response", "error", err)
 			}

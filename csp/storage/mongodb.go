@@ -24,7 +24,7 @@ const DefaultDatabase = "twofactor"
 var (
 	// ErrTokenNotFound is returned if the token is not found in the database.
 	ErrTokenNotFound = fmt.Errorf("token not found")
-	// ErrPrepareUpdate is returned if the update document cannot be created.
+	// ErrPrepareDocument is returned if the update document cannot be created.
 	// It is a previous step before setting or updating the data.
 	ErrPrepareDocument = fmt.Errorf("cannot create update document")
 	// ErrStoreToken is returned if the token cannot be created or updated.
@@ -42,6 +42,8 @@ var (
 	ErrTokenNoVerified = fmt.Errorf("token not verified")
 )
 
+// MongoConfig holds the configuration for the MongoDB storage.
+// It includes the MongoDB client and the name of the database to use.
 type MongoConfig struct {
 	Client *mongo.Client
 	DBName string
@@ -125,10 +127,7 @@ func (ms *MongoStorage) Reset() error {
 	if err := ms.cspTokensStatus.Drop(ctx); err != nil {
 		return err
 	}
-	if err := ms.createIndexes(); err != nil {
-		return err
-	}
-	return nil
+	return ms.createIndexes()
 }
 
 // createIndexes creates the necessary indexes in the MongoDB database.

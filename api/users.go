@@ -104,7 +104,7 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// send the token back to the user
-	apicommon.HttpWriteOK(w)
+	apicommon.HTTPWriteOK(w)
 }
 
 // verifyUserAccountHandler godoc
@@ -182,7 +182,7 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// send the token back to the user
-	apicommon.HttpWriteJSON(w, res)
+	apicommon.HTTPWriteJSON(w, res)
 }
 
 // userVerificationCodeInfoHandler godoc
@@ -235,7 +235,7 @@ func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	// return the verification code information
-	apicommon.HttpWriteJSON(w, apicommon.UserVerification{
+	apicommon.HTTPWriteJSON(w, apicommon.UserVerification{
 		Email:      user.Email,
 		Expiration: code.Expiration,
 		Valid:      code.Expiration.After(time.Now()),
@@ -315,7 +315,7 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
-	apicommon.HttpWriteOK(w)
+	apicommon.HTTPWriteOK(w)
 }
 
 // userInfoHandler godoc
@@ -353,7 +353,7 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	// return the user information
-	apicommon.HttpWriteJSON(w, apicommon.UserInfo{
+	apicommon.HTTPWriteJSON(w, apicommon.UserInfo{
 		Email:         user.Email,
 		FirstName:     user.FirstName,
 		LastName:      user.LastName,
@@ -445,7 +445,7 @@ func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
-	apicommon.HttpWriteJSON(w, res)
+	apicommon.HTTPWriteJSON(w, res)
 }
 
 // updateUserPasswordHandler godoc
@@ -491,7 +491,7 @@ func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) 
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
-	apicommon.HttpWriteOK(w)
+	apicommon.HTTPWriteOK(w)
 }
 
 // recoverUserPasswordHandler godoc
@@ -519,7 +519,7 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 		if err == db.ErrNotFound {
 			// do not return an error if the user is not found to avoid
 			// information leakage
-			apicommon.HttpWriteOK(w)
+			apicommon.HTTPWriteOK(w)
 			return
 		}
 		errors.ErrGenericInternalServerError.Write(w)
@@ -547,7 +547,7 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	apicommon.HttpWriteOK(w)
+	apicommon.HTTPWriteOK(w)
 }
 
 // resetUserPasswordHandler godoc
@@ -592,5 +592,5 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
-	apicommon.HttpWriteOK(w)
+	apicommon.HTTPWriteOK(w)
 }

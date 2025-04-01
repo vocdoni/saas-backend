@@ -140,7 +140,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	// send the organization back to the user
-	apicommon.HttpWriteJSON(w, apicommon.OrganizationFromDB(dbOrg, dbParentOrg))
+	apicommon.HTTPWriteJSON(w, apicommon.OrganizationFromDB(dbOrg, dbParentOrg))
 }
 
 // organizationInfoHandler godoc
@@ -164,7 +164,7 @@ func (a *API) organizationInfoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// send the organization back to the user
-	apicommon.HttpWriteJSON(w, apicommon.OrganizationFromDB(org, parent))
+	apicommon.HTTPWriteJSON(w, apicommon.OrganizationFromDB(org, parent))
 }
 
 // organizationMembersHandler godoc
@@ -228,7 +228,7 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 			Role: role,
 		})
 	}
-	apicommon.HttpWriteJSON(w, orgMembers)
+	apicommon.HTTPWriteJSON(w, orgMembers)
 }
 
 // updateOrganizationHandler godoc
@@ -308,7 +308,7 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	apicommon.HttpWriteOK(w)
+	apicommon.HTTPWriteOK(w)
 }
 
 // inviteOrganizationMemberHandler godoc
@@ -406,7 +406,7 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		errors.ErrGenericInternalServerError.Withf("could not update organization: %v", err).Write(w)
 		return
 	}
-	apicommon.HttpWriteOK(w)
+	apicommon.HTTPWriteOK(w)
 }
 
 // acceptOrganizationMemberInvitationHandler godoc
@@ -517,7 +517,7 @@ func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r
 	}
 	// delete the invitation
 	go removeInvitation()
-	apicommon.HttpWriteOK(w)
+	apicommon.HTTPWriteOK(w)
 }
 
 // pendingOrganizationMembersHandler godoc
@@ -566,7 +566,7 @@ func (a *API) pendingOrganizationMembersHandler(w http.ResponseWriter, r *http.R
 			Expiration: invitation.Expiration,
 		})
 	}
-	apicommon.HttpWriteJSON(w, &apicommon.OrganizationInviteList{Invites: invitationsList})
+	apicommon.HTTPWriteJSON(w, &apicommon.OrganizationInviteList{Invites: invitationsList})
 }
 
 // organizationsMembersRolesHandler godoc
@@ -587,7 +587,7 @@ func (a *API) organizationsMembersRolesHandler(w http.ResponseWriter, _ *http.Re
 			WritePermission: db.HasWriteAccess(role),
 		})
 	}
-	apicommon.HttpWriteJSON(w, &apicommon.OrganizationRoleList{Roles: availableRoles})
+	apicommon.HTTPWriteJSON(w, &apicommon.OrganizationRoleList{Roles: availableRoles})
 }
 
 // organizationsTypesHandler godoc
@@ -607,7 +607,7 @@ func (a *API) organizationsTypesHandler(w http.ResponseWriter, _ *http.Request) 
 			Name: name,
 		})
 	}
-	apicommon.HttpWriteJSON(w, &apicommon.OrganizationTypeList{Types: organizationTypes})
+	apicommon.HTTPWriteJSON(w, &apicommon.OrganizationTypeList{Types: organizationTypes})
 }
 
 // getOrganizationSubscriptionHandler godoc
@@ -657,7 +657,7 @@ func (a *API) getOrganizationSubscriptionHandler(w http.ResponseWriter, r *http.
 		Usage:              apicommon.SubscriptionUsageFromDB(&org.Counters),
 		Plan:               apicommon.SubscriptionPlanFromDB(plan),
 	}
-	apicommon.HttpWriteJSON(w, info)
+	apicommon.HTTPWriteJSON(w, info)
 }
 
 // organizationCensusesHandler godoc
@@ -709,5 +709,5 @@ func (a *API) organizationCensusesHandler(w http.ResponseWriter, r *http.Request
 	for _, census := range censuses {
 		result.Censuses = append(result.Censuses, apicommon.OrganizationCensusFromDB(census))
 	}
-	apicommon.HttpWriteJSON(w, result)
+	apicommon.HTTPWriteJSON(w, result)
 }

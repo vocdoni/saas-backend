@@ -11,7 +11,7 @@ func TestVerifications(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
 
-	t.Run("TestUserVerificationCode", func(t *testing.T) {
+	t.Run("TestUserVerificationCode", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		userID, err := testDB.SetUser(&User{
 			Email:     testUserEmail,
@@ -36,7 +36,7 @@ func TestVerifications(t *testing.T) {
 		c.Assert(err, qt.Equals, ErrNotFound)
 	})
 
-	t.Run("TestSetVerificationCode", func(t *testing.T) {
+	t.Run("TestSetVerificationCode", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		nonExistingUserID := uint64(100)
 		err := testDB.SetVerificationCode(&User{ID: nonExistingUserID}, "testCode", CodeTypeVerifyAccount, time.Now())

@@ -16,7 +16,7 @@ func TestOrganizationInvites(t *testing.T) {
 	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
 	expires := time.Now().Add(time.Hour)
 
-	t.Run("GetInvitation", func(t *testing.T) {
+	t.Run("GetInvitation", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Test getting non-existent invitation
 		_, err := testDB.Invitation(invitationCode)
@@ -62,7 +62,7 @@ func TestOrganizationInvites(t *testing.T) {
 		c.Assert(invitation.Expiration.Truncate(time.Second).UTC(), qt.Equals, expires.Truncate(time.Second).UTC())
 	})
 
-	t.Run("PendingInvitations", func(t *testing.T) {
+	t.Run("PendingInvitations", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// List invitations expecting none
 		invitations, err := testDB.PendingInvitations(testOrgAddress)
@@ -119,7 +119,7 @@ func TestOrganizationInvites(t *testing.T) {
 		c.Assert(invitations, qt.HasLen, 0)
 	})
 
-	t.Run("DeleteInvitation", func(t *testing.T) {
+	t.Run("DeleteInvitation", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Non existing invitation does not return an error on delete attempt
 		err := testDB.DeleteInvitation(invitationCode)

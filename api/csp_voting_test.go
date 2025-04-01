@@ -42,7 +42,7 @@ func TestCSPVoting(t *testing.T) {
 	c := qt.New(t)
 
 	// Create a test user and organization
-	t.Run("Setup Organization", func(t *testing.T) {
+	t.Run("Setup Organization", func(_ *testing.T) {
 		// Create a user with admin permissions
 		token := testCreateUser(t, "superpassword123")
 
@@ -74,10 +74,10 @@ func TestCSPVoting(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Create the organization account on the blockchain
-		t.Run("Create Account Transaction", func(t *testing.T) {
+		t.Run("Create Account Transaction", func(_ *testing.T) {
 			// Build the create account transaction
 			orgName := fmt.Sprintf("testorg-%d", internal.RandomInt(1000))
-			orgInfoUri := fmt.Sprintf("https://example.com/%d", internal.RandomInt(1000))
+			orgInfoURI := fmt.Sprintf("https://example.com/%d", internal.RandomInt(1000))
 
 			nonce := uint32(0)
 			tx := models.Tx{
@@ -87,7 +87,7 @@ func TestCSPVoting(t *testing.T) {
 						Txtype:  models.TxType_CREATE_ACCOUNT,
 						Account: orgAddress.Bytes(),
 						Name:    &orgName,
-						InfoURI: &orgInfoUri,
+						InfoURI: &orgInfoURI,
 					},
 				},
 			}
@@ -101,7 +101,7 @@ func TestCSPVoting(t *testing.T) {
 		})
 
 		// Create a process for the organization
-		t.Run("Create Process", func(t *testing.T) {
+		t.Run("Create Process", func(_ *testing.T) {
 			// Get the CSP public key
 			cspPubKey, err := testCSP.PubKey()
 			c.Assert(err, qt.IsNil)
@@ -144,7 +144,7 @@ func TestCSPVoting(t *testing.T) {
 			t.Logf("Created process with ID: %x", processID)
 
 			// Create a census and add participants
-			t.Run("Create Census and Bundle", func(t *testing.T) {
+			t.Run("Create Census and Bundle", func(_ *testing.T) {
 				// Create a new census
 				censusID := testCreateCensus(t, token, orgAddress, string(db.CensusTypeSMSorMail))
 
@@ -168,7 +168,7 @@ func TestCSPVoting(t *testing.T) {
 				bundleID, _ := testCreateBundle(t, token, censusID, [][]byte{processID})
 
 				// Create a voting key for the participant
-				t.Run("Authenticate and Vote", func(t *testing.T) {
+				t.Run("Authenticate and Vote", func(_ *testing.T) {
 					// Create the voting address for the first user
 					user1 := ethereum.SignKeys{}
 					err = user1.Generate()
@@ -196,9 +196,9 @@ func TestCSPVoting(t *testing.T) {
 				})
 
 				// Test cases to try to break the authentication and voting mechanisms
-				t.Run("Authentication Attack Vectors", func(t *testing.T) {
+				t.Run("Authentication Attack Vectors", func(_ *testing.T) {
 					// Test case 1: Try to authenticate with invalid participant ID
-					t.Run("Invalid Participant ID", func(t *testing.T) {
+					t.Run("Invalid Participant ID", func(_ *testing.T) {
 						authReq := &handlers.AuthRequest{
 							ParticipantNo: "INVALID",
 							Email:         "john.doe@example.com",
@@ -208,7 +208,7 @@ func TestCSPVoting(t *testing.T) {
 					})
 
 					// Test case 2: Try to authenticate with valid participant ID but wrong email
-					t.Run("Wrong Email", func(t *testing.T) {
+					t.Run("Wrong Email", func(_ *testing.T) {
 						authReq := &handlers.AuthRequest{
 							ParticipantNo: "P001",
 							Email:         "wrong.email@example.com",
@@ -218,7 +218,7 @@ func TestCSPVoting(t *testing.T) {
 					})
 
 					// Test case 3: Try to verify with invalid OTP code
-					t.Run("Invalid OTP Code", func(t *testing.T) {
+					t.Run("Invalid OTP Code", func(_ *testing.T) {
 						// First get a valid auth token
 						authToken := testCSPAuthenticate(t, bundleID, "P002", "jane.smith@example.com")
 
@@ -232,9 +232,9 @@ func TestCSPVoting(t *testing.T) {
 					})
 				})
 
-				t.Run("Voting Attack Vectors", func(t *testing.T) {
+				t.Run("Voting Attack Vectors", func(_ *testing.T) {
 					// Test case 4: Try to reuse an auth token for multiple processes
-					t.Run("Reuse Auth Token", func(t *testing.T) {
+					t.Run("Reuse Auth Token", func(_ *testing.T) {
 						// Create a second user
 						user2 := ethereum.SignKeys{}
 						err = user2.Generate()
@@ -273,7 +273,7 @@ func TestCSPVoting(t *testing.T) {
 					})
 
 					// Test case 5: Try to sign with a token from a different user
-					t.Run("Token From Different User", func(t *testing.T) {
+					t.Run("Token From Different User", func(_ *testing.T) {
 						// Authenticate user 4
 						authToken := testCSPAuthenticate(t, bundleID, "P004", "bob.williams@example.com")
 
@@ -329,7 +329,7 @@ func TestCSPVoting(t *testing.T) {
 					})
 
 					// Test case 6: Try to vote with a forged signature (should fail)
-					t.Run("Forged Signature", func(t *testing.T) {
+					t.Run("Forged Signature", func(_ *testing.T) {
 						// Create a user
 						user6 := ethereum.SignKeys{}
 						err = user6.Generate()

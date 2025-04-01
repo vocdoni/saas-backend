@@ -1,3 +1,4 @@
+// Package csp implements the Census Service Provider functionality
 package csp
 
 import (

@@ -328,6 +328,7 @@ type SubscriptionPlan struct {
 	CensusSizeTiers []SubscriptionPlanTier `json:"censusSizeTiers"`
 }
 
+// SubscriptionPlanFromDB converts a db.Plan to a SubscriptionPlan.
 func SubscriptionPlanFromDB(plan *db.Plan) SubscriptionPlan {
 	if plan == nil {
 		return SubscriptionPlan{}
@@ -468,6 +469,7 @@ type SubscriptionDetails struct {
 	Email string `json:"email"`
 }
 
+// SubscriptionDetailsFromDB converts a db.OrganizationSubscription to a SubscriptionDetails.
 func SubscriptionDetailsFromDB(details *db.OrganizationSubscription) SubscriptionDetails {
 	if details == nil {
 		return SubscriptionDetails{}
@@ -503,6 +505,7 @@ type SubscriptionUsage struct {
 	Processes int `json:"processes"`
 }
 
+// SubscriptionUsageFromDB converts a db.OrganizationCounters to a SubscriptionUsage.
 func SubscriptionUsageFromDB(usage *db.OrganizationCounters) SubscriptionUsage {
 	if usage == nil {
 		return SubscriptionUsage{}
@@ -565,6 +568,7 @@ type OrganizationCensus struct {
 	OrgAddress string `json:"orgAddress"`
 }
 
+// OrganizationCensusFromDB converts a db.Census to an OrganizationCensus.
 func OrganizationCensusFromDB(census *db.Census) OrganizationCensus {
 	if census == nil {
 		return OrganizationCensus{}
@@ -603,6 +607,7 @@ type AddParticipantsRequest struct {
 	Participants []OrgParticipant `json:"participants"`
 }
 
+// DbOrgParticipants converts the participants in the request to db.OrgParticipant objects.
 func (r *AddParticipantsRequest) DbOrgParticipants(orgAddress string) []db.OrgParticipant {
 	participants := make([]db.OrgParticipant, 0, len(r.Participants))
 	for _, p := range r.Participants {
@@ -634,6 +639,7 @@ type OrgParticipant struct {
 	Other map[string]any `json:"other"`
 }
 
+// ToDb converts an OrgParticipant to a db.OrgParticipant.
 func (p *OrgParticipant) ToDb(orgAddress string) db.OrgParticipant {
 	return db.OrgParticipant{
 		OrgAddress:    orgAddress,
@@ -739,7 +745,7 @@ type SignRequest struct {
 	Payload string `json:"payload,omitempty"`
 
 	// Election ID
-	ElectionId internal.HexBytes `json:"electionId,omitempty"`
+	ElectionID internal.HexBytes `json:"electionId,omitempty"`
 }
 
 // CreateProcessBundleRequest defines the payload for creating a new process bundle.

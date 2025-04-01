@@ -1,3 +1,5 @@
+// Package notifications provides a queue system for managing and sending notification
+// challenges with throttling, retries, and error handling capabilities.
 package notifications
 
 import (
@@ -56,6 +58,8 @@ func NewQueue(ctx context.Context, ttl, throttle time.Duration,
 	}
 }
 
+// Push adds a notification challenge to the queue for processing.
+// It logs the challenge details and returns any error encountered during enqueuing.
 func (sq *Queue) Push(challenge *NotificationChallenge) error {
 	log.Debugw("notification challenge enqueued",
 		"bundleID", challenge.BundleID.String(),

@@ -33,7 +33,7 @@ func TestObjectStorage(t *testing.T) {
 	defer testDB.Close()
 
 	// Create a new ObjectStorageClient
-	t.Run("New", func(t *testing.T) {
+	t.Run("New", func(_ *testing.T) {
 		c := qt.New(t)
 
 		// Test with nil config
@@ -42,7 +42,7 @@ func TestObjectStorage(t *testing.T) {
 		c.Assert(client, qt.IsNil)
 
 		// Test with valid config
-		config := &ObjectStorageConfig{
+		config := &Config{
 			DB: testDB,
 		}
 		client, err = New(config)
@@ -52,7 +52,7 @@ func TestObjectStorage(t *testing.T) {
 		c.Assert(client.supportedTypes, qt.DeepEquals, DefaultSupportedFileTypes)
 
 		// Test with custom supported types
-		config = &ObjectStorageConfig{
+		config = &Config{
 			DB:             testDB,
 			SupportedTypes: []ObjectFileType{FileTypeJPEG, FileTypePNG},
 		}
@@ -63,13 +63,13 @@ func TestObjectStorage(t *testing.T) {
 	})
 
 	// Create a client for the rest of the tests
-	config := &ObjectStorageConfig{
+	config := &Config{
 		DB: testDB,
 	}
 	client, err := New(config)
 	c.Assert(err, qt.IsNil)
 
-	t.Run("Put", func(t *testing.T) {
+	t.Run("Put", func(_ *testing.T) {
 		c := qt.New(t)
 
 		// Test with valid JPEG data
@@ -99,7 +99,7 @@ func TestObjectStorage(t *testing.T) {
 		c.Assert(err, qt.Not(qt.IsNil))
 	})
 
-	t.Run("Get", func(t *testing.T) {
+	t.Run("Get", func(_ *testing.T) {
 		c := qt.New(t)
 
 		// Test with empty objectID
@@ -137,13 +137,13 @@ func TestObjectStorage(t *testing.T) {
 		c.Assert(object.ContentType, qt.Equals, "image/jpeg")
 	})
 
-	t.Run("Cache", func(t *testing.T) {
+	t.Run("Cache", func(_ *testing.T) {
 		c := qt.New(t)
 
 		// Create a client with a small cache
 		cache, err := lru.New[string, db.Object](2)
 		c.Assert(err, qt.IsNil)
-		clientWithCache := &ObjectStorageClient{
+		clientWithCache := &Client{
 			db:             testDB,
 			supportedTypes: DefaultSupportedFileTypes,
 			cache:          cache,
@@ -200,7 +200,7 @@ func TestObjectStorage(t *testing.T) {
 		c.Assert(ok, qt.IsTrue)
 	})
 
-	t.Run("CalculateObjectID", func(t *testing.T) {
+	t.Run("CalculateObjectID", func(_ *testing.T) {
 		c := qt.New(t)
 
 		// Test with valid data
@@ -224,7 +224,7 @@ func TestObjectStorage(t *testing.T) {
 		c.Assert(objectID2, qt.Not(qt.Equals), objectID)
 	})
 
-	t.Run("ErrorHandling", func(t *testing.T) {
+	t.Run("ErrorHandling", func(_ *testing.T) {
 		c := qt.New(t)
 
 		// Test with a reader that returns an error
@@ -234,11 +234,14 @@ func TestObjectStorage(t *testing.T) {
 	})
 }
 
-// ErrorReader is a mock reader that always returns an error
+// ErrorReader is a mock reader that always returns an error.
+// It implements the io.Reader interface for testing error handling.
 type ErrorReader struct {
 	err error
 }
 
-func (r *ErrorReader) Read(p []byte) (n int, err error) {
+// Read implements the io.Reader interface and always returns the error
+// specified in the ErrorReader struct.
+func (r *ErrorReader) Read(_ []byte) (n int, err error) {
 	return 0, r.err
 }

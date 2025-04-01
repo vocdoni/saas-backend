@@ -1,3 +1,6 @@
+// Package main provides a command-line tool for census workflow operations.
+// It handles the creation and management of census data for voting processes
+// and demonstrates the API usage for the saas-backend service.
 package main
 
 import (
@@ -69,7 +72,7 @@ func (c *Client) makeRequest(method, path string, body interface{}, target inter
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			fmt.Printf("Error closing response body: %v\n", err)
+			fmt.Printf("Error closing response body: %v", err)
 		}
 	}()
 
@@ -143,7 +146,7 @@ func main() {
 		Password: config.Password,
 	}, &loginResp)
 	if err != nil {
-		fmt.Printf("Error logging in: %v\n", err)
+		fmt.Printf("Error logging in: %v", err)
 		return
 	}
 	client.token = loginResp.Token
@@ -157,7 +160,7 @@ func main() {
 		OrgAddress: config.OrgAddress,
 	}, &censusID)
 	if err != nil {
-		fmt.Printf("Error creating census: %v\n", err)
+		fmt.Printf("Error creating census: %v", err)
 		return
 	}
 	fmt.Printf("✓ Census created with ID: %s\n", censusID)
@@ -167,7 +170,7 @@ func main() {
 	var census db.Census
 	err = client.makeRequest("GET", fmt.Sprintf("/census/%s", censusID), nil, &census)
 	if err != nil {
-		fmt.Printf("Error getting census info: %v\n", err)
+		fmt.Printf("Error getting census info: %v", err)
 		return
 	}
 	fmt.Printf("✓ Census info retrieved: %+v\n", census)
@@ -179,7 +182,7 @@ func main() {
 		Participants: participants,
 	}, nil)
 	if err != nil {
-		fmt.Printf("Error adding participants: %v\n", err)
+		fmt.Printf("Error adding participants: %v", err)
 		return
 	}
 	fmt.Println("✓ Participants added successfully")
@@ -189,7 +192,7 @@ func main() {
 	var publishedCensus db.PublishedCensus
 	err = client.makeRequest("POST", fmt.Sprintf("/census/%s/publish", censusID), nil, &publishedCensus)
 	if err != nil {
-		fmt.Printf("Error publishing census: %v\n", err)
+		fmt.Printf("Error publishing census: %v", err)
 		return
 	}
 	fmt.Printf("✓ Census published with URI: %s\n", publishedCensus.URI)
@@ -204,7 +207,7 @@ func main() {
 		Metadata:            metadata,
 	}, nil)
 	if err != nil {
-		fmt.Printf("Error creating process: %v\n", err)
+		fmt.Printf("Error creating process: %v", err)
 		return
 	}
 	fmt.Printf("✓ Process created with ID: %s\n", processID)
@@ -214,7 +217,7 @@ func main() {
 	var process db.Process
 	err = client.makeRequest("GET", fmt.Sprintf("/process/%s", processID), nil, &process)
 	if err != nil {
-		fmt.Printf("Error getting process info: %v\n", err)
+		fmt.Printf("Error getting process info: %v", err)
 		return
 	}
 	fmt.Printf("✓ Process info retrieved: %+v\n", process)

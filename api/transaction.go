@@ -114,7 +114,7 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// return the signed tx payload
-	apicommon.HttpWriteJSON(w, &apicommon.TransactionData{
+	apicommon.HTTPWriteJSON(w, &apicommon.TransactionData{
 		TxPayload: stx,
 	})
 }
@@ -181,7 +181,7 @@ func (a *API) signMessageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// return the signature
-	apicommon.HttpWriteJSON(w, &apicommon.MessageSignature{
+	apicommon.HTTPWriteJSON(w, &apicommon.MessageSignature{
 		Signature: signature,
 	})
 }

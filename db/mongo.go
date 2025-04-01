@@ -190,10 +190,7 @@ func (ms *MongoStorage) Reset() error {
 		return err
 	}
 	// create indexes
-	if err := ms.createIndexes(); err != nil {
-		return err
-	}
-	return nil
+	return ms.createIndexes()
 }
 
 func (ms *MongoStorage) String() string {

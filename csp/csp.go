@@ -16,11 +16,11 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-// CSPConfig struct contains the configuration for the CSP service. It includes
+// Config struct contains the configuration for the CSP service. It includes
 // the database name, the MongoDB client, the notification cooldown time, the
 // notification throttle time, the maximum notification attempts, the SMS
 // service and the mail service.
-type CSPConfig struct {
+type Config struct {
 	// db stuff
 	DBName      string
 	MongoClient *mongo.Client
@@ -54,7 +54,7 @@ type CSP struct {
 // MongoDB client and the database name provided in the configuration, and
 // creates a new notification queue with the notification cooldown time, the
 // notification throttle time, the SMS service and the mail service.
-func New(ctx context.Context, config *CSPConfig) (*CSP, error) {
+func New(ctx context.Context, config *Config) (*CSP, error) {
 	s, err := saltedkey.NewSaltedKey(config.RootKey.String())
 	if err != nil {
 		return nil, err

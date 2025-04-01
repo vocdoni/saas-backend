@@ -234,12 +234,12 @@ func (ms *MongoStorage) createIndexes() error {
 	}
 
 	// index for the censusID and participantNo tuple
-	censusMembershipIdIndex := mongo.IndexModel{
+	censusMembershipIDIndex := mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "censusId", Value: 1}, // 1 for ascending order
 		},
 	}
-	if _, err := ms.censusMemberships.Indexes().CreateOne(ctx, censusMembershipIdIndex); err != nil {
+	if _, err := ms.censusMemberships.Indexes().CreateOne(ctx, censusMembershipIDIndex); err != nil {
 		return fmt.Errorf("failed to create index on censusID for censusMemberships: %w", err)
 	}
 
@@ -254,14 +254,14 @@ func (ms *MongoStorage) createIndexes() error {
 	}
 
 	// index for the censusID and participantNo tuple
-	censusMembershipIdNoIndex := mongo.IndexModel{
+	censusMembershipIDNoIndex := mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "censusId", Value: 1},      // 1 for ascending order
 			{Key: "participantNo", Value: 1}, // 1 for ascending order
 		},
 		Options: options.Index().SetUnique(true),
 	}
-	if _, err := ms.censusMemberships.Indexes().CreateOne(ctx, censusMembershipIdNoIndex); err != nil {
+	if _, err := ms.censusMemberships.Indexes().CreateOne(ctx, censusMembershipIDNoIndex); err != nil {
 		return fmt.Errorf("failed to create index on censusID for censusMemberships: %w", err)
 	}
 	return nil
@@ -305,7 +305,7 @@ func dynamicUpdateDocument(item interface{}, alwaysUpdateTags []string) (bson.M,
 	return bson.M{"$set": update}, nil
 }
 
-// readPlanJSON reads a JSON file with an array of subscritpions
+// ReadPlanJSON reads a JSON file with an array of subscriptions
 // and return it as a Plan array
 func ReadPlanJSON() ([]*Plan, error) {
 	file, err := root.Assets.Open("assets/plans.json")

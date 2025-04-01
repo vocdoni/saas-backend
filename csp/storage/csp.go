@@ -1,3 +1,6 @@
+// Package storage provides database operations for the CSP (Census Service Provider),
+// including authentication token management, process consumption tracking, and
+// storage and retrieval of cryptographic credentials and related data.
 package storage
 
 import (

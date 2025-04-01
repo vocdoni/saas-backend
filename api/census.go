@@ -69,7 +69,7 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	apicommon.HttpWriteJSON(w, apicommon.OrganizationCensus{
+	apicommon.HTTPWriteJSON(w, apicommon.OrganizationCensus{
 		ID:         censusID,
 		Type:       census.Type,
 		OrgAddress: census.OrgAddress,
@@ -100,7 +100,7 @@ func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	apicommon.HttpWriteJSON(w, apicommon.OrganizationCensusFromDB(census))
+	apicommon.HTTPWriteJSON(w, apicommon.OrganizationCensusFromDB(census))
 }
 
 // addParticipantsHandler godoc
@@ -159,7 +159,7 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// check if there are participants to add
 	if len(participants.Participants) == 0 {
-		apicommon.HttpWriteJSON(w, &apicommon.AddParticipantsResponse{ParticipantsNo: 0})
+		apicommon.HTTPWriteJSON(w, &apicommon.AddParticipantsResponse{ParticipantsNo: 0})
 		return
 	}
 	// add the org participants to the census in the database
@@ -187,7 +187,7 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 				"total", p.Total)
 		}
 		// Return the number of participants added
-		apicommon.HttpWriteJSON(w, &apicommon.AddParticipantsResponse{ParticipantsNo: uint32(lastProgress.Added)})
+		apicommon.HTTPWriteJSON(w, &apicommon.AddParticipantsResponse{ParticipantsNo: uint32(lastProgress.Added)})
 		return
 	}
 
@@ -200,7 +200,7 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	apicommon.HttpWriteJSON(w, &apicommon.AddParticipantsResponse{JobID: jobID})
+	apicommon.HTTPWriteJSON(w, &apicommon.AddParticipantsResponse{JobID: jobID})
 }
 
 // addParticipantsJobCheckHandler godoc
@@ -232,7 +232,7 @@ func (a *API) addParticipantsJobCheckHandler(w http.ResponseWriter, r *http.Requ
 				addParticipantsToCensusWorkers.Delete(jobID.String())
 			}()
 		}
-		apicommon.HttpWriteJSON(w, p)
+		apicommon.HTTPWriteJSON(w, p)
 		return
 	}
 
@@ -302,7 +302,7 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	apicommon.HttpWriteJSON(w, &apicommon.PublishedCensusResponse{
+	apicommon.HTTPWriteJSON(w, &apicommon.PublishedCensusResponse{
 		URI:      pubCensus.URI,
 		Root:     cspSignerPubKey,
 		CensusID: censusID,

@@ -1,3 +1,6 @@
+// Package main is the entry point for the Vocdoni SaaS backend service.
+// It initializes and configures all components including database connections,
+// API endpoints, authentication services, and notification systems.
 package main
 
 import (
@@ -80,14 +83,14 @@ func main() {
 	twilioAuthToken := viper.GetString("twilioAuthToken")
 	twilioFromNumber := viper.GetString("twilioFromNumber")
 	// stripe vars
-	stripeApiSecret := viper.GetString("stripeApiSecret")
+	stripeAPISecret := viper.GetString("stripeApiSecret")
 	stripeWebhookSecret := viper.GetString("stripeWebhookSecret")
 
 	log.Init("debug", "stdout", os.Stderr)
 	// create Stripe client and include it in the API configuration
-	var stripeClient *stripe.StripeClient
-	if stripeApiSecret != "" || stripeWebhookSecret != "" {
-		stripeClient = stripe.New(stripeApiSecret, stripeWebhookSecret)
+	var stripeClient *stripe.Client
+	if stripeAPISecret != "" || stripeWebhookSecret != "" {
+		stripeClient = stripe.New(stripeAPISecret, stripeWebhookSecret)
 	} else {
 		log.Fatalf("stripeApiSecret and stripeWebhookSecret are required")
 	}
@@ -124,7 +127,7 @@ func main() {
 	}
 	log.Infow("API client created", "endpoint", apiEndpoint, "chainID", apiClient.ChainID())
 	// init the API configuration
-	apiConf := &api.APIConfig{
+	apiConf := &api.Config{
 		Host:                host,
 		Port:                port,
 		Secret:              secret,
@@ -137,7 +140,7 @@ func main() {
 		StripeClient:        stripeClient,
 	}
 
-	cspConf := &csp.CSPConfig{
+	cspConf := &csp.Config{
 		RootKey:     bPrivKey,
 		MongoClient: database.DBClient,
 		DBName:      fmt.Sprintf("%s-csp", mongoDB),
@@ -148,8 +151,8 @@ func main() {
 		if emailFromAddress == "" || emailFromName == "" {
 			log.Fatal("emailFromAddress and emailFromName are required")
 		}
-		apiConf.MailService = new(smtp.SMTPEmail)
-		if err := apiConf.MailService.New(&smtp.SMTPConfig{
+		apiConf.MailService = new(smtp.Email)
+		if err := apiConf.MailService.New(&smtp.Config{
 			FromName:     emailFromName,
 			FromAddress:  emailFromAddress,
 			SMTPServer:   smtpServer,
@@ -170,8 +173,8 @@ func main() {
 	// create SMS notifications service if the required parameters are set and
 	// include it in the API configuration
 	if twilioAccountSid != "" && twilioAuthToken != "" && twilioFromNumber != "" {
-		apiConf.SMSService = new(twilio.TwilioSMS)
-		if err := apiConf.SMSService.New(&twilio.TwilioConfig{
+		apiConf.SMSService = new(twilio.SMS)
+		if err := apiConf.SMSService.New(&twilio.Config{
 			AccountSid: twilioAccountSid,
 			AuthToken:  twilioAuthToken,
 			FromNumber: twilioFromNumber,
@@ -189,12 +192,12 @@ func main() {
 		log.Fatalf("could not create the CSP service: %v", err)
 		return
 	}
-	subscriptions := subscriptions.New(&subscriptions.SubscriptionsConfig{
+	subscriptions := subscriptions.New(&subscriptions.Config{
 		DB: database,
 	})
 	apiConf.Subscriptions = subscriptions
 	// initialize the s3 like  object storage
-	apiConf.ObjectStorage, err = objectstorage.New(&objectstorage.ObjectStorageConfig{
+	apiConf.ObjectStorage, err = objectstorage.New(&objectstorage.Config{
 		DB: database,
 	})
 	if err != nil {

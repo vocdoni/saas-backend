@@ -14,7 +14,9 @@ import (
 )
 
 const (
-	EmailRegexTemplate  = `^[\w.\+\.\-]+@([\w\-]+\.)+[\w]{2,}$`
+	// EmailRegexTemplate is the regular expression used to validate email addresses.
+	EmailRegexTemplate = `^[\w.\+\.\-]+@([\w\-]+\.)+[\w]{2,}$`
+	// DefaultPhoneCountry is the default country code used for phone number validation.
 	DefaultPhoneCountry = "ES"
 )
 
@@ -25,7 +27,7 @@ func ValidEmail(email string) bool {
 	return emailRegex.MatchString(email)
 }
 
-// SanitizeAndVerifyEmail helper function allows to sanitize and verify a phone number.
+// SanitizeAndVerifyPhoneNumber helper function allows to sanitize and verify a phone number.
 func SanitizeAndVerifyPhoneNumber(phone string) (string, error) {
 	pn, err := phonenumbers.Parse(phone, DefaultPhoneCountry)
 	if err != nil {
@@ -38,9 +40,9 @@ func SanitizeAndVerifyPhoneNumber(phone string) (string, error) {
 	return fmt.Sprintf("+%d%d", pn.GetCountryCode(), pn.GetNationalNumber()), nil
 }
 
-// RandomInt returns a secure random integer in the range [0, max).
-func RandomInt(max int) int {
-	n, err := rand.Int(rand.Reader, big.NewInt(int64(max)))
+// RandomInt returns a secure random integer in the range [0, maxInt).
+func RandomInt(maxInt int) int {
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(maxInt)))
 	if err != nil {
 		panic(err)
 	}
@@ -79,6 +81,7 @@ func HashVerificationCode(userEmail, code string) string {
 	return hex.EncodeToString(sha256.New().Sum([]byte(userEmail + code)))
 }
 
+// HashOrgData hashes organization data using the organization address as salt.
 func HashOrgData(orgAddress, data string) []byte {
 	var salt []byte
 	hb := HexBytes{}

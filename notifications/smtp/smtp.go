@@ -1,3 +1,5 @@
+// Package smtp provides an SMTP-based implementation of the NotificationService interface
+// for sending email notifications.
 package smtp
 
 import (
@@ -14,12 +16,12 @@ import (
 
 var disableTrackingFilter = []byte(`{"filters":{"clicktrack":{"settings":{"enable":0,"enable_text":false}}}}`)
 
-// SMTPConfig represents the configuration for the SMTP email service. It
+// Config represents the configuration for the SMTP email service. It
 // contains the sender's name, address, SMTP username, password, server and
 // port. The TestAPIPort is used to define the port of the API service used
 // for testing the email service locally to check messages (for example using
 // MailHog).
-type SMTPConfig struct {
+type Config struct {
 	FromName     string
 	FromAddress  string
 	SMTPUsername string
@@ -29,20 +31,20 @@ type SMTPConfig struct {
 	TestAPIPort  int
 }
 
-// SMTPEmail is the implementation of the NotificationService interface for the
+// Email is the implementation of the NotificationService interface for the
 // SMTP email service. It contains the configuration and the SMTP auth. It uses
 // the net/smtp package to send emails.
-type SMTPEmail struct {
-	config *SMTPConfig
+type Email struct {
+	config *Config
 	auth   smtp.Auth
 }
 
 // New initializes the SMTP email service with the configuration. It sets the
 // SMTP auth if the username and password are provided. It returns an error if
 // the configuration is invalid or if the from email could not be parsed.
-func (se *SMTPEmail) New(rawConfig any) error {
+func (se *Email) New(rawConfig any) error {
 	// parse configuration
-	config, ok := rawConfig.(*SMTPConfig)
+	config, ok := rawConfig.(*Config)
 	if !ok {
 		return fmt.Errorf("invalid SMTP configuration")
 	}
@@ -61,7 +63,7 @@ func (se *SMTPEmail) New(rawConfig any) error {
 
 // SendNotification sends an email notification to the recipient. It composes
 // the email body with the notification data and sends it using the SMTP server.
-func (se *SMTPEmail) SendNotification(ctx context.Context, notification *notifications.Notification) error {
+func (se *Email) SendNotification(ctx context.Context, notification *notifications.Notification) error {
 	// compose email body
 	body, err := se.composeBody(notification)
 	if err != nil {
@@ -89,7 +91,7 @@ func (se *SMTPEmail) SendNotification(ctx context.Context, notification *notific
 // composeBody creates the email body with the notification data. It creates a
 // multipart email with a plain text and an HTML part. It returns the email
 // content as a byte slice or an error if the body could not be composed.
-func (se *SMTPEmail) composeBody(notification *notifications.Notification) ([]byte, error) {
+func (se *Email) composeBody(notification *notifications.Notification) ([]byte, error) {
 	// parse 'to' email
 	to, err := mail.ParseAddress(notification.ToAddress)
 	if err != nil {

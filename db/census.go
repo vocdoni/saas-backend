@@ -1,3 +1,6 @@
+// Package db provides database operations for the Vocdoni SaaS backend,
+// handling storage and retrieval of censuses, organizations, users, and
+// other data structures required for the voting platform.
 package db
 
 import (

@@ -20,9 +20,8 @@ func (ms *MongoStorage) nextUserID(ctx context.Context) (uint64, error) {
 	if err := ms.users.FindOne(ctx, bson.M{}, opts).Decode(&user); err != nil {
 		if err == mongo.ErrNoDocuments {
 			return 1, nil
-		} else {
-			return 0, err
 		}
+		return 0, err
 	}
 	return user.ID + 1, nil
 }

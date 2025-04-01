@@ -1,3 +1,4 @@
+// Package apicommon provides common types, constants, and helper functions for the API.
 package apicommon
 
 import "time"
@@ -6,7 +7,7 @@ import "time"
 // context.
 type MetadataKey string
 
-// userMetadataKey is the key used to store the user in the context.
+// UserMetadataKey is the key used to store the user in the context.
 const UserMetadataKey MetadataKey = "user"
 
 // VerificationCodeExpiration is the duration of the verification code

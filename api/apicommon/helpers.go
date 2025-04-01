@@ -19,8 +19,8 @@ func UserFromContext(ctx context.Context) (*db.User, bool) {
 	return nil, false
 }
 
-// HttpWriteJSON helper function allows to write a JSON response.
-func HttpWriteJSON(w http.ResponseWriter, data interface{}) {
+// HTTPWriteJSON helper function allows to write a JSON response.
+func HTTPWriteJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(data); err != nil {
@@ -32,8 +32,8 @@ func HttpWriteJSON(w http.ResponseWriter, data interface{}) {
 	}
 }
 
-// HttpWriteOK helper function allows to write an OK response.
-func HttpWriteOK(w http.ResponseWriter) {
+// HTTPWriteOK helper function allows to write an OK response.
+func HTTPWriteOK(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write([]byte("\n")); err != nil {
 		log.Warnw("failed to write on response", "error", err)

@@ -9,7 +9,7 @@ import (
 func TestPlans(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
-	t.Run("SetPlan", func(t *testing.T) {
+	t.Run("SetPlan", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 
 		plan := &Plan{
@@ -20,7 +20,7 @@ func TestPlans(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 	})
 
-	t.Run("GetPlan", func(t *testing.T) {
+	t.Run("GetPlan", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 
 		planID := uint64(123)
@@ -43,7 +43,7 @@ func TestPlans(t *testing.T) {
 		c.Assert(planDB.ID, qt.Equals, plan.ID)
 	})
 
-	t.Run("DeletePlan", func(t *testing.T) {
+	t.Run("DeletePlan", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 
 		// Create a new plan and delete it

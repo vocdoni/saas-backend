@@ -1,3 +1,6 @@
+// Package handlers provides HTTP handlers for the Cryptographic Service Provider (CSP)
+// API endpoints, managing authentication, token verification, and cryptographic
+// signing operations for process bundles in the Vocdoni voting platform.
 package handlers
 
 import (
@@ -20,19 +23,19 @@ import (
 	"go.vocdoni.io/dvote/vochain/state"
 )
 
-// cspHandlers is a struct that contains an instance of the CSP and the main
+// CSPHandlers is a struct that contains an instance of the CSP and the main
 // database (where the bundle and census data is stored). It is used to handle
 // the CSP API requests such as the authentication and signing of the bundle
 // processes.
-type cspHandlers struct {
+type CSPHandlers struct {
 	csp    *csp.CSP
 	mainDB *db.MongoStorage
 }
 
 // New creates a new instance of the CSP handlers instance. It receives the CSP
 // instance and the main database instance as parameters.
-func New(c *csp.CSP, mainDB *db.MongoStorage) *cspHandlers {
-	return &cspHandlers{
+func New(c *csp.CSP, mainDB *db.MongoStorage) *CSPHandlers {
+	return &CSPHandlers{
 		csp:    c,
 		mainDB: mainDB,
 	}
@@ -58,7 +61,7 @@ func New(c *csp.CSP, mainDB *db.MongoStorage) *cspHandlers {
 //	@Failure		404			{object}	errors.Error	"Bundle not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/process/bundle/{bundleId}/auth/{step} [post]
-func (c *cspHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) {
+func (c *CSPHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) {
 	// get the bundle ID from the URL parameters
 	bundleID := new(internal.HexBytes)
 	if err := bundleID.ParseString(chi.URLParam(r, "bundleId")); err != nil {
@@ -99,7 +102,7 @@ func (c *cspHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) 
 			errors.ErrUnauthorized.WithErr(err).Write(w)
 			return
 		}
-		apicommon.HttpWriteJSON(w, &AuthResponse{AuthToken: authToken})
+		apicommon.HTTPWriteJSON(w, &AuthResponse{AuthToken: authToken})
 		return
 	case 1:
 		authToken, err := c.authSecondStep(r)
@@ -111,7 +114,7 @@ func (c *cspHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) 
 			errors.ErrUnauthorized.WithErr(err).Write(w)
 			return
 		}
-		apicommon.HttpWriteJSON(w, &AuthResponse{AuthToken: authToken})
+		apicommon.HTTPWriteJSON(w, &AuthResponse{AuthToken: authToken})
 		return
 	}
 }
@@ -132,7 +135,7 @@ func (c *cspHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) 
 //	@Failure		404			{object}	errors.Error	"Bundle not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/process/bundle/{bundleId}/sign [post]
-func (c *cspHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) {
+func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) {
 	// get the bundle ID from the URL parameters
 	bundleID := new(internal.HexBytes)
 	if err := bundleID.ParseString(chi.URLParam(r, "bundleId")); err != nil {
@@ -171,11 +174,11 @@ func (c *cspHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// check that the received process is part of the bundle processes
-	var processId internal.HexBytes
+	var processID internal.HexBytes
 	for _, pID := range bundle.Processes {
 		if bytes.Equal(pID, req.ProcessID) {
 			// process found
-			processId = pID
+			processID = pID
 			break
 		}
 	}
@@ -190,7 +193,7 @@ func (c *cspHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// check if the process is found in the bundle
-	if len(processId) == 0 {
+	if len(processID) == 0 {
 		errors.ErrUnauthorized.Withf("process not found in bundle").Write(w)
 		return
 	}
@@ -202,14 +205,14 @@ func (c *cspHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	log.Debugw("new CSP sign request",
 		"address", address,
-		"procId", processId)
+		"procId", processID)
 	// sign the request
-	signature, err := c.csp.Sign(req.AuthToken, *address, processId, signers.SignerTypeECDSASalted)
+	signature, err := c.csp.Sign(req.AuthToken, *address, processID, signers.SignerTypeECDSASalted)
 	if err != nil {
 		errors.ErrUnauthorized.WithErr(err).Write(w)
 		return
 	}
-	apicommon.HttpWriteJSON(w, &AuthResponse{Signature: signature})
+	apicommon.HTTPWriteJSON(w, &AuthResponse{Signature: signature})
 }
 
 // ConsumedAddressHandler godoc
@@ -228,7 +231,7 @@ func (c *cspHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 //	@Failure		404			{object}	errors.Error	"Process not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/process/{processId}/sign-info [post]
-func (c *cspHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Request) {
+func (c *CSPHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Request) {
 	// get the bundle ID from the URL parameters
 	processID := new(internal.HexBytes)
 	if err := processID.ParseString(chi.URLParam(r, "processId")); err != nil {
@@ -269,7 +272,7 @@ func (c *cspHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	// return the address used to sign the process and the nullifier
-	apicommon.HttpWriteJSON(w, &ConsumedAddressResponse{
+	apicommon.HTTPWriteJSON(w, &ConsumedAddressResponse{
 		Address:   cspProcess.ConsumedAddress,
 		Nullifier: state.GenerateNullifier(common.BytesToAddress(cspProcess.ConsumedAddress), *processID),
 		At:        cspProcess.ConsumedAt,
@@ -284,7 +287,7 @@ func (c *cspHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Requ
 // destination and the challenge type. It returns the token and an error if
 // any. It sends the challenge to the user (email or SMS) to verify the user
 // token in the second step.
-func (c *cspHandlers) authFirstStep(r *http.Request, bundleID internal.HexBytes, censusID string) (internal.HexBytes, error) {
+func (c *CSPHandlers) authFirstStep(r *http.Request, bundleID internal.HexBytes, censusID string) (internal.HexBytes, error) {
 	var req AuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return nil, errors.ErrMalformedBody.Withf("invalid JSON request")
@@ -375,7 +378,7 @@ func (c *cspHandlers) authFirstStep(r *http.Request, bundleID internal.HexBytes,
 // an error if any. It the solution is valid, the token is marked as verified
 // and returned to the user. The user can use the token to sign the bundle
 // processes.
-func (c *cspHandlers) authSecondStep(r *http.Request) (internal.HexBytes, error) {
+func (c *CSPHandlers) authSecondStep(r *http.Request) (internal.HexBytes, error) {
 	var req AuthChallengeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return nil, errors.ErrMalformedBody.Withf("invalid JSON request")

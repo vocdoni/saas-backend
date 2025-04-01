@@ -1,3 +1,5 @@
+// Package saltedkey provides functionality for creating and managing salted cryptographic keys
+// for secure signing operations, supporting both ECDSA and blind signatures.
 package saltedkey
 
 import (
@@ -114,7 +116,7 @@ func SaltECDSAPubKey(pubKey *ecdsa.PublicKey, salt [saltedkey.SaltSize]byte) ([]
 	if pubKey == nil {
 		return nil, fmt.Errorf("public key is nil")
 	}
-	x, y := pubKey.Curve.ScalarBaseMult(salt[:])
-	pubKey.X, pubKey.Y = pubKey.Curve.Add(pubKey.X, pubKey.Y, x, y)
+	x, y := pubKey.ScalarBaseMult(salt[:])
+	pubKey.X, pubKey.Y = pubKey.Add(pubKey.X, pubKey.Y, x, y)
 	return ethcrypto.FromECDSAPub(pubKey), nil
 }

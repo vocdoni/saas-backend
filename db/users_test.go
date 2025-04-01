@@ -16,7 +16,7 @@ const (
 func TestUsers(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
-	t.Run("UserByEmail", func(t *testing.T) {
+	t.Run("UserByEmail", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 
 		// test not found user
@@ -42,7 +42,7 @@ func TestUsers(t *testing.T) {
 		c.Assert(user.Verified, qt.IsFalse)
 	})
 
-	t.Run("UserByID", func(t *testing.T) {
+	t.Run("UserByID", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 
 		// test not found user
@@ -73,7 +73,7 @@ func TestUsers(t *testing.T) {
 		c.Assert(user.Verified, qt.IsFalse)
 	})
 
-	t.Run("SetUser", func(t *testing.T) {
+	t.Run("SetUser", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 
 		// trying to create a new user with invalid email
@@ -111,7 +111,7 @@ func TestUsers(t *testing.T) {
 		c.Assert(user.Verified, qt.IsFalse)
 	})
 
-	t.Run("DeleteUser", func(t *testing.T) {
+	t.Run("DeleteUser", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 
 		// create a new user
@@ -145,7 +145,7 @@ func TestUsers(t *testing.T) {
 		c.Assert(err, qt.Equals, ErrNotFound)
 	})
 
-	t.Run("IsMemberOf", func(t *testing.T) {
+	t.Run("IsMemberOf", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 
 		// create a new user with some organizations
@@ -182,7 +182,7 @@ func TestUsers(t *testing.T) {
 		c.Assert(success, qt.IsFalse)
 	})
 
-	t.Run("VerifyUser", func(t *testing.T) {
+	t.Run("VerifyUser", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 
 		nonExistingUserID := uint64(100)

@@ -13,7 +13,7 @@ func TestPublishedCensus(t *testing.T) {
 	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
 
 	// Helper function to create a test census
-	setupTestCensus := func(t *testing.T) (*Census, string) {
+	setupTestCensus := func(_ *testing.T) (*Census, string) {
 		// Create test organization first
 		org := &Organization{
 			Address:   testOrgAddress,
@@ -47,7 +47,7 @@ func TestPublishedCensus(t *testing.T) {
 		return testCensus, censusID
 	}
 
-	t.Run("GetPublishedCensus", func(t *testing.T) {
+	t.Run("GetPublishedCensus", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Test not found census
 		census, err := testDB.PublishedCensus(testRoot, testURI, primitive.NewObjectID().Hex())
@@ -91,7 +91,7 @@ func TestPublishedCensus(t *testing.T) {
 		c.Assert(updatedCensus.CreatedAt, qt.Equals, retrieved.CreatedAt)
 	})
 
-	t.Run("SetPublishedCensusInvalid", func(t *testing.T) {
+	t.Run("SetPublishedCensusInvalid", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Test with empty URI
 		invalidCensus := &PublishedCensus{
@@ -136,7 +136,7 @@ func TestPublishedCensus(t *testing.T) {
 		c.Assert(err, qt.Not(qt.IsNil))
 	})
 
-	t.Run("DelPublishedCensus", func(t *testing.T) {
+	t.Run("DelPublishedCensus", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Create test census
 		testCensus, _ := setupTestCensus(t)
@@ -171,7 +171,7 @@ func TestPublishedCensus(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 	})
 
-	t.Run("PublishedCensusInvalid", func(t *testing.T) {
+	t.Run("PublishedCensusInvalid", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Test get with invalid parameters
 		retrieved, err := testDB.PublishedCensus("nil", "nil", "nil")

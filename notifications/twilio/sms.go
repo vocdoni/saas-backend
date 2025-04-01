@@ -1,3 +1,5 @@
+// Package twilio provides a Twilio-based implementation of the NotificationService interface
+// for sending SMS notifications.
 package twilio
 
 import (
@@ -11,23 +13,25 @@ import (
 )
 
 const (
+	// AccountSidEnv is the environment variable name for the Twilio account SID.
 	AccountSidEnv = "TWILIO_ACCOUNT_SID"
-	AuthTokenEnv  = "TWILIO_AUTH_TOKEN"
+	// AuthTokenEnv is the environment variable name for the Twilio auth token.
+	AuthTokenEnv = "TWILIO_AUTH_TOKEN"
 )
 
-// TwilioConfig represents the configuration for the Twilio SMS service. It
+// Config represents the configuration for the Twilio SMS service. It
 // contains the account SID, the auth token and the number from which the SMS
 // will be sent.
-type TwilioConfig struct {
+type Config struct {
 	AccountSid string
 	AuthToken  string
 	FromNumber string
 }
 
-// TwilioSMS is the implementation of the NotificationService interface for the
+// SMS is the implementation of the NotificationService interface for the
 // Twilio SMS service. It contains the configuration and the Twilio REST client.
-type TwilioSMS struct {
-	config *TwilioConfig
+type SMS struct {
+	config *Config
 	client *t.RestClient
 }
 
@@ -36,9 +40,9 @@ type TwilioSMS struct {
 // Twilio REST client. It returns an error if the configuration is invalid or if
 // the environment variables could not be set.
 // Read more here: https://www.twilio.com/docs/messaging/quickstart/go
-func (tsms *TwilioSMS) New(rawConfig any) error {
+func (tsms *SMS) New(rawConfig any) error {
 	// parse configuration
-	config, ok := rawConfig.(*TwilioConfig)
+	config, ok := rawConfig.(*Config)
 	if !ok {
 		return fmt.Errorf("invalid Twilio configuration")
 	}
@@ -60,7 +64,7 @@ func (tsms *TwilioSMS) New(rawConfig any) error {
 // message with the configured sender number and the notification data. It
 // returns an error if the notification could not be sent or if the context is
 // done.
-func (tsms *TwilioSMS) SendNotification(ctx context.Context, notification *notifications.Notification) error {
+func (tsms *SMS) SendNotification(ctx context.Context, notification *notifications.Notification) error {
 	// create message with configured sender number and notification data
 	params := &api.CreateMessageParams{}
 	params.SetTo(notification.ToNumber)

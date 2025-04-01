@@ -1,3 +1,6 @@
+// Package mailtemplates provides predefined email templates for various notification types
+// such as account verification, password reset, and organization invitations,
+// along with utilities for rendering email content.
 package mailtemplates
 
 import "github.com/vocdoni/saas-backend/notifications"

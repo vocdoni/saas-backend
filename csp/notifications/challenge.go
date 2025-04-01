@@ -1,3 +1,5 @@
+// Package notifications provides functionality for sending and managing notification challenges
+// such as SMS and email verifications for the CSP (Census Service Provider).
 package notifications
 
 import (
@@ -11,6 +13,7 @@ import (
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 )
 
+// ChallengeType represents the type of notification challenge to be sent (SMS or email).
 type ChallengeType string
 
 const (

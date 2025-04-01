@@ -285,9 +285,9 @@ func (ms *MongoStorage) OrgParticipants(orgAddress string) ([]OrgParticipant, er
 }
 
 func (ms *MongoStorage) OrgParticipantsMemberships(
-	orgAddress, censusId, bundleId string, electionIds []internal.HexBytes,
+	orgAddress, censusID, bundleID string, electionIDs []internal.HexBytes,
 ) ([]CensusMembershipParticipant, error) {
-	if len(orgAddress) == 0 || len(censusId) == 0 {
+	if len(orgAddress) == 0 || len(censusID) == 0 {
 		return nil, ErrInvalidData
 	}
 	ms.keysLock.Lock()
@@ -306,10 +306,10 @@ func (ms *MongoStorage) OrgParticipantsMemberships(
 			{Key: "as", Value: "membership"},
 		}}},
 		{primitive.E{Key: "$unwind", Value: bson.D{{Key: "path", Value: "$membership"}}}},
-		{primitive.E{Key: "$match", Value: bson.D{{Key: "membership.censusId", Value: censusId}}}},
+		{primitive.E{Key: "$match", Value: bson.D{{Key: "membership.censusId", Value: censusID}}}},
 		{primitive.E{Key: "$addFields", Value: bson.D{
-			{Key: "bundleId", Value: bundleId},
-			{Key: "electionIds", Value: electionIds}, // Store extra fields as an array
+			{Key: "bundleId", Value: bundleID},
+			{Key: "electionIds", Value: electionIDs}, // Store extra fields as an array
 		}}},
 		{primitive.E{Key: "$project", Value: bson.D{
 			{Key: "hashedEmail", Value: 1},

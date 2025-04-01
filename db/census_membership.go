@@ -73,7 +73,7 @@ func (ms *MongoStorage) SetCensusMembership(membership *CensusMembership) error 
 
 // CensusMembership retrieves a census membership from the database based on
 // participantNo and censusID. Returns ErrNotFound if the membership doesn't exist.
-func (ms *MongoStorage) CensusMembership(censusId, participantNo string) (*CensusMembership, error) {
+func (ms *MongoStorage) CensusMembership(censusID, participantNo string) (*CensusMembership, error) {
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
@@ -81,14 +81,14 @@ func (ms *MongoStorage) CensusMembership(censusId, participantNo string) (*Censu
 	defer cancel()
 
 	// validate input
-	if len(participantNo) == 0 || len(censusId) == 0 {
+	if len(participantNo) == 0 || len(censusID) == 0 {
 		return nil, ErrInvalidData
 	}
 
 	// prepare filter for upsert
 	filter := bson.M{
 		"participantNo": participantNo,
-		"censusId":      censusId,
+		"censusId":      censusID,
 	}
 
 	// find the membership
@@ -106,7 +106,7 @@ func (ms *MongoStorage) CensusMembership(censusId, participantNo string) (*Censu
 
 // DelCensusMembership removes a census membership from the database.
 // Returns nil if the membership was successfully deleted or didn't exist.
-func (ms *MongoStorage) DelCensusMembership(censusId, participantNo string) error {
+func (ms *MongoStorage) DelCensusMembership(censusID, participantNo string) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
@@ -114,14 +114,14 @@ func (ms *MongoStorage) DelCensusMembership(censusId, participantNo string) erro
 	defer cancel()
 
 	// validate input
-	if len(participantNo) == 0 || len(censusId) == 0 {
+	if len(participantNo) == 0 || len(censusID) == 0 {
 		return ErrInvalidData
 	}
 
 	// prepare filter for upsert
 	filter := bson.M{
 		"participantNo": participantNo,
-		"censusId":      censusId,
+		"censusId":      censusID,
 	}
 
 	// delete the membership
@@ -147,7 +147,7 @@ type BulkCensusMembershipStatus struct {
 // Returns a channel that sends the percentage of participants processed every 10 seconds.
 // This function must be called in a goroutine.
 func (ms *MongoStorage) SetBulkCensusMembership(
-	salt, censusId string, orgParticipants []OrgParticipant,
+	salt, censusID string, orgParticipants []OrgParticipant,
 ) (chan *BulkCensusMembershipStatus, error) {
 	progressChan := make(chan *BulkCensusMembershipStatus, 10)
 
@@ -155,13 +155,13 @@ func (ms *MongoStorage) SetBulkCensusMembership(
 		close(progressChan)
 		return progressChan, nil
 	}
-	if len(censusId) == 0 {
+	if len(censusID) == 0 {
 		close(progressChan)
 		return progressChan, ErrInvalidData
 	}
 
 	// Use the context for database operations
-	census, err := ms.Census(censusId)
+	census, err := ms.Census(censusID)
 	if err != nil {
 		close(progressChan)
 		return progressChan, fmt.Errorf("failed to get published census: %w", err)
@@ -278,11 +278,11 @@ func (ms *MongoStorage) SetBulkCensusMembership(
 
 				membershipFilter := bson.M{
 					"participantNo": participant.ParticipantNo,
-					"censusId":      censusId,
+					"censusId":      censusID,
 				}
 				membershipDoc := &CensusMembership{
 					ParticipantNo: participant.ParticipantNo,
-					CensusID:      censusId,
+					CensusID:      censusID,
 					CreatedAt:     currentTime,
 				}
 
@@ -342,7 +342,7 @@ func (ms *MongoStorage) SetBulkCensusMembership(
 }
 
 // CensusMemberships retrieves all the census memberships for a given census.
-func (ms *MongoStorage) CensusMemberships(censusId string) ([]CensusMembership, error) {
+func (ms *MongoStorage) CensusMemberships(censusID string) ([]CensusMembership, error) {
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
@@ -350,13 +350,13 @@ func (ms *MongoStorage) CensusMemberships(censusId string) ([]CensusMembership, 
 	defer cancel()
 
 	// validate input
-	if len(censusId) == 0 {
+	if len(censusID) == 0 {
 		return nil, ErrInvalidData
 	}
 
 	// prepare filter for upsert
 	filter := bson.M{
-		"censusId": censusId,
+		"censusId": censusID,
 	}
 
 	// find the membership

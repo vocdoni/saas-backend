@@ -96,7 +96,7 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
-		apicommon.HttpWriteJSON(w, apicommon.CreateProcessBundleResponse{
+		apicommon.HTTPWriteJSON(w, apicommon.CreateProcessBundleResponse{
 			URI:  a.serverURL + "/process/bundle/" + bundleID.Hex(),
 			Root: rootHex,
 		})
@@ -146,7 +146,7 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	apicommon.HttpWriteJSON(w, apicommon.CreateProcessBundleResponse{
+	apicommon.HTTPWriteJSON(w, apicommon.CreateProcessBundleResponse{
 		URI:  a.serverURL + "/process/bundle/" + bundleID.Hex(),
 		Root: rootHex,
 	})
@@ -212,7 +212,7 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
-		apicommon.HttpWriteJSON(w, apicommon.CreateProcessBundleResponse{
+		apicommon.HTTPWriteJSON(w, apicommon.CreateProcessBundleResponse{
 			URI:  "/process/bundle/" + bundleIDStr,
 			Root: rootHex,
 		})
@@ -253,7 +253,7 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	apicommon.HttpWriteJSON(w, apicommon.CreateProcessBundleResponse{
+	apicommon.HTTPWriteJSON(w, apicommon.CreateProcessBundleResponse{
 		URI:  "/process/bundle/" + bundleIDStr,
 		Root: rootHex,
 	})
@@ -296,7 +296,7 @@ func (a *API) processBundleInfoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	apicommon.HttpWriteJSON(w, bundle)
+	apicommon.HTTPWriteJSON(w, bundle)
 }
 
 // processBundleParticipantInfoHandler godoc
@@ -351,5 +351,5 @@ func (a *API) processBundleParticipantInfoHandler(w http.ResponseWriter, r *http
 		}
 	*/
 
-	apicommon.HttpWriteJSON(w, nil)
+	apicommon.HTTPWriteJSON(w, nil)
 }

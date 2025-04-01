@@ -12,7 +12,7 @@ func TestCensus(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
 
-	t.Run("SetCensus", func(t *testing.T) {
+	t.Run("SetCensus", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Test with non-existent organization
 		nonExistentCensus := &Census{
@@ -77,7 +77,7 @@ func TestCensus(t *testing.T) {
 		c.Assert(updatedCensus.UpdatedAt.After(createdCensus.CreatedAt), qt.IsTrue)
 	})
 
-	t.Run("DelCensus", func(t *testing.T) {
+	t.Run("DelCensus", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Create test organization first
 		org := &Organization{
@@ -114,7 +114,7 @@ func TestCensus(t *testing.T) {
 		c.Assert(err, qt.Not(qt.IsNil))
 	})
 
-	t.Run("GetCensus", func(t *testing.T) {
+	t.Run("GetCensus", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Create test organization first
 		org := &Organization{
@@ -155,7 +155,7 @@ func TestCensus(t *testing.T) {
 		c.Assert(err, qt.Not(qt.IsNil))
 	})
 
-	t.Run("CensusesByOrg", func(t *testing.T) {
+	t.Run("CensusesByOrg", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Create test organization first
 		org := &Organization{

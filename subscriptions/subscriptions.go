@@ -1,3 +1,5 @@
+// Package subscriptions provides functionality for managing organization subscriptions
+// and enforcing permissions based on subscription plans.
 package subscriptions
 
 import (
@@ -7,19 +9,23 @@ import (
 	"go.vocdoni.io/proto/build/go/models"
 )
 
-// SubscriptionsConfig holds the configuration for the subscriptions service.
+// Config holds the configuration for the subscriptions service.
 // It includes a reference to the MongoDB storage used by the service.
-type SubscriptionsConfig struct {
+type Config struct {
 	DB *db.MongoStorage
 }
 
-// OrgPermission represents the permissions that an organization can have.
+// DBPermission represents the permissions that an organization can have based on its subscription.
 type DBPermission int
 
 const (
+	// InviteMember represents the permission to invite new members to an organization.
 	InviteMember DBPermission = iota
+	// DeleteMember represents the permission to remove members from an organization.
 	DeleteMember
+	// CreateSubOrg represents the permission to create sub-organizations.
 	CreateSubOrg
+	// CreateDraft represents the permission to create draft processes.
 	CreateDraft
 )
 
@@ -53,7 +59,7 @@ type Subscriptions struct {
 }
 
 // New creates a new Subscriptions service with the given configuration.
-func New(conf *SubscriptionsConfig) *Subscriptions {
+func New(conf *Config) *Subscriptions {
 	if conf == nil {
 		return nil
 	}

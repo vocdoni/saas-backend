@@ -30,7 +30,7 @@ func TestProcessBundles(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
 
-	t.Run("TestSetAndGetProcessBundle", func(t *testing.T) {
+	t.Run("TestSetAndGetProcessBundle", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
 		publishedCensus := setupTestPrerequisites1(c, testDB)
@@ -100,7 +100,7 @@ func TestProcessBundles(t *testing.T) {
 		c.Assert(updated.Processes[2], qt.DeepEquals, process3.ID)
 	})
 
-	t.Run("TestProcessBundlesList", func(t *testing.T) {
+	t.Run("TestProcessBundlesList", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
 		publishedCensus := setupTestPrerequisites1(c, testDB)
@@ -145,7 +145,7 @@ func TestProcessBundles(t *testing.T) {
 		c.Assert(bundleIDs, qt.Contains, bundle2ID.String())
 	})
 
-	t.Run("TestProcessBundlesByProcess", func(t *testing.T) {
+	t.Run("TestProcessBundlesByProcess", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
 		publishedCensus := setupTestPrerequisites1(c, testDB)
@@ -198,7 +198,7 @@ func TestProcessBundles(t *testing.T) {
 		c.Assert(bundles[0].ID.Hex(), qt.Equals, bundle2ID.String())
 	})
 
-	t.Run("TestAddProcessesToBundle", func(t *testing.T) {
+	t.Run("TestAddProcessesToBundle", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
 		publishedCensus := setupTestPrerequisites1(c, testDB)
@@ -264,7 +264,7 @@ func TestProcessBundles(t *testing.T) {
 		c.Assert(retrieved.Processes, qt.HasLen, 4) // Still 4 processes, no duplication
 	})
 
-	t.Run("TestDelProcessBundle", func(t *testing.T) {
+	t.Run("TestDelProcessBundle", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
 		publishedCensus := setupTestPrerequisites1(c, testDB)

@@ -19,7 +19,7 @@ func TestBundleAuthToken(t *testing.T) {
 	c := qt.New(t)
 
 	ctx := context.Background()
-	csp, error := New(ctx, &CSPConfig{
+	csp, err := New(ctx, &Config{
 		DBName:                   "testBundleAuthToken",
 		MongoClient:              dbClient,
 		MailService:              testMailService,
@@ -27,7 +27,7 @@ func TestBundleAuthToken(t *testing.T) {
 		NotificationCoolDownTime: time.Second * 5,
 		RootKey:                  *testRootKey,
 	})
-	c.Assert(error, qt.IsNil)
+	c.Assert(err, qt.IsNil)
 
 	c.Run("empty bundleID", func(c *qt.C) {
 		_, err := csp.BundleAuthToken(nil, testUserID, testUserEmail, notifications.EmailChallenge)
@@ -82,7 +82,7 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 	c := qt.New(t)
 
 	ctx := context.Background()
-	csp, error := New(ctx, &CSPConfig{
+	csp, err := New(ctx, &Config{
 		DBName:                   "testVerifyBundleAuthToken",
 		MongoClient:              dbClient,
 		MailService:              testMailService,
@@ -90,7 +90,7 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 		NotificationCoolDownTime: time.Second * 5,
 		RootKey:                  *testRootKey,
 	})
-	c.Assert(error, qt.IsNil)
+	c.Assert(err, qt.IsNil)
 
 	c.Run("empty token", func(c *qt.C) {
 		err := csp.VerifyBundleAuthToken(nil, "")

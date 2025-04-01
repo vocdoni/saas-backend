@@ -35,7 +35,7 @@ func (a *API) refreshTokenHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// send the token back to the user
-	apicommon.HttpWriteJSON(w, res)
+	apicommon.HTTPWriteJSON(w, res)
 }
 
 // authLoginHandler godoc
@@ -84,7 +84,7 @@ func (a *API) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// send the token back to the user
-	apicommon.HttpWriteJSON(w, res)
+	apicommon.HTTPWriteJSON(w, res)
 }
 
 // writableOrganizationAddressesHandler godoc
@@ -124,5 +124,5 @@ func (a *API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *htt
 		}
 	}
 	// write the response back to the user
-	apicommon.HttpWriteJSON(w, userAddresses)
+	apicommon.HTTPWriteJSON(w, userAddresses)
 }

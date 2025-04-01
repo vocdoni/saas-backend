@@ -20,9 +20,8 @@ func (ms *MongoStorage) nextPlanID(ctx context.Context) (uint64, error) {
 	if err := ms.plans.FindOne(ctx, bson.M{}, opts).Decode(&plan); err != nil {
 		if err == mongo.ErrNoDocuments {
 			return 1, nil
-		} else {
-			return 0, err
 		}
+		return 0, err
 	}
 	return plan.ID + 1, nil
 }
@@ -81,9 +80,9 @@ func (ms *MongoStorage) Plan(planID uint64) (*Plan, error) {
 	return plan, nil
 }
 
-// PlanByStripeId method returns the plan with the given stripe ID. If the
+// PlanByStripeID method returns the plan with the given stripe ID. If the
 // plan doesn't exist, it returns the specific error.
-func (ms *MongoStorage) PlanByStripeId(stripeID string) (*Plan, error) {
+func (ms *MongoStorage) PlanByStripeID(stripeID string) (*Plan, error) {
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
 	// create a context with a timeout

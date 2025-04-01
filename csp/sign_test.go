@@ -18,7 +18,7 @@ func TestSign(t *testing.T) {
 	c := qt.New(t)
 
 	ctx := context.Background()
-	csp, error := New(ctx, &CSPConfig{
+	csp, err := New(ctx, &Config{
 		DBName:                   "testPrepareSaltedKeySigner",
 		MongoClient:              dbClient,
 		MailService:              testMailService,
@@ -26,7 +26,7 @@ func TestSign(t *testing.T) {
 		NotificationCoolDownTime: time.Second * 5,
 		RootKey:                  *testRootKey,
 	})
-	c.Assert(error, qt.IsNil)
+	c.Assert(err, qt.IsNil)
 
 	c.Run("invalid signer type", func(c *qt.C) {
 		_, err := csp.Sign(testToken, testAddress, testPID, "invalid")
@@ -51,7 +51,7 @@ func TestPrepareSaltedKeySigner(t *testing.T) {
 	c := qt.New(t)
 
 	ctx := context.Background()
-	csp, error := New(ctx, &CSPConfig{
+	csp, err := New(ctx, &Config{
 		DBName:                   "testPrepareSaltedKeySigner",
 		MongoClient:              dbClient,
 		MailService:              testMailService,
@@ -59,7 +59,7 @@ func TestPrepareSaltedKeySigner(t *testing.T) {
 		NotificationCoolDownTime: time.Second * 5,
 		RootKey:                  *testRootKey,
 	})
-	c.Assert(error, qt.IsNil)
+	c.Assert(err, qt.IsNil)
 
 	c.Run("not found token", func(c *qt.C) {
 		c.Cleanup(func() {
@@ -152,7 +152,7 @@ func TestFinishSaltedKeySigner(t *testing.T) {
 	c := qt.New(t)
 
 	ctx := context.Background()
-	csp, error := New(ctx, &CSPConfig{
+	csp, err := New(ctx, &Config{
 		DBName:                   "testFinishSaltedKeySigner",
 		MongoClient:              dbClient,
 		MailService:              testMailService,
@@ -160,7 +160,7 @@ func TestFinishSaltedKeySigner(t *testing.T) {
 		NotificationCoolDownTime: time.Second * 5,
 		RootKey:                  *testRootKey,
 	})
-	c.Assert(error, qt.IsNil)
+	c.Assert(err, qt.IsNil)
 
 	c.Run("not found token", func(c *qt.C) {
 		err := csp.finishSaltedKeySigner(testToken, testAddress, testPID)

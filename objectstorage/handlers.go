@@ -1,3 +1,6 @@
+// Package objectstorage provides functionality for storing and retrieving objects
+// such as images and files, with HTTP handlers for uploading and downloading
+// and support for different storage backends.
 package objectstorage
 
 import (
@@ -28,7 +31,7 @@ var isObjectNameRgx = regexp.MustCompile(`^([a-zA-Z0-9]+)\.(jpg|jpeg|png)`)
 //	@Failure		401		{object}	errors.Error		"Unauthorized"
 //	@Failure		500		{object}	errors.Error		"Internal server error"
 //	@Router			/storage [post]
-func (osc *ObjectStorageClient) UploadImageWithFormHandler(w http.ResponseWriter, r *http.Request) {
+func (osc *Client) UploadImageWithFormHandler(w http.ResponseWriter, r *http.Request) {
 	// check if the user is authenticated
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -76,7 +79,7 @@ func (osc *ObjectStorageClient) UploadImageWithFormHandler(w http.ResponseWriter
 		errors.ErrStorageInvalidObject.With("no files found").Write(w)
 		return
 	}
-	apicommon.HttpWriteJSON(w, map[string][]string{"urls": returnURLs})
+	apicommon.HTTPWriteJSON(w, map[string][]string{"urls": returnURLs})
 }
 
 // DownloadImageInlineHandler godoc
@@ -91,7 +94,7 @@ func (osc *ObjectStorageClient) UploadImageWithFormHandler(w http.ResponseWriter
 //	@Failure		404			{object}	errors.Error	"Object not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/storage/{objectName} [get]
-func (osc *ObjectStorageClient) DownloadImageInlineHandler(w http.ResponseWriter, r *http.Request) {
+func (osc *Client) DownloadImageInlineHandler(w http.ResponseWriter, r *http.Request) {
 	objectName := chi.URLParam(r, "objectName")
 	if objectName == "" {
 		errors.ErrMalformedURLParam.With("objectName is required").Write(w)

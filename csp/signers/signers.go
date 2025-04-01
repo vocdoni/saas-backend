@@ -1,18 +1,20 @@
+// Package signers provides types and error definitions for cryptographic signers
+// used in the CSP (Census Service Provider), including different signature types
+// and error handling.
 package signers
 
 import (
 	"fmt"
-
-	"go.vocdoni.io/proto/build/go/models"
 )
 
+// SignerType represents the type of cryptographic signer to be used.
 type SignerType string
 
-var (
-	// SignerTypeBlindSalted
-	SignerTypeBlindSalted SignerType = SignerType(models.ProofCA_ECDSA_BLIND_PIDSALTED.String())
-	// SignerTypeEthereum is the standard secp256k1 signature used in Ethereum
-	SignerTypeECDSASalted SignerType = SignerType(models.ProofCA_ECDSA_PIDSALTED.String())
+const (
+	// SignerTypeBlindSalted represents a salted blind signature type.
+	SignerTypeBlindSalted SignerType = "blind-salted"
+	// SignerTypeECDSASalted represents a salted ECDSA signature type using the secp256k1 curve.
+	SignerTypeECDSASalted SignerType = "ecdsa-salted"
 )
 
 var (

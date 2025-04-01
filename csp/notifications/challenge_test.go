@@ -14,7 +14,7 @@ import (
 
 // testMailService is the test mail service for the tests. Make it global so it
 // can be accessed by the tests directly.
-var testMailService *smtp.SMTPEmail
+var testMailService *smtp.Email
 
 const (
 	testUserEmail = "user@test.com"
@@ -44,8 +44,8 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	// create test mail service
-	testMailService = new(smtp.SMTPEmail)
-	if err := testMailService.New(&smtp.SMTPConfig{
+	testMailService = new(smtp.Email)
+	if err := testMailService.New(&smtp.Config{
 		FromAddress:  adminEmail,
 		SMTPUsername: adminUser,
 		SMTPPassword: adminPass,

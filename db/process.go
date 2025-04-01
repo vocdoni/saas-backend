@@ -43,8 +43,8 @@ func (ms *MongoStorage) SetProcess(process *Process) error {
 }
 
 // DeleteProcess removes a process and all its participants
-func (ms *MongoStorage) DelProcess(processId []byte) error {
-	if len(processId) == 0 {
+func (ms *MongoStorage) DelProcess(processID []byte) error {
+	if len(processID) == 0 {
 		return ErrInvalidData
 	}
 	ms.keysLock.Lock()
@@ -54,14 +54,14 @@ func (ms *MongoStorage) DelProcess(processId []byte) error {
 	defer cancel()
 
 	// delete the process from the database using the ID
-	filter := bson.M{"_id": processId}
+	filter := bson.M{"_id": processID}
 	_, err := ms.processes.DeleteOne(ctx, filter)
 	return err
 }
 
 // Process retrieves a process from the DB based on it ID
-func (ms *MongoStorage) Process(processId []byte) (*Process, error) {
-	if len(processId) == 0 {
+func (ms *MongoStorage) Process(processID []byte) (*Process, error) {
+	if len(processID) == 0 {
 		return nil, ErrInvalidData
 	}
 
@@ -72,7 +72,7 @@ func (ms *MongoStorage) Process(processId []byte) (*Process, error) {
 	defer cancel()
 
 	process := &Process{}
-	if err := ms.processes.FindOne(ctx, bson.M{"_id": processId}).Decode(process); err != nil {
+	if err := ms.processes.FindOne(ctx, bson.M{"_id": processID}).Decode(process); err != nil {
 		return nil, fmt.Errorf("failed to get process: %w", err)
 	}
 

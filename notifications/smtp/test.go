@@ -19,7 +19,7 @@ const (
 // inbox. If the email is not found, it returns an EOF error. If the request
 // fails, it returns an error with the status code. This method is used for
 // testing the email service.
-func (sm *SMTPEmail) FindEmail(ctx context.Context, to string) (string, error) {
+func (sm *Email) FindEmail(ctx context.Context, to string) (string, error) {
 	searchEndpoint := fmt.Sprintf(searchInboxTestEndpoint, sm.config.SMTPServer, sm.config.TestAPIPort, to)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchEndpoint, nil)
 	if err != nil {
@@ -53,7 +53,7 @@ func (sm *SMTPEmail) FindEmail(ctx context.Context, to string) (string, error) {
 	return mailResults.Items[0].Content.Body, sm.clear()
 }
 
-func (sm *SMTPEmail) clear() error {
+func (sm *Email) clear() error {
 	clearEndpoint := fmt.Sprintf(clearInboxTestEndpoint, sm.config.SMTPServer, sm.config.TestAPIPort)
 	req, err := http.NewRequest(http.MethodDelete, clearEndpoint, nil)
 	if err != nil {

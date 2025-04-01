@@ -21,7 +21,7 @@ type CSPAuth struct {
 	VerifiedAt time.Time         `json:"verifiedAt" bson:"verifiedat"`
 }
 
-// CSPPackage represents the status of a process in a bundle of processes for a
+// CSPProcess is the status of a process in a bundle of processes for a
 // user. It is used to track the status of the process in the bundle, mainly if
 // it has been consumed or not by the user. To consume a process, the user must
 // have a verified auth in the CSP. Once the process is consumed, the user

@@ -1,3 +1,5 @@
+// Package errors provides custom error types and definitions for the application.
+//
 //nolint:lll
 package errors
 

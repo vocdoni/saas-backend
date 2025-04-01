@@ -55,7 +55,7 @@ func TestProcess(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
 
-	t.Run("TestSetAndGetProcess", func(t *testing.T) {
+	t.Run("TestSetAndGetProcess", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// test not found process
 		process, err := testDB.Process(testProcessID)
@@ -130,7 +130,7 @@ func TestProcess(t *testing.T) {
 		c.Assert(createdPublishedCensus, qt.Not(qt.IsNil))
 	})
 
-	t.Run("TestSetProcessValidation", func(t *testing.T) {
+	t.Run("TestSetProcessValidation", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
 		publishedCensus := setupTestPrerequisites1(c, testDB)
@@ -166,7 +166,7 @@ func TestProcess(t *testing.T) {
 		c.Assert(err, qt.Equals, ErrInvalidData)
 	})
 
-	t.Run("TestDeleteProcess", func(t *testing.T) {
+	t.Run("TestDeleteProcess", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
 		publishedCensus := setupTestPrerequisites1(c, testDB)

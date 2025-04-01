@@ -12,7 +12,7 @@ func TestOrgParticipants(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
 
-	t.Run("SetOrgParticipant", func(t *testing.T) {
+	t.Run("SetOrgParticipant", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Create org
 		organization := &Organization{
@@ -91,7 +91,7 @@ func TestOrgParticipants(t *testing.T) {
 		c.Assert(duplicateCreatedParticipant.Name, qt.Equals, testName)
 	})
 
-	t.Run("DelOrgParticipant", func(t *testing.T) {
+	t.Run("DelOrgParticipant", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Create org
 		organization := &Organization{
@@ -125,7 +125,7 @@ func TestOrgParticipants(t *testing.T) {
 		c.Assert(err, qt.Not(qt.IsNil))
 	})
 
-	t.Run("GetOrgParticipant", func(t *testing.T) {
+	t.Run("GetOrgParticipant", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Create org
 		organization := &Organization{
@@ -164,7 +164,7 @@ func TestOrgParticipants(t *testing.T) {
 		c.Assert(err, qt.Not(qt.IsNil))
 	})
 
-	t.Run("BulkUpsertOrgParticipants", func(t *testing.T) {
+	t.Run("BulkUpsertOrgParticipants", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Create org
 		organization := &Organization{

@@ -1,3 +1,4 @@
+// Package internal provides internal utilities and types for the application.
 package internal
 
 import (
@@ -58,23 +59,23 @@ func (hb *HexBytes) SetString(s string) *HexBytes {
 }
 
 // String returns the hex string representation of the HexBytes.
-func (b *HexBytes) String() string {
-	return hex.EncodeToString(*b)
+func (hb *HexBytes) String() string {
+	return hex.EncodeToString(*hb)
 }
 
 // MarshalJSON implements the json.Marshaler interface. The HexBytes are
 // serialized as a JSON string.
-func (b HexBytes) MarshalJSON() ([]byte, error) {
-	enc := make([]byte, hex.EncodedLen(len(b))+2)
+func (hb HexBytes) MarshalJSON() ([]byte, error) {
+	enc := make([]byte, hex.EncodedLen(len(hb))+2)
 	enc[0] = '"'
-	hex.Encode(enc[1:], b)
+	hex.Encode(enc[1:], hb)
 	enc[len(enc)-1] = '"'
 	return enc, nil
 }
 
 // UnmarshalJSON implements the json.Unmarshaler interface. The HexBytes are
 // expected as a JSON string.
-func (b *HexBytes) UnmarshalJSON(data []byte) error {
+func (hb *HexBytes) UnmarshalJSON(data []byte) error {
 	if len(data) < 2 || data[0] != '"' || data[len(data)-1] != '"' {
 		return fmt.Errorf("invalid JSON string: %q", data)
 	}
@@ -84,27 +85,27 @@ func (b *HexBytes) UnmarshalJSON(data []byte) error {
 		data = data[2:]
 	}
 	decLen := hex.DecodedLen(len(data))
-	if cap(*b) < decLen {
-		*b = make([]byte, decLen)
+	if cap(*hb) < decLen {
+		*hb = make([]byte, decLen)
 	}
-	if _, err := hex.Decode(*b, data); err != nil {
+	if _, err := hex.Decode(*hb, data); err != nil {
 		return err
 	}
 	return nil
 }
 
 // ParseString decodes a hex string into the HexBytes.
-func (b *HexBytes) ParseString(str string) error {
+func (hb *HexBytes) ParseString(str string) error {
 	// Strip a leading "0x" prefix, for backwards compatibility.
 	if len(str) >= 2 && str[0] == '0' && (str[1] == 'x' || str[1] == 'X') {
 		str = str[2:]
 	}
 	var err error
-	(*b), err = hex.DecodeString(str)
+	(*hb), err = hex.DecodeString(str)
 	return err
 }
 
 // Address returns the Ethereum Address of the HexBytes.
-func (b *HexBytes) Address() common.Address {
-	return common.BytesToAddress(*b)
+func (hb *HexBytes) Address() common.Address {
+	return common.BytesToAddress(*hb)
 }

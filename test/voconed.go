@@ -1,3 +1,5 @@
+// Package test provides testing utilities for the saas-backend service,
+// including test containers for mail, MongoDB, and Voconed services.
 package test
 
 import (
@@ -14,8 +16,9 @@ import (
 )
 
 const (
-	// voconed
-	VoconedURLPath        = "/v2"
+	// VoconedURLPath is the URL path for the Voconed API.
+	VoconedURLPath = "/v2"
+	// VoconedPort is the port used by the Voconed service.
 	VoconedPort           = 9095
 	VoconedTxCosts        = 10
 	VoconedFundedAccount  = "0x032FaEf5d0F2c76bbD804215e822A5203e83385d"
@@ -27,6 +30,7 @@ const (
 	VocfaucetAmounts      = 5
 )
 
+// VoconedAPIURL constructs the full URL for the Voconed API from a base URL.
 func VoconedAPIURL(base string) string {
 	apiURL, err := url.JoinPath(base, VocfaucetBaseRoute)
 	if err != nil {
@@ -35,6 +39,8 @@ func VoconedAPIURL(base string) string {
 	return apiURL
 }
 
+// StartVoconedContainer starts a Voconed container for testing.
+// It returns the container and any error encountered during startup.
 func StartVoconedContainer(ctx context.Context) (testcontainers.Container, error) {
 	dataDir := path.Join(os.TempDir(), "voconed-test-datadir")
 	exposedPort := fmt.Sprintf("%d/tcp", VoconedPort)

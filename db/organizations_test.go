@@ -10,7 +10,7 @@ import (
 func TestOrganizations(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
-	t.Run("GetOrganization", func(t *testing.T) {
+	t.Run("GetOrganization", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 
 		// test not found organization
@@ -42,7 +42,7 @@ func TestOrganizations(t *testing.T) {
 		c.Assert(parentOrg.Address, qt.Equals, parentAddress)
 	})
 
-	t.Run("SetOrganization", func(t *testing.T) {
+	t.Run("SetOrganization", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 
 		// create a new organization
@@ -82,7 +82,7 @@ func TestOrganizations(t *testing.T) {
 		}), qt.IsNil)
 	})
 
-	t.Run("DeleteOrganization", func(t *testing.T) {
+	t.Run("DeleteOrganization", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 
 		// create a new organization and delete it
@@ -102,7 +102,7 @@ func TestOrganizations(t *testing.T) {
 		c.Assert(org, qt.IsNil)
 	})
 
-	t.Run("ReplaceCreatorEmail", func(t *testing.T) {
+	t.Run("ReplaceCreatorEmail", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 
 		// create a new organization with a creator
@@ -133,7 +133,7 @@ func TestOrganizations(t *testing.T) {
 		c.Assert(org.Creator, qt.Equals, newCreator)
 	})
 
-	t.Run("OrganizationsMembers", func(t *testing.T) {
+	t.Run("OrganizationsMembers", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 
 		// create a new organization with a creator
@@ -159,7 +159,7 @@ func TestOrganizations(t *testing.T) {
 		c.Assert(singleMember.Email, qt.Equals, testUserEmail)
 	})
 
-	t.Run("AddOrganizationPlan", func(t *testing.T) {
+	t.Run("AddOrganizationPlan", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 
 		// create a new organization

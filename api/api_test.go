@@ -55,7 +55,7 @@ var testDB *db.MongoStorage
 
 // testMailService is the test mail service for the tests. Make it global so it
 // can be accessed by the tests directly.
-var testMailService *smtp.SMTPEmail
+var testMailService *smtp.Email
 
 // testAPIEndpoint is the Voconed API endpoint for the tests. Make it global so it can be accessed by the tests directly.
 var testAPIEndpoint string
@@ -179,8 +179,8 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	// create test mail service
-	testMailService = new(smtp.SMTPEmail)
-	if err := testMailService.New(&smtp.SMTPConfig{
+	testMailService = new(smtp.Email)
+	if err := testMailService.New(&smtp.Config{
 		FromAddress:  adminEmail,
 		SMTPUsername: adminUser,
 		SMTPPassword: adminPass,
@@ -192,7 +192,7 @@ func TestMain(m *testing.M) {
 	}
 
 	rootKey := new(internal.HexBytes).SetString(test.VoconedFoundedPrivKey)
-	testCSP, err = csp.New(ctx, &csp.CSPConfig{
+	testCSP, err = csp.New(ctx, &csp.Config{
 		DBName:                   "apiTestCSP",
 		MongoClient:              testDB.DBClient,
 		MailService:              testMailService,
@@ -205,12 +205,12 @@ func TestMain(m *testing.M) {
 	}
 
 	// Initialize the subscriptions service
-	subscriptionsService := subscriptions.New(&subscriptions.SubscriptionsConfig{
+	subscriptionsService := subscriptions.New(&subscriptions.Config{
 		DB: testDB,
 	})
 
 	// start the API
-	New(&APIConfig{
+	New(&Config{
 		Host:                testHost,
 		Port:                testPort,
 		Secret:              testSecret,

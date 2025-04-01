@@ -1,3 +1,5 @@
+// Package account provides functionality for managing Vocdoni blockchain accounts,
+// including signing transactions, creating faucet packages, and interacting with the Vocdoni API.
 package account
 
 import (
