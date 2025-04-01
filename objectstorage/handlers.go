@@ -14,6 +14,7 @@ import (
 var isObjectNameRgx = regexp.MustCompile(`^([a-zA-Z0-9]+)\.(jpg|jpeg|png)`)
 
 // UploadImageWithFormHandler godoc
+//
 //	@Summary		Upload images
 //	@Description	Upload images through a multipart form. Expects the request to contain a "file" field with one or more
 //	@Description	files to be uploaded.
@@ -79,6 +80,7 @@ func (osc *ObjectStorageClient) UploadImageWithFormHandler(w http.ResponseWriter
 }
 
 // DownloadImageInlineHandler godoc
+//
 //	@Summary		Download an image
 //	@Description	Download an image inline. Retrieves the object from storage and displays it in the browser.
 //	@Tags			storage

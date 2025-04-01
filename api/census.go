@@ -25,6 +25,7 @@ const (
 var addParticipantsToCensusWorkers sync.Map
 
 // createCensusHandler godoc
+//
 //	@Summary		Create a new census
 //	@Description	Create a new census for an organization. Requires Manager/Admin role.
 //	@Tags			census
@@ -76,6 +77,7 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // censusInfoHandler godoc
+//
 //	@Summary		Get census information
 //	@Description	Retrieve census information by ID. Returns census type, organization address, and creation time.
 //	@Tags			census
@@ -102,6 +104,7 @@ func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // addParticipantsHandler godoc
+//
 //	@Summary		Add participants to a census
 //	@Description	Add multiple participants to a census. Requires Manager/Admin role.
 //	@Tags			census
@@ -201,6 +204,7 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // addParticipantsJobCheckHandler godoc
+//
 //	@Summary		Check the progress of adding participants
 //	@Description	Check the progress of a job to add participants to a census. Returns the progress of the job.
 //	@Description	If the job is completed, the job is deleted after 60 seconds.
@@ -236,6 +240,7 @@ func (a *API) addParticipantsJobCheckHandler(w http.ResponseWriter, r *http.Requ
 }
 
 // publishCensusHandler godoc
+//
 //	@Summary		Publish a census for voting
 //	@Description	Publish a census for voting. Requires Manager/Admin role. Returns published census with credentials.
 //	@Tags			census

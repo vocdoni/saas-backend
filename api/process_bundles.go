@@ -22,6 +22,7 @@ type AddProcessesToBundleRequest struct {
 }
 
 // createProcessBundleHandler godoc
+//
 //	@Summary		Create a new process bundle
 //	@Description	Create a new process bundle with the specified census and optional list of processes. Requires
 //	@Description	Manager/Admin role for the organization that owns the census. The census root will be the same as the
@@ -152,6 +153,7 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 }
 
 // updateProcessBundleHandler godoc
+//
 //	@Summary		Add processes to an existing bundle
 //	@Description	Add additional processes to an existing bundle. Requires Manager/Admin role for the organization
 //	@Description	that owns the bundle.
@@ -258,6 +260,7 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 }
 
 // processBundleInfoHandler godoc
+//
 //	@Summary		Get process bundle information
 //	@Description	Retrieve process bundle information by ID. Returns bundle details including the associated census,
 //	@Description	census root, organization address, and list of processes.
@@ -297,6 +300,7 @@ func (a *API) processBundleInfoHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // processBundleParticipantInfoHandler godoc
+//
 //	@Summary		Get participant information for a process bundle
 //	@Description	Retrieve process information for a participant in a process bundle. Returns process details including
 //	@Description	the census and metadata.

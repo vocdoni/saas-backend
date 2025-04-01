@@ -12,6 +12,7 @@ import (
 )
 
 // createProcessHandler godoc
+//
 //	@Summary		Create a new voting process
 //	@Description	Create a new voting process. Requires Manager/Admin role.
 //	@Tags			process
@@ -95,6 +96,7 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // processInfoHandler godoc
+//
 //	@Summary		Get process information
 //	@Description	Retrieve voting process information by ID. Returns process details including census and metadata.
 //	@Tags			process

@@ -16,6 +16,7 @@ import (
 )
 
 // createOrganizationHandler godoc
+//
 //	@Summary		Create a new organization
 //	@Description	Create a new organization. If the organization is a suborganization, the parent organization must be
 //	@Description	specified in the request body, and the user must be an admin of the parent. If the parent organization
@@ -143,6 +144,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 // organizationInfoHandler godoc
+//
 //	@Summary		Get organization information
 //	@Description	Get information about an organization
 //	@Tags			organizations
@@ -166,6 +168,7 @@ func (a *API) organizationInfoHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // organizationMembersHandler godoc
+//
 //	@Summary		Get organization members
 //	@Description	Get the list of members with their roles in the organization
 //	@Tags			organizations
@@ -229,6 +232,7 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 }
 
 // updateOrganizationHandler godoc
+//
 //	@Summary		Update organization information
 //	@Description	Update the information of an organization. Only the admin of the organization can update the information.
 //	@Description	Only certain fields can be updated, and they will be updated only if they are not empty.
@@ -308,6 +312,7 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 // inviteOrganizationMemberHandler godoc
+//
 //	@Summary		Invite a new member to an organization
 //	@Description	Invite a new member to an organization. Only the admin of the organization can invite a new member.
 //	@Description	It stores the invitation in the database and sends an email to the new member with the invitation code.
@@ -405,6 +410,7 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 }
 
 // acceptOrganizationMemberInvitationHandler godoc
+//
 //	@Summary		Accept an invitation to an organization
 //	@Description	Accept an invitation to an organization. It checks if the invitation is valid and not expired, and if the
 //	@Description	user is not already a member of the organization. If the user does not exist, it creates a new user with
@@ -515,6 +521,7 @@ func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r
 }
 
 // pendingOrganizationMembersHandler godoc
+//
 //	@Summary		Get pending organization members
 //	@Description	Get the list of pending invitations for an organization
 //	@Tags			organizations
@@ -563,6 +570,7 @@ func (a *API) pendingOrganizationMembersHandler(w http.ResponseWriter, r *http.R
 }
 
 // organizationsMembersRolesHandler godoc
+//
 //	@Summary		Get available organization member roles
 //	@Description	Get the list of available roles that can be assigned to a member of an organization
 //	@Tags			organizations
@@ -583,6 +591,7 @@ func (a *API) organizationsMembersRolesHandler(w http.ResponseWriter, _ *http.Re
 }
 
 // organizationsTypesHandler godoc
+//
 //	@Summary		Get available organization types
 //	@Description	Get the list of available organization types that can be assigned to an organization
 //	@Tags			organizations
@@ -602,6 +611,7 @@ func (a *API) organizationsTypesHandler(w http.ResponseWriter, _ *http.Request) 
 }
 
 // getOrganizationSubscriptionHandler godoc
+//
 //	@Summary		Get organization subscription
 //	@Description	Get the subscription information for an organization
 //	@Tags			organizations
@@ -651,6 +661,7 @@ func (a *API) getOrganizationSubscriptionHandler(w http.ResponseWriter, r *http.
 }
 
 // organizationCensusesHandler godoc
+//
 //	@Summary		Get organization censuses
 //	@Description	Get the list of censuses for an organization
 //	@Tags			organizations

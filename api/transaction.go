@@ -13,6 +13,7 @@ import (
 )
 
 // signTxHandler godoc
+//
 //	@Summary		Sign a transaction
 //	@Description	Sign a transaction with the organization's private key. The user must be a member of the organization.
 //	@Tags			transactions
@@ -119,6 +120,7 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // signMessageHandler godoc
+//
 //	@Summary		Sign a message
 //	@Description	Sign a message with the organization's private key. The user must have admin role for the organization.
 //	@Tags			transactions

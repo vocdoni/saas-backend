@@ -20,6 +20,7 @@ import (
 var mu sync.Mutex
 
 // handleWebhook godoc
+//
 //	@Summary		Handle Stripe webhook events
 //	@Description	Process incoming webhook events from Stripe for subscription management. Handles subscription creation,
 //	@Description	updates, deletions, and payment events.
@@ -159,6 +160,7 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 // createSubscriptionCheckoutHandler godoc
+//
 //	@Summary		Create a subscription checkout session
 //	@Description	Create a new Stripe checkout session for subscription purchases
 //	@Tags			plans
@@ -228,6 +230,7 @@ func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.R
 }
 
 // checkoutSessionHandler godoc
+//
 //	@Summary		Get checkout session status
 //	@Description	Retrieve the status of a Stripe checkout session
 //	@Tags			plans
@@ -277,6 +280,7 @@ func (a *API) getSubscriptionOrgInfo(event *stripe.Event) (*stripeService.Stripe
 }
 
 // createSubscriptionPortalSessionHandler godoc
+//
 //	@Summary		Create a subscription portal session
 //	@Description	Create a Stripe customer portal session for managing subscriptions
 //	@Tags			plans

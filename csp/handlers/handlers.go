@@ -39,6 +39,7 @@ func New(c *csp.CSP, mainDB *db.MongoStorage) *cspHandlers {
 }
 
 // BundleAuthHandler godoc
+//
 //	@Summary		Authenticate for a process bundle
 //	@Description	Handle authentication for a process bundle. There are two steps in the authentication process:
 //	@Description	- Step 0: The user sends the participant number and contact information (email or phone).
@@ -116,6 +117,7 @@ func (c *cspHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 // BundleSignHandler godoc
+//
 //	@Summary		Sign a process in a bundle
 //	@Description	Sign a process in a bundle. Requires a verified token. The server signs the address with the user data
 //	@Description	and returns the signature. Once signed, the process is marked as consumed and cannot be signed again.
@@ -211,6 +213,7 @@ func (c *cspHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 // ConsumedAddressHandler godoc
+//
 //	@Summary		Get the address used to sign a process
 //	@Description	Get the address used to sign a process. Requires a verified token. Returns the address, nullifier,
 //	@Description	and timestamp of the consumption.

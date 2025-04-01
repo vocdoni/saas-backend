@@ -16,6 +16,7 @@ import (
 )
 
 // registerHandler godoc
+//
 //	@Summary		Register a new user
 //	@Description	Register a new user with email, password, and personal information
 //	@Tags			users
@@ -107,6 +108,7 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // verifyUserAccountHandler godoc
+//
 //	@Summary		Verify user account
 //	@Description	Verify a user account with the verification code
 //	@Tags			users
@@ -184,6 +186,7 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // userVerificationCodeInfoHandler godoc
+//
 //	@Summary		Get verification code information
 //	@Description	Get information about a user's verification code
 //	@Tags			users
@@ -240,6 +243,7 @@ func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Req
 }
 
 // resendUserVerificationCodeHandler godoc
+//
 //	@Summary		Resend verification code
 //	@Description	Resend a verification code to the user's email
 //	@Tags			users
@@ -315,6 +319,7 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 }
 
 // userInfoHandler godoc
+//
 //	@Summary		Get user information
 //	@Description	Get information about the authenticated user
 //	@Tags			users
@@ -358,6 +363,7 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // updateUserInfoHandler godoc
+//
 //	@Summary		Update user information
 //	@Description	Update information for the authenticated user
 //	@Tags			users
@@ -443,6 +449,7 @@ func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // updateUserPasswordHandler godoc
+//
 //	@Summary		Update user password
 //	@Description	Update the password for the authenticated user
 //	@Tags			users
@@ -488,6 +495,7 @@ func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 // recoverUserPasswordHandler godoc
+//
 //	@Summary		Recover user password
 //	@Description	Request a password recovery code for a user
 //	@Tags			users
@@ -543,6 +551,7 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 }
 
 // resetUserPasswordHandler godoc
+//
 //	@Summary		Reset user password
 //	@Description	Reset a user's password using a verification code
 //	@Tags			users

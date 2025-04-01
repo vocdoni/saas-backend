@@ -10,6 +10,7 @@ import (
 )
 
 // getPlansHandler godoc
+//
 //	@Summary		Get all subscription plans
 //	@Description	Get the list of available subscription plans
 //	@Tags			plans
@@ -30,6 +31,7 @@ func (a *API) getPlansHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // planInfoHandler godoc
+//
 //	@Summary		Get plan information
 //	@Description	Get detailed information about a specific subscription plan
 //	@Tags			plans

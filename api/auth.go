@@ -11,6 +11,7 @@ import (
 )
 
 // refreshTokenHandler godoc
+//
 //	@Summary		Refresh JWT token
 //	@Description	Refresh the JWT token for an authenticated user
 //	@Tags			auth
@@ -38,6 +39,7 @@ func (a *API) refreshTokenHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // authLoginHandler godoc
+//
 //	@Summary		Login to get a JWT token
 //	@Description	Authenticate a user and get a JWT token
 //	@Tags			auth
@@ -86,6 +88,7 @@ func (a *API) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // writableOrganizationAddressesHandler godoc
+//
 //	@Summary		Get writable organization addresses
 //	@Description	Get the list of organization addresses where the user has write access
 //	@Tags			auth
