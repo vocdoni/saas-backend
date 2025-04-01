@@ -1,4 +1,4 @@
-// Package handlers provides HTTP handlers for the Cryptographic Service Provider (CSP)
+// Package handlers provides HTTP handlers for the CSP
 // API endpoints, managing authentication, token verification, and cryptographic
 // signing operations for process bundles in the Vocdoni voting platform.
 package handlers

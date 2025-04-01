@@ -23,7 +23,7 @@ type Account struct {
 	client *apiclient.HTTPclient
 	signer *ethereum.SignKeys
 
-	PubKey            internal.HexBytes
+	PubKey            internal.HexBytes `swaggertype:"string" format:"hex" example:"deadbeef"`
 	TxCosts           map[models.TxType]uint64
 	ElectionPriceCalc *electionprice.Calculator
 }

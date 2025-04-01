@@ -231,23 +231,23 @@ type LoginResponse struct {
 // swagger:model TransactionData
 type TransactionData struct {
 	// Blockchain address
-	Address internal.HexBytes `json:"address"`
+	Address internal.HexBytes `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
 
 	// Transaction payload bytes
-	TxPayload []byte `json:"txPayload"`
+	TxPayload []byte `json:"txPayload" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 }
 
 // MessageSignature contains a payload and its signature.
 // swagger:model MessageSignature
 type MessageSignature struct {
 	// Blockchain address
-	Address string `json:"address"`
+	Address string `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
 
 	// Message payload bytes
-	Payload []byte `json:"payload,omitempty"`
+	Payload []byte `json:"payload,omitempty" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 
 	// Cryptographic signature
-	Signature internal.HexBytes `json:"signature,omitempty"`
+	Signature internal.HexBytes `json:"signature,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 }
 
 // OrganizationFromDB converts a db.Organization to an OrganizationInfo, if the parent
@@ -542,7 +542,7 @@ type SubscriptionCheckout struct {
 // swagger:model ParticipantNotification
 type ParticipantNotification struct {
 	// ID of the voting process
-	ProcessID []byte `json:"processID"`
+	ProcessID []byte `json:"processID" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 
 	// Notification details
 	Notification notifications.Notification `json:"notification"`
@@ -587,10 +587,10 @@ type PublishedCensusResponse struct {
 	URI string `json:"uri" bson:"uri"`
 
 	// Merkle root of the census
-	Root internal.HexBytes `json:"root" bson:"root"`
+	Root internal.HexBytes `json:"root" bson:"root" swaggertype:"string" format:"hex" example:"deadbeef"`
 
 	// Census ID
-	CensusID internal.HexBytes `json:"censusId" bson:"censusId"`
+	CensusID internal.HexBytes `json:"censusId" bson:"censusId" swaggertype:"string" format:"hex" example:"deadbeef"`
 }
 
 // OrganizationCensuses wraps a list of censuses of an organization.
@@ -659,7 +659,7 @@ type AddParticipantsResponse struct {
 	ParticipantsNo uint32 `json:"participantsNo"`
 
 	// Job ID for tracking the addition process
-	JobID internal.HexBytes `json:"jobID"`
+	JobID internal.HexBytes `json:"jobID" swaggertype:"string" format:"hex" example:"deadbeef"`
 }
 
 // Request types for process operations
@@ -668,17 +668,17 @@ type AddParticipantsResponse struct {
 // swagger:model CreateProcessRequest
 type CreateProcessRequest struct {
 	// Merkle root of the published census
-	PublishedCensusRoot internal.HexBytes `json:"censusRoot"`
+	PublishedCensusRoot internal.HexBytes `json:"censusRoot" swaggertype:"string" format:"hex" example:"deadbeef"`
 
 	// URI of the published census
 	PublishedCensusURI string `json:"censusUri"`
 
 	// Census ID
-	CensusID internal.HexBytes `json:"censusID"`
+	CensusID internal.HexBytes `json:"censusID" swaggertype:"string" format:"hex" example:"deadbeef"`
 
 	// Additional metadata for the process
 	// Can be any key-value pairs
-	Metadata []byte `json:"metadata,omitempty"`
+	Metadata []byte `json:"metadata,omitempty" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 }
 
 // InitiateAuthRequest defines the payload for participant authentication.
@@ -714,7 +714,7 @@ type GenerateProofRequest struct {
 	Token string `json:"token"`
 
 	// Blinded address for proof generation
-	BlindedAddress []byte `json:"blindedAddress"`
+	BlindedAddress []byte `json:"blindedAddress" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 }
 
 // Two-factor authentication types
@@ -733,7 +733,7 @@ type AuthRequest struct {
 // swagger:model SignRequest
 type SignRequest struct {
 	// Token R value
-	TokenR internal.HexBytes `json:"tokenR"`
+	TokenR internal.HexBytes `json:"tokenR" swaggertype:"string" format:"hex" example:"deadbeef"`
 
 	// Authentication token
 	AuthToken *uuid.UUID `json:"authToken"`
@@ -745,7 +745,7 @@ type SignRequest struct {
 	Payload string `json:"payload,omitempty"`
 
 	// Election ID
-	ElectionID internal.HexBytes `json:"electionId,omitempty"`
+	ElectionID internal.HexBytes `json:"electionId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 }
 
 // CreateProcessBundleRequest defines the payload for creating a new process bundle.
@@ -765,5 +765,5 @@ type CreateProcessBundleResponse struct {
 	URI string `json:"uri"`
 
 	// Merkle root of the process bundle
-	Root internal.HexBytes `json:"root"`
+	Root internal.HexBytes `json:"root" swaggertype:"string" format:"hex" example:"deadbeef"`
 }

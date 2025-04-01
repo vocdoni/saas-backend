@@ -150,7 +150,7 @@ type OrganizationInvite struct {
 type Object struct {
 	ID          string    `json:"id" bson:"_id"`
 	Name        string    `json:"name" bson:"name"`
-	Data        []byte    `json:"data" bson:"data"`
+	Data        []byte    `json:"data" bson:"data" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 	CreatedAt   time.Time `json:"createdAt" bson:"createdAt"`
 	UserID      string    `json:"userId" bson:"userId"`
 	ContentType string    `json:"contentType" bson:"contentType"`
@@ -179,18 +179,20 @@ type Census struct {
 // An org participant is a member of the organization and her details that will be
 // used for verification and/or authentication
 // A participant is tied to an organization by the orgAddress
+//
+//nolint:lll
 type OrgParticipant struct {
 	ID primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	// OrgAddress can be used for future sharding
 	OrgAddress    string                 `json:"orgAddress" bson:"orgAddress"`
 	Email         string                 `json:"email" bson:"email"`
-	HashedEmail   []byte                 `json:"hashedEmail" bson:"hashedEmail"`
+	HashedEmail   []byte                 `json:"hashedEmail" bson:"hashedEmail" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 	Phone         string                 `json:"phone" bson:"phone"`
-	HashedPhone   []byte                 `json:"hashedPhone" bson:"hashedPhone"`
+	HashedPhone   []byte                 `json:"hashedPhone" bson:"hashedPhone" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 	ParticipantNo string                 `json:"participantNo" bson:"participantNo"`
 	Name          string                 `json:"name" bson:"name"`
 	Password      string                 `json:"password" bson:"password"`
-	HashedPass    []byte                 `json:"pass" bson:"pass"`
+	HashedPass    []byte                 `json:"pass" bson:"pass" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 	Other         map[string]interface{} `json:"other" bson:"other"`
 	CreatedAt     time.Time              `json:"createdAt" bson:"createdAt"`
 	UpdatedAt     time.Time              `json:"updatedAt" bson:"updatedAt"`
@@ -217,28 +219,34 @@ type PublishedCensus struct {
 // Process represents a voting process in the vochain
 // A process is tied to an organization by the orgAddress
 // and to a publishedCensus
+//
+//nolint:lll
 type Process struct {
-	ID              internal.HexBytes `json:"id" bson:"_id"`
+	ID              internal.HexBytes `json:"id" bson:"_id"  swaggertype:"string" format:"hex" example:"deadbeef"`
 	OrgAddress      string            `json:"orgAdress" bson:"orgAddress"`
 	PublishedCensus PublishedCensus   `json:"publishedCensus" bson:"publishedCensus"`
-	Metadata        []byte            `json:"metadata,omitempty"  bson:"metadata"`
+	Metadata        []byte            `json:"metadata,omitempty"  bson:"metadata"  swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 }
 
 // ProcessesBundle represents a group of voting processes that share a common census.
 // This allows users to participate in multiple voting processes using the same authentication mechanism.
+//
+//nolint:lll
 type ProcessesBundle struct {
-	ID         primitive.ObjectID  `json:"id" bson:"_id,omitempty"`      // Unique identifier for the bundle
-	Census     Census              `json:"census" bson:"census"`         // The census associated with this bundle
-	CensusRoot string              `json:"censusRoot" bson:"censusRoot"` // The census root public key
-	OrgAddress string              `json:"orgAddress" bson:"orgAddress"` // The organization that owns this bundle
-	Processes  []internal.HexBytes `json:"processes" bson:"processes"`   // Array of process IDs included in this bundle
+	ID         primitive.ObjectID  `json:"id" bson:"_id,omitempty"`                                                               // Unique identifier for the bundle
+	Census     Census              `json:"census" bson:"census"`                                                                  // The census associated with this bundle
+	CensusRoot string              `json:"censusRoot" bson:"censusRoot"`                                                          // The census root public key
+	OrgAddress string              `json:"orgAddress" bson:"orgAddress"`                                                          // The organization that owns this bundle
+	Processes  []internal.HexBytes `json:"processes" bson:"processes" swaggertype:"array,string" format:"hex" example:"deadbeef"` // Array of process IDs included in this bundle
 }
 
 // Mix of the Membership and the Participant
+//
+//nolint:lll
 type CensusMembershipParticipant struct {
 	ParticipantNo string              `json:"participantNo" bson:"participantNo"`
 	HashedEmail   string              `json:"hashedEmail" bson:"hashedEmail"`
 	HashedPhone   string              `json:"hashedPhone" bson:"hashedPhone"`
 	BundleID      string              `json:"bundleId" bson:"bundleId"`
-	ElectionIDs   []internal.HexBytes `json:"electionIds" bson:"electionIds"`
+	ElectionIDs   []internal.HexBytes `json:"electionIds" bson:"electionIds" swaggertype:"array,string" format:"hex" example:"deadbeef"`
 }

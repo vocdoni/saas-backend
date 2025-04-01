@@ -30,9 +30,9 @@ definitions:
     properties:
       jobID:
         description: Job ID for tracking the addition process
-        items:
-          type: integer
-        type: array
+        example: deadbeef
+        format: hex
+        type: string
       participantsNo:
         description: Number of participants added
         type: integer
@@ -52,9 +52,9 @@ definitions:
     properties:
       root:
         description: Merkle root of the process bundle
-        items:
-          type: integer
-        type: array
+        example: deadbeef
+        format: hex
+        type: string
       uri:
         description: URI of the created process bundle
         type: string
@@ -63,14 +63,14 @@ definitions:
     properties:
       censusID:
         description: Census ID
-        items:
-          type: integer
-        type: array
+        example: deadbeef
+        format: hex
+        type: string
       censusRoot:
         description: Merkle root of the published census
-        items:
-          type: integer
-        type: array
+        example: deadbeef
+        format: hex
+        type: string
       censusUri:
         description: URI of the published census
         type: string
@@ -78,9 +78,9 @@ definitions:
         description: |-
           Additional metadata for the process
           Can be any key-value pairs
-        items:
-          type: integer
-        type: array
+        example: deadbeef
+        format: hex
+        type: string
     type: object
   apicommon.LoginResponse:
     properties:
@@ -95,17 +95,19 @@ definitions:
     properties:
       address:
         description: Blockchain address
+        example: deadbeef
+        format: hex
         type: string
       payload:
         description: Message payload bytes
-        items:
-          type: integer
-        type: array
+        example: deadbeef
+        format: hex
+        type: string
       signature:
         description: Cryptographic signature
-        items:
-          type: integer
-        type: array
+        example: deadbeef
+        format: hex
+        type: string
     type: object
   apicommon.OrgParticipant:
     properties:
@@ -300,14 +302,14 @@ definitions:
     properties:
       censusId:
         description: Census ID
-        items:
-          type: integer
-        type: array
+        example: deadbeef
+        format: hex
+        type: string
       root:
         description: Merkle root of the census
-        items:
-          type: integer
-        type: array
+        example: deadbeef
+        format: hex
+        type: string
       uri:
         description: URI of the published census
         type: string
@@ -495,14 +497,14 @@ definitions:
     properties:
       address:
         description: Blockchain address
-        items:
-          type: integer
-        type: array
+        example: deadbeef
+        format: hex
+        type: string
       txPayload:
         description: Transaction payload bytes
-        items:
-          type: integer
-        type: array
+        example: deadbeef
+        format: hex
+        type: string
     type: object
   apicommon.UserInfo:
     properties:
@@ -679,13 +681,13 @@ definitions:
   db.Process:
     properties:
       id:
-        items:
-          type: integer
-        type: array
+        example: deadbeef
+        format: hex
+        type: string
       metadata:
-        items:
-          type: integer
-        type: array
+        example: deadbeef
+        format: hex
+        type: string
       orgAdress:
         type: string
       publishedCensus:
@@ -708,10 +710,11 @@ definitions:
         type: string
       processes:
         description: Array of process IDs included in this bundle
+        example:
+        - deadbeef
         items:
-          items:
-            type: integer
-          type: array
+          format: hex
+          type: string
         type: array
     type: object
   db.PublishedCensus:
@@ -757,50 +760,50 @@ definitions:
   handlers.AuthResponse:
     properties:
       authToken:
-        items:
-          type: integer
-        type: array
+        example: deadbeef
+        format: hex
+        type: string
       signature:
-        items:
-          type: integer
-        type: array
+        example: deadbeef
+        format: hex
+        type: string
     type: object
   handlers.ConsumedAddressRequest:
     properties:
       authToken:
-        items:
-          type: integer
-        type: array
+        example: deadbeef
+        format: hex
+        type: string
     type: object
   handlers.ConsumedAddressResponse:
     properties:
       at:
         type: string
       authToken:
-        items:
-          type: integer
-        type: array
+        example: deadbeef
+        format: hex
+        type: string
       nullifier:
-        items:
-          type: integer
-        type: array
+        example: deadbeef
+        format: hex
+        type: string
     type: object
   handlers.SignRequest:
     properties:
       authToken:
-        items:
-          type: integer
-        type: array
+        example: deadbeef
+        format: hex
+        type: string
       electionId:
-        items:
-          type: integer
-        type: array
+        example: deadbeef
+        format: hex
+        type: string
       payload:
         type: string
       tokenR:
-        items:
-          type: integer
-        type: array
+        example: deadbeef
+        format: hex
+        type: string
     type: object
   stripe.Account:
     properties:
