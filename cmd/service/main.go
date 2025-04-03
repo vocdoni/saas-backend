@@ -87,14 +87,13 @@ func main() {
 	stripeWebhookSecret := viper.GetString("stripeWebhookSecret")
 
 	log.Init("debug", "stdout", os.Stderr)
-	// create Stripe client and include it in the API configuration
-	var stripeClient *stripe.Client
+	// init Stripe client
 	if stripeAPISecret != "" || stripeWebhookSecret != "" {
-		stripeClient = stripe.New(stripeAPISecret, stripeWebhookSecret)
+		stripe.Init(stripeAPISecret, stripeWebhookSecret)
 	} else {
 		log.Fatalf("stripeApiSecret and stripeWebhookSecret are required")
 	}
-	availablePlans, err := stripeClient.GetPlans()
+	availablePlans, err := stripe.GetPlans()
 	if err != nil || len(availablePlans) == 0 {
 		log.Fatalf("could not get the available plans: %v", err)
 	}
@@ -137,7 +136,6 @@ func main() {
 		WebAppURL:           webURL,
 		ServerURL:           server,
 		FullTransparentMode: fullTransparentMode,
-		StripeClient:        stripeClient,
 	}
 
 	cspConf := &csp.Config{
