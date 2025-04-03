@@ -27,7 +27,16 @@ func (a *API) authenticator(next http.Handler) http.Handler {
 			return
 		}
 		// retrieve the `userId` from the claims and add it to the HTTP header
-		userEmail := claims["userId"].(string)
+		userIDValue, ok := claims["userId"]
+		if !ok {
+			errors.ErrUnauthorized.Withf("userId claim not found in JWT token").Write(w)
+			return
+		}
+		userEmail, ok := userIDValue.(string)
+		if !ok {
+			errors.ErrUnauthorized.Withf("userId claim is not a string").Write(w)
+			return
+		}
 		// get the user from the database
 		user, err := a.db.UserByEmail(userEmail)
 		if err != nil {

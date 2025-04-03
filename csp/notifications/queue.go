@@ -90,7 +90,11 @@ func (sq *Queue) Start() {
 				continue
 			}
 			// decode the challenge information
-			challenge := c.(*NotificationChallenge)
+			challenge, ok := c.(*NotificationChallenge)
+			if !ok {
+				log.Warnw("invalid challenge type in queue")
+				continue
+			}
 			if !challenge.Valid() {
 				log.Warnw("invalid notification challenge",
 					"bundle", challenge.BundleID.String(),

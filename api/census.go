@@ -224,7 +224,11 @@ func (*API) addParticipantsJobCheckHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	if v, ok := addParticipantsToCensusWorkers.Load(jobID.String()); ok {
-		p := v.(*db.BulkCensusMembershipStatus)
+		p, ok := v.(*db.BulkCensusMembershipStatus)
+		if !ok {
+			errors.ErrGenericInternalServerError.Withf("invalid job status type").Write(w)
+			return
+		}
 		if p.Progress == 100 {
 			go func() {
 				// Schedule the deletion of the job after 60 seconds
