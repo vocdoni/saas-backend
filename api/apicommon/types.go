@@ -767,3 +767,26 @@ type CreateProcessBundleResponse struct {
 	// Merkle root of the process bundle
 	Root internal.HexBytes `json:"root" swaggertype:"string" format:"hex" example:"deadbeef"`
 }
+
+// OauthLoginRequest defines the payload for register/login through the OAuth service.
+// swagger:model OauthLoginRequest
+type OauthLoginRequest struct {
+	// User email address
+	Email string `json:"email"`
+	// User first name
+	FirstName string `json:"firstName"`
+	// User last name
+	LastName string `json:"lastName"`
+	// The signature made by the OAuth service on top of the user email
+	OauthSignature string `json:"oauthSignature"`
+	// The signature made by the user on on top of the oauth signature
+	UserOauthSignature string `json:"userOauthSignature"`
+	// The address of the user
+	Address string `json:"address"`
+}
+
+// OauthServiceAddressResponse defines the response from the OAuth service containing its address.
+type OauthServiceAddressResponse struct {
+	// The address of the OAuth service signer
+	Address string `json:"address"`
+}
