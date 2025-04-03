@@ -20,7 +20,7 @@ import (
 // related to the request provided. It gets the organization address from the
 // URL parameters and retrieves the organization from the database. If the
 // organization is a suborganization, it also retrieves the parent organization.
-func (a *API) organizationFromRequest(r *http.Request) (*db.Organization, *db.Organization, bool) {
+func (a *API) organizationFromRequest(r *http.Request) (org *db.Organization, parent *db.Organization, found bool) {
 	orgAddress := chi.URLParam(r, "address")
 	// if the organization address is not empty, get the organization from
 	// the database and add it to the context

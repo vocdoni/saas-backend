@@ -130,7 +130,7 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 // generates a new challenge secret, challenge token and OTP code for the
 // secret and the attempt number. It returns the token, the secret and the
 // code respectively.
-func (c *CSP) generateToken(uID, bID internal.HexBytes) (
+func (*CSP) generateToken(uID, bID internal.HexBytes) (
 	internal.HexBytes, string, error,
 ) {
 	// generate a new challenge secret and challenge token
@@ -154,7 +154,7 @@ func (c *CSP) generateToken(uID, bID internal.HexBytes) (
 // the OTP code for the process secret and the attempt number and compares it
 // with the solution. It returns true if the solution is correct, false
 // otherwise.
-func (c *CSP) verifySolution(uID, bID internal.HexBytes, solution string) bool {
+func (*CSP) verifySolution(uID, bID internal.HexBytes, solution string) bool {
 	secret := otpSecret(uID, bID)
 	// generate the OTP code for the secret and the attempt number
 	otp := gotp.NewDefaultHOTP(secret)

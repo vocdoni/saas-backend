@@ -182,49 +182,49 @@ func GetPrices(priceIDs []string) []*stripeapi.Price {
 func GetPlans() ([]*stripeDB.Plan, error) {
 	var plans []*stripeDB.Plan
 	for i, productID := range ProductsIDs {
-		if product, err := GetProductByID(productID); product != nil && err == nil {
-			var organizationData stripeDB.PlanLimits
-			if err := json.Unmarshal([]byte(product.Metadata["organization"]), &organizationData); err != nil {
-				return nil, fmt.Errorf("error parsing plan organization metadata JSON: %s", err.Error())
-			}
-			var votingTypesData stripeDB.VotingTypes
-			if err := json.Unmarshal([]byte(product.Metadata["votingTypes"]), &votingTypesData); err != nil {
-				return nil, fmt.Errorf("error parsing plan voting types metadata JSON: %s", err.Error())
-			}
-			var featuresData stripeDB.Features
-			if err := json.Unmarshal([]byte(product.Metadata["features"]), &featuresData); err != nil {
-				return nil, fmt.Errorf("error parsing plan features metadata JSON: %s", err.Error())
-			}
-			price := product.DefaultPrice
-			startingPrice := price.UnitAmount
-			if len(price.Tiers) > 0 {
-				startingPrice = price.Tiers[0].FlatAmount
-			}
-			var tiers []stripeDB.PlanTier
-			for _, tier := range price.Tiers {
-				if tier.UpTo == 0 {
-					continue
-				}
-				tiers = append(tiers, stripeDB.PlanTier{
-					Amount: tier.FlatAmount,
-					UpTo:   tier.UpTo,
-				})
-			}
-			plans = append(plans, &stripeDB.Plan{
-				ID:              uint64(i),
-				Name:            product.Name,
-				StartingPrice:   startingPrice,
-				StripeID:        productID,
-				StripePriceID:   price.ID,
-				Default:         price.Metadata["Default"] == "true",
-				Organization:    organizationData,
-				VotingTypes:     votingTypesData,
-				Features:        featuresData,
-				CensusSizeTiers: tiers,
-			})
-		} else {
+		product, err := GetProductByID(productID)
+		if err != nil || product == nil {
 			return nil, fmt.Errorf("error getting product %s: %s", productID, err.Error())
 		}
+		var organizationData stripeDB.PlanLimits
+		if err := json.Unmarshal([]byte(product.Metadata["organization"]), &organizationData); err != nil {
+			return nil, fmt.Errorf("error parsing plan organization metadata JSON: %s", err.Error())
+		}
+		var votingTypesData stripeDB.VotingTypes
+		if err := json.Unmarshal([]byte(product.Metadata["votingTypes"]), &votingTypesData); err != nil {
+			return nil, fmt.Errorf("error parsing plan voting types metadata JSON: %s", err.Error())
+		}
+		var featuresData stripeDB.Features
+		if err := json.Unmarshal([]byte(product.Metadata["features"]), &featuresData); err != nil {
+			return nil, fmt.Errorf("error parsing plan features metadata JSON: %s", err.Error())
+		}
+		price := product.DefaultPrice
+		startingPrice := price.UnitAmount
+		if len(price.Tiers) > 0 {
+			startingPrice = price.Tiers[0].FlatAmount
+		}
+		var tiers []stripeDB.PlanTier
+		for _, tier := range price.Tiers {
+			if tier.UpTo == 0 {
+				continue
+			}
+			tiers = append(tiers, stripeDB.PlanTier{
+				Amount: tier.FlatAmount,
+				UpTo:   tier.UpTo,
+			})
+		}
+		plans = append(plans, &stripeDB.Plan{
+			ID:              uint64(i),
+			Name:            product.Name,
+			StartingPrice:   startingPrice,
+			StripeID:        productID,
+			StripePriceID:   price.ID,
+			Default:         price.Metadata["Default"] == "true",
+			Organization:    organizationData,
+			VotingTypes:     votingTypesData,
+			Features:        featuresData,
+			CensusSizeTiers: tiers,
+		})
 	}
 	return plans, nil
 }
@@ -311,11 +311,12 @@ func CreatePortalSession(customerEmail string) (*stripeapi.BillingPortalSession,
 		Email: stripeapi.String(customerEmail),
 	}
 	var customerID string
-	if customers := stripeCustomer.List(customerParams); customers.Next() {
-		customerID = customers.Customer().ID
-	} else {
+
+	customers := stripeCustomer.List(customerParams)
+	if !customers.Next() {
 		return nil, fmt.Errorf("could not find customer with email %s", customerEmail)
 	}
+	customerID = customers.Customer().ID
 
 	params := &stripeapi.BillingPortalSessionParams{
 		Customer: &customerID,

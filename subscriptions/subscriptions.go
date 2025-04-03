@@ -69,7 +69,7 @@ func New(conf *Config) *Subscriptions {
 }
 
 // hasElectionMetadataPermissions checks if the organization has permission to create an election with the given metadata.
-func (p *Subscriptions) hasElectionMetadataPermissions(process *models.NewProcessTx, plan *db.Plan) (bool, error) {
+func hasElectionMetadataPermissions(process *models.NewProcessTx, plan *db.Plan) (bool, error) {
 	// check ANONYMOUS
 	if process.Process.EnvelopeType.Anonymous && !plan.Features.Anonymous {
 		return false, fmt.Errorf("anonymous elections are not allowed")
@@ -125,7 +125,6 @@ func (p *Subscriptions) HasTxPermission(
 		if !user.HasRoleFor(org.Address, db.AdminRole) {
 			return false, fmt.Errorf("user does not have admin role")
 		}
-
 	// check CREATE PROCESS
 	case models.TxType_NEW_PROCESS, models.TxType_SET_PROCESS_CENSUS:
 		// check if the user has the admin role for the organization
@@ -139,7 +138,7 @@ func (p *Subscriptions) HasTxPermission(
 		if org.Counters.Processes >= plan.Organization.MaxProcesses {
 			return false, fmt.Errorf("max processes reached")
 		}
-		return p.hasElectionMetadataPermissions(newProcess, plan)
+		return hasElectionMetadataPermissions(newProcess, plan)
 
 	// check SET_PROCESS
 	case models.TxType_SET_PROCESS_STATUS:

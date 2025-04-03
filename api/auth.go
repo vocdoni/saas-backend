@@ -104,7 +104,7 @@ func (a *API) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 //
 // writableOrganizationAddressesHandler returns the list of addresses of the
 // organizations where the user has write access.
-func (a *API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *http.Request) {
+func (*API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {

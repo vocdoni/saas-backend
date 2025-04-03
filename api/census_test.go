@@ -243,6 +243,6 @@ func TestCensus(t *testing.T) {
 }
 
 // Helper function to parse JSON responses
-func parseJSON(data []byte, v interface{}) error {
+func parseJSON(data []byte, v any) error {
 	return json.Unmarshal(data, v)
 }

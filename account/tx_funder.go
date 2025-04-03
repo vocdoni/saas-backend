@@ -65,7 +65,6 @@ func (a *Account) FundTransaction(tx *models.Tx, targetAddr common.Address) (*mo
 					SetAccount: txSetAccount,
 				},
 			}
-
 		}
 	case *models.Tx_NewProcess:
 		txNewProcess := tx.GetNewProcess()
@@ -74,7 +73,7 @@ func (a *Account) FundTransaction(tx *models.Tx, targetAddr common.Address) (*mo
 			return nil, nil, errors.ErrInvalidTxFormat.With("missing fields")
 		}
 		// check the tx subtype
-		switch txNewProcess.Txtype {
+		switch txNewProcess.Txtype { //nolint:revive // avoid replacing single-case switch by an if-then
 		case models.TxType_NEW_PROCESS:
 			txType = models.TxType_NEW_PROCESS
 			// get the tx cost for the tx type

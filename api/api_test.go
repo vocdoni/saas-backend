@@ -356,7 +356,7 @@ func testNewVocdoniClient(t *testing.T) *apiclient.HTTPclient {
 // Returns the response data if any.
 func signRemoteSignerAndSendVocdoniTx(t *testing.T, tx *models.Tx, token string, vocdoniClient *apiclient.HTTPclient,
 	orgAddress internal.HexBytes,
-) []byte {
+) (responseData []byte) {
 	c := qt.New(t)
 	txBytes, err := proto.Marshal(tx)
 	c.Assert(err, qt.IsNil)
@@ -383,7 +383,7 @@ func signRemoteSignerAndSendVocdoniTx(t *testing.T, tx *models.Tx, token string,
 // signAndSendVocdoniTx signs and sends a transaction to the Voconed API and waits for it to be mined.
 // It uses the provided signer to sign the transaction.
 // Returns the response data if any.
-func signAndSendVocdoniTx(t *testing.T, tx *models.Tx, signer *ethereum.SignKeys, vocdoniClient *apiclient.HTTPclient) []byte {
+func signAndSendVocdoniTx(t *testing.T, tx *models.Tx, signer *ethereum.SignKeys, vocdoniClient *apiclient.HTTPclient) (responseData []byte) {
 	c := qt.New(t)
 	txBytes, err := proto.Marshal(tx)
 	c.Assert(err, qt.IsNil)
