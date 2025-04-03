@@ -78,8 +78,8 @@ definitions:
         description: |-
           Additional metadata for the process
           Can be any key-value pairs
-        example: deadbeef
-        format: hex
+        example: aGVsbG8gd29ybGQ=
+        format: base64
         type: string
     type: object
   apicommon.LoginResponse:
@@ -100,8 +100,8 @@ definitions:
         type: string
       payload:
         description: Message payload bytes
-        example: deadbeef
-        format: hex
+        example: aGVsbG8gd29ybGQ=
+        format: base64
         type: string
       signature:
         description: Cryptographic signature
@@ -502,8 +502,8 @@ definitions:
         type: string
       txPayload:
         description: Transaction payload bytes
-        example: deadbeef
-        format: hex
+        example: aGVsbG8gd29ybGQ=
+        format: base64
         type: string
     type: object
   apicommon.UserInfo:
@@ -685,8 +685,8 @@ definitions:
         format: hex
         type: string
       metadata:
-        example: deadbeef
-        format: hex
+        example: aGVsbG8gd29ybGQ=
+        format: base64
         type: string
       orgAdress:
         type: string
