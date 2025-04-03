@@ -65,7 +65,6 @@ func (a *Account) FundTransaction(tx *models.Tx, targetAddr common.Address) (*mo
 					SetAccount: txSetAccount,
 				},
 			}
-
 		}
 	case *models.Tx_NewProcess:
 		txNewProcess := tx.GetNewProcess()

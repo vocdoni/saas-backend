@@ -125,7 +125,6 @@ func (p *Subscriptions) HasTxPermission(
 		if !user.HasRoleFor(org.Address, db.AdminRole) {
 			return false, fmt.Errorf("user does not have admin role")
 		}
-
 	// check CREATE PROCESS
 	case models.TxType_NEW_PROCESS, models.TxType_SET_PROCESS_CENSUS:
 		// check if the user has the admin role for the organization

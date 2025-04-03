@@ -311,11 +311,12 @@ func CreatePortalSession(customerEmail string) (*stripeapi.BillingPortalSession,
 		Email: stripeapi.String(customerEmail),
 	}
 	var customerID string
-	if customers := stripeCustomer.List(customerParams); customers.Next() {
-		customerID = customers.Customer().ID
-	} else {
+
+	customers := stripeCustomer.List(customerParams)
+	if !customers.Next() {
 		return nil, fmt.Errorf("could not find customer with email %s", customerEmail)
 	}
+	customerID = customers.Customer().ID
 
 	params := &stripeapi.BillingPortalSessionParams{
 		Customer: &customerID,
