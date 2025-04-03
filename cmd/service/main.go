@@ -50,6 +50,7 @@ func main() {
 	flag.String("twilioFromNumber", "", "Twilio from number")
 	flag.String("stripeApiSecret", "", "Stripe API secret")
 	flag.String("stripeWebhookSecret", "", "Stripe Webhook secret")
+	flag.String("oauthServiceURL", "http://oauth.vocdoni.net", "OAuth service URL")
 	// parse flags
 	flag.Parse()
 	// initialize Viper
@@ -85,6 +86,8 @@ func main() {
 	// stripe vars
 	stripeAPISecret := viper.GetString("stripeApiSecret")
 	stripeWebhookSecret := viper.GetString("stripeWebhookSecret")
+	// oauth vars
+	oauthServiceURL := viper.GetString("oauthServiceURL")
 
 	log.Init("debug", "stdout", os.Stderr)
 	// init Stripe client
@@ -136,6 +139,7 @@ func main() {
 		WebAppURL:           webURL,
 		ServerURL:           server,
 		FullTransparentMode: fullTransparentMode,
+		OauthServiceURL:     oauthServiceURL,
 	}
 
 	cspConf := &csp.Config{

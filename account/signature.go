@@ -3,8 +3,10 @@ package account
 import (
 	"encoding/hex"
 	"fmt"
+	"strings"
 
 	"go.vocdoni.io/dvote/crypto/ethereum"
+	"go.vocdoni.io/dvote/util"
 	"go.vocdoni.io/proto/build/go/models"
 	"google.golang.org/protobuf/proto"
 )
@@ -53,4 +55,21 @@ func SignMessage(message []byte, signer *ethereum.SignKeys) ([]byte, error) {
 		return nil, fmt.Errorf("could not sign message: %w", err)
 	}
 	return signature, nil
+}
+
+func VerifySignature(message, signature, address string) error {
+	// calcAddress, err := ethereum.AddrFromSignature([]byte(message), []byte(signature))
+	messageBytes := []byte(message)
+	signatureBytes, err := hex.DecodeString(util.TrimHex(signature))
+	if err != nil {
+		return fmt.Errorf("could not decode signature: %w", err)
+	}
+	calcAddress, err := ethereum.AddrFromSignature(messageBytes, signatureBytes)
+	if err != nil {
+		return fmt.Errorf("could not calculate address from signature: %w", err)
+	}
+	if strings.EqualFold(calcAddress.String(), util.TrimHex(address)) {
+		return fmt.Errorf("signature verification failed")
+	}
+	return nil
 }

@@ -2,12 +2,15 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
+	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.vocdoni.io/dvote/log"
 )
 
 // refreshTokenHandler godoc
@@ -99,6 +102,9 @@ func (a *API) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		401	{object}	errors.Error
 //	@Failure		404	{object}	errors.Error	"No organizations found"
 //	@Router			/auth/addresses [get]
+//
+// writableOrganizationAddressesHandler returns the list of addresses of the
+// organizations where the user has write access.
 func (a *API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -125,4 +131,93 @@ func (a *API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *htt
 	}
 	// write the response back to the user
 	apicommon.HTTPWriteJSON(w, userAddresses)
+}
+
+// oauthLoginHandler godoc
+//
+//	@Summary		Login using OAuth service
+//	@Description	Register/Authenticate a user and get a JWT token
+//	@Tags			auth
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body		apicommon.UserInfo	true	"Login credentials"
+//	@Success		200		{object}	apicommon.LoginResponse
+//	@Failure		400		{object}	errors.Error
+//	@Failure		401		{object}	errors.Error
+//	@Router			/oauth/login [post]
+func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
+	// het the user info from the request body
+	loginInfo := &apicommon.OauthLoginRequest{}
+	if err := json.NewDecoder(r.Body).Decode(loginInfo); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	log.Debugf("%v", loginInfo)
+	// get the user information from the database by email
+	user, err := a.db.UserByEmail(loginInfo.Email)
+	if err != nil && err != db.ErrNotFound {
+		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
+	// if the user doesn't exist, do oauth verifictaion and on success create the new user
+	if err == db.ErrNotFound {
+		// Register the user
+		// extract from the external signature the user pubkey and verify matches the provided one
+		if err := account.VerifySignature(loginInfo.OauthSignature, loginInfo.UserOauthSignature, loginInfo.Address); err != nil {
+			errors.ErrUnauthorized.WithErr(err).Write(w)
+			return
+		}
+		// fetch oauth service pubkey or address and verify the internal signature
+		resp, err := http.Get(fmt.Sprintf("%s/api/info/getAddress", a.oauthServiceURL))
+		if err != nil {
+			// TODO create new error for connection with the external service
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				// handle the error, for example log it
+				fmt.Println("Error closing response body:", err)
+			}
+		}()
+		var result apicommon.OauthServiceAddressResponse
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			// TODO create new error for connection with the external service
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+
+		// verify the signature of the oauth service
+		if err := account.VerifySignature(loginInfo.Email, loginInfo.OauthSignature, result.Address); err != nil {
+			errors.ErrUnauthorized.WithErr(err).Write(w)
+			return
+		}
+
+		// genareate the new user and password and store it in the database
+		user = &db.User{
+			Email:     loginInfo.Email,
+			FirstName: loginInfo.FirstName,
+			LastName:  loginInfo.LastName,
+			Password:  internal.HexHashPassword(passwordSalt, loginInfo.UserOauthSignature),
+			Verified:  true,
+		}
+		if _, err := a.db.SetUser(user); err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		}
+	} else {
+		// Login
+		// check that the address generated password matches the one in the database
+		if pass := internal.HexHashPassword(passwordSalt, loginInfo.UserOauthSignature); pass != user.Password {
+			errors.ErrUnauthorized.Write(w)
+			return
+		}
+	}
+	// generate a new token with the user name as the subject
+	res, err := a.buildLoginResponse(loginInfo.Email)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	// send the token back to the user
+	apicommon.HTTPWriteJSON(w, res)
 }
