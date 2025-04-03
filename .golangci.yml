@@ -9,32 +9,29 @@ linters:
     lll:
       line-length: 130
     revive:
-      # enable-all-rules: true
+      enable-all-rules: true
       rules:
-      - name: blank-imports
-      - name: context-as-argument
-      - name: context-keys-type
-      - name: dot-imports
-      - name: error-return
-      - name: error-strings
-      - name: error-naming
-      # - name: exported # TODO: fix all issues and re-enable this rule
-      - name: if-return
-      - name: increment-decrement
-      - name: var-naming
-      - name: var-declaration
-      - name: package-comments
-      - name: range
-      - name: receiver-naming
-      - name: time-naming
-      - name: unexported-return
-      - name: indent-error-flow
-      - name: errorf
-      - name: empty-block
-      - name: superfluous-else
-      - name: unused-parameter
-      - name: unreachable-code
-      - name: redefines-builtin-id
+      - name: line-length-limit # lll is already run by golangci-lint
+        disabled: true
+      - name: function-length # test funcs are usually long and complex, and that's ok
+        exclude: ["**/*_test.go"]
+      - name: cognitive-complexity # test funcs are usually long and complex, and that's ok
+        exclude: ["**/*_test.go"]
+      - name: cyclomatic # test funcs are usually long and complex, and that's ok
+        exclude: ["**/*_test.go"]
+        # Disable some rules until fixing the issues in current codebase
+      - name: exported # TODO: fix all issues and re-enable this rule
+        disabled: true
+      - name: use-errors-new # TODO: fix all issues and re-enable this rule
+        disabled: true
+      - name: add-constant # TODO: fix all issues and re-enable this rule
+        disabled: true
+      - name: cyclomatic # TODO: fix all issues and re-enable this rule
+        disabled: true
+      - name: cognitive-complexity # TODO: fix all issues and re-enable this rule
+        disabled: true
+      - name: function-length # TODO: fix all issues and re-enable this rule
+        disabled: true
   exclusions:
     generated: lax
     paths:
