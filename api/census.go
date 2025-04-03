@@ -216,7 +216,7 @@ func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		400		{object}	errors.Error	"Invalid job ID"
 //	@Failure		404		{object}	errors.Error	"Job not found"
 //	@Router			/census/check/{jobid} [get]
-func (a *API) addParticipantsJobCheckHandler(w http.ResponseWriter, r *http.Request) {
+func (*API) addParticipantsJobCheckHandler(w http.ResponseWriter, r *http.Request) {
 	jobID := internal.HexBytes{}
 	if err := jobID.ParseString(chi.URLParam(r, "jobid")); err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid job ID").Write(w)

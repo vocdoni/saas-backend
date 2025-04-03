@@ -578,7 +578,7 @@ func (a *API) pendingOrganizationMembersHandler(w http.ResponseWriter, r *http.R
 //	@Produce		json
 //	@Success		200	{object}	apicommon.OrganizationRoleList
 //	@Router			/organizations/roles [get]
-func (a *API) organizationsMembersRolesHandler(w http.ResponseWriter, _ *http.Request) {
+func (*API) organizationsMembersRolesHandler(w http.ResponseWriter, _ *http.Request) {
 	availableRoles := []*apicommon.OrganizationRole{}
 	for role, name := range db.UserRolesNames {
 		availableRoles = append(availableRoles, &apicommon.OrganizationRole{
@@ -599,7 +599,7 @@ func (a *API) organizationsMembersRolesHandler(w http.ResponseWriter, _ *http.Re
 //	@Produce		json
 //	@Success		200	{object}	apicommon.OrganizationTypeList
 //	@Router			/organizations/types [get]
-func (a *API) organizationsTypesHandler(w http.ResponseWriter, _ *http.Request) {
+func (*API) organizationsTypesHandler(w http.ResponseWriter, _ *http.Request) {
 	organizationTypes := []*apicommon.OrganizationType{}
 	for orgType, name := range db.OrganizationTypesNames {
 		organizationTypes = append(organizationTypes, &apicommon.OrganizationType{

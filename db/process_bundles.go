@@ -267,6 +267,6 @@ func (ms *MongoStorage) AddProcessesToBundle(hbBundleID internal.HexBytes, proce
 
 // NewBundleID generates a new unique ObjectID for a process bundle.
 // This is used when creating a new bundle to ensure it has a unique identifier.
-func (ms *MongoStorage) NewBundleID() primitive.ObjectID {
+func (*MongoStorage) NewBundleID() primitive.ObjectID {
 	return primitive.NewObjectID()
 }
