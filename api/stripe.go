@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/stripe/stripe-go/v81"
+	stripeapi "github.com/stripe/stripe-go/v81"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
-	stripeService "github.com/vocdoni/saas-backend/stripe"
+	"github.com/vocdoni/saas-backend/stripe"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -45,7 +45,7 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	signatureHeader := r.Header.Get("Stripe-Signature")
-	event, err := a.stripe.DecodeEvent(payload, signatureHeader)
+	event, err := stripe.DecodeEvent(payload, signatureHeader)
 	if err != nil {
 		log.Errorf("stripe webhook: error decoding event: %s", err.Error())
 		w.WriteHeader(http.StatusBadRequest)
@@ -135,7 +135,7 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		log.Infof("stripe webhook: subscription %s for organization %s processed as %s successfully",
 			stripeSubscriptionInfo.ID, org.Address, stripeSubscriptionInfo.Status)
 	case "invoice.payment_succeeded":
-		paymentTime, orgAddress, err := a.stripe.GetInvoiceInfoFromEvent(*event)
+		paymentTime, orgAddress, err := stripe.GetInvoiceInfoFromEvent(*event)
 		if err != nil {
 			log.Errorf("could not update payment from event: %s \tEvent Type:%s \tError: %v", event.ID, event.Type, err)
 			w.WriteHeader(http.StatusBadRequest)
@@ -212,7 +212,7 @@ func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	session, err := a.stripe.CreateSubscriptionCheckoutSession(
+	session, err := stripe.CreateSubscriptionCheckoutSession(
 		plan.StripePriceID, checkout.ReturnURL, checkout.Address, org.Creator, checkout.Locale, checkout.Amount)
 	if err != nil {
 		errors.ErrStripeError.Withf("Cannot create session: %v", err).Write(w)
@@ -247,7 +247,7 @@ func (a *API) checkoutSessionHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrMalformedURLParam.Withf("sessionID is required").Write(w)
 		return
 	}
-	status, err := a.stripe.RetrieveCheckoutSession(sessionID)
+	status, err := stripe.RetrieveCheckoutSession(sessionID)
 	if err != nil {
 		errors.ErrStripeError.Withf("Cannot get session: %v", err).Write(w)
 		return
@@ -258,8 +258,8 @@ func (a *API) checkoutSessionHandler(w http.ResponseWriter, r *http.Request) {
 
 // getSubscriptionOrgInfo is a helper function that retrieves the subscription information from
 // the subscription event and the Organization information from the database.
-func (a *API) getSubscriptionOrgInfo(event *stripe.Event) (*stripeService.SubscriptionInfo, *db.Organization, error) {
-	stripeSubscriptionInfo, err := a.stripe.GetSubscriptionInfoFromEvent(*event)
+func (a *API) getSubscriptionOrgInfo(event *stripeapi.Event) (*stripe.SubscriptionInfo, *db.Organization, error) {
+	stripeSubscriptionInfo, err := stripe.GetSubscriptionInfoFromEvent(*event)
 	if err != nil {
 		return nil, nil, fmt.Errorf("could not decode event for subscription: %s", err.Error())
 	}
@@ -309,7 +309,7 @@ func (a *API) createSubscriptionPortalSessionHandler(w http.ResponseWriter, r *h
 		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
-	session, err := a.stripe.CreatePortalSession(org.Creator)
+	session, err := stripe.CreatePortalSession(org.Creator)
 	if err != nil {
 		errors.ErrStripeError.Withf("Cannot create customer portal session: %v", err).Write(w)
 		return

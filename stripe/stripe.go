@@ -7,14 +7,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/stripe/stripe-go/v81"
-	portalSession "github.com/stripe/stripe-go/v81/billingportal/session"
-	"github.com/stripe/stripe-go/v81/checkout/session"
-	"github.com/stripe/stripe-go/v81/customer"
-	"github.com/stripe/stripe-go/v81/price"
-	"github.com/stripe/stripe-go/v81/product"
-	"github.com/stripe/stripe-go/v81/webhook"
-	"github.com/vocdoni/saas-backend/db"
+	stripeapi "github.com/stripe/stripe-go/v81"
+	stripePortalSession "github.com/stripe/stripe-go/v81/billingportal/session"
+	stripeCheckoutSession "github.com/stripe/stripe-go/v81/checkout/session"
+	stripeCustomer "github.com/stripe/stripe-go/v81/customer"
+	stripePrice "github.com/stripe/stripe-go/v81/price"
+	stripeProduct "github.com/stripe/stripe-go/v81/product"
+	stripeWebhook "github.com/stripe/stripe-go/v81/webhook"
+	stripeDB "github.com/vocdoni/saas-backend/db"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -46,31 +46,33 @@ type SubscriptionInfo struct {
 	EndDate             time.Time
 }
 
-// Client is a client for interacting with the Stripe API.
-// It holds the necessary configuration such as the webhook secret.
-type Client struct {
-	webhookSecret string
-}
+// whSecret is the global webhook secret.
+var (
+	whSecret    string
+	initialized bool
+)
 
-// New creates a new instance of Client with the provided API secret and webhook secret.
-// It sets the Stripe API key to the provided apiSecret.
-func New(apiSecret, webhookSecret string) *Client {
-	stripe.Key = apiSecret
-	return &Client{
-		webhookSecret: webhookSecret,
+// Init initializes the global Stripe client configuration.
+// It must be called once during application startup.
+func Init(apiSecret, webhookSecret string) {
+	if initialized {
+		panic("stripe.Init called more than once")
 	}
+	stripeapi.Key = apiSecret
+	whSecret = webhookSecret
+	initialized = true
 }
 
 // DecodeEvent decodes a Stripe webhook event from the given payload and signature header.
 // It verifies the webhook signature and returns the decoded event or an error if validation fails.
-func (s *Client) DecodeEvent(payload []byte, signatureHeader string) (*stripe.Event, error) {
-	event := stripe.Event{}
+func DecodeEvent(payload []byte, signatureHeader string) (*stripeapi.Event, error) {
+	event := stripeapi.Event{}
 	if err := json.Unmarshal(payload, &event); err != nil {
 		log.Errorf("stripe webhook: error while parsing basic request. %s", err.Error())
 		return nil, err
 	}
 
-	event, err := webhook.ConstructEvent(payload, signatureHeader, s.webhookSecret)
+	event, err := stripeWebhook.ConstructEvent(payload, signatureHeader, whSecret)
 	if err != nil {
 		log.Errorf("stripe webhook: webhook signature verification failed. %s", err.Error())
 		return nil, err
@@ -78,8 +80,8 @@ func (s *Client) DecodeEvent(payload []byte, signatureHeader string) (*stripe.Ev
 	return &event, nil
 }
 
-func (s *Client) GetInvoiceInfoFromEvent(event stripe.Event) (time.Time, string, error) {
-	var invoice stripe.Invoice
+func GetInvoiceInfoFromEvent(event stripeapi.Event) (time.Time, string, error) {
+	var invoice stripeapi.Invoice
 	err := json.Unmarshal(event.Data.Raw, &invoice)
 	if err != nil {
 		return time.Time{}, "", fmt.Errorf("error parsing webhook JSON: %v", err)
@@ -95,15 +97,15 @@ func (s *Client) GetInvoiceInfoFromEvent(event stripe.Event) (time.Time, string,
 
 // GetSubscriptionInfoFromEvent processes a Stripe event to extract subscription information.
 // It unmarshals the event data and retrieves the associated customer and subscription details.
-func (s *Client) GetSubscriptionInfoFromEvent(event stripe.Event) (*SubscriptionInfo, error) {
-	var subscription stripe.Subscription
+func GetSubscriptionInfoFromEvent(event stripeapi.Event) (*SubscriptionInfo, error) {
+	var subscription stripeapi.Subscription
 	err := json.Unmarshal(event.Data.Raw, &subscription)
 	if err != nil {
 		return &SubscriptionInfo{}, fmt.Errorf("error parsing webhook JSON: %v", err)
 	}
 
-	params := &stripe.CustomerParams{}
-	customer, err := customer.Get(subscription.Customer.ID, params)
+	params := &stripeapi.CustomerParams{}
+	customer, err := stripeCustomer.Get(subscription.Customer.ID, params)
 	if err != nil || customer == nil {
 		return &SubscriptionInfo{}, fmt.Errorf(
 			"could not update subscription %s, stripe internal error getting customer",
@@ -134,14 +136,14 @@ func (s *Client) GetSubscriptionInfoFromEvent(event stripe.Event) (*Subscription
 // GetPriceByID retrieves a Stripe price object by its ID.
 // It searches for an active price with the given lookup key.
 // Returns nil if no matching price is found.
-func (s *Client) GetPriceByID(priceID string) *stripe.Price {
-	params := &stripe.PriceSearchParams{
-		SearchParams: stripe.SearchParams{
+func GetPriceByID(priceID string) *stripeapi.Price {
+	params := &stripeapi.PriceSearchParams{
+		SearchParams: stripeapi.SearchParams{
 			Query: fmt.Sprintf("active:'true' AND lookup_key:'%s'", priceID),
 		},
 	}
 	params.AddExpand("data.tiers")
-	if results := price.Search(params); results.Next() {
+	if results := stripePrice.Search(params); results.Next() {
 		return results.Price()
 	}
 	return nil
@@ -150,11 +152,11 @@ func (s *Client) GetPriceByID(priceID string) *stripe.Price {
 // GetProductByID retrieves a Stripe product by its ID.
 // It expands the default price and its tiers in the response.
 // Returns the product object and any error encountered.
-func (s *Client) GetProductByID(productID string) (*stripe.Product, error) {
-	params := &stripe.ProductParams{}
+func GetProductByID(productID string) (*stripeapi.Product, error) {
+	params := &stripeapi.ProductParams{}
 	params.AddExpand("default_price")
 	params.AddExpand("default_price.tiers")
-	product, err := product.Get(productID, params)
+	product, err := stripeProduct.Get(productID, params)
 	if err != nil {
 		return nil, err
 	}
@@ -164,10 +166,10 @@ func (s *Client) GetProductByID(productID string) (*stripe.Product, error) {
 // GetPrices retrieves multiple Stripe prices by their IDs.
 // It returns a slice of Price objects for all valid price IDs.
 // Invalid or non-existent price IDs are silently skipped.
-func (s *Client) GetPrices(priceIDs []string) []*stripe.Price {
-	var prices []*stripe.Price
+func GetPrices(priceIDs []string) []*stripeapi.Price {
+	var prices []*stripeapi.Price
 	for _, priceID := range priceIDs {
-		if price := s.GetPriceByID(priceID); price != nil {
+		if price := GetPriceByID(priceID); price != nil {
 			prices = append(prices, price)
 		}
 	}
@@ -177,19 +179,19 @@ func (s *Client) GetPrices(priceIDs []string) []*stripe.Price {
 // GetPlans retrieves and constructs a list of subscription plans from Stripe products.
 // It processes product metadata to extract organization limits, voting types, and features.
 // Returns a slice of Plan objects and any error encountered during processing.
-func (s *Client) GetPlans() ([]*db.Plan, error) {
-	var plans []*db.Plan
+func GetPlans() ([]*stripeDB.Plan, error) {
+	var plans []*stripeDB.Plan
 	for i, productID := range ProductsIDs {
-		if product, err := s.GetProductByID(productID); product != nil && err == nil {
-			var organizationData db.PlanLimits
+		if product, err := GetProductByID(productID); product != nil && err == nil {
+			var organizationData stripeDB.PlanLimits
 			if err := json.Unmarshal([]byte(product.Metadata["organization"]), &organizationData); err != nil {
 				return nil, fmt.Errorf("error parsing plan organization metadata JSON: %s", err.Error())
 			}
-			var votingTypesData db.VotingTypes
+			var votingTypesData stripeDB.VotingTypes
 			if err := json.Unmarshal([]byte(product.Metadata["votingTypes"]), &votingTypesData); err != nil {
 				return nil, fmt.Errorf("error parsing plan voting types metadata JSON: %s", err.Error())
 			}
-			var featuresData db.Features
+			var featuresData stripeDB.Features
 			if err := json.Unmarshal([]byte(product.Metadata["features"]), &featuresData); err != nil {
 				return nil, fmt.Errorf("error parsing plan features metadata JSON: %s", err.Error())
 			}
@@ -198,17 +200,17 @@ func (s *Client) GetPlans() ([]*db.Plan, error) {
 			if len(price.Tiers) > 0 {
 				startingPrice = price.Tiers[0].FlatAmount
 			}
-			var tiers []db.PlanTier
+			var tiers []stripeDB.PlanTier
 			for _, tier := range price.Tiers {
 				if tier.UpTo == 0 {
 					continue
 				}
-				tiers = append(tiers, db.PlanTier{
+				tiers = append(tiers, stripeDB.PlanTier{
 					Amount: tier.FlatAmount,
 					UpTo:   tier.UpTo,
 				})
 			}
-			plans = append(plans, &db.Plan{
+			plans = append(plans, &stripeDB.Plan{
 				ID:              uint64(i),
 				Name:            product.Name,
 				StartingPrice:   startingPrice,
@@ -234,48 +236,48 @@ func (s *Client) GetPlans() ([]*db.Plan, error) {
 // Returns the created checkout session and any error encountered.
 // Overview of stripe checkout mechanics: https://docs.stripe.com/checkout/custom/quickstart
 // API description https://docs.stripe.com/api/checkout/sessions
-func (s *Client) CreateSubscriptionCheckoutSession(
+func CreateSubscriptionCheckoutSession(
 	priceID, returnURL, address, email, locale string, amount int64,
-) (*stripe.CheckoutSession, error) {
+) (*stripeapi.CheckoutSession, error) {
 	if len(locale) == 0 {
 		locale = "auto"
 	}
 	if locale == "ca" {
 		locale = "es"
 	}
-	checkoutParams := &stripe.CheckoutSessionParams{
+	checkoutParams := &stripeapi.CheckoutSessionParams{
 		// Subscription mode
-		Mode:          stripe.String(string(stripe.CheckoutSessionModeSubscription)),
+		Mode:          stripeapi.String(string(stripeapi.CheckoutSessionModeSubscription)),
 		CustomerEmail: &email,
-		LineItems: []*stripe.CheckoutSessionLineItemParams{
+		LineItems: []*stripeapi.CheckoutSessionLineItemParams{
 			{
-				Price:    stripe.String(priceID),
-				Quantity: stripe.Int64(amount),
+				Price:    stripeapi.String(priceID),
+				Quantity: stripeapi.Int64(amount),
 			},
 		},
 		// UI mode is set to embedded, since the client is integrated in our UI
-		UIMode: stripe.String(string(stripe.CheckoutSessionUIModeEmbedded)),
+		UIMode: stripeapi.String(string(stripeapi.CheckoutSessionUIModeEmbedded)),
 		// Automatic tax calculation is enabled
-		AutomaticTax: &stripe.CheckoutSessionAutomaticTaxParams{
-			Enabled: stripe.Bool(true),
+		AutomaticTax: &stripeapi.CheckoutSessionAutomaticTaxParams{
+			Enabled: stripeapi.Bool(true),
 		},
 		// We store in the metadata the address of the organization
-		SubscriptionData: &stripe.CheckoutSessionSubscriptionDataParams{
+		SubscriptionData: &stripeapi.CheckoutSessionSubscriptionDataParams{
 			Metadata: map[string]string{
 				"address": address,
 			},
 		},
 		// The locale is being used to configure the language of the embedded client
-		Locale: stripe.String(locale),
+		Locale: stripeapi.String(locale),
 	}
 
 	// The returnURL is used to redirect the user after the payment is completed
 	if len(returnURL) > 0 {
-		checkoutParams.ReturnURL = stripe.String(returnURL + "/{CHECKOUT_SESSION_ID}")
+		checkoutParams.ReturnURL = stripeapi.String(returnURL + "/{CHECKOUT_SESSION_ID}")
 	} else {
-		checkoutParams.RedirectOnCompletion = stripe.String("never")
+		checkoutParams.RedirectOnCompletion = stripeapi.String("never")
 	}
-	session, err := session.New(checkoutParams)
+	session, err := stripeCheckoutSession.New(checkoutParams)
 	if err != nil {
 		return nil, err
 	}
@@ -287,10 +289,10 @@ func (s *Client) CreateSubscriptionCheckoutSession(
 // It returns a ReturnStatus object and an error if any.
 // The ReturnStatus object contains information about the session status,
 // customer email, and subscription status.
-func (s *Client) RetrieveCheckoutSession(sessionID string) (*ReturnStatus, error) {
-	params := &stripe.CheckoutSessionParams{}
+func RetrieveCheckoutSession(sessionID string) (*ReturnStatus, error) {
+	params := &stripeapi.CheckoutSessionParams{}
 	params.AddExpand("line_items")
-	sess, err := session.Get(sessionID, params)
+	sess, err := stripeCheckoutSession.Get(sessionID, params)
 	if err != nil {
 		return nil, err
 	}
@@ -303,20 +305,20 @@ func (s *Client) RetrieveCheckoutSession(sessionID string) (*ReturnStatus, error
 }
 
 // CreatePortalSession creates a new billing portal session for a customer based on an email address.
-func (s *Client) CreatePortalSession(customerEmail string) (*stripe.BillingPortalSession, error) {
+func CreatePortalSession(customerEmail string) (*stripeapi.BillingPortalSession, error) {
 	// get stripe customer based on provided email
-	customerParams := &stripe.CustomerListParams{
-		Email: stripe.String(customerEmail),
+	customerParams := &stripeapi.CustomerListParams{
+		Email: stripeapi.String(customerEmail),
 	}
 	var customerID string
-	if customers := customer.List(customerParams); customers.Next() {
+	if customers := stripeCustomer.List(customerParams); customers.Next() {
 		customerID = customers.Customer().ID
 	} else {
 		return nil, fmt.Errorf("could not find customer with email %s", customerEmail)
 	}
 
-	params := &stripe.BillingPortalSessionParams{
+	params := &stripeapi.BillingPortalSessionParams{
 		Customer: &customerID,
 	}
-	return portalSession.New(params)
+	return stripePortalSession.New(params)
 }

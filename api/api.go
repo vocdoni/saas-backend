@@ -61,7 +61,6 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/vocdoni/saas-backend/objectstorage"
-	"github.com/vocdoni/saas-backend/stripe"
 	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
@@ -87,8 +86,6 @@ type Config struct {
 	// FullTransparentMode if true allows signing all transactions and does not
 	// modify any of them.
 	FullTransparentMode bool
-	// Stripe secrets
-	StripeClient *stripe.Client
 	// Subscriptions permissions manager
 	Subscriptions *subscriptions.Subscriptions
 	// Object storage
@@ -111,7 +108,6 @@ type API struct {
 	webAppURL       string
 	serverURL       string
 	transparentMode bool
-	stripe          *stripe.Client
 	subscriptions   *subscriptions.Subscriptions
 	objectStorage   *objectstorage.Client
 	csp             *csp.CSP
@@ -140,7 +136,6 @@ func New(conf *Config) *API {
 		webAppURL:       conf.WebAppURL,
 		serverURL:       conf.ServerURL,
 		transparentMode: conf.FullTransparentMode,
-		stripe:          conf.StripeClient,
 		subscriptions:   conf.Subscriptions,
 		objectStorage:   conf.ObjectStorage,
 		csp:             conf.CSP,
