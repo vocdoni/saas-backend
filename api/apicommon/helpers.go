@@ -20,7 +20,7 @@ func UserFromContext(ctx context.Context) (*db.User, bool) {
 }
 
 // HTTPWriteJSON helper function allows to write a JSON response.
-func HTTPWriteJSON(w http.ResponseWriter, data interface{}) {
+func HTTPWriteJSON(w http.ResponseWriter, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(data); err != nil {
