@@ -46,7 +46,7 @@ func newClient(baseURL string) *Client {
 	}
 }
 
-func (c *Client) makeRequest(method, path string, body interface{}, target interface{}) error {
+func (c *Client) makeRequest(method, path string, body any, target any) error {
 	var bodyReader io.Reader
 	if body != nil {
 		bodyBytes, err := json.Marshal(body)
@@ -104,13 +104,13 @@ func generateParticipants(n int) []apicommon.OrgParticipant {
 }
 
 func generateMetadata() []byte {
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		"title":       "Test Voting Process",
 		"description": "This is a test voting process created by the workflow script",
 		"startDate":   time.Now().Add(24 * time.Hour).Format(time.RFC3339),
 		"endDate":     time.Now().Add(72 * time.Hour).Format(time.RFC3339),
 		"votingType":  "single-choice",
-		"questions": []map[string]interface{}{
+		"questions": []map[string]any{
 			{
 				"title":   "Test Question",
 				"choices": []string{"Option A", "Option B", "Option C"},

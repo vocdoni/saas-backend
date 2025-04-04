@@ -58,7 +58,7 @@ func (ms *MongoStorage) addOrganizationToUser(ctx context.Context, userEmail, ad
 	return nil
 }
 
-func (ms *MongoStorage) user(ctx context.Context, id uint64) (*User, error) {
+func (ms *MongoStorage) fetchUserFromDB(ctx context.Context, id uint64) (*User, error) {
 	// find the user in the database
 	result := ms.users.FindOne(ctx, bson.M{"_id": id})
 	user := &User{}
@@ -79,7 +79,7 @@ func (ms *MongoStorage) User(id uint64) (*User, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	return ms.user(ctx, id)
+	return ms.fetchUserFromDB(ctx, id)
 }
 
 // UserByEmail method returns the user with the given email. If the user doesn't
@@ -178,7 +178,7 @@ func (ms *MongoStorage) VerifyUserAccount(user *User) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	// try to get the user to ensure it exists
-	if _, err := ms.user(ctx, user.ID); err != nil {
+	if _, err := ms.fetchUserFromDB(ctx, user.ID); err != nil {
 		return err
 	}
 	// update the user to mark as verified

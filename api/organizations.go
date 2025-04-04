@@ -66,7 +66,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
-		dbParentOrg, _, err = a.db.Organization(orgInfo.Parent.Address, false)
+		dbParentOrg, err = a.db.Organization(orgInfo.Parent.Address)
 		if err != nil {
 			if err == db.ErrNotFound {
 				errors.ErrOrganizationNotFound.Withf("parent organization not found").Write(w)
@@ -578,7 +578,7 @@ func (a *API) pendingOrganizationMembersHandler(w http.ResponseWriter, r *http.R
 //	@Produce		json
 //	@Success		200	{object}	apicommon.OrganizationRoleList
 //	@Router			/organizations/roles [get]
-func (a *API) organizationsMembersRolesHandler(w http.ResponseWriter, _ *http.Request) {
+func (*API) organizationsMembersRolesHandler(w http.ResponseWriter, _ *http.Request) {
 	availableRoles := []*apicommon.OrganizationRole{}
 	for role, name := range db.UserRolesNames {
 		availableRoles = append(availableRoles, &apicommon.OrganizationRole{
@@ -599,7 +599,7 @@ func (a *API) organizationsMembersRolesHandler(w http.ResponseWriter, _ *http.Re
 //	@Produce		json
 //	@Success		200	{object}	apicommon.OrganizationTypeList
 //	@Router			/organizations/types [get]
-func (a *API) organizationsTypesHandler(w http.ResponseWriter, _ *http.Request) {
+func (*API) organizationsTypesHandler(w http.ResponseWriter, _ *http.Request) {
 	organizationTypes := []*apicommon.OrganizationType{}
 	for orgType, name := range db.OrganizationTypesNames {
 		organizationTypes = append(organizationTypes, &apicommon.OrganizationType{
@@ -610,7 +610,7 @@ func (a *API) organizationsTypesHandler(w http.ResponseWriter, _ *http.Request) 
 	apicommon.HTTPWriteJSON(w, &apicommon.OrganizationTypeList{Types: organizationTypes})
 }
 
-// getOrganizationSubscriptionHandler godoc
+// organizationSubscriptionHandler godoc
 //
 //	@Summary		Get organization subscription
 //	@Description	Get the subscription information for an organization
@@ -625,7 +625,7 @@ func (a *API) organizationsTypesHandler(w http.ResponseWriter, _ *http.Request) 
 //	@Failure		404		{object}	errors.Error	"Organization not found or no subscription"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/organizations/{address}/subscription [get]
-func (a *API) getOrganizationSubscriptionHandler(w http.ResponseWriter, r *http.Request) {
+func (a *API) organizationSubscriptionHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {

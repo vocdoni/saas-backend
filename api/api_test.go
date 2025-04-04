@@ -73,6 +73,8 @@ func init() {
 
 // testURL helper function returns the full URL for the given path using the
 // test host and port.
+//
+//revive:disable:import-shadowing
 func testURL(path string) string {
 	return fmt.Sprintf("http://%s:%d%s", testHost, testPort, path)
 }
@@ -353,7 +355,7 @@ func testNewVocdoniClient(t *testing.T) *apiclient.HTTPclient {
 // Returns the response data if any.
 func signRemoteSignerAndSendVocdoniTx(t *testing.T, tx *models.Tx, token string, vocdoniClient *apiclient.HTTPclient,
 	orgAddress internal.HexBytes,
-) []byte {
+) (responseData []byte) {
 	c := qt.New(t)
 	txBytes, err := proto.Marshal(tx)
 	c.Assert(err, qt.IsNil)
@@ -427,9 +429,9 @@ func waitUntilTxIsMined(ctx context.Context, txHash []byte, c *apiclient.HTTPcli
 }
 
 func fetchVocdoniAccountNonce(t *testing.T, client *apiclient.HTTPclient, address internal.HexBytes) uint32 {
-	account, err := client.Account(address.String())
+	acc, err := client.Account(address.String())
 	qt.Assert(t, err, qt.IsNil)
-	return account.Nonce
+	return acc.Nonce
 }
 
 func fetchVocdoniChainID(t *testing.T, client *apiclient.HTTPclient) string {
@@ -485,7 +487,7 @@ func testAddParticipantsToCensus(t *testing.T, token, censusID string, participa
 
 // testPublishCensus publishes the given census.
 // It returns the published census URI and root.
-func testPublishCensus(t *testing.T, token, censusID string) (string, string) {
+func testPublishCensus(t *testing.T, token, censusID string) (uri string, root string) {
 	c := qt.New(t)
 
 	// Publish the census
@@ -504,7 +506,7 @@ func testPublishCensus(t *testing.T, token, censusID string) (string, string) {
 
 // testCreateBundle creates a new process bundle with the given census ID and process IDs.
 // It returns the bundle ID and root.
-func testCreateBundle(t *testing.T, token, censusID string, processIDs [][]byte) (string, string) {
+func testCreateBundle(t *testing.T, token, censusID string, processIDs [][]byte) (bundleID string, root string) {
 	c := qt.New(t)
 
 	// Convert process IDs to hex strings

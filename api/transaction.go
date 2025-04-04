@@ -49,7 +49,7 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 
 	// get the organization info from the database with the address provided in
 	// the request
-	org, _, err := a.db.Organization(signReq.Address.String(), false)
+	org, err := a.db.Organization(signReq.Address.String())
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrOrganizationNotFound.Withf("organization not found").Write(w)
@@ -159,7 +159,7 @@ func (a *API) signMessageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// get the organization info from the database with the address provided in
 	// the request
-	org, _, err := a.db.Organization(signReq.Address, false)
+	org, err := a.db.Organization(signReq.Address)
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrOrganizationNotFound.Withf("organization not found").Write(w)

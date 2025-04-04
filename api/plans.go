@@ -9,7 +9,7 @@ import (
 	"github.com/vocdoni/saas-backend/errors"
 )
 
-// getPlansHandler godoc
+// plansHandler godoc
 //
 //	@Summary		Get all subscription plans
 //	@Description	Get the list of available subscription plans
@@ -19,7 +19,7 @@ import (
 //	@Success		200	{array}		db.Plan
 //	@Failure		500	{object}	errors.Error	"Internal server error"
 //	@Router			/plans [get]
-func (a *API) getPlansHandler(w http.ResponseWriter, _ *http.Request) {
+func (a *API) plansHandler(w http.ResponseWriter, _ *http.Request) {
 	// get the subscritions from the database
 	plans, err := a.db.Plans()
 	if err != nil {

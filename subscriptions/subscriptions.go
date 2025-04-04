@@ -49,7 +49,8 @@ func (p DBPermission) String() string {
 type DBInterface interface {
 	Plan(id uint64) (*db.Plan, error)
 	UserByEmail(email string) (*db.User, error)
-	Organization(address string, parent bool) (*db.Organization, *db.Organization, error)
+	Organization(address string) (*db.Organization, error)
+	OrganizationWithParent(address string) (*db.Organization, *db.Organization, error)
 }
 
 // Subscriptions is the service that manages the organization permissions based on
@@ -69,7 +70,7 @@ func New(conf *Config) *Subscriptions {
 }
 
 // hasElectionMetadataPermissions checks if the organization has permission to create an election with the given metadata.
-func (p *Subscriptions) hasElectionMetadataPermissions(process *models.NewProcessTx, plan *db.Plan) (bool, error) {
+func hasElectionMetadataPermissions(process *models.NewProcessTx, plan *db.Plan) (bool, error) {
 	// check ANONYMOUS
 	if process.Process.EnvelopeType.Anonymous && !plan.Features.Anonymous {
 		return false, fmt.Errorf("anonymous elections are not allowed")
@@ -125,7 +126,6 @@ func (p *Subscriptions) HasTxPermission(
 		if !user.HasRoleFor(org.Address, db.AdminRole) {
 			return false, fmt.Errorf("user does not have admin role")
 		}
-
 	// check CREATE PROCESS
 	case models.TxType_NEW_PROCESS, models.TxType_SET_PROCESS_CENSUS:
 		// check if the user has the admin role for the organization
@@ -139,7 +139,7 @@ func (p *Subscriptions) HasTxPermission(
 		if org.Counters.Processes >= plan.Organization.MaxProcesses {
 			return false, fmt.Errorf("max processes reached")
 		}
-		return p.hasElectionMetadataPermissions(newProcess, plan)
+		return hasElectionMetadataPermissions(newProcess, plan)
 
 	// check SET_PROCESS
 	case models.TxType_SET_PROCESS_STATUS:
@@ -147,9 +147,7 @@ func (p *Subscriptions) HasTxPermission(
 		if !user.HasRoleFor(org.Address, db.AdminRole) && !user.HasRoleFor(org.Address, db.ManagerRole) {
 			return false, fmt.Errorf("user does not have admin role")
 		}
-
 	}
-
 	return true, nil
 }
 
@@ -159,7 +157,7 @@ func (p *Subscriptions) HasDBPersmission(userEmail, orgAddress string, permissio
 	if err != nil {
 		return false, fmt.Errorf("could not get user: %v", err)
 	}
-	org, _, err := p.db.Organization(orgAddress, false)
+	org, err := p.db.Organization(orgAddress)
 	if err != nil {
 		return false, fmt.Errorf("could not get organization: %v", err)
 	}

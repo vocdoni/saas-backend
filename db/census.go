@@ -25,7 +25,7 @@ func (ms *MongoStorage) SetCensus(census *Census) (string, error) {
 		return "", ErrInvalidData
 	}
 	// check that the org exists
-	_, _, err := ms.Organization(census.OrgAddress, false)
+	_, err := ms.Organization(census.OrgAddress)
 	if err != nil {
 		if err == ErrNotFound {
 			return "", ErrInvalidData
@@ -109,7 +109,7 @@ func (ms *MongoStorage) CensusesByOrg(orgAddress string) ([]*Census, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if _, err := ms.organization(ctx, orgAddress); err != nil {
+	if _, err := ms.fetchOrganizationFromDB(ctx, orgAddress); err != nil {
 		if err == ErrNotFound {
 			return nil, ErrInvalidData
 		}

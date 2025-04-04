@@ -21,7 +21,7 @@ func (ms *MongoStorage) SetProcessBundle(bundle *ProcessesBundle) (internal.HexB
 	}
 
 	// Check that the org exists
-	if _, _, err := ms.Organization(bundle.OrgAddress, false); err != nil {
+	if _, err := ms.Organization(bundle.OrgAddress); err != nil {
 		return nil, fmt.Errorf("failed to get organization: %w", err)
 	}
 
@@ -45,10 +45,10 @@ func (ms *MongoStorage) SetProcessBundle(bundle *ProcessesBundle) (internal.HexB
 	} else {
 		filter := bson.M{"_id": bundle.ID}
 		update := bson.M{"$set": bundle}
-		options := &options.UpdateOptions{}
-		options.SetUpsert(true)
+		opts := &options.UpdateOptions{}
+		opts.SetUpsert(true)
 
-		if _, err := ms.processBundles.UpdateOne(ctx, filter, update, options); err != nil {
+		if _, err := ms.processBundles.UpdateOne(ctx, filter, update, opts); err != nil {
 			return nil, fmt.Errorf("failed to update process bundle: %w", err)
 		}
 	}
@@ -267,6 +267,6 @@ func (ms *MongoStorage) AddProcessesToBundle(hbBundleID internal.HexBytes, proce
 
 // NewBundleID generates a new unique ObjectID for a process bundle.
 // This is used when creating a new bundle to ensure it has a unique identifier.
-func (ms *MongoStorage) NewBundleID() primitive.ObjectID {
+func (*MongoStorage) NewBundleID() primitive.ObjectID {
 	return primitive.NewObjectID()
 }

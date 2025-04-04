@@ -46,6 +46,8 @@ func (c *CSP) Sign(token, address, processID internal.HexBytes, signType signers
 // - The process has not been consumed yet.
 // Then generates a bundle CA and encodes it to be signed. It returns userID,
 // the salt as nil and the encoded CA as a message to sign.
+//
+//revive:disable:function-result-limit
 func (c *CSP) prepareSaltedKeySigner(token, address, processID internal.HexBytes) (
 	internal.HexBytes, *[saltedkey.SaltSize]byte, internal.HexBytes, error,
 ) {

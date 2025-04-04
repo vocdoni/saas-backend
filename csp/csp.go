@@ -10,7 +10,7 @@ import (
 	"github.com/vocdoni/saas-backend/csp/signers/saltedkey"
 	"github.com/vocdoni/saas-backend/csp/storage"
 	"github.com/vocdoni/saas-backend/internal"
-	saasNotifications "github.com/vocdoni/saas-backend/notifications"
+	saasNotifications "github.com/vocdoni/saas-backend/notifications" //revive:disable:import-alias-naming
 
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.vocdoni.io/dvote/log"

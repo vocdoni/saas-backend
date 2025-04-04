@@ -99,7 +99,7 @@ func (a *API) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		401	{object}	errors.Error
 //	@Failure		404	{object}	errors.Error	"No organizations found"
 //	@Router			/auth/addresses [get]
-func (a *API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *http.Request) {
+func (*API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {

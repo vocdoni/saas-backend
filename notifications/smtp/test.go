@@ -36,6 +36,7 @@ func (sm *Email) FindEmail(ctx context.Context, to string) (string, error) {
 		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
+	//revive:disable:nested-structs
 	type mailResponse struct {
 		Items []struct {
 			Content struct {

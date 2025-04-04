@@ -53,7 +53,9 @@ func InitElectionPriceCalculator(vochainURI string) (*electionprice.Calculator, 
 // ElectionPriceFactors returns the election price factors from the Vochain. It
 // returns the base price, capacity, and factors. If there is an error, it
 // returns the error.
-func electionPriceFactors(vochainURI string) (uint64, uint64, electionprice.Factors, error) {
+//
+//revive:disable:function-result-limit
+func electionPriceFactors(vochainURI string) (basePrice uint64, capacity uint64, factors electionprice.Factors, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
 	// create the request to get the election price factors
