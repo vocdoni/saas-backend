@@ -177,7 +177,15 @@ func (m *mockMongoStorage) UserByEmail(email string) (*db.User, error) {
 	return user, nil
 }
 
-func (m *mockMongoStorage) Organization(address string, _ bool) (org *db.Organization, parent *db.Organization, err error) {
+func (m *mockMongoStorage) Organization(address string) (org *db.Organization, err error) {
+	org, ok := m.orgs[address]
+	if !ok {
+		return nil, db.ErrNotFound
+	}
+	return org, nil
+}
+
+func (m *mockMongoStorage) OrganizationWithParent(address string) (org *db.Organization, parent *db.Organization, err error) {
 	org, ok := m.orgs[address]
 	if !ok {
 		return nil, nil, db.ErrNotFound

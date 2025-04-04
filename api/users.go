@@ -339,7 +339,7 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user organizations information from the database if any
 	userOrgs := make([]*apicommon.UserOrganization, 0)
 	for _, orgInfo := range user.Organizations {
-		org, parent, err := a.db.Organization(orgInfo.Address, true)
+		org, parent, err := a.db.OrganizationWithParent(orgInfo.Address)
 		if err != nil {
 			if err == db.ErrNotFound {
 				continue

@@ -49,7 +49,8 @@ func (p DBPermission) String() string {
 type DBInterface interface {
 	Plan(id uint64) (*db.Plan, error)
 	UserByEmail(email string) (*db.User, error)
-	Organization(address string, parent bool) (*db.Organization, *db.Organization, error)
+	Organization(address string) (*db.Organization, error)
+	OrganizationWithParent(address string) (*db.Organization, *db.Organization, error)
 }
 
 // Subscriptions is the service that manages the organization permissions based on
@@ -158,7 +159,7 @@ func (p *Subscriptions) HasDBPersmission(userEmail, orgAddress string, permissio
 	if err != nil {
 		return false, fmt.Errorf("could not get user: %v", err)
 	}
-	org, _, err := p.db.Organization(orgAddress, false)
+	org, err := p.db.Organization(orgAddress)
 	if err != nil {
 		return false, fmt.Errorf("could not get organization: %v", err)
 	}

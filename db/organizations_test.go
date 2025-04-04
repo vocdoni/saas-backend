@@ -15,7 +15,7 @@ func TestOrganizations(t *testing.T) {
 
 		// test not found organization
 		address := "childOrgToGet"
-		org, _, err := testDB.Organization(address, false)
+		org, err := testDB.Organization(address)
 		c.Assert(org, qt.IsNil)
 		c.Assert(err, qt.Equals, ErrNotFound)
 		// create a new organization with the address and a not found parent
@@ -26,7 +26,7 @@ func TestOrganizations(t *testing.T) {
 			Subscription: OrganizationSubscription{},
 		}), qt.IsNil)
 		// test not found parent organization
-		_, parentOrg, err := testDB.Organization(address, true)
+		_, parentOrg, err := testDB.OrganizationWithParent(address)
 		c.Assert(parentOrg, qt.IsNil)
 		c.Assert(err, qt.Equals, ErrNotFound)
 		// create a new parent organization
@@ -34,7 +34,7 @@ func TestOrganizations(t *testing.T) {
 			Address: parentAddress,
 		}), qt.IsNil)
 		// test found organization and parent organization
-		org, parentOrg, err = testDB.Organization(address, true)
+		org, parentOrg, err = testDB.OrganizationWithParent(address)
 		c.Assert(err, qt.IsNil)
 		c.Assert(org, qt.Not(qt.IsNil))
 		c.Assert(org.Address, qt.Equals, address)
@@ -50,7 +50,7 @@ func TestOrganizations(t *testing.T) {
 		c.Assert(testDB.SetOrganization(&Organization{
 			Address: address,
 		}), qt.IsNil)
-		org, _, err := testDB.Organization(address, false)
+		org, err := testDB.Organization(address)
 		c.Assert(err, qt.IsNil)
 		c.Assert(org, qt.Not(qt.IsNil))
 		c.Assert(org.Address, qt.Equals, address)
@@ -58,7 +58,7 @@ func TestOrganizations(t *testing.T) {
 		c.Assert(testDB.SetOrganization(&Organization{
 			Address: address,
 		}), qt.IsNil)
-		org, _, err = testDB.Organization(address, false)
+		org, err = testDB.Organization(address)
 		c.Assert(err, qt.IsNil)
 		c.Assert(org, qt.Not(qt.IsNil))
 		c.Assert(org.Address, qt.Equals, address)
@@ -90,14 +90,14 @@ func TestOrganizations(t *testing.T) {
 		c.Assert(testDB.SetOrganization(&Organization{
 			Address: address,
 		}), qt.IsNil)
-		org, _, err := testDB.Organization(address, false)
+		org, err := testDB.Organization(address)
 		c.Assert(err, qt.IsNil)
 		c.Assert(org, qt.Not(qt.IsNil))
 		c.Assert(org.Address, qt.Equals, address)
 		// delete the organization
 		c.Assert(testDB.DelOrganization(org), qt.IsNil)
 		// check the organization doesn't exist
-		org, _, err = testDB.Organization(address, false)
+		org, err = testDB.Organization(address)
 		c.Assert(err, qt.Equals, ErrNotFound)
 		c.Assert(org, qt.IsNil)
 	})
@@ -118,7 +118,7 @@ func TestOrganizations(t *testing.T) {
 			Address: address,
 			Creator: testUserEmail,
 		}), qt.IsNil)
-		org, _, err := testDB.Organization(address, false)
+		org, err := testDB.Organization(address)
 		c.Assert(err, qt.IsNil)
 		c.Assert(org, qt.Not(qt.IsNil))
 		c.Assert(org.Address, qt.Equals, address)
@@ -126,7 +126,7 @@ func TestOrganizations(t *testing.T) {
 		// replace the creator email
 		newCreator := "mySecond@email.test"
 		c.Assert(testDB.ReplaceCreatorEmail(testUserEmail, newCreator), qt.IsNil)
-		org, _, err = testDB.Organization(address, false)
+		org, err = testDB.Organization(address)
 		c.Assert(err, qt.IsNil)
 		c.Assert(org, qt.Not(qt.IsNil))
 		c.Assert(org.Address, qt.Equals, address)
@@ -149,7 +149,7 @@ func TestOrganizations(t *testing.T) {
 			Address: address,
 			Creator: testUserEmail,
 		}), qt.IsNil)
-		_, _, err = testDB.Organization(address, false)
+		_, err = testDB.Organization(address)
 		c.Assert(err, qt.IsNil)
 		// get the organization members
 		members, err := testDB.OrganizationsMembers(address)
@@ -189,7 +189,7 @@ func TestOrganizations(t *testing.T) {
 		orgSubscription.PlanID = subscriptionID
 		c.Assert(testDB.SetOrganizationSubscription(address, orgSubscription), qt.IsNil)
 		// retrieve the organization and check the subscription details
-		org, _, err := testDB.Organization(address, false)
+		org, err := testDB.Organization(address)
 		c.Assert(err, qt.IsNil)
 		c.Assert(org, qt.Not(qt.IsNil))
 		c.Assert(org.Address, qt.Equals, address)

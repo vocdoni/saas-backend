@@ -15,7 +15,7 @@ func (ms *MongoStorage) SetProcess(process *Process) error {
 	}
 
 	// check that the org exists
-	if _, _, err := ms.Organization(process.OrgAddress, false); err != nil {
+	if _, err := ms.Organization(process.OrgAddress); err != nil {
 		return fmt.Errorf("failed to get organization: %w", err)
 	}
 	// check that the publishedCensus and if not create it

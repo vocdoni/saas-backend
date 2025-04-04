@@ -66,7 +66,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
-		dbParentOrg, _, err = a.db.Organization(orgInfo.Parent.Address, false)
+		dbParentOrg, err = a.db.Organization(orgInfo.Parent.Address)
 		if err != nil {
 			if err == db.ErrNotFound {
 				errors.ErrOrganizationNotFound.Withf("parent organization not found").Write(w)
