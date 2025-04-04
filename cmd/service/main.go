@@ -88,11 +88,10 @@ func main() {
 
 	log.Init("debug", "stdout", os.Stderr)
 	// init Stripe client
-	if stripeAPISecret != "" || stripeWebhookSecret != "" {
-		stripe.Init(stripeAPISecret, stripeWebhookSecret)
-	} else {
+	if stripeAPISecret == "" && stripeWebhookSecret == "" {
 		log.Fatalf("stripeApiSecret and stripeWebhookSecret are required")
 	}
+	stripe.Init(stripeAPISecret, stripeWebhookSecret)
 	availablePlans, err := stripe.GetPlans()
 	if err != nil || len(availablePlans) == 0 {
 		log.Fatalf("could not get the available plans: %v", err)
