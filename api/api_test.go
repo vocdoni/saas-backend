@@ -73,6 +73,8 @@ func init() {
 
 // testURL helper function returns the full URL for the given path using the
 // test host and port.
+//
+//revive:disable:import-shadowing
 func testURL(path string) string {
 	return fmt.Sprintf("http://%s:%d%s", testHost, testPort, path)
 }
@@ -427,9 +429,9 @@ func waitUntilTxIsMined(ctx context.Context, txHash []byte, c *apiclient.HTTPcli
 }
 
 func fetchVocdoniAccountNonce(t *testing.T, client *apiclient.HTTPclient, address internal.HexBytes) uint32 {
-	account, err := client.Account(address.String())
+	acc, err := client.Account(address.String())
 	qt.Assert(t, err, qt.IsNil)
-	return account.Nonce
+	return acc.Nonce
 }
 
 func fetchVocdoniChainID(t *testing.T, client *apiclient.HTTPclient) string {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	//revive:disable:import-alias-naming
 	stripeapi "github.com/stripe/stripe-go/v81"
 	stripePortalSession "github.com/stripe/stripe-go/v81/billingportal/session"
 	stripeCheckoutSession "github.com/stripe/stripe-go/v81/checkout/session"

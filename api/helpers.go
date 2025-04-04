@@ -59,6 +59,8 @@ func (a *API) buildLoginResponse(id string) (*apicommon.LoginResponse, error) {
 // error if the URL could not be built. It encodes the parameters in the query
 // string of the URL to prevent any issues with special characters. It returns
 // the URL as a string and an error if the URL could not be built.
+//
+//revive:disable:import-shadowing
 func (a *API) buildWebAppURL(path string, params map[string]any) (string, error) {
 	// parse the web app URL with the path provided
 	url, err := url.Parse(a.webAppURL + path)

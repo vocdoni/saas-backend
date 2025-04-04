@@ -11,13 +11,13 @@ func TestBytesSetBytes(t *testing.T) {
 	b := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0xff}
 
 	hb := new(HexBytes).SetBytes(b)
-	if bytes.Equal(hb.Bytes(), b) == false {
+	if !bytes.Equal(hb.Bytes(), b) {
 		t.Error("SetBytes failed")
 	}
 
 	newB := []byte{0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b}
 	hb.SetBytes(newB)
-	if bytes.Equal(hb.Bytes(), newB) == false {
+	if !bytes.Equal(hb.Bytes(), newB) {
 		t.Error("SetBytes failed")
 	}
 }
@@ -26,7 +26,7 @@ func TestStringSetString(t *testing.T) {
 	hexString := "0x0102030405ff"
 
 	hb := new(HexBytes).SetString(hexString)
-	if bytes.Equal(hb.Bytes(), []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0xff}) == false {
+	if !bytes.Equal(hb.Bytes(), []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0xff}) {
 		t.Error("SetString failed")
 	}
 	if hb.String() != hexString[2:] {
@@ -35,7 +35,7 @@ func TestStringSetString(t *testing.T) {
 
 	hexStringWithoutOx := "060708090a0b"
 	hb.SetString(hexStringWithoutOx)
-	if bytes.Equal(hb.Bytes(), []byte{0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b}) == false {
+	if !bytes.Equal(hb.Bytes(), []byte{0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b}) {
 		t.Error("SetString failed")
 	}
 	if hb.String() != hexStringWithoutOx {
@@ -66,7 +66,7 @@ func TestJSONMarshalUnmarshal(t *testing.T) {
 	if err = json.Unmarshal(jsonData, &decodeHB); err != nil {
 		t.Error(err)
 	}
-	if bytes.Equal(expectedHB.HB.Bytes(), decodeHB.HB.Bytes()) == false {
+	if !bytes.Equal(expectedHB.HB.Bytes(), decodeHB.HB.Bytes()) {
 		t.Error("JSON marshal/unmarshal failed")
 	}
 }
@@ -88,7 +88,7 @@ func TestBigIntSetBigInt(t *testing.T) {
 	hexHb := new(HexBytes).SetString("0x0102030405ff")
 	bigHb := hexHb.BigInt()
 	newHexHb := new(HexBytes).SetBigInt(bigHb)
-	if bytes.Equal(hexHb.Bytes(), newHexHb.Bytes()) == false {
+	if !bytes.Equal(hexHb.Bytes(), newHexHb.Bytes()) {
 		t.Error("SetBigInt failed")
 	}
 }
