@@ -19,6 +19,171 @@ import (
 
 var mu sync.Mutex
 
+// Constants for webhook handling
+const (
+	MaxBodyBytes = int64(65536)
+)
+
+// handleSubscriptionCreated processes a subscription creation event
+func (a *API) handleSubscriptionCreated(event *stripeapi.Event, w http.ResponseWriter) bool {
+	log.Infof("received stripe event Type: %s", event.Type)
+
+	stripeSubscriptionInfo, org, err := a.getSubscriptionOrgInfo(event)
+	if err != nil {
+		log.Errorf("could not update subscription %s, a corresponding organization with address %s was not found.",
+			stripeSubscriptionInfo.ID, stripeSubscriptionInfo.OrganizationAddress)
+		log.Errorf("please do manually for creator %s \n  Error:  %s", stripeSubscriptionInfo.CustomerEmail, err.Error())
+		w.WriteHeader(http.StatusBadRequest)
+		return false
+	}
+
+	dbSubscription, err := a.db.PlanByStripeID(stripeSubscriptionInfo.ProductID)
+	if err != nil || dbSubscription == nil {
+		log.Errorf("could not update subscription %s, a corresponding subscription was not found.",
+			stripeSubscriptionInfo.ID)
+		log.Errorf("please do manually: %s", err.Error())
+		w.WriteHeader(http.StatusBadRequest)
+		return false
+	}
+
+	organizationSubscription := &db.OrganizationSubscription{
+		PlanID:        dbSubscription.ID,
+		StartDate:     stripeSubscriptionInfo.StartDate,
+		RenewalDate:   stripeSubscriptionInfo.EndDate,
+		Active:        stripeSubscriptionInfo.Status == "active",
+		MaxCensusSize: stripeSubscriptionInfo.Quantity,
+		Email:         stripeSubscriptionInfo.CustomerEmail,
+	}
+
+	// TODO will only worked for new subscriptions
+	if err := a.db.SetOrganizationSubscription(org.Address, organizationSubscription); err != nil {
+		log.Errorf("could not update subscription %s for organization %s: %s",
+			stripeSubscriptionInfo.ID, org.Address, err.Error())
+		w.WriteHeader(http.StatusBadRequest)
+		return false
+	}
+
+	log.Infof("stripe webhook: subscription %s for organization %s processed successfully",
+		stripeSubscriptionInfo.ID, org.Address)
+	return true
+}
+
+// handleSubscriptionUpdated processes a subscription update or deletion event
+func (a *API) handleSubscriptionUpdated(event *stripeapi.Event, w http.ResponseWriter) bool {
+	log.Infof("received stripe event Type: %s", event.Type)
+
+	stripeSubscriptionInfo, org, err := a.getSubscriptionOrgInfo(event)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return false
+	}
+
+	orgPlan, err := a.db.Plan(org.Subscription.PlanID)
+	if err != nil || orgPlan == nil {
+		log.Errorf("could not update subscription %s", stripeSubscriptionInfo.ID)
+		log.Errorf("a corresponding plan with id %d for organization with address %s was not found",
+			org.Subscription.PlanID, stripeSubscriptionInfo.OrganizationAddress)
+		log.Errorf("please do manually for creator %s \n  Error:  %s",
+			stripeSubscriptionInfo.CustomerEmail, err.Error())
+		w.WriteHeader(http.StatusBadRequest)
+		return false
+	}
+
+	// Handle subscription cancellation
+	if stripeSubscriptionInfo.Status == "canceled" && stripeSubscriptionInfo.ProductID == orgPlan.StripeID {
+		if !a.handleSubscriptionCancellation(stripeSubscriptionInfo.ID, org, w) {
+			return false
+		}
+	} else if stripeSubscriptionInfo.Status == "active" && !org.Subscription.Active {
+		// Handle subscription activation
+		if !a.handleSubscriptionActivation(stripeSubscriptionInfo.ID, org, w) {
+			return false
+		}
+	}
+
+	log.Infof("stripe webhook: subscription %s for organization %s processed as %s successfully",
+		stripeSubscriptionInfo.ID, org.Address, stripeSubscriptionInfo.Status)
+	return true
+}
+
+// handleSubscriptionCancellation handles a canceled subscription by switching to the default plan
+func (a *API) handleSubscriptionCancellation(
+	id string,
+	org *db.Organization,
+	w http.ResponseWriter,
+) bool {
+	// Replace organization subscription with the default plan
+	defaultPlan, err := a.db.DefaultPlan()
+	if err != nil || defaultPlan == nil {
+		errors.ErrNoDefaultPlan.WithErr(err).Write(w)
+		return false
+	}
+
+	orgSubscription := &db.OrganizationSubscription{
+		PlanID:          defaultPlan.ID,
+		StartDate:       time.Now(),
+		LastPaymentDate: org.Subscription.LastPaymentDate,
+		Active:          true,
+		MaxCensusSize:   defaultPlan.Organization.MaxCensus,
+	}
+
+	if err := a.db.SetOrganizationSubscription(org.Address, orgSubscription); err != nil {
+		log.Errorf("could not cancel subscription %s for organization %s: %s",
+			id, org.Address, err.Error())
+		w.WriteHeader(http.StatusBadRequest)
+		return false
+	}
+
+	return true
+}
+
+// handleSubscriptionActivation handles activating a subscription
+func (a *API) handleSubscriptionActivation(
+	id string,
+	org *db.Organization,
+	w http.ResponseWriter,
+) bool {
+	org.Subscription.Active = true
+	if err := a.db.SetOrganization(org); err != nil {
+		log.Errorf("could not activate subscription %s for organization %s: %s",
+			id, org.Address, err.Error())
+		w.WriteHeader(http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
+// handlePaymentSucceeded processes a successful payment event
+func (a *API) handlePaymentSucceeded(event *stripeapi.Event, w http.ResponseWriter) bool {
+	paymentTime, orgAddress, err := stripe.GetInvoiceInfoFromEvent(*event)
+	if err != nil {
+		log.Errorf("could not update payment from event: %s \tEvent Type:%s \tError: %v",
+			event.ID, event.Type, err)
+		w.WriteHeader(http.StatusBadRequest)
+		return false
+	}
+
+	org, _, err := a.db.Organization(orgAddress, false)
+	if err != nil || org == nil {
+		log.Errorf("could not update payment from event because could not retrieve organization: %s \tEvent Type:%s",
+			event.ID, event.Type)
+		w.WriteHeader(http.StatusBadRequest)
+		return false
+	}
+
+	org.Subscription.LastPaymentDate = paymentTime
+	if err := a.db.SetOrganization(org); err != nil {
+		log.Errorf("could not update payment from event: %s \tEvent Type:%s \tError: %v",
+			event.ID, event.Type, err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return false
+	}
+
+	log.Infof("stripe webhook: payment %s for organization %s processed successfully",
+		event.ID, org.Address)
+	return true
+}
+
 // handleWebhook godoc
 //
 //	@Summary		Handle Stripe webhook events
@@ -35,7 +200,8 @@ var mu sync.Mutex
 func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
 	defer mu.Unlock()
-	const MaxBodyBytes = int64(65536)
+
+	// Read and validate the request body
 	r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
 	payload, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -44,6 +210,7 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Decode and verify the event
 	signatureHeader := r.Header.Get("Stripe-Signature")
 	event, err := stripe.DecodeEvent(payload, signatureHeader)
 	if err != nil {
@@ -51,112 +218,25 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	// Unmarshal the event data into an appropriate struct depending on its Type
+
+	// Process the event based on its type
+	success := false
 	switch event.Type {
 	case "customer.subscription.created":
-		log.Infof("received stripe event Type: %s", event.Type)
-		stripeSubscriptionInfo, org, err := a.getSubscriptionOrgInfo(event)
-		if err != nil {
-			log.Errorf("could not update subscription %s, a corresponding organization with address %s was not found.",
-				stripeSubscriptionInfo.ID, stripeSubscriptionInfo.OrganizationAddress)
-			log.Errorf("please do manually for creator %s \n  Error:  %s", stripeSubscriptionInfo.CustomerEmail, err.Error())
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		dbSubscription, err := a.db.PlanByStripeID(stripeSubscriptionInfo.ProductID)
-		if err != nil || dbSubscription == nil {
-			log.Errorf("could not update subscription %s, a corresponding subscription was not found.",
-				stripeSubscriptionInfo.ID)
-			log.Errorf("please do manually: %s", err.Error())
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-
-		organizationSubscription := &db.OrganizationSubscription{
-			PlanID:        dbSubscription.ID,
-			StartDate:     stripeSubscriptionInfo.StartDate,
-			RenewalDate:   stripeSubscriptionInfo.EndDate,
-			Active:        stripeSubscriptionInfo.Status == "active",
-			MaxCensusSize: stripeSubscriptionInfo.Quantity,
-			Email:         stripeSubscriptionInfo.CustomerEmail,
-		}
-
-		// TODO will only worked for new subscriptions
-		if err := a.db.SetOrganizationSubscription(org.Address, organizationSubscription); err != nil {
-			log.Errorf("could not update subscription %s for organization %s: %s", stripeSubscriptionInfo.ID, org.Address, err.Error())
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		log.Infof("stripe webhook: subscription %s for organization %s processed successfully", stripeSubscriptionInfo.ID, org.Address)
-
+		success = a.handleSubscriptionCreated(event, w)
 	case "customer.subscription.updated", "customer.subscription.deleted":
-		log.Infof("received stripe event Type: %s", event.Type)
-		stripeSubscriptionInfo, org, err := a.getSubscriptionOrgInfo(event)
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		orgPlan, err := a.db.Plan(org.Subscription.PlanID)
-		if err != nil || orgPlan == nil {
-			log.Errorf("could not update subscription %s", stripeSubscriptionInfo.ID)
-			log.Errorf("a corresponding plan with id %d for organization with address %s was not found",
-				org.Subscription.PlanID, stripeSubscriptionInfo.OrganizationAddress)
-			log.Errorf("please do manually for creator %s \n  Error:  %s", stripeSubscriptionInfo.CustomerEmail, err.Error())
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		if stripeSubscriptionInfo.Status == "canceled" && stripeSubscriptionInfo.ProductID == orgPlan.StripeID {
-			// replace organization subscription with the default plan
-			defaultPlan, err := a.db.DefaultPlan()
-			if err != nil || defaultPlan == nil {
-				errors.ErrNoDefaultPlan.WithErr((err)).Write(w)
-				return
-			}
-			orgSubscription := &db.OrganizationSubscription{
-				PlanID:          defaultPlan.ID,
-				StartDate:       time.Now(),
-				LastPaymentDate: org.Subscription.LastPaymentDate,
-				Active:          true,
-				MaxCensusSize:   defaultPlan.Organization.MaxCensus,
-			}
-			if err := a.db.SetOrganizationSubscription(org.Address, orgSubscription); err != nil {
-				log.Errorf("could not cancel subscription %s for organization %s: %s", stripeSubscriptionInfo.ID, org.Address, err.Error())
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-		} else if stripeSubscriptionInfo.Status == "active" && !org.Subscription.Active {
-			org.Subscription.Active = true
-			if err := a.db.SetOrganization(org); err != nil {
-				log.Errorf("could not activate organizations  %s subscription to active: %s", org.Address, err.Error())
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-		}
-		log.Infof("stripe webhook: subscription %s for organization %s processed as %s successfully",
-			stripeSubscriptionInfo.ID, org.Address, stripeSubscriptionInfo.Status)
+		success = a.handleSubscriptionUpdated(event, w)
 	case "invoice.payment_succeeded":
-		paymentTime, orgAddress, err := stripe.GetInvoiceInfoFromEvent(*event)
-		if err != nil {
-			log.Errorf("could not update payment from event: %s \tEvent Type:%s \tError: %v", event.ID, event.Type, err)
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		org, _, err := a.db.Organization(orgAddress, false)
-		if err != nil || org == nil {
-			log.Errorf("could not update payment from event because could not retrieve organization: %s \tEvent Type:%s",
-				event.ID, event.Type)
-		}
-		org.Subscription.LastPaymentDate = paymentTime
-		if err := a.db.SetOrganization(org); err != nil {
-			log.Errorf("could not update payment from event: %s \tEvent Type:%s \tError: %v", event.ID, event.Type, err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		log.Infof("stripe webhook: payment %s for organization %s processed successfully", event.ID, org.Address)
+		success = a.handlePaymentSucceeded(event, w)
 	default:
 		log.Infof("received stripe event: %s with type: %s", event.ID, event.Type)
+		success = true
 	}
-	w.WriteHeader(http.StatusOK)
+
+	// If the event was processed successfully, return OK
+	if success {
+		w.WriteHeader(http.StatusOK)
+	}
 }
 
 // createSubscriptionCheckoutHandler godoc

@@ -38,6 +38,8 @@ func signAndMarshalTx(t *testing.T, tx *models.Tx, signer *ethereum.SignKeys) []
 // TestCSPVoting tests the complete flow of creating an organization, a process,
 // a census with participants, and a bundle, then authenticating a participant
 // with the CSP, signing a vote, and casting it.
+//
+//revive:disable:cognitive-complexity
 func TestCSPVoting(t *testing.T) {
 	c := qt.New(t)
 
