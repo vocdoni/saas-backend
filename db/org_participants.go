@@ -25,7 +25,7 @@ func (ms *MongoStorage) SetOrgParticipant(salt string, orgParticipant *OrgPartic
 	}
 
 	// check that the org exists
-	_, _, err := ms.Organization(orgParticipant.OrgAddress, false)
+	_, err := ms.Organization(orgParticipant.OrgAddress)
 	if err != nil {
 		if err == ErrNotFound {
 			return "", ErrInvalidData

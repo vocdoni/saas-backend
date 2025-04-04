@@ -163,7 +163,7 @@ func (a *API) handlePaymentSucceeded(event *stripeapi.Event, w http.ResponseWrit
 		return false
 	}
 
-	org, _, err := a.db.Organization(orgAddress, false)
+	org, err := a.db.Organization(orgAddress)
 	if err != nil || org == nil {
 		log.Errorf("could not update payment from event because could not retrieve organization: %s \tEvent Type:%s",
 			event.ID, event.Type)
@@ -276,7 +276,7 @@ func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	org, _, err := a.db.Organization(checkout.Address, false)
+	org, err := a.db.Organization(checkout.Address)
 	if err != nil {
 		errors.ErrOrganizationNotFound.Withf("Error retrieving organization: %v", err).Write(w)
 		return
@@ -343,7 +343,7 @@ func (a *API) getSubscriptionOrgInfo(event *stripeapi.Event) (*stripe.Subscripti
 	if err != nil {
 		return nil, nil, fmt.Errorf("could not decode event for subscription: %s", err.Error())
 	}
-	org, _, err := a.db.Organization(stripeSubscriptionInfo.OrganizationAddress, false)
+	org, err := a.db.Organization(stripeSubscriptionInfo.OrganizationAddress)
 	if err != nil || org == nil {
 		log.Errorf("could not update subscription %s, a corresponding organization with address %s was not found.",
 			stripeSubscriptionInfo.ID, stripeSubscriptionInfo.OrganizationAddress)

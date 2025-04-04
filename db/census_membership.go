@@ -27,7 +27,7 @@ func (ms *MongoStorage) validateCensusMembership(membership *CensusMembership) (
 	}
 
 	// check that the org exists
-	_, _, err = ms.Organization(census.OrgAddress, false)
+	_, err = ms.Organization(census.OrgAddress)
 	if err != nil {
 		if err == ErrNotFound {
 			return "", ErrInvalidData
@@ -337,7 +337,7 @@ func (ms *MongoStorage) validateBulkCensusMembership(
 		return nil, fmt.Errorf("failed to get published census: %w", err)
 	}
 
-	if _, _, err := ms.Organization(census.OrgAddress, false); err != nil {
+	if _, err := ms.Organization(census.OrgAddress); err != nil {
 		return nil, err
 	}
 

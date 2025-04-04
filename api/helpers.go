@@ -25,8 +25,8 @@ func (a *API) organizationFromRequest(r *http.Request) (org *db.Organization, pa
 	// if the organization address is not empty, get the organization from
 	// the database and add it to the context
 	if orgAddress != "" {
-		// get the organization from the database
-		if org, parent, err := a.db.Organization(orgAddress, true); err == nil {
+		// get the organization from the database with its parent
+		if org, parent, err := a.db.OrganizationWithParent(orgAddress); err == nil {
 			return org, parent, true
 		}
 	}

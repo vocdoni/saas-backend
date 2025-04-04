@@ -21,7 +21,7 @@ func (ms *MongoStorage) SetProcessBundle(bundle *ProcessesBundle) (internal.HexB
 	}
 
 	// Check that the org exists
-	if _, _, err := ms.Organization(bundle.OrgAddress, false); err != nil {
+	if _, err := ms.Organization(bundle.OrgAddress); err != nil {
 		return nil, fmt.Errorf("failed to get organization: %w", err)
 	}
 

@@ -27,12 +27,10 @@ func (ms *MongoStorage) organization(ctx context.Context, address string) (*Orga
 	return org, nil
 }
 
-// Organization method returns the organization with the given address. If the
-// parent flag is true, it also returns the parent organization if it exists. If
-// the organization doesn't exist or the parent organization doesn't exist and
-// it should be returned, it returns the specific error. If other errors occur,
-// it returns the error.
-func (ms *MongoStorage) Organization(address string, parent bool) (*Organization, *Organization, error) {
+// Organization method returns the organization with the given address.
+// If the organization doesn't exist, it returns the specific error.
+// If other errors occur, it returns the error.
+func (ms *MongoStorage) Organization(address string) (*Organization, error) {
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
@@ -41,17 +39,35 @@ func (ms *MongoStorage) Organization(address string, parent bool) (*Organization
 	// find the organization in the database
 	org, err := ms.organization(ctx, address)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	if !parent || org.Parent == "" {
-		return org, nil, nil
-	}
-	// find the parent organization in the database
-	parentOrg, err := ms.organization(ctx, org.Parent)
+	return org, nil
+}
+
+// OrganizationWithParent method returns the organization with the given address
+// and its parent organization if it exists. If the organization doesn't exist
+// or the parent organization doesn't exist, it returns the specific error.
+// If other errors occur, it returns the error.
+func (ms *MongoStorage) OrganizationWithParent(address string) (org *Organization, parent *Organization, err error) {
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// find the organization in the database
+	org, err = ms.organization(ctx, address)
 	if err != nil {
 		return nil, nil, err
 	}
-	return org, parentOrg, nil
+	if org.Parent == "" {
+		return org, nil, nil
+	}
+	// find the parent organization in the database
+	parent, err = ms.organization(ctx, org.Parent)
+	if err != nil {
+		return nil, nil, err
+	}
+	return org, parent, nil
 }
 
 // SetOrganization method creates or updates the organization in the database.
