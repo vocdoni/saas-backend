@@ -148,7 +148,6 @@ func (p *Subscriptions) HasTxPermission(
 		}
 
 	}
-
 	return true, nil
 }
 
