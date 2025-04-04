@@ -211,7 +211,7 @@ func (a *API) initRouter() http.Handler {
 		r.Get(organizationMembersEndpoint, a.organizationMembersHandler)
 		// get organization subscription
 		log.Infow("new route", "method", "GET", "path", organizationSubscriptionEndpoint)
-		r.Get(organizationSubscriptionEndpoint, a.getOrganizationSubscriptionHandler)
+		r.Get(organizationSubscriptionEndpoint, a.organizationSubscriptionHandler)
 		// invite a new admin member to the organization
 		log.Infow("new route", "method", "POST", "path", organizationAddMemberEndpoint)
 		r.Post(organizationAddMemberEndpoint, a.inviteOrganizationMemberHandler)
@@ -298,7 +298,7 @@ func (a *API) initRouter() http.Handler {
 		r.Get(organizationTypesEndpoint, a.organizationsTypesHandler)
 		// get subscriptions
 		log.Infow("new route", "method", "GET", "path", plansEndpoint)
-		r.Get(plansEndpoint, a.getPlansHandler)
+		r.Get(plansEndpoint, a.plansHandler)
 		// get subscription info
 		log.Infow("new route", "method", "GET", "path", planInfoEndpoint)
 		r.Get(planInfoEndpoint, a.planInfoHandler)
