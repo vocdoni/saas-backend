@@ -1,5 +1,7 @@
 package db
 
+//revive:disable:max-public-structs
+
 type UserCollection struct {
 	Users []User `json:"users" bson:"users"`
 }

@@ -1,5 +1,7 @@
 package db
 
+//revive:disable:max-public-structs
+
 import (
 	"strings"
 	"time"
