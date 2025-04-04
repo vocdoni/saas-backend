@@ -18,11 +18,11 @@ func (ms *MongoStorage) CreateInvitation(invite *OrganizationInvite) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	// check if the organization exists
-	if _, err := ms.organization(ctx, invite.OrganizationAddress); err != nil {
+	if _, err := ms.fetchOrganizationFromDB(ctx, invite.OrganizationAddress); err != nil {
 		return err
 	}
 	// check if the user exists
-	user, err := ms.user(ctx, invite.CurrentUserID)
+	user, err := ms.fetchUserFromDB(ctx, invite.CurrentUserID)
 	if err != nil {
 		return err
 	}

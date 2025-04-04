@@ -37,7 +37,7 @@ func (ms *MongoStorage) UserByVerificationCode(code string, t CodeType) (*User, 
 		}
 		return nil, err
 	}
-	return ms.user(ctx, verification.ID)
+	return ms.fetchUserFromDB(ctx, verification.ID)
 }
 
 // UserVerificationCode returns the verification code for the user provided. If
@@ -70,7 +70,7 @@ func (ms *MongoStorage) SetVerificationCode(user *User, code string, t CodeType,
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	// try to get the user to ensure it exists
-	if _, err := ms.user(ctx, user.ID); err != nil {
+	if _, err := ms.fetchUserFromDB(ctx, user.ID); err != nil {
 		return err
 	}
 	// insert the verification code for the user provided
