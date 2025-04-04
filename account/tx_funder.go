@@ -158,7 +158,7 @@ func (a *Account) calculateSetProcessElectionPrice(
 				maxCensusSize = censusWithSize.GetSize()
 			}
 		}
-	} else {
+	} else { //revive:disable:empty-block
 		// Fallback: use default values
 		// In a real implementation, you might want to use reflection to extract values
 		// from the currentProcess object, but for now we'll use defaults
