@@ -67,6 +67,93 @@ func (sq *Queue) Push(challenge *NotificationChallenge) error {
 	return sq.items.Enqueue(challenge)
 }
 
+// dequeueChallenge attempts to dequeue a challenge from the queue
+// Returns nil and an error if dequeuing fails or the item is invalid
+func (sq *Queue) dequeueChallenge() (*NotificationChallenge, error) {
+	c, err := sq.items.Dequeue()
+	if err != nil {
+		if err.Error() != "empty queue" {
+			log.Warnw("dequeue error", "error", err)
+		}
+		return nil, err
+	}
+
+	// Decode the challenge information
+	challenge, ok := c.(*NotificationChallenge)
+	if !ok {
+		log.Warnw("invalid challenge type in queue")
+		return nil, fmt.Errorf("invalid challenge type")
+	}
+
+	if !challenge.Valid() {
+		log.Warnw("invalid notification challenge",
+			"bundle", challenge.BundleID.String(),
+			"user", challenge.UserID.String())
+		return nil, fmt.Errorf("invalid challenge")
+	}
+
+	return challenge, nil
+}
+
+// getNotificationService returns the appropriate notification service based on challenge type
+func (sq *Queue) getNotificationService(challenge *NotificationChallenge) notifications.NotificationService {
+	if challenge.Type == SMSChallenge {
+		return sq.smsService
+	}
+	return sq.mailService
+}
+
+// handleFailedNotification handles a failed notification attempt
+// Returns true if the challenge was successfully re-enqueued
+func (sq *Queue) handleFailedNotification(challenge *NotificationChallenge, err error) bool {
+	log.Warnw("failed to send notification",
+		"bundle", challenge.BundleID.String(),
+		"user", challenge.UserID.String(),
+		"error", err)
+
+	if err := sq.reenqueue(challenge); err != nil {
+		log.Warnw("notification challenge not re-enqueued",
+			"bundle", challenge.BundleID.String(),
+			"user", challenge.UserID.String(),
+			"error", err)
+		// Notify that we're removing this element
+		sq.NotificationsSent <- challenge
+		return false
+	}
+
+	return true
+}
+
+// handleSuccessfulNotification handles a successful notification
+func (sq *Queue) handleSuccessfulNotification(challenge *NotificationChallenge) {
+	log.Debugw("notification with challenge successfully sent",
+		"bundle", challenge.BundleID.String(),
+		"user", challenge.UserID.String(),
+		"type", challenge.Type)
+	sq.NotificationsSent <- challenge
+}
+
+// processNextChallenge processes the next challenge in the queue
+func (sq *Queue) processNextChallenge() {
+	challenge, err := sq.dequeueChallenge()
+	if err != nil {
+		return // Nothing to process or invalid challenge
+	}
+
+	// Get the appropriate notification service
+	notifyService := sq.getNotificationService(challenge)
+
+	// Try to send the notification
+	if err := challenge.Send(sq.ctx, notifyService); err != nil {
+		// Handle failed notification
+		sq.handleFailedNotification(challenge, err)
+		return
+	}
+
+	// Handle successful notification
+	sq.handleSuccessfulNotification(challenge)
+}
+
 // Start starts the queue processing loop. It will dequeue elements from the
 // queue and send the notification challenge. If the notification fails, it
 // will re-enqueue the challenge up to DefaultQueueMaxRetries times. The
@@ -81,51 +168,7 @@ func (sq *Queue) Start() {
 		case <-sq.ctx.Done():
 			return
 		case <-ticker.C:
-			// get the next element from the queue
-			c, err := sq.items.Dequeue()
-			if err != nil {
-				if err.Error() != "empty queue" {
-					log.Warnw("dequeue error", "error", err)
-				}
-				continue
-			}
-			// decode the challenge information
-			challenge, ok := c.(*NotificationChallenge)
-			if !ok {
-				log.Warnw("invalid challenge type in queue")
-				continue
-			}
-			if !challenge.Valid() {
-				log.Warnw("invalid notification challenge",
-					"bundle", challenge.BundleID.String(),
-					"user", challenge.UserID.String())
-				continue
-			}
-			notifyService := sq.mailService
-			if challenge.Type == SMSChallenge {
-				notifyService = sq.smsService
-			}
-			// try to send the notification, if it fails, try to re-enqueue it
-			if err := challenge.Send(sq.ctx, notifyService); err != nil {
-				log.Warnw("failed to send notification",
-					"bundle", challenge.BundleID.String(),
-					"user", challenge.UserID.String(),
-					"error", err)
-				if err := sq.reenqueue(challenge); err != nil {
-					log.Warnw("notification challenge no re-enqueued",
-						"bundle", challenge.BundleID.String(),
-						"user", challenge.UserID.String(),
-						"error", err)
-					// send a signal (channel) to let the caller know we are removing this element
-					sq.NotificationsSent <- challenge
-				}
-				continue
-			}
-			// Success
-			log.Debugw("sms with challenge successfully sent",
-				"bundle", challenge.BundleID.String(),
-				"user", challenge.UserID.String())
-			sq.NotificationsSent <- challenge
+			sq.processNextChallenge()
 		}
 	}
 }

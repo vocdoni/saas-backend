@@ -176,56 +176,96 @@ func GetPrices(priceIDs []string) []*stripeapi.Price {
 	return prices
 }
 
+// extractPlanMetadata extracts and parses plan metadata from a Stripe product.
+// It handles unmarshaling of organization limits, voting types, and features.
+func extractPlanMetadata(product *stripeapi.Product) (
+	stripeDB.PlanLimits, stripeDB.VotingTypes, stripeDB.Features, error,
+) {
+	var organizationData stripeDB.PlanLimits
+	if err := json.Unmarshal([]byte(product.Metadata["organization"]), &organizationData); err != nil {
+		return stripeDB.PlanLimits{}, stripeDB.VotingTypes{}, stripeDB.Features{},
+			fmt.Errorf("error parsing plan organization metadata JSON: %s", err.Error())
+	}
+
+	var votingTypesData stripeDB.VotingTypes
+	if err := json.Unmarshal([]byte(product.Metadata["votingTypes"]), &votingTypesData); err != nil {
+		return stripeDB.PlanLimits{}, stripeDB.VotingTypes{}, stripeDB.Features{},
+			fmt.Errorf("error parsing plan voting types metadata JSON: %s", err.Error())
+	}
+
+	var featuresData stripeDB.Features
+	if err := json.Unmarshal([]byte(product.Metadata["features"]), &featuresData); err != nil {
+		return stripeDB.PlanLimits{}, stripeDB.VotingTypes{}, stripeDB.Features{},
+			fmt.Errorf("error parsing plan features metadata JSON: %s", err.Error())
+	}
+
+	return organizationData, votingTypesData, featuresData, nil
+}
+
+// processPriceTiers converts Stripe price tiers to application-specific plan tiers.
+func processPriceTiers(priceTiers []*stripeapi.PriceTier) []stripeDB.PlanTier {
+	var tiers []stripeDB.PlanTier
+	for _, tier := range priceTiers {
+		if tier.UpTo == 0 {
+			continue
+		}
+		tiers = append(tiers, stripeDB.PlanTier{
+			Amount: tier.FlatAmount,
+			UpTo:   tier.UpTo,
+		})
+	}
+	return tiers
+}
+
+// processProduct converts a Stripe product to an application-specific plan.
+func processProduct(index int, productID string, product *stripeapi.Product) (*stripeDB.Plan, error) {
+	organizationData, votingTypesData, featuresData, err := extractPlanMetadata(product)
+	if err != nil {
+		return nil, err
+	}
+
+	price := product.DefaultPrice
+	startingPrice := price.UnitAmount
+	if len(price.Tiers) > 0 {
+		startingPrice = price.Tiers[0].FlatAmount
+	}
+
+	tiers := processPriceTiers(price.Tiers)
+
+	return &stripeDB.Plan{
+		ID:              uint64(index),
+		Name:            product.Name,
+		StartingPrice:   startingPrice,
+		StripeID:        productID,
+		StripePriceID:   price.ID,
+		Default:         price.Metadata["Default"] == "true",
+		Organization:    organizationData,
+		VotingTypes:     votingTypesData,
+		Features:        featuresData,
+		CensusSizeTiers: tiers,
+	}, nil
+}
+
 // GetPlans retrieves and constructs a list of subscription plans from Stripe products.
 // It processes product metadata to extract organization limits, voting types, and features.
 // Returns a slice of Plan objects and any error encountered during processing.
 func GetPlans() ([]*stripeDB.Plan, error) {
 	var plans []*stripeDB.Plan
+
 	for i, productID := range ProductsIDs {
 		product, err := GetProductByID(productID)
 		if err != nil || product == nil {
 			return nil, fmt.Errorf("error getting product %s: %s", productID, err.Error())
 		}
-		var organizationData stripeDB.PlanLimits
-		if err := json.Unmarshal([]byte(product.Metadata["organization"]), &organizationData); err != nil {
-			return nil, fmt.Errorf("error parsing plan organization metadata JSON: %s", err.Error())
+
+		plan, err := processProduct(i, productID, product)
+		if err != nil {
+			return nil, err
 		}
-		var votingTypesData stripeDB.VotingTypes
-		if err := json.Unmarshal([]byte(product.Metadata["votingTypes"]), &votingTypesData); err != nil {
-			return nil, fmt.Errorf("error parsing plan voting types metadata JSON: %s", err.Error())
-		}
-		var featuresData stripeDB.Features
-		if err := json.Unmarshal([]byte(product.Metadata["features"]), &featuresData); err != nil {
-			return nil, fmt.Errorf("error parsing plan features metadata JSON: %s", err.Error())
-		}
-		price := product.DefaultPrice
-		startingPrice := price.UnitAmount
-		if len(price.Tiers) > 0 {
-			startingPrice = price.Tiers[0].FlatAmount
-		}
-		var tiers []stripeDB.PlanTier
-		for _, tier := range price.Tiers {
-			if tier.UpTo == 0 {
-				continue
-			}
-			tiers = append(tiers, stripeDB.PlanTier{
-				Amount: tier.FlatAmount,
-				UpTo:   tier.UpTo,
-			})
-		}
-		plans = append(plans, &stripeDB.Plan{
-			ID:              uint64(i),
-			Name:            product.Name,
-			StartingPrice:   startingPrice,
-			StripeID:        productID,
-			StripePriceID:   price.ID,
-			Default:         price.Metadata["Default"] == "true",
-			Organization:    organizationData,
-			VotingTypes:     votingTypesData,
-			Features:        featuresData,
-			CensusSizeTiers: tiers,
-		})
+
+		plans = append(plans, plan)
 	}
+
 	return plans, nil
 }
 

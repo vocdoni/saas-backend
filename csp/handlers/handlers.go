@@ -16,6 +16,7 @@ import (
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/notifications"
 	"github.com/vocdoni/saas-backend/csp/signers"
+	"github.com/vocdoni/saas-backend/csp/storage"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
@@ -41,6 +42,73 @@ func New(c *csp.CSP, mainDB *db.MongoStorage) *CSPHandlers {
 	}
 }
 
+// parseBundleID parses the bundle ID from the URL parameters
+func parseBundleID(w http.ResponseWriter, r *http.Request) (*internal.HexBytes, bool) {
+	bundleID := new(internal.HexBytes)
+	if err := bundleID.ParseString(chi.URLParam(r, "bundleId")); err != nil {
+		errors.ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
+		return nil, false
+	}
+	return bundleID, true
+}
+
+// parseAuthStep parses the authentication step from the URL parameters
+func parseAuthStep(w http.ResponseWriter, r *http.Request) (int, bool) {
+	stepString := chi.URLParam(r, "step")
+	step, err := strconv.Atoi(stepString)
+	if err != nil || (step != 0 && step != 1) {
+		errors.ErrMalformedURLParam.Withf("wrong step ID").Write(w)
+		return 0, false
+	}
+	return step, true
+}
+
+// getBundle retrieves the bundle from the database
+func (c *CSPHandlers) getBundle(w http.ResponseWriter, bundleID internal.HexBytes) (*db.ProcessesBundle, bool) {
+	bundle, err := c.mainDB.ProcessBundle(bundleID)
+	if err != nil {
+		if err == db.ErrNotFound {
+			errors.ErrMalformedURLParam.Withf("bundle not found").Write(w)
+			return nil, false
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return nil, false
+	}
+
+	// Check if the bundle has processes
+	if len(bundle.Processes) == 0 {
+		errors.ErrInvalidOrganizationData.Withf("bundle has no processes").Write(w)
+		return nil, false
+	}
+
+	return bundle, true
+}
+
+// handleAuthStep handles the authentication step and writes the response
+func (c *CSPHandlers) handleAuthStep(w http.ResponseWriter, r *http.Request,
+	step int, bundleID internal.HexBytes, censusID string,
+) {
+	var authToken internal.HexBytes
+	var err error
+
+	if step == 0 {
+		authToken, err = c.authFirstStep(r, bundleID, censusID)
+	} else {
+		authToken, err = c.authSecondStep(r)
+	}
+
+	if err != nil {
+		if apiErr, ok := err.(errors.Error); ok {
+			apiErr.Write(w)
+			return
+		}
+		errors.ErrUnauthorized.WithErr(err).Write(w)
+		return
+	}
+
+	apicommon.HTTPWriteJSON(w, &AuthResponse{AuthToken: authToken})
+}
+
 // BundleAuthHandler godoc
 //
 //	@Summary		Authenticate for a process bundle
@@ -62,61 +130,99 @@ func New(c *csp.CSP, mainDB *db.MongoStorage) *CSPHandlers {
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/process/bundle/{bundleId}/auth/{step} [post]
 func (c *CSPHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) {
-	// get the bundle ID from the URL parameters
-	bundleID := new(internal.HexBytes)
-	if err := bundleID.ParseString(chi.URLParam(r, "bundleId")); err != nil {
-		errors.ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
+	// Parse the bundle ID and authentication step
+	bundleID, ok := parseBundleID(w, r)
+	if !ok {
 		return
 	}
-	// get the step from the URL parameters
-	stepString := chi.URLParam(r, "step")
-	step, err := strconv.Atoi(stepString)
-	if err != nil || (step != 0 && step != 1) {
-		errors.ErrMalformedURLParam.Withf("wrong step ID").Write(w)
+
+	step, ok := parseAuthStep(w, r)
+	if !ok {
 		return
 	}
-	// check if the bundle exists
-	bundle, err := c.mainDB.ProcessBundle(*bundleID)
+
+	// Get the bundle
+	bundle, ok := c.getBundle(w, *bundleID)
+	if !ok {
+		return
+	}
+
+	// Handle the authentication step
+	c.handleAuthStep(w, r, step, *bundleID, bundle.Census.ID.Hex())
+}
+
+// parseSignRequest parses the sign request from the request body
+func parseSignRequest(w http.ResponseWriter, r *http.Request) (*SignRequest, bool) {
+	var req SignRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return nil, false
+	}
+
+	// Check that the request contains the auth token
+	if req.AuthToken == nil {
+		errors.ErrUnauthorized.Withf("missing auth token").Write(w)
+		return nil, false
+	}
+
+	return &req, true
+}
+
+// getAuthInfo retrieves the authentication information from the token
+func (c *CSPHandlers) getAuthInfo(w http.ResponseWriter, authToken internal.HexBytes) (*storage.CSPAuth, bool) {
+	auth, err := c.csp.Storage.CSPAuth(authToken)
 	if err != nil {
+		errors.ErrUnauthorized.WithErr(err).Write(w)
+		return nil, false
+	}
+	return auth, true
+}
+
+// findProcessInBundle checks if the process is part of the bundle
+func findProcessInBundle(bundle *db.ProcessesBundle, processID internal.HexBytes) (internal.HexBytes, bool) {
+	for _, pID := range bundle.Processes {
+		if bytes.Equal(pID, processID) {
+			return pID, true
+		}
+	}
+	return nil, false
+}
+
+// checkCensusMembership checks if the participant is in the census
+func (c *CSPHandlers) checkCensusMembership(w http.ResponseWriter, censusID string, userID string) bool {
+	if _, err := c.mainDB.CensusMembership(censusID, userID); err != nil {
 		if err == db.ErrNotFound {
-			errors.ErrMalformedURLParam.Withf("bundle not found").Write(w)
-			return
+			errors.ErrUnauthorized.Withf("participant not found in the census").Write(w)
+			return false
 		}
+		log.Warnw("error getting census membership", "error", err)
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return false
+	}
+	return true
+}
+
+// parseAddress parses the address from the payload
+func parseAddress(w http.ResponseWriter, payload string) (*internal.HexBytes, bool) {
+	address := new(internal.HexBytes)
+	if err := address.ParseString(payload); err != nil {
+		errors.ErrMalformedBody.WithErr(err).Write(w)
+		return nil, false
+	}
+	return address, true
+}
+
+// signAndRespond signs the request and sends the response
+func (c *CSPHandlers) signAndRespond(w http.ResponseWriter, authToken, address, processID internal.HexBytes) {
+	log.Debugw("new CSP sign request", "address", address, "procId", processID)
+
+	signature, err := c.csp.Sign(authToken, address, processID, signers.SignerTypeECDSASalted)
+	if err != nil {
+		errors.ErrUnauthorized.WithErr(err).Write(w)
 		return
 	}
-	// check if the bundle has processes
-	if len(bundle.Processes) == 0 {
-		errors.ErrInvalidOrganizationData.Withf("bundle has no processes").Write(w)
-		return
-	}
-	// switch between the steps
-	switch step {
-	case 0:
-		authToken, err := c.authFirstStep(r, *bundleID, bundle.Census.ID.Hex())
-		if err != nil {
-			if apiErr, ok := err.(errors.Error); ok {
-				apiErr.Write(w)
-				return
-			}
-			errors.ErrUnauthorized.WithErr(err).Write(w)
-			return
-		}
-		apicommon.HTTPWriteJSON(w, &AuthResponse{AuthToken: authToken})
-		return
-	case 1:
-		authToken, err := c.authSecondStep(r)
-		if err != nil {
-			if apiErr, ok := err.(errors.Error); ok {
-				apiErr.Write(w)
-				return
-			}
-			errors.ErrUnauthorized.WithErr(err).Write(w)
-			return
-		}
-		apicommon.HTTPWriteJSON(w, &AuthResponse{AuthToken: authToken})
-		return
-	}
+
+	apicommon.HTTPWriteJSON(w, &AuthResponse{Signature: signature})
 }
 
 // BundleSignHandler godoc
@@ -136,83 +242,50 @@ func (c *CSPHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) 
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/process/bundle/{bundleId}/sign [post]
 func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) {
-	// get the bundle ID from the URL parameters
-	bundleID := new(internal.HexBytes)
-	if err := bundleID.ParseString(chi.URLParam(r, "bundleId")); err != nil {
-		errors.ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
+	// Parse the bundle ID
+	bundleID, ok := parseBundleID(w, r)
+	if !ok {
 		return
 	}
-	// get the bundle ID from the main database
-	bundle, err := c.mainDB.ProcessBundle(*bundleID)
-	if err != nil {
-		if err == db.ErrNotFound {
-			errors.ErrMalformedURLParam.Withf("bundle not found").Write(w)
-			return
-		}
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+
+	// Get the bundle
+	bundle, ok := c.getBundle(w, *bundleID)
+	if !ok {
 		return
 	}
-	// check if the bundle has processes
-	if len(bundle.Processes) == 0 {
-		errors.ErrInvalidOrganizationData.Withf("bundle has no processes").Write(w)
+
+	// Parse the sign request
+	req, ok := parseSignRequest(w, r)
+	if !ok {
 		return
 	}
-	// parse the request from the body
-	var req SignRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		errors.ErrMalformedBody.Write(w)
+
+	// Get the authentication information
+	auth, ok := c.getAuthInfo(w, req.AuthToken)
+	if !ok {
 		return
 	}
-	// check that the request contains the auth
-	if req.AuthToken == nil {
-		errors.ErrUnauthorized.Withf("missing auth token").Write(w)
-		return
-	}
-	auth, err := c.csp.Storage.CSPAuth(req.AuthToken)
-	if err != nil {
-		errors.ErrUnauthorized.WithErr(err).Write(w)
-		return
-	}
-	// check that the received process is part of the bundle processes
-	var processID internal.HexBytes
-	for _, pID := range bundle.Processes {
-		if bytes.Equal(pID, req.ProcessID) {
-			// process found
-			processID = pID
-			break
-		}
-	}
-	// check the census membership of the participant
-	if _, err := c.mainDB.CensusMembership(bundle.Census.ID.Hex(), string(auth.UserID)); err != nil {
-		if err == db.ErrNotFound {
-			errors.ErrUnauthorized.Withf("participant not found in the census").Write(w)
-			return
-		}
-		log.Warnw("error getting census membership", "error", err)
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-	// check if the process is found in the bundle
-	if len(processID) == 0 {
+
+	// Find the process in the bundle
+	processID, found := findProcessInBundle(bundle, req.ProcessID)
+	if !found {
 		errors.ErrUnauthorized.Withf("process not found in bundle").Write(w)
 		return
 	}
-	// get the address from the request payload
-	address := new(internal.HexBytes)
-	if err = address.ParseString(req.Payload); err != nil {
-		errors.ErrMalformedBody.WithErr(err).Write(w)
+
+	// Check if the participant is in the census
+	if !c.checkCensusMembership(w, bundle.Census.ID.Hex(), string(auth.UserID)) {
 		return
 	}
-	log.Debugw("new CSP sign request",
-		"address", address,
-		"procId", processID)
-	// sign the request
-	signature, err := c.csp.Sign(req.AuthToken, *address, processID, signers.SignerTypeECDSASalted)
-	if err != nil {
-		errors.ErrUnauthorized.WithErr(err).Write(w)
+
+	// Parse the address from the payload
+	address, ok := parseAddress(w, req.Payload)
+	if !ok {
 		return
 	}
-	apicommon.HTTPWriteJSON(w, &AuthResponse{Signature: signature})
+
+	// Sign the request and send the response
+	c.signAndRespond(w, req.AuthToken, *address, processID)
 }
 
 // ConsumedAddressHandler godoc
@@ -279,6 +352,163 @@ func (c *CSPHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+// validateParticipantNumber checks if the participant number is provided
+func validateParticipantNumber(participantNo string) error {
+	if len(participantNo) == 0 {
+		return errors.ErrInvalidUserData.Withf("participant number not provided")
+	}
+	return nil
+}
+
+// validateContactInfo checks if at least one contact method is provided
+func validateContactInfo(email, phone string) error {
+	if len(email) == 0 && len(phone) == 0 {
+		return errors.ErrInvalidUserData.Withf("no contact information provided (email or phone)")
+	}
+	return nil
+}
+
+// validateEmail validates the email format if provided
+func validateEmail(email string) error {
+	if len(email) > 0 && !internal.ValidEmail(email) {
+		return errors.ErrInvalidUserData.Withf("invalid email format")
+	}
+	return nil
+}
+
+// validatePhone validates and sanitizes the phone number if provided
+func validatePhone(phone *string) error {
+	if len(*phone) == 0 {
+		return nil
+	}
+
+	sanitizedPhone, err := internal.SanitizeAndVerifyPhoneNumber(*phone)
+	if err != nil {
+		log.Warnw("invalid phone number format", "phone", *phone, "error", err)
+		return errors.ErrInvalidUserData.Withf("invalid phone number format")
+	}
+	*phone = sanitizedPhone
+	return nil
+}
+
+// validateAuthRequest validates the authentication request data
+func validateAuthRequest(req *AuthRequest) error {
+	// Check request participant number
+	err := validateParticipantNumber(req.ParticipantNo)
+	if err != nil {
+		return err
+	}
+
+	// Check request contact information
+	err = validateContactInfo(req.Email, req.Phone)
+	if err != nil {
+		return err
+	}
+
+	// Validate email if provided
+	err = validateEmail(req.Email)
+	if err != nil {
+		return err
+	}
+
+	// Validate phone if provided
+	return validatePhone(&req.Phone)
+}
+
+// getCensusAndParticipant retrieves the census and participant information
+func (c *CSPHandlers) getCensusAndParticipant(censusID string, participantNo string) (*db.Census, *db.OrgParticipant, error) {
+	// Get census information
+	census, err := c.mainDB.Census(censusID)
+	if err != nil {
+		if err == db.ErrNotFound {
+			return nil, nil, errors.ErrCensusNotFound
+		}
+		return nil, nil, errors.ErrGenericInternalServerError.WithErr(err)
+	}
+
+	// Check the census membership of the participant
+	if _, err := c.mainDB.CensusMembership(censusID, participantNo); err != nil {
+		if err == db.ErrNotFound {
+			return nil, nil, errors.ErrUnauthorized.Withf("participant not found in the census")
+		}
+		return nil, nil, errors.ErrGenericInternalServerError.WithErr(err)
+	}
+
+	// Get participant information
+	participant, err := c.mainDB.OrgParticipantByNo(census.OrgAddress, participantNo)
+	if err != nil {
+		return nil, nil, errors.ErrCensusParticipantNotFound
+	}
+
+	return census, participant, nil
+}
+
+// verifyPassword checks if the provided password matches the participant's hashed password
+func (c *CSPHandlers) verifyPassword(password string, hashedPass []byte) error {
+	if password != "" && !bytes.Equal(internal.HashPassword(c.csp.PasswordSalt, password), hashedPass) {
+		return fmt.Errorf("invalid user data")
+	}
+	return nil
+}
+
+// verifyEmail checks if the provided email matches the participant's hashed email
+func verifyEmail(orgAddress string, email string, hashedEmail []byte) error {
+	if !bytes.Equal(internal.HashOrgData(orgAddress, email), hashedEmail) {
+		return errors.ErrUnauthorized.Withf("invalid user email")
+	}
+	return nil
+}
+
+// verifyPhone checks if the provided phone matches the participant's hashed phone
+func verifyPhone(orgAddress string, phone string, hashedPhone []byte) error {
+	if !bytes.Equal(internal.HashOrgData(orgAddress, phone), hashedPhone) {
+		return errors.ErrUnauthorized.Withf("invalid user phone")
+	}
+	return nil
+}
+
+// handleEmailContact verifies the email and returns the appropriate contact method
+func handleEmailContact(orgAddress string, email string, hashedEmail []byte) (string, notifications.ChallengeType, error) {
+	if err := verifyEmail(orgAddress, email, hashedEmail); err != nil {
+		return "", "", err
+	}
+	return email, notifications.EmailChallenge, nil
+}
+
+// handlePhoneContact verifies the phone and returns the appropriate contact method
+func handlePhoneContact(orgAddress string, phone string, hashedPhone []byte) (string, notifications.ChallengeType, error) {
+	if err := verifyPhone(orgAddress, phone, hashedPhone); err != nil {
+		return "", "", err
+	}
+	return phone, notifications.SMSChallenge, nil
+}
+
+// determineContactMethod determines the contact method based on the census type and request data
+func determineContactMethod(
+	census *db.Census,
+	req *AuthRequest,
+	participant *db.OrgParticipant,
+) (string, notifications.ChallengeType, error) {
+	switch census.Type {
+	case db.CensusTypeMail:
+		return handleEmailContact(census.OrgAddress, req.Email, participant.HashedEmail)
+
+	case db.CensusTypeSMS:
+		return handlePhoneContact(census.OrgAddress, req.Phone, participant.HashedPhone)
+
+	case db.CensusTypeSMSorMail:
+		if req.Email != "" {
+			return handleEmailContact(census.OrgAddress, req.Email, participant.HashedEmail)
+		}
+
+		if req.Phone != "" {
+			return handlePhoneContact(census.OrgAddress, req.Phone, participant.HashedPhone)
+		}
+	}
+
+	return "", "", errors.ErrNotSupported.Withf("invalid census type")
+}
+
 // authFirstStep is the first step of the authentication process. It receives
 // the request, the bundle ID and the census ID as parameters. It checks the
 // request data (participant number, email and phone) against the census data.
@@ -288,87 +518,34 @@ func (c *CSPHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Requ
 // any. It sends the challenge to the user (email or SMS) to verify the user
 // token in the second step.
 func (c *CSPHandlers) authFirstStep(r *http.Request, bundleID internal.HexBytes, censusID string) (internal.HexBytes, error) {
+	// Parse and validate request
 	var req AuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return nil, errors.ErrMalformedBody.Withf("invalid JSON request")
 	}
-	// check request participant number
-	if len(req.ParticipantNo) == 0 {
-		return nil, errors.ErrInvalidUserData.Withf("participant number not provided")
+
+	if err := validateAuthRequest(&req); err != nil {
+		return nil, err
 	}
-	// check request contact information
-	if len(req.Email) == 0 && len(req.Phone) == 0 {
-		return nil, errors.ErrInvalidUserData.Withf("no contact information provided (email or phone)")
-	} else if len(req.Email) > 0 && !internal.ValidEmail(req.Email) {
-		return nil, errors.ErrInvalidUserData.Withf("invalid email format")
-	} else if len(req.Phone) > 0 {
-		var err error
-		if req.Phone, err = internal.SanitizeAndVerifyPhoneNumber(req.Phone); err != nil {
-			log.Warnw("invalid phone number format", "phone", req.Phone, "error", err)
-			return nil, errors.ErrInvalidUserData.Withf("invalid phone number format")
-		}
-	}
-	// get census information
-	census, err := c.mainDB.Census(censusID)
+
+	// Get census and participant information
+	census, participant, err := c.getCensusAndParticipant(censusID, req.ParticipantNo)
 	if err != nil {
-		if err == db.ErrNotFound {
-			return nil, errors.ErrCensusNotFound
-		}
-		return nil, errors.ErrGenericInternalServerError.WithErr(err)
+		return nil, err
 	}
-	// check the census membership of the participant
-	if _, err := c.mainDB.CensusMembership(censusID, req.ParticipantNo); err != nil {
-		if err == db.ErrNotFound {
-			return nil, errors.ErrUnauthorized.Withf("participant not found in the census")
-		}
-		return nil, errors.ErrGenericInternalServerError.WithErr(err)
+
+	// Verify password if provided
+	if err := c.verifyPassword(req.Password, participant.HashedPass); err != nil {
+		return nil, err
 	}
-	// get participant information
-	participant, err := c.mainDB.OrgParticipantByNo(census.OrgAddress, req.ParticipantNo)
+
+	// Determine contact method based on census type
+	toDestinations, challengeType, err := determineContactMethod(census, &req, participant)
 	if err != nil {
-		return nil, errors.ErrCensusParticipantNotFound
+		return nil, err
 	}
-	// check the password
-	if req.Password != "" && !bytes.Equal(internal.HashPassword(c.csp.PasswordSalt, req.Password), participant.HashedPass) {
-		return nil, fmt.Errorf("invalid user data")
-	}
-	// check the census type and parse the destination and notification type
-	// accordingly
-	var toDestinations string
-	var challengeType notifications.ChallengeType
-	switch census.Type {
-	case db.CensusTypeMail:
-		if !bytes.Equal(internal.HashOrgData(census.OrgAddress, req.Email), participant.HashedEmail) {
-			return nil, errors.ErrUnauthorized.Withf("invalid user email")
-		}
-		toDestinations = req.Email
-		challengeType = notifications.EmailChallenge
-	case db.CensusTypeSMS:
-		if !bytes.Equal(internal.HashOrgData(census.OrgAddress, req.Phone), participant.HashedPhone) {
-			return nil, errors.ErrUnauthorized.Withf("invalid user phone")
-		}
-		toDestinations = req.Phone
-		challengeType = notifications.SMSChallenge
-	case db.CensusTypeSMSorMail:
-		if req.Email != "" {
-			if !bytes.Equal(internal.HashOrgData(census.OrgAddress, req.Email), participant.HashedEmail) {
-				return nil, errors.ErrUnauthorized.Withf("invalid user email")
-			}
-			toDestinations = req.Email
-			challengeType = notifications.EmailChallenge
-		} else if req.Phone != "" {
-			if !bytes.Equal(internal.HashOrgData(census.OrgAddress, req.Phone), participant.HashedPhone) {
-				return nil, errors.ErrUnauthorized.Withf("invalid user phone")
-			}
-			toDestinations = req.Phone
-			challengeType = notifications.SMSChallenge
-		}
-	default:
-		return nil, errors.ErrNotSupported.Withf("invalid census type")
-	}
-	// generate the token with the bundle ID, the participant number as the
-	// user ID, the contact information as the destination, and the challenge
-	// type
+
+	// Generate the token
 	return c.csp.BundleAuthToken(bundleID, internal.HexBytes(participant.ParticipantNo), toDestinations, challengeType)
 }
 
@@ -383,17 +560,19 @@ func (c *CSPHandlers) authSecondStep(r *http.Request) (internal.HexBytes, error)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return nil, errors.ErrMalformedBody.Withf("invalid JSON request")
 	}
-	if err := c.csp.VerifyBundleAuthToken(req.AuthToken, req.AuthData[0]); err != nil {
-		switch err {
-		case csp.ErrInvalidAuthToken, csp.ErrInvalidSolution, csp.ErrChallengeCodeFailure:
-			return nil, errors.ErrUnauthorized.WithErr(err)
-		case csp.ErrUserUnknown, csp.ErrUserNotBelongsToBundle:
-			return nil, errors.ErrUserNotFound.WithErr(err)
-		case csp.ErrStorageFailure:
-			return nil, errors.ErrInternalStorageError.WithErr(err)
-		default:
-			return nil, errors.ErrGenericInternalServerError.WithErr(err)
-		}
+	err := c.csp.VerifyBundleAuthToken(req.AuthToken, req.AuthData[0])
+	if err == nil {
+		return req.AuthToken, nil
 	}
-	return req.AuthToken, nil
+
+	switch err {
+	case csp.ErrInvalidAuthToken, csp.ErrInvalidSolution, csp.ErrChallengeCodeFailure:
+		return nil, errors.ErrUnauthorized.WithErr(err)
+	case csp.ErrUserUnknown, csp.ErrUserNotBelongsToBundle:
+		return nil, errors.ErrUserNotFound.WithErr(err)
+	case csp.ErrStorageFailure:
+		return nil, errors.ErrInternalStorageError.WithErr(err)
+	default:
+		return nil, errors.ErrGenericInternalServerError.WithErr(err)
+	}
 }

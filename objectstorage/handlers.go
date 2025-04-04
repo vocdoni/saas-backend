@@ -5,16 +5,87 @@ package objectstorage
 
 import (
 	"fmt"
+	"mime/multipart"
 	"net/http"
 	"regexp"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 )
 
 // isObjectNameRgx is a regular expression to match object names.
 var isObjectNameRgx = regexp.MustCompile(`^([a-zA-Z0-9]+)\.(jpg|jpeg|png)`)
+
+// validateUser checks if the user is authenticated
+func validateUser(w http.ResponseWriter, r *http.Request) (*db.User, bool) {
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return nil, false
+	}
+	return user, true
+}
+
+// parseMultipartForm parses the multipart form from the request
+func parseMultipartForm(w http.ResponseWriter, r *http.Request) bool {
+	// 32 MB is the default used by FormFile() function
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		errors.ErrStorageInvalidObject.Withf("could not parse form: %v", err).Write(w)
+		return false
+	}
+	return true
+}
+
+// processFile processes a single file from the multipart form
+func (osc *Client) processFile(w http.ResponseWriter, fileHeader *multipart.FileHeader, userEmail string) (string, bool) {
+	// Open the file
+	file, err := fileHeader.Open()
+	if err != nil {
+		errors.ErrStorageInvalidObject.Withf("cannot open file %s %v", fileHeader.Filename, err).Write(w)
+		return "", false
+	}
+	defer func() {
+		if err := file.Close(); err != nil {
+			errors.ErrStorageInvalidObject.Withf("cannot close file %s %v", fileHeader.Filename, err).Write(w)
+		}
+	}()
+
+	// Upload the file using the object storage client
+	storedFileID, err := osc.Put(file, fileHeader.Size, userEmail)
+	if err != nil {
+		errors.ErrInternalStorageError.Withf("%s %v", fileHeader.Filename, err).Write(w)
+		return "", false
+	}
+
+	return storedFileID, true
+}
+
+// processAllFiles processes all files from the multipart form
+func (osc *Client) processAllFiles(w http.ResponseWriter, form *multipart.Form, userEmail string) ([]string, bool) {
+	var returnURLs []string
+	filesFound := false
+
+	for _, fileHeaders := range form.File {
+		for _, fileHeader := range fileHeaders {
+			storedFileID, ok := osc.processFile(w, fileHeader, userEmail)
+			if !ok {
+				return nil, false
+			}
+
+			filesFound = true
+			returnURLs = append(returnURLs, objectURL(osc.ServerURL, storedFileID))
+		}
+	}
+
+	if !filesFound {
+		errors.ErrStorageInvalidObject.With("no files found").Write(w)
+		return nil, false
+	}
+
+	return returnURLs, true
+}
 
 // UploadImageWithFormHandler godoc
 //
@@ -32,53 +103,24 @@ var isObjectNameRgx = regexp.MustCompile(`^([a-zA-Z0-9]+)\.(jpg|jpeg|png)`)
 //	@Failure		500		{object}	errors.Error		"Internal server error"
 //	@Router			/storage [post]
 func (osc *Client) UploadImageWithFormHandler(w http.ResponseWriter, r *http.Request) {
-	// check if the user is authenticated
-	// get the user from the request context
-	user, ok := apicommon.UserFromContext(r.Context())
+	// Validate user
+	user, ok := validateUser(w, r)
 	if !ok {
-		errors.ErrUnauthorized.Write(w)
 		return
 	}
 
-	// 32 MB is the default used by FormFile() function
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		errors.ErrStorageInvalidObject.Withf("could not parse form: %v", err).Write(w)
+	// Parse multipart form
+	if !parseMultipartForm(w, r) {
 		return
 	}
 
-	// Get a reference to the fileHeaders.
-	// They are accessible only after ParseMultipartForm is called
-	filesFound := false
-	var returnURLs []string
-	for _, fileHeaders := range r.MultipartForm.File {
-		for _, fileHeader := range fileHeaders {
-			// Open the file
-			file, err := fileHeader.Open()
-			if err != nil {
-				errors.ErrStorageInvalidObject.Withf("cannot open file %s %v", fileHeader.Filename, err).Write(w)
-				return
-			}
-			defer func() {
-				if err := file.Close(); err != nil {
-					errors.ErrStorageInvalidObject.Withf("cannot close file %s  %v", fileHeader.Filename, err).Write(w)
-					return
-				}
-			}()
-			// upload the file using the object storage client
-			// and get the URL of the uploaded file
-			filesFound = true
-			storedFileID, err := osc.Put(file, fileHeader.Size, user.Email)
-			if err != nil {
-				errors.ErrInternalStorageError.Withf("%s %v", fileHeader.Filename, err).Write(w)
-				return
-			}
-			returnURLs = append(returnURLs, objectURL(osc.ServerURL, storedFileID))
-		}
-	}
-	if !filesFound {
-		errors.ErrStorageInvalidObject.With("no files found").Write(w)
+	// Process all files
+	returnURLs, ok := osc.processAllFiles(w, r.MultipartForm, user.Email)
+	if !ok {
 		return
 	}
+
+	// Return URLs of uploaded files
 	apicommon.HTTPWriteJSON(w, map[string][]string{"urls": returnURLs})
 }
 
