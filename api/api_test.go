@@ -382,7 +382,7 @@ func signRemoteSignerAndSendVocdoniTx(t *testing.T, tx *models.Tx, token string,
 // signAndSendVocdoniTx signs and sends a transaction to the Voconed API and waits for it to be mined.
 // It uses the provided signer to sign the transaction.
 // Returns the response data if any.
-func signAndSendVocdoniTx(t *testing.T, tx *models.Tx, signer *ethereum.SignKeys, vocdoniClient *apiclient.HTTPclient) (responseData []byte) {
+func signAndSendVocdoniTx(t *testing.T, tx *models.Tx, signer *ethereum.SignKeys, vocdoniClient *apiclient.HTTPclient) []byte {
 	c := qt.New(t)
 	txBytes, err := proto.Marshal(tx)
 	c.Assert(err, qt.IsNil)
@@ -487,7 +487,7 @@ func testAddParticipantsToCensus(t *testing.T, token, censusID string, participa
 
 // testPublishCensus publishes the given census.
 // It returns the published census URI and root.
-func testPublishCensus(t *testing.T, token, censusID string) (string, string) {
+func testPublishCensus(t *testing.T, token, censusID string) (uri string, root string) {
 	c := qt.New(t)
 
 	// Publish the census
@@ -506,7 +506,7 @@ func testPublishCensus(t *testing.T, token, censusID string) (string, string) {
 
 // testCreateBundle creates a new process bundle with the given census ID and process IDs.
 // It returns the bundle ID and root.
-func testCreateBundle(t *testing.T, token, censusID string, processIDs [][]byte) (string, string) {
+func testCreateBundle(t *testing.T, token, censusID string, processIDs [][]byte) (bundleID string, root string) {
 	c := qt.New(t)
 
 	// Convert process IDs to hex strings

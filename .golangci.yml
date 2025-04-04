@@ -17,10 +17,14 @@ linters:
         disabled: true
       - name: add-constant # TODO: fix all issues and re-enable this rule
         disabled: true
-      - name: exported # TODO: fix all issues and re-enable this rule
-        disabled: true
       - name: line-length-limit # lll is already run by golangci-lint
         disabled: true
+      - name: function-length
+        exclude: ["**/*_test.go"]
+      - name: cognitive-complexity
+        exclude: ["**/*_test.go"]
+      - name: cyclomatic
+        exclude: ["**/*_test.go"]
   exclusions:
     generated: lax
     paths:
