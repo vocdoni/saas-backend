@@ -21,7 +21,7 @@ var mu sync.Mutex
 
 // Constants for webhook handling
 const (
-	MaxBodyBytes = int64(65536)
+	MaxBodyBytes = int64(65536) //revive:disable:unexported-naming
 )
 
 // handleSubscriptionCreated processes a subscription creation event
@@ -321,7 +321,7 @@ func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.R
 //	@Failure		400			{object}	errors.Error	"Invalid session ID"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/subscriptions/checkout/{sessionID} [get]
-func (a *API) checkoutSessionHandler(w http.ResponseWriter, r *http.Request) {
+func (*API) checkoutSessionHandler(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionID")
 	if sessionID == "" {
 		errors.ErrMalformedURLParam.Withf("sessionID is required").Write(w)

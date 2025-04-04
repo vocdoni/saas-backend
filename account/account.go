@@ -50,7 +50,7 @@ func New(privateKey string, apiEndpoint string) (*Account, error) {
 	// get account and log some info
 	account, err := apiClient.Account("")
 	if err != nil {
-		log.Fatalf("failed to get account: %v", err)
+		return nil, fmt.Errorf("failed to get account: %v", err)
 	}
 	log.Infow("Vocdoni account initialized",
 		"endpoint", apiEndpoint,

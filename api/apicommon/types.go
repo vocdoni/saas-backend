@@ -1,5 +1,7 @@
 package apicommon
 
+//revive:disable:max-public-structs
+
 import (
 	"time"
 

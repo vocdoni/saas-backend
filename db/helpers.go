@@ -271,7 +271,7 @@ func (ms *MongoStorage) createIndexes() error {
 // It uses reflection to iterate over the struct fields and create the update document.
 // The struct fields must have a bson tag to be included in the update document.
 // The _id field is skipped.
-func dynamicUpdateDocument(item interface{}, alwaysUpdateTags []string) (bson.M, error) {
+func dynamicUpdateDocument(item any, alwaysUpdateTags []string) (bson.M, error) {
 	val := reflect.ValueOf(item)
 	if val.Kind() == reflect.Ptr {
 		val = val.Elem()

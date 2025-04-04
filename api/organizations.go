@@ -610,7 +610,7 @@ func (*API) organizationsTypesHandler(w http.ResponseWriter, _ *http.Request) {
 	apicommon.HTTPWriteJSON(w, &apicommon.OrganizationTypeList{Types: organizationTypes})
 }
 
-// getOrganizationSubscriptionHandler godoc
+// organizationSubscriptionHandler godoc
 //
 //	@Summary		Get organization subscription
 //	@Description	Get the subscription information for an organization
@@ -625,7 +625,7 @@ func (*API) organizationsTypesHandler(w http.ResponseWriter, _ *http.Request) {
 //	@Failure		404		{object}	errors.Error	"Organization not found or no subscription"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/organizations/{address}/subscription [get]
-func (a *API) getOrganizationSubscriptionHandler(w http.ResponseWriter, r *http.Request) {
+func (a *API) organizationSubscriptionHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {

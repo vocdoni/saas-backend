@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	//revive:disable:import-alias-naming
 	stripeapi "github.com/stripe/stripe-go/v81"
 	stripePortalSession "github.com/stripe/stripe-go/v81/billingportal/session"
 	stripeCheckoutSession "github.com/stripe/stripe-go/v81/checkout/session"
@@ -178,6 +179,8 @@ func GetPrices(priceIDs []string) []*stripeapi.Price {
 
 // extractPlanMetadata extracts and parses plan metadata from a Stripe product.
 // It handles unmarshaling of organization limits, voting types, and features.
+//
+//revive:disable:function-result-limit
 func extractPlanMetadata(product *stripeapi.Product) (
 	stripeDB.PlanLimits, stripeDB.VotingTypes, stripeDB.Features, error,
 ) {

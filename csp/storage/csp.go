@@ -49,7 +49,7 @@ func (ms *MongoStorage) CSPAuth(token internal.HexBytes) (*CSPAuth, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	// find the token
-	return ms.cspAuth(ctx, token)
+	return ms.fetchCSPAuthFromDB(ctx, token)
 }
 
 // LastCSPAuth method returns the last CSP authentication data for a given
@@ -91,7 +91,7 @@ func (ms *MongoStorage) VerifyCSPAuth(token internal.HexBytes) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	// ensure that the token exists
-	if _, err := ms.cspAuth(ctx, token); err != nil {
+	if _, err := ms.fetchCSPAuthFromDB(ctx, token); err != nil {
 		return err
 	}
 	// update the token
@@ -116,12 +116,12 @@ func (ms *MongoStorage) CSPProcess(token, pid internal.HexBytes) (*CSPProcess, e
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	// get the token data
-	tokenData, err := ms.cspAuth(ctx, token)
+	tokenData, err := ms.fetchCSPAuthFromDB(ctx, token)
 	if err != nil {
 		return nil, err
 	}
 	// find the token status by id
-	return ms.cspProcess(ctx, cspAuthTokenStatusID(tokenData.UserID, pid))
+	return ms.fetchCSPProcessFromDB(ctx, cspAuthTokenStatusID(tokenData.UserID, pid))
 }
 
 // IsCSPProcessConsumed method checks if a CSP process has been consumed by a
@@ -135,7 +135,7 @@ func (ms *MongoStorage) IsCSPProcessConsumed(userID, processID internal.HexBytes
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	// try to find the token status by id
-	currentStatus, err := ms.cspProcess(ctx, cspAuthTokenStatusID(userID, processID))
+	currentStatus, err := ms.fetchCSPProcessFromDB(ctx, cspAuthTokenStatusID(userID, processID))
 	if err != nil {
 		if err == ErrTokenNotFound {
 			return false, nil
@@ -143,7 +143,7 @@ func (ms *MongoStorage) IsCSPProcessConsumed(userID, processID internal.HexBytes
 		return false, err
 	}
 	// check if the token is verified
-	tokenData, err := ms.cspAuth(ctx, currentStatus.ConsumedToken)
+	tokenData, err := ms.fetchCSPAuthFromDB(ctx, currentStatus.ConsumedToken)
 	if err != nil {
 		return false, err
 	}
@@ -168,14 +168,14 @@ func (ms *MongoStorage) ConsumeCSPProcess(token, pid, address internal.HexBytes)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	// check if the token exists
-	tokenData, err := ms.cspAuth(ctx, token)
+	tokenData, err := ms.fetchCSPAuthFromDB(ctx, token)
 	if err != nil {
 		return err
 	}
 	// calculate the status id
 	id := cspAuthTokenStatusID(tokenData.UserID, pid)
 	// get the token status
-	tokenStatus, err := ms.cspProcess(ctx, id)
+	tokenStatus, err := ms.fetchCSPProcessFromDB(ctx, id)
 	if err != nil && !errors.Is(err, ErrTokenNotFound) {
 		return err
 	}
@@ -207,7 +207,7 @@ func (ms *MongoStorage) ConsumeCSPProcess(token, pid, address internal.HexBytes)
 	return nil
 }
 
-func (ms *MongoStorage) cspAuth(ctx context.Context, token internal.HexBytes) (*CSPAuth, error) {
+func (ms *MongoStorage) fetchCSPAuthFromDB(ctx context.Context, token internal.HexBytes) (*CSPAuth, error) {
 	tokenData := new(CSPAuth)
 	if err := ms.cspTokens.FindOne(ctx, bson.M{"_id": token}).Decode(tokenData); err != nil {
 		if err == mongo.ErrNoDocuments {
@@ -218,7 +218,7 @@ func (ms *MongoStorage) cspAuth(ctx context.Context, token internal.HexBytes) (*
 	return tokenData, nil
 }
 
-func (ms *MongoStorage) cspProcess(ctx context.Context, id internal.HexBytes) (*CSPProcess, error) {
+func (ms *MongoStorage) fetchCSPProcessFromDB(ctx context.Context, id internal.HexBytes) (*CSPProcess, error) {
 	// find the token status
 	tokenStatus := new(CSPProcess)
 	if err := ms.cspTokensStatus.FindOne(ctx, bson.M{"_id": id}).Decode(tokenStatus); err != nil {

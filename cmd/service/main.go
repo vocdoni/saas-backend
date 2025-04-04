@@ -91,11 +91,10 @@ func main() {
 
 	log.Init("debug", "stdout", os.Stderr)
 	// init Stripe client
-	if stripeAPISecret != "" || stripeWebhookSecret != "" {
-		stripe.Init(stripeAPISecret, stripeWebhookSecret)
-	} else {
+	if stripeAPISecret == "" && stripeWebhookSecret == "" {
 		log.Fatalf("stripeApiSecret and stripeWebhookSecret are required")
 	}
+	stripe.Init(stripeAPISecret, stripeWebhookSecret)
 	availablePlans, err := stripe.GetPlans()
 	if err != nil || len(availablePlans) == 0 {
 		log.Fatalf("could not get the available plans: %v", err)
@@ -194,10 +193,9 @@ func main() {
 		log.Fatalf("could not create the CSP service: %v", err)
 		return
 	}
-	subscriptions := subscriptions.New(&subscriptions.Config{
+	apiConf.Subscriptions = subscriptions.New(&subscriptions.Config{
 		DB: database,
 	})
-	apiConf.Subscriptions = subscriptions
 	// initialize the s3 like  object storage
 	apiConf.ObjectStorage, err = objectstorage.New(&objectstorage.Config{
 		DB: database,

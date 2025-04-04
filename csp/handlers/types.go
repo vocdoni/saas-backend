@@ -1,5 +1,7 @@
 package handlers
 
+//revive:disable:max-public-structs
+
 import (
 	"time"
 

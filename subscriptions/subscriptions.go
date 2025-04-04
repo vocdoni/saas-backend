@@ -147,9 +147,7 @@ func (p *Subscriptions) HasTxPermission(
 		if !user.HasRoleFor(org.Address, db.AdminRole) && !user.HasRoleFor(org.Address, db.ManagerRole) {
 			return false, fmt.Errorf("user does not have admin role")
 		}
-
 	}
-
 	return true, nil
 }
 

@@ -59,6 +59,8 @@ func (a *API) buildLoginResponse(id string) (*apicommon.LoginResponse, error) {
 // error if the URL could not be built. It encodes the parameters in the query
 // string of the URL to prevent any issues with special characters. It returns
 // the URL as a string and an error if the URL could not be built.
+//
+//revive:disable:import-shadowing
 func (a *API) buildWebAppURL(path string, params map[string]any) (string, error) {
 	// parse the web app URL with the path provided
 	url, err := url.Parse(a.webAppURL + path)
@@ -82,13 +84,14 @@ func (a *API) buildWebAppURL(path string, params map[string]any) (string, error)
 // It returns the generated verification code, the link to the web app and
 // an error if the verification code could not be generated or stored in the
 // database.
-func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) (string, string, error) {
+func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) (
+	verificationCode string, verificationLink string, err error,
+) {
 	// generate verification code if the mail service is available, if not
 	// the verification code will not be sent but stored in the database
 	// generated with just the user email to mock the verification process
-	var code string
 	if a.mail != nil {
-		code = util.RandomHex(apicommon.VerificationCodeLength)
+		verificationCode = util.RandomHex(apicommon.VerificationCodeLength)
 	}
 	var webAppURI string
 	var linkParams map[string]any
@@ -100,7 +103,7 @@ func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) 
 			return "", "", fmt.Errorf("invalid target type")
 		}
 		// generate the verification code for the user and the expiration time
-		hashCode := internal.HashVerificationCode(user.Email, code)
+		hashCode := internal.HashVerificationCode(user.Email, verificationCode)
 		exp := time.Now().Add(apicommon.VerificationCodeExpiration)
 		// store the verification code in the database
 		if err := a.db.SetVerificationCode(&db.User{ID: user.ID}, hashCode, codeType, exp); err != nil {
@@ -113,7 +116,7 @@ func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) 
 		}
 		linkParams = map[string]any{
 			"email": user.Email,
-			"code":  code,
+			"code":  verificationCode,
 		}
 	case db.CodeTypeOrgInvite:
 		// the target should be a database organization invite
@@ -123,7 +126,7 @@ func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) 
 		}
 		// set the verification code for the organization invite and the
 		// expiration time
-		invite.InvitationCode = code
+		invite.InvitationCode = verificationCode
 		invite.Expiration = time.Now().Add(apicommon.InvitationExpiration)
 		// store the organization invite in the database
 		if err := a.db.CreateInvitation(invite); err != nil {
@@ -141,6 +144,6 @@ func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) 
 	}
 	// generate the verification link to the web app with the selected uri
 	// and the link parameters
-	verificationLink, err := a.buildWebAppURL(webAppURI, linkParams)
-	return code, verificationLink, err
+	verificationLink, err = a.buildWebAppURL(webAppURI, linkParams)
+	return verificationCode, verificationLink, err
 }

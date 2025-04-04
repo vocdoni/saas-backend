@@ -124,7 +124,7 @@ func (a *Account) handleNewProcessTx(tx *models.Tx, targetAddr common.Address) (
 // calculateSetProcessElectionPrice calculates the election price for a SetProcess transaction.
 func (a *Account) calculateSetProcessElectionPrice(
 	txSetProcess *models.SetProcessTx,
-	currentProcess interface{},
+	currentProcess any,
 ) uint64 {
 	// Extract the necessary fields based on the actual structure
 	var maxCensusSize uint64
@@ -142,7 +142,7 @@ func (a *Account) calculateSetProcessElectionPrice(
 		GetEncryptedVotes() bool
 		GetAnonymous() bool
 		GetMaxVoteOverwrites() uint32
-		GetCensus() interface{}
+		GetCensus() any
 	}
 
 	// Try to access the fields directly first
@@ -158,7 +158,7 @@ func (a *Account) calculateSetProcessElectionPrice(
 				maxCensusSize = censusWithSize.GetSize()
 			}
 		}
-	} else {
+	} else { //nolint empty branch
 		// Fallback: use default values
 		// In a real implementation, you might want to use reflection to extract values
 		// from the currentProcess object, but for now we'll use defaults
@@ -190,7 +190,7 @@ func (a *Account) calculateSetProcessElectionPrice(
 }
 
 // validateSetProcessTx validates a SetProcess transaction.
-func (a *Account) validateSetProcessTx(txSetProcess *models.SetProcessTx) error {
+func (*Account) validateSetProcessTx(txSetProcess *models.SetProcessTx) error {
 	if txSetProcess == nil || txSetProcess.ProcessId == nil {
 		return errors.ErrInvalidTxFormat.With("missing fields")
 	}
@@ -295,7 +295,7 @@ func (a *Account) handleSetSIKTx(tx *models.Tx, targetAddr common.Address) (*mod
 }
 
 // handleCollectFaucetTx handles a CollectFaucet transaction.
-func (a *Account) handleCollectFaucetTx(tx *models.Tx) (*models.Tx, *models.TxType, error) {
+func (*Account) handleCollectFaucetTx(tx *models.Tx) (*models.Tx, *models.TxType, error) {
 	txCollectFaucet := tx.GetCollectFaucet()
 	txType := models.TxType_COLLECT_FAUCET
 

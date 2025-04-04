@@ -12,7 +12,7 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-func (ms *MongoStorage) organization(ctx context.Context, address string) (*Organization, error) {
+func (ms *MongoStorage) fetchOrganizationFromDB(ctx context.Context, address string) (*Organization, error) {
 	// find the organization in the database by its address (case insensitive)
 	filter := bson.M{"_id": bson.M{"$regex": address, "$options": "i"}}
 	result := ms.organizations.FindOne(ctx, filter)
@@ -37,7 +37,7 @@ func (ms *MongoStorage) Organization(address string) (*Organization, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	// find the organization in the database
-	org, err := ms.organization(ctx, address)
+	org, err := ms.fetchOrganizationFromDB(ctx, address)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +55,7 @@ func (ms *MongoStorage) OrganizationWithParent(address string) (org *Organizatio
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	// find the organization in the database
-	org, err = ms.organization(ctx, address)
+	org, err = ms.fetchOrganizationFromDB(ctx, address)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -63,7 +63,7 @@ func (ms *MongoStorage) OrganizationWithParent(address string) (org *Organizatio
 		return org, nil, nil
 	}
 	// find the parent organization in the database
-	parent, err = ms.organization(ctx, org.Parent)
+	parent, err = ms.fetchOrganizationFromDB(ctx, org.Parent)
 	if err != nil {
 		return nil, nil, err
 	}

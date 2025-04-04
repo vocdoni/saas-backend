@@ -150,12 +150,14 @@ func New(conf *Config) *API {
 func (a *API) Start() {
 	go func() {
 		if err := http.ListenAndServe(fmt.Sprintf("%s:%d", a.host, a.port), a.initRouter()); err != nil {
-			log.Fatalf("failed to start the API server: %v", err)
+			log.Fatalf("failed to start the API server: %v", err) //revive:disable:deep-exit
 		}
 	}()
 }
 
 // router creates the router with all the routes and middleware.
+//
+//revive:disable:function-length
 func (a *API) initRouter() http.Handler {
 	// Create the router with a basic middleware stack
 	r := chi.NewRouter()
@@ -215,7 +217,7 @@ func (a *API) initRouter() http.Handler {
 		r.Get(organizationMembersEndpoint, a.organizationMembersHandler)
 		// get organization subscription
 		log.Infow("new route", "method", "GET", "path", organizationSubscriptionEndpoint)
-		r.Get(organizationSubscriptionEndpoint, a.getOrganizationSubscriptionHandler)
+		r.Get(organizationSubscriptionEndpoint, a.organizationSubscriptionHandler)
 		// invite a new admin member to the organization
 		log.Infow("new route", "method", "POST", "path", organizationAddMemberEndpoint)
 		r.Post(organizationAddMemberEndpoint, a.inviteOrganizationMemberHandler)
@@ -305,7 +307,7 @@ func (a *API) initRouter() http.Handler {
 		r.Get(organizationTypesEndpoint, a.organizationsTypesHandler)
 		// get subscriptions
 		log.Infow("new route", "method", "GET", "path", plansEndpoint)
-		r.Get(plansEndpoint, a.getPlansHandler)
+		r.Get(plansEndpoint, a.plansHandler)
 		// get subscription info
 		log.Infow("new route", "method", "GET", "path", planInfoEndpoint)
 		r.Get(planInfoEndpoint, a.planInfoHandler)
