@@ -196,7 +196,7 @@ func createBulkOperations(
 	censusID string,
 	salt string,
 	currentTime time.Time,
-) ([]mongo.WriteModel, []mongo.WriteModel) {
+) (participantOps []mongo.WriteModel, membershipOps []mongo.WriteModel) {
 	var bulkParticipantsOps []mongo.WriteModel
 	var bulkMembershipOps []mongo.WriteModel
 
