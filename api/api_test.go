@@ -45,7 +45,7 @@ const (
 	adminUser  = "admin"
 	adminPass  = "admin123"
 
-	testOauthServiceURL = "http://test-oauth-service"
+	testOAuthServiceURL = "http://test-oauth-service"
 )
 
 // testPort is the port used for the API tests.
@@ -223,7 +223,7 @@ func TestMain(m *testing.M) {
 		FullTransparentMode: false,
 		Subscriptions:       subscriptionsService,
 		CSP:                 testCSP,
-		OauthServiceURL:     testOauthServiceURL,
+		OAuthServiceURL:     testOAuthServiceURL,
 	}).Start()
 	// wait for the API to start
 	if err := pingAPI(testURL(pingEndpoint), 5); err != nil {

@@ -58,7 +58,6 @@ func SignMessage(message []byte, signer *ethereum.SignKeys) ([]byte, error) {
 }
 
 func VerifySignature(message, signature, address string) error {
-	// calcAddress, err := ethereum.AddrFromSignature([]byte(message), []byte(signature))
 	messageBytes := []byte(message)
 	signatureBytes, err := hex.DecodeString(util.TrimHex(signature))
 	if err != nil {

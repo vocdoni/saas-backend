@@ -15,7 +15,7 @@ import (
 	"go.vocdoni.io/dvote/crypto/ethereum"
 )
 
-// testOauthServiceURL is the URL of the OAuth service used for testing
+// testOAuthServiceURL is the URL of the OAuth service used for testing
 
 // These regexes are used to extract tokens from responses
 var (
@@ -34,7 +34,7 @@ type mockTransport struct {
 
 func (m *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// If the request is to the OAuth service, redirect it to our mock server
-	if req.URL.String() == fmt.Sprintf("%s/api/info/getAddress", testOauthServiceURL) {
+	if req.URL.String() == fmt.Sprintf("%s/api/info/getAddress", testOAuthServiceURL) {
 		newURL := fmt.Sprintf("%s/getAddress", m.mockURL)
 		newReq, err := http.NewRequest(req.Method, newURL, req.Body)
 		if err != nil {

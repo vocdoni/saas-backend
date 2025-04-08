@@ -10,7 +10,6 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.vocdoni.io/dvote/log"
 )
 
 // refreshTokenHandler godoc
@@ -146,20 +145,19 @@ func (a *API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *htt
 //	@Failure		401		{object}	errors.Error
 //	@Router			/oauth/login [post]
 func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
-	// het the user info from the request body
+	// get the user info from the request body
 	loginInfo := &apicommon.OauthLoginRequest{}
 	if err := json.NewDecoder(r.Body).Decode(loginInfo); err != nil {
 		errors.ErrMalformedBody.Write(w)
 		return
 	}
-	log.Debugf("%v", loginInfo)
 	// get the user information from the database by email
 	user, err := a.db.UserByEmail(loginInfo.Email)
 	if err != nil && err != db.ErrNotFound {
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
-	// if the user doesn't exist, do oauth verifictaion and on success create the new user
+	// if the user doesn't exist, do oauth verification and on success create the new user
 	if err == db.ErrNotFound {
 		// Register the user
 		// extract from the external signature the user pubkey and verify matches the provided one
@@ -169,20 +167,18 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		// fetch oauth service pubkey or address and verify the internal signature
 		resp, err := http.Get(fmt.Sprintf("%s/api/info/getAddress", a.oauthServiceURL))
-		if err != nil {
-			// TODO create new error for connection with the external service
-			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-			return
-		}
 		defer func() {
 			if err := resp.Body.Close(); err != nil {
 				// handle the error, for example log it
 				fmt.Println("Error closing response body:", err)
 			}
 		}()
+		if err != nil {
+			errors.ErrOauthServerConnectionFailed.WithErr(err).Write(w)
+			return
+		}
 		var result apicommon.OauthServiceAddressResponse
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			// TODO create new error for connection with the external service
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
@@ -204,13 +200,12 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 		if _, err := a.db.SetUser(user); err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		}
-	} else {
-		// Login
-		// check that the address generated password matches the one in the database
-		if pass := internal.HexHashPassword(passwordSalt, loginInfo.UserOauthSignature); pass != user.Password {
-			errors.ErrUnauthorized.Write(w)
-			return
-		}
+	}
+	// Login
+	// check that the address generated password matches the one in the database
+	if pass := internal.HexHashPassword(passwordSalt, loginInfo.UserOauthSignature); pass != user.Password {
+		errors.ErrUnauthorized.Write(w)
+		return
 	}
 	// generate a new token with the user name as the subject
 	res, err := a.buildLoginResponse(loginInfo.Email)

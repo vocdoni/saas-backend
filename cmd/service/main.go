@@ -139,7 +139,7 @@ func main() {
 		WebAppURL:           webURL,
 		ServerURL:           server,
 		FullTransparentMode: fullTransparentMode,
-		OauthServiceURL:     oauthServiceURL,
+		OAuthServiceURL:     oauthServiceURL,
 	}
 
 	cspConf := &csp.Config{

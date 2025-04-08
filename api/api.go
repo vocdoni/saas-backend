@@ -92,7 +92,7 @@ type Config struct {
 	ObjectStorage *objectstorage.Client
 	CSP           *csp.CSP
 	// OAuth service URL
-	OauthServiceURL string
+	OAuthServiceURL string
 }
 
 // API type represents the API HTTP server with JWT authentication capabilities.
@@ -142,7 +142,7 @@ func New(conf *Config) *API {
 		subscriptions:   conf.Subscriptions,
 		objectStorage:   conf.ObjectStorage,
 		csp:             conf.CSP,
-		oauthServiceURL: conf.OauthServiceURL,
+		oauthServiceURL: conf.OAuthServiceURL,
 	}
 }
 
