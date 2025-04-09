@@ -9,6 +9,7 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -20,39 +21,43 @@ func (ms *MongoStorage) SetProcessBundle(bundle *ProcessesBundle) (internal.HexB
 		bundle.ID = primitive.NewObjectID()
 	}
 
-	// Check that the org exists
+	// Check that the org exists before starting the transaction
 	if _, err := ms.Organization(bundle.OrgAddress); err != nil {
 		return nil, fmt.Errorf("failed to get organization: %w", err)
 	}
 
-	// check that the census exists
+	// Check that the census exists before starting the transaction
 	_, err := ms.Census(bundle.Census.ID.Hex())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get census: %w", err)
 	}
 
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
 	// Create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// If the bundle has an ID, update it, otherwise create a new one
-	if bundle.ID.IsZero() {
-		if _, err := ms.processBundles.InsertOne(ctx, bundle); err != nil {
-			return nil, fmt.Errorf("failed to create process bundle: %w", err)
-		}
-	} else {
-		filter := bson.M{"_id": bundle.ID}
-		update := bson.M{"$set": bundle}
-		opts := &options.UpdateOptions{}
-		opts.SetUpsert(true)
+	// Execute the operation within a transaction
+	err = ms.WithTransaction(ctx, func(sessCtx mongo.SessionContext) error {
+		// If the bundle has an ID, update it, otherwise create a new one
+		if bundle.ID.IsZero() {
+			if _, err := ms.processBundles.InsertOne(sessCtx, bundle); err != nil {
+				return fmt.Errorf("failed to create process bundle: %w", err)
+			}
+		} else {
+			filter := bson.M{"_id": bundle.ID}
+			update := bson.M{"$set": bundle}
+			opts := &options.UpdateOptions{}
+			opts.SetUpsert(true)
 
-		if _, err := ms.processBundles.UpdateOne(ctx, filter, update, opts); err != nil {
-			return nil, fmt.Errorf("failed to update process bundle: %w", err)
+			if _, err := ms.processBundles.UpdateOne(sessCtx, filter, update, opts); err != nil {
+				return fmt.Errorf("failed to update process bundle: %w", err)
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-
 	return *new(internal.HexBytes).SetString(bundle.ID.Hex()), nil
 }
 
@@ -67,24 +72,25 @@ func (ms *MongoStorage) DelProcessBundle(hbBundleID internal.HexBytes) error {
 		return ErrInvalidData
 	}
 
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
 	// Create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Delete the process bundle from the database using the ID
-	filter := bson.M{"_id": bundleID}
-	result, err := ms.processBundles.DeleteOne(ctx, filter)
-	if err != nil {
-		return fmt.Errorf("failed to delete process bundle: %w", err)
-	}
+	// Execute the operation within a transaction
+	return ms.WithTransaction(ctx, func(sessCtx mongo.SessionContext) error {
+		// Delete the process bundle from the database using the ID
+		filter := bson.M{"_id": bundleID}
+		result, err := ms.processBundles.DeleteOne(sessCtx, filter)
+		if err != nil {
+			return fmt.Errorf("failed to delete process bundle: %w", err)
+		}
 
-	if result.DeletedCount == 0 {
-		return ErrNotFound
-	}
+		if result.DeletedCount == 0 {
+			return ErrNotFound
+		}
 
-	return nil
+		return nil
+	})
 }
 
 // ProcessBundle retrieves a process bundle from the database based on its ID.
@@ -98,45 +104,67 @@ func (ms *MongoStorage) ProcessBundle(hbBundleID internal.HexBytes) (*ProcessesB
 		return nil, ErrInvalidData
 	}
 
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
 	// Create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	bundle := &ProcessesBundle{}
-	if err := ms.processBundles.FindOne(ctx, bson.M{"_id": bundleID}).Decode(bundle); err != nil {
-		return nil, fmt.Errorf("failed to get process bundle: %w", err)
+	// Read operations don't need transactions, but we'll use a session for consistency
+	session, err := ms.DBClient.StartSession()
+	if err != nil {
+		return nil, fmt.Errorf("failed to start session: %w", err)
 	}
+	defer session.EndSession(ctx)
 
+	var bundle *ProcessesBundle
+	err = mongo.WithSession(ctx, session, func(sessCtx mongo.SessionContext) error {
+		bundle = &ProcessesBundle{}
+		if err := ms.processBundles.FindOne(sessCtx, bson.M{"_id": bundleID}).Decode(bundle); err != nil {
+			return fmt.Errorf("failed to get process bundle: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 	return bundle, nil
 }
 
 // ProcessBundles retrieves all process bundles from the database.
 // Returns a slice of all process bundles with their complete information.
 func (ms *MongoStorage) ProcessBundles() ([]*ProcessesBundle, error) {
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
 	// Create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cursor, err := ms.processBundles.Find(ctx, bson.M{})
+	// Read operations don't need transactions, but we'll use a session for consistency
+	session, err := ms.DBClient.StartSession()
 	if err != nil {
-		return nil, fmt.Errorf("failed to find process bundles: %w", err)
+		return nil, fmt.Errorf("failed to start session: %w", err)
 	}
-	defer func() {
-		err := cursor.Close(ctx)
-		if err != nil {
-			fmt.Println("failed to close cursor")
-		}
-	}()
+	defer session.EndSession(ctx)
 
 	var bundles []*ProcessesBundle
-	if err := cursor.All(ctx, &bundles); err != nil {
-		return nil, fmt.Errorf("failed to decode process bundles: %w", err)
-	}
+	err = mongo.WithSession(ctx, session, func(sessCtx mongo.SessionContext) error {
+		cursor, err := ms.processBundles.Find(sessCtx, bson.M{})
+		if err != nil {
+			return fmt.Errorf("failed to find process bundles: %w", err)
+		}
+		defer func() {
+			err := cursor.Close(sessCtx)
+			if err != nil {
+				fmt.Println("failed to close cursor")
+			}
+		}()
 
+		bundles = []*ProcessesBundle{}
+		if err := cursor.All(sessCtx, &bundles); err != nil {
+			return fmt.Errorf("failed to decode process bundles: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 	return bundles, nil
 }
 
@@ -147,30 +175,41 @@ func (ms *MongoStorage) ProcessBundlesByProcess(processID []byte) ([]*ProcessesB
 		return nil, ErrInvalidData
 	}
 
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
 	// Create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Find bundles where the processes array contains a process with the given ID
-	filter := bson.M{"processes": processID}
-	cursor, err := ms.processBundles.Find(ctx, filter)
+	// Read operations don't need transactions, but we'll use a session for consistency
+	session, err := ms.DBClient.StartSession()
 	if err != nil {
-		return nil, fmt.Errorf("failed to find process bundles by process ID: %w", err)
+		return nil, fmt.Errorf("failed to start session: %w", err)
 	}
-	defer func() {
-		err := cursor.Close(ctx)
-		if err != nil {
-			fmt.Println("failed to close cursor")
-		}
-	}()
+	defer session.EndSession(ctx)
 
 	var bundles []*ProcessesBundle
-	if err := cursor.All(ctx, &bundles); err != nil {
-		return nil, fmt.Errorf("failed to decode process bundles: %w", err)
-	}
+	err = mongo.WithSession(ctx, session, func(sessCtx mongo.SessionContext) error {
+		// Find bundles where the processes array contains a process with the given ID
+		filter := bson.M{"processes": processID}
+		cursor, err := ms.processBundles.Find(sessCtx, filter)
+		if err != nil {
+			return fmt.Errorf("failed to find process bundles by process ID: %w", err)
+		}
+		defer func() {
+			err := cursor.Close(sessCtx)
+			if err != nil {
+				fmt.Println("failed to close cursor")
+			}
+		}()
 
+		bundles = []*ProcessesBundle{}
+		if err := cursor.All(sessCtx, &bundles); err != nil {
+			return fmt.Errorf("failed to decode process bundles: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 	return bundles, nil
 }
 
@@ -181,30 +220,41 @@ func (ms *MongoStorage) ProcessBundlesByOrg(orgAddress string) ([]*ProcessesBund
 		return nil, ErrInvalidData
 	}
 
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
 	// Create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Find bundles where the orgAddress matches the given address
-	filter := bson.M{"orgAddress": orgAddress}
-	cursor, err := ms.processBundles.Find(ctx, filter)
+	// Read operations don't need transactions, but we'll use a session for consistency
+	session, err := ms.DBClient.StartSession()
 	if err != nil {
-		return nil, fmt.Errorf("failed to find process bundles by organization: %w", err)
+		return nil, fmt.Errorf("failed to start session: %w", err)
 	}
-	defer func() {
-		err := cursor.Close(ctx)
-		if err != nil {
-			fmt.Println("failed to close cursor")
-		}
-	}()
+	defer session.EndSession(ctx)
 
 	var bundles []*ProcessesBundle
-	if err := cursor.All(ctx, &bundles); err != nil {
-		return nil, fmt.Errorf("failed to decode process bundles: %w", err)
-	}
+	err = mongo.WithSession(ctx, session, func(sessCtx mongo.SessionContext) error {
+		// Find bundles where the orgAddress matches the given address
+		filter := bson.M{"orgAddress": orgAddress}
+		cursor, err := ms.processBundles.Find(sessCtx, filter)
+		if err != nil {
+			return fmt.Errorf("failed to find process bundles by organization: %w", err)
+		}
+		defer func() {
+			err := cursor.Close(sessCtx)
+			if err != nil {
+				fmt.Println("failed to close cursor")
+			}
+		}()
 
+		bundles = []*ProcessesBundle{}
+		if err := cursor.All(sessCtx, &bundles); err != nil {
+			return fmt.Errorf("failed to decode process bundles: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 	return bundles, nil
 }
 
@@ -219,6 +269,7 @@ func (ms *MongoStorage) AddProcessesToBundle(hbBundleID internal.HexBytes, proce
 		return ErrInvalidData
 	}
 
+	// Get the bundle before starting the transaction
 	bundle, err := ms.ProcessBundle(hbBundleID)
 	if err != nil {
 		return fmt.Errorf("failed to get process bundle: %w", err)
@@ -227,12 +278,6 @@ func (ms *MongoStorage) AddProcessesToBundle(hbBundleID internal.HexBytes, proce
 	if bundle.ID.IsZero() {
 		bundle.ID = primitive.NewObjectID()
 	}
-
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-	// Create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
 
 	// Check each process and add it if it doesn't already exist in the bundle
 	processesAdded := false
@@ -255,14 +300,20 @@ func (ms *MongoStorage) AddProcessesToBundle(hbBundleID internal.HexBytes, proce
 		return nil
 	}
 
-	// Update the bundle in the database
-	filter := bson.M{"_id": bundleID}
-	update := bson.M{"$set": bson.M{"processes": bundle.Processes}}
-	if _, err := ms.processBundles.UpdateOne(ctx, filter, update); err != nil {
-		return fmt.Errorf("failed to update process bundle: %w", err)
-	}
+	// Create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	return nil
+	// Execute the operation within a transaction
+	return ms.WithTransaction(ctx, func(sessCtx mongo.SessionContext) error {
+		// Update the bundle in the database
+		filter := bson.M{"_id": bundleID}
+		update := bson.M{"$set": bson.M{"processes": bundle.Processes}}
+		if _, err := ms.processBundles.UpdateOne(sessCtx, filter, update); err != nil {
+			return fmt.Errorf("failed to update process bundle: %w", err)
+		}
+		return nil
+	})
 }
 
 // NewBundleID generates a new unique ObjectID for a process bundle.

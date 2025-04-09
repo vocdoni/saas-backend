@@ -6,19 +6,21 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
-// CreateProcess creates a new process for an organization
+// SetProcess creates a new process for an organization
 func (ms *MongoStorage) SetProcess(process *Process) error {
 	if len(process.ID) == 0 || len(process.OrgAddress) == 0 || len(process.PublishedCensus.Root) == 0 {
 		return ErrInvalidData
 	}
 
-	// check that the org exists
+	// Check that the org exists
 	if _, err := ms.Organization(process.OrgAddress); err != nil {
 		return fmt.Errorf("failed to get organization: %w", err)
 	}
-	// check that the publishedCensus and if not create it
+
+	// Check that the publishedCensus exists and if not create it
 	if _, err := ms.PublishedCensus(process.PublishedCensus.Root, process.PublishedCensus.URI,
 		process.PublishedCensus.Census.ID.Hex()); err != nil {
 		if err != ErrNotFound {
@@ -29,34 +31,36 @@ func (ms *MongoStorage) SetProcess(process *Process) error {
 		}
 	}
 
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-	// create a context with a timeout
+	// Create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if _, err := ms.processes.InsertOne(ctx, process); err != nil {
-		return fmt.Errorf("failed to create process: %w", err)
-	}
-
-	return nil
+	// Execute the operation within a transaction
+	return ms.WithTransaction(ctx, func(sessCtx mongo.SessionContext) error {
+		if _, err := ms.processes.InsertOne(sessCtx, process); err != nil {
+			return fmt.Errorf("failed to create process: %w", err)
+		}
+		return nil
+	})
 }
 
-// DeleteProcess removes a process and all its participants
+// DelProcess removes a process and all its participants
 func (ms *MongoStorage) DelProcess(processID []byte) error {
 	if len(processID) == 0 {
 		return ErrInvalidData
 	}
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-	// create a context with a timeout
+
+	// Create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// delete the process from the database using the ID
-	filter := bson.M{"_id": processID}
-	_, err := ms.processes.DeleteOne(ctx, filter)
-	return err
+	// Execute the operation within a transaction
+	return ms.WithTransaction(ctx, func(sessCtx mongo.SessionContext) error {
+		// Delete the process from the database using the ID
+		filter := bson.M{"_id": processID}
+		_, err := ms.processes.DeleteOne(sessCtx, filter)
+		return err
+	})
 }
 
 // Process retrieves a process from the DB based on it ID
@@ -65,16 +69,27 @@ func (ms *MongoStorage) Process(processID []byte) (*Process, error) {
 		return nil, ErrInvalidData
 	}
 
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-	// create a context with a timeout
+	// Create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	process := &Process{}
-	if err := ms.processes.FindOne(ctx, bson.M{"_id": processID}).Decode(process); err != nil {
-		return nil, fmt.Errorf("failed to get process: %w", err)
+	// Read operations don't need transactions, but we'll use a session for consistency
+	session, err := ms.DBClient.StartSession()
+	if err != nil {
+		return nil, fmt.Errorf("failed to start session: %w", err)
 	}
+	defer session.EndSession(ctx)
 
+	var process *Process
+	err = mongo.WithSession(ctx, session, func(sessCtx mongo.SessionContext) error {
+		process = &Process{}
+		if err := ms.processes.FindOne(sessCtx, bson.M{"_id": processID}).Decode(process); err != nil {
+			return fmt.Errorf("failed to get process: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 	return process, nil
 }

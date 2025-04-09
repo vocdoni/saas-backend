@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -17,11 +16,10 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-// MongoStorage uses an external MongoDB service for stoting the user data and election details.
+// MongoStorage uses an external MongoDB service for storing the user data and election details.
 type MongoStorage struct {
 	database    string
 	DBClient    *mongo.Client
-	keysLock    sync.RWMutex
 	stripePlans []*Plan
 
 	users               *mongo.Collection
@@ -195,8 +193,6 @@ func (ms *MongoStorage) Reset() error {
 
 func (ms *MongoStorage) String() string {
 	const contextTimeout = 30 * time.Second
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
 	// get all users
 	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
 	defer cancel()
@@ -396,8 +392,6 @@ func (ms *MongoStorage) String() string {
 
 // Import imports a JSON dataset produced by String() into the database.
 func (ms *MongoStorage) Import(jsonData []byte) error {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
 	// decode import data
 	log.Infow("importing database")
 	var collection Collection
