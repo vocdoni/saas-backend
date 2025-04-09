@@ -91,6 +91,8 @@ type Config struct {
 	// Object storage
 	ObjectStorage *objectstorage.Client
 	CSP           *csp.CSP
+	// OAuth service URL
+	OAuthServiceURL string
 }
 
 // API type represents the API HTTP server with JWT authentication capabilities.
@@ -111,6 +113,7 @@ type API struct {
 	subscriptions   *subscriptions.Subscriptions
 	objectStorage   *objectstorage.Client
 	csp             *csp.CSP
+	oauthServiceURL string
 }
 
 // New creates a new API HTTP server. It does not start the server. Use Start() for that.
@@ -139,6 +142,7 @@ func New(conf *Config) *API {
 		subscriptions:   conf.Subscriptions,
 		objectStorage:   conf.ObjectStorage,
 		csp:             conf.CSP,
+		oauthServiceURL: conf.OAuthServiceURL,
 	}
 }
 
@@ -266,6 +270,9 @@ func (a *API) initRouter() http.Handler {
 		// login
 		log.Infow("new route", "method", "POST", "path", authLoginEndpoint)
 		r.Post(authLoginEndpoint, a.authLoginHandler)
+		// oauth login
+		log.Infow("new route", "method", "POST", "path", oauthLoginEndpoint)
+		r.Post(oauthLoginEndpoint, a.oauthLoginHandler)
 		// register user
 		log.Infow("new route", "method", "POST", "path", usersEndpoint)
 		r.Post(usersEndpoint, a.registerHandler)

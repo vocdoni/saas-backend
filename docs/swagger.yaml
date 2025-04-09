@@ -22191,6 +22191,36 @@ paths:
       summary: Check the progress of adding participants
       tags:
       - census
+  /oauth/login:
+    post:
+      consumes:
+      - application/json
+      description: Register/Authenticate a user and get a JWT token
+      parameters:
+      - description: Login credentials
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.UserInfo'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.LoginResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Login using OAuth service
+      tags:
+      - auth
   /organizations:
     post:
       consumes:
