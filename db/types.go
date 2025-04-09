@@ -369,6 +369,7 @@ type Process struct {
 	OrgAddress common.Address     `json:"orgAdress" bson:"orgAddress"`
 	Census     Census             `json:"census" bson:"census"`
 	Metadata   map[string]any     `json:"metadata"  bson:"metadata"`
+	Draft      bool               `json:"draft" bson:"draft"`
 }
 
 // ProcessesBundle represents a group of voting processes that share a common census.
