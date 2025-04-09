@@ -132,5 +132,10 @@ func (hb HexBytes) Address() common.Address {
 }
 
 func (hb HexBytes) Equals(b HexBytes) bool {
-	return hb.String() == b.String()
+	return hb.Cmp(b) == 0
+}
+
+// Cmp compares two HexBytes
+func (hb HexBytes) Cmp(other HexBytes) int {
+	return bytes.Compare(hb, other)
 }

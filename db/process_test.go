@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -56,6 +57,7 @@ func TestProcess(t *testing.T) {
 
 	t.Run("TestSetAndGetProcess", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
+		_ = setupTestPrerequisites1(c, testDB)
 		// test not found process
 		process, err := testDB.ProcessByAddress(testProcessID)
 		c.Assert(process, qt.IsNil)
@@ -110,6 +112,17 @@ func TestProcess(t *testing.T) {
 		c.Assert(retrieved.Census.Published.Root, qt.DeepEquals, rootHex)
 		c.Assert(retrieved.Census.ID, qt.Equals, census.ID)
 		c.Assert(retrieved.Metadata, qt.DeepEquals, testProcessMetadata)
+		c.Assert(retrieved.Address, qt.DeepEquals, testProcessID)
+
+		// update a process
+		retrieved.Metadata["key1"] = "newvalue1"
+		_, err = testDB.SetProcess(retrieved)
+		c.Assert(err, qt.IsNil)
+
+		// retrieve updated process
+		updated, err := testDB.Process(pid)
+		c.Assert(err, qt.IsNil)
+		c.Assert(updated.Metadata["key1"], qt.Equals, "newvalue1")
 	})
 
 	t.Run("TestSetProcessValidation", func(_ *testing.T) {
@@ -164,5 +177,83 @@ func TestProcess(t *testing.T) {
 		// test delete with empty ID
 		err = testDB.DelProcess(primitive.NilObjectID)
 		c.Assert(err, qt.Equals, ErrInvalidData)
+	})
+
+	t.Run("TestListProcesses", func(_ *testing.T) {
+		c.Assert(testDB.Reset(), qt.IsNil)
+		census := setupTestPrerequisites1(c, testDB)
+
+		// Create draft process (no address)
+		draftProcess := &Process{
+			OrgAddress: testOrgAddress,
+			Census:     *census,
+			Metadata:   map[string]any{"type": "draft"},
+		}
+		draftID, err := testDB.SetProcess(draftProcess)
+		c.Assert(err, qt.IsNil)
+
+		// Create published process (with address)
+		publishedProcess := &Process{
+			Address:    testProcessID,
+			OrgAddress: testOrgAddress,
+			Census:     *census,
+			Metadata:   map[string]any{"type": "published"},
+		}
+		publishedID, err := testDB.SetProcess(publishedProcess)
+		c.Assert(err, qt.IsNil)
+
+		// Test listing draft processes
+		totalItems, processes, err := testDB.ListProcesses(testOrgAddress, 1, 10, DraftOnly)
+		c.Assert(err, qt.IsNil)
+		c.Assert(totalItems, qt.Equals, int64(1))
+		c.Assert(processes, qt.HasLen, 1)
+		c.Assert(processes[0].ID, qt.Equals, draftID)
+		c.Assert(processes[0].Address, qt.IsNil)
+		c.Assert(processes[0].Metadata["type"], qt.Equals, "draft")
+
+		// Test listing published processes
+		totalItems, processes, err = testDB.ListProcesses(testOrgAddress, 1, 10, PublishedOnly)
+		c.Assert(err, qt.IsNil)
+		c.Assert(totalItems, qt.Equals, int64(1))
+		c.Assert(processes, qt.HasLen, 1)
+		c.Assert(processes[0].ID, qt.Equals, publishedID)
+		c.Assert(processes[0].Address, qt.DeepEquals, testProcessID)
+		c.Assert(processes[0].Metadata["type"], qt.Equals, "published")
+
+		// Test with non-existent organization
+		totalItems, processes, err = testDB.ListProcesses(testNonExistentOrg, 1, 10, AllProcesses)
+		c.Assert(err, qt.IsNil)
+		c.Assert(totalItems, qt.Equals, int64(0))
+		c.Assert(processes, qt.HasLen, 0)
+
+		// Test with empty organization address
+		totalItems, processes, err = testDB.ListProcesses(common.Address{}, 1, 10, AllProcesses)
+		c.Assert(err, qt.Equals, ErrInvalidData)
+		c.Assert(totalItems, qt.Equals, int64(0))
+		c.Assert(processes, qt.IsNil)
+
+		// Test pagination
+		// Create more draft processes
+		for i := 0; i < 5; i++ {
+			extraDraftProcess := &Process{
+				OrgAddress: testOrgAddress,
+				Census:     *census,
+				Metadata:   map[string]any{"type": "draft", "index": i},
+			}
+			_, err = testDB.SetProcess(extraDraftProcess)
+			c.Assert(err, qt.IsNil)
+		}
+
+		// Test first page with page size 3
+		totalItems, processes, err = testDB.ListProcesses(testOrgAddress, 1, 3, DraftOnly)
+		c.Assert(err, qt.IsNil)
+		c.Assert(totalItems, qt.Equals, int64(6)) // 6 draft processes total, 3 per page = 2 pages
+		c.Assert(processes, qt.HasLen, 3)
+
+		// Test second page
+		totalItems, processes, err = testDB.ListProcesses(testOrgAddress, 2, 3, DraftOnly)
+		c.Assert(err, qt.IsNil)
+		c.Assert(totalItems, qt.Equals, int64(6))
+		c.Assert(processes, qt.HasLen, 3)
 	})
 }

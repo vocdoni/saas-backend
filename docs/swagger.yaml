@@ -243,6 +243,18 @@ definitions:
         - $ref: '#/definitions/apicommon.Pagination'
         description: Pagination fields
     type: object
+  apicommon.ListOrganizationProcesses:
+    properties:
+      pagination:
+        allOf:
+        - $ref: '#/definitions/apicommon.Pagination'
+        description: Pagination fields
+      processes:
+        description: List of organization processes
+        items:
+          $ref: '#/definitions/db.Process'
+        type: array
+    type: object
   apicommon.LoginResponse:
     properties:
       expirity:
@@ -2388,6 +2400,29 @@ paths:
       summary: Check the progress of adding members
       tags:
       - organizations
+  /organizations/{address}/processes/drafts:
+    get:
+      consumes:
+      - application/json
+      description: Returns a list of voting process drafts.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ListOrganizationProcesses'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Get paginated list of process drafts
+      tags:
+      - process
   /organizations/{address}/subscription:
     get:
       consumes:
@@ -3177,6 +3212,50 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Get process information
+      tags:
+      - process
+    put:
+      consumes:
+      - application/json
+      description: Update an existing voting process. Requires Manager/Admin role.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Process update information
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.CreateProcessRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Update an existing voting process
       tags:
       - process
   /process/{processId}/sign-info:
