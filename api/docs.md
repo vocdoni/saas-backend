@@ -6,6 +6,7 @@
 
 - [🔐 Auth](#-auth)
   - [🔑 Login](#-login)
+  - [🌐 OAuth Login](#-oauth-login)
   - [🥤 Refresh token](#-refresh-token)
   - [💼 User writable organizations addresses](#-user-writable-organizations-addresses)
 - [🧾 Transactions](#-transactions)
@@ -96,6 +97,44 @@
 | `400` | `40004` | `malformed JSON body` |
 | `401` | `40014` | `user account not verified` |
 | `500` | `50002` | `internal server error` |
+
+### 🌐 OAuth Login
+
+* **Path** `/oauth/login`
+* **Method** `POST`
+* **Request Body** 
+```json
+{
+    "email": "my@email.me",
+    "firstName": "Steve",
+    "lastName": "Urkel",
+    "oauthSignature": "<signature_from_oauth_service>",
+    "userOAuthSignature": "<user_signature_on_oauth_signature>",
+    "address": "0x..."
+}
+```
+
+* **Description**
+Authenticates a user using OAuth. If the user doesn't exist, a new account is created with the provided information. The endpoint performs two signature verifications:
+1. Verifies the user's signature (`userOAuthSignature`) against the OAuth signature
+2. Verifies the OAuth service's signature (`oauthSignature`) against the user's email
+
+* **Response**
+```json
+{
+  "token": "<jwt_token>",
+  "expirity": "2024-08-21T11:26:54.368718+02:00"
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40004` | `malformed JSON body` |
+| `500` | `50002` | `internal server error` |
+| `500` | `50007` | `OAuth server connection failed` |
 
 ### 🥤 Refresh token
 

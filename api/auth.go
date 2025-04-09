@@ -143,6 +143,7 @@ func (*API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *http.
 //	@Success		200		{object}	apicommon.LoginResponse
 //	@Failure		400		{object}	errors.Error
 //	@Failure		401		{object}	errors.Error
+//	@Failure		500		{object}	errors.Error
 //	@Router			/oauth/login [post]
 func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user info from the request body

@@ -22218,6 +22218,10 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/errors.Error'
       summary: Login using OAuth service
       tags:
       - auth
