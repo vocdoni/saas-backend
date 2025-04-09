@@ -239,6 +239,9 @@ func (a *API) initRouter() http.Handler {
 		// get organization censuses
 		log.Infow("new route", "method", "GET", "path", organizationCensusesEndpoint)
 		r.Get(organizationCensusesEndpoint, a.organizationCensusesHandler)
+		// get organization draft processes
+		log.Infow("new route", "method", "GET", "path", organizationListProcessDraftsEndpoint)
+		r.Get(organizationListProcessDraftsEndpoint, a.organizationListProcessDraftsHandler)
 		// pending organization invitations
 		log.Infow("new route", "method", "GET", "path", organizationPendingUsersEndpoint)
 		r.Get(organizationPendingUsersEndpoint, a.pendingOrganizationUsersHandler)
@@ -336,6 +339,8 @@ func (a *API) initRouter() http.Handler {
 		// PROCESS ROUTES
 		log.Infow("new route", "method", "POST", "path", processCreateEndpoint)
 		r.Post(processCreateEndpoint, a.createProcessHandler)
+		log.Infow("new route", "method", "PUT", "path", processEndpoint)
+		r.Put(processEndpoint, a.updateProcessHandler)
 		// PROCESS BUNDLE ROUTES (private)
 		log.Infow("new route", "method", "POST", "path", processBundleEndpoint)
 		r.Post(processBundleEndpoint, a.createProcessBundleHandler)

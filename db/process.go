@@ -8,11 +8,16 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// CreateProcess creates a new process for an organization
+// SetProcess creates a new process or updates an existing one for an organization.
+// If the process already exists and is in draft mode, it will be updated.
 func (ms *MongoStorage) SetProcess(process *Process) (primitive.ObjectID, error) {
-	if process.OrgAddress.Cmp(common.Address{}) == 0 {
+	// validate input
+	// either OrgAddress or Census.ID cannot be empty in order to connect to an organization
+	if (process.OrgAddress.Cmp(common.Address{}) == 0) {
 		return primitive.NilObjectID, ErrInvalidData
 	}
 
@@ -32,6 +37,20 @@ func (ms *MongoStorage) SetProcess(process *Process) (primitive.ObjectID, error)
 		if len(census.Published.Root) == 0 || len(census.Published.URI) == 0 {
 			return primitive.NilObjectID, fmt.Errorf("census %s does not have a published root or URI", census.ID.Hex())
 		}
+		if census.OrgAddress.Cmp(process.OrgAddress) != 0 {
+			return primitive.NilObjectID, fmt.Errorf("census %s does not belong to organization %s",
+				census.ID.Hex(), process.OrgAddress.String())
+		}
+	}
+
+	if process.ID == primitive.NilObjectID {
+		// if the process doesn't exist, create its id
+		process.ID = primitive.NewObjectID()
+	}
+
+	updateDoc, err := dynamicUpdateDocument(process, []string{"draft"})
+	if err != nil {
+		return primitive.NilObjectID, fmt.Errorf("failed to create update document: %w", err)
 	}
 
 	if process.ID.IsZero() {
@@ -42,9 +61,15 @@ func (ms *MongoStorage) SetProcess(process *Process) (primitive.ObjectID, error)
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	_, err := ms.processes.InsertOne(ctx, process)
+	// Use ReplaceOne with upsert option to either update an existing process or insert a new one
+	filter := bson.M{"_id": process.ID}
+	opts := options.Update().SetUpsert(true)
+	res, err := ms.processes.UpdateOne(ctx, filter, updateDoc, opts)
 	if err != nil {
-		return primitive.NilObjectID, fmt.Errorf("failed to create process: %w", err)
+		return primitive.NilObjectID, fmt.Errorf("failed to create or update process: %w", err)
+	}
+	if res.UpsertedID == nil {
+		return primitive.NilObjectID, nil
 	}
 
 	return process.ID, nil
@@ -77,12 +102,15 @@ func (ms *MongoStorage) Process(processID primitive.ObjectID) (*Process, error) 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	process := &Process{}
-	if err := ms.processes.FindOne(ctx, bson.M{"_id": processID}).Decode(process); err != nil {
+	process := Process{}
+	if err := ms.processes.FindOne(ctx, bson.M{"_id": processID}).Decode(&process); err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("failed to get process: %w", err)
 	}
 
-	return process, nil
+	return &process, nil
 }
 
 // Process retrieves a process from the DB based on its address
@@ -97,8 +125,33 @@ func (ms *MongoStorage) ProcessByAddress(address internal.HexBytes) (*Process, e
 
 	process := &Process{}
 	if err := ms.processes.FindOne(ctx, bson.M{"address": address}).Decode(process); err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("failed to get process: %w", err)
 	}
 
 	return process, nil
+}
+
+// ListProcesses retrieves all processes from the DB for an organization
+func (ms *MongoStorage) ListProcesses(orgAddress common.Address, page, limit int64, draft DraftFilter) (int64, []Process, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return 0, nil, ErrInvalidData
+	}
+
+	// Create filter - draft processes have nil address, published processes have non-nil address
+	filter := bson.M{
+		"orgAddress": orgAddress,
+	}
+	switch draft {
+	case DraftOnly:
+		filter["address"] = bson.M{"$eq": nil}
+	case PublishedOnly:
+		filter["address"] = bson.M{"$ne": nil}
+	default:
+		// no filter
+	}
+
+	return paginatedDocuments[Process](ms.processes, page, limit, filter, options.Find())
 }

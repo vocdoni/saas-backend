@@ -255,6 +255,15 @@ type ListOrganizationMemberGroupResponse struct {
 	Members []OrgMember `json:"members"`
 }
 
+// ListOrganizationProcesses represents the response for listing the processes of an organization.
+// swagger:model ListOrganizationProcesses
+type ListOrganizationProcesses struct {
+	// Pagination fields
+	Pagination *Pagination `json:"pagination"`
+	// List of organization processes
+	Processes []db.Process `json:"processes"`
+}
+
 // ValidateMemberGroupRequest validates the request for creating or updating an organization member group.
 // Validates that either AuthFields or TwoFaFields are provided and checks for duplicates or empty fields.
 // swagger:model ValidateMemberGroupRequest
@@ -959,6 +968,20 @@ type CreateProcessRequest struct {
 	// Organization address
 	OrgAddress common.Address `json:"orgAddress"`
 
+	// Vochain ID/Address of the process
+	Address internal.HexBytes `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
+
+	// Census ID
+	CensusID internal.HexBytes `json:"censusId" swaggertype:"string" format:"hex" example:"deadbeef"`
+
+	// Additional metadata for the process
+	// Can be any key-value pairs
+	Metadata map[string]any `json:"metadata"`
+}
+
+// UpdateProcessRequest defines the payload for updating an existing voting process.
+// swagger:model UpdateProcessRequest
+type UpdateProcessRequest struct {
 	// Vochain ID/Address of the process
 	Address internal.HexBytes `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
 

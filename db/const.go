@@ -103,3 +103,12 @@ func IsValidUserRole(role UserRole) bool {
 	_, valid := validRoles[role]
 	return valid
 }
+
+// DraftFilter is used to filter processes by draft status
+type DraftFilter int
+
+const (
+	AllProcesses DraftFilter = iota
+	DraftOnly
+	PublishedOnly
+)

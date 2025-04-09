@@ -68,6 +68,9 @@ const (
 	organizationSubscriptionEndpoint = "/organizations/{address}/subscription"
 	// GET /organizations/{address}/censuses to get the organization censuses
 	organizationCensusesEndpoint = "/organizations/{address}/censuses"
+	// GET /organizations/{address}/processes/drafts to get the organization draft processes
+	organizationListProcessDraftsEndpoint = "/organizations/{address}/processes/drafts"
+
 	// GET /organizations/{address}/members to get the organization members
 	organizationMembersEndpoint = "/organizations/{address}/members"
 	// POST /organizations/{address}/members to add new members
