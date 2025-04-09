@@ -146,7 +146,7 @@ func (a *API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *htt
 //	@Router			/oauth/login [post]
 func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user info from the request body
-	loginInfo := &apicommon.OauthLoginRequest{}
+	loginInfo := &apicommon.OAuthLoginRequest{}
 	if err := json.NewDecoder(r.Body).Decode(loginInfo); err != nil {
 		errors.ErrMalformedBody.Write(w)
 		return
@@ -161,7 +161,7 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 	if err == db.ErrNotFound {
 		// Register the user
 		// extract from the external signature the user pubkey and verify matches the provided one
-		if err := account.VerifySignature(loginInfo.OauthSignature, loginInfo.UserOauthSignature, loginInfo.Address); err != nil {
+		if err := account.VerifySignature(loginInfo.OAuthSignature, loginInfo.UserOAuthSignature, loginInfo.Address); err != nil {
 			errors.ErrUnauthorized.WithErr(err).Write(w)
 			return
 		}
@@ -174,17 +174,17 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}()
 		if err != nil {
-			errors.ErrOauthServerConnectionFailed.WithErr(err).Write(w)
+			errors.ErrOAuthServerConnectionFailed.WithErr(err).Write(w)
 			return
 		}
-		var result apicommon.OauthServiceAddressResponse
+		var result apicommon.OAuthServiceAddressResponse
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
 
 		// verify the signature of the oauth service
-		if err := account.VerifySignature(loginInfo.Email, loginInfo.OauthSignature, result.Address); err != nil {
+		if err := account.VerifySignature(loginInfo.Email, loginInfo.OAuthSignature, result.Address); err != nil {
 			errors.ErrUnauthorized.WithErr(err).Write(w)
 			return
 		}
@@ -194,7 +194,7 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 			Email:     loginInfo.Email,
 			FirstName: loginInfo.FirstName,
 			LastName:  loginInfo.LastName,
-			Password:  internal.HexHashPassword(passwordSalt, loginInfo.UserOauthSignature),
+			Password:  internal.HexHashPassword(passwordSalt, loginInfo.UserOAuthSignature),
 			Verified:  true,
 		}
 		if _, err := a.db.SetUser(user); err != nil {
@@ -203,7 +203,7 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// Login
 	// check that the address generated password matches the one in the database
-	if pass := internal.HexHashPassword(passwordSalt, loginInfo.UserOauthSignature); pass != user.Password {
+	if pass := internal.HexHashPassword(passwordSalt, loginInfo.UserOAuthSignature); pass != user.Password {
 		errors.ErrUnauthorized.Write(w)
 		return
 	}

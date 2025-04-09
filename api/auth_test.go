@@ -47,7 +47,7 @@ func (m *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return http.DefaultTransport.RoundTrip(req)
 }
 
-func TestOauthLoginHandler(t *testing.T) {
+func TestOAuthLoginHandler(t *testing.T) {
 	c := qt.New(t)
 
 	// Create a signer for the OAuth service
@@ -57,10 +57,10 @@ func TestOauthLoginHandler(t *testing.T) {
 	oauthAddress := oauthSigner.Address().Hex()
 
 	// Create a mock OAuth service server that will respond to the getAddress request
-	mockOauthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mockOAuthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/getAddress" {
 			// Return the OAuth service address
-			resp := apicommon.OauthServiceAddressResponse{
+			resp := apicommon.OAuthServiceAddressResponse{
 				Address: oauthAddress,
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -72,7 +72,7 @@ func TestOauthLoginHandler(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	defer mockOauthServer.Close()
+	defer mockOAuthServer.Close()
 
 	// Create a signer for the user
 	userSigner := ethereum.NewSignKeys()
@@ -86,7 +86,7 @@ func TestOauthLoginHandler(t *testing.T) {
 	// Set up HTTP client with mock transport
 	http.DefaultClient = &http.Client{
 		Transport: &mockTransport{
-			mockURL: mockOauthServer.URL,
+			mockURL: mockOAuthServer.URL,
 		},
 	}
 	defer func() { http.DefaultClient = originalClient }()
@@ -98,16 +98,16 @@ func TestOauthLoginHandler(t *testing.T) {
 
 	// Test with invalid OAuth signature
 	email := fmt.Sprintf("oauth-user-%d@test.com", internal.RandomInt(10000))
-	invalidOauthSignature := "invalid-signature"
-	userOauthSignatureBytes, err := userSigner.SignEthereum([]byte(invalidOauthSignature))
+	invalidOAuthSignature := "invalid-signature"
+	userOAuthSignatureBytes, err := userSigner.SignEthereum([]byte(invalidOAuthSignature))
 	c.Assert(err, qt.IsNil)
 
-	invalidLoginReq := &apicommon.OauthLoginRequest{
+	invalidLoginReq := &apicommon.OAuthLoginRequest{
 		Email:              email,
 		FirstName:          "Test",
 		LastName:           "User",
-		OauthSignature:     invalidOauthSignature,
-		UserOauthSignature: hex.EncodeToString(userOauthSignatureBytes),
+		OAuthSignature:     invalidOAuthSignature,
+		UserOAuthSignature: hex.EncodeToString(userOAuthSignatureBytes),
 		Address:            userAddress,
 	}
 
@@ -119,12 +119,12 @@ func TestOauthLoginHandler(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	oauthSignatureHex := hex.EncodeToString(oauthSignatureBytes)
 
-	invalidUserLoginReq := &apicommon.OauthLoginRequest{
+	invalidUserLoginReq := &apicommon.OAuthLoginRequest{
 		Email:              email,
 		FirstName:          "Test",
 		LastName:           "User",
-		OauthSignature:     oauthSignatureHex,
-		UserOauthSignature: "invalid-user-signature",
+		OAuthSignature:     oauthSignatureHex,
+		UserOAuthSignature: "invalid-user-signature",
 		Address:            userAddress,
 	}
 
@@ -132,15 +132,15 @@ func TestOauthLoginHandler(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
 	// Test with valid signatures for a new user (should create the user)
-	userOauthSignatureBytes, err = userSigner.SignEthereum([]byte(oauthSignatureHex))
+	userOAuthSignatureBytes, err = userSigner.SignEthereum([]byte(oauthSignatureHex))
 	c.Assert(err, qt.IsNil)
 
-	validLoginReq := &apicommon.OauthLoginRequest{
+	validLoginReq := &apicommon.OAuthLoginRequest{
 		Email:              email,
 		FirstName:          "Test",
 		LastName:           "User",
-		OauthSignature:     oauthSignatureHex,
-		UserOauthSignature: hex.EncodeToString(userOauthSignatureBytes),
+		OAuthSignature:     oauthSignatureHex,
+		UserOAuthSignature: hex.EncodeToString(userOAuthSignatureBytes),
 		Address:            userAddress,
 	}
 
@@ -162,13 +162,13 @@ func TestOauthLoginHandler(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(loginResp.Token, qt.Not(qt.Equals), "")
 
-	// Test with invalid user password (wrong UserOauthSignature for existing user)
-	invalidExistingUserReq := &apicommon.OauthLoginRequest{
+	// Test with invalid user password (wrong UserOAuthSignature for existing user)
+	invalidExistingUserReq := &apicommon.OAuthLoginRequest{
 		Email:              email,
 		FirstName:          "Test",
 		LastName:           "User",
-		OauthSignature:     oauthSignatureHex,
-		UserOauthSignature: "wrong-signature",
+		OAuthSignature:     oauthSignatureHex,
+		UserOAuthSignature: "wrong-signature",
 		Address:            userAddress,
 	}
 

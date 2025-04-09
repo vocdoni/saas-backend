@@ -53,15 +53,15 @@ var (
 	ErrTxTypeNotAllowed        = Error{Code: 40008, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("transaction type not allowed")}
 
 	// Not found errors (404)
-	ErrOrganizationNotFound       = Error{Code: 40049, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("organization not found")}
-	ErrNoOrganizations            = Error{Code: 40042, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("user has no organizations")}
-	ErrUserNotFound               = Error{Code: 40048, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("user not found")}
-	ErrNoOrganizationSubscription = Error{Code: 40040, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("organization has no subscription")}
-	ErrPlanNotFound               = Error{Code: 40043, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("subscription plan not found")}
-	ErrJobNotFound                = Error{Code: 40046, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("job not found")}
-	ErrCensusNotFound             = Error{Code: 40047, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("census not found")}
-	ErrCensusTypeNotFound         = Error{Code: 40048, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("census type not found")}
-	ErrCensusParticipantNotFound  = Error{Code: 40049, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("census participant not found")}
+	ErrOrganizationNotFound       = Error{Code: 40009, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("organization not found")}
+	ErrNoOrganizations            = Error{Code: 40012, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("user has no organizations")}
+	ErrUserNotFound               = Error{Code: 40018, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("user not found")}
+	ErrNoOrganizationSubscription = Error{Code: 40020, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("organization has no subscription")}
+	ErrPlanNotFound               = Error{Code: 40023, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("subscription plan not found")}
+	ErrJobNotFound                = Error{Code: 40026, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("job not found")}
+	ErrCensusNotFound             = Error{Code: 40027, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("census not found")}
+	ErrCensusTypeNotFound         = Error{Code: 40028, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("census type not found")}
+	ErrCensusParticipantNotFound  = Error{Code: 40029, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("census participant not found")}
 
 	// Conflict errors (409)
 	ErrDuplicateConflict = Error{Code: 40901, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("resource already exists")}
@@ -77,5 +77,5 @@ var (
 	ErrVochainRequestFailed        = Error{Code: 50004, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("server error: blockchain request failed"), LogLevel: "error"}
 	ErrStripeError                 = Error{Code: 50005, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("server error: payment processing failed"), LogLevel: "error"}
 	ErrInternalStorageError        = Error{Code: 50006, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("server error: storage operation failed"), LogLevel: "error"}
-	ErrOauthServerConnectionFailed = Error{Code: 50007, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("server error: OAuth server connection failed"), LogLevel: "error"}
+	ErrOAuthServerConnectionFailed = Error{Code: 50007, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("server error: OAuth server connection failed"), LogLevel: "error"}
 )
