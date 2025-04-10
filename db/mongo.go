@@ -396,8 +396,8 @@ func (ms *MongoStorage) String() string {
 
 // Import imports a JSON dataset produced by String() into the database.
 func (ms *MongoStorage) Import(jsonData []byte) error {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
 	// decode import data
 	log.Infow("importing database")
 	var collection Collection

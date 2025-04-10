@@ -95,15 +95,15 @@ func (ms *MongoStorage) DelOrgParticipant(id string) error {
 	return err
 }
 
-// OrgParticipants retrieves a orgParticipants from the DB based on it ID
+// OrgParticipant retrieves a orgParticipant from the DB based on it ID
 func (ms *MongoStorage) OrgParticipant(id string) (*OrgParticipant, error) {
 	objID, err := primitive.ObjectIDFromHex(id)
 	if err != nil {
 		return nil, ErrInvalidData
 	}
 
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -116,13 +116,13 @@ func (ms *MongoStorage) OrgParticipant(id string) (*OrgParticipant, error) {
 	return orgParticipant, nil
 }
 
-// OrgParticipants retrieves a orgParticipants from the DB based on it ID
+// OrgParticipantByNo retrieves a orgParticipant from the DB based on organization address and participant number
 func (ms *MongoStorage) OrgParticipantByNo(orgAddress, participantNo string) (*OrgParticipant, error) {
 	if len(participantNo) == 0 {
 		return nil, ErrInvalidData
 	}
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -255,13 +255,13 @@ func (ms *MongoStorage) BulkUpsertOrgParticipants(
 	return finalResult, nil
 }
 
-// OrgParticipants retrieves a orgParticipants from the DB based on it ID
+// OrgParticipants retrieves all orgParticipants for an organization from the DB
 func (ms *MongoStorage) OrgParticipants(orgAddress string) ([]OrgParticipant, error) {
 	if len(orgAddress) == 0 {
 		return nil, ErrInvalidData
 	}
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -290,8 +290,8 @@ func (ms *MongoStorage) OrgParticipantsMemberships(
 	if len(orgAddress) == 0 || len(censusID) == 0 {
 		return nil, ErrInvalidData
 	}
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

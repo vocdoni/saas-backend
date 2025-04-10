@@ -77,15 +77,15 @@ func (ms *MongoStorage) DelCensus(censusID string) error {
 	return err
 }
 
-// Census retrieves a census from the DB based on it ID
+// Census retrieves a census from the DB based on its ID
 func (ms *MongoStorage) Census(censusID string) (*Census, error) {
 	objID, err := primitive.ObjectIDFromHex(censusID)
 	if err != nil {
 		return nil, ErrInvalidData
 	}
 
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -103,8 +103,8 @@ func (ms *MongoStorage) Census(censusID string) (*Census, error) {
 // address. It checks that the organization exists and returns an error if it
 // doesn't. If the organization exists, it returns the censuses.
 func (ms *MongoStorage) CensusesByOrg(orgAddress string) ([]*Census, error) {
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

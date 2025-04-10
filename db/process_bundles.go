@@ -98,8 +98,8 @@ func (ms *MongoStorage) ProcessBundle(hbBundleID internal.HexBytes) (*ProcessesB
 		return nil, ErrInvalidData
 	}
 
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
 	// Create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -115,8 +115,8 @@ func (ms *MongoStorage) ProcessBundle(hbBundleID internal.HexBytes) (*ProcessesB
 // ProcessBundles retrieves all process bundles from the database.
 // Returns a slice of all process bundles with their complete information.
 func (ms *MongoStorage) ProcessBundles() ([]*ProcessesBundle, error) {
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
 	// Create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -147,8 +147,8 @@ func (ms *MongoStorage) ProcessBundlesByProcess(processID []byte) ([]*ProcessesB
 		return nil, ErrInvalidData
 	}
 
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
 	// Create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -181,8 +181,8 @@ func (ms *MongoStorage) ProcessBundlesByOrg(orgAddress string) ([]*ProcessesBund
 		return nil, ErrInvalidData
 	}
 
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
 	// Create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
