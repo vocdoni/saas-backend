@@ -44,8 +44,8 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(fmt.Sprintf("failed to start MongoDB container: %v", err))
 	}
-	// get the MongoDB connection string
-	mongoURI, err := dbContainer.Endpoint(ctx, "mongodb")
+	// get the MongoDB connection string with replica set name
+	mongoURI, err := test.GetMongoURIWithReplicaSet(ctx, dbContainer)
 	if err != nil {
 		panic(fmt.Sprintf("failed to get MongoDB endpoint: %v", err))
 	}

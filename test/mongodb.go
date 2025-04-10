@@ -5,25 +5,77 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
+	"strings"
+	"time"
 
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 // StartMongoContainer creates and starts an instance of the mongodb container
+// configured as a replica set for transaction support
 func StartMongoContainer(ctx context.Context) (testcontainers.Container, error) {
-	return testcontainers.GenericContainer(ctx,
+	// MongoDB replica set initialization script
+	initScript := `
+	#!/bin/bash
+	echo "Starting replica set initialization"
+	mongosh --eval "
+		rs.initiate({
+			_id: 'rs0',
+			members: [
+				{ _id: 0, host: 'localhost:27017' }
+			]
+		})
+	"
+	echo "Replica set initialized"
+	`
+
+	container, err := testcontainers.GenericContainer(ctx,
 		testcontainers.GenericContainerRequest{
 			ContainerRequest: testcontainers.ContainerRequest{
 				Image:        "mongo",
 				ExposedPorts: []string{"27017/tcp"},
+				Cmd:          []string{"--replSet", "rs0", "--bind_ip_all"},
 				WaitingFor: wait.ForAll(
 					wait.ForLog("Waiting for connections"),
 					wait.ForListeningPort("27017/tcp"),
 				),
+				Files: []testcontainers.ContainerFile{
+					{
+						ContainerFilePath: "/docker-entrypoint-initdb.d/init-rs.sh",
+						FileMode:          0o755,
+						Reader:            strings.NewReader(initScript),
+					},
+				},
 			},
 			Started: true,
 		})
+	if err != nil {
+		return nil, err
+	}
+
+	// Wait a bit for the replica set to initialize
+	time.Sleep(2 * time.Second)
+
+	return container, nil
+}
+
+// GetMongoURIWithReplicaSet returns the MongoDB connection URI with the replica set name
+// This should be used instead of directly calling container.Endpoint(ctx, "mongodb")
+func GetMongoURIWithReplicaSet(ctx context.Context, container testcontainers.Container) (string, error) {
+	mongoURI, err := container.Endpoint(ctx, "mongodb")
+	if err != nil {
+		return "", err
+	}
+
+	// Add the replica set name to the connection string
+	if !strings.Contains(mongoURI, "?") {
+		mongoURI += "/?replicaSet=rs0"
+	} else {
+		mongoURI += "&replicaSet=rs0"
+	}
+
+	return mongoURI, nil
 }
 
 //

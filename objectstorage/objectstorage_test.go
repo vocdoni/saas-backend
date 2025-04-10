@@ -23,8 +23,8 @@ func TestObjectStorage(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	defer func() { _ = dbContainer.Terminate(ctx) }()
 
-	// Get the MongoDB connection string
-	mongoURI, err := dbContainer.Endpoint(ctx, "mongodb")
+	// Get the MongoDB connection string with replica set name
+	mongoURI, err := test.GetMongoURIWithReplicaSet(ctx, dbContainer)
 	c.Assert(err, qt.IsNil)
 
 	// Create a new MongoDB connection with a random database name
