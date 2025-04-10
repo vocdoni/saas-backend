@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -31,13 +32,23 @@ func (ms *MongoStorage) fetchOrganizationFromDB(ctx context.Context, address str
 // If the organization doesn't exist, it returns the specific error.
 // If other errors occur, it returns the error.
 func (ms *MongoStorage) Organization(address string) (*Organization, error) {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
-	// create a context with a timeout
+	// Create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	// find the organization in the database
-	org, err := ms.fetchOrganizationFromDB(ctx, address)
+
+	// Read operations don't need transactions, but we'll use a session for consistency
+	session, err := ms.DBClient.StartSession()
+	if err != nil {
+		return nil, fmt.Errorf("failed to start session: %w", err)
+	}
+	defer session.EndSession(ctx)
+
+	var org *Organization
+	err = mongo.WithSession(ctx, session, func(sessCtx mongo.SessionContext) error {
+		var err error
+		org, err = ms.fetchOrganizationFromDB(sessCtx, address)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -49,21 +60,33 @@ func (ms *MongoStorage) Organization(address string) (*Organization, error) {
 // or the parent organization doesn't exist, it returns the specific error.
 // If other errors occur, it returns the error.
 func (ms *MongoStorage) OrganizationWithParent(address string) (org *Organization, parent *Organization, err error) {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
-	// create a context with a timeout
+	// Create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	// find the organization in the database
-	org, err = ms.fetchOrganizationFromDB(ctx, address)
+
+	// Read operations don't need transactions, but we'll use a session for consistency
+	session, err := ms.DBClient.StartSession()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to start session: %w", err)
 	}
-	if org.Parent == "" {
-		return org, nil, nil
-	}
-	// find the parent organization in the database
-	parent, err = ms.fetchOrganizationFromDB(ctx, org.Parent)
+	defer session.EndSession(ctx)
+
+	err = mongo.WithSession(ctx, session, func(sessCtx mongo.SessionContext) error {
+		// Find the organization in the database
+		org, err = ms.fetchOrganizationFromDB(sessCtx, address)
+		if err != nil {
+			return err
+		}
+		if org.Parent == "" {
+			return nil
+		}
+		// Find the parent organization in the database
+		parent, err = ms.fetchOrganizationFromDB(sessCtx, org.Parent)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -75,98 +98,114 @@ func (ms *MongoStorage) OrganizationWithParent(address string) (org *Organizatio
 // If the organization doesn't exist, it creates it. If an error occurs, it
 // returns the error.
 func (ms *MongoStorage) SetOrganization(org *Organization) error {
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-	// create a context with a timeout
+	// Create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	// prepare the document to be updated in the database modifying only the
-	// fields that have changed
-	// define 'active' parameter to be updated always to update it even its new
-	// value is false
-	updateDoc, err := dynamicUpdateDocument(org, []string{"active"})
-	if err != nil {
-		return err
-	}
-	// set upsert to true to create the document if it doesn't exist
-	opts := options.Update().SetUpsert(true)
-	if _, err := ms.organizations.UpdateOne(ctx, bson.M{"_id": org.Address}, updateDoc, opts); err != nil {
-		if strings.Contains(err.Error(), "duplicate key error") {
-			return ErrAlreadyExists
+
+	// Execute the operation within a transaction
+	return ms.WithTransaction(ctx, func(sessCtx mongo.SessionContext) error {
+		// Prepare the document to be updated in the database modifying only the
+		// fields that have changed
+		// Define 'active' parameter to be updated always to update it even its new
+		// value is false
+		updateDoc, err := dynamicUpdateDocument(org, []string{"active"})
+		if err != nil {
+			return err
 		}
-		return err
-	}
-	// assing organization to the creator if it's not empty including the address
-	// in the organizations list of the user if it's not already there as admin
-	if org.Creator != "" {
-		if err := ms.addOrganizationToUser(ctx, org.Creator, org.Address, AdminRole); err != nil {
-			// if an error occurs, delete the organization from the database
-			if _, delErr := ms.organizations.DeleteOne(ctx, bson.M{"_id": org.Address}); delErr != nil {
-				return errors.Join(err, delErr)
+		// Set upsert to true to create the document if it doesn't exist
+		opts := options.Update().SetUpsert(true)
+		if _, err := ms.organizations.UpdateOne(sessCtx, bson.M{"_id": org.Address}, updateDoc, opts); err != nil {
+			if strings.Contains(err.Error(), "duplicate key error") {
+				return ErrAlreadyExists
 			}
 			return err
 		}
-	}
-	return nil
+		// Assign organization to the creator if it's not empty including the address
+		// in the organizations list of the user if it's not already there as admin
+		if org.Creator != "" {
+			if err := ms.addOrganizationToUser(sessCtx, org.Creator, org.Address, AdminRole); err != nil {
+				// If an error occurs, delete the organization from the database
+				if _, delErr := ms.organizations.DeleteOne(sessCtx, bson.M{"_id": org.Address}); delErr != nil {
+					return errors.Join(err, delErr)
+				}
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // DelOrganization method deletes the organization from the database. If an
 // error occurs, it returns the error.
 func (ms *MongoStorage) DelOrganization(org *Organization) error {
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-	// create a context with a timeout
+	// Create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	// delete the organization from the database
-	_, err := ms.organizations.DeleteOne(ctx, bson.M{"_id": org.Address})
-	return err
+
+	// Execute the operation within a transaction
+	return ms.WithTransaction(ctx, func(sessCtx mongo.SessionContext) error {
+		// Delete the organization from the database
+		_, err := ms.organizations.DeleteOne(sessCtx, bson.M{"_id": org.Address})
+		return err
+	})
 }
 
 // ReplaceCreatorEmail method replaces the creator email in the organizations
 // where it is the creator. If an error occurs, it returns the error.
 func (ms *MongoStorage) ReplaceCreatorEmail(oldEmail, newEmail string) error {
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-	// create a context with a timeout
+	// Create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	// update the creator email in the organizations where it is the creator
-	updateDoc := bson.M{"$set": bson.M{"creator": newEmail}}
-	if _, err := ms.organizations.UpdateMany(ctx, bson.M{"creator": oldEmail}, updateDoc); err != nil {
-		return err
-	}
-	return nil
+
+	// Execute the operation within a transaction
+	return ms.WithTransaction(ctx, func(sessCtx mongo.SessionContext) error {
+		// Update the creator email in the organizations where it is the creator
+		updateDoc := bson.M{"$set": bson.M{"creator": newEmail}}
+		if _, err := ms.organizations.UpdateMany(sessCtx, bson.M{"creator": oldEmail}, updateDoc); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // OrganizationsMembers method returns the users that are members of the
 // organization with the given address. If an error occurs, it returns the
 // error.
 func (ms *MongoStorage) OrganizationsMembers(address string) ([]User, error) {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
-	// create a context with a timeout
+	// Create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	// find the organization in the database
-	filter := bson.M{
-		"organizations": bson.M{
-			"$elemMatch": bson.M{
-				"_id": address,
-			},
-		},
-	}
-	users := []User{}
-	cursor, err := ms.users.Find(ctx, filter)
+
+	// Read operations don't need transactions, but we'll use a session for consistency
+	session, err := ms.DBClient.StartSession()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to start session: %w", err)
 	}
-	defer func() {
-		if err := cursor.Close(ctx); err != nil {
-			log.Warnw("error closing cursor", "error", err)
+	defer session.EndSession(ctx)
+
+	var users []User
+	err = mongo.WithSession(ctx, session, func(sessCtx mongo.SessionContext) error {
+		// Find the organization in the database
+		filter := bson.M{
+			"organizations": bson.M{
+				"$elemMatch": bson.M{
+					"_id": address,
+				},
+			},
 		}
-	}()
-	if err := cursor.All(ctx, &users); err != nil {
+		users = []User{}
+		cursor, err := ms.users.Find(sessCtx, filter)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if err := cursor.Close(sessCtx); err != nil {
+				log.Warnw("error closing cursor", "error", err)
+			}
+		}()
+		return cursor.All(sessCtx, &users)
+	})
+	if err != nil {
 		return nil, err
 	}
 	return users, nil
@@ -175,20 +214,24 @@ func (ms *MongoStorage) OrganizationsMembers(address string) ([]User, error) {
 // SetOrganizationSubscription method adds the provided subscription to
 // the organization with the given address
 func (ms *MongoStorage) SetOrganizationSubscription(address string, orgSubscription *OrganizationSubscription) error {
+	// Validate the plan ID before starting the transaction
 	if _, err := ms.Plan(orgSubscription.PlanID); err != nil {
 		return ErrInvalidData
 	}
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-	// create a context with a timeout
+
+	// Create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	// prepare the document to be updated in the database
-	filter := bson.M{"_id": address}
-	updateDoc := bson.M{"$set": bson.M{"subscription": orgSubscription}}
-	// update the organization in the database
-	if _, err := ms.organizations.UpdateOne(ctx, filter, updateDoc); err != nil {
-		return err
-	}
-	return nil
+
+	// Execute the operation within a transaction
+	return ms.WithTransaction(ctx, func(sessCtx mongo.SessionContext) error {
+		// Prepare the document to be updated in the database
+		filter := bson.M{"_id": address}
+		updateDoc := bson.M{"$set": bson.M{"subscription": orgSubscription}}
+		// Update the organization in the database
+		if _, err := ms.organizations.UpdateOne(sessCtx, filter, updateDoc); err != nil {
+			return err
+		}
+		return nil
+	})
 }
