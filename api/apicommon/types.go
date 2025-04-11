@@ -787,6 +787,17 @@ type OAuthLoginRequest struct {
 	Address string `json:"address"`
 }
 
+type OAuthLoginResponse struct {
+	// JWT authentication token
+	Token string `json:"token"`
+
+	// Token expiration time
+	Expirity time.Time `json:"expirity"`
+
+	// Whether the user had to be  registered
+	Registered bool `json:"registered"`
+}
+
 // OAuthServiceAddressResponse defines the response from the OAuth service containing its address.
 type OAuthServiceAddressResponse struct {
 	// The address of the OAuth service signer

@@ -123,7 +123,8 @@ Authenticates a user using OAuth. If the user doesn't exist, a new account is cr
 ```json
 {
   "token": "<jwt_token>",
-  "expirity": "2024-08-21T11:26:54.368718+02:00"
+  "expirity": "2024-08-21T11:26:54.368718+02:00",
+  "registered": "true"  // returns true when a new user is added in the DB
 }
 ```
 

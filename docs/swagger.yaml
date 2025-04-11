@@ -109,6 +109,18 @@ definitions:
         format: hex
         type: string
     type: object
+  apicommon.OAuthLoginResponse:
+    properties:
+      expirity:
+        description: Token expiration time
+        type: string
+      registered:
+        description: Whether the user had to be  registered
+        type: boolean
+      token:
+        description: JWT authentication token
+        type: string
+    type: object
   apicommon.OrgParticipant:
     properties:
       email:
@@ -22209,7 +22221,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/apicommon.LoginResponse'
+            $ref: '#/definitions/apicommon.OAuthLoginResponse'
         "400":
           description: Bad Request
           schema:
