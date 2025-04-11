@@ -140,7 +140,7 @@ func (*API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *http.
 //	@Accept			json
 //	@Produce		json
 //	@Param			request	body		apicommon.UserInfo	true	"Login credentials"
-//	@Success		200		{object}	apicommon.LoginResponse
+//	@Success		200		{object}	apicommon.OAuthLoginResponse
 //	@Failure		400		{object}	errors.Error
 //	@Failure		401		{object}	errors.Error
 //	@Failure		500		{object}	errors.Error
@@ -158,6 +158,7 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
+	res := &apicommon.OAuthLoginResponse{}
 	// if the user doesn't exist, do oauth verification and on success create the new user
 	if err == db.ErrNotFound {
 		// Register the user
@@ -201,6 +202,7 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 		if _, err := a.db.SetUser(user); err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		}
+		res.Registered = true
 	}
 	// Login
 	// check that the address generated password matches the one in the database
@@ -209,11 +211,13 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// generate a new token with the user name as the subject
-	res, err := a.buildLoginResponse(loginInfo.Email)
+	login, err := a.buildLoginResponse(loginInfo.Email)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
+	res.Token = login.Token
+	res.Expirity = login.Expirity
 	// send the token back to the user
 	apicommon.HTTPWriteJSON(w, res)
 }
