@@ -15,6 +15,27 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
+// collectionsMap returns a map of collection names to their corresponding field pointers
+// in the MongoStorage struct. This is used by both initCollections and Reset methods.
+func (ms *MongoStorage) collectionsMap() map[string]**mongo.Collection {
+	return map[string]**mongo.Collection{
+		"users":               &ms.users,
+		"verifications":       &ms.verifications,
+		"organizations":       &ms.organizations,
+		"organizationInvites": &ms.organizationInvites,
+		"plans":               &ms.plans,
+		"objects":             &ms.objects,
+		"census":              &ms.censuses,
+		"orgParticipants":     &ms.orgParticipants,
+		"censusMemberships":   &ms.censusMemberships,
+		"publishedCensuses":   &ms.publishedCensuses,
+		"processes":           &ms.processes,
+		"processBundles":      &ms.processBundles,
+		"cspTokens":           &ms.cspTokens,
+		"cspTokensStatus":     &ms.cspTokensStatus,
+	}
+}
+
 // initCollections creates the collections in the MongoDB database if they
 // don't exist. It also includes the registered validations for every collection
 // and creates the indexes for the collections.
@@ -22,7 +43,7 @@ func (ms *MongoStorage) initCollections(database string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	// get the current collections names to create only the missing ones
-	currentCollections, err := ms.collectionNames(ctx, database)
+	currentCollections, err := ms.listCollectionsInDB(ctx, database)
 	if err != nil {
 		return fmt.Errorf("failed to get current collections: %w", err)
 	}
@@ -71,74 +92,23 @@ func (ms *MongoStorage) initCollections(database string) error {
 		// return the collection
 		return ms.DBClient.Database(database).Collection(name), nil
 	}
-	// users collection
-	if ms.users, err = getCollection("users"); err != nil {
-		return err
-	}
-	// verifications collection
-	if ms.verifications, err = getCollection("verifications"); err != nil {
-		return err
-	}
-	// organizations collection
-	if ms.organizations, err = getCollection("organizations"); err != nil {
-		return err
-	}
-	// organizationInvites collection
-	if ms.organizationInvites, err = getCollection("organizationInvites"); err != nil {
-		return err
-	}
-	// subscriptions collection
-	if ms.plans, err = getCollection("plans"); err != nil {
-		return err
-	}
-	// objects collection
-	if ms.objects, err = getCollection("objects"); err != nil {
-		return err
-	}
-	// census collection
-	if ms.censuses, err = getCollection("census"); err != nil {
-		return err
-	}
-	// orgParticipants collection
-	if ms.orgParticipants, err = getCollection("orgParticipants"); err != nil {
-		return err
-	}
-	// censusMemberships collection
-	if ms.censusMemberships, err = getCollection("censusMemberships"); err != nil {
-		return err
+
+	// Initialize all collections
+	for name, collectionPtr := range ms.collectionsMap() {
+		collection, err := getCollection(name)
+		if err != nil {
+			return err
+		}
+		*collectionPtr = collection
 	}
 
-	// publishedCensuses collection
-	if ms.publishedCensuses, err = getCollection("publishedCensuses"); err != nil {
-		return err
-	}
-
-	// processes collection
-	if ms.processes, err = getCollection("processes"); err != nil {
-		return err
-	}
-
-	// processBundles collection
-	if ms.processBundles, err = getCollection("processBundles"); err != nil {
-		return err
-	}
-
-	// cspTokens collection
-	if ms.cspTokens, err = getCollection("cspTokens"); err != nil {
-		return err
-	}
-
-	// cspTokensStatus collection
-	if ms.cspTokensStatus, err = getCollection("cspTokensStatus"); err != nil {
-		return err
-	}
 	return nil
 }
 
-// collectionNames returns the names of the collections in the given database.
+// listCollectionsInDB returns the names of the collections in the given database.
 // It uses the ListCollections method of the MongoDB client to get the
 // collections info and decode the names from the result.
-func (ms *MongoStorage) collectionNames(ctx context.Context, database string) ([]string, error) {
+func (ms *MongoStorage) listCollectionsInDB(ctx context.Context, database string) ([]string, error) {
 	collectionsCursor, err := ms.DBClient.Database(database).ListCollections(ctx, bson.D{})
 	if err != nil {
 		return nil, err

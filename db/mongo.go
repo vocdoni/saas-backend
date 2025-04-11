@@ -149,66 +149,20 @@ func (ms *MongoStorage) Reset() error {
 	log.Infow("resetting database")
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	// drop users collection
-	if err := ms.users.Drop(ctx); err != nil {
-		return err
-	}
-	// drop organizations collection
-	if err := ms.organizations.Drop(ctx); err != nil {
-		return err
-	}
-	// drop organizationInvites collection
-	if err := ms.organizationInvites.Drop(ctx); err != nil {
-		return err
-	}
-	// drop verifications collection
-	if err := ms.verifications.Drop(ctx); err != nil {
-		return err
-	}
-	// drop subscriptions collection
-	if err := ms.plans.Drop(ctx); err != nil {
-		return err
-	}
-	// drop the objects collection
-	if err := ms.objects.Drop(ctx); err != nil {
-		return err
-	}
-	// drop the  orgParticipants collection
-	if err := ms.orgParticipants.Drop(ctx); err != nil {
-		return err
-	}
-	// drop the censusMemberships collection
-	if err := ms.censusMemberships.Drop(ctx); err != nil {
-		return err
-	}
-	// drop the censuses collection
-	if err := ms.censuses.Drop(ctx); err != nil {
-		return err
-	}
-	// drop the publishedCensuses collection
-	if err := ms.publishedCensuses.Drop(ctx); err != nil {
-		return err
-	}
-	// drop the processes collection
-	if err := ms.processes.Drop(ctx); err != nil {
-		return err
-	}
-	// drop the processBundles collection
-	if err := ms.processBundles.Drop(ctx); err != nil {
-		return err
-	}
-	// drop the cspTokens collection
-	if err := ms.cspTokens.Drop(ctx); err != nil {
-		return err
-	}
-	// drop the cspTokensStatus collection
-	if err := ms.cspTokensStatus.Drop(ctx); err != nil {
-		return err
+
+	// Drop all collections
+	for _, collectionPtr := range ms.collectionsMap() {
+		if *collectionPtr != nil {
+			if err := (*collectionPtr).Drop(ctx); err != nil {
+				return err
+			}
+		}
 	}
 	// init the collections
 	if err := ms.initCollections(ms.database); err != nil {
 		return err
 	}
+
 	// create indexes
 	return ms.createIndexes()
 }
