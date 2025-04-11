@@ -59,14 +59,14 @@ func (ms *MongoStorage) DelProcess(processID []byte) error {
 	return err
 }
 
-// Process retrieves a process from the DB based on it ID
+// Process retrieves a process from the DB based on its ID
 func (ms *MongoStorage) Process(processID []byte) (*Process, error) {
 	if len(processID) == 0 {
 		return nil, ErrInvalidData
 	}
 
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

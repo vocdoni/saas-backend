@@ -53,14 +53,14 @@ func (ms *MongoStorage) DelPublishedCensus(root, uri string) error {
 	return err
 }
 
-// PublishedCensus retrieves a publishedCensus from the DB based on it ID
+// PublishedCensus retrieves a publishedCensus from the DB based on its ID
 func (ms *MongoStorage) PublishedCensus(root, uri, censusID string) (*PublishedCensus, error) {
 	if len(uri) == 0 || len(root) == 0 {
 		return nil, ErrInvalidData
 	}
 
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
