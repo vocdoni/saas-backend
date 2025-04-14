@@ -91,7 +91,15 @@ func testURL(path string) string {
 	return fmt.Sprintf("http://%s:%d%s", testHost, testPort, path)
 }
 
-// Removed unused function
+// mustMarshal helper function marshalls the input interface into a byte slice.
+// It panics if the marshalling fails.
+func mustMarshal(i any) []byte {
+	b, err := json.Marshal(i)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
 
 // runAPITestCase helper function runs the given API test case and checks the
 // response status code and body against the expected values.
