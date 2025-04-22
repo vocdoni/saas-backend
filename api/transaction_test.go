@@ -215,7 +215,7 @@ func TestSignTxHandler(t *testing.T) {
 					Address:   mainOrgAddress.Bytes(),
 					TxPayload: bInvalidTxTypeTx,
 				}),
-				expectedBody:   mustMarshal(errors.ErrTxTypeNotAllowed),
+				expectedBody:   mustMarshal(errors.ErrInvalidTxFormat.With("invalid SetAccount tx type")),
 				expectedStatus: http.StatusBadRequest,
 			},
 			{
