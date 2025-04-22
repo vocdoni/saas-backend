@@ -62,8 +62,6 @@ func (ms *MongoStorage) SetPlan(plan *Plan) (uint64, error) {
 // Plan method returns the plan with the given ID. If the
 // plan doesn't exist, it returns the specific error.
 func (ms *MongoStorage) Plan(planID uint64) (*Plan, error) {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -83,8 +81,6 @@ func (ms *MongoStorage) Plan(planID uint64) (*Plan, error) {
 // PlanByStripeID method returns the plan with the given stripe ID. If the
 // plan doesn't exist, it returns the specific error.
 func (ms *MongoStorage) PlanByStripeID(stripeID string) (*Plan, error) {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -104,8 +100,6 @@ func (ms *MongoStorage) PlanByStripeID(stripeID string) (*Plan, error) {
 // DefaultPlan method returns the default plan plan. If the
 // plan doesn't exist, it returns the specific error.
 func (ms *MongoStorage) DefaultPlan() (*Plan, error) {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -124,8 +118,6 @@ func (ms *MongoStorage) DefaultPlan() (*Plan, error) {
 
 // Plans method returns all plans from the database.
 func (ms *MongoStorage) Plans() ([]*Plan, error) {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

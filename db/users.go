@@ -74,8 +74,6 @@ func (ms *MongoStorage) fetchUserFromDB(ctx context.Context, id uint64) (*User, 
 // User method returns the user with the given ID. If the user doesn't exist, it
 // returns a specific error. If other errors occur, it returns the error.
 func (ms *MongoStorage) User(id uint64) (*User, error) {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -86,9 +84,6 @@ func (ms *MongoStorage) User(id uint64) (*User, error) {
 // exist, it returns a specific error. If other errors occur, it returns the
 // error.
 func (ms *MongoStorage) UserByEmail(email string) (*User, error) {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

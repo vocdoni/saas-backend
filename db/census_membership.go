@@ -89,8 +89,6 @@ func (ms *MongoStorage) SetCensusMembership(membership *CensusMembership) error 
 // CensusMembership retrieves a census membership from the database based on
 // participantNo and censusID. Returns ErrNotFound if the membership doesn't exist.
 func (ms *MongoStorage) CensusMembership(censusID, participantNo string) (*CensusMembership, error) {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -440,8 +438,6 @@ func (ms *MongoStorage) SetBulkCensusMembership(
 
 // CensusMemberships retrieves all the census memberships for a given census.
 func (ms *MongoStorage) CensusMemberships(censusID string) ([]CensusMembership, error) {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

@@ -15,8 +15,6 @@ import (
 
 // Object retrieves an object from the MongoDB collection by its ID.
 func (ms *MongoStorage) Object(id string) (*Object, error) {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

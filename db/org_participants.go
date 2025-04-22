@@ -102,8 +102,6 @@ func (ms *MongoStorage) OrgParticipant(id string) (*OrgParticipant, error) {
 		return nil, ErrInvalidData
 	}
 
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -121,8 +119,6 @@ func (ms *MongoStorage) OrgParticipantByNo(orgAddress, participantNo string) (*O
 	if len(participantNo) == 0 {
 		return nil, ErrInvalidData
 	}
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -260,8 +256,6 @@ func (ms *MongoStorage) OrgParticipants(orgAddress string) ([]OrgParticipant, er
 	if len(orgAddress) == 0 {
 		return nil, ErrInvalidData
 	}
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -290,8 +284,6 @@ func (ms *MongoStorage) OrgParticipantsMemberships(
 	if len(orgAddress) == 0 || len(censusID) == 0 {
 		return nil, ErrInvalidData
 	}
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

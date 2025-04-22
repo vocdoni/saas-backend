@@ -31,8 +31,6 @@ func (ms *MongoStorage) fetchOrganizationFromDB(ctx context.Context, address str
 // If the organization doesn't exist, it returns the specific error.
 // If other errors occur, it returns the error.
 func (ms *MongoStorage) Organization(address string) (*Organization, error) {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -143,8 +141,6 @@ func (ms *MongoStorage) ReplaceCreatorEmail(oldEmail, newEmail string) error {
 // organization with the given address. If an error occurs, it returns the
 // error.
 func (ms *MongoStorage) OrganizationsMembers(address string) ([]User, error) {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

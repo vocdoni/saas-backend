@@ -59,8 +59,6 @@ func (ms *MongoStorage) PublishedCensus(root, uri, censusID string) (*PublishedC
 		return nil, ErrInvalidData
 	}
 
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

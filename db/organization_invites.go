@@ -63,9 +63,6 @@ func (ms *MongoStorage) CreateInvitation(invite *OrganizationInvite) error {
 
 // Invitation returns the invitation for the given code.
 func (ms *MongoStorage) Invitation(invitationCode string) (*OrganizationInvite, error) {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -82,9 +79,6 @@ func (ms *MongoStorage) Invitation(invitationCode string) (*OrganizationInvite, 
 
 // PendingInvitations returns the pending invitations for the given organization.
 func (ms *MongoStorage) PendingInvitations(organizationAddress string) ([]OrganizationInvite, error) {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

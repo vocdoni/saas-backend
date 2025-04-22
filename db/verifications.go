@@ -44,9 +44,6 @@ func (ms *MongoStorage) UserByVerificationCode(code string, t CodeType) (*User, 
 // the user has not a verification code, it returns an specific error, if other
 // error occurs, it returns the error.
 func (ms *MongoStorage) UserVerificationCode(user *User, t CodeType) (*UserVerification, error) {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
