@@ -758,6 +758,9 @@ type CreateProcessBundleRequest struct {
 
 	// List of process IDs to include in the bundle
 	Processes []string `json:"processes"`
+
+	// List of process metadatas, used to create processes in case they don't exist already
+	Metadatas [][]byte `json:"metadatas"`
 }
 
 // CreateProcessBundleResponse defines the response for a successful process bundle creation.

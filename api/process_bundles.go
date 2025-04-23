@@ -105,10 +105,17 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Create the process bundle
+	cspPubKey, err := a.csp.PubKey()
+	if err != nil {
+		errors.ErrGenericInternalServerError.Withf("failed to get CSP public key").Write(w)
+		return
+	}
+
 	// Collect all processes
 	var processes []internal.HexBytes
 
-	for _, processReq := range req.Processes {
+	for i, processReq := range req.Processes {
 		if len(processReq) == 0 {
 			errors.ErrMalformedBody.Withf("missing process ID").Write(w)
 			return
@@ -120,14 +127,27 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		}
 
 		processes = append(processes, processID)
+
+		// if process doesn't exist, and metadata was passed for this, create it
+		if _, err := a.db.Process(processID); err != nil { // TODO: check specific error rather than != nil
+			if i >= len(req.Metadatas) {
+				continue
+			}
+			if err := a.db.SetProcess(&db.Process{
+				ID:         processID,
+				OrgAddress: census.OrgAddress,
+				PublishedCensus: db.PublishedCensus{
+					Root:   cspPubKey.String(),
+					Census: *census,
+				},
+				Metadata: req.Metadatas[i],
+			}); err != nil {
+				errors.ErrMalformedBody.Withf("couldn't create process %d", i).Write(w)
+				return
+			}
+		}
 	}
 
-	// Create the process bundle
-	cspPubKey, err := a.csp.PubKey()
-	if err != nil {
-		errors.ErrGenericInternalServerError.Withf("failed to get CSP public key").Write(w)
-		return
-	}
 	bundle := &db.ProcessesBundle{
 		ID:         bundleID,
 		OrgAddress: census.OrgAddress,
