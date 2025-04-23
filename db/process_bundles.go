@@ -26,7 +26,7 @@ func (ms *MongoStorage) SetProcessBundle(bundle *ProcessesBundle) (internal.HexB
 	}
 
 	// check that the census exists
-	_, err := ms.Census(bundle.Census.ID.Hex())
+	_, err := ms.Census(bundle.PublishedCensus.Census.ID.Hex())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get census: %w", err)
 	}

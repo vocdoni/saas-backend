@@ -81,9 +81,11 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		// Create the process bundle
 		bundle := &db.ProcessesBundle{
 			ID:         bundleID,
-			CensusRoot: censusRoot.String(),
 			OrgAddress: census.OrgAddress,
-			Census:     *census,
+			PublishedCensus: db.PublishedCensus{
+				Root:   censusRoot.String(),
+				Census: *census,
+			},
 		}
 		_, err = a.db.SetProcessBundle(bundle)
 		if err != nil {
@@ -126,13 +128,14 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrGenericInternalServerError.Withf("failed to get CSP public key").Write(w)
 		return
 	}
-
 	bundle := &db.ProcessesBundle{
 		ID:         bundleID,
-		Processes:  processes,
-		CensusRoot: cspPubKey.String(),
 		OrgAddress: census.OrgAddress,
-		Census:     *census,
+		PublishedCensus: db.PublishedCensus{
+			Root:   cspPubKey.String(),
+			Census: *census,
+		},
+		Processes: processes,
 	}
 
 	_, err = a.db.SetProcessBundle(bundle)
@@ -208,7 +211,7 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 
 	if len(req.Processes) == 0 {
 		var rootHex internal.HexBytes
-		if err := rootHex.ParseString(bundle.CensusRoot); err != nil {
+		if err := rootHex.ParseString(bundle.PublishedCensus.Root); err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
@@ -249,7 +252,7 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	var rootHex internal.HexBytes
-	if err := rootHex.ParseString(bundle.CensusRoot); err != nil {
+	if err := rootHex.ParseString(bundle.PublishedCensus.Root); err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}

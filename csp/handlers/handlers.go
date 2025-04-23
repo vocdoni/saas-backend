@@ -148,7 +148,7 @@ func (c *CSPHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Handle the authentication step
-	c.handleAuthStep(w, r, step, *bundleID, bundle.Census.ID.Hex())
+	c.handleAuthStep(w, r, step, *bundleID, bundle.PublishedCensus.Census.ID.Hex())
 }
 
 // parseSignRequest parses the sign request from the request body
@@ -274,7 +274,7 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Check if the participant is in the census
-	if !c.checkCensusMembership(w, bundle.Census.ID.Hex(), string(auth.UserID)) {
+	if !c.checkCensusMembership(w, bundle.PublishedCensus.Census.ID.Hex(), string(auth.UserID)) {
 		return
 	}
 
