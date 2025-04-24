@@ -39,6 +39,12 @@ func signAndMarshalTx(t *testing.T, tx *models.Tx, signer *ethereum.SignKeys) []
 // a census with participants, and a bundle, then authenticating a participant
 // with the CSP, signing a vote, and casting it.
 func TestCSPVoting(t *testing.T) {
+	testCSPVotingWithCensusType(t, db.CensusTypeSMSorMail)
+	testCSPVotingWithCensusType(t, db.CensusTypeMail)
+	testCSPVotingWithCensusType(t, db.CensusTypeSMS)
+}
+
+func testCSPVotingWithCensusType(t *testing.T, censusType db.CensusType) {
 	c := qt.New(t)
 
 	// Create a test user and organization
@@ -146,7 +152,7 @@ func TestCSPVoting(t *testing.T) {
 			// Create a census and add participants
 			t.Run("Create Census and Bundle", func(_ *testing.T) {
 				// Create a new census
-				censusID := testCreateCensus(t, token, orgAddress, string(db.CensusTypeSMSorMail))
+				censusID := testCreateCensus(t, token, orgAddress, censusType)
 
 				// Generate test participants
 				participants := testGenerateTestParticipants(5) // Increased to 5 participants for more test cases
@@ -176,7 +182,13 @@ func TestCSPVoting(t *testing.T) {
 					user1Addr := user1.Address().Bytes()
 
 					// Authenticate the participant with the CSP
-					authToken := testCSPAuthenticate(t, bundleID, "P001", "john.doe@example.com")
+					authFn := testCSPAuthenticateWithMail // default
+					authSecret := participants[0].Email
+					if censusType == db.CensusTypeSMS {
+						authFn = testCSPAuthenticateWithSMS
+						authSecret = participants[0].Phone
+					}
+					authToken := authFn(t, bundleID, participants[0].ParticipantNo, authSecret)
 
 					// Sign the voter's address with the CSP
 					signature := testCSPSign(t, bundleID, authToken, processID, user1Addr)
@@ -220,7 +232,7 @@ func TestCSPVoting(t *testing.T) {
 					// Test case 3: Try to verify with invalid OTP code
 					t.Run("Invalid OTP Code", func(_ *testing.T) {
 						// First get a valid auth token
-						authToken := testCSPAuthenticate(t, bundleID, "P002", "jane.smith@example.com")
+						authToken := testCSPAuthenticateWithMail(t, bundleID, "P002", "jane.smith@example.com")
 
 						// Then try to verify with an invalid code
 						authChallengeReq := &handlers.AuthChallengeRequest{
@@ -242,7 +254,7 @@ func TestCSPVoting(t *testing.T) {
 						user2Addr := user2.Address().Bytes()
 
 						// Authenticate user 3
-						authToken := testCSPAuthenticate(t, bundleID, "P003", "alice.johnson@example.com")
+						authToken := testCSPAuthenticateWithMail(t, bundleID, "P003", "alice.johnson@example.com")
 
 						// Sign the voter's address with the CSP
 						signature := testCSPSign(t, bundleID, authToken, processID, user2Addr)
@@ -275,7 +287,7 @@ func TestCSPVoting(t *testing.T) {
 					// Test case 5: Try to sign with a token from a different user
 					t.Run("Token From Different User", func(_ *testing.T) {
 						// Authenticate user 4
-						authToken := testCSPAuthenticate(t, bundleID, "P004", "bob.williams@example.com")
+						authToken := testCSPAuthenticateWithMail(t, bundleID, "P004", "bob.williams@example.com")
 
 						// Create a user
 						user4 := ethereum.SignKeys{}
@@ -295,7 +307,7 @@ func TestCSPVoting(t *testing.T) {
 						t.Logf("Vote cast successfully with nullifier: %x", nullifier)
 
 						// Now authenticate user 5
-						authToken5 := testCSPAuthenticate(t, bundleID, "P005", "charlie.brown@example.com")
+						authToken5 := testCSPAuthenticateWithMail(t, bundleID, "P005", "charlie.brown@example.com")
 
 						// Try to sign with user 5's token but for user 4's address
 						// Note: The signature will be the same because the CSP signs the same data (processID + address)

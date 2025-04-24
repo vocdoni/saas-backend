@@ -487,12 +487,12 @@ func fetchVocdoniChainID(t *testing.T, client *apiclient.HTTPclient) string {
 
 // testCreateCensus creates a new census with the given organization address and census type.
 // It returns the census ID.
-func testCreateCensus(t *testing.T, token string, orgAddress internal.HexBytes, censusType string) string {
+func testCreateCensus(t *testing.T, token string, orgAddress internal.HexBytes, censusType db.CensusType) string {
 	c := qt.New(t)
 
 	// Create a new census
 	censusInfo := &apicommon.OrganizationCensus{
-		Type:       db.CensusType(censusType),
+		Type:       censusType,
 		OrgAddress: orgAddress.String(),
 	}
 	resp, code := testRequest(t, http.MethodPost, token, censusInfo, censusEndpoint)
@@ -582,9 +582,9 @@ func testCreateBundle(t *testing.T, token, censusID string, processIDs [][]byte)
 	return bundleIDStr, bundleResp.Root.String()
 }
 
-// testCSPAuthenticate performs the CSP authentication flow for a participant.
+// testCSPAuthenticateWithMail performs the CSP authentication flow for a participant.
 // It returns the verified auth token.
-func testCSPAuthenticate(t *testing.T, bundleID, participantID, email string) internal.HexBytes {
+func testCSPAuthenticateWithMail(t *testing.T, bundleID, participantID, email string) internal.HexBytes {
 	c := qt.New(t)
 
 	// Step 1: Initiate authentication (auth/0)
@@ -618,8 +618,66 @@ func testCSPAuthenticate(t *testing.T, bundleID, participantID, email string) in
 	c.Assert(err, qt.IsNil, qt.Commentf("failed to receive email after %d attempts", maxRetries))
 
 	// Extract the OTP code from the email
-	otpCode := extractOTPFromEmail(mailBody)
+	otpCode := extractOTPFromEmailOrSMS(mailBody)
 	c.Assert(otpCode, qt.Not(qt.Equals), "", qt.Commentf("failed to extract OTP code from email"))
+	t.Logf("Extracted OTP code: %s", otpCode)
+
+	// Step 3: Verify authentication (auth/1)
+	authChallengeReq := &handlers.AuthChallengeRequest{
+		AuthToken: authResp.AuthToken,
+		AuthData:  []string{otpCode},
+	}
+	resp, code = testRequest(t, http.MethodPost, "", authChallengeReq, "process", "bundle", bundleID, "auth", "1")
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("failed to verify auth: %s", resp))
+
+	var verifyResp handlers.AuthResponse
+	err = json.Unmarshal(resp, &verifyResp)
+	c.Assert(err, qt.IsNil)
+	c.Assert(verifyResp.AuthToken, qt.Not(qt.Equals), "", qt.Commentf("verified auth token is empty"))
+
+	t.Logf("Authentication verified with token: %s", verifyResp.AuthToken.String())
+	return verifyResp.AuthToken
+}
+
+// testCSPAuthenticateWithMail performs the CSP authentication flow for a participant.
+// It returns the verified auth token.
+func testCSPAuthenticateWithSMS(t *testing.T, bundleID, participantID, phone string) internal.HexBytes {
+	c := qt.New(t)
+
+	// Step 1: Initiate authentication (auth/0)
+	authReq := &handlers.AuthRequest{
+		ParticipantNo: participantID,
+		Phone:         phone,
+	}
+	resp, code := testRequest(t, http.MethodPost, "", authReq, "process", "bundle", bundleID, "auth", "0")
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("failed to initiate auth: %s", resp))
+
+	var authResp handlers.AuthResponse
+	err := json.Unmarshal(resp, &authResp)
+	c.Assert(err, qt.IsNil)
+	c.Assert(authResp.AuthToken, qt.Not(qt.Equals), "", qt.Commentf("auth token is empty"))
+
+	t.Logf("Received auth token: %s", authResp.AuthToken.String())
+
+	// Step 2: Get the OTP code from the sms storage with retries
+	var smsBody string
+	maxRetries := 10
+	for i := 0; i < maxRetries; i++ {
+		// TODO: find SMS
+		// ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		// mailBody, err = testMailService.FindEmail(ctx, email)
+		// cancel()
+		if err == nil {
+			break
+		}
+		t.Logf("Waiting for sms, attempt %d/%d...", i+1, maxRetries)
+		time.Sleep(500 * time.Millisecond)
+	}
+	c.Assert(err, qt.IsNil, qt.Commentf("failed to receive sms after %d attempts", maxRetries))
+
+	// Extract the OTP code from the sms
+	otpCode := extractOTPFromEmailOrSMS(smsBody)
+	c.Assert(otpCode, qt.Not(qt.Equals), "", qt.Commentf("failed to extract OTP code from sms"))
 	t.Logf("Extracted OTP code: %s", otpCode)
 
 	// Step 3: Verify authentication (auth/1)
@@ -700,12 +758,12 @@ func testCastVote(t *testing.T, vocdoniClient *apiclient.HTTPclient, signer *eth
 	return signAndSendVocdoniTx(t, &tx, signer, vocdoniClient)
 }
 
-// extractOTPFromEmail extracts the OTP code from the email body.
+// extractOTPFromEmailOrSMS extracts the OTP code from the email or sms body.
 // It returns the OTP code as a string.
-func extractOTPFromEmail(mailBody string) string {
-	// The OTP code is typically a 6-digit number in the email
+func extractOTPFromEmailOrSMS(text string) string {
+	// The OTP code is typically a 6-digit number in the email or sms
 	re := regexp.MustCompile(`\b\d{6}\b`)
-	matches := re.FindStringSubmatch(mailBody)
+	matches := re.FindStringSubmatch(text)
 	if len(matches) > 0 {
 		return matches[0]
 	}
