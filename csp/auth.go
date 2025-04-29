@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vocdoni/saas-backend/csp/notifications"
-	"github.com/vocdoni/saas-backend/csp/storage"
+	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/xlzd/gotp"
 	"go.vocdoni.io/dvote/log"
@@ -30,7 +30,7 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 	}
 	// get last token for the user and bundle
 	lastToken, err := c.Storage.LastCSPAuth(uID, bID)
-	if err != nil && err != storage.ErrTokenNotFound {
+	if err != nil && err != db.ErrTokenNotFound {
 		log.Warnw("error getting last token",
 			"userID", uID,
 			"bundleID", bID,

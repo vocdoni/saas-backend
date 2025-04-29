@@ -10,18 +10,21 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/csp/notifications"
+	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
+	"github.com/vocdoni/saas-backend/test"
 	"github.com/xlzd/gotp"
 )
 
 func TestBundleAuthToken(t *testing.T) {
 	c := qt.New(t)
+	testDB, err := db.New(testMongoURI, test.RandomDatabaseName(), nil)
+	c.Assert(err, qt.IsNil)
 
 	ctx := context.Background()
 	csp, err := New(ctx, &Config{
-		DBName:                   "testBundleAuthToken",
-		MongoClient:              dbClient,
+		DB:                       testDB,
 		MailService:              testMailService,
 		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,
@@ -81,10 +84,12 @@ func TestBundleAuthToken(t *testing.T) {
 func TestVerifyBundleAuthToken(t *testing.T) {
 	c := qt.New(t)
 
+	testDB, err := db.New(testMongoURI, test.RandomDatabaseName(), nil)
+	c.Assert(err, qt.IsNil)
+
 	ctx := context.Background()
 	csp, err := New(ctx, &Config{
-		DBName:                   "testVerifyBundleAuthToken",
-		MongoClient:              dbClient,
+		DB:                       testDB,
 		MailService:              testMailService,
 		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,

@@ -5,7 +5,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -142,9 +141,8 @@ func main() {
 	}
 
 	cspConf := &csp.Config{
-		RootKey:     bPrivKey,
-		MongoClient: database.DBClient,
-		DBName:      fmt.Sprintf("%s-csp", mongoDB),
+		RootKey: bPrivKey,
+		DB:      database,
 	}
 	// overwrite the email notifications service with the SMTP service if the
 	// required parameters are set and include it in the API configuration

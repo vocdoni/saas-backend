@@ -8,7 +8,9 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/csp/signers"
 	"github.com/vocdoni/saas-backend/csp/signers/saltedkey"
+	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
+	"github.com/vocdoni/saas-backend/test"
 	"go.vocdoni.io/dvote/util"
 	"go.vocdoni.io/proto/build/go/models"
 	"google.golang.org/protobuf/proto"
@@ -17,10 +19,12 @@ import (
 func TestSign(t *testing.T) {
 	c := qt.New(t)
 
+	testDB, err := db.New(testMongoURI, test.RandomDatabaseName(), nil)
+	c.Assert(err, qt.IsNil)
+
 	ctx := context.Background()
 	csp, err := New(ctx, &Config{
-		DBName:                   "testPrepareSaltedKeySigner",
-		MongoClient:              dbClient,
+		DB:                       testDB,
 		MailService:              testMailService,
 		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,
@@ -50,10 +54,12 @@ func TestSign(t *testing.T) {
 func TestPrepareSaltedKeySigner(t *testing.T) {
 	c := qt.New(t)
 
+	testDB, err := db.New(testMongoURI, test.RandomDatabaseName(), nil)
+	c.Assert(err, qt.IsNil)
+
 	ctx := context.Background()
 	csp, err := New(ctx, &Config{
-		DBName:                   "testPrepareSaltedKeySigner",
-		MongoClient:              dbClient,
+		DB:                       testDB,
 		MailService:              testMailService,
 		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,
@@ -151,10 +157,12 @@ func TestPrepareSaltedKeySigner(t *testing.T) {
 func TestFinishSaltedKeySigner(t *testing.T) {
 	c := qt.New(t)
 
+	testDB, err := db.New(testMongoURI, test.RandomDatabaseName(), nil)
+	c.Assert(err, qt.IsNil)
+
 	ctx := context.Background()
 	csp, err := New(ctx, &Config{
-		DBName:                   "testFinishSaltedKeySigner",
-		MongoClient:              dbClient,
+		DB:                       testDB,
 		MailService:              testMailService,
 		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,

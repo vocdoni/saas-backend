@@ -8,11 +8,10 @@ import (
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/vocdoni/saas-backend/csp/notifications"
 	"github.com/vocdoni/saas-backend/csp/signers/saltedkey"
-	"github.com/vocdoni/saas-backend/csp/storage"
+	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	saasNotifications "github.com/vocdoni/saas-backend/notifications" //revive:disable:import-alias-naming
 
-	"go.mongodb.org/mongo-driver/mongo"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -22,8 +21,7 @@ import (
 // service and the mail service.
 type Config struct {
 	// db stuff
-	DBName      string
-	MongoClient *mongo.Client
+	DB *db.MongoStorage
 	// signer stuff
 	PasswordSalt string
 	RootKey      internal.HexBytes
@@ -40,7 +38,7 @@ type Config struct {
 type CSP struct {
 	PasswordSalt string
 	Signer       *saltedkey.SaltedKey
-	Storage      storage.Storage
+	Storage      *db.MongoStorage
 	signerLock   sync.Map
 	notifyQueue  *notifications.Queue
 
@@ -57,13 +55,6 @@ type CSP struct {
 func New(ctx context.Context, config *Config) (*CSP, error) {
 	s, err := saltedkey.NewSaltedKey(config.RootKey.String())
 	if err != nil {
-		return nil, err
-	}
-	stg := new(storage.MongoStorage)
-	if err := stg.Init(&storage.MongoConfig{
-		DBName: config.DBName,
-		Client: config.MongoClient,
-	}); err != nil {
 		return nil, err
 	}
 	queue := notifications.NewQueue(
@@ -89,7 +80,7 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 	}()
 	go queue.Start()
 	return &CSP{
-		Storage:                  stg,
+		Storage:                  config.DB,
 		Signer:                   s,
 		notifyQueue:              queue,
 		notificationThrottleTime: config.NotificationThrottleTime,
