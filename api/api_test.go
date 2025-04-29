@@ -239,8 +239,7 @@ func TestMain(m *testing.M) {
 
 	rootKey := new(internal.HexBytes).SetString(test.VoconedFoundedPrivKey)
 	testCSP, err = csp.New(ctx, &csp.Config{
-		DBName:                   "apiTestCSP",
-		MongoClient:              testDB.DBClient,
+		DB:                       testDB,
 		MailService:              testMailService,
 		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,

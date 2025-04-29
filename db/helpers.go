@@ -122,6 +122,16 @@ func (ms *MongoStorage) initCollections(database string) error {
 	if ms.processBundles, err = getCollection("processBundles"); err != nil {
 		return err
 	}
+
+	// cspTokens collection
+	if ms.cspTokens, err = getCollection("cspTokens"); err != nil {
+		return err
+	}
+
+	// cspTokensStatus collection
+	if ms.cspTokensStatus, err = getCollection("cspTokensStatus"); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -263,6 +273,17 @@ func (ms *MongoStorage) createIndexes() error {
 	}
 	if _, err := ms.censusMemberships.Indexes().CreateOne(ctx, censusMembershipIDNoIndex); err != nil {
 		return fmt.Errorf("failed to create index on censusID for censusMemberships: %w", err)
+	}
+
+	// unique index over userID and processID
+	if _, err := ms.cspTokensStatus.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "userid", Value: 1},
+			{Key: "processid", Value: 1},
+		},
+		Options: options.Index().SetUnique(true),
+	}); err != nil {
+		return err
 	}
 	return nil
 }

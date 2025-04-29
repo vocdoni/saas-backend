@@ -1,7 +1,4 @@
-// Package storage provides database operations for the CSP (Census Service Provider),
-// including authentication token management, process consumption tracking, and
-// storage and retrieval of cryptographic credentials and related data.
-package storage
+package db
 
 import (
 	"context"
@@ -14,6 +11,27 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
+// CSPAuth represents a user authentication information for a bundle of processes
+type CSPAuth struct {
+	Token      internal.HexBytes `json:"token" bson:"_id"`
+	UserID     internal.HexBytes `json:"userID" bson:"userid"`
+	BundleID   internal.HexBytes `json:"bundleID" bson:"bundleid"`
+	CreatedAt  time.Time         `json:"createdAt" bson:"createdat"`
+	Verified   bool              `json:"verified" bson:"verified"`
+	VerifiedAt time.Time         `json:"verifiedAt" bson:"verifiedat"`
+}
+
+// CSPProcess is the status of a process in a bundle of processes for a user
+type CSPProcess struct {
+	ID              internal.HexBytes `json:"id" bson:"_id"` // hash(userID + processID)
+	UserID          internal.HexBytes `json:"userID" bson:"userid"`
+	ProcessID       internal.HexBytes `json:"processID" bson:"processid"`
+	Consumed        bool              `json:"consumed" bson:"consumed"`
+	ConsumedToken   internal.HexBytes `json:"consumedToken" bson:"consumedtoken"`
+	ConsumedAt      time.Time         `json:"consumedAt" bson:"consumedat"`
+	ConsumedAddress internal.HexBytes `json:"consumedAddress" bson:"consumedaddress"`
+}
 
 // SetCSPAuth method stores a new CSP authentication token for a user and a
 // bundle of processes. It returns an error if the token, user ID or bundle
@@ -59,8 +77,6 @@ func (ms *MongoStorage) LastCSPAuth(userID, bundleID internal.HexBytes) (*CSPAut
 	if userID == nil || bundleID == nil {
 		return nil, ErrBadInputs
 	}
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -103,15 +119,14 @@ func (ms *MongoStorage) VerifyCSPAuth(token internal.HexBytes) error {
 	return nil
 }
 
-// CSPProcess method returns the CSP process data for a given token and
-//
-//	process ID. It returns an error if the token or process ID are nil.
-func (ms *MongoStorage) CSPProcess(token, pid internal.HexBytes) (*CSPProcess, error) {
-	if token == nil || pid == nil {
+// CSPProcess returns the CSPProcess for the given token and processID.
+// It returns an error if the token or processID are nil.
+func (ms *MongoStorage) CSPProcess(token, processID internal.HexBytes) (*CSPProcess, error) {
+	if token == nil || processID == nil {
 		return nil, ErrBadInputs
 	}
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -121,16 +136,16 @@ func (ms *MongoStorage) CSPProcess(token, pid internal.HexBytes) (*CSPProcess, e
 		return nil, err
 	}
 	// find the token status by id
-	return ms.fetchCSPProcessFromDB(ctx, cspAuthTokenStatusID(tokenData.UserID, pid))
+	return ms.fetchCSPProcessFromDB(ctx, cspAuthTokenStatusID(tokenData.UserID, processID))
 }
 
 // IsCSPProcessConsumed method checks if a CSP process has been consumed by a
-// user. It returns an error if the user ID or process ID are nil. It returns
+// user. It returns an error if the userID or processID are nil. It returns
 // true if the process has been consumed, false if it has not been consumed and
 // an error if the process does not exist or the token is not verified.
 func (ms *MongoStorage) IsCSPProcessConsumed(userID, processID internal.HexBytes) (bool, error) {
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -148,17 +163,17 @@ func (ms *MongoStorage) IsCSPProcessConsumed(userID, processID internal.HexBytes
 		return false, err
 	}
 	if !tokenData.Verified {
-		return false, ErrTokenNoVerified
+		return false, ErrTokenNotVerified
 	}
 	return currentStatus.Consumed, nil
 }
 
 // ConsumeCSPProcess method consumes a CSP process for a user. It returns an
-// error if the token, process ID or address are nil. It returns an error if
+// error if the token, processID or address are nil. It returns an error if
 // the token does not exist, the process has already been consumed or the
 // token is not verified.
-func (ms *MongoStorage) ConsumeCSPProcess(token, pid, address internal.HexBytes) error {
-	if token == nil || pid == nil || address == nil {
+func (ms *MongoStorage) ConsumeCSPProcess(token, processID, address internal.HexBytes) error {
+	if token == nil || processID == nil || address == nil {
 		return ErrBadInputs
 	}
 	// lock the keys
@@ -173,7 +188,7 @@ func (ms *MongoStorage) ConsumeCSPProcess(token, pid, address internal.HexBytes)
 		return err
 	}
 	// calculate the status id
-	id := cspAuthTokenStatusID(tokenData.UserID, pid)
+	id := cspAuthTokenStatusID(tokenData.UserID, processID)
 	// get the token status
 	tokenStatus, err := ms.fetchCSPProcessFromDB(ctx, id)
 	if err != nil && !errors.Is(err, ErrTokenNotFound) {
@@ -187,7 +202,7 @@ func (ms *MongoStorage) ConsumeCSPProcess(token, pid, address internal.HexBytes)
 	updateDoc, err := dynamicUpdateDocument(CSPProcess{
 		ID:              id,
 		UserID:          tokenData.UserID,
-		ProcessID:       pid,
+		ProcessID:       processID,
 		Consumed:        true,
 		ConsumedAt:      time.Now(),
 		ConsumedToken:   token,
@@ -230,7 +245,7 @@ func (ms *MongoStorage) fetchCSPProcessFromDB(ctx context.Context, id internal.H
 	return tokenStatus, nil
 }
 
-func cspAuthTokenStatusID(uid, pid internal.HexBytes) internal.HexBytes {
-	hash := sha256.Sum256(append(uid, pid...))
+func cspAuthTokenStatusID(userID, processID internal.HexBytes) internal.HexBytes {
+	hash := sha256.Sum256(append(userID, processID...))
 	return internal.HexBytes(hash[:])
 }

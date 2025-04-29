@@ -7,7 +7,7 @@ import (
 
 	"github.com/vocdoni/saas-backend/csp/signers"
 	"github.com/vocdoni/saas-backend/csp/signers/saltedkey"
-	"github.com/vocdoni/saas-backend/csp/storage"
+	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/proto/build/go/models"
@@ -64,7 +64,7 @@ func (c *CSP) prepareSaltedKeySigner(token, address, processID internal.HexBytes
 	if consumed, err := c.Storage.IsCSPProcessConsumed(authTokenData.UserID, processID); err != nil {
 		log.Warn(err)
 		switch err {
-		case storage.ErrTokenNoVerified:
+		case db.ErrTokenNotVerified:
 			return nil, nil, nil, ErrAuthTokenNotVerified
 		default:
 			return nil, nil, nil, ErrStorageFailure

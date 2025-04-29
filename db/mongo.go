@@ -36,6 +36,8 @@ type MongoStorage struct {
 	publishedCensuses   *mongo.Collection
 	processes           *mongo.Collection
 	processBundles      *mongo.Collection
+	cspTokens           *mongo.Collection
+	cspTokensStatus     *mongo.Collection
 }
 
 type Options struct {
@@ -183,6 +185,14 @@ func (ms *MongoStorage) Reset() error {
 	}
 	// drop the processBundles collection
 	if err := ms.processBundles.Drop(ctx); err != nil {
+		return err
+	}
+	// drop the cspTokens collection
+	if err := ms.cspTokens.Drop(ctx); err != nil {
+		return err
+	}
+	// drop the cspTokensStatus collection
+	if err := ms.cspTokensStatus.Drop(ctx); err != nil {
 		return err
 	}
 	// init the collections

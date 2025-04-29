@@ -16,7 +16,6 @@ import (
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/notifications"
 	"github.com/vocdoni/saas-backend/csp/signers"
-	"github.com/vocdoni/saas-backend/csp/storage"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
@@ -169,7 +168,7 @@ func parseSignRequest(w http.ResponseWriter, r *http.Request) (*SignRequest, boo
 }
 
 // getAuthInfo retrieves the authentication information from the token
-func (c *CSPHandlers) getAuthInfo(w http.ResponseWriter, authToken internal.HexBytes) (*storage.CSPAuth, bool) {
+func (c *CSPHandlers) getAuthInfo(w http.ResponseWriter, authToken internal.HexBytes) (*db.CSPAuth, bool) {
 	auth, err := c.csp.Storage.CSPAuth(authToken)
 	if err != nil {
 		errors.ErrUnauthorized.WithErr(err).Write(w)
