@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 )
@@ -32,7 +31,7 @@ func (ms *MongoStorage) SetProcess(process *Process) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	if _, err := ms.processes.InsertOne(ctx, process); err != nil {
@@ -50,7 +49,7 @@ func (ms *MongoStorage) DelProcess(processID []byte) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	// delete the process from the database using the ID
@@ -66,7 +65,7 @@ func (ms *MongoStorage) Process(processID []byte) (*Process, error) {
 	}
 
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	process := &Process{}

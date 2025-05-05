@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"strings"
-	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -75,7 +74,7 @@ func (ms *MongoStorage) fetchUserFromDB(ctx context.Context, id uint64) (*User, 
 // returns a specific error. If other errors occur, it returns the error.
 func (ms *MongoStorage) User(id uint64) (*User, error) {
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	return ms.fetchUserFromDB(ctx, id)
 }
@@ -84,7 +83,7 @@ func (ms *MongoStorage) User(id uint64) (*User, error) {
 // exist, it returns a specific error. If other errors occur, it returns the
 // error.
 func (ms *MongoStorage) UserByEmail(email string) (*User, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	result := ms.users.FindOne(ctx, bson.M{"email": email})
@@ -105,7 +104,7 @@ func (ms *MongoStorage) SetUser(user *User) (uint64, error) {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// get the next available user ID
 	nextID, err := ms.nextUserID(ctx)
@@ -153,7 +152,7 @@ func (ms *MongoStorage) DelUser(user *User) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// delete the user from the database using the ID or the email
 	filter := bson.M{"_id": user.ID}
@@ -170,7 +169,7 @@ func (ms *MongoStorage) DelUser(user *User) error {
 func (ms *MongoStorage) VerifyUserAccount(user *User) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// try to get the user to ensure it exists
 	if _, err := ms.fetchUserFromDB(ctx, user.ID); err != nil {

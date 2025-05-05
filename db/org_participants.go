@@ -17,7 +17,7 @@ import (
 // reqires an existing organization
 func (ms *MongoStorage) SetOrgParticipant(salt string, orgParticipant *OrgParticipant) (string, error) {
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	if len(orgParticipant.OrgAddress) == 0 {
@@ -86,7 +86,7 @@ func (ms *MongoStorage) DelOrgParticipant(id string) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	// delete the orgParticipants from the database using the ID
@@ -103,7 +103,7 @@ func (ms *MongoStorage) OrgParticipant(id string) (*OrgParticipant, error) {
 	}
 
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	orgParticipant := &OrgParticipant{}
@@ -120,7 +120,7 @@ func (ms *MongoStorage) OrgParticipantByNo(orgAddress, participantNo string) (*O
 		return nil, ErrInvalidData
 	}
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	orgParticipant := &OrgParticipant{}
@@ -148,7 +148,7 @@ func (ms *MongoStorage) BulkUpsertOrgParticipants(
 	}
 
 	// Create a context with a timeout for checking organization existence
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	// Check that the organization exists
@@ -175,7 +175,7 @@ func (ms *MongoStorage) BulkUpsertOrgParticipants(
 		}
 
 		// Create a new context for each batch
-		batchCtx, batchCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		batchCtx, batchCancel := context.WithTimeout(context.Background(), batchTimeout)
 
 		// Prepare bulk operations for this batch
 		var bulkOps []mongo.WriteModel
@@ -257,7 +257,7 @@ func (ms *MongoStorage) OrgParticipants(orgAddress string) ([]OrgParticipant, er
 		return nil, ErrInvalidData
 	}
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	cursor, err := ms.orgParticipants.Find(ctx, bson.M{"orgAddress": orgAddress})
@@ -285,7 +285,7 @@ func (ms *MongoStorage) OrgParticipantsMemberships(
 		return nil, ErrInvalidData
 	}
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	// Optimized aggregation pipeline

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
@@ -34,7 +33,7 @@ func (ms *MongoStorage) SetProcessBundle(bundle *ProcessesBundle) (internal.HexB
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// Create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	// If the bundle has an ID, update it, otherwise create a new one
@@ -70,7 +69,7 @@ func (ms *MongoStorage) DelProcessBundle(hbBundleID internal.HexBytes) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// Create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	// Delete the process bundle from the database using the ID
@@ -99,7 +98,7 @@ func (ms *MongoStorage) ProcessBundle(hbBundleID internal.HexBytes) (*ProcessesB
 	}
 
 	// Create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	bundle := &ProcessesBundle{}
@@ -114,7 +113,7 @@ func (ms *MongoStorage) ProcessBundle(hbBundleID internal.HexBytes) (*ProcessesB
 // Returns a slice of all process bundles with their complete information.
 func (ms *MongoStorage) ProcessBundles() ([]*ProcessesBundle, error) {
 	// Create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	cursor, err := ms.processBundles.Find(ctx, bson.M{})
@@ -144,7 +143,7 @@ func (ms *MongoStorage) ProcessBundlesByProcess(processID []byte) ([]*ProcessesB
 	}
 
 	// Create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	// Find bundles where the processes array contains a process with the given ID
@@ -176,7 +175,7 @@ func (ms *MongoStorage) ProcessBundlesByOrg(orgAddress string) ([]*ProcessesBund
 	}
 
 	// Create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	// Find bundles where the orgAddress matches the given address
@@ -223,7 +222,7 @@ func (ms *MongoStorage) AddProcessesToBundle(hbBundleID internal.HexBytes, proce
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// Create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	// Check each process and add it if it doesn't already exist in the bundle

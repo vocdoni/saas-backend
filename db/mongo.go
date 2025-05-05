@@ -17,6 +17,17 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
+const (
+	// connectTimeout is used for connection timeout
+	connectTimeout = 10 * time.Second
+	// defaultTimeout is used for simple operations (FindOne, UpdateOne, DeleteOne)
+	defaultTimeout = 10 * time.Second
+	// batchTimeout is used for batch operations (BulkWrite)
+	batchTimeout = 20 * time.Second
+	// exportTimeout is used for export/import operations (String, Import)
+	exportTimeout = 30 * time.Second
+)
+
 // MongoStorage uses an external MongoDB service for stoting the user data and election details.
 type MongoStorage struct {
 	database    string
@@ -87,17 +98,16 @@ func New(url, database string, plans []*Plan) (*MongoStorage, error) {
 	opts := options.Client()
 	opts.ApplyURI(url)
 	opts.SetMaxConnecting(200)
-	timeout := time.Second * 10
-	opts.ConnectTimeout = &timeout
+	opts.SetConnectTimeout(connectTimeout)
 	// create a new client with the connection options
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
 	defer cancel()
 	client, err := mongo.Connect(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("cannot connect to mongodb: %w", err)
 	}
 	// check if the connection is successful
-	ctx, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel2 := context.WithTimeout(context.Background(), connectTimeout)
 	defer cancel2()
 	// try to ping the database
 	if err = client.Ping(ctx, readpref.Primary()); err != nil {
@@ -128,7 +138,7 @@ func New(url, database string, plans []*Plan) (*MongoStorage, error) {
 }
 
 func (ms *MongoStorage) Close() {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
 	defer cancel()
 	if err := ms.DBClient.Disconnect(ctx); err != nil {
 		log.Warnw("disconnect error", "error", err)
@@ -137,7 +147,7 @@ func (ms *MongoStorage) Close() {
 
 func (ms *MongoStorage) Reset() error {
 	log.Infow("resetting database")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// drop users collection
 	if err := ms.users.Drop(ctx); err != nil {
@@ -204,11 +214,10 @@ func (ms *MongoStorage) Reset() error {
 }
 
 func (ms *MongoStorage) String() string {
-	const contextTimeout = 30 * time.Second
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
 	// get all users
-	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel()
 	userCur, err := ms.users.Find(ctx, bson.D{{}})
 	if err != nil {
@@ -216,7 +225,7 @@ func (ms *MongoStorage) String() string {
 		return "{}"
 	}
 	// append all users to the export data
-	ctx, cancel2 := context.WithTimeout(context.Background(), contextTimeout)
+	ctx, cancel2 := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel2()
 	var users UserCollection
 	for userCur.Next(ctx) {
@@ -228,7 +237,7 @@ func (ms *MongoStorage) String() string {
 		users.Users = append(users.Users, user)
 	}
 	// get all user verifications
-	ctx, cancel3 := context.WithTimeout(context.Background(), contextTimeout)
+	ctx, cancel3 := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel3()
 	verCur, err := ms.verifications.Find(ctx, bson.D{{}})
 	if err != nil {
@@ -236,7 +245,7 @@ func (ms *MongoStorage) String() string {
 		return "{}"
 	}
 	// append all user verifications to the export data
-	ctx, cancel4 := context.WithTimeout(context.Background(), contextTimeout)
+	ctx, cancel4 := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel4()
 	var verifications UserVerifications
 	for verCur.Next(ctx) {
@@ -248,7 +257,7 @@ func (ms *MongoStorage) String() string {
 		verifications.Verifications = append(verifications.Verifications, ver)
 	}
 	// get all organizations
-	ctx, cancel5 := context.WithTimeout(context.Background(), contextTimeout)
+	ctx, cancel5 := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel5()
 	orgCur, err := ms.organizations.Find(ctx, bson.D{{}})
 	if err != nil {
@@ -256,7 +265,7 @@ func (ms *MongoStorage) String() string {
 		return "{}"
 	}
 	// append all organizations to the export data
-	ctx, cancel6 := context.WithTimeout(context.Background(), contextTimeout)
+	ctx, cancel6 := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel6()
 	var organizations OrganizationCollection
 	for orgCur.Next(ctx) {
@@ -269,7 +278,7 @@ func (ms *MongoStorage) String() string {
 	}
 
 	// get all censuses
-	ctx, cancel7 := context.WithTimeout(context.Background(), contextTimeout)
+	ctx, cancel7 := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel7()
 	censusCur, err := ms.censuses.Find(ctx, bson.D{{}})
 	if err != nil {
@@ -277,7 +286,7 @@ func (ms *MongoStorage) String() string {
 		return "{}"
 	}
 	// append all censuses to the export data
-	ctx, cancel8 := context.WithTimeout(context.Background(), contextTimeout)
+	ctx, cancel8 := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel8()
 	var censuses CensusCollection
 	for censusCur.Next(ctx) {
@@ -290,7 +299,7 @@ func (ms *MongoStorage) String() string {
 	}
 
 	// get all census participants
-	ctx, cancel9 := context.WithTimeout(context.Background(), contextTimeout)
+	ctx, cancel9 := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel9()
 	censusPartCur, err := ms.orgParticipants.Find(ctx, bson.D{{}})
 	if err != nil {
@@ -298,7 +307,7 @@ func (ms *MongoStorage) String() string {
 		return "{}"
 	}
 	// append all census participants to the export data
-	ctx, cancel10 := context.WithTimeout(context.Background(), contextTimeout)
+	ctx, cancel10 := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel10()
 	var orgParticipants OrgParticipantsCollection
 	for censusPartCur.Next(ctx) {
@@ -311,7 +320,7 @@ func (ms *MongoStorage) String() string {
 	}
 
 	// get all census memberships
-	ctx, cancel11 := context.WithTimeout(context.Background(), contextTimeout)
+	ctx, cancel11 := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel11()
 	censusMemCur, err := ms.censusMemberships.Find(ctx, bson.D{{}})
 	if err != nil {
@@ -319,7 +328,7 @@ func (ms *MongoStorage) String() string {
 		return "{}"
 	}
 	// append all census memberships to the export data
-	ctx, cancel12 := context.WithTimeout(context.Background(), contextTimeout)
+	ctx, cancel12 := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel12()
 	var censusMemberships CensusMembershipsCollection
 	for censusMemCur.Next(ctx) {
@@ -332,7 +341,7 @@ func (ms *MongoStorage) String() string {
 	}
 
 	// get all published censuses
-	ctx, cancel13 := context.WithTimeout(context.Background(), contextTimeout)
+	ctx, cancel13 := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel13()
 	pubCensusCur, err := ms.publishedCensuses.Find(ctx, bson.D{{}})
 	if err != nil {
@@ -340,7 +349,7 @@ func (ms *MongoStorage) String() string {
 		return "{}"
 	}
 	// append all published censuses to the export data
-	ctx, cancel14 := context.WithTimeout(context.Background(), contextTimeout)
+	ctx, cancel14 := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel14()
 	var publishedCensuses PublishedCensusesCollection
 	for pubCensusCur.Next(ctx) {
@@ -353,7 +362,7 @@ func (ms *MongoStorage) String() string {
 	}
 
 	// get all processes
-	ctx, cancel15 := context.WithTimeout(context.Background(), contextTimeout)
+	ctx, cancel15 := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel15()
 	processCur, err := ms.processes.Find(ctx, bson.D{{}})
 	if err != nil {
@@ -361,7 +370,7 @@ func (ms *MongoStorage) String() string {
 		return "{}"
 	}
 	// append all processes to the export data
-	ctx, cancel16 := context.WithTimeout(context.Background(), contextTimeout)
+	ctx, cancel16 := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel16()
 	var processes ProcessesCollection
 	for processCur.Next(ctx) {
@@ -373,7 +382,7 @@ func (ms *MongoStorage) String() string {
 		processes.Processes = append(processes.Processes, process)
 	}
 	// get all organization invites
-	ctx, cancel17 := context.WithTimeout(context.Background(), contextTimeout)
+	ctx, cancel17 := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel17()
 	invCur, err := ms.organizationInvites.Find(ctx, bson.D{{}})
 	if err != nil {
@@ -381,7 +390,7 @@ func (ms *MongoStorage) String() string {
 		return "{}"
 	}
 	// append all organization invites to the export data
-	ctx, cancel18 := context.WithTimeout(context.Background(), contextTimeout)
+	ctx, cancel18 := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel18()
 	var organizationInvites OrganizationInvitesCollection
 	for invCur.Next(ctx) {
@@ -416,7 +425,7 @@ func (ms *MongoStorage) Import(jsonData []byte) error {
 		return err
 	}
 	// create global context to import data
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*exportTimeout)
 	defer cancel()
 	// upsert users collection
 	log.Infow("importing users", "count", len(collection.Users))

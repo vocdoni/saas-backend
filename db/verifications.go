@@ -26,7 +26,7 @@ func (ms *MongoStorage) UserByVerificationCode(code string, t CodeType) (*User, 
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	result := ms.verifications.FindOne(ctx, bson.M{"code": code, "type": t})
@@ -44,7 +44,7 @@ func (ms *MongoStorage) UserByVerificationCode(code string, t CodeType) (*User, 
 // the user has not a verification code, it returns an specific error, if other
 // error occurs, it returns the error.
 func (ms *MongoStorage) UserVerificationCode(user *User, t CodeType) (*UserVerification, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	result := ms.verifications.FindOne(ctx, bson.M{"_id": user.ID, "type": t})
@@ -64,7 +64,7 @@ func (ms *MongoStorage) UserVerificationCode(user *User, t CodeType) (*UserVerif
 func (ms *MongoStorage) SetVerificationCode(user *User, code string, t CodeType, exp time.Time) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// try to get the user to ensure it exists
 	if _, err := ms.fetchUserFromDB(ctx, user.ID); err != nil {

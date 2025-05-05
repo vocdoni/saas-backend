@@ -75,7 +75,7 @@ func (ms *MongoStorage) SetCensusMembership(membership *CensusMembership) error 
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	opts := options.Update().SetUpsert(true)
@@ -90,7 +90,7 @@ func (ms *MongoStorage) SetCensusMembership(membership *CensusMembership) error 
 // participantNo and censusID. Returns ErrNotFound if the membership doesn't exist.
 func (ms *MongoStorage) CensusMembership(censusID, participantNo string) (*CensusMembership, error) {
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	// validate input
@@ -123,7 +123,7 @@ func (ms *MongoStorage) DelCensusMembership(censusID, participantNo string) erro
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	// validate input
@@ -266,7 +266,7 @@ func (ms *MongoStorage) processBatch(
 	defer ms.keysLock.Unlock()
 
 	// Create a new context for the batch
-	batchCtx, batchCancel := context.WithTimeout(context.Background(), 20*time.Second)
+	batchCtx, batchCancel := context.WithTimeout(context.Background(), batchTimeout)
 	defer batchCancel()
 
 	// Execute the bulk write operations for participants
@@ -439,7 +439,7 @@ func (ms *MongoStorage) SetBulkCensusMembership(
 // CensusMemberships retrieves all the census memberships for a given census.
 func (ms *MongoStorage) CensusMemberships(censusID string) ([]CensusMembership, error) {
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	// validate input

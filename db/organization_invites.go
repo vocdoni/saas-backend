@@ -15,7 +15,7 @@ func (ms *MongoStorage) CreateInvitation(invite *OrganizationInvite) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// check if the organization exists
 	if _, err := ms.fetchOrganizationFromDB(ctx, invite.OrganizationAddress); err != nil {
@@ -63,7 +63,7 @@ func (ms *MongoStorage) CreateInvitation(invite *OrganizationInvite) error {
 
 // Invitation returns the invitation for the given code.
 func (ms *MongoStorage) Invitation(invitationCode string) (*OrganizationInvite, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	result := ms.organizationInvites.FindOne(ctx, bson.M{"invitationCode": invitationCode})
@@ -79,7 +79,7 @@ func (ms *MongoStorage) Invitation(invitationCode string) (*OrganizationInvite, 
 
 // PendingInvitations returns the pending invitations for the given organization.
 func (ms *MongoStorage) PendingInvitations(organizationAddress string) ([]OrganizationInvite, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	cursor, err := ms.organizationInvites.Find(ctx, bson.M{"organizationAddress": organizationAddress})
@@ -103,7 +103,7 @@ func (ms *MongoStorage) DeleteInvitation(invitationCode string) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	_, err := ms.organizationInvites.DeleteOne(ctx, bson.M{"invitationCode": invitationCode})

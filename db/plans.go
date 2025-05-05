@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"errors"
-	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -32,7 +31,7 @@ func (ms *MongoStorage) SetPlan(plan *Plan) (uint64, error) {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	nextID, err := ms.nextPlanID(ctx)
 	if err != nil {
@@ -63,7 +62,7 @@ func (ms *MongoStorage) SetPlan(plan *Plan) (uint64, error) {
 // plan doesn't exist, it returns the specific error.
 func (ms *MongoStorage) Plan(planID uint64) (*Plan, error) {
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// find the plan in the database
 	filter := bson.M{"_id": planID}
@@ -82,7 +81,7 @@ func (ms *MongoStorage) Plan(planID uint64) (*Plan, error) {
 // plan doesn't exist, it returns the specific error.
 func (ms *MongoStorage) PlanByStripeID(stripeID string) (*Plan, error) {
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// find the plan in the database
 	filter := bson.M{"stripeID": stripeID}
@@ -101,7 +100,7 @@ func (ms *MongoStorage) PlanByStripeID(stripeID string) (*Plan, error) {
 // plan doesn't exist, it returns the specific error.
 func (ms *MongoStorage) DefaultPlan() (*Plan, error) {
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// find the plan in the database
 	filter := bson.M{"default": true}
@@ -119,7 +118,7 @@ func (ms *MongoStorage) DefaultPlan() (*Plan, error) {
 // Plans method returns all plans from the database.
 func (ms *MongoStorage) Plans() ([]*Plan, error) {
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// find all plans in the database
 	cursor, err := ms.plans.Find(ctx, bson.M{})
@@ -153,7 +152,7 @@ func (ms *MongoStorage) DelPlan(plan *Plan) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// delete the organization from the database
 	_, err := ms.plans.DeleteOne(ctx, bson.M{"_id": plan.ID})

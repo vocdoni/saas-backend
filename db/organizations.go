@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -32,7 +31,7 @@ func (ms *MongoStorage) fetchOrganizationFromDB(ctx context.Context, address str
 // If other errors occur, it returns the error.
 func (ms *MongoStorage) Organization(address string) (*Organization, error) {
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// find the organization in the database
 	org, err := ms.fetchOrganizationFromDB(ctx, address)
@@ -50,7 +49,7 @@ func (ms *MongoStorage) OrganizationWithParent(address string) (org *Organizatio
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// find the organization in the database
 	org, err = ms.fetchOrganizationFromDB(ctx, address)
@@ -76,7 +75,7 @@ func (ms *MongoStorage) SetOrganization(org *Organization) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// prepare the document to be updated in the database modifying only the
 	// fields that have changed
@@ -114,7 +113,7 @@ func (ms *MongoStorage) DelOrganization(org *Organization) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// delete the organization from the database
 	_, err := ms.organizations.DeleteOne(ctx, bson.M{"_id": org.Address})
@@ -127,7 +126,7 @@ func (ms *MongoStorage) ReplaceCreatorEmail(oldEmail, newEmail string) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// update the creator email in the organizations where it is the creator
 	updateDoc := bson.M{"$set": bson.M{"creator": newEmail}}
@@ -142,7 +141,7 @@ func (ms *MongoStorage) ReplaceCreatorEmail(oldEmail, newEmail string) error {
 // error.
 func (ms *MongoStorage) OrganizationsMembers(address string) ([]User, error) {
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// find the organization in the database
 	filter := bson.M{
@@ -177,7 +176,7 @@ func (ms *MongoStorage) SetOrganizationSubscription(address string, orgSubscript
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// prepare the document to be updated in the database
 	filter := bson.M{"_id": address}
