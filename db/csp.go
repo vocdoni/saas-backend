@@ -43,7 +43,7 @@ func (ms *MongoStorage) SetCSPAuth(token, userID, bundleID internal.HexBytes) er
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// insert the token
 	if _, err := ms.cspTokens.InsertOne(ctx, CSPAuth{
@@ -64,7 +64,7 @@ func (ms *MongoStorage) CSPAuth(token internal.HexBytes) (*CSPAuth, error) {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// find the token
 	return ms.fetchCSPAuthFromDB(ctx, token)
@@ -78,7 +78,7 @@ func (ms *MongoStorage) LastCSPAuth(userID, bundleID internal.HexBytes) (*CSPAut
 		return nil, ErrBadInputs
 	}
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// generate filter and options to find the last token for the user and
 	// bundle
@@ -104,7 +104,7 @@ func (ms *MongoStorage) VerifyCSPAuth(token internal.HexBytes) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// ensure that the token exists
 	if _, err := ms.fetchCSPAuthFromDB(ctx, token); err != nil {
@@ -128,7 +128,7 @@ func (ms *MongoStorage) CSPProcess(token, processID internal.HexBytes) (*CSPProc
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// get the token data
 	tokenData, err := ms.fetchCSPAuthFromDB(ctx, token)
@@ -147,7 +147,7 @@ func (ms *MongoStorage) IsCSPProcessConsumed(userID, processID internal.HexBytes
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// try to find the token status by id
 	currentStatus, err := ms.fetchCSPProcessFromDB(ctx, cspAuthTokenStatusID(userID, processID))
@@ -180,7 +180,7 @@ func (ms *MongoStorage) ConsumeCSPProcess(token, processID, address internal.Hex
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// check if the token exists
 	tokenData, err := ms.fetchCSPAuthFromDB(ctx, token)

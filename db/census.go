@@ -18,7 +18,7 @@ import (
 // Returns the hex representation of the census
 func (ms *MongoStorage) SetCensus(census *Census) (string, error) {
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	if census.OrgAddress == "" {
@@ -68,7 +68,7 @@ func (ms *MongoStorage) DelCensus(censusID string) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	// delete the census from the database using the ID
@@ -85,7 +85,7 @@ func (ms *MongoStorage) Census(censusID string) (*Census, error) {
 	}
 
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	census := &Census{}
@@ -104,7 +104,7 @@ func (ms *MongoStorage) CensusesByOrg(orgAddress string) ([]*Census, error) {
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	if _, err := ms.fetchOrganizationFromDB(ctx, orgAddress); err != nil {

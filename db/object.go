@@ -15,7 +15,7 @@ import (
 
 // Object retrieves an object from the MongoDB collection by its ID.
 func (ms *MongoStorage) Object(id string) (*Object, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	// find the object in the database
@@ -36,7 +36,7 @@ func (ms *MongoStorage) Object(id string) (*Object, error) {
 func (ms *MongoStorage) SetObject(objectID, userID, contentType string, data []byte) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	object := &Object{
 		ID:          objectID,
@@ -59,7 +59,7 @@ func (ms *MongoStorage) SetObject(objectID, userID, contentType string, data []b
 func (ms *MongoStorage) RemoveObject(objectID string) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	_, err := ms.objects.DeleteOne(ctx, bson.M{"_id": objectID})
 	return err

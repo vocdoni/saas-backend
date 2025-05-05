@@ -23,7 +23,7 @@ func (ms *MongoStorage) SetPublishedCensus(publishedCensus *PublishedCensus) err
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	// TODO do no recreate the publishedCensus if it already exists
@@ -44,7 +44,7 @@ func (ms *MongoStorage) DelPublishedCensus(root, uri string) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	// delete the publishedCensus from the database using the ID
@@ -60,7 +60,7 @@ func (ms *MongoStorage) PublishedCensus(root, uri, censusID string) (*PublishedC
 	}
 
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	publishedCensus := &PublishedCensus{}
