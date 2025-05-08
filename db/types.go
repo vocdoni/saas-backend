@@ -228,6 +228,7 @@ type Process struct {
 	OrgAddress      string            `json:"orgAdress" bson:"orgAddress"`
 	PublishedCensus PublishedCensus   `json:"publishedCensus" bson:"publishedCensus"`
 	Metadata        []byte            `json:"metadata,omitempty"  bson:"metadata"  swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
+	Draft           bool              `json:"draft" bson:"draft"`
 }
 
 // ProcessesBundle represents a group of voting processes that share a common census.

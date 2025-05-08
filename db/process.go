@@ -5,9 +5,12 @@ import (
 	"fmt"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// CreateProcess creates a new process for an organization
+// SetProcess creates a new process or updates an existing one for an organization.
+// If the process already exists and is in draft mode, it will be updated.
 func (ms *MongoStorage) SetProcess(process *Process) error {
 	if len(process.ID) == 0 || len(process.OrgAddress) == 0 || len(process.PublishedCensus.Root) == 0 {
 		return ErrInvalidData
@@ -34,8 +37,11 @@ func (ms *MongoStorage) SetProcess(process *Process) error {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	if _, err := ms.processes.InsertOne(ctx, process); err != nil {
-		return fmt.Errorf("failed to create process: %w", err)
+	// Use ReplaceOne with upsert option to either update an existing process or insert a new one
+	filter := bson.M{"_id": process.ID}
+	opts := options.Replace().SetUpsert(true)
+	if _, err := ms.processes.ReplaceOne(ctx, filter, process, opts); err != nil {
+		return fmt.Errorf("failed to create or update process: %w", err)
 	}
 
 	return nil
@@ -70,6 +76,9 @@ func (ms *MongoStorage) Process(processID []byte) (*Process, error) {
 
 	process := &Process{}
 	if err := ms.processes.FindOne(ctx, bson.M{"_id": processID}).Decode(process); err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("failed to get process: %w", err)
 	}
 
