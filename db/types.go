@@ -235,11 +235,10 @@ type Process struct {
 //
 //nolint:lll
 type ProcessesBundle struct {
-	ID         primitive.ObjectID  `json:"id" bson:"_id,omitempty"`                                                               // Unique identifier for the bundle
-	Census     Census              `json:"census" bson:"census"`                                                                  // The census associated with this bundle
-	CensusRoot string              `json:"censusRoot" bson:"censusRoot"`                                                          // The census root public key
-	OrgAddress string              `json:"orgAddress" bson:"orgAddress"`                                                          // The organization that owns this bundle
-	Processes  []internal.HexBytes `json:"processes" bson:"processes" swaggertype:"array,string" format:"hex" example:"deadbeef"` // Array of process IDs included in this bundle
+	ID              primitive.ObjectID  `json:"id" bson:"_id,omitempty"`                                                               // Unique identifier for the bundle
+	OrgAddress      string              `json:"orgAddress" bson:"orgAddress"`                                                          // The organization that owns this bundle
+	PublishedCensus PublishedCensus     `json:"publishedCensus" bson:"publishedCensus"`                                                // The census associated with this bundle
+	Processes       []internal.HexBytes `json:"processes" bson:"processes" swaggertype:"array,string" format:"hex" example:"deadbeef"` // Array of process IDs included in this bundle
 }
 
 // Mix of the Membership and the Participant
