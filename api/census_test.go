@@ -13,6 +13,12 @@ import (
 )
 
 func TestCensus(t *testing.T) {
+	testCensusWithType(t, db.CensusTypeSMSorMail)
+	testCensusWithType(t, db.CensusTypeSMS)
+	testCensusWithType(t, db.CensusTypeMail)
+}
+
+func testCensusWithType(t *testing.T, censusType db.CensusType) {
 	c := qt.New(t)
 
 	// Create a user with admin permissions
@@ -34,7 +40,7 @@ func TestCensus(t *testing.T) {
 	// Test 1: Create a census
 	// Test 1.1: Test with valid data
 	censusInfo := &apicommon.OrganizationCensus{
-		Type:       db.CensusTypeSMSorMail,
+		Type:       censusType,
 		OrgAddress: orgAddress.String(),
 	}
 	resp, code = testRequest(t, http.MethodPost, adminToken, censusInfo, censusEndpoint)
@@ -45,7 +51,7 @@ func TestCensus(t *testing.T) {
 	err := parseJSON(resp, &createdCensus)
 	c.Assert(err, qt.IsNil)
 	c.Assert(createdCensus.ID, qt.Not(qt.Equals), "")
-	c.Assert(createdCensus.Type, qt.Equals, db.CensusTypeSMSorMail)
+	c.Assert(createdCensus.Type, qt.Equals, censusType)
 	c.Assert(createdCensus.OrgAddress, qt.Equals, orgAddress.String())
 
 	censusID := createdCensus.ID
@@ -57,7 +63,7 @@ func TestCensus(t *testing.T) {
 
 	// Test 1.3: Test with invalid organization address
 	invalidCensusInfo := &apicommon.OrganizationCensus{
-		Type:       db.CensusTypeSMSorMail,
+		Type:       censusType,
 		OrgAddress: "invalid-address",
 	}
 	_, code = testRequest(t, http.MethodPost, adminToken, invalidCensusInfo, censusEndpoint)
@@ -72,7 +78,7 @@ func TestCensus(t *testing.T) {
 	err = parseJSON(resp, &retrievedCensus)
 	c.Assert(err, qt.IsNil)
 	c.Assert(retrievedCensus.ID, qt.Equals, censusID)
-	c.Assert(retrievedCensus.Type, qt.Equals, db.CensusTypeSMSorMail)
+	c.Assert(retrievedCensus.Type, qt.Equals, censusType)
 	c.Assert(retrievedCensus.OrgAddress, qt.Equals, orgAddress.String())
 
 	// Test 2.2: Test with invalid census ID
