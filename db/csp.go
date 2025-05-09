@@ -61,8 +61,8 @@ func (ms *MongoStorage) SetCSPAuth(token, userID, bundleID internal.HexBytes) er
 // CSPAuth method returns the CSP authentication data for a given token. It
 // returns an error if the token is nil or the token does not exist.
 func (ms *MongoStorage) CSPAuth(token internal.HexBytes) (*CSPAuth, error) {
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
