@@ -654,6 +654,20 @@ func (p *OrgParticipant) ToDb(orgAddress string) db.OrgParticipant {
 	}
 }
 
+func OrgParticipantFromDb(p db.OrgParticipant) OrgParticipant {
+	return OrgParticipant{
+		ParticipantNo: p.ParticipantNo,
+		Name:          p.Name,
+		Email:         p.Email,
+		Phone:         p.Phone,
+		Password:      p.Password,
+	}
+}
+
+type OrganizationParticipantsResponse struct {
+	Participants []OrgParticipant `json:"participants"`
+}
+
 // AddParticipantsResponse defines the response for successful participant addition.
 // swagger:model AddParticipantsResponse
 type AddParticipantsResponse struct {

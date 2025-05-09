@@ -227,6 +227,15 @@ func (a *API) initRouter() http.Handler {
 		// pending organization invitations
 		log.Infow("new route", "method", "GET", "path", organizationPendingMembersEndpoint)
 		r.Get(organizationPendingMembersEndpoint, a.pendingOrganizationMembersHandler)
+		// get organization participants
+		log.Infow("new route", "method", "GET", "path", organizationParticipantsEndpoint)
+		r.Get(organizationParticipantsEndpoint, a.organizationParticipantsHandler)
+		// add organization participants
+		log.Infow("new route", "method", "POST", "path", organizationAddParticipantsEndpoint)
+		r.Post(organizationAddParticipantsEndpoint, a.addOrganizationParticipantsHandler)
+		// check the status of the add participants job
+		log.Infow("new route", "method", "GET", "path", organizationAddParticipantsCheckEndpoint)
+		r.Get(organizationAddParticipantsCheckEndpoint, a.addOrganizationParticipantsJobCheckHandler)
 		// handle stripe checkout session
 		log.Infow("new route", "method", "POST", "path", subscriptionsCheckout)
 		r.Post(subscriptionsCheckout, a.createSubscriptionCheckoutHandler)
@@ -245,7 +254,7 @@ func (a *API) initRouter() http.Handler {
 		r.Post(censusEndpoint, a.createCensusHandler)
 		// add census participants
 		log.Infow("new route", "method", "POST", "path", censusIDEndpoint)
-		r.Post(censusIDEndpoint, a.addParticipantsHandler)
+		r.Post(censusIDEndpoint, a.addCensusParticipantsHandler)
 		// get census participants job
 		log.Infow("new route", "method", "GET", "path", censusAddParticipantsCheckEndpoint)
 		r.Get(censusAddParticipantsCheckEndpoint, a.addParticipantsJobCheckHandler)

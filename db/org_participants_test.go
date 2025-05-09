@@ -164,7 +164,7 @@ func TestOrgParticipants(t *testing.T) {
 		c.Assert(err, qt.Not(qt.IsNil))
 	})
 
-	t.Run("BulkUpsertOrgParticipants", func(_ *testing.T) {
+	t.Run("SetBulkOrgParticipants", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Create org
 		organization := &Organization{
@@ -192,9 +192,19 @@ func TestOrgParticipants(t *testing.T) {
 		}
 
 		// Perform bulk upsert
-		result, err := testDB.BulkUpsertOrgParticipants(testOrgAddress, testSalt, participants)
+		progressChan, err := testDB.SetBulkOrgParticipants(testOrgAddress, testSalt, participants)
 		c.Assert(err, qt.IsNil)
-		c.Assert(result.UpsertedCount, qt.Equals, int64(2))
+
+		// Wait for the operation to complete and get the final status
+		var lastStatus *BulkOrgParticipantsStatus
+		for status := range progressChan {
+			lastStatus = status
+		}
+
+		// Verify the operation completed successfully
+		c.Assert(lastStatus, qt.Not(qt.IsNil))
+		c.Assert(lastStatus.Progress, qt.Equals, 100)
+		c.Assert(lastStatus.Added, qt.Equals, 2)
 
 		// Verify both participants were created with hashed fields
 		participant1, err := testDB.OrgParticipantByNo(testOrgAddress, testParticipantNo)
@@ -214,10 +224,18 @@ func TestOrgParticipants(t *testing.T) {
 		participants[1].Phone = "+34678678971"
 
 		// Perform bulk upsert again
-		result, err = testDB.BulkUpsertOrgParticipants(testOrgAddress, testSalt, participants)
+		progressChan, err = testDB.SetBulkOrgParticipants(testOrgAddress, testSalt, participants)
 		c.Assert(err, qt.IsNil)
-		c.Assert(result.ModifiedCount, qt.Equals, int64(2)) // Both documents should be modified
-		c.Assert(result.UpsertedCount, qt.Equals, int64(0)) // No new documents should be inserted
+
+		// Wait for the operation to complete and get the final status
+		for status := range progressChan {
+			lastStatus = status
+		}
+
+		// Verify the operation completed successfully
+		c.Assert(lastStatus, qt.Not(qt.IsNil))
+		c.Assert(lastStatus.Progress, qt.Equals, 100)
+		c.Assert(lastStatus.Added, qt.Equals, 2) // Both documents should be updated
 
 		// Verify updates for both participants
 		updatedParticipant1, err := testDB.OrgParticipantByNo(testOrgAddress, testParticipantNo)
@@ -231,7 +249,7 @@ func TestOrgParticipants(t *testing.T) {
 		c.Assert(updatedParticipant2.Name, qt.Equals, "Test Participant 2")
 
 		// Test with empty organization address
-		_, err = testDB.BulkUpsertOrgParticipants("", testSalt, participants)
+		_, err = testDB.SetBulkOrgParticipants("", testSalt, participants)
 		c.Assert(err, qt.Not(qt.IsNil))
 	})
 }
