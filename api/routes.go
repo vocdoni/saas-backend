@@ -62,6 +62,14 @@ const (
 	organizationSubscriptionEndpoint = "/organizations/{address}/subscription"
 	// GET /organizations/{address}/censuses to get the organization censuses
 	organizationCensusesEndpoint = "/organizations/{address}/censuses"
+	// GET /organizations/{address}/participants to get the organization participants
+	organizationParticipantsEndpoint = "/organizations/{address}/participants"
+	// POST /organizations/{address}/participants to add new participants
+	organizationAddParticipantsEndpoint = "/organizations/{address}/participants"
+	// GET /organizations/{address}/participants/check/{jobid} to check the status of the add participants job
+	organizationAddParticipantsCheckEndpoint = "/organizations/{address}/participants/check/{jobid}"
+	// DELETE /organizations/{address}/participants to delete participants
+	organizationDeleteParticipantsEndpoint = "/organizations/{address}/participants"
 
 	// subscription routes
 	// GET /subscriptions to get the subscriptions of an organization

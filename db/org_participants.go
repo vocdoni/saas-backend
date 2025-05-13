@@ -133,126 +133,254 @@ func (ms *MongoStorage) OrgParticipantByNo(orgAddress, participantNo string) (*O
 	return orgParticipant, nil
 }
 
-// BulkAddOrgParticipants adds multiple census participants to the database in batches of 1000 entries
-// and updates already existing participants (decided by combination of participantNo and the censusID)
-// reqires an existing organization
-func (ms *MongoStorage) BulkUpsertOrgParticipants(
-	orgAddress, salt string,
+// BulkOrgParticipantsStatus is returned by SetBulkOrgParticipants to provide the output.
+type BulkOrgParticipantsStatus struct {
+	Progress int `json:"progress"`
+	Total    int `json:"total"`
+	Added    int `json:"added"`
+}
+
+// validateBulkOrgParticipants validates the input parameters for bulk org participants
+func (ms *MongoStorage) validateBulkOrgParticipants(
+	orgAddress string,
 	orgParticipants []OrgParticipant,
-) (*mongo.BulkWriteResult, error) {
+) (*Organization, error) {
+	// Early returns for invalid input
 	if len(orgParticipants) == 0 {
-		return nil, nil
+		return nil, nil // Not an error, just no work to do
 	}
 	if len(orgAddress) == 0 {
 		return nil, ErrInvalidData
 	}
 
-	// Create a context with a timeout for checking organization existence
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-
 	// Check that the organization exists
-	org := ms.organizations.FindOne(ctx, bson.M{"_id": orgAddress})
-	if org.Err() != nil {
-		return nil, ErrNotFound
+	org, err := ms.Organization(orgAddress)
+	if err != nil {
+		return nil, err
 	}
 
-	// Timestamp for all participants
-	currentTime := time.Now()
+	return org, nil
+}
 
+// prepareOrgParticipant processes a participant for storage
+func prepareOrgParticipant(participant *OrgParticipant, orgAddress, salt string, currentTime time.Time) {
+	participant.OrgAddress = orgAddress
+	participant.CreatedAt = currentTime
+
+	// Hash email if valid
+	if participant.Email != "" {
+		participant.HashedEmail = internal.HashOrgData(orgAddress, participant.Email)
+		participant.Email = ""
+	}
+
+	// Hash phone if valid
+	if participant.Phone != "" {
+		normalizedPhone, err := internal.SanitizeAndVerifyPhoneNumber(participant.Phone)
+		if err == nil {
+			participant.HashedPhone = internal.HashOrgData(orgAddress, normalizedPhone)
+		}
+		participant.Phone = ""
+	}
+
+	// Hash password if present
+	if participant.Password != "" {
+		participant.HashedPass = internal.HashPassword(salt, participant.Password)
+		participant.Password = ""
+	}
+}
+
+// createOrgParticipantBulkOperations creates the bulk write operations for participants
+func createOrgParticipantBulkOperations(
+	participants []OrgParticipant,
+	orgAddress string,
+	salt string,
+	currentTime time.Time,
+) []mongo.WriteModel {
+	var bulkOps []mongo.WriteModel
+
+	for _, participant := range participants {
+		// Prepare the participant
+		prepareOrgParticipant(&participant, orgAddress, salt, currentTime)
+
+		// Create filter and update document
+		filter := bson.M{
+			"participantNo": participant.ParticipantNo,
+			"orgAddress":    orgAddress,
+		}
+
+		updateDoc, err := dynamicUpdateDocument(participant, nil)
+		if err != nil {
+			log.Warnw("failed to create update document for participant",
+				"error", err, "participantNo", participant.ParticipantNo)
+			continue // Skip this participant but continue with others
+		}
+
+		// Create upsert model
+		upsertModel := mongo.NewUpdateOneModel().
+			SetFilter(filter).
+			SetUpdate(updateDoc).
+			SetUpsert(true)
+		bulkOps = append(bulkOps, upsertModel)
+	}
+
+	return bulkOps
+}
+
+// processOrgParticipantBatch processes a batch of participants and returns the number added
+func (ms *MongoStorage) processOrgParticipantBatch(
+	bulkOps []mongo.WriteModel,
+) int {
+	if len(bulkOps) == 0 {
+		return 0
+	}
+
+	// Only lock the mutex during the actual database operations
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
-	// Process participants in batches of 1000
-	batchSize := 1000
-	var finalResult *mongo.BulkWriteResult
+	// Create a new context for the batch
+	batchCtx, batchCancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer batchCancel()
 
-	for i := 0; i < len(orgParticipants); i += batchSize {
-		// Calculate end index for current batch
-		end := i + batchSize
-		if end > len(orgParticipants) {
-			end = len(orgParticipants)
-		}
-
-		// Create a new context for each batch
-		batchCtx, batchCancel := context.WithTimeout(context.Background(), batchTimeout)
-
-		// Prepare bulk operations for this batch
-		var bulkOps []mongo.WriteModel
-
-		// Process current batch
-		for _, participant := range orgParticipants[i:end] {
-			filter := bson.M{
-				"participantNo": participant.ParticipantNo,
-				"orgAddress":    orgAddress,
-			}
-			participant.OrgAddress = orgAddress
-			participant.CreatedAt = currentTime
-			if participant.Email != "" {
-				// store only the hashed email
-				participant.HashedEmail = internal.HashOrgData(orgAddress, participant.Email)
-				participant.Email = ""
-			}
-			if participant.Phone != "" {
-				// normalize and store only the hashed phone
-				normalizedPhone, err := internal.SanitizeAndVerifyPhoneNumber(participant.Phone)
-				if err == nil {
-					participant.HashedPhone = internal.HashOrgData(orgAddress, normalizedPhone)
-				}
-				participant.Phone = ""
-			}
-			if participant.Password != "" {
-				participant.HashedPass = internal.HashPassword(salt, participant.Password)
-				participant.Password = ""
-			}
-
-			// Create the update document for the participant
-			updateDoc, err := dynamicUpdateDocument(participant, nil)
-			if err != nil {
-				batchCancel()
-				return nil, err
-			}
-
-			// Create the upsert model for the bulk operation
-			upsertModel := mongo.NewUpdateOneModel().
-				SetFilter(filter).    // AND condition filter
-				SetUpdate(updateDoc). // Update document
-				SetUpsert(true)       // Ensure upsert behavior
-
-			// Add the operation to the bulkOps array
-			bulkOps = append(bulkOps, upsertModel)
-		}
-
-		// Execute the bulk write operation for this batch
-		result, err := ms.orgParticipants.BulkWrite(batchCtx, bulkOps)
-		batchCancel()
-
-		if err != nil {
-			return nil, fmt.Errorf("failed to perform bulk operation: %w", err)
-		}
-
-		// Merge results if this is not the first batch
-		if finalResult == nil {
-			finalResult = result
-		} else {
-			finalResult.InsertedCount += result.InsertedCount
-			finalResult.MatchedCount += result.MatchedCount
-			finalResult.ModifiedCount += result.ModifiedCount
-			finalResult.DeletedCount += result.DeletedCount
-			finalResult.UpsertedCount += result.UpsertedCount
-
-			// Merge the upserted IDs
-			for k, v := range result.UpsertedIDs {
-				finalResult.UpsertedIDs[k] = v
-			}
-		}
+	// Execute the bulk write operations
+	_, err := ms.orgParticipants.BulkWrite(batchCtx, bulkOps)
+	if err != nil {
+		log.Warnw("failed to perform bulk operation on participants", "error", err)
+		return 0
 	}
 
-	return finalResult, nil
+	return len(bulkOps)
 }
 
-// OrgParticipants retrieves all orgParticipants for an organization from the DB
-func (ms *MongoStorage) OrgParticipants(orgAddress string) ([]OrgParticipant, error) {
+// startOrgParticipantProgressReporter starts a goroutine that reports progress periodically
+func startOrgParticipantProgressReporter(
+	ctx context.Context,
+	progressChan chan<- *BulkOrgParticipantsStatus,
+	totalParticipants int,
+	processedParticipants *int,
+	addedParticipants *int,
+) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// Calculate and send progress percentage
+			if totalParticipants > 0 {
+				progress := (*processedParticipants * 100) / totalParticipants
+				progressChan <- &BulkOrgParticipantsStatus{
+					Progress: progress,
+					Total:    totalParticipants,
+					Added:    *addedParticipants,
+				}
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// processOrgParticipantBatches processes participants in batches and sends progress updates
+func (ms *MongoStorage) processOrgParticipantBatches(
+	orgParticipants []OrgParticipant,
+	orgAddress string,
+	salt string,
+	progressChan chan<- *BulkOrgParticipantsStatus,
+) {
+	defer close(progressChan)
+
+	// Process participants in batches of 200
+	batchSize := 200
+	totalParticipants := len(orgParticipants)
+	processedParticipants := 0
+	addedParticipants := 0
+	currentTime := time.Now()
+
+	// Send initial progress
+	progressChan <- &BulkOrgParticipantsStatus{
+		Progress: 0,
+		Total:    totalParticipants,
+		Added:    addedParticipants,
+	}
+
+	// Create a context for the entire operation
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start progress reporter in a separate goroutine
+	go startOrgParticipantProgressReporter(
+		ctx,
+		progressChan,
+		totalParticipants,
+		&processedParticipants,
+		&addedParticipants,
+	)
+
+	// Process participants in batches
+	for i := 0; i < totalParticipants; i += batchSize {
+		// Calculate end index for current batch
+		end := i + batchSize
+		if end > totalParticipants {
+			end = totalParticipants
+		}
+
+		// Create bulk operations for this batch
+		bulkOps := createOrgParticipantBulkOperations(
+			orgParticipants[i:end],
+			orgAddress,
+			salt,
+			currentTime,
+		)
+
+		// Process the batch and get number of added participants
+		added := ms.processOrgParticipantBatch(bulkOps)
+		addedParticipants += added
+
+		// Update processed count
+		processedParticipants += (end - i)
+	}
+
+	// Send final progress (100%)
+	progressChan <- &BulkOrgParticipantsStatus{
+		Progress: 100,
+		Total:    totalParticipants,
+		Added:    addedParticipants,
+	}
+}
+
+// SetBulkOrgParticipants adds multiple organization participants to the database in batches of 200 entries
+// and updates already existing participants (decided by combination of participantNo and orgAddress)
+// Requires an existing organization
+// Returns a channel that sends the percentage of participants processed every 10 seconds.
+// This function must be called in a goroutine.
+func (ms *MongoStorage) SetBulkOrgParticipants(
+	orgAddress, salt string,
+	orgParticipants []OrgParticipant,
+) (chan *BulkOrgParticipantsStatus, error) {
+	progressChan := make(chan *BulkOrgParticipantsStatus, 10)
+
+	// Validate input parameters
+	org, err := ms.validateBulkOrgParticipants(orgAddress, orgParticipants)
+	if err != nil {
+		close(progressChan)
+		return progressChan, err
+	}
+
+	// If no participants, return empty channel
+	if org == nil {
+		close(progressChan)
+		return progressChan, nil
+	}
+
+	// Start processing in a goroutine
+	go ms.processOrgParticipantBatches(orgParticipants, orgAddress, salt, progressChan)
+
+	return progressChan, nil
+}
+
+// OrgParticipantsWithPagination retrieves paginated orgParticipants for an organization from the DB
+func (ms *MongoStorage) OrgParticipants(orgAddress string, page, pageSize int) ([]OrgParticipant, error) {
 	if len(orgAddress) == 0 {
 		return nil, ErrInvalidData
 	}
@@ -260,7 +388,19 @@ func (ms *MongoStorage) OrgParticipants(orgAddress string) ([]OrgParticipant, er
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	cursor, err := ms.orgParticipants.Find(ctx, bson.M{"orgAddress": orgAddress})
+	// Calculate skip value based on page and pageSize
+	skip := (page - 1) * pageSize
+
+	// Create filter
+	filter := bson.M{"orgAddress": orgAddress}
+
+	// Set up options for pagination
+	findOptions := options.Find().
+		SetSkip(int64(skip)).
+		SetLimit(int64(pageSize))
+
+	// Execute the find operation with pagination
+	cursor, err := ms.orgParticipants.Find(ctx, filter, findOptions)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get orgParticipants: %w", err)
 	}
@@ -270,63 +410,39 @@ func (ms *MongoStorage) OrgParticipants(orgAddress string) ([]OrgParticipant, er
 		}
 	}()
 
+	// Decode results
 	var orgParticipants []OrgParticipant
 	if err = cursor.All(ctx, &orgParticipants); err != nil {
-		return nil, fmt.Errorf("failed to get orgParticipants: %w", err)
+		return nil, fmt.Errorf("failed to decode orgParticipants: %w", err)
 	}
 
 	return orgParticipants, nil
 }
 
-func (ms *MongoStorage) OrgParticipantsMemberships(
-	orgAddress, censusID, bundleID string, electionIDs []internal.HexBytes,
-) ([]CensusMembershipParticipant, error) {
-	if len(orgAddress) == 0 || len(censusID) == 0 {
-		return nil, ErrInvalidData
+func (ms *MongoStorage) DeleteOrgParticipants(orgAddress string, participantIDs []string) (int, error) {
+	if len(orgAddress) == 0 {
+		return 0, ErrInvalidData
 	}
+	if len(participantIDs) == 0 {
+		return 0, nil
+	}
+
 	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Optimized aggregation pipeline
-	pipeline := mongo.Pipeline{
-		{primitive.E{Key: "$match", Value: bson.D{{Key: "orgAddress", Value: orgAddress}}}},
-		{primitive.E{Key: "$lookup", Value: bson.D{
-			{Key: "from", Value: "censusMemberships"},
-			{Key: "localField", Value: "participantNo"},
-			{Key: "foreignField", Value: "participantNo"},
-			{Key: "as", Value: "membership"},
-		}}},
-		{primitive.E{Key: "$unwind", Value: bson.D{{Key: "path", Value: "$membership"}}}},
-		{primitive.E{Key: "$match", Value: bson.D{{Key: "membership.censusId", Value: censusID}}}},
-		{primitive.E{Key: "$addFields", Value: bson.D{
-			{Key: "bundleId", Value: bundleID},
-			{Key: "electionIds", Value: electionIDs}, // Store extra fields as an array
-		}}},
-		{primitive.E{Key: "$project", Value: bson.D{
-			{Key: "hashedEmail", Value: 1},
-			{Key: "hashedPhone", Value: 1},
-			{Key: "participantNo", Value: 1},
-			{Key: "bundleId", Value: 1},
-			{Key: "electionIds", Value: 1},
-		}}},
+	// create the filter for the delete operation
+	filter := bson.M{
+		"orgAddress": orgAddress,
+		"participantNo": bson.M{
+			"$in": participantIDs,
+		},
 	}
 
-	cursor, err := ms.orgParticipants.Aggregate(ctx, pipeline)
+	result, err := ms.orgParticipants.DeleteMany(ctx, filter)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get orgParticipants: %w", err)
-	}
-	defer func() {
-		if err := cursor.Close(ctx); err != nil {
-			log.Warnw("error closing cursor", "error", err)
-		}
-	}()
-
-	// Convert cursor to slice of OrgParticipants
-	var participants []CensusMembershipParticipant
-	if err := cursor.All(ctx, &participants); err != nil {
-		return nil, fmt.Errorf("failed to get orgParticipants: %w", err)
+		return 0, fmt.Errorf("failed to delete orgParticipants: %w", err)
 	}
 
-	return participants, nil
+	return int(result.DeletedCount), nil
 }
