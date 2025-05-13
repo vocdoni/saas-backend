@@ -103,7 +103,7 @@ func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 	apicommon.HTTPWriteJSON(w, apicommon.OrganizationCensusFromDB(census))
 }
 
-// addParticipantsHandler godoc
+// addCensusParticipantsHandler godoc
 //
 //	@Summary		Add participants to a census
 //	@Description	Add multiple participants to a census. Requires Manager/Admin role.
@@ -120,7 +120,7 @@ func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		404		{object}	errors.Error	"Census not found"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/census/{id} [post]
-func (a *API) addParticipantsHandler(w http.ResponseWriter, r *http.Request) {
+func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 	censusID := internal.HexBytes{}
 	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
 		errors.ErrMalformedURLParam.Withf("wrong census ID").Write(w)

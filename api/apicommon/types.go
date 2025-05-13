@@ -618,6 +618,15 @@ func (r *AddParticipantsRequest) DbOrgParticipants(orgAddress string) []db.OrgPa
 	return participants
 }
 
+type DeleteParticipantsRequest struct {
+	// List of participant ids numbers to delete
+	ParticipantIDs []string `json:"participantIDs"`
+}
+type DeleteParticipantsResponse struct {
+	// Number of participants deleted
+	ParticipantsNo int `json:"participantsNo"`
+}
+
 // OrgParticipant defines the structure of a participant in the API.
 // It is the mirror struct of db.OrgParticipant.
 // swagger:model OrgParticipant
@@ -652,6 +661,19 @@ func (p *OrgParticipant) ToDb(orgAddress string) db.OrgParticipant {
 		Password:      p.Password,
 		Other:         p.Other,
 	}
+}
+
+func OrgParticipantFromDb(p db.OrgParticipant) OrgParticipant {
+	return OrgParticipant{
+		ParticipantNo: p.ParticipantNo,
+		Name:          p.Name,
+		Email:         p.Email,
+		Phone:         p.Phone,
+	}
+}
+
+type OrganizationParticipantsResponse struct {
+	Participants []OrgParticipant `json:"participants"`
 }
 
 // AddParticipantsResponse defines the response for successful participant addition.

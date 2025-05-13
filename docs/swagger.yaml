@@ -82,6 +82,20 @@ definitions:
         format: base64
         type: string
     type: object
+  apicommon.DeleteParticipantsRequest:
+    properties:
+      participantIDs:
+        description: List of participant ids numbers to delete
+        items:
+          type: string
+        type: array
+    type: object
+  apicommon.DeleteParticipantsResponse:
+    properties:
+      participantsNo:
+        description: Number of participants deleted
+        type: integer
+    type: object
   apicommon.LoginResponse:
     properties:
       expirity:
@@ -256,6 +270,13 @@ definitions:
         description: List of organization members
         items:
           $ref: '#/definitions/apicommon.OrganizationMember'
+        type: array
+    type: object
+  apicommon.OrganizationParticipantsResponse:
+    properties:
+      participants:
+        items:
+          $ref: '#/definitions/apicommon.OrgParticipant'
         type: array
     type: object
   apicommon.OrganizationRole:
@@ -588,6 +609,15 @@ definitions:
         type: boolean
     type: object
   db.BulkCensusMembershipStatus:
+    properties:
+      added:
+        type: integer
+      progress:
+        type: integer
+      total:
+        type: integer
+    type: object
+  db.BulkOrgParticipantsStatus:
     properties:
       added:
         type: integer
@@ -22570,6 +22600,177 @@ paths:
       security:
       - BearerAuth: []
       summary: Get pending organization members
+      tags:
+      - organizations
+  /organizations/{address}/participants:
+    delete:
+      consumes:
+      - application/json
+      description: Delete multiple participants from an organization. Requires Manager/Admin
+        role.
+      parameters:
+      - description: Organization address
+        in: path
+        name: address
+        required: true
+        type: string
+      - description: Participant IDs to delete
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.DeleteParticipantsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.DeleteParticipantsResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Delete organization participants
+      tags:
+      - organizations
+    get:
+      consumes:
+      - application/json
+      description: Retrieve all participants of an organization with pagination support
+      parameters:
+      - description: Organization address
+        in: path
+        name: address
+        required: true
+        type: string
+      - description: 'Page number (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - description: 'Number of items per page (default: 10)'
+        in: query
+        name: pageSize
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.OrganizationParticipantsResponse'
+        "400":
+          description: Invalid input
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get organization participants
+      tags:
+      - organizations
+    post:
+      consumes:
+      - application/json
+      description: Add multiple participants to an organization. Requires Manager/Admin
+        role.
+      parameters:
+      - description: Organization address
+        in: path
+        name: address
+        required: true
+        type: string
+      - description: Process asynchronously and return job ID
+        in: query
+        name: async
+        type: boolean
+      - description: Participants to add
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.AddParticipantsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.AddParticipantsResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Add participants to an organization
+      tags:
+      - organizations
+  /organizations/{address}/participants/check/{jobid}:
+    get:
+      consumes:
+      - application/json
+      description: |-
+        Check the progress of a job to add participants to an organization. Returns the progress of the job.
+        If the job is completed, the job is deleted after 60 seconds.
+      parameters:
+      - description: Organization address
+        in: path
+        name: address
+        required: true
+        type: string
+      - description: Job ID
+        in: path
+        name: jobid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/db.BulkOrgParticipantsStatus'
+        "400":
+          description: Invalid job ID
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Job not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Check the progress of adding participants
       tags:
       - organizations
   /organizations/{address}/subscription:

@@ -32,6 +32,10 @@
   - [🤝 Accept organization invitation](#-accept-organization-invitation)
   - [💸 Organization Subscription Info](#-organization-subscription-info)
   - [📊 Organization Censuses](#-organization-censuses)
+  - [👥 Organization Participants](#-organization-participants)
+  - [➕ Add Organization Participants](#-add-organization-participants)
+  - [🔍 Check Add Participants Job Status](#-check-add-participants-job-status)
+  - [❌ Delete Organization Participants](#-delete-organization-participants)
   - [🤠 Available organization members roles](#-available-organization-members-roles)
   - [🏛️ Available organization types](#-available-organization-types)
 - [🏦 Plans](#-plans)
@@ -879,6 +883,164 @@ This request can be made only by organization admins.
 |:---:|:---:|:---|
 | `401` | `40001` | `user not authorized` |
 | `400` | `40009` | `organization not found` |
+| `400` | `40011` | `no organization provided` |
+| `500` | `50002` | `internal server error` |
+
+### 👥 Organization Participants
+
+* **Path** `/organizations/{address}/participants`
+* **Method** `GET`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Query params**
+  * `page` - Page number (default: 1)
+  * `pageSize` - Number of items per page (default: 10)
+* **Response**
+```json
+{
+  "participants": [
+    {
+      "participantNo": "12345",
+      "name": "John Doe",
+      "email": "john@example.com",
+      "phone": "+1234567890",
+    },
+    {
+      "participantNo": "67890",
+      "name": "Jane Smith",
+      "email": "jane@example.com",
+      "phone": "+0987654321",
+    }
+  ]
+}
+```
+
+* **Description**
+Retrieves all participants of an organization with pagination support. Requires Manager or Admin role for the organization.
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `401` | `40001` | `user is not admin of organization` |
+| `400` | `40011` | `no organization provided` |
+| `500` | `50002` | `internal server error` |
+
+### ➕ Add Organization Participants
+
+* **Path** `/organizations/{address}/participants`
+* **Method** `POST`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Query params**
+  * `async` - Process asynchronously and return job ID (default: false)
+* **Request body**
+```json
+{
+  "participants": [
+    {
+      "participantNo": "12345",
+      "name": "John Doe",
+      "email": "john@example.com",
+      "phone": "+1234567890",
+      "password": "secretpass"
+    },
+    {
+      "participantNo": "67890",
+      "name": "Jane Smith",
+      "email": "jane@example.com",
+      "phone": "+0987654321",
+      "password": "secretpass"
+    }
+  ]
+}
+```
+
+* **Response (Synchronous)**
+```json
+{
+  "participantsNo": 2
+}
+```
+
+* **Response (Asynchronous)**
+```json
+{
+  "jobID": "deadbeef"
+}
+```
+
+* **Description**
+Adds multiple participants to an organization. Requires Manager or Admin role for the organization. Can be processed synchronously or asynchronously. If processed asynchronously, returns a job ID that can be used to check the status of the operation.
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `401` | `40001` | `user is not admin of organization` |
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40011` | `no organization provided` |
+| `500` | `50002` | `internal server error` |
+
+### 🔍 Check Add Participants Job Status
+
+* **Path** `/organizations/{address}/participants/check/{jobid}`
+* **Method** `GET`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Response**
+```json
+{
+  "progress": 75,
+  "added": 150,
+  "total": 200
+}
+```
+
+* **Description**
+Checks the progress of a job to add participants to an organization. Returns the progress percentage, number of participants added so far, and total number of participants to add. If the job is completed (progress = 100), the job information is automatically deleted after 60 seconds.
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40010` | `malformed URL parameter` |
+| `404` | `40404` | `job not found` |
+| `500` | `50002` | `internal server error` |
+
+### ❌ Delete Organization Participants
+
+* **Path** `/organizations/{address}/participants`
+* **Method** `DELETE`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Request body**
+```json
+{
+  "participantIDs": ["12345", "67890"]
+}
+```
+
+* **Response**
+```json
+{
+  "participantsNo": 2
+}
+```
+
+* **Description**
+Deletes multiple participants from an organization by their participant IDs. Requires Manager or Admin role for the organization. Returns the number of participants successfully deleted.
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `401` | `40001` | `user is not admin of organization` |
+| `400` | `40004` | `malformed JSON body` |
 | `400` | `40011` | `no organization provided` |
 | `500` | `50002` | `internal server error` |
 
