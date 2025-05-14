@@ -186,7 +186,7 @@ func TestCensus(t *testing.T) {
 
 	// Poll the job status until it's complete or max attempts reached
 	for attempts < maxAttempts && !completed {
-		resp, code = testRequest(t, http.MethodGet, adminToken, nil, "census", "check", jobIDHex.String())
+		resp, code = testRequest(t, http.MethodGet, adminToken, nil, "census", "job", jobIDHex.String())
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		err = json.Unmarshal(resp, &jobStatus)

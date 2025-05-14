@@ -207,7 +207,7 @@ func TestOrganizationParticipants(t *testing.T) {
 			"organizations",
 			orgAddress.String(),
 			"participants",
-			"check",
+			"job",
 			jobIDHex.String(),
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))

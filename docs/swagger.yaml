@@ -22202,7 +22202,7 @@ paths:
       summary: Publish a census for voting
       tags:
       - census
-  /census/check/{jobid}:
+  /census/job/{jobid}:
     get:
       consumes:
       - application/json
@@ -22731,7 +22731,7 @@ paths:
       summary: Add participants to an organization
       tags:
       - organizations
-  /organizations/{address}/participants/check/{jobid}:
+  /organizations/{address}/participants/job/{jobid}:
     get:
       consumes:
       - application/json
