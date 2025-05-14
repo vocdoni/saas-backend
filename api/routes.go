@@ -67,7 +67,7 @@ const (
 	// POST /organizations/{address}/participants to add new participants
 	organizationAddParticipantsEndpoint = "/organizations/{address}/participants"
 	// GET /organizations/{address}/participants/check/{jobid} to check the status of the add participants job
-	organizationAddParticipantsCheckEndpoint = "/organizations/{address}/participants/check/{jobid}"
+	organizationAddParticipantsJobStatusEndpoint = "/organizations/{address}/participants/job/{jobid}"
 	// DELETE /organizations/{address}/participants to delete participants
 	organizationDeleteParticipantsEndpoint = "/organizations/{address}/participants"
 
@@ -97,7 +97,7 @@ const (
 	// POST /census/{id} to add participants to census
 	censusIDEndpoint = "/census/{id}"
 	// GET /census/check/{jobid} to check the status of the add participants job
-	censusAddParticipantsCheckEndpoint = "/census/check/{jobid}"
+	censusAddParticipantsJobStatusEndpoint = "/census/job/{jobid}"
 	// POST /census/{id}/publish to publish a census
 	censusPublishEndpoint = "/census/{id}/publish"
 

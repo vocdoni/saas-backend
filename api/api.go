@@ -234,8 +234,8 @@ func (a *API) initRouter() http.Handler {
 		log.Infow("new route", "method", "POST", "path", organizationAddParticipantsEndpoint)
 		r.Post(organizationAddParticipantsEndpoint, a.addOrganizationParticipantsHandler)
 		// check the status of the add participants job
-		log.Infow("new route", "method", "GET", "path", organizationAddParticipantsCheckEndpoint)
-		r.Get(organizationAddParticipantsCheckEndpoint, a.addOrganizationParticipantsJobCheckHandler)
+		log.Infow("new route", "method", "GET", "path", organizationAddParticipantsJobStatusEndpoint)
+		r.Get(organizationAddParticipantsJobStatusEndpoint, a.addOrganizationParticipantsJobStatusHandler)
 		// delete a set of organization participants
 		log.Infow("new route", "method", "DELETE", "path", organizationDeleteParticipantsEndpoint)
 		r.Delete(organizationDeleteParticipantsEndpoint, a.deleteOrganizationParticipantsHandler)
@@ -259,8 +259,8 @@ func (a *API) initRouter() http.Handler {
 		log.Infow("new route", "method", "POST", "path", censusIDEndpoint)
 		r.Post(censusIDEndpoint, a.addCensusParticipantsHandler)
 		// get census participants job
-		log.Infow("new route", "method", "GET", "path", censusAddParticipantsCheckEndpoint)
-		r.Get(censusAddParticipantsCheckEndpoint, a.addParticipantsJobCheckHandler)
+		log.Infow("new route", "method", "GET", "path", censusAddParticipantsJobStatusEndpoint)
+		r.Get(censusAddParticipantsJobStatusEndpoint, a.censusAddParticipantsJobStatusHandler)
 		// publish census
 		log.Infow("new route", "method", "POST", "path", censusPublishEndpoint)
 		r.Post(censusPublishEndpoint, a.publishCensusHandler)

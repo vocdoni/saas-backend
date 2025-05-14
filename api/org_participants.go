@@ -179,7 +179,7 @@ func (a *API) addOrganizationParticipantsHandler(w http.ResponseWriter, r *http.
 	apicommon.HTTPWriteJSON(w, &apicommon.AddParticipantsResponse{JobID: jobID})
 }
 
-// addOrganizationParticipantsJobCheckHandler godoc
+// addOrganizationParticipantsJobStatusHandler godoc
 //
 //	@Summary		Check the progress of adding participants
 //	@Description	Check the progress of a job to add participants to an organization. Returns the progress of the job.
@@ -194,8 +194,8 @@ func (a *API) addOrganizationParticipantsHandler(w http.ResponseWriter, r *http.
 //	@Failure		400		{object}	errors.Error	"Invalid job ID"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
 //	@Failure		404		{object}	errors.Error	"Job not found"
-//	@Router			/organizations/{address}/participants/check/{jobid} [get]
-func (*API) addOrganizationParticipantsJobCheckHandler(w http.ResponseWriter, r *http.Request) {
+//	@Router			/organizations/{address}/participants/job/{jobid} [get]
+func (*API) addOrganizationParticipantsJobStatusHandler(w http.ResponseWriter, r *http.Request) {
 	jobID := internal.HexBytes{}
 	if err := jobID.ParseString(chi.URLParam(r, "jobid")); err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid job ID").Write(w)

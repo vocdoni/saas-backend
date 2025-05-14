@@ -52,6 +52,7 @@
   - [📝 Create Census](#-create-census)
   - [ℹ️ Get Census Info](#ℹ%EF%B8%8F-get-census-info)
   - [👥 Add Participants](#-add-participants)
+  - [🔍 Check Add Participants Job Status](#-check-add-participants-job-status)
   - [📢 Publish Census](#-publish-census)
   - [📋 Get Published Census Info](#-get-published-census-info)
 - [🔄 Process](#-process)
@@ -986,7 +987,7 @@ Adds multiple participants to an organization. Requires Manager or Admin role fo
 
 ### 🔍 Check Add Participants Job Status
 
-* **Path** `/organizations/{address}/participants/check/{jobid}`
+* **Path** `/organizations/{address}/participants/job/{jobid}`
 * **Method** `GET`
 * **Headers**
   * `Authentication: Bearer <user_token>`
@@ -1404,6 +1405,8 @@ Returns the census ID
 * **Method** `POST`
 * **Headers**
   * `Authentication: Bearer <user_token>`
+* **Query params**
+  * `async` - Process asynchronously and return job ID (default: false)
 * **Request body**
 ```json
 {
@@ -1416,14 +1419,22 @@ Returns the census ID
 }
 ```
 
-* **Response**
+* **Response (Synchronous)**
 Returns the number of participants successfully added
 ```json
 42
 ```
 
+* **Response (Asynchronous)**
+Returns a job ID that can be used to check the status of the operation
+```json
+{
+  "jobID": "deadbeef"
+}
+```
+
 * **Description**
-Adds multiple participants to a census in bulk. Requires Manager or Admin role for the organization that owns the census. If the request contains no participants or if the participants array is empty, returns 0.
+Adds multiple participants to a census in bulk. Requires Manager or Admin role for the organization that owns the census. If the request contains no participants or if the participants array is empty, returns 0. Can be processed synchronously or asynchronously by setting the `async` query parameter to `true`.
 
 * **Errors**
 
@@ -1436,6 +1447,30 @@ Adds multiple participants to a census in bulk. Requires Manager or Admin role f
 | `400` | `40010` | `census not found` |
 | `500` | `50002` | `internal server error` |
 | `500` | `50004` | `not all participants were added` |
+
+### 🔍 Check Add Participants Job Status
+
+* **Path** `/census/check/{jobid}`
+* **Method** `GET`
+* **Response**
+```json
+{
+  "progress": 75,
+  "added": 150,
+  "total": 200
+}
+```
+
+* **Description**
+Checks the progress of a job to add participants to a census. Returns the progress percentage, number of participants added so far, and total number of participants to add. If the job is completed (progress = 100), the job information is automatically deleted after 60 seconds.
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `400` | `40010` | `malformed URL parameter` |
+| `404` | `40404` | `job not found` |
+| `500` | `50002` | `internal server error` |
 
 ### 📢 Publish Census
 
