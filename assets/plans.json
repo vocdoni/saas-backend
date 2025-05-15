@@ -31,7 +31,8 @@
             "emailReminder": false,
             "smsNotification": false,
             "whiteLabel": false,
-            "liveStreaming": false
+            "liveStreaming": false,
+            "phoneSupport": false
         }
     },
     {
@@ -66,7 +67,8 @@
             "emailReminder": false,
             "smsNotification": false,
             "whiteLabel": true,
-            "liveStreaming": true
+            "liveStreaming": true,
+            "phoneSupport": true
         }
     },
     {
@@ -101,7 +103,8 @@
             "emailReminder": false,
             "smsNotification": false,
             "whiteLabel": false,
-            "liveStreaming": false
+            "liveStreaming": false,
+            "phoneSupport": false
         }
     },
     {
@@ -136,7 +139,8 @@
             "emailReminder": true,
             "smsNotification": true,
             "whiteLabel": true,
-            "liveStreaming": true
+            "liveStreaming": true,
+            "phoneSupport": true
         }
     }
 ]
