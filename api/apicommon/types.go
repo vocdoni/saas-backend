@@ -432,6 +432,9 @@ type SubscriptionFeatures struct {
 
 	// Whether live streaming is available
 	LiveStreaming bool `json:"liveStreaming"`
+
+	// Whether eligible for phone support
+	PhoneSupport bool `json:"phoneSupport"`
 }
 
 // SubscriptionPlanTier represents a pricing tier of a subscription plan.

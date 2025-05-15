@@ -100,6 +100,7 @@ type Features struct {
 	SmsNotification bool `json:"smsNotification" bson:"smsNotification"`
 	WhiteLabel      bool `json:"whiteLabel" bson:"whiteLabel"`
 	LiveStreaming   bool `json:"liveStreaming" bson:"liveStreaming"`
+	PhoneSupport    bool `json:"phoneSupport" bson:"phoneSupport"`
 }
 
 type Plan struct {
