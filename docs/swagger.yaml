@@ -157,6 +157,14 @@ definitions:
         description: Participant's phone number
         type: string
     type: object
+  apicommon.OrganizationAddMetaRequest:
+    properties:
+      meta:
+        additionalProperties: {}
+        description: Set of key-value pairs to add or update in the organization's
+          meta information
+        type: object
+    type: object
   apicommon.OrganizationAddresses:
     properties:
       addresses:
@@ -186,6 +194,14 @@ definitions:
           $ref: '#/definitions/apicommon.OrganizationCensus'
         type: array
     type: object
+  apicommon.OrganizationDeleteMetaRequest:
+    properties:
+      keys:
+        description: List of keys to delete from the organization's meta information
+        items:
+          type: string
+        type: array
+    type: object
   apicommon.OrganizationInfo:
     properties:
       active:
@@ -210,6 +226,10 @@ definitions:
       createdAt:
         description: Creation timestamp in RFC3339 format
         type: string
+      meta:
+        additionalProperties: {}
+        description: Arbitrary key value fields with metadata regarding the organization
+        type: object
       parent:
         allOf:
         - $ref: '#/definitions/apicommon.OrganizationInfo'
@@ -271,6 +291,13 @@ definitions:
         items:
           $ref: '#/definitions/apicommon.OrganizationMember'
         type: array
+    type: object
+  apicommon.OrganizationMetaResponse:
+    properties:
+      meta:
+        additionalProperties: {}
+        description: Meta information of the organization
+        type: object
     type: object
   apicommon.OrganizationParticipantsResponse:
     properties:
@@ -408,6 +435,9 @@ definitions:
         type: boolean
       personalization:
         description: Whether UI personalization is available
+        type: boolean
+      phoneSupport:
+        description: Whether eligible for phone support
         type: boolean
       smsNotification:
         description: Whether SMS notifications are available
@@ -664,6 +694,8 @@ definitions:
       overwrite:
         type: boolean
       personalization:
+        type: boolean
+      phoneSupport:
         type: boolean
       smsNotification:
         type: boolean
@@ -22810,6 +22842,192 @@ paths:
       security:
       - BearerAuth: []
       summary: Get organization subscription
+      tags:
+      - organizations
+  /organizations/{orgAddress}/meta:
+    delete:
+      consumes:
+      - application/json
+      description: Deletes a set of keys from the meta information of an organization.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: Keys to delete from the organization meta
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.OrganizationDeleteMetaRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Forbidden - User is not a manager or admin of the organization
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "422":
+          description: Invalid meta information
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Delete organization meta information
+      tags:
+      - organizations
+    get:
+      consumes:
+      - application/json
+      description: Retrieves the meta information of an organization. Requires Manager/Admin
+        role.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Organization meta information
+          schema:
+            $ref: '#/definitions/apicommon.OrganizationMetaResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Forbidden - User is not a manager or admin of the organization
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get organization meta information
+      tags:
+      - organizations
+    post:
+      consumes:
+      - application/json
+      description: Overwrite the meta information of an organization. Requires Manager/Admin
+        role.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: Meta information to add to the organization
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.OrganizationAddMetaRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Forbidden - User is not a manager or admin of the organization
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "422":
+          description: Invalid meta information
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Add meta information to an organization
+      tags:
+      - organizations
+    put:
+      consumes:
+      - application/json
+      description: Updates existing or adds new key/value pairs in the meta information
+        of an organization.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: Meta information to update in the organization
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.OrganizationAddMetaRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Forbidden - User is not a manager or admin of the organization
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "422":
+          description: Invalid meta information
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Update organization meta information
       tags:
       - organizations
   /organizations/roles:
