@@ -37,6 +37,18 @@ definitions:
         description: Number of participants added
         type: integer
     type: object
+  apicommon.CreateOrganizationTicketRequest:
+    properties:
+      description:
+        description: Body of the ticket
+        type: string
+      title:
+        description: Title of the ticket
+        type: string
+      type:
+        description: Type of te ticket to create (definde externally)
+        type: string
+    type: object
   apicommon.CreateProcessBundleRequest:
     properties:
       censusID:
@@ -22810,6 +22822,52 @@ paths:
       security:
       - BearerAuth: []
       summary: Get organization subscription
+      tags:
+      - organizations
+  /organizations/{address}/tickets:
+    post:
+      consumes:
+      - application/json
+      description: Create a new ticket for an organization. The user must be a member
+        of the organization with any role.
+      parameters:
+      - description: Organization address
+        in: path
+        name: address
+        required: true
+        type: string
+      - description: Ticket request information
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.CreateOrganizationTicketRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Create a new ticket for an organization
       tags:
       - organizations
   /organizations/roles:
