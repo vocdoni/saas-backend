@@ -53,3 +53,20 @@ You can also use this link to join the organization: {{.Link}}`,
 	},
 	WebAppURI: "/account/invite",
 }
+
+// PlainNotification is a notification that does not require any template
+var SupportNotification = MailTemplate{
+	File: "support",
+	Placeholder: notifications.Notification{
+		Subject: "New {{.Type}} Ticket from {{.Email}}: {{.Title}}",
+		PlainBody: `You have a new support request:
+
+		Title: {{.Title}}
+		Type: {{.Type}}
+		User: {{.Email}}
+		Organization: {{.Organization}}
+
+		Description:
+		{{.Description}}`,
+	},
+}

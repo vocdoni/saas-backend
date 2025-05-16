@@ -36,6 +36,7 @@
   - [➕ Add Organization Participants](#-add-organization-participants)
   - [🔍 Check Add Participants Job Status](#-check-add-participants-job-status)
   - [❌ Delete Organization Participants](#-delete-organization-participants)
+  - [🎫 Create Organization Ticket](#-create-organization-ticket)
   - [🤠 Available organization members roles](#-available-organization-members-roles)
   - [🏛️ Available organization types](#-available-organization-types)
 - [🏦 Plans](#-plans)
@@ -1041,6 +1042,33 @@ Deletes multiple participants from an organization by their participant IDs. Req
 |:---:|:---:|:---|
 | `401` | `40001` | `user not authorized` |
 | `401` | `40001` | `user is not admin of organization` |
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40011` | `no organization provided` |
+| `500` | `50002` | `internal server error` |
+
+### 🎫 Create Organization Ticket
+
+* **Path** `/organizations/{address}/tickets`
+* **Method** `POST`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Request body**
+```json
+{
+  "type": "support",
+  "title": "Need help with voting process",
+  "description": "I'm having trouble setting up a new voting process. Can you help?"
+}
+```
+
+* **Description**
+Creates a new support ticket for the organization. The user must be a member of the organization with any role. The ticket is sent to the support team via email.
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
 | `400` | `40004` | `malformed JSON body` |
 | `400` | `40011` | `no organization provided` |
 | `500` | `50002` | `internal server error` |

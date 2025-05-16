@@ -70,6 +70,8 @@ const (
 	organizationAddParticipantsJobStatusEndpoint = "/organizations/{address}/participants/job/{jobid}"
 	// DELETE /organizations/{address}/participants to delete participants
 	organizationDeleteParticipantsEndpoint = "/organizations/{address}/participants"
+	// POST /organizations/{address}/ticket to create a new ticket to our support system
+	organizationCreateTicketEndpoint = "/organizations/{address}/tickets"
 
 	// subscription routes
 	// GET /subscriptions to get the subscriptions of an organization
