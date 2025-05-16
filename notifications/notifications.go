@@ -28,6 +28,7 @@ type Notification struct {
 	Body           string `json:"body"`
 	PlainBody      string `json:"plainBody"`
 	EnableTracking bool   `json:"enableTracking"`
+	ReplyTo        string `json:"replyTo"`
 }
 
 // NotificationService is the interface that must be implemented by any

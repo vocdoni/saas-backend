@@ -102,6 +102,13 @@ func (se *Email) composeBody(notification *notifications.Notification) ([]byte, 
 	boundary := "----=_Part_0_123456789.123456789"
 	headers.WriteString(fmt.Sprintf("From: %s\r\n", se.config.FromAddress))
 	headers.WriteString(fmt.Sprintf("To: %s\r\n", to.String()))
+	if notification.ReplyTo != "" {
+		replyToAddress, err := mail.ParseAddress(notification.ReplyTo)
+		if err != nil {
+			return nil, fmt.Errorf("could not parse reply-to email: %v", err)
+		}
+		headers.WriteString(fmt.Sprintf("Reply-To: %s\r\n", replyToAddress.String()))
+	}
 	headers.WriteString(fmt.Sprintf("Subject: %s\r\n", notification.Subject))
 	if !notification.EnableTracking {
 		headers.WriteString(fmt.Sprintf("X-SMTPAPI: %s\r\n", disableTrackingFilter))
