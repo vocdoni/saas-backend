@@ -67,6 +67,7 @@ type Organization struct {
 	TokensPurchased uint64                   `json:"tokensPurchased" bson:"tokensPurchased"`
 	TokensRemaining uint64                   `json:"tokensRemaining" bson:"tokensRemaining"`
 	Parent          string                   `json:"parent" bson:"parent"`
+	Meta            map[string]any           `json:"meta" bson:"meta"`
 	Subscription    OrganizationSubscription `json:"subscription" bson:"subscription"`
 	Counters        OrganizationCounters     `json:"counters" bson:"counters"`
 }

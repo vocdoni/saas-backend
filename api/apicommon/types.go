@@ -55,6 +55,9 @@ type OrganizationInfo struct {
 
 	// Parent organization if this is a sub-organization
 	Parent *OrganizationInfo `json:"parent"`
+
+	// Arbitrary key value fields with metadata regarding the organization
+	Meta map[string]any `json:"meta"`
 }
 
 // OrganizationMembers represents a list of members of an organization.
@@ -126,6 +129,28 @@ type OrganizationType struct {
 type OrganizationTypeList struct {
 	// List of organization types
 	Types []*OrganizationType `json:"types"`
+}
+
+// OrganizationAddMetaRequest represents a request to add or update meta information for an organization.
+// swagger:model OrganizationAddMetaRequest
+type OrganizationAddMetaRequest struct {
+	// Set of key-value pairs to add or update in the organization's meta information
+	Meta map[string]any `json:"meta"`
+}
+
+// OrganizationMetaResponse represents the meta information of an organization.
+// swagger:model OrganizationMetaResponse
+type OrganizationMetaResponse struct {
+	// Meta information of the organization
+	Meta map[string]any `json:"meta"`
+}
+
+// OrganizationDeleteMetaRequest represents a request to delete a set of keys from the meta information
+// for an organization.
+// swagger:model OrganizationDeleteMetaRequest
+type OrganizationDeleteMetaRequest struct {
+	// List of keys to delete from the organization's meta information
+	Keys []string `json:"keys"`
 }
 
 // UserInfo represents user information and is used for user registration.

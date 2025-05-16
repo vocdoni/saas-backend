@@ -70,6 +70,8 @@ const (
 	organizationAddParticipantsJobStatusEndpoint = "/organizations/{address}/participants/job/{jobid}"
 	// DELETE /organizations/{address}/participants to delete participants
 	organizationDeleteParticipantsEndpoint = "/organizations/{address}/participants"
+	// POST/PUT/GET/DELETE /organizations/{address}/meta to add/set/get/delete the organization metadata
+	organizationMetaEndpoint = "/organizations/{address}/meta"
 
 	// subscription routes
 	// GET /subscriptions to get the subscriptions of an organization
