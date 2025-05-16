@@ -77,8 +77,6 @@ func (mt MailTemplate) ExecTemplate(data any) (*notifications.Notification, erro
 	if err != nil {
 		return nil, err
 	}
-	// set the mail subject
-	n.Subject = mt.Placeholder.Subject
 	// parse the html template file
 	content, err := root.Assets.ReadFile(path)
 	if err != nil {
@@ -121,6 +119,20 @@ func (mt MailTemplate) ExecPlain(data any) (*notifications.Notification, error) 
 		}
 		// return the notification with the plain body filled with the data
 		n.PlainBody = buf.String()
+	}
+	if mt.Placeholder.Subject != "" {
+		// parse the placeholder subject template
+		tmpl, err := texttemplate.New("subject").Parse(mt.Placeholder.Subject)
+		if err != nil {
+			return nil, err
+		}
+		// inflate the template with the data
+		buf := new(bytes.Buffer)
+		if err := tmpl.Execute(buf, data); err != nil {
+			return nil, err
+		}
+		// return the notification with the subject filled with the data
+		n.Subject = buf.String()
 	}
 	return n, nil
 }
