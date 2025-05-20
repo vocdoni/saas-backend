@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -185,5 +186,87 @@ func (ms *MongoStorage) SetOrganizationSubscription(address string, orgSubscript
 	if _, err := ms.organizations.UpdateOne(ctx, filter, updateDoc); err != nil {
 		return err
 	}
+	return nil
+}
+
+// SetOrganizationMeta method sets the metadata for the organization with the
+// given address. If the organization doesn't exist, it returns an error.
+func (ms *MongoStorage) AddOrganizationMeta(address string, meta map[string]any) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	// prepare the document to be updated in the database
+	filter := bson.M{"_id": address}
+	updateDoc := bson.M{"$set": bson.M{"meta": meta}}
+	// update the organization in the database
+	if _, err := ms.organizations.UpdateOne(ctx, filter, updateDoc); err != nil {
+		return err
+	}
+	return nil
+}
+
+// UpdateOrganizationMeta updates individual keys in the 'meta' subdocument
+// Has only one layer o depth, if a second layer document is provided, for example meta.doc = [a,b,c] it will
+// all the docment will be updated
+func (ms *MongoStorage) UpdateOrganizationMeta(address string, metaUpdates map[string]any) error {
+	updateFields := bson.M{}
+
+	// Construct dot notation keys like "meta.region": "EU"
+	for k, v := range metaUpdates {
+		updateFields["meta."+k] = v
+	}
+
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	filter := bson.M{"_id": address}
+	update := bson.M{"$set": updateFields}
+
+	result, err := ms.organizations.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to update eta: %w", err)
+	}
+
+	if result.MatchedCount == 0 {
+		return fmt.Errorf("no organization found with address: %s", address)
+	}
+
+	fmt.Printf("Matched: %d, Modified: %d\n", result.MatchedCount, result.ModifiedCount)
+	return nil
+}
+
+// DeleteOrganizationMetaKeys deletes specific keys from the 'meta' object of a given Organization
+func (ms *MongoStorage) DeleteOrganizationMetaKeys(address string, keysToDelete []string) error {
+	unsetFields := bson.M{}
+
+	// Build the unset document: { "meta.key1": 1, "meta.key2": 1 }
+	// In MongoDB, the value in $unset doesn't matter, but it's conventional to use 1
+	for _, key := range keysToDelete {
+		unsetFields["meta."+key] = 1
+	}
+
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	filter := bson.M{"_id": address}
+	update := bson.M{"$unset": unsetFields}
+
+	result, err := ms.organizations.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to unset meta fields: %w", err)
+	}
+
+	if result.MatchedCount == 0 {
+		return fmt.Errorf("no organization found with address: %s", address)
+	}
+
 	return nil
 }
