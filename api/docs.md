@@ -36,6 +36,7 @@
   - [➕ Add Organization Participants](#-add-organization-participants)
   - [🔍 Check Add Participants Job Status](#-check-add-participants-job-status)
   - [❌ Delete Organization Participants](#-delete-organization-participants)
+  - [📋 Organization Meta Information](#-organization-meta-information)
   - [🤠 Available organization members roles](#-available-organization-members-roles)
   - [🏛️ Available organization types](#-available-organization-types)
 - [🏦 Plans](#-plans)
@@ -1043,6 +1044,134 @@ Deletes multiple participants from an organization by their participant IDs. Req
 | `401` | `40001` | `user is not admin of organization` |
 | `400` | `40004` | `malformed JSON body` |
 | `400` | `40011` | `no organization provided` |
+| `500` | `50002` | `internal server error` |
+
+### 📋 Organization Meta Information
+
+* **Path** `/organizations/{address}/meta`
+* **Method** `POST`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Description**
+  Adds or overwrites meta information for an organization. Requires Manager or Admin role for the organization.
+* **Request body**
+```json
+{
+  "meta": {
+    "key1": "value1",
+    "key2": "value2",
+    "nestedKey": {
+      "subKey1": "subValue1"
+    }
+  }
+}
+```
+
+* **Response**
+```json
+"OK"
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `403` | `40001` | `user is not a manager or admin of organization` |
+| `400` | `40011` | `no organization provided` |
+| `422` | `40005` | `invalid meta information` |
+| `404` | `40009` | `organization not found` |
+| `500` | `50002` | `internal server error` |
+
+* **Path** `/organizations/{address}/meta`
+* **Method** `PUT`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Description**
+  Updates existing or adds new key/value pairs in the meta information of an organization. Requires Manager or Admin role for the organization.
+  Has only one layer o depth, if a second layer document is provided, for example meta.doc = [a,b,c]  all the document will be updated
+* **Request body**
+```json
+{
+  "meta": {
+    "key1": "updatedValue1",
+    "newKey": "newValue"
+  }
+}
+```
+
+* **Response**
+```json
+"OK"
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `403` | `40001` | `user is not a manager or admin of organization` |
+| `400` | `40011` | `no organization provided` |
+| `422` | `40005` | `invalid meta information` |
+| `404` | `40009` | `organization not found` |
+| `500` | `50002` | `internal server error` |
+
+* **Path** `/organizations/{address}/meta`
+* **Method** `GET`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Description**
+  Gets the meta information of an organization. Requires Manager or Admin role for the organization.
+* **Response**
+```json
+{
+  "meta": {
+    "key1": "value1",
+    "key2": "value2",
+    "nestedKey": {
+      "subKey1": "subValue1"
+    }
+  }
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `403` | `40001` | `user is not a manager or admin of organization` |
+| `400` | `40011` | `no organization provided` |
+| `404` | `40009` | `organization not found` |
+| `500` | `50002` | `internal server error` |
+
+* **Path** `/organizations/{address}/meta`
+* **Method** `DELETE`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Description**
+  Deletes specific keys from the meta information of an organization. Requires Manager or Admin role for the organization.
+* **Request body**
+```json
+{
+  "keys": ["key1", "nestedKey.subKey1"]
+}
+```
+
+* **Response**
+```json
+"OK"
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `403` | `40001` | `user is not a manager or admin of organization` |
+| `400` | `40011` | `no organization provided` |
+| `422` | `40005` | `invalid meta information` |
+| `404` | `40009` | `organization not found` |
 | `500` | `50002` | `internal server error` |
 
 ### 🤠 Available organization members roles
