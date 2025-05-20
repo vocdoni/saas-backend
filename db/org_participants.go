@@ -446,3 +446,35 @@ func (ms *MongoStorage) DeleteOrgParticipants(orgAddress string, participantIDs 
 
 	return int(result.DeletedCount), nil
 }
+
+// validateOrgParticipants checks if the provided participants IDs are valid
+func (ms *MongoStorage) validateOrgParticipants(ctx context.Context, orgAddress string, participants []string) error {
+	if len(participants) == 0 {
+		return fmt.Errorf("no participants provided")
+	}
+	cursor, err := ms.orgParticipants.Find(ctx, bson.M{
+		"_id":          bson.M{"$in": participants},
+		"orgAddress: ": orgAddress,
+	})
+	if err != nil {
+		return err
+	}
+	defer cursor.Close(ctx)
+
+	var found []OrgParticipant
+	if err := cursor.All(ctx, &found); err != nil {
+		return err
+	}
+
+	foundMap := make(map[string]bool)
+	for _, member := range found {
+		foundMap[member.ID.String()] = true
+	}
+
+	for _, id := range participants {
+		if !foundMap[id] {
+			return fmt.Errorf("invalid member ID in add list: %s", id)
+		}
+	}
+	return nil
+}
