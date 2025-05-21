@@ -221,6 +221,7 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 		}
 		orgMembers.Members = append(orgMembers.Members, &apicommon.OrganizationMember{
 			Info: &apicommon.UserInfo{
+				ID:        member.ID,
 				Email:     member.Email,
 				FirstName: member.FirstName,
 				LastName:  member.LastName,
