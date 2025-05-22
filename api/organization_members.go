@@ -3,8 +3,10 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
@@ -358,4 +360,135 @@ func (*API) organizationsMembersRolesHandler(w http.ResponseWriter, _ *http.Requ
 		})
 	}
 	apicommon.HTTPWriteJSON(w, &apicommon.OrganizationRoleList{Roles: availableRoles})
+}
+
+// updateOrganizationMemberRoleHandler godoc
+//
+//	@Summary		Update organization member role
+//	@Description	Update the role of a member in an organization. Only the admin of the organization can update the role.
+//	@Tags			organizations
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			address	path		string											true	"Organization address"
+//	@Param			userid	path		string											true	"User ID"
+//	@Param			request	body		apicommon.UpdateOrganizationMemberRoleRequest	true	"Update member role information"
+//	@Success		200		{string}	string											"OK"
+//	@Failure		400		{object}	errors.Error									"Invalid input data"
+//	@Failure		401		{object}	errors.Error									"Unauthorized"
+//	@Failure		404		{object}	errors.Error									"Organization not found"
+//
+// Note: The implementation returns 200 OK even for non-existent members
+//
+//	@Failure		500		{object}	errors.Error									"Internal server error"
+//	@Router			/organizations/{address}/members/{userid} [put]
+func (a *API) updateOrganizationMemberRoleHandler(w http.ResponseWriter, r *http.Request) {
+	// get the user from the request context
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	// get the organization info from the request context
+	org, _, ok := a.organizationFromRequest(r)
+	if !ok {
+		errors.ErrNoOrganizationProvided.Write(w)
+		return
+	}
+	if !user.HasRoleFor(org.Address, db.AdminRole) {
+		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		return
+	}
+	// get the member ID from the request path
+	userID := chi.URLParam(r, "userid")
+	if userID == "" {
+		errors.ErrMalformedBody.With("member ID not provided").Write(w)
+		return
+	}
+	// convert the user ID to the correct type
+	userIDInt, err := strconv.Atoi(userID)
+	if err != nil {
+		errors.ErrMalformedBody.Withf("invalid user ID: %v", err).Write(w)
+		return
+	}
+
+	// get the new role from the request body
+	update := &apicommon.UpdateOrganizationMemberRoleRequest{}
+	if err := json.NewDecoder(r.Body).Decode(update); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	if update.Role == "" {
+		errors.ErrMalformedBody.With("role not provided").Write(w)
+		return
+	}
+	if valid := db.IsValidUserRole(db.UserRole(update.Role)); !valid {
+		errors.ErrInvalidUserData.Withf("invalid role").Write(w)
+		return
+	}
+	if err := a.db.UpdateOrganizationMemberRole(org.Address, uint64(userIDInt), db.UserRole(update.Role)); err != nil {
+		errors.ErrInvalidUserData.Withf("member not found: %v", err).Write(w)
+		return
+	}
+	apicommon.HTTPWriteOK(w)
+}
+
+// removeOrganizationMemberHandler godoc
+//
+//	@Summary		Remove a user from the organization members
+//	@Description	Remove a user from the organization members. Only the admin of the organization can remove a member.
+//	@Tags			organizations
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			address	path		string			true	"Organization address"
+//	@Param			userid	path		string			true	"User ID"
+//	@Success		200		{string}	string			"OK"
+//	@Failure		400		{object}	errors.Error	"Invalid input data"
+//	@Failure		401		{object}	errors.Error	"Unauthorized"
+//	@Failure		404		{object}	errors.Error	"Organization not found"
+//
+// Note: The implementation returns 200 OK even for non-existent members
+//
+//	@Failure		400		{object}	errors.Error	"Invalid input data - User cannot remove itself"
+//	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{address}/members/{userid} [delete]
+func (a *API) removeOrganizationMemberHandler(w http.ResponseWriter, r *http.Request) {
+	// get the user from the request context
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	// get the organization info from the request context
+	org, _, ok := a.organizationFromRequest(r)
+	if !ok {
+		errors.ErrNoOrganizationProvided.Write(w)
+		return
+	}
+	if !user.HasRoleFor(org.Address, db.AdminRole) {
+		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		return
+	}
+	// get the member ID from the request path
+	userID := chi.URLParam(r, "userid")
+	if userID == "" {
+		errors.ErrMalformedBody.With("member ID not provided").Write(w)
+		return
+	}
+	// convert the user ID to the correct type
+	userIDInt, err := strconv.Atoi(userID)
+	if err != nil {
+		errors.ErrMalformedBody.Withf("invalid user ID: %v", err).Write(w)
+		return
+	}
+	if uint64(userIDInt) == user.ID {
+		errors.ErrInvalidUserData.With("user cannot remove itself from the organization").Write(w)
+		return
+	}
+	if err := a.db.RemoveOrganizationMember(org.Address, uint64(userIDInt)); err != nil {
+		errors.ErrInvalidUserData.Withf("member not found: %v", err).Write(w)
+		return
+	}
+	apicommon.HTTPWriteOK(w)
 }

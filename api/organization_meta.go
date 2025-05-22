@@ -65,7 +65,7 @@ func (a *API) addOrganizationMetaHandler(w http.ResponseWriter, r *http.Request)
 //	@Description	Updates existing or adds new key/value pairs in the meta information of an organization.
 //	@Description	Has only one layer of depth. If a second layer document is provided, for example meta.doc = [a,b,c],
 //	@Description	the entire document will be updated.
-//	@Description 	Requires Manager/Admin role.
+//	@Description	Requires Manager/Admin role.
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
