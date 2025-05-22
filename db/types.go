@@ -202,6 +202,17 @@ type OrgParticipant struct {
 	UpdatedAt     time.Time      `json:"updatedAt" bson:"updatedAt"`
 }
 
+// An Organization participant group is a precursor of a census, and is simply a
+// collection of participants that are grouped together for a specific purpose
+type OrgParticipantsGroup struct {
+	ID             primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	OrgAddress     string             `json:"orgAddress" bson:"orgAddress"`
+	ParticipantIDs []string           `json:"participantIds" bson:"participanIds"`
+	CreatedAt      time.Time          `json:"createdAt" bson:"createdAt"`
+	UpdatedAt      time.Time          `json:"updatedAt" bson:"updatedAt"`
+	CensusID       string             `json:"censusId" bson:"censusId"`
+}
+
 // Relates an OrgParticipant to a Census
 // The censID is the hex format in string of the objectID
 type CensusMembership struct {
