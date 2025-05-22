@@ -853,3 +853,14 @@ type OAuthServiceAddressResponse struct {
 	// The address of the OAuth service signer
 	Address string `json:"address"`
 }
+
+type CreateOrganizationTicketRequest struct {
+	// Type of the ticket to create (definded externally)
+	TicketType string `json:"type"`
+
+	// Title of the ticket
+	Title string `json:"title"`
+
+	// Body of the ticket
+	Description string `json:"description"`
+}

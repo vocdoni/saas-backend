@@ -711,3 +711,79 @@ func (a *API) organizationCensusesHandler(w http.ResponseWriter, r *http.Request
 	}
 	apicommon.HTTPWriteJSON(w, result)
 }
+
+// organizationCreateTicket godoc
+//
+//	@Summary		Create a new ticket for an organization
+//	@Description	Create a new ticket for an organization. The user must be a member of the organization with any role.
+//	@Tags			organizations
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			address	path		string										true	"Organization address"
+//	@Param			request	body		apicommon.CreateOrganizationTicketRequest	true	"Ticket request information"
+//	@Success		200		{string}	string										"OK"
+//	@Failure		400		{object}	errors.Error								"Invalid input data"
+//	@Failure		401		{object}	errors.Error								"Unauthorized"
+//	@Failure		404		{object}	errors.Error								"Organization not found"
+//	@Failure		500		{object}	errors.Error								"Internal server error"
+//	@Router			/organizations/{address}/ticket [post]
+func (a *API) organizationCreateTicket(w http.ResponseWriter, r *http.Request) {
+	// get the user from the request context
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	// get the organization info from the request context
+	org, _, ok := a.organizationFromRequest(r)
+	if !ok {
+		errors.ErrNoOrganizationProvided.Write(w)
+		return
+	}
+	if !user.HasRoleFor(org.Address, db.AnyRole) {
+		errors.ErrUnauthorized.Withf("user is not a member of organization").Write(w)
+		return
+	}
+	// get the ticket request from the request body
+	ticketReq := &apicommon.CreateOrganizationTicketRequest{}
+	if err := json.NewDecoder(r.Body).Decode(ticketReq); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	// validate the ticket request
+	if ticketReq.Title == "" || ticketReq.Description == "" {
+		errors.ErrMalformedBody.With("title and description are required").Write(w)
+		return
+	}
+
+	if !internal.ValidEmail(user.Email) {
+		errors.ErrEmailMalformed.With("invalid user email address").Write(w)
+		return
+	}
+	notification, err := mailtemplates.SupportNotification.ExecTemplate(
+		struct {
+			Type         string
+			Organization string
+			Title        string
+			Description  string
+			Email        string
+		}{ticketReq.TicketType, org.Address, ticketReq.Title, ticketReq.Description, user.Email},
+	)
+	if err != nil {
+		log.Warnw("could not execute support notification template", "error", err)
+		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
+
+	notification.ToAddress = apicommon.SupportEmail
+	notification.ReplyTo = user.Email
+
+	// send an email to the support destination
+	if err := a.mail.SendNotification(r.Context(), notification); err != nil {
+		log.Warnw("could not send ticket notification email", "error", err)
+		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
+	apicommon.HTTPWriteOK(w)
+}

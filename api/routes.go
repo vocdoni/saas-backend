@@ -72,6 +72,8 @@ const (
 	organizationDeleteParticipantsEndpoint = "/organizations/{address}/participants"
 	// POST/PUT/GET/DELETE /organizations/{address}/meta to add/set/get/delete the organization metadata
 	organizationMetaEndpoint = "/organizations/{address}/meta"
+	// POST /organizations/{address}/ticket to create a new ticket to our support system
+	organizationCreateTicketEndpoint = "/organizations/{address}/ticket"
 
 	// subscription routes
 	// GET /subscriptions to get the subscriptions of an organization
