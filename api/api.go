@@ -251,6 +251,9 @@ func (a *API) initRouter() http.Handler {
 		// delete organization meta information
 		log.Infow("new route", "method", "DELETE", "path", organizationMetaEndpoint)
 		r.Delete(organizationMetaEndpoint, a.deleteOrganizationMetaHandler)
+		// create a new ticket for the organization
+		log.Infow("new route", "method", "POST", "path", organizationCreateTicketEndpoint)
+		r.Post(organizationCreateTicketEndpoint, a.organizationCreateTicket)
 		// handle stripe checkout session
 		log.Infow("new route", "method", "POST", "path", subscriptionsCheckout)
 		r.Post(subscriptionsCheckout, a.createSubscriptionCheckoutHandler)
