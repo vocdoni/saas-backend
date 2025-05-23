@@ -29,6 +29,7 @@
   - [🧑‍🤝‍🧑 Organization members](#-organization-members)
   - [🧑‍💼 Invite organization member](#-invite-organization-member)
   - [⏳ List pending invitations](#-list-pending-invitations)
+  - [🗑️ Delete pending invitation](#-delete-pending-invitation)
   - [🤝 Accept organization invitation](#-accept-organization-invitation)
   - [🔄 Update organization member role](#-update-organization-member-role)
   - [❌ Remove organization member](#-remove-organization-member)
@@ -770,6 +771,39 @@ Only the following parameters can be changed. Every parameter is optional.
 | `400` | `40009` | `organization not found` |
 | `400` | `40011` | `no organization provided` |
 | `401` | `40014` | `user account not verified` |
+| `500` | `50002` | `internal server error` |
+
+### 🗑️ Delete pending invitation
+
+* **Path** `/organizations/{address}/members/pending`
+* **Method** `DELETE`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Request body**
+```json
+{
+  "email": "inviteduser@email.com"
+}
+```
+
+* **Description**
+Delete a pending invitation for a user to join an organization by email. Only admins of the organization can delete invitations. The invitation must exist and belong to the specified organization.
+
+* **Response**
+```json
+"OK"
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `401` | `40001` | `user is not admin of organization` |
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40005` | `invitation code not provided` |
+| `400` | `40005` | `invalid data - invitation not found` |
+| `400` | `40011` | `no organization provided` |
 | `500` | `50002` | `internal server error` |
 
 ### 🤝 Accept organization invitation

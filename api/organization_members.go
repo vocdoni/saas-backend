@@ -292,6 +292,75 @@ func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r
 	apicommon.HTTPWriteOK(w)
 }
 
+// deletePendingMemberInvitationHandler godoc
+//
+//	@Summary		Delete a pending invitation to an organization
+//	@Description	Delete a pending invitation to an organization by email.
+//	@Description	Only the admin of the organization can delete an invitation.
+//	@Tags			organizations
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			address	path		string											true	"Organization address"
+//	@Param			request	body		apicommon.DeleteOrganizationInvitationRequest	true	"Invitation deletion information"
+//	@Success		200		{string}	string											"OK"
+//	@Failure		400		{object}	errors.Error									"Invalid input data"
+//	@Failure		401		{object}	errors.Error									"Unauthorized"
+//	@Failure		400		{object}	errors.Error									"Invalid data - invitation not found"
+//	@Failure		500		{object}	errors.Error									"Internal server error"
+//	@Router			/organizations/{address}/members/pending [delete]
+
+func (a *API) deletePendingMemberInvitationHandler(w http.ResponseWriter, r *http.Request) {
+	// get the user from the request context
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	// get the organization info from the request context
+	org, _, ok := a.organizationFromRequest(r)
+	if !ok {
+		errors.ErrNoOrganizationProvided.Write(w)
+		return
+	}
+	if !user.HasRoleFor(org.Address, db.AdminRole) {
+		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		return
+	}
+	invitationToDelete := &apicommon.DeleteOrganizationInvitationRequest{}
+	if err := json.NewDecoder(r.Body).Decode(invitationToDelete); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+
+	// get the invitation code from the request path
+	if invitationToDelete.Email == "" {
+		errors.ErrMalformedBody.With("invitation code not provided").Write(w)
+		return
+	}
+	// get the invitation from the database
+	invitation, err := a.db.InvitationByEmail(invitationToDelete.Email)
+	if err != nil {
+		if err == db.ErrNotFound {
+			errors.ErrInvalidData.With("invitation not found").Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.Withf("could not get invitation: %v", err).Write(w)
+		return
+	}
+	// check if the organization is correct
+	if invitation.OrganizationAddress != org.Address {
+		errors.ErrUnauthorized.Withf("invitation is not for this organization").Write(w)
+		return
+	}
+
+	if err := a.db.DeleteInvitationByEmail(invitationToDelete.Email); err != nil {
+		errors.ErrGenericInternalServerError.Withf("could not get invitation: %v", err).Write(w)
+		return
+	}
+	apicommon.HTTPWriteOK(w)
+}
+
 // pendingOrganizationMembersHandler godoc
 //
 //	@Summary		Get pending organization members

@@ -22400,7 +22400,8 @@ paths:
       consumes:
       - application/json
       description: |-
-        Update the information of an organization. Only the admin of the organization can update the information.
+        Update the information of an organization.
+        Only the admin of the organization can update the information.
         Only certain fields can be updated, and they will be updated only if they are not empty.
       parameters:
       - description: Organization address

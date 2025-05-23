@@ -165,4 +165,97 @@ func TestOrganizationInvites(t *testing.T) {
 		_, err = testDB.Invitation(invitationCode)
 		c.Assert(err, qt.ErrorIs, ErrNotFound)
 	})
+
+	t.Run("InvitationByEmail", func(_ *testing.T) {
+		c.Assert(testDB.Reset(), qt.IsNil)
+		// Test getting non-existent invitation by email
+		_, err := testDB.InvitationByEmail(newMemberEmail)
+		c.Assert(err, qt.ErrorIs, ErrNotFound)
+
+		// Create organization and user
+		err = testDB.SetOrganization(&Organization{
+			Address: testOrgAddress,
+		})
+		c.Assert(err, qt.IsNil)
+
+		_, err = testDB.SetUser(&User{
+			Email:     testUserEmail,
+			Password:  testUserPass,
+			FirstName: testUserFirstName,
+			LastName:  testUserLastName,
+			Organizations: []OrganizationMember{
+				{Address: testOrgAddress, Role: AdminRole},
+			},
+		})
+		c.Assert(err, qt.IsNil)
+
+		// Create invitation
+		err = testDB.CreateInvitation(&OrganizationInvite{
+			InvitationCode:      invitationCode,
+			OrganizationAddress: testOrgAddress,
+			CurrentUserID:       currentUserID,
+			NewUserEmail:        newMemberEmail,
+			Role:                AdminRole,
+			Expiration:          expires,
+		})
+		c.Assert(err, qt.IsNil)
+
+		// Get invitation by email
+		invitation, err := testDB.InvitationByEmail(newMemberEmail)
+		c.Assert(err, qt.IsNil)
+		c.Assert(invitation.InvitationCode, qt.Equals, invitationCode)
+		c.Assert(invitation.OrganizationAddress, qt.Equals, testOrgAddress)
+		c.Assert(invitation.CurrentUserID, qt.Equals, currentUserID)
+		c.Assert(invitation.NewUserEmail, qt.Equals, newMemberEmail)
+		c.Assert(invitation.Role, qt.Equals, AdminRole)
+		// Truncate expiration to seconds to avoid rounding issues, also set to UTC
+		c.Assert(invitation.Expiration.Truncate(time.Second).UTC(), qt.Equals, expires.Truncate(time.Second).UTC())
+	})
+
+	t.Run("DeleteInvitationByEmail", func(_ *testing.T) {
+		c.Assert(testDB.Reset(), qt.IsNil)
+		// Non existing invitation does not return an error on delete attempt
+		err := testDB.DeleteInvitationByEmail(newMemberEmail)
+		c.Assert(err, qt.IsNil)
+
+		// Create organization and user
+		err = testDB.SetOrganization(&Organization{
+			Address: testOrgAddress,
+		})
+		c.Assert(err, qt.IsNil)
+
+		_, err = testDB.SetUser(&User{
+			Email:     testUserEmail,
+			Password:  testUserPass,
+			FirstName: testUserFirstName,
+			LastName:  testUserLastName,
+			Organizations: []OrganizationMember{
+				{Address: testOrgAddress, Role: AdminRole},
+			},
+		})
+		c.Assert(err, qt.IsNil)
+
+		// Create invitation
+		err = testDB.CreateInvitation(&OrganizationInvite{
+			InvitationCode:      invitationCode,
+			OrganizationAddress: testOrgAddress,
+			CurrentUserID:       currentUserID,
+			NewUserEmail:        newMemberEmail,
+			Role:                AdminRole,
+			Expiration:          expires,
+		})
+		c.Assert(err, qt.IsNil)
+
+		// Verify invitation exists by email
+		_, err = testDB.InvitationByEmail(newMemberEmail)
+		c.Assert(err, qt.IsNil)
+
+		// Delete the invitation by email
+		err = testDB.DeleteInvitationByEmail(newMemberEmail)
+		c.Assert(err, qt.IsNil)
+
+		// Verify invitation is deleted
+		_, err = testDB.InvitationByEmail(newMemberEmail)
+		c.Assert(err, qt.ErrorIs, ErrNotFound)
+	})
 }
