@@ -354,6 +354,7 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// return the user information
 	apicommon.HTTPWriteJSON(w, apicommon.UserInfo{
+		ID:            user.ID,
 		Email:         user.Email,
 		FirstName:     user.FirstName,
 		LastName:      user.LastName,

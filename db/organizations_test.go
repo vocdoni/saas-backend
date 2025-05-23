@@ -195,4 +195,158 @@ func TestOrganizations(t *testing.T) {
 		c.Assert(org.Address, qt.Equals, address)
 		c.Assert(org.Subscription.Active, qt.Equals, active)
 	})
+
+	t.Run("UpdateOrganizationMemberRole", func(_ *testing.T) {
+		c.Assert(testDB.Reset(), qt.IsNil)
+
+		// Create a test user
+		userEmail := "roletest@example.com"
+		userID, err := testDB.SetUser(&User{
+			Email:     userEmail,
+			Password:  testDBUserPass,
+			FirstName: testDBFirstName,
+			LastName:  testDBLastName,
+		})
+		c.Assert(err, qt.IsNil)
+		c.Assert(userID, qt.Not(qt.Equals), uint64(0))
+
+		// Create a test organization
+		orgAddress := "orgForRoleUpdate"
+		c.Assert(testDB.SetOrganization(&Organization{
+			Address: orgAddress,
+			Creator: userEmail, // This will add the user as admin
+		}), qt.IsNil)
+
+		// Verify the user is initially an admin
+		user, err := testDB.User(userID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(user, qt.Not(qt.IsNil))
+		c.Assert(user.Organizations, qt.HasLen, 1)
+		c.Assert(user.Organizations[0].Address, qt.Equals, orgAddress)
+		c.Assert(user.Organizations[0].Role, qt.Equals, AdminRole)
+
+		// Update the role from Admin to Manager
+		c.Assert(testDB.UpdateOrganizationMemberRole(orgAddress, userID, ManagerRole), qt.IsNil)
+
+		// Verify the role was updated
+		user, err = testDB.User(userID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(user, qt.Not(qt.IsNil))
+		c.Assert(user.Organizations, qt.HasLen, 1)
+		c.Assert(user.Organizations[0].Address, qt.Equals, orgAddress)
+		c.Assert(user.Organizations[0].Role, qt.Equals, ManagerRole)
+
+		// Update the role from Manager to Viewer
+		c.Assert(testDB.UpdateOrganizationMemberRole(orgAddress, userID, ViewerRole), qt.IsNil)
+
+		// Verify the role was updated
+		user, err = testDB.User(userID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(user, qt.Not(qt.IsNil))
+		c.Assert(user.Organizations, qt.HasLen, 1)
+		c.Assert(user.Organizations[0].Address, qt.Equals, orgAddress)
+		c.Assert(user.Organizations[0].Role, qt.Equals, ViewerRole)
+
+		// Test updating a non-existent user
+		nonExistentUserID := uint64(9999)
+		err = testDB.UpdateOrganizationMemberRole(orgAddress, nonExistentUserID, AdminRole)
+		// The function doesn't return an error for non-existent users, it just doesn't update anything
+		c.Assert(err, qt.IsNil)
+
+		// Test updating a user for a non-existent organization
+		nonExistentOrgAddress := "nonExistentOrg"
+		err = testDB.UpdateOrganizationMemberRole(nonExistentOrgAddress, userID, AdminRole)
+		// The function doesn't return an error for non-existent organizations, it just doesn't update anything
+		c.Assert(err, qt.IsNil)
+
+		// Verify the user's role hasn't changed after the non-existent org update
+		user, err = testDB.User(userID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(user, qt.Not(qt.IsNil))
+		c.Assert(user.Organizations, qt.HasLen, 1)
+		c.Assert(user.Organizations[0].Address, qt.Equals, orgAddress)
+		c.Assert(user.Organizations[0].Role, qt.Equals, ViewerRole)
+	})
+
+	t.Run("RemoveOrganizationMember", func(_ *testing.T) {
+		c.Assert(testDB.Reset(), qt.IsNil)
+
+		// Create a test user
+		userEmail := "membertest@example.com"
+		userID, err := testDB.SetUser(&User{
+			Email:     userEmail,
+			Password:  testDBUserPass,
+			FirstName: testDBFirstName,
+			LastName:  testDBLastName,
+		})
+		c.Assert(err, qt.IsNil)
+		c.Assert(userID, qt.Not(qt.Equals), uint64(0))
+
+		// Create a test organization
+		orgAddress := "orgForMemberRemoval"
+		c.Assert(testDB.SetOrganization(&Organization{
+			Address: orgAddress,
+			Creator: userEmail, // This will add the user as admin
+		}), qt.IsNil)
+
+		// Verify the user is initially a member
+		user, err := testDB.User(userID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(user, qt.Not(qt.IsNil))
+		c.Assert(user.Organizations, qt.HasLen, 1)
+		c.Assert(user.Organizations[0].Address, qt.Equals, orgAddress)
+
+		// Remove the user from the organization
+		c.Assert(testDB.RemoveOrganizationMember(orgAddress, userID), qt.IsNil)
+
+		// Verify the user is no longer a member
+		user, err = testDB.User(userID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(user, qt.Not(qt.IsNil))
+		c.Assert(user.Organizations, qt.HasLen, 0)
+
+		// Test removing a non-existent user
+		nonExistentUserID := uint64(9999)
+		err = testDB.RemoveOrganizationMember(orgAddress, nonExistentUserID)
+		// The function doesn't return an error for non-existent users, it just doesn't remove anything
+		c.Assert(err, qt.IsNil)
+
+		// Create another user and add them to multiple organizations
+		secondUserEmail := "seconduser@example.com"
+		secondUserID, err := testDB.SetUser(&User{
+			Email:     secondUserEmail,
+			Password:  testDBUserPass,
+			FirstName: testDBFirstName,
+			LastName:  testDBLastName,
+		})
+		c.Assert(err, qt.IsNil)
+
+		// Create two organizations for the second user
+		firstOrgAddress := "firstOrgForSecondUser"
+		secondOrgAddress := "secondOrgForSecondUser"
+
+		c.Assert(testDB.SetOrganization(&Organization{
+			Address: firstOrgAddress,
+			Creator: secondUserEmail,
+		}), qt.IsNil)
+
+		c.Assert(testDB.SetOrganization(&Organization{
+			Address: secondOrgAddress,
+			Creator: secondUserEmail,
+		}), qt.IsNil)
+
+		// Verify the second user is a member of both organizations
+		secondUser, err := testDB.User(secondUserID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(secondUser.Organizations, qt.HasLen, 2)
+
+		// Remove the second user from the first organization
+		c.Assert(testDB.RemoveOrganizationMember(firstOrgAddress, secondUserID), qt.IsNil)
+
+		// Verify the second user is now only a member of the second organization
+		secondUser, err = testDB.User(secondUserID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(secondUser.Organizations, qt.HasLen, 1)
+		c.Assert(secondUser.Organizations[0].Address, qt.Equals, secondOrgAddress)
+	})
 }

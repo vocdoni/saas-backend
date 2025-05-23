@@ -77,6 +77,22 @@ func (ms *MongoStorage) Invitation(invitationCode string) (*OrganizationInvite, 
 	return invite, nil
 }
 
+// InvitationByEmail returns the invitation for the given email.
+func (ms *MongoStorage) InvitationByEmail(email string) (*OrganizationInvite, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	result := ms.organizationInvites.FindOne(ctx, bson.M{"newUserEmail": email})
+	invite := &OrganizationInvite{}
+	if err := result.Decode(invite); err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return invite, nil
+}
+
 // PendingInvitations returns the pending invitations for the given organization.
 func (ms *MongoStorage) PendingInvitations(organizationAddress string) ([]OrganizationInvite, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -107,5 +123,17 @@ func (ms *MongoStorage) DeleteInvitation(invitationCode string) error {
 	defer cancel()
 
 	_, err := ms.organizationInvites.DeleteOne(ctx, bson.M{"invitationCode": invitationCode})
+	return err
+}
+
+// DeleteInvitationByEmail removes the invitation from the database.
+func (ms *MongoStorage) DeleteInvitationByEmail(email string) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	_, err := ms.organizationInvites.DeleteOne(ctx, bson.M{"newUserEmail": email})
 	return err
 }

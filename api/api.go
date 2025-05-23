@@ -221,12 +221,21 @@ func (a *API) initRouter() http.Handler {
 		// invite a new admin member to the organization
 		log.Infow("new route", "method", "POST", "path", organizationAddMemberEndpoint)
 		r.Post(organizationAddMemberEndpoint, a.inviteOrganizationMemberHandler)
+		// update an organization's member role
+		log.Infow("new route", "method", "PUT", "path", organizationUpdateMemberEndpoint)
+		r.Put(organizationUpdateMemberEndpoint, a.updateOrganizationMemberRoleHandler)
+		// remove a member from an organization
+		log.Infow("new route", "method", "DELETE", "path", organizationDeleteMemberEndpoint)
+		r.Delete(organizationDeleteMemberEndpoint, a.removeOrganizationMemberHandler)
 		// get organization censuses
 		log.Infow("new route", "method", "GET", "path", organizationCensusesEndpoint)
 		r.Get(organizationCensusesEndpoint, a.organizationCensusesHandler)
 		// pending organization invitations
 		log.Infow("new route", "method", "GET", "path", organizationPendingMembersEndpoint)
 		r.Get(organizationPendingMembersEndpoint, a.pendingOrganizationMembersHandler)
+		// delete pending organization invitation
+		log.Infow("new route", "method", "DELETE", "path", organizationDeletePendingInvitationEndpoint)
+		r.Delete(organizationDeletePendingInvitationEndpoint, a.deletePendingMemberInvitationHandler)
 		// get organization participants
 		log.Infow("new route", "method", "GET", "path", organizationParticipantsEndpoint)
 		r.Get(organizationParticipantsEndpoint, a.organizationParticipantsHandler)
