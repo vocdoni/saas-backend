@@ -9,7 +9,10 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/internal"
+	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"github.com/vocdoni/saas-backend/subscriptions"
+	"go.vocdoni.io/dvote/log"
 )
 
 // createOrganizationHandler godoc
@@ -43,7 +46,8 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// create the organization signer to store the address and the nonce
-	signer, nonce, err := account.NewSigner(a.secret, user.Email) // TODO: replace email with something else such as user ID
+	// TODO: replace email with something else such as user ID
+	signer, nonce, err := account.NewSigner(a.secret, user.Email)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not create organization signer: %v", err).Write(w)
 		return
@@ -78,7 +82,9 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		isAdmin, err := a.db.IsMemberOf(user.Email, dbParentOrg.Address, db.AdminRole)
 		if err != nil {
-			errors.ErrGenericInternalServerError.Withf("could not check if user is admin of parent organization: %v", err).Write(w)
+			errors.ErrGenericInternalServerError.
+				Withf("could not check if user is admin of parent organization: %v", err).
+				Write(w)
 			return
 		}
 		if !isAdmin {
@@ -167,7 +173,8 @@ func (a *API) organizationInfoHandler(w http.ResponseWriter, r *http.Request) {
 // updateOrganizationHandler godoc
 //
 //	@Summary		Update organization information
-//	@Description	Update the information of an organization. Only the admin of the organization can update the information.
+//	@Description	Update the information of an organization.
+//	@Description	Only the admin of the organization can update the information.
 //	@Description	Only certain fields can be updated, and they will be updated only if they are not empty.
 //	@Tags			organizations
 //	@Accept			json

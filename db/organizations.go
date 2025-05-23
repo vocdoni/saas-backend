@@ -168,6 +168,63 @@ func (ms *MongoStorage) OrganizationsMembers(address string) ([]User, error) {
 	return users, nil
 }
 
+// UpdateOrganiationMemberRole method updates the role of the user in the
+// organization with the given address.
+func (ms *MongoStorage) UpdateOrganizationMemberRole(address string, userID uint64, newRole UserRole) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	filter := bson.M{
+		"_id":               userID,
+		"organizations._id": address,
+	}
+
+	update := bson.M{
+		"$set": bson.M{
+			"organizations.$.role": newRole,
+		},
+	}
+
+	_, err := ms.users.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// RemoveOrganizationMember method removes the user from the organization
+// with the given address.
+func (ms *MongoStorage) RemoveOrganizationMember(address string, userID uint64) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	filter := bson.M{
+		"_id":               userID,
+		"organizations._id": address,
+	}
+	update := bson.M{
+		"$pull": bson.M{
+			"organizations": bson.M{
+				"_id": address,
+			},
+		},
+	}
+	_, err := ms.users.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// SetOrganizationmMemberRole method sets the role of the user in the
+// organization with the given address. If the user doesn't exist, it returns
+// an error. If the organization doesn't exist, it returns an error. If the
+
 // SetOrganizationSubscription method adds the provided subscription to
 // the organization with the given address
 func (ms *MongoStorage) SetOrganizationSubscription(address string, orgSubscription *OrganizationSubscription) error {

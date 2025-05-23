@@ -153,6 +153,13 @@ type OrganizationDeleteMetaRequest struct {
 	Keys []string `json:"keys"`
 }
 
+// UpdateOrganizationMemberRoleRequest represents a request to update the role of an organization member.
+// swagger:model UpdateOrganizationMemberRoleRequest
+type UpdateOrganizationMemberRoleRequest struct {
+	// The new role to assign to the member
+	Role string `json:"role"`
+}
+
 // UserInfo represents user information and is used for user registration.
 // swagger:model UserInfo
 type UserInfo struct {
