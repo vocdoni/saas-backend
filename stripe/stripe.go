@@ -236,7 +236,7 @@ func processProduct(index int, productID string, product *stripeapi.Product) (*s
 	tiers := processPriceTiers(price.Tiers)
 
 	return &stripeDB.Plan{
-		ID:              uint64(index),
+		ID:              uint64(index + 1),
 		Name:            product.Name,
 		StartingPrice:   startingPrice,
 		StripeID:        productID,
