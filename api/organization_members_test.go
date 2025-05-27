@@ -467,19 +467,21 @@ func TestOrganizationMembers(t *testing.T) {
 		c.Assert(len(pendingInvites.Invites), qt.Equals, 1)
 		c.Assert(pendingInvites.Invites[0].Email, qt.Equals, userToInviteEmail)
 
+		// Get the invitation ID
+		invitationID := pendingInvites.Invites[0].ID
+		c.Assert(invitationID, qt.Not(qt.Equals), "")
+
 		// Test 1: Delete the pending invitation
-		deleteRequest := &apicommon.DeleteOrganizationInvitationRequest{
-			Email: userToInviteEmail,
-		}
 		resp, code = testRequest(
 			t,
 			http.MethodDelete,
 			adminToken,
-			deleteRequest,
+			nil, // No request body needed
 			"organizations",
 			newOrgAddress.String(),
 			"members",
 			"pending",
+			invitationID, // Add invitationID as path parameter
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
@@ -501,35 +503,31 @@ func TestOrganizationMembers(t *testing.T) {
 		c.Assert(len(pendingInvites.Invites), qt.Equals, 0)
 
 		// Test 2: Try to delete a non-existent invitation
-		nonExistentEmail := "nonexistent@example.com"
-		deleteRequest = &apicommon.DeleteOrganizationInvitationRequest{
-			Email: nonExistentEmail,
-		}
+		nonExistentID := "000000000000000000000000" // Invalid ObjectID format
 		_, code = testRequest(
 			t,
 			http.MethodDelete,
 			adminToken,
-			deleteRequest,
+			nil,
 			"organizations",
 			newOrgAddress.String(),
 			"members",
 			"pending",
+			nonExistentID,
 		)
 		c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
 
 		// Test 3: Try to delete without authentication
-		deleteRequest = &apicommon.DeleteOrganizationInvitationRequest{
-			Email: userToInviteEmail,
-		}
 		_, code = testRequest(
 			t,
 			http.MethodDelete,
 			"",
-			deleteRequest,
+			nil,
 			"organizations",
 			newOrgAddress.String(),
 			"members",
 			"pending",
+			invitationID,
 		)
 		c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
@@ -540,11 +538,12 @@ func TestOrganizationMembers(t *testing.T) {
 			t,
 			http.MethodDelete,
 			nonAdminToken,
-			deleteRequest,
+			nil,
 			"organizations",
 			newOrgAddress.String(),
 			"members",
 			"pending",
+			invitationID,
 		)
 		c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
@@ -568,19 +567,38 @@ func TestOrganizationMembers(t *testing.T) {
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
+		// Get the invitation ID from the second organization
+		resp, code = testRequest(
+			t,
+			http.MethodGet,
+			adminToken,
+			nil,
+			"organizations",
+			anotherOrgAddress.String(),
+			"members",
+			"pending",
+		)
+		c.Assert(code, qt.Equals, http.StatusOK)
+
+		var anotherPendingInvites apicommon.OrganizationInviteList
+		err = parseJSON(resp, &anotherPendingInvites)
+		c.Assert(err, qt.IsNil)
+		c.Assert(len(anotherPendingInvites.Invites), qt.Equals, 1)
+
+		anotherInvitationID := anotherPendingInvites.Invites[0].ID
+		c.Assert(anotherInvitationID, qt.Not(qt.Equals), "")
+
 		// Try to delete the invitation from the wrong organization
-		deleteRequest = &apicommon.DeleteOrganizationInvitationRequest{
-			Email: userToInviteEmail,
-		}
 		_, code = testRequest(
 			t,
 			http.MethodDelete,
 			adminToken,
-			deleteRequest,
+			nil,
 			"organizations",
 			newOrgAddress.String(), // Using first org to delete invitation from second org
 			"members",
 			"pending",
+			anotherInvitationID,
 		)
 		c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
 
@@ -589,11 +607,12 @@ func TestOrganizationMembers(t *testing.T) {
 			t,
 			http.MethodDelete,
 			adminToken,
-			deleteRequest,
+			nil,
 			"organizations",
 			anotherOrgAddress.String(),
 			"members",
 			"pending",
+			anotherInvitationID,
 		)
 		c.Assert(code, qt.Equals, http.StatusOK)
 	})

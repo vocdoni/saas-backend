@@ -274,6 +274,9 @@ definitions:
       expiration:
         description: Expiration time of the invitation
         type: string
+      id:
+        description: Unique identifier for the invitation
+        type: string
       role:
         description: Role to be assigned to the invitee
         type: string

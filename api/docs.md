@@ -775,16 +775,10 @@ Only the following parameters can be changed. Every parameter is optional.
 
 ### 🗑️ Delete pending invitation
 
-* **Path** `/organizations/{address}/members/pending`
+* **Path** `/organizations/{address}/members/pending/{invitationID}`
 * **Method** `DELETE`
 * **Headers**
   * `Authentication: Bearer <user_token>`
-* **Request body**
-```json
-{
-  "email": "inviteduser@email.com"
-}
-```
 
 * **Description**
 Delete a pending invitation for a user to join an organization by email. Only admins of the organization can delete invitations. The invitation must exist and belong to the specified organization.

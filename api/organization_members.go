@@ -213,7 +213,7 @@ func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r
 		return
 	}
 	// get the invitation from the database
-	invitation, err := a.db.Invitation(invitationReq.Code)
+	invitation, err := a.db.InvitationByCode(invitationReq.Code)
 	if err != nil {
 		errors.ErrUnauthorized.Withf("could not get invitation: %v", err).Write(w)
 		return
@@ -226,7 +226,7 @@ func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r
 	// create a helper function to remove the invitation from the database in
 	// case of error or expiration
 	removeInvitation := func() {
-		if err := a.db.DeleteInvitation(invitationReq.Code); err != nil {
+		if err := a.db.DeleteInvitationByCode(invitationReq.Code); err != nil {
 			log.Warnf("could not delete invitation: %v", err)
 		}
 	}
@@ -301,14 +301,14 @@ func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string											true	"Organization address"
-//	@Param			request	body		apicommon.DeleteOrganizationInvitationRequest	true	"Invitation deletion information"
-//	@Success		200		{string}	string											"OK"
-//	@Failure		400		{object}	errors.Error									"Invalid input data"
-//	@Failure		401		{object}	errors.Error									"Unauthorized"
-//	@Failure		400		{object}	errors.Error									"Invalid data - invitation not found"
-//	@Failure		500		{object}	errors.Error									"Internal server error"
-//	@Router			/organizations/{address}/members/pending [delete]
+//	@Param			address			path		string			true	"Organization address"
+//	@Param			invitationID	path		string			true	"Invitation ID"
+//	@Success		200				{string}	string			"OK"
+//	@Failure		400				{object}	errors.Error	"Invalid input data"
+//	@Failure		401				{object}	errors.Error	"Unauthorized"
+//	@Failure		400				{object}	errors.Error	"Invalid data - invitation not found"
+//	@Failure		500				{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{address}/members/pending/{invitationID} [delete]
 
 func (a *API) deletePendingMemberInvitationHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
@@ -327,19 +327,14 @@ func (a *API) deletePendingMemberInvitationHandler(w http.ResponseWriter, r *htt
 		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
-	invitationToDelete := &apicommon.DeleteOrganizationInvitationRequest{}
-	if err := json.NewDecoder(r.Body).Decode(invitationToDelete); err != nil {
-		errors.ErrMalformedBody.Write(w)
-		return
-	}
 
-	// get the invitation code from the request path
-	if invitationToDelete.Email == "" {
-		errors.ErrMalformedBody.With("invitation code not provided").Write(w)
+	invitationID := chi.URLParam(r, "invitationID")
+	if invitationID == "" {
+		errors.ErrMalformedBody.With("invitation ID not provided").Write(w)
 		return
 	}
 	// get the invitation from the database
-	invitation, err := a.db.InvitationByEmail(invitationToDelete.Email)
+	invitation, err := a.db.Invitation(invitationID)
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrInvalidData.With("invitation not found").Write(w)
@@ -354,7 +349,7 @@ func (a *API) deletePendingMemberInvitationHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
-	if err := a.db.DeleteInvitationByEmail(invitationToDelete.Email); err != nil {
+	if err := a.db.DeleteInvitation(invitationID); err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not get invitation: %v", err).Write(w)
 		return
 	}
@@ -402,6 +397,7 @@ func (a *API) pendingOrganizationMembersHandler(w http.ResponseWriter, r *http.R
 	invitationsList := make([]*apicommon.OrganizationInvite, 0, len(invitations))
 	for _, invitation := range invitations {
 		invitationsList = append(invitationsList, &apicommon.OrganizationInvite{
+			ID:         invitation.ID.Hex(),
 			Email:      invitation.NewUserEmail,
 			Role:       string(invitation.Role),
 			Expiration: invitation.Expiration,
