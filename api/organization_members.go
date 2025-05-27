@@ -353,6 +353,13 @@ func (a *API) deletePendingMemberInvitationHandler(w http.ResponseWriter, r *htt
 		errors.ErrGenericInternalServerError.Withf("could not get invitation: %v", err).Write(w)
 		return
 	}
+
+	// update the org members counter
+	org.Counters.Members--
+	if err := a.db.SetOrganization(org); err != nil {
+		errors.ErrGenericInternalServerError.Withf("could not update organization: %v", err).Write(w)
+		return
+	}
 	apicommon.HTTPWriteOK(w)
 }
 
