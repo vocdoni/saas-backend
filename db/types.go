@@ -141,12 +141,13 @@ type OrganizationCounters struct {
 }
 
 type OrganizationInvite struct {
-	InvitationCode      string    `json:"invitationCode" bson:"invitationCode"`
-	OrganizationAddress string    `json:"organizationAddress" bson:"organizationAddress"`
-	CurrentUserID       uint64    `json:"currentUserID" bson:"currentUserID"`
-	NewUserEmail        string    `json:"newUserEmail" bson:"newUserEmail"`
-	Role                UserRole  `json:"role" bson:"role"`
-	Expiration          time.Time `json:"expiration" bson:"expiration"`
+	ID                  primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	InvitationCode      string             `json:"invitationCode" bson:"invitationCode"`
+	OrganizationAddress string             `json:"organizationAddress" bson:"organizationAddress"`
+	CurrentUserID       uint64             `json:"currentUserID" bson:"currentUserID"`
+	NewUserEmail        string             `json:"newUserEmail" bson:"newUserEmail"`
+	Role                UserRole           `json:"role" bson:"role"`
+	Expiration          time.Time          `json:"expiration" bson:"expiration"`
 }
 
 // Object represents a user uploaded object Includes user defined ID and the data

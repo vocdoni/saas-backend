@@ -19,7 +19,7 @@ func TestOrganizationInvites(t *testing.T) {
 	t.Run("GetInvitation", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Test getting non-existent invitation
-		_, err := testDB.Invitation(invitationCode)
+		_, err := testDB.InvitationByCode(invitationCode)
 		c.Assert(err, qt.ErrorIs, ErrNotFound)
 
 		// Create organization and user
@@ -51,7 +51,7 @@ func TestOrganizationInvites(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Get invitation
-		invitation, err := testDB.Invitation(invitationCode)
+		invitation, err := testDB.InvitationByCode(invitationCode)
 		c.Assert(err, qt.IsNil)
 		c.Assert(invitation.InvitationCode, qt.Equals, invitationCode)
 		c.Assert(invitation.OrganizationAddress, qt.Equals, testOrgAddress)
@@ -110,7 +110,7 @@ func TestOrganizationInvites(t *testing.T) {
 		c.Assert(invitations[0].Expiration.Truncate(time.Second).UTC(), qt.Equals, expires.Truncate(time.Second).UTC())
 
 		// Delete the invitation
-		err = testDB.DeleteInvitation(invitationCode)
+		err = testDB.DeleteInvitationByCode(invitationCode)
 		c.Assert(err, qt.IsNil)
 
 		// List invitations expecting none
@@ -122,7 +122,7 @@ func TestOrganizationInvites(t *testing.T) {
 	t.Run("DeleteInvitation", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Non existing invitation does not return an error on delete attempt
-		err := testDB.DeleteInvitation(invitationCode)
+		err := testDB.DeleteInvitationByCode(invitationCode)
 		c.Assert(err, qt.IsNil)
 
 		// Create organization and user
@@ -154,15 +154,15 @@ func TestOrganizationInvites(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Verify invitation exists
-		_, err = testDB.Invitation(invitationCode)
+		_, err = testDB.InvitationByCode(invitationCode)
 		c.Assert(err, qt.IsNil)
 
 		// Delete the invitation
-		err = testDB.DeleteInvitation(invitationCode)
+		err = testDB.DeleteInvitationByCode(invitationCode)
 		c.Assert(err, qt.IsNil)
 
 		// Verify invitation is deleted
-		_, err = testDB.Invitation(invitationCode)
+		_, err = testDB.InvitationByCode(invitationCode)
 		c.Assert(err, qt.ErrorIs, ErrNotFound)
 	})
 
