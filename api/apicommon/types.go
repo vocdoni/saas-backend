@@ -187,6 +187,9 @@ type UserInfo struct {
 // OrganizationInvite represents an invitation to join an organization.
 // swagger:model OrganizationInvite
 type OrganizationInvite struct {
+	// Unique identifier for the invitation
+	ID string `json:"id"`
+
 	// Email address of the invitee
 	Email string `json:"email"`
 
@@ -212,13 +215,6 @@ type AcceptOrganizationInvitation struct {
 
 	// User information for registration or identification
 	User *UserInfo `json:"user"`
-}
-
-// DeleteOrganizationInvitation represents a request to delete an organization invitation.
-// swagger:model DeleteOrganizationInvitation
-type DeleteOrganizationInvitationRequest struct {
-	// Email of the invitd person
-	Email string `json:"email"`
 }
 
 // UserPasswordUpdate represents a request to update a user's password.
