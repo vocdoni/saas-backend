@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.vocdoni.io/dvote/log"
 )
@@ -45,6 +46,7 @@ func (ms *MongoStorage) CreateInvitation(invite *OrganizationInvite) error {
 	if !IsValidUserRole(invite.Role) {
 		return fmt.Errorf("invalid role")
 	}
+	invite.ID = primitive.NewObjectID()
 	// insert the invitation in the database
 	_, err = ms.organizationInvites.InsertOne(ctx, invite)
 	// check if the user is already invited to the organization, the error is
@@ -61,8 +63,27 @@ func (ms *MongoStorage) CreateInvitation(invite *OrganizationInvite) error {
 	return err
 }
 
-// Invitation returns the invitation for the given code.
-func (ms *MongoStorage) Invitation(invitationCode string) (*OrganizationInvite, error) {
+// Invitation returns the invitation for the given ID.
+func (ms *MongoStorage) Invitation(invitationID string) (*OrganizationInvite, error) {
+	objID, err := primitive.ObjectIDFromHex(invitationID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid invitation ID: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	result := ms.organizationInvites.FindOne(ctx, bson.M{"_id": objID})
+	invite := &OrganizationInvite{}
+	if err := result.Decode(invite); err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return invite, nil
+}
+
+// InvitationByCode returns the invitation for the given code.
+func (ms *MongoStorage) InvitationByCode(invitationCode string) (*OrganizationInvite, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
@@ -114,26 +135,37 @@ func (ms *MongoStorage) PendingInvitations(organizationAddress string) ([]Organi
 	return invitations, nil
 }
 
-// DeleteInvitation removes the invitation from the database.
-func (ms *MongoStorage) DeleteInvitation(invitationCode string) error {
+func (ms *MongoStorage) deleteInvitation(filter bson.M) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	_, err := ms.organizationInvites.DeleteOne(ctx, bson.M{"invitationCode": invitationCode})
-	return err
+	// Delete the invitation from the database
+	_, err := ms.organizationInvites.DeleteOne(ctx, filter)
+	if err != nil {
+		return fmt.Errorf("failed to delete invitation: %w", err)
+	}
+	return nil
+}
+
+// DeleteInvitation removes the invitation from the database by its ID.
+func (ms *MongoStorage) DeleteInvitation(invitationID string) error {
+	objID, err := primitive.ObjectIDFromHex(invitationID)
+	if err != nil {
+		return fmt.Errorf("invalid invitation ID: %w", err)
+	}
+
+	return ms.deleteInvitation(bson.M{"_id": objID})
+}
+
+// DeleteInvitationByCode removes the invitation from the database.
+func (ms *MongoStorage) DeleteInvitationByCode(invitationCode string) error {
+	return ms.deleteInvitation(bson.M{"invitationCode": invitationCode})
 }
 
 // DeleteInvitationByEmail removes the invitation from the database.
 func (ms *MongoStorage) DeleteInvitationByEmail(email string) error {
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-
-	_, err := ms.organizationInvites.DeleteOne(ctx, bson.M{"newUserEmail": email})
-	return err
+	return ms.deleteInvitation(bson.M{"newUserEmail": email})
 }
