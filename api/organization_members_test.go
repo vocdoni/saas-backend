@@ -8,6 +8,7 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/google/uuid"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 )
@@ -421,5 +422,179 @@ func TestOrganizationMembers(t *testing.T) {
 			fmt.Sprintf("%d", adminInfo.ID),
 		)
 		c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+	})
+
+	t.Run("DeletePendingInvitation", func(t *testing.T) {
+		// Create a new organization for this test
+		newOrgAddress := testCreateOrganization(t, adminToken)
+		t.Logf("Created organization with address: %s\n", newOrgAddress.String())
+
+		// Create a user to be invited
+		userToInviteEmail := fmt.Sprintf("invite-%s@example.com", uuid.New().String())
+
+		// Invite the user to the organization
+		inviteRequest := &apicommon.OrganizationInvite{
+			Email: userToInviteEmail,
+			Role:  string(db.ViewerRole),
+		}
+		resp, code := testRequest(
+			t,
+			http.MethodPost,
+			adminToken,
+			inviteRequest,
+			"organizations",
+			newOrgAddress.String(),
+			"members",
+		)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+		// Verify the invitation was created by checking pending invitations
+		resp, code = testRequest(
+			t,
+			http.MethodGet,
+			adminToken,
+			nil,
+			"organizations",
+			newOrgAddress.String(),
+			"members",
+			"pending",
+		)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+		var pendingInvites apicommon.OrganizationInviteList
+		err := parseJSON(resp, &pendingInvites)
+		c.Assert(err, qt.IsNil)
+		c.Assert(len(pendingInvites.Invites), qt.Equals, 1)
+		c.Assert(pendingInvites.Invites[0].Email, qt.Equals, userToInviteEmail)
+
+		// Test 1: Delete the pending invitation
+		deleteRequest := &apicommon.DeleteOrganizationInvitationRequest{
+			Email: userToInviteEmail,
+		}
+		resp, code = testRequest(
+			t,
+			http.MethodDelete,
+			adminToken,
+			deleteRequest,
+			"organizations",
+			newOrgAddress.String(),
+			"members",
+			"pending",
+		)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+		// Verify the invitation was deleted by checking pending invitations again
+		resp, code = testRequest(
+			t,
+			http.MethodGet,
+			adminToken,
+			nil,
+			"organizations",
+			newOrgAddress.String(),
+			"members",
+			"pending",
+		)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+		err = parseJSON(resp, &pendingInvites)
+		c.Assert(err, qt.IsNil)
+		c.Assert(len(pendingInvites.Invites), qt.Equals, 0)
+
+		// Test 2: Try to delete a non-existent invitation
+		nonExistentEmail := "nonexistent@example.com"
+		deleteRequest = &apicommon.DeleteOrganizationInvitationRequest{
+			Email: nonExistentEmail,
+		}
+		_, code = testRequest(
+			t,
+			http.MethodDelete,
+			adminToken,
+			deleteRequest,
+			"organizations",
+			newOrgAddress.String(),
+			"members",
+			"pending",
+		)
+		c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+
+		// Test 3: Try to delete without authentication
+		deleteRequest = &apicommon.DeleteOrganizationInvitationRequest{
+			Email: userToInviteEmail,
+		}
+		_, code = testRequest(
+			t,
+			http.MethodDelete,
+			"",
+			deleteRequest,
+			"organizations",
+			newOrgAddress.String(),
+			"members",
+			"pending",
+		)
+		c.Assert(code, qt.Equals, http.StatusUnauthorized)
+
+		// Test 4: Try to delete with a non-admin user
+		// Create a non-admin user
+		nonAdminToken := testCreateUser(t, "nonadminpassword123")
+		_, code = testRequest(
+			t,
+			http.MethodDelete,
+			nonAdminToken,
+			deleteRequest,
+			"organizations",
+			newOrgAddress.String(),
+			"members",
+			"pending",
+		)
+		c.Assert(code, qt.Equals, http.StatusUnauthorized)
+
+		// Test 5: Create another organization and invitation, then try to delete it from the wrong organization
+		anotherOrgAddress := testCreateOrganization(t, adminToken)
+		t.Logf("Created another organization with address: %s\n", anotherOrgAddress.String())
+
+		// Invite the user to the second organization
+		inviteRequest = &apicommon.OrganizationInvite{
+			Email: userToInviteEmail,
+			Role:  string(db.ViewerRole),
+		}
+		resp, code = testRequest(
+			t,
+			http.MethodPost,
+			adminToken,
+			inviteRequest,
+			"organizations",
+			anotherOrgAddress.String(),
+			"members",
+		)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+		// Try to delete the invitation from the wrong organization
+		deleteRequest = &apicommon.DeleteOrganizationInvitationRequest{
+			Email: userToInviteEmail,
+		}
+		_, code = testRequest(
+			t,
+			http.MethodDelete,
+			adminToken,
+			deleteRequest,
+			"organizations",
+			newOrgAddress.String(), // Using first org to delete invitation from second org
+			"members",
+			"pending",
+		)
+		c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+
+		// Clean up: Delete the invitation from the correct organization
+		_, code = testRequest(
+			t,
+			http.MethodDelete,
+			adminToken,
+			deleteRequest,
+			"organizations",
+			anotherOrgAddress.String(),
+			"members",
+			"pending",
+		)
+		c.Assert(code, qt.Equals, http.StatusOK)
 	})
 }

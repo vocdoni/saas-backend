@@ -46,6 +46,7 @@ var (
 	ErrStorageInvalidObject    = Error{Code: 40024, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid storage object or parameters")}
 	ErrNotSupported            = Error{Code: 40025, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("feature not supported")}
 	ErrUserNoVoted             = Error{Code: 40026, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("user has not voted yet"), LogLevel: "info"}
+	ErrInvalidData             = Error{Code: 40027, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid data provided")}
 
 	// Transaction errors (400)
 	ErrCouldNotSignTransaction = Error{Code: 40006, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("transaction signing failed")}
