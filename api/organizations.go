@@ -61,7 +61,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	var dbParentOrg *db.Organization
 	if orgInfo.Parent != nil {
 		// check if the org has permission to create suborganizations
-		hasPermission, err := a.subscriptions.HasDBPersmission(user.Email, orgInfo.Parent.Address, subscriptions.CreateSubOrg)
+		hasPermission, err := a.subscriptions.HasDBPermission(user.Email, orgInfo.Parent.Address, subscriptions.CreateSubOrg)
 		if !hasPermission || err != nil {
 			errors.ErrUnauthorized.Withf("user does not have permission to create suborganizations: %v", err).Write(w)
 			return
@@ -80,7 +80,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 			errors.ErrMalformedBody.Withf("parent organization is already a suborganization").Write(w)
 			return
 		}
-		isAdmin, err := a.db.IsMemberOf(user.Email, dbParentOrg.Address, db.AdminRole)
+		isAdmin, err := a.db.UserHasRoleInOrg(user.Email, dbParentOrg.Address, db.AdminRole)
 		if err != nil {
 			errors.ErrGenericInternalServerError.
 				Withf("could not check if user is admin of parent organization: %v", err).
@@ -376,7 +376,7 @@ func (a *API) organizationCensusesHandler(w http.ResponseWriter, r *http.Request
 // organizationCreateTicket godoc
 //
 //	@Summary		Create a new ticket for an organization
-//	@Description	Create a new ticket for an organization. The user must be a member of the organization with any role.
+//	@Description	Create a new ticket for an organization. The user must have some role in the organization (any role).
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
@@ -403,7 +403,7 @@ func (a *API) organizationCreateTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !user.HasRoleFor(org.Address, db.AnyRole) {
-		errors.ErrUnauthorized.Withf("user is not a member of organization").Write(w)
+		errors.ErrUnauthorized.Withf("user has no role in the organization").Write(w)
 		return
 	}
 	// get the ticket request from the request body

@@ -46,21 +46,21 @@ const (
 	organizationsEndpoint = "/organizations"
 	// GET /organizations/{address} to get the organization information
 	organizationEndpoint = "/organizations/{address}"
-	// GET /organizations/{address}/members to get the organization members
-	organizationMembersEndpoint = "/organizations/{address}/members"
-	// POST /organizations/{address}/members/invite to add a new member
-	organizationAddMemberEndpoint = "/organizations/{address}/members"
-	// POST /organizations/{address}/members/invite/accept to accept the invitation
-	organizationAcceptMemberEndpoint = "/organizations/{address}/members/accept"
-	// GET /organizations/{address}/members/pending to get the pending members
-	organizationPendingMembersEndpoint = "/organizations/{address}/members/pending"
-	// DELETE /organizations/{address}/members/pending/{memberid} to delete the a pending invitation
-	organizationHandlePendingInvitationEndpoint = "/organizations/{address}/members/pending/{invitationID}"
-	// PUT /organizations/{address}/members/{memberid} to update the role of an  organization member
-	organizationUpdateMemberEndpoint = "/organizations/{address}/members/{userid}"
-	// DELETE /organizations/{address}/members/{memberid} to remove member from  an organization
-	organizationDeleteMemberEndpoint = "/organizations/{address}/members/{userid}"
-	// GET /organizations/roles to get the available organization member roles
+	// GET /organizations/{address}/users to get the organization users
+	organizationUsersEndpoint = "/organizations/{address}/users"
+	// POST /organizations/{address}/users/invite to add a new user
+	organizationAddUserEndpoint = "/organizations/{address}/users"
+	// POST /organizations/{address}/users/invite/accept to accept the invitation
+	organizationAcceptUserEndpoint = "/organizations/{address}/users/accept"
+	// GET /organizations/{address}/users/pending to get the pending users
+	organizationPendingUsersEndpoint = "/organizations/{address}/users/pending"
+	// DELETE /organizations/{address}/users/pending/{userid} to delete the a pending invitation
+	organizationHandlePendingInvitationEndpoint = "/organizations/{address}/users/pending/{invitationID}"
+	// PUT /organizations/{address}/users/{userid} to update the role of an  organization user
+	organizationUpdateUserEndpoint = "/organizations/{address}/users/{userid}"
+	// DELETE /organizations/{address}/users/{userid} to remove user from  an organization
+	organizationDeleteUserEndpoint = "/organizations/{address}/users/{userid}"
+	// GET /organizations/roles to get the available organization user roles
 	organizationRolesEndpoint = "/organizations/roles"
 	// GET /organizations/types to get the available organization types
 	organizationTypesEndpoint = "/organizations/types"

@@ -27,7 +27,7 @@ func (ms *MongoStorage) CreateInvitation(invite *OrganizationInvite) error {
 	if err != nil {
 		return err
 	}
-	// check if the user is already a member of the organization
+	// check if the inviting user belongs to the organization
 	partOfOrg := false
 	for _, org := range user.Organizations {
 		if org.Address == invite.OrganizationAddress {
