@@ -214,6 +214,13 @@ type AcceptOrganizationInvitation struct {
 	User *UserInfo `json:"user"`
 }
 
+// DeleteOrganizationInvitation represents a request to delete an organization invitation.
+// swagger:model DeleteOrganizationInvitation
+type DeleteOrganizationInvitationRequest struct {
+	// Email of the invitd person
+	Email string `json:"email"`
+}
+
 // UserPasswordUpdate represents a request to update a user's password.
 // swagger:model UserPasswordUpdate
 type UserPasswordUpdate struct {
