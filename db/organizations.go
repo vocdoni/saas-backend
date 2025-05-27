@@ -137,10 +137,10 @@ func (ms *MongoStorage) ReplaceCreatorEmail(oldEmail, newEmail string) error {
 	return nil
 }
 
-// OrganizationsMembers method returns the users that are members of the
+// OrganizationUsers method returns the users that have a role in the
 // organization with the given address. If an error occurs, it returns the
 // error.
-func (ms *MongoStorage) OrganizationsMembers(address string) ([]User, error) {
+func (ms *MongoStorage) OrganizationUsers(address string) ([]User, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
@@ -168,9 +168,9 @@ func (ms *MongoStorage) OrganizationsMembers(address string) ([]User, error) {
 	return users, nil
 }
 
-// UpdateOrganiationMemberRole method updates the role of the user in the
+// UpdateOrganizationUserRole method updates the role of the user in the
 // organization with the given address.
-func (ms *MongoStorage) UpdateOrganizationMemberRole(address string, userID uint64, newRole UserRole) error {
+func (ms *MongoStorage) UpdateOrganizationUserRole(address string, userID uint64, newRole UserRole) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
@@ -195,9 +195,9 @@ func (ms *MongoStorage) UpdateOrganizationMemberRole(address string, userID uint
 	return nil
 }
 
-// RemoveOrganizationMember method removes the user from the organization
+// RemoveOrganizationUser method removes the user from the organization
 // with the given address.
-func (ms *MongoStorage) RemoveOrganizationMember(address string, userID uint64) error {
+func (ms *MongoStorage) RemoveOrganizationUser(address string, userID uint64) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
@@ -220,10 +220,6 @@ func (ms *MongoStorage) RemoveOrganizationMember(address string, userID uint64) 
 	}
 	return nil
 }
-
-// SetOrganizationmMemberRole method sets the role of the user in the
-// organization with the given address. If the user doesn't exist, it returns
-// an error. If the organization doesn't exist, it returns an error. If the
 
 // SetOrganizationSubscription method adds the provided subscription to
 // the organization with the given address

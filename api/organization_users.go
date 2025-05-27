@@ -16,22 +16,22 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-// organizationMembersHandler godoc
+// organizationUsersHandler godoc
 //
-//	@Summary		Get organization members
-//	@Description	Get the list of members with their roles in the organization
+//	@Summary		Get organization users
+//	@Description	Get the list of users with their roles in the organization
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			address	path		string	true	"Organization address"
-//	@Success		200		{object}	apicommon.OrganizationMembers
+//	@Success		200		{object}	apicommon.OrganizationUsers
 //	@Failure		400		{object}	errors.Error	"Invalid input data"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
 //	@Failure		404		{object}	errors.Error	"Organization not found"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/members [get]
-func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request) {
+//	@Router			/organizations/{address}/users [get]
+func (a *API) organizationUsersHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
@@ -49,17 +49,17 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	// send the organization back to the user
-	members, err := a.db.OrganizationsMembers(org.Address)
+	users, err := a.db.OrganizationUsers(org.Address)
 	if err != nil {
-		errors.ErrGenericInternalServerError.Withf("could not get organization members: %v", err).Write(w)
+		errors.ErrGenericInternalServerError.Withf("could not get organization users: %v", err).Write(w)
 		return
 	}
-	orgMembers := apicommon.OrganizationMembers{
-		Members: make([]*apicommon.OrganizationMember, 0, len(members)),
+	orgUsers := apicommon.OrganizationUsers{
+		Users: make([]*apicommon.OrganizationUser, 0, len(users)),
 	}
-	for _, member := range members {
+	for _, user := range users {
 		var role string
-		for _, userOrg := range member.Organizations {
+		for _, userOrg := range user.Organizations {
 			if userOrg.Address == org.Address {
 				role = string(userOrg.Role)
 				break
@@ -68,24 +68,24 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 		if role == "" {
 			continue
 		}
-		orgMembers.Members = append(orgMembers.Members, &apicommon.OrganizationMember{
+		orgUsers.Users = append(orgUsers.Users, &apicommon.OrganizationUser{
 			Info: &apicommon.UserInfo{
-				ID:        member.ID,
-				Email:     member.Email,
-				FirstName: member.FirstName,
-				LastName:  member.LastName,
+				ID:        user.ID,
+				Email:     user.Email,
+				FirstName: user.FirstName,
+				LastName:  user.LastName,
 			},
 			Role: role,
 		})
 	}
-	apicommon.HTTPWriteJSON(w, orgMembers)
+	apicommon.HTTPWriteJSON(w, orgUsers)
 }
 
-// inviteOrganizationMemberHandler godoc
+// inviteOrganizationUserHandler godoc
 //
-//	@Summary		Invite a new member to an organization
-//	@Description	Invite a new member to an organization. Only the admin of the organization can invite a new member.
-//	@Description	It stores the invitation in the database and sends an email to the new member with the invitation code.
+//	@Summary		Invite a new user to an organization
+//	@Description	Invite a new user to an organization. Only the admin of the organization can invite a new user.
+//	@Description	It stores the invitation in the database and sends an email to the new user with the invitation code.
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
@@ -95,10 +95,10 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 //	@Success		200		{string}	string							"OK"
 //	@Failure		400		{object}	errors.Error					"Invalid input data"
 //	@Failure		401		{object}	errors.Error					"Unauthorized"
-//	@Failure		409		{object}	errors.Error					"User is already a member of the organization"
+//	@Failure		409		{object}	errors.Error					"User already has a role in the organization"
 //	@Failure		500		{object}	errors.Error					"Internal server error"
-//	@Router			/organizations/{address}/members [post]
-func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Request) {
+//	@Router			/organizations/{address}/users [post]
+func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
@@ -112,8 +112,8 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// check if the user/org has permission to invite members
-	hasPermission, err := a.subscriptions.HasDBPersmission(user.Email, org.Address, subscriptions.InviteMember)
+	// check if the user/org has permission to invite new users
+	hasPermission, err := a.subscriptions.HasDBPermission(user.Email, org.Address, subscriptions.InviteUser)
 	if !hasPermission || err != nil {
 		errors.ErrUnauthorized.Withf("user does not have permission to sign transactions: %v", err).Write(w)
 		return
@@ -134,8 +134,9 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		errors.ErrInvalidUserData.Withf("invalid role").Write(w)
 		return
 	}
-	// check if the new user is already a member of the organization
-	if _, err := a.db.IsMemberOf(invite.Email, org.Address, db.AdminRole); err == nil {
+	// check if the new user already has a role in the organization
+	// TODO: check ANY role (not just admin)
+	if _, err := a.db.UserHasRoleInOrg(invite.Email, org.Address, db.AdminRole); err == nil {
 		errors.ErrDuplicateConflict.With("user is already admin of organization").Write(w)
 		return
 	}
@@ -170,8 +171,8 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// update the org members counter
-	org.Counters.Members++
+	// update the org users counter
+	org.Counters.Users++
 	if err := a.db.SetOrganization(org); err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not update organization: %v", err).Write(w)
 		return
@@ -179,14 +180,12 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 	apicommon.HTTPWriteOK(w)
 }
 
-// acceptOrganizationMemberInvitationHandler godoc
+// acceptOrganizationUserInvitationHandler godoc
 //
 //	@Summary		Accept an invitation to an organization
-//	@Description	Accept an invitation to an organization. It checks if the invitation is valid and not expired,
-//	@Description	and if the user is not already a member of the organization.
-//	@Description	user is not already a member of the organization. If the user does not exist, it creates a new user with
-//	@Description	the provided information. If the user already exists and is verified,
-//	@Description	it adds the organization to the user.
+//	@Description	Accept an invitation to an organization. It checks if the invitation is valid and not expired, and that the
+//	@Description	user has no role in the organization yet. If the user does not exist, it creates a new user with the provided
+//	@Description	information. If the user already exists and is verified, it assigns a role to the user in the organization.
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
@@ -195,18 +194,18 @@ func (a *API) inviteOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 //	@Success		200		{string}	string									"OK"
 //	@Failure		400		{object}	errors.Error							"Invalid input data"
 //	@Failure		401		{object}	errors.Error							"Unauthorized or invalid invitation"
-//	@Failure		409		{object}	errors.Error							"User is already a member of the organization"
+//	@Failure		409		{object}	errors.Error							"User already has a role in the organization"
 //	@Failure		410		{object}	errors.Error							"Invitation expired"
 //	@Failure		500		{object}	errors.Error							"Internal server error"
-//	@Router			/organizations/{address}/members/accept [post]
-func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r *http.Request) {
+//	@Router			/organizations/{address}/users/accept [post]
+func (a *API) acceptOrganizationUserInvitationHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)
 	if !ok {
 		errors.ErrNoOrganizationProvided.Write(w)
 		return
 	}
-	// get new member info from the request body
+	// get new user info from the request body
 	invitationReq := &apicommon.AcceptOrganizationInvitation{}
 	if err := json.NewDecoder(r.Body).Decode(invitationReq); err != nil {
 		errors.ErrMalformedBody.Write(w)
@@ -270,15 +269,15 @@ func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r
 			errors.ErrUserNoVerified.With("user already exists but is not verified").Write(w)
 			return
 		}
-		// check if the user is already a member of the organization
-		if _, err := a.db.IsMemberOf(invitation.NewUserEmail, org.Address, invitation.Role); err == nil {
+		// check if the user already has a role in the organization
+		if _, err := a.db.UserHasRoleInOrg(invitation.NewUserEmail, org.Address, invitation.Role); err == nil {
 			go removeInvitation()
-			errors.ErrDuplicateConflict.With("user is already admin of organization").Write(w)
+			errors.ErrDuplicateConflict.With("user already has the role in the organization").Write(w)
 			return
 		}
 	}
 	// include the new organization in the user
-	dbUser.Organizations = append(dbUser.Organizations, db.OrganizationMember{
+	dbUser.Organizations = append(dbUser.Organizations, db.OrganizationUser{
 		Address: org.Address,
 		Role:    invitation.Role,
 	})
@@ -292,7 +291,7 @@ func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r
 	apicommon.HTTPWriteOK(w)
 }
 
-// updatePendingMemberInvitationHandler godoc
+// updatePendingUserInvitationHandler godoc
 //
 //	@Summary		Update a pending invitation to an organization
 //	@Description	Update the code, link and expiration time of a pending invitation to an organization by email.
@@ -309,8 +308,8 @@ func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r
 //	@Failure		401				{object}	errors.Error	"Unauthorized"
 //	@Failure		400				{object}	errors.Error	"Invalid data - invitation not found"
 //	@Failure		500				{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/members/pending/{invitationID} [put]
-func (a *API) updatePendingMemberInvitationHandler(w http.ResponseWriter, r *http.Request) {
+//	@Router			/organizations/{address}/users/pending/{invitationID} [put]
+func (a *API) updatePendingUserInvitationHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
@@ -387,7 +386,7 @@ func (a *API) updatePendingMemberInvitationHandler(w http.ResponseWriter, r *htt
 	apicommon.HTTPWriteOK(w)
 }
 
-// deletePendingMemberInvitationHandler godoc
+// deletePendingUserInvitationHandler godoc
 //
 //	@Summary		Delete a pending invitation to an organization
 //	@Description	Delete a pending invitation to an organization by email.
@@ -403,8 +402,8 @@ func (a *API) updatePendingMemberInvitationHandler(w http.ResponseWriter, r *htt
 //	@Failure		401				{object}	errors.Error	"Unauthorized"
 //	@Failure		400				{object}	errors.Error	"Invalid data - invitation not found"
 //	@Failure		500				{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/members/pending/{invitationID} [delete]
-func (a *API) deletePendingMemberInvitationHandler(w http.ResponseWriter, r *http.Request) {
+//	@Router			/organizations/{address}/users/pending/{invitationID} [delete]
+func (a *API) deletePendingUserInvitationHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
@@ -448,8 +447,8 @@ func (a *API) deletePendingMemberInvitationHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// update the org members counter
-	org.Counters.Members--
+	// update the org users counter
+	org.Counters.Users--
 	if err := a.db.SetOrganization(org); err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not update organization: %v", err).Write(w)
 		return
@@ -457,9 +456,9 @@ func (a *API) deletePendingMemberInvitationHandler(w http.ResponseWriter, r *htt
 	apicommon.HTTPWriteOK(w)
 }
 
-// pendingOrganizationMembersHandler godoc
+// pendingOrganizationUsersHandler godoc
 //
-//	@Summary		Get pending organization members
+//	@Summary		Get pending organization users
 //	@Description	Get the list of pending invitations for an organization
 //	@Tags			organizations
 //	@Accept			json
@@ -471,8 +470,8 @@ func (a *API) deletePendingMemberInvitationHandler(w http.ResponseWriter, r *htt
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
 //	@Failure		404		{object}	errors.Error	"Organization not found"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/members/pending [get]
-func (a *API) pendingOrganizationMembersHandler(w http.ResponseWriter, r *http.Request) {
+//	@Router			/organizations/{address}/users/pending [get]
+func (a *API) pendingOrganizationUsersHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
@@ -507,16 +506,16 @@ func (a *API) pendingOrganizationMembersHandler(w http.ResponseWriter, r *http.R
 	apicommon.HTTPWriteJSON(w, &apicommon.OrganizationInviteList{Invites: invitationsList})
 }
 
-// organizationsMembersRolesHandler godoc
+// organizationRolesHandler godoc
 //
-//	@Summary		Get available organization member roles
-//	@Description	Get the list of available roles that can be assigned to a member of an organization
+//	@Summary		Get available organization user roles
+//	@Description	Get the list of available roles that can be assigned to a user of an organization
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
 //	@Success		200	{object}	apicommon.OrganizationRoleList
 //	@Router			/organizations/roles [get]
-func (*API) organizationsMembersRolesHandler(w http.ResponseWriter, _ *http.Request) {
+func (*API) organizationRolesHandler(w http.ResponseWriter, _ *http.Request) {
 	availableRoles := []*apicommon.OrganizationRole{}
 	for role, name := range db.UserRolesNames {
 		availableRoles = append(availableRoles, &apicommon.OrganizationRole{
@@ -528,27 +527,27 @@ func (*API) organizationsMembersRolesHandler(w http.ResponseWriter, _ *http.Requ
 	apicommon.HTTPWriteJSON(w, &apicommon.OrganizationRoleList{Roles: availableRoles})
 }
 
-// updateOrganizationMemberRoleHandler godoc
+// updateOrganizationUserHandler godoc
 //
-//	@Summary		Update organization member role
-//	@Description	Update the role of a member in an organization. Only the admin of the organization can update the role.
+//	@Summary		Update organization user role
+//	@Description	Update the role of a user in an organization. Only the admin of the organization can update the role.
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string											true	"Organization address"
-//	@Param			userid	path		string											true	"User ID"
-//	@Param			request	body		apicommon.UpdateOrganizationMemberRoleRequest	true	"Update member role information"
-//	@Success		200		{string}	string											"OK"
-//	@Failure		400		{object}	errors.Error									"Invalid input data"
-//	@Failure		401		{object}	errors.Error									"Unauthorized"
-//	@Failure		404		{object}	errors.Error									"Organization not found"
+//	@Param			address	path		string										true	"Organization address"
+//	@Param			userid	path		string										true	"User ID"
+//	@Param			request	body		apicommon.UpdateOrganizationUserRoleRequest	true	"Update user role information"
+//	@Success		200		{string}	string										"OK"
+//	@Failure		400		{object}	errors.Error								"Invalid input data"
+//	@Failure		401		{object}	errors.Error								"Unauthorized"
+//	@Failure		404		{object}	errors.Error								"Organization not found"
 //
-// Note: The implementation returns 200 OK even for non-existent members
+// Note: The implementation returns 200 OK even for non-existent users
 //
-//	@Failure		500		{object}	errors.Error									"Internal server error"
-//	@Router			/organizations/{address}/members/{userid} [put]
-func (a *API) updateOrganizationMemberRoleHandler(w http.ResponseWriter, r *http.Request) {
+//	@Failure		500		{object}	errors.Error								"Internal server error"
+//	@Router			/organizations/{address}/users/{userid} [put]
+func (a *API) updateOrganizationUserHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
@@ -565,10 +564,10 @@ func (a *API) updateOrganizationMemberRoleHandler(w http.ResponseWriter, r *http
 		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
-	// get the member ID from the request path
+	// get the user ID from the request path
 	userID := chi.URLParam(r, "userid")
 	if userID == "" {
-		errors.ErrMalformedBody.With("member ID not provided").Write(w)
+		errors.ErrMalformedBody.With("user ID not provided").Write(w)
 		return
 	}
 	// convert the user ID to the correct type
@@ -579,7 +578,7 @@ func (a *API) updateOrganizationMemberRoleHandler(w http.ResponseWriter, r *http
 	}
 
 	// get the new role from the request body
-	update := &apicommon.UpdateOrganizationMemberRoleRequest{}
+	update := &apicommon.UpdateOrganizationUserRoleRequest{}
 	if err := json.NewDecoder(r.Body).Decode(update); err != nil {
 		errors.ErrMalformedBody.Write(w)
 		return
@@ -592,17 +591,17 @@ func (a *API) updateOrganizationMemberRoleHandler(w http.ResponseWriter, r *http
 		errors.ErrInvalidUserData.Withf("invalid role").Write(w)
 		return
 	}
-	if err := a.db.UpdateOrganizationMemberRole(org.Address, uint64(userIDInt), db.UserRole(update.Role)); err != nil {
-		errors.ErrInvalidUserData.Withf("member not found: %v", err).Write(w)
+	if err := a.db.UpdateOrganizationUserRole(org.Address, uint64(userIDInt), db.UserRole(update.Role)); err != nil {
+		errors.ErrInvalidUserData.Withf("user not found: %v", err).Write(w)
 		return
 	}
 	apicommon.HTTPWriteOK(w)
 }
 
-// removeOrganizationMemberHandler godoc
+// removeOrganizationUserHandler godoc
 //
-//	@Summary		Remove a user from the organization members
-//	@Description	Remove a user from the organization members. Only the admin of the organization can remove a member.
+//	@Summary		Remove a user from the organization
+//	@Description	Remove a user from the organization. Only the admin of the organization can remove a user.
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
@@ -614,12 +613,12 @@ func (a *API) updateOrganizationMemberRoleHandler(w http.ResponseWriter, r *http
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
 //	@Failure		404		{object}	errors.Error	"Organization not found"
 //
-// Note: The implementation returns 200 OK even for non-existent members
+// Note: The implementation returns 200 OK even for non-existent users
 //
 //	@Failure		400		{object}	errors.Error	"Invalid input data - User cannot remove itself"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/members/{userid} [delete]
-func (a *API) removeOrganizationMemberHandler(w http.ResponseWriter, r *http.Request) {
+//	@Router			/organizations/{address}/users/{userid} [delete]
+func (a *API) removeOrganizationUserHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
@@ -636,10 +635,10 @@ func (a *API) removeOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
-	// get the member ID from the request path
+	// get the user ID from the request path
 	userID := chi.URLParam(r, "userid")
 	if userID == "" {
-		errors.ErrMalformedBody.With("member ID not provided").Write(w)
+		errors.ErrMalformedBody.With("user ID not provided").Write(w)
 		return
 	}
 	// convert the user ID to the correct type
@@ -652,13 +651,13 @@ func (a *API) removeOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		errors.ErrInvalidUserData.With("user cannot remove itself from the organization").Write(w)
 		return
 	}
-	if err := a.db.RemoveOrganizationMember(org.Address, uint64(userIDInt)); err != nil {
-		errors.ErrInvalidUserData.Withf("member not found: %v", err).Write(w)
+	if err := a.db.RemoveOrganizationUser(org.Address, uint64(userIDInt)); err != nil {
+		errors.ErrInvalidUserData.Withf("user not found: %v", err).Write(w)
 		return
 	}
 
-	// update the org members counter
-	org.Counters.Members--
+	// update the org users counter
+	org.Counters.Users--
 	if err := a.db.SetOrganization(org); err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not update organization: %v", err).Write(w)
 		return

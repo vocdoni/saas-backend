@@ -25,7 +25,7 @@ const (
 	testPassword         = "testpass123"
 	testSalt             = "testSalt"
 	invitationCode       = "abc123"
-	newMemberEmail       = "inviteme@email.com"
+	newUserEmail         = "inviteme@email.com"
 	testURI              = "test_uri"
 	testRoot             = "test_root"
 )
