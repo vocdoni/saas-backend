@@ -75,7 +75,7 @@ func TestSignTxHandler(t *testing.T) {
 	c.Assert(loginResp.Body.Close(), qt.IsNil)
 	// create an organization
 	orgDataJSON := mustMarshal(&apicommon.OrganizationInfo{
-		Type:      "community",
+		Type:      "company",
 		Size:      "100",
 		Color:     "#ff0000",
 		Subdomain: "mysubdomain",
