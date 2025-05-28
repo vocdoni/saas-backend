@@ -404,7 +404,6 @@ func (a *API) updatePendingMemberInvitationHandler(w http.ResponseWriter, r *htt
 //	@Failure		400				{object}	errors.Error	"Invalid data - invitation not found"
 //	@Failure		500				{object}	errors.Error	"Internal server error"
 //	@Router			/organizations/{address}/members/pending/{invitationID} [delete]
-
 func (a *API) deletePendingMemberInvitationHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
