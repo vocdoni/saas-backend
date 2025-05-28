@@ -7,20 +7,16 @@ const (
 	ViewerRole  UserRole = "viewer"
 	AnyRole     UserRole = "any"
 	// organization types
-	AssemblyType               OrganizationType = "assembly"
-	AssociationType            OrganizationType = "association"
-	ChamberType                OrganizationType = "chamber"
-	ReligiousType              OrganizationType = "religious"
-	CityType                   OrganizationType = "city"
-	CompanyType                OrganizationType = "company"
-	CooperativeType            OrganizationType = "cooperative"
-	PoliticalPartyType         OrganizationType = "political_party"
-	EducationalInstitutionType OrganizationType = "educational"
-	UnionType                  OrganizationType = "union"
-	NonprofitType              OrganizationType = "nonprofit"
-	CommunityType              OrganizationType = "community"
-	ProfessionalCollegeType    OrganizationType = "professional_college"
-	OthersType                 OrganizationType = "others"
+	AssociationType      OrganizationType = "association"
+	CommunityType        OrganizationType = "community"
+	CompanyType          OrganizationType = "company"
+	CooperativeType      OrganizationType = "cooperative"
+	GovernmentType       OrganizationType = "government"
+	OthersType           OrganizationType = "others"
+	PoliticalPartyType   OrganizationType = "political_party"
+	ProfessionalBodyType OrganizationType = "professional_body"
+	SportsClubType       OrganizationType = "sports_club"
+	UnionType            OrganizationType = "union"
 	// verification code types
 	CodeTypeVerifyAccount   CodeType = "verify_account"
 	CodeTypePasswordReset   CodeType = "password_reset"
@@ -51,27 +47,30 @@ func HasWriteAccess(role UserRole) bool {
 
 // validOrganizationTypes is a map that contains the valid organization types
 var validOrganizationTypes = map[OrganizationType]bool{
-	CompanyType:   true,
-	CommunityType: true,
+	AssociationType:      true,
+	CompanyType:          true,
+	CooperativeType:      true,
+	GovernmentType:       true,
+	OthersType:           true,
+	PoliticalPartyType:   true,
+	ProfessionalBodyType: true,
+	SportsClubType:       true,
+	UnionType:            true,
 }
 
 // OrganizationTypesNames is a map that contains the organization type names by
 // type
 var OrganizationTypesNames = map[OrganizationType]string{
-	AssemblyType:               "Assembly",
-	AssociationType:            "Association",
-	ChamberType:                "Chamber",
-	ReligiousType:              "Church / Religious Organization",
-	CityType:                   "City / Municipality",
-	CompanyType:                "Company / Corporation",
-	CooperativeType:            "Cooperative",
-	PoliticalPartyType:         "Political Party",
-	EducationalInstitutionType: "University / Educational Institution",
-	UnionType:                  "Union",
-	NonprofitType:              "Nonprofit / NGO",
-	CommunityType:              "Community Group",
-	ProfessionalCollegeType:    "Professional College",
-	OthersType:                 "Others",
+	AssociationType:      "Association",
+	CompanyType:          "Company / Corporation",
+	CooperativeType:      "Cooperative",
+	GovernmentType:       "Government",
+	PoliticalPartyType:   "Political Party",
+	ProfessionalBodyType: "Professional Body",
+	SportsClubType:       "Sports Club",
+	UnionType:            "Union",
+	CommunityType:        "Community Group",
+	OthersType:           "Others",
 }
 
 // IsOrganizationTypeValid function checks if the organization type is valid
