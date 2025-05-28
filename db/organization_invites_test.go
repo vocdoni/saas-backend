@@ -5,6 +5,7 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 const (
@@ -15,6 +16,86 @@ func TestOrganizationInvites(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
 	expires := time.Now().Add(time.Hour)
+
+	t.Run("UpdateInvitation", func(_ *testing.T) {
+		c.Assert(testDB.Reset(), qt.IsNil)
+
+		// Test updating invitation with empty ID
+		emptyIDInvite := &OrganizationInvite{
+			Role:       ManagerRole,
+			Expiration: time.Now().Add(time.Hour),
+		}
+		err := testDB.UpdateInvitation(emptyIDInvite)
+		c.Assert(err, qt.ErrorMatches, "invitation ID cannot be empty")
+
+		// Create organization and user
+		err = testDB.SetOrganization(&Organization{
+			Address: testOrgAddress,
+		})
+		c.Assert(err, qt.IsNil)
+
+		_, err = testDB.SetUser(&User{
+			Email:     testUserEmail,
+			Password:  testUserPass,
+			FirstName: testUserFirstName,
+			LastName:  testUserLastName,
+			Organizations: []OrganizationMember{
+				{Address: testOrgAddress, Role: AdminRole},
+			},
+		})
+		c.Assert(err, qt.IsNil)
+
+		// Create invitation
+		invite := &OrganizationInvite{
+			InvitationCode:      invitationCode,
+			OrganizationAddress: testOrgAddress,
+			CurrentUserID:       currentUserID,
+			NewUserEmail:        newMemberEmail,
+			Role:                AdminRole,
+			Expiration:          expires,
+		}
+		err = testDB.CreateInvitation(invite)
+		c.Assert(err, qt.IsNil)
+
+		// Get invitation to retrieve its ID
+		invitation, err := testDB.InvitationByCode(invitationCode)
+		c.Assert(err, qt.IsNil)
+		c.Assert(invitation.Role, qt.Equals, AdminRole)
+
+		// Update invitation with new role and expiration
+		newExpires := time.Now().Add(time.Hour * 2)
+		updatedInvite := &OrganizationInvite{
+			ID:         invitation.ID,
+			Role:       ManagerRole,
+			Expiration: newExpires,
+		}
+		err = testDB.UpdateInvitation(updatedInvite)
+		c.Assert(err, qt.IsNil)
+
+		// Verify invitation was updated
+		updatedInvitation, err := testDB.InvitationByCode(invitationCode)
+		c.Assert(err, qt.IsNil)
+		c.Assert(updatedInvitation.ID, qt.Equals, invitation.ID)
+		c.Assert(updatedInvitation.InvitationCode, qt.Equals, invitationCode)
+		c.Assert(updatedInvitation.OrganizationAddress, qt.Equals, testOrgAddress)
+		c.Assert(updatedInvitation.CurrentUserID, qt.Equals, currentUserID)
+		c.Assert(updatedInvitation.NewUserEmail, qt.Equals, newMemberEmail)
+		c.Assert(updatedInvitation.Role, qt.Equals, ManagerRole)
+		// Truncate expiration to seconds to avoid rounding issues, also set to UTC
+		c.Assert(updatedInvitation.Expiration.Truncate(time.Second).UTC(), qt.Equals, newExpires.Truncate(time.Second).UTC())
+
+		// Test updating invitation with non-existent ID
+		nonExistentID, err := primitive.ObjectIDFromHex("5f50cf9b8b5cf3b5e1c8a1a1")
+		c.Assert(err, qt.IsNil)
+		nonExistentInvite := &OrganizationInvite{
+			ID:         nonExistentID,
+			Role:       ViewerRole,
+			Expiration: time.Now().Add(time.Hour * 3),
+		}
+		err = testDB.UpdateInvitation(nonExistentInvite)
+		// This should not return an error, as MongoDB's UpdateOne doesn't error when no documents match
+		c.Assert(err, qt.IsNil)
+	})
 
 	t.Run("GetInvitation", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)

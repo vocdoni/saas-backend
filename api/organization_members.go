@@ -292,6 +292,101 @@ func (a *API) acceptOrganizationMemberInvitationHandler(w http.ResponseWriter, r
 	apicommon.HTTPWriteOK(w)
 }
 
+// updatePendingMemberInvitationHandler godoc
+//
+//	@Summary		Update a pending invitation to an organization
+//	@Description	Update the code, link and expiration time of a pending invitation to an organization by email.
+//	@Description	Resend the invitation email.
+//	@Description	Only the admin of the organization can update an invitation.
+//	@Tags			organizations
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			address			path		string			true	"Organization address"
+//	@Param			invitationID	path		string			true	"Invitation ID"
+//	@Success		200				{string}	string			"OK"
+//	@Failure		400				{object}	errors.Error	"Invalid input data"
+//	@Failure		401				{object}	errors.Error	"Unauthorized"
+//	@Failure		400				{object}	errors.Error	"Invalid data - invitation not found"
+//	@Failure		500				{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{address}/members/pending/{invitationID} [put]
+func (a *API) updatePendingMemberInvitationHandler(w http.ResponseWriter, r *http.Request) {
+	// get the user from the request context
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	// get the organization info from the request context
+	org, _, ok := a.organizationFromRequest(r)
+	if !ok {
+		errors.ErrNoOrganizationProvided.Write(w)
+		return
+	}
+	if !user.HasRoleFor(org.Address, db.AdminRole) {
+		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		return
+	}
+
+	invitationID := chi.URLParam(r, "invitationID")
+	if invitationID == "" {
+		errors.ErrMalformedBody.With("invitation ID not provided").Write(w)
+		return
+	}
+	// get the invitation from the database
+	invitation, err := a.db.Invitation(invitationID)
+	if err != nil {
+		if err == db.ErrNotFound {
+			errors.ErrInvalidData.With("invitation not found").Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.Withf("could not get invitation: %v", err).Write(w)
+		return
+	}
+
+	// create the updated invitation
+	orgInvite := &db.OrganizationInvite{
+		ID:                  invitation.ID,
+		OrganizationAddress: org.Address,
+		NewUserEmail:        invitation.NewUserEmail,
+		Role:                db.UserRole(invitation.Role),
+		CurrentUserID:       user.ID,
+	}
+	// generate the verification code and the verification link
+	code, link, err := a.generateVerificationCodeAndLink(orgInvite, db.CodeTypeOrgInviteUpdate)
+	if err != nil {
+		if err == db.ErrAlreadyExists {
+			errors.ErrDuplicateConflict.With("user is already invited to the organization").Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.Withf("could not create the invite: %v", err).Write(w)
+		return
+	}
+
+	orgInvite.InvitationCode = code
+	orgInvite.Expiration = time.Now().Add(apicommon.InvitationExpiration)
+	// store the updated invitation in the database
+	if err := a.db.UpdateInvitation(orgInvite); err != nil {
+		errors.ErrGenericInternalServerError.Withf("could not update invitation: %v", err).Write(w)
+		return
+	}
+
+	// send the invitation mail to invited user email with the invite code and
+	// the invite link
+	if err := a.sendMail(r.Context(), orgInvite.NewUserEmail, mailtemplates.InviteNotification,
+		struct {
+			Organization string
+			Code         string
+			Link         string
+		}{org.Address, code, link},
+	); err != nil {
+		log.Warnw("could not send verification code email", "error", err)
+		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
+	apicommon.HTTPWriteOK(w)
+}
+
 // deletePendingMemberInvitationHandler godoc
 //
 //	@Summary		Delete a pending invitation to an organization
