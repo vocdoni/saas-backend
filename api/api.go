@@ -233,6 +233,9 @@ func (a *API) initRouter() http.Handler {
 		// pending organization invitations
 		log.Infow("new route", "method", "GET", "path", organizationPendingMembersEndpoint)
 		r.Get(organizationPendingMembersEndpoint, a.pendingOrganizationMembersHandler)
+		// update pending organization invitation
+		log.Infow("new route", "method", "PUT", "path", organizationHandlePendingInvitationEndpoint)
+		r.Put(organizationHandlePendingInvitationEndpoint, a.updatePendingMemberInvitationHandler)
 		// delete pending organization invitation
 		log.Infow("new route", "method", "DELETE", "path", organizationHandlePendingInvitationEndpoint)
 		r.Delete(organizationHandlePendingInvitationEndpoint, a.deletePendingMemberInvitationHandler)

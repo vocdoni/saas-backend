@@ -54,7 +54,7 @@ const (
 	organizationAcceptMemberEndpoint = "/organizations/{address}/members/accept"
 	// GET /organizations/{address}/members/pending to get the pending members
 	organizationPendingMembersEndpoint = "/organizations/{address}/members/pending"
-	// DELETE /organizations/{address}/members/pending to delete the pending invitations
+	// DELETE /organizations/{address}/members/pending/{memberid} to delete the a pending invitation
 	organizationHandlePendingInvitationEndpoint = "/organizations/{address}/members/pending/{invitationID}"
 	// PUT /organizations/{address}/members/{memberid} to update the role of an  organization member
 	organizationUpdateMemberEndpoint = "/organizations/{address}/members/{userid}"

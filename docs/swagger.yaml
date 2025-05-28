@@ -22756,6 +22756,49 @@ paths:
       summary: Get pending organization members
       tags:
       - organizations
+  /organizations/{address}/members/pending/{invitationID}:
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Update the code, link and expiration time of a pending invitation to an organization by email.
+        Resend the invitation email.
+        Only the admin of the organization can update an invitation.
+      parameters:
+      - description: Organization address
+        in: path
+        name: address
+        required: true
+        type: string
+      - description: Invitation ID
+        in: path
+        name: invitationID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid data - invitation not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Update a pending invitation to an organization
+      tags:
+      - organizations
   /organizations/{address}/participants:
     delete:
       consumes:

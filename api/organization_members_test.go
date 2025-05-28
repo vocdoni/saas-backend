@@ -424,6 +424,218 @@ func TestOrganizationMembers(t *testing.T) {
 		c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
 	})
 
+	t.Run("UpdatePendingInvitation", func(t *testing.T) {
+		// Create a new organization for this test
+		newOrgAddress := testCreateOrganization(t, adminToken)
+		t.Logf("Created organization with address: %s\n", newOrgAddress.String())
+
+		// Create a user to be invited
+		userToInviteEmail := fmt.Sprintf("invite-%s@example.com", uuid.New().String())
+
+		// Invite the user to the organization
+		inviteRequest := &apicommon.OrganizationInvite{
+			Email: userToInviteEmail,
+			Role:  string(db.ViewerRole),
+		}
+		resp, code := testRequest(
+			t,
+			http.MethodPost,
+			adminToken,
+			inviteRequest,
+			"organizations",
+			newOrgAddress.String(),
+			"members",
+		)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+		// Verify the invitation was created by checking pending invitations
+		resp, code = testRequest(
+			t,
+			http.MethodGet,
+			adminToken,
+			nil,
+			"organizations",
+			newOrgAddress.String(),
+			"members",
+			"pending",
+		)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+		var pendingInvites apicommon.OrganizationInviteList
+		err := parseJSON(resp, &pendingInvites)
+		c.Assert(err, qt.IsNil)
+		c.Assert(len(pendingInvites.Invites), qt.Equals, 1)
+		c.Assert(pendingInvites.Invites[0].Email, qt.Equals, userToInviteEmail)
+
+		// Get the invitation ID and initial expiration time
+		invitationID := pendingInvites.Invites[0].ID
+		c.Assert(invitationID, qt.Not(qt.Equals), "")
+		initialExpiration := pendingInvites.Invites[0].Expiration
+
+		// Test 1: Update the pending invitation
+		resp, code = testRequest(
+			t,
+			http.MethodPut,
+			adminToken,
+			nil, // No request body needed
+			"organizations",
+			newOrgAddress.String(),
+			"members",
+			"pending",
+			invitationID, // Add invitationID as path parameter
+		)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+		// Verify the invitation was updated by checking pending invitations again
+		resp, code = testRequest(
+			t,
+			http.MethodGet,
+			adminToken,
+			nil,
+			"organizations",
+			newOrgAddress.String(),
+			"members",
+			"pending",
+		)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+		var updatedPendingInvites apicommon.OrganizationInviteList
+		err = parseJSON(resp, &updatedPendingInvites)
+		c.Assert(err, qt.IsNil)
+		c.Assert(len(updatedPendingInvites.Invites), qt.Equals, 1)
+		c.Assert(updatedPendingInvites.Invites[0].Email, qt.Equals, userToInviteEmail)
+
+		// Verify the expiration time has been updated (should be later than the initial one)
+		c.Assert(updatedPendingInvites.Invites[0].Expiration.After(initialExpiration), qt.IsTrue)
+
+		// Test 2: Try to update a non-existent invitation
+		nonExistentID := "000000000000000000000000" // Invalid ObjectID format
+		_, code = testRequest(
+			t,
+			http.MethodPut,
+			adminToken,
+			nil,
+			"organizations",
+			newOrgAddress.String(),
+			"members",
+			"pending",
+			nonExistentID,
+		)
+		c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+
+		// Test 3: Try to update without authentication
+		_, code = testRequest(
+			t,
+			http.MethodPut,
+			"",
+			nil,
+			"organizations",
+			newOrgAddress.String(),
+			"members",
+			"pending",
+			invitationID,
+		)
+		c.Assert(code, qt.Equals, http.StatusUnauthorized)
+
+		// Test 4: Try to update with a non-admin user
+		// Create a non-admin user
+		nonAdminToken := testCreateUser(t, "nonadminpassword123")
+		_, code = testRequest(
+			t,
+			http.MethodPut,
+			nonAdminToken,
+			nil,
+			"organizations",
+			newOrgAddress.String(),
+			"members",
+			"pending",
+			invitationID,
+		)
+		c.Assert(code, qt.Equals, http.StatusUnauthorized)
+
+		// Test 5: Create another organization and invitation, then try to update it from the wrong organization
+		anotherOrgAddress := testCreateOrganization(t, adminToken)
+		t.Logf("Created another organization with address: %s\n", anotherOrgAddress.String())
+
+		// Invite the user to the second organization
+		inviteRequest = &apicommon.OrganizationInvite{
+			Email: userToInviteEmail,
+			Role:  string(db.ViewerRole),
+		}
+		resp, code = testRequest(
+			t,
+			http.MethodPost,
+			adminToken,
+			inviteRequest,
+			"organizations",
+			anotherOrgAddress.String(),
+			"members",
+		)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+		// Get the invitation ID from the second organization
+		resp, code = testRequest(
+			t,
+			http.MethodGet,
+			adminToken,
+			nil,
+			"organizations",
+			anotherOrgAddress.String(),
+			"members",
+			"pending",
+		)
+		c.Assert(code, qt.Equals, http.StatusOK)
+
+		var anotherPendingInvites apicommon.OrganizationInviteList
+		err = parseJSON(resp, &anotherPendingInvites)
+		c.Assert(err, qt.IsNil)
+		c.Assert(len(anotherPendingInvites.Invites), qt.Equals, 1)
+
+		anotherInvitationID := anotherPendingInvites.Invites[0].ID
+		c.Assert(anotherInvitationID, qt.Not(qt.Equals), "")
+
+		// Try to update the invitation from the wrong organization
+		_, code = testRequest(
+			t,
+			http.MethodPut,
+			adminToken,
+			nil,
+			"organizations",
+			newOrgAddress.String(), // Using first org to update invitation from second org
+			"members",
+			"pending",
+			anotherInvitationID,
+		)
+		c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+
+		// Clean up: Delete the invitations
+		_, code = testRequest(
+			t,
+			http.MethodDelete,
+			adminToken,
+			nil,
+			"organizations",
+			newOrgAddress.String(),
+			"members",
+			"pending",
+			invitationID,
+		)
+		c.Assert(code, qt.Equals, http.StatusOK)
+
+		_, code = testRequest(
+			t,
+			http.MethodDelete,
+			adminToken,
+			nil,
+			"organizations",
+			anotherOrgAddress.String(),
+			"members",
+			"pending",
+			anotherInvitationID,
+		)
+		c.Assert(code, qt.Equals, http.StatusOK)
+	})
+
 	t.Run("DeletePendingInvitation", func(t *testing.T) {
 		// Create a new organization for this test
 		newOrgAddress := testCreateOrganization(t, adminToken)

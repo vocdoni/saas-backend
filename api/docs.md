@@ -30,6 +30,7 @@
   - [🧑‍💼 Invite organization member](#-invite-organization-member)
   - [⏳ List pending invitations](#-list-pending-invitations)
   - [🗑️ Delete pending invitation](#-delete-pending-invitation)
+  - [🔄 Update pending invitation](#-update-pending-invitation)
   - [🤝 Accept organization invitation](#-accept-organization-invitation)
   - [🔄 Update organization member role](#-update-organization-member-role)
   - [❌ Remove organization member](#-remove-organization-member)
@@ -798,6 +799,34 @@ Delete a pending invitation for a user to join an organization by email. Only ad
 | `400` | `40005` | `invitation code not provided` |
 | `400` | `40005` | `invalid data - invitation not found` |
 | `400` | `40011` | `no organization provided` |
+| `500` | `50002` | `internal server error` |
+
+### 🔄 Update pending invitation
+
+* **Path** `/organizations/{address}/members/pending/{invitationID}`
+* **Method** `PUT`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+
+* **Description**
+Update the code, link and expiration time of a pending invitation to an organization by email. Resend the invitation email. Only admins of the organization can update an invitation. The invitation must exist and belong to the specified organization.
+
+* **Response**
+```json
+"OK"
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `401` | `40001` | `user is not admin of organization` |
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40005` | `invitation ID not provided` |
+| `400` | `40005` | `invalid data - invitation not found` |
+| `400` | `40011` | `no organization provided` |
+| `409` | `40901` | `duplicate conflict - user is already invited to the organization` |
 | `500` | `50002` | `internal server error` |
 
 ### 🤝 Accept organization invitation

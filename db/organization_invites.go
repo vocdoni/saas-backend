@@ -82,6 +82,26 @@ func (ms *MongoStorage) Invitation(invitationID string) (*OrganizationInvite, er
 	return invite, nil
 }
 
+// UpdateInvitation updates an existing invitation in the database.
+func (ms *MongoStorage) UpdateInvitation(invite *OrganizationInvite) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	if invite.ID == primitive.NilObjectID {
+		return fmt.Errorf("invitation ID cannot be empty")
+	}
+	updateDoc, err := dynamicUpdateDocument(invite, nil)
+	if err != nil {
+		return err
+	}
+	filter := bson.M{"_id": invite.ID}
+	// update the invitation in the database
+	_, err = ms.organizationInvites.UpdateOne(ctx, filter, updateDoc)
+	return err
+}
+
 // InvitationByCode returns the invitation for the given code.
 func (ms *MongoStorage) InvitationByCode(invitationCode string) (*OrganizationInvite, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -135,7 +155,8 @@ func (ms *MongoStorage) PendingInvitations(organizationAddress string) ([]Organi
 	return invitations, nil
 }
 
-func (ms *MongoStorage) deleteInvitation(filter bson.M) error {
+// deleteInvitation is a helper function to delete an invitation based on the provided filter.
+func (ms *MongoStorage) deleteInvitationHelper(filter bson.M) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
@@ -157,15 +178,15 @@ func (ms *MongoStorage) DeleteInvitation(invitationID string) error {
 		return fmt.Errorf("invalid invitation ID: %w", err)
 	}
 
-	return ms.deleteInvitation(bson.M{"_id": objID})
+	return ms.deleteInvitationHelper(bson.M{"_id": objID})
 }
 
 // DeleteInvitationByCode removes the invitation from the database.
 func (ms *MongoStorage) DeleteInvitationByCode(invitationCode string) error {
-	return ms.deleteInvitation(bson.M{"invitationCode": invitationCode})
+	return ms.deleteInvitationHelper(bson.M{"invitationCode": invitationCode})
 }
 
 // DeleteInvitationByEmail removes the invitation from the database.
 func (ms *MongoStorage) DeleteInvitationByEmail(email string) error {
-	return ms.deleteInvitation(bson.M{"newUserEmail": email})
+	return ms.deleteInvitationHelper(bson.M{"newUserEmail": email})
 }

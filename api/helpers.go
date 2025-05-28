@@ -139,6 +139,25 @@ func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) 
 			"code":    invite.InvitationCode,
 			"address": invite.OrganizationAddress,
 		}
+	case db.CodeTypeOrgInviteUpdate:
+		// when the invitation is update there is no need to store it here
+		// but just return the verification code and link
+		invite, ok := target.(*db.OrganizationInvite)
+		if !ok {
+			return "", "", fmt.Errorf("invalid target type")
+		}
+		// set the verification code for the organization invite and the
+		// expiration time
+		invite.InvitationCode = verificationCode
+
+		// set the web app URI and the link parameters
+		webAppURI = mailtemplates.InviteNotification.WebAppURI
+		linkParams = map[string]any{
+			"email":   invite.NewUserEmail,
+			"code":    invite.InvitationCode,
+			"address": invite.OrganizationAddress,
+		}
+
 	default:
 		return "", "", fmt.Errorf("invalid code type")
 	}
