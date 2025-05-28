@@ -41,10 +41,9 @@ func TestProcessBundles(t *testing.T) {
 
 		// Test with empty processes array - should be valid now
 		emptyBundle := &ProcessesBundle{
-			OrgAddress: testOrgAddress,
-			Census:     publishedCensus.Census,
-			CensusRoot: publishedCensus.Root,
-			Processes:  []internal.HexBytes{},
+			OrgAddress:      testOrgAddress,
+			PublishedCensus: *publishedCensus,
+			Processes:       []internal.HexBytes{},
 		}
 		emptyBundleID, err := testDB.SetProcessBundle(emptyBundle)
 		c.Assert(err, qt.IsNil)
@@ -53,13 +52,15 @@ func TestProcessBundles(t *testing.T) {
 		// Test with non-existent organization
 		nonExistentBundle := &ProcessesBundle{
 			OrgAddress: "non-existent-org",
-			Census: Census{
-				ID:         primitive.NewObjectID(),
-				OrgAddress: "non-existent-org",
-				Type:       CensusTypeMail,
+			PublishedCensus: PublishedCensus{
+				Census: Census{
+					ID:         primitive.NewObjectID(),
+					OrgAddress: "non-existent-org",
+					Type:       CensusTypeMail,
+				},
+				Root: testProcessRoot,
 			},
-			CensusRoot: testProcessRoot,
-			Processes:  []internal.HexBytes{testProcessID3},
+			Processes: []internal.HexBytes{testProcessID3},
 		}
 		_, err = testDB.SetProcessBundle(nonExistentBundle)
 		c.Assert(err, qt.Not(qt.IsNil))
@@ -67,10 +68,9 @@ func TestProcessBundles(t *testing.T) {
 
 		// Create a new process bundle
 		bundle := &ProcessesBundle{
-			OrgAddress: testOrgAddress,
-			Census:     publishedCensus.Census,
-			CensusRoot: publishedCensus.Root,
-			Processes:  []internal.HexBytes{process1.ID, process2.ID},
+			OrgAddress:      testOrgAddress,
+			PublishedCensus: *publishedCensus,
+			Processes:       []internal.HexBytes{process1.ID, process2.ID},
 		}
 		bundleID, err := testDB.SetProcessBundle(bundle)
 		c.Assert(err, qt.IsNil)
@@ -117,19 +117,17 @@ func TestProcessBundles(t *testing.T) {
 
 		// Create two process bundles
 		bundle1 := &ProcessesBundle{
-			OrgAddress: testOrgAddress,
-			Census:     publishedCensus.Census,
-			CensusRoot: publishedCensus.Root,
-			Processes:  []internal.HexBytes{process1.ID, process2.ID},
+			OrgAddress:      testOrgAddress,
+			PublishedCensus: *publishedCensus,
+			Processes:       []internal.HexBytes{process1.ID, process2.ID},
 		}
 		bundle1ID, err := testDB.SetProcessBundle(bundle1)
 		c.Assert(err, qt.IsNil)
 
 		bundle2 := &ProcessesBundle{
-			OrgAddress: testOrgAddress,
-			Census:     publishedCensus.Census,
-			CensusRoot: publishedCensus.Root,
-			Processes:  []internal.HexBytes{process2.ID, process3.ID},
+			OrgAddress:      testOrgAddress,
+			PublishedCensus: *publishedCensus,
+			Processes:       []internal.HexBytes{process2.ID, process3.ID},
 		}
 		bundle2ID, err := testDB.SetProcessBundle(bundle2)
 		c.Assert(err, qt.IsNil)
@@ -157,19 +155,17 @@ func TestProcessBundles(t *testing.T) {
 
 		// Create two process bundles
 		bundle1 := &ProcessesBundle{
-			OrgAddress: testOrgAddress,
-			Census:     publishedCensus.Census,
-			CensusRoot: publishedCensus.Root,
-			Processes:  []internal.HexBytes{process1.ID, process2.ID},
+			OrgAddress:      testOrgAddress,
+			PublishedCensus: *publishedCensus,
+			Processes:       []internal.HexBytes{process1.ID, process2.ID},
 		}
 		bundle1ID, err := testDB.SetProcessBundle(bundle1)
 		c.Assert(err, qt.IsNil)
 
 		bundle2 := &ProcessesBundle{
-			OrgAddress: testOrgAddress,
-			Census:     publishedCensus.Census,
-			CensusRoot: publishedCensus.Root,
-			Processes:  []internal.HexBytes{process2.ID, process3.ID},
+			OrgAddress:      testOrgAddress,
+			PublishedCensus: *publishedCensus,
+			Processes:       []internal.HexBytes{process2.ID, process3.ID},
 		}
 		bundle2ID, err := testDB.SetProcessBundle(bundle2)
 		c.Assert(err, qt.IsNil)
@@ -210,10 +206,9 @@ func TestProcessBundles(t *testing.T) {
 
 		// Create a process bundle with one process
 		bundle := &ProcessesBundle{
-			OrgAddress: testOrgAddress,
-			Census:     publishedCensus.Census,
-			CensusRoot: publishedCensus.Root,
-			Processes:  []internal.HexBytes{process1.ID},
+			OrgAddress:      testOrgAddress,
+			PublishedCensus: *publishedCensus,
+			Processes:       []internal.HexBytes{process1.ID},
 		}
 		bundleID, err := testDB.SetProcessBundle(bundle)
 		c.Assert(err, qt.IsNil)
@@ -275,10 +270,9 @@ func TestProcessBundles(t *testing.T) {
 
 		// Create a process bundle
 		bundle := &ProcessesBundle{
-			OrgAddress: testOrgAddress,
-			Census:     publishedCensus.Census,
-			CensusRoot: publishedCensus.Root,
-			Processes:  []internal.HexBytes{process1.ID, process2.ID},
+			OrgAddress:      testOrgAddress,
+			PublishedCensus: *publishedCensus,
+			Processes:       []internal.HexBytes{process1.ID, process2.ID},
 		}
 		bundleID, err := testDB.SetProcessBundle(bundle)
 		c.Assert(err, qt.IsNil)
