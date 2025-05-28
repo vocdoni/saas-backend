@@ -289,7 +289,7 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 	cspSignerPubKey := a.account.PubKey // TODO: use a different key based on the censusID
 	var pubCensus *db.PublishedCensus
 	switch census.Type {
-	case CensusTypeSMSOrMail:
+	case CensusTypeSMSOrMail, db.CensusTypeSMS, db.CensusTypeMail:
 		pubCensus = &db.PublishedCensus{
 			Census:    *census,
 			URI:       a.serverURL + "/process",
