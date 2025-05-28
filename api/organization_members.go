@@ -656,5 +656,12 @@ func (a *API) removeOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		errors.ErrInvalidUserData.Withf("member not found: %v", err).Write(w)
 		return
 	}
+
+	// update the org members counter
+	org.Counters.Members--
+	if err := a.db.SetOrganization(org); err != nil {
+		errors.ErrGenericInternalServerError.Withf("could not update organization: %v", err).Write(w)
+		return
+	}
 	apicommon.HTTPWriteOK(w)
 }
