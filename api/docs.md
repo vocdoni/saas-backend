@@ -388,7 +388,7 @@ This endpoint only returns the addresses of the organizations where the current 
         "address": "0x...",
         "website": "",
         "createdAt": "2025-01-16T11:56:04Z",
-        "type": "community",
+        "type": "company",
         "description": "My amazing testing organization",
         "size": 10,
         "color": "#ff0000",
@@ -536,7 +536,7 @@ This method invalidates any previous JWT token for the user, so it returns a new
 {
   "name": "Test Organization",
   "website": "https://[...].com",
-  "type": "community",
+  "type": "company",
   "description": "My amazing testing organization",
   "size": "10",
   "color": "#ff0000",
@@ -566,7 +566,7 @@ If the user want to create a sub org, the address of the root organization must 
   "address": "0x23eE5d3ECE54a275FD75cF25E77C3bBeCe3CF3f7",
   "website": "",
   "createdAt": "2025-01-16T11:56:04Z",
-  "type": "community",
+  "type": "company",
   "size": "10",
   "color": "#ff0000",
   "subdomain": "mysubdomain",
@@ -618,7 +618,7 @@ Only the following parameters can be changed. Every parameter is optional.
 {
   "name": "Test Organization",
   "website": "https://[...].com",
-  "type": "community",
+  "type": "company",
   "description": "My amazing testing organization",
   "size": "10",
   "color": "#ff0000",
@@ -653,7 +653,7 @@ Only the following parameters can be changed. Every parameter is optional.
   "address": "0x23eE5d3ECE54a275FD75cF25E77C3bBeCe3CF3f7",
   "website": "",
   "createdAt": "2025-01-16T11:56:04Z",
-  "type": "community",
+  "type": "company",
   "size": "10",
   "color": "#ff0000",
   "subdomain": "mysubdomain",
@@ -1359,52 +1359,24 @@ Creates a new support ticket for the organization. The user must be a member of 
       "name": "Cooperative"
     },
     {
-      "type": "educational",
-      "name": "University / Educational Institution"
-    },
-    {
       "type": "others",
       "name": "Others"
     },
     {
-      "type": "assembly",
-      "name": "Assembly"
-    },
-    {
-      "type": "religious",
-      "name": "Church / Religious Organization"
-    },
-    {
       "type": "company",
-      "name": "Company / Corporation"
+      "name": "Company"
     },
     {
       "type": "political_party",
       "name": "Political Party"
     },
     {
-      "type": "chamber",
-      "name": "Chamber"
-    },
-    {
       "type": "nonprofit",
       "name": "Nonprofit / NGO"
     },
     {
-      "type": "community",
-      "name": "Community Group"
-    },
-    {
-      "type": "professional_college",
-      "name": "Professional College"
-    },
-    {
       "type": "association",
       "name": "Association"
-    },
-    {
-      "type": "city",
-      "name": "City / Municipality"
     },
     {
       "type": "union",

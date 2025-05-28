@@ -8,7 +8,6 @@ const (
 	AnyRole     UserRole = "any"
 	// organization types
 	AssociationType      OrganizationType = "association"
-	CommunityType        OrganizationType = "community"
 	CompanyType          OrganizationType = "company"
 	CooperativeType      OrganizationType = "cooperative"
 	GovernmentType       OrganizationType = "government"
@@ -69,7 +68,6 @@ var OrganizationTypesNames = map[OrganizationType]string{
 	ProfessionalBodyType: "Professional Body",
 	SportsClubType:       "Sports Club",
 	UnionType:            "Union",
-	CommunityType:        "Community Group",
 	OthersType:           "Others",
 }
 
