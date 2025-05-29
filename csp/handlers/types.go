@@ -9,15 +9,15 @@ import (
 )
 
 // AuthRequest defines the payload for the authentication request. It includes
-// the participant number, the email, the phone, and the password. Not all
+// the member number, the email, the phone, and the password. Not all
 // fields are required for all types of authentication, for example, the
 // password is required for password-based authentication, but not for OTP
 // authentication. For OTP authentication, the email or phone is required.
 type AuthRequest struct {
-	ParticipantNo string `json:"participantNo"`
-	Email         string `json:"email,omitempty"`
-	Phone         string `json:"phone,omitempty"`
-	Password      string `json:"password,omitempty"`
+	MemberNo string `json:"memberNo"`
+	Email    string `json:"email,omitempty"`
+	Phone    string `json:"phone,omitempty"`
+	Password string `json:"password,omitempty"`
 }
 
 // AuthResponse defines the payload for the authentication response, including

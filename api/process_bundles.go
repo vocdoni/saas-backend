@@ -299,22 +299,22 @@ func (a *API) processBundleInfoHandler(w http.ResponseWriter, r *http.Request) {
 	apicommon.HTTPWriteJSON(w, bundle)
 }
 
-// processBundleParticipantInfoHandler godoc
+// processBundleMemberInfoHandler godoc
 //
-//	@Summary		Get participant information for a process bundle
-//	@Description	Retrieve process information for a participant in a process bundle. Returns process details including
+//	@Summary		Get member information for a process bundle
+//	@Description	Retrieve process information for a member in a process bundle. Returns process details including
 //	@Description	the census and metadata.
 //	@Tags			process
 //	@Accept			json
 //	@Produce		json
-//	@Param			bundleId		path		string	true	"Bundle ID"
-//	@Param			participantId	path		string	true	"Participant ID"
-//	@Success		200				{object}	interface{}
-//	@Failure		400				{object}	errors.Error	"Invalid bundle ID or participant ID"
-//	@Failure		404				{object}	errors.Error	"Bundle not found"
-//	@Failure		500				{object}	errors.Error	"Internal server error"
-//	@Router			/process/bundle/{bundleId}/{participantId} [get]
-func (a *API) processBundleParticipantInfoHandler(w http.ResponseWriter, r *http.Request) {
+//	@Param			bundleId	path		string	true	"Bundle ID"
+//	@Param			memberId	path		string	true	"Member ID"
+//	@Success		200			{object}	interface{}
+//	@Failure		400			{object}	errors.Error	"Invalid bundle ID or member ID"
+//	@Failure		404			{object}	errors.Error	"Bundle not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/process/bundle/{bundleId}/{memberId} [get]
+func (a *API) processBundleMemberInfoHandler(w http.ResponseWriter, r *http.Request) {
 	bundleIDStr := chi.URLParam(r, "bundleId")
 	if bundleIDStr == "" {
 		errors.ErrMalformedURLParam.Withf("missing bundle ID").Write(w)
@@ -337,14 +337,14 @@ func (a *API) processBundleParticipantInfoHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	participantID := chi.URLParam(r, "participantId")
-	if participantID == "" {
-		errors.ErrMalformedURLParam.Withf("missing participant ID").Write(w)
+	memberID := chi.URLParam(r, "memberId")
+	if memberID == "" {
+		errors.ErrMalformedURLParam.Withf("missing member ID").Write(w)
 		return
 	}
 
 	// TODO
-	/*	elections := a.csp.Indexer(participantID, bundleIDStr, "")
+	/*	elections := a.csp.Indexer(memberID, bundleIDStr, "")
 		if len(elections) == 0 {
 			httpWriteJSON(w, []twofactor.Election{})
 			return

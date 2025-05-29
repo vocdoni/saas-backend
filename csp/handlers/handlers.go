@@ -112,7 +112,7 @@ func (c *CSPHandlers) handleAuthStep(w http.ResponseWriter, r *http.Request,
 //
 //	@Summary		Authenticate for a process bundle
 //	@Description	Handle authentication for a process bundle. There are two steps in the authentication process:
-//	@Description	- Step 0: The user sends the participant number and contact information (email or phone).
+//	@Description	- Step 0: The user sends the member number and contact information (email or phone).
 //	@Description	If valid, the server sends a challenge to the user with a token.
 //	@Description	- Step 1: The user sends the token and challenge solution back to the server.
 //	@Description	If valid, the token is marked as verified and returned.
@@ -187,11 +187,11 @@ func findProcessInBundle(bundle *db.ProcessesBundle, processID internal.HexBytes
 	return nil, false
 }
 
-// checkCensusMembership checks if the participant is in the census
+// checkCensusMembership checks if the member is in the census
 func (c *CSPHandlers) checkCensusMembership(w http.ResponseWriter, censusID string, userID string) bool {
 	if _, err := c.mainDB.CensusMembership(censusID, userID); err != nil {
 		if err == db.ErrNotFound {
-			errors.ErrUnauthorized.Withf("participant not found in the census").Write(w)
+			errors.ErrUnauthorized.Withf("member not found in the census").Write(w)
 			return false
 		}
 		log.Warnw("error getting census membership", "error", err)
@@ -272,7 +272,7 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Check if the participant is in the census
+	// Check if the member is in the census
 	if !c.checkCensusMembership(w, bundle.Census.ID.Hex(), string(auth.UserID)) {
 		return
 	}
@@ -351,10 +351,10 @@ func (c *CSPHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Requ
 	})
 }
 
-// validateParticipantNumber checks if the participant number is provided
-func validateParticipantNumber(participantNo string) error {
-	if len(participantNo) == 0 {
-		return errors.ErrInvalidUserData.Withf("participant number not provided")
+// validateMemberNumber checks if the member number is provided
+func validateMemberNumber(memberNo string) error {
+	if len(memberNo) == 0 {
+		return errors.ErrInvalidUserData.Withf("member number not provided")
 	}
 	return nil
 }
@@ -392,8 +392,8 @@ func validatePhone(phone *string) error {
 
 // validateAuthRequest validates the authentication request data
 func validateAuthRequest(req *AuthRequest) error {
-	// Check request participant number
-	err := validateParticipantNumber(req.ParticipantNo)
+	// Check request member number
+	err := validateMemberNumber(req.MemberNo)
 	if err != nil {
 		return err
 	}
@@ -414,8 +414,8 @@ func validateAuthRequest(req *AuthRequest) error {
 	return validatePhone(&req.Phone)
 }
 
-// getCensusAndParticipant retrieves the census and participant information
-func (c *CSPHandlers) getCensusAndParticipant(censusID string, participantNo string) (*db.Census, *db.OrgParticipant, error) {
+// getCensusAndMember retrieves the census and member information
+func (c *CSPHandlers) getCensusAndMember(censusID string, memberNo string) (*db.Census, *db.OrgMember, error) {
 	// Get census information
 	census, err := c.mainDB.Census(censusID)
 	if err != nil {
@@ -425,24 +425,24 @@ func (c *CSPHandlers) getCensusAndParticipant(censusID string, participantNo str
 		return nil, nil, errors.ErrGenericInternalServerError.WithErr(err)
 	}
 
-	// Check the census membership of the participant
-	if _, err := c.mainDB.CensusMembership(censusID, participantNo); err != nil {
+	// Check the census membership of the member
+	if _, err := c.mainDB.CensusMembership(censusID, memberNo); err != nil {
 		if err == db.ErrNotFound {
-			return nil, nil, errors.ErrUnauthorized.Withf("participant not found in the census")
+			return nil, nil, errors.ErrUnauthorized.Withf("member not found in the census")
 		}
 		return nil, nil, errors.ErrGenericInternalServerError.WithErr(err)
 	}
 
-	// Get participant information
-	participant, err := c.mainDB.OrgParticipantByNo(census.OrgAddress, participantNo)
+	// Get member information
+	member, err := c.mainDB.OrgMemberByNo(census.OrgAddress, memberNo)
 	if err != nil {
-		return nil, nil, errors.ErrCensusParticipantNotFound
+		return nil, nil, errors.ErrCensusMemberNotFound
 	}
 
-	return census, participant, nil
+	return census, member, nil
 }
 
-// verifyPassword checks if the provided password matches the participant's hashed password
+// verifyPassword checks if the provided password matches the member's hashed password
 func (c *CSPHandlers) verifyPassword(password string, hashedPass []byte) error {
 	if password != "" && !bytes.Equal(internal.HashPassword(c.csp.PasswordSalt, password), hashedPass) {
 		return fmt.Errorf("invalid user data")
@@ -450,7 +450,7 @@ func (c *CSPHandlers) verifyPassword(password string, hashedPass []byte) error {
 	return nil
 }
 
-// verifyEmail checks if the provided email matches the participant's hashed email
+// verifyEmail checks if the provided email matches the member's hashed email
 func verifyEmail(orgAddress string, email string, hashedEmail []byte) error {
 	if !bytes.Equal(internal.HashOrgData(orgAddress, email), hashedEmail) {
 		return errors.ErrUnauthorized.Withf("invalid user email")
@@ -458,7 +458,7 @@ func verifyEmail(orgAddress string, email string, hashedEmail []byte) error {
 	return nil
 }
 
-// verifyPhone checks if the provided phone matches the participant's hashed phone
+// verifyPhone checks if the provided phone matches the member's hashed phone
 func verifyPhone(orgAddress string, phone string, hashedPhone []byte) error {
 	if !bytes.Equal(internal.HashOrgData(orgAddress, phone), hashedPhone) {
 		return errors.ErrUnauthorized.Withf("invalid user phone")
@@ -486,22 +486,22 @@ func handlePhoneContact(orgAddress string, phone string, hashedPhone []byte) (st
 func determineContactMethod(
 	census *db.Census,
 	req *AuthRequest,
-	participant *db.OrgParticipant,
+	member *db.OrgMember,
 ) (string, notifications.ChallengeType, error) {
 	switch census.Type {
 	case db.CensusTypeMail:
-		return handleEmailContact(census.OrgAddress, req.Email, participant.HashedEmail)
+		return handleEmailContact(census.OrgAddress, req.Email, member.HashedEmail)
 
 	case db.CensusTypeSMS:
-		return handlePhoneContact(census.OrgAddress, req.Phone, participant.HashedPhone)
+		return handlePhoneContact(census.OrgAddress, req.Phone, member.HashedPhone)
 
 	case db.CensusTypeSMSorMail:
 		if req.Email != "" {
-			return handleEmailContact(census.OrgAddress, req.Email, participant.HashedEmail)
+			return handleEmailContact(census.OrgAddress, req.Email, member.HashedEmail)
 		}
 
 		if req.Phone != "" {
-			return handlePhoneContact(census.OrgAddress, req.Phone, participant.HashedPhone)
+			return handlePhoneContact(census.OrgAddress, req.Phone, member.HashedPhone)
 		}
 	}
 
@@ -510,9 +510,9 @@ func determineContactMethod(
 
 // authFirstStep is the first step of the authentication process. It receives
 // the request, the bundle ID and the census ID as parameters. It checks the
-// request data (participant number, email and phone) against the census data.
+// request data (member number, email and phone) against the census data.
 // If the data is valid, it generates a token with the bundle ID, the
-// participant number as the user ID, the contact information as the
+// member number as the user ID, the contact information as the
 // destination and the challenge type. It returns the token and an error if
 // any. It sends the challenge to the user (email or SMS) to verify the user
 // token in the second step.
@@ -527,25 +527,25 @@ func (c *CSPHandlers) authFirstStep(r *http.Request, bundleID internal.HexBytes,
 		return nil, err
 	}
 
-	// Get census and participant information
-	census, participant, err := c.getCensusAndParticipant(censusID, req.ParticipantNo)
+	// Get census and member information
+	census, member, err := c.getCensusAndMember(censusID, req.MemberNo)
 	if err != nil {
 		return nil, err
 	}
 
 	// Verify password if provided
-	if err := c.verifyPassword(req.Password, participant.HashedPass); err != nil {
+	if err := c.verifyPassword(req.Password, member.HashedPass); err != nil {
 		return nil, err
 	}
 
 	// Determine contact method based on census type
-	toDestinations, challengeType, err := determineContactMethod(census, &req, participant)
+	toDestinations, challengeType, err := determineContactMethod(census, &req, member)
 	if err != nil {
 		return nil, err
 	}
 
 	// Generate the token
-	return c.csp.BundleAuthToken(bundleID, internal.HexBytes(participant.ParticipantNo), toDestinations, challengeType)
+	return c.csp.BundleAuthToken(bundleID, internal.HexBytes(member.MemberNo), toDestinations, challengeType)
 }
 
 // authSecondStep is the second step of the authentication process. It

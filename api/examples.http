@@ -262,16 +262,16 @@ Content-Type: application/json
 GET http://localhost:8080/census/{id}
 Authorization: Bearer <user_token>
 
-### Add participants
+### Add members
 POST http://localhost:8080/census/{id}
 Authorization: Bearer <user_token>
 Content-Type: application/json
 
 {
-  "participants": [
+  "members": [
     {
-      "id": "participant_id",
-      "email": "participant@example.com",
+      "id": "member_id",
+      "email": "member@example.com",
       "phone": "+1234567890",
       "password": "secretpass1234"
     }
@@ -306,8 +306,8 @@ POST http://localhost:8080/process/{processId}/auth
 Content-Type: application/json
 
 {
-  "participantNo": "participant_id",
-  "email": "participant@example.com",
+  "memberNo": "member_id",
+  "email": "member@example.com",
   "phone": "+1234567890",
   "password": "secretpass1234"
 }

@@ -507,26 +507,26 @@ func testCreateCensus(t *testing.T, token string, orgAddress internal.HexBytes, 
 	return createdCensus.ID
 }
 
-// testAddParticipantsToCensus adds participants to the given census.
-// It returns the number of participants added.
-func testAddParticipantsToCensus(t *testing.T, token, censusID string, participants []apicommon.OrgParticipant) uint32 {
+// testAddMembersToCensus adds members to the given census.
+// It returns the number of members added.
+func testAddMembersToCensus(t *testing.T, token, censusID string, members []apicommon.OrgMember) uint32 {
 	c := qt.New(t)
 
-	// Add participants to the census
-	participantsReq := &apicommon.AddParticipantsRequest{
-		Participants: participants,
+	// Add members to the census
+	membersReq := &apicommon.AddMembersRequest{
+		Members: members,
 	}
-	resp, code := testRequest(t, http.MethodPost, token, participantsReq, censusEndpoint, censusID)
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("failed to add participants: %s", resp))
+	resp, code := testRequest(t, http.MethodPost, token, membersReq, censusEndpoint, censusID)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("failed to add members: %s", resp))
 
-	// Verify the response contains the number of participants added
-	var addedResponse apicommon.AddParticipantsResponse
+	// Verify the response contains the number of members added
+	var addedResponse apicommon.AddMembersResponse
 	err := json.Unmarshal(resp, &addedResponse)
 	c.Assert(err, qt.IsNil)
-	c.Assert(addedResponse.ParticipantsNo, qt.Equals, uint32(len(participants)),
-		qt.Commentf("expected %d participants, got %d", len(participants), addedResponse.ParticipantsNo))
+	c.Assert(addedResponse.MembersNo, qt.Equals, uint32(len(members)),
+		qt.Commentf("expected %d members, got %d", len(members), addedResponse.MembersNo))
 
-	return addedResponse.ParticipantsNo
+	return addedResponse.MembersNo
 }
 
 // testPublishCensus publishes the given census.
@@ -581,15 +581,15 @@ func testCreateBundle(t *testing.T, token, censusID string, processIDs [][]byte)
 	return bundleIDStr, bundleResp.Root.String()
 }
 
-// testCSPAuthenticate performs the CSP authentication flow for a participant.
+// testCSPAuthenticate performs the CSP authentication flow for a member.
 // It returns the verified auth token.
-func testCSPAuthenticate(t *testing.T, bundleID, participantID, email string) internal.HexBytes {
+func testCSPAuthenticate(t *testing.T, bundleID, memberID, email string) internal.HexBytes {
 	c := qt.New(t)
 
 	// Step 1: Initiate authentication (auth/0)
 	authReq := &handlers.AuthRequest{
-		ParticipantNo: participantID,
-		Email:         email,
+		MemberNo: memberID,
+		Email:    email,
 	}
 	resp, code := testRequest(t, http.MethodPost, "", authReq, "process", "bundle", bundleID, "auth", "0")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("failed to initiate auth: %s", resp))
@@ -711,18 +711,18 @@ func extractOTPFromEmail(mailBody string) string {
 	return ""
 }
 
-// testGenerateTestParticipants generates a list of test participants.
-// It returns the list of participants.
-func testGenerateTestParticipants(count int) []apicommon.OrgParticipant {
-	participants := make([]apicommon.OrgParticipant, count)
+// testGenerateTestMembers generates a list of test members.
+// It returns the list of members.
+func testGenerateTestMembers(count int) []apicommon.OrgMember {
+	members := make([]apicommon.OrgMember, count)
 	for i := 0; i < count; i++ {
 		id := fmt.Sprintf("P%03d", i+1)
-		participants[i] = apicommon.OrgParticipant{
-			ParticipantNo: id,
-			Name:          fmt.Sprintf("Test User %d", i+1),
-			Email:         fmt.Sprintf("%s@example.com", id),
-			Phone:         fmt.Sprintf("+346123456%02d", i+1),
+		members[i] = apicommon.OrgMember{
+			MemberNo: id,
+			Name:     fmt.Sprintf("Test User %d", i+1),
+			Email:    fmt.Sprintf("%s@example.com", id),
+			Phone:    fmt.Sprintf("+346123456%02d", i+1),
 		}
 	}
-	return participants
+	return members
 }

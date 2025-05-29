@@ -239,18 +239,18 @@ func (a *API) initRouter() http.Handler {
 		// delete pending organization invitation
 		log.Infow("new route", "method", "DELETE", "path", organizationHandlePendingInvitationEndpoint)
 		r.Delete(organizationHandlePendingInvitationEndpoint, a.deletePendingUserInvitationHandler)
-		// get organization participants
-		log.Infow("new route", "method", "GET", "path", organizationParticipantsEndpoint)
-		r.Get(organizationParticipantsEndpoint, a.organizationParticipantsHandler)
-		// add organization participants
-		log.Infow("new route", "method", "POST", "path", organizationAddParticipantsEndpoint)
-		r.Post(organizationAddParticipantsEndpoint, a.addOrganizationParticipantsHandler)
-		// check the status of the add participants job
-		log.Infow("new route", "method", "GET", "path", organizationAddParticipantsJobStatusEndpoint)
-		r.Get(organizationAddParticipantsJobStatusEndpoint, a.addOrganizationParticipantsJobStatusHandler)
-		// delete a set of organization participants
-		log.Infow("new route", "method", "DELETE", "path", organizationDeleteParticipantsEndpoint)
-		r.Delete(organizationDeleteParticipantsEndpoint, a.deleteOrganizationParticipantsHandler)
+		// get organization members
+		log.Infow("new route", "method", "GET", "path", organizationMembersEndpoint)
+		r.Get(organizationMembersEndpoint, a.organizationMembersHandler)
+		// add organization members
+		log.Infow("new route", "method", "POST", "path", organizationAddMembersEndpoint)
+		r.Post(organizationAddMembersEndpoint, a.addOrganizationMembersHandler)
+		// check the status of the add members job
+		log.Infow("new route", "method", "GET", "path", organizationAddMembersJobStatusEndpoint)
+		r.Get(organizationAddMembersJobStatusEndpoint, a.addOrganizationMembersJobStatusHandler)
+		// delete a set of organization members
+		log.Infow("new route", "method", "DELETE", "path", organizationDeleteMembersEndpoint)
+		r.Delete(organizationDeleteMembersEndpoint, a.deleteOrganizationMembersHandler)
 		// add/overwrite organization meta information
 		log.Infow("new route", "method", "POST", "path", organizationMetaEndpoint)
 		r.Post(organizationMetaEndpoint, a.addOrganizationMetaHandler)
@@ -282,12 +282,12 @@ func (a *API) initRouter() http.Handler {
 		// create census
 		log.Infow("new route", "method", "POST", "path", censusEndpoint)
 		r.Post(censusEndpoint, a.createCensusHandler)
-		// add census participants
+		// add census members
 		log.Infow("new route", "method", "POST", "path", censusIDEndpoint)
-		r.Post(censusIDEndpoint, a.addCensusParticipantsHandler)
-		// get census participants job
-		log.Infow("new route", "method", "GET", "path", censusAddParticipantsJobStatusEndpoint)
-		r.Get(censusAddParticipantsJobStatusEndpoint, a.censusAddParticipantsJobStatusHandler)
+		r.Post(censusIDEndpoint, a.addCensusMembersHandler)
+		// get census members job
+		log.Infow("new route", "method", "GET", "path", censusAddMembersJobStatusEndpoint)
+		r.Get(censusAddMembersJobStatusEndpoint, a.censusAddMembersJobStatusHandler)
 		// publish census
 		log.Infow("new route", "method", "POST", "path", censusPublishEndpoint)
 		r.Post(censusPublishEndpoint, a.publishCensusHandler)
@@ -376,9 +376,9 @@ func (a *API) initRouter() http.Handler {
 		log.Infow("new route", "method", "POST", "path", processBundleSignEndpoint)
 		// r.Post(processBundleSignEndpoint, a.processBundleSignHandler)
 		r.Post(processBundleSignEndpoint, cspHandlers.BundleSignHandler)
-		// process bundle participant info handler
-		log.Infow("new route", "method", "GET", "path", processBundleParticipantEndpoint)
-		r.Get(processBundleParticipantEndpoint, a.processBundleParticipantInfoHandler)
+		// process bundle member info handler
+		log.Infow("new route", "method", "GET", "path", processBundleMemberEndpoint)
+		r.Get(processBundleMemberEndpoint, a.processBundleMemberInfoHandler)
 	})
 	a.router = r
 	return r

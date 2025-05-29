@@ -18,23 +18,23 @@ definitions:
         - $ref: '#/definitions/apicommon.UserInfo'
         description: User information for registration or identification
     type: object
-  apicommon.AddParticipantsRequest:
+  apicommon.AddMembersRequest:
     properties:
-      participants:
-        description: List of participants to add
+      members:
+        description: List of members to add
         items:
-          $ref: '#/definitions/apicommon.OrgParticipant'
+          $ref: '#/definitions/apicommon.OrgMember'
         type: array
     type: object
-  apicommon.AddParticipantsResponse:
+  apicommon.AddMembersResponse:
     properties:
       jobID:
         description: Job ID for tracking the addition process
         example: deadbeef
         format: hex
         type: string
-      participantsNo:
-        description: Number of participants added
+      membersNo:
+        description: Number of members added
         type: integer
     type: object
   apicommon.CreateOrganizationTicketRequest:
@@ -94,18 +94,18 @@ definitions:
         format: base64
         type: string
     type: object
-  apicommon.DeleteParticipantsRequest:
+  apicommon.DeleteMembersRequest:
     properties:
-      participantIDs:
-        description: List of participant ids numbers to delete
+      memberIDs:
+        description: List of member ids numbers to delete
         items:
           type: string
         type: array
     type: object
-  apicommon.DeleteParticipantsResponse:
+  apicommon.DeleteMembersResponse:
     properties:
-      participantsNo:
-        description: Number of participants deleted
+      membersNo:
+        description: Number of members deleted
         type: integer
     type: object
   apicommon.LoginResponse:
@@ -147,26 +147,26 @@ definitions:
         description: JWT authentication token
         type: string
     type: object
-  apicommon.OrgParticipant:
+  apicommon.OrgMember:
     properties:
       email:
-        description: Participant's email address
+        description: Member's email address
+        type: string
+      memberNo:
+        description: Unique member number
         type: string
       name:
-        description: Participant's name
+        description: Member's name
         type: string
       other:
         additionalProperties: {}
         description: Additional custom fields
         type: object
-      participantNo:
-        description: Unique participant number
-        type: string
       password:
-        description: Participant's password (for authentication)
+        description: Member's password (for authentication)
         type: string
       phone:
-        description: Participant's phone number
+        description: Member's phone number
         type: string
     type: object
   apicommon.OrganizationAddMetaRequest:
@@ -289,19 +289,19 @@ definitions:
           $ref: '#/definitions/apicommon.OrganizationInvite'
         type: array
     type: object
+  apicommon.OrganizationMembersResponse:
+    properties:
+      members:
+        items:
+          $ref: '#/definitions/apicommon.OrgMember'
+        type: array
+    type: object
   apicommon.OrganizationMetaResponse:
     properties:
       meta:
         additionalProperties: {}
         description: Meta information of the organization
         type: object
-    type: object
-  apicommon.OrganizationParticipantsResponse:
-    properties:
-      participants:
-        items:
-          $ref: '#/definitions/apicommon.OrgParticipant'
-        type: array
     type: object
   apicommon.OrganizationRole:
     properties:
@@ -671,7 +671,7 @@ definitions:
       total:
         type: integer
     type: object
-  db.BulkOrgParticipantsStatus:
+  db.BulkOrgMembersStatus:
     properties:
       added:
         type: integer
@@ -22173,7 +22173,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: Add multiple participants to a census. Requires Manager/Admin role.
+      description: Add multiple members to a census. Requires Manager/Admin role.
       parameters:
       - description: Census ID
         in: path
@@ -22184,19 +22184,19 @@ paths:
         in: query
         name: async
         type: boolean
-      - description: Participants to add
+      - description: Members to add
         in: body
         name: request
         required: true
         schema:
-          $ref: '#/definitions/apicommon.AddParticipantsRequest'
+          $ref: '#/definitions/apicommon.AddMembersRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/apicommon.AddParticipantsResponse'
+            $ref: '#/definitions/apicommon.AddMembersResponse'
         "400":
           description: Invalid input data
           schema:
@@ -22215,7 +22215,7 @@ paths:
             $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
-      summary: Add participants to a census
+      summary: Add members to a census
       tags:
       - census
   /census/{id}/publish:
@@ -22263,7 +22263,7 @@ paths:
       consumes:
       - application/json
       description: |-
-        Check the progress of a job to add participants to a census. Returns the progress of the job.
+        Check the progress of a job to add members to a census. Returns the progress of the job.
         If the job is completed, the job is deleted after 60 seconds.
       parameters:
       - description: Job ID
@@ -22286,7 +22286,7 @@ paths:
           description: Job not found
           schema:
             $ref: '#/definitions/errors.Error'
-      summary: Check the progress of adding participants
+      summary: Check the progress of adding members
       tags:
       - census
   /oauth/login:
@@ -22485,11 +22485,11 @@ paths:
       summary: Get organization censuses
       tags:
       - organizations
-  /organizations/{address}/participants:
+  /organizations/{address}/member:
     delete:
       consumes:
       - application/json
-      description: Delete multiple participants from an organization. Requires Manager/Admin
+      description: Delete multiple members from an organization. Requires Manager/Admin
         role.
       parameters:
       - description: Organization address
@@ -22497,19 +22497,19 @@ paths:
         name: address
         required: true
         type: string
-      - description: Participant IDs to delete
+      - description: Member IDs to delete
         in: body
         name: request
         required: true
         schema:
-          $ref: '#/definitions/apicommon.DeleteParticipantsRequest'
+          $ref: '#/definitions/apicommon.DeleteMembersRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/apicommon.DeleteParticipantsResponse'
+            $ref: '#/definitions/apicommon.DeleteMembersResponse'
         "400":
           description: Invalid input data
           schema:
@@ -22524,13 +22524,14 @@ paths:
             $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
-      summary: Delete organization participants
+      summary: Delete organization members
       tags:
       - organizations
+  /organizations/{address}/members:
     get:
       consumes:
       - application/json
-      description: Retrieve all participants of an organization with pagination support
+      description: Retrieve all members of an organization with pagination support
       parameters:
       - description: Organization address
         in: path
@@ -22551,7 +22552,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/apicommon.OrganizationParticipantsResponse'
+            $ref: '#/definitions/apicommon.OrganizationMembersResponse'
         "400":
           description: Invalid input
           schema:
@@ -22566,13 +22567,13 @@ paths:
             $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
-      summary: Get organization participants
+      summary: Get organization members
       tags:
       - organizations
     post:
       consumes:
       - application/json
-      description: Add multiple participants to an organization. Requires Manager/Admin
+      description: Add multiple members to an organization. Requires Manager/Admin
         role.
       parameters:
       - description: Organization address
@@ -22584,19 +22585,19 @@ paths:
         in: query
         name: async
         type: boolean
-      - description: Participants to add
+      - description: Members to add
         in: body
         name: request
         required: true
         schema:
-          $ref: '#/definitions/apicommon.AddParticipantsRequest'
+          $ref: '#/definitions/apicommon.AddMembersRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/apicommon.AddParticipantsResponse'
+            $ref: '#/definitions/apicommon.AddMembersResponse'
         "400":
           description: Invalid input data
           schema:
@@ -22611,15 +22612,15 @@ paths:
             $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
-      summary: Add participants to an organization
+      summary: Add members to an organization
       tags:
       - organizations
-  /organizations/{address}/participants/job/{jobid}:
+  /organizations/{address}/members/job/{jobid}:
     get:
       consumes:
       - application/json
       description: |-
-        Check the progress of a job to add participants to an organization. Returns the progress of the job.
+        Check the progress of a job to add members to an organization. Returns the progress of the job.
         If the job is completed, the job is deleted after 60 seconds.
       parameters:
       - description: Organization address
@@ -22638,7 +22639,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/db.BulkOrgParticipantsStatus'
+            $ref: '#/definitions/db.BulkOrgMembersStatus'
         "400":
           description: Invalid job ID
           schema:
@@ -22653,7 +22654,7 @@ paths:
             $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
-      summary: Check the progress of adding participants
+      summary: Check the progress of adding members
       tags:
       - organizations
   /organizations/{address}/subscription:
@@ -23620,12 +23621,12 @@ paths:
       summary: Add processes to an existing bundle
       tags:
       - process
-  /process/bundle/{bundleId}/{participantId}:
+  /process/bundle/{bundleId}/{memberId}:
     get:
       consumes:
       - application/json
       description: |-
-        Retrieve process information for a participant in a process bundle. Returns process details including
+        Retrieve process information for a member in a process bundle. Returns process details including
         the census and metadata.
       parameters:
       - description: Bundle ID
@@ -23633,9 +23634,9 @@ paths:
         name: bundleId
         required: true
         type: string
-      - description: Participant ID
+      - description: Member ID
         in: path
-        name: participantId
+        name: memberId
         required: true
         type: string
       produces:
@@ -23645,7 +23646,7 @@ paths:
           description: OK
           schema: {}
         "400":
-          description: Invalid bundle ID or participant ID
+          description: Invalid bundle ID or member ID
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
@@ -23656,7 +23657,7 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
-      summary: Get participant information for a process bundle
+      summary: Get member information for a process bundle
       tags:
       - process
   /process/bundle/{bundleId}/auth/{step}:
@@ -23665,7 +23666,7 @@ paths:
       - application/json
       description: |-
         Handle authentication for a process bundle. There are two steps in the authentication process:
-        - Step 0: The user sends the participant number and contact information (email or phone).
+        - Step 0: The user sends the member number and contact information (email or phone).
         If valid, the server sends a challenge to the user with a token.
         - Step 1: The user sends the token and challenge solution back to the server.
         If valid, the token is marked as verified and returned.

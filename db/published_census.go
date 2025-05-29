@@ -35,7 +35,7 @@ func (ms *MongoStorage) SetPublishedCensus(publishedCensus *PublishedCensus) err
 	return nil
 }
 
-// DeletePublishedCensus removes a publishedCensus and all its participants
+// DeletePublishedCensus removes a publishedCensus
 func (ms *MongoStorage) DelPublishedCensus(root, uri string) error {
 	if len(uri) == 0 || len(root) == 0 {
 		return ErrInvalidData
