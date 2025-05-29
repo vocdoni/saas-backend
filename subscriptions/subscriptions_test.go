@@ -29,7 +29,7 @@ func TestHasTxPermission(t *testing.T) {
 	// Create a mock user
 	user := &db.User{
 		Email: "test@example.com",
-		Organizations: []db.OrganizationMember{
+		Organizations: []db.OrganizationUser{
 			{
 				Address: "0x123",
 				Role:    db.AdminRole,
@@ -91,7 +91,7 @@ func TestHasDBPermission(t *testing.T) {
 		users: map[string]*db.User{
 			"test@example.com": {
 				Email: "test@example.com",
-				Organizations: []db.OrganizationMember{
+				Organizations: []db.OrganizationUser{
 					{
 						Address: "0x123",
 						Role:    db.AdminRole,
@@ -116,7 +116,7 @@ func TestHasDBPermission(t *testing.T) {
 					PlanID: 1,
 				},
 				Counters: db.OrganizationCounters{
-					Members: 5,
+					Users:   5,
 					SubOrgs: 2,
 				},
 			},
@@ -126,7 +126,7 @@ func TestHasDBPermission(t *testing.T) {
 				ID:   1,
 				Name: "Test Plan",
 				Organization: db.PlanLimits{
-					Members: 10,
+					Users:   10,
 					SubOrgs: 5,
 				},
 			},
@@ -139,17 +139,17 @@ func TestHasDBPermission(t *testing.T) {
 	}
 
 	// Test case 1: Organization without a plan
-	_, err := subs.HasDBPersmission("test@example.com", "0x123", InviteMember)
+	_, err := subs.HasDBPermission("test@example.com", "0x123", InviteUser)
 	c.Assert(err, qt.Not(qt.IsNil))
 	c.Assert(err.Error(), qt.Equals, "organization has no subscription plan")
 
-	// Test case 2: Organization with a plan - invite member
-	hasPermission, err := subs.HasDBPersmission("test@example.com", "0x456", InviteMember)
+	// Test case 2: Organization with a plan - invite user
+	hasPermission, err := subs.HasDBPermission("test@example.com", "0x456", InviteUser)
 	c.Assert(err, qt.IsNil)
 	c.Assert(hasPermission, qt.IsTrue)
 
 	// Test case 3: Organization with a plan - create sub org
-	hasPermission, err = subs.HasDBPersmission("test@example.com", "0x456", CreateSubOrg)
+	hasPermission, err = subs.HasDBPermission("test@example.com", "0x456", CreateSubOrg)
 	c.Assert(err, qt.IsNil)
 	c.Assert(hasPermission, qt.IsTrue)
 }

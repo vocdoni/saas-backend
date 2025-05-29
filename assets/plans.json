@@ -7,7 +7,7 @@
         "startingPrice": 24900,
         "default": false,
         "organization": {
-            "members": 1,
+            "users": 1,
             "subOrgs": 0,
             "maxProcesses": 10,
             "maxCensus": 2500,
@@ -43,7 +43,7 @@
         "startingPrice": 49900,
         "default": false,
         "organization": {
-            "members": 5,
+            "users": 5,
             "subOrgs": 1,
             "maxProcesses": 20,
             "maxCensus": 10000,
@@ -79,7 +79,7 @@
         "startingPrice": 0,
         "default": true,
         "organization": {
-            "members": 1,
+            "users": 1,
             "subOrgs": 0,
             "maxProcesses": 10,
             "maxCensus": 50,
@@ -115,7 +115,7 @@
         "startingPrice": 99900,
         "default": false,
         "organization": {
-            "members": 10,
+            "users": 10,
             "subOrgs": 3,
             "maxProcesses": 50,
             "maxCensus": 10000,

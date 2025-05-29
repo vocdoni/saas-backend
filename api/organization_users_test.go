@@ -13,7 +13,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 )
 
-func TestOrganizationMembers(t *testing.T) {
+func TestOrganizationUsers(t *testing.T) {
 	c := qt.New(t)
 
 	// Create an admin user
@@ -33,20 +33,20 @@ func TestOrganizationMembers(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Create a second user to be invited to the organization
-	memberToken := testCreateUser(t, "memberpassword123")
+	userToken := testCreateUser(t, "userpassword123")
 
 	// Get the second user's info
-	resp, code = testRequest(t, http.MethodGet, memberToken, nil, usersMeEndpoint)
+	resp, code = testRequest(t, http.MethodGet, userToken, nil, usersMeEndpoint)
 	c.Assert(code, qt.Equals, http.StatusOK)
 
-	var memberInfo apicommon.UserInfo
-	err := parseJSON(resp, &memberInfo)
+	var userInfo apicommon.UserInfo
+	err := parseJSON(resp, &userInfo)
 	c.Assert(err, qt.IsNil)
-	t.Logf("Member user ID: %d\n", memberInfo.ID)
+	t.Logf("User ID: %d\n", userInfo.ID)
 
 	// Invite the second user to the organization as a viewer
 	inviteRequest := &apicommon.OrganizationInvite{
-		Email: memberInfo.Email,
+		Email: userInfo.Email,
 		Role:  string(db.ViewerRole),
 	}
 	resp, code = testRequest(
@@ -56,14 +56,14 @@ func TestOrganizationMembers(t *testing.T) {
 		inviteRequest,
 		"organizations",
 		orgAddress.String(),
-		"members",
+		"users",
 	)
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Get the invitation code from the email
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	mailBody, err := testMailService.FindEmail(ctx, memberInfo.Email)
+	mailBody, err := testMailService.FindEmail(ctx, userInfo.Email)
 	c.Assert(err, qt.IsNil)
 
 	// Extract the verification code using regex
@@ -79,40 +79,40 @@ func TestOrganizationMembers(t *testing.T) {
 	resp, code = testRequest(
 		t,
 		http.MethodPost,
-		memberToken,
+		userToken,
 		acceptRequest,
 		"organizations",
 		orgAddress.String(),
-		"members",
+		"users",
 		"accept",
 	)
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
-	// Get the organization members to verify the second user is now a member
-	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "members")
+	// Get the organization users to verify the second user is now a user
+	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "users")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
-	var members apicommon.OrganizationMembers
-	err = parseJSON(resp, &members)
+	var users apicommon.OrganizationUsers
+	err = parseJSON(resp, &users)
 	c.Assert(err, qt.IsNil)
-	c.Assert(len(members.Members), qt.Equals, 2) // Admin + new member
+	c.Assert(len(users.Users), qt.Equals, 2) // Admin + new user
 
-	// Find the member in the list
-	var memberID uint64
+	// Find the user in the list
+	var userID uint64
 	var initialRole string
-	for _, member := range members.Members {
-		if member.Info.Email == memberInfo.Email {
-			memberID = member.Info.ID
-			initialRole = member.Role
+	for _, user := range users.Users {
+		if user.Info.Email == userInfo.Email {
+			userID = user.Info.ID
+			initialRole = user.Role
 			break
 		}
 	}
-	c.Assert(memberID, qt.Not(qt.Equals), uint64(0), qt.Commentf("Member not found in organization"))
+	c.Assert(userID, qt.Not(qt.Equals), uint64(0), qt.Commentf("User not found in organization"))
 	c.Assert(initialRole, qt.Equals, string(db.ViewerRole))
 
-	t.Run("UpdateOrganizationMemberRole", func(t *testing.T) {
-		// Test 1: Update the member's role from Viewer to Manager
-		updateRequest := &apicommon.UpdateOrganizationMemberRoleRequest{
+	t.Run("UpdateOrganizationUserRole", func(t *testing.T) {
+		// Test 1: Update the user's role from Viewer to Manager
+		updateRequest := &apicommon.UpdateOrganizationUserRoleRequest{
 			Role: string(db.ManagerRole),
 		}
 		resp, code = testRequest(
@@ -122,30 +122,30 @@ func TestOrganizationMembers(t *testing.T) {
 			updateRequest,
 			"organizations",
 			orgAddress.String(),
-			"members",
-			fmt.Sprintf("%d", memberID),
+			"users",
+			fmt.Sprintf("%d", userID),
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		// Verify the role was updated
-		resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "members")
+		resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "users")
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
-		var updatedMembers apicommon.OrganizationMembers
-		err = parseJSON(resp, &updatedMembers)
+		var updatedUsers apicommon.OrganizationUsers
+		err = parseJSON(resp, &updatedUsers)
 		c.Assert(err, qt.IsNil)
 
 		var updatedRole string
-		for _, member := range updatedMembers.Members {
-			if member.Info.ID == memberID {
-				updatedRole = member.Role
+		for _, user := range updatedUsers.Users {
+			if user.Info.ID == userID {
+				updatedRole = user.Role
 				break
 			}
 		}
 		c.Assert(updatedRole, qt.Equals, string(db.ManagerRole))
 
-		// Test 2: Update the member's role from Manager to Admin
-		updateRequest = &apicommon.UpdateOrganizationMemberRoleRequest{
+		// Test 2: Update the user's role from Manager to Admin
+		updateRequest = &apicommon.UpdateOrganizationUserRoleRequest{
 			Role: string(db.AdminRole),
 		}
 		resp, code = testRequest(
@@ -155,8 +155,8 @@ func TestOrganizationMembers(t *testing.T) {
 			updateRequest,
 			"organizations",
 			orgAddress.String(),
-			"members",
-			fmt.Sprintf("%d", memberID),
+			"users",
+			fmt.Sprintf("%d", userID),
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
@@ -168,23 +168,23 @@ func TestOrganizationMembers(t *testing.T) {
 			nil,
 			"organizations",
 			orgAddress.String(),
-			"members",
+			"users",
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
-		err = parseJSON(resp, &updatedMembers)
+		err = parseJSON(resp, &updatedUsers)
 		c.Assert(err, qt.IsNil)
 
-		for _, member := range updatedMembers.Members {
-			if member.Info.ID == memberID {
-				updatedRole = member.Role
+		for _, user := range updatedUsers.Users {
+			if user.Info.ID == userID {
+				updatedRole = user.Role
 				break
 			}
 		}
 		c.Assert(updatedRole, qt.Equals, string(db.AdminRole))
 
 		// Test 3: Try to update with an invalid role
-		updateRequest = &apicommon.UpdateOrganizationMemberRoleRequest{
+		updateRequest = &apicommon.UpdateOrganizationUserRoleRequest{
 			Role: "invalid_role",
 		}
 		_, code = testRequest(
@@ -194,13 +194,13 @@ func TestOrganizationMembers(t *testing.T) {
 			updateRequest,
 			"organizations",
 			orgAddress.String(),
-			"members",
-			fmt.Sprintf("%d", memberID),
+			"users",
+			fmt.Sprintf("%d", userID),
 		)
 		c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
 
 		// Test 4: Try to update without authentication
-		updateRequest = &apicommon.UpdateOrganizationMemberRoleRequest{
+		updateRequest = &apicommon.UpdateOrganizationUserRoleRequest{
 			Role: string(db.ViewerRole),
 		}
 		_, code = testRequest(
@@ -210,8 +210,8 @@ func TestOrganizationMembers(t *testing.T) {
 			updateRequest,
 			"organizations",
 			orgAddress.String(),
-			"members",
-			fmt.Sprintf("%d", memberID),
+			"users",
+			fmt.Sprintf("%d", userID),
 		)
 		c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
@@ -225,13 +225,13 @@ func TestOrganizationMembers(t *testing.T) {
 			updateRequest,
 			"organizations",
 			orgAddress.String(),
-			"members",
-			fmt.Sprintf("%d", memberID),
+			"users",
+			fmt.Sprintf("%d", userID),
 		)
 		c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
-		// Test 6: Try to update a non-existent member
-		// Note: The current implementation returns 200 OK even for non-existent members
+		// Test 6: Try to update a non-existent user
+		// Note: The current implementation returns 200 OK even for non-existent users
 		// because the MongoDB UpdateOne operation doesn't return an error if no documents match
 		_, code = testRequest(
 			t,
@@ -240,13 +240,13 @@ func TestOrganizationMembers(t *testing.T) {
 			updateRequest,
 			"organizations",
 			orgAddress.String(),
-			"members",
+			"users",
 			"999999",
 		)
 		c.Assert(code, qt.Equals, http.StatusOK)
 	})
 
-	t.Run("RemoveOrganizationMember", func(t *testing.T) {
+	t.Run("RemoveOrganizationUser", func(t *testing.T) {
 		// Create a new organization and user for this test
 		newOrgAddress := testCreateOrganization(t, adminToken)
 		t.Logf("Created organization with address: %s\n", newOrgAddress.String())
@@ -273,7 +273,7 @@ func TestOrganizationMembers(t *testing.T) {
 			inviteRequest,
 			"organizations",
 			newOrgAddress.String(),
-			"members",
+			"users",
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
@@ -299,12 +299,12 @@ func TestOrganizationMembers(t *testing.T) {
 			acceptRequest,
 			"organizations",
 			newOrgAddress.String(),
-			"members",
+			"users",
 			"accept",
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
-		// Get the organization members to verify the user is now a member
+		// Get the organization users to verify the user is now a user
 		resp, code = testRequest(
 			t,
 			http.MethodGet,
@@ -312,26 +312,26 @@ func TestOrganizationMembers(t *testing.T) {
 			nil,
 			"organizations",
 			newOrgAddress.String(),
-			"members",
+			"users",
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
-		var members apicommon.OrganizationMembers
-		err = parseJSON(resp, &members)
+		var users apicommon.OrganizationUsers
+		err = parseJSON(resp, &users)
 		c.Assert(err, qt.IsNil)
-		c.Assert(len(members.Members), qt.Equals, 2) // Admin + new member
+		c.Assert(len(users.Users), qt.Equals, 2) // Admin + new user
 
-		// Find the member in the list
-		var memberID uint64
-		for _, member := range members.Members {
-			if member.Info.Email == userToRemoveInfo.Email {
-				memberID = member.Info.ID
+		// Find the user in the list
+		var userID uint64
+		for _, user := range users.Users {
+			if user.Info.Email == userToRemoveInfo.Email {
+				userID = user.Info.ID
 				break
 			}
 		}
-		c.Assert(memberID, qt.Not(qt.Equals), uint64(0), qt.Commentf("Member not found in organization"))
+		c.Assert(userID, qt.Not(qt.Equals), uint64(0), qt.Commentf("User not found in organization"))
 
-		// Test 1: Remove the member from the organization
+		// Test 1: Remove the user from the organization
 		resp, code = testRequest(
 			t,
 			http.MethodDelete,
@@ -339,21 +339,21 @@ func TestOrganizationMembers(t *testing.T) {
 			nil,
 			"organizations",
 			newOrgAddress.String(),
-			"members",
-			fmt.Sprintf("%d", memberID),
+			"users",
+			fmt.Sprintf("%d", userID),
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
-		// Verify the member was removed
-		resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", newOrgAddress.String(), "members")
+		// Verify the user was removed
+		resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", newOrgAddress.String(), "users")
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
-		var updatedMembers apicommon.OrganizationMembers
-		err = parseJSON(resp, &updatedMembers)
+		var updatedUsers apicommon.OrganizationUsers
+		err = parseJSON(resp, &updatedUsers)
 		c.Assert(err, qt.IsNil)
-		c.Assert(len(updatedMembers.Members), qt.Equals, 1) // Only admin remains
+		c.Assert(len(updatedUsers.Users), qt.Equals, 1) // Only admin remains
 
-		// Test 2: Try to remove a member without authentication
+		// Test 2: Try to remove a user without authentication
 		_, code = testRequest(
 			t,
 			http.MethodDelete,
@@ -361,12 +361,12 @@ func TestOrganizationMembers(t *testing.T) {
 			nil,
 			"organizations",
 			newOrgAddress.String(),
-			"members",
-			fmt.Sprintf("%d", memberID),
+			"users",
+			fmt.Sprintf("%d", userID),
 		)
 		c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
-		// Test 3: Try to remove a member with a non-admin user
+		// Test 3: Try to remove a user with a non-admin user
 		// Create a third user who is not an admin of the organization
 		nonAdminToken := testCreateUser(t, "nonadminpassword123")
 		_, code = testRequest(
@@ -376,13 +376,13 @@ func TestOrganizationMembers(t *testing.T) {
 			nil,
 			"organizations",
 			newOrgAddress.String(),
-			"members",
-			fmt.Sprintf("%d", memberID),
+			"users",
+			fmt.Sprintf("%d", userID),
 		)
 		c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
-		// Test 4: Try to remove a non-existent member
-		// Note: The current implementation returns 200 OK even for non-existent members
+		// Test 4: Try to remove a non-existent user
+		// Note: The current implementation returns 200 OK even for non-existent users
 		// because the MongoDB UpdateOne operation doesn't return an error if no documents match
 		_, code = testRequest(
 			t,
@@ -391,7 +391,7 @@ func TestOrganizationMembers(t *testing.T) {
 			nil,
 			"organizations",
 			newOrgAddress.String(),
-			"members",
+			"users",
 			"999999",
 		)
 		c.Assert(code, qt.Equals, http.StatusOK)
@@ -418,7 +418,7 @@ func TestOrganizationMembers(t *testing.T) {
 			nil,
 			"organizations",
 			newOrgAddress.String(),
-			"members",
+			"users",
 			fmt.Sprintf("%d", adminInfo.ID),
 		)
 		c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
@@ -444,7 +444,7 @@ func TestOrganizationMembers(t *testing.T) {
 			inviteRequest,
 			"organizations",
 			newOrgAddress.String(),
-			"members",
+			"users",
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
@@ -456,7 +456,7 @@ func TestOrganizationMembers(t *testing.T) {
 			nil,
 			"organizations",
 			newOrgAddress.String(),
-			"members",
+			"users",
 			"pending",
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
@@ -480,7 +480,7 @@ func TestOrganizationMembers(t *testing.T) {
 			nil, // No request body needed
 			"organizations",
 			newOrgAddress.String(),
-			"members",
+			"users",
 			"pending",
 			invitationID, // Add invitationID as path parameter
 		)
@@ -494,7 +494,7 @@ func TestOrganizationMembers(t *testing.T) {
 			nil,
 			"organizations",
 			newOrgAddress.String(),
-			"members",
+			"users",
 			"pending",
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
@@ -517,7 +517,7 @@ func TestOrganizationMembers(t *testing.T) {
 			nil,
 			"organizations",
 			newOrgAddress.String(),
-			"members",
+			"users",
 			"pending",
 			nonExistentID,
 		)
@@ -531,7 +531,7 @@ func TestOrganizationMembers(t *testing.T) {
 			nil,
 			"organizations",
 			newOrgAddress.String(),
-			"members",
+			"users",
 			"pending",
 			invitationID,
 		)
@@ -547,7 +547,7 @@ func TestOrganizationMembers(t *testing.T) {
 			nil,
 			"organizations",
 			newOrgAddress.String(),
-			"members",
+			"users",
 			"pending",
 			invitationID,
 		)
@@ -569,7 +569,7 @@ func TestOrganizationMembers(t *testing.T) {
 			inviteRequest,
 			"organizations",
 			anotherOrgAddress.String(),
-			"members",
+			"users",
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
@@ -581,7 +581,7 @@ func TestOrganizationMembers(t *testing.T) {
 			nil,
 			"organizations",
 			anotherOrgAddress.String(),
-			"members",
+			"users",
 			"pending",
 		)
 		c.Assert(code, qt.Equals, http.StatusOK)
@@ -602,7 +602,7 @@ func TestOrganizationMembers(t *testing.T) {
 			nil,
 			"organizations",
 			newOrgAddress.String(), // Using first org to update invitation from second org
-			"members",
+			"users",
 			"pending",
 			anotherInvitationID,
 		)
@@ -616,7 +616,7 @@ func TestOrganizationMembers(t *testing.T) {
 			nil,
 			"organizations",
 			newOrgAddress.String(),
-			"members",
+			"users",
 			"pending",
 			invitationID,
 		)
@@ -629,7 +629,7 @@ func TestOrganizationMembers(t *testing.T) {
 			nil,
 			"organizations",
 			anotherOrgAddress.String(),
-			"members",
+			"users",
 			"pending",
 			anotherInvitationID,
 		)
@@ -656,7 +656,7 @@ func TestOrganizationMembers(t *testing.T) {
 			inviteRequest,
 			"organizations",
 			newOrgAddress.String(),
-			"members",
+			"users",
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
@@ -668,7 +668,7 @@ func TestOrganizationMembers(t *testing.T) {
 			nil,
 			"organizations",
 			newOrgAddress.String(),
-			"members",
+			"users",
 			"pending",
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
@@ -691,7 +691,7 @@ func TestOrganizationMembers(t *testing.T) {
 			nil, // No request body needed
 			"organizations",
 			newOrgAddress.String(),
-			"members",
+			"users",
 			"pending",
 			invitationID, // Add invitationID as path parameter
 		)
@@ -705,7 +705,7 @@ func TestOrganizationMembers(t *testing.T) {
 			nil,
 			"organizations",
 			newOrgAddress.String(),
-			"members",
+			"users",
 			"pending",
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
@@ -723,7 +723,7 @@ func TestOrganizationMembers(t *testing.T) {
 			nil,
 			"organizations",
 			newOrgAddress.String(),
-			"members",
+			"users",
 			"pending",
 			nonExistentID,
 		)
@@ -737,7 +737,7 @@ func TestOrganizationMembers(t *testing.T) {
 			nil,
 			"organizations",
 			newOrgAddress.String(),
-			"members",
+			"users",
 			"pending",
 			invitationID,
 		)
@@ -753,7 +753,7 @@ func TestOrganizationMembers(t *testing.T) {
 			nil,
 			"organizations",
 			newOrgAddress.String(),
-			"members",
+			"users",
 			"pending",
 			invitationID,
 		)
@@ -775,7 +775,7 @@ func TestOrganizationMembers(t *testing.T) {
 			inviteRequest,
 			"organizations",
 			anotherOrgAddress.String(),
-			"members",
+			"users",
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
@@ -787,7 +787,7 @@ func TestOrganizationMembers(t *testing.T) {
 			nil,
 			"organizations",
 			anotherOrgAddress.String(),
-			"members",
+			"users",
 			"pending",
 		)
 		c.Assert(code, qt.Equals, http.StatusOK)
@@ -808,7 +808,7 @@ func TestOrganizationMembers(t *testing.T) {
 			nil,
 			"organizations",
 			newOrgAddress.String(), // Using first org to delete invitation from second org
-			"members",
+			"users",
 			"pending",
 			anotherInvitationID,
 		)
@@ -822,7 +822,7 @@ func TestOrganizationMembers(t *testing.T) {
 			nil,
 			"organizations",
 			anotherOrgAddress.String(),
-			"members",
+			"users",
 			"pending",
 			anotherInvitationID,
 		)

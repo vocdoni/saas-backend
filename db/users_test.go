@@ -145,7 +145,7 @@ func TestUsers(t *testing.T) {
 		c.Assert(err, qt.Equals, ErrNotFound)
 	})
 
-	t.Run("IsMemberOf", func(_ *testing.T) {
+	t.Run("UserHasRoleInOrg", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 
 		// create a new user with some organizations
@@ -154,7 +154,7 @@ func TestUsers(t *testing.T) {
 			Password:  testUserPass,
 			FirstName: testUserFirstName,
 			LastName:  testUserLastName,
-			Organizations: []OrganizationMember{
+			Organizations: []OrganizationUser{
 				{Address: "adminOrg", Role: AdminRole},
 				{Address: "managerOrg", Role: ManagerRole},
 				{Address: "viewOrg", Role: ViewerRole},
@@ -162,22 +162,22 @@ func TestUsers(t *testing.T) {
 		}
 		_, err := testDB.SetUser(user)
 		c.Assert(err, qt.IsNil)
-		// test the user is member of the organizations
+		// test the user has a role in the organizations
 		for _, org := range user.Organizations {
-			success, err := testDB.IsMemberOf(user.Email, org.Address, org.Role)
+			success, err := testDB.UserHasRoleInOrg(user.Email, org.Address, org.Role)
 			c.Assert(err, qt.IsNil)
 			c.Assert(success, qt.IsTrue)
 		}
-		// test the user is not member of the organizations
-		success, err := testDB.IsMemberOf(user.Email, "notFoundOrg", AdminRole)
+		// test the user role in a non-existent organizations
+		success, err := testDB.UserHasRoleInOrg(user.Email, "notFoundOrg", AdminRole)
 		c.Assert(err, qt.Equals, ErrNotFound)
 		c.Assert(success, qt.IsFalse)
-		// test the user has no role in the organization
-		success, err = testDB.IsMemberOf(user.Email, "adminOrg", ViewerRole)
+		// test the user with a different role in the organization
+		success, err = testDB.UserHasRoleInOrg(user.Email, "adminOrg", ViewerRole)
 		c.Assert(err, qt.IsNil)
 		c.Assert(success, qt.IsFalse)
 		// test not found user
-		success, err = testDB.IsMemberOf("notFoundUser", "adminOrg", AdminRole)
+		success, err = testDB.UserHasRoleInOrg("notFoundUser", "adminOrg", AdminRole)
 		c.Assert(err, qt.Equals, ErrNotFound)
 		c.Assert(success, qt.IsFalse)
 	})

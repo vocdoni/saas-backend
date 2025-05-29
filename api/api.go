@@ -212,33 +212,33 @@ func (a *API) initRouter() http.Handler {
 		// update the organization
 		log.Infow("new route", "method", "PUT", "path", organizationEndpoint)
 		r.Put(organizationEndpoint, a.updateOrganizationHandler)
-		// get organization members
-		log.Infow("new route", "method", "GET", "path", organizationMembersEndpoint)
-		r.Get(organizationMembersEndpoint, a.organizationMembersHandler)
+		// get organization users
+		log.Infow("new route", "method", "GET", "path", organizationUsersEndpoint)
+		r.Get(organizationUsersEndpoint, a.organizationUsersHandler)
 		// get organization subscription
 		log.Infow("new route", "method", "GET", "path", organizationSubscriptionEndpoint)
 		r.Get(organizationSubscriptionEndpoint, a.organizationSubscriptionHandler)
-		// invite a new admin member to the organization
-		log.Infow("new route", "method", "POST", "path", organizationAddMemberEndpoint)
-		r.Post(organizationAddMemberEndpoint, a.inviteOrganizationMemberHandler)
-		// update an organization's member role
-		log.Infow("new route", "method", "PUT", "path", organizationUpdateMemberEndpoint)
-		r.Put(organizationUpdateMemberEndpoint, a.updateOrganizationMemberRoleHandler)
-		// remove a member from an organization
-		log.Infow("new route", "method", "DELETE", "path", organizationDeleteMemberEndpoint)
-		r.Delete(organizationDeleteMemberEndpoint, a.removeOrganizationMemberHandler)
+		// invite a new user to the organization
+		log.Infow("new route", "method", "POST", "path", organizationAddUserEndpoint)
+		r.Post(organizationAddUserEndpoint, a.inviteOrganizationUserHandler)
+		// update an organization's user role
+		log.Infow("new route", "method", "PUT", "path", organizationUpdateUserEndpoint)
+		r.Put(organizationUpdateUserEndpoint, a.updateOrganizationUserHandler)
+		// remove a user from an organization
+		log.Infow("new route", "method", "DELETE", "path", organizationDeleteUserEndpoint)
+		r.Delete(organizationDeleteUserEndpoint, a.removeOrganizationUserHandler)
 		// get organization censuses
 		log.Infow("new route", "method", "GET", "path", organizationCensusesEndpoint)
 		r.Get(organizationCensusesEndpoint, a.organizationCensusesHandler)
 		// pending organization invitations
-		log.Infow("new route", "method", "GET", "path", organizationPendingMembersEndpoint)
-		r.Get(organizationPendingMembersEndpoint, a.pendingOrganizationMembersHandler)
+		log.Infow("new route", "method", "GET", "path", organizationPendingUsersEndpoint)
+		r.Get(organizationPendingUsersEndpoint, a.pendingOrganizationUsersHandler)
 		// update pending organization invitation
 		log.Infow("new route", "method", "PUT", "path", organizationHandlePendingInvitationEndpoint)
-		r.Put(organizationHandlePendingInvitationEndpoint, a.updatePendingMemberInvitationHandler)
+		r.Put(organizationHandlePendingInvitationEndpoint, a.updatePendingUserInvitationHandler)
 		// delete pending organization invitation
 		log.Infow("new route", "method", "DELETE", "path", organizationHandlePendingInvitationEndpoint)
-		r.Delete(organizationHandlePendingInvitationEndpoint, a.deletePendingMemberInvitationHandler)
+		r.Delete(organizationHandlePendingInvitationEndpoint, a.deletePendingUserInvitationHandler)
 		// get organization participants
 		log.Infow("new route", "method", "GET", "path", organizationParticipantsEndpoint)
 		r.Get(organizationParticipantsEndpoint, a.organizationParticipantsHandler)
@@ -336,11 +336,11 @@ func (a *API) initRouter() http.Handler {
 		log.Infow("new route", "method", "GET", "path", organizationEndpoint)
 		r.Get(organizationEndpoint, a.organizationInfoHandler)
 		// accept organization invitation
-		log.Infow("new route", "method", "POST", "path", organizationAcceptMemberEndpoint)
-		r.Post(organizationAcceptMemberEndpoint, a.acceptOrganizationMemberInvitationHandler)
+		log.Infow("new route", "method", "POST", "path", organizationAcceptUserEndpoint)
+		r.Post(organizationAcceptUserEndpoint, a.acceptOrganizationUserInvitationHandler)
 		// get organization roles
 		log.Infow("new route", "method", "GET", "path", organizationRolesEndpoint)
-		r.Get(organizationRolesEndpoint, a.organizationsMembersRolesHandler)
+		r.Get(organizationRolesEndpoint, a.organizationRolesHandler)
 		// get organization types
 		log.Infow("new route", "method", "GET", "path", organizationTypesEndpoint)
 		r.Get(organizationTypesEndpoint, a.organizationsTypesHandler)

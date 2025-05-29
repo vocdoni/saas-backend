@@ -163,11 +163,11 @@ Content-Type: application/json
 ### Get organization info
 GET http://localhost:8080/organizations/0xbB77d65d95308866Ebf2cEf68c16C8bff1859509
 
-### Get organization members
-GET http://localhost:8080/organizations/{address}/members
+### Get organization users
+GET http://localhost:8080/organizations/{address}/users
 
-### Invite organization member
-POST http://localhost:8080/organizations/{address}/members
+### Invite organization user
+POST http://localhost:8080/organizations/{address}/users
 Authorization: Bearer <user_token>
 Content-Type: application/json
 
@@ -177,11 +177,11 @@ Content-Type: application/json
 }
 
 ### List pending invitations
-GET http://localhost:8080/organizations/{address}/members/pending
+GET http://localhost:8080/organizations/{address}/users/pending
 Authorization: Bearer <user_token>
 
 ### Accept organization invitation
-POST http://localhost:8080/organizations/{address}/members/accept
+POST http://localhost:8080/organizations/{address}/users/accept
 Content-Type: application/json
 
 {

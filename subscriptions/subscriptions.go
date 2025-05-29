@@ -19,10 +19,10 @@ type Config struct {
 type DBPermission int
 
 const (
-	// InviteMember represents the permission to invite new members to an organization.
-	InviteMember DBPermission = iota
-	// DeleteMember represents the permission to remove members from an organization.
-	DeleteMember
+	// InviteUser represents the permission to invite new users to an organization.
+	InviteUser DBPermission = iota
+	// DeleteUser represents the permission to remove users from an organization.
+	DeleteUser
 	// CreateSubOrg represents the permission to create sub-organizations.
 	CreateSubOrg
 	// CreateDraft represents the permission to create draft processes.
@@ -32,10 +32,10 @@ const (
 // String returns the string representation of the DBPermission.
 func (p DBPermission) String() string {
 	switch p {
-	case InviteMember:
-		return "InviteMember"
-	case DeleteMember:
-		return "DeleteMember"
+	case InviteUser:
+		return "InviteUser"
+	case DeleteUser:
+		return "DeleteUser"
 	case CreateSubOrg:
 		return "CreateSubOrg"
 	case CreateDraft:
@@ -151,8 +151,8 @@ func (p *Subscriptions) HasTxPermission(
 	return true, nil
 }
 
-// HasDBPersmission checks if the user has permission to perform the given action in the organization stored in the DB
-func (p *Subscriptions) HasDBPersmission(userEmail, orgAddress string, permission DBPermission) (bool, error) {
+// HasDBPermission checks if the user has permission to perform the given action in the organization stored in the DB
+func (p *Subscriptions) HasDBPermission(userEmail, orgAddress string, permission DBPermission) (bool, error) {
 	user, err := p.db.UserByEmail(userEmail)
 	if err != nil {
 		return false, fmt.Errorf("could not get user: %v", err)
@@ -172,17 +172,17 @@ func (p *Subscriptions) HasDBPersmission(userEmail, orgAddress string, permissio
 		return false, fmt.Errorf("could not get organization plan: %v", err)
 	}
 	switch permission {
-	case InviteMember:
-		// check if the user has permission to invite members
+	case InviteUser:
+		// check if the user has permission to invite users
 		if !user.HasRoleFor(orgAddress, db.AdminRole) {
 			return false, fmt.Errorf("user does not have admin role")
 		}
-		if org.Counters.Members >= plan.Organization.Members {
-			return false, fmt.Errorf("max members reached")
+		if org.Counters.Users >= plan.Organization.Users {
+			return false, fmt.Errorf("max users reached")
 		}
 		return true, nil
-	case DeleteMember:
-		// check if the user has permission to delete members
+	case DeleteUser:
+		// check if the user has permission to delete users
 		if !user.HasRoleFor(orgAddress, db.AdminRole) {
 			return false, fmt.Errorf("user does not have admin role")
 		}

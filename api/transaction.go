@@ -15,7 +15,7 @@ import (
 // signTxHandler godoc
 //
 //	@Summary		Sign a transaction
-//	@Description	Sign a transaction with the organization's private key. The user must be a member of the organization.
+//	@Description	Sign a transaction with the organization's private key. The user must have a role in the organization.
 //	@Tags			transactions
 //	@Accept			json
 //	@Produce		json
@@ -41,9 +41,9 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// check if the user is a member of the organization
+	// check if the user has a role in the organization
 	if !user.HasRoleFor(signReq.Address.String(), db.AnyRole) {
-		errors.ErrUnauthorized.With("user is not an organization member").Write(w)
+		errors.ErrUnauthorized.With("user has no role in the organization").Write(w)
 		return
 	}
 

@@ -26,14 +26,14 @@
   - [🆕 Create organization](#-create-organization)
   - [⚙️ Update organization](#-update-organization)
   - [🔍 Organization info](#-organization-info)
-  - [🧑‍🤝‍🧑 Organization members](#-organization-members)
-  - [🧑‍💼 Invite organization member](#-invite-organization-member)
+  - [🧑‍🤝‍🧑 Organization users](#-organization-users)
+  - [🧑‍💼 Invite organization user](#-invite-organization-user)
   - [⏳ List pending invitations](#-list-pending-invitations)
   - [🗑️ Delete pending invitation](#-delete-pending-invitation)
   - [🔄 Update pending invitation](#-update-pending-invitation)
   - [🤝 Accept organization invitation](#-accept-organization-invitation)
-  - [🔄 Update organization member role](#-update-organization-member-role)
-  - [❌ Remove organization member](#-remove-organization-member)
+  - [🔄 Update organization user role](#-update-organization-user-role)
+  - [❌ Remove organization user](#-remove-organization-user)
   - [💸 Organization Subscription Info](#-organization-subscription-info)
   - [📊 Organization Censuses](#-organization-censuses)
   - [👥 Organization Participants](#-organization-participants)
@@ -42,7 +42,7 @@
   - [❌ Delete Organization Participants](#-delete-organization-participants)
   - [📋 Organization Meta Information](#-organization-meta-information)
   - [🎫 Create Organization Ticket](#-create-organization-ticket)
-  - [🤠 Available organization members roles](#-available-organization-members-roles)
+  - [🤠 Available organization user roles](#-available-organization-user-roles)
   - [🏛️ Available organization types](#-available-organization-types)
 - [🏦 Plans](#-plans)
   - [📋 Get Available Plans](#-get-plans)
@@ -413,7 +413,7 @@ This endpoint only returns the addresses of the organizations where the current 
           "sentSMS": 0,
           "sentEmails": 0,
           "subOrgs": 0,
-          "members": 0
+          "users": 0
         }
       }
     }
@@ -590,7 +590,7 @@ If the user want to create a sub org, the address of the root organization must 
     "sentSMS": 0,
     "sentEmails": 0,
     "subOrgs": 0,
-    "members": 0
+    "users": 0
   }
 }
 ```
@@ -677,7 +677,7 @@ Only the following parameters can be changed. Every parameter is optional.
     "sentSMS": 0,
     "sentEmails": 0,
     "subOrgs": 0,
-    "members": 0
+    "users": 0
   }
 }
 ```
@@ -691,14 +691,14 @@ Only the following parameters can be changed. Every parameter is optional.
 | `400` | `4012` | `no organization provided` |
 | `500` | `50002` | `internal server error` |
 
-### 🧑‍🤝‍🧑 Organization members
+### 🧑‍🤝‍🧑 Organization users
 
-* **Path** `/organizations/{address}/members`
+* **Path** `/organizations/{address}/users`
 * **Method** `GET`
 * **Response**
 ```json
 {
-  "members": [
+  "users": [
     {
       "info": { /* user info response */ },
       "role": "admin"
@@ -716,9 +716,9 @@ Only the following parameters can be changed. Every parameter is optional.
 | `400` | `4012` | `no organization provided` |
 | `500` | `50002` | `internal server error` |
 
-### 🧑‍💼 Invite organization member
+### 🧑‍💼 Invite organization user
 
-* **Path** `/organizations/{address}/members`
+* **Path** `/organizations/{address}/users`
 * **Method** `POST`
 * **Headers**
   * `Authentication: Bearer <user_token>`
@@ -747,7 +747,7 @@ Only the following parameters can be changed. Every parameter is optional.
 
 ### ⏳ List pending invitations
 
-* **Path** `/organizations/{address}/members/pending`
+* **Path** `/organizations/{address}/users/pending`
 * **Method** `GET`
 * **Headers**
   * `Authentication: Bearer <user_token>`
@@ -776,7 +776,7 @@ Only the following parameters can be changed. Every parameter is optional.
 
 ### 🗑️ Delete pending invitation
 
-* **Path** `/organizations/{address}/members/pending/{invitationID}`
+* **Path** `/organizations/{address}/users/pending/{invitationID}`
 * **Method** `DELETE`
 * **Headers**
   * `Authentication: Bearer <user_token>`
@@ -803,7 +803,7 @@ Delete a pending invitation for a user to join an organization by email. Only ad
 
 ### 🔄 Update pending invitation
 
-* **Path** `/organizations/{address}/members/pending/{invitationID}`
+* **Path** `/organizations/{address}/users/pending/{invitationID}`
 * **Method** `PUT`
 * **Headers**
   * `Authentication: Bearer <user_token>`
@@ -831,7 +831,7 @@ Update the code, link and expiration time of a pending invitation to an organiza
 
 ### 🤝 Accept organization invitation
 
-* **Path** `/organizations/{address}/members/accept`
+* **Path** `/organizations/{address}/users/accept`
 * **Method** `POST`
 * **Request**
 ```json
@@ -861,9 +861,9 @@ Update the code, link and expiration time of a pending invitation to an organiza
 | `409` | `40901` | `duplicate conflict` |
 | `500` | `50002` | `internal server error` |
 
-### 🔄 Update organization member role
+### 🔄 Update organization user role
 
-* **Path** `/organizations/{address}/members/{userid}`
+* **Path** `/organizations/{address}/users/{userid}`
 * **Method** `PUT`
 * **Headers**
   * `Authentication: Bearer <user_token>`
@@ -875,7 +875,7 @@ Update the code, link and expiration time of a pending invitation to an organiza
 ```
 
 * **Description**
-Update the role of a member in an organization. Only admins of the organization can update the role.
+Update the role of a user in an organization. Only admins of the organization can update the role.
 
 * **Response**
 ```json
@@ -894,16 +894,16 @@ Update the role of a member in an organization. Only admins of the organization 
 | `404` | `40009` | `organization not found` |
 | `500` | `50002` | `internal server error` |
 
-### ❌ Remove organization member
+### ❌ Remove organization user
 
-* **Path** `/organizations/{address}/members/{userid}`
+* **Path** `/organizations/{address}/users/{userid}`
 * **Method** `DELETE`
 * **Headers**
   * `Authentication: Bearer <user_token>`
 
 * **Description**
-Remove a user from the organization members. Only admins of an organization can remove a member. An admin cannot remove themselves from the organization.
-**If a user does not exist, or is not a member,  no error is returned**
+Remove a user from the organization. Only admins of an organization can remove a user. An admin cannot remove themselves from the organization.
+**If a user does not exist, or has no role in the organization, no error is returned**
 
 * **Response**
 ```json
@@ -942,7 +942,7 @@ Remove a user from the organization members. Only admins of an organization can 
     "sentSMS":0,
     "sentEmails":0,
     "subOrgs":0,
-    "members":0
+    "users":0
   },
   "plan":{
     "id":3,
@@ -950,7 +950,7 @@ Remove a user from the organization members. Only admins of an organization can 
     "stripeID":"stripe_789",
     "default":true,
     "organization":{
-      "memberships":10,
+      "users":10,
       "subOrgs":5,
       "censusSize":10
     },
@@ -1182,7 +1182,7 @@ Deletes multiple participants from an organization by their participant IDs. Req
 ```
 
 * **Description**
-Creates a new support ticket for the organization. The user must be a member of the organization with any role. The ticket is sent to the support team via email.
+Creates a new support ticket for the organization. The user must have any role in the organization. The ticket is sent to the support team via email.
 
 * **Errors**
 
@@ -1321,7 +1321,7 @@ Creates a new support ticket for the organization. The user must be a member of 
 | `404` | `40009` | `organization not found` |
 | `500` | `50002` | `internal server error` |
 
-### 🤠 Available organization members roles
+### 🤠 Available organization user roles
 * **Path** `/organizations/roles`
 * **Method** `GET`
 * **Response**
@@ -1400,7 +1400,7 @@ Creates a new support ticket for the organization. The user must be a member of 
       "id":1,
       "name":"Basic",
       "stripeID":"stripe_123",
-        "memberships":1,
+        "users":1,
         "subOrgs":1
       },
       "votingTypes":{
@@ -1447,7 +1447,7 @@ Creates a new support ticket for the organization. The user must be a member of 
   "stripeID":"stripe_123",
   "startingPrice": "9900",
   "organization":{
-    "memberships":1,
+    "users":1,
     "subOrgs":1
   },
   "votingTypes":{

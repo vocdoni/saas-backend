@@ -39,7 +39,7 @@ func TestOrganizationInvites(t *testing.T) {
 			Password:  testUserPass,
 			FirstName: testUserFirstName,
 			LastName:  testUserLastName,
-			Organizations: []OrganizationMember{
+			Organizations: []OrganizationUser{
 				{Address: testOrgAddress, Role: AdminRole},
 			},
 		})
@@ -50,7 +50,7 @@ func TestOrganizationInvites(t *testing.T) {
 			InvitationCode:      invitationCode,
 			OrganizationAddress: testOrgAddress,
 			CurrentUserID:       currentUserID,
-			NewUserEmail:        newMemberEmail,
+			NewUserEmail:        newUserEmail,
 			Role:                AdminRole,
 			Expiration:          expires,
 		}
@@ -79,7 +79,7 @@ func TestOrganizationInvites(t *testing.T) {
 		c.Assert(updatedInvitation.InvitationCode, qt.Equals, invitationCode)
 		c.Assert(updatedInvitation.OrganizationAddress, qt.Equals, testOrgAddress)
 		c.Assert(updatedInvitation.CurrentUserID, qt.Equals, currentUserID)
-		c.Assert(updatedInvitation.NewUserEmail, qt.Equals, newMemberEmail)
+		c.Assert(updatedInvitation.NewUserEmail, qt.Equals, newUserEmail)
 		c.Assert(updatedInvitation.Role, qt.Equals, ManagerRole)
 		// Truncate expiration to seconds to avoid rounding issues, also set to UTC
 		c.Assert(updatedInvitation.Expiration.Truncate(time.Second).UTC(), qt.Equals, newExpires.Truncate(time.Second).UTC())
@@ -114,7 +114,7 @@ func TestOrganizationInvites(t *testing.T) {
 			Password:  testUserPass,
 			FirstName: testUserFirstName,
 			LastName:  testUserLastName,
-			Organizations: []OrganizationMember{
+			Organizations: []OrganizationUser{
 				{Address: testOrgAddress, Role: AdminRole},
 			},
 		})
@@ -125,7 +125,7 @@ func TestOrganizationInvites(t *testing.T) {
 			InvitationCode:      invitationCode,
 			OrganizationAddress: testOrgAddress,
 			CurrentUserID:       currentUserID,
-			NewUserEmail:        newMemberEmail,
+			NewUserEmail:        newUserEmail,
 			Role:                AdminRole,
 			Expiration:          expires,
 		})
@@ -137,7 +137,7 @@ func TestOrganizationInvites(t *testing.T) {
 		c.Assert(invitation.InvitationCode, qt.Equals, invitationCode)
 		c.Assert(invitation.OrganizationAddress, qt.Equals, testOrgAddress)
 		c.Assert(invitation.CurrentUserID, qt.Equals, currentUserID)
-		c.Assert(invitation.NewUserEmail, qt.Equals, newMemberEmail)
+		c.Assert(invitation.NewUserEmail, qt.Equals, newUserEmail)
 		c.Assert(invitation.Role, qt.Equals, AdminRole)
 		// Truncate expiration to seconds to avoid rounding issues, also set to UTC
 		c.Assert(invitation.Expiration.Truncate(time.Second).UTC(), qt.Equals, expires.Truncate(time.Second).UTC())
@@ -161,7 +161,7 @@ func TestOrganizationInvites(t *testing.T) {
 			Password:  testUserPass,
 			FirstName: testUserFirstName,
 			LastName:  testUserLastName,
-			Organizations: []OrganizationMember{
+			Organizations: []OrganizationUser{
 				{Address: testOrgAddress, Role: AdminRole},
 			},
 		})
@@ -172,7 +172,7 @@ func TestOrganizationInvites(t *testing.T) {
 			InvitationCode:      invitationCode,
 			OrganizationAddress: testOrgAddress,
 			CurrentUserID:       currentUserID,
-			NewUserEmail:        newMemberEmail,
+			NewUserEmail:        newUserEmail,
 			Role:                AdminRole,
 			Expiration:          expires,
 		})
@@ -185,7 +185,7 @@ func TestOrganizationInvites(t *testing.T) {
 		c.Assert(invitations[0].InvitationCode, qt.Equals, invitationCode)
 		c.Assert(invitations[0].OrganizationAddress, qt.Equals, testOrgAddress)
 		c.Assert(invitations[0].CurrentUserID, qt.Equals, currentUserID)
-		c.Assert(invitations[0].NewUserEmail, qt.Equals, newMemberEmail)
+		c.Assert(invitations[0].NewUserEmail, qt.Equals, newUserEmail)
 		c.Assert(invitations[0].Role, qt.Equals, AdminRole)
 		// Truncate expiration to seconds to avoid rounding issues, also set to UTC
 		c.Assert(invitations[0].Expiration.Truncate(time.Second).UTC(), qt.Equals, expires.Truncate(time.Second).UTC())
@@ -217,7 +217,7 @@ func TestOrganizationInvites(t *testing.T) {
 			Password:  testUserPass,
 			FirstName: testUserFirstName,
 			LastName:  testUserLastName,
-			Organizations: []OrganizationMember{
+			Organizations: []OrganizationUser{
 				{Address: testOrgAddress, Role: AdminRole},
 			},
 		})
@@ -228,7 +228,7 @@ func TestOrganizationInvites(t *testing.T) {
 			InvitationCode:      invitationCode,
 			OrganizationAddress: testOrgAddress,
 			CurrentUserID:       currentUserID,
-			NewUserEmail:        newMemberEmail,
+			NewUserEmail:        newUserEmail,
 			Role:                AdminRole,
 			Expiration:          expires,
 		})
@@ -250,7 +250,7 @@ func TestOrganizationInvites(t *testing.T) {
 	t.Run("InvitationByEmail", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Test getting non-existent invitation by email
-		_, err := testDB.InvitationByEmail(newMemberEmail)
+		_, err := testDB.InvitationByEmail(newUserEmail)
 		c.Assert(err, qt.ErrorIs, ErrNotFound)
 
 		// Create organization and user
@@ -264,7 +264,7 @@ func TestOrganizationInvites(t *testing.T) {
 			Password:  testUserPass,
 			FirstName: testUserFirstName,
 			LastName:  testUserLastName,
-			Organizations: []OrganizationMember{
+			Organizations: []OrganizationUser{
 				{Address: testOrgAddress, Role: AdminRole},
 			},
 		})
@@ -275,19 +275,19 @@ func TestOrganizationInvites(t *testing.T) {
 			InvitationCode:      invitationCode,
 			OrganizationAddress: testOrgAddress,
 			CurrentUserID:       currentUserID,
-			NewUserEmail:        newMemberEmail,
+			NewUserEmail:        newUserEmail,
 			Role:                AdminRole,
 			Expiration:          expires,
 		})
 		c.Assert(err, qt.IsNil)
 
 		// Get invitation by email
-		invitation, err := testDB.InvitationByEmail(newMemberEmail)
+		invitation, err := testDB.InvitationByEmail(newUserEmail)
 		c.Assert(err, qt.IsNil)
 		c.Assert(invitation.InvitationCode, qt.Equals, invitationCode)
 		c.Assert(invitation.OrganizationAddress, qt.Equals, testOrgAddress)
 		c.Assert(invitation.CurrentUserID, qt.Equals, currentUserID)
-		c.Assert(invitation.NewUserEmail, qt.Equals, newMemberEmail)
+		c.Assert(invitation.NewUserEmail, qt.Equals, newUserEmail)
 		c.Assert(invitation.Role, qt.Equals, AdminRole)
 		// Truncate expiration to seconds to avoid rounding issues, also set to UTC
 		c.Assert(invitation.Expiration.Truncate(time.Second).UTC(), qt.Equals, expires.Truncate(time.Second).UTC())
@@ -296,7 +296,7 @@ func TestOrganizationInvites(t *testing.T) {
 	t.Run("DeleteInvitationByEmail", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Non existing invitation does not return an error on delete attempt
-		err := testDB.DeleteInvitationByEmail(newMemberEmail)
+		err := testDB.DeleteInvitationByEmail(newUserEmail)
 		c.Assert(err, qt.IsNil)
 
 		// Create organization and user
@@ -310,7 +310,7 @@ func TestOrganizationInvites(t *testing.T) {
 			Password:  testUserPass,
 			FirstName: testUserFirstName,
 			LastName:  testUserLastName,
-			Organizations: []OrganizationMember{
+			Organizations: []OrganizationUser{
 				{Address: testOrgAddress, Role: AdminRole},
 			},
 		})
@@ -321,22 +321,22 @@ func TestOrganizationInvites(t *testing.T) {
 			InvitationCode:      invitationCode,
 			OrganizationAddress: testOrgAddress,
 			CurrentUserID:       currentUserID,
-			NewUserEmail:        newMemberEmail,
+			NewUserEmail:        newUserEmail,
 			Role:                AdminRole,
 			Expiration:          expires,
 		})
 		c.Assert(err, qt.IsNil)
 
 		// Verify invitation exists by email
-		_, err = testDB.InvitationByEmail(newMemberEmail)
+		_, err = testDB.InvitationByEmail(newUserEmail)
 		c.Assert(err, qt.IsNil)
 
 		// Delete the invitation by email
-		err = testDB.DeleteInvitationByEmail(newMemberEmail)
+		err = testDB.DeleteInvitationByEmail(newUserEmail)
 		c.Assert(err, qt.IsNil)
 
 		// Verify invitation is deleted
-		_, err = testDB.InvitationByEmail(newMemberEmail)
+		_, err = testDB.InvitationByEmail(newUserEmail)
 		c.Assert(err, qt.ErrorIs, ErrNotFound)
 	})
 }

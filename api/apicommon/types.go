@@ -60,20 +60,29 @@ type OrganizationInfo struct {
 	Meta map[string]any `json:"meta"`
 }
 
-// OrganizationMembers represents a list of members of an organization.
-// swagger:model OrganizationMembers
-type OrganizationMembers struct {
-	// List of organization members
-	Members []*OrganizationMember `json:"members"`
+// OrganizationUsers represents a list of users of an organization.
+// swagger:model OrganizationUsers
+type OrganizationUsers struct {
+	// List of organization users
+	Users []*OrganizationUser `json:"users"`
 }
 
-// OrganizationMember represents a member of an organization with their role.
-// swagger:model OrganizationMember
-type OrganizationMember struct {
+// OrganizationMembers represents a list of users of an organization
+// swagger:model OrganizationMembers
+//
+// Deprecated: use OrganizationUsers instead.
+type OrganizationMembers struct {
+	// List of organization users
+	Members []*OrganizationUser `json:"members"`
+}
+
+// OrganizationUser represents a user of an organization with their role.
+// swagger:model OrganizationUser
+type OrganizationUser struct {
 	// User information
 	Info *UserInfo `json:"info"`
 
-	// The role of the member in the organization
+	// The role of the user in the organization
 	Role string `json:"role"`
 }
 
@@ -94,7 +103,7 @@ type UserOrganization struct {
 	Organization *OrganizationInfo `json:"organization"`
 }
 
-// OrganizationRole represents a role that can be assigned to organization members.
+// OrganizationRole represents a role that can be assigned to organization users.
 // swagger:model OrganizationRole
 type OrganizationRole struct {
 	// Role identifier
@@ -153,10 +162,10 @@ type OrganizationDeleteMetaRequest struct {
 	Keys []string `json:"keys"`
 }
 
-// UpdateOrganizationMemberRoleRequest represents a request to update the role of an organization member.
-// swagger:model UpdateOrganizationMemberRoleRequest
-type UpdateOrganizationMemberRoleRequest struct {
-	// The new role to assign to the member
+// UpdateOrganizationUserRoleRequest represents a request to update the role of an organization user.
+// swagger:model UpdateOrganizationUserRoleRequest
+type UpdateOrganizationUserRoleRequest struct {
+	// The new role to assign to the user
 	Role string `json:"role"`
 }
 
@@ -397,8 +406,8 @@ func SubscriptionPlanFromDB(plan *db.Plan) SubscriptionPlan {
 // It is the mirror struct of db.PlanLimits.
 // swagger:model SubscriptionPlanLimits
 type SubscriptionPlanLimits struct {
-	// Maximum number of members allowed
-	Members int `json:"members"`
+	// Maximum number of users allowed
+	Users int `json:"users"`
 
 	// Maximum number of sub-organizations allowed
 	SubOrgs int `json:"subOrgs"`
@@ -540,8 +549,8 @@ type SubscriptionUsage struct {
 	// Number of sub-organizations created
 	SubOrgs int `json:"subOrgs"`
 
-	// Number of members in the organization
-	Members int `json:"members"`
+	// Number of users in the organization
+	Users int `json:"users"`
 
 	// Number of voting processes created
 	Processes int `json:"processes"`
@@ -556,7 +565,7 @@ func SubscriptionUsageFromDB(usage *db.OrganizationCounters) SubscriptionUsage {
 		SentSMS:    usage.SentSMS,
 		SentEmails: usage.SentEmails,
 		SubOrgs:    usage.SubOrgs,
-		Members:    usage.Members,
+		Users:      usage.Users,
 		Processes:  usage.Processes,
 	}
 }

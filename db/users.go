@@ -44,7 +44,7 @@ func (ms *MongoStorage) addOrganizationToUser(ctx context.Context, userEmail, ad
 	// add the organization to the user
 	updateDoc := bson.M{
 		"$addToSet": bson.M{
-			"organizations": OrganizationMember{
+			"organizations": OrganizationUser{
 				Address: address,
 				Role:    role,
 			},
@@ -113,7 +113,7 @@ func (ms *MongoStorage) SetUser(user *User) (uint64, error) {
 	}
 	// if the user provided doesn't have organizations, create an empty slice
 	if user.Organizations == nil {
-		user.Organizations = []OrganizationMember{}
+		user.Organizations = []OrganizationUser{}
 	}
 	// check if the user exists or needs to be created
 	if user.ID > 0 {
@@ -184,17 +184,21 @@ func (ms *MongoStorage) VerifyUserAccount(user *User) error {
 	return ms.delVerificationCode(ctx, user.ID, CodeTypeVerifyAccount)
 }
 
-// IsMemberOf method checks if the user with the given email is a member of the
-// organization with the given address and role. If the user is a member, it
-// returns true. If the user is not a member, it returns false. If an error
+// UserHasRoleInOrg method checks if the user with the given email has a specific role in the
+// organization with the given address. If the user has the role, it
+// returns true. If the user doesn't have that role, it returns false. If an error
 // occurs, it returns the error.
-func (ms *MongoStorage) IsMemberOf(userEmail, organizationAddress string, role UserRole) (bool, error) {
+func (ms *MongoStorage) UserHasRoleInOrg(userEmail, organizationAddress string, role UserRole) (bool, error) {
 	user, err := ms.UserByEmail(userEmail)
 	if err != nil {
 		return false, err
 	}
 	for _, org := range user.Organizations {
 		if org.Address == organizationAddress {
+			// TODO: add support for passing AnyRole, like this:
+			// if role == AnyRole {
+			// 	return true, nil
+			// }
 			return org.Role == role, nil
 		}
 	}

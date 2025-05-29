@@ -12,13 +12,13 @@ import (
 )
 
 type User struct {
-	ID            uint64               `json:"id" bson:"_id"`
-	Email         string               `json:"email" bson:"email"`
-	Password      string               `json:"password" bson:"password"`
-	FirstName     string               `json:"firstName" bson:"firstName"`
-	LastName      string               `json:"lastName" bson:"lastName"`
-	Organizations []OrganizationMember `json:"organizations" bson:"organizations"`
-	Verified      bool                 `json:"verified" bson:"verified"`
+	ID            uint64             `json:"id" bson:"_id"`
+	Email         string             `json:"email" bson:"email"`
+	Password      string             `json:"password" bson:"password"`
+	FirstName     string             `json:"firstName" bson:"firstName"`
+	LastName      string             `json:"lastName" bson:"lastName"`
+	Organizations []OrganizationUser `json:"organizations" bson:"organizations"`
+	Verified      bool               `json:"verified" bson:"verified"`
 }
 
 type CodeType string
@@ -45,7 +45,7 @@ type UserRole string
 
 type OrganizationType string
 
-type OrganizationMember struct {
+type OrganizationUser struct {
 	Address string   `json:"address" bson:"_id"`
 	Role    UserRole `json:"role" bson:"role"`
 }
@@ -73,7 +73,7 @@ type Organization struct {
 }
 
 type PlanLimits struct {
-	Members      int `json:"members" bson:"members"`
+	Users        int `json:"users" bson:"users"`
 	SubOrgs      int `json:"subOrgs" bson:"subOrgs"`
 	MaxProcesses int `json:"maxProcesses" bson:"maxProcesses"`
 	MaxCensus    int `json:"maxCensus" bson:"maxCensus"`
@@ -136,7 +136,7 @@ type OrganizationCounters struct {
 	SentSMS    int `json:"sentSMS" bson:"sentSMS"`
 	SentEmails int `json:"sentEmails" bson:"sentEmails"`
 	SubOrgs    int `json:"subOrgs" bson:"subOrgs"`
-	Members    int `json:"members" bson:"members"`
+	Users      int `json:"users" bson:"users"`
 	Processes  int `json:"processes" bson:"processes"`
 }
 
@@ -181,7 +181,7 @@ type Census struct {
 	UpdatedAt  time.Time          `json:"updatedAt" bson:"updatedAt"`
 }
 
-// An org participant is a member of the organization and her details that will be
+// An org participant belongs to an organization and her details that will be
 // used for verification and/or authentication
 // A participant is tied to an organization by the orgAddress
 //
