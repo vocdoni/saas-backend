@@ -165,14 +165,14 @@ type Object struct {
 type CensusType string
 
 const (
-	// CensusTypeMail is used when the organizer uploads a list of names, participantNos and e‑mails.
+	// CensusTypeMail is used when the organizer uploads a list of names, memberNos and e‑mails.
 	CensusTypePass      CensusType = "pass"
 	CensusTypeMail      CensusType = "mail"
 	CensusTypeSMS       CensusType = "sms"
 	CensusTypeSMSorMail CensusType = "sms_or_mail"
 )
 
-// Census represents the information of a set of census participants
+// Census represents the information of a set of census members
 type Census struct {
 	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	OrgAddress string             `json:"orgAddress" bson:"orgAddress"`
@@ -181,35 +181,35 @@ type Census struct {
 	UpdatedAt  time.Time          `json:"updatedAt" bson:"updatedAt"`
 }
 
-// An org participant belongs to an organization and her details that will be
+// An org member belongs to an organization and her details that will be
 // used for verification and/or authentication
-// A participant is tied to an organization by the orgAddress
+// A member is tied to an organization by the orgAddress
 //
 //nolint:lll
-type OrgParticipant struct {
+type OrgMember struct {
 	ID primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	// OrgAddress can be used for future sharding
-	OrgAddress    string         `json:"orgAddress" bson:"orgAddress"`
-	Email         string         `json:"email" bson:"email"`
-	HashedEmail   []byte         `json:"hashedEmail" bson:"hashedEmail" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
-	Phone         string         `json:"phone" bson:"phone"`
-	HashedPhone   []byte         `json:"hashedPhone" bson:"hashedPhone" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
-	ParticipantNo string         `json:"participantNo" bson:"participantNo"`
-	Name          string         `json:"name" bson:"name"`
-	Password      string         `json:"password" bson:"password"`
-	HashedPass    []byte         `json:"pass" bson:"pass" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
-	Other         map[string]any `json:"other" bson:"other"`
-	CreatedAt     time.Time      `json:"createdAt" bson:"createdAt"`
-	UpdatedAt     time.Time      `json:"updatedAt" bson:"updatedAt"`
+	OrgAddress  string         `json:"orgAddress" bson:"orgAddress"`
+	Email       string         `json:"email" bson:"email"`
+	HashedEmail []byte         `json:"hashedEmail" bson:"hashedEmail" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
+	Phone       string         `json:"phone" bson:"phone"`
+	HashedPhone []byte         `json:"hashedPhone" bson:"hashedPhone" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
+	MemberNo    string         `json:"memberNo" bson:"memberNo"`
+	Name        string         `json:"name" bson:"name"`
+	Password    string         `json:"password" bson:"password"`
+	HashedPass  []byte         `json:"pass" bson:"pass" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
+	Other       map[string]any `json:"other" bson:"other"`
+	CreatedAt   time.Time      `json:"createdAt" bson:"createdAt"`
+	UpdatedAt   time.Time      `json:"updatedAt" bson:"updatedAt"`
 }
 
-// Relates an OrgParticipant to a Census
-// The censID is the hex format in string of the objectID
+// Relates an OrgMember to a Census
+// The censusID is the hex format in string of the objectID
 type CensusMembership struct {
-	ParticipantNo string    `json:"participantNo" bson:"participantNo"`
-	CensusID      string    `json:"censusId" bson:"censusId"`
-	CreatedAt     time.Time `json:"createdAt" bson:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt" bson:"updatedAt"`
+	MemberNo  string    `json:"memberNo" bson:"memberNo"`
+	CensusID  string    `json:"censusId" bson:"censusId"`
+	CreatedAt time.Time `json:"createdAt" bson:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt" bson:"updatedAt"`
 }
 
 // Represents a published census as a census is represented in the vochain
@@ -248,8 +248,8 @@ type ProcessesBundle struct {
 // Mix of the Membership and the Participant
 //
 //nolint:lll
-type CensusMembershipParticipant struct {
-	ParticipantNo string              `json:"participantNo" bson:"participantNo"`
+type CensusMembershipParticipant struct { // TODO: what to do with this one???
+	ParticipantNo string              `json:"memberNo" bson:"memberNo"`
 	HashedEmail   string              `json:"hashedEmail" bson:"hashedEmail"`
 	HashedPhone   string              `json:"hashedPhone" bson:"hashedPhone"`
 	BundleID      string              `json:"bundleId" bson:"bundleId"`

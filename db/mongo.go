@@ -41,7 +41,7 @@ type MongoStorage struct {
 	organizationInvites *mongo.Collection
 	plans               *mongo.Collection
 	objects             *mongo.Collection
-	orgParticipants     *mongo.Collection
+	orgMembers          *mongo.Collection
 	censusMemberships   *mongo.Collection
 	censuses            *mongo.Collection
 	publishedCensuses   *mongo.Collection
@@ -252,25 +252,25 @@ func (ms *MongoStorage) String() string {
 		censuses.Censuses = append(censuses.Censuses, census)
 	}
 
-	// get all census participants
+	// get all census members
 	ctx, cancel9 := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel9()
-	censusPartCur, err := ms.orgParticipants.Find(ctx, bson.D{{}})
+	censusPartCur, err := ms.orgMembers.Find(ctx, bson.D{{}})
 	if err != nil {
-		log.Warnw("error decoding census participant", "error", err)
+		log.Warnw("error decoding census member", "error", err)
 		return "{}"
 	}
-	// append all census participants to the export data
+	// append all census members to the export data
 	ctx, cancel10 := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel10()
-	var orgParticipants OrgParticipantsCollection
+	var orgMembers OrgMembersCollection
 	for censusPartCur.Next(ctx) {
-		var censusPart OrgParticipant
+		var censusPart OrgMember
 		err := censusPartCur.Decode(&censusPart)
 		if err != nil {
-			log.Warnw("error finding census participants", "error", err)
+			log.Warnw("error finding census members", "error", err)
 		}
-		orgParticipants.OrgParticipants = append(orgParticipants.OrgParticipants, censusPart)
+		orgMembers.OrgMembers = append(orgMembers.OrgMembers, censusPart)
 	}
 
 	// get all census memberships
@@ -359,7 +359,7 @@ func (ms *MongoStorage) String() string {
 	// encode the data to JSON and return it
 	data, err := json.Marshal(&Collection{
 		users, verifications, organizations, organizationInvites, censuses,
-		orgParticipants, censusMemberships, publishedCensuses, processes,
+		orgMembers, censusMemberships, publishedCensuses, processes,
 	})
 	if err != nil {
 		log.Warnw("error marshaling data", "error", err)
@@ -417,15 +417,15 @@ func (ms *MongoStorage) Import(jsonData []byte) error {
 		}
 	}
 
-	// upsert census participants collection
-	log.Infow("importing census participants", "count", len(collection.OrgParticipants))
-	for _, censusPart := range collection.OrgParticipants {
-		filter := bson.M{"_id": censusPart.ID}
-		update := bson.M{"$set": censusPart}
+	// upsert census members collection
+	log.Infow("importing census members", "count", len(collection.OrgMembers))
+	for _, orgMember := range collection.OrgMembers {
+		filter := bson.M{"_id": orgMember.ID}
+		update := bson.M{"$set": orgMember}
 		opts := options.Update().SetUpsert(true)
-		_, err := ms.orgParticipants.UpdateOne(ctx, filter, update, opts)
+		_, err := ms.orgMembers.UpdateOne(ctx, filter, update, opts)
 		if err != nil {
-			log.Warnw("error upserting census participant", "error", err, "orgParticipant", censusPart.ID)
+			log.Warnw("error upserting census member", "error", err, "orgMember", orgMember.ID)
 		}
 	}
 
@@ -433,14 +433,14 @@ func (ms *MongoStorage) Import(jsonData []byte) error {
 	log.Infow("importing census memberships", "count", len(collection.CensusMemberships))
 	for _, censusMem := range collection.CensusMemberships {
 		filter := bson.M{
-			"participantNo": censusMem.ParticipantNo,
-			"censusId":      censusMem.CensusID,
+			"memberNo": censusMem.MemberNo,
+			"censusId": censusMem.CensusID,
 		}
 		update := bson.M{"$set": censusMem}
 		opts := options.Update().SetUpsert(true)
 		_, err := ms.censusMemberships.UpdateOne(ctx, filter, update, opts)
 		if err != nil {
-			log.Warnw("error upserting census membership", "error", err, "censusMembership", censusMem.ParticipantNo)
+			log.Warnw("error upserting census membership", "error", err, "censusMembership", censusMem.MemberNo)
 		}
 	}
 

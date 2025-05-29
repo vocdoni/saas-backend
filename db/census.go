@@ -58,7 +58,7 @@ func (ms *MongoStorage) SetCensus(census *Census) (string, error) {
 	return census.ID.Hex(), nil
 }
 
-// DeleteCensus removes a census and all its participants
+// DeleteCensus removes a census and all its members
 func (ms *MongoStorage) DelCensus(censusID string) error {
 	objID, err := primitive.ObjectIDFromHex(censusID)
 	if err != nil {

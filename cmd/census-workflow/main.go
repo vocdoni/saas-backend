@@ -90,17 +90,17 @@ func (c *Client) makeRequest(method, path string, body any, target any) error {
 	return nil
 }
 
-func generateParticipants(n int) []apicommon.OrgParticipant {
-	participants := make([]apicommon.OrgParticipant, n)
+func generateMembers(n int) []apicommon.OrgMember {
+	members := make([]apicommon.OrgMember, n)
 	for i := 0; i < n; i++ {
-		participants[i] = apicommon.OrgParticipant{
-			Email:         fmt.Sprintf("user%d@example.com", i+1),
-			Phone:         fmt.Sprintf("+%010d", rand.Int63n(10000000000)),
-			ParticipantNo: fmt.Sprintf("participant_%d", i+1),
-			Name:          fmt.Sprintf("User %d", i+1),
+		members[i] = apicommon.OrgMember{
+			Email:    fmt.Sprintf("user%d@example.com", i+1),
+			Phone:    fmt.Sprintf("+%010d", rand.Int63n(10000000000)),
+			MemberNo: fmt.Sprintf("member_%d", i+1),
+			Name:     fmt.Sprintf("User %d", i+1),
 		}
 	}
-	return participants
+	return members
 }
 
 func generateMetadata() []byte {
@@ -175,17 +175,17 @@ func main() {
 	}
 	fmt.Printf("✓ Census info retrieved: %+v\n", census)
 
-	// 4. Add participants
-	fmt.Println("\n4. Adding participants...")
-	participants := generateParticipants(10)
-	err = client.makeRequest("POST", fmt.Sprintf("/census/%s", censusID), apicommon.AddParticipantsRequest{
-		Participants: participants,
+	// 4. Add members
+	fmt.Println("\n4. Adding members...")
+	members := generateMembers(10)
+	err = client.makeRequest("POST", fmt.Sprintf("/census/%s", censusID), apicommon.AddMembersRequest{
+		Members: members,
 	}, nil)
 	if err != nil {
-		fmt.Printf("Error adding participants: %v", err)
+		fmt.Printf("Error adding members: %v", err)
 		return
 	}
-	fmt.Println("✓ Participants added successfully")
+	fmt.Println("✓ Members added successfully")
 
 	// 5. Publish census
 	fmt.Println("\n5. Publishing census...")

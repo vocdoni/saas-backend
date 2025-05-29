@@ -16,14 +16,14 @@ import (
 	"go.vocdoni.io/dvote/util"
 )
 
-// addParticipantsToOrgWorkers is a map of job identifiers to the progress of adding participants to a census.
+// addMembersToOrgWorkers is a map of job identifiers to the progress of adding members to a census.
 // This is used to check the progress of the job.
-var addParticipantsToOrgWorkers sync.Map
+var addMembersToOrgWorkers sync.Map
 
-// organizationParticipantsHandler godoc
+// organizationMembersHandler godoc
 //
-//	@Summary		Get organization participants
-//	@Description	Retrieve all participants of an organization with pagination support
+//	@Summary		Get organization members
+//	@Description	Retrieve all members of an organization with pagination support
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
@@ -31,12 +31,12 @@ var addParticipantsToOrgWorkers sync.Map
 //	@Param			address		path		string	true	"Organization address"
 //	@Param			page		query		integer	false	"Page number (default: 1)"
 //	@Param			pageSize	query		integer	false	"Number of items per page (default: 10)"
-//	@Success		200			{object}	apicommon.OrganizationParticipantsResponse
+//	@Success		200			{object}	apicommon.OrganizationMembersResponse
 //	@Failure		400			{object}	errors.Error	"Invalid input"
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/participants [get]
-func (a *API) organizationParticipantsHandler(w http.ResponseWriter, r *http.Request) {
+//	@Router			/organizations/{address}/members [get]
+func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)
 	if !ok {
@@ -71,41 +71,41 @@ func (a *API) organizationParticipantsHandler(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	// retrieve the orgParticipants with pagination
-	participants, err := a.db.OrgParticipants(org.Address, page, pageSize)
+	// retrieve the orgMembers with pagination
+	members, err := a.db.OrgMembers(org.Address, page, pageSize)
 	if err != nil {
-		errors.ErrGenericInternalServerError.Withf("could not get org participants: %v", err).Write(w)
+		errors.ErrGenericInternalServerError.Withf("could not get org members: %v", err).Write(w)
 		return
 	}
 
-	// convert the orgParticipants to the response format
-	participantsResponse := make([]apicommon.OrgParticipant, 0, len(participants))
-	for _, p := range participants {
-		participantsResponse = append(participantsResponse, apicommon.OrgParticipantFromDb(p))
+	// convert the orgMembers to the response format
+	membersResponse := make([]apicommon.OrgMember, 0, len(members))
+	for _, p := range members {
+		membersResponse = append(membersResponse, apicommon.OrgMemberFromDb(p))
 	}
 
-	apicommon.HTTPWriteJSON(w, &apicommon.OrganizationParticipantsResponse{
-		Participants: participantsResponse,
+	apicommon.HTTPWriteJSON(w, &apicommon.OrganizationMembersResponse{
+		Members: membersResponse,
 	})
 }
 
-// addOrganizationParticipantsHandler godoc
+// addOrganizationMembersHandler godoc
 //
-//	@Summary		Add participants to an organization
-//	@Description	Add multiple participants to an organization. Requires Manager/Admin role.
+//	@Summary		Add members to an organization
+//	@Description	Add multiple members to an organization. Requires Manager/Admin role.
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string								true	"Organization address"
-//	@Param			async	query		boolean								false	"Process asynchronously and return job ID"
-//	@Param			request	body		apicommon.AddParticipantsRequest	true	"Participants to add"
-//	@Success		200		{object}	apicommon.AddParticipantsResponse
+//	@Param			address	path		string						true	"Organization address"
+//	@Param			async	query		boolean						false	"Process asynchronously and return job ID"
+//	@Param			request	body		apicommon.AddMembersRequest	true	"Members to add"
+//	@Success		200		{object}	apicommon.AddMembersResponse
 //	@Failure		400		{object}	errors.Error	"Invalid input data"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/participants [post]
-func (a *API) addOrganizationParticipantsHandler(w http.ResponseWriter, r *http.Request) {
+//	@Router			/organizations/{address}/members [post]
+func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)
 	if !ok {
@@ -127,23 +127,23 @@ func (a *API) addOrganizationParticipantsHandler(w http.ResponseWriter, r *http.
 		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
-	// decode the participants from the request body
-	participants := &apicommon.AddParticipantsRequest{}
-	if err := json.NewDecoder(r.Body).Decode(participants); err != nil {
+	// decode the members from the request body
+	members := &apicommon.AddMembersRequest{}
+	if err := json.NewDecoder(r.Body).Decode(members); err != nil {
 		log.Error(err)
-		errors.ErrMalformedBody.Withf("missing participants").Write(w)
+		errors.ErrMalformedBody.Withf("missing members").Write(w)
 		return
 	}
-	// check if there are participants to add
-	if len(participants.Participants) == 0 {
-		apicommon.HTTPWriteJSON(w, &apicommon.AddParticipantsResponse{ParticipantsNo: 0})
+	// check if there are members to add
+	if len(members.Members) == 0 {
+		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{MembersNo: 0})
 		return
 	}
-	// add the org participants to the database
-	progressChan, err := a.db.SetBulkOrgParticipants(
+	// add the org members to the database
+	progressChan, err := a.db.SetBulkOrgMembers(
 		org.Address,
 		passwordSalt,
-		participants.DbOrgParticipants(org.Address),
+		members.DbOrgMembers(org.Address),
 	)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -152,18 +152,18 @@ func (a *API) addOrganizationParticipantsHandler(w http.ResponseWriter, r *http.
 
 	if !async {
 		// Wait for the channel to be closed (100% completion)
-		var lastProgress *db.BulkOrgParticipantsStatus
+		var lastProgress *db.BulkOrgMembersStatus
 		for p := range progressChan {
 			lastProgress = p
 			// Just drain the channel until it's closed
-			log.Debugw("org add participants",
+			log.Debugw("org add members",
 				"org", org.Address,
 				"progress", p.Progress,
 				"added", p.Added,
 				"total", p.Total)
 		}
-		// Return the number of participants added
-		apicommon.HTTPWriteJSON(w, &apicommon.AddParticipantsResponse{ParticipantsNo: uint32(lastProgress.Added)})
+		// Return the number of members added
+		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{MembersNo: uint32(lastProgress.Added)})
 		return
 	}
 
@@ -172,17 +172,17 @@ func (a *API) addOrganizationParticipantsHandler(w http.ResponseWriter, r *http.
 	go func() {
 		for p := range progressChan {
 			// We need to drain the channel to avoid blocking
-			addParticipantsToOrgWorkers.Store(jobID.String(), p)
+			addMembersToOrgWorkers.Store(jobID.String(), p)
 		}
 	}()
 
-	apicommon.HTTPWriteJSON(w, &apicommon.AddParticipantsResponse{JobID: jobID})
+	apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{JobID: jobID})
 }
 
-// addOrganizationParticipantsJobStatusHandler godoc
+// addOrganizationMembersJobStatusHandler godoc
 //
-//	@Summary		Check the progress of adding participants
-//	@Description	Check the progress of a job to add participants to an organization. Returns the progress of the job.
+//	@Summary		Check the progress of adding members
+//	@Description	Check the progress of a job to add members to an organization. Returns the progress of the job.
 //	@Description	If the job is completed, the job is deleted after 60 seconds.
 //	@Tags			organizations
 //	@Accept			json
@@ -190,20 +190,20 @@ func (a *API) addOrganizationParticipantsHandler(w http.ResponseWriter, r *http.
 //	@Security		BearerAuth
 //	@Param			address	path		string	true	"Organization address"
 //	@Param			jobid	path		string	true	"Job ID"
-//	@Success		200		{object}	db.BulkOrgParticipantsStatus
+//	@Success		200		{object}	db.BulkOrgMembersStatus
 //	@Failure		400		{object}	errors.Error	"Invalid job ID"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
 //	@Failure		404		{object}	errors.Error	"Job not found"
-//	@Router			/organizations/{address}/participants/job/{jobid} [get]
-func (*API) addOrganizationParticipantsJobStatusHandler(w http.ResponseWriter, r *http.Request) {
+//	@Router			/organizations/{address}/members/job/{jobid} [get]
+func (*API) addOrganizationMembersJobStatusHandler(w http.ResponseWriter, r *http.Request) {
 	jobID := internal.HexBytes{}
 	if err := jobID.ParseString(chi.URLParam(r, "jobid")); err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid job ID").Write(w)
 		return
 	}
 
-	if v, ok := addParticipantsToOrgWorkers.Load(jobID.String()); ok {
-		p, ok := v.(*db.BulkOrgParticipantsStatus)
+	if v, ok := addMembersToOrgWorkers.Load(jobID.String()); ok {
+		p, ok := v.(*db.BulkOrgMembersStatus)
 		if !ok {
 			errors.ErrGenericInternalServerError.Withf("invalid job status type").Write(w)
 			return
@@ -212,7 +212,7 @@ func (*API) addOrganizationParticipantsJobStatusHandler(w http.ResponseWriter, r
 			go func() {
 				// Schedule the deletion of the job after 60 seconds
 				time.Sleep(60 * time.Second)
-				addParticipantsToOrgWorkers.Delete(jobID.String())
+				addMembersToOrgWorkers.Delete(jobID.String())
 			}()
 		}
 		apicommon.HTTPWriteJSON(w, p)
@@ -222,22 +222,22 @@ func (*API) addOrganizationParticipantsJobStatusHandler(w http.ResponseWriter, r
 	errors.ErrJobNotFound.Withf("%s", jobID.String()).Write(w)
 }
 
-// deleteOrganizationParticipantsHandler godoc
+// deleteOrganizationMembersHandler godoc
 //
-//	@Summary		Delete organization participants
-//	@Description	Delete multiple participants from an organization. Requires Manager/Admin role.
+//	@Summary		Delete organization members
+//	@Description	Delete multiple members from an organization. Requires Manager/Admin role.
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string								true	"Organization address"
-//	@Param			request	body		apicommon.DeleteParticipantsRequest	true	"Participant IDs to delete"
-//	@Success		200		{object}	apicommon.DeleteParticipantsResponse
+//	@Param			address	path		string							true	"Organization address"
+//	@Param			request	body		apicommon.DeleteMembersRequest	true	"Member IDs to delete"
+//	@Success		200		{object}	apicommon.DeleteMembersResponse
 //	@Failure		400		{object}	errors.Error	"Invalid input data"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/participants [delete]
-func (a *API) deleteOrganizationParticipantsHandler(w http.ResponseWriter, r *http.Request) {
+//	@Router			/organizations/{address}/member [delete]
+func (a *API) deleteOrganizationMembersHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)
 	if !ok {
@@ -255,22 +255,22 @@ func (a *API) deleteOrganizationParticipantsHandler(w http.ResponseWriter, r *ht
 		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
-	// get participantIds from the request body
-	participants := &apicommon.DeleteParticipantsRequest{}
-	if err := json.NewDecoder(r.Body).Decode(participants); err != nil {
-		errors.ErrMalformedBody.Withf("error decoding participant IDs").Write(w)
+	// get memberIds from the request body
+	members := &apicommon.DeleteMembersRequest{}
+	if err := json.NewDecoder(r.Body).Decode(members); err != nil {
+		errors.ErrMalformedBody.Withf("error decoding member IDs").Write(w)
 		return
 	}
-	// check if there are participant IDs to delete
-	if len(participants.ParticipantIDs) == 0 {
-		apicommon.HTTPWriteJSON(w, &apicommon.DeleteParticipantsResponse{ParticipantsNo: 0})
+	// check if there are member IDs to delete
+	if len(members.MemberIDs) == 0 {
+		apicommon.HTTPWriteJSON(w, &apicommon.DeleteMembersResponse{MembersNo: 0})
 		return
 	}
-	// delete the org participants from the database
-	deleted, err := a.db.DeleteOrgParticipants(org.Address, participants.ParticipantIDs)
+	// delete the org members from the database
+	deleted, err := a.db.DeleteOrgMembers(org.Address, members.MemberIDs)
 	if err != nil {
-		errors.ErrGenericInternalServerError.Withf("could not delete org participants: %v", err).Write(w)
+		errors.ErrGenericInternalServerError.Withf("could not delete org members: %v", err).Write(w)
 		return
 	}
-	apicommon.HTTPWriteJSON(w, &apicommon.DeleteParticipantsResponse{ParticipantsNo: deleted})
+	apicommon.HTTPWriteJSON(w, &apicommon.DeleteMembersResponse{MembersNo: deleted})
 }

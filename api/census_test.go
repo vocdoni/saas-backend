@@ -79,27 +79,27 @@ func TestCensus(t *testing.T) {
 	_, code = testRequest(t, http.MethodGet, adminToken, nil, censusEndpoint, "invalid-id")
 	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
 
-	// Test 3: Add participants to census
+	// Test 3: Add members to census
 	// Test 3.1: Test with valid data
-	participants := &apicommon.AddParticipantsRequest{
-		Participants: []apicommon.OrgParticipant{
+	members := &apicommon.AddMembersRequest{
+		Members: []apicommon.OrgMember{
 			{
-				ParticipantNo: "P001",
-				Name:          "John Doe",
-				Email:         "john.doe@example.com",
-				Phone:         "+34612345678",
-				Password:      "password123",
+				MemberNo: "P001",
+				Name:     "John Doe",
+				Email:    "john.doe@example.com",
+				Phone:    "+34612345678",
+				Password: "password123",
 				Other: map[string]any{
 					"department": "Engineering",
 					"age":        30,
 				},
 			},
 			{
-				ParticipantNo: "P002",
-				Name:          "Jane Smith",
-				Email:         "jane.smith@example.com",
-				Phone:         "+34698765432",
-				Password:      "password456",
+				MemberNo: "P002",
+				Name:     "Jane Smith",
+				Email:    "jane.smith@example.com",
+				Phone:    "+34698765432",
+				Password: "password456",
 				Other: map[string]any{
 					"department": "Marketing",
 					"age":        28,
@@ -108,50 +108,50 @@ func TestCensus(t *testing.T) {
 		},
 	}
 
-	resp, code = testRequest(t, http.MethodPost, adminToken, participants, censusEndpoint, censusID)
+	resp, code = testRequest(t, http.MethodPost, adminToken, members, censusEndpoint, censusID)
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
-	// Verify the response contains the number of participants added
-	var addedResponse apicommon.AddParticipantsResponse
+	// Verify the response contains the number of members added
+	var addedResponse apicommon.AddMembersResponse
 	err = parseJSON(resp, &addedResponse)
 	c.Assert(err, qt.IsNil)
-	c.Assert(addedResponse.ParticipantsNo, qt.Equals, uint32(2))
+	c.Assert(addedResponse.MembersNo, qt.Equals, uint32(2))
 
 	// Test 3.2: Test with no authentication
-	_, code = testRequest(t, http.MethodPost, "", participants, censusEndpoint, censusID)
+	_, code = testRequest(t, http.MethodPost, "", members, censusEndpoint, censusID)
 	c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
 	// Test 3.3: Test with invalid census ID
-	_, code = testRequest(t, http.MethodPost, adminToken, participants, censusEndpoint, "invalid-id")
+	_, code = testRequest(t, http.MethodPost, adminToken, members, censusEndpoint, "invalid-id")
 	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
 
-	// Test 3.4: Test with empty participants list
-	emptyParticipants := &apicommon.AddParticipantsRequest{
-		Participants: []apicommon.OrgParticipant{},
+	// Test 3.4: Test with empty members list
+	emptyMembersList := &apicommon.AddMembersRequest{
+		Members: []apicommon.OrgMember{},
 	}
-	_, code = testRequest(t, http.MethodPost, adminToken, emptyParticipants, censusEndpoint, censusID)
+	_, code = testRequest(t, http.MethodPost, adminToken, emptyMembersList, censusEndpoint, censusID)
 	c.Assert(code, qt.Equals, http.StatusOK)
 
 	// Test 3.5: Test with async=true flag
-	asyncParticipants := &apicommon.AddParticipantsRequest{
-		Participants: []apicommon.OrgParticipant{
+	asyncMembers := &apicommon.AddMembersRequest{
+		Members: []apicommon.OrgMember{
 			{
-				ParticipantNo: "P003",
-				Name:          "Bob Johnson",
-				Email:         "bob.johnson@example.com",
-				Phone:         "+34611223344",
-				Password:      "password789",
+				MemberNo: "P003",
+				Name:     "Bob Johnson",
+				Email:    "bob.johnson@example.com",
+				Phone:    "+34611223344",
+				Password: "password789",
 				Other: map[string]any{
 					"department": "Sales",
 					"age":        35,
 				},
 			},
 			{
-				ParticipantNo: "P004",
-				Name:          "Alice Brown",
-				Email:         "alice.brown@example.com",
-				Phone:         "+34655443322",
-				Password:      "passwordabc",
+				MemberNo: "P004",
+				Name:     "Alice Brown",
+				Email:    "alice.brown@example.com",
+				Phone:    "+34655443322",
+				Password: "passwordabc",
 				Other: map[string]any{
 					"department": "HR",
 					"age":        42,
@@ -161,11 +161,11 @@ func TestCensus(t *testing.T) {
 	}
 
 	// Make the request with async=true
-	resp, code = testRequest(t, http.MethodPost, adminToken, asyncParticipants, censusEndpoint, censusID+"?async=true")
+	resp, code = testRequest(t, http.MethodPost, adminToken, asyncMembers, censusEndpoint, censusID+"?async=true")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Verify the response contains a job ID
-	var asyncResponse apicommon.AddParticipantsResponse
+	var asyncResponse apicommon.AddMembersResponse
 	err = parseJSON(resp, &asyncResponse)
 	c.Assert(err, qt.IsNil)
 	c.Assert(asyncResponse.JobID, qt.Not(qt.IsNil))
@@ -205,7 +205,7 @@ func TestCensus(t *testing.T) {
 
 	// Verify the job completed successfully
 	c.Assert(completed, qt.Equals, true, qt.Commentf("Job did not complete within expected time"))
-	c.Assert(jobStatus.Added, qt.Equals, 2) // We added 2 participants
+	c.Assert(jobStatus.Added, qt.Equals, 2) // We added 2 members
 	c.Assert(jobStatus.Total, qt.Equals, 2)
 	c.Assert(jobStatus.Progress, qt.Equals, 100)
 

@@ -589,9 +589,9 @@ type SubscriptionCheckout struct {
 	Locale string `json:"locale"`
 }
 
-// ParticipantNotification represents a notification sent to a participant.
-// swagger:model ParticipantNotification
-type ParticipantNotification struct {
+// MemberNotification represents a notification sent to a member.
+// swagger:model MemberNotification
+type MemberNotification struct {
 	// ID of the voting process
 	ProcessID []byte `json:"processID" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 
@@ -651,85 +651,85 @@ type OrganizationCensuses struct {
 	Censuses []OrganizationCensus `json:"censuses"`
 }
 
-// AddParticipantsRequest defines the payload for adding participants to a census.
-// swagger:model AddParticipantsRequest
-type AddParticipantsRequest struct {
-	// List of participants to add
-	Participants []OrgParticipant `json:"participants"`
+// AddMembersRequest defines the payload for adding members to a census.
+// swagger:model AddMembersRequest
+type AddMembersRequest struct {
+	// List of members to add
+	Members []OrgMember `json:"members"`
 }
 
-// DbOrgParticipants converts the participants in the request to db.OrgParticipant objects.
-func (r *AddParticipantsRequest) DbOrgParticipants(orgAddress string) []db.OrgParticipant {
-	participants := make([]db.OrgParticipant, 0, len(r.Participants))
-	for _, p := range r.Participants {
-		participants = append(participants, p.ToDb(orgAddress))
+// DbOrgMembers converts the members in the request to db.OrgMember objects.
+func (r *AddMembersRequest) DbOrgMembers(orgAddress string) []db.OrgMember {
+	members := make([]db.OrgMember, 0, len(r.Members))
+	for _, p := range r.Members {
+		members = append(members, p.ToDb(orgAddress))
 	}
-	return participants
+	return members
 }
 
-type DeleteParticipantsRequest struct {
-	// List of participant ids numbers to delete
-	ParticipantIDs []string `json:"participantIDs"`
+type DeleteMembersRequest struct {
+	// List of member ids numbers to delete
+	MemberIDs []string `json:"memberIDs"`
 }
-type DeleteParticipantsResponse struct {
-	// Number of participants deleted
-	ParticipantsNo int `json:"participantsNo"`
+type DeleteMembersResponse struct {
+	// Number of members deleted
+	MembersNo int `json:"membersNo"`
 }
 
-// OrgParticipant defines the structure of a participant in the API.
-// It is the mirror struct of db.OrgParticipant.
-// swagger:model OrgParticipant
-type OrgParticipant struct {
-	// Unique participant number
-	ParticipantNo string `json:"participantNo"`
+// OrgMember defines the structure of a member in the API.
+// It is the mirror struct of db.OrgMember.
+// swagger:model OrgMember
+type OrgMember struct {
+	// Unique member number
+	MemberNo string `json:"memberNo"`
 
-	// Participant's name
+	// Member's name
 	Name string `json:"name"`
 
-	// Participant's email address
+	// Member's email address
 	Email string `json:"email"`
 
-	// Participant's phone number
+	// Member's phone number
 	Phone string `json:"phone"`
 
-	// Participant's password (for authentication)
+	// Member's password (for authentication)
 	Password string `json:"password"`
 
 	// Additional custom fields
 	Other map[string]any `json:"other"`
 }
 
-// ToDb converts an OrgParticipant to a db.OrgParticipant.
-func (p *OrgParticipant) ToDb(orgAddress string) db.OrgParticipant {
-	return db.OrgParticipant{
-		OrgAddress:    orgAddress,
-		ParticipantNo: p.ParticipantNo,
-		Name:          p.Name,
-		Email:         p.Email,
-		Phone:         p.Phone,
-		Password:      p.Password,
-		Other:         p.Other,
+// ToDb converts an OrgMember to a db.OrgMember.
+func (p *OrgMember) ToDb(orgAddress string) db.OrgMember {
+	return db.OrgMember{
+		OrgAddress: orgAddress,
+		MemberNo:   p.MemberNo,
+		Name:       p.Name,
+		Email:      p.Email,
+		Phone:      p.Phone,
+		Password:   p.Password,
+		Other:      p.Other,
 	}
 }
 
-func OrgParticipantFromDb(p db.OrgParticipant) OrgParticipant {
-	return OrgParticipant{
-		ParticipantNo: p.ParticipantNo,
-		Name:          p.Name,
-		Email:         p.Email,
-		Phone:         p.Phone,
+func OrgMemberFromDb(p db.OrgMember) OrgMember {
+	return OrgMember{
+		MemberNo: p.MemberNo,
+		Name:     p.Name,
+		Email:    p.Email,
+		Phone:    p.Phone,
 	}
 }
 
-type OrganizationParticipantsResponse struct {
-	Participants []OrgParticipant `json:"participants"`
+type OrganizationMembersResponse struct {
+	Members []OrgMember `json:"members"`
 }
 
-// AddParticipantsResponse defines the response for successful participant addition.
-// swagger:model AddParticipantsResponse
-type AddParticipantsResponse struct {
-	// Number of participants added
-	ParticipantsNo uint32 `json:"participantsNo"`
+// AddMembersResponse defines the response for successful member addition.
+// swagger:model AddMembersResponse
+type AddMembersResponse struct {
+	// Number of members added
+	MembersNo uint32 `json:"membersNo"`
 
 	// Job ID for tracking the addition process
 	JobID internal.HexBytes `json:"jobID" swaggertype:"string" format:"hex" example:"deadbeef"`
@@ -754,19 +754,19 @@ type CreateProcessRequest struct {
 	Metadata []byte `json:"metadata,omitempty" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 }
 
-// InitiateAuthRequest defines the payload for participant authentication.
+// InitiateAuthRequest defines the payload for member authentication.
 // swagger:model InitiateAuthRequest
 type InitiateAuthRequest struct {
-	// Unique participant number
-	ParticipantNo string `json:"participantNo"`
+	// Unique member number
+	MemberNo string `json:"memberNo"`
 
-	// Participant's email address (optional)
+	// Member's email address (optional)
 	Email string `json:"email,omitempty"`
 
-	// Participant's phone number (optional)
+	// Member's phone number (optional)
 	Phone string `json:"phone,omitempty"`
 
-	// Participant's password (optional)
+	// Member's password (optional)
 	Password string `json:"password,omitempty"`
 }
 

@@ -68,14 +68,14 @@ const (
 	organizationSubscriptionEndpoint = "/organizations/{address}/subscription"
 	// GET /organizations/{address}/censuses to get the organization censuses
 	organizationCensusesEndpoint = "/organizations/{address}/censuses"
-	// GET /organizations/{address}/participants to get the organization participants
-	organizationParticipantsEndpoint = "/organizations/{address}/participants"
-	// POST /organizations/{address}/participants to add new participants
-	organizationAddParticipantsEndpoint = "/organizations/{address}/participants"
-	// GET /organizations/{address}/participants/check/{jobid} to check the status of the add participants job
-	organizationAddParticipantsJobStatusEndpoint = "/organizations/{address}/participants/job/{jobid}"
-	// DELETE /organizations/{address}/participants to delete participants
-	organizationDeleteParticipantsEndpoint = "/organizations/{address}/participants"
+	// GET /organizations/{address}/members to get the organization members
+	organizationMembersEndpoint = "/organizations/{address}/members"
+	// POST /organizations/{address}/members to add new members
+	organizationAddMembersEndpoint = "/organizations/{address}/members"
+	// GET /organizations/{address}/members/check/{jobid} to check the status of the add members job
+	organizationAddMembersJobStatusEndpoint = "/organizations/{address}/members/job/{jobid}"
+	// DELETE /organizations/{address}/members to delete members
+	organizationDeleteMembersEndpoint = "/organizations/{address}/members"
 	// POST/PUT/GET/DELETE /organizations/{address}/meta to add/set/get/delete the organization metadata
 	organizationMetaEndpoint = "/organizations/{address}/meta"
 	// POST /organizations/{address}/ticket to create a new ticket to our support system
@@ -104,10 +104,10 @@ const (
 	// POST /census to create a new census
 	censusEndpoint = "/census"
 	// GET /census/{id} to get census information
-	// POST /census/{id} to add participants to census
+	// POST /census/{id} to add members to census
 	censusIDEndpoint = "/census/{id}"
-	// GET /census/check/{jobid} to check the status of the add participants job
-	censusAddParticipantsJobStatusEndpoint = "/census/job/{jobid}"
+	// GET /census/check/{jobid} to check the status of the add members job
+	censusAddMembersJobStatusEndpoint = "/census/job/{jobid}"
 	// POST /census/{id}/publish to publish a census
 	censusPublishEndpoint = "/census/{id}/publish"
 
@@ -131,8 +131,8 @@ const (
 	processBundleAuthEndpoint = "/process/bundle/{bundleId}/auth/{step}"
 	// POST /process/bundle/{bundleId}/sign to sign with two-factor authentication
 	processBundleSignEndpoint = "/process/bundle/{bundleId}/sign"
-	// GET /process/bundle/{bundleId}/{participantId} to get the process information
-	processBundleParticipantEndpoint = "/process/bundle/{bundleId}/{participantId}"
+	// GET /process/bundle/{bundleId}/{memberId} to get the process information
+	processBundleMemberEndpoint = "/process/bundle/{bundleId}/{memberId}"
 
 	// // census auth routes (currently not implemented)
 	// // POST /process/{processId}/auth/0 to initiate auth

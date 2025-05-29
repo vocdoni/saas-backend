@@ -46,26 +46,26 @@ func TestProcess(t *testing.T) {
 	censusID := createdCensus.ID
 	t.Logf("Created census with ID: %s\n", censusID)
 
-	// Add participants to the census
-	participants := &apicommon.AddParticipantsRequest{
-		Participants: []apicommon.OrgParticipant{
+	// Add members to the census
+	members := &apicommon.AddMembersRequest{
+		Members: []apicommon.OrgMember{
 			{
-				ParticipantNo: "P001",
-				Name:          "John Doe",
-				Email:         "john.doe@example.com",
-				Phone:         "+34612345678",
-				Password:      "password123",
+				MemberNo: "P001",
+				Name:     "John Doe",
+				Email:    "john.doe@example.com",
+				Phone:    "+34612345678",
+				Password: "password123",
 				Other: map[string]any{
 					"department": "Engineering",
 					"age":        30,
 				},
 			},
 			{
-				ParticipantNo: "P002",
-				Name:          "Jane Smith",
-				Email:         "jane.smith@example.com",
-				Phone:         "+34698765432",
-				Password:      "password456",
+				MemberNo: "P002",
+				Name:     "Jane Smith",
+				Email:    "jane.smith@example.com",
+				Phone:    "+34698765432",
+				Password: "password456",
 				Other: map[string]any{
 					"department": "Marketing",
 					"age":        28,
@@ -74,7 +74,7 @@ func TestProcess(t *testing.T) {
 		},
 	}
 
-	resp, code = testRequest(t, http.MethodPost, adminToken, participants, censusEndpoint, censusID)
+	resp, code = testRequest(t, http.MethodPost, adminToken, members, censusEndpoint, censusID)
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Publish the census

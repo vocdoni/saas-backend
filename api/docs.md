@@ -36,10 +36,10 @@
   - [❌ Remove organization user](#-remove-organization-user)
   - [💸 Organization Subscription Info](#-organization-subscription-info)
   - [📊 Organization Censuses](#-organization-censuses)
-  - [👥 Organization Participants](#-organization-participants)
-  - [➕ Add Organization Participants](#-add-organization-participants)
-  - [🔍 Check Add Participants Job Status](#-check-add-participants-job-status)
-  - [❌ Delete Organization Participants](#-delete-organization-participants)
+  - [👥 Organization Members](#-organization-members)
+  - [➕ Add Organization Members](#-add-organization-members)
+  - [🔍 Check Add Members Job Status](#-check-add-members-job-status)
+  - [❌ Delete Organization Members](#-delete-organization-members)
   - [📋 Organization Meta Information](#-organization-meta-information)
   - [🎫 Create Organization Ticket](#-create-organization-ticket)
   - [🤠 Available organization user roles](#-available-organization-user-roles)
@@ -57,8 +57,8 @@
 - [📊 Census](#-census)
   - [📝 Create Census](#-create-census)
   - [ℹ️ Get Census Info](#ℹ%EF%B8%8F-get-census-info)
-  - [👥 Add Participants](#-add-participants)
-  - [🔍 Check Add Participants Job Status](#-check-add-participants-job-status)
+  - [👥 Add Members](#-add-members)
+  - [🔍 Check Add Members Job Status](#-check-add-members-job-status)
   - [📢 Publish Census](#-publish-census)
   - [📋 Get Published Census Info](#-get-published-census-info)
 - [🔄 Process](#-process)
@@ -1008,9 +1008,9 @@ This request can be made only by organization admins.
 | `400` | `40011` | `no organization provided` |
 | `500` | `50002` | `internal server error` |
 
-### 👥 Organization Participants
+### 👥 Organization Members
 
-* **Path** `/organizations/{address}/participants`
+* **Path** `/organizations/{address}/members`
 * **Method** `GET`
 * **Headers**
   * `Authentication: Bearer <user_token>`
@@ -1020,15 +1020,15 @@ This request can be made only by organization admins.
 * **Response**
 ```json
 {
-  "participants": [
+  "members": [
     {
-      "participantNo": "12345",
+      "memberNo": "12345",
       "name": "John Doe",
       "email": "john@example.com",
       "phone": "+1234567890",
     },
     {
-      "participantNo": "67890",
+      "memberNo": "67890",
       "name": "Jane Smith",
       "email": "jane@example.com",
       "phone": "+0987654321",
@@ -1038,7 +1038,7 @@ This request can be made only by organization admins.
 ```
 
 * **Description**
-Retrieves all participants of an organization with pagination support. Requires Manager or Admin role for the organization.
+Retrieves all members of an organization with pagination support. Requires Manager or Admin role for the organization.
 
 * **Errors**
 
@@ -1049,9 +1049,9 @@ Retrieves all participants of an organization with pagination support. Requires 
 | `400` | `40011` | `no organization provided` |
 | `500` | `50002` | `internal server error` |
 
-### ➕ Add Organization Participants
+### ➕ Add Organization Members
 
-* **Path** `/organizations/{address}/participants`
+* **Path** `/organizations/{address}/members`
 * **Method** `POST`
 * **Headers**
   * `Authentication: Bearer <user_token>`
@@ -1060,16 +1060,16 @@ Retrieves all participants of an organization with pagination support. Requires 
 * **Request body**
 ```json
 {
-  "participants": [
+  "members": [
     {
-      "participantNo": "12345",
+      "memberNo": "12345",
       "name": "John Doe",
       "email": "john@example.com",
       "phone": "+1234567890",
       "password": "secretpass"
     },
     {
-      "participantNo": "67890",
+      "memberNo": "67890",
       "name": "Jane Smith",
       "email": "jane@example.com",
       "phone": "+0987654321",
@@ -1082,7 +1082,7 @@ Retrieves all participants of an organization with pagination support. Requires 
 * **Response (Synchronous)**
 ```json
 {
-  "participantsNo": 2
+  "membersNo": 2
 }
 ```
 
@@ -1094,7 +1094,7 @@ Retrieves all participants of an organization with pagination support. Requires 
 ```
 
 * **Description**
-Adds multiple participants to an organization. Requires Manager or Admin role for the organization. Can be processed synchronously or asynchronously. If processed asynchronously, returns a job ID that can be used to check the status of the operation.
+Adds multiple members to an organization. Requires Manager or Admin role for the organization. Can be processed synchronously or asynchronously. If processed asynchronously, returns a job ID that can be used to check the status of the operation.
 
 * **Errors**
 
@@ -1106,9 +1106,9 @@ Adds multiple participants to an organization. Requires Manager or Admin role fo
 | `400` | `40011` | `no organization provided` |
 | `500` | `50002` | `internal server error` |
 
-### 🔍 Check Add Participants Job Status
+### 🔍 Check Add Members Job Status
 
-* **Path** `/organizations/{address}/participants/job/{jobid}`
+* **Path** `/organizations/{address}/members/job/{jobid}`
 * **Method** `GET`
 * **Headers**
   * `Authentication: Bearer <user_token>`
@@ -1122,7 +1122,7 @@ Adds multiple participants to an organization. Requires Manager or Admin role fo
 ```
 
 * **Description**
-Checks the progress of a job to add participants to an organization. Returns the progress percentage, number of participants added so far, and total number of participants to add. If the job is completed (progress = 100), the job information is automatically deleted after 60 seconds.
+Checks the progress of a job to add members to an organization. Returns the progress percentage, number of members added so far, and total number of members to add. If the job is completed (progress = 100), the job information is automatically deleted after 60 seconds.
 
 * **Errors**
 
@@ -1133,28 +1133,28 @@ Checks the progress of a job to add participants to an organization. Returns the
 | `404` | `40404` | `job not found` |
 | `500` | `50002` | `internal server error` |
 
-### ❌ Delete Organization Participants
+### ❌ Delete Organization Members
 
-* **Path** `/organizations/{address}/participants`
+* **Path** `/organizations/{address}/members`
 * **Method** `DELETE`
 * **Headers**
   * `Authentication: Bearer <user_token>`
 * **Request body**
 ```json
 {
-  "participantIDs": ["12345", "67890"]
+  "memberIDs": ["12345", "67890"]
 }
 ```
 
 * **Response**
 ```json
 {
-  "participantsNo": 2
+  "membersNo": 2
 }
 ```
 
 * **Description**
-Deletes multiple participants from an organization by their participant IDs. Requires Manager or Admin role for the organization. Returns the number of participants successfully deleted.
+Deletes multiple members from an organization by their member IDs. Requires Manager or Admin role for the organization. Returns the number of members successfully deleted.
 
 * **Errors**
 
@@ -1647,7 +1647,7 @@ Returns the census ID
 | `400` | `40010` | `malformed URL parameter` |
 | `500` | `50002` | `internal server error` |
 
-### 👥 Add Participants
+### 👥 Add Members
 
 * **Path** `/census/{id}`
 * **Method** `POST`
@@ -1658,9 +1658,9 @@ Returns the census ID
 * **Request body**
 ```json
 {
-  "participants": [
+  "members": [
     {
-      "email": "participant@example.com",
+      "email": "member@example.com",
       "phone": "+1234567890"
     }
   ]
@@ -1668,7 +1668,7 @@ Returns the census ID
 ```
 
 * **Response (Synchronous)**
-Returns the number of participants successfully added
+Returns the number of members successfully added
 ```json
 42
 ```
@@ -1682,7 +1682,7 @@ Returns a job ID that can be used to check the status of the operation
 ```
 
 * **Description**
-Adds multiple participants to a census in bulk. Requires Manager or Admin role for the organization that owns the census. If the request contains no participants or if the participants array is empty, returns 0. Can be processed synchronously or asynchronously by setting the `async` query parameter to `true`.
+Adds multiple members to a census in bulk. Requires Manager or Admin role for the organization that owns the census. If the request contains no members or if the members array is empty, returns 0. Can be processed synchronously or asynchronously by setting the `async` query parameter to `true`.
 
 * **Errors**
 
@@ -1694,9 +1694,9 @@ Adds multiple participants to a census in bulk. Requires Manager or Admin role f
 | `400` | `40010` | `malformed URL parameter` |
 | `400` | `40010` | `census not found` |
 | `500` | `50002` | `internal server error` |
-| `500` | `50004` | `not all participants were added` |
+| `500` | `50004` | `not all members were added` |
 
-### 🔍 Check Add Participants Job Status
+### 🔍 Check Add Members Job Status
 
 * **Path** `/census/check/{jobid}`
 * **Method** `GET`
@@ -1710,7 +1710,7 @@ Adds multiple participants to a census in bulk. Requires Manager or Admin role f
 ```
 
 * **Description**
-Checks the progress of a job to add participants to a census. Returns the progress percentage, number of participants added so far, and total number of participants to add. If the job is completed (progress = 100), the job information is automatically deleted after 60 seconds.
+Checks the progress of a job to add members to a census. Returns the progress percentage, number of members added so far, and total number of members to add. If the job is completed (progress = 100), the job information is automatically deleted after 60 seconds.
 
 * **Errors**
 
@@ -1847,8 +1847,8 @@ Returns 201 Created on success
 * **Request Body**
 ```json
 {
-  "participantNo": "participant_id",
-  "email": "participant@example.com",  // Optional: Required if using email authentication
+  "memberNo": "member_id",
+  "email": "member@example.com",  // Optional: Required if using email authentication
   "phone": "+1234567890",             // Optional: Required if using phone authentication
   "password": "secretpass1234"        // Optional: Required if using password authentication
 }
@@ -1862,7 +1862,7 @@ Returns 201 Created on success
 ```
 
 * **Description**
-Validates a participant's authentication for a process. The participant must exist in both the organization and the published census. Authentication can be done via email, phone number, or password. At least one authentication method must be provided.
+Validates a member's authentication for a process. The member must exist in both the organization and the published census. Authentication can be done via email, phone number, or password. At least one authentication method must be provided.
 
 * **Errors**
 
@@ -1870,8 +1870,8 @@ Validates a participant's authentication for a process. The participant must exi
 |:---:|:---:|:---|
 | `400` | `40004` | `malformed JSON body` |
 | `400` | `40010` | `malformed URL parameter` |
-| `401` | `40001` | `participant not found` |
-| `401` | `40001` | `participant not found in census` |
+| `401` | `40001` | `member not found` |
+| `401` | `40001` | `member not found in census` |
 | `401` | `40001` | `invalid user data` |
 | `500` | `50002` | `internal server error` |
 
@@ -1897,8 +1897,8 @@ This method return if exists, in inline mode. the image/file of the provided by 
 * **Request Body (Step 0)** 
 ```json
 {
-  "participantNo": "participant_id",
-  "email": "participant@example.com",  // Optional: Required if using email authentication
+  "memberNo": "member_id",
+  "email": "member@example.com",  // Optional: Required if using email authentication
   "phone": "+1234567890",             // Optional: Required if using phone authentication
   "password": "secretpass1234"        // Optional: Required if using password authentication
 }
@@ -2081,8 +2081,8 @@ Retrieves information about a process bundle by its ID, including the associated
 * **Request Body (Step 0)** 
 ```json
 {
-  "participantNo": "participant_id",
-  "email": "participant@example.com",  // Optional: Required if using email authentication
+  "memberNo": "member_id",
+  "email": "member@example.com",  // Optional: Required if using email authentication
   "phone": "+1234567890",             // Optional: Required if using phone authentication
   "password": "secretpass1234"        // Optional: Required if using password authentication
 }
@@ -2159,9 +2159,9 @@ Signs a payload for a process bundle using two-factor authentication. Requires a
 | `401` | `40001` | `user not authorized` |
 | `500` | `50002` | `internal server error` |
 
-### 📋 Get Process Bundle Participant Info
+### 📋 Get Process Bundle Member Info
 
-* **Path** `/process/bundle/{bundleId}/{participantId}`
+* **Path** `/process/bundle/{bundleId}/{memberId}`
 * **Method** `GET`
 * **Response**
 ```json
@@ -2184,7 +2184,7 @@ Signs a payload for a process bundle using two-factor authentication. Requires a
 ```
 
 * **Description**
-Retrieves process information for a specific participant in a process bundle. Returns an array of election objects containing details such as the election ID, remaining voting attempts, consumption status, and additional metadata. If no elections are found for the participant, returns an empty array.
+Retrieves process information for a specific member in a process bundle. Returns an array of election objects containing details such as the election ID, remaining voting attempts, consumption status, and additional metadata. If no elections are found for the member, returns an empty array.
 
 * **Errors**
 
@@ -2193,5 +2193,5 @@ Retrieves process information for a specific participant in a process bundle. Re
 | `400` | `40010` | `malformed URL parameter` |
 | `400` | `40010` | `missing bundle ID` |
 | `400` | `40010` | `invalid bundle ID` |
-| `400` | `40010` | `missing participant ID` |
+| `400` | `40010` | `missing member ID` |
 | `500` | `50002` | `internal server error` |

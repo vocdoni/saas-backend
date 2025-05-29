@@ -36,7 +36,7 @@ func signAndMarshalTx(t *testing.T, tx *models.Tx, signer *ethereum.SignKeys) []
 }
 
 // TestCSPVoting tests the complete flow of creating an organization, a process,
-// a census with participants, and a bundle, then authenticating a participant
+// a census with members, and a bundle, then authenticating a member
 // with the CSP, signing a vote, and casting it.
 func TestCSPVoting(t *testing.T) {
 	c := qt.New(t)
@@ -143,23 +143,23 @@ func TestCSPVoting(t *testing.T) {
 			processID := signRemoteSignerAndSendVocdoniTx(t, &tx, token, vocdoniClient, orgAddress)
 			t.Logf("Created process with ID: %x", processID)
 
-			// Create a census and add participants
+			// Create a census and add members
 			t.Run("Create Census and Bundle", func(_ *testing.T) {
 				// Create a new census
 				censusID := testCreateCensus(t, token, orgAddress, string(db.CensusTypeSMSorMail))
 
-				// Generate test participants
-				participants := testGenerateTestParticipants(5) // Increased to 5 participants for more test cases
+				// Generate test members
+				members := testGenerateTestMembers(5) // Increased to 5 members for more test cases
 
 				// Override email for easier testing
-				participants[0].Email = "john.doe@example.com"
-				participants[1].Email = "jane.smith@example.com"
-				participants[2].Email = "alice.johnson@example.com"
-				participants[3].Email = "bob.williams@example.com"
-				participants[4].Email = "charlie.brown@example.com"
+				members[0].Email = "john.doe@example.com"
+				members[1].Email = "jane.smith@example.com"
+				members[2].Email = "alice.johnson@example.com"
+				members[3].Email = "bob.williams@example.com"
+				members[4].Email = "charlie.brown@example.com"
 
-				// Add participants to the census
-				testAddParticipantsToCensus(t, token, censusID, participants)
+				// Add members to the census
+				testAddMembersToCensus(t, token, censusID, members)
 
 				// Publish the census
 				_, _ = testPublishCensus(t, token, censusID)
@@ -167,7 +167,7 @@ func TestCSPVoting(t *testing.T) {
 				// Create a bundle with the census and process
 				bundleID, _ := testCreateBundle(t, token, censusID, [][]byte{processID})
 
-				// Create a voting key for the participant
+				// Create a voting key for the member
 				t.Run("Authenticate and Vote", func(_ *testing.T) {
 					// Create the voting address for the first user
 					user1 := ethereum.SignKeys{}
@@ -175,7 +175,7 @@ func TestCSPVoting(t *testing.T) {
 					c.Assert(err, qt.IsNil)
 					user1Addr := user1.Address().Bytes()
 
-					// Authenticate the participant with the CSP
+					// Authenticate the member with the CSP
 					authToken := testCSPAuthenticate(t, bundleID, "P001", "john.doe@example.com")
 
 					// Sign the voter's address with the CSP
@@ -197,21 +197,21 @@ func TestCSPVoting(t *testing.T) {
 
 				// Test cases to try to break the authentication and voting mechanisms
 				t.Run("Authentication Attack Vectors", func(_ *testing.T) {
-					// Test case 1: Try to authenticate with invalid participant ID
-					t.Run("Invalid Participant ID", func(_ *testing.T) {
+					// Test case 1: Try to authenticate with invalid member ID
+					t.Run("Invalid Member ID", func(_ *testing.T) {
 						authReq := &handlers.AuthRequest{
-							ParticipantNo: "INVALID",
-							Email:         "john.doe@example.com",
+							MemberNo: "INVALID",
+							Email:    "john.doe@example.com",
 						}
 						resp, code := testRequest(t, http.MethodPost, "", authReq, "process", "bundle", bundleID, "auth", "0")
 						c.Assert(code, qt.Equals, http.StatusUnauthorized, qt.Commentf("expected unauthorized, got %d: %s", code, resp))
 					})
 
-					// Test case 2: Try to authenticate with valid participant ID but wrong email
+					// Test case 2: Try to authenticate with valid member ID but wrong email
 					t.Run("Wrong Email", func(_ *testing.T) {
 						authReq := &handlers.AuthRequest{
-							ParticipantNo: "P001",
-							Email:         "wrong.email@example.com",
+							MemberNo: "P001",
+							Email:    "wrong.email@example.com",
 						}
 						resp, code := testRequest(t, http.MethodPost, "", authReq, "process", "bundle", bundleID, "auth", "0")
 						c.Assert(code, qt.Equals, http.StatusUnauthorized, qt.Commentf("expected unauthorized, got %d: %s", code, resp))
