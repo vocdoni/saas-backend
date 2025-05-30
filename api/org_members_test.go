@@ -59,7 +59,7 @@ func TestOrganizationMembers(t *testing.T) {
 	members := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
 			{
-				MemberNo: "P001",
+				MemberID: "P001",
 				Name:     "John Doe",
 				Email:    "john.doe@example.com",
 				Phone:    "+34612345678",
@@ -70,7 +70,7 @@ func TestOrganizationMembers(t *testing.T) {
 				},
 			},
 			{
-				MemberNo: "P002",
+				MemberID: "P002",
 				Name:     "Jane Smith",
 				Email:    "jane.smith@example.com",
 				Phone:    "+34698765432",
@@ -98,7 +98,7 @@ func TestOrganizationMembers(t *testing.T) {
 	var addedResponse apicommon.AddMembersResponse
 	err = json.Unmarshal(resp, &addedResponse)
 	c.Assert(err, qt.IsNil)
-	c.Assert(addedResponse.MembersNo, qt.Equals, uint32(2))
+	c.Assert(addedResponse.Count, qt.Equals, uint32(2))
 
 	// Test 2.2: Test with no authentication
 	_, code = testRequest(t, http.MethodPost, "", members, "organizations", orgAddress.String(), "members")
@@ -126,7 +126,7 @@ func TestOrganizationMembers(t *testing.T) {
 	// Verify the response for empty members list
 	err = json.Unmarshal(resp, &addedResponse)
 	c.Assert(err, qt.IsNil)
-	c.Assert(addedResponse.MembersNo, qt.Equals, uint32(0))
+	c.Assert(addedResponse.Count, qt.Equals, uint32(0))
 
 	// Test 3: Get organization members (now with added members)
 	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "members")
@@ -141,7 +141,7 @@ func TestOrganizationMembers(t *testing.T) {
 	asyncMembers := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
 			{
-				MemberNo: "P003",
+				MemberID: "P003",
 				Name:     "Bob Johnson",
 				Email:    "bob.johnson@example.com",
 				Phone:    "+34611223344",
@@ -152,7 +152,7 @@ func TestOrganizationMembers(t *testing.T) {
 				},
 			},
 			{
-				MemberNo: "P004",
+				MemberID: "P004",
 				Name:     "Alice Brown",
 				Email:    "alice.brown@example.com",
 				Phone:    "+34655443322",
@@ -291,7 +291,7 @@ func TestOrganizationMembers(t *testing.T) {
 	var deleteResponse apicommon.DeleteMembersResponse
 	err = json.Unmarshal(resp, &deleteResponse)
 	c.Assert(err, qt.IsNil)
-	c.Assert(deleteResponse.MembersNo, qt.Equals, 2, qt.Commentf("expected 2 members deleted"))
+	c.Assert(deleteResponse.Count, qt.Equals, 2, qt.Commentf("expected 2 members deleted"))
 
 	// Test 7.2: Test with no authentication
 	_, code = testRequest(t, http.MethodDelete, "", deleteRequest, "organizations", orgAddress.String(), "members")
@@ -327,7 +327,7 @@ func TestOrganizationMembers(t *testing.T) {
 	// Verify the response for empty member IDs list
 	err = json.Unmarshal(resp, &deleteResponse)
 	c.Assert(err, qt.IsNil)
-	c.Assert(deleteResponse.MembersNo, qt.Equals, 0, qt.Commentf("expected 0 members deleted"))
+	c.Assert(deleteResponse.Count, qt.Equals, 0, qt.Commentf("expected 0 members deleted"))
 
 	// Test 8: Verify members were deleted by getting the list again
 	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "members")

@@ -84,7 +84,7 @@ func TestCensus(t *testing.T) {
 	members := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
 			{
-				MemberNo: "P001",
+				MemberID: "P001",
 				Name:     "John Doe",
 				Email:    "john.doe@example.com",
 				Phone:    "+34612345678",
@@ -95,7 +95,7 @@ func TestCensus(t *testing.T) {
 				},
 			},
 			{
-				MemberNo: "P002",
+				MemberID: "P002",
 				Name:     "Jane Smith",
 				Email:    "jane.smith@example.com",
 				Phone:    "+34698765432",
@@ -115,7 +115,7 @@ func TestCensus(t *testing.T) {
 	var addedResponse apicommon.AddMembersResponse
 	err = parseJSON(resp, &addedResponse)
 	c.Assert(err, qt.IsNil)
-	c.Assert(addedResponse.MembersNo, qt.Equals, uint32(2))
+	c.Assert(addedResponse.Count, qt.Equals, uint32(2))
 
 	// Test 3.2: Test with no authentication
 	_, code = testRequest(t, http.MethodPost, "", members, censusEndpoint, censusID)
@@ -136,7 +136,7 @@ func TestCensus(t *testing.T) {
 	asyncMembers := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
 			{
-				MemberNo: "P003",
+				MemberID: "P003",
 				Name:     "Bob Johnson",
 				Email:    "bob.johnson@example.com",
 				Phone:    "+34611223344",
@@ -147,7 +147,7 @@ func TestCensus(t *testing.T) {
 				},
 			},
 			{
-				MemberNo: "P004",
+				MemberID: "P004",
 				Name:     "Alice Brown",
 				Email:    "alice.brown@example.com",
 				Phone:    "+34655443322",

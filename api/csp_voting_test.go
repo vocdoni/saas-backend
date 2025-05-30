@@ -200,7 +200,7 @@ func TestCSPVoting(t *testing.T) {
 					// Test case 1: Try to authenticate with invalid member ID
 					t.Run("Invalid Member ID", func(_ *testing.T) {
 						authReq := &handlers.AuthRequest{
-							MemberNo: "INVALID",
+							MemberID: "INVALID",
 							Email:    "john.doe@example.com",
 						}
 						resp, code := testRequest(t, http.MethodPost, "", authReq, "process", "bundle", bundleID, "auth", "0")
@@ -210,7 +210,7 @@ func TestCSPVoting(t *testing.T) {
 					// Test case 2: Try to authenticate with valid member ID but wrong email
 					t.Run("Wrong Email", func(_ *testing.T) {
 						authReq := &handlers.AuthRequest{
-							MemberNo: "P001",
+							MemberID: "P001",
 							Email:    "wrong.email@example.com",
 						}
 						resp, code := testRequest(t, http.MethodPost, "", authReq, "process", "bundle", bundleID, "auth", "0")

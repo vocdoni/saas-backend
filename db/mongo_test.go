@@ -18,7 +18,7 @@ const (
 	testDBUserPass  = "testpass123"
 	testDBFirstName = "Test"
 	testDBLastName  = "User"
-	testMemberNo    = "member123"
+	testMemberID    = "member123"
 	testMemberEmail = "member@test.com"
 	testPhone       = "+34678909090"
 	testName        = "Test Member"

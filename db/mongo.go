@@ -433,14 +433,14 @@ func (ms *MongoStorage) Import(jsonData []byte) error {
 	log.Infow("importing census memberships", "count", len(collection.CensusMemberships))
 	for _, censusMem := range collection.CensusMemberships {
 		filter := bson.M{
-			"memberNo": censusMem.MemberNo,
+			"memberID": censusMem.MemberID,
 			"censusId": censusMem.CensusID,
 		}
 		update := bson.M{"$set": censusMem}
 		opts := options.Update().SetUpsert(true)
 		_, err := ms.censusMemberships.UpdateOne(ctx, filter, update, opts)
 		if err != nil {
-			log.Warnw("error upserting census membership", "error", err, "censusMembership", censusMem.MemberNo)
+			log.Warnw("error upserting census membership", "error", err, "censusMembership", censusMem.MemberID)
 		}
 	}
 

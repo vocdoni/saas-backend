@@ -352,8 +352,8 @@ func (c *CSPHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Requ
 }
 
 // validateMemberNumber checks if the member number is provided
-func validateMemberNumber(memberNo string) error {
-	if len(memberNo) == 0 {
+func validateMemberNumber(memberID string) error {
+	if len(memberID) == 0 {
 		return errors.ErrInvalidUserData.Withf("member number not provided")
 	}
 	return nil
@@ -393,7 +393,7 @@ func validatePhone(phone *string) error {
 // validateAuthRequest validates the authentication request data
 func validateAuthRequest(req *AuthRequest) error {
 	// Check request member number
-	err := validateMemberNumber(req.MemberNo)
+	err := validateMemberNumber(req.MemberID)
 	if err != nil {
 		return err
 	}
@@ -415,7 +415,7 @@ func validateAuthRequest(req *AuthRequest) error {
 }
 
 // getCensusAndMember retrieves the census and member information
-func (c *CSPHandlers) getCensusAndMember(censusID string, memberNo string) (*db.Census, *db.OrgMember, error) {
+func (c *CSPHandlers) getCensusAndMember(censusID string, memberID string) (*db.Census, *db.OrgMember, error) {
 	// Get census information
 	census, err := c.mainDB.Census(censusID)
 	if err != nil {
@@ -426,7 +426,7 @@ func (c *CSPHandlers) getCensusAndMember(censusID string, memberNo string) (*db.
 	}
 
 	// Check the census membership of the member
-	if _, err := c.mainDB.CensusMembership(censusID, memberNo); err != nil {
+	if _, err := c.mainDB.CensusMembership(censusID, memberID); err != nil {
 		if err == db.ErrNotFound {
 			return nil, nil, errors.ErrUnauthorized.Withf("member not found in the census")
 		}
@@ -434,9 +434,9 @@ func (c *CSPHandlers) getCensusAndMember(censusID string, memberNo string) (*db.
 	}
 
 	// Get member information
-	member, err := c.mainDB.OrgMemberByNo(census.OrgAddress, memberNo)
+	member, err := c.mainDB.OrgMemberByID(census.OrgAddress, memberID)
 	if err != nil {
-		return nil, nil, errors.ErrCensusMemberNotFound
+		return nil, nil, errors.ErrCensusMemberIDtFound
 	}
 
 	return census, member, nil
@@ -528,7 +528,7 @@ func (c *CSPHandlers) authFirstStep(r *http.Request, bundleID internal.HexBytes,
 	}
 
 	// Get census and member information
-	census, member, err := c.getCensusAndMember(censusID, req.MemberNo)
+	census, member, err := c.getCensusAndMember(censusID, req.MemberID)
 	if err != nil {
 		return nil, err
 	}
@@ -545,7 +545,7 @@ func (c *CSPHandlers) authFirstStep(r *http.Request, bundleID internal.HexBytes,
 	}
 
 	// Generate the token
-	return c.csp.BundleAuthToken(bundleID, internal.HexBytes(member.MemberNo), toDestinations, challengeType)
+	return c.csp.BundleAuthToken(bundleID, internal.HexBytes(member.MemberID), toDestinations, challengeType)
 }
 
 // authSecondStep is the second step of the authentication process. It

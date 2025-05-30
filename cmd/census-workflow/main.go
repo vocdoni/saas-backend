@@ -96,7 +96,7 @@ func generateMembers(n int) []apicommon.OrgMember {
 		members[i] = apicommon.OrgMember{
 			Email:    fmt.Sprintf("user%d@example.com", i+1),
 			Phone:    fmt.Sprintf("+%010d", rand.Int63n(10000000000)),
-			MemberNo: fmt.Sprintf("member_%d", i+1),
+			MemberID: fmt.Sprintf("member_%d", i+1),
 			Name:     fmt.Sprintf("User %d", i+1),
 		}
 	}

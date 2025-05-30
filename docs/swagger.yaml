@@ -28,14 +28,14 @@ definitions:
     type: object
   apicommon.AddMembersResponse:
     properties:
+      count:
+        description: Number of members added
+        type: integer
       jobID:
         description: Job ID for tracking the addition process
         example: deadbeef
         format: hex
         type: string
-      membersNo:
-        description: Number of members added
-        type: integer
     type: object
   apicommon.CreateOrganizationTicketRequest:
     properties:
@@ -104,7 +104,7 @@ definitions:
     type: object
   apicommon.DeleteMembersResponse:
     properties:
-      membersNo:
+      count:
         description: Number of members deleted
         type: integer
     type: object
@@ -152,7 +152,7 @@ definitions:
       email:
         description: Member's email address
         type: string
-      memberNo:
+      memberID:
         description: Unique member number
         type: string
       name:

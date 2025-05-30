@@ -190,24 +190,24 @@ func (ms *MongoStorage) createIndexes() error {
 		return fmt.Errorf("failed to create index on orgAddress for orgMembers: %w", err)
 	}
 
-	// create an index for the memberNo
+	// create an index for the memberID
 	if _, err := ms.orgMembers.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{
-			{Key: "memberNo", Value: 1}, // 1 for ascending order
+			{Key: "memberID", Value: 1}, // 1 for ascending order
 		},
 	}); err != nil {
-		return fmt.Errorf("failed to create index on memberNo for orgMembers: %w", err)
+		return fmt.Errorf("failed to create index on memberID for orgMembers: %w", err)
 	}
 
-	// create an index for the tuple orgAddress and memberNo
+	// create an index for the tuple orgAddress and memberID
 	if _, err := ms.orgMembers.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "orgAddress", Value: 1}, // 1 for ascending order
-			{Key: "memberNo", Value: 1},   // 1 for ascending order
+			{Key: "memberID", Value: 1},   // 1 for ascending order
 		},
 		Options: options.Index().SetUnique(true),
 	}); err != nil {
-		return fmt.Errorf("failed to create index on orgAddress and memberNo for orgMembers: %w", err)
+		return fmt.Errorf("failed to create index on orgAddress and memberID for orgMembers: %w", err)
 	}
 
 	// index for the censusId
@@ -219,24 +219,24 @@ func (ms *MongoStorage) createIndexes() error {
 		return fmt.Errorf("failed to create index on censusId for censusMemberships: %w", err)
 	}
 
-	// index for the memberNo
+	// index for the memberID
 	if _, err := ms.censusMemberships.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{
-			{Key: "memberNo", Value: 1}, // 1 for ascending order
+			{Key: "memberID", Value: 1}, // 1 for ascending order
 		},
 	}); err != nil {
-		return fmt.Errorf("failed to create index on memberNo for censusMemberships: %w", err)
+		return fmt.Errorf("failed to create index on memberID for censusMemberships: %w", err)
 	}
 
-	// index for the censusId and memberNo tuple
+	// index for the censusId and memberID tuple
 	if _, err := ms.censusMemberships.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "censusId", Value: 1}, // 1 for ascending order
-			{Key: "memberNo", Value: 1}, // 1 for ascending order
+			{Key: "memberID", Value: 1}, // 1 for ascending order
 		},
 		Options: options.Index().SetUnique(true),
 	}); err != nil {
-		return fmt.Errorf("failed to create index on censusId and memberNo for censusMemberships: %w", err)
+		return fmt.Errorf("failed to create index on censusId and memberID for censusMemberships: %w", err)
 	}
 
 	// unique index over userID and processID
