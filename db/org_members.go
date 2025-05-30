@@ -114,9 +114,9 @@ func (ms *MongoStorage) OrgMember(id string) (*OrgMember, error) {
 	return orgMember, nil
 }
 
-// OrgMemberByNo retrieves a orgMember from the DB based on organization address and member number
-func (ms *MongoStorage) OrgMemberByNo(orgAddress, memberNo string) (*OrgMember, error) {
-	if len(memberNo) == 0 {
+// OrgMemberByID retrieves a orgMember from the DB based on organization address and member number
+func (ms *MongoStorage) OrgMemberByID(orgAddress, memberID string) (*OrgMember, error) {
+	if len(memberID) == 0 {
 		return nil, ErrInvalidData
 	}
 	// create a context with a timeout
@@ -125,7 +125,7 @@ func (ms *MongoStorage) OrgMemberByNo(orgAddress, memberNo string) (*OrgMember, 
 
 	orgMember := &OrgMember{}
 	if err := ms.orgMembers.FindOne(
-		ctx, bson.M{"orgAddress": orgAddress, "memberNo": memberNo},
+		ctx, bson.M{"orgAddress": orgAddress, "memberID": memberID},
 	).Decode(orgMember); err != nil {
 		return nil, fmt.Errorf("failed to get orgMember: %w", err)
 	}
@@ -204,14 +204,14 @@ func createOrgMemberBulkOperations(
 
 		// Create filter and update document
 		filter := bson.M{
-			"memberNo":   member.MemberNo,
+			"memberID":   member.MemberID,
 			"orgAddress": orgAddress,
 		}
 
 		updateDoc, err := dynamicUpdateDocument(member, nil)
 		if err != nil {
 			log.Warnw("failed to create update document for member",
-				"error", err, "memberNo", member.MemberNo)
+				"error", err, "memberID", member.MemberID)
 			continue // Skip this member but continue with others
 		}
 
@@ -350,7 +350,7 @@ func (ms *MongoStorage) processOrgMemberBatches(
 }
 
 // SetBulkOrgMembers adds multiple organization members to the database in batches of 200 entries
-// and updates already existing members (decided by combination of memberNo and orgAddress)
+// and updates already existing members (decided by combination of memberID and orgAddress)
 // Requires an existing organization
 // Returns a channel that sends the percentage of members processed every 10 seconds.
 // This function must be called in a goroutine.
@@ -434,7 +434,7 @@ func (ms *MongoStorage) DeleteOrgMembers(orgAddress string, memberIDs []string) 
 	// create the filter for the delete operation
 	filter := bson.M{
 		"orgAddress": orgAddress,
-		"memberNo": bson.M{
+		"memberID": bson.M{
 			"$in": memberIDs,
 		},
 	}

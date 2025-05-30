@@ -589,9 +589,9 @@ type SubscriptionCheckout struct {
 	Locale string `json:"locale"`
 }
 
-// MemberNotification represents a notification sent to a member.
-// swagger:model MemberNotification
-type MemberNotification struct {
+// MemberIDtification represents a notification sent to a member.
+// swagger:model MemberIDtification
+type MemberIDtification struct {
 	// ID of the voting process
 	ProcessID []byte `json:"processID" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 
@@ -673,7 +673,7 @@ type DeleteMembersRequest struct {
 }
 type DeleteMembersResponse struct {
 	// Number of members deleted
-	MembersNo int `json:"membersNo"`
+	Count int `json:"count"`
 }
 
 // OrgMember defines the structure of a member in the API.
@@ -681,7 +681,7 @@ type DeleteMembersResponse struct {
 // swagger:model OrgMember
 type OrgMember struct {
 	// Unique member number
-	MemberNo string `json:"memberNo"`
+	MemberID string `json:"memberID"`
 
 	// Member's name
 	Name string `json:"name"`
@@ -703,7 +703,7 @@ type OrgMember struct {
 func (p *OrgMember) ToDb(orgAddress string) db.OrgMember {
 	return db.OrgMember{
 		OrgAddress: orgAddress,
-		MemberNo:   p.MemberNo,
+		MemberID:   p.MemberID,
 		Name:       p.Name,
 		Email:      p.Email,
 		Phone:      p.Phone,
@@ -714,7 +714,7 @@ func (p *OrgMember) ToDb(orgAddress string) db.OrgMember {
 
 func OrgMemberFromDb(p db.OrgMember) OrgMember {
 	return OrgMember{
-		MemberNo: p.MemberNo,
+		MemberID: p.MemberID,
 		Name:     p.Name,
 		Email:    p.Email,
 		Phone:    p.Phone,
@@ -729,7 +729,7 @@ type OrganizationMembersResponse struct {
 // swagger:model AddMembersResponse
 type AddMembersResponse struct {
 	// Number of members added
-	MembersNo uint32 `json:"membersNo"`
+	Count uint32 `json:"count"`
 
 	// Job ID for tracking the addition process
 	JobID internal.HexBytes `json:"jobID" swaggertype:"string" format:"hex" example:"deadbeef"`
@@ -758,7 +758,7 @@ type CreateProcessRequest struct {
 // swagger:model InitiateAuthRequest
 type InitiateAuthRequest struct {
 	// Unique member number
-	MemberNo string `json:"memberNo"`
+	MemberID string `json:"memberID"`
 
 	// Member's email address (optional)
 	Email string `json:"email,omitempty"`

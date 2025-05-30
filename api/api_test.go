@@ -523,10 +523,10 @@ func testAddMembersToCensus(t *testing.T, token, censusID string, members []apic
 	var addedResponse apicommon.AddMembersResponse
 	err := json.Unmarshal(resp, &addedResponse)
 	c.Assert(err, qt.IsNil)
-	c.Assert(addedResponse.MembersNo, qt.Equals, uint32(len(members)),
-		qt.Commentf("expected %d members, got %d", len(members), addedResponse.MembersNo))
+	c.Assert(addedResponse.Count, qt.Equals, uint32(len(members)),
+		qt.Commentf("expected %d members, got %d", len(members), addedResponse.Count))
 
-	return addedResponse.MembersNo
+	return addedResponse.Count
 }
 
 // testPublishCensus publishes the given census.
@@ -588,7 +588,7 @@ func testCSPAuthenticate(t *testing.T, bundleID, memberID, email string) interna
 
 	// Step 1: Initiate authentication (auth/0)
 	authReq := &handlers.AuthRequest{
-		MemberNo: memberID,
+		MemberID: memberID,
 		Email:    email,
 	}
 	resp, code := testRequest(t, http.MethodPost, "", authReq, "process", "bundle", bundleID, "auth", "0")
@@ -718,7 +718,7 @@ func testGenerateTestMembers(count int) []apicommon.OrgMember {
 	for i := 0; i < count; i++ {
 		id := fmt.Sprintf("P%03d", i+1)
 		members[i] = apicommon.OrgMember{
-			MemberNo: id,
+			MemberID: id,
 			Name:     fmt.Sprintf("Test User %d", i+1),
 			Email:    fmt.Sprintf("%s@example.com", id),
 			Phone:    fmt.Sprintf("+346123456%02d", i+1),

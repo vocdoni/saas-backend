@@ -16,7 +16,7 @@ import (
 // by checking that the census exists, the organization exists, and the member exists
 func (ms *MongoStorage) validateCensusMembership(membership *CensusMembership) (string, error) {
 	// validate required fields
-	if len(membership.MemberNo) == 0 || len(membership.CensusID) == 0 {
+	if len(membership.MemberID) == 0 || len(membership.CensusID) == 0 {
 		return "", ErrInvalidData
 	}
 
@@ -36,7 +36,7 @@ func (ms *MongoStorage) validateCensusMembership(membership *CensusMembership) (
 	}
 
 	// check that the member exists
-	if _, err := ms.OrgMemberByNo(census.OrgAddress, membership.MemberNo); err != nil {
+	if _, err := ms.OrgMemberByID(census.OrgAddress, membership.MemberID); err != nil {
 		return "", fmt.Errorf("failed to get org member: %w", err)
 	}
 
@@ -44,7 +44,7 @@ func (ms *MongoStorage) validateCensusMembership(membership *CensusMembership) (
 }
 
 // SetCensusMembership creates or updates a census membership in the database.
-// If the membership already exists (same memberNo and censusID), it updates it.
+// If the membership already exists (same memberID and censusID), it updates it.
 // If it doesn't exist, it creates a new one.
 func (ms *MongoStorage) SetCensusMembership(membership *CensusMembership) error {
 	// Validate the membership
@@ -55,7 +55,7 @@ func (ms *MongoStorage) SetCensusMembership(membership *CensusMembership) error 
 
 	// prepare filter for upsert
 	filter := bson.M{
-		"memberNo": membership.MemberNo,
+		"memberID": membership.MemberID,
 		"censusId": membership.CensusID,
 	}
 
@@ -87,20 +87,20 @@ func (ms *MongoStorage) SetCensusMembership(membership *CensusMembership) error 
 }
 
 // CensusMembership retrieves a census membership from the database based on
-// memberNo and censusID. Returns ErrNotFound if the membership doesn't exist.
-func (ms *MongoStorage) CensusMembership(censusID, memberNo string) (*CensusMembership, error) {
+// memberID and censusID. Returns ErrNotFound if the membership doesn't exist.
+func (ms *MongoStorage) CensusMembership(censusID, memberID string) (*CensusMembership, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	// validate input
-	if len(memberNo) == 0 || len(censusID) == 0 {
+	if len(memberID) == 0 || len(censusID) == 0 {
 		return nil, ErrInvalidData
 	}
 
 	// prepare filter for upsert
 	filter := bson.M{
-		"memberNo": memberNo,
+		"memberID": memberID,
 		"censusId": censusID,
 	}
 
@@ -119,7 +119,7 @@ func (ms *MongoStorage) CensusMembership(censusID, memberNo string) (*CensusMemb
 
 // DelCensusMembership removes a census membership from the database.
 // Returns nil if the membership was successfully deleted or didn't exist.
-func (ms *MongoStorage) DelCensusMembership(censusID, memberNo string) error {
+func (ms *MongoStorage) DelCensusMembership(censusID, memberID string) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
@@ -127,13 +127,13 @@ func (ms *MongoStorage) DelCensusMembership(censusID, memberNo string) error {
 	defer cancel()
 
 	// validate input
-	if len(memberNo) == 0 || len(censusID) == 0 {
+	if len(memberID) == 0 || len(censusID) == 0 {
 		return ErrInvalidData
 	}
 
 	// prepare filter for upsert
 	filter := bson.M{
-		"memberNo": memberNo,
+		"memberID": memberID,
 		"censusId": censusID,
 	}
 
@@ -204,14 +204,14 @@ func createBulkOperations(
 
 		// Create member filter and update document
 		memberFilter := bson.M{
-			"memberNo":   orgMember.MemberNo,
+			"memberID":   orgMember.MemberID,
 			"orgAddress": orgAddress,
 		}
 
 		updateOrgMembersDoc, err := dynamicUpdateDocument(orgMember, nil)
 		if err != nil {
 			log.Warnw("failed to create update document for member",
-				"error", err, "memberNo", orgMember.MemberNo)
+				"error", err, "memberID", orgMember.MemberID)
 			continue // Skip this member but continue with others
 		}
 
@@ -224,11 +224,11 @@ func createBulkOperations(
 
 		// Create membership filter and document
 		censusMembersFilter := bson.M{
-			"memberNo": orgMember.MemberNo,
+			"memberID": orgMember.MemberID,
 			"censusId": censusID,
 		}
 		membershipDoc := &CensusMembership{
-			MemberNo:  orgMember.MemberNo,
+			MemberID:  orgMember.MemberID,
 			CensusID:  censusID,
 			CreatedAt: currentTime,
 		}
@@ -237,7 +237,7 @@ func createBulkOperations(
 		updateMembershipDoc, err := dynamicUpdateDocument(membershipDoc, nil)
 		if err != nil {
 			log.Warnw("failed to create update document for membership",
-				"error", err, "memberNo", orgMember.MemberNo)
+				"error", err, "memberID", orgMember.MemberID)
 			continue
 		}
 
@@ -407,7 +407,7 @@ func (ms *MongoStorage) processBatches(
 }
 
 // SetBulkCensusMembership creates or updates an org member and a census membership in the database.
-// If the membership already exists (same memberNo and censusID), it updates it.
+// If the membership already exists (same memberID and censusID), it updates it.
 // If it doesn't exist, it creates a new one.
 // Processes members in batches of 200 entries.
 // Returns a channel that sends the percentage of members processed every 10 seconds.

@@ -136,7 +136,7 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 	}
 	// check if there are members to add
 	if len(members.Members) == 0 {
-		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{MembersNo: 0})
+		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{Count: 0})
 		return
 	}
 	// add the org members to the database
@@ -163,7 +163,7 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 				"total", p.Total)
 		}
 		// Return the number of members added
-		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{MembersNo: uint32(lastProgress.Added)})
+		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{Count: uint32(lastProgress.Added)})
 		return
 	}
 
@@ -263,7 +263,7 @@ func (a *API) deleteOrganizationMembersHandler(w http.ResponseWriter, r *http.Re
 	}
 	// check if there are member IDs to delete
 	if len(members.MemberIDs) == 0 {
-		apicommon.HTTPWriteJSON(w, &apicommon.DeleteMembersResponse{MembersNo: 0})
+		apicommon.HTTPWriteJSON(w, &apicommon.DeleteMembersResponse{Count: 0})
 		return
 	}
 	// delete the org members from the database
@@ -272,5 +272,5 @@ func (a *API) deleteOrganizationMembersHandler(w http.ResponseWriter, r *http.Re
 		errors.ErrGenericInternalServerError.Withf("could not delete org members: %v", err).Write(w)
 		return
 	}
-	apicommon.HTTPWriteJSON(w, &apicommon.DeleteMembersResponse{MembersNo: deleted})
+	apicommon.HTTPWriteJSON(w, &apicommon.DeleteMembersResponse{Count: deleted})
 }

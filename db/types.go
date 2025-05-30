@@ -165,7 +165,7 @@ type Object struct {
 type CensusType string
 
 const (
-	// CensusTypeMail is used when the organizer uploads a list of names, memberNos and e‑mails.
+	// CensusTypeMail is used when the organizer uploads a list of names, memberIDs and e‑mails.
 	CensusTypePass      CensusType = "pass"
 	CensusTypeMail      CensusType = "mail"
 	CensusTypeSMS       CensusType = "sms"
@@ -194,7 +194,7 @@ type OrgMember struct {
 	HashedEmail []byte         `json:"hashedEmail" bson:"hashedEmail" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 	Phone       string         `json:"phone" bson:"phone"`
 	HashedPhone []byte         `json:"hashedPhone" bson:"hashedPhone" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
-	MemberNo    string         `json:"memberNo" bson:"memberNo"`
+	MemberID    string         `json:"memberID" bson:"memberID"`
 	Name        string         `json:"name" bson:"name"`
 	Password    string         `json:"password" bson:"password"`
 	HashedPass  []byte         `json:"pass" bson:"pass" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
@@ -206,7 +206,7 @@ type OrgMember struct {
 // Relates an OrgMember to a Census
 // The censusID is the hex format in string of the objectID
 type CensusMembership struct {
-	MemberNo  string    `json:"memberNo" bson:"memberNo"`
+	MemberID  string    `json:"memberID" bson:"memberID"`
 	CensusID  string    `json:"censusId" bson:"censusId"`
 	CreatedAt time.Time `json:"createdAt" bson:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt" bson:"updatedAt"`
@@ -243,15 +243,4 @@ type ProcessesBundle struct {
 	CensusRoot string              `json:"censusRoot" bson:"censusRoot"`                                                          // The census root public key
 	OrgAddress string              `json:"orgAddress" bson:"orgAddress"`                                                          // The organization that owns this bundle
 	Processes  []internal.HexBytes `json:"processes" bson:"processes" swaggertype:"array,string" format:"hex" example:"deadbeef"` // Array of process IDs included in this bundle
-}
-
-// Mix of the Membership and the Participant
-//
-//nolint:lll
-type CensusMembershipParticipant struct { // TODO: what to do with this one???
-	ParticipantNo string              `json:"memberNo" bson:"memberNo"`
-	HashedEmail   string              `json:"hashedEmail" bson:"hashedEmail"`
-	HashedPhone   string              `json:"hashedPhone" bson:"hashedPhone"`
-	BundleID      string              `json:"bundleId" bson:"bundleId"`
-	ElectionIDs   []internal.HexBytes `json:"electionIds" bson:"electionIds" swaggertype:"array,string" format:"hex" example:"deadbeef"`
 }

@@ -270,7 +270,7 @@ Content-Type: application/json
 {
   "members": [
     {
-      "id": "member_id",
+      "id": "012345",
       "email": "member@example.com",
       "phone": "+1234567890",
       "password": "secretpass1234"
@@ -306,7 +306,7 @@ POST http://localhost:8080/process/{processId}/auth
 Content-Type: application/json
 
 {
-  "memberNo": "member_id",
+  "memberID": "012345",
   "email": "member@example.com",
   "phone": "+1234567890",
   "password": "secretpass1234"

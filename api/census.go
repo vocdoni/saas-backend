@@ -159,7 +159,7 @@ func (a *API) addCensusMembersHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// check if there are members to add
 	if len(members.Members) == 0 {
-		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{MembersNo: 0})
+		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{Count: 0})
 		return
 	}
 	// add the org members to the census in the database
@@ -187,7 +187,7 @@ func (a *API) addCensusMembersHandler(w http.ResponseWriter, r *http.Request) {
 				"total", p.Total)
 		}
 		// Return the number of members added
-		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{MembersNo: uint32(lastProgress.Added)})
+		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{Count: uint32(lastProgress.Added)})
 		return
 	}
 

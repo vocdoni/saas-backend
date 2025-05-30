@@ -50,7 +50,7 @@ func TestProcess(t *testing.T) {
 	members := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
 			{
-				MemberNo: "P001",
+				MemberID: "P001",
 				Name:     "John Doe",
 				Email:    "john.doe@example.com",
 				Phone:    "+34612345678",
@@ -61,7 +61,7 @@ func TestProcess(t *testing.T) {
 				},
 			},
 			{
-				MemberNo: "P002",
+				MemberID: "P002",
 				Name:     "Jane Smith",
 				Email:    "jane.smith@example.com",
 				Phone:    "+34698765432",
