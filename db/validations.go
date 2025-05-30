@@ -104,7 +104,7 @@ var subscriptionCollectionValidator = bson.M{
 			// 			},
 			// 			"maxCensusSize": bson.M{
 			// 				"bsonType":    "int",
-			// 				"description": "the max number of participants allowed in the each election must be an integer and is required",
+			// 				"description": "the max number of members allowed in the each election must be an integer and is required",
 			// 				"minimum":     1,
 			// 			},
 			// 		},

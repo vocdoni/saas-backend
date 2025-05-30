@@ -41,7 +41,7 @@ func (ms *MongoStorage) SetProcess(process *Process) error {
 	return nil
 }
 
-// DeleteProcess removes a process and all its participants
+// DeleteProcess removes a process
 func (ms *MongoStorage) DelProcess(processID []byte) error {
 	if len(processID) == 0 {
 		return ErrInvalidData
