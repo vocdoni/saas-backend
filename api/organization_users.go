@@ -135,9 +135,8 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	// check if the new user already has a role in the organization
-	// TODO: check ANY role (not just admin)
-	if _, err := a.db.UserHasRoleInOrg(invite.Email, org.Address, db.AdminRole); err == nil {
-		errors.ErrDuplicateConflict.With("user is already admin of organization").Write(w)
+	if _, err := a.db.UserHasAnyRoleInOrg(invite.Email, org.Address); err == nil {
+		errors.ErrDuplicateConflict.With("user already has a role in the organization").Write(w)
 		return
 	}
 	// create new invitation
@@ -269,7 +268,7 @@ func (a *API) acceptOrganizationUserInvitationHandler(w http.ResponseWriter, r *
 			errors.ErrUserNoVerified.With("user already exists but is not verified").Write(w)
 			return
 		}
-		// check if the user already has a role in the organization
+		// check if the user already has the role in the organization
 		if _, err := a.db.UserHasRoleInOrg(invitation.NewUserEmail, org.Address, invitation.Role); err == nil {
 			go removeInvitation()
 			errors.ErrDuplicateConflict.With("user already has the role in the organization").Write(w)

@@ -167,6 +167,10 @@ func TestUsers(t *testing.T) {
 			success, err := testDB.UserHasRoleInOrg(user.Email, org.Address, org.Role)
 			c.Assert(err, qt.IsNil)
 			c.Assert(success, qt.IsTrue)
+			success, err = testDB.UserHasAnyRoleInOrg(user.Email, org.Address)
+			c.Assert(err, qt.IsNil)
+			c.Assert(success, qt.IsTrue)
+
 		}
 		// test the user role in a non-existent organizations
 		success, err := testDB.UserHasRoleInOrg(user.Email, "notFoundOrg", AdminRole)
@@ -179,6 +183,10 @@ func TestUsers(t *testing.T) {
 		// test not found user
 		success, err = testDB.UserHasRoleInOrg("notFoundUser", "adminOrg", AdminRole)
 		c.Assert(err, qt.Equals, ErrNotFound)
+		c.Assert(success, qt.IsFalse)
+		// test no role
+		success, err = testDB.UserHasAnyRoleInOrg(user.Email, "unrelatedOrg")
+		c.Assert(err, qt.IsNil)
 		c.Assert(success, qt.IsFalse)
 	})
 
