@@ -195,12 +195,25 @@ func (ms *MongoStorage) UserHasRoleInOrg(userEmail, organizationAddress string, 
 	}
 	for _, org := range user.Organizations {
 		if org.Address == organizationAddress {
-			// TODO: add support for passing AnyRole, like this:
-			// if role == AnyRole {
-			// 	return true, nil
-			// }
 			return org.Role == role, nil
 		}
 	}
 	return false, ErrNotFound
+}
+
+// UserHasAnyRoleInOrg method checks if the user with the given email has any role in the
+// organization with the given address. If the user has any role, it
+// returns true. If the user doesn't have any role, it returns false. If an error
+// occurs, it returns the error.
+func (ms *MongoStorage) UserHasAnyRoleInOrg(userEmail, organizationAddress string) (bool, error) {
+	user, err := ms.UserByEmail(userEmail)
+	if err != nil {
+		return false, err
+	}
+	for _, org := range user.Organizations {
+		if org.Address == organizationAddress {
+			return true, nil
+		}
+	}
+	return false, nil
 }
