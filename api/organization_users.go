@@ -135,10 +135,14 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	// check if the new user already has a role in the organization
-	if _, err := a.db.UserHasAnyRoleInOrg(invite.Email, org.Address); err == nil {
+	if hasAnyRole, err := a.db.UserHasAnyRoleInOrg(invite.Email, org.Address); err != nil {
+		errors.ErrInvalidUserData.WithErr(err).Write(w)
+		return
+	} else if hasAnyRole {
 		errors.ErrDuplicateConflict.With("user already has a role in the organization").Write(w)
 		return
 	}
+
 	// create new invitation
 	orgInvite := &db.OrganizationInvite{
 		OrganizationAddress: org.Address,
