@@ -7,7 +7,7 @@ COPY . .
 RUN --mount=type=cache,target=/go-cache go mod download
 RUN --mount=type=cache,target=/go-cache go build -o=backend -ldflags="-s -w" cmd/service/main.go
 
-FROM debian:bookworm-slim as base
+FROM debian:bookworm-slim AS base
 
 WORKDIR /app
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
