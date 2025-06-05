@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
@@ -202,7 +201,7 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 //	@Router			/users/verify/code [get]
 func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user email of the user from the request query
-	userEmail := chi.URLParam(r, "email")
+	userEmail := r.URL.Query().Get("email")
 	// check the email is not empty
 	if userEmail == "" {
 		errors.ErrInvalidUserData.With("no email provided").Write(w)
