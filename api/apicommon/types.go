@@ -721,6 +721,7 @@ func OrgMemberFromDb(p db.OrgMember) OrgMember {
 		Name:     p.Name,
 		Email:    p.Email,
 		Phone:    p.Phone,
+		Other:    p.Other,
 	}
 }
 
