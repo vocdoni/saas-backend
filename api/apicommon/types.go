@@ -169,6 +169,59 @@ type UpdateOrganizationUserRoleRequest struct {
 	Role string `json:"role"`
 }
 
+type CreateOrganizationMemberGroupRequest struct {
+	// Title of the group
+	Title string `json:"title"`
+	// Description of the group
+	Description string `json:"description"`
+	// The IDs of the members to add to the group
+	MemberIDs []string `json:"memberIds"`
+}
+
+type OrganizationMemberGroupInfo struct {
+	// Unique identifier for the group
+	ID string `json:"id,omitempty" bson:"_id"`
+	// Title of the group
+	Title string `json:"title,omitempty" bson:"title"`
+	// Description of the group
+	Description string `json:"description,omitempty" bson:"description"`
+	// Creation timestamp
+	CreatedAt time.Time `json:"createdAt,omitempty" bson:"createdAt"`
+	// Last updated timestamp
+	UpdatedAt time.Time `json:"updatedAt,omitempty" bson:"updatedAt"`
+	// List of member IDs in the group
+	MemberIDs []string `json:"memberIds,omitempty" bson:"memberIds"`
+	// List of census IDs associated with the group
+	CensusIDs []string `json:"censusIds,omitempty" bson:"censusIds"`
+	// Count of members in the group
+	MembersCount int `json:"membersCount,omitempty" bson:"membersCount"`
+}
+
+type OrganizationMemberGroupsResponse struct {
+	// List of organization member groups
+	Groups []*OrganizationMemberGroupInfo `json:"groups"`
+}
+
+type UpdateOrganizationMemberGroupsRequest struct {
+	// Updated Title
+	Title string `json:"title"`
+	// Updated Description
+	Description string `json:"description"`
+	// The IDs of the members to add to the group
+	AddMembers []string `json:"addMembers"`
+	// The IDs of the members to remove from the group
+	RemoveMembers []string `json:"removeMembers"`
+}
+
+type ListOrganizationMemberGroupResponse struct {
+	// Total number of pages
+	TotalPages int `json:"totalPages"`
+	// Current page number
+	CurrentPage int `json:"currentPage"`
+	// List of organization group members
+	Members []OrgMember `json:"members"`
+}
+
 // UserInfo represents user information and is used for user registration.
 // swagger:model UserInfo
 type UserInfo struct {
