@@ -262,12 +262,12 @@ func (a *API) deleteOrganizationMembersHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	// check if there are member IDs to delete
-	if len(members.MemberIDs) == 0 {
+	if len(members.IDs) == 0 {
 		apicommon.HTTPWriteJSON(w, &apicommon.DeleteMembersResponse{Count: 0})
 		return
 	}
 	// delete the org members from the database
-	deleted, err := a.db.DeleteOrgMembers(org.Address, members.MemberIDs)
+	deleted, err := a.db.DeleteOrgMembers(org.Address, members.IDs)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not delete org members: %v", err).Write(w)
 		return

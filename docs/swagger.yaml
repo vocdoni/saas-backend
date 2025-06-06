@@ -96,8 +96,8 @@ definitions:
     type: object
   apicommon.DeleteMembersRequest:
     properties:
-      memberIDs:
-        description: List of member ids numbers to delete
+      ids:
+        description: List of member internal ids numbers to delete
         items:
           type: string
         type: array
@@ -152,8 +152,11 @@ definitions:
       email:
         description: Member's email address
         type: string
+      id:
+        description: Member's internal unique internal ID
+        type: string
       memberID:
-        description: Unique member number
+        description: Unique member number as defined by the organization
         type: string
       name:
         description: Member's name

@@ -419,12 +419,21 @@ func (ms *MongoStorage) OrgMembers(orgAddress string, page, pageSize int) ([]Org
 	return orgMembers, nil
 }
 
-func (ms *MongoStorage) DeleteOrgMembers(orgAddress string, memberIDs []string) (int, error) {
+func (ms *MongoStorage) DeleteOrgMembers(orgAddress string, ids []string) (int, error) {
 	if len(orgAddress) == 0 {
 		return 0, ErrInvalidData
 	}
-	if len(memberIDs) == 0 {
+	if len(ids) == 0 {
 		return 0, nil
+	}
+	// Convert string IDs to ObjectIDs
+	var oids []primitive.ObjectID
+	for _, id := range ids {
+		objID, err := primitive.ObjectIDFromHex(id)
+		if err != nil {
+			return 0, fmt.Errorf("invalid member ID %s: %w", id, ErrInvalidData)
+		}
+		oids = append(oids, objID)
 	}
 
 	// create a context with a timeout
@@ -434,8 +443,8 @@ func (ms *MongoStorage) DeleteOrgMembers(orgAddress string, memberIDs []string) 
 	// create the filter for the delete operation
 	filter := bson.M{
 		"orgAddress": orgAddress,
-		"memberID": bson.M{
-			"$in": memberIDs,
+		"_id": bson.M{
+			"$in": oids,
 		},
 	}
 

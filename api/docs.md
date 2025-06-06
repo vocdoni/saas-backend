@@ -1022,12 +1022,14 @@ This request can be made only by organization admins.
 {
   "members": [
     {
+      "id": "internal-uid1",
       "memberID": "12345",
       "name": "John Doe",
       "email": "john@example.com",
       "phone": "+1234567890",
     },
     {
+      "id": "internal-uid2",
       "memberID": "67890",
       "name": "Jane Smith",
       "email": "jane@example.com",
@@ -1142,7 +1144,7 @@ Checks the progress of a job to add members to an organization. Returns the prog
 * **Request body**
 ```json
 {
-  "memberIDs": ["12345", "67890"]
+  "IDs": ["internal-uid1","internal-uid2"]
 }
 ```
 

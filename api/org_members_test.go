@@ -273,7 +273,7 @@ func TestOrganizationMembers(t *testing.T) {
 	// Test 7: Delete members
 	// Test 7.1: Test with valid member IDs
 	deleteRequest := &apicommon.DeleteMembersRequest{
-		MemberIDs: []string{"P001", "P003"},
+		IDs: []string{membersResponse.Members[0].ID , membersResponse.Members[1].ID},
 	}
 
 	resp, code = testRequest(
@@ -311,7 +311,7 @@ func TestOrganizationMembers(t *testing.T) {
 
 	// Test 7.4: Test with empty member IDs list
 	emptyDeleteRequest := &apicommon.DeleteMembersRequest{
-		MemberIDs: []string{},
+		IDs: []string{},
 	}
 	resp, code = testRequest(
 		t,
