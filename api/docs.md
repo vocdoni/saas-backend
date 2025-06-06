@@ -1022,7 +1022,7 @@ This request can be made only by organization admins.
 {
   "pages": 10, // Total number of pages
   "page": 1, // Current page
-  "members": [
+  "members": [  // Currently sorted alphabetically by name
     {
       "id": "internal-uid1",
       "memberID": "12345",
