@@ -589,9 +589,9 @@ type SubscriptionCheckout struct {
 	Locale string `json:"locale"`
 }
 
-// MemberIDtification represents a notification sent to a member.
-// swagger:model MemberIDtification
-type MemberIDtification struct {
+// MemberNotification represents a notification sent to a member.
+// swagger:model MemberNotification
+type MemberNotification struct {
 	// ID of the voting process
 	ProcessID []byte `json:"processID" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 
@@ -668,8 +668,8 @@ func (r *AddMembersRequest) DbOrgMembers(orgAddress string) []db.OrgMember {
 }
 
 type DeleteMembersRequest struct {
-	// List of member ids numbers to delete
-	MemberIDs []string `json:"memberIDs"`
+	// List of member internal ids numbers to delete
+	IDs []string `json:"ids"`
 }
 type DeleteMembersResponse struct {
 	// Number of members deleted
@@ -680,7 +680,9 @@ type DeleteMembersResponse struct {
 // It is the mirror struct of db.OrgMember.
 // swagger:model OrgMember
 type OrgMember struct {
-	// Unique member number
+	// Member's internal unique internal ID
+	ID string `json:"id"`
+	// Unique member number as defined by the organization
 	MemberID string `json:"memberID"`
 
 	// Member's name
@@ -714,6 +716,7 @@ func (p *OrgMember) ToDb(orgAddress string) db.OrgMember {
 
 func OrgMemberFromDb(p db.OrgMember) OrgMember {
 	return OrgMember{
+		ID:       p.ID.Hex(),
 		MemberID: p.MemberID,
 		Name:     p.Name,
 		Email:    p.Email,
