@@ -1020,6 +1020,8 @@ This request can be made only by organization admins.
 * **Response**
 ```json
 {
+  "pages": 10, // Total number of pages
+  "page": 1, // Current page
   "members": [
     {
       "id": "internal-uid1",

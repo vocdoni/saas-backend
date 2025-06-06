@@ -72,7 +72,7 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	// retrieve the orgMembers with pagination
-	members, err := a.db.OrgMembers(org.Address, page, pageSize)
+	pages, members, err := a.db.OrgMembers(org.Address, page, pageSize)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not get org members: %v", err).Write(w)
 		return
@@ -85,6 +85,8 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	apicommon.HTTPWriteJSON(w, &apicommon.OrganizationMembersResponse{
+		Pages:   pages,
+		Page:    page,
 		Members: membersResponse,
 	})
 }

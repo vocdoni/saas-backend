@@ -725,6 +725,13 @@ func OrgMemberFromDb(p db.OrgMember) OrgMember {
 }
 
 type OrganizationMembersResponse struct {
+	// Total number of pages available
+	Pages int `json:"pages"`
+
+	// Current page number
+	Page int `json:"page"`
+
+	// Total number of members in the organization
 	Members []OrgMember `json:"members"`
 }
 

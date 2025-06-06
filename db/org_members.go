@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/vocdoni/saas-backend/internal"
@@ -380,19 +381,26 @@ func (ms *MongoStorage) SetBulkOrgMembers(
 }
 
 // OrgMembers retrieves paginated orgMembers for an organization from the DB
-func (ms *MongoStorage) OrgMembers(orgAddress string, page, pageSize int) ([]OrgMember, error) {
+func (ms *MongoStorage) OrgMembers(orgAddress string, page, pageSize int) (int, []OrgMember, error) {
 	if len(orgAddress) == 0 {
-		return nil, ErrInvalidData
+		return 0, nil, ErrInvalidData
 	}
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
+	// Create filter
+	filter := bson.M{"orgAddress": orgAddress}
+
 	// Calculate skip value based on page and pageSize
 	skip := (page - 1) * pageSize
 
-	// Create filter
-	filter := bson.M{"orgAddress": orgAddress}
+	// Count total documents
+	totalCount, err := ms.orgMembers.CountDocuments(ctx, filter)
+	if err != nil {
+		return 0, nil, err
+	}
+	totalPages := int(math.Ceil(float64(totalCount) / float64(pageSize)))
 
 	// Set up options for pagination
 	findOptions := options.Find().
@@ -402,7 +410,7 @@ func (ms *MongoStorage) OrgMembers(orgAddress string, page, pageSize int) ([]Org
 	// Execute the find operation with pagination
 	cursor, err := ms.orgMembers.Find(ctx, filter, findOptions)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get orgMembers: %w", err)
+		return 0, nil, fmt.Errorf("failed to get orgMembers: %w", err)
 	}
 	defer func() {
 		if err := cursor.Close(ctx); err != nil {
@@ -413,10 +421,10 @@ func (ms *MongoStorage) OrgMembers(orgAddress string, page, pageSize int) ([]Org
 	// Decode results
 	var orgMembers []OrgMember
 	if err = cursor.All(ctx, &orgMembers); err != nil {
-		return nil, fmt.Errorf("failed to decode orgMembers: %w", err)
+		return 0, nil, fmt.Errorf("failed to decode orgMembers: %w", err)
 	}
 
-	return orgMembers, nil
+	return totalPages, orgMembers, nil
 }
 
 func (ms *MongoStorage) DeleteOrgMembers(orgAddress string, ids []string) (int, error) {
