@@ -295,9 +295,16 @@ definitions:
   apicommon.OrganizationMembersResponse:
     properties:
       members:
+        description: Total number of members in the organization
         items:
           $ref: '#/definitions/apicommon.OrgMember'
         type: array
+      page:
+        description: Current page number
+        type: integer
+      pages:
+        description: Total number of pages available
+        type: integer
     type: object
   apicommon.OrganizationMetaResponse:
     properties:
