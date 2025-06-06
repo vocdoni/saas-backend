@@ -404,6 +404,7 @@ func (ms *MongoStorage) OrgMembers(orgAddress string, page, pageSize int) (int, 
 
 	// Set up options for pagination
 	findOptions := options.Find().
+		SetSort(bson.M{"name": 1}). // Sort by createdAt in descending order
 		SetSkip(int64(skip)).
 		SetLimit(int64(pageSize))
 
