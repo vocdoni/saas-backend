@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
@@ -450,9 +451,9 @@ func (c *CSPHandlers) verifyPassword(password string, hashedPass []byte) error {
 	return nil
 }
 
-// verifyEmail checks if the provided email matches the member's hashed email
-func verifyEmail(orgAddress string, email string, hashedEmail []byte) error {
-	if !bytes.Equal(internal.HashOrgData(orgAddress, email), hashedEmail) {
+// verifyEmail checks if the provided email matches the member's stored email
+func verifyEmail(email string, storedEmail string) error {
+	if !strings.EqualFold(email, storedEmail) {
 		return errors.ErrUnauthorized.Withf("invalid user email")
 	}
 	return nil
@@ -467,15 +468,22 @@ func verifyPhone(orgAddress string, phone string, hashedPhone []byte) error {
 }
 
 // handleEmailContact verifies the email and returns the appropriate contact method
-func handleEmailContact(orgAddress string, email string, hashedEmail []byte) (string, notifications.ChallengeType, error) {
-	if err := verifyEmail(orgAddress, email, hashedEmail); err != nil {
+func handleEmailContact(
+	email string,
+	storedEmail string,
+) (string, notifications.ChallengeType, error) {
+	if err := verifyEmail(email, storedEmail); err != nil {
 		return "", "", err
 	}
 	return email, notifications.EmailChallenge, nil
 }
 
 // handlePhoneContact verifies the phone and returns the appropriate contact method
-func handlePhoneContact(orgAddress string, phone string, hashedPhone []byte) (string, notifications.ChallengeType, error) {
+func handlePhoneContact(
+	orgAddress string,
+	phone string,
+	hashedPhone []byte,
+) (string, notifications.ChallengeType, error) {
 	if err := verifyPhone(orgAddress, phone, hashedPhone); err != nil {
 		return "", "", err
 	}
@@ -490,14 +498,14 @@ func determineContactMethod(
 ) (string, notifications.ChallengeType, error) {
 	switch census.Type {
 	case db.CensusTypeMail:
-		return handleEmailContact(census.OrgAddress, req.Email, member.HashedEmail)
+		return handleEmailContact(req.Email, member.Email)
 
 	case db.CensusTypeSMS:
 		return handlePhoneContact(census.OrgAddress, req.Phone, member.HashedPhone)
 
 	case db.CensusTypeSMSorMail:
 		if req.Email != "" {
-			return handleEmailContact(census.OrgAddress, req.Email, member.HashedEmail)
+			return handleEmailContact(req.Email, member.Email)
 		}
 
 		if req.Phone != "" {
@@ -516,7 +524,11 @@ func determineContactMethod(
 // destination and the challenge type. It returns the token and an error if
 // any. It sends the challenge to the user (email or SMS) to verify the user
 // token in the second step.
-func (c *CSPHandlers) authFirstStep(r *http.Request, bundleID internal.HexBytes, censusID string) (internal.HexBytes, error) {
+func (c *CSPHandlers) authFirstStep(
+	r *http.Request,
+	bundleID internal.HexBytes,
+	censusID string,
+) (internal.HexBytes, error) {
 	// Parse and validate request
 	var req AuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

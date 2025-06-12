@@ -689,10 +689,10 @@ type OrgMember struct {
 	Name string `json:"name"`
 
 	// Member's email address
-	Email string `json:"email"`
+	Email string `json:"email,omitempty"`
 
 	// Member's phone number
-	Phone string `json:"phone"`
+	Phone string `json:"phone,omitempty"`
 
 	// Member's password (for authentication)
 	Password string `json:"password"`
@@ -720,7 +720,7 @@ func OrgMemberFromDb(p db.OrgMember) OrgMember {
 		MemberID: p.MemberID,
 		Name:     p.Name,
 		Email:    p.Email,
-		Phone:    p.Phone,
+		Phone:    string(p.HashedPhone)[6:],
 		Other:    p.Other,
 	}
 }

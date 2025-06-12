@@ -34,11 +34,6 @@ func (ms *MongoStorage) SetOrgMember(salt string, orgMember *OrgMember) (string,
 		return "", fmt.Errorf("organization not found: %w", err)
 	}
 
-	if orgMember.Email != "" {
-		// store only the hashed email
-		orgMember.HashedEmail = internal.HashOrgData(orgMember.OrgAddress, orgMember.Email)
-		orgMember.Email = ""
-	}
 	if orgMember.Phone != "" {
 		// normalize and store only the hashed phone
 		normalizedPhone, err := internal.SanitizeAndVerifyPhoneNumber(orgMember.Phone)
@@ -167,12 +162,6 @@ func (ms *MongoStorage) validateBulkOrgMembers(
 func prepareOrgMember(member *OrgMember, orgAddress, salt string, currentTime time.Time) {
 	member.OrgAddress = orgAddress
 	member.CreatedAt = currentTime
-
-	// Hash email if valid
-	if member.Email != "" {
-		member.HashedEmail = internal.HashOrgData(orgAddress, member.Email)
-		member.Email = ""
-	}
 
 	// Hash phone if valid
 	if member.Phone != "" {
