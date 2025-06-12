@@ -763,6 +763,9 @@ type CreateProcessRequest struct {
 	// Additional metadata for the process
 	// Can be any key-value pairs
 	Metadata []byte `json:"metadata,omitempty" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
+
+	// Whether this process is a draft (not yet pushed to the vochain)
+	Draft bool `json:"draft,omitempty"`
 }
 
 // InitiateAuthRequest defines the payload for member authentication.
