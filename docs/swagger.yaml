@@ -149,6 +149,9 @@ definitions:
     type: object
   apicommon.OrgMember:
     properties:
+      birthDate:
+        description: Member's date of birth in format YYYY-MM-DD
+        type: string
       email:
         description: Member's email address
         type: string
@@ -161,6 +164,9 @@ definitions:
       name:
         description: Member's name
         type: string
+      nationalID:
+        description: Member's National ID No
+        type: string
       other:
         additionalProperties: {}
         description: Additional custom fields
@@ -170,6 +176,9 @@ definitions:
         type: string
       phone:
         description: Member's phone number
+        type: string
+      surname:
+        description: Member's surname
         type: string
     type: object
   apicommon.OrganizationAddMetaRequest:

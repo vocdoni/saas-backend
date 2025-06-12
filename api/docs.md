@@ -1026,16 +1026,30 @@ This request can be made only by organization admins.
     {
       "id": "internal-uid1",
       "memberID": "12345",
-      "name": "John Doe",
+      "name": "John",
+      "surname": "Doe",
+      "nationalID": "12345678A",
+      "birthDate": "1990-05-15",
       "email": "john@example.com",
-      "phone": "+1234567890",
+      "phone": "7890",
+      "other": {
+        "department": "Engineering",
+        "position": "Developer"
+      }
     },
     {
       "id": "internal-uid2",
       "memberID": "67890",
-      "name": "Jane Smith",
+      "name": "Jane",
+      "surname": "Smith",
+      "nationalID": "87654321B",
+      "birthDate": "1985-12-03",
       "email": "jane@example.com",
-      "phone": "+0987654321",
+      "phone": "54321",
+      "other": {
+        "department": "Marketing",
+        "position": "Manager"
+      }
     }
   ]
 }
@@ -1067,21 +1081,49 @@ Retrieves all members of an organization with pagination support. Requires Manag
   "members": [
     {
       "memberID": "12345",
-      "name": "John Doe",
+      "name": "John",
+      "surname": "Doe",
+      "nationalID": "12345678A",
+      "birthDate": "1990-05-15",
       "email": "john@example.com",
       "phone": "+1234567890",
-      "password": "secretpass"
+      "password": "secretpass",
+      "other": {
+        "department": "Engineering",
+        "position": "Developer"
+      }
     },
     {
       "memberID": "67890",
-      "name": "Jane Smith",
+      "name": "Jane",
+      "surname": "Smith",
+      "nationalID": "87654321B",
+      "birthDate": "1985-12-03",
       "email": "jane@example.com",
       "phone": "+0987654321",
-      "password": "secretpass"
+      "password": "secretpass",
+      "other": {
+        "department": "Marketing",
+        "position": "Manager"
+      }
+    },
+    {
+      "memberID": "11111",
+      "name": "Carlos",
+      "nationalID": "99887766E",
+      "birthDate": "1988-07-22",
+      "email": "carlos@example.com",
+      "phone": "+1555123456",
+      "password": "secretpass",
+      "other": {
+        "department": "Finance"
+      }
     }
   ]
 }
 ```
+
+**Note**: The new fields `surname`, `nationalID`, and `birthDate` are optional. If not provided, they will be stored as empty strings. The `birthDate` field should be in YYYY-MM-DD format.
 
 * **Response (Synchronous)**
 ```json

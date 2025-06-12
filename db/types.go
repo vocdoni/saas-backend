@@ -189,17 +189,21 @@ type Census struct {
 type OrgMember struct {
 	ID primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	// OrgAddress can be used for future sharding
-	OrgAddress  string         `json:"orgAddress" bson:"orgAddress"`
-	Email       string         `json:"email" bson:"email"`
-	Phone       string         `json:"phone" bson:"phone"`
-	HashedPhone []byte         `json:"hashedPhone" bson:"hashedPhone" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
-	MemberID    string         `json:"memberID" bson:"memberID"`
-	Name        string         `json:"name" bson:"name"`
-	Password    string         `json:"password" bson:"password"`
-	HashedPass  []byte         `json:"pass" bson:"pass" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
-	Other       map[string]any `json:"other" bson:"other"`
-	CreatedAt   time.Time      `json:"createdAt" bson:"createdAt"`
-	UpdatedAt   time.Time      `json:"updatedAt" bson:"updatedAt"`
+	OrgAddress     string         `json:"orgAddress" bson:"orgAddress"`
+	Email          string         `json:"email" bson:"email"`
+	Phone          string         `json:"phone" bson:"phone"`
+	HashedPhone    []byte         `json:"hashedPhone" bson:"hashedPhone" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
+	MemberID       string         `json:"memberID" bson:"memberID"`
+	NationalID     string         `json:"nationalID" bson:"nationalID"`
+	Name           string         `json:"name" bson:"name"`
+	Surname        string         `json:"surname" bson:"surname"`
+	BirthDate      string         `json:"birthDate" bson:"birthDate"`
+	ParsedBirtDate time.Time      `json:"parsedBirthDate" bson:"parsedBirthDate"`
+	Password       string         `json:"password" bson:"password"`
+	HashedPass     []byte         `json:"pass" bson:"pass" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
+	Other          map[string]any `json:"other" bson:"other"`
+	CreatedAt      time.Time      `json:"createdAt" bson:"createdAt"`
+	UpdatedAt      time.Time      `json:"updatedAt" bson:"updatedAt"`
 }
 
 // Relates an OrgMember to a Census
