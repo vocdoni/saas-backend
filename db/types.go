@@ -191,7 +191,6 @@ type OrgMember struct {
 	// OrgAddress can be used for future sharding
 	OrgAddress  string         `json:"orgAddress" bson:"orgAddress"`
 	Email       string         `json:"email" bson:"email"`
-	HashedEmail []byte         `json:"hashedEmail" bson:"hashedEmail" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 	Phone       string         `json:"phone" bson:"phone"`
 	HashedPhone []byte         `json:"hashedPhone" bson:"hashedPhone" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 	MemberID    string         `json:"memberID" bson:"memberID"`

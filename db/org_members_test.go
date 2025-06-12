@@ -39,7 +39,7 @@ func TestOrgMembers(t *testing.T) {
 		// Verify the member was created correctly
 		createdMember, err := testDB.OrgMember(memberOID)
 		c.Assert(err, qt.IsNil)
-		c.Assert(createdMember.HashedEmail, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testMemberEmail))
+		c.Assert(createdMember.Email, qt.Equals, testMemberEmail)
 		c.Assert(createdMember.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testPhone))
 		c.Assert(createdMember.MemberID, qt.Equals, member.MemberID)
 		c.Assert(createdMember.Name, qt.Equals, testName)
@@ -153,7 +153,7 @@ func TestOrgMembers(t *testing.T) {
 		// Test getting member with valid ID
 		retrievedMember, err := testDB.OrgMember(memberOID)
 		c.Assert(err, qt.IsNil)
-		c.Assert(retrievedMember.HashedEmail, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testMemberEmail))
+		c.Assert(retrievedMember.Email, qt.Equals, testMemberEmail)
 		c.Assert(retrievedMember.MemberID, qt.Equals, testMemberID)
 		c.Assert(retrievedMember.Name, qt.Equals, testName)
 		c.Assert(retrievedMember.CreatedAt, qt.Not(qt.IsNil))
@@ -209,13 +209,11 @@ func TestOrgMembers(t *testing.T) {
 		// Verify both members were created with hashed fields
 		member1, err := testDB.OrgMemberByID(testOrgAddress, testMemberID)
 		c.Assert(err, qt.IsNil)
-		c.Assert(member1.HashedEmail, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testMemberEmail))
 		c.Assert(member1.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testPhone))
 		c.Assert(member1.HashedPass, qt.DeepEquals, internal.HashPassword(testSalt, testPassword))
 
 		member2, err := testDB.OrgMemberByID(testOrgAddress, members[1].MemberID)
 		c.Assert(err, qt.IsNil)
-		c.Assert(member2.HashedEmail, qt.DeepEquals, internal.HashOrgData(testOrgAddress, members[1].Email))
 		c.Assert(member2.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, members[1].Phone))
 		c.Assert(member2.HashedPass, qt.DeepEquals, internal.HashPassword(testSalt, members[1].Password))
 
@@ -241,7 +239,7 @@ func TestOrgMembers(t *testing.T) {
 		updatedMember1, err := testDB.OrgMemberByID(testOrgAddress, testMemberID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(updatedMember1.Name, qt.Equals, "Updated Name")
-		c.Assert(updatedMember1.HashedEmail, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testMemberEmail))
+		c.Assert(updatedMember1.Email, qt.Equals, testMemberEmail)
 
 		updatedMember2, err := testDB.OrgMemberByID(testOrgAddress, "member456")
 		c.Assert(err, qt.IsNil)

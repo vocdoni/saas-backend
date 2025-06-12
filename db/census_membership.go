@@ -162,12 +162,6 @@ func prepareMember(member *OrgMember, orgAddress, salt string, currentTime time.
 	member.OrgAddress = orgAddress
 	member.CreatedAt = currentTime
 
-	// Hash email if valid
-	if member.Email != "" && internal.ValidEmail(member.Email) {
-		member.HashedEmail = internal.HashOrgData(orgAddress, member.Email)
-		member.Email = ""
-	}
-
 	// Hash phone if valid
 	if member.Phone != "" {
 		pn, err := internal.SanitizeAndVerifyPhoneNumber(member.Phone)

@@ -295,8 +295,7 @@ func TestCensusMembership(t *testing.T) {
 			for _, p := range members {
 				member, err := testDB.OrgMemberByID(testOrgAddress, p.MemberID)
 				c.Assert(err, qt.IsNil)
-				c.Assert(member.Email, qt.Equals, "")
-				c.Assert(member.HashedEmail, qt.Not(qt.Equals), "")
+				c.Assert(member.Email, qt.Not(qt.Equals), "")
 				c.Assert(member.Phone, qt.Equals, "")
 				c.Assert(member.HashedPhone, qt.Not(qt.Equals), "")
 				c.Assert(member.Password, qt.Equals, "")
@@ -358,11 +357,10 @@ func TestCensusMembership(t *testing.T) {
 			c.Assert(lastProgress.Progress, qt.Equals, 100)
 
 			// Verify updates
-			for _, p := range members {
+			for i, p := range members {
 				member, err := testDB.OrgMemberByID(testOrgAddress, p.MemberID)
 				c.Assert(err, qt.IsNil)
-				c.Assert(member.Email, qt.Equals, "")
-				c.Assert(member.HashedEmail, qt.Not(qt.Equals), "")
+				c.Assert(member.Email, qt.Equals, members[i].Email)
 				c.Assert(member.Phone, qt.Equals, "")
 				c.Assert(member.HashedPhone, qt.Not(qt.Equals), "")
 			}
