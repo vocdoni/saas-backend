@@ -59,22 +59,28 @@ func TestOrganizationMembers(t *testing.T) {
 	members := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
 			{
-				MemberID: "P001",
-				Name:     "John Doe",
-				Email:    "john.doe@example.com",
-				Phone:    "+34612345678",
-				Password: "password123",
+				MemberID:   "P001",
+				Name:       "John",
+				Surname:    "Doe",
+				NationalID: "12345678A",
+				BirthDate:  "1990-05-15",
+				Email:      "john.doe@example.com",
+				Phone:      "+34612345678",
+				Password:   "password123",
 				Other: map[string]any{
 					"department": "Engineering",
 					"age":        30,
 				},
 			},
 			{
-				MemberID: "P002",
-				Name:     "Jane Smith",
-				Email:    "jane.smith@example.com",
-				Phone:    "+34698765432",
-				Password: "password456",
+				MemberID:   "P002",
+				Name:       "Jane",
+				Surname:    "Smith",
+				NationalID: "87654321B",
+				BirthDate:  "1995-08-22",
+				Email:      "jane.smith@example.com",
+				Phone:      "+34698765432",
+				Password:   "password456",
 				Other: map[string]any{
 					"department": "Marketing",
 					"age":        28,
@@ -128,35 +134,145 @@ func TestOrganizationMembers(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(addedResponse.Count, qt.Equals, uint32(0))
 
+	// Test 2.5: Test with members missing some of the new optional fields
+	membersWithMissingFields := &apicommon.AddMembersRequest{
+		Members: []apicommon.OrgMember{
+			{
+				MemberID: "P005",
+				Name:     "Carlos",
+				// Surname is missing
+				NationalID: "99887766E",
+				BirthDate:  "1985-07-10",
+				Email:      "carlos@example.com",
+				Phone:      "+34600111222",
+				Password:   "password999",
+				Other: map[string]any{
+					"department": "Finance",
+				},
+			},
+			{
+				MemberID: "P006",
+				Name:     "Maria",
+				Surname:  "Garcia",
+				// NationalID is missing
+				BirthDate: "1992-11-25",
+				Email:     "maria.garcia@example.com",
+				Phone:     "+34600333444",
+				Password:  "passwordxyz",
+				Other: map[string]any{
+					"department": "Legal",
+				},
+			},
+			{
+				MemberID:   "P007",
+				Name:       "Pedro",
+				Surname:    "Martinez",
+				NationalID: "44556677F",
+				// BirthDate is missing
+				Email:    "pedro.martinez@example.com",
+				Phone:    "+34600555666",
+				Password: "passwordabc",
+				Other: map[string]any{
+					"department": "Operations",
+				},
+			},
+		},
+	}
+
+	resp, code = testRequest(
+		t,
+		http.MethodPost,
+		adminToken,
+		membersWithMissingFields,
+		"organizations",
+		orgAddress.String(),
+		"members",
+	)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+	// Verify the response contains the number of members added
+	err = json.Unmarshal(resp, &addedResponse)
+	c.Assert(err, qt.IsNil)
+	c.Assert(addedResponse.Count, qt.Equals, uint32(3))
+
 	// Test 3: Get organization members (now with added members)
 	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "members")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	err = json.Unmarshal(resp, &membersResponse)
 	c.Assert(err, qt.IsNil)
-	c.Assert(len(membersResponse.Members), qt.Equals, 2, qt.Commentf("expected 2 members"))
+	c.Assert(len(membersResponse.Members), qt.Equals, 5, qt.Commentf("expected 5 members (2 from Test 2.1 + 3 from Test 2.5)"))
+
+	// Verify that members with missing fields were stored correctly
+	// Find the member with missing surname (Carlos)
+	var carlosFound bool
+	for _, member := range membersResponse.Members {
+		if member.MemberID == "P005" {
+			carlosFound = true
+			c.Assert(member.Name, qt.Equals, "Carlos")
+			c.Assert(member.Surname, qt.Equals, "") // Should be empty
+			c.Assert(member.NationalID, qt.Equals, "99887766E")
+			c.Assert(member.BirthDate, qt.Equals, "1985-07-10")
+			break
+		}
+	}
+	c.Assert(carlosFound, qt.Equals, true, qt.Commentf("Carlos member should be found"))
+
+	// Find the member with missing NationalID (Maria)
+	var mariaFound bool
+	for _, member := range membersResponse.Members {
+		if member.MemberID == "P006" {
+			mariaFound = true
+			c.Assert(member.Name, qt.Equals, "Maria")
+			c.Assert(member.Surname, qt.Equals, "Garcia")
+			c.Assert(member.NationalID, qt.Equals, "") // Should be empty
+			c.Assert(member.BirthDate, qt.Equals, "1992-11-25")
+			break
+		}
+	}
+	c.Assert(mariaFound, qt.Equals, true, qt.Commentf("Maria member should be found"))
+
+	// Find the member with missing BirthDate (Pedro)
+	var pedroFound bool
+	for _, member := range membersResponse.Members {
+		if member.MemberID == "P007" {
+			pedroFound = true
+			c.Assert(member.Name, qt.Equals, "Pedro")
+			c.Assert(member.Surname, qt.Equals, "Martinez")
+			c.Assert(member.NationalID, qt.Equals, "44556677F")
+			c.Assert(member.BirthDate, qt.Equals, "") // Should be empty
+			break
+		}
+	}
+	c.Assert(pedroFound, qt.Equals, true, qt.Commentf("Pedro member should be found"))
 
 	// Test 4: Add members asynchronously
 	// Test 4.1: Test with valid data and async=true
 	asyncMembers := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
 			{
-				MemberID: "P003",
-				Name:     "Bob Johnson",
-				Email:    "bob.johnson@example.com",
-				Phone:    "+34611223344",
-				Password: "password789",
+				MemberID:   "P003",
+				Name:       "Bob",
+				Surname:    "Johnson",
+				NationalID: "11223344C",
+				BirthDate:  "1988-12-03",
+				Email:      "bob.johnson@example.com",
+				Phone:      "+34611223344",
+				Password:   "password789",
 				Other: map[string]any{
 					"department": "Sales",
 					"age":        35,
 				},
 			},
 			{
-				MemberID: "P004",
-				Name:     "Alice Brown",
-				Email:    "alice.brown@example.com",
-				Phone:    "+34655443322",
-				Password: "passwordabc",
+				MemberID:   "P004",
+				Name:       "Alice",
+				Surname:    "Brown",
+				NationalID: "55443322D",
+				BirthDate:  "1982-03-18",
+				Email:      "alice.brown@example.com",
+				Phone:      "+34655443322",
+				Password:   "passwordabc",
 				Other: map[string]any{
 					"department": "HR",
 					"age":        42,
@@ -338,5 +454,5 @@ func TestOrganizationMembers(t *testing.T) {
 
 	err = json.Unmarshal(resp, &membersResponse)
 	c.Assert(err, qt.IsNil)
-	c.Assert(len(membersResponse.Members), qt.Equals, 2, qt.Commentf("expected 2 members remaining"))
+	c.Assert(len(membersResponse.Members), qt.Equals, 5, qt.Commentf("expected 5 members remaining (7 total - 2 deleted)"))
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications"
+	"go.vocdoni.io/dvote/log"
 )
 
 // OrganizationInfo represents an organization in the API.
@@ -686,7 +687,16 @@ type OrgMember struct {
 	MemberID string `json:"memberID"`
 
 	// Member's name
-	Name string `json:"name"`
+	Name string `json:"name,omitempty"`
+
+	// Member's surname
+	Surname string `json:"surname,omitempty"`
+
+	// Member's National ID No
+	NationalID string `json:"nationalID,omitempty"`
+
+	// Member's date of birth in format YYYY-MM-DD
+	BirthDate string `json:"birthDate,omitempty"`
 
 	// Member's email address
 	Email string `json:"email,omitempty"`
@@ -703,14 +713,27 @@ type OrgMember struct {
 
 // ToDb converts an OrgMember to a db.OrgMember.
 func (p *OrgMember) ToDb(orgAddress string) db.OrgMember {
+	parsedBirthDate := time.Time{}
+	if len(p.BirthDate) > 0 {
+		// Parse the birth date from string to time.Time
+		var err error
+		parsedBirthDate, err = time.Parse("2006-01-02", p.BirthDate)
+		if err != nil {
+			log.Warnf("Failed to parse birth date %s for member %s: %v", p.BirthDate, p.MemberID, err)
+		}
+	}
 	return db.OrgMember{
-		OrgAddress: orgAddress,
-		MemberID:   p.MemberID,
-		Name:       p.Name,
-		Email:      p.Email,
-		Phone:      p.Phone,
-		Password:   p.Password,
-		Other:      p.Other,
+		OrgAddress:     orgAddress,
+		MemberID:       p.MemberID,
+		Name:           p.Name,
+		Surname:        p.Surname,
+		NationalID:     p.NationalID,
+		BirthDate:      p.BirthDate,
+		ParsedBirtDate: parsedBirthDate,
+		Email:          p.Email,
+		Phone:          p.Phone,
+		Password:       p.Password,
+		Other:          p.Other,
 	}
 }
 
@@ -720,13 +743,18 @@ func OrgMemberFromDb(p db.OrgMember) OrgMember {
 		// If the phone is hashed, we return the last 6 characters
 		hashedPhone = hashedPhone[len(hashedPhone)-6:]
 	}
+	// if p.BirthDate != nil {
+
 	return OrgMember{
-		ID:       p.ID.Hex(),
-		MemberID: p.MemberID,
-		Name:     p.Name,
-		Email:    p.Email,
-		Phone:    hashedPhone,
-		Other:    p.Other,
+		ID:         p.ID.Hex(),
+		MemberID:   p.MemberID,
+		Name:       p.Name,
+		Surname:    p.Surname,
+		NationalID: p.NationalID,
+		BirthDate:  p.BirthDate,
+		Email:      p.Email,
+		Phone:      hashedPhone,
+		Other:      p.Other,
 	}
 }
 
