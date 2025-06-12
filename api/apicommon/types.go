@@ -715,12 +715,17 @@ func (p *OrgMember) ToDb(orgAddress string) db.OrgMember {
 }
 
 func OrgMemberFromDb(p db.OrgMember) OrgMember {
+	hashedPhone := string(p.HashedPhone)
+	if len(hashedPhone) > 0 {
+		// If the phone is hashed, we return the last 6 characters
+		hashedPhone = hashedPhone[len(hashedPhone)-6:]
+	}
 	return OrgMember{
 		ID:       p.ID.Hex(),
 		MemberID: p.MemberID,
 		Name:     p.Name,
 		Email:    p.Email,
-		Phone:    string(p.HashedPhone)[6:],
+		Phone:    hashedPhone,
 		Other:    p.Other,
 	}
 }
