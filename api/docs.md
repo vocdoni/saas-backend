@@ -1017,6 +1017,7 @@ This request can be made only by organization admins.
 * **Query params**
   * `page` - Page number (default: 1)
   * `pageSize` - Number of items per page (default: 10)
+  * `search` - Search term
 * **Response**
 ```json
 {

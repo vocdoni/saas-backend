@@ -22565,6 +22565,10 @@ paths:
         in: query
         name: pageSize
         type: integer
+      - description: Search term for member properties
+        in: query
+        name: search
+        type: string
       produces:
       - application/json
       responses:

@@ -249,6 +249,21 @@ func (ms *MongoStorage) createIndexes() error {
 	}); err != nil {
 		return fmt.Errorf("failed to create index on userid and processid for cspTokensStatus: %w", err)
 	}
+
+	// member properties text index for filtering
+	if _, err := ms.orgMembers.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "email", Value: "text"},
+			{Key: "memberID", Value: "text"},
+			{Key: "nationalID", Value: "text"},
+			{Key: "name", Value: "text"},
+			{Key: "surname", Value: "text"},
+			{Key: "birthDate", Value: "text"},
+		},
+	}); err != nil {
+		return fmt.Errorf("failed to create text index on orgMembers: %w", err)
+	}
+
 	return nil
 }
 

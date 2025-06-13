@@ -370,7 +370,7 @@ func (ms *MongoStorage) SetBulkOrgMembers(
 }
 
 // OrgMembers retrieves paginated orgMembers for an organization from the DB
-func (ms *MongoStorage) OrgMembers(orgAddress string, page, pageSize int) (int, []OrgMember, error) {
+func (ms *MongoStorage) OrgMembers(orgAddress string, page, pageSize int, search string) (int, []OrgMember, error) {
 	if len(orgAddress) == 0 {
 		return 0, nil, ErrInvalidData
 	}
@@ -379,7 +379,14 @@ func (ms *MongoStorage) OrgMembers(orgAddress string, page, pageSize int) (int, 
 	defer cancel()
 
 	// Create filter
-	filter := bson.M{"orgAddress": orgAddress}
+	filter := bson.M{
+		"orgAddress": orgAddress,
+	}
+	if len(search) > 0 {
+		filter["$text"] = bson.M{
+			"$search": search,
+		}
+	}
 
 	// Calculate skip value based on page and pageSize
 	skip := (page - 1) * pageSize
