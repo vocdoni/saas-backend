@@ -705,7 +705,7 @@ type OrgMember struct {
 	Phone string `json:"phone,omitempty"`
 
 	// Member's password (for authentication)
-	Password string `json:"password"`
+	Password string `json:"password,omitempty"`
 
 	// Additional custom fields
 	Other map[string]any `json:"other"`
