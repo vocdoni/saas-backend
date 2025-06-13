@@ -31,6 +31,7 @@ var addMembersToOrgWorkers sync.Map
 //	@Param			address		path		string	true	"Organization address"
 //	@Param			page		query		integer	false	"Page number (default: 1)"
 //	@Param			pageSize	query		integer	false	"Number of items per page (default: 10)"
+//	@Param			search		query		string	false	"Search term for member properties"
 //	@Success		200			{object}	apicommon.OrganizationMembersResponse
 //	@Failure		400			{object}	errors.Error	"Invalid input"
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
@@ -58,6 +59,7 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 	// Parse pagination parameters from query string
 	page := 1      // Default page number
 	pageSize := 10 // Default page size
+	search := ""   // Default search term
 
 	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
 		if pageVal, err := strconv.Atoi(pageStr); err == nil && pageVal > 0 {
@@ -71,8 +73,12 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	if searchStr := r.URL.Query().Get("search"); searchStr != "" {
+		search = searchStr
+	}
+
 	// retrieve the orgMembers with pagination
-	pages, members, err := a.db.OrgMembers(org.Address, page, pageSize)
+	pages, members, err := a.db.OrgMembers(org.Address, page, pageSize, search)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not get org members: %v", err).Write(w)
 		return
