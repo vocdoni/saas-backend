@@ -7,6 +7,7 @@ import (
 
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.vocdoni.io/dvote/log"
@@ -197,15 +198,18 @@ func createBulkOperations(
 		prepareMember(&orgMember, orgAddress, salt, currentTime)
 
 		// Create member filter and update document
-		memberFilter := bson.M{
-			"memberID":   orgMember.MemberID,
-			"orgAddress": orgAddress,
+		memberFilter := bson.M{}
+		if orgMember.ID != primitive.NilObjectID {
+			memberFilter = bson.M{
+				"_id":        orgMember.ID,
+				"orgAddress": orgAddress,
+			}
 		}
 
 		updateOrgMembersDoc, err := dynamicUpdateDocument(orgMember, nil)
 		if err != nil {
 			log.Warnw("failed to create update document for member",
-				"error", err, "memberID", orgMember.MemberID)
+				"error", err, "ID", orgMember.ID)
 			continue // Skip this member but continue with others
 		}
 

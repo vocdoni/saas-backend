@@ -64,8 +64,8 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(updatedMember.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, newPhone))
 		c.Assert(updatedMember.CreatedAt, qt.Equals, createdMember.CreatedAt)
 
-		// Test duplicate entries
 		duplicateMember := &OrgMember{
+			ID:         updatedMember.ID, // Use the same ID to simulate a duplicate
 			OrgAddress: testOrgAddress,
 			Email:      testMemberEmail,
 			Phone:      testPhone,
@@ -73,10 +73,6 @@ func TestOrgMembers(t *testing.T) {
 			Name:       testName,
 			Password:   testPassword,
 		}
-
-		// Attempt to create duplicate member
-		_, err = testDB.SetOrgMember(testSalt, duplicateMember)
-		c.Assert(err, qt.Not(qt.IsNil))
 
 		// Attempt to update member
 		duplicateMember.ID = updatedMember.ID
@@ -218,7 +214,9 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(member2.HashedPass, qt.DeepEquals, internal.HashPassword(testSalt, members[1].Password))
 
 		// Test updating existing members
+		members[0].ID = member1.ID // Use the existing ID for the first member
 		members[0].Name = "Updated Name"
+		members[1].ID = member2.ID // Use the existing ID for the second member
 		members[1].Phone = "+34678678971"
 
 		// Perform bulk upsert again

@@ -160,6 +160,9 @@ func (ms *MongoStorage) validateBulkOrgMembers(
 
 // prepareOrgMember processes a member for storage
 func prepareOrgMember(member *OrgMember, orgAddress, salt string, currentTime time.Time) {
+	if member.ID == primitive.NilObjectID {
+		member.ID = primitive.NewObjectID() // Assign a new ID if not provided
+	}
 	member.OrgAddress = orgAddress
 	member.CreatedAt = currentTime
 
@@ -192,16 +195,16 @@ func createOrgMemberBulkOperations(
 		// Prepare the member
 		prepareOrgMember(&member, orgAddress, salt, currentTime)
 
-		// Create filter and update document
+		// Create filter for existing members and update document
 		filter := bson.M{
-			"memberID":   member.MemberID,
+			"_id":        member.ID,
 			"orgAddress": orgAddress,
 		}
 
 		updateDoc, err := dynamicUpdateDocument(member, nil)
 		if err != nil {
 			log.Warnw("failed to create update document for member",
-				"error", err, "memberID", member.MemberID)
+				"error", err, "ID", member.ID)
 			continue // Skip this member but continue with others
 		}
 
@@ -233,11 +236,18 @@ func (ms *MongoStorage) processOrgMemberBatch(
 	defer batchCancel()
 
 	// Execute the bulk write operations
-	_, err := ms.orgMembers.BulkWrite(batchCtx, bulkOps)
+	tmp, err := ms.orgMembers.BulkWrite(batchCtx, bulkOps)
 	if err != nil {
 		log.Warnw("failed to perform bulk operation on members", "error", err)
 		return 0
 	}
+	// Log the number of operations performed
+	log.Debugw("bulk operation on org members completed",
+		"matchedCount", tmp.MatchedCount,
+		"modifiedCount", tmp.ModifiedCount,
+		"upsertedCount", tmp.UpsertedCount,
+		"deletedCount", tmp.DeletedCount,
+	)
 
 	return len(bulkOps)
 }
@@ -340,7 +350,7 @@ func (ms *MongoStorage) processOrgMemberBatches(
 }
 
 // SetBulkOrgMembers adds multiple organization members to the database in batches of 200 entries
-// and updates already existing members (decided by combination of memberID and orgAddress)
+// and updates already existing members (decided by combination of internal id and orgAddress)
 // Requires an existing organization
 // Returns a channel that sends the percentage of members processed every 10 seconds.
 // This function must be called in a goroutine.
