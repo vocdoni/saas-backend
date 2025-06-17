@@ -7,6 +7,7 @@ import (
 
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.vocdoni.io/dvote/log"
@@ -36,7 +37,7 @@ func (ms *MongoStorage) validateCensusMembership(membership *CensusMembership) (
 	}
 
 	// check that the member exists
-	if _, err := ms.OrgMemberByID(census.OrgAddress, membership.MemberID); err != nil {
+	if _, err := ms.OrgMember(census.OrgAddress, membership.MemberID); err != nil {
 		return "", fmt.Errorf("failed to get org member: %w", err)
 	}
 
@@ -88,19 +89,19 @@ func (ms *MongoStorage) SetCensusMembership(membership *CensusMembership) error 
 
 // CensusMembership retrieves a census membership from the database based on
 // memberID and censusID. Returns ErrNotFound if the membership doesn't exist.
-func (ms *MongoStorage) CensusMembership(censusID, memberID string) (*CensusMembership, error) {
+func (ms *MongoStorage) CensusMembership(censusID, id string) (*CensusMembership, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	// validate input
-	if len(memberID) == 0 || len(censusID) == 0 {
+	if len(id) == 0 || len(censusID) == 0 {
 		return nil, ErrInvalidData
 	}
 
-	// prepare filter for upsert
+	// prepare filter for find
 	filter := bson.M{
-		"memberID": memberID,
+		"memberID": id,
 		"censusId": censusID,
 	}
 
@@ -115,6 +116,45 @@ func (ms *MongoStorage) CensusMembership(censusID, memberID string) (*CensusMemb
 	}
 
 	return membership, nil
+}
+
+// CensusMembership retrieves a census membership from the database based on
+// memberID and censusID. Returns ErrNotFound if the membership doesn't exist.
+func (ms *MongoStorage) CensusMembershipByMemberID(censusID, memberID, orgAddress string) (*OrgMember, *CensusMembership, error) {
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	// validate input
+	if len(memberID) == 0 || len(censusID) == 0 {
+		return nil, nil, ErrInvalidData
+	}
+
+	orgMember, err := ms.OrgMemberByMemberID(orgAddress, memberID)
+	if err != nil {
+		if err == mongo.ErrNoDocuments || err == ErrNotFound {
+			return nil, nil, ErrNotFound
+		}
+		return nil, nil, fmt.Errorf("failed to get org member: %w", err)
+	}
+
+	// prepare filter for find
+	filter := bson.M{
+		"memberID": orgMember.ID.Hex(),
+		"censusId": censusID,
+	}
+
+	// find the membership
+	membership := &CensusMembership{}
+	err = ms.censusMemberships.FindOne(ctx, filter).Decode(membership)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil, ErrNotFound
+		}
+		return nil, nil, fmt.Errorf("failed to get census membership: %w", err)
+	}
+
+	return orgMember, membership, nil
 }
 
 // DelCensusMembership removes a census membership from the database.
@@ -159,6 +199,11 @@ type BulkCensusMembershipStatus struct {
 // - Hashing sensitive data (email, phone, password)
 // - Clearing the original sensitive data
 func prepareMember(member *OrgMember, orgAddress, salt string, currentTime time.Time) {
+	// Assign a new internal ID if not provided
+	if member.ID == primitive.NilObjectID {
+		member.ID = primitive.NewObjectID()
+	}
+
 	member.OrgAddress = orgAddress
 	member.CreatedAt = currentTime
 
@@ -181,8 +226,8 @@ func prepareMember(member *OrgMember, orgAddress, salt string, currentTime time.
 	}
 }
 
-// createBulkOperations creates the bulk write operations for members and memberships
-func createBulkOperations(
+// createCensusMembershipBulkOperations creates the bulk write operations for members and memberships
+func createCensusMembershipBulkOperations(
 	orgMembers []OrgMember,
 	orgAddress string,
 	censusID string,
@@ -198,14 +243,14 @@ func createBulkOperations(
 
 		// Create member filter and update document
 		memberFilter := bson.M{
-			"memberID":   orgMember.MemberID,
+			"_id":        orgMember.ID,
 			"orgAddress": orgAddress,
 		}
 
 		updateOrgMembersDoc, err := dynamicUpdateDocument(orgMember, nil)
 		if err != nil {
 			log.Warnw("failed to create update document for member",
-				"error", err, "memberID", orgMember.MemberID)
+				"error", err, "ID", orgMember.ID)
 			continue // Skip this member but continue with others
 		}
 
@@ -218,11 +263,11 @@ func createBulkOperations(
 
 		// Create membership filter and document
 		censusMembersFilter := bson.M{
-			"memberID": orgMember.MemberID,
+			"memberID": orgMember.ID.Hex(),
 			"censusId": censusID,
 		}
 		membershipDoc := &CensusMembership{
-			MemberID:  orgMember.MemberID,
+			MemberID:  orgMember.ID.Hex(),
 			CensusID:  censusID,
 			CreatedAt: currentTime,
 		}
@@ -231,7 +276,7 @@ func createBulkOperations(
 		updateMembershipDoc, err := dynamicUpdateDocument(membershipDoc, nil)
 		if err != nil {
 			log.Warnw("failed to create update document for membership",
-				"error", err, "memberID", orgMember.MemberID)
+				"error", err, "memberID", orgMember.ID.Hex())
 			continue
 		}
 
@@ -376,7 +421,7 @@ func (ms *MongoStorage) processBatches(
 		}
 
 		// Create bulk operations for this batch
-		bulkOrgMembersOps, bulkCensusMembershipOps := createBulkOperations(
+		bulkOrgMembersOps, bulkCensusMembershipOps := createCensusMembershipBulkOperations(
 			orgMembers[i:end],
 			census.OrgAddress,
 			censusID,

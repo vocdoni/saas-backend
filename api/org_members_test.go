@@ -10,6 +10,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 func TestOrganizationMembers(t *testing.T) {
@@ -135,6 +136,8 @@ func TestOrganizationMembers(t *testing.T) {
 	c.Assert(addedResponse.Count, qt.Equals, uint32(0))
 
 	// Test 2.5: Test with members missing some of the new optional fields
+	// Generate a new test member ID
+	pedroID := primitive.NewObjectID().Hex()
 	membersWithMissingFields := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
 			{
@@ -164,14 +167,15 @@ func TestOrganizationMembers(t *testing.T) {
 				},
 			},
 			{
-				MemberID:   "P007",
+				ID: pedroID,
+				// MemberID is missing
 				Name:       "Pedro",
 				Surname:    "Martinez",
 				NationalID: "44556677F",
-				// BirthDate is missing
-				Email:    "pedro.martinez@example.com",
-				Phone:    "+34600555666",
-				Password: "passwordabc",
+				BirthDate:  "1992-11-25",
+				Email:      "pedro.martinez@example.com",
+				Phone:      "+34600555666",
+				Password:   "passwordabc",
 				Other: map[string]any{
 					"department": "Operations",
 				},
@@ -232,15 +236,15 @@ func TestOrganizationMembers(t *testing.T) {
 	}
 	c.Assert(mariaFound, qt.Equals, true, qt.Commentf("Maria member should be found"))
 
-	// Find the member with missing BirthDate (Pedro)
+	// Find the member with missing MemberID (Pedro)
 	var pedroFound bool
 	for _, member := range membersResponse.Members {
-		if member.MemberID == "P007" {
+		if member.ID == pedroID {
 			pedroFound = true
 			c.Assert(member.Name, qt.Equals, "Pedro")
 			c.Assert(member.Surname, qt.Equals, "Martinez")
 			c.Assert(member.NationalID, qt.Equals, "44556677F")
-			c.Assert(member.BirthDate, qt.Equals, "") // Should be empty
+			c.Assert(member.MemberID, qt.Equals, "") // Should be empty
 			break
 		}
 	}
