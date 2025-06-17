@@ -9,6 +9,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -790,7 +791,17 @@ func (p *OrgMember) ToDb(orgAddress string) db.OrgMember {
 			log.Warnf("Failed to parse birth date %s for member %s: %v", p.BirthDate, p.MemberID, err)
 		}
 	}
+	id := primitive.NilObjectID
+	if len(p.ID) > 0 {
+		// Convert the ID from string to ObjectID
+		var err error
+		id, err = primitive.ObjectIDFromHex(p.ID)
+		if err != nil {
+			log.Warnf("Failed to convert member ID %s to ObjectID: %v", p.ID, err)
+		}
+	}
 	return db.OrgMember{
+		ID:             id,
 		OrgAddress:     orgAddress,
 		MemberID:       p.MemberID,
 		Name:           p.Name,

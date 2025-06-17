@@ -190,7 +190,15 @@ func findProcessInBundle(bundle *db.ProcessesBundle, processID internal.HexBytes
 
 // checkCensusMembership checks if the member is in the census
 func (c *CSPHandlers) checkCensusMembership(w http.ResponseWriter, censusID string, userID string) bool {
-	if _, err := c.mainDB.CensusMembership(censusID, userID); err != nil {
+	// Get census information
+	census, err := c.mainDB.Census(censusID)
+	if err != nil {
+		if err == db.ErrNotFound {
+			return false
+		}
+		return false
+	}
+	if _, _, err := c.mainDB.CensusMembershipByMemberID(censusID, userID, census.OrgAddress); err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrUnauthorized.Withf("member not found in the census").Write(w)
 			return false
@@ -427,17 +435,12 @@ func (c *CSPHandlers) getCensusAndMember(censusID string, memberID string) (*db.
 	}
 
 	// Check the census membership of the member
-	if _, err := c.mainDB.CensusMembership(censusID, memberID); err != nil {
+	member, _, err := c.mainDB.CensusMembershipByMemberID(censusID, memberID, census.OrgAddress)
+	if err != nil {
 		if err == db.ErrNotFound {
 			return nil, nil, errors.ErrUnauthorized.Withf("member not found in the census")
 		}
 		return nil, nil, errors.ErrGenericInternalServerError.WithErr(err)
-	}
-
-	// Get member information
-	member, err := c.mainDB.OrgMemberByID(census.OrgAddress, memberID)
-	if err != nil {
-		return nil, nil, errors.ErrCensusMemberIDtFound
 	}
 
 	return census, member, nil

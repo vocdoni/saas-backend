@@ -195,7 +195,7 @@ func (ms *MongoStorage) createIndexes() error {
 	if _, err := ms.orgMembers.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "orgAddress", Value: 1}, // 1 for ascending order
-			{Key: "id", Value: 1},         // 1 for ascending order
+			{Key: "_id", Value: 1},        // 1 for ascending order
 		},
 		Options: options.Index().SetUnique(true),
 	}); err != nil {

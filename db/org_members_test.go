@@ -37,7 +37,7 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(memberOID, qt.Not(qt.Equals), "")
 
 		// Verify the member was created correctly
-		createdMember, err := testDB.OrgMember(memberOID)
+		createdMember, err := testDB.OrgMember(testOrgAddress, memberOID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(createdMember.Email, qt.Equals, testMemberEmail)
 		c.Assert(createdMember.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testPhone))
@@ -58,14 +58,14 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(updatedID, qt.Equals, memberOID)
 
 		// Verify the member was updated correctly
-		updatedMember, err := testDB.OrgMember(updatedID)
+		updatedMember, err := testDB.OrgMember(testOrgAddress, updatedID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(updatedMember.Name, qt.Equals, newName)
 		c.Assert(updatedMember.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, newPhone))
 		c.Assert(updatedMember.CreatedAt, qt.Equals, createdMember.CreatedAt)
 
-		// Test duplicate entries
 		duplicateMember := &OrgMember{
+			ID:         updatedMember.ID, // Use the same ID to simulate a duplicate
 			OrgAddress: testOrgAddress,
 			Email:      testMemberEmail,
 			Phone:      testPhone,
@@ -74,10 +74,6 @@ func TestOrgMembers(t *testing.T) {
 			Password:   testPassword,
 		}
 
-		// Attempt to create duplicate member
-		_, err = testDB.SetOrgMember(testSalt, duplicateMember)
-		c.Assert(err, qt.Not(qt.IsNil))
-
 		// Attempt to update member
 		duplicateMember.ID = updatedMember.ID
 		duplicateID, err := testDB.SetOrgMember(testSalt, duplicateMember)
@@ -85,7 +81,7 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(duplicateID, qt.Equals, memberOID)
 
 		// Verify the duplicate member was not created but updated
-		duplicateCreatedMember, err := testDB.OrgMember(duplicateID)
+		duplicateCreatedMember, err := testDB.OrgMember(testOrgAddress, duplicateID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(duplicateCreatedMember.MemberID, qt.Equals, testMemberID)
 		c.Assert(duplicateCreatedMember.Name, qt.Equals, testName)
@@ -121,7 +117,7 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Verify the member was deleted
-		_, err = testDB.OrgMember(memberOID)
+		_, err = testDB.OrgMember(testOrgAddress, memberOID)
 		c.Assert(err, qt.Not(qt.IsNil))
 	})
 
@@ -135,7 +131,7 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Test getting member with invalid ID
-		_, err = testDB.OrgMember("invalid-id")
+		_, err = testDB.OrgMember(testOrgAddress, "invalid-id")
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Create a member to retrieve
@@ -151,7 +147,7 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Test getting member with valid ID
-		retrievedMember, err := testDB.OrgMember(memberOID)
+		retrievedMember, err := testDB.OrgMember(testOrgAddress, memberOID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(retrievedMember.Email, qt.Equals, testMemberEmail)
 		c.Assert(retrievedMember.MemberID, qt.Equals, testMemberID)
@@ -160,7 +156,7 @@ func TestOrgMembers(t *testing.T) {
 
 		// Test getting non-existent member
 		nonExistentID := primitive.NewObjectID().Hex()
-		_, err = testDB.OrgMember(nonExistentID)
+		_, err = testDB.OrgMember(testOrgAddress, nonExistentID)
 		c.Assert(err, qt.Not(qt.IsNil))
 	})
 
@@ -207,18 +203,20 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(lastStatus.Added, qt.Equals, 2)
 
 		// Verify both members were created with hashed fields
-		member1, err := testDB.OrgMemberByID(testOrgAddress, testMemberID)
+		member1, err := testDB.OrgMemberByMemberID(testOrgAddress, testMemberID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(member1.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testPhone))
 		c.Assert(member1.HashedPass, qt.DeepEquals, internal.HashPassword(testSalt, testPassword))
 
-		member2, err := testDB.OrgMemberByID(testOrgAddress, members[1].MemberID)
+		member2, err := testDB.OrgMemberByMemberID(testOrgAddress, members[1].MemberID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(member2.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, members[1].Phone))
 		c.Assert(member2.HashedPass, qt.DeepEquals, internal.HashPassword(testSalt, members[1].Password))
 
 		// Test updating existing members
+		members[0].ID = member1.ID // Use the existing ID for the first member
 		members[0].Name = "Updated Name"
+		members[1].ID = member2.ID // Use the existing ID for the second member
 		members[1].Phone = "+34678678971"
 
 		// Perform bulk upsert again
@@ -236,12 +234,12 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(lastStatus.Added, qt.Equals, 2) // Both documents should be updated
 
 		// Verify updates for both members
-		updatedMember1, err := testDB.OrgMemberByID(testOrgAddress, testMemberID)
+		updatedMember1, err := testDB.OrgMemberByMemberID(testOrgAddress, testMemberID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(updatedMember1.Name, qt.Equals, "Updated Name")
 		c.Assert(updatedMember1.Email, qt.Equals, testMemberEmail)
 
-		updatedMember2, err := testDB.OrgMemberByID(testOrgAddress, "member456")
+		updatedMember2, err := testDB.OrgMemberByMemberID(testOrgAddress, "member456")
 		c.Assert(err, qt.IsNil)
 		c.Assert(updatedMember2.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, members[1].Phone))
 		c.Assert(updatedMember2.Name, qt.Equals, "Test Member 2")

@@ -92,7 +92,7 @@ func (ms *MongoStorage) DelOrgMember(id string) error {
 }
 
 // OrgMember retrieves a orgMember from the DB based on it ID
-func (ms *MongoStorage) OrgMember(id string) (*OrgMember, error) {
+func (ms *MongoStorage) OrgMember(orgAddress, id string) (*OrgMember, error) {
 	objID, err := primitive.ObjectIDFromHex(id)
 	if err != nil {
 		return nil, ErrInvalidData
@@ -103,15 +103,15 @@ func (ms *MongoStorage) OrgMember(id string) (*OrgMember, error) {
 	defer cancel()
 
 	orgMember := &OrgMember{}
-	if err = ms.orgMembers.FindOne(ctx, bson.M{"_id": objID}).Decode(orgMember); err != nil {
+	if err = ms.orgMembers.FindOne(ctx, bson.M{"_id": objID, "orgAddress": orgAddress}).Decode(orgMember); err != nil {
 		return nil, fmt.Errorf("failed to get orgMember: %w", err)
 	}
 
 	return orgMember, nil
 }
 
-// OrgMemberByID retrieves a orgMember from the DB based on organization address and member number
-func (ms *MongoStorage) OrgMemberByID(orgAddress, memberID string) (*OrgMember, error) {
+// OrgMemberByMemberID retrieves a orgMember from the DB based on organization address and member number
+func (ms *MongoStorage) OrgMemberByMemberID(orgAddress, memberID string) (*OrgMember, error) {
 	if len(memberID) == 0 {
 		return nil, ErrInvalidData
 	}
@@ -123,6 +123,9 @@ func (ms *MongoStorage) OrgMemberByID(orgAddress, memberID string) (*OrgMember, 
 	if err := ms.orgMembers.FindOne(
 		ctx, bson.M{"orgAddress": orgAddress, "memberID": memberID},
 	).Decode(orgMember); err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("failed to get orgMember: %w", err)
 	}
 
@@ -160,6 +163,10 @@ func (ms *MongoStorage) validateBulkOrgMembers(
 
 // prepareOrgMember processes a member for storage
 func prepareOrgMember(member *OrgMember, orgAddress, salt string, currentTime time.Time) {
+	// Assign a new internal ID if not provided
+	if member.ID == primitive.NilObjectID {
+		member.ID = primitive.NewObjectID()
+	}
 	member.OrgAddress = orgAddress
 	member.CreatedAt = currentTime
 
@@ -192,16 +199,16 @@ func createOrgMemberBulkOperations(
 		// Prepare the member
 		prepareOrgMember(&member, orgAddress, salt, currentTime)
 
-		// Create filter and update document
+		// Create filter for existing members and update document
 		filter := bson.M{
-			"memberID":   member.MemberID,
+			"_id":        member.ID,
 			"orgAddress": orgAddress,
 		}
 
 		updateDoc, err := dynamicUpdateDocument(member, nil)
 		if err != nil {
 			log.Warnw("failed to create update document for member",
-				"error", err, "memberID", member.MemberID)
+				"error", err, "ID", member.ID)
 			continue // Skip this member but continue with others
 		}
 
@@ -340,7 +347,7 @@ func (ms *MongoStorage) processOrgMemberBatches(
 }
 
 // SetBulkOrgMembers adds multiple organization members to the database in batches of 200 entries
-// and updates already existing members (decided by combination of memberID and orgAddress)
+// and updates already existing members (decided by combination of internal id and orgAddress)
 // Requires an existing organization
 // Returns a channel that sends the percentage of members processed every 10 seconds.
 // This function must be called in a goroutine.
