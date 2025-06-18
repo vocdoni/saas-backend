@@ -1971,7 +1971,7 @@ Adds multiple members to a census in bulk. Requires Manager or Admin role for th
 
 ### 🔍 Check Add Members Job Status
 
-* **Path** `/census/check/{jobid}`
+* **Path** `/census/job/{jobid}`
 * **Method** `GET`
 * **Response**
 ```json
