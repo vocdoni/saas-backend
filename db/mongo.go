@@ -42,6 +42,7 @@ type MongoStorage struct {
 	plans               *mongo.Collection
 	objects             *mongo.Collection
 	orgMembers          *mongo.Collection
+	orgMemberGroups     *mongo.Collection
 	censusMemberships   *mongo.Collection
 	censuses            *mongo.Collection
 	publishedCensuses   *mongo.Collection
@@ -356,10 +357,32 @@ func (ms *MongoStorage) String() string {
 		organizationInvites.OrganizationInvites = append(organizationInvites.OrganizationInvites, inv)
 	}
 
+	// get all organization groups
+	ctx, cancel19 := context.WithTimeout(context.Background(), exportTimeout)
+	defer cancel19()
+	orgGroupsCursor, err := ms.orgMemberGroups.Find(ctx, bson.D{{}})
+	if err != nil {
+		log.Warnw("error decoding organization groups", "error", err)
+		return "{}"
+	}
+
+	// append all organization groups to the export data
+	ctx, cancel20 := context.WithTimeout(context.Background(), exportTimeout)
+	defer cancel20()
+	var orgGroups OrgMemberGroupsCollection
+	for orgGroupsCursor.Next(ctx) {
+		var orgGroup OrganizationMemberGroup
+		err := orgGroupsCursor.Decode(&orgGroup)
+		if err != nil {
+			log.Warnw("error finding organization groups", "error", err)
+		}
+		orgGroups.OrgMemberGroups = append(orgGroups.OrgMemberGroups, orgGroup)
+	}
+
 	// encode the data to JSON and return it
 	data, err := json.Marshal(&Collection{
 		users, verifications, organizations, organizationInvites, censuses,
-		orgMembers, censusMemberships, publishedCensuses, processes,
+		orgMembers, orgGroups, censusMemberships, publishedCensuses, processes,
 	})
 	if err != nil {
 		log.Warnw("error marshaling data", "error", err)

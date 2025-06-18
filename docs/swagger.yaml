@@ -37,6 +37,20 @@ definitions:
         format: hex
         type: string
     type: object
+  apicommon.CreateOrganizationMemberGroupRequest:
+    properties:
+      description:
+        description: Description of the group
+        type: string
+      memberIds:
+        description: The IDs of the members to add to the group
+        items:
+          type: string
+        type: array
+      title:
+        description: Title of the group
+        type: string
+    type: object
   apicommon.CreateOrganizationTicketRequest:
     properties:
       description:
@@ -106,6 +120,20 @@ definitions:
     properties:
       count:
         description: Number of members deleted
+        type: integer
+    type: object
+  apicommon.ListOrganizationMemberGroupResponse:
+    properties:
+      currentPage:
+        description: Current page number
+        type: integer
+      members:
+        description: List of organization group members
+        items:
+          $ref: '#/definitions/apicommon.OrgMember'
+        type: array
+      totalPages:
+        description: Total number of pages
         type: integer
     type: object
   apicommon.LoginResponse:
@@ -300,6 +328,51 @@ definitions:
         items:
           $ref: '#/definitions/apicommon.OrganizationInvite'
         type: array
+    type: object
+  apicommon.OrganizationMemberGroupInfo:
+    properties:
+      censusIds:
+        description: List of census IDs associated with the group
+        items:
+          type: string
+        type: array
+      createdAt:
+        description: Creation timestamp
+        type: string
+      description:
+        description: Description of the group
+        type: string
+      id:
+        description: Unique identifier for the group
+        type: string
+      memberIds:
+        description: List of member IDs in the group
+        items:
+          type: string
+        type: array
+      membersCount:
+        description: Count of members in the group
+        type: integer
+      title:
+        description: Title of the group
+        type: string
+      updatedAt:
+        description: Last updated timestamp
+        type: string
+    type: object
+  apicommon.OrganizationMemberGroupsResponse:
+    properties:
+      currentPage:
+        description: Current page number
+        type: integer
+      groups:
+        description: List of organization member groups
+        items:
+          $ref: '#/definitions/apicommon.OrganizationMemberGroupInfo'
+        type: array
+      totalPages:
+        description: Total number of pages
+        type: integer
     type: object
   apicommon.OrganizationMembersResponse:
     properties:
@@ -601,6 +674,25 @@ definitions:
         description: Transaction payload bytes
         example: aGVsbG8gd29ybGQ=
         format: base64
+        type: string
+    type: object
+  apicommon.UpdateOrganizationMemberGroupsRequest:
+    properties:
+      addMembers:
+        description: The IDs of the members to add to the group
+        items:
+          type: string
+        type: array
+      description:
+        description: Updated Description
+        type: string
+      removeMembers:
+        description: The IDs of the members to remove from the group
+        items:
+          type: string
+        type: array
+      title:
+        description: Updated Title
         type: string
     type: object
   apicommon.UpdateOrganizationUserRoleRequest:
@@ -22502,6 +22594,296 @@ paths:
       security:
       - BearerAuth: []
       summary: Get organization censuses
+      tags:
+      - organizations
+  /organizations/{address}/groups:
+    get:
+      consumes:
+      - application/json
+      description: |-
+        Get the list of groups and their info of the organization
+        Does not return the members of the groups, only the groups themselves.
+        Needs admin or manager role
+      parameters:
+      - description: Organization address
+        in: path
+        name: address
+        required: true
+        type: string
+      - description: 'Page number (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - description: 'Number of items per page (default: 10)'
+        in: query
+        name: pageSize
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.OrganizationMemberGroupsResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get organization member groups
+      tags:
+      - organizations
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Create an organization member group with the given members
+        Needs admin or manager role
+      parameters:
+      - description: Organization address
+        in: path
+        name: address
+        required: true
+        type: string
+      - description: Group info to create
+        in: body
+        name: group
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.CreateOrganizationMemberGroupRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.OrganizationMemberGroupInfo'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Create an organization member group
+      tags:
+      - organizations
+  /organizations/{address}/groups/{groupID}:
+    delete:
+      consumes:
+      - application/json
+      description: Delete an organization member group by its ID
+      parameters:
+      - description: Organization address
+        in: path
+        name: address
+        required: true
+        type: string
+      - description: Group ID
+        in: path
+        name: groupID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization or group not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Delete an organization member group
+      tags:
+      - organizations
+    get:
+      consumes:
+      - application/json
+      description: |-
+        Get the information of an organization member group by its ID
+        Needs admin or manager role
+      parameters:
+      - description: Organization address
+        in: path
+        name: address
+        required: true
+        type: string
+      - description: Group ID
+        in: path
+        name: groupID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.OrganizationMemberGroupInfo'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization or group not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get the information of an organization member group
+      tags:
+      - organizations
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Update an organization member group changing the info, and adding or removing members
+        Needs admin or manager role
+      parameters:
+      - description: Organization address
+        in: path
+        name: address
+        required: true
+        type: string
+      - description: Group ID
+        in: path
+        name: groupID
+        required: true
+        type: string
+      - description: Group info to update
+        in: body
+        name: group
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.UpdateOrganizationMemberGroupsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization or group not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Update an organization member group
+      tags:
+      - organizations
+  /organizations/{address}/groups/{groupID}/members:
+    get:
+      consumes:
+      - application/json
+      description: |-
+        Get the list of members with details of an organization member group
+        Needs admin or manager role
+      parameters:
+      - description: Organization address
+        in: path
+        name: address
+        required: true
+        type: string
+      - description: Group ID
+        in: path
+        name: groupID
+        required: true
+        type: string
+      - description: Page number for pagination
+        in: query
+        name: page
+        type: integer
+      - description: Number of items per page
+        in: query
+        name: pageSize
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ListOrganizationMemberGroupResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization or group not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get the list of members with details of an organization member group
       tags:
       - organizations
   /organizations/{address}/member:

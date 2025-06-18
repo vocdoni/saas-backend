@@ -266,6 +266,25 @@ func (a *API) initRouter() http.Handler {
 		// create a new ticket for the organization
 		log.Infow("new route", "method", "POST", "path", organizationCreateTicketEndpoint)
 		r.Post(organizationCreateTicketEndpoint, a.organizationCreateTicket)
+		// create a new organization member group
+		log.Infow("new route", "method", "POST", "path", organizationGroupsEndpoint)
+		r.Post(organizationGroupsEndpoint, a.createOrganizationMemberGroupHandler)
+		// get organization member groups list
+		log.Infow("new route", "method", "GET", "path", organizationGroupsEndpoint)
+		r.Get(organizationGroupsEndpoint, a.organizationMemberGroupsHandler)
+		// get details of an organization member group
+		log.Infow("new route", "method", "GET", "path", organizationGroupEndpoint)
+		r.Get(organizationGroupEndpoint, a.organizationMemberGroupHandler)
+		// get members of an organization member group
+		log.Infow("new route", "method", "GET", "path", organizationGroupMembersEndpoint)
+		r.Get(organizationGroupMembersEndpoint, a.listOrganizationMemberGroupsHandler)
+		// update an organization member group
+		log.Infow("new route", "method", "PUT", "path", organizationGroupEndpoint)
+		r.Put(organizationGroupEndpoint, a.updateOrganizationMemberGroupHandler)
+		// delete an organization member group
+		log.Infow("new route", "method", "DELETE", "path", organizationGroupEndpoint)
+		r.Delete(organizationGroupEndpoint, a.deleteOrganizationMemberGroupHandler)
+
 		// handle stripe checkout session
 		log.Infow("new route", "method", "POST", "path", subscriptionsCheckout)
 		r.Post(subscriptionsCheckout, a.createSubscriptionCheckoutHandler)
