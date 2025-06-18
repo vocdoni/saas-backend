@@ -170,6 +170,74 @@ type UpdateOrganizationUserRoleRequest struct {
 	Role string `json:"role"`
 }
 
+// CreateOrganizationMemberGroupRequest represents a request to create a new organization member group.
+// swagger:model CreateOrganizationMemberGroupRequest
+type CreateOrganizationMemberGroupRequest struct {
+	// Title of the group
+	Title string `json:"title"`
+	// Description of the group
+	Description string `json:"description"`
+	// The IDs of the members to add to the group
+	MemberIDs []string `json:"memberIds"`
+}
+
+// OrganizationMemberGroupInfo represents detailed information about an organization member group.
+// swagger:model OrganizationMemberGroupInfo
+type OrganizationMemberGroupInfo struct {
+	// Unique identifier for the group
+	ID string `json:"id,omitempty" bson:"_id"`
+	// Title of the group
+	Title string `json:"title,omitempty" bson:"title"`
+	// Description of the group
+	Description string `json:"description,omitempty" bson:"description"`
+	// Creation timestamp
+	CreatedAt time.Time `json:"createdAt,omitempty" bson:"createdAt"`
+	// Last updated timestamp
+	UpdatedAt time.Time `json:"updatedAt,omitempty" bson:"updatedAt"`
+	// List of member IDs in the group
+	MemberIDs []string `json:"memberIds,omitempty" bson:"memberIds"`
+	// List of census IDs associated with the group
+	CensusIDs []string `json:"censusIds,omitempty" bson:"censusIds"`
+	// Count of members in the group
+	MembersCount int `json:"membersCount,omitempty" bson:"membersCount"`
+}
+
+// OrganizationMemberGroupsResponse represents the response for listing organization member groups.
+// swagger:model OrganizationMemberGroupsResponse
+type OrganizationMemberGroupsResponse struct {
+	// Total number of pages
+	TotalPages int `json:"totalPages"`
+	// Current page number
+	CurrentPage int `json:"currentPage"`
+	// List of organization member groups
+	Groups []*OrganizationMemberGroupInfo `json:"groups"`
+}
+
+// UpdateOrganizationMemberGroupsRequest represents a request to update an organization member group
+// title, description or members.
+// swagger:model UpdateOrganizationMemberGroupsRequest
+type UpdateOrganizationMemberGroupsRequest struct {
+	// Updated Title
+	Title string `json:"title"`
+	// Updated Description
+	Description string `json:"description"`
+	// The IDs of the members to add to the group
+	AddMembers []string `json:"addMembers"`
+	// The IDs of the members to remove from the group
+	RemoveMembers []string `json:"removeMembers"`
+}
+
+// ListOrganizationMemberGroupResponse represents the response for listing the members of an  organization group.
+// swagger:model ListOrganizationMemberGroupResponse
+type ListOrganizationMemberGroupResponse struct {
+	// Total number of pages
+	TotalPages int `json:"totalPages"`
+	// Current page number
+	CurrentPage int `json:"currentPage"`
+	// List of organization group members
+	Members []OrgMember `json:"members"`
+}
+
 // UserInfo represents user information and is used for user registration.
 // swagger:model UserInfo
 type UserInfo struct {

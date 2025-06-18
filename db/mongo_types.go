@@ -30,6 +30,10 @@ type OrgMembersCollection struct {
 	OrgMembers []OrgMember `json:"orgMembers" bson:"orgMembers"`
 }
 
+type OrgMemberGroupsCollection struct {
+	OrgMemberGroups []OrganizationMemberGroup `json:"organizationMemberGroups" bson:"organizationMemberGroups"`
+}
+
 type CensusMembershipsCollection struct {
 	CensusMemberships []CensusMembership `json:"censusMemberships" bson:"censusMemberships"`
 }
@@ -49,6 +53,7 @@ type Collection struct {
 	OrganizationInvitesCollection
 	CensusCollection
 	OrgMembersCollection
+	OrgMemberGroupsCollection
 	CensusMembershipsCollection
 	PublishedCensusesCollection
 	ProcessesCollection

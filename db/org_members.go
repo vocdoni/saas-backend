@@ -460,3 +460,114 @@ func (ms *MongoStorage) DeleteOrgMembers(orgAddress string, ids []string) (int, 
 
 	return int(result.DeletedCount), nil
 }
+
+// validateOrgMembers checks if the provided member IDs are valid
+func (ms *MongoStorage) validateOrgMembers(ctx context.Context, orgAddress string, members []string) error {
+	if len(members) == 0 {
+		return fmt.Errorf("no members provided")
+	}
+
+	// Convert string IDs to ObjectIDs
+	var objectIDs []primitive.ObjectID
+	for _, id := range members {
+		objID, err := primitive.ObjectIDFromHex(id)
+		if err != nil {
+			return fmt.Errorf("invalid ObjectID format: %s", id)
+		}
+		objectIDs = append(objectIDs, objID)
+	}
+
+	cursor, err := ms.orgMembers.Find(ctx, bson.M{
+		"_id":        bson.M{"$in": objectIDs},
+		"orgAddress": orgAddress,
+	})
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("error closing cursor", "error", err)
+		}
+	}()
+
+	var found []OrgMember
+	if err := cursor.All(ctx, &found); err != nil {
+		return err
+	}
+
+	// Create a map of found IDs for quick lookup
+	foundMap := make(map[string]bool)
+	for _, member := range found {
+		foundMap[member.ID.Hex()] = true
+	}
+
+	// Check if all requested IDs were found
+	for _, id := range members {
+		if !foundMap[id] {
+			return fmt.Errorf("invalid member ID in add list: %s", id)
+		}
+	}
+	return nil
+}
+
+// getOrgMembersByIDs retrieves organization members by their IDs
+func (ms *MongoStorage) orgMembersByIDs(
+	orgAddress string,
+	memberIDs []string,
+	page, pageSize int64,
+) (int, []*OrgMember, error) {
+	if len(memberIDs) == 0 {
+		return 0, nil, nil // No members to retrieve
+	}
+
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	// Convert string IDs to ObjectIDs
+	var objectIDs []primitive.ObjectID
+	for _, id := range memberIDs {
+		objID, err := primitive.ObjectIDFromHex(id)
+		if err != nil {
+			return 0, nil, fmt.Errorf("invalid ObjectID format: %s", id)
+		}
+		objectIDs = append(objectIDs, objID)
+	}
+
+	filter := bson.M{
+		"_id":        bson.M{"$in": objectIDs},
+		"orgAddress": orgAddress,
+	}
+
+	// Count total documents
+	totalCount, err := ms.orgMembers.CountDocuments(ctx, filter)
+	if err != nil {
+		return 0, nil, err
+	}
+	totalPages := int(math.Ceil(float64(totalCount) / float64(pageSize)))
+
+	// Calculate skip value based on page and pageSize
+	skip := (page - 1) * pageSize
+
+	// Set up options for pagination
+	findOptions := options.Find().
+		SetSkip(skip).
+		SetLimit(pageSize)
+
+	cursor, err := ms.orgMembers.Find(ctx, filter, findOptions)
+	if err != nil {
+		return 0, nil, fmt.Errorf("failed to find org participants: %w", err)
+	}
+	defer func() {
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("error closing cursor", "error", err)
+		}
+	}()
+
+	var members []*OrgMember
+	if err := cursor.All(ctx, &members); err != nil {
+		return 0, nil, fmt.Errorf("failed to decode org participants: %w", err)
+	}
+
+	return totalPages, members, nil
+}

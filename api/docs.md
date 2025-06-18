@@ -43,6 +43,13 @@
   - [📋 Organization Meta Information](#-organization-meta-information)
   - [🎫 Create Organization Ticket](#-create-organization-ticket)
   - [🤠 Available organization user roles](#-available-organization-user-roles)
+  - [👥 Organization Member Groups](#-organization-member-groups)
+  - [🔍 Get Organization Member Group](#-get-organization-member-group)
+  - [🆕 Create Organization Member Group](#-create-organization-member-group)
+  - [🔄 Update Organization Member Group](#-update-organization-member-group)
+  - [❌ Delete Organization Member Group](#-delete-organization-member-group)
+  - [📋 List Organization Member Group Members](#-list-organization-member-group-members)
+  - [🤠 Available organization members roles](#-available-organization-members-roles)
   - [🏛️ Available organization types](#-available-organization-types)
 - [🏦 Plans](#-plans)
   - [📋 Get Available Plans](#-get-plans)
@@ -1238,6 +1245,225 @@ Creates a new support ticket for the organization. The user must have any role i
 | `401` | `40001` | `user not authorized` |
 | `400` | `40004` | `malformed JSON body` |
 | `400` | `40011` | `no organization provided` |
+| `500` | `50002` | `internal server error` |
+
+### 👥 Organization Member Groups
+
+* **Path** `/organizations/{address}/groups`
+* **Method** `GET`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Query params**
+  * `page` - Page number (default: 1)
+  * `pageSize` - Number of items per page (default: 10)
+* **Description**
+Get the list of groups and their info of the organization. Does not return the members of the groups, only the groups themselves. Requires admin or manager role.
+
+* **Response**
+```json
+{
+  "groups": [
+    {
+      "id": "group_id_hex",
+      "title": "Development Team",
+      "description": "Software development group",
+      "createdAt": "2025-01-16T11:56:04Z",
+      "updatedAt": "2025-01-16T11:56:04Z",
+      "censusIDs": ["census_id_1", "census_id_2"],
+      "membersCount": 5
+    }
+  ]
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `401` | `40001` | `user is not admin of organization` |
+| `400` | `40011` | `no organization provided` |
+| `404` | `40009` | `organization not found` |
+| `500` | `50002` | `internal server error` |
+
+### 🔍 Get Organization Member Group
+
+* **Path** `/organizations/{address}/groups/{groupID}`
+* **Method** `GET`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Description**
+Get the information of an organization member group by its ID. Requires admin or manager role.
+
+* **Response**
+```json
+{
+  "id": "group_id_hex",
+  "title": "Development Team",
+  "description": "Software development group",
+  "memberIDs": ["member_id_1", "member_id_2"],
+  "censusIDs": ["census_id_1", "census_id_2"],
+  "createdAt": "2025-01-16T11:56:04Z",
+  "updatedAt": "2025-01-16T11:56:04Z"
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `401` | `40001` | `user is not admin of organization` |
+| `400` | `40005` | `group ID is required` |
+| `400` | `40005` | `group not found` |
+| `400` | `40011` | `no organization provided` |
+| `404` | `40009` | `organization not found` |
+| `500` | `50002` | `internal server error` |
+
+### 🆕 Create Organization Member Group
+
+* **Path** `/organizations/{address}/groups`
+* **Method** `POST`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Description**
+Create an organization member group with the given members. Requires admin or manager role.
+
+* **Request body**
+```json
+{
+  "title": "Development Team",
+  "description": "Software development group",
+  "memberIDs": ["member_id_1", "member_id_2"]
+}
+```
+
+* **Response**
+```json
+{
+  "id": "group_id_hex"
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `401` | `40001` | `user is not admin of organization` |
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40005` | `organization not found` |
+| `400` | `40011` | `no organization provided` |
+| `404` | `40009` | `organization not found` |
+| `500` | `50002` | `internal server error` |
+
+### 🔄 Update Organization Member Group
+
+* **Path** `/organizations/{address}/groups/{groupID}`
+* **Method** `PUT`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Description**
+Update an organization member group changing the info, and adding or removing members. Requires admin or manager role.
+
+* **Request body**
+```json
+{
+  "title": "Updated Development Team",
+  "description": "Updated software development group",
+  "addMembers": ["new_member_id_1", "new_member_id_2"],
+  "removeMembers": ["old_member_id_1"]
+}
+```
+
+* **Response**
+```json
+"OK"
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `401` | `40001` | `user is not admin of organization` |
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40005` | `group ID is required` |
+| `400` | `40005` | `group not found` |
+| `400` | `40011` | `no organization provided` |
+| `404` | `40009` | `organization not found` |
+| `500` | `50002` | `internal server error` |
+
+### ❌ Delete Organization Member Group
+
+* **Path** `/organizations/{address}/groups/{groupID}`
+* **Method** `DELETE`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Description**
+Delete an organization member group by its ID. Requires admin or manager role.
+
+* **Response**
+```json
+"OK"
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `401` | `40001` | `user is not admin of organization` |
+| `400` | `40005` | `group ID is required` |
+| `400` | `40005` | `group not found` |
+| `400` | `40011` | `no organization provided` |
+| `404` | `40009` | `organization not found` |
+| `500` | `50002` | `internal server error` |
+
+### 📋 List Organization Member Group Members
+
+* **Path** `/organizations/{address}/groups/{groupID}/members`
+* **Method** `GET`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Query params**
+  * `page` - Page number (default: 1)
+  * `pageSize` - Number of items per page (default: 10)
+* **Description**
+Get the list of members with details of an organization member group. Requires admin or manager role.
+
+* **Response**
+```json
+{
+  "totalPages": 5,
+  "currentPage": 1,
+  "members": [
+    {
+      "participantNo": "12345",
+      "name": "John Doe",
+      "email": "john@example.com",
+      "phone": "+1234567890"
+    },
+    {
+      "participantNo": "67890",
+      "name": "Jane Smith",
+      "email": "jane@example.com",
+      "phone": "+0987654321"
+    }
+  ]
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `401` | `40001` | `user is not admin of organization` |
+| `400` | `40005` | `group ID is required` |
+| `400` | `40005` | `group not found` |
+| `400` | `40011` | `no organization provided` |
+| `404` | `40009` | `organization not found` |
 | `500` | `50002` | `internal server error` |
 
 ### 📋 Organization Meta Information

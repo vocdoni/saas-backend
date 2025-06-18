@@ -80,6 +80,13 @@ const (
 	organizationMetaEndpoint = "/organizations/{address}/meta"
 	// POST /organizations/{address}/ticket to create a new ticket to our support system
 	organizationCreateTicketEndpoint = "/organizations/{address}/ticket"
+	// POST/GET /organizations/{address}/groups to create a new organization member group or get the
+	// list of groups of an organization
+	organizationGroupsEndpoint = "/organizations/{address}/groups"
+	// PUT/DELETE /organizations/{address}/groups/{groupID} to update or delete an organization member group
+	organizationGroupEndpoint = "/organizations/{address}/groups/{groupID}"
+	// GET /organizations/{address}/groups/{groupID}/members to get the members of an organization member group
+	organizationGroupMembersEndpoint = "/organizations/{address}/groups/{groupID}/members"
 
 	// subscription routes
 	// GET /subscriptions to get the subscriptions of an organization

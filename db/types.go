@@ -206,6 +206,19 @@ type OrgMember struct {
 	UpdatedAt      time.Time      `json:"updatedAt" bson:"updatedAt"`
 }
 
+// An Organization members' group is a precursor of a census, and is simply a
+// collection of members that are grouped together for a specific purpose
+type OrganizationMemberGroup struct {
+	ID          primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	OrgAddress  string             `json:"orgAddress" bson:"orgAddress"`
+	Title       string             `json:"title" bson:"title"`
+	Description string             `json:"description" bson:"description"`
+	MemberIDs   []string           `json:"memberIds" bson:"memberIds"`
+	CreatedAt   time.Time          `json:"createdAt" bson:"createdAt"`
+	UpdatedAt   time.Time          `json:"updatedAt" bson:"updatedAt"`
+	CensusIDs   []string           `json:"censusIds" bson:"censusIds"`
+}
+
 // Relates an OrgMember to a Census
 // The censusID is the hex format in string of the objectID
 type CensusMembership struct {
