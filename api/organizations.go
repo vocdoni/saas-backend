@@ -136,9 +136,8 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 
 	// update the parent organization counter
 	if orgInfo.Parent != nil {
-		dbParentOrg.Counters.SubOrgs++
-		if err := a.db.SetOrganization(dbParentOrg); err != nil {
-			errors.ErrGenericInternalServerError.Withf("could not update parent organization: %v", err).Write(w)
+		if err := a.db.IncrementOrganizationSubOrgsCounter(dbParentOrg.Address); err != nil {
+			errors.ErrGenericInternalServerError.Withf("could not update parent organization suborgs counter: %v", err).Write(w)
 			return
 		}
 	}
