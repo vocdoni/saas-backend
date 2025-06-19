@@ -157,28 +157,11 @@ func (p *Subscriptions) HasDBPermission(userEmail, orgAddress string, permission
 	if err != nil {
 		return false, fmt.Errorf("could not get user: %v", err)
 	}
-	org, err := p.db.Organization(orgAddress)
-	if err != nil {
-		return false, fmt.Errorf("could not get organization: %v", err)
-	}
-
-	// Check if the organization has a subscription
-	if org.Subscription.PlanID == 0 {
-		return false, fmt.Errorf("organization has no subscription plan")
-	}
-
-	plan, err := p.db.Plan(org.Subscription.PlanID)
-	if err != nil {
-		return false, fmt.Errorf("could not get organization plan: %v", err)
-	}
 	switch permission {
 	case InviteUser:
 		// check if the user has permission to invite users
 		if !user.HasRoleFor(orgAddress, db.AdminRole) {
 			return false, fmt.Errorf("user does not have admin role")
-		}
-		if org.Counters.Users >= plan.Organization.Users {
-			return false, fmt.Errorf("max users reached")
 		}
 		return true, nil
 	case DeleteUser:
@@ -191,9 +174,6 @@ func (p *Subscriptions) HasDBPermission(userEmail, orgAddress string, permission
 		// check if the user has permission to create sub organizations
 		if !user.HasRoleFor(orgAddress, db.AdminRole) {
 			return false, fmt.Errorf("user does not have admin role")
-		}
-		if org.Counters.SubOrgs >= plan.Organization.SubOrgs {
-			return false, fmt.Errorf("max sub organizations reached")
 		}
 		return true, nil
 	}
