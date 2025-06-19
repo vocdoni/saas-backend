@@ -171,10 +171,9 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// update the org users counter
-	org.Counters.Users++
-	if err := a.db.SetOrganization(org); err != nil {
-		errors.ErrGenericInternalServerError.Withf("could not update organization: %v", err).Write(w)
+	// update the org users counter atomically to avoid race conditions
+	if err := a.db.IncrementOrganizationUsersCounter(org.Address); err != nil {
+		errors.ErrGenericInternalServerError.Withf("could not update organization users counter: %v", err).Write(w)
 		return
 	}
 	apicommon.HTTPWriteOK(w)
@@ -447,10 +446,9 @@ func (a *API) deletePendingUserInvitationHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// update the org users counter
-	org.Counters.Users--
-	if err := a.db.SetOrganization(org); err != nil {
-		errors.ErrGenericInternalServerError.Withf("could not update organization: %v", err).Write(w)
+	// update the org users counter atomically to avoid race conditions
+	if err := a.db.DecrementOrganizationUsersCounter(org.Address); err != nil {
+		errors.ErrGenericInternalServerError.Withf("could not update organization users counter: %v", err).Write(w)
 		return
 	}
 	apicommon.HTTPWriteOK(w)
@@ -656,10 +654,9 @@ func (a *API) removeOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// update the org users counter
-	org.Counters.Users--
-	if err := a.db.SetOrganization(org); err != nil {
-		errors.ErrGenericInternalServerError.Withf("could not update organization: %v", err).Write(w)
+	// update the org users counter atomically to avoid race conditions
+	if err := a.db.DecrementOrganizationUsersCounter(org.Address); err != nil {
+		errors.ErrGenericInternalServerError.Withf("could not update organization users counter: %v", err).Write(w)
 		return
 	}
 	apicommon.HTTPWriteOK(w)
