@@ -753,7 +753,7 @@ type OrgMember struct {
 	// Member's internal unique internal ID
 	ID string `json:"id"`
 	// Unique member number as defined by the organization
-	MemberID string `json:"memberID"`
+	MemberNumber string `json:"memberNumber"`
 
 	// Member's name
 	Name string `json:"name,omitempty"`
@@ -788,7 +788,7 @@ func (p *OrgMember) ToDb(orgAddress string) db.OrgMember {
 		var err error
 		parsedBirthDate, err = time.Parse("2006-01-02", p.BirthDate)
 		if err != nil {
-			log.Warnf("Failed to parse birth date %s for member %s: %v", p.BirthDate, p.MemberID, err)
+			log.Warnf("Failed to parse birth date %s for member %s: %v", p.BirthDate, p.MemberNumber, err)
 		}
 	}
 	id := primitive.NilObjectID
@@ -803,7 +803,7 @@ func (p *OrgMember) ToDb(orgAddress string) db.OrgMember {
 	return db.OrgMember{
 		ID:             id,
 		OrgAddress:     orgAddress,
-		MemberID:       p.MemberID,
+		MemberNumber:   p.MemberNumber,
 		Name:           p.Name,
 		Surname:        p.Surname,
 		NationalID:     p.NationalID,
@@ -825,15 +825,15 @@ func OrgMemberFromDb(p db.OrgMember) OrgMember {
 	// if p.BirthDate != nil {
 
 	return OrgMember{
-		ID:         p.ID.Hex(),
-		MemberID:   p.MemberID,
-		Name:       p.Name,
-		Surname:    p.Surname,
-		NationalID: p.NationalID,
-		BirthDate:  p.BirthDate,
-		Email:      p.Email,
-		Phone:      hashedPhone,
-		Other:      p.Other,
+		ID:           p.ID.Hex(),
+		MemberNumber: p.MemberNumber,
+		Name:         p.Name,
+		Surname:      p.Surname,
+		NationalID:   p.NationalID,
+		BirthDate:    p.BirthDate,
+		Email:        p.Email,
+		Phone:        hashedPhone,
+		Other:        p.Other,
 	}
 }
 

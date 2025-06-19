@@ -110,9 +110,9 @@ func (ms *MongoStorage) OrgMember(orgAddress, id string) (*OrgMember, error) {
 	return orgMember, nil
 }
 
-// OrgMemberByMemberID retrieves a orgMember from the DB based on organization address and member number
-func (ms *MongoStorage) OrgMemberByMemberID(orgAddress, memberID string) (*OrgMember, error) {
-	if len(memberID) == 0 {
+// OrgMemberByMemberNumber retrieves a orgMember from the DB based on organization address and member number
+func (ms *MongoStorage) OrgMemberByMemberNumber(orgAddress, memberNumber string) (*OrgMember, error) {
+	if len(memberNumber) == 0 {
 		return nil, ErrInvalidData
 	}
 	// create a context with a timeout
@@ -121,7 +121,7 @@ func (ms *MongoStorage) OrgMemberByMemberID(orgAddress, memberID string) (*OrgMe
 
 	orgMember := &OrgMember{}
 	if err := ms.orgMembers.FindOne(
-		ctx, bson.M{"orgAddress": orgAddress, "memberID": memberID},
+		ctx, bson.M{"orgAddress": orgAddress, "memberNumber": memberNumber},
 	).Decode(orgMember); err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, ErrNotFound

@@ -84,22 +84,22 @@ func TestCensus(t *testing.T) {
 	members := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
 			{
-				MemberID: "P001",
-				Name:     "John Doe",
-				Email:    "john.doe@example.com",
-				Phone:    "+34612345678",
-				Password: "password123",
+				MemberNumber: "P001",
+				Name:         "John Doe",
+				Email:        "john.doe@example.com",
+				Phone:        "+34612345678",
+				Password:     "password123",
 				Other: map[string]any{
 					"department": "Engineering",
 					"age":        30,
 				},
 			},
 			{
-				MemberID: "P002",
-				Name:     "Jane Smith",
-				Email:    "jane.smith@example.com",
-				Phone:    "+34698765432",
-				Password: "password456",
+				MemberNumber: "P002",
+				Name:         "Jane Smith",
+				Email:        "jane.smith@example.com",
+				Phone:        "+34698765432",
+				Password:     "password456",
 				Other: map[string]any{
 					"department": "Marketing",
 					"age":        28,
@@ -136,22 +136,22 @@ func TestCensus(t *testing.T) {
 	asyncMembers := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
 			{
-				MemberID: "P003",
-				Name:     "Bob Johnson",
-				Email:    "bob.johnson@example.com",
-				Phone:    "+34611223344",
-				Password: "password789",
+				MemberNumber: "P003",
+				Name:         "Bob Johnson",
+				Email:        "bob.johnson@example.com",
+				Phone:        "+34611223344",
+				Password:     "password789",
 				Other: map[string]any{
 					"department": "Sales",
 					"age":        35,
 				},
 			},
 			{
-				MemberID: "P004",
-				Name:     "Alice Brown",
-				Email:    "alice.brown@example.com",
-				Phone:    "+34655443322",
-				Password: "passwordabc",
+				MemberNumber: "P004",
+				Name:         "Alice Brown",
+				Email:        "alice.brown@example.com",
+				Phone:        "+34655443322",
+				Password:     "passwordabc",
 				Other: map[string]any{
 					"department": "HR",
 					"age":        42,

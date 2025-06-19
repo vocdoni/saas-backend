@@ -50,22 +50,22 @@ func TestProcess(t *testing.T) {
 	members := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
 			{
-				MemberID: "P001",
-				Name:     "John Doe",
-				Email:    "john.doe@example.com",
-				Phone:    "+34612345678",
-				Password: "password123",
+				MemberNumber: "P001",
+				Name:         "John Doe",
+				Email:        "john.doe@example.com",
+				Phone:        "+34612345678",
+				Password:     "password123",
 				Other: map[string]any{
 					"department": "Engineering",
 					"age":        30,
 				},
 			},
 			{
-				MemberID: "P002",
-				Name:     "Jane Smith",
-				Email:    "jane.smith@example.com",
-				Phone:    "+34698765432",
-				Password: "password456",
+				MemberNumber: "P002",
+				Name:         "Jane Smith",
+				Email:        "jane.smith@example.com",
+				Phone:        "+34698765432",
+				Password:     "password456",
 				Other: map[string]any{
 					"department": "Marketing",
 					"age":        28,

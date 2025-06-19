@@ -119,18 +119,22 @@ func (ms *MongoStorage) CensusMembership(censusID, id string) (*CensusMembership
 }
 
 // CensusMembership retrieves a census membership from the database based on
-// memberID and censusID. Returns ErrNotFound if the membership doesn't exist.
-func (ms *MongoStorage) CensusMembershipByMemberID(censusID, memberID, orgAddress string) (*OrgMember, *CensusMembership, error) {
+// memberNumber and censusID. Returns ErrNotFound if the membership doesn't exist.
+func (ms *MongoStorage) CensusMembershipByMemberNumber(
+	censusID string,
+	memberNumber string,
+	orgAddress string,
+) (*OrgMember, *CensusMembership, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	// validate input
-	if len(memberID) == 0 || len(censusID) == 0 {
+	if len(memberNumber) == 0 || len(censusID) == 0 {
 		return nil, nil, ErrInvalidData
 	}
 
-	orgMember, err := ms.OrgMemberByMemberID(orgAddress, memberID)
+	orgMember, err := ms.OrgMemberByMemberNumber(orgAddress, memberNumber)
 	if err != nil {
 		if err == mongo.ErrNoDocuments || err == ErrNotFound {
 			return nil, nil, ErrNotFound

@@ -198,7 +198,7 @@ func (c *CSPHandlers) checkCensusMembership(w http.ResponseWriter, censusID stri
 		}
 		return false
 	}
-	if _, _, err := c.mainDB.CensusMembershipByMemberID(censusID, userID, census.OrgAddress); err != nil {
+	if _, _, err := c.mainDB.CensusMembershipByMemberNumber(censusID, userID, census.OrgAddress); err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrUnauthorized.Withf("member not found in the census").Write(w)
 			return false
@@ -435,7 +435,7 @@ func (c *CSPHandlers) getCensusAndMember(censusID string, memberID string) (*db.
 	}
 
 	// Check the census membership of the member
-	member, _, err := c.mainDB.CensusMembershipByMemberID(censusID, memberID, census.OrgAddress)
+	member, _, err := c.mainDB.CensusMembershipByMemberNumber(censusID, memberID, census.OrgAddress)
 	if err != nil {
 		if err == db.ErrNotFound {
 			return nil, nil, errors.ErrUnauthorized.Withf("member not found in the census")
@@ -560,7 +560,7 @@ func (c *CSPHandlers) authFirstStep(
 	}
 
 	// Generate the token
-	return c.csp.BundleAuthToken(bundleID, internal.HexBytes(member.MemberID), toDestinations, challengeType)
+	return c.csp.BundleAuthToken(bundleID, internal.HexBytes(member.MemberNumber), toDestinations, challengeType)
 }
 
 // authSecondStep is the second step of the authentication process. It

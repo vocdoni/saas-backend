@@ -193,7 +193,7 @@ type OrgMember struct {
 	Email          string         `json:"email" bson:"email"`
 	Phone          string         `json:"phone" bson:"phone"`
 	HashedPhone    []byte         `json:"hashedPhone" bson:"hashedPhone" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
-	MemberID       string         `json:"memberID" bson:"memberID"`
+	MemberNumber   string         `json:"memberNumber" bson:"memberNumber"`
 	NationalID     string         `json:"nationalID" bson:"nationalID"`
 	Name           string         `json:"name" bson:"name"`
 	Surname        string         `json:"surname" bson:"surname"`

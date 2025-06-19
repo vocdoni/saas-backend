@@ -26,12 +26,12 @@ func setupTestCensusMembershipPrerequisites(t *testing.T, memberSuffix string) (
 	// Create test member with unique ID
 	memberID := testMembershipMemberID + memberSuffix
 	member := &OrgMember{
-		ID:         primitive.NewObjectID(),
-		OrgAddress: testOrgAddress,
-		MemberID:   memberID,
-		Email:      "test" + memberSuffix + "@example.com",
-		CreatedAt:  time.Now(),
-		UpdatedAt:  time.Now(),
+		ID:           primitive.NewObjectID(),
+		OrgAddress:   testOrgAddress,
+		MemberNumber: memberID,
+		Email:        "test" + memberSuffix + "@example.com",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 	_, err = testDB.SetOrgMember("test_salt", member)
 	if err != nil {
@@ -226,10 +226,10 @@ func TestCensusMembership(t *testing.T) {
 			// Test with empty census ID
 			members := []OrgMember{
 				{
-					MemberID: "test1",
-					Email:    "test1@example.com",
-					Phone:    "1234567890",
-					Password: "password1",
+					MemberNumber: "test1",
+					Email:        "test1@example.com",
+					Phone:        "1234567890",
+					Password:     "password1",
 				},
 			}
 			progressChan, err := testDB.SetBulkCensusMembership("test_salt", "", members)
@@ -243,10 +243,10 @@ func TestCensusMembership(t *testing.T) {
 		t.Run("NonExistentCensus", func(_ *testing.T) {
 			members := []OrgMember{
 				{
-					MemberID: "test1",
-					Email:    "test1@example.com",
-					Phone:    "1234567890",
-					Password: "password1",
+					MemberNumber: "test1",
+					Email:        "test1@example.com",
+					Phone:        "1234567890",
+					Password:     "password1",
 				},
 			}
 			// Test with non-existent census
@@ -262,16 +262,16 @@ func TestCensusMembership(t *testing.T) {
 			// Test successful bulk creation
 			members := []OrgMember{
 				{
-					MemberID: "test1",
-					Email:    "test1@example.com",
-					Phone:    "1234567890",
-					Password: "password1",
+					MemberNumber: "test1",
+					Email:        "test1@example.com",
+					Phone:        "1234567890",
+					Password:     "password1",
 				},
 				{
-					MemberID: "test2",
-					Email:    "test2@example.com",
-					Phone:    "0987654321",
-					Password: "password2",
+					MemberNumber: "test2",
+					Email:        "test2@example.com",
+					Phone:        "0987654321",
+					Password:     "password2",
 				},
 			}
 
@@ -289,7 +289,7 @@ func TestCensusMembership(t *testing.T) {
 
 			// Verify members were created with hashed data
 			for _, p := range members {
-				member, err := testDB.OrgMemberByMemberID(testOrgAddress, p.MemberID)
+				member, err := testDB.OrgMemberByMemberNumber(testOrgAddress, p.MemberNumber)
 				c.Assert(err, qt.IsNil)
 				c.Assert(member.Email, qt.Not(qt.Equals), "")
 				c.Assert(member.Phone, qt.Equals, "")
@@ -310,16 +310,16 @@ func TestCensusMembership(t *testing.T) {
 			// Create members first
 			members := []OrgMember{
 				{
-					MemberID: "update1",
-					Email:    "update1@example.com",
-					Phone:    "1234567890",
-					Password: "password1",
+					MemberNumber: "update1",
+					Email:        "update1@example.com",
+					Phone:        "1234567890",
+					Password:     "password1",
 				},
 				{
-					MemberID: "update2",
-					Email:    "update2@example.com",
-					Phone:    "0987654321",
-					Password: "password2",
+					MemberNumber: "update2",
+					Email:        "update2@example.com",
+					Phone:        "0987654321",
+					Password:     "password2",
 				},
 			}
 
@@ -337,11 +337,11 @@ func TestCensusMembership(t *testing.T) {
 
 			// Test updating existing members and memberships
 			// set first their internal ID correctly
-			member0, err := testDB.OrgMemberByMemberID(testOrgAddress, members[0].MemberID)
+			member0, err := testDB.OrgMemberByMemberNumber(testOrgAddress, members[0].MemberNumber)
 			c.Assert(err, qt.IsNil)
 			members[0].ID = member0.ID
 			members[0].Email = "updated1@example.com"
-			member1, err := testDB.OrgMemberByMemberID(testOrgAddress, members[1].MemberID)
+			member1, err := testDB.OrgMemberByMemberNumber(testOrgAddress, members[1].MemberNumber)
 			c.Assert(err, qt.IsNil)
 			members[1].ID = member1.ID
 			members[1].Phone = "1111111111"
@@ -360,7 +360,7 @@ func TestCensusMembership(t *testing.T) {
 
 			// Verify updates
 			for i, p := range members {
-				member, err := testDB.OrgMemberByMemberID(testOrgAddress, p.MemberID)
+				member, err := testDB.OrgMemberByMemberNumber(testOrgAddress, p.MemberNumber)
 				c.Assert(err, qt.IsNil)
 				c.Assert(member.Email, qt.Equals, members[i].Email)
 				c.Assert(member.Phone, qt.Equals, "")

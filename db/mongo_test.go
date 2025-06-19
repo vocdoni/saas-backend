@@ -13,21 +13,21 @@ var testDB *MongoStorage
 
 // Common test constants
 const (
-	testOrgAddress  = "0x123456789"
-	testDBUserEmail = "test@example.com"
-	testDBUserPass  = "testpass123"
-	testDBFirstName = "Test"
-	testDBLastName  = "User"
-	testMemberID    = "member123"
-	testMemberEmail = "member@test.com"
-	testPhone       = "+34678909090"
-	testName        = "Test Member"
-	testPassword    = "testpass123"
-	testSalt        = "testSalt"
-	invitationCode  = "abc123"
-	newUserEmail    = "inviteme@email.com"
-	testURI         = "test_uri"
-	testRoot        = "test_root"
+	testOrgAddress   = "0x123456789"
+	testDBUserEmail  = "test@example.com"
+	testDBUserPass   = "testpass123"
+	testDBFirstName  = "Test"
+	testDBLastName   = "User"
+	testMemberNumber = "member123"
+	testMemberEmail  = "member@test.com"
+	testPhone        = "+34678909090"
+	testName         = "Test Member"
+	testPassword     = "testpass123"
+	testSalt         = "testSalt"
+	invitationCode   = "abc123"
+	newUserEmail     = "inviteme@email.com"
+	testURI          = "test_uri"
+	testRoot         = "test_root"
 )
 
 func TestMain(m *testing.M) {
