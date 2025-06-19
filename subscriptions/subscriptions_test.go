@@ -100,6 +100,10 @@ func TestHasDBPermission(t *testing.T) {
 						Address: "0x456",
 						Role:    db.AdminRole,
 					},
+					{
+						Address: "0x789",
+						Role:    db.AdminRole,
+					},
 				},
 			},
 		},
@@ -117,6 +121,16 @@ func TestHasDBPermission(t *testing.T) {
 				},
 				Counters: db.OrganizationCounters{
 					Users:   5,
+					SubOrgs: 2,
+				},
+			},
+			"0x789": {
+				Address: "0x789",
+				Subscription: db.OrganizationSubscription{
+					PlanID: 1,
+				},
+				Counters: db.OrganizationCounters{
+					Users:   10, // Max users reached
 					SubOrgs: 2,
 				},
 			},
@@ -152,6 +166,12 @@ func TestHasDBPermission(t *testing.T) {
 	hasPermission, err = subs.HasDBPermission("test@example.com", "0x456", CreateSubOrg)
 	c.Assert(err, qt.IsNil)
 	c.Assert(hasPermission, qt.IsTrue)
+
+	// Test case 4: Organization with max users reached
+	hasPermission, err = subs.HasDBPermission("test@example.com", "0x789", InviteUser)
+	c.Assert(err, qt.Not(qt.IsNil))
+	c.Assert(err.Error(), qt.Equals, "max users reached")
+	c.Assert(hasPermission, qt.IsFalse)
 }
 
 // Mock implementation of the necessary db.MongoStorage methods for testing
