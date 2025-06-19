@@ -68,7 +68,7 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	if pageSizeStr := r.URL.Query().Get("pageSize"); pageSizeStr != "" {
-		if pageSizeVal, err := strconv.Atoi(pageSizeStr); err == nil && pageSizeVal > 0 {
+		if pageSizeVal, err := strconv.Atoi(pageSizeStr); err == nil && pageSizeVal >= 0 {
 			pageSize = pageSizeVal
 		}
 	}
