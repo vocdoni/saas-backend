@@ -94,7 +94,7 @@ func TestHasDBPermission(t *testing.T) {
 				Organizations: []db.OrganizationUser{
 					{
 						Address: "0x123",
-						Role:    db.AdminRole,
+						Role:    db.ViewerRole,
 					},
 					{
 						Address: "0x456",
@@ -106,9 +106,6 @@ func TestHasDBPermission(t *testing.T) {
 		orgs: map[string]*db.Organization{
 			"0x123": {
 				Address: "0x123",
-				Subscription: db.OrganizationSubscription{
-					PlanID: 0,
-				},
 			},
 			"0x456": {
 				Address: "0x456",
@@ -138,10 +135,16 @@ func TestHasDBPermission(t *testing.T) {
 		db: mockDB,
 	}
 
-	// Test case 1: Organization without a plan
-	_, err := subs.HasDBPermission("test@example.com", "0x123", InviteUser)
-	c.Assert(err, qt.Not(qt.IsNil))
-	c.Assert(err.Error(), qt.Equals, "organization has no subscription plan")
+	// Test case: Non-existent user
+	_, err := subs.HasDBPermission("notfound@example.com", "0x123", InviteUser)
+	c.Assert(err, qt.ErrorMatches, "could not get user.*")
+	// Test case: Not an admin
+	_, err = subs.HasDBPermission("test@example.com", "0x123", InviteUser)
+	c.Assert(err, qt.ErrorMatches, "user does not have admin role")
+	_, err = subs.HasDBPermission("test@example.com", "0x123", DeleteUser)
+	c.Assert(err, qt.ErrorMatches, "user does not have admin role")
+	_, err = subs.HasDBPermission("test@example.com", "0x123", CreateSubOrg)
+	c.Assert(err, qt.ErrorMatches, "user does not have admin role")
 
 	// Test case 2: Organization with a plan - invite user
 	hasPermission, err := subs.HasDBPermission("test@example.com", "0x456", InviteUser)
