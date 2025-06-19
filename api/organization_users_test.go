@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -109,6 +110,124 @@ func TestOrganizationUsers(t *testing.T) {
 	}
 	c.Assert(userID, qt.Not(qt.Equals), uint64(0), qt.Commentf("User not found in organization"))
 	c.Assert(initialRole, qt.Equals, string(db.ViewerRole))
+
+	// Test for race condition in inviteOrganizationUserHandler
+	t.Run("RaceConditionInviteUsers", func(t *testing.T) {
+		// Create a new organization for this test
+		newOrgAddress := testCreateOrganization(t, adminToken)
+		t.Logf("Created organization with address: %s\n", newOrgAddress.String())
+
+		// Get the initial organization to check the users counter
+		resp, code := testRequest(t, http.MethodGet, adminToken, nil, "organizations", newOrgAddress.String())
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+		var initialOrg struct {
+			Address  string `json:"address"`
+			Counters struct {
+				Users int `json:"users"`
+			} `json:"counters"`
+		}
+		err := parseJSON(resp, &initialOrg)
+		c.Assert(err, qt.IsNil)
+		// The initial user counter is 0 (not 1) as seen in the test output
+		initialUserCount := initialOrg.Counters.Users
+		t.Logf("Initial users counter: %d", initialUserCount)
+
+		// Create two users to be invited concurrently
+		user1Email := fmt.Sprintf("user1-%s@example.com", uuid.New().String())
+		user2Email := fmt.Sprintf("user2-%s@example.com", uuid.New().String())
+
+		// Create invite requests for both users
+		invite1 := &apicommon.OrganizationInvite{
+			Email: user1Email,
+			Role:  string(db.ViewerRole),
+		}
+
+		invite2 := &apicommon.OrganizationInvite{
+			Email: user2Email,
+			Role:  string(db.ViewerRole),
+		}
+
+		// Use a WaitGroup to ensure both goroutines complete
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		// Send invites concurrently to trigger the race condition
+		go func() {
+			defer wg.Done()
+			resp, code := testRequest(
+				t,
+				http.MethodPost,
+				adminToken,
+				invite1,
+				"organizations",
+				newOrgAddress.String(),
+				"users",
+			)
+			c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+		}()
+
+		go func() {
+			defer wg.Done()
+			resp, code := testRequest(
+				t,
+				http.MethodPost,
+				adminToken,
+				invite2,
+				"organizations",
+				newOrgAddress.String(),
+				"users",
+			)
+			c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+		}()
+
+		// Wait for both invites to complete
+		wg.Wait()
+
+		// Wait a bit more to ensure all DB operations complete
+		time.Sleep(500 * time.Millisecond)
+
+		// Get the organization again to check the users counter
+		resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", newOrgAddress.String())
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+		var finalOrg struct {
+			Address  string `json:"address"`
+			Counters struct {
+				Users int `json:"users"`
+			} `json:"counters"`
+		}
+		err = parseJSON(resp, &finalOrg)
+		c.Assert(err, qt.IsNil)
+
+		// After our fix, we expect the counter to be correctly incremented by 2
+		expectedCount := initialUserCount + 2
+
+		t.Logf("Final users counter: %d (expected %d after fixing the race condition)",
+			finalOrg.Counters.Users, expectedCount)
+
+		c.Assert(finalOrg.Counters.Users, qt.Equals, expectedCount,
+			qt.Commentf("Race condition fix not working: expected users counter to be %d, got %d",
+				expectedCount, finalOrg.Counters.Users))
+
+		// Verify both invitations were actually created by checking pending invitations
+		resp, code = testRequest(
+			t,
+			http.MethodGet,
+			adminToken,
+			nil,
+			"organizations",
+			newOrgAddress.String(),
+			"users",
+			"pending",
+		)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+		var pendingInvites apicommon.OrganizationInviteList
+		err = parseJSON(resp, &pendingInvites)
+		c.Assert(err, qt.IsNil)
+		c.Assert(len(pendingInvites.Invites), qt.Equals, 2, qt.Commentf("Expected 2 pending invitations, got %d", len(pendingInvites.Invites)))
+	})
 
 	t.Run("UpdateOrganizationUserRole", func(t *testing.T) {
 		// Test 1: Update the user's role from Viewer to Manager
