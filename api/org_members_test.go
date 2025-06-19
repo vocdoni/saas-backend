@@ -60,28 +60,28 @@ func TestOrganizationMembers(t *testing.T) {
 	members := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
 			{
-				MemberID:   "P001",
-				Name:       "John",
-				Surname:    "Doe",
-				NationalID: "12345678A",
-				BirthDate:  "1990-05-15",
-				Email:      "john.doe@example.com",
-				Phone:      "+34612345678",
-				Password:   "password123",
+				MemberNumber: "P001",
+				Name:         "John",
+				Surname:      "Doe",
+				NationalID:   "12345678A",
+				BirthDate:    "1990-05-15",
+				Email:        "john.doe@example.com",
+				Phone:        "+34612345678",
+				Password:     "password123",
 				Other: map[string]any{
 					"department": "Engineering",
 					"age":        30,
 				},
 			},
 			{
-				MemberID:   "P002",
-				Name:       "Jane",
-				Surname:    "Smith",
-				NationalID: "87654321B",
-				BirthDate:  "1995-08-22",
-				Email:      "jane.smith@example.com",
-				Phone:      "+34698765432",
-				Password:   "password456",
+				MemberNumber: "P002",
+				Name:         "Jane",
+				Surname:      "Smith",
+				NationalID:   "87654321B",
+				BirthDate:    "1995-08-22",
+				Email:        "jane.smith@example.com",
+				Phone:        "+34698765432",
+				Password:     "password456",
 				Other: map[string]any{
 					"department": "Marketing",
 					"age":        28,
@@ -141,8 +141,8 @@ func TestOrganizationMembers(t *testing.T) {
 	membersWithMissingFields := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
 			{
-				MemberID: "P005",
-				Name:     "Carlos",
+				MemberNumber: "P005",
+				Name:         "Carlos",
 				// Surname is missing
 				NationalID: "99887766E",
 				BirthDate:  "1985-07-10",
@@ -154,9 +154,9 @@ func TestOrganizationMembers(t *testing.T) {
 				},
 			},
 			{
-				MemberID: "P006",
-				Name:     "Maria",
-				Surname:  "Garcia",
+				MemberNumber: "P006",
+				Name:         "Maria",
+				Surname:      "Garcia",
 				// NationalID is missing
 				BirthDate: "1992-11-25",
 				Email:     "maria.garcia@example.com",
@@ -168,7 +168,7 @@ func TestOrganizationMembers(t *testing.T) {
 			},
 			{
 				ID: pedroID,
-				// MemberID is missing
+				// MemberNumber is missing
 				Name:       "Pedro",
 				Surname:    "Martinez",
 				NationalID: "44556677F",
@@ -211,7 +211,7 @@ func TestOrganizationMembers(t *testing.T) {
 	// Find the member with missing surname (Carlos)
 	var carlosFound bool
 	for _, member := range membersResponse.Members {
-		if member.MemberID == "P005" {
+		if member.MemberNumber == "P005" {
 			carlosFound = true
 			c.Assert(member.Name, qt.Equals, "Carlos")
 			c.Assert(member.Surname, qt.Equals, "") // Should be empty
@@ -225,7 +225,7 @@ func TestOrganizationMembers(t *testing.T) {
 	// Find the member with missing NationalID (Maria)
 	var mariaFound bool
 	for _, member := range membersResponse.Members {
-		if member.MemberID == "P006" {
+		if member.MemberNumber == "P006" {
 			mariaFound = true
 			c.Assert(member.Name, qt.Equals, "Maria")
 			c.Assert(member.Surname, qt.Equals, "Garcia")
@@ -236,7 +236,7 @@ func TestOrganizationMembers(t *testing.T) {
 	}
 	c.Assert(mariaFound, qt.Equals, true, qt.Commentf("Maria member should be found"))
 
-	// Find the member with missing MemberID (Pedro)
+	// Find the member with missing MemberNumber (Pedro)
 	var pedroFound bool
 	for _, member := range membersResponse.Members {
 		if member.ID == pedroID {
@@ -244,7 +244,7 @@ func TestOrganizationMembers(t *testing.T) {
 			c.Assert(member.Name, qt.Equals, "Pedro")
 			c.Assert(member.Surname, qt.Equals, "Martinez")
 			c.Assert(member.NationalID, qt.Equals, "44556677F")
-			c.Assert(member.MemberID, qt.Equals, "") // Should be empty
+			c.Assert(member.MemberNumber, qt.Equals, "") // Should be empty
 			break
 		}
 	}
@@ -255,28 +255,28 @@ func TestOrganizationMembers(t *testing.T) {
 	asyncMembers := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
 			{
-				MemberID:   "P003",
-				Name:       "Bob",
-				Surname:    "Johnson",
-				NationalID: "11223344C",
-				BirthDate:  "1988-12-03",
-				Email:      "bob.johnson@example.com",
-				Phone:      "+34611223344",
-				Password:   "password789",
+				MemberNumber: "P003",
+				Name:         "Bob",
+				Surname:      "Johnson",
+				NationalID:   "11223344C",
+				BirthDate:    "1988-12-03",
+				Email:        "bob.johnson@example.com",
+				Phone:        "+34611223344",
+				Password:     "password789",
 				Other: map[string]any{
 					"department": "Sales",
 					"age":        35,
 				},
 			},
 			{
-				MemberID:   "P004",
-				Name:       "Alice",
-				Surname:    "Brown",
-				NationalID: "55443322D",
-				BirthDate:  "1982-03-18",
-				Email:      "alice.brown@example.com",
-				Phone:      "+34655443322",
-				Password:   "passwordabc",
+				MemberNumber: "P004",
+				Name:         "Alice",
+				Surname:      "Brown",
+				NationalID:   "55443322D",
+				BirthDate:    "1982-03-18",
+				Email:        "alice.brown@example.com",
+				Phone:        "+34655443322",
+				Password:     "passwordabc",
 				Other: map[string]any{
 					"department": "HR",
 					"age":        42,

@@ -211,14 +211,14 @@ func (ms *MongoStorage) createIndexes() error {
 		return fmt.Errorf("failed to create index on orgAddress for orgMembers: %w", err)
 	}
 
-	// create an index for the tuple orgAddress and memberID
+	// create an index for the tuple orgAddress and memberNumber
 	if _, err := ms.orgMembers.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{
-			{Key: "orgAddress", Value: 1}, // 1 for ascending order
-			{Key: "memberID", Value: 1},   // 1 for ascending order
+			{Key: "orgAddress", Value: 1},   // 1 for ascending order
+			{Key: "memberNumber", Value: 1}, // 1 for ascending order
 		},
 	}); err != nil {
-		return fmt.Errorf("failed to create index on orgAddress and memberID for orgMembers: %w", err)
+		return fmt.Errorf("failed to create index on orgAddress and memberNumber for orgMembers: %w", err)
 	}
 
 	// create an index for the tuple orgAddress and email on organization members
@@ -285,7 +285,7 @@ func (ms *MongoStorage) createIndexes() error {
 	if _, err := ms.orgMembers.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "email", Value: "text"},
-			{Key: "memberID", Value: "text"},
+			{Key: "memberNumber", Value: "text"},
 			{Key: "nationalID", Value: "text"},
 			{Key: "name", Value: "text"},
 			{Key: "surname", Value: "text"},

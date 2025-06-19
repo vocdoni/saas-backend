@@ -28,11 +28,11 @@ func setupTestOrgMembersGroupPrerequisites(t *testing.T, participantSuffix strin
 	for i := 0; i < 3; i++ {
 		participantNo := testGroupMemberNo + participantSuffix + "_" + string(rune('1'+i))
 		participant := &OrgMember{
-			OrgAddress: testOrgAddress,
-			MemberID:   participantNo,
-			Email:      "test" + participantSuffix + "_" + string(rune('1'+i)) + "@example.com",
-			CreatedAt:  time.Now(),
-			UpdatedAt:  time.Now(),
+			OrgAddress:   testOrgAddress,
+			MemberNumber: participantNo,
+			Email:        "test" + participantSuffix + "_" + string(rune('1'+i)) + "@example.com",
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
 		}
 		id, err := testDB.SetOrgMember("test_salt", participant)
 		if err != nil {
@@ -209,11 +209,11 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			for i := 0; i < 2; i++ {
 				participantNo := "diff_participant_" + string(rune('1'+i))
 				participant := &OrgMember{
-					OrgAddress: "different_org",
-					MemberID:   participantNo,
-					Email:      "diff_" + string(rune('1'+i)) + "@example.com",
-					CreatedAt:  time.Now(),
-					UpdatedAt:  time.Now(),
+					OrgAddress:   "different_org",
+					MemberNumber: participantNo,
+					Email:        "diff_" + string(rune('1'+i)) + "@example.com",
+					CreatedAt:    time.Now(),
+					UpdatedAt:    time.Now(),
 				}
 				id, err := testDB.SetOrgMember("test_salt", participant)
 				c.Assert(err, qt.IsNil)
@@ -272,11 +272,11 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		for i := 0; i < 2; i++ {
 			participantNo := "additional_" + string(rune('1'+i))
 			participant := &OrgMember{
-				OrgAddress: testOrgAddress,
-				MemberID:   participantNo,
-				Email:      "additional_" + string(rune('1'+i)) + "@example.com",
-				CreatedAt:  time.Now(),
-				UpdatedAt:  time.Now(),
+				OrgAddress:   testOrgAddress,
+				MemberNumber: participantNo,
+				Email:        "additional_" + string(rune('1'+i)) + "@example.com",
+				CreatedAt:    time.Now(),
+				UpdatedAt:    time.Now(),
 			}
 			id, err := testDB.SetOrgMember("test_salt", participant)
 			c.Assert(err, qt.IsNil)

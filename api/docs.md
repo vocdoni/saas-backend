@@ -1033,7 +1033,7 @@ This request can be made only by organization admins.
   "members": [  // Currently sorted alphabetically by name
     {
       "id": "internal-uid1",
-      "memberID": "12345",
+      "memberNumber": "12345",
       "name": "John",
       "surname": "Doe",
       "nationalID": "12345678A",
@@ -1047,7 +1047,7 @@ This request can be made only by organization admins.
     },
     {
       "id": "internal-uid2",
-      "memberID": "67890",
+      "memberNumber": "67890",
       "name": "Jane",
       "surname": "Smith",
       "nationalID": "87654321B",
@@ -1088,7 +1088,7 @@ Retrieves all members of an organization with pagination support. Requires Manag
 {
   "members": [
     {
-      "memberID": "12345",
+      "memberNumber": "12345",
       "name": "John",
       "surname": "Doe",
       "nationalID": "12345678A",
@@ -1102,7 +1102,7 @@ Retrieves all members of an organization with pagination support. Requires Manag
       }
     },
     {
-      "memberID": "67890",
+      "memberNumber": "67890",
       "name": "Jane",
       "surname": "Smith",
       "nationalID": "87654321B",
@@ -1116,7 +1116,7 @@ Retrieves all members of an organization with pagination support. Requires Manag
       }
     },
     {
-      "memberID": "11111",
+      "memberNumber": "11111",
       "name": "Carlos",
       "nationalID": "99887766E",
       "birthDate": "1988-07-22",
@@ -2120,7 +2120,7 @@ Returns 201 Created on success
 * **Request Body**
 ```json
 {
-  "memberID": "012345",
+  "memberNumber": "012345",
   "email": "member@example.com",  // Optional: Required if using email authentication
   "phone": "+1234567890",             // Optional: Required if using phone authentication
   "password": "secretpass1234"        // Optional: Required if using password authentication
@@ -2170,7 +2170,7 @@ This method return if exists, in inline mode. the image/file of the provided by 
 * **Request Body (Step 0)** 
 ```json
 {
-  "memberID": "012345",
+  "memberNumber": "012345",
   "email": "member@example.com",  // Optional: Required if using email authentication
   "phone": "+1234567890",             // Optional: Required if using phone authentication
   "password": "secretpass1234"        // Optional: Required if using password authentication
@@ -2354,7 +2354,7 @@ Retrieves information about a process bundle by its ID, including the associated
 * **Request Body (Step 0)** 
 ```json
 {
-  "memberID": "012345",
+  "memberNumber": "012345",
   "email": "member@example.com",  // Optional: Required if using email authentication
   "phone": "+1234567890",             // Optional: Required if using phone authentication
   "password": "secretpass1234"        // Optional: Required if using password authentication

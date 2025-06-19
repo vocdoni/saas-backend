@@ -718,10 +718,10 @@ func testGenerateTestMembers(count int) []apicommon.OrgMember {
 	for i := 0; i < count; i++ {
 		id := fmt.Sprintf("P%03d", i+1)
 		members[i] = apicommon.OrgMember{
-			MemberID: id,
-			Name:     fmt.Sprintf("Test User %d", i+1),
-			Email:    fmt.Sprintf("%s@example.com", id),
-			Phone:    fmt.Sprintf("+346123456%02d", i+1),
+			MemberNumber: id,
+			Name:         fmt.Sprintf("Test User %d", i+1),
+			Email:        fmt.Sprintf("%s@example.com", id),
+			Phone:        fmt.Sprintf("+346123456%02d", i+1),
 		}
 	}
 	return members

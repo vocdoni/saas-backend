@@ -23,12 +23,12 @@ func TestOrgMembers(t *testing.T) {
 
 		// Test creating a new member
 		member := &OrgMember{
-			OrgAddress: testOrgAddress,
-			Email:      testMemberEmail,
-			Phone:      testPhone,
-			MemberID:   testMemberID,
-			Name:       testName,
-			Password:   testPassword,
+			OrgAddress:   testOrgAddress,
+			Email:        testMemberEmail,
+			Phone:        testPhone,
+			MemberNumber: testMemberNumber,
+			Name:         testName,
+			Password:     testPassword,
 		}
 
 		// Create new member
@@ -41,7 +41,7 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(createdMember.Email, qt.Equals, testMemberEmail)
 		c.Assert(createdMember.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testPhone))
-		c.Assert(createdMember.MemberID, qt.Equals, member.MemberID)
+		c.Assert(createdMember.MemberNumber, qt.Equals, member.MemberNumber)
 		c.Assert(createdMember.Name, qt.Equals, testName)
 		c.Assert(createdMember.HashedPass, qt.DeepEquals, internal.HashPassword(testSalt, testPassword))
 		c.Assert(createdMember.CreatedAt, qt.Not(qt.IsNil))
@@ -65,13 +65,13 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(updatedMember.CreatedAt, qt.Equals, createdMember.CreatedAt)
 
 		duplicateMember := &OrgMember{
-			ID:         updatedMember.ID, // Use the same ID to simulate a duplicate
-			OrgAddress: testOrgAddress,
-			Email:      testMemberEmail,
-			Phone:      testPhone,
-			MemberID:   testMemberID,
-			Name:       testName,
-			Password:   testPassword,
+			ID:           updatedMember.ID, // Use the same ID to simulate a duplicate
+			OrgAddress:   testOrgAddress,
+			Email:        testMemberEmail,
+			Phone:        testPhone,
+			MemberNumber: testMemberNumber,
+			Name:         testName,
+			Password:     testPassword,
 		}
 
 		// Attempt to update member
@@ -83,7 +83,7 @@ func TestOrgMembers(t *testing.T) {
 		// Verify the duplicate member was not created but updated
 		duplicateCreatedMember, err := testDB.OrgMember(testOrgAddress, duplicateID)
 		c.Assert(err, qt.IsNil)
-		c.Assert(duplicateCreatedMember.MemberID, qt.Equals, testMemberID)
+		c.Assert(duplicateCreatedMember.MemberNumber, qt.Equals, testMemberNumber)
 		c.Assert(duplicateCreatedMember.Name, qt.Equals, testName)
 	})
 
@@ -98,10 +98,10 @@ func TestOrgMembers(t *testing.T) {
 
 		// Create a member to delete
 		member := &OrgMember{
-			OrgAddress: testOrgAddress,
-			Email:      testMemberEmail,
-			MemberID:   testMemberID,
-			Name:       testName,
+			OrgAddress:   testOrgAddress,
+			Email:        testMemberEmail,
+			MemberNumber: testMemberNumber,
+			Name:         testName,
 		}
 
 		// Create new member
@@ -136,10 +136,10 @@ func TestOrgMembers(t *testing.T) {
 
 		// Create a member to retrieve
 		member := &OrgMember{
-			OrgAddress: testOrgAddress,
-			Email:      testMemberEmail,
-			MemberID:   testMemberID,
-			Name:       testName,
+			OrgAddress:   testOrgAddress,
+			Email:        testMemberEmail,
+			MemberNumber: testMemberNumber,
+			Name:         testName,
 		}
 
 		// Create new member
@@ -150,7 +150,7 @@ func TestOrgMembers(t *testing.T) {
 		retrievedMember, err := testDB.OrgMember(testOrgAddress, memberOID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(retrievedMember.Email, qt.Equals, testMemberEmail)
-		c.Assert(retrievedMember.MemberID, qt.Equals, testMemberID)
+		c.Assert(retrievedMember.MemberNumber, qt.Equals, testMemberNumber)
 		c.Assert(retrievedMember.Name, qt.Equals, testName)
 		c.Assert(retrievedMember.CreatedAt, qt.Not(qt.IsNil))
 
@@ -172,18 +172,18 @@ func TestOrgMembers(t *testing.T) {
 		// Test bulk insert of new members
 		members := []OrgMember{
 			{
-				Email:    testMemberEmail,
-				Phone:    testPhone,
-				MemberID: testMemberID,
-				Name:     testName,
-				Password: testPassword,
+				Email:        testMemberEmail,
+				Phone:        testPhone,
+				MemberNumber: testMemberNumber,
+				Name:         testName,
+				Password:     testPassword,
 			},
 			{
-				Email:    "member2@test.com",
-				Phone:    "+34678678978",
-				MemberID: "member456",
-				Name:     "Test Member 2",
-				Password: "testpass456",
+				Email:        "member2@test.com",
+				Phone:        "+34678678978",
+				MemberNumber: "member456",
+				Name:         "Test Member 2",
+				Password:     "testpass456",
 			},
 		}
 
@@ -203,12 +203,12 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(lastStatus.Added, qt.Equals, 2)
 
 		// Verify both members were created with hashed fields
-		member1, err := testDB.OrgMemberByMemberID(testOrgAddress, testMemberID)
+		member1, err := testDB.OrgMemberByMemberNumber(testOrgAddress, testMemberNumber)
 		c.Assert(err, qt.IsNil)
 		c.Assert(member1.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, testPhone))
 		c.Assert(member1.HashedPass, qt.DeepEquals, internal.HashPassword(testSalt, testPassword))
 
-		member2, err := testDB.OrgMemberByMemberID(testOrgAddress, members[1].MemberID)
+		member2, err := testDB.OrgMemberByMemberNumber(testOrgAddress, members[1].MemberNumber)
 		c.Assert(err, qt.IsNil)
 		c.Assert(member2.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, members[1].Phone))
 		c.Assert(member2.HashedPass, qt.DeepEquals, internal.HashPassword(testSalt, members[1].Password))
@@ -234,12 +234,12 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(lastStatus.Added, qt.Equals, 2) // Both documents should be updated
 
 		// Verify updates for both members
-		updatedMember1, err := testDB.OrgMemberByMemberID(testOrgAddress, testMemberID)
+		updatedMember1, err := testDB.OrgMemberByMemberNumber(testOrgAddress, testMemberNumber)
 		c.Assert(err, qt.IsNil)
 		c.Assert(updatedMember1.Name, qt.Equals, "Updated Name")
 		c.Assert(updatedMember1.Email, qt.Equals, testMemberEmail)
 
-		updatedMember2, err := testDB.OrgMemberByMemberID(testOrgAddress, "member456")
+		updatedMember2, err := testDB.OrgMemberByMemberNumber(testOrgAddress, "member456")
 		c.Assert(err, qt.IsNil)
 		c.Assert(updatedMember2.HashedPhone, qt.DeepEquals, internal.HashOrgData(testOrgAddress, members[1].Phone))
 		c.Assert(updatedMember2.Name, qt.Equals, "Test Member 2")
