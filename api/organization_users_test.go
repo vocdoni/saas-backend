@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
@@ -827,5 +828,52 @@ func TestOrganizationUsers(t *testing.T) {
 			anotherInvitationID,
 		)
 		c.Assert(code, qt.Equals, http.StatusOK)
+	})
+
+	t.Run("MaxUsersReached", func(t *testing.T) {
+		c := qt.New(t)
+
+		// Create an admin user
+		adminToken := testCreateUser(t, "adminpassword123")
+
+		// Create an organization
+		orgAddress := testCreateOrganization(t, adminToken)
+		t.Logf("Created organization with address: %s\n", orgAddress.String())
+
+		// Get the organization from the database
+		org, err := testDB.Organization(orgAddress.String())
+		c.Assert(err, qt.IsNil)
+
+		// Set the organization's subscription plan to plan ID 1 (which has a user limit of 10)
+		// and set the user counter to the maximum allowed by the plan
+		org.Subscription.PlanID = 1
+		org.Counters.Users = 10 // Max users allowed by plan ID 1
+		err = testDB.SetOrganization(org)
+		c.Assert(err, qt.IsNil)
+
+		// Try to invite a user to the organization (should fail with "max users reached")
+		inviteRequest := &apicommon.OrganizationInvite{
+			Email: "maxusers@example.com",
+			Role:  string(db.ViewerRole),
+		}
+		resp, code := testRequest(
+			t,
+			http.MethodPost,
+			adminToken,
+			inviteRequest,
+			"organizations",
+			orgAddress.String(),
+			"users",
+		)
+		c.Assert(code, qt.Not(qt.Equals), http.StatusOK, qt.Commentf("expected error, got success: %s", resp))
+
+		// Verify the error message contains "max users reached"
+		var errorResp struct {
+			Error string `json:"error"`
+			Code  int    `json:"code"`
+		}
+		err = json.Unmarshal(resp, &errorResp)
+		c.Assert(err, qt.IsNil)
+		c.Assert(errorResp.Error, qt.Contains, "max users reached")
 	})
 }
