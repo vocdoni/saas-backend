@@ -203,7 +203,7 @@ func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Reques
 	apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{JobID: jobID})
 }
 
-// censusAddMembersJobStatusHandler godoc
+// censusAddParticipantsJobStatusHandler godoc
 //
 //	@Summary		Check the progress of adding members
 //	@Description	Check the progress of a job to add members to a census. Returns the progress of the job.
@@ -216,7 +216,7 @@ func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Reques
 //	@Failure		400		{object}	errors.Error	"Invalid job ID"
 //	@Failure		404		{object}	errors.Error	"Job not found"
 //	@Router			/census/job/{jobid} [get]
-func (*API) censusAddMembersJobStatusHandler(w http.ResponseWriter, r *http.Request) {
+func (*API) censusAddParticipantsJobStatusHandler(w http.ResponseWriter, r *http.Request) {
 	jobID := internal.HexBytes{}
 	if err := jobID.ParseString(chi.URLParam(r, "jobid")); err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid job ID").Write(w)

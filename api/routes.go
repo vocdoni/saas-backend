@@ -114,7 +114,7 @@ const (
 	// POST /census/{id} to add members to census
 	censusIDEndpoint = "/census/{id}"
 	// GET /census/check/{jobid} to check the status of the add members job
-	censusAddMembersJobStatusEndpoint = "/census/job/{jobid}"
+	censusAddParticipantsJobStatusEndpoint = "/census/job/{jobid}"
 	// POST /census/{id}/publish to publish a census
 	censusPublishEndpoint = "/census/{id}/publish"
 

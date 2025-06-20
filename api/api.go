@@ -301,12 +301,12 @@ func (a *API) initRouter() http.Handler {
 		// create census
 		log.Infow("new route", "method", "POST", "path", censusEndpoint)
 		r.Post(censusEndpoint, a.createCensusHandler)
-		// add census members
+		// add census participants
 		log.Infow("new route", "method", "POST", "path", censusIDEndpoint)
 		r.Post(censusIDEndpoint, a.addCensusParticipantsHandler)
-		// get census members job
-		log.Infow("new route", "method", "GET", "path", censusAddMembersJobStatusEndpoint)
-		r.Get(censusAddMembersJobStatusEndpoint, a.censusAddMembersJobStatusHandler)
+		// get census participants job
+		log.Infow("new route", "method", "GET", "path", censusAddParticipantsJobStatusEndpoint)
+		r.Get(censusAddParticipantsJobStatusEndpoint, a.censusAddParticipantsJobStatusHandler)
 		// publish census
 		log.Infow("new route", "method", "POST", "path", censusPublishEndpoint)
 		r.Post(censusPublishEndpoint, a.publishCensusHandler)

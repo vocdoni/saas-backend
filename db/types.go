@@ -172,7 +172,7 @@ const (
 	CensusTypeSMSorMail CensusType = "sms_or_mail"
 )
 
-// Census represents the information of a set of census members
+// Census represents the information of a set of census participants
 type Census struct {
 	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	OrgAddress string             `json:"orgAddress" bson:"orgAddress"`

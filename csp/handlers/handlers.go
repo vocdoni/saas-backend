@@ -203,7 +203,7 @@ func (c *CSPHandlers) checkCensusParticipant(w http.ResponseWriter, censusID str
 			errors.ErrUnauthorized.Withf("member not found in the census").Write(w)
 			return false
 		}
-		log.Warnw("error getting census membership", "error", err)
+		log.Warnw("error getting census participant", "error", err)
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return false
 	}
@@ -434,7 +434,7 @@ func (c *CSPHandlers) getCensusAndMember(censusID string, memberNumber string) (
 		return nil, nil, errors.ErrGenericInternalServerError.WithErr(err)
 	}
 
-	// Check the census membership of the member
+	// Check the member is a census participant
 	member, _, err := c.mainDB.CensusParticipantByMemberNumber(censusID, memberNumber, census.OrgAddress)
 	if err != nil {
 		if err == db.ErrNotFound {

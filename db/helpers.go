@@ -28,7 +28,7 @@ func (ms *MongoStorage) collectionsMap() map[string]**mongo.Collection {
 		"census":              &ms.censuses,
 		"orgMembers":          &ms.orgMembers,
 		"orgMemberGroups":     &ms.orgMemberGroups,
-		"censusMemberships":   &ms.censusParticipants,
+		"censusParticipants":  &ms.censusParticipants,
 		"publishedCensuses":   &ms.publishedCensuses,
 		"processes":           &ms.processes,
 		"processBundles":      &ms.processBundles,
@@ -247,7 +247,7 @@ func (ms *MongoStorage) createIndexes() error {
 			{Key: "censusId", Value: 1}, // 1 for ascending order
 		},
 	}); err != nil {
-		return fmt.Errorf("failed to create index on censusId for censusMemberships: %w", err)
+		return fmt.Errorf("failed to create index on censusId for censusParticipants: %w", err)
 	}
 
 	// index for the participantID
@@ -256,7 +256,7 @@ func (ms *MongoStorage) createIndexes() error {
 			{Key: "participantID", Value: 1}, // 1 for ascending order
 		},
 	}); err != nil {
-		return fmt.Errorf("failed to create index on participantID for censusMemberships: %w", err)
+		return fmt.Errorf("failed to create index on participantID for censusParticipants: %w", err)
 	}
 
 	// index for the censusId and participantID tuple
@@ -267,7 +267,7 @@ func (ms *MongoStorage) createIndexes() error {
 		},
 		Options: options.Index().SetUnique(true),
 	}); err != nil {
-		return fmt.Errorf("failed to create index on censusId and participantID for censusMemberships: %w", err)
+		return fmt.Errorf("failed to create index on censusId and participantID for censusParticipants: %w", err)
 	}
 
 	// unique index over userID and processID
