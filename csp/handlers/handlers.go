@@ -188,8 +188,8 @@ func findProcessInBundle(bundle *db.ProcessesBundle, processID internal.HexBytes
 	return nil, false
 }
 
-// checkCensusMembership checks if the member is in the census
-func (c *CSPHandlers) checkCensusMembership(w http.ResponseWriter, censusID string, userID string) bool {
+// checkCensusParticipant checks if the participant is in the census
+func (c *CSPHandlers) checkCensusParticipant(w http.ResponseWriter, censusID string, userID string) bool {
 	// Get census information
 	census, err := c.mainDB.Census(censusID)
 	if err != nil {
@@ -198,12 +198,12 @@ func (c *CSPHandlers) checkCensusMembership(w http.ResponseWriter, censusID stri
 		}
 		return false
 	}
-	if _, _, err := c.mainDB.CensusMembershipByMemberNumber(censusID, userID, census.OrgAddress); err != nil {
+	if _, _, err := c.mainDB.CensusParticipantByMemberNumber(censusID, userID, census.OrgAddress); err != nil {
 		if err == db.ErrNotFound {
-			errors.ErrUnauthorized.Withf("member not found in the census").Write(w)
+			errors.ErrUnauthorized.Withf("participant not found in the census").Write(w)
 			return false
 		}
-		log.Warnw("error getting census membership", "error", err)
+		log.Warnw("error getting census participant", "error", err)
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return false
 	}
@@ -281,8 +281,8 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Check if the member is in the census
-	if !c.checkCensusMembership(w, bundle.Census.ID.Hex(), string(auth.UserID)) {
+	// Check if the participant is in the census
+	if !c.checkCensusParticipant(w, bundle.Census.ID.Hex(), string(auth.UserID)) {
 		return
 	}
 
@@ -361,8 +361,8 @@ func (c *CSPHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Requ
 }
 
 // validateMemberNumber checks if the member number is provided
-func validateMemberNumber(memberID string) error {
-	if len(memberID) == 0 {
+func validateMemberNumber(memberNumber string) error {
+	if len(memberNumber) == 0 {
 		return errors.ErrInvalidUserData.Withf("member number not provided")
 	}
 	return nil
@@ -402,7 +402,7 @@ func validatePhone(phone *string) error {
 // validateAuthRequest validates the authentication request data
 func validateAuthRequest(req *AuthRequest) error {
 	// Check request member number
-	err := validateMemberNumber(req.MemberID)
+	err := validateMemberNumber(req.ParticipantID)
 	if err != nil {
 		return err
 	}
@@ -424,7 +424,7 @@ func validateAuthRequest(req *AuthRequest) error {
 }
 
 // getCensusAndMember retrieves the census and member information
-func (c *CSPHandlers) getCensusAndMember(censusID string, memberID string) (*db.Census, *db.OrgMember, error) {
+func (c *CSPHandlers) getCensusAndMember(censusID string, memberNumber string) (*db.Census, *db.OrgMember, error) {
 	// Get census information
 	census, err := c.mainDB.Census(censusID)
 	if err != nil {
@@ -434,11 +434,11 @@ func (c *CSPHandlers) getCensusAndMember(censusID string, memberID string) (*db.
 		return nil, nil, errors.ErrGenericInternalServerError.WithErr(err)
 	}
 
-	// Check the census membership of the member
-	member, _, err := c.mainDB.CensusMembershipByMemberNumber(censusID, memberID, census.OrgAddress)
+	// Check the member is a census participant
+	member, _, err := c.mainDB.CensusParticipantByMemberNumber(censusID, memberNumber, census.OrgAddress)
 	if err != nil {
 		if err == db.ErrNotFound {
-			return nil, nil, errors.ErrUnauthorized.Withf("member not found in the census")
+			return nil, nil, errors.ErrUnauthorized.Withf("participant not found in the census")
 		}
 		return nil, nil, errors.ErrGenericInternalServerError.WithErr(err)
 	}
@@ -543,7 +543,7 @@ func (c *CSPHandlers) authFirstStep(
 	}
 
 	// Get census and member information
-	census, member, err := c.getCensusAndMember(censusID, req.MemberID)
+	census, member, err := c.getCensusAndMember(censusID, req.ParticipantID)
 	if err != nil {
 		return nil, err
 	}

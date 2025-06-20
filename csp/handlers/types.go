@@ -14,10 +14,10 @@ import (
 // password is required for password-based authentication, but not for OTP
 // authentication. For OTP authentication, the email or phone is required.
 type AuthRequest struct {
-	MemberID string `json:"memberID"`
-	Email    string `json:"email,omitempty"`
-	Phone    string `json:"phone,omitempty"`
-	Password string `json:"password,omitempty"`
+	ParticipantID string `json:"participantID,omitempty"`
+	Email         string `json:"email,omitempty"`
+	Phone         string `json:"phone,omitempty"`
+	Password      string `json:"password,omitempty"`
 }
 
 // AuthResponse defines the payload for the authentication response, including

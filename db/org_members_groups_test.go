@@ -8,9 +8,9 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-const testGroupMemberNo = "participant123"
+const testGroupMemberNumber = "participant123"
 
-func setupTestOrgMembersGroupPrerequisites(t *testing.T, participantSuffix string) (*Organization, []string) {
+func setupTestOrgMembersGroupPrerequisites(t *testing.T, memberSuffix string) (*Organization, []string) {
 	// Create test organization
 	org := &Organization{
 		Address:   testOrgAddress,
@@ -24,24 +24,24 @@ func setupTestOrgMembersGroupPrerequisites(t *testing.T, participantSuffix strin
 	}
 
 	// Create test participants with unique IDs
-	participantIDs := make([]string, 3)
+	memberIDs := make([]string, 3)
 	for i := 0; i < 3; i++ {
-		participantNo := testGroupMemberNo + participantSuffix + "_" + string(rune('1'+i))
-		participant := &OrgMember{
+		memberNumber := testGroupMemberNumber + memberSuffix + "_" + string(rune('1'+i))
+		member := &OrgMember{
 			OrgAddress:   testOrgAddress,
-			MemberNumber: participantNo,
-			Email:        "test" + participantSuffix + "_" + string(rune('1'+i)) + "@example.com",
+			MemberNumber: memberNumber,
+			Email:        "test" + memberSuffix + "_" + string(rune('1'+i)) + "@example.com",
 			CreatedAt:    time.Now(),
 			UpdatedAt:    time.Now(),
 		}
-		id, err := testDB.SetOrgMember("test_salt", participant)
+		id, err := testDB.SetOrgMember("test_salt", member)
 		if err != nil {
 			t.Fatalf("failed to set organization participant: %v", err)
 		}
-		participantIDs[i] = id // Store the MongoDB ID, not the participantNo
+		memberIDs[i] = id // Store the MongoDB ID, not the participantNo
 	}
 
-	return org, participantIDs
+	return org, memberIDs
 }
 
 func TestOrganizationMemberGroup(t *testing.T) {
@@ -51,7 +51,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 	t.Run("CreateOrganizationMemberGroup", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
-		_, participantIDs := setupTestOrgMembersGroupPrerequisites(t, "_create")
+		_, memberIDs := setupTestOrgMembersGroupPrerequisites(t, "_create")
 
 		t.Run("InvalidData", func(_ *testing.T) {
 			// Test with invalid organization address
@@ -59,7 +59,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 				OrgAddress:  "invalid_address",
 				Title:       "Test Group",
 				Description: "Test Description",
-				MemberIDs:   participantIDs,
+				MemberIDs:   memberIDs,
 			}
 			_, err := testDB.CreateOrganizationMemberGroup(invalidGroup)
 			c.Assert(err, qt.Not(qt.IsNil))
@@ -81,7 +81,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 				OrgAddress:  testOrgAddress,
 				Title:       "Test Group",
 				Description: "Test Description",
-				MemberIDs:   participantIDs,
+				MemberIDs:   memberIDs,
 			}
 			groupID, err := testDB.CreateOrganizationMemberGroup(validGroup)
 			c.Assert(err, qt.IsNil)
@@ -93,7 +93,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			c.Assert(createdGroup.OrgAddress, qt.Equals, testOrgAddress)
 			c.Assert(createdGroup.Title, qt.Equals, "Test Group")
 			c.Assert(createdGroup.Description, qt.Equals, "Test Description")
-			c.Assert(createdGroup.MemberIDs, qt.DeepEquals, participantIDs)
+			c.Assert(createdGroup.MemberIDs, qt.DeepEquals, memberIDs)
 			c.Assert(createdGroup.CreatedAt.IsZero(), qt.IsFalse)
 			c.Assert(createdGroup.UpdatedAt.IsZero(), qt.IsFalse)
 		})
@@ -102,7 +102,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 	t.Run("OrganizationMemberGroup", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
-		_, participantIDs := setupTestOrgMembersGroupPrerequisites(t, "_get")
+		_, memberIDs := setupTestOrgMembersGroupPrerequisites(t, "_get")
 
 		t.Run("NonExistentGroup", func(_ *testing.T) {
 			// Test getting non-existent group
@@ -117,7 +117,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 				OrgAddress:  testOrgAddress,
 				Title:       "Test Group",
 				Description: "Test Description",
-				MemberIDs:   participantIDs,
+				MemberIDs:   memberIDs,
 			}
 			groupID, err := testDB.CreateOrganizationMemberGroup(group)
 			c.Assert(err, qt.IsNil)
@@ -128,7 +128,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			c.Assert(retrievedGroup.OrgAddress, qt.Equals, testOrgAddress)
 			c.Assert(retrievedGroup.Title, qt.Equals, "Test Group")
 			c.Assert(retrievedGroup.Description, qt.Equals, "Test Description")
-			c.Assert(retrievedGroup.MemberIDs, qt.DeepEquals, participantIDs)
+			c.Assert(retrievedGroup.MemberIDs, qt.DeepEquals, memberIDs)
 			c.Assert(retrievedGroup.CreatedAt.IsZero(), qt.IsFalse)
 			c.Assert(retrievedGroup.UpdatedAt.IsZero(), qt.IsFalse)
 		})
@@ -139,7 +139,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 				OrgAddress:  testOrgAddress,
 				Title:       "Test Group",
 				Description: "Test Description",
-				MemberIDs:   participantIDs,
+				MemberIDs:   memberIDs,
 			}
 			groupID, err := testDB.CreateOrganizationMemberGroup(group)
 			c.Assert(err, qt.IsNil)

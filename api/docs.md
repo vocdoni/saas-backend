@@ -2434,7 +2434,7 @@ Signs a payload for a process bundle using two-factor authentication. Requires a
 
 ### 📋 Get Process Bundle Member Info
 
-* **Path** `/process/bundle/{bundleId}/{memberId}`
+* **Path** `/process/bundle/{bundleId}/{participantID}`
 * **Method** `GET`
 * **Response**
 ```json

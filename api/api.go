@@ -301,12 +301,12 @@ func (a *API) initRouter() http.Handler {
 		// create census
 		log.Infow("new route", "method", "POST", "path", censusEndpoint)
 		r.Post(censusEndpoint, a.createCensusHandler)
-		// add census members
+		// add census participants
 		log.Infow("new route", "method", "POST", "path", censusIDEndpoint)
-		r.Post(censusIDEndpoint, a.addCensusMembersHandler)
-		// get census members job
-		log.Infow("new route", "method", "GET", "path", censusAddMembersJobStatusEndpoint)
-		r.Get(censusAddMembersJobStatusEndpoint, a.censusAddMembersJobStatusHandler)
+		r.Post(censusIDEndpoint, a.addCensusParticipantsHandler)
+		// get census participants job
+		log.Infow("new route", "method", "GET", "path", censusAddParticipantsJobStatusEndpoint)
+		r.Get(censusAddParticipantsJobStatusEndpoint, a.censusAddParticipantsJobStatusHandler)
 		// publish census
 		log.Infow("new route", "method", "POST", "path", censusPublishEndpoint)
 		r.Post(censusPublishEndpoint, a.publishCensusHandler)
@@ -397,7 +397,7 @@ func (a *API) initRouter() http.Handler {
 		r.Post(processBundleSignEndpoint, cspHandlers.BundleSignHandler)
 		// process bundle member info handler
 		log.Infow("new route", "method", "GET", "path", processBundleMemberEndpoint)
-		r.Get(processBundleMemberEndpoint, a.processBundleMemberInfoHandler)
+		r.Get(processBundleMemberEndpoint, a.processBundleParticipantInfoHandler)
 	})
 	a.router = r
 	return r

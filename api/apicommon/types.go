@@ -881,7 +881,7 @@ type CreateProcessRequest struct {
 // swagger:model InitiateAuthRequest
 type InitiateAuthRequest struct {
 	// Unique member number
-	MemberID string `json:"memberID"`
+	ParticipantID string `json:"participantID"`
 
 	// Member's email address (optional)
 	Email string `json:"email,omitempty"`

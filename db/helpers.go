@@ -28,7 +28,7 @@ func (ms *MongoStorage) collectionsMap() map[string]**mongo.Collection {
 		"census":              &ms.censuses,
 		"orgMembers":          &ms.orgMembers,
 		"orgMemberGroups":     &ms.orgMemberGroups,
-		"censusMemberships":   &ms.censusMemberships,
+		"censusParticipants":  &ms.censusParticipants,
 		"publishedCensuses":   &ms.publishedCensuses,
 		"processes":           &ms.processes,
 		"processBundles":      &ms.processBundles,
@@ -242,32 +242,32 @@ func (ms *MongoStorage) createIndexes() error {
 	}
 
 	// index for the censusId
-	if _, err := ms.censusMemberships.Indexes().CreateOne(ctx, mongo.IndexModel{
+	if _, err := ms.censusParticipants.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "censusId", Value: 1}, // 1 for ascending order
 		},
 	}); err != nil {
-		return fmt.Errorf("failed to create index on censusId for censusMemberships: %w", err)
+		return fmt.Errorf("failed to create index on censusId for censusParticipants: %w", err)
 	}
 
-	// index for the memberID
-	if _, err := ms.censusMemberships.Indexes().CreateOne(ctx, mongo.IndexModel{
+	// index for the participantID
+	if _, err := ms.censusParticipants.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{
-			{Key: "memberID", Value: 1}, // 1 for ascending order
+			{Key: "participantID", Value: 1}, // 1 for ascending order
 		},
 	}); err != nil {
-		return fmt.Errorf("failed to create index on memberID for censusMemberships: %w", err)
+		return fmt.Errorf("failed to create index on participantID for censusParticipants: %w", err)
 	}
 
-	// index for the censusId and memberID tuple
-	if _, err := ms.censusMemberships.Indexes().CreateOne(ctx, mongo.IndexModel{
+	// index for the censusId and participantID tuple
+	if _, err := ms.censusParticipants.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{
-			{Key: "censusId", Value: 1}, // 1 for ascending order
-			{Key: "memberID", Value: 1}, // 1 for ascending order
+			{Key: "censusId", Value: 1},      // 1 for ascending order
+			{Key: "participantID", Value: 1}, // 1 for ascending order
 		},
 		Options: options.Index().SetUnique(true),
 	}); err != nil {
-		return fmt.Errorf("failed to create index on censusId and memberID for censusMemberships: %w", err)
+		return fmt.Errorf("failed to create index on censusId and participantID for censusParticipants: %w", err)
 	}
 
 	// unique index over userID and processID

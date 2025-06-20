@@ -20,9 +20,9 @@ const (
 	CensusTypeSMSOrMail = "sms_or_mail"
 )
 
-// addMembersToCensusWorkers is a map of job identifiers to the progress of adding members to a census.
+// addParticipantsToCensusWorkers is a map of job identifiers to the progress of adding participants to a census.
 // This is used to check the progress of the job.
-var addMembersToCensusWorkers sync.Map
+var addParticipantsToCensusWorkers sync.Map
 
 // createCensusHandler godoc
 //
@@ -103,24 +103,24 @@ func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 	apicommon.HTTPWriteJSON(w, apicommon.OrganizationCensusFromDB(census))
 }
 
-// addCensusMembersHandler godoc
+// addCensusParticipantsHandler godoc
 //
-//	@Summary		Add members to a census
-//	@Description	Add multiple members to a census. Requires Manager/Admin role.
+//	@Summary		Add participants to a census
+//	@Description	Add multiple participants to a census. Requires Manager/Admin role.
 //	@Tags			census
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			id		path		string						true	"Census ID"
 //	@Param			async	query		boolean						false	"Process asynchronously and return job ID"
-//	@Param			request	body		apicommon.AddMembersRequest	true	"Members to add"
+//	@Param			request	body		apicommon.AddMembersRequest	true	"Participants to add"
 //	@Success		200		{object}	apicommon.AddMembersResponse
 //	@Failure		400		{object}	errors.Error	"Invalid input data"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
 //	@Failure		404		{object}	errors.Error	"Census not found"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/census/{id} [post]
-func (a *API) addCensusMembersHandler(w http.ResponseWriter, r *http.Request) {
+func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 	censusID := internal.HexBytes{}
 	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
 		errors.ErrMalformedURLParam.Withf("wrong census ID").Write(w)
@@ -150,20 +150,20 @@ func (a *API) addCensusMembersHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
-	// decode the members from the request body
+	// decode the participants from the request body
 	members := &apicommon.AddMembersRequest{}
 	if err := json.NewDecoder(r.Body).Decode(members); err != nil {
 		log.Error(err)
-		errors.ErrMalformedBody.Withf("missing members").Write(w)
+		errors.ErrMalformedBody.Withf("missing participants").Write(w)
 		return
 	}
-	// check if there are members to add
+	// check if there are participants to add
 	if len(members.Members) == 0 {
 		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{Count: 0})
 		return
 	}
-	// add the org members to the census in the database
-	progressChan, err := a.db.SetBulkCensusMembership(
+	// add the org members as census participants in the database
+	progressChan, err := a.db.SetBulkCensusParticipant(
 		passwordSalt,
 		censusID.String(),
 		members.DbOrgMembers(census.OrgAddress),
@@ -175,18 +175,18 @@ func (a *API) addCensusMembersHandler(w http.ResponseWriter, r *http.Request) {
 
 	if !async {
 		// Wait for the channel to be closed (100% completion)
-		var lastProgress *db.BulkCensusMembershipStatus
+		var lastProgress *db.BulkCensusParticipantStatus
 		for p := range progressChan {
 			lastProgress = p
 			// Just drain the channel until it's closed
-			log.Debugw("census add members",
+			log.Debugw("census add participants",
 				"census", censusID.String(),
 				"org", census.OrgAddress,
 				"progress", p.Progress,
 				"added", p.Added,
 				"total", p.Total)
 		}
-		// Return the number of members added
+		// Return the number of participants added
 		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{Count: uint32(lastProgress.Added)})
 		return
 	}
@@ -196,35 +196,35 @@ func (a *API) addCensusMembersHandler(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		for p := range progressChan {
 			// We need to drain the channel to avoid blocking
-			addMembersToCensusWorkers.Store(jobID.String(), p)
+			addParticipantsToCensusWorkers.Store(jobID.String(), p)
 		}
 	}()
 
 	apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{JobID: jobID})
 }
 
-// censusAddMembersJobStatusHandler godoc
+// censusAddParticipantsJobStatusHandler godoc
 //
-//	@Summary		Check the progress of adding members
-//	@Description	Check the progress of a job to add members to a census. Returns the progress of the job.
+//	@Summary		Check the progress of adding participants
+//	@Description	Check the progress of a job to add participants to a census. Returns the progress of the job.
 //	@Description	If the job is completed, the job is deleted after 60 seconds.
 //	@Tags			census
 //	@Accept			json
 //	@Produce		json
 //	@Param			jobid	path		string	true	"Job ID"
-//	@Success		200		{object}	db.BulkCensusMembershipStatus
+//	@Success		200		{object}	db.BulkCensusParticipantStatus
 //	@Failure		400		{object}	errors.Error	"Invalid job ID"
 //	@Failure		404		{object}	errors.Error	"Job not found"
 //	@Router			/census/job/{jobid} [get]
-func (*API) censusAddMembersJobStatusHandler(w http.ResponseWriter, r *http.Request) {
+func (*API) censusAddParticipantsJobStatusHandler(w http.ResponseWriter, r *http.Request) {
 	jobID := internal.HexBytes{}
 	if err := jobID.ParseString(chi.URLParam(r, "jobid")); err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid job ID").Write(w)
 		return
 	}
 
-	if v, ok := addMembersToCensusWorkers.Load(jobID.String()); ok {
-		p, ok := v.(*db.BulkCensusMembershipStatus)
+	if v, ok := addParticipantsToCensusWorkers.Load(jobID.String()); ok {
+		p, ok := v.(*db.BulkCensusParticipantStatus)
 		if !ok {
 			errors.ErrGenericInternalServerError.Withf("invalid job status type").Write(w)
 			return
@@ -233,7 +233,7 @@ func (*API) censusAddMembersJobStatusHandler(w http.ResponseWriter, r *http.Requ
 			go func() {
 				// Schedule the deletion of the job after 60 seconds
 				time.Sleep(60 * time.Second)
-				addMembersToCensusWorkers.Delete(jobID.String())
+				addParticipantsToCensusWorkers.Delete(jobID.String())
 			}()
 		}
 		apicommon.HTTPWriteJSON(w, p)

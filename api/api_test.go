@@ -583,13 +583,13 @@ func testCreateBundle(t *testing.T, token, censusID string, processIDs [][]byte)
 
 // testCSPAuthenticate performs the CSP authentication flow for a member.
 // It returns the verified auth token.
-func testCSPAuthenticate(t *testing.T, bundleID, memberID, email string) internal.HexBytes {
+func testCSPAuthenticate(t *testing.T, bundleID, participantID, email string) internal.HexBytes {
 	c := qt.New(t)
 
 	// Step 1: Initiate authentication (auth/0)
 	authReq := &handlers.AuthRequest{
-		MemberID: memberID,
-		Email:    email,
+		ParticipantID: participantID,
+		Email:         email,
 	}
 	resp, code := testRequest(t, http.MethodPost, "", authReq, "process", "bundle", bundleID, "auth", "0")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("failed to initiate auth: %s", resp))
