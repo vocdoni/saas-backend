@@ -8,6 +8,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.vocdoni.io/dvote/log"
+	"go.vocdoni.io/dvote/util"
 )
 
 // nextUserID internal method returns the next available user ID. If an error
@@ -194,7 +195,7 @@ func (ms *MongoStorage) UserHasRoleInOrg(userEmail, organizationAddress string, 
 		return false, err
 	}
 	for _, org := range user.Organizations {
-		if org.Address == organizationAddress {
+		if util.TrimHex(strings.ToLower(org.Address)) == util.TrimHex(strings.ToLower(organizationAddress)) {
 			return org.Role == role, nil
 		}
 	}
@@ -211,7 +212,7 @@ func (ms *MongoStorage) UserHasAnyRoleInOrg(userEmail, organizationAddress strin
 		return false, err
 	}
 	for _, org := range user.Organizations {
-		if org.Address == organizationAddress {
+		if util.TrimHex(strings.ToLower(org.Address)) == util.TrimHex(strings.ToLower(organizationAddress)) {
 			return true, nil
 		}
 	}

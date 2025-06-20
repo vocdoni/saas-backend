@@ -5,7 +5,6 @@ const (
 	AdminRole   UserRole = "admin"
 	ManagerRole UserRole = "manager"
 	ViewerRole  UserRole = "viewer"
-	AnyRole     UserRole = "any"
 	// organization types
 	AssociationType      OrganizationType = "association"
 	CompanyType          OrganizationType = "company"
@@ -28,7 +27,6 @@ var writableRoles = map[UserRole]bool{
 	AdminRole:   true,
 	ManagerRole: true,
 	ViewerRole:  false,
-	AnyRole:     false,
 }
 
 // UserRoleNames is a map that contains the user role names by role
@@ -36,7 +34,6 @@ var UserRolesNames = map[UserRole]string{
 	AdminRole:   "Admin",
 	ManagerRole: "Manager",
 	ViewerRole:  "Viewer",
-	AnyRole:     "Any",
 }
 
 // HasWriteAccess function checks if the user role has write access
@@ -82,7 +79,6 @@ var validRoles = map[UserRole]bool{
 	AdminRole:   true,
 	ManagerRole: true,
 	ViewerRole:  true,
-	AnyRole:     false,
 }
 
 // IsValidUserRole function checks if the user role is valid

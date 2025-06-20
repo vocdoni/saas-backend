@@ -402,10 +402,15 @@ func (a *API) organizationCreateTicket(w http.ResponseWriter, r *http.Request) {
 		errors.ErrNoOrganizationProvided.Write(w)
 		return
 	}
-	if !user.HasRoleFor(org.Address, db.AnyRole) {
+	// check if the new user already has a role in the organization
+	if hasAnyRole, err := a.db.UserHasAnyRoleInOrg(user.Email, org.Address); err != nil {
+		errors.ErrInvalidUserData.WithErr(err).Write(w)
+		return
+	} else if !hasAnyRole {
 		errors.ErrUnauthorized.Withf("user has no role in the organization").Write(w)
 		return
 	}
+
 	// get the ticket request from the request body
 	ticketReq := &apicommon.CreateOrganizationTicketRequest{}
 	if err := json.NewDecoder(r.Body).Decode(ticketReq); err != nil {
