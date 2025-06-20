@@ -339,7 +339,7 @@ func (a *API) processBundleParticipantInfoHandler(w http.ResponseWriter, r *http
 
 	participantID := chi.URLParam(r, "participantId")
 	if participantID == "" {
-		errors.ErrMalformedURLParam.Withf("missing member ID").Write(w)
+		errors.ErrMalformedURLParam.Withf("missing participant ID").Write(w)
 		return
 	}
 
