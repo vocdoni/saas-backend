@@ -14,7 +14,7 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-// CreateCensus creates a new census for an organization
+// SetCensus creates a new census for an organization
 // Returns the hex representation of the census
 func (ms *MongoStorage) SetCensus(census *Census) (string, error) {
 	// create a context with a timeout
@@ -32,6 +32,65 @@ func (ms *MongoStorage) SetCensus(census *Census) (string, error) {
 		}
 		return "", fmt.Errorf("organization not found: %w", err)
 	}
+
+	if census.ID != primitive.NilObjectID {
+		// if the census exists, update it with the new data
+		census.UpdatedAt = time.Now()
+	} else {
+		// if the census doesn't exist, create its id
+		census.ID = primitive.NewObjectID()
+		census.CreatedAt = time.Now()
+	}
+
+	updateDoc, err := dynamicUpdateDocument(census, nil)
+	if err != nil {
+		return "", err
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	filter := bson.M{"_id": census.ID}
+	opts := options.Update().SetUpsert(true)
+	_, err = ms.censuses.UpdateOne(ctx, filter, updateDoc, opts)
+	if err != nil {
+		return "", err
+	}
+
+	return census.ID.Hex(), nil
+}
+
+// SetGroupCensus creates a new census for an organization
+// Returns the hex representation of the census
+func (ms *MongoStorage) SetGroupCensus(census *Census, groupID string) (string, error) {
+	if len(groupID) == 0 {
+		return ms.SetCensus(census)
+	}
+
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	if census.OrgAddress == "" {
+		return "", ErrInvalidData
+	}
+
+	// check that the org exists
+	_, err := ms.Organization(census.OrgAddress)
+	if err != nil {
+		if err == ErrNotFound {
+			return "", ErrInvalidData
+		}
+		return "", fmt.Errorf("error retrieving organization: %w", err)
+	}
+
+	// check that the group exists
+	group, err := ms.OrganizationMemberGroup(groupID, census.OrgAddress)
+	if err != nil {
+		if err == ErrNotFound {
+			return "", ErrInvalidData
+		}
+		return "", fmt.Errorf("error retrieving organization group: %w", err)
+	}
+	census.GroupID = group.ID
 
 	if census.ID != primitive.NilObjectID {
 		// if the census exists, update it with the new data

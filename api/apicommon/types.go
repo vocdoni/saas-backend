@@ -687,6 +687,9 @@ type OrganizationCensus struct {
 
 	// Organization address
 	OrgAddress string `json:"orgAddress"`
+
+	// Optional for creating a census based on an organization member group
+	GroupID string `json:"groupID,omitempty"`
 }
 
 // OrganizationCensusFromDB converts a db.Census to an OrganizationCensus.

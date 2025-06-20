@@ -64,7 +64,13 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 		OrgAddress: util.TrimHex(censusInfo.OrgAddress),
 		CreatedAt:  time.Now(),
 	}
-	censusID, err := a.db.SetCensus(census)
+	var censusID string
+	var err error
+	if censusInfo.GroupID != "" {
+		censusID, err = a.db.SetGroupCensus(census, censusInfo.GroupID)
+	} else {
+		censusID, err = a.db.SetCensus(census)
+	}
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
@@ -73,6 +79,7 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 		ID:         censusID,
 		Type:       census.Type,
 		OrgAddress: census.OrgAddress,
+		GroupID:    censusInfo.GroupID,
 	})
 }
 

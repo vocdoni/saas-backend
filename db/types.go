@@ -168,7 +168,7 @@ type CensusType string
 
 const (
 	// CensusTypeMail is used when the organizer uploads a list of names, memberIDs and e‑mails.
-	CensusTypePass      CensusType = "pass"
+	CensusTypeAuth      CensusType = "auth"
 	CensusTypeMail      CensusType = "mail"
 	CensusTypeSMS       CensusType = "sms"
 	CensusTypeSMSorMail CensusType = "sms_or_mail"
@@ -179,8 +179,11 @@ type Census struct {
 	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	OrgAddress string             `json:"orgAddress" bson:"orgAddress"`
 	Type       CensusType         `json:"type" bson:"type"`
-	CreatedAt  time.Time          `json:"createdAt" bson:"createdAt"`
-	UpdatedAt  time.Time          `json:"updatedAt" bson:"updatedAt"`
+	GroupID    primitive.ObjectID `json:"groupId" bson:"groupId"`
+	Published  PublishedCensus    `json:"published" bson:"published"`
+
+	CreatedAt time.Time `json:"createdAt" bson:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt" bson:"updatedAt"`
 }
 
 // An org member belongs to an organization and her details that will be
@@ -189,6 +192,7 @@ type Census struct {
 //
 //nolint:lll
 type OrgMember struct {
+	// Also referred to as member UID
 	ID primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	// OrgAddress can be used for future sharding
 	OrgAddress     string         `json:"orgAddress" bson:"orgAddress"`
@@ -235,7 +239,6 @@ type CensusParticipant struct {
 type PublishedCensus struct {
 	URI       string    `json:"uri" bson:"uri"`
 	Root      string    `json:"root" bson:"root"`
-	Census    Census    `json:"census" bson:"census"`
 	CreatedAt time.Time `json:"createdAt" bson:"createdAt"`
 }
 
@@ -245,10 +248,10 @@ type PublishedCensus struct {
 //
 //nolint:lll
 type Process struct {
-	ID              internal.HexBytes `json:"id" bson:"_id"  swaggertype:"string" format:"hex" example:"deadbeef"`
-	OrgAddress      string            `json:"orgAdress" bson:"orgAddress"`
-	PublishedCensus PublishedCensus   `json:"publishedCensus" bson:"publishedCensus"`
-	Metadata        []byte            `json:"metadata,omitempty"  bson:"metadata"  swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
+	ID         internal.HexBytes `json:"id" bson:"_id"  swaggertype:"string" format:"hex" example:"deadbeef"`
+	OrgAddress string            `json:"orgAdress" bson:"orgAddress"`
+	Census     Census            `json:"census" bson:"census"`
+	Metadata   []byte            `json:"metadata,omitempty"  bson:"metadata"  swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 }
 
 // ProcessesBundle represents a group of voting processes that share a common census.
