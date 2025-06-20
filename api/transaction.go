@@ -42,8 +42,11 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// check if the user has a role in the organization
-	if !user.HasRoleFor(signReq.Address.String(), db.AnyRole) {
-		errors.ErrUnauthorized.With("user has no role in the organization").Write(w)
+	if hasAnyRole, err := a.db.UserHasAnyRoleInOrg(user.Email, signReq.Address.String()); err != nil {
+		errors.ErrInvalidUserData.WithErr(err).Write(w)
+		return
+	} else if !hasAnyRole {
+		errors.ErrUnauthorized.Withf("user has no role in the organization").Write(w)
 		return
 	}
 

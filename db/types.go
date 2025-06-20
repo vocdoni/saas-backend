@@ -30,11 +30,13 @@ type UserVerification struct {
 	Expiration time.Time `json:"expiration" bson:"expiration"`
 }
 
+// TODO this is the default role function while it should be
+// used only when it is not necessary to consult the DB
 func (u *User) HasRoleFor(address string, role UserRole) bool {
 	for _, org := range u.Organizations {
 		if util.TrimHex(strings.ToLower(org.Address)) == util.TrimHex(strings.ToLower(address)) &&
-			// Check if the role is "any: or if the role matches the organization role
-			(string(role) == string(AnyRole) || string(org.Role) == string(role)) {
+			// Check if the role matches the organization role
+			string(org.Role) == string(role) {
 			return true
 		}
 	}
