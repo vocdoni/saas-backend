@@ -35,7 +35,7 @@ definitions:
         description: Errors encountered during job
         items: {}
         type: array
-      jobID:
+      jobId:
         description: Job ID for tracking the addition process
         example: deadbeef
         format: hex
@@ -69,7 +69,7 @@ definitions:
     type: object
   apicommon.CreateProcessBundleRequest:
     properties:
-      censusID:
+      censusId:
         description: Census ID
         type: string
       processes:
@@ -91,7 +91,7 @@ definitions:
     type: object
   apicommon.CreateProcessRequest:
     properties:
-      censusID:
+      censusId:
         description: Census ID
         example: deadbeef
         format: hex
@@ -196,7 +196,7 @@ definitions:
       name:
         description: Member's name
         type: string
-      nationalID:
+      nationalId:
         description: Member's National ID No
         type: string
       other:
@@ -231,7 +231,7 @@ definitions:
     type: object
   apicommon.OrganizationCensus:
     properties:
-      censusID:
+      censusId:
         description: Unique identifier for the census
         type: string
       orgAddress:
@@ -517,7 +517,7 @@ definitions:
       maxCensusSize:
         description: Maximum census size allowed
         type: integer
-      planID:
+      planId:
         description: ID of the subscription plan
         type: integer
       renewalDate:
@@ -584,10 +584,10 @@ definitions:
       startingPrice:
         description: Starting price in cents
         type: integer
-      stripeID:
+      stripeId:
         description: Stripe product ID
         type: string
-      stripePriceID:
+      stripePriceId:
         description: Stripe price ID
         type: string
       votingTypes:
