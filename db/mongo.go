@@ -287,12 +287,12 @@ func (ms *MongoStorage) String() string {
 	defer cancel12()
 	var censusParticipants CensusParticipantsCollection
 	for censusParticipantCur.Next(ctx) {
-		var censusMem CensusParticipant
-		err := censusParticipantCur.Decode(&censusMem)
+		var censusParticipant CensusParticipant
+		err := censusParticipantCur.Decode(&censusParticipant)
 		if err != nil {
 			log.Warnw("error finding census participants", "error", err)
 		}
-		censusParticipants.CensusParticipants = append(censusParticipants.CensusParticipants, censusMem)
+		censusParticipants.CensusParticipants = append(censusParticipants.CensusParticipants, censusParticipant)
 	}
 
 	// get all published censuses
