@@ -31,7 +31,7 @@ definitions:
       count:
         description: Number of members added
         type: integer
-      jobID:
+      jobId:
         description: Job ID for tracking the addition process
         example: deadbeef
         format: hex
@@ -65,7 +65,7 @@ definitions:
     type: object
   apicommon.CreateProcessBundleRequest:
     properties:
-      censusID:
+      censusId:
         description: Census ID
         type: string
       processes:
@@ -87,7 +87,7 @@ definitions:
     type: object
   apicommon.CreateProcessRequest:
     properties:
-      censusID:
+      censusId:
         description: Census ID
         example: deadbeef
         format: hex
@@ -192,7 +192,7 @@ definitions:
       name:
         description: Member's name
         type: string
-      nationalID:
+      nationalId:
         description: Member's National ID No
         type: string
       other:
@@ -227,7 +227,7 @@ definitions:
     type: object
   apicommon.OrganizationCensus:
     properties:
-      censusID:
+      censusId:
         description: Unique identifier for the census
         type: string
       orgAddress:
@@ -513,7 +513,7 @@ definitions:
       maxCensusSize:
         description: Maximum census size allowed
         type: integer
-      planID:
+      planId:
         description: ID of the subscription plan
         type: integer
       renewalDate:
@@ -580,10 +580,10 @@ definitions:
       startingPrice:
         description: Starting price in cents
         type: integer
-      stripeID:
+      stripeId:
         description: Stripe product ID
         type: string
-      stripePriceID:
+      stripePriceId:
         description: Stripe price ID
         type: string
       votingTypes:
@@ -22284,7 +22284,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: Add multiple members to a census. Requires Manager/Admin role.
+      description: Add multiple participants to a census. Requires Manager/Admin role.
       parameters:
       - description: Census ID
         in: path
@@ -22295,7 +22295,7 @@ paths:
         in: query
         name: async
         type: boolean
-      - description: Members to add
+      - description: Participants to add
         in: body
         name: request
         required: true
@@ -22326,7 +22326,7 @@ paths:
             $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
-      summary: Add members to a census
+      summary: Add participants to a census
       tags:
       - census
   /census/{id}/publish:
@@ -22374,7 +22374,7 @@ paths:
       consumes:
       - application/json
       description: |-
-        Check the progress of a job to add members to a census. Returns the progress of the job.
+        Check the progress of a job to add participants to a census. Returns the progress of the job.
         If the job is completed, the job is deleted after 60 seconds.
       parameters:
       - description: Job ID
@@ -22397,7 +22397,7 @@ paths:
           description: Job not found
           schema:
             $ref: '#/definitions/errors.Error'
-      summary: Check the progress of adding members
+      summary: Check the progress of adding participants
       tags:
       - census
   /oauth/login:

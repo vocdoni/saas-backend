@@ -422,10 +422,10 @@ type SubscriptionPlan struct {
 	Name string `json:"name"`
 
 	// Stripe product ID
-	StripeID string `json:"stripeID"`
+	StripeID string `json:"stripeId"`
 
 	// Stripe price ID
-	StripePriceID string `json:"stripePriceID"`
+	StripePriceID string `json:"stripePriceId"`
 
 	// Starting price in cents
 	StartingPrice int64 `json:"startingPrice"`
@@ -569,7 +569,7 @@ type SubscriptionPlanTier struct {
 // swagger:model SubscriptionDetails
 type SubscriptionDetails struct {
 	// ID of the subscription plan
-	PlanID uint64 `json:"planID"`
+	PlanID uint64 `json:"planId"`
 
 	// Date when the subscription started
 	StartDate time.Time `json:"startDate"`
@@ -663,7 +663,7 @@ type SubscriptionCheckout struct {
 // swagger:model MemberNotification
 type MemberNotification struct {
 	// ID of the voting process
-	ProcessID []byte `json:"processID" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
+	ProcessID []byte `json:"processId" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 
 	// Notification details
 	Notification notifications.Notification `json:"notification"`
@@ -680,7 +680,7 @@ type MemberNotification struct {
 // swagger:model OrganizationCensus
 type OrganizationCensus struct {
 	// Unique identifier for the census
-	ID string `json:"censusID"`
+	ID string `json:"censusId"`
 
 	// Type of census
 	Type db.CensusType `json:"type"`
@@ -762,7 +762,7 @@ type OrgMember struct {
 	Surname string `json:"surname,omitempty"`
 
 	// Member's National ID No
-	NationalID string `json:"nationalID,omitempty"`
+	NationalID string `json:"nationalId,omitempty"`
 
 	// Member's date of birth in format YYYY-MM-DD
 	BirthDate string `json:"birthDate,omitempty"`
@@ -855,7 +855,7 @@ type AddMembersResponse struct {
 	Count uint32 `json:"count"`
 
 	// Job ID for tracking the addition process
-	JobID internal.HexBytes `json:"jobID" swaggertype:"string" format:"hex" example:"deadbeef"`
+	JobID internal.HexBytes `json:"jobId" swaggertype:"string" format:"hex" example:"deadbeef"`
 }
 
 // Request types for process operations
@@ -870,7 +870,7 @@ type CreateProcessRequest struct {
 	PublishedCensusURI string `json:"censusUri"`
 
 	// Census ID
-	CensusID internal.HexBytes `json:"censusID" swaggertype:"string" format:"hex" example:"deadbeef"`
+	CensusID internal.HexBytes `json:"censusId" swaggertype:"string" format:"hex" example:"deadbeef"`
 
 	// Additional metadata for the process
 	// Can be any key-value pairs
@@ -880,8 +880,8 @@ type CreateProcessRequest struct {
 // InitiateAuthRequest defines the payload for member authentication.
 // swagger:model InitiateAuthRequest
 type InitiateAuthRequest struct {
-	// Unique member number
-	ParticipantID string `json:"participantID"`
+	// Unique participant ID
+	ParticipantID string `json:"participantId"`
 
 	// Member's email address (optional)
 	Email string `json:"email,omitempty"`
@@ -948,7 +948,7 @@ type SignRequest struct {
 // swagger:model CreateProcessBundleRequest
 type CreateProcessBundleRequest struct {
 	// Census ID
-	CensusID string `json:"censusID"`
+	CensusID string `json:"censusId"`
 
 	// List of process IDs to include in the bundle
 	Processes []string `json:"processes"`

@@ -301,7 +301,7 @@ func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.R
 
 	data := &struct {
 		ClientSecret string `json:"clientSecret"`
-		SessionID    string `json:"sessionID"`
+		SessionID    string `json:"sessionId"`
 	}{
 		ClientSecret: session.ClientSecret,
 		SessionID:    session.ID,
