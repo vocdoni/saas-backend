@@ -43,7 +43,7 @@ type MongoStorage struct {
 	objects             *mongo.Collection
 	orgMembers          *mongo.Collection
 	orgMemberGroups     *mongo.Collection
-	censusMemberships   *mongo.Collection
+	censusParticipants  *mongo.Collection
 	censuses            *mongo.Collection
 	publishedCensuses   *mongo.Collection
 	processes           *mongo.Collection
@@ -277,7 +277,7 @@ func (ms *MongoStorage) String() string {
 	// get all census memberships
 	ctx, cancel11 := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel11()
-	censusMemCur, err := ms.censusMemberships.Find(ctx, bson.D{{}})
+	censusMemCur, err := ms.censusParticipants.Find(ctx, bson.D{{}})
 	if err != nil {
 		log.Warnw("error decoding census membership", "error", err)
 		return "{}"
@@ -461,7 +461,7 @@ func (ms *MongoStorage) Import(jsonData []byte) error {
 		}
 		update := bson.M{"$set": censusMem}
 		opts := options.Update().SetUpsert(true)
-		_, err := ms.censusMemberships.UpdateOne(ctx, filter, update, opts)
+		_, err := ms.censusParticipants.UpdateOne(ctx, filter, update, opts)
 		if err != nil {
 			log.Warnw("error upserting census membership", "error", err, "censusMembership", censusMem.ParticipantID)
 		}

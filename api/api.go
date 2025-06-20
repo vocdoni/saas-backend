@@ -303,7 +303,7 @@ func (a *API) initRouter() http.Handler {
 		r.Post(censusEndpoint, a.createCensusHandler)
 		// add census members
 		log.Infow("new route", "method", "POST", "path", censusIDEndpoint)
-		r.Post(censusIDEndpoint, a.addCensusMembersHandler)
+		r.Post(censusIDEndpoint, a.addCensusParticipantsHandler)
 		// get census members job
 		log.Infow("new route", "method", "GET", "path", censusAddMembersJobStatusEndpoint)
 		r.Get(censusAddMembersJobStatusEndpoint, a.censusAddMembersJobStatusHandler)

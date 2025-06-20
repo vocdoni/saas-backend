@@ -13,16 +13,16 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-// validateCensusParticipant validates that a census membership can be created
+// validateCensusParticipant validates that a census participant can be created
 // by checking that the census exists, the organization exists, and the member exists
-func (ms *MongoStorage) validateCensusParticipant(membership *CensusParticipant) (string, error) {
+func (ms *MongoStorage) validateCensusParticipant(participant *CensusParticipant) (string, error) {
 	// validate required fields
-	if len(membership.ParticipantID) == 0 || len(membership.CensusID) == 0 {
+	if len(participant.ParticipantID) == 0 || len(participant.CensusID) == 0 {
 		return "", ErrInvalidData
 	}
 
 	// check that the published census exists
-	census, err := ms.Census(membership.CensusID)
+	census, err := ms.Census(participant.CensusID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get published census: %w", err)
 	}
@@ -37,39 +37,39 @@ func (ms *MongoStorage) validateCensusParticipant(membership *CensusParticipant)
 	}
 
 	// check that the member exists
-	if _, err := ms.OrgMember(census.OrgAddress, membership.ParticipantID); err != nil {
+	if _, err := ms.OrgMember(census.OrgAddress, participant.ParticipantID); err != nil {
 		return "", fmt.Errorf("failed to get org member: %w", err)
 	}
 
 	return census.OrgAddress, nil
 }
 
-// SetCensusParticipant creates or updates a census membership in the database.
-// If the membership already exists (same participantID and censusID), it updates it.
+// SetCensusParticipant creates or updates a census participant in the database.
+// If the participant already exists (same participantID and censusID), it updates it.
 // If it doesn't exist, it creates a new one.
-func (ms *MongoStorage) SetCensusParticipant(membership *CensusParticipant) error {
-	// Validate the membership
-	_, err := ms.validateCensusParticipant(membership)
+func (ms *MongoStorage) SetCensusParticipant(participant *CensusParticipant) error {
+	// Validate the participant
+	_, err := ms.validateCensusParticipant(participant)
 	if err != nil {
 		return err
 	}
 
 	// prepare filter for upsert
 	filter := bson.M{
-		"participantID": membership.ParticipantID,
-		"censusId":      membership.CensusID,
+		"participantID": participant.ParticipantID,
+		"censusId":      participant.CensusID,
 	}
 
 	// set timestamps
 	now := time.Now()
-	membership.UpdatedAt = now
-	if membership.CreatedAt.IsZero() {
-		membership.CreatedAt = now
+	participant.UpdatedAt = now
+	if participant.CreatedAt.IsZero() {
+		participant.CreatedAt = now
 	}
 
 	// create update document
 	updateDoc := bson.M{
-		"$set": membership,
+		"$set": participant,
 	}
 
 	// Perform database operation
@@ -80,15 +80,15 @@ func (ms *MongoStorage) SetCensusParticipant(membership *CensusParticipant) erro
 	defer cancel()
 
 	opts := options.Update().SetUpsert(true)
-	if _, err := ms.censusMemberships.UpdateOne(ctx, filter, updateDoc, opts); err != nil {
-		return fmt.Errorf("failed to set census membership: %w", err)
+	if _, err := ms.censusParticipants.UpdateOne(ctx, filter, updateDoc, opts); err != nil {
+		return fmt.Errorf("failed to set census participant: %w", err)
 	}
 
 	return nil
 }
 
-// CensusParticipant retrieves a census membership from the database based on
-// participantID and censusID. Returns ErrNotFound if the membership doesn't exist.
+// CensusParticipant retrieves a census participant from the database based on
+// participantID and censusID. Returns ErrNotFound if the participant doesn't exist.
 func (ms *MongoStorage) CensusParticipant(censusID, id string) (*CensusParticipant, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -105,21 +105,21 @@ func (ms *MongoStorage) CensusParticipant(censusID, id string) (*CensusParticipa
 		"censusId":      censusID,
 	}
 
-	// find the membership
-	membership := &CensusParticipant{}
-	err := ms.censusMemberships.FindOne(ctx, filter).Decode(membership)
+	// find the participant
+	participant := &CensusParticipant{}
+	err := ms.censusParticipants.FindOne(ctx, filter).Decode(participant)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, ErrNotFound
 		}
-		return nil, fmt.Errorf("failed to get census membership: %w", err)
+		return nil, fmt.Errorf("failed to get census participant: %w", err)
 	}
 
-	return membership, nil
+	return participant, nil
 }
 
-// CensusParticipant retrieves a census membership from the database based on
-// memberNumber and censusID. Returns ErrNotFound if the membership doesn't exist.
+// CensusParticipantByMemberNumber retrieves a census participant from the database based on
+// memberNumber and censusID. Returns ErrNotFound if the participant doesn't exist.
 func (ms *MongoStorage) CensusParticipantByMemberNumber(
 	censusID string,
 	memberNumber string,
@@ -148,21 +148,21 @@ func (ms *MongoStorage) CensusParticipantByMemberNumber(
 		"censusId":      censusID,
 	}
 
-	// find the membership
-	membership := &CensusParticipant{}
-	err = ms.censusMemberships.FindOne(ctx, filter).Decode(membership)
+	// find the participant
+	participant := &CensusParticipant{}
+	err = ms.censusParticipants.FindOne(ctx, filter).Decode(participant)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, nil, ErrNotFound
 		}
-		return nil, nil, fmt.Errorf("failed to get census membership: %w", err)
+		return nil, nil, fmt.Errorf("failed to get census participant: %w", err)
 	}
 
-	return orgMember, membership, nil
+	return orgMember, participant, nil
 }
 
-// DelCensusParticipant removes a census membership from the database.
-// Returns nil if the membership was successfully deleted or didn't exist.
+// DelCensusParticipant removes a census participant from the database.
+// Returns nil if the participant was successfully deleted or didn't exist.
 func (ms *MongoStorage) DelCensusParticipant(censusID, participantID string) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
@@ -181,10 +181,10 @@ func (ms *MongoStorage) DelCensusParticipant(censusID, participantID string) err
 		"censusId":      censusID,
 	}
 
-	// delete the membership
-	_, err := ms.censusMemberships.DeleteOne(ctx, filter)
+	// delete the participant
+	_, err := ms.censusParticipants.DeleteOne(ctx, filter)
 	if err != nil {
-		return fmt.Errorf("failed to delete census membership: %w", err)
+		return fmt.Errorf("failed to delete census participant: %w", err)
 	}
 
 	return nil
@@ -230,16 +230,16 @@ func prepareMember(member *OrgMember, orgAddress, salt string, currentTime time.
 	}
 }
 
-// createCensusParticipantBulkOperations creates the bulk write operations for members and memberships
+// createCensusParticipantBulkOperations creates the bulk write operations for members and participants
 func createCensusParticipantBulkOperations(
 	orgMembers []OrgMember,
 	orgAddress string,
 	censusID string,
 	salt string,
 	currentTime time.Time,
-) (orgMembersOps []mongo.WriteModel, censusMembershipOps []mongo.WriteModel) {
+) (orgMembersOps []mongo.WriteModel, censusParticipantOps []mongo.WriteModel) {
 	var bulkOrgMembersOps []mongo.WriteModel
-	var bulkCensusMembersOps []mongo.WriteModel
+	var bulkCensusParticipantsOps []mongo.WriteModel
 
 	for _, orgMember := range orgMembers {
 		// Prepare the member
@@ -265,34 +265,34 @@ func createCensusParticipantBulkOperations(
 			SetUpsert(true)
 		bulkOrgMembersOps = append(bulkOrgMembersOps, upsertOrgMembersModel)
 
-		// Create membership filter and document
-		censusMembersFilter := bson.M{
+		// Create participant filter and document
+		censusParticipantsFilter := bson.M{
 			"participantID": orgMember.ID.Hex(),
 			"censusId":      censusID,
 		}
-		membershipDoc := &CensusParticipant{
+		participantDoc := &CensusParticipant{
 			ParticipantID: orgMember.ID.Hex(),
 			CensusID:      censusID,
 			CreatedAt:     currentTime,
 		}
 
-		// Create membership update document
-		updateMembershipDoc, err := dynamicUpdateDocument(membershipDoc, nil)
+		// Create participant update document
+		updateParticipantDoc, err := dynamicUpdateDocument(participantDoc, nil)
 		if err != nil {
-			log.Warnw("failed to create update document for membership",
+			log.Warnw("failed to create update document for participant",
 				"error", err, "participantID", orgMember.ID.Hex())
 			continue
 		}
 
-		// Create membership upsert model
-		upsertCensusMembersModel := mongo.NewUpdateOneModel().
-			SetFilter(censusMembersFilter).
-			SetUpdate(updateMembershipDoc).
+		// Create participant upsert model
+		upsertCensusParticipantsModel := mongo.NewUpdateOneModel().
+			SetFilter(censusParticipantsFilter).
+			SetUpdate(updateParticipantDoc).
 			SetUpsert(true)
-		bulkCensusMembersOps = append(bulkCensusMembersOps, upsertCensusMembersModel)
+		bulkCensusParticipantsOps = append(bulkCensusParticipantsOps, upsertCensusParticipantsModel)
 	}
 
-	return bulkOrgMembersOps, bulkCensusMembersOps
+	return bulkOrgMembersOps, bulkCensusParticipantsOps
 }
 
 // processBatch processes a batch of members and returns the number added
@@ -319,10 +319,10 @@ func (ms *MongoStorage) processBatch(
 		return 0
 	}
 
-	// Execute the bulk write operations for census memberships
-	_, err = ms.censusMemberships.BulkWrite(batchCtx, bulkCensusParticipantOps)
+	// Execute the bulk write operations for census participants
+	_, err = ms.censusParticipants.BulkWrite(batchCtx, bulkCensusParticipantOps)
 	if err != nil {
-		log.Warnw("failed to perform bulk operation on memberships", "error", err)
+		log.Warnw("failed to perform bulk operation on participants", "error", err)
 		return 0
 	}
 
@@ -358,7 +358,7 @@ func startProgressReporter(
 	}
 }
 
-// validateBulkCensusParticipant validates the input parameters for bulk census membership
+// validateBulkCensusParticipant validates the input parameters for bulk census participant
 // and returns the census if valid
 func (ms *MongoStorage) validateBulkCensusParticipant(
 	censusID string,
@@ -449,8 +449,8 @@ func (ms *MongoStorage) processBatches(
 	}
 }
 
-// SetBulkCensusParticipant creates or updates an org member and a census membership in the database.
-// If the membership already exists (same participantID and censusID), it updates it.
+// SetBulkCensusParticipant creates or updates an org member and a census participant in the database.
+// If the participant already exists (same participantID and censusID), it updates it.
 // If it doesn't exist, it creates a new one.
 // Processes members in batches of 200 entries.
 // Returns a channel that sends the percentage of members processed every 10 seconds.
@@ -479,7 +479,7 @@ func (ms *MongoStorage) SetBulkCensusParticipant(
 	return progressChan, nil
 }
 
-// CensusParticipants retrieves all the census memberships for a given census.
+// CensusParticipants retrieves all the census participants for a given census.
 func (ms *MongoStorage) CensusParticipants(censusID string) ([]CensusParticipant, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -495,20 +495,20 @@ func (ms *MongoStorage) CensusParticipants(censusID string) ([]CensusParticipant
 		"censusId": censusID,
 	}
 
-	// find the membership
-	cursor, err := ms.censusMemberships.Find(ctx, filter)
+	// find the participant
+	cursor, err := ms.censusParticipants.Find(ctx, filter)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get census memberships: %w", err)
+		return nil, fmt.Errorf("failed to get census participants: %w", err)
 	}
 	defer func() {
 		if err := cursor.Close(ctx); err != nil {
 			log.Warnw("error closing cursor", "error", err)
 		}
 	}()
-	var memberships []CensusParticipant
-	if err := cursor.All(ctx, &memberships); err != nil {
-		return nil, fmt.Errorf("failed to get census memberships: %w", err)
+	var participants []CensusParticipant
+	if err := cursor.All(ctx, &participants); err != nil {
+		return nil, fmt.Errorf("failed to get census participants: %w", err)
 	}
 
-	return memberships, nil
+	return participants, nil
 }
