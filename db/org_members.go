@@ -567,7 +567,7 @@ func (ms *MongoStorage) orgMembersByIDs(
 
 	cursor, err := ms.orgMembers.Find(ctx, filter, findOptions)
 	if err != nil {
-		return 0, nil, fmt.Errorf("failed to find org participants: %w", err)
+		return 0, nil, fmt.Errorf("failed to find org members: %w", err)
 	}
 	defer func() {
 		if err := cursor.Close(ctx); err != nil {
@@ -577,7 +577,7 @@ func (ms *MongoStorage) orgMembersByIDs(
 
 	var members []*OrgMember
 	if err := cursor.All(ctx, &members); err != nil {
-		return 0, nil, fmt.Errorf("failed to decode org participants: %w", err)
+		return 0, nil, fmt.Errorf("failed to decode org members: %w", err)
 	}
 
 	return totalPages, members, nil
