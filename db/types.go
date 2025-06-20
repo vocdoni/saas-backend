@@ -221,11 +221,11 @@ type OrganizationMemberGroup struct {
 
 // Relates an OrgMember to a Census
 // The censusID is the hex format in string of the objectID
-type CensusMembership struct {
-	MemberID  string    `json:"memberID" bson:"memberID"`
-	CensusID  string    `json:"censusId" bson:"censusId"`
-	CreatedAt time.Time `json:"createdAt" bson:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt" bson:"updatedAt"`
+type CensusParticipant struct {
+	ParticipantID string    `json:"participantID" bson:"participantID"`
+	CensusID      string    `json:"censusId" bson:"censusId"`
+	CreatedAt     time.Time `json:"createdAt" bson:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt" bson:"updatedAt"`
 }
 
 // Represents a published census as a census is represented in the vochain

@@ -397,7 +397,7 @@ func (a *API) initRouter() http.Handler {
 		r.Post(processBundleSignEndpoint, cspHandlers.BundleSignHandler)
 		// process bundle member info handler
 		log.Infow("new route", "method", "GET", "path", processBundleMemberEndpoint)
-		r.Get(processBundleMemberEndpoint, a.processBundleMemberInfoHandler)
+		r.Get(processBundleMemberEndpoint, a.processBundleParticipantInfoHandler)
 	})
 	a.router = r
 	return r

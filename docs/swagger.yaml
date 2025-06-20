@@ -186,7 +186,7 @@ definitions:
       id:
         description: Member's internal unique internal ID
         type: string
-      memberID:
+      memberNumber:
         description: Unique member number as defined by the organization
         type: string
       name:
@@ -773,7 +773,7 @@ definitions:
         description: Whether the verification is valid
         type: boolean
     type: object
-  db.BulkCensusMembershipStatus:
+  db.BulkCensusParticipantStatus:
     properties:
       added:
         type: integer
@@ -22388,7 +22388,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/db.BulkCensusMembershipStatus'
+            $ref: '#/definitions/db.BulkCensusParticipantStatus'
         "400":
           description: Invalid job ID
           schema:
@@ -24026,12 +24026,12 @@ paths:
       summary: Add processes to an existing bundle
       tags:
       - process
-  /process/bundle/{bundleId}/{memberId}:
+  /process/bundle/{bundleId}/{participantId}:
     get:
       consumes:
       - application/json
       description: |-
-        Retrieve process information for a member in a process bundle. Returns process details including
+        Retrieve process information for a participant in a process bundle. Returns process details including
         the census and metadata.
       parameters:
       - description: Bundle ID
@@ -24039,9 +24039,9 @@ paths:
         name: bundleId
         required: true
         type: string
-      - description: Member ID
+      - description: Participant ID
         in: path
-        name: memberId
+        name: participantID
         required: true
         type: string
       produces:
@@ -24051,7 +24051,7 @@ paths:
           description: OK
           schema: {}
         "400":
-          description: Invalid bundle ID or member ID
+          description: Invalid bundle ID or participant ID
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
@@ -24062,7 +24062,7 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
-      summary: Get member information for a process bundle
+      summary: Get participant information for a process bundle
       tags:
       - process
   /process/bundle/{bundleId}/auth/{step}:

@@ -138,8 +138,8 @@ const (
 	processBundleAuthEndpoint = "/process/bundle/{bundleId}/auth/{step}"
 	// POST /process/bundle/{bundleId}/sign to sign with two-factor authentication
 	processBundleSignEndpoint = "/process/bundle/{bundleId}/sign"
-	// GET /process/bundle/{bundleId}/{memberId} to get the process information
-	processBundleMemberEndpoint = "/process/bundle/{bundleId}/{memberId}"
+	// GET /process/bundle/{bundleId}/{participantId} to get the process information
+	processBundleMemberEndpoint = "/process/bundle/{bundleId}/{participantId}"
 
 	// // census auth routes (currently not implemented)
 	// // POST /process/{processId}/auth/0 to initiate auth

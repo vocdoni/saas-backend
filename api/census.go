@@ -163,7 +163,7 @@ func (a *API) addCensusMembersHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// add the org members to the census in the database
-	progressChan, err := a.db.SetBulkCensusMembership(
+	progressChan, err := a.db.SetBulkCensusParticipant(
 		passwordSalt,
 		censusID.String(),
 		members.DbOrgMembers(census.OrgAddress),
@@ -175,7 +175,7 @@ func (a *API) addCensusMembersHandler(w http.ResponseWriter, r *http.Request) {
 
 	if !async {
 		// Wait for the channel to be closed (100% completion)
-		var lastProgress *db.BulkCensusMembershipStatus
+		var lastProgress *db.BulkCensusParticipantStatus
 		for p := range progressChan {
 			lastProgress = p
 			// Just drain the channel until it's closed
@@ -212,7 +212,7 @@ func (a *API) addCensusMembersHandler(w http.ResponseWriter, r *http.Request) {
 //	@Accept			json
 //	@Produce		json
 //	@Param			jobid	path		string	true	"Job ID"
-//	@Success		200		{object}	db.BulkCensusMembershipStatus
+//	@Success		200		{object}	db.BulkCensusParticipantStatus
 //	@Failure		400		{object}	errors.Error	"Invalid job ID"
 //	@Failure		404		{object}	errors.Error	"Job not found"
 //	@Router			/census/job/{jobid} [get]
@@ -224,7 +224,7 @@ func (*API) censusAddMembersJobStatusHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	if v, ok := addMembersToCensusWorkers.Load(jobID.String()); ok {
-		p, ok := v.(*db.BulkCensusMembershipStatus)
+		p, ok := v.(*db.BulkCensusParticipantStatus)
 		if !ok {
 			errors.ErrGenericInternalServerError.Withf("invalid job status type").Write(w)
 			return

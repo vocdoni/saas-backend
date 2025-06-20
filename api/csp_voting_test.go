@@ -197,21 +197,21 @@ func TestCSPVoting(t *testing.T) {
 
 				// Test cases to try to break the authentication and voting mechanisms
 				t.Run("Authentication Attack Vectors", func(_ *testing.T) {
-					// Test case 1: Try to authenticate with invalid member ID
-					t.Run("Invalid Member ID", func(_ *testing.T) {
+					// Test case 1: Try to authenticate with invalid participant ID
+					t.Run("Invalid Participant ID", func(_ *testing.T) {
 						authReq := &handlers.AuthRequest{
-							MemberID: "INVALID",
-							Email:    "john.doe@example.com",
+							ParticipantID: "INVALID",
+							Email:         "john.doe@example.com",
 						}
 						resp, code := testRequest(t, http.MethodPost, "", authReq, "process", "bundle", bundleID, "auth", "0")
 						c.Assert(code, qt.Equals, http.StatusUnauthorized, qt.Commentf("expected unauthorized, got %d: %s", code, resp))
 					})
 
-					// Test case 2: Try to authenticate with valid member ID but wrong email
+					// Test case 2: Try to authenticate with valid participant ID but wrong email
 					t.Run("Wrong Email", func(_ *testing.T) {
 						authReq := &handlers.AuthRequest{
-							MemberID: "P001",
-							Email:    "wrong.email@example.com",
+							ParticipantID: "P001",
+							Email:         "wrong.email@example.com",
 						}
 						resp, code := testRequest(t, http.MethodPost, "", authReq, "process", "bundle", bundleID, "auth", "0")
 						c.Assert(code, qt.Equals, http.StatusUnauthorized, qt.Commentf("expected unauthorized, got %d: %s", code, resp))

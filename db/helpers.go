@@ -250,24 +250,24 @@ func (ms *MongoStorage) createIndexes() error {
 		return fmt.Errorf("failed to create index on censusId for censusMemberships: %w", err)
 	}
 
-	// index for the memberID
+	// index for the participantID
 	if _, err := ms.censusMemberships.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{
-			{Key: "memberID", Value: 1}, // 1 for ascending order
+			{Key: "participantID", Value: 1}, // 1 for ascending order
 		},
 	}); err != nil {
-		return fmt.Errorf("failed to create index on memberID for censusMemberships: %w", err)
+		return fmt.Errorf("failed to create index on participantID for censusMemberships: %w", err)
 	}
 
-	// index for the censusId and memberID tuple
+	// index for the censusId and participantID tuple
 	if _, err := ms.censusMemberships.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{
-			{Key: "censusId", Value: 1}, // 1 for ascending order
-			{Key: "memberID", Value: 1}, // 1 for ascending order
+			{Key: "censusId", Value: 1},      // 1 for ascending order
+			{Key: "participantID", Value: 1}, // 1 for ascending order
 		},
 		Options: options.Index().SetUnique(true),
 	}); err != nil {
-		return fmt.Errorf("failed to create index on censusId and memberID for censusMemberships: %w", err)
+		return fmt.Errorf("failed to create index on censusId and participantID for censusMemberships: %w", err)
 	}
 
 	// unique index over userID and processID
