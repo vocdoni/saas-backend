@@ -14,7 +14,7 @@ import (
 // password is required for password-based authentication, but not for OTP
 // authentication. For OTP authentication, the email or phone is required.
 type AuthRequest struct {
-	ParticipantID string `json:"participantID,omitempty"`
+	ParticipantID string `json:"participantId,omitempty"`
 	Email         string `json:"email,omitempty"`
 	Phone         string `json:"phone,omitempty"`
 	Password      string `json:"password,omitempty"`
