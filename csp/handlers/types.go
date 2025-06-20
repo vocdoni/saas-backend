@@ -9,7 +9,7 @@ import (
 )
 
 // AuthRequest defines the payload for the authentication request. It includes
-// the member number, the email, the phone, and the password. Not all
+// the participant ID, the email, the phone, and the password. Not all
 // fields are required for all types of authentication, for example, the
 // password is required for password-based authentication, but not for OTP
 // authentication. For OTP authentication, the email or phone is required.
