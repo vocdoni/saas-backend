@@ -69,15 +69,6 @@ type OrganizationUsers struct {
 	Users []*OrganizationUser `json:"users"`
 }
 
-// OrganizationMembers represents a list of users of an organization
-// swagger:model OrganizationMembers
-//
-// Deprecated: use OrganizationUsers instead.
-type OrganizationMembers struct {
-	// List of organization users
-	Members []*OrganizationUser `json:"members"`
-}
-
 // OrganizationUser represents a user of an organization with their role.
 // swagger:model OrganizationUser
 type OrganizationUser struct {
@@ -877,19 +868,19 @@ type CreateProcessRequest struct {
 	Metadata []byte `json:"metadata,omitempty" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 }
 
-// InitiateAuthRequest defines the payload for member authentication.
+// InitiateAuthRequest defines the payload for participant authentication.
 // swagger:model InitiateAuthRequest
 type InitiateAuthRequest struct {
-	// Unique member number
+	// Unique participant ID
 	ParticipantID string `json:"participantID"`
 
-	// Member's email address (optional)
+	// Participant's email address (optional)
 	Email string `json:"email,omitempty"`
 
-	// Member's phone number (optional)
+	// Participant's phone number (optional)
 	Phone string `json:"phone,omitempty"`
 
-	// Member's password (optional)
+	// Participant's password (optional)
 	Password string `json:"password,omitempty"`
 }
 

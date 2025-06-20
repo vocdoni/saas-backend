@@ -8,7 +8,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-const testGroupMemberNumber = "participant123"
+const testGroupMemberNumber = "member123"
 
 func setupTestOrgMembersGroupPrerequisites(t *testing.T, memberSuffix string) (*Organization, []string) {
 	// Create test organization
@@ -23,7 +23,7 @@ func setupTestOrgMembersGroupPrerequisites(t *testing.T, memberSuffix string) (*
 		t.Fatalf("failed to set organization: %v", err)
 	}
 
-	// Create test participants with unique IDs
+	// Create test members with unique IDs
 	memberIDs := make([]string, 3)
 	for i := 0; i < 3; i++ {
 		memberNumber := testGroupMemberNumber + memberSuffix + "_" + string(rune('1'+i))
@@ -36,9 +36,9 @@ func setupTestOrgMembersGroupPrerequisites(t *testing.T, memberSuffix string) (*
 		}
 		id, err := testDB.SetOrgMember("test_salt", member)
 		if err != nil {
-			t.Fatalf("failed to set organization participant: %v", err)
+			t.Fatalf("failed to set organization member: %v", err)
 		}
-		memberIDs[i] = id // Store the MongoDB ID, not the participantNo
+		memberIDs[i] = id // Store the MongoDB ID, not the memberNumber
 	}
 
 	return org, memberIDs
@@ -153,7 +153,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 	t.Run("OrganizationMemberGroups", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
-		_, participantIDs := setupTestOrgMembersGroupPrerequisites(t, "_list")
+		_, memberIDs := setupTestOrgMembersGroupPrerequisites(t, "_list")
 
 		t.Run("EmptyList", func(_ *testing.T) {
 			// Test getting groups for organization with no groups
@@ -170,7 +170,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 					OrgAddress:  testOrgAddress,
 					Title:       "Test Group " + string(rune('1'+i)),
 					Description: "Test Description " + string(rune('1'+i)),
-					MemberIDs:   participantIDs,
+					MemberIDs:   memberIDs,
 				}
 				_, err := testDB.CreateOrganizationMemberGroup(group)
 				c.Assert(err, qt.IsNil)
@@ -193,7 +193,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		t.Run("DifferentOrganizations", func(_ *testing.T) {
 			c.Assert(testDB.Reset(), qt.IsNil)
 			// Setup prerequisites
-			_, participantIDs := setupTestOrgMembersGroupPrerequisites(t, "_diff_org")
+			_, memberIDs := setupTestOrgMembersGroupPrerequisites(t, "_diff_org")
 
 			// Create a different organization
 			diffOrg := &Organization{
@@ -204,20 +204,20 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			err := testDB.SetOrganization(diffOrg)
 			c.Assert(err, qt.IsNil)
 
-			// Create participants for different organization
-			diffParticipantIDs := make([]string, 2)
+			// Create members for different organization
+			diffMemberIDs := make([]string, 2)
 			for i := 0; i < 2; i++ {
-				participantNo := "diff_participant_" + string(rune('1'+i))
-				participant := &OrgMember{
+				memberNumber := "diff_member_" + string(rune('1'+i))
+				member := &OrgMember{
 					OrgAddress:   "different_org",
-					MemberNumber: participantNo,
+					MemberNumber: memberNumber,
 					Email:        "diff_" + string(rune('1'+i)) + "@example.com",
 					CreatedAt:    time.Now(),
 					UpdatedAt:    time.Now(),
 				}
-				id, err := testDB.SetOrgMember("test_salt", participant)
+				id, err := testDB.SetOrgMember("test_salt", member)
 				c.Assert(err, qt.IsNil)
-				diffParticipantIDs[i] = id // Store the MongoDB ID, not the participantNo
+				diffMemberIDs[i] = id // Store the MongoDB ID, not the memberNumber
 			}
 
 			// Create groups for original organization
@@ -226,7 +226,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 					OrgAddress:  testOrgAddress,
 					Title:       "Org1 Group " + string(rune('1'+i)),
 					Description: "Org1 Description " + string(rune('1'+i)),
-					MemberIDs:   participantIDs,
+					MemberIDs:   memberIDs,
 				}
 				_, err := testDB.CreateOrganizationMemberGroup(group)
 				c.Assert(err, qt.IsNil)
@@ -238,7 +238,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 					OrgAddress:  "different_org",
 					Title:       "Org2 Group " + string(rune('1'+i)),
 					Description: "Org2 Description " + string(rune('1'+i)),
-					MemberIDs:   diffParticipantIDs,
+					MemberIDs:   diffMemberIDs,
 				}
 				_, err := testDB.CreateOrganizationMemberGroup(group)
 				c.Assert(err, qt.IsNil)
@@ -265,22 +265,22 @@ func TestOrganizationMemberGroup(t *testing.T) {
 	t.Run("UpdateOrganizationMemberGroup", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
-		_, participantIDs := setupTestOrgMembersGroupPrerequisites(t, "_update")
+		_, memberIDs := setupTestOrgMembersGroupPrerequisites(t, "_update")
 
-		// Create additional participants for testing updates
-		additionalParticipantIDs := make([]string, 2)
+		// Create additional members for testing updates
+		additionalMemberIDs := make([]string, 2)
 		for i := 0; i < 2; i++ {
-			participantNo := "additional_" + string(rune('1'+i))
-			participant := &OrgMember{
+			memberNumber := "additional_" + string(rune('1'+i))
+			member := &OrgMember{
 				OrgAddress:   testOrgAddress,
-				MemberNumber: participantNo,
+				MemberNumber: memberNumber,
 				Email:        "additional_" + string(rune('1'+i)) + "@example.com",
 				CreatedAt:    time.Now(),
 				UpdatedAt:    time.Now(),
 			}
-			id, err := testDB.SetOrgMember("test_salt", participant)
+			id, err := testDB.SetOrgMember("test_salt", member)
 			c.Assert(err, qt.IsNil)
-			additionalParticipantIDs[i] = id // Store the MongoDB ID, not the participantNo
+			additionalMemberIDs[i] = id // Store the MongoDB ID, not the memberNumber
 		}
 
 		t.Run("NonExistentGroup", func(_ *testing.T) {
@@ -289,7 +289,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			err := testDB.UpdateOrganizationMemberGroup(
 				nonExistentID, testOrgAddress,
 				"Updated Title", "Updated Description",
-				additionalParticipantIDs, nil,
+				additionalMemberIDs, nil,
 			)
 			c.Assert(err, qt.Not(qt.IsNil))
 		})
@@ -300,7 +300,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 				OrgAddress:  testOrgAddress,
 				Title:       "Original Title",
 				Description: "Original Description",
-				MemberIDs:   participantIDs,
+				MemberIDs:   memberIDs,
 			}
 			groupID, err := testDB.CreateOrganizationMemberGroup(group)
 			c.Assert(err, qt.IsNil)
@@ -318,7 +318,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			c.Assert(err, qt.IsNil)
 			c.Assert(updatedGroup.Title, qt.Equals, "Updated Title")
 			c.Assert(updatedGroup.Description, qt.Equals, "Updated Description")
-			c.Assert(updatedGroup.MemberIDs, qt.DeepEquals, participantIDs) // Members should remain unchanged
+			c.Assert(updatedGroup.MemberIDs, qt.DeepEquals, memberIDs) // Members should remain unchanged
 		})
 
 		t.Run("AddAndRemoveMembers", func(_ *testing.T) {
@@ -327,7 +327,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 				OrgAddress:  testOrgAddress,
 				Title:       "Add and Remove Group",
 				Description: "Test adding and removing members",
-				MemberIDs:   participantIDs, // Include all three members initially
+				MemberIDs:   memberIDs, // Include all three members initially
 			}
 			groupID, err := testDB.CreateOrganizationMemberGroup(group)
 			c.Assert(err, qt.IsNil)
@@ -336,7 +336,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			err = testDB.UpdateOrganizationMemberGroup(
 				groupID, testOrgAddress,
 				"", "",
-				additionalParticipantIDs, []string{participantIDs[0]},
+				additionalMemberIDs, []string{memberIDs[0]},
 			)
 			c.Assert(err, qt.IsNil)
 
@@ -347,11 +347,11 @@ func TestOrganizationMemberGroup(t *testing.T) {
 
 			// Check that the removed member is not in the group
 			for _, memberID := range updatedGroup.MemberIDs {
-				c.Assert(memberID, qt.Not(qt.Equals), participantIDs[0])
+				c.Assert(memberID, qt.Not(qt.Equals), memberIDs[0])
 			}
 
 			// Check that the remaining original members and additional members are in the group
-			expectedMembers := append(participantIDs[1:], additionalParticipantIDs...)
+			expectedMembers := append(memberIDs[1:], additionalMemberIDs...)
 			for _, memberID := range expectedMembers {
 				found := false
 				for _, groupMemberID := range updatedGroup.MemberIDs {
@@ -370,7 +370,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 				OrgAddress:  testOrgAddress,
 				Title:       "Invalid Members Group",
 				Description: "Test invalid members",
-				MemberIDs:   participantIDs,
+				MemberIDs:   memberIDs,
 			}
 			groupID, err := testDB.CreateOrganizationMemberGroup(group)
 			c.Assert(err, qt.IsNil)
@@ -388,7 +388,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 	t.Run("DeleteOrganizationMemberGroup", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
-		_, participantIDs := setupTestOrgMembersGroupPrerequisites(t, "_delete")
+		_, memberIDs := setupTestOrgMembersGroupPrerequisites(t, "_delete")
 
 		t.Run("NonExistentGroup", func(_ *testing.T) {
 			// Test deleting non-existent group
@@ -403,7 +403,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 				OrgAddress:  testOrgAddress,
 				Title:       "Delete Group",
 				Description: "Test deleting group",
-				MemberIDs:   participantIDs,
+				MemberIDs:   memberIDs,
 			}
 			groupID, err := testDB.CreateOrganizationMemberGroup(group)
 			c.Assert(err, qt.IsNil)
@@ -427,7 +427,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 				OrgAddress:  testOrgAddress,
 				Title:       "Wrong Org Group",
 				Description: "Test wrong organization",
-				MemberIDs:   participantIDs,
+				MemberIDs:   memberIDs,
 			}
 			groupID, err := testDB.CreateOrganizationMemberGroup(group)
 			c.Assert(err, qt.IsNil)
@@ -445,7 +445,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 	t.Run("ListOrganizationMemberGroup", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
-		_, participantIDs := setupTestOrgMembersGroupPrerequisites(t, "_list_members")
+		_, memberIDs := setupTestOrgMembersGroupPrerequisites(t, "_list_members")
 
 		t.Run("NonExistentGroup", func(_ *testing.T) {
 			// Test listing members of non-existent group
@@ -460,7 +460,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 				OrgAddress:  testOrgAddress,
 				Title:       "Empty Group",
 				Description: "Test empty group",
-				MemberIDs:   participantIDs[:1], // Start with one member
+				MemberIDs:   memberIDs[:1], // Start with one member
 			}
 			groupID, err := testDB.CreateOrganizationMemberGroup(group)
 			c.Assert(err, qt.IsNil)
@@ -469,7 +469,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			err = testDB.UpdateOrganizationMemberGroup(
 				groupID, testOrgAddress,
 				"", "",
-				nil, participantIDs[:1], // Remove the only member
+				nil, memberIDs[:1], // Remove the only member
 			)
 			c.Assert(err, qt.IsNil)
 
@@ -486,7 +486,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 				OrgAddress:  testOrgAddress,
 				Title:       "Members Group",
 				Description: "Test group with members",
-				MemberIDs:   participantIDs,
+				MemberIDs:   memberIDs,
 			}
 			groupID, err := testDB.CreateOrganizationMemberGroup(group)
 			c.Assert(err, qt.IsNil)
@@ -495,7 +495,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			count, members, err := testDB.ListOrganizationMemberGroup(groupID, testOrgAddress, 1, 10)
 			c.Assert(err, qt.IsNil)
 			c.Assert(count, qt.Equals, 1) // Expect 1 page since all members fit in one page
-			c.Assert(members, qt.HasLen, len(participantIDs))
+			c.Assert(members, qt.HasLen, len(memberIDs))
 
 			// Verify each member is from the correct organization
 			for _, member := range members {
@@ -510,7 +510,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 
 			count, members, err = testDB.ListOrganizationMemberGroup(groupID, testOrgAddress, 2, 1)
 			c.Assert(err, qt.IsNil)
-			c.Assert(count, qt.Equals, len(participantIDs))
+			c.Assert(count, qt.Equals, len(memberIDs))
 			c.Assert(members, qt.HasLen, 1)
 		})
 
@@ -520,7 +520,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 				OrgAddress:  testOrgAddress,
 				Title:       "Wrong Org List Group",
 				Description: "Test wrong organization for listing",
-				MemberIDs:   participantIDs,
+				MemberIDs:   memberIDs,
 			}
 			groupID, err := testDB.CreateOrganizationMemberGroup(group)
 			c.Assert(err, qt.IsNil)

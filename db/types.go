@@ -167,7 +167,7 @@ type Object struct {
 type CensusType string
 
 const (
-	// CensusTypeMail is used when the organizer uploads a list of names, memberIDs and e‑mails.
+	// CensusTypeMail is used when the organizer uploads a list of names, memberNumbers and e‑mails.
 	CensusTypePass      CensusType = "pass"
 	CensusTypeMail      CensusType = "mail"
 	CensusTypeSMS       CensusType = "sms"

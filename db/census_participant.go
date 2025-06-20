@@ -124,22 +124,22 @@ func (ms *MongoStorage) CensusParticipantByMemberNumber(
 	censusID string,
 	memberNumber string,
 	orgAddress string,
-) (*OrgMember, *CensusParticipant, error) {
+) (*CensusParticipant, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	// validate input
 	if len(memberNumber) == 0 || len(censusID) == 0 {
-		return nil, nil, ErrInvalidData
+		return nil, ErrInvalidData
 	}
 
 	orgMember, err := ms.OrgMemberByMemberNumber(orgAddress, memberNumber)
 	if err != nil {
 		if err == mongo.ErrNoDocuments || err == ErrNotFound {
-			return nil, nil, ErrNotFound
+			return nil, ErrNotFound
 		}
-		return nil, nil, fmt.Errorf("failed to get org member: %w", err)
+		return nil, fmt.Errorf("failed to get org member: %w", err)
 	}
 
 	// prepare filter for find
@@ -153,12 +153,12 @@ func (ms *MongoStorage) CensusParticipantByMemberNumber(
 	err = ms.censusParticipants.FindOne(ctx, filter).Decode(participant)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
-			return nil, nil, ErrNotFound
+			return nil, ErrNotFound
 		}
-		return nil, nil, fmt.Errorf("failed to get census participant: %w", err)
+		return nil, fmt.Errorf("failed to get census participant: %w", err)
 	}
 
-	return orgMember, participant, nil
+	return participant, nil
 }
 
 // DelCensusParticipant removes a census participant from the database.

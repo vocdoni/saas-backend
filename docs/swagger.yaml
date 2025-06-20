@@ -24073,7 +24073,7 @@ paths:
       - application/json
       description: |-
         Handle authentication for a process bundle. There are two steps in the authentication process:
-        - Step 0: The user sends the member number and contact information (email or phone).
+        - Step 0: The user sends the participant ID and contact information (email or phone).
         If valid, the server sends a challenge to the user with a token.
         - Step 1: The user sends the token and challenge solution back to the server.
         If valid, the token is marked as verified and returned.
