@@ -177,9 +177,6 @@ func (p *Subscriptions) HasDBPermission(userEmail, orgAddress string, permission
 		if !user.HasRoleFor(orgAddress, db.AdminRole) {
 			return false, fmt.Errorf("user does not have admin role")
 		}
-		if org.Counters.Users >= plan.Organization.Users {
-			return false, fmt.Errorf("max users reached")
-		}
 		return true, nil
 	case DeleteUser:
 		// check if the user has permission to delete users
@@ -192,7 +189,7 @@ func (p *Subscriptions) HasDBPermission(userEmail, orgAddress string, permission
 		if !user.HasRoleFor(orgAddress, db.AdminRole) {
 			return false, fmt.Errorf("user does not have admin role")
 		}
-		if org.Counters.SubOrgs >= plan.Organization.SubOrgs {
+		if org.Counters.SubOrgs >= plan.Organization.SubOrgs { // TODO: move this check somewhere else
 			return false, fmt.Errorf("max sub organizations reached")
 		}
 		return true, nil
