@@ -134,7 +134,7 @@ func (ms *MongoStorage) CensusParticipantByMemberNumber(
 		return nil, nil, ErrInvalidData
 	}
 
-	orgMember, err := ms.OrgMemberByMemberNumber(orgAddress, memberNumber)
+	orgMembers, err := ms.OrgMembersByMemberNumber(orgAddress, memberNumber)
 	if err != nil {
 		if err == mongo.ErrNoDocuments || err == ErrNotFound {
 			return nil, nil, ErrNotFound
@@ -142,23 +142,41 @@ func (ms *MongoStorage) CensusParticipantByMemberNumber(
 		return nil, nil, fmt.Errorf("failed to get org member: %w", err)
 	}
 
-	// prepare filter for find
-	filter := bson.M{
-		"participantID": orgMember.ID.Hex(),
-		"censusId":      censusID,
+	// orgMember, err := ms.OrgMemberByMemberNumber(orgAddress, memberNumber)
+	// if err != nil {
+	// 	if err == mongo.ErrNoDocuments || err == ErrNotFound {
+	// 		return nil, nil, ErrNotFound
+	// 	}
+	// 	return nil, nil, fmt.Errorf("failed to get org member: %w", err)
+	// }
+
+	// consider multiple org members with the same member number
+	if len(orgMembers) == 0 {
+		return nil, nil, ErrNotFound
 	}
 
-	// find the participant
-	participant := &CensusParticipant{}
-	err = ms.censusParticipants.FindOne(ctx, filter).Decode(participant)
-	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			return nil, nil, ErrNotFound
+	// If there are multiple org members, we will return the first one found
+	for _, orgMember := range orgMembers {
+		// prepare filter for find
+		filter := bson.M{
+			"participantID": orgMember.ID.Hex(),
+			"censusId":      censusID,
 		}
-		return nil, nil, fmt.Errorf("failed to get census participant: %w", err)
+		// find the participant
+		participant := &CensusParticipant{}
+		err = ms.censusParticipants.FindOne(ctx, filter).Decode(participant)
+		if err != nil {
+			if err != mongo.ErrNoDocuments {
+				return nil, nil, fmt.Errorf("failed to get census participant: %w", err)
+			}
+		} else {
+			// If participant is found, return both orgMember and participant
+			return &orgMember, participant, nil
+		}
 	}
 
-	return orgMember, participant, nil
+	// If no participant is found, return the orgMember with a nil participant
+	return nil, nil, ErrNotFound
 }
 
 // DelCensusParticipant removes a census participant from the database.

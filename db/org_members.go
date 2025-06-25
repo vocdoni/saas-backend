@@ -132,6 +132,39 @@ func (ms *MongoStorage) OrgMemberByMemberNumber(orgAddress, memberNumber string)
 	return orgMember, nil
 }
 
+// OrgMemberByMemberNumber retrieves a orgMember from the DB based on organization address and member number
+func (ms *MongoStorage) OrgMembersByMemberNumber(orgAddress, memberNumber string) ([]OrgMember, error) {
+	if len(memberNumber) == 0 {
+		return nil, ErrInvalidData
+	}
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	filter := bson.M{
+		"orgAddress":   orgAddress,
+		"memberNumber": memberNumber,
+	}
+
+	cursor, err := ms.orgMembers.Find(ctx, filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get orgMembers: %w", err)
+	}
+	defer func() {
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("error closing cursor", "error", err)
+		}
+	}()
+
+	// Decode results
+	var orgMembers []OrgMember
+	if err = cursor.All(ctx, &orgMembers); err != nil {
+		return nil, fmt.Errorf("failed to decode orgMembers: %w", err)
+	}
+
+	return orgMembers, nil
+}
+
 // BulkOrgMembersStatus is returned by SetBulkOrgMembers to provide the output.
 type BulkOrgMembersStatus struct {
 	Progress int `json:"progress"`
