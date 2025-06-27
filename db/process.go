@@ -9,7 +9,7 @@ import (
 
 // CreateProcess creates a new process for an organization
 func (ms *MongoStorage) SetProcess(process *Process) error {
-	if len(process.ID) == 0 || len(process.OrgAddress) == 0 || len(process.PublishedCensus.Root) == 0 {
+	if len(process.ID) == 0 || len(process.OrgAddress) == 0 || len(process.Census.ID) == 0 {
 		return ErrInvalidData
 	}
 
@@ -17,23 +17,17 @@ func (ms *MongoStorage) SetProcess(process *Process) error {
 	if _, err := ms.Organization(process.OrgAddress); err != nil {
 		return fmt.Errorf("failed to get organization: %w", err)
 	}
-	// check that the publishedCensus and if not create it
-	if _, err := ms.PublishedCensus(process.PublishedCensus.Root, process.PublishedCensus.URI,
-		process.PublishedCensus.Census.ID.Hex()); err != nil {
-		if err != ErrNotFound {
-			return fmt.Errorf("failed to get publishedCensus: %w", err)
-		}
-		if err := ms.SetPublishedCensus(&process.PublishedCensus); err != nil {
-			return fmt.Errorf("failed to create publishedCensus: %w", err)
-		}
+	// check that the census exists
+	if _, err := ms.Census(process.Census.ID.Hex()); err != nil {
+		return fmt.Errorf("failed to get census: %w", err)
 	}
+	// TODO create the census if not found?
 
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-
 	if _, err := ms.processes.InsertOne(ctx, process); err != nil {
 		return fmt.Errorf("failed to create process: %w", err)
 	}

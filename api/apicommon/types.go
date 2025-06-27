@@ -687,6 +687,35 @@ type OrganizationCensus struct {
 
 	// Organization address
 	OrgAddress string `json:"orgAddress"`
+
+	// Optional for creating a census based on an organization member group
+	GroupID string `json:"groupID,omitempty"`
+
+	// Optional for defining which member data should be used for authentication
+	OrgMemberAuthFields []db.OrgMemberAuthFields `json:"OrgMemberAuthFields,omitempty"`
+}
+
+// CreateCensusRequest represents a request to create a new census for an organization.
+// swagger:model CreateCensusRequest
+type CreateCensusRequest struct {
+	// Type of census to create
+	Type db.CensusType `json:"type"`
+
+	// Organization address
+	OrgAddress string `json:"orgAddress"`
+
+	// Optional for creating a census based on an organization member group
+	GroupID string `json:"groupID,omitempty"`
+
+	// Optional for defining which member data should be used for authentication
+	OrgMemberAuthFields []db.OrgMemberAuthFields `json:"OrgMemberAuthFields,omitempty"`
+}
+
+type CreateCensusResponse struct {
+	// Unique identifier for the census
+	ID string `json:"censusID"`
+
+	MemberWarnings db.OrgMemberAggregationResults `json:"memberWarnings,omitempty"`
 }
 
 // OrganizationCensusFromDB converts a db.Census to an OrganizationCensus.
