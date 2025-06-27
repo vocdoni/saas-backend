@@ -582,3 +582,101 @@ func (ms *MongoStorage) orgMembersByIDs(
 
 	return totalPages, members, nil
 }
+
+// CheckOrgMemberAuthFields checks if the provided orgFields are valid for authentication
+// Checks the entire member base of an organization creating a projection that contains only
+// the provided auth fields and verifies that the resulting data do not have duplicates or
+// missing fields. Returns the corrsponding informative errors concerning duplicates or columns with empty values
+func (ms *MongoStorage) CheckOrgMemberAuthFields(orgAddress string, orgFields []OrgMemberAuthFields) (*OrgMemberAggregationResults, error) {
+	if len(orgAddress) == 0 {
+		return nil, ErrInvalidData
+	}
+	if len(orgFields) == 0 {
+		return nil, fmt.Errorf("no auth fields provided")
+	}
+
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	// 1️⃣ Match stage on extKey
+	matchStage := bson.D{{Key: "$match", Value: bson.D{
+		{Key: "extKey", Value: orgAddress},
+	}}}
+
+	// 2️⃣ Project stage: keep only _id + each requested field
+	projDoc := bson.D{{Key: "_id", Value: 1}}
+	for _, f := range orgFields {
+		projDoc = append(projDoc, bson.E{Key: string(f), Value: 1})
+	}
+	projectStage := bson.D{{Key: "$project", Value: projDoc}}
+
+	// 3️⃣ Build composite _id for grouping (exclude the real _id)
+	groupID := bson.M{}
+	for _, f := range orgFields {
+		groupID[string(f)] = "$" + f
+	}
+
+	// 4️⃣ Build empty‐field matcher ($or: field=="" or field==null)
+	orClauses := make([]bson.M, 0, len(orgFields))
+	for _, f := range orgFields {
+		orClauses = append(orClauses, bson.M{string(f): bson.M{"$in": bson.A{"", nil}}})
+	}
+
+	// 5️⃣ Facet: duplicates vs empties
+	facetStage := bson.D{{Key: "$facet", Value: bson.D{
+		{"duplicates", bson.A{
+			// group by composite key, collect all IDs, count>1
+			bson.D{{Key: "$group", Value: bson.D{
+				{Key: "_id", Value: groupID},
+				{Key: "ids", Value: bson.D{{Key: "$push", Value: "$_id"}}},
+				{Key: "count", Value: bson.D{{Key: "$sum", Value: 1}}},
+			}}},
+			bson.D{{Key: "$match", Value: bson.D{{Key: "count", Value: bson.D{{Key: "$gt", Value: 1}}}}}},
+			bson.D{{Key: "$unwind", Value: "$ids"}},
+			bson.D{{Key: "$project", Value: bson.D{{Key: "_id", Value: "$ids"}}}},
+		}},
+		{"empties", bson.A{
+			bson.D{{Key: "$match", Value: bson.D{{Key: "$or", Value: orClauses}}}},
+			bson.D{{Key: "$project", Value: bson.D{{Key: "_id", Value: 1}}}},
+		}},
+	}}}
+
+	pipeline := mongo.Pipeline{matchStage, projectStage, facetStage}
+
+	// 6️⃣ Run aggregation with disk use if needed
+	cur, err := ms.orgMembers.Aggregate(ctx, pipeline, options.Aggregate().SetAllowDiskUse(true))
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+
+	// 7️⃣ Decode into intermediate struct
+	type idOnly struct {
+		ID primitive.ObjectID `bson:"_id"`
+	}
+	var raw []struct {
+		Duplicates []idOnly `bson:"duplicates"`
+		Empties    []idOnly `bson:"empties"`
+	}
+	if err := cur.All(ctx, &raw); err != nil {
+		return nil, err
+	}
+	if len(raw) == 0 {
+		return &OrgMemberAggregationResults{}, nil
+	}
+
+	// 8️⃣ Flatten into []uint64
+	out := &OrgMemberAggregationResults{
+		Duplicates: make([]primitive.ObjectID, 0, len(raw[0].Duplicates)),
+		Empties:    make([]primitive.ObjectID, 0, len(raw[0].Empties)),
+	}
+	for _, r := range raw[0].Duplicates {
+		out.Duplicates = append(out.Duplicates, r.ID)
+	}
+	for _, r := range raw[0].Empties {
+		out.Empties = append(out.Empties, r.ID)
+	}
+
+	return out, nil
+}
