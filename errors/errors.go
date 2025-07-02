@@ -16,6 +16,7 @@ type Error struct {
 	Code       int    // Error code
 	HTTPstatus int    // HTTP status code to return
 	LogLevel   string // Log level for this error (defaults to "debug")
+	Data       any    // Optional data to include in the error response
 }
 
 // MarshalJSON returns a JSON containing Err.Error() and Code. Field HTTPstatus is ignored.
@@ -28,9 +29,11 @@ func (e Error) MarshalJSON() ([]byte, error) {
 		struct {
 			Err  string `json:"error"`
 			Code int    `json:"code"`
+			Data any    `json:"data,omitempty"`
 		}{
 			Err:  e.Err.Error(),
 			Code: e.Code,
+			Data: e.Data,
 		})
 }
 
@@ -127,5 +130,15 @@ func (e Error) WithLogLevel(level string) Error {
 		Code:       e.Code,
 		HTTPstatus: e.HTTPstatus,
 		LogLevel:   level,
+	}
+}
+
+func (e Error) WithData(data any) Error {
+	return Error{
+		Err:        e.Err,
+		Code:       e.Code,
+		HTTPstatus: e.HTTPstatus,
+		LogLevel:   e.LogLevel,
+		Data:       data,
 	}
 }
