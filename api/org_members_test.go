@@ -311,7 +311,7 @@ func TestOrganizationMembers(t *testing.T) {
 
 	// Test 5: Check the job progress
 	var (
-		jobStatus   *db.BulkOrgMembersStatus
+		jobStatus   *db.BulkOrgMembersJob
 		maxAttempts = 30
 		attempts    = 0
 		completed   = false
@@ -335,8 +335,8 @@ func TestOrganizationMembers(t *testing.T) {
 		err = json.Unmarshal(resp, &jobStatus)
 		c.Assert(err, qt.IsNil)
 
-		t.Logf("Job progress: %d%%, Added: %d, Total: %d\n",
-			jobStatus.Progress, jobStatus.Added, jobStatus.Total)
+		t.Logf("Job progress: %d%%, Added: %d, Total: %d, Errors: %d\n",
+			jobStatus.Progress, jobStatus.Added, jobStatus.Total, len(jobStatus.Errors))
 
 		if jobStatus.Progress == 100 {
 			completed = true
@@ -351,6 +351,7 @@ func TestOrganizationMembers(t *testing.T) {
 	c.Assert(jobStatus.Added, qt.Equals, 2) // We added 2 members
 	c.Assert(jobStatus.Total, qt.Equals, 2)
 	c.Assert(jobStatus.Progress, qt.Equals, 100)
+	c.Assert(jobStatus.Errors, qt.HasLen, 0)
 
 	// Test 6: Get organization members with pagination
 	// Test 6.1: Test with page=1 and pageSize=2

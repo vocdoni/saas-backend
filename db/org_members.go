@@ -132,11 +132,12 @@ func (ms *MongoStorage) OrgMemberByMemberNumber(orgAddress, memberNumber string)
 	return orgMember, nil
 }
 
-// BulkOrgMembersStatus is returned by SetBulkOrgMembers to provide the output.
-type BulkOrgMembersStatus struct {
-	Progress int `json:"progress"`
-	Total    int `json:"total"`
-	Added    int `json:"added"`
+// BulkOrgMembersJob is returned by SetBulkOrgMembers to provide the output.
+type BulkOrgMembersJob struct {
+	Progress int     `json:"progress"`
+	Total    int     `json:"total"`
+	Added    int     `json:"added"`
+	Errors   []error `json:"errors"`
 }
 
 // validateBulkOrgMembers validates the input parameters for bulk org members
@@ -186,14 +187,16 @@ func prepareOrgMember(member *OrgMember, orgAddress, salt string, currentTime ti
 	}
 }
 
-// createOrgMemberBulkOperations creates the bulk write operations for members
-func createOrgMemberBulkOperations(
+// createOrgMemberBulkOperations creates a batch of members using bulk write operations,
+// and returns the number of members added (or updated) and any errors encountered.
+func (ms *MongoStorage) createOrgMemberBulkOperations(
 	members []OrgMember,
 	orgAddress string,
 	salt string,
 	currentTime time.Time,
-) []mongo.WriteModel {
+) (int, []error) {
 	var bulkOps []mongo.WriteModel
+	var errors []error
 
 	for _, member := range members {
 		// Prepare the member
@@ -209,6 +212,7 @@ func createOrgMemberBulkOperations(
 		if err != nil {
 			log.Warnw("failed to create update document for member",
 				"error", err, "ID", member.ID)
+			errors = append(errors, fmt.Errorf("member %s: %w", member.ID.Hex(), err))
 			continue // Skip this member but continue with others
 		}
 
@@ -220,15 +224,8 @@ func createOrgMemberBulkOperations(
 		bulkOps = append(bulkOps, upsertModel)
 	}
 
-	return bulkOps
-}
-
-// processOrgMemberBatch processes a batch of members and returns the number added
-func (ms *MongoStorage) processOrgMemberBatch(
-	bulkOps []mongo.WriteModel,
-) int {
 	if len(bulkOps) == 0 {
-		return 0
+		return 0, errors
 	}
 
 	// Only lock the mutex during the actual database operations
@@ -240,39 +237,42 @@ func (ms *MongoStorage) processOrgMemberBatch(
 	defer batchCancel()
 
 	// Execute the bulk write operations
-	_, err := ms.orgMembers.BulkWrite(batchCtx, bulkOps)
+	result, err := ms.orgMembers.BulkWrite(batchCtx, bulkOps)
 	if err != nil {
-		log.Warnw("failed to perform bulk operation on members", "error", err)
-		return 0
+		log.Warnw("error during bulk operation on members batch", "error", err)
+		firstID := members[0].ID
+		lastID := members[len(members)-1].ID
+		errors = append(errors, fmt.Errorf("batch %s - %s: %w", firstID.Hex(), lastID.Hex(), err))
 	}
 
-	return len(bulkOps)
+	return int(result.ModifiedCount + result.UpsertedCount), errors
 }
 
 // startOrgMemberProgressReporter starts a goroutine that reports progress periodically
 func startOrgMemberProgressReporter(
 	ctx context.Context,
-	progressChan chan<- *BulkOrgMembersStatus,
-	totalMembers int,
-	processedMembers *int,
-	addedMembers *int,
+	progressChan chan<- *BulkOrgMembersJob,
+	status *BulkOrgMembersJob,
 ) {
+	defer close(progressChan)
+
+	if status.Total == 0 {
+		return
+	}
+
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
+
+	// Send initial progress
+	progressChan <- status
 
 	for {
 		select {
 		case <-ticker.C:
-			// Calculate and send progress percentage
-			if totalMembers > 0 {
-				progress := (*processedMembers * 100) / totalMembers
-				progressChan <- &BulkOrgMembersStatus{
-					Progress: progress,
-					Total:    totalMembers,
-					Added:    *addedMembers,
-				}
-			}
+			progressChan <- status
 		case <-ctx.Done():
+			// Send final progress (100%)
+			progressChan <- status
 			return
 		}
 	}
@@ -283,25 +283,25 @@ func (ms *MongoStorage) processOrgMemberBatches(
 	orgMembers []OrgMember,
 	orgAddress string,
 	salt string,
-	progressChan chan<- *BulkOrgMembersStatus,
+	progressChan chan<- *BulkOrgMembersJob,
 ) {
-	defer close(progressChan)
+	if len(orgMembers) == 0 {
+		close(progressChan)
+		return
+	}
 
 	// Process members in batches of 200
 	batchSize := 200
-	totalMembers := len(orgMembers)
-	processedMembers := 0
-	addedMembers := 0
 	currentTime := time.Now()
 
-	// Send initial progress
-	progressChan <- &BulkOrgMembersStatus{
+	job := BulkOrgMembersJob{
 		Progress: 0,
-		Total:    totalMembers,
-		Added:    addedMembers,
+		Total:    len(orgMembers),
+		Added:    0,
+		Errors:   []error{},
 	}
 
-	// Create a context for the entire operation
+	// Create a context for the progress reporter
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -309,40 +309,29 @@ func (ms *MongoStorage) processOrgMemberBatches(
 	go startOrgMemberProgressReporter(
 		ctx,
 		progressChan,
-		totalMembers,
-		&processedMembers,
-		&addedMembers,
+		&job,
 	)
 
 	// Process members in batches
-	for i := 0; i < totalMembers; i += batchSize {
+	for start := 0; start < job.Total; start += batchSize {
 		// Calculate end index for current batch
-		end := i + batchSize
-		if end > totalMembers {
-			end = totalMembers
-		}
+		end := min(start+batchSize, job.Total)
 
-		// Create bulk operations for this batch
-		bulkOps := createOrgMemberBulkOperations(
-			orgMembers[i:end],
+		// Process the batch and get number of added members
+		added, errs := ms.createOrgMemberBulkOperations(
+			orgMembers[start:end],
 			orgAddress,
 			salt,
 			currentTime,
 		)
 
-		// Process the batch and get number of added members
-		added := ms.processOrgMemberBatch(bulkOps)
-		addedMembers += added
-
-		// Update processed count
-		processedMembers += (end - i)
-	}
-
-	// Send final progress (100%)
-	progressChan <- &BulkOrgMembersStatus{
-		Progress: 100,
-		Total:    totalMembers,
-		Added:    addedMembers,
+		// Update job stats
+		job = BulkOrgMembersJob{
+			Progress: (end / job.Total) * 100,
+			Total:    job.Total,
+			Added:    job.Added + added,
+			Errors:   append(job.Errors, errs...),
+		}
 	}
 }
 
@@ -354,8 +343,8 @@ func (ms *MongoStorage) processOrgMemberBatches(
 func (ms *MongoStorage) SetBulkOrgMembers(
 	orgAddress, salt string,
 	orgMembers []OrgMember,
-) (chan *BulkOrgMembersStatus, error) {
-	progressChan := make(chan *BulkOrgMembersStatus, 10)
+) (chan *BulkOrgMembersJob, error) {
+	progressChan := make(chan *BulkOrgMembersJob, 10)
 
 	// Validate input parameters
 	org, err := ms.validateBulkOrgMembers(orgAddress, orgMembers)

@@ -192,7 +192,7 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Wait for the operation to complete and get the final status
-		var lastStatus *BulkOrgMembersStatus
+		var lastStatus *BulkOrgMembersJob
 		for status := range progressChan {
 			lastStatus = status
 		}
@@ -201,6 +201,7 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(lastStatus, qt.Not(qt.IsNil))
 		c.Assert(lastStatus.Progress, qt.Equals, 100)
 		c.Assert(lastStatus.Added, qt.Equals, 2)
+		c.Assert(lastStatus.Errors, qt.HasLen, 0)
 
 		// Verify both members were created with hashed fields
 		member1, err := testDB.OrgMemberByMemberNumber(testOrgAddress, testMemberNumber)
@@ -232,6 +233,7 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(lastStatus, qt.Not(qt.IsNil))
 		c.Assert(lastStatus.Progress, qt.Equals, 100)
 		c.Assert(lastStatus.Added, qt.Equals, 2) // Both documents should be updated
+		c.Assert(lastStatus.Errors, qt.HasLen, 0)
 
 		// Verify updates for both members
 		updatedMember1, err := testDB.OrgMemberByMemberNumber(testOrgAddress, testMemberNumber)
