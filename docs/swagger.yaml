@@ -31,6 +31,10 @@ definitions:
       count:
         description: Number of members added
         type: integer
+      errors:
+        description: Errors encountered during job
+        items: {}
+        type: array
       jobID:
         description: Job ID for tracking the addition process
         example: deadbeef
@@ -782,10 +786,13 @@ definitions:
       total:
         type: integer
     type: object
-  db.BulkOrgMembersStatus:
+  db.BulkOrgMembersJob:
     properties:
       added:
         type: integer
+      errors:
+        items: {}
+        type: array
       progress:
         type: integer
       total:
@@ -957,6 +964,8 @@ definitions:
       code:
         description: Error code
         type: integer
+      data:
+        description: Optional data to include in the error response
       err:
         description: Original error
       httpstatus:
@@ -23044,7 +23053,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/db.BulkOrgMembersStatus'
+            $ref: '#/definitions/db.BulkOrgMembersJob'
         "400":
           description: Invalid job ID
           schema:

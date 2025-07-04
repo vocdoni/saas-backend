@@ -160,7 +160,7 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 
 	if !async {
 		// Wait for the channel to be closed (100% completion)
-		var lastProgress *db.BulkOrgMembersStatus
+		var lastProgress *db.BulkOrgMembersJob
 		for p := range progressChan {
 			lastProgress = p
 			// Just drain the channel until it's closed
@@ -168,10 +168,14 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 				"org", org.Address,
 				"progress", p.Progress,
 				"added", p.Added,
-				"total", p.Total)
+				"total", p.Total,
+				"errors", len(p.Errors))
 		}
 		// Return the number of members added
-		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{Count: uint32(lastProgress.Added)})
+		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{
+			Count:  uint32(lastProgress.Added),
+			Errors: lastProgress.Errors,
+		})
 		return
 	}
 
@@ -179,7 +183,7 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 	jobID := internal.HexBytes(util.RandomBytes(16))
 	go func() {
 		for p := range progressChan {
-			// We need to drain the channel to avoid blocking
+			// Store progress updates in a map that is read by another endpoint to check a job status
 			addMembersToOrgWorkers.Store(jobID.String(), p)
 		}
 	}()
@@ -198,7 +202,7 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 //	@Security		BearerAuth
 //	@Param			address	path		string	true	"Organization address"
 //	@Param			jobid	path		string	true	"Job ID"
-//	@Success		200		{object}	db.BulkOrgMembersStatus
+//	@Success		200		{object}	db.BulkOrgMembersJob
 //	@Failure		400		{object}	errors.Error	"Invalid job ID"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
 //	@Failure		404		{object}	errors.Error	"Job not found"
@@ -211,7 +215,7 @@ func (*API) addOrganizationMembersJobStatusHandler(w http.ResponseWriter, r *htt
 	}
 
 	if v, ok := addMembersToOrgWorkers.Load(jobID.String()); ok {
-		p, ok := v.(*db.BulkOrgMembersStatus)
+		p, ok := v.(*db.BulkOrgMembersJob)
 		if !ok {
 			errors.ErrGenericInternalServerError.Withf("invalid job status type").Write(w)
 			return
