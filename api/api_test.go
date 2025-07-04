@@ -215,9 +215,19 @@ func TestMain(m *testing.M) {
 	}
 	// create the remote test API client
 	testAPIClient, err := apiclient.New(testAPIEndpoint)
+	retries := 3
+	for i := range retries {
+		if err == nil {
+			break
+		}
+		log.Warnf("failed to create api client (%s), will wait and retry (%d/%d)", err, i, retries)
+		time.Sleep(time.Second)
+		testAPIClient, err = apiclient.New(testAPIEndpoint)
+	}
 	if err != nil {
 		panic(err)
 	}
+
 	// create the test account with the Voconed private key and the API
 	// container endpoint
 	testAccount, err := account.New(test.VoconedFoundedPrivKey, testAPIEndpoint)
