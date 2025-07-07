@@ -16,7 +16,7 @@ func (ms *MongoStorage) fetchOrganizationFromDB(ctx context.Context, address str
 	// find the organization in the database by its address (case insensitive)
 	filter := bson.M{"_id": bson.M{"$regex": address, "$options": "i"}}
 	result := ms.organizations.FindOne(ctx, filter)
-	org := &Organization{Subscription: OrganizationSubscription{}}
+	org := &Organization{}
 	if err := result.Decode(org); err != nil {
 		// if the organization doesn't exist return a specific error
 		if err == mongo.ErrNoDocuments {
@@ -233,7 +233,7 @@ func (ms *MongoStorage) SetOrganizationSubscription(address string, orgSubscript
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// prepare the document to be updated in the database
-	filter := bson.M{"_id": address}
+	filter := bson.M{"_id": bson.M{"$regex": address, "$options": "i"}}
 	updateDoc := bson.M{"$set": bson.M{"subscription": orgSubscription}}
 	// update the organization in the database
 	if _, err := ms.organizations.UpdateOne(ctx, filter, updateDoc); err != nil {
@@ -251,7 +251,7 @@ func (ms *MongoStorage) AddOrganizationMeta(address string, meta map[string]any)
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// prepare the document to be updated in the database
-	filter := bson.M{"_id": address}
+	filter := bson.M{"_id": bson.M{"$regex": address, "$options": "i"}}
 	updateDoc := bson.M{"$set": bson.M{"meta": meta}}
 	// update the organization in the database
 	if _, err := ms.organizations.UpdateOne(ctx, filter, updateDoc); err != nil {
@@ -277,7 +277,7 @@ func (ms *MongoStorage) UpdateOrganizationMeta(address string, metaUpdates map[s
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	filter := bson.M{"_id": address}
+	filter := bson.M{"_id": bson.M{"$regex": address, "$options": "i"}}
 	update := bson.M{"$set": updateFields}
 
 	result, err := ms.organizations.UpdateOne(ctx, filter, update)
@@ -309,7 +309,7 @@ func (ms *MongoStorage) DeleteOrganizationMetaKeys(address string, keysToDelete 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	filter := bson.M{"_id": address}
+	filter := bson.M{"_id": bson.M{"$regex": address, "$options": "i"}}
 	update := bson.M{"$unset": unsetFields}
 
 	result, err := ms.organizations.UpdateOne(ctx, filter, update)
