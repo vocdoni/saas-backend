@@ -334,8 +334,6 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
 		// Test 6: Try to update a non-existent user
-		// Note: The current implementation returns 200 OK even for non-existent users
-		// because the MongoDB UpdateOne operation doesn't return an error if no documents match
 		_, code = testRequest(
 			t,
 			http.MethodPut,
@@ -346,7 +344,7 @@ func TestOrganizationUsers(t *testing.T) {
 			"users",
 			"999999",
 		)
-		c.Assert(code, qt.Equals, http.StatusOK)
+		c.Assert(code, qt.Equals, http.StatusBadRequest)
 	})
 
 	t.Run("RemoveOrganizationUser", func(t *testing.T) {
@@ -485,8 +483,6 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
 		// Test 4: Try to remove a non-existent user
-		// Note: The current implementation returns 200 OK even for non-existent users
-		// because the MongoDB UpdateOne operation doesn't return an error if no documents match
 		_, code = testRequest(
 			t,
 			http.MethodDelete,
@@ -497,7 +493,7 @@ func TestOrganizationUsers(t *testing.T) {
 			"users",
 			"999999",
 		)
-		c.Assert(code, qt.Equals, http.StatusOK)
+		c.Assert(code, qt.Equals, http.StatusBadRequest)
 
 		// Test 5: Try to remove yourself (which should fail)
 		// Get the admin's user ID

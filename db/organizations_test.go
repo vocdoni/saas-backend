@@ -250,14 +250,12 @@ func TestOrganizations(t *testing.T) {
 		// Test updating a non-existent user
 		nonExistentUserID := uint64(9999)
 		err = testDB.UpdateOrganizationUserRole(orgAddress, nonExistentUserID, AdminRole)
-		// The function doesn't return an error for non-existent users, it just doesn't update anything
-		c.Assert(err, qt.IsNil)
+		c.Assert(err, qt.ErrorMatches, ".*user has no role in organization.*")
 
 		// Test updating a user for a non-existent organization
 		nonExistentOrgAddress := "nonExistentOrg"
 		err = testDB.UpdateOrganizationUserRole(nonExistentOrgAddress, userID, AdminRole)
-		// The function doesn't return an error for non-existent organizations, it just doesn't update anything
-		c.Assert(err, qt.IsNil)
+		c.Assert(err, qt.ErrorMatches, ".*organization doesn't exist.*")
 
 		// Verify the user's role hasn't changed after the non-existent org update
 		user, err = testDB.User(userID)
@@ -309,7 +307,7 @@ func TestOrganizations(t *testing.T) {
 		nonExistentUserID := uint64(9999)
 		err = testDB.RemoveOrganizationUser(orgAddress, nonExistentUserID)
 		// The function doesn't return an error for non-existent users, it just doesn't remove anything
-		c.Assert(err, qt.IsNil)
+		c.Assert(err, qt.ErrorMatches, ".*user has no role in organization.*")
 
 		// Create another user and add them to multiple organizations
 		secondUserEmail := "seconduser@example.com"
