@@ -957,6 +957,8 @@ definitions:
       code:
         description: Error code
         type: integer
+      data:
+        description: Optional data to include in the error response
       err:
         description: Original error
       httpstatus:
