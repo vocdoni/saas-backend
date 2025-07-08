@@ -295,6 +295,28 @@ func (ms *MongoStorage) createIndexes() error {
 		return fmt.Errorf("failed to create text index on orgMembers: %w", err)
 	}
 
+	// Individual indexes for regex search optimization on orgMembers
+	// These indexes improve performance for regex queries on individual fields
+	orgMemberRegexIndexes := []struct {
+		field string
+		key   string
+	}{
+		{"email", "email"},
+		{"memberNumber", "memberNumber"},
+		{"nationalID", "nationalID"},
+		{"name", "name"},
+		{"surname", "surname"},
+		{"birthDate", "birthDate"},
+	}
+
+	for _, idx := range orgMemberRegexIndexes {
+		if _, err := ms.orgMembers.Indexes().CreateOne(ctx, mongo.IndexModel{
+			Keys: bson.D{{Key: idx.key, Value: 1}}, // 1 for ascending order
+		}); err != nil {
+			return fmt.Errorf("failed to create index on %s for orgMembers: %w", idx.field, err)
+		}
+	}
+
 	return nil
 }
 

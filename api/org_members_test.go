@@ -63,7 +63,7 @@ func TestOrganizationMembers(t *testing.T) {
 				Name:         "John",
 				Surname:      "Doe",
 				NationalID:   "12345678A",
-				BirthDate:    "1990-05-15",
+				BirthDate:    "1992-05-15",
 				Email:        "john.doe@example.com",
 				Phone:        "+34612345678",
 				Password:     "password123",
@@ -234,6 +234,7 @@ func TestOrganizationMembers(t *testing.T) {
 			c.Assert(member.Surname, qt.Equals, "Garcia")
 			c.Assert(member.NationalID, qt.Equals, "") // Should be empty
 			c.Assert(member.BirthDate, qt.Equals, "1992-11-25")
+			c.Assert(member.Phone, qt.Not(qt.Equals), "+34600333444") // Should be hashed, not the original string
 			break
 		}
 	}
@@ -252,6 +253,27 @@ func TestOrganizationMembers(t *testing.T) {
 		}
 	}
 	c.Assert(pedroFound, qt.Equals, true, qt.Commentf("Pedro member should be found"))
+
+	// Test 3.1: Get organization members (filtered)
+	for _, test := range []struct {
+		filter  string
+		results int
+	}{
+		{filter: "?search=Maria", results: 1},       // Name
+		{filter: "?search=artin", results: 1},       // Name
+		{filter: "?search=Garcia", results: 1},      // Surname
+		{filter: "?search=5566", results: 1},        // NationalID
+		{filter: "?search=77", results: 2},          // NationalID
+		{filter: "?search=1992", results: 2},        // BirthDate
+		{filter: "?search=P00", results: 4},         // MemberNumber
+		{filter: "?search=example.com", results: 4}, // Email
+	} {
+		resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "members", test.filter)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+		c.Assert(json.Unmarshal(resp, &membersResponse), qt.IsNil)
+		c.Assert(len(membersResponse.Members), qt.Equals, test.results,
+			qt.Commentf("expected %d result(s) for filter %q", test.results, test.filter))
+	}
 
 	// Test 4: Add members asynchronously
 	// Test 4.1: Test with valid data (including some errors) and async=true
