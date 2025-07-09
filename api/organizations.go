@@ -57,6 +57,12 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		errors.ErrMalformedBody.Withf("invalid organization type").Write(w)
 		return
 	}
+	// find default plan
+	defaultPlan, err := a.db.DefaultPlan()
+	if err != nil || defaultPlan == nil {
+		errors.ErrNoDefaultPlan.WithErr((err)).Write(w)
+		return
+	}
 	parentOrg := ""
 	var dbParentOrg *db.Organization
 	if orgInfo.Parent != nil {
@@ -92,18 +98,11 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		parentOrg = orgInfo.Parent.Address
-	}
-	// find default plan
-	defaultPlan, err := a.db.DefaultPlan()
-	if err != nil || defaultPlan == nil {
-		errors.ErrNoDefaultPlan.WithErr((err)).Write(w)
-		return
-	}
-	subscription := &db.OrganizationSubscription{
-		PlanID:        defaultPlan.ID,
-		StartDate:     time.Now(),
-		Active:        true,
-		MaxCensusSize: defaultPlan.Organization.MaxCensus,
+		// update the parent organization counter
+		if err := a.db.IncrementOrganizationSubOrgsCounter(parentOrg); err != nil {
+			errors.ErrGenericInternalServerError.Withf("increment suborgs: %v", err).Write(w)
+			return
+		}
 	}
 	// create the organization
 	dbOrg := &db.Organization{
@@ -123,23 +122,25 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		TokensPurchased: 0,
 		TokensRemaining: 0,
 		Parent:          parentOrg,
-		Subscription:    *subscription,
+		Subscription: db.OrganizationSubscription{
+			PlanID:        defaultPlan.ID,
+			StartDate:     time.Now(),
+			Active:        true,
+			MaxCensusSize: defaultPlan.Organization.MaxCensus,
+		},
 	}
 	if err := a.db.SetOrganization(dbOrg); err != nil {
+		if orgInfo.Parent != nil {
+			if err := a.db.DecrementOrganizationSubOrgsCounter(parentOrg); err != nil {
+				log.Errorf("decrement suborgs: %v", err)
+			}
+		}
 		if err == db.ErrAlreadyExists {
 			errors.ErrInvalidOrganizationData.WithErr(err).Write(w)
 			return
 		}
 		errors.ErrGenericInternalServerError.Write(w)
 		return
-	}
-
-	// update the parent organization counter
-	if orgInfo.Parent != nil {
-		if err := a.db.IncrementOrganizationSubOrgsCounter(dbParentOrg.Address); err != nil {
-			errors.ErrGenericInternalServerError.Withf("could not update parent organization suborgs counter: %v", err).Write(w)
-			return
-		}
 	}
 	// send the organization back to the user
 	apicommon.HTTPWriteJSON(w, apicommon.OrganizationFromDB(dbOrg, dbParentOrg))
