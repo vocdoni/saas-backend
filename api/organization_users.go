@@ -143,6 +143,11 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// all pre-checks OK, now update the org users counter
+	if err := a.db.IncrementOrganizationUsersCounter(org.Address); err != nil {
+		errors.ErrGenericInternalServerError.Withf("increment users: %v", err).Write(w)
+		return
+	}
 	// create new invitation
 	orgInvite := &db.OrganizationInvite{
 		OrganizationAddress: org.Address,
@@ -152,10 +157,16 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 	}
 	// generate the verification code and the verification link
 	code, link, err := a.generateVerificationCodeAndLink(orgInvite, db.CodeTypeOrgInvite)
+	if err == db.ErrAlreadyExists {
+		if err := a.db.DecrementOrganizationUsersCounter(org.Address); err != nil {
+			log.Errorf("decrement users: %v", err)
+		}
+		errors.ErrDuplicateConflict.With("user is already invited to the organization").Write(w)
+		return
+	}
 	if err != nil {
-		if err == db.ErrAlreadyExists {
-			errors.ErrDuplicateConflict.With("user is already invited to the organization").Write(w)
-			return
+		if err := a.db.DecrementOrganizationUsersCounter(org.Address); err != nil {
+			log.Errorf("decrement users: %v", err)
 		}
 		errors.ErrGenericInternalServerError.Withf("could not create the invite: %v", err).Write(w)
 		return
@@ -169,14 +180,10 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 			Link         string
 		}{org.Address, code, link},
 	); err != nil {
+		// in this case we don't DecrementOrganizationUsersCounter because the invite was actually created,
+		// just the notification failed.
 		log.Warnw("could not send verification code email", "error", err)
 		errors.ErrGenericInternalServerError.Write(w)
-		return
-	}
-
-	// update the org users counter
-	if err := a.db.IncrementOrganizationUsersCounter(org.Address); err != nil {
-		errors.ErrGenericInternalServerError.Withf("could not update organization users counter: %v", err).Write(w)
 		return
 	}
 	apicommon.HTTPWriteOK(w)
@@ -451,6 +458,7 @@ func (a *API) deletePendingUserInvitationHandler(w http.ResponseWriter, r *http.
 
 	// update the org users counter
 	if err := a.db.DecrementOrganizationUsersCounter(org.Address); err != nil {
+		log.Errorf("decrement users: %v", err)
 		errors.ErrGenericInternalServerError.Withf("could not update organization users counter: %v", err).Write(w)
 		return
 	}
@@ -659,6 +667,7 @@ func (a *API) removeOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 
 	// update the org users counter
 	if err := a.db.DecrementOrganizationUsersCounter(org.Address); err != nil {
+		log.Errorf("decrement users: %v", err)
 		errors.ErrGenericInternalServerError.Withf("could not update organization users counter: %v", err).Write(w)
 		return
 	}

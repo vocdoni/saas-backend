@@ -331,7 +331,7 @@ func (ms *MongoStorage) IncrementOrganizationUsersCounter(address string) error 
 
 	org, err := ms.Organization(address)
 	if err != nil {
-		return fmt.Errorf("could not get organization: %v", err)
+		return fmt.Errorf("could not get organization: %w", err)
 	}
 
 	// Check if the organization has a subscription
@@ -341,7 +341,7 @@ func (ms *MongoStorage) IncrementOrganizationUsersCounter(address string) error 
 
 	plan, err := ms.Plan(org.Subscription.PlanID)
 	if err != nil {
-		return fmt.Errorf("could not get organization plan: %v", err)
+		return fmt.Errorf("could not get organization plan: %w", err)
 	}
 
 	if org.Counters.Users >= plan.Organization.Users {
