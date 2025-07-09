@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/vocdoni/saas-backend/internal"
@@ -570,4 +571,122 @@ func (ms *MongoStorage) orgMembersByIDs(
 	}
 
 	return totalPages, members, nil
+}
+
+// CheckOrgMemberAuthFields checks if the provided orgFields are valid for authentication
+// Checks the entire member base of an organization creating a projection that contains only
+// the provided auth fields and verifies that the resulting data do not have duplicates or
+// missing fields. Returns the corrsponding informative errors concerning duplicates or columns with empty values
+func (ms *MongoStorage) CheckOrgMemberAuthFields(
+	orgAddress string,
+	groupID string,
+	orgFields OrgMemberAuthFields,
+) (*OrgMemberAggregationResults, error) {
+	if len(orgAddress) == 0 {
+		return nil, ErrInvalidData
+	}
+	if len(orgFields) == 0 {
+		return nil, fmt.Errorf("no auth fields provided")
+	}
+
+	group, err := ms.OrganizationMemberGroup(groupID, orgAddress)
+	if err != nil {
+		if err == ErrNotFound {
+			return nil, fmt.Errorf("group %s not found for organization %s: %w", groupID, orgAddress, ErrInvalidData)
+		}
+		return nil, fmt.Errorf("failed to fetch group %s for organization %s: %w", groupID, orgAddress, err)
+	}
+	// Check if the group has members
+	if len(group.MemberIDs) == 0 {
+		return nil, fmt.Errorf("no members in group %s for organization %s", groupID, orgAddress)
+	}
+	objectIDs := make([]primitive.ObjectID, len(group.MemberIDs))
+	for i, id := range group.MemberIDs {
+		objID, err := primitive.ObjectIDFromHex(id)
+		if err != nil {
+			return nil, fmt.Errorf("invalid member ID %s: %w", id, ErrInvalidData)
+		}
+		objectIDs[i] = objID
+	}
+
+	results := OrgMemberAggregationResults{
+		Members:    make([]primitive.ObjectID, 0),
+		Duplicates: make([]primitive.ObjectID, 0),
+		Empties:    make([]primitive.ObjectID, 0),
+	}
+
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	// 1) Build find filter and projection
+	filter := bson.D{
+		{Key: "orgAddress", Value: orgAddress},
+		{Key: "_id", Value: bson.M{"$in": objectIDs}},
+	}
+	proj := bson.D{
+		{Key: "_id", Value: 1},
+		{Key: orgAddress, Value: 1},
+	}
+	for _, f := range orgFields {
+		proj = append(proj, bson.E{Key: string(f), Value: 1})
+	}
+	findOpts := options.Find().SetProjection(proj)
+
+	// 2) Fetch all matching docs
+	cur, err := ms.orgMembers.Find(ctx, filter, findOpts)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := cur.Close(ctx); err != nil {
+			log.Warnw("error closing cursor", "error", err)
+		}
+	}()
+
+	seenKeys := make(map[string]primitive.ObjectID, 50000)
+
+	// 4) Iterate and detect
+	for cur.Next(ctx) {
+		// decode into a map so we can handle dynamic fields
+		var m OrgMember
+		var bm bson.M
+		if err := cur.Decode(&m); err != nil {
+			return nil, err
+		}
+		if err := cur.Decode(&bm); err != nil {
+			return nil, err
+		}
+
+		// append to allDocs for potential insertion later
+		results.Members = append(results.Members, m.ID)
+
+		// build composite key & check for empties
+		keyParts := make([]string, len(orgFields))
+		rowEmpty := false
+		for i, f := range orgFields {
+			rawVal := bm[string(f)]
+			s := fmt.Sprint(rawVal)
+			if rawVal == nil || s == "" {
+				rowEmpty = true
+			}
+			keyParts[i] = s
+		}
+		if rowEmpty {
+			results.Empties = append(results.Empties, m.ID)
+		}
+
+		key := strings.Join(keyParts, "|")
+		if val, seen := seenKeys[key]; seen {
+			results.Duplicates = append(results.Duplicates, m.ID)
+			results.Duplicates = append(results.Duplicates, val)
+		} else {
+			seenKeys[key] = m.ID
+		}
+	}
+	if err := cur.Err(); err != nil {
+		return nil, err
+	}
+
+	return &results, nil
 }

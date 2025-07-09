@@ -18,6 +18,8 @@ import (
 const (
 	// CensusTypeSMSOrMail is the CSP based type of census that supports both SMS and mail.
 	CensusTypeSMSOrMail = "sms_or_mail"
+	CensusTypeMail      = "mail"
+	CensusTypeSMS       = "sms"
 )
 
 // addParticipantsToCensusWorkers is a map of job identifiers to the progress of adding participants to a census.
@@ -32,15 +34,15 @@ var addParticipantsToCensusWorkers sync.Map
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			request	body		apicommon.OrganizationCensus	true	"Census information"
-//	@Success		200		{object}	apicommon.OrganizationCensus
-//	@Failure		400		{object}	errors.Error	"Invalid input data"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Param			request	body		apicommon.CreateCensusRequest	true	"Census information"
+//	@Success		200		{object}	apicommon.CreateCensusResponse	"Returns the created census ID"
+//	@Failure		400		{object}	errors.Error					"Invalid input data"
+//	@Failure		401		{object}	errors.Error					"Unauthorized"
+//	@Failure		500		{object}	errors.Error					"Internal server error"
 //	@Router			/census [post]
 func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse request
-	censusInfo := &apicommon.OrganizationCensus{}
+	censusInfo := &apicommon.CreateCensusRequest{}
 	if err := json.NewDecoder(r.Body).Decode(&censusInfo); err != nil {
 		errors.ErrMalformedBody.Write(w)
 		return
@@ -54,25 +56,55 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// check the user has the necessary permissions
-	if !user.HasRoleFor(censusInfo.OrgAddress, db.ManagerRole) && !user.HasRoleFor(censusInfo.OrgAddress, db.AdminRole) {
-		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+	if hasAnyRole, err := a.db.UserHasAnyRoleInOrg(user.Email, censusInfo.OrgAddress); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	} else if !hasAnyRole {
+		// if the user does not have any role in the organization, return unauthorized
+		errors.ErrUnauthorized.Withf("user does not have a role in for the organization").Write(w)
+		return
+	}
+
+	if len(censusInfo.AuthFields) == 0 {
+		errors.ErrInvalidData.Withf("missing OrgMemberAuthFields").Write(w)
+		return
+	}
+	// check the org members to veriy tha the OrgMemberAuthFields can be used for authentication
+	aggregationResults, err := a.db.CheckOrgMemberAuthFields(
+		censusInfo.OrgAddress,
+		censusInfo.GroupID,
+		censusInfo.AuthFields,
+	)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if len(aggregationResults.Duplicates) > 0 || len(aggregationResults.Empties) > 0 {
+		// if there are incorrect members, return an error with the IDs of the incorrect members
+		errors.ErrInvalidCensusData.WithData(aggregationResults).Write(w)
 		return
 	}
 
 	census := &db.Census{
 		Type:       censusInfo.Type,
-		OrgAddress: util.TrimHex(censusInfo.OrgAddress),
+		OrgAddress: censusInfo.OrgAddress,
+		AuthFields: censusInfo.AuthFields,
 		CreatedAt:  time.Now(),
 	}
-	censusID, err := a.db.SetCensus(census)
+	var censusID string
+	if censusInfo.GroupID != "" {
+		censusID, err = a.db.SetGroupCensus(census, censusInfo.GroupID, aggregationResults.Members)
+	} else {
+		censusID, err = a.db.SetCensus(census)
+	}
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	apicommon.HTTPWriteJSON(w, apicommon.OrganizationCensus{
-		ID:         censusID,
-		Type:       census.Type,
-		OrgAddress: census.OrgAddress,
+
+	// add census members
+	apicommon.HTTPWriteJSON(w, apicommon.CreateCensusResponse{
+		ID: censusID,
 	})
 }
 
@@ -163,7 +195,7 @@ func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// add the org members as census participants in the database
-	progressChan, err := a.db.SetBulkCensusParticipant(
+	progressChan, err := a.db.SetBulkCensusOrgMemberParticipant(
 		passwordSalt,
 		censusID.String(),
 		members.DbOrgMembers(census.OrgAddress),
@@ -280,35 +312,45 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// check the user has the necessary permissions
-	if !user.HasRoleFor(census.OrgAddress, db.ManagerRole) && !user.HasRoleFor(census.OrgAddress, db.AdminRole) {
+	if hasAnyRole, err := a.db.UserHasAnyRoleInOrg(user.Email, census.OrgAddress); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	} else if !hasAnyRole {
+		// if the user does not have any role in the organization, return unauthorized
 		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
 
+	if len(census.Published.Root) > 0 {
+		// if the census is already published, return the censusInfo
+		apicommon.HTTPWriteJSON(w, &apicommon.PublishedCensusResponse{
+			URI:  census.Published.URI,
+			Root: census.Published.Root,
+		})
+		return
+	}
+
+	// if census.Type == CensusTypeSMSOrMail || census.Type == CenT {
 	// build the census and store it
 	cspSignerPubKey := a.account.PubKey // TODO: use a different key based on the censusID
-	var pubCensus *db.PublishedCensus
 	switch census.Type {
 	case CensusTypeSMSOrMail:
-		pubCensus = &db.PublishedCensus{
-			Census:    *census,
-			URI:       a.serverURL + "/process",
-			Root:      cspSignerPubKey.String(),
-			CreatedAt: time.Now(),
-		}
+		census.Published.Root = cspSignerPubKey
+		census.Published.URI = a.serverURL + "/process"
+		census.Published.CreatedAt = time.Now()
+
 	default:
 		errors.ErrCensusTypeNotFound.Write(w)
 		return
 	}
 
-	if err := a.db.SetPublishedCensus(pubCensus); err != nil {
+	if _, err := a.db.SetCensus(census); err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 
 	apicommon.HTTPWriteJSON(w, &apicommon.PublishedCensusResponse{
-		URI:      pubCensus.URI,
-		Root:     cspSignerPubKey,
-		CensusID: censusID,
+		URI:  census.Published.URI,
+		Root: cspSignerPubKey,
 	})
 }
