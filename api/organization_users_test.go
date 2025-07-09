@@ -208,8 +208,9 @@ func TestOrganizationUsers(t *testing.T) {
 		var pendingInvites apicommon.OrganizationInviteList
 		err = parseJSON(resp, &pendingInvites)
 		c.Assert(err, qt.IsNil)
-		c.Assert(len(pendingInvites.Invites), qt.Equals, nInvites,
-			qt.Commentf("expected %d pending invitations, got %d", nInvites, len(pendingInvites.Invites)))
+		expectedInvitesCount := min(nInvites, orgPlan.Organization.Users)
+		c.Assert(len(pendingInvites.Invites), qt.Equals, expectedInvitesCount,
+			qt.Commentf("expected %d pending invitations, got %d", expectedInvitesCount, len(pendingInvites.Invites)))
 	})
 
 	t.Run("UpdateOrganizationUserRole", func(t *testing.T) {
