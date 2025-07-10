@@ -16,6 +16,7 @@ import (
 	stripeProduct "github.com/stripe/stripe-go/v81/product"
 	stripeWebhook "github.com/stripe/stripe-go/v81/webhook"
 	stripeDB "github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -41,7 +42,7 @@ type SubscriptionInfo struct {
 	Status              string
 	ProductID           string
 	Quantity            int
-	OrganizationAddress string
+	OrganizationAddress internal.HexBytes
 	CustomerEmail       string
 	StartDate           time.Time
 	EndDate             time.Time
@@ -113,7 +114,7 @@ func GetSubscriptionInfoFromEvent(event stripeapi.Event) (*SubscriptionInfo, err
 			subscription.ID,
 		)
 	}
-	address := subscription.Metadata["address"]
+	address := internal.HexBytesFromString(subscription.Metadata["address"])
 	if len(address) == 0 {
 		return &SubscriptionInfo{}, fmt.Errorf("subscription %s does not contain an address in metadata", subscription.ID)
 	}

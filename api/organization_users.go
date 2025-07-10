@@ -60,7 +60,7 @@ func (a *API) organizationUsersHandler(w http.ResponseWriter, r *http.Request) {
 	for _, user := range users {
 		var role string
 		for _, userOrg := range user.Organizations {
-			if userOrg.Address == org.Address {
+			if userOrg.Address.Equals(org.Address) {
 				role = string(userOrg.Role)
 				break
 			}
@@ -175,7 +175,7 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 	// the invite link
 	if err := a.sendMail(r.Context(), invite.Email, mailtemplates.InviteNotification,
 		struct {
-			Organization string
+			Organization internal.HexBytes
 			Code         string
 			Link         string
 		}{org.Address, code, link},
@@ -227,7 +227,7 @@ func (a *API) acceptOrganizationUserInvitationHandler(w http.ResponseWriter, r *
 		return
 	}
 	// check if the organization is correct
-	if invitation.OrganizationAddress != org.Address {
+	if !invitation.OrganizationAddress.Equals(org.Address) {
 		errors.ErrUnauthorized.Withf("invitation is not for this organization").Write(w)
 		return
 	}
@@ -383,7 +383,7 @@ func (a *API) updatePendingUserInvitationHandler(w http.ResponseWriter, r *http.
 	// the invite link
 	if err := a.sendMail(r.Context(), orgInvite.NewUserEmail, mailtemplates.InviteNotification,
 		struct {
-			Organization string
+			Organization internal.HexBytes
 			Code         string
 			Link         string
 		}{org.Address, code, link},
@@ -446,7 +446,7 @@ func (a *API) deletePendingUserInvitationHandler(w http.ResponseWriter, r *http.
 		return
 	}
 	// check if the organization is correct
-	if invitation.OrganizationAddress != org.Address {
+	if !invitation.OrganizationAddress.Equals(org.Address) {
 		errors.ErrUnauthorized.Withf("invitation is not for this organization").Write(w)
 		return
 	}

@@ -76,7 +76,7 @@ func TestPublishedCensus(t *testing.T) {
 		c.Assert(retrieved.URI, qt.Equals, testURI)
 		c.Assert(retrieved.Root, qt.DeepEquals, testRoot)
 		c.Assert(retrieved.Census.ID, qt.Equals, testCensus.ID)
-		c.Assert(retrieved.Census.OrgAddress, qt.Equals, testCensus.OrgAddress)
+		c.Assert(retrieved.Census.OrgAddress, qt.DeepEquals, testCensus.OrgAddress)
 		c.Assert(retrieved.Census.Type, qt.Equals, testCensus.Type)
 		c.Assert(retrieved.CreatedAt.IsZero(), qt.IsFalse)
 

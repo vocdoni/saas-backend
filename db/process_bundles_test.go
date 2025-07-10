@@ -9,8 +9,8 @@ import (
 )
 
 var (
-	testProcessID2 = internal.HexBytes("test_process_id_2")
-	testProcessID3 = internal.HexBytes("test_process_id_3")
+	testProcessID2 = internal.HexBytesFromString("0x2222")
+	testProcessID3 = internal.HexBytesFromString("0x3333")
 )
 
 // Helper function to create a test process
@@ -52,10 +52,10 @@ func TestProcessBundles(t *testing.T) {
 
 		// Test with non-existent organization
 		nonExistentBundle := &ProcessesBundle{
-			OrgAddress: "non-existent-org",
+			OrgAddress: testNonExistentOrg,
 			Census: Census{
 				ID:         primitive.NewObjectID(),
-				OrgAddress: "non-existent-org",
+				OrgAddress: testNonExistentOrg,
 				Type:       CensusTypeMail,
 			},
 			CensusRoot: testProcessRoot,

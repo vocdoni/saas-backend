@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
@@ -42,7 +43,7 @@ func (ms *MongoStorage) SetProcess(process *Process) error {
 }
 
 // DeleteProcess removes a process
-func (ms *MongoStorage) DelProcess(processID []byte) error {
+func (ms *MongoStorage) DelProcess(processID internal.HexBytes) error {
 	if len(processID) == 0 {
 		return ErrInvalidData
 	}
@@ -59,7 +60,7 @@ func (ms *MongoStorage) DelProcess(processID []byte) error {
 }
 
 // Process retrieves a process from the DB based on its ID
-func (ms *MongoStorage) Process(processID []byte) (*Process, error) {
+func (ms *MongoStorage) Process(processID internal.HexBytes) (*Process, error) {
 	if len(processID) == 0 {
 		return nil, ErrInvalidData
 	}

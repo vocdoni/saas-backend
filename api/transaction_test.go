@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"testing"
 
-	ethcommon "github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/errors"
@@ -101,8 +100,7 @@ func TestSignTxHandler(t *testing.T) {
 	c.Assert(json.NewDecoder(orgsResp.Body).Decode(&orgsAddress), qt.IsNil)
 	c.Assert(orgsResp.Body.Close(), qt.IsNil)
 	// parse org address
-	strMainOrgAddress := orgsAddress.Addresses[0]
-	mainOrgAddress := ethcommon.HexToAddress(strMainOrgAddress)
+	mainOrgAddress := orgsAddress.Addresses[0]
 	c.Run("setAccountTx", func(c *qt.C) {
 		infoURI := "https://example.com"
 		authHeaders := map[string]string{

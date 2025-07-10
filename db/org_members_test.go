@@ -247,7 +247,7 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(updatedMember2.Name, qt.Equals, "Test Member 2")
 
 		// Test with empty organization address
-		_, err = testDB.SetBulkOrgMembers("", testSalt, members)
+		_, err = testDB.SetBulkOrgMembers(nil, testSalt, members)
 		c.Assert(err, qt.Not(qt.IsNil))
 	})
 }

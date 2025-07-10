@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -21,7 +22,7 @@ func (ms *MongoStorage) SetCensus(census *Census) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	if census.OrgAddress == "" {
+	if len(census.OrgAddress) == 0 {
 		return "", ErrInvalidData
 	}
 	// check that the org exists
@@ -100,7 +101,7 @@ func (ms *MongoStorage) Census(censusID string) (*Census, error) {
 // CensusesByOrg retrieves all the censuses for an organization based on its
 // address. It checks that the organization exists and returns an error if it
 // doesn't. If the organization exists, it returns the censuses.
-func (ms *MongoStorage) CensusesByOrg(orgAddress string) ([]*Census, error) {
+func (ms *MongoStorage) CensusesByOrg(orgAddress internal.HexBytes) ([]*Census, error) {
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
 	// create a context with a timeout

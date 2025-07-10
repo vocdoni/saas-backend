@@ -93,7 +93,7 @@ func (ms *MongoStorage) DelOrgMember(id string) error {
 }
 
 // OrgMember retrieves a orgMember from the DB based on it ID
-func (ms *MongoStorage) OrgMember(orgAddress, id string) (*OrgMember, error) {
+func (ms *MongoStorage) OrgMember(orgAddress internal.HexBytes, id string) (*OrgMember, error) {
 	objID, err := primitive.ObjectIDFromHex(id)
 	if err != nil {
 		return nil, ErrInvalidData
@@ -112,7 +112,7 @@ func (ms *MongoStorage) OrgMember(orgAddress, id string) (*OrgMember, error) {
 }
 
 // OrgMemberByMemberNumber retrieves a orgMember from the DB based on organization address and member number
-func (ms *MongoStorage) OrgMemberByMemberNumber(orgAddress, memberNumber string) (*OrgMember, error) {
+func (ms *MongoStorage) OrgMemberByMemberNumber(orgAddress internal.HexBytes, memberNumber string) (*OrgMember, error) {
 	if len(memberNumber) == 0 {
 		return nil, ErrInvalidData
 	}
@@ -151,7 +151,7 @@ func (j *BulkOrgMembersJob) ErrorsAsStrings() []string {
 
 // validateBulkOrgMembers validates the input parameters for bulk org members
 func (ms *MongoStorage) validateBulkOrgMembers(
-	orgAddress string,
+	orgAddress internal.HexBytes,
 	orgMembers []OrgMember,
 ) (*Organization, error) {
 	// Early returns for invalid input
@@ -172,7 +172,7 @@ func (ms *MongoStorage) validateBulkOrgMembers(
 }
 
 // prepareOrgMember processes a member for storage
-func prepareOrgMember(member *OrgMember, orgAddress, salt string, currentTime time.Time) []error {
+func prepareOrgMember(member *OrgMember, orgAddress internal.HexBytes, salt string, currentTime time.Time) []error {
 	var errors []error
 
 	// Assign a new internal ID if not provided
@@ -222,7 +222,7 @@ func prepareOrgMember(member *OrgMember, orgAddress, salt string, currentTime ti
 // and returns the number of members added (or updated) and any errors encountered.
 func (ms *MongoStorage) createOrgMemberBulkOperations(
 	members []OrgMember,
-	orgAddress string,
+	orgAddress internal.HexBytes,
 	salt string,
 	currentTime time.Time,
 ) (int, []error) {
@@ -313,7 +313,7 @@ func startOrgMemberProgressReporter(
 // processOrgMemberBatches processes members in batches and sends progress updates
 func (ms *MongoStorage) processOrgMemberBatches(
 	orgMembers []OrgMember,
-	orgAddress string,
+	orgAddress internal.HexBytes,
 	salt string,
 	progressChan chan<- *BulkOrgMembersJob,
 ) {
@@ -373,7 +373,7 @@ func (ms *MongoStorage) processOrgMemberBatches(
 // Returns a channel that sends the percentage of members processed every 10 seconds.
 // This function must be called in a goroutine.
 func (ms *MongoStorage) SetBulkOrgMembers(
-	orgAddress, salt string,
+	orgAddress internal.HexBytes, salt string,
 	orgMembers []OrgMember,
 ) (chan *BulkOrgMembersJob, error) {
 	progressChan := make(chan *BulkOrgMembersJob, 10)
@@ -398,7 +398,7 @@ func (ms *MongoStorage) SetBulkOrgMembers(
 }
 
 // OrgMembers retrieves paginated orgMembers for an organization from the DB
-func (ms *MongoStorage) OrgMembers(orgAddress string, page, pageSize int, search string) (int, []OrgMember, error) {
+func (ms *MongoStorage) OrgMembers(orgAddress internal.HexBytes, page, pageSize int, search string) (int, []OrgMember, error) {
 	if len(orgAddress) == 0 {
 		return 0, nil, ErrInvalidData
 	}
@@ -456,7 +456,7 @@ func (ms *MongoStorage) OrgMembers(orgAddress string, page, pageSize int, search
 	return totalPages, orgMembers, nil
 }
 
-func (ms *MongoStorage) DeleteOrgMembers(orgAddress string, ids []string) (int, error) {
+func (ms *MongoStorage) DeleteOrgMembers(orgAddress internal.HexBytes, ids []string) (int, error) {
 	if len(orgAddress) == 0 {
 		return 0, ErrInvalidData
 	}
@@ -494,7 +494,7 @@ func (ms *MongoStorage) DeleteOrgMembers(orgAddress string, ids []string) (int, 
 }
 
 // validateOrgMembers checks if the provided member IDs are valid
-func (ms *MongoStorage) validateOrgMembers(ctx context.Context, orgAddress string, members []string) error {
+func (ms *MongoStorage) validateOrgMembers(ctx context.Context, orgAddress internal.HexBytes, members []string) error {
 	if len(members) == 0 {
 		return fmt.Errorf("no members provided")
 	}
@@ -544,7 +544,7 @@ func (ms *MongoStorage) validateOrgMembers(ctx context.Context, orgAddress strin
 
 // getOrgMembersByIDs retrieves organization members by their IDs
 func (ms *MongoStorage) orgMembersByIDs(
-	orgAddress string,
+	orgAddress internal.HexBytes,
 	memberIDs []string,
 	page, pageSize int64,
 ) (int, []*OrgMember, error) {

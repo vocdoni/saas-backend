@@ -137,7 +137,7 @@ func (ms *MongoStorage) ProcessBundles() ([]*ProcessesBundle, error) {
 
 // ProcessBundlesByProcess retrieves process bundles that contain a specific process ID.
 // This allows finding all bundles that include a particular process.
-func (ms *MongoStorage) ProcessBundlesByProcess(processID []byte) ([]*ProcessesBundle, error) {
+func (ms *MongoStorage) ProcessBundlesByProcess(processID internal.HexBytes) ([]*ProcessesBundle, error) {
 	if len(processID) == 0 {
 		return nil, ErrInvalidData
 	}

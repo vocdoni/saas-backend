@@ -63,7 +63,7 @@ func TestCSPVoting(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(len(plans), qt.Not(qt.Equals), 0)
 
-		err = testDB.SetOrganizationSubscription(orgAddress.String(), &db.OrganizationSubscription{
+		err = testDB.SetOrganizationSubscription(orgAddress, &db.OrganizationSubscription{
 			PlanID:          plans[1].ID,
 			StartDate:       time.Now(),
 			RenewalDate:     time.Now().Add(time.Hour * 24),

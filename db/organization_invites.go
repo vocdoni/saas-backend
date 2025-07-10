@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -30,7 +31,7 @@ func (ms *MongoStorage) CreateInvitation(invite *OrganizationInvite) error {
 	// check if the inviting user belongs to the organization
 	partOfOrg := false
 	for _, org := range user.Organizations {
-		if org.Address == invite.OrganizationAddress {
+		if org.Address.Equals(invite.OrganizationAddress) {
 			partOfOrg = true
 			break
 		}
@@ -135,7 +136,7 @@ func (ms *MongoStorage) InvitationByEmail(email string) (*OrganizationInvite, er
 }
 
 // PendingInvitations returns the pending invitations for the given organization.
-func (ms *MongoStorage) PendingInvitations(organizationAddress string) ([]OrganizationInvite, error) {
+func (ms *MongoStorage) PendingInvitations(organizationAddress internal.HexBytes) ([]OrganizationInvite, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 

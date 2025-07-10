@@ -394,8 +394,7 @@ func testCreateOrganization(t *testing.T, jwt string) internal.HexBytes {
 	qt.Assert(t, err, qt.IsNil)
 	qt.Assert(t, orgResp.Address, qt.Not(qt.Equals), "")
 
-	addr := new(internal.HexBytes).SetString(orgResp.Address)
-	return *addr
+	return orgResp.Address
 }
 
 func testNewVocdoniClient(t *testing.T) *apiclient.HTTPclient {
@@ -502,7 +501,7 @@ func testCreateCensus(t *testing.T, token string, orgAddress internal.HexBytes, 
 	// Create a new census
 	censusInfo := &apicommon.OrganizationCensus{
 		Type:       db.CensusType(censusType),
-		OrgAddress: orgAddress.String(),
+		OrgAddress: orgAddress,
 	}
 	resp, code := testRequest(t, http.MethodPost, token, censusInfo, censusEndpoint)
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("failed to create census: %s", resp))

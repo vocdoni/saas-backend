@@ -61,7 +61,7 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 
 	census := &db.Census{
 		Type:       censusInfo.Type,
-		OrgAddress: util.TrimHex(censusInfo.OrgAddress),
+		OrgAddress: censusInfo.OrgAddress,
 		CreatedAt:  time.Now(),
 	}
 	censusID, err := a.db.SetCensus(census)

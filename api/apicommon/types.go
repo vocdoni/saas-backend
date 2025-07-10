@@ -17,7 +17,7 @@ import (
 // swagger:model OrganizationInfo
 type OrganizationInfo struct {
 	// The organization's blockchain address
-	Address string `json:"address"`
+	Address internal.HexBytes `json:"address"`
 
 	// The organization's website URL
 	Website string `json:"website"`
@@ -83,7 +83,7 @@ type OrganizationUser struct {
 // swagger:model OrganizationAddresses
 type OrganizationAddresses struct {
 	// List of organization blockchain addresses
-	Addresses []string `json:"addresses"`
+	Addresses []internal.HexBytes `json:"addresses"`
 }
 
 // UserOrganization represents the organization of a user including their role.
@@ -350,7 +350,7 @@ type TransactionData struct {
 // swagger:model MessageSignature
 type MessageSignature struct {
 	// Blockchain address
-	Address string `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Address internal.HexBytes `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
 
 	// Message payload bytes
 	Payload []byte `json:"payload,omitempty" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
@@ -644,7 +644,7 @@ type SubscriptionCheckout struct {
 	Amount int64 `json:"amount"`
 
 	// Organization address
-	Address string `json:"address"`
+	Address internal.HexBytes `json:"address"`
 
 	// Locale for the checkout page
 	Locale string `json:"locale"`
@@ -677,7 +677,7 @@ type OrganizationCensus struct {
 	Type db.CensusType `json:"type"`
 
 	// Organization address
-	OrgAddress string `json:"orgAddress"`
+	OrgAddress internal.HexBytes `json:"orgAddress"`
 }
 
 // OrganizationCensusFromDB converts a db.Census to an OrganizationCensus.
@@ -720,7 +720,7 @@ type AddMembersRequest struct {
 }
 
 // DbOrgMembers converts the members in the request to db.OrgMember objects.
-func (r *AddMembersRequest) DbOrgMembers(orgAddress string) []db.OrgMember {
+func (r *AddMembersRequest) DbOrgMembers(orgAddress internal.HexBytes) []db.OrgMember {
 	members := make([]db.OrgMember, 0, len(r.Members))
 	for _, p := range r.Members {
 		members = append(members, p.ToDb(orgAddress))
@@ -772,7 +772,7 @@ type OrgMember struct {
 }
 
 // ToDb converts an OrgMember to a db.OrgMember.
-func (p *OrgMember) ToDb(orgAddress string) db.OrgMember {
+func (p *OrgMember) ToDb(orgAddress internal.HexBytes) db.OrgMember {
 	parsedBirthDate := time.Time{}
 	if len(p.BirthDate) > 0 {
 		// Parse the birth date from string to time.Time

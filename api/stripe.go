@@ -13,6 +13,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/stripe"
 	"go.vocdoni.io/dvote/log"
 )
@@ -163,7 +164,7 @@ func (a *API) handlePaymentSucceeded(event *stripeapi.Event, w http.ResponseWrit
 		return false
 	}
 
-	org, err := a.db.Organization(orgAddress)
+	org, err := a.db.Organization(internal.HexBytesFromString(orgAddress))
 	if err != nil || org == nil {
 		log.Errorf("could not update payment from event because could not retrieve organization: %s \tEvent Type:%s",
 			event.ID, event.Type)
@@ -266,7 +267,7 @@ func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if checkout.Amount == 0 || checkout.Address == "" {
+	if checkout.Amount == 0 || len(checkout.Address) == 0 {
 		errors.ErrMalformedBody.Withf("Missing required fields").Write(w)
 		return
 	}
@@ -293,7 +294,7 @@ func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.R
 	}
 
 	session, err := stripe.CreateSubscriptionCheckoutSession(
-		plan.StripePriceID, checkout.ReturnURL, checkout.Address, org.Creator, checkout.Locale, checkout.Amount)
+		plan.StripePriceID, checkout.ReturnURL, checkout.Address.String(), org.Creator, checkout.Locale, checkout.Amount)
 	if err != nil {
 		errors.ErrStripeError.Withf("Cannot create session: %v", err).Write(w)
 		return

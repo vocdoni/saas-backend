@@ -468,7 +468,7 @@ func verifyEmail(email string, storedEmail string) error {
 }
 
 // verifyPhone checks if the provided phone matches the member's hashed phone
-func verifyPhone(orgAddress string, phone string, hashedPhone []byte) error {
+func verifyPhone(orgAddress internal.HexBytes, phone string, hashedPhone []byte) error {
 	if !bytes.Equal(internal.HashOrgData(orgAddress, phone), hashedPhone) {
 		return errors.ErrUnauthorized.Withf("invalid user phone")
 	}
@@ -488,7 +488,7 @@ func handleEmailContact(
 
 // handlePhoneContact verifies the phone and returns the appropriate contact method
 func handlePhoneContact(
-	orgAddress string,
+	orgAddress internal.HexBytes,
 	phone string,
 	hashedPhone []byte,
 ) (string, notifications.ChallengeType, error) {

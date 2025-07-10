@@ -118,7 +118,7 @@ func (*API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *http.
 	}
 	// get the user organizations information from the database if any
 	userAddresses := &apicommon.OrganizationAddresses{
-		Addresses: []string{},
+		Addresses: []internal.HexBytes{},
 	}
 	// get the addresses of the organizations where the user has write access
 	for _, org := range user.Organizations {

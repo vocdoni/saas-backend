@@ -6,14 +6,22 @@ import (
 	"os"
 	"testing"
 
+	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/test"
 )
 
 var testDB *MongoStorage
 
 // Common test constants
+var (
+	testOrgAddress        = internal.HexBytes{0x01, 0x23, 0x45, 0x67, 0x89}
+	testAnotherOrgAddress = internal.HexBytes{0x10, 0x11, 0x12, 0x13, 0x14}
+	testThirdOrgAddress   = internal.HexBytes{0xca, 0xfe, 0x03}
+	testFourthOrgAddress  = internal.HexBytes{0xca, 0xfe, 0x04}
+	testNonExistentOrg    = internal.HexBytes{0x01, 0x02, 0x03, 0x04}
+)
+
 const (
-	testOrgAddress   = "0x123456789"
 	testDBUserEmail  = "test@example.com"
 	testDBUserPass   = "testpass123"
 	testDBFirstName  = "Test"

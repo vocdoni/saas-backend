@@ -5,6 +5,7 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -56,7 +57,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		t.Run("InvalidData", func(_ *testing.T) {
 			// Test with invalid organization address
 			invalidGroup := &OrganizationMemberGroup{
-				OrgAddress:  "invalid_address",
+				OrgAddress:  internal.HexBytes{0x01, 0x23, 0x45},
 				Title:       "Test Group",
 				Description: "Test Description",
 				MemberIDs:   memberIDs,
@@ -90,7 +91,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			// Verify the group was created correctly
 			createdGroup, err := testDB.OrganizationMemberGroup(groupID, testOrgAddress)
 			c.Assert(err, qt.IsNil)
-			c.Assert(createdGroup.OrgAddress, qt.Equals, testOrgAddress)
+			c.Assert(createdGroup.OrgAddress, qt.DeepEquals, testOrgAddress)
 			c.Assert(createdGroup.Title, qt.Equals, "Test Group")
 			c.Assert(createdGroup.Description, qt.Equals, "Test Description")
 			c.Assert(createdGroup.MemberIDs, qt.DeepEquals, memberIDs)
@@ -125,7 +126,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			// Test getting existing group
 			retrievedGroup, err := testDB.OrganizationMemberGroup(groupID, testOrgAddress)
 			c.Assert(err, qt.IsNil)
-			c.Assert(retrievedGroup.OrgAddress, qt.Equals, testOrgAddress)
+			c.Assert(retrievedGroup.OrgAddress, qt.DeepEquals, testOrgAddress)
 			c.Assert(retrievedGroup.Title, qt.Equals, "Test Group")
 			c.Assert(retrievedGroup.Description, qt.Equals, "Test Description")
 			c.Assert(retrievedGroup.MemberIDs, qt.DeepEquals, memberIDs)
@@ -145,7 +146,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			c.Assert(err, qt.IsNil)
 
 			// Try to get the group with wrong organization address
-			_, err = testDB.OrganizationMemberGroup(groupID, "wrong_address")
+			_, err = testDB.OrganizationMemberGroup(groupID, testNonExistentOrg)
 			c.Assert(err, qt.Equals, ErrNotFound)
 		})
 	})
@@ -184,7 +185,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 
 			// Verify each group has the correct organization address
 			for _, group := range groups {
-				c.Assert(group.OrgAddress, qt.Equals, testOrgAddress)
+				c.Assert(group.OrgAddress, qt.DeepEquals, testOrgAddress)
 				c.Assert(group.CreatedAt.IsZero(), qt.IsFalse)
 				c.Assert(group.UpdatedAt.IsZero(), qt.IsFalse)
 			}
@@ -197,7 +198,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 
 			// Create a different organization
 			diffOrg := &Organization{
-				Address:   "different_org",
+				Address:   testAnotherOrgAddress,
 				Active:    true,
 				CreatedAt: time.Now(),
 			}
@@ -209,7 +210,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			for i := 0; i < 2; i++ {
 				memberNumber := "diff_member_" + string(rune('1'+i))
 				member := &OrgMember{
-					OrgAddress:   "different_org",
+					OrgAddress:   testAnotherOrgAddress,
 					MemberNumber: memberNumber,
 					Email:        "diff_" + string(rune('1'+i)) + "@example.com",
 					CreatedAt:    time.Now(),
@@ -235,7 +236,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			// Create groups for different organization
 			for i := 0; i < 3; i++ {
 				group := &OrganizationMemberGroup{
-					OrgAddress:  "different_org",
+					OrgAddress:  testAnotherOrgAddress,
 					Title:       "Org2 Group " + string(rune('1'+i)),
 					Description: "Org2 Description " + string(rune('1'+i)),
 					MemberIDs:   diffMemberIDs,
@@ -249,15 +250,15 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			c.Assert(err, qt.IsNil)
 			c.Assert(groups1, qt.HasLen, 2)
 			for _, group := range groups1 {
-				c.Assert(group.OrgAddress, qt.Equals, testOrgAddress)
+				c.Assert(group.OrgAddress, qt.DeepEquals, testOrgAddress)
 			}
 
 			// Test getting groups for different organization
-			_, groups2, err := testDB.OrganizationMemberGroups("different_org", 1, 10)
+			_, groups2, err := testDB.OrganizationMemberGroups(testAnotherOrgAddress, 1, 10)
 			c.Assert(err, qt.IsNil)
 			c.Assert(groups2, qt.HasLen, 3)
 			for _, group := range groups2 {
-				c.Assert(group.OrgAddress, qt.Equals, "different_org")
+				c.Assert(group.OrgAddress, qt.DeepEquals, testAnotherOrgAddress)
 			}
 		})
 	})
@@ -433,7 +434,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			c.Assert(err, qt.IsNil)
 
 			// Try to delete with wrong organization address
-			err = testDB.DeleteOrganizationMemberGroup(groupID, "wrong_address")
+			err = testDB.DeleteOrganizationMemberGroup(groupID, testNonExistentOrg)
 			c.Assert(err, qt.IsNil) // Should not error, just not delete anything
 
 			// Verify the group still exists
@@ -499,7 +500,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 
 			// Verify each member is from the correct organization
 			for _, member := range members {
-				c.Assert(member.OrgAddress, qt.Equals, testOrgAddress)
+				c.Assert(member.OrgAddress, qt.DeepEquals, testOrgAddress)
 			}
 
 			// Test pagination
@@ -526,7 +527,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			c.Assert(err, qt.IsNil)
 
 			// Try to list with wrong organization address
-			_, _, err = testDB.ListOrganizationMemberGroup(groupID, "wrong_address", 1, 10)
+			_, _, err = testDB.ListOrganizationMemberGroup(groupID, testNonExistentOrg, 1, 10)
 			c.Assert(err, qt.Not(qt.IsNil))
 		})
 	})

@@ -157,7 +157,7 @@ func main() {
 	var censusID string
 	err = client.makeRequest("POST", "/census", apicommon.OrganizationCensus{
 		Type:       db.CensusTypeSMSorMail,
-		OrgAddress: config.OrgAddress,
+		OrgAddress: internal.HexBytesFromString(config.OrgAddress),
 	}, &censusID)
 	if err != nil {
 		fmt.Printf("Error creating census: %v", err)
