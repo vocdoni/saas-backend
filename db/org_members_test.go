@@ -12,6 +12,215 @@ func TestOrgMembers(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
 
+	t.Run("CheckOrgMemberAuthFields", func(_ *testing.T) {
+		c.Assert(testDB.Reset(), qt.IsNil)
+		// Create org
+		organization := &Organization{
+			Address: testOrgAddress,
+		}
+		err := testDB.SetOrganization(organization)
+		c.Assert(err, qt.IsNil)
+
+		// Create members with various field combinations for testing
+		// Member 1: All fields valid
+		member1 := &OrgMember{
+			OrgAddress:   testOrgAddress,
+			Email:        testMemberEmail,
+			Phone:        testPhone,
+			MemberNumber: testMemberNumber,
+			Name:         testName,
+			Surname:      "Smith",
+			Password:     testPassword,
+		}
+		member1ID, err := testDB.SetOrgMember(testSalt, member1)
+		c.Assert(err, qt.IsNil)
+
+		// Member 2: All fields valid (different from member1)
+		member2 := &OrgMember{
+			OrgAddress:   testOrgAddress,
+			Email:        "member2@test.com",
+			Phone:        "+34678909091",
+			MemberNumber: "member456",
+			Name:         "Jane",
+			Surname:      "Doe",
+			Password:     testPassword,
+		}
+		member2ID, err := testDB.SetOrgMember(testSalt, member2)
+		c.Assert(err, qt.IsNil)
+
+		// Member 3: Duplicate fields with member1 (same name, surname, memberNumber)
+		member3 := &OrgMember{
+			OrgAddress:   testOrgAddress,
+			Email:        "member3@test.com",
+			Phone:        "+34678909092",
+			MemberNumber: testMemberNumber, // Same as member1
+			Name:         testName,         // Same as member1
+			Surname:      "Smith",          // Same as member1
+			Password:     testPassword,
+		}
+		member3ID, err := testDB.SetOrgMember(testSalt, member3)
+		c.Assert(err, qt.IsNil)
+
+		// Member 4: Empty fields
+		member4 := &OrgMember{
+			OrgAddress:   testOrgAddress,
+			Email:        "member4@test.com",
+			Phone:        "+34678909093",
+			MemberNumber: "", // Empty memberNumber
+			Name:         "", // Empty name
+			Surname:      "Johnson",
+			Password:     testPassword,
+		}
+		member4ID, err := testDB.SetOrgMember(testSalt, member4)
+		c.Assert(err, qt.IsNil)
+
+		// Create groups for testing
+		// Group 1: All members
+		allMembersGroup := &OrganizationMemberGroup{
+			OrgAddress:  testOrgAddress,
+			Title:       "All Members",
+			Description: "Group containing all test members",
+			MemberIDs:   []string{member1ID, member2ID, member3ID, member4ID},
+		}
+		allMembersGroupID, err := testDB.CreateOrganizationMemberGroup(allMembersGroup)
+		c.Assert(err, qt.IsNil)
+
+		// Group 2: Only members with duplicates (member1 and member3)
+		duplicatesGroup := &OrganizationMemberGroup{
+			OrgAddress:  testOrgAddress,
+			Title:       "Duplicates Group",
+			Description: "Group containing members with duplicate fields",
+			MemberIDs:   []string{member1ID, member3ID},
+		}
+		duplicatesGroupID, err := testDB.CreateOrganizationMemberGroup(duplicatesGroup)
+		c.Assert(err, qt.IsNil)
+
+		// Group 3: Only members without duplicates or empties (member2)
+		validGroup := &OrganizationMemberGroup{
+			OrgAddress:  testOrgAddress,
+			Title:       "Valid Group",
+			Description: "Group containing only valid members",
+			MemberIDs:   []string{member2ID},
+		}
+		validGroupID, err := testDB.CreateOrganizationMemberGroup(validGroup)
+		c.Assert(err, qt.IsNil)
+
+		// Note: We can't create an empty group through CreateOrganizationMemberGroup
+		// as it validates that MemberIDs is not empty, so we test this case with non-existent groups
+
+		// Test 1: Valid case - check fields with no duplicates or empties using valid group
+		authFields := OrgMemberAuthFields{
+			OrgMemberAuthFieldsEmail,
+		}
+		results, err := testDB.CheckOrgMemberAuthFields(testOrgAddress, validGroupID, authFields)
+		c.Assert(err, qt.IsNil)
+		c.Assert(results, qt.Not(qt.IsNil))
+		c.Assert(len(results.Members), qt.Equals, 1)    // Only 1 member in valid group
+		c.Assert(len(results.Duplicates), qt.Equals, 0) // No duplicates for email
+		c.Assert(len(results.Empties), qt.Equals, 0)    // No empties for email
+
+		// Test 2: Duplicate detection - check fields with known duplicates using duplicates group
+		authFields = OrgMemberAuthFields{
+			OrgMemberAuthFieldsName,
+			OrgMemberAuthFieldsSurname,
+			OrgMemberAuthFieldsMemberNumber,
+		}
+		results, err = testDB.CheckOrgMemberAuthFields(testOrgAddress, duplicatesGroupID, authFields)
+		c.Assert(err, qt.IsNil)
+		c.Assert(results, qt.Not(qt.IsNil))
+		c.Assert(len(results.Members), qt.Equals, 2) // Both members in duplicates group
+
+		// Should find duplicates (member1 and member3 have same name+surname+memberNumber)
+		c.Assert(len(results.Duplicates) >= 2, qt.Equals, true)
+
+		// Convert ObjectIDs to hex strings for easier comparison
+		duplicateIDs := make([]string, len(results.Duplicates))
+		for i, id := range results.Duplicates {
+			duplicateIDs[i] = id.Hex()
+		}
+
+		// Check that member1 and member3 IDs are in the duplicates list
+		c.Assert(contains(duplicateIDs, member1ID) && contains(duplicateIDs, member3ID), qt.Equals, true)
+
+		// Test 3: Empty field detection using all members group
+		authFields = OrgMemberAuthFields{
+			OrgMemberAuthFieldsName,
+			OrgMemberAuthFieldsMemberNumber,
+		}
+		results, err = testDB.CheckOrgMemberAuthFields(testOrgAddress, allMembersGroupID, authFields)
+		c.Assert(err, qt.IsNil)
+		c.Assert(results, qt.Not(qt.IsNil))
+
+		// Should find empties (member4 has empty name and memberNumber)
+		c.Assert(len(results.Empties) > 0, qt.Equals, true)
+
+		// Convert ObjectIDs to hex strings for easier comparison
+		emptyIDs := make([]string, len(results.Empties))
+		for i, id := range results.Empties {
+			emptyIDs[i] = id.Hex()
+		}
+
+		// Check that member4 ID is in the empties list
+		c.Assert(contains(emptyIDs, member4ID), qt.Equals, true)
+
+		// Test 4: Edge case - invalid organization address
+		_, err = testDB.CheckOrgMemberAuthFields("", validGroupID, authFields)
+		c.Assert(err, qt.Equals, ErrInvalidData)
+
+		// Test 5: Edge case - empty auth fields
+		_, err = testDB.CheckOrgMemberAuthFields(testOrgAddress, validGroupID, OrgMemberAuthFields{})
+		c.Assert(err, qt.Not(qt.IsNil)) // Should return an error for empty auth fields
+
+		// Test 6: Edge case - non-existent group ID
+		nonExistentGroupID := primitive.NewObjectID().Hex()
+		_, err = testDB.CheckOrgMemberAuthFields(testOrgAddress, nonExistentGroupID, authFields)
+		c.Assert(err, qt.Not(qt.IsNil)) // Should return an error for non-existent group
+
+		// Test 7: Edge case - group from different organization
+		// Create another organization
+		otherOrg := &Organization{
+			Address: "0xotherorg",
+		}
+		err = testDB.SetOrganization(otherOrg)
+		c.Assert(err, qt.IsNil)
+
+		// Create a member for the other organization
+		otherMember := &OrgMember{
+			OrgAddress:   "0xotherorg",
+			Email:        "other@test.com",
+			MemberNumber: "other123",
+			Name:         "Other",
+			Surname:      "Member",
+		}
+		otherMemberID, err := testDB.SetOrgMember(testSalt, otherMember)
+		c.Assert(err, qt.IsNil)
+
+		// Create a group for the other organization
+		otherGroup := &OrganizationMemberGroup{
+			OrgAddress:  "0xotherorg",
+			Title:       "Other Group",
+			Description: "Group from different organization",
+			MemberIDs:   []string{otherMemberID},
+		}
+		otherGroupID, err := testDB.CreateOrganizationMemberGroup(otherGroup)
+		c.Assert(err, qt.IsNil)
+
+		// Try to use the other organization's group with our organization
+		_, err = testDB.CheckOrgMemberAuthFields(testOrgAddress, otherGroupID, authFields)
+		c.Assert(err, qt.Not(qt.IsNil)) // Should return an error (group not found for this org)
+
+		// Test 8: Test with all members group to ensure filtering works correctly
+		authFields = OrgMemberAuthFields{
+			OrgMemberAuthFieldsEmail,
+		}
+		results, err = testDB.CheckOrgMemberAuthFields(testOrgAddress, allMembersGroupID, authFields)
+		c.Assert(err, qt.IsNil)
+		c.Assert(results, qt.Not(qt.IsNil))
+		c.Assert(len(results.Members), qt.Equals, 4)    // All 4 members should be found
+		c.Assert(len(results.Duplicates), qt.Equals, 0) // No duplicates for email
+		c.Assert(len(results.Empties), qt.Equals, 0)    // No empties for email
+	})
+
 	t.Run("SetOrgMember", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Create org

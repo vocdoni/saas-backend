@@ -53,22 +53,24 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pubCensus, err := a.db.PublishedCensus(
-		processInfo.PublishedCensusRoot.String(),
-		processInfo.PublishedCensusURI,
-		processInfo.CensusID.String(),
-	)
+	census, err := a.db.Census(processInfo.CensusID.String())
 	if err != nil {
 		if err == db.ErrNotFound {
-			errors.ErrMalformedURLParam.Withf("published census not found").Write(w)
+			errors.ErrMalformedURLParam.Withf("census not found").Write(w)
 			return
 		}
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 
+	if processInfo.PublishedCensusRoot.String() != census.Published.Root.String() ||
+		processInfo.PublishedCensusURI != census.Published.URI {
+		errors.ErrMalformedBody.Withf("published census root or URI does not match census").Write(w)
+		return
+	}
+
 	// check the user has the necessary permissions
-	if !user.HasRoleFor(pubCensus.Census.OrgAddress, db.ManagerRole) && !user.HasRoleFor(pubCensus.Census.OrgAddress, db.AdminRole) {
+	if !user.HasRoleFor(census.OrgAddress, db.ManagerRole) && !user.HasRoleFor(census.OrgAddress, db.AdminRole) {
 		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
@@ -81,10 +83,10 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 
 	// finally create the process
 	process := &db.Process{
-		ID:              processID,
-		PublishedCensus: *pubCensus,
-		Metadata:        processInfo.Metadata,
-		OrgAddress:      pubCensus.Census.OrgAddress,
+		ID:         processID,
+		Census:     *census,
+		Metadata:   processInfo.Metadata,
+		OrgAddress: census.OrgAddress,
 	}
 
 	if err := a.db.SetProcess(process); err != nil {

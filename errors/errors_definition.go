@@ -47,6 +47,7 @@ var (
 	ErrNotSupported            = Error{Code: 40025, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("feature not supported")}
 	ErrUserNoVoted             = Error{Code: 40026, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("user has not voted yet"), LogLevel: "info"}
 	ErrInvalidData             = Error{Code: 40027, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid data provided")}
+	ErrInvalidCensusData       = Error{Code: 40030, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid census data provided")}
 
 	// Transaction errors (400)
 	ErrCouldNotSignTransaction = Error{Code: 40006, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("transaction signing failed")}

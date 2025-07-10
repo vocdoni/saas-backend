@@ -1876,7 +1876,13 @@ Accepting files uploaded by forms as such:
 ```json
 {
   "type": "sms_or_mail",
-  "orgAddress": "0x..."
+  "orgAddress": "0x...",
+  "groupID": "group_id_hex",  // Optional: for creating a census based on an organization member group
+  "authFields": {             // Required: defines which member data should be used for authentication
+    "email": true,
+    "phone": true,
+    "password": false
+  }
 }
 ```
 
@@ -1888,12 +1894,22 @@ Returns the census ID
 }
 ```
 
+In case of empty or duplicate field an the error code `40030` is returned with the ids of the corrsponding members
+```json
+{
+  "empties": ["id1","id2",..]
+  "duplicates" ["id3","id4"]
+}
+
 * **Errors**
+In case the cen
 
 | HTTP Status | Error code | Message |
 |:---:|:---:|:---|
 | `401` | `40001` | `user not authorized` |
 | `400` | `40004` | `malformed JSON body` |
+| `400` | `40005` | `missing OrgMemberAuthFields` |
+| `400` | `40030` | `invalid census data` |
 | `500` | `50002` | `internal server error` |
 
 ### ℹ️ Get Census Info
