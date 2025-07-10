@@ -177,9 +177,9 @@ func prepareOrgMember(member *OrgMember, orgAddress, salt string, currentTime ti
 	// check if mail is valid
 	if member.Email != "" {
 		if _, err := mail.ParseAddress(member.Email); err != nil {
+			errors = append(errors, fmt.Errorf("could not parse from email: %s %v", member.Email, err))
 			// If email is invalid, set it to empty and store the error
 			member.Email = ""
-			errors = append(errors, fmt.Errorf("could not parse from email: %v", err))
 		}
 	}
 
@@ -189,7 +189,7 @@ func prepareOrgMember(member *OrgMember, orgAddress, salt string, currentTime ti
 		if err == nil {
 			member.HashedPhone = internal.HashOrgData(orgAddress, normalizedPhone)
 		} else {
-			errors = append(errors, fmt.Errorf("could not sanitize phone number: %v", err))
+			errors = append(errors, fmt.Errorf("could not sanitize phone number: %s %v", member.Phone, err))
 		}
 		member.Phone = ""
 	}
