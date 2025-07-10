@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net/mail"
 	"time"
 
 	"github.com/vocdoni/saas-backend/internal"
@@ -163,7 +164,9 @@ func (ms *MongoStorage) validateBulkOrgMembers(
 }
 
 // prepareOrgMember processes a member for storage
-func prepareOrgMember(member *OrgMember, orgAddress, salt string, currentTime time.Time) {
+func prepareOrgMember(member *OrgMember, orgAddress, salt string, currentTime time.Time) []error {
+	var errors []error
+
 	// Assign a new internal ID if not provided
 	if member.ID == primitive.NilObjectID {
 		member.ID = primitive.NewObjectID()
@@ -171,11 +174,20 @@ func prepareOrgMember(member *OrgMember, orgAddress, salt string, currentTime ti
 	member.OrgAddress = orgAddress
 	member.CreatedAt = currentTime
 
+	// check if mail is valid
+	if member.Email != "" {
+		if _, err := mail.ParseAddress(member.Email); err != nil {
+			errors = append(errors, fmt.Errorf("could not parse from email: %v", err))
+		}
+	}
+
 	// Hash phone if valid
 	if member.Phone != "" {
 		normalizedPhone, err := internal.SanitizeAndVerifyPhoneNumber(member.Phone)
 		if err == nil {
 			member.HashedPhone = internal.HashOrgData(orgAddress, normalizedPhone)
+		} else {
+			errors = append(errors, fmt.Errorf("could not sanitize phone number: %v", err))
 		}
 		member.Phone = ""
 	}
@@ -185,6 +197,7 @@ func prepareOrgMember(member *OrgMember, orgAddress, salt string, currentTime ti
 		member.HashedPass = internal.HashPassword(salt, member.Password)
 		member.Password = ""
 	}
+	return errors
 }
 
 // createOrgMemberBulkOperations creates a batch of members using bulk write operations,
@@ -200,7 +213,8 @@ func (ms *MongoStorage) createOrgMemberBulkOperations(
 
 	for _, member := range members {
 		// Prepare the member
-		prepareOrgMember(&member, orgAddress, salt, currentTime)
+		validationErrors := prepareOrgMember(&member, orgAddress, salt, currentTime)
+		errors = append(errors, validationErrors...)
 
 		// Create filter for existing members and update document
 		filter := bson.M{
