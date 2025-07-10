@@ -2,6 +2,7 @@ package db
 
 import (
 	"testing"
+	"time"
 
 	qt "github.com/frankban/quicktest"
 	"github.com/google/uuid"
@@ -12,6 +13,7 @@ var (
 	testAuthToken    = internal.HexBytes(uuid.New().String())
 	invalidAuthToken = internal.HexBytes(uuid.New().String())
 	testUserID       = internal.HexBytes([]byte("123456"))
+	testUserID2      = internal.HexBytes([]byte("7890"))
 	testUserAddress  = internal.HexBytes([]byte("address"))
 	testCSPBundleID  = internal.HexBytes([]byte("bundleID"))
 	testCSPProcessID = internal.HexBytes([]byte("processID"))
@@ -61,6 +63,42 @@ func TestSetGetCSPAuth(t *testing.T) {
 		c.Assert(testDB.SetCSPAuth(secondToken, testUserID, testCSPBundleID), qt.IsNil)
 		// get last token
 		token, err = testDB.LastCSPAuth(testUserID, testCSPBundleID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(token.Token, qt.DeepEquals, secondToken)
+		c.Assert(token.UserID, qt.DeepEquals, testUserID)
+		c.Assert(token.BundleID, qt.DeepEquals, testCSPBundleID)
+		c.Assert(token.Verified, qt.IsFalse)
+	})
+	c.Run("last token race", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
+		spamFunc := func() {
+			for i := range 100 {
+				token := internal.HexBytes(uuid.New().String())
+				c.Assert(testDB.SetCSPAuth(token, testUserID2, testCSPBundleID), qt.IsNil)
+				c.Log("spam SetCSPAuth", testUserID2, i)
+			}
+		}
+		go spamFunc()
+		time.Sleep(10 * time.Millisecond)
+		// set first token
+		firtstToken := internal.HexBytes(uuid.New().String())
+		c.Assert(testDB.SetCSPAuth(firtstToken, testUserID, testCSPBundleID), qt.IsNil)
+		c.Log("SetCSPAuth", testUserID)
+		// get last token
+		token, err := testDB.LastCSPAuth(testUserID, testCSPBundleID)
+		c.Log("LastCSPAuth", testUserID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(token.Token, qt.DeepEquals, firtstToken)
+		c.Assert(token.UserID, qt.DeepEquals, testUserID)
+		c.Assert(token.BundleID, qt.DeepEquals, testCSPBundleID)
+		c.Assert(token.Verified, qt.IsFalse)
+		// set second token
+		secondToken := internal.HexBytes(uuid.New().String())
+		c.Assert(testDB.SetCSPAuth(secondToken, testUserID, testCSPBundleID), qt.IsNil)
+		c.Log("again SetCSPAuth", testUserID)
+		// get last token
+		token, err = testDB.LastCSPAuth(testUserID, testCSPBundleID)
+		c.Log("again LastCSPAuth", testUserID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(token.Token, qt.DeepEquals, secondToken)
 		c.Assert(token.UserID, qt.DeepEquals, testUserID)
