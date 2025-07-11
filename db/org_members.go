@@ -395,8 +395,13 @@ func (ms *MongoStorage) OrgMembers(orgAddress string, page, pageSize int, search
 		"orgAddress": orgAddress,
 	}
 	if len(search) > 0 {
-		filter["$text"] = bson.M{
-			"$search": search,
+		filter["$or"] = []bson.M{
+			{"email": bson.M{"$regex": search, "$options": "i"}},
+			{"memberNumber": bson.M{"$regex": search, "$options": "i"}},
+			{"nationalID": bson.M{"$regex": search, "$options": "i"}},
+			{"name": bson.M{"$regex": search, "$options": "i"}},
+			{"surname": bson.M{"$regex": search, "$options": "i"}},
+			{"birthDate": bson.M{"$regex": search, "$options": "i"}},
 		}
 	}
 
