@@ -188,9 +188,10 @@ func (ms *MongoStorage) UpdateOrganizationUserRole(address string, userID uint64
 		},
 	}
 
-	_, err := ms.users.UpdateOne(ctx, filter, update)
-	if err != nil {
+	if result, err := ms.users.UpdateOne(ctx, filter, update); err != nil {
 		return err
+	} else if result.MatchedCount == 0 {
+		return fmt.Errorf("either user has no role in organization, or organization doesn't exist (user %d, org %s)", userID, address)
 	}
 	return nil
 }
@@ -214,9 +215,10 @@ func (ms *MongoStorage) RemoveOrganizationUser(address string, userID uint64) er
 			},
 		},
 	}
-	_, err := ms.users.UpdateOne(ctx, filter, update)
-	if err != nil {
+	if result, err := ms.users.UpdateOne(ctx, filter, update); err != nil {
 		return err
+	} else if result.MatchedCount == 0 {
+		return fmt.Errorf("either user has no role in organization, or organization doesn't exist (user %d, org %s)", userID, address)
 	}
 	return nil
 }
@@ -236,8 +238,10 @@ func (ms *MongoStorage) SetOrganizationSubscription(address string, orgSubscript
 	filter := bson.M{"_id": bson.M{"$regex": address, "$options": "i"}}
 	updateDoc := bson.M{"$set": bson.M{"subscription": orgSubscription}}
 	// update the organization in the database
-	if _, err := ms.organizations.UpdateOne(ctx, filter, updateDoc); err != nil {
+	if result, err := ms.organizations.UpdateOne(ctx, filter, updateDoc); err != nil {
 		return err
+	} else if result.MatchedCount == 0 {
+		return fmt.Errorf("no organization found with address: %s", address)
 	}
 	return nil
 }
@@ -254,8 +258,10 @@ func (ms *MongoStorage) AddOrganizationMeta(address string, meta map[string]any)
 	filter := bson.M{"_id": bson.M{"$regex": address, "$options": "i"}}
 	updateDoc := bson.M{"$set": bson.M{"meta": meta}}
 	// update the organization in the database
-	if _, err := ms.organizations.UpdateOne(ctx, filter, updateDoc); err != nil {
+	if result, err := ms.organizations.UpdateOne(ctx, filter, updateDoc); err != nil {
 		return err
+	} else if result.MatchedCount == 0 {
+		return fmt.Errorf("no organization found with address: %s", address)
 	}
 	return nil
 }
