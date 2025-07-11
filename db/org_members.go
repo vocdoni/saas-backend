@@ -141,6 +141,14 @@ type BulkOrgMembersJob struct {
 	Errors   []error `json:"errors"`
 }
 
+func (j *BulkOrgMembersJob) ErrorsAsStrings() []string {
+	s := []string{}
+	for _, err := range j.Errors {
+		s = append(s, err.Error())
+	}
+	return s
+}
+
 // validateBulkOrgMembers validates the input parameters for bulk org members
 func (ms *MongoStorage) validateBulkOrgMembers(
 	orgAddress string,
@@ -364,15 +372,9 @@ func (ms *MongoStorage) SetBulkOrgMembers(
 
 	// Validate input parameters
 	org, err := ms.validateBulkOrgMembers(orgAddress, orgMembers)
-	if err != nil {
+	if err != nil || org == nil {
 		close(progressChan)
 		return progressChan, err
-	}
-
-	// If no members, return empty channel
-	if org == nil {
-		close(progressChan)
-		return progressChan, nil
 	}
 
 	// Start processing in a goroutine

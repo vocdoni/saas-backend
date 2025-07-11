@@ -33,7 +33,8 @@ definitions:
         type: integer
       errors:
         description: Errors encountered during job
-        items: {}
+        items:
+          type: string
         type: array
       jobId:
         description: Job ID for tracking the addition process
