@@ -2,6 +2,7 @@
 package internal
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"math/big"
@@ -18,8 +19,7 @@ type HexBytes []byte
 
 // SetBytes sets the raw bytes of the HexBytes.
 func (hb *HexBytes) SetBytes(b []byte) *HexBytes {
-	newHb := HexBytes(b)
-	*hb = newHb
+	*hb = HexBytes(bytes.Clone(b))
 	return hb
 }
 
@@ -39,11 +39,10 @@ func (hb *HexBytes) BigInt() *big.Int {
 	return new(big.Int).SetBytes(*hb)
 }
 
-// SetString decodes a hex string into the HexBytes. It strips a leading '0x'
-// or '0X' if found, for backwards compatibility. Panics if the string is not a
-// valid hex string.
-func (hb *HexBytes) SetString(s string) *HexBytes {
-	// strip a leading "0x" prefix, for backwards compatibility.
+// ParseString decodes a hex string into the HexBytes. It strips a leading '0x'
+// or '0X' if found, for backwards compatibility. Also pads with a leading '0' if the length is odd.
+func (hb *HexBytes) ParseString(s string) error {
+	// Strip a leading "0x" prefix, for backwards compatibility.
 	if len(s) >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X') {
 		s = s[2:]
 	}
@@ -53,9 +52,21 @@ func (hb *HexBytes) SetString(s string) *HexBytes {
 	}
 	b, err := hex.DecodeString(s)
 	if err != nil {
+		return err
+	}
+	*hb = HexBytes(b)
+	return err
+}
+
+// SetString decodes a hex string into the HexBytes. It strips a leading '0x'
+// or '0X' if found, for backwards compatibility. Also pads with a leading '0' if the length is odd.
+// Panics if the resulting string is not a valid hex string.
+func (hb *HexBytes) SetString(s string) *HexBytes {
+	err := hb.ParseString(s)
+	if err != nil {
 		panic(err)
 	}
-	return hb.SetBytes(b)
+	return hb
 }
 
 // String returns the hex string representation of the HexBytes.
@@ -92,17 +103,6 @@ func (hb *HexBytes) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	return nil
-}
-
-// ParseString decodes a hex string into the HexBytes.
-func (hb *HexBytes) ParseString(str string) error {
-	// Strip a leading "0x" prefix, for backwards compatibility.
-	if len(str) >= 2 && str[0] == '0' && (str[1] == 'x' || str[1] == 'X') {
-		str = str[2:]
-	}
-	var err error
-	(*hb), err = hex.DecodeString(str)
-	return err
 }
 
 // Address returns the Ethereum Address of the HexBytes.

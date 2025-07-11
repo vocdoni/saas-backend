@@ -350,7 +350,7 @@ type TransactionData struct {
 // swagger:model MessageSignature
 type MessageSignature struct {
 	// Blockchain address
-	Address string `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Address internal.HexBytes `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
 
 	// Message payload bytes
 	Payload []byte `json:"payload,omitempty" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`

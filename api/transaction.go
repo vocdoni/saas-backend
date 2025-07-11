@@ -156,13 +156,13 @@ func (a *API) signMessageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// check if the user has the admin role for the organization
-	if !user.HasRoleFor(signReq.Address, db.AdminRole) {
+	if !user.HasRoleFor(signReq.Address.String(), db.AdminRole) {
 		errors.ErrUnauthorized.With("user does not have admin role").Write(w)
 		return
 	}
 	// get the organization info from the database with the address provided in
 	// the request
-	org, err := a.db.Organization(signReq.Address)
+	org, err := a.db.Organization(signReq.Address.String())
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrOrganizationNotFound.Withf("organization not found").Write(w)
