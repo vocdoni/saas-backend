@@ -199,6 +199,14 @@ func prepareOrgMember(member *OrgMember, orgAddress, salt string, currentTime ti
 		member.HashedPass = internal.HashPassword(salt, member.Password)
 		member.Password = ""
 	}
+
+	// Check that the birthdate is valid
+	if len(member.BirthDate) > 0 {
+		if _, err := time.Parse("2006-01-02", member.BirthDate); err != nil {
+			errors = append(errors, fmt.Errorf("invalid birthdate format: %s %v", member.BirthDate, err))
+			member.BirthDate = "" // Reset invalid birthdate
+		}
+	}
 	return errors
 }
 
