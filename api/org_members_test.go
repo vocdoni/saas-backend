@@ -172,9 +172,9 @@ func TestOrganizationMembers(t *testing.T) {
 				Name:       "Pedro",
 				Surname:    "Martinez",
 				NationalID: "44556677F",
-				BirthDate:  "1992-11-25",
-				Email:      "pedro.martinez@example.com",
-				Phone:      "+34600555666",
+				BirthDate:  "invalid-birthdate",
+				Email:      "invalid-email",
+				Phone:      "invalid-phone",
 				Password:   "passwordabc",
 				Other: map[string]any{
 					"department": "Operations",
@@ -198,6 +198,10 @@ func TestOrganizationMembers(t *testing.T) {
 	err = json.Unmarshal(resp, &addedResponse)
 	c.Assert(err, qt.IsNil)
 	c.Assert(addedResponse.Count, qt.Equals, uint32(3))
+	c.Assert(addedResponse.Errors, qt.HasLen, 3)
+	c.Assert(addedResponse.Errors[0], qt.Matches, ".*invalid-email.*")
+	c.Assert(addedResponse.Errors[1], qt.Matches, ".*invalid-phone.*")
+	c.Assert(addedResponse.Errors[2], qt.Matches, ".*invalid-birthdate.*")
 
 	// Test 3: Get organization members (now with added members)
 	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "members")

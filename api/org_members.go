@@ -174,7 +174,7 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 		// Return the number of members added
 		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{
 			Count:  uint32(lastProgress.Added),
-			Errors: lastProgress.Errors,
+			Errors: lastProgress.ErrorsAsStrings(),
 		})
 		return
 	}
