@@ -141,6 +141,14 @@ type BulkOrgMembersJob struct {
 	Errors   []error `json:"errors"`
 }
 
+func (j *BulkOrgMembersJob) ErrorsAsStrings() []string {
+	s := []string{}
+	for _, err := range j.Errors {
+		s = append(s, err.Error())
+	}
+	return s
+}
+
 // validateBulkOrgMembers validates the input parameters for bulk org members
 func (ms *MongoStorage) validateBulkOrgMembers(
 	orgAddress string,

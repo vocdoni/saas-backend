@@ -846,7 +846,7 @@ type AddMembersResponse struct {
 	Count uint32 `json:"count"`
 
 	// Errors encountered during job
-	Errors []error `json:"errors"`
+	Errors []string `json:"errors"`
 
 	// Job ID for tracking the addition process
 	JobID internal.HexBytes `json:"jobId" swaggertype:"string" format:"hex" example:"deadbeef"`
