@@ -38,19 +38,13 @@ func (ms *MongoStorage) SetProcessBundle(bundle *ProcessesBundle) (internal.HexB
 	defer cancel()
 
 	// If the bundle has an ID, update it, otherwise create a new one
-	if bundle.ID.IsZero() {
-		if _, err := ms.processBundles.InsertOne(ctx, bundle); err != nil {
-			return nil, fmt.Errorf("failed to create process bundle: %w", err)
-		}
-	} else {
-		filter := bson.M{"_id": bundle.ID}
-		update := bson.M{"$set": bundle}
-		opts := &options.UpdateOptions{}
-		opts.SetUpsert(true)
+	filter := bson.M{"_id": bundle.ID}
+	update := bson.M{"$set": bundle}
+	opts := &options.UpdateOptions{}
+	opts.SetUpsert(true)
 
-		if _, err := ms.processBundles.UpdateOne(ctx, filter, update, opts); err != nil {
-			return nil, fmt.Errorf("failed to update process bundle: %w", err)
-		}
+	if _, err := ms.processBundles.UpdateOne(ctx, filter, update, opts); err != nil {
+		return nil, fmt.Errorf("failed to update process bundle: %w", err)
 	}
 
 	return *new(internal.HexBytes).SetString(bundle.ID.Hex()), nil
