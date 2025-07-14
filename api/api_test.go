@@ -331,7 +331,7 @@ func testRequest(t *testing.T, method, jwt string, jsonBody any, urlPath ...stri
 
 // testCreateUser creates a new user with the given password and returns the JWT token.
 func testCreateUser(t *testing.T, password string) string {
-	n := internal.RandomInt(10000)
+	n := internal.RandomInt(100000000000)
 	mail := fmt.Sprintf("%d%s", n, testEmail)
 
 	// Register a new user
@@ -341,8 +341,8 @@ func testCreateUser(t *testing.T, password string) string {
 		FirstName: fmt.Sprintf("%d%s", n, testFirstName),
 		LastName:  fmt.Sprintf("%d%s", n, testLastName),
 	}
-	_, status := testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
-	qt.Assert(t, status, qt.Equals, http.StatusOK)
+	resp, status := testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
+	qt.Assert(t, status, qt.Equals, http.StatusOK, qt.Commentf("resp: %q", resp))
 
 	// Get the verification code from the email
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
