@@ -166,8 +166,8 @@ type Object struct {
 type CensusType string
 
 const (
-	// CensusTypeMail is used when the organizer uploads a list of names, memberNumbers and e‑mails.
-	CensusTypePass      CensusType = "pass"
+	// CensusTypeMail is used when the organizer uploads a list of names, memberIDs and e‑mails.
+	CensusTypeAuthOnly  CensusType = "auth"
 	CensusTypeMail      CensusType = "mail"
 	CensusTypeSMS       CensusType = "sms"
 	CensusTypeSMSorMail CensusType = "sms_or_mail"
@@ -175,11 +175,16 @@ const (
 
 // Census represents the information of a set of census participants
 type Census struct {
-	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`
-	OrgAddress common.Address     `json:"orgAddress" bson:"orgAddress"`
-	Type       CensusType         `json:"type" bson:"type"`
-	CreatedAt  time.Time          `json:"createdAt" bson:"createdAt"`
-	UpdatedAt  time.Time          `json:"updatedAt" bson:"updatedAt"`
+	ID          primitive.ObjectID   `json:"id" bson:"_id,omitempty"`
+	OrgAddress  common.Address       `json:"orgAddress" bson:"orgAddress"`
+	Type        CensusType           `json:"type" bson:"type"`
+	GroupID     primitive.ObjectID   `json:"groupId" bson:"groupId"`
+	Published   PublishedCensus      `json:"published" bson:"published"`
+	AuthFields  OrgMemberAuthFields  `json:"orgMemberAuthFields" bson:"orgMemberAuthFields"`
+	TwoFaFields OrgMemberTwoFaFields `json:"orgMemberTwoFaFields" bson:"orgMemberTwoFaFields"`
+
+	CreatedAt time.Time `json:"createdAt" bson:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt" bson:"updatedAt"`
 }
 
 // An org member belongs to an organization and her details that will be
@@ -188,6 +193,7 @@ type Census struct {
 //
 //nolint:lll
 type OrgMember struct {
+	// Also referred to as member UID
 	ID primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	// OrgAddress can be used for future sharding
 	OrgAddress     common.Address `json:"orgAddress" bson:"orgAddress"`
@@ -205,6 +211,40 @@ type OrgMember struct {
 	Other          map[string]any `json:"other" bson:"other"`
 	CreatedAt      time.Time      `json:"createdAt" bson:"createdAt"`
 	UpdatedAt      time.Time      `json:"updatedAt" bson:"updatedAt"`
+}
+
+// OrgMemberAuthFields defines the fields that can be used for member authentication.
+type OrgMemberAuthField string
+
+const (
+	OrgMemberAuthFieldsName         OrgMemberAuthField = "name"
+	OrgMemberAuthFieldsSurname      OrgMemberAuthField = "surname"
+	OrgMemberAuthFieldsMemberNumber OrgMemberAuthField = "memberNumber"
+	OrgMemberAuthFieldsNationalID   OrgMemberAuthField = "nationalID"
+	OrgMemberAuthFieldsBirthDate    OrgMemberAuthField = "birthDate"
+)
+
+// OrgMemberAuthFields is a list of fields that can be used for member authentication.
+type OrgMemberAuthFields []OrgMemberAuthField
+
+// OrgMemberTwoFaField defines the fields that can be used for two-factor authentication.
+type OrgMemberTwoFaField string
+
+const (
+	OrgMemberTwoFaFieldEmail OrgMemberTwoFaField = "email"
+	OrgMemberTwoFaFieldPhone OrgMemberTwoFaField = "phone"
+)
+
+// OrgMemberTwoFaFields is a list of fields that can be used for two-factor authentication.
+type OrgMemberTwoFaFields []OrgMemberTwoFaField
+
+type OrgMemberAggregationResults struct {
+	// MemberIDs is a list of member IDs that are result of the aggregation
+	Members []primitive.ObjectID `json:"memberIds" bson:"memberIds"`
+	// Duplicates is a list of member IDs that were found to be duplicates in string
+	Duplicates []primitive.ObjectID `json:"duplicates" bson:"duplicates"`
+	// Empties is a list of member IDs that had colums were found to be empty in string
+	Empties []primitive.ObjectID `json:"empties" bson:"empties"`
 }
 
 // An Organization members' group is a precursor of a census, and is simply a
@@ -232,10 +272,9 @@ type CensusParticipant struct {
 // Represents a published census as a census is represented in the vochain
 // The publishedCensus is tied to a Census
 type PublishedCensus struct {
-	URI       string    `json:"uri" bson:"uri"`
-	Root      string    `json:"root" bson:"root"`
-	Census    Census    `json:"census" bson:"census"`
-	CreatedAt time.Time `json:"createdAt" bson:"createdAt"`
+	URI       string            `json:"uri" bson:"uri"`
+	Root      internal.HexBytes `json:"root" bson:"root"`
+	CreatedAt time.Time         `json:"createdAt" bson:"createdAt"`
 }
 
 // Process represents a voting process in the vochain
@@ -244,10 +283,10 @@ type PublishedCensus struct {
 //
 //nolint:lll
 type Process struct {
-	ID              internal.HexBytes `json:"id" bson:"_id"  swaggertype:"string" format:"hex" example:"deadbeef"`
-	OrgAddress      common.Address    `json:"orgAdress" bson:"orgAddress"`
-	PublishedCensus PublishedCensus   `json:"publishedCensus" bson:"publishedCensus"`
-	Metadata        []byte            `json:"metadata,omitempty"  bson:"metadata"  swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
+	ID         internal.HexBytes `json:"id" bson:"_id"  swaggertype:"string" format:"hex" example:"deadbeef"`
+	OrgAddress common.Address    `json:"orgAdress" bson:"orgAddress"`
+	Census     Census            `json:"census" bson:"census"`
+	Metadata   []byte            `json:"metadata,omitempty"  bson:"metadata"  swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 }
 
 // ProcessesBundle represents a group of voting processes that share a common census.
@@ -257,7 +296,6 @@ type Process struct {
 type ProcessesBundle struct {
 	ID         primitive.ObjectID  `json:"id" bson:"_id,omitempty"`                                                               // Unique identifier for the bundle
 	Census     Census              `json:"census" bson:"census"`                                                                  // The census associated with this bundle
-	CensusRoot string              `json:"censusRoot" bson:"censusRoot"`                                                          // The census root public key
 	OrgAddress common.Address      `json:"orgAddress" bson:"orgAddress"`                                                          // The organization that owns this bundle
 	Processes  []internal.HexBytes `json:"processes" bson:"processes" swaggertype:"array,string" format:"hex" example:"deadbeef"` // Array of process IDs included in this bundle
 }

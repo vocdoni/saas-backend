@@ -1872,11 +1872,37 @@ Accepting files uploaded by forms as such:
 * **Method** `POST`
 * **Headers**
   * `Authentication: Bearer <user_token>`
+* **Description**
+  Creates a new census for an organization. Requires any role in the organization.
+  Creates either a regular census or a group-based census if GroupID is provided.
+  Validates that either AuthFields or TwoFaFields are provided and checks for duplicates or empty fields.
+  
+  **Possible values for authFields:**
+  - "name" - Member's name
+  - "surname" - Member's surname
+  - "memberNumber" - Member's unique number
+  - "nationalID" - Member's national ID
+  - "birthDate" - Member's birth date
+  
+  **Possible values for twoFaFields:**
+  - "email" - Member's email address
+  - "phone" - Member's phone number
+  
 * **Request body**
 ```json
 {
   "type": "sms_or_mail",
-  "orgAddress": "0x..."
+  "orgAddress": "0x...",
+  "groupID": "group_id_hex",  // Optional: for creating a census based on an organization member group
+  "authFields": [             // At least one of authFields or twoFaFields must be provided
+    "name",
+    "memberNumber",
+    "nationalID"
+  ],
+  "twoFaFields": [            // Optional: defines which member data should be used for two-factor authentication
+    "email",
+    "phone"
+  ]
 }
 ```
 
@@ -1884,7 +1910,16 @@ Accepting files uploaded by forms as such:
 Returns the census ID
 ```json
 {
-  "censusID": "67bdfcfaeeb24a44660ec461"
+  "ID": "67bdfcfaeeb24a44660ec461"
+}
+```
+
+* **Error Response**
+In case of empty or duplicate fields, the error code `40030` is returned with the IDs of the corresponding members
+```json
+{
+  "empties": ["id1","id2"],
+  "duplicates": ["id3","id4"]
 }
 ```
 
@@ -1894,6 +1929,8 @@ Returns the census ID
 |:---:|:---:|:---|
 | `401` | `40001` | `user not authorized` |
 | `400` | `40004` | `malformed JSON body` |
+| `400` | `40005` | `missing both AuthFields and TwoFaFields` |
+| `400` | `40030` | `invalid census data` |
 | `500` | `50002` | `internal server error` |
 
 ### ℹ️ Get Census Info

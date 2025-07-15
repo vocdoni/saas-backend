@@ -9,6 +9,322 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
+func TestSetGroupCensus(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
+
+	t.Run("FallbackToSetCensus", func(_ *testing.T) {
+		c.Assert(testDB.Reset(), qt.IsNil)
+		// Create test organization first
+		org := &Organization{
+			Address:   testOrgAddress,
+			Active:    true,
+			CreatedAt: time.Now(),
+		}
+		err := testDB.SetOrganization(org)
+		c.Assert(err, qt.IsNil)
+
+		// Test with empty groupID (should fallback to SetCensus behavior)
+		census := &Census{
+			OrgAddress: testOrgAddress,
+			Type:       CensusTypeMail,
+		}
+
+		// Call SetGroupCensus with empty groupID
+		censusID, err := testDB.SetGroupCensus(census, "", nil)
+		c.Assert(err, qt.IsNil)
+		c.Assert(censusID, qt.Not(qt.Equals), "")
+
+		// Verify the census was created correctly
+		createdCensus, err := testDB.Census(censusID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(createdCensus.OrgAddress, qt.Equals, testOrgAddress)
+		c.Assert(createdCensus.Type, qt.Equals, CensusTypeMail)
+		c.Assert(createdCensus.CreatedAt.IsZero(), qt.IsFalse)
+		// GroupID should be empty since we didn't specify a group
+		c.Assert(createdCensus.GroupID, qt.Equals, primitive.NilObjectID)
+	})
+
+	t.Run("InputValidation", func(_ *testing.T) {
+		c.Assert(testDB.Reset(), qt.IsNil)
+		// Create test organization first
+		org := &Organization{
+			Address:   testOrgAddress,
+			Active:    true,
+			CreatedAt: time.Now(),
+		}
+		err := testDB.SetOrganization(org)
+		c.Assert(err, qt.IsNil)
+
+		// Test with empty orgAddress
+		invalidCensus := &Census{
+			OrgAddress: common.Address{},
+			Type:       CensusTypeMail,
+		}
+		_, err = testDB.SetGroupCensus(invalidCensus, "some-group-id", nil)
+		c.Assert(err, qt.Equals, ErrInvalidData)
+
+		// Test with non-existent organization
+		nonExistentCensus := &Census{
+			OrgAddress: testNonExistentOrg,
+			Type:       CensusTypeMail,
+		}
+		_, err = testDB.SetGroupCensus(nonExistentCensus, "some-group-id", nil)
+		c.Assert(err, qt.Not(qt.IsNil))
+		c.Assert(err.Error(), qt.Contains, "invalid data provided")
+
+		// Test with non-existent group
+		nonExistentGroupCensus := &Census{
+			OrgAddress: testOrgAddress,
+			Type:       CensusTypeMail,
+		}
+		nonExistentGroupID := primitive.NewObjectID().Hex()
+		_, err = testDB.SetGroupCensus(nonExistentGroupCensus, nonExistentGroupID, nil)
+		c.Assert(err, qt.Not(qt.IsNil))
+		c.Assert(err.Error(), qt.Contains, "invalid data provided")
+
+		// Test with invalid groupID format
+		invalidGroupCensus := &Census{
+			OrgAddress: testOrgAddress,
+			Type:       CensusTypeMail,
+		}
+		_, err = testDB.SetGroupCensus(invalidGroupCensus, "invalid-group-id-format", nil)
+		c.Assert(err, qt.Not(qt.IsNil))
+	})
+
+	t.Run("GroupValidation", func(_ *testing.T) {
+		c.Assert(testDB.Reset(), qt.IsNil)
+		// Create test organizations
+		org1 := &Organization{
+			Address:   testOrgAddress,
+			Active:    true,
+			CreatedAt: time.Now(),
+		}
+		err := testDB.SetOrganization(org1)
+		c.Assert(err, qt.IsNil)
+
+		org2 := &Organization{
+			Address:   testAnotherOrgAddress,
+			Active:    true,
+			CreatedAt: time.Now(),
+		}
+		err = testDB.SetOrganization(org2)
+		c.Assert(err, qt.IsNil)
+
+		// Create members for org1
+		member1 := &OrgMember{
+			OrgAddress: testOrgAddress,
+			Email:      "member1@example.com",
+			Name:       "Member 1",
+		}
+		member1ID, err := testDB.SetOrgMember(testSalt, member1)
+		c.Assert(err, qt.IsNil)
+
+		// Create members for org2
+		member2 := &OrgMember{
+			OrgAddress: testAnotherOrgAddress,
+			Email:      "member2@example.com",
+			Name:       "Member 2",
+		}
+		member2ID, err := testDB.SetOrgMember(testSalt, member2)
+		c.Assert(err, qt.IsNil)
+
+		// Create a group for org1
+		group1 := &OrganizationMemberGroup{
+			OrgAddress:  testOrgAddress,
+			Title:       "Test Group 1",
+			Description: "Test Group 1 Description",
+			MemberIDs:   []string{member1ID},
+		}
+		group1ID, err := testDB.CreateOrganizationMemberGroup(group1)
+		c.Assert(err, qt.IsNil)
+
+		// Create a group for org2
+		group2 := &OrganizationMemberGroup{
+			OrgAddress:  testAnotherOrgAddress,
+			Title:       "Test Group 2",
+			Description: "Test Group 2 Description",
+			MemberIDs:   []string{member2ID},
+		}
+		group2ID, err := testDB.CreateOrganizationMemberGroup(group2)
+		c.Assert(err, qt.IsNil)
+
+		// Test with valid organization but group belonging to different organization
+		census1 := &Census{
+			OrgAddress: testOrgAddress,
+			Type:       CensusTypeMail,
+		}
+		_, err = testDB.SetGroupCensus(census1, group2ID, nil)
+		c.Assert(err, qt.Not(qt.IsNil))
+		c.Assert(err.Error(), qt.Contains, "invalid data provided")
+
+		// Test with valid group and organization combination
+		census2 := &Census{
+			OrgAddress: testOrgAddress,
+			Type:       CensusTypeMail,
+		}
+		censusID, err := testDB.SetGroupCensus(census2, group1ID, nil)
+		c.Assert(err, qt.IsNil)
+		c.Assert(censusID, qt.Not(qt.Equals), "")
+
+		// Verify the census was created correctly with the group ID
+		createdCensus, err := testDB.Census(censusID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(createdCensus.OrgAddress, qt.Equals, testOrgAddress)
+		c.Assert(createdCensus.Type, qt.Equals, CensusTypeMail)
+		c.Assert(createdCensus.GroupID.Hex(), qt.Equals, group1ID)
+	})
+
+	t.Run("CensusCreation", func(_ *testing.T) {
+		c.Assert(testDB.Reset(), qt.IsNil)
+		// Create test organization
+		org := &Organization{
+			Address:   testOrgAddress,
+			Active:    true,
+			CreatedAt: time.Now(),
+		}
+		err := testDB.SetOrganization(org)
+		c.Assert(err, qt.IsNil)
+
+		// Create a member for the group
+		member := &OrgMember{
+			OrgAddress: testOrgAddress,
+			Email:      "member@example.com",
+			Name:       "Test Member",
+		}
+		memberID, err := testDB.SetOrgMember(testSalt, member)
+		c.Assert(err, qt.IsNil)
+
+		// Create a group
+		group := &OrganizationMemberGroup{
+			OrgAddress:  testOrgAddress,
+			Title:       "Test Group",
+			Description: "Test Group Description",
+			MemberIDs:   []string{memberID},
+		}
+		groupID, err := testDB.CreateOrganizationMemberGroup(group)
+		c.Assert(err, qt.IsNil)
+
+		// Test creating new census with group
+		census := &Census{
+			OrgAddress: testOrgAddress,
+			Type:       CensusTypeMail,
+		}
+		censusID, err := testDB.SetGroupCensus(census, groupID, nil)
+		c.Assert(err, qt.IsNil)
+		c.Assert(censusID, qt.Not(qt.Equals), "")
+
+		// Verify the census was created correctly
+		createdCensus, err := testDB.Census(censusID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(createdCensus.OrgAddress, qt.Equals, testOrgAddress)
+		c.Assert(createdCensus.Type, qt.Equals, CensusTypeMail)
+		c.Assert(createdCensus.GroupID.Hex(), qt.Equals, groupID)
+		c.Assert(createdCensus.CreatedAt.IsZero(), qt.IsFalse)
+
+		// Test updating existing census with group
+		createdCensus.Type = CensusTypeSMS
+
+		// Ensure different UpdatedAt timestamp
+		time.Sleep(time.Millisecond)
+
+		// Update census
+		updatedID, err := testDB.SetGroupCensus(createdCensus, groupID, nil)
+		c.Assert(err, qt.IsNil)
+		c.Assert(updatedID, qt.Equals, censusID)
+
+		// Verify the census was updated correctly
+		updatedCensus, err := testDB.Census(updatedID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(updatedCensus.Type, qt.Equals, CensusTypeSMS)
+		c.Assert(updatedCensus.GroupID.Hex(), qt.Equals, groupID)
+		c.Assert(updatedCensus.CreatedAt, qt.Equals, createdCensus.CreatedAt)
+		c.Assert(updatedCensus.UpdatedAt.After(createdCensus.CreatedAt), qt.IsTrue)
+	})
+
+	t.Run("ParticipantHandling", func(_ *testing.T) {
+		c.Assert(testDB.Reset(), qt.IsNil)
+		// Create test organization
+		org := &Organization{
+			Address:   testOrgAddress,
+			Active:    true,
+			CreatedAt: time.Now(),
+		}
+		err := testDB.SetOrganization(org)
+		c.Assert(err, qt.IsNil)
+
+		// Create test members
+		member1 := &OrgMember{
+			OrgAddress: testOrgAddress,
+			Email:      "member1@example.com",
+			Name:       "Member 1",
+		}
+		member1ID, err := testDB.SetOrgMember(testSalt, member1)
+		c.Assert(err, qt.IsNil)
+		c.Assert(member1ID, qt.Not(qt.Equals), "")
+		member1ObjID, err := primitive.ObjectIDFromHex(member1ID)
+		c.Assert(err, qt.IsNil)
+		member1.ID = member1ObjID
+
+		member2 := &OrgMember{
+			OrgAddress: testOrgAddress,
+			Email:      "member2@example.com",
+			Name:       "Member 2",
+		}
+		member2ID, err := testDB.SetOrgMember(testSalt, member2)
+		c.Assert(err, qt.IsNil)
+		c.Assert(member2ID, qt.Not(qt.Equals), "")
+		member2ObjID, err := primitive.ObjectIDFromHex(member2ID)
+		c.Assert(err, qt.IsNil)
+		member2.ID = member2ObjID
+
+		// Create a group with one of the members
+		group := &OrganizationMemberGroup{
+			OrgAddress:  testOrgAddress,
+			Title:       "Test Group",
+			Description: "Test Group Description",
+			MemberIDs:   []string{member1ID},
+		}
+		groupID, err := testDB.CreateOrganizationMemberGroup(group)
+		c.Assert(err, qt.IsNil)
+
+		// Test with empty participantIDs array (no participants added)
+		census1 := &Census{
+			OrgAddress: testOrgAddress,
+			Type:       CensusTypeMail,
+		}
+		censusID1, err := testDB.SetGroupCensus(census1, groupID, nil)
+		c.Assert(err, qt.IsNil)
+
+		// Verify no participants were added
+		participants1, err := testDB.CensusParticipants(censusID1)
+		c.Assert(err, qt.IsNil)
+		c.Assert(participants1, qt.HasLen, 0)
+
+		// Test with valid participantIDs
+		census2 := &Census{
+			OrgAddress: testOrgAddress,
+			Type:       CensusTypeMail,
+		}
+		participantIDs := []primitive.ObjectID{member1.ID, member2.ID}
+		censusID2, err := testDB.SetGroupCensus(census2, groupID, participantIDs)
+		c.Assert(err, qt.IsNil)
+
+		// Verify participants were added
+		participants2, err := testDB.CensusParticipants(censusID2)
+		c.Assert(err, qt.IsNil)
+		c.Assert(participants2, qt.HasLen, 2)
+
+		// Verify the correct participants were added
+		participantMap := make(map[string]bool)
+		for _, p := range participants2 {
+			participantMap[p.ParticipantID] = true
+		}
+		c.Assert(participantMap[member1.ID.Hex()], qt.IsTrue)
+		c.Assert(participantMap[member2.ID.Hex()], qt.IsTrue)
+	})
+}
+
 func TestCensus(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })

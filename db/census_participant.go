@@ -363,10 +363,10 @@ func startProgressReporter(
 // and returns the census if valid
 func (ms *MongoStorage) validateBulkCensusParticipant(
 	censusID string,
-	orgMembers []OrgMember,
+	orgMembersSize int,
 ) (*Census, error) {
 	// Early returns for invalid input
-	if len(orgMembers) == 0 {
+	if orgMembersSize == 0 {
 		return nil, nil // Not an error, just no work to do
 	}
 	if len(censusID) == 0 {
@@ -450,19 +450,19 @@ func (ms *MongoStorage) processBatches(
 	}
 }
 
-// SetBulkCensusParticipant creates or updates an org member and a census participant in the database.
+// SetBulkCensusOrgMemberParticipant creates or updates an org member and a census participant in the database.
 // If the participant already exists (same participantID and censusID), it updates it.
 // If it doesn't exist, it creates a new one.
 // Processes members in batches of 200 entries.
 // Returns a channel that sends the percentage of members processed every 10 seconds.
 // This function must be called in a goroutine.
-func (ms *MongoStorage) SetBulkCensusParticipant(
+func (ms *MongoStorage) SetBulkCensusOrgMemberParticipant(
 	salt, censusID string, orgMembers []OrgMember,
 ) (chan *BulkCensusParticipantStatus, error) {
 	progressChan := make(chan *BulkCensusParticipantStatus, 10)
 
 	// Validate input parameters
-	census, err := ms.validateBulkCensusParticipant(censusID, orgMembers)
+	census, err := ms.validateBulkCensusParticipant(censusID, len(orgMembers))
 	if err != nil {
 		close(progressChan)
 		return progressChan, err
@@ -478,6 +478,47 @@ func (ms *MongoStorage) SetBulkCensusParticipant(
 	go ms.processBatches(orgMembers, census, censusID, salt, progressChan)
 
 	return progressChan, nil
+}
+
+func (ms *MongoStorage) setBulkCensusParticipant(
+	ctx context.Context, censusID string, memberIDs []primitive.ObjectID,
+) error {
+	currentTime := time.Now()
+	docs := make([]mongo.WriteModel, 0, len(memberIDs))
+	for _, pid := range memberIDs {
+		// Create participant filter and document
+		id := pid.Hex()
+		censusParticipantsFilter := bson.M{
+			"participantID": id,
+			"censusId":      censusID,
+		}
+		participantDoc := &CensusParticipant{
+			ParticipantID: id,
+			CensusID:      censusID,
+			CreatedAt:     currentTime,
+			UpdatedAt:     currentTime,
+		}
+
+		// Create participant update document
+		updateParticipantDoc, err := dynamicUpdateDocument(participantDoc, nil)
+		if err != nil {
+			log.Warnw("failed to create update document for participant",
+				"error", err, "participantID", id)
+			continue
+		}
+
+		// Create participant upsert model
+		upsertCensusParticipantsModel := mongo.NewUpdateOneModel().
+			SetFilter(censusParticipantsFilter).
+			SetUpdate(updateParticipantDoc).
+			SetUpsert(true)
+		docs = append(docs, upsertCensusParticipantsModel)
+	}
+	// Unordered makes it continue on errors (e.g., one dup), but you can set Ordered=true if you prefer.
+	bulkOpts := options.BulkWrite().SetOrdered(false)
+
+	_, err := ms.censusParticipants.BulkWrite(ctx, docs, bulkOpts)
+	return err
 }
 
 // CensusParticipants retrieves all the census participants for a given census.

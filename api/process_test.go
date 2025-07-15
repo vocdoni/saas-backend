@@ -34,6 +34,9 @@ func TestProcess(t *testing.T) {
 	censusInfo := &apicommon.OrganizationCensus{
 		Type:       db.CensusTypeSMSorMail,
 		OrgAddress: orgAddress,
+		AuthFields: db.OrgMemberAuthFields{
+			db.OrgMemberAuthFieldsMemberNumber,
+		},
 	}
 	resp, code = testRequest(t, http.MethodPost, adminToken, censusInfo, censusEndpoint)
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))

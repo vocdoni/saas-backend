@@ -81,7 +81,6 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		// Create the process bundle
 		bundle := &db.ProcessesBundle{
 			ID:         bundleID,
-			CensusRoot: censusRoot.String(),
 			OrgAddress: census.OrgAddress,
 			Census:     *census,
 		}
@@ -130,7 +129,6 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	bundle := &db.ProcessesBundle{
 		ID:         bundleID,
 		Processes:  processes,
-		CensusRoot: cspPubKey.String(),
 		OrgAddress: census.OrgAddress,
 		Census:     *census,
 	}
@@ -207,14 +205,9 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	if len(req.Processes) == 0 {
-		var rootHex internal.HexBytes
-		if err := rootHex.ParseString(bundle.CensusRoot); err != nil {
-			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-			return
-		}
 		apicommon.HTTPWriteJSON(w, apicommon.CreateProcessBundleResponse{
 			URI:  "/process/bundle/" + bundleIDStr,
-			Root: rootHex,
+			Root: bundle.Census.Published.Root,
 		})
 		return
 	}
@@ -248,14 +241,9 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var rootHex internal.HexBytes
-	if err := rootHex.ParseString(bundle.CensusRoot); err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
 	apicommon.HTTPWriteJSON(w, apicommon.CreateProcessBundleResponse{
 		URI:  "/process/bundle/" + bundleIDStr,
-		Root: rootHex,
+		Root: bundle.Census.Published.Root,
 	})
 }
 

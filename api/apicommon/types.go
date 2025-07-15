@@ -679,18 +679,48 @@ type OrganizationCensus struct {
 
 	// Organization address
 	OrgAddress common.Address `json:"orgAddress"`
+
+	// Optional for creating a census based on an organization member group
+	GroupID string `json:"groupID,omitempty"`
+
+	// Optional for defining which member data should be used for authentication
+	AuthFields db.OrgMemberAuthFields `json:"authFields,omitempty"`
+
+	// Optional for defining which member data should be used for two-factor authentication
+	TwoFaFields db.OrgMemberTwoFaFields `json:"twoFaFields,omitempty"`
 }
 
-// OrganizationCensusFromDB converts a db.Census to an OrganizationCensus.
-func OrganizationCensusFromDB(census *db.Census) OrganizationCensus {
-	if census == nil {
-		return OrganizationCensus{}
-	}
-	return OrganizationCensus{
-		ID:         census.ID.Hex(),
-		Type:       census.Type,
-		OrgAddress: census.OrgAddress,
-	}
+// CreateCensusRequest represents a request to create a new census for an organization.
+// swagger:model CreateCensusRequest
+type CreateCensusRequest struct {
+	// Type of census to create
+	Type db.CensusType `json:"type"`
+
+	// Organization address
+	OrgAddress common.Address `json:"orgAddress"`
+
+	// Optional for creating a census based on an organization member group
+	GroupID string `json:"groupID,omitempty"`
+
+	// Optional for defining which member data should be used for authentication
+	AuthFields db.OrgMemberAuthFields `json:"authFields,omitempty"`
+
+	// Optional for defining which member data should be used for two-factor authentication
+	TwoFaFields db.OrgMemberTwoFaFields `json:"twoFaFields,omitempty"`
+}
+
+type CreateCensusResponse struct {
+	// Unique identifier for the census
+	ID string `json:"censusID,omitempty"`
+
+	MemberWarnings db.OrgMemberAggregationResults `json:"memberWarnings,omitempty"`
+}
+
+// PublishCensusRequest represents a request to create a new census for an organization.
+// swagger:model PublishCensusRequest
+type PublishCensusRequest struct {
+	// Type of census to create
+	Type db.CensusType `json:"type"`
 }
 
 // PublishedCensusResponse represents a published census.
@@ -701,9 +731,21 @@ type PublishedCensusResponse struct {
 
 	// Merkle root of the census
 	Root internal.HexBytes `json:"root" bson:"root" swaggertype:"string" format:"hex" example:"deadbeef"`
+}
 
-	// Census ID
-	CensusID internal.HexBytes `json:"censusId" bson:"censusId" swaggertype:"string" format:"hex" example:"deadbeef"`
+// OrganizationCensusFromDB converts a db.Census to an OrganizationCensus.
+func OrganizationCensusFromDB(census *db.Census) OrganizationCensus {
+	if census == nil {
+		return OrganizationCensus{}
+	}
+	return OrganizationCensus{
+		ID:          census.ID.Hex(),
+		Type:        census.Type,
+		OrgAddress:  census.OrgAddress,
+		GroupID:     census.GroupID.Hex(),
+		TwoFaFields: census.TwoFaFields,
+		AuthFields:  census.AuthFields,
+	}
 }
 
 // OrganizationCensuses wraps a list of censuses of an organization.

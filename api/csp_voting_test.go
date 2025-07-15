@@ -146,7 +146,14 @@ func TestCSPVoting(t *testing.T) {
 			// Create a census and add members
 			t.Run("Create Census and Bundle", func(_ *testing.T) {
 				// Create a new census
-				censusID := testCreateCensus(t, token, orgAddress, string(db.CensusTypeSMSorMail))
+
+				authFields := db.OrgMemberAuthFields{}
+				// use the email for two-factor authentication
+				twoFaFields := db.OrgMemberTwoFaFields{
+					db.OrgMemberTwoFaFieldEmail,
+				}
+
+				censusID := testCreateCensus(t, token, orgAddress, authFields, twoFaFields)
 
 				// Generate test members
 				members := testGenerateTestMembers(5) // Increased to 5 members for more test cases
