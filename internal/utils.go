@@ -8,8 +8,8 @@ import (
 	"math/big"
 	"regexp"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/nyaruka/phonenumbers"
-	"go.vocdoni.io/dvote/log"
 	"golang.org/x/crypto/argon2"
 )
 
@@ -82,18 +82,8 @@ func HashVerificationCode(userEmail, code string) string {
 }
 
 // HashOrgData hashes organization data using the organization address as salt.
-func HashOrgData(orgAddress, data string) []byte {
-	var salt []byte
-	hb := HexBytes{}
-	if err := hb.ParseString(orgAddress); err != nil {
-		// This should never happened but if it does, let's try to keep going
-		log.Warnw("invalid org address for hashing", "address", orgAddress)
-		salt = []byte(orgAddress)
-	} else {
-		salt = hb.Bytes()
-	}
-
-	return argon2hash([]byte(data), salt)
+func HashOrgData(orgAddress common.Address, data string) []byte {
+	return argon2hash([]byte(data), orgAddress.Bytes())
 }
 
 func argon2hash(data, salt []byte) []byte {

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -26,7 +27,7 @@ func (a *API) organizationFromRequest(r *http.Request) (org *db.Organization, pa
 	// the database and add it to the context
 	if orgAddress != "" {
 		// get the organization from the database with its parent
-		if org, parent, err := a.db.OrganizationWithParent(orgAddress); err == nil {
+		if org, parent, err := a.db.OrganizationWithParent(common.HexToAddress(orgAddress)); err == nil {
 			return org, parent, true
 		}
 	}

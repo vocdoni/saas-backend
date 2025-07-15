@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
@@ -63,7 +64,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		errors.ErrNoDefaultPlan.WithErr((err)).Write(w)
 		return
 	}
-	parentOrg := ""
+	parentOrg := common.Address{}
 	var dbParentOrg *db.Organization
 	if orgInfo.Parent != nil {
 		// check if the org has permission to create suborganizations
@@ -82,7 +83,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 			errors.ErrGenericInternalServerError.Withf("could not get parent organization: %v", err).Write(w)
 			return
 		}
-		if dbParentOrg.Parent != "" {
+		if len(dbParentOrg.Parent) > 0 {
 			errors.ErrMalformedBody.Withf("parent organization is already a suborganization").Write(w)
 			return
 		}
@@ -106,7 +107,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	// create the organization
 	dbOrg := &db.Organization{
-		Address:         signer.AddressString(),
+		Address:         signer.Address(),
 		Website:         orgInfo.Website,
 		Creator:         user.Email,
 		CreatedAt:       time.Now(),
@@ -430,7 +431,7 @@ func (a *API) organizationCreateTicket(w http.ResponseWriter, r *http.Request) {
 	notification, err := mailtemplates.SupportNotification.ExecTemplate(
 		struct {
 			Type         string
-			Organization string
+			Organization common.Address
 			Title        string
 			Description  string
 			Email        string

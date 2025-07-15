@@ -3,12 +3,11 @@ package db
 //revive:disable:max-public-structs
 
 import (
-	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.vocdoni.io/dvote/util"
 )
 
 type User struct {
@@ -32,9 +31,9 @@ type UserVerification struct {
 
 // TODO this is the default role function while it should be
 // used only when it is not necessary to consult the DB
-func (u *User) HasRoleFor(address string, role UserRole) bool {
+func (u *User) HasRoleFor(address common.Address, role UserRole) bool {
 	for _, org := range u.Organizations {
-		if util.TrimHex(strings.ToLower(org.Address)) == util.TrimHex(strings.ToLower(address)) &&
+		if org.Address == address &&
 			// Check if the role matches the organization role
 			string(org.Role) == string(role) {
 			return true
@@ -48,12 +47,12 @@ type UserRole string
 type OrganizationType string
 
 type OrganizationUser struct {
-	Address string   `json:"address" bson:"_id"`
-	Role    UserRole `json:"role" bson:"role"`
+	Address common.Address `json:"address" bson:"_id"` // common.Address is serialized as bytes in the db
+	Role    UserRole       `json:"role" bson:"role"`
 }
 
 type Organization struct {
-	Address         string                   `json:"address" bson:"_id"`
+	Address         common.Address           `json:"address" bson:"_id"` // common.Address is serialized as bytes in the db
 	Website         string                   `json:"website" bson:"website"`
 	Type            OrganizationType         `json:"type" bson:"type"`
 	Creator         string                   `json:"creator" bson:"creator"`
@@ -68,7 +67,7 @@ type Organization struct {
 	Communications  bool                     `json:"communications" bson:"communications"`
 	TokensPurchased uint64                   `json:"tokensPurchased" bson:"tokensPurchased"`
 	TokensRemaining uint64                   `json:"tokensRemaining" bson:"tokensRemaining"`
-	Parent          string                   `json:"parent" bson:"parent"`
+	Parent          common.Address           `json:"parent" bson:"parent"`
 	Meta            map[string]any           `json:"meta" bson:"meta"`
 	Subscription    OrganizationSubscription `json:"subscription" bson:"subscription"`
 	Counters        OrganizationCounters     `json:"counters" bson:"counters"`
@@ -145,7 +144,7 @@ type OrganizationCounters struct {
 type OrganizationInvite struct {
 	ID                  primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	InvitationCode      string             `json:"invitationCode" bson:"invitationCode"`
-	OrganizationAddress string             `json:"organizationAddress" bson:"organizationAddress"`
+	OrganizationAddress common.Address     `json:"organizationAddress" bson:"organizationAddress"`
 	CurrentUserID       uint64             `json:"currentUserID" bson:"currentUserID"`
 	NewUserEmail        string             `json:"newUserEmail" bson:"newUserEmail"`
 	Role                UserRole           `json:"role" bson:"role"`
@@ -177,7 +176,7 @@ const (
 // Census represents the information of a set of census participants
 type Census struct {
 	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`
-	OrgAddress string             `json:"orgAddress" bson:"orgAddress"`
+	OrgAddress common.Address     `json:"orgAddress" bson:"orgAddress"`
 	Type       CensusType         `json:"type" bson:"type"`
 	CreatedAt  time.Time          `json:"createdAt" bson:"createdAt"`
 	UpdatedAt  time.Time          `json:"updatedAt" bson:"updatedAt"`
@@ -191,7 +190,7 @@ type Census struct {
 type OrgMember struct {
 	ID primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	// OrgAddress can be used for future sharding
-	OrgAddress     string         `json:"orgAddress" bson:"orgAddress"`
+	OrgAddress     common.Address `json:"orgAddress" bson:"orgAddress"`
 	Email          string         `json:"email" bson:"email"`
 	Phone          string         `json:"phone" bson:"phone"`
 	HashedPhone    []byte         `json:"hashedPhone" bson:"hashedPhone" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
@@ -212,7 +211,7 @@ type OrgMember struct {
 // collection of members that are grouped together for a specific purpose
 type OrganizationMemberGroup struct {
 	ID          primitive.ObjectID `json:"id" bson:"_id,omitempty"`
-	OrgAddress  string             `json:"orgAddress" bson:"orgAddress"`
+	OrgAddress  common.Address     `json:"orgAddress" bson:"orgAddress"`
 	Title       string             `json:"title" bson:"title"`
 	Description string             `json:"description" bson:"description"`
 	MemberIDs   []string           `json:"memberIds" bson:"memberIds"`
@@ -246,7 +245,7 @@ type PublishedCensus struct {
 //nolint:lll
 type Process struct {
 	ID              internal.HexBytes `json:"id" bson:"_id"  swaggertype:"string" format:"hex" example:"deadbeef"`
-	OrgAddress      string            `json:"orgAdress" bson:"orgAddress"`
+	OrgAddress      common.Address    `json:"orgAdress" bson:"orgAddress"`
 	PublishedCensus PublishedCensus   `json:"publishedCensus" bson:"publishedCensus"`
 	Metadata        []byte            `json:"metadata,omitempty"  bson:"metadata"  swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 }
@@ -259,6 +258,6 @@ type ProcessesBundle struct {
 	ID         primitive.ObjectID  `json:"id" bson:"_id,omitempty"`                                                               // Unique identifier for the bundle
 	Census     Census              `json:"census" bson:"census"`                                                                  // The census associated with this bundle
 	CensusRoot string              `json:"censusRoot" bson:"censusRoot"`                                                          // The census root public key
-	OrgAddress string              `json:"orgAddress" bson:"orgAddress"`                                                          // The organization that owns this bundle
+	OrgAddress common.Address      `json:"orgAddress" bson:"orgAddress"`                                                          // The organization that owns this bundle
 	Processes  []internal.HexBytes `json:"processes" bson:"processes" swaggertype:"array,string" format:"hex" example:"deadbeef"` // Array of process IDs included in this bundle
 }

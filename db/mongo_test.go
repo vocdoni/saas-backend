@@ -6,14 +6,22 @@ import (
 	"os"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/test"
 )
 
 var testDB *MongoStorage
 
 // Common test constants
+var (
+	testOrgAddress        = common.Address{0x01, 0x23, 0x45, 0x67, 0x89}
+	testAnotherOrgAddress = common.Address{0x10, 0x11, 0x12, 0x13, 0x14}
+	testThirdOrgAddress   = common.Address{0xca, 0xfe, 0x03}
+	testFourthOrgAddress  = common.Address{0xca, 0xfe, 0x04}
+	testNonExistentOrg    = common.Address{0x01, 0x02, 0x03, 0x04}
+)
+
 const (
-	testOrgAddress   = "0x123456789"
 	testDBUserEmail  = "test@example.com"
 	testDBUserPass   = "testpass123"
 	testDBFirstName  = "Test"

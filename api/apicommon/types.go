@@ -5,6 +5,7 @@ package apicommon
 import (
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/google/uuid"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
@@ -17,7 +18,7 @@ import (
 // swagger:model OrganizationInfo
 type OrganizationInfo struct {
 	// The organization's blockchain address
-	Address string `json:"address"`
+	Address common.Address `json:"address"`
 
 	// The organization's website URL
 	Website string `json:"website"`
@@ -83,7 +84,7 @@ type OrganizationUser struct {
 // swagger:model OrganizationAddresses
 type OrganizationAddresses struct {
 	// List of organization blockchain addresses
-	Addresses []string `json:"addresses"`
+	Addresses []common.Address `json:"addresses"`
 }
 
 // UserOrganization represents the organization of a user including their role.
@@ -340,7 +341,7 @@ type LoginResponse struct {
 // swagger:model TransactionData
 type TransactionData struct {
 	// Blockchain address
-	Address internal.HexBytes `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Address common.Address `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
 
 	// Transaction payload bytes
 	TxPayload []byte `json:"txPayload" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
@@ -350,7 +351,7 @@ type TransactionData struct {
 // swagger:model MessageSignature
 type MessageSignature struct {
 	// Blockchain address
-	Address string `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Address common.Address `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
 
 	// Message payload bytes
 	Payload []byte `json:"payload,omitempty" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
@@ -644,7 +645,7 @@ type SubscriptionCheckout struct {
 	Amount int64 `json:"amount"`
 
 	// Organization address
-	Address string `json:"address"`
+	Address common.Address `json:"address"`
 
 	// Locale for the checkout page
 	Locale string `json:"locale"`
@@ -677,7 +678,7 @@ type OrganizationCensus struct {
 	Type db.CensusType `json:"type"`
 
 	// Organization address
-	OrgAddress string `json:"orgAddress"`
+	OrgAddress common.Address `json:"orgAddress"`
 }
 
 // OrganizationCensusFromDB converts a db.Census to an OrganizationCensus.
@@ -720,7 +721,7 @@ type AddMembersRequest struct {
 }
 
 // DbOrgMembers converts the members in the request to db.OrgMember objects.
-func (r *AddMembersRequest) DbOrgMembers(orgAddress string) []db.OrgMember {
+func (r *AddMembersRequest) DbOrgMembers(orgAddress common.Address) []db.OrgMember {
 	members := make([]db.OrgMember, 0, len(r.Members))
 	for _, p := range r.Members {
 		members = append(members, p.ToDb(orgAddress))
@@ -732,6 +733,7 @@ type DeleteMembersRequest struct {
 	// List of member internal ids numbers to delete
 	IDs []string `json:"ids"`
 }
+
 type DeleteMembersResponse struct {
 	// Number of members deleted
 	Count int `json:"count"`
@@ -772,7 +774,7 @@ type OrgMember struct {
 }
 
 // ToDb converts an OrgMember to a db.OrgMember.
-func (p *OrgMember) ToDb(orgAddress string) db.OrgMember {
+func (p *OrgMember) ToDb(orgAddress common.Address) db.OrgMember {
 	parsedBirthDate := time.Time{}
 	if len(p.BirthDate) > 0 {
 		// Parse the birth date from string to time.Time

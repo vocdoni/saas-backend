@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
 	stripeapi "github.com/stripe/stripe-go/v81"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -163,7 +164,7 @@ func (a *API) handlePaymentSucceeded(event *stripeapi.Event, w http.ResponseWrit
 		return false
 	}
 
-	org, err := a.db.Organization(orgAddress)
+	org, err := a.db.Organization(common.HexToAddress(orgAddress))
 	if err != nil || org == nil {
 		log.Errorf("could not update payment from event because could not retrieve organization: %s \tEvent Type:%s",
 			event.ID, event.Type)
@@ -266,7 +267,7 @@ func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if checkout.Amount == 0 || checkout.Address == "" {
+	if checkout.Amount == 0 || checkout.Address.Cmp(common.Address{}) == 0 {
 		errors.ErrMalformedBody.Withf("Missing required fields").Write(w)
 		return
 	}
@@ -293,7 +294,7 @@ func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.R
 	}
 
 	session, err := stripe.CreateSubscriptionCheckoutSession(
-		plan.StripePriceID, checkout.ReturnURL, checkout.Address, org.Creator, checkout.Locale, checkout.Amount)
+		plan.StripePriceID, checkout.ReturnURL, checkout.Address.String(), org.Creator, checkout.Locale, checkout.Amount)
 	if err != nil {
 		errors.ErrStripeError.Withf("Cannot create session: %v", err).Write(w)
 		return

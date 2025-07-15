@@ -6,6 +6,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -14,7 +15,7 @@ import (
 )
 
 // OrgMembersGroup returns an organization members group
-func (ms *MongoStorage) OrganizationMemberGroup(groupID, orgAddress string) (*OrganizationMemberGroup, error) {
+func (ms *MongoStorage) OrganizationMemberGroup(groupID string, orgAddress common.Address) (*OrganizationMemberGroup, error) {
 	objID, err := primitive.ObjectIDFromHex(groupID)
 	if err != nil {
 		return nil, ErrInvalidData
@@ -39,7 +40,7 @@ func (ms *MongoStorage) OrganizationMemberGroup(groupID, orgAddress string) (*Or
 
 // OrganizationMemberGroups returns the list of an organization's members groups
 func (ms *MongoStorage) OrganizationMemberGroups(
-	orgAddress string,
+	orgAddress common.Address,
 	page, pageSize int,
 ) (int, []*OrganizationMemberGroup, error) {
 	// create a context with a timeout
@@ -96,7 +97,7 @@ func (ms *MongoStorage) CreateOrganizationMemberGroup(group *OrganizationMemberG
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	if group == nil || group.OrgAddress == "" || len(group.MemberIDs) == 0 {
+	if group == nil || group.OrgAddress.Cmp(common.Address{}) == 0 || len(group.MemberIDs) == 0 {
 		return "", ErrInvalidData
 	}
 
@@ -133,7 +134,7 @@ func (ms *MongoStorage) CreateOrganizationMemberGroup(group *OrganizationMemberG
 // and/or removing members. If a member exists in both lists, it will be removed
 // TODO allow to update the rest of the fields as well. Maybe a different function?
 func (ms *MongoStorage) UpdateOrganizationMemberGroup(
-	groupID, orgAddress string,
+	groupID string, orgAddress common.Address,
 	title, description string, addedMembers, removedMembers []string,
 ) error {
 	group, err := ms.OrganizationMemberGroup(groupID, orgAddress)
@@ -224,7 +225,7 @@ func (ms *MongoStorage) UpdateOrganizationMemberGroup(
 }
 
 // DeleteOrganizationMemberGroup deletes an organization member group by its ID
-func (ms *MongoStorage) DeleteOrganizationMemberGroup(groupID, orgAddress string) error {
+func (ms *MongoStorage) DeleteOrganizationMemberGroup(groupID string, orgAddress common.Address) error {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
@@ -248,7 +249,7 @@ func (ms *MongoStorage) DeleteOrganizationMemberGroup(groupID, orgAddress string
 
 // ListOrganizationMemberGroup lists all the members of an organization member group and the total number of members
 func (ms *MongoStorage) ListOrganizationMemberGroup(
-	groupID, orgAddress string,
+	groupID string, orgAddress common.Address,
 	page, pageSize int64,
 ) (int, []*OrgMember, error) {
 	// get the group

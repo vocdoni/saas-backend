@@ -42,7 +42,7 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// check if the user has a role in the organization
-	if hasAnyRole, err := a.db.UserHasAnyRoleInOrg(user.Email, signReq.Address.String()); err != nil {
+	if hasAnyRole, err := a.db.UserHasAnyRoleInOrg(user.Email, signReq.Address); err != nil {
 		errors.ErrInvalidUserData.WithErr(err).Write(w)
 		return
 	} else if !hasAnyRole {
@@ -52,7 +52,7 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 
 	// get the organization info from the database with the address provided in
 	// the request
-	org, err := a.db.Organization(signReq.Address.String())
+	org, err := a.db.Organization(signReq.Address)
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrOrganizationNotFound.Withf("organization not found").Write(w)

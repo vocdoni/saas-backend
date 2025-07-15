@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -380,7 +381,7 @@ func testCreateUser(t *testing.T, password string) string {
 }
 
 // testCreateOrganization creates a new organization and returns the address.
-func testCreateOrganization(t *testing.T, jwt string) internal.HexBytes {
+func testCreateOrganization(t *testing.T, jwt string) common.Address {
 	orgName := fmt.Sprintf("org-%d", internal.RandomInt(10000))
 	orgInfo := &apicommon.OrganizationInfo{
 		Type:    string(db.CompanyType),
@@ -394,8 +395,7 @@ func testCreateOrganization(t *testing.T, jwt string) internal.HexBytes {
 	qt.Assert(t, err, qt.IsNil)
 	qt.Assert(t, orgResp.Address, qt.Not(qt.Equals), "")
 
-	addr := new(internal.HexBytes).SetString(orgResp.Address)
-	return *addr
+	return orgResp.Address
 }
 
 func testNewVocdoniClient(t *testing.T) *apiclient.HTTPclient {
@@ -408,7 +408,7 @@ func testNewVocdoniClient(t *testing.T) *apiclient.HTTPclient {
 // It uses the remote signer from the API to sign the transaction.
 // Returns the response data if any.
 func signRemoteSignerAndSendVocdoniTx(t *testing.T, tx *models.Tx, token string, vocdoniClient *apiclient.HTTPclient,
-	orgAddress internal.HexBytes,
+	orgAddress common.Address,
 ) (responseData []byte) {
 	c := qt.New(t)
 	txBytes, err := proto.Marshal(tx)
@@ -482,7 +482,7 @@ func waitUntilTxIsMined(ctx context.Context, txHash []byte, c *apiclient.HTTPcli
 	}
 }
 
-func fetchVocdoniAccountNonce(t *testing.T, client *apiclient.HTTPclient, address internal.HexBytes) uint32 {
+func fetchVocdoniAccountNonce(t *testing.T, client *apiclient.HTTPclient, address common.Address) uint32 {
 	acc, err := client.Account(address.String())
 	qt.Assert(t, err, qt.IsNil)
 	return acc.Nonce
@@ -496,13 +496,13 @@ func fetchVocdoniChainID(t *testing.T, client *apiclient.HTTPclient) string {
 
 // testCreateCensus creates a new census with the given organization address and census type.
 // It returns the census ID.
-func testCreateCensus(t *testing.T, token string, orgAddress internal.HexBytes, censusType string) string {
+func testCreateCensus(t *testing.T, token string, orgAddress common.Address, censusType string) string {
 	c := qt.New(t)
 
 	// Create a new census
 	censusInfo := &apicommon.OrganizationCensus{
 		Type:       db.CensusType(censusType),
-		OrgAddress: orgAddress.String(),
+		OrgAddress: orgAddress,
 	}
 	resp, code := testRequest(t, http.MethodPost, token, censusInfo, censusEndpoint)
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("failed to create census: %s", resp))

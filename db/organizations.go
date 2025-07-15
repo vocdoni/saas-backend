@@ -6,15 +6,16 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ethereum/go-ethereum/common"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.vocdoni.io/dvote/log"
 )
 
-func (ms *MongoStorage) fetchOrganizationFromDB(ctx context.Context, address string) (*Organization, error) {
-	// find the organization in the database by its address (case insensitive)
-	filter := bson.M{"_id": bson.M{"$regex": address, "$options": "i"}}
+func (ms *MongoStorage) fetchOrganizationFromDB(ctx context.Context, address common.Address) (*Organization, error) {
+	// find the organization in the database by its address
+	filter := bson.M{"_id": address}
 	result := ms.organizations.FindOne(ctx, filter)
 	org := &Organization{}
 	if err := result.Decode(org); err != nil {
@@ -30,7 +31,7 @@ func (ms *MongoStorage) fetchOrganizationFromDB(ctx context.Context, address str
 // Organization method returns the organization with the given address.
 // If the organization doesn't exist, it returns the specific error.
 // If other errors occur, it returns the error.
-func (ms *MongoStorage) Organization(address string) (*Organization, error) {
+func (ms *MongoStorage) Organization(address common.Address) (*Organization, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
@@ -46,7 +47,7 @@ func (ms *MongoStorage) Organization(address string) (*Organization, error) {
 // and its parent organization if it exists. If the organization doesn't exist
 // or the parent organization doesn't exist, it returns the specific error.
 // If other errors occur, it returns the error.
-func (ms *MongoStorage) OrganizationWithParent(address string) (org *Organization, parent *Organization, err error) {
+func (ms *MongoStorage) OrganizationWithParent(address common.Address) (org *Organization, parent *Organization, err error) {
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
@@ -57,7 +58,7 @@ func (ms *MongoStorage) OrganizationWithParent(address string) (org *Organizatio
 	if err != nil {
 		return nil, nil, err
 	}
-	if org.Parent == "" {
+	if org.Parent.Cmp(common.Address{}) == 0 {
 		return org, nil, nil
 	}
 	// find the parent organization in the database
@@ -140,7 +141,7 @@ func (ms *MongoStorage) ReplaceCreatorEmail(oldEmail, newEmail string) error {
 // OrganizationUsers method returns the users that have a role in the
 // organization with the given address. If an error occurs, it returns the
 // error.
-func (ms *MongoStorage) OrganizationUsers(address string) ([]User, error) {
+func (ms *MongoStorage) OrganizationUsers(address common.Address) ([]User, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
@@ -170,7 +171,7 @@ func (ms *MongoStorage) OrganizationUsers(address string) ([]User, error) {
 
 // UpdateOrganizationUserRole method updates the role of the user in the
 // organization with the given address.
-func (ms *MongoStorage) UpdateOrganizationUserRole(address string, userID uint64, newRole UserRole) error {
+func (ms *MongoStorage) UpdateOrganizationUserRole(address common.Address, userID uint64, newRole UserRole) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
@@ -197,7 +198,7 @@ func (ms *MongoStorage) UpdateOrganizationUserRole(address string, userID uint64
 
 // RemoveOrganizationUser method removes the user from the organization
 // with the given address.
-func (ms *MongoStorage) RemoveOrganizationUser(address string, userID uint64) error {
+func (ms *MongoStorage) RemoveOrganizationUser(address common.Address, userID uint64) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
@@ -223,7 +224,7 @@ func (ms *MongoStorage) RemoveOrganizationUser(address string, userID uint64) er
 
 // SetOrganizationSubscription method adds the provided subscription to
 // the organization with the given address
-func (ms *MongoStorage) SetOrganizationSubscription(address string, orgSubscription *OrganizationSubscription) error {
+func (ms *MongoStorage) SetOrganizationSubscription(address common.Address, orgSubscription *OrganizationSubscription) error {
 	if _, err := ms.Plan(orgSubscription.PlanID); err != nil {
 		return ErrInvalidData
 	}
@@ -233,7 +234,7 @@ func (ms *MongoStorage) SetOrganizationSubscription(address string, orgSubscript
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// prepare the document to be updated in the database
-	filter := bson.M{"_id": bson.M{"$regex": address, "$options": "i"}}
+	filter := bson.M{"_id": address}
 	updateDoc := bson.M{"$set": bson.M{"subscription": orgSubscription}}
 	// update the organization in the database
 	if _, err := ms.organizations.UpdateOne(ctx, filter, updateDoc); err != nil {
@@ -244,14 +245,14 @@ func (ms *MongoStorage) SetOrganizationSubscription(address string, orgSubscript
 
 // SetOrganizationMeta method sets the metadata for the organization with the
 // given address. If the organization doesn't exist, it returns an error.
-func (ms *MongoStorage) AddOrganizationMeta(address string, meta map[string]any) error {
+func (ms *MongoStorage) AddOrganizationMeta(address common.Address, meta map[string]any) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// prepare the document to be updated in the database
-	filter := bson.M{"_id": bson.M{"$regex": address, "$options": "i"}}
+	filter := bson.M{"_id": address}
 	updateDoc := bson.M{"$set": bson.M{"meta": meta}}
 	// update the organization in the database
 	if _, err := ms.organizations.UpdateOne(ctx, filter, updateDoc); err != nil {
@@ -263,7 +264,7 @@ func (ms *MongoStorage) AddOrganizationMeta(address string, meta map[string]any)
 // UpdateOrganizationMeta updates individual keys in the 'meta' subdocument
 // Has only one layer o depth, if a second layer document is provided, for example meta.doc = [a,b,c] it will
 // all the docment will be updated
-func (ms *MongoStorage) UpdateOrganizationMeta(address string, metaUpdates map[string]any) error {
+func (ms *MongoStorage) UpdateOrganizationMeta(address common.Address, metaUpdates map[string]any) error {
 	updateFields := bson.M{}
 
 	// Construct dot notation keys like "meta.region": "EU"
@@ -277,7 +278,7 @@ func (ms *MongoStorage) UpdateOrganizationMeta(address string, metaUpdates map[s
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	filter := bson.M{"_id": bson.M{"$regex": address, "$options": "i"}}
+	filter := bson.M{"_id": address}
 	update := bson.M{"$set": updateFields}
 
 	result, err := ms.organizations.UpdateOne(ctx, filter, update)
@@ -294,7 +295,7 @@ func (ms *MongoStorage) UpdateOrganizationMeta(address string, metaUpdates map[s
 }
 
 // DeleteOrganizationMetaKeys deletes specific keys from the 'meta' object of a given Organization
-func (ms *MongoStorage) DeleteOrganizationMetaKeys(address string, keysToDelete []string) error {
+func (ms *MongoStorage) DeleteOrganizationMetaKeys(address common.Address, keysToDelete []string) error {
 	unsetFields := bson.M{}
 
 	// Build the unset document: { "meta.key1": 1, "meta.key2": 1 }
@@ -309,7 +310,7 @@ func (ms *MongoStorage) DeleteOrganizationMetaKeys(address string, keysToDelete 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	filter := bson.M{"_id": bson.M{"$regex": address, "$options": "i"}}
+	filter := bson.M{"_id": address}
 	update := bson.M{"$unset": unsetFields}
 
 	result, err := ms.organizations.UpdateOne(ctx, filter, update)
@@ -325,7 +326,7 @@ func (ms *MongoStorage) DeleteOrganizationMetaKeys(address string, keysToDelete 
 }
 
 // IncrementOrganizationUsersCounter atomically increments the users counter for the organization with the given address.
-func (ms *MongoStorage) IncrementOrganizationUsersCounter(address string) error {
+func (ms *MongoStorage) IncrementOrganizationUsersCounter(address common.Address) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
@@ -372,7 +373,7 @@ func (ms *MongoStorage) IncrementOrganizationUsersCounter(address string) error 
 }
 
 // DecrementOrganizationUsersCounter atomically decrements the users counter for the organization with the given address.
-func (ms *MongoStorage) DecrementOrganizationUsersCounter(address string) error {
+func (ms *MongoStorage) DecrementOrganizationUsersCounter(address common.Address) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
@@ -400,7 +401,7 @@ func (ms *MongoStorage) DecrementOrganizationUsersCounter(address string) error 
 }
 
 // IncrementOrganizationSubOrgsCounter atomically increments the suborgs counter for the organization with the given address.
-func (ms *MongoStorage) IncrementOrganizationSubOrgsCounter(address string) error {
+func (ms *MongoStorage) IncrementOrganizationSubOrgsCounter(address common.Address) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
@@ -447,7 +448,7 @@ func (ms *MongoStorage) IncrementOrganizationSubOrgsCounter(address string) erro
 }
 
 // DecrementOrganizationSubOrgsCounter atomically decrements the suborgs counter for the organization with the given address.
-func (ms *MongoStorage) DecrementOrganizationSubOrgsCounter(address string) error {
+func (ms *MongoStorage) DecrementOrganizationSubOrgsCounter(address common.Address) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 

@@ -3,6 +3,7 @@ package db
 import (
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -247,7 +248,7 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(updatedMember2.Name, qt.Equals, "Test Member 2")
 
 		// Test with empty organization address
-		_, err = testDB.SetBulkOrgMembers("", testSalt, members)
+		_, err = testDB.SetBulkOrgMembers(common.Address{}, testSalt, members)
 		c.Assert(err, qt.Not(qt.IsNil))
 	})
 }

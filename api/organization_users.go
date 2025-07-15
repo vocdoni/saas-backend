@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
@@ -175,7 +176,7 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 	// the invite link
 	if err := a.sendMail(r.Context(), invite.Email, mailtemplates.InviteNotification,
 		struct {
-			Organization string
+			Organization common.Address
 			Code         string
 			Link         string
 		}{org.Address, code, link},
@@ -383,7 +384,7 @@ func (a *API) updatePendingUserInvitationHandler(w http.ResponseWriter, r *http.
 	// the invite link
 	if err := a.sendMail(r.Context(), orgInvite.NewUserEmail, mailtemplates.InviteNotification,
 		struct {
-			Organization string
+			Organization common.Address
 			Code         string
 			Link         string
 		}{org.Address, code, link},

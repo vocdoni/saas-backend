@@ -5,6 +5,7 @@ package subscriptions
 import (
 	"fmt"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/db"
 	"go.vocdoni.io/proto/build/go/models"
 )
@@ -49,8 +50,8 @@ func (p DBPermission) String() string {
 type DBInterface interface {
 	Plan(id uint64) (*db.Plan, error)
 	UserByEmail(email string) (*db.User, error)
-	Organization(address string) (*db.Organization, error)
-	OrganizationWithParent(address string) (*db.Organization, *db.Organization, error)
+	Organization(address common.Address) (*db.Organization, error)
+	OrganizationWithParent(address common.Address) (*db.Organization, *db.Organization, error)
 }
 
 // Subscriptions is the service that manages the organization permissions based on
@@ -152,7 +153,7 @@ func (p *Subscriptions) HasTxPermission(
 }
 
 // HasDBPermission checks if the user has permission to perform the given action in the organization stored in the DB
-func (p *Subscriptions) HasDBPermission(userEmail, orgAddress string, permission DBPermission) (bool, error) {
+func (p *Subscriptions) HasDBPermission(userEmail string, orgAddress common.Address, permission DBPermission) (bool, error) {
 	user, err := p.db.UserByEmail(userEmail)
 	if err != nil {
 		return false, fmt.Errorf("could not get user: %v", err)

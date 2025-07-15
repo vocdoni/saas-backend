@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
@@ -118,7 +119,7 @@ func (*API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *http.
 	}
 	// get the user organizations information from the database if any
 	userAddresses := &apicommon.OrganizationAddresses{
-		Addresses: []string{},
+		Addresses: []common.Address{},
 	}
 	// get the addresses of the organizations where the user has write access
 	for _, org := range user.Organizations {

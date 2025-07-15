@@ -4,11 +4,11 @@ import (
 	"context"
 	"strings"
 
+	"github.com/ethereum/go-ethereum/common"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.vocdoni.io/dvote/log"
-	"go.vocdoni.io/dvote/util"
 )
 
 // nextUserID internal method returns the next available user ID. If an error
@@ -29,7 +29,9 @@ func (ms *MongoStorage) nextUserID(ctx context.Context) (uint64, error) {
 // addOrganizationToUser internal method adds the organization to the user with
 // the given email. If an error occurs, it returns the error. This method must
 // be called with the keysLock held.
-func (ms *MongoStorage) addOrganizationToUser(ctx context.Context, userEmail, address string, role UserRole) error {
+func (ms *MongoStorage) addOrganizationToUser(ctx context.Context,
+	userEmail string, address common.Address, role UserRole,
+) error {
 	// check if the user exists after add the organization
 	filter := bson.M{"email": userEmail}
 	count, err := ms.users.CountDocuments(ctx, filter)
@@ -189,13 +191,13 @@ func (ms *MongoStorage) VerifyUserAccount(user *User) error {
 // organization with the given address. If the user has the role, it
 // returns true. If the user doesn't have that role, it returns false. If an error
 // occurs, it returns the error.
-func (ms *MongoStorage) UserHasRoleInOrg(userEmail, organizationAddress string, role UserRole) (bool, error) {
+func (ms *MongoStorage) UserHasRoleInOrg(userEmail string, organizationAddress common.Address, role UserRole) (bool, error) {
 	user, err := ms.UserByEmail(userEmail)
 	if err != nil {
 		return false, err
 	}
 	for _, org := range user.Organizations {
-		if util.TrimHex(strings.ToLower(org.Address)) == util.TrimHex(strings.ToLower(organizationAddress)) {
+		if org.Address == organizationAddress {
 			return org.Role == role, nil
 		}
 	}
@@ -206,13 +208,13 @@ func (ms *MongoStorage) UserHasRoleInOrg(userEmail, organizationAddress string, 
 // organization with the given address. If the user has any role, it
 // returns true. If the user doesn't have any role, it returns false. If an error
 // occurs, it returns the error.
-func (ms *MongoStorage) UserHasAnyRoleInOrg(userEmail, organizationAddress string) (bool, error) {
+func (ms *MongoStorage) UserHasAnyRoleInOrg(userEmail string, organizationAddress common.Address) (bool, error) {
 	user, err := ms.UserByEmail(userEmail)
 	if err != nil {
 		return false, err
 	}
 	for _, org := range user.Organizations {
-		if util.TrimHex(strings.ToLower(org.Address)) == util.TrimHex(strings.ToLower(organizationAddress)) {
+		if org.Address == organizationAddress {
 			return true, nil
 		}
 	}

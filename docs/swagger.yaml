@@ -244,7 +244,9 @@ definitions:
       addresses:
         description: List of organization blockchain addresses
         items:
-          type: string
+          items:
+            type: integer
+          type: array
         type: array
     type: object
   apicommon.OrganizationCensus:
@@ -254,7 +256,9 @@ definitions:
         type: string
       orgAddress:
         description: Organization address
-        type: string
+        items:
+          type: integer
+        type: array
       type:
         allOf:
         - $ref: '#/definitions/db.CensusType'
@@ -283,7 +287,9 @@ definitions:
         type: boolean
       address:
         description: The organization's blockchain address
-        type: string
+        items:
+          type: integer
+        type: array
       color:
         description: The organization's brand color in hex format
         type: string
@@ -507,7 +513,9 @@ definitions:
     properties:
       address:
         description: Organization address
-        type: string
+        items:
+          type: integer
+        type: array
       amount:
         description: Amount in cents
         type: integer
@@ -811,7 +819,9 @@ definitions:
       id:
         type: string
       orgAddress:
-        type: string
+        items:
+          type: integer
+        type: array
       type:
         $ref: '#/definitions/db.CensusType'
       updatedAt:
@@ -911,7 +921,9 @@ definitions:
         format: base64
         type: string
       orgAdress:
-        type: string
+        items:
+          type: integer
+        type: array
       publishedCensus:
         $ref: '#/definitions/db.PublishedCensus'
     type: object
@@ -929,7 +941,9 @@ definitions:
         type: string
       orgAddress:
         description: The organization that owns this bundle
-        type: string
+        items:
+          type: integer
+        type: array
       processes:
         description: Array of process IDs included in this bundle
         example:

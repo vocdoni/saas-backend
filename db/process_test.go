@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	testProcessID       = internal.HexBytes("test_process_id")
+	testProcessID       = internal.HexBytesFromString("0x1111")
 	testProcessRoot     = "test_process_root"
 	testProcessURI      = "test_process_uri"
 	testProcessMetadata = []byte("test_metadata")
@@ -65,13 +65,13 @@ func TestProcess(t *testing.T) {
 		// Test with non-existent organization
 		nonExistentProcess := &Process{
 			ID:         testProcessID,
-			OrgAddress: "non-existent-org",
+			OrgAddress: testNonExistentOrg,
 			PublishedCensus: PublishedCensus{
 				URI:  testProcessURI,
 				Root: testProcessRoot,
 				Census: Census{
 					ID:         primitive.NewObjectID(),
-					OrgAddress: "non-existent-org",
+					OrgAddress: testNonExistentOrg,
 					Type:       CensusTypeMail,
 				},
 			},
@@ -100,7 +100,7 @@ func TestProcess(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(retrieved, qt.Not(qt.IsNil))
 		c.Assert(retrieved.ID, qt.DeepEquals, testProcessID)
-		c.Assert(retrieved.OrgAddress, qt.Equals, testOrgAddress)
+		c.Assert(retrieved.OrgAddress, qt.DeepEquals, testOrgAddress)
 		c.Assert(retrieved.PublishedCensus.URI, qt.Equals, testProcessURI)
 		c.Assert(retrieved.PublishedCensus.Root, qt.DeepEquals, testProcessRoot)
 		c.Assert(retrieved.PublishedCensus.Census.ID, qt.Equals, publishedCensus.Census.ID)
