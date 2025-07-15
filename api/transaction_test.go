@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"testing"
 
-	ethcommon "github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/errors"
@@ -101,8 +100,7 @@ func TestSignTxHandler(t *testing.T) {
 	c.Assert(json.NewDecoder(orgsResp.Body).Decode(&orgsAddress), qt.IsNil)
 	c.Assert(orgsResp.Body.Close(), qt.IsNil)
 	// parse org address
-	strMainOrgAddress := orgsAddress.Addresses[0]
-	mainOrgAddress := ethcommon.HexToAddress(strMainOrgAddress)
+	mainOrgAddress := orgsAddress.Addresses[0]
 	c.Run("setAccountTx", func(c *qt.C) {
 		infoURI := "https://example.com"
 		authHeaders := map[string]string{
@@ -176,7 +174,7 @@ func TestSignTxHandler(t *testing.T) {
 				method:  http.MethodPost,
 				headers: authHeaders,
 				body: mustMarshal(&apicommon.TransactionData{
-					Address:   mainOrgAddress.Bytes(),
+					Address:   mainOrgAddress,
 					TxPayload: bDifferentAccountTx,
 				}),
 				expectedBody:   mustMarshal(errors.ErrUnauthorized.With("invalid account")),
@@ -188,7 +186,7 @@ func TestSignTxHandler(t *testing.T) {
 				method:  http.MethodPost,
 				headers: authHeaders,
 				body: mustMarshal(&apicommon.TransactionData{
-					Address:   mainOrgAddress.Bytes(),
+					Address:   mainOrgAddress,
 					TxPayload: (bNoInfoURITx),
 				}),
 				expectedBody:   mustMarshal(errors.ErrInvalidTxFormat.With("missing fields")),
@@ -200,7 +198,7 @@ func TestSignTxHandler(t *testing.T) {
 				method:  http.MethodPost,
 				headers: authHeaders,
 				body: mustMarshal(&apicommon.TransactionData{
-					Address:   mainOrgAddress.Bytes(),
+					Address:   mainOrgAddress,
 					TxPayload: (bNoAccountTx),
 				}),
 				expectedBody:   mustMarshal(errors.ErrInvalidTxFormat.With("missing fields")),
@@ -212,7 +210,7 @@ func TestSignTxHandler(t *testing.T) {
 				method:  http.MethodPost,
 				headers: authHeaders,
 				body: mustMarshal(&apicommon.TransactionData{
-					Address:   mainOrgAddress.Bytes(),
+					Address:   mainOrgAddress,
 					TxPayload: bInvalidTxTypeTx,
 				}),
 				expectedBody:   mustMarshal(errors.ErrInvalidTxFormat.With("invalid SetAccount tx type")),
@@ -224,7 +222,7 @@ func TestSignTxHandler(t *testing.T) {
 				method:  http.MethodPost,
 				headers: authHeaders,
 				body: mustMarshal(&apicommon.TransactionData{
-					Address:   mainOrgAddress.Bytes(),
+					Address:   mainOrgAddress,
 					TxPayload: bValidSetAccountTx,
 				}),
 				expectedStatus: http.StatusOK,

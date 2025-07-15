@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -137,7 +138,7 @@ func (ms *MongoStorage) ProcessBundles() ([]*ProcessesBundle, error) {
 
 // ProcessBundlesByProcess retrieves process bundles that contain a specific process ID.
 // This allows finding all bundles that include a particular process.
-func (ms *MongoStorage) ProcessBundlesByProcess(processID []byte) ([]*ProcessesBundle, error) {
+func (ms *MongoStorage) ProcessBundlesByProcess(processID internal.HexBytes) ([]*ProcessesBundle, error) {
 	if len(processID) == 0 {
 		return nil, ErrInvalidData
 	}
@@ -169,8 +170,8 @@ func (ms *MongoStorage) ProcessBundlesByProcess(processID []byte) ([]*ProcessesB
 
 // ProcessBundlesByOrg retrieves process bundles that belong to a specific organization.
 // This allows finding all bundles created by a particular organization.
-func (ms *MongoStorage) ProcessBundlesByOrg(orgAddress string) ([]*ProcessesBundle, error) {
-	if len(orgAddress) == 0 {
+func (ms *MongoStorage) ProcessBundlesByOrg(orgAddress common.Address) ([]*ProcessesBundle, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
 		return nil, ErrInvalidData
 	}
 

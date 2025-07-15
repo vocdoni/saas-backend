@@ -124,7 +124,7 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(len(plans), qt.Not(qt.Equals), 0)
 		orgPlan := plans[1]
 
-		err = testDB.SetOrganizationSubscription(newOrgAddress.String(), &db.OrganizationSubscription{
+		err = testDB.SetOrganizationSubscription(newOrgAddress, &db.OrganizationSubscription{
 			PlanID:          orgPlan.ID,
 			StartDate:       time.Now(),
 			RenewalDate:     time.Now().Add(time.Hour * 24),
@@ -940,10 +940,10 @@ func TestOrganizationUsers(t *testing.T) {
 
 		// Create an organization
 		orgAddress := testCreateOrganization(t, adminToken)
-		t.Logf("Created organization with address: %s\n", orgAddress.String())
+		t.Logf("Created organization with address: %s\n", orgAddress)
 
 		// Get the organization from the database
-		org, err := testDB.Organization(orgAddress.String())
+		org, err := testDB.Organization(orgAddress)
 		c.Assert(err, qt.IsNil)
 
 		// Set the organization's subscription plan to plan ID 1 (which has a user limit of 10)

@@ -16,7 +16,7 @@ func TestCensus(t *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Test with non-existent organization
 		nonExistentCensus := &Census{
-			OrgAddress: "non-existent-org",
+			OrgAddress: testNonExistentOrg,
 			Type:       CensusTypeMail,
 		}
 		_, err := testDB.SetCensus(nonExistentCensus)
@@ -34,7 +34,7 @@ func TestCensus(t *testing.T) {
 
 		// Test with invalid data
 		invalidCensus := &Census{
-			OrgAddress: "",
+			OrgAddress: testNonExistentOrg,
 			Type:       CensusTypeMail,
 		}
 		_, err = testDB.SetCensus(invalidCensus)
@@ -54,7 +54,7 @@ func TestCensus(t *testing.T) {
 		// Verify the census was created correctly
 		createdCensus, err := testDB.Census(censusID)
 		c.Assert(err, qt.IsNil)
-		c.Assert(createdCensus.OrgAddress, qt.Equals, testOrgAddress)
+		c.Assert(createdCensus.OrgAddress, qt.DeepEquals, testOrgAddress)
 		c.Assert(createdCensus.Type, qt.Equals, CensusTypeMail)
 		c.Assert(createdCensus.CreatedAt.IsZero(), qt.IsFalse)
 
@@ -145,7 +145,7 @@ func TestCensus(t *testing.T) {
 		// Test getting census with valid ID
 		retrievedCensus, err := testDB.Census(censusID)
 		c.Assert(err, qt.IsNil)
-		c.Assert(retrievedCensus.OrgAddress, qt.Equals, testOrgAddress)
+		c.Assert(retrievedCensus.OrgAddress, qt.DeepEquals, testOrgAddress)
 		c.Assert(retrievedCensus.Type, qt.Equals, CensusTypeMail)
 		c.Assert(retrievedCensus.CreatedAt.IsZero(), qt.IsFalse)
 
@@ -167,7 +167,7 @@ func TestCensus(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Try to get censuses for non-existent organization
-		_, err = testDB.CensusesByOrg("non-existent-org")
+		_, err = testDB.CensusesByOrg(testNonExistentOrg)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Get censuses for the organization (should be empty)
@@ -188,7 +188,7 @@ func TestCensus(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(censuses, qt.HasLen, 1)
 		c.Assert(censuses[0].ID.Hex(), qt.Equals, firstCensusID)
-		c.Assert(censuses[0].OrgAddress, qt.Equals, testOrgAddress)
+		c.Assert(censuses[0].OrgAddress, qt.DeepEquals, testOrgAddress)
 		c.Assert(censuses[0].Type, qt.Equals, CensusTypeMail)
 
 		// Create another census for the organization
@@ -204,10 +204,10 @@ func TestCensus(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(censuses, qt.HasLen, 2)
 		c.Assert(censuses[0].ID.Hex(), qt.Equals, firstCensusID)
-		c.Assert(censuses[0].OrgAddress, qt.Equals, testOrgAddress)
+		c.Assert(censuses[0].OrgAddress, qt.DeepEquals, testOrgAddress)
 		c.Assert(censuses[0].Type, qt.Equals, CensusTypeMail)
 		c.Assert(censuses[1].ID.Hex(), qt.Equals, secondCensusID)
-		c.Assert(censuses[1].OrgAddress, qt.Equals, testOrgAddress)
+		c.Assert(censuses[1].OrgAddress, qt.DeepEquals, testOrgAddress)
 		c.Assert(censuses[1].Type, qt.Equals, CensusTypeSMS)
 
 		// Remove the first census
@@ -219,7 +219,7 @@ func TestCensus(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(censuses, qt.HasLen, 1)
 		c.Assert(censuses[0].ID.Hex(), qt.Equals, secondCensusID)
-		c.Assert(censuses[0].OrgAddress, qt.Equals, testOrgAddress)
+		c.Assert(censuses[0].OrgAddress, qt.DeepEquals, testOrgAddress)
 		c.Assert(censuses[0].Type, qt.Equals, CensusTypeSMS)
 	})
 }

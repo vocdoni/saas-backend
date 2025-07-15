@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
@@ -157,7 +158,7 @@ func main() {
 	var censusID string
 	err = client.makeRequest("POST", "/census", apicommon.OrganizationCensus{
 		Type:       db.CensusTypeSMSorMail,
-		OrgAddress: config.OrgAddress,
+		OrgAddress: common.HexToAddress(config.OrgAddress),
 	}, &censusID)
 	if err != nil {
 		fmt.Printf("Error creating census: %v", err)

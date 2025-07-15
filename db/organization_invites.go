@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -135,7 +136,7 @@ func (ms *MongoStorage) InvitationByEmail(email string) (*OrganizationInvite, er
 }
 
 // PendingInvitations returns the pending invitations for the given organization.
-func (ms *MongoStorage) PendingInvitations(organizationAddress string) ([]OrganizationInvite, error) {
+func (ms *MongoStorage) PendingInvitations(organizationAddress common.Address) ([]OrganizationInvite, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 

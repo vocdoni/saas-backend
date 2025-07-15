@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -15,30 +16,30 @@ import (
 
 // validateCensusParticipant validates that a census participant can be created
 // by checking that the census exists, the organization exists, and the member exists
-func (ms *MongoStorage) validateCensusParticipant(participant *CensusParticipant) (string, error) {
+func (ms *MongoStorage) validateCensusParticipant(participant *CensusParticipant) (common.Address, error) {
 	// validate required fields
 	if len(participant.ParticipantID) == 0 || len(participant.CensusID) == 0 {
-		return "", ErrInvalidData
+		return common.Address{}, ErrInvalidData
 	}
 
 	// check that the published census exists
 	census, err := ms.Census(participant.CensusID)
 	if err != nil {
-		return "", fmt.Errorf("failed to get published census: %w", err)
+		return common.Address{}, fmt.Errorf("failed to get published census: %w", err)
 	}
 
 	// check that the org exists
 	_, err = ms.Organization(census.OrgAddress)
 	if err != nil {
 		if err == ErrNotFound {
-			return "", ErrInvalidData
+			return common.Address{}, ErrInvalidData
 		}
-		return "", fmt.Errorf("organization not found: %w", err)
+		return common.Address{}, fmt.Errorf("organization not found: %w", err)
 	}
 
 	// check that the member exists
 	if _, err := ms.OrgMember(census.OrgAddress, participant.ParticipantID); err != nil {
-		return "", fmt.Errorf("failed to get org member: %w", err)
+		return common.Address{}, fmt.Errorf("failed to get org member: %w", err)
 	}
 
 	return census.OrgAddress, nil
@@ -123,7 +124,7 @@ func (ms *MongoStorage) CensusParticipant(censusID, id string) (*CensusParticipa
 func (ms *MongoStorage) CensusParticipantByMemberNumber(
 	censusID string,
 	memberNumber string,
-	orgAddress string,
+	orgAddress common.Address,
 ) (*CensusParticipant, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -202,7 +203,7 @@ type BulkCensusParticipantStatus struct {
 // - Setting the creation timestamp
 // - Hashing sensitive data (email, phone, password)
 // - Clearing the original sensitive data
-func prepareMember(member *OrgMember, orgAddress, salt string, currentTime time.Time) {
+func prepareMember(member *OrgMember, orgAddress common.Address, salt string, currentTime time.Time) {
 	// Assign a new internal ID if not provided
 	if member.ID == primitive.NilObjectID {
 		member.ID = primitive.NewObjectID()
@@ -233,7 +234,7 @@ func prepareMember(member *OrgMember, orgAddress, salt string, currentTime time.
 // createCensusParticipantBulkOperations creates the bulk write operations for members and participants
 func createCensusParticipantBulkOperations(
 	orgMembers []OrgMember,
-	orgAddress string,
+	orgAddress common.Address,
 	censusID string,
 	salt string,
 	currentTime time.Time,

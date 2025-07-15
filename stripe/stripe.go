@@ -8,6 +8,7 @@ import (
 	"time"
 
 	//revive:disable:import-alias-naming
+	"github.com/ethereum/go-ethereum/common"
 	stripeapi "github.com/stripe/stripe-go/v81"
 	stripePortalSession "github.com/stripe/stripe-go/v81/billingportal/session"
 	stripeCheckoutSession "github.com/stripe/stripe-go/v81/checkout/session"
@@ -41,7 +42,7 @@ type SubscriptionInfo struct {
 	Status              string
 	ProductID           string
 	Quantity            int
-	OrganizationAddress string
+	OrganizationAddress common.Address
 	CustomerEmail       string
 	StartDate           time.Time
 	EndDate             time.Time
@@ -113,7 +114,7 @@ func GetSubscriptionInfoFromEvent(event stripeapi.Event) (*SubscriptionInfo, err
 			subscription.ID,
 		)
 	}
-	address := subscription.Metadata["address"]
+	address := common.HexToAddress(subscription.Metadata["address"])
 	if len(address) == 0 {
 		return &SubscriptionInfo{}, fmt.Errorf("subscription %s does not contain an address in metadata", subscription.ID)
 	}

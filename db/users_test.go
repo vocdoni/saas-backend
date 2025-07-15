@@ -155,9 +155,9 @@ func TestUsers(t *testing.T) {
 			FirstName: testUserFirstName,
 			LastName:  testUserLastName,
 			Organizations: []OrganizationUser{
-				{Address: "adminOrg", Role: AdminRole},
-				{Address: "managerOrg", Role: ManagerRole},
-				{Address: "viewOrg", Role: ViewerRole},
+				{Address: testOrgAddress, Role: AdminRole},
+				{Address: testAnotherOrgAddress, Role: ManagerRole},
+				{Address: testThirdOrgAddress, Role: ViewerRole},
 			},
 		}
 		_, err := testDB.SetUser(user)
@@ -172,19 +172,19 @@ func TestUsers(t *testing.T) {
 			c.Assert(success, qt.IsTrue)
 		}
 		// test the user role in a non-existent organizations
-		success, err := testDB.UserHasRoleInOrg(user.Email, "notFoundOrg", AdminRole)
+		success, err := testDB.UserHasRoleInOrg(user.Email, testNonExistentOrg, AdminRole)
 		c.Assert(err, qt.Equals, ErrNotFound)
 		c.Assert(success, qt.IsFalse)
 		// test the user with a different role in the organization
-		success, err = testDB.UserHasRoleInOrg(user.Email, "adminOrg", ViewerRole)
+		success, err = testDB.UserHasRoleInOrg(user.Email, testOrgAddress, ViewerRole)
 		c.Assert(err, qt.IsNil)
 		c.Assert(success, qt.IsFalse)
 		// test not found user
-		success, err = testDB.UserHasRoleInOrg("notFoundUser", "adminOrg", AdminRole)
+		success, err = testDB.UserHasRoleInOrg("notFoundUser", testOrgAddress, AdminRole)
 		c.Assert(err, qt.Equals, ErrNotFound)
 		c.Assert(success, qt.IsFalse)
 		// test no role
-		success, err = testDB.UserHasAnyRoleInOrg(user.Email, "unrelatedOrg")
+		success, err = testDB.UserHasAnyRoleInOrg(user.Email, testFourthOrgAddress)
 		c.Assert(err, qt.IsNil)
 		c.Assert(success, qt.IsFalse)
 	})

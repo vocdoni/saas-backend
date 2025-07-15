@@ -4,18 +4,20 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
 // CreateProcess creates a new process for an organization
 func (ms *MongoStorage) SetProcess(process *Process) error {
-	if len(process.ID) == 0 || len(process.OrgAddress) == 0 || len(process.PublishedCensus.Root) == 0 {
+	if len(process.ID) == 0 || process.OrgAddress.Cmp(common.Address{}) == 0 || len(process.PublishedCensus.Root) == 0 {
 		return ErrInvalidData
 	}
 
 	// check that the org exists
 	if _, err := ms.Organization(process.OrgAddress); err != nil {
-		return fmt.Errorf("failed to get organization: %w", err)
+		return fmt.Errorf("failed to get organization %s: %w", process.OrgAddress, err)
 	}
 	// check that the publishedCensus and if not create it
 	if _, err := ms.PublishedCensus(process.PublishedCensus.Root, process.PublishedCensus.URI,
@@ -42,7 +44,7 @@ func (ms *MongoStorage) SetProcess(process *Process) error {
 }
 
 // DeleteProcess removes a process
-func (ms *MongoStorage) DelProcess(processID []byte) error {
+func (ms *MongoStorage) DelProcess(processID internal.HexBytes) error {
 	if len(processID) == 0 {
 		return ErrInvalidData
 	}
@@ -59,7 +61,7 @@ func (ms *MongoStorage) DelProcess(processID []byte) error {
 }
 
 // Process retrieves a process from the DB based on its ID
-func (ms *MongoStorage) Process(processID []byte) (*Process, error) {
+func (ms *MongoStorage) Process(processID internal.HexBytes) (*Process, error) {
 	if len(processID) == 0 {
 		return nil, ErrInvalidData
 	}

@@ -33,7 +33,7 @@ func TestProcess(t *testing.T) {
 	// Create a census
 	censusInfo := &apicommon.OrganizationCensus{
 		Type:       db.CensusTypeSMSorMail,
-		OrgAddress: orgAddress.String(),
+		OrgAddress: orgAddress,
 	}
 	resp, code = testRequest(t, http.MethodPost, adminToken, censusInfo, censusEndpoint)
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))

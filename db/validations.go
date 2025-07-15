@@ -47,8 +47,8 @@ var organizationInvitesCollectionValidator = bson.M{
 				"pattern":     `^[\w]{6,}$`,
 			},
 			"organizationAddress": bson.M{
-				"bsonType":    "string",
-				"description": "must be a string and is required",
+				"bsonType":    "binData",
+				"description": "must be binary data and is required",
 			},
 			"currentUserID": bson.M{
 				"bsonType":    "long",
