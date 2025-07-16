@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -221,5 +222,21 @@ func TestCensus(t *testing.T) {
 		c.Assert(censuses[0].ID.Hex(), qt.Equals, secondCensusID)
 		c.Assert(censuses[0].OrgAddress, qt.DeepEquals, testOrgAddress)
 		c.Assert(censuses[0].Type, qt.Equals, CensusTypeSMS)
+	})
+
+	t.Run("ZeroAddressValidation", func(_ *testing.T) {
+		c.Assert(testDB.Reset(), qt.IsNil)
+
+		// Test SetCensus with zero address - should fail
+		zeroAddrCensus := &Census{
+			OrgAddress: common.Address{}, // Zero address
+			Type:       CensusTypeMail,
+		}
+		_, err := testDB.SetCensus(zeroAddrCensus)
+		c.Assert(err, qt.Equals, ErrInvalidData)
+
+		// Test CensusesByOrg with zero address - should fail
+		_, err = testDB.CensusesByOrg(common.Address{})
+		c.Assert(err, qt.Equals, ErrInvalidData)
 	})
 }

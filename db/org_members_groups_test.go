@@ -531,4 +531,38 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			c.Assert(err, qt.Not(qt.IsNil))
 		})
 	})
+
+	t.Run("ZeroAddressValidation", func(_ *testing.T) {
+		c.Assert(testDB.Reset(), qt.IsNil)
+
+		// Test CreateOrganizationMemberGroup with zero address - should fail
+		zeroAddrGroup := &OrganizationMemberGroup{
+			OrgAddress:  common.Address{}, // Zero address
+			Title:       "Test Group",
+			Description: "Test Description",
+			MemberIDs:   []string{"some-id"},
+		}
+		_, err := testDB.CreateOrganizationMemberGroup(zeroAddrGroup)
+		c.Assert(err, qt.Equals, ErrInvalidData)
+
+		// Test OrganizationMemberGroup with zero address - should fail
+		_, err = testDB.OrganizationMemberGroup("some-id", common.Address{})
+		c.Assert(err, qt.Equals, ErrInvalidData)
+
+		// Test OrganizationMemberGroups with zero address - should fail
+		_, _, err = testDB.OrganizationMemberGroups(common.Address{}, 1, 10)
+		c.Assert(err, qt.Equals, ErrInvalidData)
+
+		// Test UpdateOrganizationMemberGroup with zero address - should fail
+		err = testDB.UpdateOrganizationMemberGroup("some-id", common.Address{}, "title", "desc", nil, nil)
+		c.Assert(err, qt.Equals, ErrInvalidData)
+
+		// Test DeleteOrganizationMemberGroup with zero address - should fail
+		err = testDB.DeleteOrganizationMemberGroup("some-id", common.Address{})
+		c.Assert(err, qt.Equals, ErrInvalidData)
+
+		// Test ListOrganizationMemberGroup with zero address - should fail
+		_, _, err = testDB.ListOrganizationMemberGroup("some-id", common.Address{}, 1, 10)
+		c.Assert(err, qt.Equals, ErrInvalidData)
+	})
 }
