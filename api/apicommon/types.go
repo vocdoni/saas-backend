@@ -843,7 +843,7 @@ type OrganizationMembersResponse struct {
 // swagger:model AddMembersResponse
 type AddMembersResponse struct {
 	// Number of members added
-	Count uint32 `json:"count"`
+	Added uint32 `json:"added"`
 
 	// Errors encountered during job
 	Errors []string `json:"errors"`

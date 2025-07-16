@@ -144,7 +144,7 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 	}
 	// check if there are members to add
 	if len(members.Members) == 0 {
-		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{Count: 0})
+		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{Added: 0})
 		return
 	}
 	// add the org members to the database
@@ -173,7 +173,7 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 		}
 		// Return the number of members added
 		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{
-			Count:  uint32(lastProgress.Added),
+			Added:  uint32(lastProgress.Added),
 			Errors: lastProgress.ErrorsAsStrings(),
 		})
 		return

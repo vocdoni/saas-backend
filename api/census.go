@@ -159,7 +159,7 @@ func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Reques
 	}
 	// check if there are participants to add
 	if len(members.Members) == 0 {
-		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{Count: 0})
+		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{Added: 0})
 		return
 	}
 	// add the org members as census participants in the database
@@ -187,7 +187,7 @@ func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Reques
 				"total", p.Total)
 		}
 		// Return the number of participants added
-		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{Count: uint32(lastProgress.Added)})
+		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{Added: uint32(lastProgress.Added)})
 		return
 	}
 
