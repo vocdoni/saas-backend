@@ -202,7 +202,7 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 //	@Security		BearerAuth
 //	@Param			address	path		string	true	"Organization address"
 //	@Param			jobid	path		string	true	"Job ID"
-//	@Success		200		{object}	db.BulkOrgMembersJob
+//	@Success		200		{object}	apicommon.AddMembersJobResponse
 //	@Failure		400		{object}	errors.Error	"Invalid job ID"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
 //	@Failure		404		{object}	errors.Error	"Job not found"
@@ -227,7 +227,7 @@ func (*API) addOrganizationMembersJobStatusHandler(w http.ResponseWriter, r *htt
 				addMembersToOrgWorkers.Delete(jobID.String())
 			}()
 		}
-		apicommon.HTTPWriteJSON(w, apicommon.AddMembersResponse{
+		apicommon.HTTPWriteJSON(w, apicommon.AddMembersJobResponse{
 			Added:    uint32(p.Added),
 			Errors:   p.ErrorsAsStrings(),
 			Progress: uint32(p.Progress),

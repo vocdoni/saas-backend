@@ -839,7 +839,7 @@ type OrganizationMembersResponse struct {
 	Members []OrgMember `json:"members"`
 }
 
-// AddMembersResponse defines the response for successful member addition (or job in progress).
+// AddMembersResponse defines the response for successful member addition
 // swagger:model AddMembersResponse
 type AddMembersResponse struct {
 	// Number of members added
@@ -850,12 +850,22 @@ type AddMembersResponse struct {
 
 	// Job ID for tracking the addition process
 	JobID internal.HexBytes `json:"jobId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+}
 
-	// Progress is used on async jobs, equals Added / Total * 100
-	Progress uint32 `json:"progress,omitempty"`
+// AddMembersJobResponse defines the response for the status of an async job of member addition
+// swagger:model AddMembersJobResponse
+type AddMembersJobResponse struct {
+	// Number of members added
+	Added uint32 `json:"added"`
 
-	// Total is used on async jobs, equals the length of the passed members list
-	Total uint32 `json:"total,omitempty"`
+	// Errors encountered during job
+	Errors []string `json:"errors"`
+
+	// Progress equals Added / Total * 100
+	Progress uint32 `json:"progress"`
+
+	// Total members in this job
+	Total uint32 `json:"total"`
 }
 
 // Request types for process operations
