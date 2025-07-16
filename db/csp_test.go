@@ -2,6 +2,7 @@ package db
 
 import (
 	"testing"
+	"time"
 
 	qt "github.com/frankban/quicktest"
 	"github.com/google/uuid"
@@ -56,6 +57,8 @@ func TestSetGetCSPAuth(t *testing.T) {
 		c.Assert(token.UserID, qt.DeepEquals, testUserID)
 		c.Assert(token.BundleID, qt.DeepEquals, testCSPBundleID)
 		c.Assert(token.Verified, qt.IsFalse)
+		// wait 10 ms since token.CreatedAt has only ms precision
+		time.Sleep(10 * time.Millisecond)
 		// set second token
 		secondToken := internal.HexBytes(uuid.New().String())
 		c.Assert(testDB.SetCSPAuth(secondToken, testUserID, testCSPBundleID), qt.IsNil)
