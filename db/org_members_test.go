@@ -251,4 +251,30 @@ func TestOrgMembers(t *testing.T) {
 		_, err = testDB.SetBulkOrgMembers(common.Address{}, testSalt, members)
 		c.Assert(err, qt.Not(qt.IsNil))
 	})
+
+	t.Run("ZeroAddressValidation", func(_ *testing.T) {
+		c.Assert(testDB.Reset(), qt.IsNil)
+
+		// Test SetOrgMember with zero address - should fail
+		zeroAddrMember := &OrgMember{
+			OrgAddress:   common.Address{}, // Zero address
+			Email:        testMemberEmail,
+			MemberNumber: testMemberNumber,
+			Name:         testName,
+		}
+		_, err := testDB.SetOrgMember(testSalt, zeroAddrMember)
+		c.Assert(err, qt.Equals, ErrInvalidData)
+
+		// Test OrgMember with zero address - should fail
+		_, err = testDB.OrgMember(common.Address{}, "some-id")
+		c.Assert(err, qt.Equals, ErrInvalidData)
+
+		// Test OrgMembers with zero address - should fail
+		_, _, err = testDB.OrgMembers(common.Address{}, 0, 10, "")
+		c.Assert(err, qt.Equals, ErrInvalidData)
+
+		// Test DeleteOrgMembers with zero address - should fail
+		_, err = testDB.DeleteOrgMembers(common.Address{}, []string{"some-id"})
+		c.Assert(err, qt.Equals, ErrInvalidData)
+	})
 }
