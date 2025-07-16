@@ -28,7 +28,7 @@ definitions:
     type: object
   apicommon.AddMembersResponse:
     properties:
-      count:
+      added:
         description: Number of members added
         type: integer
       errors:
@@ -41,6 +41,13 @@ definitions:
         example: deadbeef
         format: hex
         type: string
+      progress:
+        description: Progress is used on async jobs, equals Added / Total * 100
+        type: integer
+      total:
+        description: Total is used on async jobs, equals the length of the passed
+          members list
+        type: integer
     type: object
   apicommon.CreateOrganizationMemberGroupRequest:
     properties:
