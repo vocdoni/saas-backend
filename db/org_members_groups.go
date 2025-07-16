@@ -16,6 +16,9 @@ import (
 
 // OrgMembersGroup returns an organization members group
 func (ms *MongoStorage) OrganizationMemberGroup(groupID string, orgAddress common.Address) (*OrganizationMemberGroup, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return nil, ErrInvalidData
+	}
 	objID, err := primitive.ObjectIDFromHex(groupID)
 	if err != nil {
 		return nil, ErrInvalidData
@@ -43,6 +46,9 @@ func (ms *MongoStorage) OrganizationMemberGroups(
 	orgAddress common.Address,
 	page, pageSize int,
 ) (int, []*OrganizationMemberGroup, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return 0, nil, ErrInvalidData
+	}
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
@@ -137,6 +143,9 @@ func (ms *MongoStorage) UpdateOrganizationMemberGroup(
 	groupID string, orgAddress common.Address,
 	title, description string, addedMembers, removedMembers []string,
 ) error {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return ErrInvalidData
+	}
 	group, err := ms.OrganizationMemberGroup(groupID, orgAddress)
 	if err != nil {
 		if err == ErrNotFound {
@@ -226,6 +235,9 @@ func (ms *MongoStorage) UpdateOrganizationMemberGroup(
 
 // DeleteOrganizationMemberGroup deletes an organization member group by its ID
 func (ms *MongoStorage) DeleteOrganizationMemberGroup(groupID string, orgAddress common.Address) error {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return ErrInvalidData
+	}
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
@@ -252,6 +264,9 @@ func (ms *MongoStorage) ListOrganizationMemberGroup(
 	groupID string, orgAddress common.Address,
 	page, pageSize int64,
 ) (int, []*OrgMember, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return 0, nil, ErrInvalidData
+	}
 	// get the group
 	group, err := ms.OrganizationMemberGroup(groupID, orgAddress)
 	if err != nil {
