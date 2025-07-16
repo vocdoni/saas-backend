@@ -514,7 +514,7 @@ func (ms *MongoStorage) setBulkCensusParticipant(
 			SetUpsert(true)
 		docs = append(docs, upsertCensusParticipantsModel)
 	}
-	// Unordered makes it continue on errors (e.g., one dup), but you can set Ordered=true if you prefer.
+	// Unordered makes it continue on errors (e.g., one dup)
 	bulkOpts := options.BulkWrite().SetOrdered(false)
 
 	_, err := ms.censusParticipants.BulkWrite(ctx, docs, bulkOpts)

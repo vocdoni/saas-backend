@@ -286,7 +286,7 @@ func (ms *MongoStorage) ListOrganizationMemberGroup(
 // Checks the entire member base of an organization creating a projection that contains only
 // the provided auth fields and verifies that the resulting data do not have duplicates or
 // missing fields. Returns the corrsponding informative errors concerning duplicates or columns with empty values
-// The authFields are checked for empties and duplicates while the twoFaFields are only checked for empties
+// The authFields are checked for missing data and duplicates while the twoFaFields are only checked for missing data
 func (ms *MongoStorage) CheckGroupMembersFields(
 	orgAddress common.Address,
 	groupID string,
@@ -316,9 +316,9 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 	}()
 
 	results := OrgMemberAggregationResults{
-		Members:    make([]primitive.ObjectID, 0),
-		Duplicates: make([]primitive.ObjectID, 0),
-		Empties:    make([]primitive.ObjectID, 0),
+		Members:     make([]primitive.ObjectID, 0),
+		Duplicates:  make([]primitive.ObjectID, 0),
+		MissingData: make([]primitive.ObjectID, 0),
 	}
 
 	seenKeys := make(map[string]primitive.ObjectID, 50000)
@@ -356,10 +356,10 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 			}
 		}
 		if rowEmpty {
-			// if any of the fields are empty, add to empties
+			// if any of the fields are empty, add to missing data
 			// and continue to the next member
 			// we do not check for duplicates in empty rows
-			results.Empties = append(results.Empties, m.ID)
+			results.MissingData = append(results.MissingData, m.ID)
 			continue
 		}
 

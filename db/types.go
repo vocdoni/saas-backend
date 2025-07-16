@@ -241,10 +241,10 @@ type OrgMemberTwoFaFields []OrgMemberTwoFaField
 type OrgMemberAggregationResults struct {
 	// MemberIDs is a list of member IDs that are result of the aggregation
 	Members []primitive.ObjectID `json:"memberIds" bson:"memberIds"`
-	// Duplicates is a list of member IDs that were found to be duplicates in string
+	// Duplicates is a list of member IDs that were found to be duplicates
 	Duplicates []primitive.ObjectID `json:"duplicates" bson:"duplicates"`
-	// Empties is a list of member IDs that had colums were found to be empty in string
-	Empties []primitive.ObjectID `json:"empties" bson:"empties"`
+	// MissingData is a list of member IDs that had columns found to be empty
+	MissingData []primitive.ObjectID `json:"missingData" bson:"missingData"`
 }
 
 // An Organization members' group is a precursor of a census, and is simply a

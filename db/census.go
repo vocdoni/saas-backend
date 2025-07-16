@@ -100,6 +100,8 @@ func (ms *MongoStorage) SetGroupCensus(
 		return "", ErrInvalidData
 	}
 
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
 	// check that the org exists
 	_, err := ms.Organization(census.OrgAddress)
 	if err != nil {
@@ -132,8 +134,6 @@ func (ms *MongoStorage) SetGroupCensus(
 	if err != nil {
 		return "", err
 	}
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
 	filter := bson.M{"_id": census.ID}
 	opts := options.Update().SetUpsert(true)
 	_, err = ms.censuses.UpdateOne(ctx, filter, updateDoc, opts)

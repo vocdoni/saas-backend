@@ -140,7 +140,7 @@ func main() {
 	flag.Parse()
 
 	if config.Email == "" || config.Password == "" {
-		fmt.Println("Error: email, password, and organization address are required")
+		fmt.Println("Error: email, password are required")
 		flag.Usage()
 		return
 	}
@@ -204,7 +204,7 @@ func main() {
 			}
 			fmt.Printf("Waiting for members to be added... Progress: %d%%\n", jobResp.Progress)
 			// Sleep for a while before checking again
-			time.Sleep(5 * time.Second) // Uncomment if you want to wait before checking again
+			time.Sleep(5 * time.Second)
 		}
 	} else {
 		fmt.Printf("Members added synchronously, %d members added\n", addMembersResp.Added)
@@ -269,7 +269,7 @@ func main() {
 	if createCensusResp.ID == "" {
 		fmt.Println("Error: census ID is empty")
 		fmt.Printf("Found the duplicates: %v\n", createCensusResp.MemberWarnings.Duplicates)
-		fmt.Printf("Found the empties: %v\n", createCensusResp.MemberWarnings.Empties)
+		fmt.Printf("Found the missing data: %v\n", createCensusResp.MemberWarnings.MissingData)
 		return
 	}
 	// Print the census ID and member warnings

@@ -58,7 +58,7 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// check the user has the necessary permissions
-	if user.HasRoleFor(censusInfo.OrgAddress, db.ManagerRole) || user.HasRoleFor(censusInfo.OrgAddress, db.AdminRole) {
+	if !user.HasRoleFor(censusInfo.OrgAddress, db.ManagerRole) && !user.HasRoleFor(censusInfo.OrgAddress, db.AdminRole) {
 		errors.ErrUnauthorized.Withf("user does not have the necessary permissions in the organization").Write(w)
 		return
 	}
@@ -78,7 +78,7 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	if len(aggregationResults.Duplicates) > 0 || len(aggregationResults.Empties) > 0 {
+	if len(aggregationResults.Duplicates) > 0 || len(aggregationResults.MissingData) > 0 {
 		// if there are incorrect members, return an error with the IDs of the incorrect members
 		errors.ErrInvalidCensusData.WithData(aggregationResults).Write(w)
 		return
@@ -100,7 +100,6 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// add census members
 	apicommon.HTTPWriteJSON(w, apicommon.CreateCensusResponse{
 		ID: censusID,
 	})
@@ -310,7 +309,7 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// check the user has the necessary permissions
-	if user.HasRoleFor(census.OrgAddress, db.ManagerRole) || user.HasRoleFor(census.OrgAddress, db.AdminRole) {
+	if !user.HasRoleFor(census.OrgAddress, db.ManagerRole) && !user.HasRoleFor(census.OrgAddress, db.AdminRole) {
 		errors.ErrUnauthorized.Withf("user does not have the necessary permissions in the organization").Write(w)
 		return
 	}

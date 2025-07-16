@@ -649,7 +649,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		duplicatesGroupID, err := testDB.CreateOrganizationMemberGroup(duplicatesGroup)
 		c.Assert(err, qt.IsNil)
 
-		// Group 3: Only members without duplicates or empties (member2)
+		// Group 3: Only members without duplicates or missing data (member2)
 		validGroup := &OrganizationMemberGroup{
 			OrgAddress:  testOrgAddress,
 			Title:       "Valid Group",
@@ -659,7 +659,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		validGroupID, err := testDB.CreateOrganizationMemberGroup(validGroup)
 		c.Assert(err, qt.IsNil)
 
-		// Test 1: Valid case - check fields with no duplicates or empties using valid group
+		// Test 1: Valid case - check fields with no duplicates or missing data using valid group
 		authFields := OrgMemberAuthFields{
 			OrgMemberAuthFieldsName,
 		}
@@ -667,9 +667,9 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		results, err := testDB.CheckGroupMembersFields(testOrgAddress, validGroupID, authFields, twoFaFields)
 		c.Assert(err, qt.IsNil)
 		c.Assert(results, qt.Not(qt.IsNil))
-		c.Assert(len(results.Members), qt.Equals, 1)    // Only 1 member in valid group
-		c.Assert(len(results.Duplicates), qt.Equals, 0) // No duplicates for email
-		c.Assert(len(results.Empties), qt.Equals, 0)    // No empties for email
+		c.Assert(len(results.Members), qt.Equals, 1)     // Only 1 member in valid group
+		c.Assert(len(results.Duplicates), qt.Equals, 0)  // No duplicates for email
+		c.Assert(len(results.MissingData), qt.Equals, 0) // No missing data for email
 
 		// Test 2: Duplicate detection - check fields with known duplicates using duplicates group
 		authFields = OrgMemberAuthFields{
@@ -707,16 +707,16 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(results, qt.Not(qt.IsNil))
 
-		// Should find empties (member4 has empty name and memberNumber)
-		c.Assert(len(results.Empties) > 0, qt.Equals, true)
+		// Should find missing data (member4 has empty name and memberNumber)
+		c.Assert(len(results.MissingData) > 0, qt.Equals, true)
 
 		// Convert ObjectIDs to hex strings for easier comparison
-		emptyIDs := make([]string, len(results.Empties))
-		for i, id := range results.Empties {
+		emptyIDs := make([]string, len(results.MissingData))
+		for i, id := range results.MissingData {
 			emptyIDs[i] = id.Hex()
 		}
 
-		// Check that member4 ID is in the empties list
+		// Check that member4 ID is in the missing data list
 		c.Assert(contains(emptyIDs, member4ID), qt.Equals, true)
 
 		// Test 4: Edge case - invalid organization address
@@ -783,9 +783,9 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		// Since some members in the all members group have duplicates or empty fields, they're not all
 		// added to the Members field
 		c.Assert(len(results.Members) > 0, qt.Equals, true) // At least some members should be in the Members field
-		// Check for duplicates and empties
-		c.Assert(len(results.Duplicates) >= 0, qt.Equals, true) // May or may not have duplicates
-		c.Assert(len(results.Empties) >= 0, qt.Equals, true)    // May or may not have empties
+		// Check for duplicates and missing data
+		c.Assert(len(results.Duplicates) >= 0, qt.Equals, true)  // May or may not have duplicates
+		c.Assert(len(results.MissingData) >= 0, qt.Equals, true) // May or may not have missing data
 		// Test 9: Test with only twoFaFields (empty authFields)
 		authFields = OrgMemberAuthFields{}
 		twoFaFields = OrgMemberTwoFaFields{
@@ -795,9 +795,9 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		results, err = testDB.CheckGroupMembersFields(testOrgAddress, validGroupID, authFields, twoFaFields)
 		c.Assert(err, qt.IsNil)
 		c.Assert(results, qt.Not(qt.IsNil))
-		c.Assert(len(results.Members) >= 0, qt.Equals, true)    // May or may not have members
-		c.Assert(len(results.Duplicates) >= 0, qt.Equals, true) // May or may not have duplicates
-		c.Assert(len(results.Empties) >= 0, qt.Equals, true)    // May or may not have empties
+		c.Assert(len(results.Members) >= 0, qt.Equals, true)     // May or may not have members
+		c.Assert(len(results.Duplicates) >= 0, qt.Equals, true)  // May or may not have duplicates
+		c.Assert(len(results.MissingData) >= 0, qt.Equals, true) // May or may not have missing data
 
 		// Test 10: Test with both authFields and twoFaFields
 		authFields = OrgMemberAuthFields{
@@ -844,15 +844,15 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		results, err = testDB.CheckGroupMembersFields(testOrgAddress, emptyPhoneGroupID, authFields, twoFaFields)
 		c.Assert(err, qt.IsNil)
 		c.Assert(results, qt.Not(qt.IsNil))
-		c.Assert(len(results.Empties) > 0, qt.Equals, true) // Should detect empty phone
+		c.Assert(len(results.MissingData) > 0, qt.Equals, true) // Should detect empty phone
 
 		// Convert ObjectIDs to hex strings for easier comparison
-		emptyIDs = make([]string, len(results.Empties))
-		for i, id := range results.Empties {
+		emptyIDs = make([]string, len(results.MissingData))
+		for i, id := range results.MissingData {
 			emptyIDs[i] = id.Hex()
 		}
 
-		// Check that the member with empty phone is in the empties list
+		// Check that the member with empty phone is in the missing data list
 		c.Assert(contains(emptyIDs, emptyPhoneMemberID), qt.Equals, true)
 	})
 }

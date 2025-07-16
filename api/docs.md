@@ -1918,7 +1918,7 @@ Returns the census ID
 In case of empty or duplicate fields, the error code `40030` is returned with the IDs of the corresponding members
 ```json
 {
-  "empties": ["id1","id2"],
+  "missingData": ["id1","id2"],
   "duplicates": ["id3","id4"]
 }
 ```
