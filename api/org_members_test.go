@@ -8,7 +8,6 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
-	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -255,7 +254,7 @@ func TestOrganizationMembers(t *testing.T) {
 	c.Assert(pedroFound, qt.Equals, true, qt.Commentf("Pedro member should be found"))
 
 	// Test 4: Add members asynchronously
-	// Test 4.1: Test with valid data and async=true
+	// Test 4.1: Test with valid data (including some errors) and async=true
 	asyncMembers := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
 			{
@@ -277,9 +276,9 @@ func TestOrganizationMembers(t *testing.T) {
 				Name:         "Alice",
 				Surname:      "Brown",
 				NationalID:   "55443322D",
-				BirthDate:    "1982-03-18",
-				Email:        "alice.brown@example.com",
-				Phone:        "+34655443322",
+				BirthDate:    "invalid-birthdate",
+				Email:        "invalid-email",
+				Phone:        "invalid-phone",
 				Password:     "passwordabc",
 				Other: map[string]any{
 					"department": "HR",
@@ -315,7 +314,7 @@ func TestOrganizationMembers(t *testing.T) {
 
 	// Test 5: Check the job progress
 	var (
-		jobStatus   *db.BulkOrgMembersJob
+		jobStatus   *apicommon.AddMembersResponse
 		maxAttempts = 30
 		attempts    = 0
 		completed   = false
@@ -352,10 +351,13 @@ func TestOrganizationMembers(t *testing.T) {
 
 	// Verify the job completed successfully
 	c.Assert(completed, qt.Equals, true, qt.Commentf("Job did not complete within expected time"))
-	c.Assert(jobStatus.Added, qt.Equals, 2) // We added 2 members
-	c.Assert(jobStatus.Total, qt.Equals, 2)
-	c.Assert(jobStatus.Progress, qt.Equals, 100)
-	c.Assert(jobStatus.Errors, qt.HasLen, 0)
+	c.Assert(jobStatus.Added, qt.Equals, uint32(2)) // We added 2 members
+	c.Assert(jobStatus.Total, qt.Equals, uint32(2))
+	c.Assert(jobStatus.Progress, qt.Equals, uint32(100))
+	c.Assert(jobStatus.Errors, qt.HasLen, 3)
+	c.Assert(jobStatus.Errors[0], qt.Matches, ".*invalid-email.*")
+	c.Assert(jobStatus.Errors[1], qt.Matches, ".*invalid-phone.*")
+	c.Assert(jobStatus.Errors[2], qt.Matches, ".*invalid-birthdate.*")
 
 	// Test 6: Get organization members with pagination
 	// Test 6.1: Test with page=1 and pageSize=2

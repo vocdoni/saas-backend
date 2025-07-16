@@ -135,10 +135,10 @@ func (ms *MongoStorage) OrgMemberByMemberNumber(orgAddress, memberNumber string)
 
 // BulkOrgMembersJob is returned by SetBulkOrgMembers to provide the output.
 type BulkOrgMembersJob struct {
-	Progress int     `json:"progress"`
-	Total    int     `json:"total"`
-	Added    int     `json:"added"`
-	Errors   []error `json:"errors"`
+	Progress int
+	Total    int
+	Added    int
+	Errors   []error
 }
 
 func (j *BulkOrgMembersJob) ErrorsAsStrings() []string {
@@ -359,7 +359,7 @@ func (ms *MongoStorage) processOrgMemberBatches(
 
 		// Update job stats
 		job = BulkOrgMembersJob{
-			Progress: (end / job.Total) * 100,
+			Progress: ((job.Added + added) / job.Total) * 100,
 			Total:    job.Total,
 			Added:    job.Added + added,
 			Errors:   append(job.Errors, errs...),
