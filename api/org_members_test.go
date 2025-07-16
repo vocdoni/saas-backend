@@ -105,7 +105,7 @@ func TestOrganizationMembers(t *testing.T) {
 	var addedResponse apicommon.AddMembersResponse
 	err = json.Unmarshal(resp, &addedResponse)
 	c.Assert(err, qt.IsNil)
-	c.Assert(addedResponse.Count, qt.Equals, uint32(2))
+	c.Assert(addedResponse.Added, qt.Equals, uint32(2))
 
 	// Test 2.2: Test with no authentication
 	_, code = testRequest(t, http.MethodPost, "", members, "organizations", orgAddress.String(), "members")
@@ -133,7 +133,7 @@ func TestOrganizationMembers(t *testing.T) {
 	// Verify the response for empty members list
 	err = json.Unmarshal(resp, &addedResponse)
 	c.Assert(err, qt.IsNil)
-	c.Assert(addedResponse.Count, qt.Equals, uint32(0))
+	c.Assert(addedResponse.Added, qt.Equals, uint32(0))
 
 	// Test 2.5: Test with members missing some of the new optional fields
 	// Generate a new test member ID
@@ -197,7 +197,7 @@ func TestOrganizationMembers(t *testing.T) {
 	// Verify the response contains the number of members added
 	err = json.Unmarshal(resp, &addedResponse)
 	c.Assert(err, qt.IsNil)
-	c.Assert(addedResponse.Count, qt.Equals, uint32(3))
+	c.Assert(addedResponse.Added, qt.Equals, uint32(3))
 	c.Assert(addedResponse.Errors, qt.HasLen, 3)
 	c.Assert(addedResponse.Errors[0], qt.Matches, ".*invalid-email.*")
 	c.Assert(addedResponse.Errors[1], qt.Matches, ".*invalid-phone.*")

@@ -533,10 +533,10 @@ func testAddMembersToCensus(t *testing.T, token, censusID string, members []apic
 	var addedResponse apicommon.AddMembersResponse
 	err := json.Unmarshal(resp, &addedResponse)
 	c.Assert(err, qt.IsNil)
-	c.Assert(addedResponse.Count, qt.Equals, uint32(len(members)),
-		qt.Commentf("expected %d members, got %d", len(members), addedResponse.Count))
+	c.Assert(addedResponse.Added, qt.Equals, uint32(len(members)),
+		qt.Commentf("expected %d members, got %d", len(members), addedResponse.Added))
 
-	return addedResponse.Count
+	return addedResponse.Added
 }
 
 // testPublishCensus publishes the given census.
