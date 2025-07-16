@@ -28,14 +28,10 @@ func TestStripeAPI(t *testing.T) {
 				Locale:    "en",
 			}
 
-			resp, status := testRequest(t, http.MethodPost, token, checkoutReq, "subscriptions", "checkout")
-			c.Assert(status, qt.Equals, http.StatusBadRequest, qt.Commentf("response: %s", resp))
-
+			errorResp := requestAndParseWithAssertCode[apiError](http.StatusBadRequest, t, http.MethodPost, token, checkoutReq,
+				"subscriptions", "checkout")
 			// Verify the error message indicates missing required fields
-			var errorResp map[string]any
-			err := json.Unmarshal(resp, &errorResp)
-			c.Assert(err, qt.IsNil)
-			c.Assert(errorResp["error"], qt.Contains, "Missing required fields")
+			c.Assert(errorResp.Error, qt.Contains, "Missing required fields")
 		})
 
 		t.Run("ValidAddress", func(t *testing.T) {

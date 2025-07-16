@@ -8,6 +8,7 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
@@ -47,9 +48,8 @@ func TestCSPVoting(t *testing.T) {
 		token := testCreateUser(t, "superpassword123")
 
 		// Verify the token works
-		resp, code := testRequest(t, http.MethodGet, token, nil, usersMeEndpoint)
-		c.Assert(code, qt.Equals, http.StatusOK)
-		t.Logf("User info: %s", resp)
+		user := requestAndParse[apicommon.UserInfo](t, http.MethodGet, token, nil, usersMeEndpoint)
+		t.Logf("User: %+v\n", user)
 
 		// Create a new vocdoni client
 		vocdoniClient := testNewVocdoniClient(t)
@@ -96,8 +96,7 @@ func TestCSPVoting(t *testing.T) {
 			signRemoteSignerAndSendVocdoniTx(t, &tx, token, vocdoniClient, orgAddress)
 
 			// Verify the organization was created
-			resp, code = testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String())
-			c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+			requestAndAssertCode(http.StatusOK, t, http.MethodGet, token, nil, "organizations", orgAddress.String())
 		})
 
 		// Create a process for the organization

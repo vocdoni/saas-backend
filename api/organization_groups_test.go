@@ -16,7 +16,7 @@ func TestOrganizationGroups(t *testing.T) {
 
 	// Verify the token works
 	resp, code := testRequest(t, http.MethodGet, adminToken, nil, usersMeEndpoint)
-	c.Assert(code, qt.Equals, http.StatusOK)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 	t.Logf("Admin user: %s\n", resp)
 
 	// Create an organization
@@ -67,12 +67,9 @@ func TestOrganizationGroups(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Verify the members were added
-	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "members")
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	var membersResponse apicommon.OrganizationMembersResponse
-	err := parseJSON(resp, &membersResponse)
-	c.Assert(err, qt.IsNil)
+	membersResponse := requestAndParse[apicommon.OrganizationMembersResponse](
+		t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "members")
 	c.Assert(len(membersResponse.Members), qt.Equals, 2, qt.Commentf("expected 2 members"))
 
 	// Store participant IDs for later use
@@ -117,11 +114,9 @@ func TestOrganizationGroups(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Get all members to find the third participant's ID
-	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "members")
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	err = parseJSON(resp, &membersResponse)
-	c.Assert(err, qt.IsNil)
+	membersResponse = requestAndParse[apicommon.OrganizationMembersResponse](
+		t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "members")
 	c.Assert(len(membersResponse.Members), qt.Equals, 3, qt.Commentf("expected 3 members"))
 
 	var participant3ID string
@@ -140,59 +135,27 @@ func TestOrganizationGroups(t *testing.T) {
 			Description: "This is a test group",
 			MemberIDs:   []string{participant1ID, participant2ID},
 		}
-		resp, code = testRequest(
-			t,
-			http.MethodPost,
-			adminToken,
-			createRequest,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-		)
-		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-		var groupInfo apicommon.OrganizationMemberGroupInfo
-		err = parseJSON(resp, &groupInfo)
-		c.Assert(err, qt.IsNil)
+		groupInfo := requestAndParse[apicommon.OrganizationMemberGroupInfo](
+			t, http.MethodPost, adminToken, createRequest,
+			"organizations", orgAddress.String(), "groups")
 		c.Assert(groupInfo.ID, qt.Not(qt.Equals), "")
 
 		// Test 2: Try to create a group without authentication
-		_, code = testRequest(
-			t,
-			http.MethodPost,
-			"",
-			createRequest,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-		)
-		c.Assert(code, qt.Equals, http.StatusUnauthorized)
+		requestAndAssertCode(http.StatusUnauthorized,
+			t, http.MethodPost, "", createRequest,
+			"organizations", orgAddress.String(), "groups")
 
 		// Test 3: Try to create a group with a non-admin user
 		// Create a non-admin user
 		nonAdminToken := testCreateUser(t, "nonadminpassword123")
-		_, code = testRequest(
-			t,
-			http.MethodPost,
-			nonAdminToken,
-			createRequest,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-		)
-		c.Assert(code, qt.Equals, http.StatusUnauthorized)
+		requestAndAssertCode(http.StatusUnauthorized,
+			t, http.MethodPost, nonAdminToken, createRequest,
+			"organizations", orgAddress.String(), "groups")
 
 		// Test 4: Create a group with an invalid organization address
-		_, code = testRequest(
-			t,
-			http.MethodPost,
-			adminToken,
-			createRequest,
-			"organizations",
-			"invalid-address",
-			"groups",
-		)
-		c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+		requestAndAssertCode(http.StatusBadRequest,
+			t, http.MethodPost, adminToken, createRequest,
+			"organizations", "invalid-address", "groups")
 
 		// Test 5: Create a group with invalid member IDs
 		invalidRequest := &apicommon.CreateOrganizationMemberGroupRequest{
@@ -200,16 +163,9 @@ func TestOrganizationGroups(t *testing.T) {
 			Description: "This group has invalid member IDs",
 			MemberIDs:   []string{"invalid-id", "not-a-number"},
 		}
-		_, code = testRequest(
-			t,
-			http.MethodPost,
-			adminToken,
-			invalidRequest,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-		)
-		c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+		requestAndAssertCode(http.StatusInternalServerError,
+			t, http.MethodPost, adminToken, invalidRequest,
+			"organizations", orgAddress.String(), "groups")
 
 		// Save the group ID for later tests
 		groupID := groupInfo.ID
@@ -220,134 +176,60 @@ func TestOrganizationGroups(t *testing.T) {
 			Description: "This group has only one member",
 			MemberIDs:   []string{participant1ID},
 		}
-		resp, code = testRequest(
-			t,
-			http.MethodPost,
-			adminToken,
-			createRequest,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-		)
-		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-		var singleMemberGroupInfo apicommon.OrganizationMemberGroupInfo
-		err = parseJSON(resp, &singleMemberGroupInfo)
-		c.Assert(err, qt.IsNil)
+		singleMemberGroupInfo := requestAndParse[apicommon.OrganizationMemberGroupInfo](
+			t, http.MethodPost, adminToken, createRequest,
+			"organizations", orgAddress.String(), "groups")
 		c.Assert(singleMemberGroupInfo.ID, qt.Not(qt.Equals), "")
 		c.Assert(singleMemberGroupInfo.ID, qt.Not(qt.Equals), groupID) // Ensure it's a different group
 	})
 
 	t.Run("GetOrganizationMemberGroups", func(t *testing.T) {
 		// Test 1: Get all groups for the organization
-		resp, code = testRequest(
-			t,
-			http.MethodGet,
-			adminToken,
-			nil,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-		)
-		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-		var groupsResponse apicommon.OrganizationMemberGroupsResponse
-		err = parseJSON(resp, &groupsResponse)
-		c.Assert(err, qt.IsNil)
-		c.Assert(len(groupsResponse.Groups), qt.Equals, 2) // We created two groups in the previous test
+		groupsResponse := requestAndParse[apicommon.OrganizationMemberGroupsResponse](
+			t, http.MethodGet, adminToken, nil,
+			"organizations", orgAddress.String(), "groups")
+		c.Assert(len(groupsResponse.Groups), qt.Equals, 2) // We created two groups in the previous test (Test 1 and Test 6)
 
 		// Test 2: Try to get groups without authentication
-		_, code = testRequest(
-			t,
-			http.MethodGet,
-			"",
-			nil,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-		)
-		c.Assert(code, qt.Equals, http.StatusUnauthorized)
+		requestAndAssertCode(http.StatusUnauthorized,
+			t, http.MethodGet, "", nil,
+			"organizations", orgAddress.String(), "groups")
 
 		// Test 3: Try to get groups with a non-admin user
 		nonAdminToken := testCreateUser(t, "nonadminpassword123")
-		_, code = testRequest(
-			t,
-			http.MethodGet,
-			nonAdminToken,
-			nil,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-		)
-		c.Assert(code, qt.Equals, http.StatusUnauthorized)
+		requestAndAssertCode(http.StatusUnauthorized,
+			t, http.MethodGet, nonAdminToken, nil,
+			"organizations", orgAddress.String(), "groups")
 
 		// Test 4: Try to get groups with an invalid organization address
-		_, code = testRequest(
-			t,
-			http.MethodGet,
-			adminToken,
-			nil,
-			"organizations",
-			"invalid-address",
-			"groups",
-		)
-		c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+		requestAndAssertCode(http.StatusBadRequest,
+			t, http.MethodGet, adminToken, nil,
+			"organizations", "invalid-address", "groups")
 
 		// Save the first group ID for later tests
 		firstGroupID := groupsResponse.Groups[0].ID
 		c.Assert(firstGroupID, qt.Not(qt.Equals), "")
 
 		// Test 5: Get a specific group by ID
-		resp, code = testRequest(
-			t,
-			http.MethodGet,
-			adminToken,
-			nil,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-			firstGroupID,
-		)
-		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-		var groupInfo apicommon.OrganizationMemberGroupInfo
-		err = parseJSON(resp, &groupInfo)
-		c.Assert(err, qt.IsNil)
+		groupInfo := requestAndParse[apicommon.OrganizationMemberGroupInfo](
+			t, http.MethodGet, adminToken, nil,
+			"organizations", orgAddress.String(), "groups", firstGroupID)
 		c.Assert(groupInfo.ID, qt.Equals, firstGroupID)
 		c.Assert(groupInfo.Title, qt.Not(qt.Equals), "")
 		c.Assert(groupInfo.Description, qt.Not(qt.Equals), "")
 		c.Assert(len(groupInfo.MemberIDs), qt.Not(qt.Equals), 0)
 
 		// Test 6: Try to get a non-existent group
-		_, code = testRequest(
-			t,
-			http.MethodGet,
-			adminToken,
-			nil,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-			"nonexistentgroupid",
-		)
-		c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+		requestAndAssertCode(http.StatusInternalServerError,
+			t, http.MethodGet, adminToken, nil,
+			"organizations", orgAddress.String(), "groups", "nonexistentgroupid")
 	})
 
 	t.Run("UpdateOrganizationMemberGroup", func(t *testing.T) {
 		// First, get all groups to find a group ID to update
-		resp, code := testRequest(
-			t,
-			http.MethodGet,
-			adminToken,
-			nil,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-		)
-		c.Assert(code, qt.Equals, http.StatusOK)
-
-		var groupsResponse apicommon.OrganizationMemberGroupsResponse
-		err := parseJSON(resp, &groupsResponse)
-		c.Assert(err, qt.IsNil)
+		groupsResponse := requestAndParse[apicommon.OrganizationMemberGroupsResponse](
+			t, http.MethodGet, adminToken, nil,
+			"organizations", orgAddress.String(), "groups")
 		c.Assert(len(groupsResponse.Groups), qt.Not(qt.Equals), 0)
 
 		groupID := groupsResponse.Groups[0].ID
@@ -357,34 +239,14 @@ func TestOrganizationGroups(t *testing.T) {
 			Title:       "Updated Group Title",
 			Description: "Updated group description",
 		}
-		resp, code = testRequest(
-			t,
-			http.MethodPut,
-			adminToken,
-			updateRequest,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-			groupID,
-		)
-		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+		requestAndAssertCode(http.StatusOK,
+			t, http.MethodPut, adminToken, updateRequest,
+			"organizations", orgAddress.String(), "groups", groupID)
 
 		// Verify the update was successful
-		resp, code = testRequest(
-			t,
-			http.MethodGet,
-			adminToken,
-			nil,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-			groupID,
-		)
-		c.Assert(code, qt.Equals, http.StatusOK)
-
-		var updatedGroup apicommon.OrganizationMemberGroupInfo
-		err = parseJSON(resp, &updatedGroup)
-		c.Assert(err, qt.IsNil)
+		updatedGroup := requestAndParse[apicommon.OrganizationMemberGroupInfo](
+			t, http.MethodGet, adminToken, nil,
+			"organizations", orgAddress.String(), "groups", groupID)
 		c.Assert(updatedGroup.Title, qt.Equals, "Updated Group Title")
 		c.Assert(updatedGroup.Description, qt.Equals, "Updated group description")
 
@@ -394,33 +256,14 @@ func TestOrganizationGroups(t *testing.T) {
 			Description: updatedGroup.Description,
 			AddMembers:  []string{participant3ID},
 		}
-		resp, code = testRequest(
-			t,
-			http.MethodPut,
-			adminToken,
-			updateRequest,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-			groupID,
-		)
-		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+		requestAndAssertCode(http.StatusOK,
+			t, http.MethodPut, adminToken, updateRequest,
+			"organizations", orgAddress.String(), "groups", groupID)
 
 		// Verify the participant was added
-		resp, code = testRequest(
-			t,
-			http.MethodGet,
-			adminToken,
-			nil,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-			groupID,
-		)
-		c.Assert(code, qt.Equals, http.StatusOK)
-
-		err = parseJSON(resp, &updatedGroup)
-		c.Assert(err, qt.IsNil)
+		updatedGroup = requestAndParse[apicommon.OrganizationMemberGroupInfo](
+			t, http.MethodGet, adminToken, nil,
+			"organizations", orgAddress.String(), "groups", groupID)
 
 		// Check if the new participant ID is in the group's member IDs
 		found := false
@@ -438,33 +281,14 @@ func TestOrganizationGroups(t *testing.T) {
 			Description:   updatedGroup.Description,
 			RemoveMembers: []string{participant3ID},
 		}
-		resp, code = testRequest(
-			t,
-			http.MethodPut,
-			adminToken,
-			updateRequest,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-			groupID,
-		)
-		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+		requestAndAssertCode(http.StatusOK,
+			t, http.MethodPut, adminToken, updateRequest,
+			"organizations", orgAddress.String(), "groups", groupID)
 
 		// Verify the participant was removed
-		resp, code = testRequest(
-			t,
-			http.MethodGet,
-			adminToken,
-			nil,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-			groupID,
-		)
-		c.Assert(code, qt.Equals, http.StatusOK)
-
-		err = parseJSON(resp, &updatedGroup)
-		c.Assert(err, qt.IsNil)
+		updatedGroup = requestAndParse[apicommon.OrganizationMemberGroupInfo](
+			t, http.MethodGet, adminToken, nil,
+			"organizations", orgAddress.String(), "groups", groupID)
 
 		// Check that the participant ID is no longer in the group's member IDs
 		found = false
@@ -477,44 +301,20 @@ func TestOrganizationGroups(t *testing.T) {
 		c.Assert(found, qt.Equals, false, qt.Commentf("Removed participant still found in group"))
 
 		// Test 4: Try to update a group without authentication
-		_, code = testRequest(
-			t,
-			http.MethodPut,
-			"",
-			updateRequest,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-			groupID,
-		)
-		c.Assert(code, qt.Equals, http.StatusUnauthorized)
+		requestAndAssertCode(http.StatusUnauthorized,
+			t, http.MethodPut, "", updateRequest,
+			"organizations", orgAddress.String(), "groups", groupID)
 
 		// Test 5: Try to update a group with a non-admin user
 		nonAdminToken := testCreateUser(t, "nonadminpassword123")
-		_, code = testRequest(
-			t,
-			http.MethodPut,
-			nonAdminToken,
-			updateRequest,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-			groupID,
-		)
-		c.Assert(code, qt.Equals, http.StatusUnauthorized)
+		requestAndAssertCode(http.StatusUnauthorized,
+			t, http.MethodPut, nonAdminToken, updateRequest,
+			"organizations", orgAddress.String(), "groups", groupID)
 
 		// Test 6: Try to update a non-existent group
-		_, code = testRequest(
-			t,
-			http.MethodPut,
-			adminToken,
-			updateRequest,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-			"nonexistentgroupid",
-		)
-		c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+		requestAndAssertCode(http.StatusInternalServerError,
+			t, http.MethodPut, adminToken, updateRequest,
+			"organizations", orgAddress.String(), "groups", "nonexistentgroupid")
 	})
 
 	t.Run("ListOrganizationMemberGroupMembers", func(t *testing.T) {
@@ -528,7 +328,7 @@ func TestOrganizationGroups(t *testing.T) {
 			orgAddress.String(),
 			"groups",
 		)
-		c.Assert(code, qt.Equals, http.StatusOK)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		var groupsResponse apicommon.OrganizationMemberGroupsResponse
 		err := parseJSON(resp, &groupsResponse)
@@ -578,47 +378,20 @@ func TestOrganizationGroups(t *testing.T) {
 		c.Assert(membersResponse.CurrentPage, qt.Equals, 1)
 
 		// Test 3: Try to list members without authentication
-		_, code = testRequest(
-			t,
-			http.MethodGet,
-			"",
-			nil,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-			groupID,
-			"members",
-		)
-		c.Assert(code, qt.Equals, http.StatusUnauthorized)
+		requestAndAssertCode(http.StatusUnauthorized,
+			t, http.MethodGet, "", nil,
+			"organizations", orgAddress.String(), "groups", groupID, "members")
 
 		// Test 4: Try to list members with a non-admin user
 		nonAdminToken := testCreateUser(t, "nonadminpassword123")
-		_, code = testRequest(
-			t,
-			http.MethodGet,
-			nonAdminToken,
-			nil,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-			groupID,
-			"members",
-		)
-		c.Assert(code, qt.Equals, http.StatusUnauthorized)
+		requestAndAssertCode(http.StatusUnauthorized,
+			t, http.MethodGet, nonAdminToken, nil,
+			"organizations", orgAddress.String(), "groups", groupID, "members")
 
 		// Test 5: Try to list members of a non-existent group
-		_, code = testRequest(
-			t,
-			http.MethodGet,
-			adminToken,
-			nil,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-			"nonexistentgroupid",
-			"members",
-		)
-		c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+		requestAndAssertCode(http.StatusInternalServerError,
+			t, http.MethodGet, adminToken, nil,
+			"organizations", orgAddress.String(), "groups", "nonexistentgroupid", "members")
 	})
 
 	t.Run("DeleteOrganizationMemberGroup", func(t *testing.T) {
@@ -637,7 +410,7 @@ func TestOrganizationGroups(t *testing.T) {
 			orgAddress.String(),
 			"groups",
 		)
-		c.Assert(code, qt.Equals, http.StatusOK)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		var groupInfo apicommon.OrganizationMemberGroupInfo
 		err := parseJSON(resp, &groupInfo)
@@ -660,17 +433,9 @@ func TestOrganizationGroups(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		// Verify the group was deleted by trying to get it
-		_, code = testRequest(
-			t,
-			http.MethodGet,
-			adminToken,
-			nil,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-			groupID,
-		)
-		c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+		requestAndAssertCode(http.StatusBadRequest,
+			t, http.MethodGet, adminToken, nil,
+			"organizations", orgAddress.String(), "groups", groupID)
 
 		// Test 2: Try to delete a group without authentication
 		// First create another group
@@ -688,53 +453,29 @@ func TestOrganizationGroups(t *testing.T) {
 			orgAddress.String(),
 			"groups",
 		)
-		c.Assert(code, qt.Equals, http.StatusOK)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		err = parseJSON(resp, &groupInfo)
 		c.Assert(err, qt.IsNil)
 		groupID = groupInfo.ID
 
-		_, code = testRequest(
-			t,
-			http.MethodDelete,
-			"",
-			nil,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-			groupID,
-		)
-		c.Assert(code, qt.Equals, http.StatusUnauthorized)
+		requestAndAssertCode(http.StatusUnauthorized,
+			t, http.MethodDelete, "", nil,
+			"organizations", orgAddress.String(), "groups", groupID)
 
 		// Test 3: Try to delete a group with a non-admin user
 		nonAdminToken := testCreateUser(t, "nonadminpassword123")
-		_, code = testRequest(
-			t,
-			http.MethodDelete,
-			nonAdminToken,
-			nil,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-			groupID,
-		)
-		c.Assert(code, qt.Equals, http.StatusUnauthorized)
+		requestAndAssertCode(http.StatusUnauthorized,
+			t, http.MethodDelete, nonAdminToken, nil,
+			"organizations", orgAddress.String(), "groups", groupID)
 
 		// Test 4: Try to delete a non-existent group
-		_, code = testRequest(
-			t,
-			http.MethodDelete,
-			adminToken,
-			nil,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-			"nonexistentgroupid",
-		)
-		c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+		requestAndAssertCode(http.StatusInternalServerError,
+			t, http.MethodDelete, adminToken, nil,
+			"organizations", orgAddress.String(), "groups", "nonexistentgroupid")
 
 		// Clean up: Delete the group created for this test
-		_, code = testRequest(
+		resp, code = testRequest(
 			t,
 			http.MethodDelete,
 			adminToken,
@@ -744,7 +485,7 @@ func TestOrganizationGroups(t *testing.T) {
 			"groups",
 			groupID,
 		)
-		c.Assert(code, qt.Equals, http.StatusOK)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 	})
 
 	// Clean up: Delete the members
@@ -764,5 +505,5 @@ func TestOrganizationGroups(t *testing.T) {
 		orgAddress.String(),
 		"members",
 	)
-	c.Assert(code, qt.Equals, http.StatusOK)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 }

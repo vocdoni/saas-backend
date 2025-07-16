@@ -18,17 +18,15 @@ func TestProcess(t *testing.T) {
 	adminToken := testCreateUser(t, "adminpassword123")
 
 	// Verify the token works
-	resp, code := testRequest(t, http.MethodGet, adminToken, nil, usersMeEndpoint)
-	c.Assert(code, qt.Equals, http.StatusOK)
-	t.Logf("Admin user: %s\n", resp)
+	user := requestAndParse[apicommon.UserInfo](t, http.MethodGet, adminToken, nil, usersMeEndpoint)
+	t.Logf("Admin user: %+v\n", user)
 
 	// Create an organization
 	orgAddress := testCreateOrganization(t, adminToken)
 	t.Logf("Created organization with address: %s\n", orgAddress.String())
 
 	// Get the organization to verify it exists
-	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String())
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+	requestAndAssertCode(http.StatusOK, t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String())
 
 	// Create a census
 	authFields := db.OrgMemberAuthFields{}
@@ -68,7 +66,7 @@ func TestProcess(t *testing.T) {
 		},
 	}
 
-	resp, code = testRequest(t, http.MethodPost, adminToken, members, censusEndpoint, censusID)
+	resp, code := testRequest(t, http.MethodPost, adminToken, members, censusEndpoint, censusID)
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Publish the census
@@ -105,8 +103,7 @@ func TestProcess(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Test 1.2: Test with no authentication
-	_, code = testRequest(t, http.MethodPost, "", processInfo, "process", processID.String())
-	c.Assert(code, qt.Equals, http.StatusUnauthorized)
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "", processInfo, "process", processID.String())
 
 	// Test 1.3: Test with invalid process ID
 	_, code = testRequest(t, http.MethodPost, adminToken, processInfo, "process", "invalid-id")

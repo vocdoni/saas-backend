@@ -11,6 +11,7 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 )
@@ -92,9 +93,9 @@ func TestOAuthLoginHandler(t *testing.T) {
 	defer func() { http.DefaultClient = originalClient }()
 
 	// Test invalid body
-	resp, code := testRequest(t, http.MethodPost, "", "invalid body", oauthLoginEndpoint)
-	c.Assert(code, qt.Equals, http.StatusBadRequest)
-	c.Assert(string(resp), qt.Contains, "40004") // ErrMalformedBody
+	invalidBodyResp := requestAndParseWithAssertCode[errors.Error](http.StatusBadRequest, t, http.MethodPost, "", "invalid body",
+		oauthLoginEndpoint)
+	c.Assert(invalidBodyResp.Code, qt.Equals, errors.ErrMalformedBody.Code)
 
 	// Test with invalid OAuth signature
 	email := fmt.Sprintf("oauth-user-%d@test.com", internal.RandomInt(10000))
@@ -111,8 +112,7 @@ func TestOAuthLoginHandler(t *testing.T) {
 		Address:            userAddress,
 	}
 
-	_, code = testRequest(t, http.MethodPost, "", invalidLoginReq, oauthLoginEndpoint)
-	c.Assert(code, qt.Equals, http.StatusUnauthorized)
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "", invalidLoginReq, oauthLoginEndpoint)
 
 	// Test with valid OAuth signature but invalid user signature
 	oauthSignatureBytes, err := oauthSigner.SignEthereum([]byte(email))
@@ -128,7 +128,7 @@ func TestOAuthLoginHandler(t *testing.T) {
 		Address:            userAddress,
 	}
 
-	_, code = testRequest(t, http.MethodPost, "", invalidUserLoginReq, oauthLoginEndpoint)
+	_, code := testRequest(t, http.MethodPost, "", invalidUserLoginReq, oauthLoginEndpoint)
 	c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
 	// Test with valid signatures for a new user (should create the user)
@@ -144,8 +144,8 @@ func TestOAuthLoginHandler(t *testing.T) {
 		Address:            userAddress,
 	}
 
-	resp, code = testRequest(t, http.MethodPost, "", validLoginReq, oauthLoginEndpoint)
-	c.Assert(code, qt.Equals, http.StatusOK)
+	resp, code := testRequest(t, http.MethodPost, "", validLoginReq, oauthLoginEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Verify the response contains a valid token
 	var loginResp apicommon.OAuthLoginResponse
@@ -157,7 +157,7 @@ func TestOAuthLoginHandler(t *testing.T) {
 
 	// Test login with the same user again (should authenticate the existing user)
 	resp, code = testRequest(t, http.MethodPost, "", validLoginReq, oauthLoginEndpoint)
-	c.Assert(code, qt.Equals, http.StatusOK)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Verify the response contains a valid token
 	err = json.Unmarshal(resp, &loginResp)

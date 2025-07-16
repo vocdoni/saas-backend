@@ -20,17 +20,15 @@ func TestCensus(t *testing.T) {
 	adminToken := testCreateUser(t, "adminpassword123")
 
 	// Verify the token works
-	resp, code := testRequest(t, http.MethodGet, adminToken, nil, usersMeEndpoint)
-	c.Assert(code, qt.Equals, http.StatusOK)
-	t.Logf("Admin user: %s\n", resp)
+	adminUser := requestAndParse[apicommon.UserInfo](t, http.MethodGet, adminToken, nil, usersMeEndpoint)
+	t.Logf("Admin user: %+v\n", adminUser)
 
 	// Create an organization
 	orgAddress := testCreateOrganization(t, adminToken)
 	t.Logf("Created organization with address: %s\n", orgAddress)
 
 	// Get the organization to verify it exists
-	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String())
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+	requestAndAssertCode(http.StatusOK, t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String())
 
 	// First, add some organization members to test with
 	members := &apicommon.AddMembersRequest{
@@ -61,8 +59,8 @@ func TestCensus(t *testing.T) {
 	}
 
 	// Add members to the organization first
-	resp, code = testRequest(t, http.MethodPost, adminToken, members, "organizations", orgAddress.String(), "members")
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+	requestAndAssertCode(http.StatusOK, t, http.MethodPost, adminToken, members,
+		"organizations", orgAddress.String(), "members")
 
 	// Test 1: Create a census
 	// Test 1.1: Test with valid data and auth fields
@@ -74,25 +72,16 @@ func TestCensus(t *testing.T) {
 			db.OrgMemberAuthFieldsName,
 		},
 	}
-	resp, code = testRequest(t, http.MethodPost, adminToken, censusInfo, censusEndpoint)
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	// Parse the response to get the census ID
-	var createdCensusResponse apicommon.CreateCensusResponse
-	err := parseJSON(resp, &createdCensusResponse)
-	c.Assert(err, qt.IsNil)
+	createdCensusResponse := requestAndParse[apicommon.CreateCensusResponse](t, http.MethodPost, adminToken, censusInfo,
+		censusEndpoint)
 	c.Assert(createdCensusResponse.ID, qt.Not(qt.Equals), "")
 
 	censusID := createdCensusResponse.ID
 	t.Logf("Created census with ID: %s\n", censusID)
 
 	// Verify the census was created correctly by retrieving it
-	resp, code = testRequest(t, http.MethodGet, adminToken, nil, censusEndpoint, censusID)
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	var retrievedCensus apicommon.OrganizationCensus
-	err = parseJSON(resp, &retrievedCensus)
-	c.Assert(err, qt.IsNil)
+	retrievedCensus := requestAndParse[apicommon.OrganizationCensus](t, http.MethodGet, adminToken, nil,
+		censusEndpoint, censusID)
 	c.Assert(retrievedCensus.ID, qt.Equals, censusID)
 	c.Assert(retrievedCensus.Type, qt.Equals, db.CensusTypeSMSorMail)
 	c.Assert(retrievedCensus.OrgAddress, qt.Equals, orgAddress)
@@ -103,12 +92,12 @@ func TestCensus(t *testing.T) {
 		OrgAddress: orgAddress,
 		// AuthFields is missing
 	}
-	_, code = testRequest(t, http.MethodPost, adminToken, censusInfoNoAuth, censusEndpoint)
-	c.Assert(code, qt.Equals, http.StatusBadRequest)
+	requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, adminToken, censusInfoNoAuth,
+		censusEndpoint)
 
 	// Test 1.3: Test with no authentication
-	_, code = testRequest(t, http.MethodPost, "", censusInfo, censusEndpoint)
-	c.Assert(code, qt.Equals, http.StatusUnauthorized)
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "", censusInfo,
+		censusEndpoint)
 
 	// Test 1.4: Test with invalid organization address
 	invalidCensusInfo := &apicommon.CreateCensusRequest{
@@ -118,15 +107,15 @@ func TestCensus(t *testing.T) {
 			db.OrgMemberAuthFieldsMemberNumber,
 		},
 	}
-	_, code = testRequest(t, http.MethodPost, adminToken, invalidCensusInfo, censusEndpoint)
-	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, adminToken, invalidCensusInfo,
+		censusEndpoint)
 
 	// Test 2: Get census information
 	// Test 2.1: Test with valid census ID (already tested above)
 
 	// Test 2.2: Test with invalid census ID
-	_, code = testRequest(t, http.MethodGet, adminToken, nil, censusEndpoint, "invalid-id")
-	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+	requestAndAssertCode(http.StatusBadRequest, t, http.MethodGet, adminToken, nil,
+		censusEndpoint, "invalid-id")
 
 	// Test 3: Add members to census
 	// Test 3.1: Test with valid data (using the same members we added to the organization)
@@ -157,29 +146,22 @@ func TestCensus(t *testing.T) {
 		},
 	}
 
-	resp, code = testRequest(t, http.MethodPost, adminToken, censusMembers, censusEndpoint, censusID)
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	// Verify the response contains the number of members added
-	var addedResponse apicommon.AddMembersResponse
-	err = parseJSON(resp, &addedResponse)
-	c.Assert(err, qt.IsNil)
+	addedResponse := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, adminToken, censusMembers,
+		censusEndpoint, censusID)
 	c.Assert(addedResponse.Added, qt.Equals, uint32(2))
 
 	// Test 3.2: Test with no authentication
-	_, code = testRequest(t, http.MethodPost, "", censusMembers, censusEndpoint, censusID)
-	c.Assert(code, qt.Equals, http.StatusUnauthorized)
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "", censusMembers, censusEndpoint, censusID)
 
 	// Test 3.3: Test with invalid census ID
-	_, code = testRequest(t, http.MethodPost, adminToken, censusMembers, censusEndpoint, "invalid-id")
-	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+	requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, adminToken, censusMembers,
+		censusEndpoint, "invalid-id")
 
 	// Test 3.4: Test with empty members list
 	emptyMembersList := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{},
 	}
-	_, code = testRequest(t, http.MethodPost, adminToken, emptyMembersList, censusEndpoint, censusID)
-	c.Assert(code, qt.Equals, http.StatusOK)
+	requestAndAssertCode(http.StatusOK, t, http.MethodPost, adminToken, emptyMembersList, censusEndpoint, censusID)
 
 	// Test 3.5: Test with async=true flag
 	asyncMembers := &apicommon.AddMembersRequest{
@@ -209,15 +191,9 @@ func TestCensus(t *testing.T) {
 		},
 	}
 
-	// Make the request with async=true
-	resp, code = testRequest(t, http.MethodPost, adminToken, asyncMembers, censusEndpoint, censusID+"?async=true")
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	// Verify the response contains a job ID
-	var asyncResponse apicommon.AddMembersResponse
-	err = parseJSON(resp, &asyncResponse)
-	c.Assert(err, qt.IsNil)
-	c.Assert(asyncResponse.JobID, qt.Not(qt.IsNil))
+	// Make the request with async=true and verify the response contains a job ID
+	asyncResponse := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, adminToken, asyncMembers,
+		censusEndpoint, censusID+"?async=true")
 	c.Assert(len(asyncResponse.JobID), qt.Equals, 16) // JobID should be 16 bytes
 
 	// Convert the job ID to a hex string for the API call
@@ -227,55 +203,42 @@ func TestCensus(t *testing.T) {
 
 	// Check the job progress
 	var (
-		jobStatus   *db.BulkCensusParticipantStatus
+		jobStatus   db.BulkCensusParticipantStatus
 		maxAttempts = 30
-		attempts    = 0
-		completed   = false
 	)
 
 	// Poll the job status until it's complete or max attempts reached
-	for attempts < maxAttempts && !completed {
-		resp, code = testRequest(t, http.MethodGet, adminToken, nil, "census", "job", jobIDHex.String())
-		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-		err = json.Unmarshal(resp, &jobStatus)
-		c.Assert(err, qt.IsNil)
+	for range maxAttempts {
+		jobStatus = requestAndParse[db.BulkCensusParticipantStatus](t, http.MethodGet, adminToken, nil,
+			"census", "job", jobIDHex.String())
 
 		t.Logf("Job progress: %d%%, Added: %d, Total: %d\n",
 			jobStatus.Progress, jobStatus.Added, jobStatus.Total)
 
 		if jobStatus.Progress == 100 {
-			completed = true
-		} else {
-			attempts++
-			time.Sleep(100 * time.Millisecond) // Wait a bit before checking again
+			break
 		}
+
+		time.Sleep(100 * time.Millisecond) // Wait a bit before checking again
 	}
 
 	// Verify the job completed successfully
-	c.Assert(completed, qt.Equals, true, qt.Commentf("Job did not complete within expected time"))
+	c.Assert(jobStatus.Progress, qt.Equals, 100, qt.Commentf("Job did not complete within expected time"))
 	c.Assert(jobStatus.Added, qt.Equals, 2) // We added 2 members
 	c.Assert(jobStatus.Total, qt.Equals, 2)
-	c.Assert(jobStatus.Progress, qt.Equals, 100)
 
 	// Test 4: Publish census
 	// Test 4.1: Test with valid data
-	resp, code = testRequest(t, http.MethodPost, adminToken, nil, censusEndpoint, censusID, "publish")
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	var publishedCensus apicommon.PublishedCensusResponse
-	err = parseJSON(resp, &publishedCensus)
-	c.Assert(err, qt.IsNil)
+	publishedCensus := requestAndParse[apicommon.PublishedCensusResponse](t, http.MethodPost, adminToken, nil,
+		censusEndpoint, censusID, "publish")
 	c.Assert(publishedCensus.URI, qt.Not(qt.Equals), "")
 	c.Assert(publishedCensus.Root, qt.Not(qt.Equals), "")
 
 	// Test 4.2: Test with no authentication
-	_, code = testRequest(t, http.MethodPost, "", nil, censusEndpoint, censusID, "publish")
-	c.Assert(code, qt.Equals, http.StatusUnauthorized)
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "", nil, censusEndpoint, censusID, "publish")
 
 	// Test 4.3: Test with invalid census ID
-	_, code = testRequest(t, http.MethodPost, adminToken, nil, censusEndpoint, "invalid-id", "publish")
-	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+	requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, adminToken, nil, censusEndpoint, "invalid-id", "publish")
 
 	// Test 5: Test group-based census creation
 	// First, create a member group
@@ -286,12 +249,10 @@ func TestCensus(t *testing.T) {
 	}
 
 	// Get organization members to add to the group
-	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "members")
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	var orgMembersResponse apicommon.OrganizationMembersResponse
-	err = parseJSON(resp, &orgMembersResponse)
-	c.Assert(err, qt.IsNil)
+	orgMembersResponse := requestAndParse[apicommon.OrganizationMembersResponse](
+		t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "members",
+	)
 	c.Assert(len(orgMembersResponse.Members), qt.Equals, 6)
 
 	// Add member IDs to the group request
@@ -300,12 +261,8 @@ func TestCensus(t *testing.T) {
 	}
 
 	// Create the group
-	resp, code = testRequest(t, http.MethodPost, adminToken, groupRequest, "organizations", orgAddress.String(), "groups")
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	var createdGroup apicommon.OrganizationMemberGroupInfo
-	err = parseJSON(resp, &createdGroup)
-	c.Assert(err, qt.IsNil)
+	createdGroup := requestAndParse[apicommon.OrganizationMemberGroupInfo](t, http.MethodPost, adminToken, groupRequest,
+		"organizations", orgAddress.String(), "groups")
 	c.Assert(createdGroup.ID, qt.Not(qt.Equals), "")
 
 	// Test 5.1: Create a census based on the group
@@ -318,12 +275,8 @@ func TestCensus(t *testing.T) {
 			db.OrgMemberAuthFieldsName,
 		},
 	}
-	resp, code = testRequest(t, http.MethodPost, adminToken, groupCensusInfo, censusEndpoint)
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	var groupCensusResponse apicommon.CreateCensusResponse
-	err = parseJSON(resp, &groupCensusResponse)
-	c.Assert(err, qt.IsNil)
+	groupCensusResponse := requestAndParse[apicommon.CreateCensusResponse](t, http.MethodPost, adminToken, groupCensusInfo,
+		censusEndpoint)
 	c.Assert(groupCensusResponse.ID, qt.Not(qt.Equals), "")
 
 	groupCensusID := groupCensusResponse.ID
@@ -338,8 +291,7 @@ func TestCensus(t *testing.T) {
 			db.OrgMemberAuthFieldsMemberNumber,
 		},
 	}
-	_, code = testRequest(t, http.MethodPost, adminToken, invalidGroupCensusInfo, censusEndpoint)
-	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+	requestAndAssertCode(http.StatusInternalServerError, t, http.MethodPost, adminToken, invalidGroupCensusInfo, censusEndpoint)
 
 	// Test 6: Test census creation with duplicate auth field values
 	// Add members with duplicate member numbers to test validation
@@ -370,32 +322,14 @@ func TestCensus(t *testing.T) {
 	}
 
 	// Add duplicate members to the organization
-	resp, code = testRequest(
-		t,
-		http.MethodPost,
-		adminToken,
-		duplicateMembers,
-		"organizations",
-		orgAddress.String(),
-		"members",
-	)
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+	requestAndAssertCode(http.StatusOK, t, http.MethodPost, adminToken, duplicateMembers,
+		"organizations", orgAddress.String(), "members")
 
 	// Create a new group with all members including duplicates
-	allMembersResp, code := testRequest(
-		t,
-		http.MethodGet,
-		adminToken,
-		nil,
-		"organizations",
-		orgAddress.String(),
-		"members",
+	allMembersResponse := requestAndParse[apicommon.OrganizationMembersResponse](
+		t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "members",
 	)
-	c.Assert(code, qt.Equals, http.StatusOK)
-
-	var allMembersResponse apicommon.OrganizationMembersResponse
-	err = parseJSON(allMembersResp, &allMembersResponse)
-	c.Assert(err, qt.IsNil)
 
 	var allMemberIDs []string
 	for _, member := range allMembersResponse.Members {
@@ -408,20 +342,10 @@ func TestCensus(t *testing.T) {
 		MemberIDs:   allMemberIDs,
 	}
 
-	resp, code = testRequest(
-		t,
-		http.MethodPost,
-		adminToken,
-		duplicateGroupRequest,
-		"organizations",
-		orgAddress.String(),
-		"groups",
+	duplicateGroup := requestAndParse[apicommon.OrganizationMemberGroupInfo](
+		t, http.MethodPost, adminToken, duplicateGroupRequest,
+		"organizations", orgAddress.String(), "groups",
 	)
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	var duplicateGroup apicommon.OrganizationMemberGroupInfo
-	err = parseJSON(resp, &duplicateGroup)
-	c.Assert(err, qt.IsNil)
 
 	// Test 6.1: Try to create a census with duplicate member number auth field (should fail)
 	duplicateCensusInfo := &apicommon.CreateCensusRequest{
@@ -432,18 +356,13 @@ func TestCensus(t *testing.T) {
 			db.OrgMemberAuthFieldsMemberNumber, // This will have duplicates
 		},
 	}
-	resp, code = testRequest(t, http.MethodPost, adminToken, duplicateCensusInfo, censusEndpoint)
-	c.Assert(code, qt.Equals, http.StatusBadRequest, qt.Commentf("response: %s", resp))
+	duplicateCensusResponse := requestAndParseWithAssertCode[map[string]any](http.StatusBadRequest,
+		t, http.MethodPost, adminToken, duplicateCensusInfo, censusEndpoint)
 
 	// The response should contain information about the duplicates
-	aggregationResults := decodeNestedFieldAs[db.OrgMemberAggregationResults](c, resp, "data")
-	// TODO: fix bug and re-enable this check
-	c.Assert(
-		aggregationResults.Duplicates,
-		qt.HasLen,
-		len(duplicateMembers.Members),
-		qt.Commentf("aggregationResults: %+v", aggregationResults),
-	)
+	aggregationResults := decodeNestedFieldAs[db.OrgMemberAggregationResults](c, duplicateCensusResponse, "data")
+	c.Assert(aggregationResults.Duplicates, qt.HasLen, len(duplicateMembers.Members),
+		qt.Commentf("aggregationResults: %+v", aggregationResults))
 
 	// Test 7: Test census creation with empty auth field values
 	// Add a member with empty email to test validation
@@ -460,32 +379,14 @@ func TestCensus(t *testing.T) {
 	}
 
 	// Add member with empty field to the organization
-	resp, code = testRequest(
-		t,
-		http.MethodPost,
-		adminToken,
-		emptyFieldMember,
-		"organizations",
-		orgAddress.String(),
-		"members",
-	)
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+	requestAndAssertCode(http.StatusOK, t, http.MethodPost, adminToken, emptyFieldMember,
+		"organizations", orgAddress.String(), "members")
 
 	// Create a group with the empty field member
-	updatedMembersResp, code := testRequest(
-		t,
-		http.MethodGet,
-		adminToken,
-		nil,
-		"organizations",
-		orgAddress.String(),
-		"members",
+	updatedMembersResponse := requestAndParse[apicommon.OrganizationMembersResponse](
+		t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "members",
 	)
-	c.Assert(code, qt.Equals, http.StatusOK)
-
-	var updatedMembersResponse apicommon.OrganizationMembersResponse
-	err = parseJSON(updatedMembersResp, &updatedMembersResponse)
-	c.Assert(err, qt.IsNil)
 
 	var updatedMemberIDs []string
 	for _, member := range updatedMembersResponse.Members {
@@ -498,20 +399,10 @@ func TestCensus(t *testing.T) {
 		MemberIDs:   updatedMemberIDs,
 	}
 
-	resp, code = testRequest(
-		t,
-		http.MethodPost,
-		adminToken,
-		emptyFieldGroupRequest,
-		"organizations",
-		orgAddress.String(),
-		"groups",
+	emptyFieldGroup := requestAndParse[apicommon.OrganizationMemberGroupInfo](
+		t, http.MethodPost, adminToken, emptyFieldGroupRequest,
+		"organizations", orgAddress.String(), "groups",
 	)
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	var emptyFieldGroup apicommon.OrganizationMemberGroupInfo
-	err = parseJSON(resp, &emptyFieldGroup)
-	c.Assert(err, qt.IsNil)
 
 	// Test 7.1: Try to create a census with email twoFa field when some members have empty emails (should fail)
 	emptyFieldCensusInfo := &apicommon.CreateCensusRequest{
@@ -522,26 +413,20 @@ func TestCensus(t *testing.T) {
 			db.OrgMemberTwoFaFieldEmail, // This will have empty values
 		},
 	}
-	resp, code = testRequest(t, http.MethodPost, adminToken, emptyFieldCensusInfo, censusEndpoint)
-	c.Assert(code, qt.Equals, http.StatusBadRequest, qt.Commentf("response: %s", resp))
+	emptyFieldCensusResponse := requestAndParseWithAssertCode[map[string]any](http.StatusBadRequest,
+		t, http.MethodPost, adminToken, emptyFieldCensusInfo, censusEndpoint)
 
 	// The response should contain information about the empty fields
-	aggregationResults = decodeNestedFieldAs[db.OrgMemberAggregationResults](c, resp, "data")
-	c.Assert(
-		aggregationResults.MissingData,
-		qt.HasLen,
-		len(emptyFieldMember.Members),
-		qt.Commentf("aggregationResults: %+v", aggregationResults),
-	)
+	aggregationResults = decodeNestedFieldAs[db.OrgMemberAggregationResults](c, emptyFieldCensusResponse, "data")
+	c.Assert(aggregationResults.MissingData, qt.HasLen, len(emptyFieldMember.Members),
+		qt.Commentf("aggregationResults: %+v", aggregationResults))
 
 	// Test 8: Create a user with manager role and test permissions
 	// Create a second user
 	managerToken := testCreateUser(t, "managerpassword123")
 
-	// Verify the token works
-	resp, code = testRequest(t, http.MethodGet, managerToken, nil, usersMeEndpoint)
-	c.Assert(code, qt.Equals, http.StatusOK)
-	t.Logf("Manager user: %s\n", resp)
+	managerUser := requestAndParse[apicommon.UserInfo](t, http.MethodGet, managerToken, nil, usersMeEndpoint)
+	t.Logf("Manager user: %+v\n", managerUser)
 
 	// Add the user as a manager to the organization
 	// This would require implementing a helper to add a user to an organization with a specific role
@@ -553,10 +438,7 @@ func parseJSON(data []byte, v any) error {
 	return json.Unmarshal(data, v)
 }
 
-func decodeNestedFieldAs[T any](c *qt.C, data []byte, field string) T {
-	var parsedJSON map[string]any
-	err := parseJSON(data, &parsedJSON)
-	c.Assert(err, qt.IsNil)
+func decodeNestedFieldAs[T any](c *qt.C, parsedJSON map[string]any, field string) T {
 	c.Assert(parsedJSON[field], qt.Not(qt.IsNil), qt.Commentf("no field %q in json %#v\n", parsedJSON))
 
 	// to decode field we need to Marshal and Unmarshal
