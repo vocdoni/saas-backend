@@ -76,8 +76,8 @@ func TestRegisterHandler(t *testing.T) {
 		LastName:  "last",
 	}
 	// Using the response directly
-	_, code = testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
-	c.Assert(code, qt.Equals, http.StatusOK)
+	resp, code = testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Test duplicate user
 	resp, code = testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
@@ -126,16 +126,13 @@ func TestRegisterHandler(t *testing.T) {
 }
 
 func TestVerifyAccountHandler(t *testing.T) {
-	c := qt.New(t)
-
 	// Register a user with short expiration time
 	apicommon.VerificationCodeExpiration = 5 * time.Second
 	token := testCreateUser(t, testPass)
 
 	// get the user to verify the token works
-	resp, code := testRequest(t, http.MethodGet, token, nil, usersMeEndpoint)
-	c.Assert(code, qt.Equals, http.StatusOK)
-	t.Logf("%s\n", resp)
+	user := requestAndParse[apicommon.UserInfo](t, http.MethodGet, token, nil, usersMeEndpoint)
+	t.Logf("%+v\n", user)
 }
 
 func TestRecoverAndResetPassword(t *testing.T) {
@@ -148,8 +145,8 @@ func TestRecoverAndResetPassword(t *testing.T) {
 		FirstName: testFirstName,
 		LastName:  testLastName,
 	}
-	_, code := testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
-	c.Assert(code, qt.Equals, http.StatusOK)
+	resp, code := testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Get the verification code from the email
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -164,15 +161,15 @@ func TestRecoverAndResetPassword(t *testing.T) {
 		Email: testEmail,
 		Code:  verifyMailCode[1],
 	}
-	_, code = testRequest(t, http.MethodPost, "", verification, verifyUserEndpoint)
-	c.Assert(code, qt.Equals, http.StatusOK)
+	resp, code = testRequest(t, http.MethodPost, "", verification, verifyUserEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Request password recovery
 	recoverInfo := &apicommon.UserInfo{
 		Email: testEmail,
 	}
-	_, code = testRequest(t, http.MethodPost, "", recoverInfo, usersRecoveryPasswordEndpoint)
-	c.Assert(code, qt.Equals, http.StatusOK)
+	resp, code = testRequest(t, http.MethodPost, "", recoverInfo, usersRecoveryPasswordEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Get the recovery code from the email
 	mailBody, err = testMailService.FindEmail(ctx, testEmail)
@@ -187,8 +184,8 @@ func TestRecoverAndResetPassword(t *testing.T) {
 		Code:        passResetMailCode[1],
 		NewPassword: newPassword,
 	}
-	_, code = testRequest(t, http.MethodPost, "", resetPass, usersResetPasswordEndpoint)
-	c.Assert(code, qt.Equals, http.StatusOK)
+	resp, code = testRequest(t, http.MethodPost, "", resetPass, usersResetPasswordEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Try to login with the old password (should fail)
 	loginInfo := &apicommon.UserInfo{
@@ -200,8 +197,8 @@ func TestRecoverAndResetPassword(t *testing.T) {
 
 	// Try to login with the new password (should succeed)
 	loginInfo.Password = newPassword
-	_, code = testRequest(t, http.MethodPost, "", loginInfo, authLoginEndpoint)
-	c.Assert(code, qt.Equals, http.StatusOK)
+	resp, code = testRequest(t, http.MethodPost, "", loginInfo, authLoginEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 }
 
 func TestUserWithOrganization(t *testing.T) {
@@ -212,7 +209,7 @@ func TestUserWithOrganization(t *testing.T) {
 
 	// Get the user to verify the token works
 	resp, code := testRequest(t, http.MethodGet, token, nil, usersMeEndpoint)
-	c.Assert(code, qt.Equals, http.StatusOK)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 	t.Logf("%s\n", resp)
 
 	// Create an organization

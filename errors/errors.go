@@ -27,13 +27,13 @@ func (e Error) MarshalJSON() ([]byte, error) {
 	// since it wouldn't be marshaled otherwise. (json.Marshal doesn't call Err.Error())
 	return json.Marshal(
 		struct {
-			Err  string `json:"error"`
-			Code int    `json:"code"`
-			Data any    `json:"data,omitempty"`
+			Error string `json:"error"`
+			Code  int    `json:"code"`
+			Data  any    `json:"data,omitempty"`
 		}{
-			Err:  e.Err.Error(),
-			Code: e.Code,
-			Data: e.Data,
+			Error: e.Err.Error(),
+			Code:  e.Code,
+			Data:  e.Data,
 		})
 }
 

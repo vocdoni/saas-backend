@@ -16,17 +16,15 @@ func TestOrganizationMeta(t *testing.T) {
 	adminToken := testCreateUser(t, "adminpassword123")
 
 	// Verify the token works
-	resp, code := testRequest(t, http.MethodGet, adminToken, nil, usersMeEndpoint)
-	c.Assert(code, qt.Equals, http.StatusOK)
-	t.Logf("Admin user: %s\n", resp)
+	user := requestAndParse[apicommon.UserInfo](t, http.MethodGet, adminToken, nil, usersMeEndpoint)
+	t.Logf("Admin user: %+v\n", user)
 
 	// Create an organization
 	orgAddress := testCreateOrganization(t, adminToken)
 	t.Logf("Created organization with address: %s\n", orgAddress)
 
 	// Get the organization to verify it exists
-	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String())
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+	requestAndAssertCode(http.StatusOK, t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String())
 
 	// Test 1: Add organization meta
 	// Test 1.1: Test with valid data
@@ -39,12 +37,11 @@ func TestOrganizationMeta(t *testing.T) {
 			"public":   true,
 		},
 	}
-	resp, code = testRequest(t, http.MethodPost, adminToken, metaInfo, "organizations", orgAddress.String(), "meta")
+	resp, code := testRequest(t, http.MethodPost, adminToken, metaInfo, "organizations", orgAddress.String(), "meta")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Test 1.2: Test with no authentication
-	_, code = testRequest(t, http.MethodPost, "", metaInfo, "organizations", orgAddress.String(), "meta")
-	c.Assert(code, qt.Equals, http.StatusUnauthorized)
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "", metaInfo, "organizations", orgAddress.String(), "meta")
 
 	// Test 1.3: Test with invalid organization address
 	_, code = testRequest(t, http.MethodPost, adminToken, metaInfo, "organizations", "invalid-address", "meta")
@@ -302,7 +299,7 @@ func TestOrganizationMeta(t *testing.T) {
 
 	// Verify the token works
 	resp, code = testRequest(t, http.MethodGet, managerToken, nil, usersMeEndpoint)
-	c.Assert(code, qt.Equals, http.StatusOK)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 	t.Logf("Manager user: %s\n", resp)
 
 	// Test 6.1: Test that the manager can't access the organization meta initially

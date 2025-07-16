@@ -19,40 +19,32 @@ func TestOrganizationMembers(t *testing.T) {
 	adminToken := testCreateUser(t, "adminpassword123")
 
 	// Verify the token works
-	resp, code := testRequest(t, http.MethodGet, adminToken, nil, usersMeEndpoint)
-	c.Assert(code, qt.Equals, http.StatusOK)
-	t.Logf("Admin user: %s\n", resp)
+	user := requestAndParse[apicommon.UserInfo](t, http.MethodGet, adminToken, nil, usersMeEndpoint)
+	t.Logf("Admin user: %+v\n", user)
 
 	// Create an organization
 	orgAddress := testCreateOrganization(t, adminToken)
 	t.Logf("Created organization with address: %s\n", orgAddress)
 
 	// Get the organization to verify it exists
-	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String())
-	c.Assert(
-		code,
-		qt.Equals,
-		http.StatusOK,
-		qt.Commentf("response: %s", resp),
-	)
+	requestAndAssertCode(http.StatusOK, t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String())
 
 	// Test 1: Get organization members (initially empty)
 	// Test 1.1: Test with valid organization address
-	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "members")
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	var membersResponse apicommon.OrganizationMembersResponse
-	err := json.Unmarshal(resp, &membersResponse)
-	c.Assert(err, qt.IsNil)
-	c.Assert(len(membersResponse.Members), qt.Equals, 0, qt.Commentf("expected empty members list"))
+	emptyMembersResponse := requestAndParse[apicommon.OrganizationMembersResponse](
+		t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "members")
+	c.Assert(len(emptyMembersResponse.Members), qt.Equals, 0, qt.Commentf("expected empty members list"))
 
 	// Test 1.2: Test with no authentication
-	_, code = testRequest(t, http.MethodGet, "", nil, "organizations", orgAddress.String(), "members")
-	c.Assert(code, qt.Equals, http.StatusUnauthorized)
+	requestAndAssertCode(http.StatusUnauthorized,
+		t, http.MethodGet, "", nil,
+		"organizations", orgAddress.String(), "members")
 
 	// Test 1.3: Test with invalid organization address
-	_, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", "invalid-address", "members")
-	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+	requestAndAssertCode(http.StatusBadRequest,
+		t, http.MethodGet, adminToken, nil,
+		"organizations", "invalid-address", "members")
 
 	// Test 2: Add members to organization
 	// Test 2.1: Test with valid data
@@ -89,50 +81,31 @@ func TestOrganizationMembers(t *testing.T) {
 		},
 	}
 
-	resp, code = testRequest(
-		t,
-		http.MethodPost,
-		adminToken,
-		members,
-		"organizations",
-		orgAddress.String(),
-		"members",
+	addedResponse := requestAndParse[apicommon.AddMembersResponse](
+		t, http.MethodPost, adminToken, members,
+		"organizations", orgAddress.String(), "members",
 	)
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	// Verify the response contains the number of members added
-	var addedResponse apicommon.AddMembersResponse
-	err = json.Unmarshal(resp, &addedResponse)
-	c.Assert(err, qt.IsNil)
 	c.Assert(addedResponse.Added, qt.Equals, uint32(2))
 
 	// Test 2.2: Test with no authentication
-	_, code = testRequest(t, http.MethodPost, "", members, "organizations", orgAddress.String(), "members")
-	c.Assert(code, qt.Equals, http.StatusUnauthorized)
+	requestAndAssertCode(http.StatusUnauthorized,
+		t, http.MethodPost, "", members,
+		"organizations", orgAddress.String(), "members")
 
 	// Test 2.3: Test with invalid organization address
-	_, code = testRequest(t, http.MethodPost, adminToken, members, "organizations", "invalid-address", "members")
-	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+	requestAndAssertCode(http.StatusBadRequest,
+		t, http.MethodPost, adminToken, members,
+		"organizations", "invalid-address", "members")
 
 	// Test 2.4: Test with empty members list
 	emptyMembers := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{},
 	}
-	resp, code = testRequest(
-		t,
-		http.MethodPost,
-		adminToken,
-		emptyMembers,
-		"organizations",
-		orgAddress.String(),
-		"members",
+	emptyAddedResponse := requestAndParse[apicommon.AddMembersResponse](
+		t, http.MethodPost, adminToken, emptyMembers,
+		"organizations", orgAddress.String(), "members",
 	)
-	c.Assert(code, qt.Equals, http.StatusOK)
-
-	// Verify the response for empty members list
-	err = json.Unmarshal(resp, &addedResponse)
-	c.Assert(err, qt.IsNil)
-	c.Assert(addedResponse.Added, qt.Equals, uint32(0))
+	c.Assert(emptyAddedResponse.Added, qt.Equals, uint32(0))
 
 	// Test 2.5: Test with members missing some of the new optional fields
 	// Generate a new test member ID
@@ -182,32 +155,19 @@ func TestOrganizationMembers(t *testing.T) {
 		},
 	}
 
-	resp, code = testRequest(
-		t,
-		http.MethodPost,
-		adminToken,
-		membersWithMissingFields,
-		"organizations",
-		orgAddress.String(),
-		"members",
-	)
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	// Verify the response contains the number of members added
-	err = json.Unmarshal(resp, &addedResponse)
-	c.Assert(err, qt.IsNil)
-	c.Assert(addedResponse.Added, qt.Equals, uint32(3))
-	c.Assert(addedResponse.Errors, qt.HasLen, 3)
-	c.Assert(addedResponse.Errors[0], qt.Matches, ".*invalid-email.*")
-	c.Assert(addedResponse.Errors[1], qt.Matches, ".*invalid-phone.*")
-	c.Assert(addedResponse.Errors[2], qt.Matches, ".*invalid-birthdate.*")
+	missingFieldsResponse := requestAndParse[apicommon.AddMembersResponse](
+		t, http.MethodPost, adminToken, membersWithMissingFields,
+		"organizations", orgAddress.String(), "members")
+	c.Assert(missingFieldsResponse.Added, qt.Equals, uint32(3))
+	c.Assert(missingFieldsResponse.Errors, qt.HasLen, 3)
+	c.Assert(missingFieldsResponse.Errors[0], qt.Matches, ".*invalid-email.*")
+	c.Assert(missingFieldsResponse.Errors[1], qt.Matches, ".*invalid-phone.*")
+	c.Assert(missingFieldsResponse.Errors[2], qt.Matches, ".*invalid-birthdate.*")
 
 	// Test 3: Get organization members (now with added members)
-	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "members")
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	err = json.Unmarshal(resp, &membersResponse)
-	c.Assert(err, qt.IsNil)
+	membersResponse := requestAndParse[apicommon.OrganizationMembersResponse](
+		t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "members")
 	c.Assert(len(membersResponse.Members), qt.Equals, 5, qt.Commentf("expected 5 members (2 from Test 2.1 + 3 from Test 2.5)"))
 
 	// Verify that members with missing fields were stored correctly
@@ -268,7 +228,7 @@ func TestOrganizationMembers(t *testing.T) {
 		{filter: "?search=P00", results: 4},         // MemberNumber
 		{filter: "?search=example.com", results: 4}, // Email
 	} {
-		resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "members", test.filter)
+		resp, code := testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "members", test.filter)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 		c.Assert(json.Unmarshal(resp, &membersResponse), qt.IsNil)
 		c.Assert(len(membersResponse.Members), qt.Equals, test.results,
@@ -311,21 +271,9 @@ func TestOrganizationMembers(t *testing.T) {
 	}
 
 	// Make the request with async=true
-	resp, code = testRequest(
-		t,
-		http.MethodPost,
-		adminToken,
-		asyncMembers,
-		"organizations",
-		orgAddress.String(),
-		"members?async=true",
-	)
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	// Verify the response contains a job ID
-	var asyncResponse apicommon.AddMembersResponse
-	err = json.Unmarshal(resp, &asyncResponse)
-	c.Assert(err, qt.IsNil)
+	asyncResponse := requestAndParse[apicommon.AddMembersResponse](
+		t, http.MethodPost, adminToken, asyncMembers,
+		"organizations", orgAddress.String(), "members?async=true")
 	c.Assert(asyncResponse.JobID, qt.Not(qt.IsNil))
 	c.Assert(len(asyncResponse.JobID), qt.Equals, 16) // JobID should be 16 bytes
 
@@ -336,29 +284,17 @@ func TestOrganizationMembers(t *testing.T) {
 
 	// Test 5: Check the job progress
 	var (
-		jobStatus   *apicommon.AddMembersJobResponse
 		maxAttempts = 30
 		attempts    = 0
 		completed   = false
 	)
 
 	// Poll the job status until it's complete or max attempts reached
+	var jobStatus apicommon.AddMembersJobResponse
 	for attempts < maxAttempts && !completed {
-		resp, code = testRequest(
-			t,
-			http.MethodGet,
-			adminToken,
-			nil,
-			"organizations",
-			orgAddress.String(),
-			"members",
-			"job",
-			jobIDHex.String(),
-		)
-		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-		err = json.Unmarshal(resp, &jobStatus)
-		c.Assert(err, qt.IsNil)
+		jobStatus = requestAndParse[apicommon.AddMembersJobResponse](
+			t, http.MethodGet, adminToken, nil,
+			"organizations", orgAddress.String(), "members", "job", jobIDHex.String())
 
 		t.Logf("Job progress: %d%%, Added: %d, Total: %d, Errors: %d\n",
 			jobStatus.Progress, jobStatus.Added, jobStatus.Total, len(jobStatus.Errors))
@@ -383,41 +319,16 @@ func TestOrganizationMembers(t *testing.T) {
 
 	// Test 6: Get organization members with pagination
 	// Test 6.1: Test with page=1 and pageSize=2
-	resp, code = testRequest(
-		t,
-		http.MethodGet,
-		adminToken,
-		nil,
-		"organizations",
-		orgAddress.String(),
-		"members?page=1&pageSize=2",
-	)
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	err = json.Unmarshal(resp, &membersResponse)
-	c.Assert(err, qt.IsNil)
+	membersResponse = requestAndParse[apicommon.OrganizationMembersResponse](
+		t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "members?page=1&pageSize=2")
 	c.Assert(len(membersResponse.Members), qt.Equals, 2, qt.Commentf("expected 2 members with pagination"))
 
 	// Test 6.2: Test with page=2 and pageSize=2
-	resp, code = testRequest(
-		t,
-		http.MethodGet,
-		adminToken,
-		nil,
-		"organizations",
-		orgAddress.String(),
-		"members?page=2&pageSize=2",
-	)
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	err = json.Unmarshal(resp, &membersResponse)
-	c.Assert(err, qt.IsNil)
-	c.Assert(
-		len(membersResponse.Members),
-		qt.Equals,
-		2,
-		qt.Commentf("expected 2 members on page 2"),
-	)
+	membersResponse = requestAndParse[apicommon.OrganizationMembersResponse](
+		t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "members?page=2&pageSize=2")
+	c.Assert(len(membersResponse.Members), qt.Equals, 2, qt.Commentf("expected 2 members on page 2"))
 
 	// Test 7: Delete members
 	// Test 7.1: Test with valid member IDs
@@ -428,64 +339,33 @@ func TestOrganizationMembers(t *testing.T) {
 		},
 	}
 
-	resp, code = testRequest(
-		t,
-		http.MethodDelete,
-		adminToken,
-		deleteRequest,
-		"organizations",
-		orgAddress.String(),
-		"members",
-	)
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	// Verify the response contains the number of members deleted
-	var deleteResponse apicommon.DeleteMembersResponse
-	err = json.Unmarshal(resp, &deleteResponse)
-	c.Assert(err, qt.IsNil)
+	deleteResponse := requestAndParse[apicommon.DeleteMembersResponse](
+		t, http.MethodDelete, adminToken, deleteRequest,
+		"organizations", orgAddress.String(), "members")
 	c.Assert(deleteResponse.Count, qt.Equals, 2, qt.Commentf("expected 2 members deleted"))
 
 	// Test 7.2: Test with no authentication
-	_, code = testRequest(t, http.MethodDelete, "", deleteRequest, "organizations", orgAddress.String(), "members")
-	c.Assert(code, qt.Equals, http.StatusUnauthorized)
+	requestAndAssertCode(http.StatusUnauthorized,
+		t, http.MethodDelete, "", deleteRequest,
+		"organizations", orgAddress.String(), "members")
 
 	// Test 7.3: Test with invalid organization address
-	_, code = testRequest(
-		t,
-		http.MethodDelete,
-		adminToken,
-		deleteRequest,
-		"organizations",
-		"invalid-address",
-		"members",
-	)
-	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+	requestAndAssertCode(http.StatusBadRequest,
+		t, http.MethodDelete, adminToken, deleteRequest,
+		"organizations", "invalid-address", "members")
 
 	// Test 7.4: Test with empty member IDs list
 	emptyDeleteRequest := &apicommon.DeleteMembersRequest{
 		IDs: []string{},
 	}
-	resp, code = testRequest(
-		t,
-		http.MethodDelete,
-		adminToken,
-		emptyDeleteRequest,
-		"organizations",
-		orgAddress.String(),
-		"members",
-	)
-	c.Assert(code, qt.Equals, http.StatusOK)
-
-	// Verify the response for empty member IDs list
-	err = json.Unmarshal(resp, &deleteResponse)
-	c.Assert(err, qt.IsNil)
-	c.Assert(deleteResponse.Count, qt.Equals, 0, qt.Commentf("expected 0 members deleted"))
+	emptyDeleteResponse := requestAndParse[apicommon.DeleteMembersResponse](
+		t, http.MethodDelete, adminToken, emptyDeleteRequest,
+		"organizations", orgAddress.String(), "members")
+	c.Assert(emptyDeleteResponse.Count, qt.Equals, 0, qt.Commentf("expected 0 members deleted"))
 
 	// Test 8: Verify members were deleted by getting the list again
-	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "members")
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	err = json.Unmarshal(resp, &membersResponse)
-	c.Assert(err, qt.IsNil)
+	membersResponse = requestAndParse[apicommon.OrganizationMembersResponse](
+		t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "members")
 	c.Assert(len(membersResponse.Members), qt.Equals, 5, qt.Commentf("expected 5 members remaining (7 total - 2 deleted)"))
 }

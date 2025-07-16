@@ -59,6 +59,14 @@ const (
 	testOAuthServiceURL = "http://test-oauth-service"
 )
 
+// apiError mimics the anon struct used in errors/errors.go
+// TODO: refactor that anon struct into an importable struct somehow
+type apiError struct {
+	Error string `json:"error"`
+	Code  int    `json:"code"`
+	Data  any    `json:"data,omitempty"`
+}
+
 // testPort is the port used for the API tests.
 var testPort int
 
@@ -342,8 +350,7 @@ func testCreateUser(t *testing.T, password string) string {
 		FirstName: fmt.Sprintf("%d%s", n, testFirstName),
 		LastName:  fmt.Sprintf("%d%s", n, testLastName),
 	}
-	resp, status := testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
-	qt.Assert(t, status, qt.Equals, http.StatusOK, qt.Commentf("resp: %q", resp))
+	requestAndAssertCode(http.StatusOK, t, http.MethodPost, "", userInfo, usersEndpoint)
 
 	// Get the verification code from the email
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -360,21 +367,14 @@ func testCreateUser(t *testing.T, password string) string {
 		Email: mail,
 		Code:  mailCode[1],
 	}
-	_, status = testRequest(t, http.MethodPost, "", verification, verifyUserEndpoint)
-	qt.Assert(t, status, qt.Equals, http.StatusOK)
+	requestAndAssertCode(http.StatusOK, t, http.MethodPost, "", verification, verifyUserEndpoint)
 
 	// Login to get the JWT token
 	loginInfo := &apicommon.UserInfo{
 		Email:    mail,
 		Password: password,
 	}
-	respBody, status := testRequest(t, http.MethodPost, "", loginInfo, authLoginEndpoint)
-	qt.Assert(t, status, qt.Equals, http.StatusOK)
-
-	// Extract the token from the response
-	var loginResp apicommon.LoginResponse
-	err = json.Unmarshal(respBody, &loginResp)
-	qt.Assert(t, err, qt.IsNil)
+	loginResp := requestAndParse[apicommon.LoginResponse](t, http.MethodPost, "", loginInfo, authLoginEndpoint)
 	qt.Assert(t, loginResp.Token, qt.Not(qt.Equals), "")
 
 	return loginResp.Token
@@ -387,12 +387,7 @@ func testCreateOrganization(t *testing.T, jwt string) common.Address {
 		Type:    string(db.CompanyType),
 		Website: fmt.Sprintf("https://%s.com", orgName),
 	}
-	respBody, status := testRequest(t, http.MethodPost, jwt, orgInfo, organizationsEndpoint)
-	qt.Assert(t, status, qt.Equals, http.StatusOK)
-
-	var orgResp apicommon.OrganizationInfo
-	err := json.Unmarshal(respBody, &orgResp)
-	qt.Assert(t, err, qt.IsNil)
+	orgResp := requestAndParse[apicommon.OrganizationInfo](t, http.MethodPost, jwt, orgInfo, organizationsEndpoint)
 	qt.Assert(t, orgResp.Address, qt.Not(qt.Equals), "")
 
 	return orgResp.Address
@@ -419,12 +414,10 @@ func signRemoteSignerAndSendVocdoniTx(t *testing.T, tx *models.Tx, token string,
 	}
 
 	// sign the transaction using the remote signer from the API
-	resp, code := testRequest(t, http.MethodPost, token, td, signTxEndpoint)
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-	c.Assert(json.Unmarshal(resp, td), qt.IsNil)
+	signedTD := requestAndParse[apicommon.TransactionData](t, http.MethodPost, token, td, signTxEndpoint)
 
 	// submit the transaction
-	hash, data, err := vocdoniClient.SendTx(td.TxPayload)
+	hash, data, err := vocdoniClient.SendTx(signedTD.TxPayload)
 	c.Assert(err, qt.IsNil)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -512,13 +505,7 @@ func testCreateCensus(
 		AuthFields:  authFields,
 		TwoFaFields: twoFaFields,
 	}
-	resp, code := testRequest(t, http.MethodPost, token, censusInfo, censusEndpoint)
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("failed to create census: %s", resp))
-
-	// Parse the response to get the census ID
-	var createdCensus apicommon.CreateCensusResponse
-	err := json.Unmarshal(resp, &createdCensus)
-	c.Assert(err, qt.IsNil)
+	createdCensus := requestAndParse[apicommon.CreateCensusResponse](t, http.MethodPost, token, censusInfo, censusEndpoint)
 	c.Assert(createdCensus.ID, qt.Not(qt.Equals), "", qt.Commentf("census ID is empty"))
 
 	t.Logf("Created census with ID: %s", createdCensus.ID)
@@ -534,13 +521,8 @@ func testAddMembersToCensus(t *testing.T, token, censusID string, members []apic
 	membersReq := &apicommon.AddMembersRequest{
 		Members: members,
 	}
-	resp, code := testRequest(t, http.MethodPost, token, membersReq, censusEndpoint, censusID)
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("failed to add members: %s", resp))
-
-	// Verify the response contains the number of members added
-	var addedResponse apicommon.AddMembersResponse
-	err := json.Unmarshal(resp, &addedResponse)
-	c.Assert(err, qt.IsNil)
+	addedResponse := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, token, membersReq,
+		censusEndpoint, censusID)
 	c.Assert(addedResponse.Added, qt.Equals, uint32(len(members)),
 		qt.Commentf("expected %d members, got %d", len(members), addedResponse.Added))
 
@@ -553,12 +535,8 @@ func testPublishCensus(t *testing.T, token, censusID string) (uri string, root s
 	c := qt.New(t)
 
 	// Publish the census
-	resp, code := testRequest(t, http.MethodPost, token, nil, censusEndpoint, censusID, "publish")
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("failed to publish census: %s", resp))
-
-	var publishedCensus apicommon.PublishedCensusResponse
-	err := json.Unmarshal(resp, &publishedCensus)
-	c.Assert(err, qt.IsNil)
+	publishedCensus := requestAndParse[apicommon.PublishedCensusResponse](t, http.MethodPost, token, nil,
+		censusEndpoint, censusID, "publish")
 	c.Assert(publishedCensus.URI, qt.Not(qt.Equals), "", qt.Commentf("published census URI is empty"))
 	c.Assert(publishedCensus.Root, qt.Not(qt.Equals), "", qt.Commentf("published census root is empty"))
 
@@ -582,12 +560,7 @@ func testCreateBundle(t *testing.T, token, censusID string, processIDs [][]byte)
 		CensusID:  censusID,
 		Processes: hexProcessIDs,
 	}
-	resp, code := testRequest(t, http.MethodPost, token, bundleReq, "process", "bundle")
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("failed to create bundle: %s", resp))
-
-	var bundleResp apicommon.CreateProcessBundleResponse
-	err := json.Unmarshal(resp, &bundleResp)
-	c.Assert(err, qt.IsNil)
+	bundleResp := requestAndParse[apicommon.CreateProcessBundleResponse](t, http.MethodPost, token, bundleReq, "process", "bundle")
 	c.Assert(bundleResp.URI, qt.Not(qt.Equals), "", qt.Commentf("bundle URI is empty"))
 	c.Assert(bundleResp.Root, qt.Not(qt.Equals), "", qt.Commentf("bundle root is empty"))
 
@@ -609,18 +582,14 @@ func testCSPAuthenticate(t *testing.T, bundleID, participantID, email string) in
 		ParticipantID: participantID,
 		Email:         email,
 	}
-	resp, code := testRequest(t, http.MethodPost, "", authReq, "process", "bundle", bundleID, "auth", "0")
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("failed to initiate auth: %s", resp))
-
-	var authResp handlers.AuthResponse
-	err := json.Unmarshal(resp, &authResp)
-	c.Assert(err, qt.IsNil)
+	authResp := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", authReq, "process", "bundle", bundleID, "auth", "0")
 	c.Assert(authResp.AuthToken, qt.Not(qt.Equals), "", qt.Commentf("auth token is empty"))
 
 	t.Logf("Received auth token: %s", authResp.AuthToken.String())
 
 	// Step 2: Get the OTP code from the email with retries
 	var mailBody string
+	var err error
 	maxRetries := 10
 	for i := 0; i < maxRetries; i++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -644,12 +613,8 @@ func testCSPAuthenticate(t *testing.T, bundleID, participantID, email string) in
 		AuthToken: authResp.AuthToken,
 		AuthData:  []string{otpCode},
 	}
-	resp, code = testRequest(t, http.MethodPost, "", authChallengeReq, "process", "bundle", bundleID, "auth", "1")
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("failed to verify auth: %s", resp))
-
-	var verifyResp handlers.AuthResponse
-	err = json.Unmarshal(resp, &verifyResp)
-	c.Assert(err, qt.IsNil)
+	verifyResp := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", authChallengeReq,
+		"process", "bundle", bundleID, "auth", "1")
 	c.Assert(verifyResp.AuthToken, qt.Not(qt.Equals), "", qt.Commentf("verified auth token is empty"))
 
 	t.Logf("Authentication verified with token: %s", verifyResp.AuthToken.String())
@@ -667,12 +632,7 @@ func testCSPSign(t *testing.T, bundleID string, authToken, processID, payload in
 		ProcessID: processID,
 		Payload:   hex.EncodeToString(payload),
 	}
-	resp, code := testRequest(t, http.MethodPost, "", signReq, "process", "bundle", bundleID, "sign")
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("failed to sign: %s", resp))
-
-	var signResp handlers.AuthResponse
-	err := json.Unmarshal(resp, &signResp)
-	c.Assert(err, qt.IsNil)
+	signResp := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", signReq, "process", "bundle", bundleID, "sign")
 	c.Assert(signResp.Signature, qt.Not(qt.Equals), "", qt.Commentf("signature is empty"))
 
 	t.Logf("Received signature: %s", signResp.Signature.String())
@@ -743,4 +703,30 @@ func testGenerateTestMembers(count int) []apicommon.OrgMember {
 		}
 	}
 	return members
+}
+
+// requestAndParse makes a request and parses the JSON response.
+// It takes the same parameters as testRequest plus a type parameter for the response.
+// Asserts the HTTP Status Code is 200 OK, and returns the parsed response of the specified type.
+func requestAndParse[T any](t *testing.T, method, jwt string, jsonBody any, urlPath ...string) T {
+	return requestAndParseWithAssertCode[T](http.StatusOK, t, method, jwt, jsonBody, urlPath...)
+}
+
+// requestAndParseWithAssertCode makes a request, asserts the expected status code, and parses the JSON response.
+// It takes the expected status code as the first parameter, followed by the same parameters as testRequest.
+func requestAndParseWithAssertCode[T any](expectedCode int, t *testing.T, method, jwt string, jsonBody any, urlPath ...string) T {
+	var result T
+	resp, code := testRequest(t, method, jwt, jsonBody, urlPath...)
+	qt.Assert(t, code, qt.Equals, expectedCode, qt.Commentf("response: %s", resp))
+
+	err := json.Unmarshal(resp, &result)
+	qt.Assert(t, err, qt.IsNil, qt.Commentf("failed to parse response: %s", resp))
+	return result
+}
+
+// requestAndAssertCode makes a request and asserts the expected status code.
+// It takes the expected status code as the first parameter, followed by the same parameters as testRequest.
+func requestAndAssertCode(expectedCode int, t *testing.T, method, jwt string, jsonBody any, urlPath ...string) {
+	resp, code := testRequest(t, method, jwt, jsonBody, urlPath...)
+	qt.Assert(t, code, qt.Equals, expectedCode, qt.Commentf("response: %s", resp))
 }

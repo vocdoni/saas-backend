@@ -23,7 +23,7 @@ func TestOrganizationUsers(t *testing.T) {
 
 	// Verify the token works
 	resp, code := testRequest(t, http.MethodGet, adminToken, nil, usersMeEndpoint)
-	c.Assert(code, qt.Equals, http.StatusOK)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 	t.Logf("Admin user: %s\n", resp)
 
 	// Create an organization
@@ -39,7 +39,7 @@ func TestOrganizationUsers(t *testing.T) {
 
 	// Get the second user's info
 	resp, code = testRequest(t, http.MethodGet, userToken, nil, usersMeEndpoint)
-	c.Assert(code, qt.Equals, http.StatusOK)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	var userInfo apicommon.UserInfo
 	err := parseJSON(resp, &userInfo)
@@ -336,7 +336,7 @@ func TestOrganizationUsers(t *testing.T) {
 		// Test 6: Try to update a non-existent user
 		// Note: The current implementation returns 200 OK even for non-existent users
 		// because the MongoDB UpdateOne operation doesn't return an error if no documents match
-		_, code = testRequest(
+		resp, code = testRequest(
 			t,
 			http.MethodPut,
 			adminToken,
@@ -346,7 +346,7 @@ func TestOrganizationUsers(t *testing.T) {
 			"users",
 			"999999",
 		)
-		c.Assert(code, qt.Equals, http.StatusOK)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 	})
 
 	t.Run("RemoveOrganizationUser", func(t *testing.T) {
@@ -357,7 +357,7 @@ func TestOrganizationUsers(t *testing.T) {
 		// Create a user to be removed
 		userToRemoveToken := testCreateUser(t, "removepassword123")
 		resp, code = testRequest(t, http.MethodGet, userToRemoveToken, nil, usersMeEndpoint)
-		c.Assert(code, qt.Equals, http.StatusOK)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		var userToRemoveInfo apicommon.UserInfo
 		err := parseJSON(resp, &userToRemoveInfo)
@@ -487,7 +487,7 @@ func TestOrganizationUsers(t *testing.T) {
 		// Test 4: Try to remove a non-existent user
 		// Note: The current implementation returns 200 OK even for non-existent users
 		// because the MongoDB UpdateOne operation doesn't return an error if no documents match
-		_, code = testRequest(
+		resp, code = testRequest(
 			t,
 			http.MethodDelete,
 			adminToken,
@@ -497,7 +497,7 @@ func TestOrganizationUsers(t *testing.T) {
 			"users",
 			"999999",
 		)
-		c.Assert(code, qt.Equals, http.StatusOK)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		// Test 5: Try to remove yourself (which should fail)
 		// Get the admin's user ID
@@ -508,7 +508,7 @@ func TestOrganizationUsers(t *testing.T) {
 			nil,
 			usersMeEndpoint,
 		)
-		c.Assert(code, qt.Equals, http.StatusOK)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		var adminInfo apicommon.UserInfo
 		err = parseJSON(resp, &adminInfo)
@@ -687,7 +687,7 @@ func TestOrganizationUsers(t *testing.T) {
 			"users",
 			"pending",
 		)
-		c.Assert(code, qt.Equals, http.StatusOK)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		var anotherPendingInvites apicommon.OrganizationInviteList
 		err = parseJSON(resp, &anotherPendingInvites)
@@ -712,7 +712,7 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
 
 		// Clean up: Delete the invitations
-		_, code = testRequest(
+		resp, code = testRequest(
 			t,
 			http.MethodDelete,
 			adminToken,
@@ -723,9 +723,9 @@ func TestOrganizationUsers(t *testing.T) {
 			"pending",
 			invitationID,
 		)
-		c.Assert(code, qt.Equals, http.StatusOK)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
-		_, code = testRequest(
+		resp, code = testRequest(
 			t,
 			http.MethodDelete,
 			adminToken,
@@ -736,7 +736,7 @@ func TestOrganizationUsers(t *testing.T) {
 			"pending",
 			anotherInvitationID,
 		)
-		c.Assert(code, qt.Equals, http.StatusOK)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 	})
 
 	t.Run("DeletePendingInvitation", func(t *testing.T) {
@@ -893,7 +893,7 @@ func TestOrganizationUsers(t *testing.T) {
 			"users",
 			"pending",
 		)
-		c.Assert(code, qt.Equals, http.StatusOK)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		var anotherPendingInvites apicommon.OrganizationInviteList
 		err = parseJSON(resp, &anotherPendingInvites)
@@ -918,7 +918,7 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
 
 		// Clean up: Delete the invitation from the correct organization
-		_, code = testRequest(
+		resp, code = testRequest(
 			t,
 			http.MethodDelete,
 			adminToken,
@@ -929,7 +929,7 @@ func TestOrganizationUsers(t *testing.T) {
 			"pending",
 			anotherInvitationID,
 		)
-		c.Assert(code, qt.Equals, http.StatusOK)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 	})
 
 	t.Run("MaxUsersReached", func(t *testing.T) {
