@@ -227,7 +227,12 @@ func (*API) addOrganizationMembersJobStatusHandler(w http.ResponseWriter, r *htt
 				addMembersToOrgWorkers.Delete(jobID.String())
 			}()
 		}
-		apicommon.HTTPWriteJSON(w, p)
+		apicommon.HTTPWriteJSON(w, apicommon.AddMembersResponse{
+			Added:    uint32(p.Added),
+			Errors:   p.ErrorsAsStrings(),
+			Progress: uint32(p.Progress),
+			Total:    uint32(p.Total),
+		})
 		return
 	}
 
