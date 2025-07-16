@@ -314,7 +314,7 @@ func TestOrganizationMembers(t *testing.T) {
 
 	// Test 5: Check the job progress
 	var (
-		jobStatus   *apicommon.AddMembersResponse
+		jobStatus   *apicommon.AddMembersJobResponse
 		maxAttempts = 30
 		attempts    = 0
 		completed   = false

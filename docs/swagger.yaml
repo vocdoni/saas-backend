@@ -18,6 +18,23 @@ definitions:
         - $ref: '#/definitions/apicommon.UserInfo'
         description: User information for registration or identification
     type: object
+  apicommon.AddMembersJobResponse:
+    properties:
+      added:
+        description: Number of members added
+        type: integer
+      errors:
+        description: Errors encountered during job
+        items:
+          type: string
+        type: array
+      progress:
+        description: Progress equals Added / Total * 100
+        type: integer
+      total:
+        description: Total members in this job
+        type: integer
+    type: object
   apicommon.AddMembersRequest:
     properties:
       members:
@@ -41,13 +58,6 @@ definitions:
         example: deadbeef
         format: hex
         type: string
-      progress:
-        description: Progress is used on async jobs, equals Added / Total * 100
-        type: integer
-      total:
-        description: Total is used on async jobs, equals the length of the passed
-          members list
-        type: integer
     type: object
   apicommon.CreateOrganizationMemberGroupRequest:
     properties:
@@ -789,18 +799,6 @@ definitions:
     properties:
       added:
         type: integer
-      progress:
-        type: integer
-      total:
-        type: integer
-    type: object
-  db.BulkOrgMembersJob:
-    properties:
-      added:
-        type: integer
-      errors:
-        items: {}
-        type: array
       progress:
         type: integer
       total:
@@ -23203,7 +23201,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/db.BulkOrgMembersJob'
+            $ref: '#/definitions/apicommon.AddMembersJobResponse'
         "400":
           description: Invalid job ID
           schema:
