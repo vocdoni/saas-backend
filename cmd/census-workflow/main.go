@@ -262,17 +262,11 @@ func main() {
 			},
 		}, &createCensusResp,
 	)
+	// Print the census ID and member warnings
 	if err != nil {
 		fmt.Printf("Error creating census: %v", err)
 		return
 	}
-	if createCensusResp.ID == "" {
-		fmt.Println("Error: census ID is empty")
-		fmt.Printf("Found the duplicates: %v\n", createCensusResp.MemberWarnings.Duplicates)
-		fmt.Printf("Found the missing data: %v\n", createCensusResp.MemberWarnings.MissingData)
-		return
-	}
-	// Print the census ID and member warnings
 
 	fmt.Printf("✓ Census created with ID: %s\n", createCensusResp.ID)
 

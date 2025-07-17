@@ -64,7 +64,7 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(censusInfo.AuthFields) == 0 && len(censusInfo.TwoFaFields) == 0 {
-		errors.ErrInvalidData.Withf("missing both AuthFields and TwoFaFields ").Write(w)
+		errors.ErrInvalidData.Withf("missing both AuthFields and TwoFaFields").Write(w)
 		return
 	}
 	// check the org members to veriy tha the OrgMemberAuthFields can be used for authentication

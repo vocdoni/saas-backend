@@ -305,7 +305,6 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 
 	// 2) Fetch all matching docs
 	cur, err := ms.getGroupMembersFields(ctx, orgAddress, groupID, authFields, twoFaFields)
-	// ms.orgMembers.Find(ctx, filter, findOpts)
 	if err != nil {
 		return nil, err
 	}

@@ -709,18 +709,11 @@ type CreateCensusRequest struct {
 	TwoFaFields db.OrgMemberTwoFaFields `json:"twoFaFields,omitempty"`
 }
 
+// CreateCensusResponse represents the response after creating a census returning the census ID.
+// swagger:model CreateCensusResponse
 type CreateCensusResponse struct {
 	// Unique identifier for the census
-	ID string `json:"censusID,omitempty"`
-
-	MemberWarnings db.OrgMemberAggregationResults `json:"memberWarnings,omitempty"`
-}
-
-// PublishCensusRequest represents a request to create a new census for an organization.
-// swagger:model PublishCensusRequest
-type PublishCensusRequest struct {
-	// Type of census to create
-	Type db.CensusType `json:"type"`
+	ID string `json:"id,omitempty"`
 }
 
 // PublishedCensusResponse represents a published census.
@@ -743,8 +736,8 @@ func OrganizationCensusFromDB(census *db.Census) OrganizationCensus {
 		Type:        census.Type,
 		OrgAddress:  census.OrgAddress,
 		GroupID:     census.GroupID.Hex(),
-		TwoFaFields: census.TwoFaFields,
 		AuthFields:  census.AuthFields,
+		TwoFaFields: census.TwoFaFields,
 	}
 }
 

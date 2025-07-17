@@ -342,7 +342,7 @@ func TestCensus(t *testing.T) {
 	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
 
 	// Test 6: Test census creation with duplicate auth field values
-	// Add members with duplicate email addresses to test validation
+	// Add members with duplicate member numbers to test validation
 	duplicateMembers := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
 			{
@@ -438,7 +438,12 @@ func TestCensus(t *testing.T) {
 	// The response should contain information about the duplicates
 	aggregationResults := decodeNestedFieldAs[db.OrgMemberAggregationResults](c, resp, "data")
 	// TODO: fix bug and re-enable this check
-	c.Assert(aggregationResults.Duplicates, qt.HasLen, len(duplicateMembers.Members), qt.Commentf("aggregationResults: %+v", aggregationResults))
+	c.Assert(
+		aggregationResults.Duplicates,
+		qt.HasLen,
+		len(duplicateMembers.Members),
+		qt.Commentf("aggregationResults: %+v", aggregationResults),
+	)
 
 	// Test 7: Test census creation with empty auth field values
 	// Add a member with empty email to test validation
@@ -522,7 +527,12 @@ func TestCensus(t *testing.T) {
 
 	// The response should contain information about the empty fields
 	aggregationResults = decodeNestedFieldAs[db.OrgMemberAggregationResults](c, resp, "data")
-	c.Assert(aggregationResults.MissingData, qt.HasLen, len(emptyFieldMember.Members), qt.Commentf("aggregationResults: %+v", aggregationResults))
+	c.Assert(
+		aggregationResults.MissingData,
+		qt.HasLen,
+		len(emptyFieldMember.Members),
+		qt.Commentf("aggregationResults: %+v", aggregationResults),
+	)
 
 	// Test 8: Create a user with manager role and test permissions
 	// Create a second user
