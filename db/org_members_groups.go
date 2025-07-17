@@ -368,6 +368,8 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 			// and continue to the next member
 			results.Duplicates = append(results.Duplicates, m.ID)
 			results.Duplicates = append(results.Duplicates, val)
+			// update the seen key to the latest member ID seen
+			seenKeys[key] = m.ID
 			continue
 		}
 
@@ -378,6 +380,9 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 	}
 	if err := cur.Err(); err != nil {
 		return nil, err
+	}
+	if len(results.Duplicates) > 0 {
+		results.Duplicates = unique(results.Duplicates)
 	}
 
 	return &results, nil
@@ -448,4 +453,21 @@ func contains(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+// Helper function that receives a slice and returns a slice with
+// unique
+func unique[T comparable](slice []T) []T {
+	// Using maps with empty struct values is the most memory-efficient approach
+	keys := make(map[T]struct{}, len(slice))
+	uniqueSlice := make([]T, 0, len(slice))
+
+	for _, item := range slice {
+		if _, ok := keys[item]; !ok {
+			keys[item] = struct{}{}
+			uniqueSlice = append(uniqueSlice, item)
+		}
+	}
+
+	return uniqueSlice
 }
