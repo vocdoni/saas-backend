@@ -37,10 +37,10 @@ func TestCensus(t *testing.T) {
 		Members: []apicommon.OrgMember{
 			{
 				MemberNumber: "P001",
-				Name:         "John Doe",
-				Email:        "john.doe@example.com",
-				Phone:        "+34612345678",
-				Password:     "password123",
+				Name:         "Alice Doe",
+				Email:        "alice.doe@example.com",
+				Phone:        "+34111111111",
+				Password:     "password111",
 				Other: map[string]any{
 					"department": "Engineering",
 					"age":        30,
@@ -48,10 +48,10 @@ func TestCensus(t *testing.T) {
 			},
 			{
 				MemberNumber: "P002",
-				Name:         "Jane Smith",
-				Email:        "jane.smith@example.com",
-				Phone:        "+34698765432",
-				Password:     "password456",
+				Name:         "Bob Smith",
+				Email:        "bob.smith@example.com",
+				Phone:        "+34222222222",
+				Password:     "password222",
 				Other: map[string]any{
 					"department": "Marketing",
 					"age":        28,
@@ -134,10 +134,10 @@ func TestCensus(t *testing.T) {
 		Members: []apicommon.OrgMember{
 			{
 				MemberNumber: "P003",
-				Name:         "Bob Johnson",
-				Email:        "bob.johnson@example.com",
-				Phone:        "+34611223344",
-				Password:     "password789",
+				Name:         "Carla Johnson",
+				Email:        "carla.johnson@example.com",
+				Phone:        "+34333333333",
+				Password:     "password333",
 				Other: map[string]any{
 					"department": "Sales",
 					"age":        35,
@@ -145,10 +145,10 @@ func TestCensus(t *testing.T) {
 			},
 			{
 				MemberNumber: "P004",
-				Name:         "Alice Brown",
-				Email:        "alice.brown@example.com",
-				Phone:        "+34655443322",
-				Password:     "passwordabc",
+				Name:         "Diego Brown",
+				Email:        "diego.brown@example.com",
+				Phone:        "+34444444444",
+				Password:     "password444",
 				Other: map[string]any{
 					"department": "HR",
 					"age":        42,
@@ -186,10 +186,10 @@ func TestCensus(t *testing.T) {
 		Members: []apicommon.OrgMember{
 			{
 				MemberNumber: "P005",
-				Name:         "John Smith",
-				Email:        "john.smith@example.com",
-				Phone:        "+34611223145",
-				Password:     "passwordjohnsmith",
+				Name:         "Elsa Smith",
+				Email:        "elsa.smith@example.com",
+				Phone:        "+34555555555",
+				Password:     "password555",
 				Other: map[string]any{
 					"department": "Sales",
 					"age":        35,
@@ -197,10 +197,10 @@ func TestCensus(t *testing.T) {
 			},
 			{
 				MemberNumber: "P006",
-				Name:         "Jane Doe",
-				Email:        "jane.doe@example.com",
-				Phone:        "+34655446758",
-				Password:     "passwordabcde",
+				Name:         "Fabian Doe",
+				Email:        "fabian.doe@example.com",
+				Phone:        "+34666666666",
+				Password:     "password666",
 				Other: map[string]any{
 					"department": "HR",
 					"age":        42,
@@ -455,11 +455,11 @@ func TestCensus(t *testing.T) {
 	emptyFieldMember := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
 			{
-				MemberNumber: "P007",
+				MemberNumber: "P008",
 				Name:         "Empty Email User",
 				Email:        "", // Empty email
-				Phone:        "+34633333333",
-				Password:     "password123",
+				Phone:        "+34888888888",
+				Password:     "password888",
 			},
 		},
 	}
