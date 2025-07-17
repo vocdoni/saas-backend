@@ -3093,6 +3093,7 @@ definitions:
     properties:
       available:
         additionalProperties:
+          format: int64
           type: integer
         description: A hash of all cash balances available to this customer. You cannot
           delete a customer with any cash balances, even if the balance is 0. Amounts
@@ -8002,6 +8003,146 @@ definitions:
       CurrencyYER: Yemeni Rial
       CurrencyZAR: South African Rand
       CurrencyZMW: Zambian Kwacha
+    x-enum-descriptions:
+    - United Arab Emirates Dirham
+    - Afghan Afghani
+    - Albanian Lek
+    - Armenian Dram
+    - Netherlands Antillean Gulden
+    - Angolan Kwanza
+    - Argentine Peso
+    - Australian Dollar
+    - Aruban Florin
+    - Azerbaijani Manat
+    - Bosnia & Herzegovina Convertible Mark
+    - Barbadian Dollar
+    - Bangladeshi Taka
+    - Bulgarian Lev
+    - Burundian Franc
+    - Bermudian Dollar
+    - Brunei Dollar
+    - Bolivian Boliviano
+    - Brazilian Real
+    - Bahamian Dollar
+    - Botswana Pula
+    - Belize Dollar
+    - Canadian Dollar
+    - Congolese Franc
+    - Swiss Franc
+    - Chilean Peso
+    - Chinese Renminbi Yuan
+    - Colombian Peso
+    - Costa Rican Colón
+    - Cape Verdean Escudo
+    - Czech Koruna
+    - Djiboutian Franc
+    - Danish Krone
+    - Dominican Peso
+    - Algerian Dinar
+    - Estonian Kroon
+    - Egyptian Pound
+    - Ethiopian Birr
+    - Euro
+    - Fijian Dollar
+    - Falkland Islands Pound
+    - British Pound
+    - Georgian Lari
+    - Gibraltar Pound
+    - Gambian Dalasi
+    - Guinean Franc
+    - Guatemalan Quetzal
+    - Guyanese Dollar
+    - Hong Kong Dollar
+    - Honduran Lempira
+    - Croatian Kuna
+    - Haitian Gourde
+    - Hungarian Forint
+    - Indonesian Rupiah
+    - Israeli New Sheqel
+    - Indian Rupee
+    - Icelandic Króna
+    - Jamaican Dollar
+    - Japanese Yen
+    - Kenyan Shilling
+    - Kyrgyzstani Som
+    - Cambodian Riel
+    - Comorian Franc
+    - South Korean Won
+    - Cayman Islands Dollar
+    - Kazakhstani Tenge
+    - Lao Kip
+    - Lebanese Pound
+    - Sri Lankan Rupee
+    - Liberian Dollar
+    - Lesotho Loti
+    - Lithuanian Litas
+    - Latvian Lats
+    - Moroccan Dirham
+    - Moldovan Leu
+    - Malagasy Ariary
+    - Macedonian Denar
+    - Mongolian Tögrög
+    - Macanese Pataca
+    - Mauritanian Ouguiya
+    - Mauritian Rupee
+    - Maldivian Rufiyaa
+    - Malawian Kwacha
+    - Mexican Peso
+    - Malaysian Ringgit
+    - Mozambican Metical
+    - Namibian Dollar
+    - Nigerian Naira
+    - Nicaraguan Córdoba
+    - Norwegian Krone
+    - Nepalese Rupee
+    - New Zealand Dollar
+    - Panamanian Balboa
+    - Peruvian Nuevo Sol
+    - Papua New Guinean Kina
+    - Philippine Peso
+    - Pakistani Rupee
+    - Polish Złoty
+    - Paraguayan Guaraní
+    - Qatari Riyal
+    - Romanian Leu
+    - Serbian Dinar
+    - Russian Ruble
+    - Rwandan Franc
+    - Saudi Riyal
+    - Solomon Islands Dollar
+    - Seychellois Rupee
+    - Swedish Krona
+    - Singapore Dollar
+    - Saint Helenian Pound
+    - Sierra Leonean Leone
+    - Somali Shilling
+    - Surinamese Dollar
+    - São Tomé and Príncipe Dobra
+    - Salvadoran Colón
+    - Swazi Lilangeni
+    - Thai Baht
+    - Tajikistani Somoni
+    - Tongan Paʻanga
+    - Turkish Lira
+    - Trinidad and Tobago Dollar
+    - New Taiwan Dollar
+    - Tanzanian Shilling
+    - Ukrainian Hryvnia
+    - Ugandan Shilling
+    - United States Dollar
+    - Uruguayan Peso
+    - Uzbekistani Som
+    - Venezuelan Bolívar
+    - Vietnamese Đồng
+    - Vanuatu Vatu
+    - Samoan Tala
+    - Central African Cfa Franc
+    - East Caribbean Dollar
+    - West African Cfa Franc
+    - Cfp Franc
+    - Yemeni Rial
+    - South African Rand
+    - Zambian Kwacha
     x-enum-varnames:
     - CurrencyAED
     - CurrencyAFN
@@ -8206,6 +8347,7 @@ definitions:
         type: string
       invoice_credit_balance:
         additionalProperties:
+          format: int64
           type: integer
         description: The current multi-currency balances, if any, that's stored on
           the customer. If positive in a currency, the customer has a credit to apply
