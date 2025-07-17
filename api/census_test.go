@@ -434,6 +434,15 @@ func TestCensus(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(errorResponse["data"], qt.Not(qt.IsNil))
 
+	// to decode data we need to Marshal and Unmarshal
+	bytes, err := json.Marshal(errorResponse["data"])
+	c.Assert(err, qt.IsNil)
+
+	var aggregationResults db.OrgMemberAggregationResults
+	err = json.Unmarshal(bytes, &aggregationResults)
+	c.Assert(err, qt.IsNil, qt.Commentf("%#v\n", errorResponse["data"]))
+	c.Assert(aggregationResults.Duplicates, qt.HasLen, 5, qt.Commentf("aggregationResults: %+v", aggregationResults))
+
 	// Test 7: Test census creation with empty auth field values
 	// Add a member with empty email to test validation
 	emptyFieldMember := &apicommon.AddMembersRequest{
