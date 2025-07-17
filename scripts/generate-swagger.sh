@@ -1,5 +1,5 @@
 #!/bin/bash
-SWAG_VERSION=v1.16.4
+SWAG_VERSION=v1.16.5
 # Check if swag is installed, if not install it
 if ! (swag --version | grep -q "^swag version ${SWAG_VERSION}$") ; then
     echo "swag not found, installing..."
