@@ -196,7 +196,7 @@ func TestCensus(t *testing.T) {
 				},
 			},
 			{
-				MemberNumber: "P004",
+				MemberNumber: "P006",
 				Name:         "Jane Doe",
 				Email:        "jane.doe@example.com",
 				Phone:        "+34655446758",
@@ -346,18 +346,25 @@ func TestCensus(t *testing.T) {
 	duplicateMembers := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
 			{
-				MemberNumber: "P005", // Same member number
-				Name:         "Duplicate User 1",
-				Email:        "duplicate1@example.com",
-				Phone:        "+34611111111",
-				Password:     "password123",
+				MemberNumber: "P007", // Same member number
+				Name:         "Duplicate User7 A",
+				Email:        "duplicate7a@example.com",
+				Phone:        "+34777777111",
+				Password:     "password7a",
 			},
 			{
-				MemberNumber: "P005", // Same member number
-				Name:         "Duplicate User 2",
-				Email:        "duplicate2@example.com",
-				Phone:        "+34622222222",
-				Password:     "password456",
+				MemberNumber: "P007", // Same member number
+				Name:         "Duplicate User7 B",
+				Email:        "duplicate7b@example.com",
+				Phone:        "+34777777222",
+				Password:     "password7b",
+			},
+			{
+				MemberNumber: "P007", // Same member number
+				Name:         "Duplicate User7 C",
+				Email:        "duplicate7c@example.com",
+				Phone:        "+34777777333",
+				Password:     "password7c",
 			},
 		},
 	}
@@ -416,7 +423,7 @@ func TestCensus(t *testing.T) {
 	err = parseJSON(resp, &duplicateGroup)
 	c.Assert(err, qt.IsNil)
 
-	// Test 6.1: Try to create a census with duplicate email auth field (should fail)
+	// Test 6.1: Try to create a census with duplicate member number auth field (should fail)
 	duplicateCensusInfo := &apicommon.CreateCensusRequest{
 		Type:       db.CensusTypeSMSorMail,
 		OrgAddress: orgAddress,
