@@ -448,7 +448,7 @@ func TestCensus(t *testing.T) {
 	var aggregationResults db.OrgMemberAggregationResults
 	err = json.Unmarshal(bytes, &aggregationResults)
 	c.Assert(err, qt.IsNil, qt.Commentf("%#v\n", errorResponse["data"]))
-	c.Assert(aggregationResults.Duplicates, qt.HasLen, 5, qt.Commentf("aggregationResults: %+v", aggregationResults))
+	c.Assert(aggregationResults.Duplicates, qt.HasLen, len(duplicateMembers.Members), qt.Commentf("aggregationResults: %+v", aggregationResults))
 
 	// Test 7: Test census creation with empty auth field values
 	// Add a member with empty email to test validation
