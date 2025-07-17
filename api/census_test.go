@@ -436,18 +436,8 @@ func TestCensus(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusBadRequest, qt.Commentf("response: %s", resp))
 
 	// The response should contain information about the duplicates
-	var errorResponse map[string]any
-	err = parseJSON(resp, &errorResponse)
-	c.Assert(err, qt.IsNil)
-	c.Assert(errorResponse["data"], qt.Not(qt.IsNil))
-
-	// to decode data we need to Marshal and Unmarshal
-	bytes, err := json.Marshal(errorResponse["data"])
-	c.Assert(err, qt.IsNil)
-
-	var aggregationResults db.OrgMemberAggregationResults
-	err = json.Unmarshal(bytes, &aggregationResults)
-	c.Assert(err, qt.IsNil, qt.Commentf("%#v\n", errorResponse["data"]))
+	aggregationResults := decodeNestedFieldAs[db.OrgMemberAggregationResults](c, resp, "data")
+	// TODO: fix bug and re-enable this check
 	c.Assert(aggregationResults.Duplicates, qt.HasLen, len(duplicateMembers.Members), qt.Commentf("aggregationResults: %+v", aggregationResults))
 
 	// Test 7: Test census creation with empty auth field values
@@ -531,10 +521,8 @@ func TestCensus(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusBadRequest, qt.Commentf("response: %s", resp))
 
 	// The response should contain information about the empty fields
-	var emptyErrorResponse map[string]any
-	err = parseJSON(resp, &emptyErrorResponse)
-	c.Assert(err, qt.IsNil)
-	c.Assert(emptyErrorResponse["data"], qt.Not(qt.IsNil))
+	aggregationResults = decodeNestedFieldAs[db.OrgMemberAggregationResults](c, resp, "data")
+	c.Assert(aggregationResults.MissingData, qt.HasLen, len(emptyFieldMember.Members), qt.Commentf("aggregationResults: %+v", aggregationResults))
 
 	// Test 8: Create a user with manager role and test permissions
 	// Create a second user
@@ -553,4 +541,20 @@ func TestCensus(t *testing.T) {
 // Helper function to parse JSON responses
 func parseJSON(data []byte, v any) error {
 	return json.Unmarshal(data, v)
+}
+
+func decodeNestedFieldAs[T any](c *qt.C, data []byte, field string) T {
+	var parsedJSON map[string]any
+	err := parseJSON(data, &parsedJSON)
+	c.Assert(err, qt.IsNil)
+	c.Assert(parsedJSON[field], qt.Not(qt.IsNil), qt.Commentf("no field %q in json %#v\n", parsedJSON))
+
+	// to decode field we need to Marshal and Unmarshal
+	nestedFieldBytes, err := json.Marshal(parsedJSON[field])
+	c.Assert(err, qt.IsNil)
+
+	var nestedField T
+	err = json.Unmarshal(nestedFieldBytes, &nestedField)
+	c.Assert(err, qt.IsNil, qt.Commentf("%#v\n", parsedJSON[field]))
+	return nestedField
 }
