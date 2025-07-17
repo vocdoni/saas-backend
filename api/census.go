@@ -93,8 +93,14 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	var censusID string
 	if censusInfo.GroupID != "" {
+		// In the group-based census, we need to be sure that there are members to be added
+		if len(aggregationResults.Members) == 0 {
+			errors.ErrInvalidCensusData.Withf("no valid members found for the census").Write(w)
+			return
+		}
 		censusID, err = a.db.SetGroupCensus(census, censusInfo.GroupID, aggregationResults.Members)
 	} else {
+		// In the regular census, members will be added later so we just create the DB entry
 		censusID, err = a.db.SetCensus(census)
 	}
 	if err != nil {

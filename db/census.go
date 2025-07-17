@@ -142,11 +142,11 @@ func (ms *MongoStorage) SetGroupCensus(
 	}
 
 	// set the participants for the census
-	if len(participantIDs) > 0 {
-		err := ms.setBulkCensusParticipant(ctx, census.ID.Hex(), participantIDs)
-		if err != nil {
-			return "", fmt.Errorf("error setting census participants: %w", err)
-		}
+	if len(participantIDs) == 0 {
+		return "", fmt.Errorf("no participants provided for the census")
+	}
+	if err := ms.setBulkCensusParticipant(ctx, census.ID.Hex(), participantIDs); err != nil {
+		return "", fmt.Errorf("error setting census participants: %w", err)
 	}
 	return census.ID.Hex(), nil
 }
