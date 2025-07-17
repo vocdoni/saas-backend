@@ -113,7 +113,7 @@ func TestCensus(t *testing.T) {
 	// Test 1.4: Test with invalid organization address
 	invalidCensusInfo := &apicommon.CreateCensusRequest{
 		Type:       db.CensusTypeSMSorMail,
-		OrgAddress: common.MaxAddress,
+		OrgAddress: common.Address{},
 		AuthFields: db.OrgMemberAuthFields{
 			db.OrgMemberAuthFieldsMemberNumber,
 		},
@@ -133,25 +133,25 @@ func TestCensus(t *testing.T) {
 	censusMembers := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
 			{
-				MemberNumber: "P001",
-				Name:         "John Doe",
-				Email:        "john.doe@example.com",
-				Phone:        "+34612345678",
-				Password:     "password123",
+				MemberNumber: "P003",
+				Name:         "Bob Johnson",
+				Email:        "bob.johnson@example.com",
+				Phone:        "+34611223344",
+				Password:     "password789",
 				Other: map[string]any{
-					"department": "Engineering",
-					"age":        30,
+					"department": "Sales",
+					"age":        35,
 				},
 			},
 			{
-				MemberNumber: "P002",
-				Name:         "Jane Smith",
-				Email:        "jane.smith@example.com",
-				Phone:        "+34698765432",
-				Password:     "password456",
+				MemberNumber: "P004",
+				Name:         "Alice Brown",
+				Email:        "alice.brown@example.com",
+				Phone:        "+34655443322",
+				Password:     "passwordabc",
 				Other: map[string]any{
-					"department": "Marketing",
-					"age":        28,
+					"department": "HR",
+					"age":        42,
 				},
 			},
 		},
@@ -185,11 +185,11 @@ func TestCensus(t *testing.T) {
 	asyncMembers := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
 			{
-				MemberNumber: "P003",
-				Name:         "Bob Johnson",
-				Email:        "bob.johnson@example.com",
-				Phone:        "+34611223344",
-				Password:     "password789",
+				MemberNumber: "P005",
+				Name:         "John Smith",
+				Email:        "john.smith@example.com",
+				Phone:        "+34611223145",
+				Password:     "passwordjohnsmith",
 				Other: map[string]any{
 					"department": "Sales",
 					"age":        35,
@@ -197,10 +197,10 @@ func TestCensus(t *testing.T) {
 			},
 			{
 				MemberNumber: "P004",
-				Name:         "Alice Brown",
-				Email:        "alice.brown@example.com",
-				Phone:        "+34655443322",
-				Password:     "passwordabc",
+				Name:         "Jane Doe",
+				Email:        "jane.doe@example.com",
+				Phone:        "+34655446758",
+				Password:     "passwordabcde",
 				Other: map[string]any{
 					"department": "HR",
 					"age":        42,
@@ -292,7 +292,7 @@ func TestCensus(t *testing.T) {
 	var orgMembersResponse apicommon.OrganizationMembersResponse
 	err = parseJSON(resp, &orgMembersResponse)
 	c.Assert(err, qt.IsNil)
-	c.Assert(len(orgMembersResponse.Members), qt.Equals, 2)
+	c.Assert(len(orgMembersResponse.Members), qt.Equals, 6)
 
 	// Add member IDs to the group request
 	for _, member := range orgMembersResponse.Members {

@@ -293,7 +293,7 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 	authFields OrgMemberAuthFields,
 	twoFaFields OrgMemberTwoFaFields,
 ) (*OrgMemberAggregationResults, error) {
-	if len(orgAddress) == 0 {
+	if orgAddress.Cmp(common.Address{}) == 0 {
 		return nil, ErrInvalidData
 	}
 	if len(authFields) == 0 && len(twoFaFields) == 0 {

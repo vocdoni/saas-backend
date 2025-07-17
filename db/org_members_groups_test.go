@@ -720,7 +720,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		c.Assert(contains(emptyIDs, member4ID), qt.Equals, true)
 
 		// Test 4: Edge case - invalid organization address
-		_, err = testDB.CheckGroupMembersFields(testNonExistentOrg, validGroupID, authFields, twoFaFields)
+		_, err = testDB.CheckGroupMembersFields(common.Address{}, validGroupID, authFields, twoFaFields)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test 5: Edge case - empty auth fields but with twoFa fields
