@@ -1,9 +1,9 @@
 #!/bin/bash
-
+SWAG_VERSION=v1.16.4
 # Check if swag is installed, if not install it
-if ! command -v swag &> /dev/null; then
+if ! (swag --version | grep -q "^swag version ${SWAG_VERSION}$") ; then
     echo "swag not found, installing..."
-    go install github.com/swaggo/swag/cmd/swag@latest
+    go install github.com/swaggo/swag/cmd/swag@${SWAG_VERSION}
     [ $? -ne 0 ] && echo "Error: swag installation failed." && exit 1
     echo "swag installed successfully."
 fi
