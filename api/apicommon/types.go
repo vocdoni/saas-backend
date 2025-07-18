@@ -693,9 +693,6 @@ type OrganizationCensus struct {
 // CreateCensusRequest represents a request to create a new census for an organization.
 // swagger:model CreateCensusRequest
 type CreateCensusRequest struct {
-	// Type of census to create
-	Type db.CensusType `json:"type"`
-
 	// Organization address
 	OrgAddress common.Address `json:"orgAddress"`
 

@@ -43,6 +43,7 @@ func (ms *MongoStorage) SetCensus(census *Census) (string, error) {
 		census.ID = primitive.NewObjectID()
 		census.CreatedAt = time.Now()
 	}
+	census.Type = census.TwoFaFields.GetCensusType()
 
 	updateDoc, err := dynamicUpdateDocument(census, nil)
 	if err != nil {
@@ -129,6 +130,7 @@ func (ms *MongoStorage) SetGroupCensus(
 		census.ID = primitive.NewObjectID()
 		census.CreatedAt = time.Now()
 	}
+	census.Type = census.TwoFaFields.GetCensusType()
 
 	updateDoc, err := dynamicUpdateDocument(census, nil)
 	if err != nil {

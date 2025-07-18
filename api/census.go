@@ -85,7 +85,6 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	census := &db.Census{
-		Type:        censusInfo.Type,
 		OrgAddress:  censusInfo.OrgAddress,
 		AuthFields:  censusInfo.AuthFields,
 		TwoFaFields: censusInfo.TwoFaFields,

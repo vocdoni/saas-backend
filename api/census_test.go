@@ -67,7 +67,6 @@ func TestCensus(t *testing.T) {
 	// Test 1: Create a census
 	// Test 1.1: Test with valid data and auth fields
 	censusInfo := &apicommon.CreateCensusRequest{
-		Type:       db.CensusTypeSMSorMail,
 		OrgAddress: orgAddress,
 		AuthFields: db.OrgMemberAuthFields{
 			db.OrgMemberAuthFieldsMemberNumber,
@@ -99,7 +98,6 @@ func TestCensus(t *testing.T) {
 
 	// Test 1.2: Test with missing auth fields (should fail)
 	censusInfoNoAuth := &apicommon.CreateCensusRequest{
-		Type:       db.CensusTypeSMSorMail,
 		OrgAddress: orgAddress,
 		// AuthFields is missing
 	}
@@ -112,7 +110,6 @@ func TestCensus(t *testing.T) {
 
 	// Test 1.4: Test with invalid organization address
 	invalidCensusInfo := &apicommon.CreateCensusRequest{
-		Type:       db.CensusTypeSMSorMail,
 		OrgAddress: common.Address{},
 		AuthFields: db.OrgMemberAuthFields{
 			db.OrgMemberAuthFieldsMemberNumber,
@@ -310,7 +307,6 @@ func TestCensus(t *testing.T) {
 
 	// Test 5.1: Create a census based on the group
 	groupCensusInfo := &apicommon.CreateCensusRequest{
-		Type:       db.CensusTypeSMSorMail,
 		OrgAddress: orgAddress,
 		GroupID:    createdGroup.ID,
 		AuthFields: db.OrgMemberAuthFields{
@@ -331,7 +327,6 @@ func TestCensus(t *testing.T) {
 
 	// Test 5.2: Test with invalid group ID
 	invalidGroupCensusInfo := &apicommon.CreateCensusRequest{
-		Type:       db.CensusTypeSMSorMail,
 		OrgAddress: orgAddress,
 		GroupID:    "invalid-group-id",
 		AuthFields: db.OrgMemberAuthFields{
@@ -425,7 +420,6 @@ func TestCensus(t *testing.T) {
 
 	// Test 6.1: Try to create a census with duplicate member number auth field (should fail)
 	duplicateCensusInfo := &apicommon.CreateCensusRequest{
-		Type:       db.CensusTypeSMSorMail,
 		OrgAddress: orgAddress,
 		GroupID:    duplicateGroup.ID,
 		AuthFields: db.OrgMemberAuthFields{
@@ -515,7 +509,6 @@ func TestCensus(t *testing.T) {
 
 	// Test 7.1: Try to create a census with email twoFa field when some members have empty emails (should fail)
 	emptyFieldCensusInfo := &apicommon.CreateCensusRequest{
-		Type:       db.CensusTypeSMSorMail,
 		OrgAddress: orgAddress,
 		GroupID:    emptyFieldGroup.ID,
 		TwoFaFields: db.OrgMemberTwoFaFields{
