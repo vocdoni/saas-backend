@@ -253,7 +253,6 @@ func main() {
 		"POST",
 		"/census",
 		apicommon.CreateCensusRequest{
-			Type:       db.CensusTypeSMSorMail,
 			OrgAddress: orgResp.Address,
 			GroupID:    groupResp.ID,
 			AuthFields: db.OrgMemberAuthFields{
