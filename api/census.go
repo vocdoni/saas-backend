@@ -85,7 +85,6 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	census := &db.Census{
-		Type:        censusInfo.Type,
 		OrgAddress:  censusInfo.OrgAddress,
 		AuthFields:  censusInfo.AuthFields,
 		TwoFaFields: censusInfo.TwoFaFields,
@@ -335,7 +334,7 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 	// build the census and store it
 	cspSignerPubKey := a.account.PubKey // TODO: use a different key based on the censusID
 	switch census.Type {
-	case CensusTypeSMSOrMail:
+	case CensusTypeSMSOrMail, CensusTypeMail, CensusTypeSMS:
 		census.Published.Root = cspSignerPubKey
 		census.Published.URI = a.serverURL + "/process"
 		census.Published.CreatedAt = time.Now()
