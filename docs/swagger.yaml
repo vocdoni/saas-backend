@@ -88,11 +88,9 @@ definitions:
     type: object
   apicommon.CreateCensusResponse:
     properties:
-      censusID:
+      id:
         description: Unique identifier for the census
         type: string
-      memberWarnings:
-        $ref: '#/definitions/db.OrgMemberAggregationResults'
     type: object
   apicommon.CreateOrganizationMemberGroupRequest:
     properties:
@@ -916,25 +914,6 @@ definitions:
         type: boolean
       whiteLabel:
         type: boolean
-    type: object
-  db.OrgMemberAggregationResults:
-    properties:
-      duplicates:
-        description: Duplicates is a list of member IDs that were found to be duplicates
-        items:
-          type: string
-        type: array
-      memberIds:
-        description: MemberIDs is a list of member IDs that are result of the aggregation
-        items:
-          type: string
-        type: array
-      missingData:
-        description: MissingData is a list of member IDs that had columns found to
-          be empty
-        items:
-          type: string
-        type: array
     type: object
   db.OrgMemberAuthField:
     enum:

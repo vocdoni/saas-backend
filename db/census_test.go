@@ -119,6 +119,8 @@ func TestSetGroupCensus(t *testing.T) {
 		}
 		member1ID, err := testDB.SetOrgMember(testSalt, member1)
 		c.Assert(err, qt.IsNil)
+		member1OID, err := primitive.ObjectIDFromHex(member1ID)
+		c.Assert(err, qt.IsNil)
 
 		// Create members for org2
 		member2 := &OrgMember{
@@ -128,6 +130,9 @@ func TestSetGroupCensus(t *testing.T) {
 		}
 		member2ID, err := testDB.SetOrgMember(testSalt, member2)
 		c.Assert(err, qt.IsNil)
+		member2OID, err := primitive.ObjectIDFromHex(member2ID)
+		c.Assert(err, qt.IsNil)
+		participantIDs := []primitive.ObjectID{member1OID, member2OID}
 
 		// Create a group for org1
 		group1 := &OrganizationMemberGroup{
@@ -154,7 +159,7 @@ func TestSetGroupCensus(t *testing.T) {
 			OrgAddress: testOrgAddress,
 			Type:       CensusTypeMail,
 		}
-		_, err = testDB.SetGroupCensus(census1, group2ID, nil)
+		_, err = testDB.SetGroupCensus(census1, group2ID, participantIDs)
 		c.Assert(err, qt.Not(qt.IsNil))
 		c.Assert(err.Error(), qt.Contains, "invalid data provided")
 
@@ -163,7 +168,7 @@ func TestSetGroupCensus(t *testing.T) {
 			OrgAddress: testOrgAddress,
 			Type:       CensusTypeMail,
 		}
-		censusID, err := testDB.SetGroupCensus(census2, group1ID, nil)
+		censusID, err := testDB.SetGroupCensus(census2, group1ID, participantIDs)
 		c.Assert(err, qt.IsNil)
 		c.Assert(censusID, qt.Not(qt.Equals), "")
 
@@ -194,6 +199,9 @@ func TestSetGroupCensus(t *testing.T) {
 		}
 		memberID, err := testDB.SetOrgMember(testSalt, member)
 		c.Assert(err, qt.IsNil)
+		memberOID, err := primitive.ObjectIDFromHex(memberID)
+		c.Assert(err, qt.IsNil)
+		partipantIDs := []primitive.ObjectID{memberOID}
 
 		// Create a group
 		group := &OrganizationMemberGroup{
@@ -210,7 +218,7 @@ func TestSetGroupCensus(t *testing.T) {
 			OrgAddress: testOrgAddress,
 			Type:       CensusTypeMail,
 		}
-		censusID, err := testDB.SetGroupCensus(census, groupID, nil)
+		censusID, err := testDB.SetGroupCensus(census, groupID, partipantIDs)
 		c.Assert(err, qt.IsNil)
 		c.Assert(censusID, qt.Not(qt.Equals), "")
 
