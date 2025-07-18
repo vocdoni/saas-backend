@@ -516,7 +516,7 @@ func testCreateCensus(
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("failed to create census: %s", resp))
 
 	// Parse the response to get the census ID
-	var createdCensus apicommon.OrganizationCensus
+	var createdCensus apicommon.CreateCensusResponse
 	err := json.Unmarshal(resp, &createdCensus)
 	c.Assert(err, qt.IsNil)
 	c.Assert(createdCensus.ID, qt.Not(qt.Equals), "", qt.Commentf("census ID is empty"))
