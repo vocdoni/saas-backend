@@ -321,6 +321,7 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 	}
 
 	seenKeys := make(map[string]primitive.ObjectID, cur.RemainingBatchLength())
+	duplicates := make(map[primitive.ObjectID]struct{}, 0)
 
 	// 4) Iterate and detect
 	for cur.Next(ctx) {
@@ -334,42 +335,20 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 			return nil, err
 		}
 
-		// build composite key & check for empty rows
-		keyParts := make([]string, len(authFields))
-		rowEmpty := false
-		for i, f := range authFields {
-			rawVal := bm[string(f)]
-			s := fmt.Sprint(rawVal)
-			if rawVal == nil || s == "" {
-				rowEmpty = true
-				break
-			}
-			keyParts[i] = s
-		}
-		for _, f := range twoFaFields {
-			rawVal := bm[string(f)]
-			s := fmt.Sprint(rawVal)
-			if rawVal == nil || s == "" {
-				rowEmpty = true
-				break
-			}
-		}
-		if rowEmpty {
-			// if any of the fields are empty, add to missing data
-			// and continue to the next member
-			// we do not check for duplicates in empty rows
+		// if any of the fields are empty, add to missing data
+		// and continue to the next member
+		// we do not check for duplicates in empty rows
+		if hasEmptyFields(bm, authFields) || hasEmptyFields(bm, twoFaFields) {
 			results.MissingData = append(results.MissingData, m.ID)
 			continue
 		}
 
-		key := strings.Join(keyParts, "|")
+		// if the key is already seen, add to duplicates
+		// and continue to the next member
+		key := buildKey(bm, authFields)
 		if val, seen := seenKeys[key]; seen {
-			// if the key is already seen, add to duplicates
-			// and continue to the next member
-			results.Duplicates = append(results.Duplicates, m.ID)
-			results.Duplicates = append(results.Duplicates, val)
-			// update the seen key to the latest member ID seen
-			seenKeys[key] = m.ID
+			duplicates[m.ID] = struct{}{}
+			duplicates[val] = struct{}{}
 			continue
 		}
 
@@ -381,9 +360,7 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 	if err := cur.Err(); err != nil {
 		return nil, err
 	}
-	if len(results.Duplicates) > 0 {
-		results.Duplicates = unique(results.Duplicates)
-	}
+	results.Duplicates = mapKeysToSlice(duplicates)
 
 	return &results, nil
 }
@@ -455,19 +432,32 @@ func contains(slice []string, item string) bool {
 	return false
 }
 
-// Helper function that receives a slice and returns a slice with
-// unique
-func unique[T comparable](slice []T) []T {
-	// Using maps with empty struct values is the most memory-efficient approach
-	keys := make(map[T]struct{}, len(slice))
-	uniqueSlice := make([]T, 0, len(slice))
+// mapKeysToSlice extracts all keys from a map as a slice.
+func mapKeysToSlice[T comparable, V any](m map[T]V) []T {
+	keys := make([]T, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
 
-	for _, item := range slice {
-		if _, ok := keys[item]; !ok {
-			keys[item] = struct{}{}
-			uniqueSlice = append(uniqueSlice, item)
+// hasEmptyFields returns true if any of the specified fields in the BSON document are empty or nil.
+func hasEmptyFields[T ~string](bm bson.M, fields []T) bool {
+	for _, f := range fields {
+		val := fmt.Sprint(bm[string(f)])
+		if val == "" || bm[string(f)] == nil {
+			return true
 		}
 	}
+	return false
+}
 
-	return uniqueSlice
+// buildKey constructs a composite key from the values of specified fields in the BSON document.
+// The values are concatenated with "|" as a delimiter.
+func buildKey[T ~string](bm bson.M, fields []T) string {
+	keyParts := make([]string, len(fields))
+	for i, f := range fields {
+		keyParts[i] = fmt.Sprint(bm[string(f)])
+	}
+	return strings.Join(keyParts, "|")
 }
