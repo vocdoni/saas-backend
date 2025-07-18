@@ -320,7 +320,7 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 		MissingData: make([]primitive.ObjectID, 0),
 	}
 
-	seenKeys := make(map[string]primitive.ObjectID, 50000)
+	seenKeys := make(map[string]primitive.ObjectID, cur.RemainingBatchLength())
 
 	// 4) Iterate and detect
 	for cur.Next(ctx) {

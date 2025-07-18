@@ -42,7 +42,7 @@ func TestProcess(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Parse the response to get the census ID
-	var createdCensus apicommon.OrganizationCensus
+	var createdCensus apicommon.CreateCensusResponse
 	err := parseJSON(resp, &createdCensus)
 	c.Assert(err, qt.IsNil)
 	c.Assert(createdCensus.ID, qt.Not(qt.Equals), "")
