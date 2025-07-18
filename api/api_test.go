@@ -496,19 +496,27 @@ func fetchVocdoniChainID(t *testing.T, client *apiclient.HTTPclient) string {
 
 // testCreateCensus creates a new census with the given organization address and census type.
 // It returns the census ID.
-func testCreateCensus(t *testing.T, token string, orgAddress common.Address, censusType string) string {
+func testCreateCensus(
+	t *testing.T,
+	token string,
+	orgAddress common.Address,
+	authFields db.OrgMemberAuthFields,
+	twoFaFields db.OrgMemberTwoFaFields,
+) string {
 	c := qt.New(t)
 
 	// Create a new census
 	censusInfo := &apicommon.OrganizationCensus{
-		Type:       db.CensusType(censusType),
-		OrgAddress: orgAddress,
+		OrgAddress:  orgAddress,
+		Type:        db.CensusTypeSMSorMail,
+		AuthFields:  authFields,
+		TwoFaFields: twoFaFields,
 	}
 	resp, code := testRequest(t, http.MethodPost, token, censusInfo, censusEndpoint)
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("failed to create census: %s", resp))
 
 	// Parse the response to get the census ID
-	var createdCensus apicommon.OrganizationCensus
+	var createdCensus apicommon.CreateCensusResponse
 	err := json.Unmarshal(resp, &createdCensus)
 	c.Assert(err, qt.IsNil)
 	c.Assert(createdCensus.ID, qt.Not(qt.Equals), "", qt.Commentf("census ID is empty"))

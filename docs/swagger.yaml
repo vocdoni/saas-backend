@@ -59,6 +59,39 @@ definitions:
         format: hex
         type: string
     type: object
+  apicommon.CreateCensusRequest:
+    properties:
+      authFields:
+        description: Optional for defining which member data should be used for authentication
+        items:
+          $ref: '#/definitions/db.OrgMemberAuthField'
+        type: array
+      groupID:
+        description: Optional for creating a census based on an organization member
+          group
+        type: string
+      orgAddress:
+        description: Organization address
+        items:
+          type: integer
+        type: array
+      twoFaFields:
+        description: Optional for defining which member data should be used for two-factor
+          authentication
+        items:
+          $ref: '#/definitions/db.OrgMemberTwoFaField'
+        type: array
+      type:
+        allOf:
+        - $ref: '#/definitions/db.CensusType'
+        description: Type of census to create
+    type: object
+  apicommon.CreateCensusResponse:
+    properties:
+      id:
+        description: Unique identifier for the census
+        type: string
+    type: object
   apicommon.CreateOrganizationMemberGroupRequest:
     properties:
       description:
@@ -251,13 +284,28 @@ definitions:
     type: object
   apicommon.OrganizationCensus:
     properties:
+      authFields:
+        description: Optional for defining which member data should be used for authentication
+        items:
+          $ref: '#/definitions/db.OrgMemberAuthField'
+        type: array
       censusId:
         description: Unique identifier for the census
+        type: string
+      groupID:
+        description: Optional for creating a census based on an organization member
+          group
         type: string
       orgAddress:
         description: Organization address
         items:
           type: integer
+        type: array
+      twoFaFields:
+        description: Optional for defining which member data should be used for two-factor
+          authentication
+        items:
+          $ref: '#/definitions/db.OrgMemberTwoFaField'
         type: array
       type:
         allOf:
@@ -495,11 +543,6 @@ definitions:
     type: object
   apicommon.PublishedCensusResponse:
     properties:
-      censusId:
-        description: Census ID
-        example: deadbeef
-        format: hex
-        type: string
       root:
         description: Merkle root of the census
         example: deadbeef
@@ -816,12 +859,24 @@ definitions:
     properties:
       createdAt:
         type: string
+      groupId:
+        type: string
       id:
         type: string
       orgAddress:
         items:
           type: integer
         type: array
+      orgMemberAuthFields:
+        items:
+          $ref: '#/definitions/db.OrgMemberAuthField'
+        type: array
+      orgMemberTwoFaFields:
+        items:
+          $ref: '#/definitions/db.OrgMemberTwoFaField'
+        type: array
+      published:
+        $ref: '#/definitions/db.PublishedCensus'
       type:
         $ref: '#/definitions/db.CensusType'
       updatedAt:
@@ -829,13 +884,13 @@ definitions:
     type: object
   db.CensusType:
     enum:
-    - pass
+    - auth
     - mail
     - sms
     - sms_or_mail
     type: string
     x-enum-varnames:
-    - CensusTypePass
+    - CensusTypeAuthOnly
     - CensusTypeMail
     - CensusTypeSMS
     - CensusTypeSMSorMail
@@ -860,6 +915,28 @@ definitions:
       whiteLabel:
         type: boolean
     type: object
+  db.OrgMemberAuthField:
+    enum:
+    - name
+    - surname
+    - memberNumber
+    - nationalID
+    - birthDate
+    type: string
+    x-enum-varnames:
+    - OrgMemberAuthFieldsName
+    - OrgMemberAuthFieldsSurname
+    - OrgMemberAuthFieldsMemberNumber
+    - OrgMemberAuthFieldsNationalID
+    - OrgMemberAuthFieldsBirthDate
+  db.OrgMemberTwoFaField:
+    enum:
+    - email
+    - phone
+    type: string
+    x-enum-varnames:
+    - OrgMemberTwoFaFieldEmail
+    - OrgMemberTwoFaFieldPhone
   db.Plan:
     properties:
       censusSizeTiers:
@@ -912,6 +989,8 @@ definitions:
     type: object
   db.Process:
     properties:
+      census:
+        $ref: '#/definitions/db.Census'
       id:
         example: deadbeef
         format: hex
@@ -924,8 +1003,6 @@ definitions:
         items:
           type: integer
         type: array
-      publishedCensus:
-        $ref: '#/definitions/db.PublishedCensus'
     type: object
   db.ProcessesBundle:
     properties:
@@ -933,9 +1010,6 @@ definitions:
         allOf:
         - $ref: '#/definitions/db.Census'
         description: The census associated with this bundle
-      censusRoot:
-        description: The census root public key
-        type: string
       id:
         description: Unique identifier for the bundle
         type: string
@@ -955,12 +1029,12 @@ definitions:
     type: object
   db.PublishedCensus:
     properties:
-      census:
-        $ref: '#/definitions/db.Census'
       createdAt:
         type: string
       root:
-        type: string
+        items:
+          type: integer
+        type: array
       uri:
         type: string
     type: object
@@ -22385,24 +22459,26 @@ paths:
     post:
       consumes:
       - application/json
-      description: Create a new census for an organization. Requires Manager/Admin
-        role.
+      description: |-
+        Create a new census for an organization. Requires Manager/Admin role.
+        Creates either a regular census or a group-based census if GroupID is provided.
+        Validates that either AuthFields or TwoFaFields are provided and checks for duplicates or empty fields.
       parameters:
       - description: Census information
         in: body
         name: request
         required: true
         schema:
-          $ref: '#/definitions/apicommon.OrganizationCensus'
+          $ref: '#/definitions/apicommon.CreateCensusRequest'
       produces:
       - application/json
       responses:
         "200":
-          description: OK
+          description: Returns the created census ID
           schema:
-            $ref: '#/definitions/apicommon.OrganizationCensus'
+            $ref: '#/definitions/apicommon.CreateCensusResponse'
         "400":
-          description: Invalid input data
+          description: Invalid input data or missing required fields
           schema:
             $ref: '#/definitions/errors.Error'
         "401":

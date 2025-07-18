@@ -10,13 +10,13 @@ import (
 )
 
 var (
-	testProcessID       = internal.HexBytesFromString("0x1111")
-	testProcessRoot     = "test_process_root"
+	testProcessID       = internal.HexBytes("test_process_id")
+	testProcessRoot     = "0xabcde"
 	testProcessURI      = "test_process_uri"
 	testProcessMetadata = []byte("test_metadata")
 )
 
-func setupTestPrerequisites1(c *qt.C, db *MongoStorage) *PublishedCensus {
+func setupTestPrerequisites1(c *qt.C, db *MongoStorage) *Census {
 	// Create test organization
 	org := &Organization{
 		Address:   testOrgAddress,
@@ -26,29 +26,28 @@ func setupTestPrerequisites1(c *qt.C, db *MongoStorage) *PublishedCensus {
 	err := db.SetOrganization(org)
 	c.Assert(err, qt.IsNil)
 
+	var rootHex internal.HexBytes
+	if err := rootHex.ParseString(testProcessRoot); err != nil {
+		c.Assert(err, qt.Not(qt.IsNil))
+	}
+
 	// Create test census
 	census := &Census{
 		OrgAddress: testOrgAddress,
 		Type:       CensusTypeMail,
-		CreatedAt:  time.Now(),
-		UpdatedAt:  time.Now(),
+		Published: PublishedCensus{
+			Root: rootHex,
+			URI:  testProcessURI,
+		},
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	}
 	censusID, err := db.SetCensus(census)
 	c.Assert(err, qt.IsNil)
 	census.ID, err = primitive.ObjectIDFromHex(censusID)
 	c.Assert(err, qt.IsNil)
 
-	// Create test published census
-	publishedCensus := &PublishedCensus{
-		URI:       testProcessURI,
-		Root:      testProcessRoot,
-		Census:    *census,
-		CreatedAt: time.Now(),
-	}
-	err = db.SetPublishedCensus(publishedCensus)
-	c.Assert(err, qt.IsNil)
-
-	return publishedCensus
+	return census
 }
 
 func TestProcess(t *testing.T) {
@@ -61,34 +60,40 @@ func TestProcess(t *testing.T) {
 		process, err := testDB.Process(testProcessID)
 		c.Assert(process, qt.IsNil)
 		c.Assert(err, qt.Not(qt.IsNil))
+		var rootHex internal.HexBytes
+		if err := rootHex.ParseString(testProcessRoot); err != nil {
+			c.Assert(err, qt.Not(qt.IsNil))
+		}
+
+		census := &Census{
+			ID:         primitive.NewObjectID(),
+			OrgAddress: testNonExistentOrg,
+			Type:       CensusTypeMail,
+			Published: PublishedCensus{
+				URI:  testProcessURI,
+				Root: rootHex,
+			},
+		}
 
 		// Test with non-existent organization
 		nonExistentProcess := &Process{
 			ID:         testProcessID,
 			OrgAddress: testNonExistentOrg,
-			PublishedCensus: PublishedCensus{
-				URI:  testProcessURI,
-				Root: testProcessRoot,
-				Census: Census{
-					ID:         primitive.NewObjectID(),
-					OrgAddress: testNonExistentOrg,
-					Type:       CensusTypeMail,
-				},
-			},
+			Census:     *census,
 		}
 		err = testDB.SetProcess(nonExistentProcess)
 		c.Assert(err, qt.Not(qt.IsNil))
 		c.Assert(err.Error(), qt.Contains, "failed to get organization")
 
 		// Setup prerequisites
-		publishedCensus := setupTestPrerequisites1(c, testDB)
+		census = setupTestPrerequisites1(c, testDB)
 
 		// create a new process
 		process = &Process{
-			ID:              testProcessID,
-			OrgAddress:      testOrgAddress,
-			PublishedCensus: *publishedCensus,
-			Metadata:        testProcessMetadata,
+			ID:         testProcessID,
+			OrgAddress: testOrgAddress,
+			Census:     *census,
+			Metadata:   testProcessMetadata,
 		}
 
 		// test setting the process
@@ -100,82 +105,66 @@ func TestProcess(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(retrieved, qt.Not(qt.IsNil))
 		c.Assert(retrieved.ID, qt.DeepEquals, testProcessID)
-		c.Assert(retrieved.OrgAddress, qt.DeepEquals, testOrgAddress)
-		c.Assert(retrieved.PublishedCensus.URI, qt.Equals, testProcessURI)
-		c.Assert(retrieved.PublishedCensus.Root, qt.DeepEquals, testProcessRoot)
-		c.Assert(retrieved.PublishedCensus.Census.ID, qt.Equals, publishedCensus.Census.ID)
+		c.Assert(retrieved.OrgAddress, qt.Equals, testOrgAddress)
+		c.Assert(retrieved.Census.Published.URI, qt.Equals, testProcessURI)
+		c.Assert(retrieved.Census.Published.Root, qt.DeepEquals, rootHex)
+		c.Assert(retrieved.Census.ID, qt.Equals, census.ID)
 		c.Assert(retrieved.Metadata, qt.DeepEquals, testProcessMetadata)
-
-		// Test with non-existent published census (should create it)
-		newPublishedCensus := PublishedCensus{
-			URI:  "new-uri",
-			Root: "new-root",
-			Census: Census{
-				ID:         publishedCensus.Census.ID,
-				OrgAddress: testOrgAddress,
-				Type:       CensusTypeMail,
-			},
-		}
-		newProcess := &Process{
-			ID:              internal.HexBytes("new-process"),
-			OrgAddress:      testOrgAddress,
-			PublishedCensus: newPublishedCensus,
-		}
-		err = testDB.SetProcess(newProcess)
-		c.Assert(err, qt.IsNil)
-
-		// Verify the published census was created
-		createdPublishedCensus, err := testDB.PublishedCensus("new-root", "new-uri", publishedCensus.Census.ID.Hex())
-		c.Assert(err, qt.IsNil)
-		c.Assert(createdPublishedCensus, qt.Not(qt.IsNil))
 	})
 
 	t.Run("TestSetProcessValidation", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
-		publishedCensus := setupTestPrerequisites1(c, testDB)
+		census := setupTestPrerequisites1(c, testDB)
 
 		// test with empty ID
 		invalidProcess := &Process{
-			OrgAddress:      testOrgAddress,
-			PublishedCensus: *publishedCensus,
+			OrgAddress: testOrgAddress,
+			Census:     *census,
 		}
 		err := testDB.SetProcess(invalidProcess)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// test with empty OrgAddress
 		invalidProcess = &Process{
-			ID:              testProcessID,
-			PublishedCensus: *publishedCensus,
+			ID:     testProcessID,
+			Census: *census,
 		}
 		err = testDB.SetProcess(invalidProcess)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
-		// test with empty PublishedCensus Root
+		// test with empty Census Published Root
+		nonPublishedCensus := &Census{
+			OrgAddress: testOrgAddress,
+			Type:       CensusTypeMail,
+			Published: PublishedCensus{
+				URI: testProcessURI,
+			},
+		}
+		nonPublishedCensusID, err := testDB.SetCensus(nonPublishedCensus)
+		c.Assert(err, qt.IsNil)
+		nonPublishedCensus.ID, err = primitive.ObjectIDFromHex(nonPublishedCensusID)
+		c.Assert(err, qt.IsNil)
 		invalidProcess = &Process{
 			ID:         testProcessID,
 			OrgAddress: testOrgAddress,
-			PublishedCensus: PublishedCensus{
-				URI: testProcessURI,
-				Census: Census{
-					ID: publishedCensus.Census.ID,
-				},
-			},
+			Census:     *nonPublishedCensus,
 		}
 		err = testDB.SetProcess(invalidProcess)
-		c.Assert(err, qt.Equals, ErrInvalidData)
+		c.Assert(err, qt.IsNotNil)
+		c.Assert(err.Error(), qt.Contains, "does not have a published root or URI")
 	})
 
 	t.Run("TestDeleteProcess", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
-		publishedCensus := setupTestPrerequisites1(c, testDB)
+		census := setupTestPrerequisites1(c, testDB)
 
 		// create a process
 		process := &Process{
-			ID:              testProcessID,
-			OrgAddress:      testOrgAddress,
-			PublishedCensus: *publishedCensus,
+			ID:         testProcessID,
+			OrgAddress: testOrgAddress,
+			Census:     *census,
 		}
 		err := testDB.SetProcess(process)
 		c.Assert(err, qt.IsNil)

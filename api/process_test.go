@@ -31,19 +31,13 @@ func TestProcess(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Create a census
-	censusInfo := &apicommon.OrganizationCensus{
-		Type:       db.CensusTypeSMSorMail,
-		OrgAddress: orgAddress,
+	authFields := db.OrgMemberAuthFields{}
+	// use the email for two-factor authentication
+	twoFaFields := db.OrgMemberTwoFaFields{
+		db.OrgMemberTwoFaFieldEmail,
 	}
-	resp, code = testRequest(t, http.MethodPost, adminToken, censusInfo, censusEndpoint)
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
-	// Parse the response to get the census ID
-	var createdCensus apicommon.OrganizationCensus
-	err := parseJSON(resp, &createdCensus)
-	c.Assert(err, qt.IsNil)
-	c.Assert(createdCensus.ID, qt.Not(qt.Equals), "")
-	censusID := createdCensus.ID
+	censusID := testCreateCensus(t, adminToken, orgAddress, authFields, twoFaFields)
 	t.Logf("Created census with ID: %s\n", censusID)
 
 	// Add members to the census
@@ -82,7 +76,7 @@ func TestProcess(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	var publishedCensus apicommon.PublishedCensusResponse
-	err = parseJSON(resp, &publishedCensus)
+	err := parseJSON(resp, &publishedCensus)
 	c.Assert(err, qt.IsNil)
 	c.Assert(publishedCensus.URI, qt.Not(qt.Equals), "")
 	c.Assert(publishedCensus.Root, qt.Not(qt.Equals), "")

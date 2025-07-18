@@ -14,12 +14,12 @@ var (
 )
 
 // Helper function to create a test process
-func createTestProcess(c *qt.C, db *MongoStorage, processID internal.HexBytes, publishedCensus *PublishedCensus) *Process {
+func createTestProcess(c *qt.C, db *MongoStorage, processID internal.HexBytes, census *Census) *Process {
 	process := &Process{
-		ID:              processID,
-		OrgAddress:      testOrgAddress,
-		PublishedCensus: *publishedCensus,
-		Metadata:        testProcessMetadata,
+		ID:         processID,
+		OrgAddress: testOrgAddress,
+		Census:     *census,
+		Metadata:   testProcessMetadata,
 	}
 	err := db.SetProcess(process)
 	c.Assert(err, qt.IsNil)
@@ -33,22 +33,26 @@ func TestProcessBundles(t *testing.T) {
 	t.Run("TestSetAndGetProcessBundle", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
-		publishedCensus := setupTestPrerequisites1(c, testDB)
+		census := setupTestPrerequisites1(c, testDB)
 
 		// Create test processes
-		process1 := createTestProcess(c, testDB, testProcessID, publishedCensus)
-		process2 := createTestProcess(c, testDB, testProcessID2, publishedCensus)
+		process1 := createTestProcess(c, testDB, testProcessID, census)
+		process2 := createTestProcess(c, testDB, testProcessID2, census)
 
 		// Test with empty processes array - should be valid now
 		emptyBundle := &ProcessesBundle{
 			OrgAddress: testOrgAddress,
-			Census:     publishedCensus.Census,
-			CensusRoot: publishedCensus.Root,
+			Census:     *census,
 			Processes:  []internal.HexBytes{},
 		}
 		emptyBundleID, err := testDB.SetProcessBundle(emptyBundle)
 		c.Assert(err, qt.IsNil)
 		c.Assert(emptyBundleID, qt.Not(qt.Equals), "")
+
+		var rootHex internal.HexBytes
+		if err := rootHex.ParseString(testProcessRoot); err != nil {
+			c.Assert(err, qt.Not(qt.IsNil))
+		}
 
 		// Test with non-existent organization
 		nonExistentBundle := &ProcessesBundle{
@@ -57,9 +61,11 @@ func TestProcessBundles(t *testing.T) {
 				ID:         primitive.NewObjectID(),
 				OrgAddress: testNonExistentOrg,
 				Type:       CensusTypeMail,
+				Published: PublishedCensus{
+					Root: rootHex,
+				},
 			},
-			CensusRoot: testProcessRoot,
-			Processes:  []internal.HexBytes{testProcessID3},
+			Processes: []internal.HexBytes{testProcessID3},
 		}
 		_, err = testDB.SetProcessBundle(nonExistentBundle)
 		c.Assert(err, qt.Not(qt.IsNil))
@@ -68,8 +74,7 @@ func TestProcessBundles(t *testing.T) {
 		// Create a new process bundle
 		bundle := &ProcessesBundle{
 			OrgAddress: testOrgAddress,
-			Census:     publishedCensus.Census,
-			CensusRoot: publishedCensus.Root,
+			Census:     *census,
 			Processes:  []internal.HexBytes{process1.ID, process2.ID},
 		}
 		bundleID, err := testDB.SetProcessBundle(bundle)
@@ -86,7 +91,7 @@ func TestProcessBundles(t *testing.T) {
 		c.Assert(retrieved.Processes[1], qt.DeepEquals, process2.ID)
 
 		// Test updating an existing bundle
-		process3 := createTestProcess(c, testDB, testProcessID3, publishedCensus)
+		process3 := createTestProcess(c, testDB, testProcessID3, census)
 		retrieved.Processes = append(retrieved.Processes, process3.ID)
 		updatedBundleID, err := testDB.SetProcessBundle(retrieved)
 		c.Assert(err, qt.IsNil)
@@ -103,12 +108,12 @@ func TestProcessBundles(t *testing.T) {
 	t.Run("TestProcessBundlesList", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
-		publishedCensus := setupTestPrerequisites1(c, testDB)
+		census := setupTestPrerequisites1(c, testDB)
 
 		// Create test processes
-		process1 := createTestProcess(c, testDB, testProcessID, publishedCensus)
-		process2 := createTestProcess(c, testDB, testProcessID2, publishedCensus)
-		process3 := createTestProcess(c, testDB, testProcessID3, publishedCensus)
+		process1 := createTestProcess(c, testDB, testProcessID, census)
+		process2 := createTestProcess(c, testDB, testProcessID2, census)
+		process3 := createTestProcess(c, testDB, testProcessID3, census)
 
 		// Initially there should be no bundles
 		bundles, err := testDB.ProcessBundles()
@@ -118,8 +123,7 @@ func TestProcessBundles(t *testing.T) {
 		// Create two process bundles
 		bundle1 := &ProcessesBundle{
 			OrgAddress: testOrgAddress,
-			Census:     publishedCensus.Census,
-			CensusRoot: publishedCensus.Root,
+			Census:     *census,
 			Processes:  []internal.HexBytes{process1.ID, process2.ID},
 		}
 		bundle1ID, err := testDB.SetProcessBundle(bundle1)
@@ -127,8 +131,7 @@ func TestProcessBundles(t *testing.T) {
 
 		bundle2 := &ProcessesBundle{
 			OrgAddress: testOrgAddress,
-			Census:     publishedCensus.Census,
-			CensusRoot: publishedCensus.Root,
+			Census:     *census,
 			Processes:  []internal.HexBytes{process2.ID, process3.ID},
 		}
 		bundle2ID, err := testDB.SetProcessBundle(bundle2)
@@ -148,18 +151,17 @@ func TestProcessBundles(t *testing.T) {
 	t.Run("TestProcessBundlesByProcess", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
-		publishedCensus := setupTestPrerequisites1(c, testDB)
+		census := setupTestPrerequisites1(c, testDB)
 
 		// Create test processes
-		process1 := createTestProcess(c, testDB, testProcessID, publishedCensus)
-		process2 := createTestProcess(c, testDB, testProcessID2, publishedCensus)
-		process3 := createTestProcess(c, testDB, testProcessID3, publishedCensus)
+		process1 := createTestProcess(c, testDB, testProcessID, census)
+		process2 := createTestProcess(c, testDB, testProcessID2, census)
+		process3 := createTestProcess(c, testDB, testProcessID3, census)
 
 		// Create two process bundles
 		bundle1 := &ProcessesBundle{
 			OrgAddress: testOrgAddress,
-			Census:     publishedCensus.Census,
-			CensusRoot: publishedCensus.Root,
+			Census:     *census,
 			Processes:  []internal.HexBytes{process1.ID, process2.ID},
 		}
 		bundle1ID, err := testDB.SetProcessBundle(bundle1)
@@ -167,8 +169,7 @@ func TestProcessBundles(t *testing.T) {
 
 		bundle2 := &ProcessesBundle{
 			OrgAddress: testOrgAddress,
-			Census:     publishedCensus.Census,
-			CensusRoot: publishedCensus.Root,
+			Census:     *census,
 			Processes:  []internal.HexBytes{process2.ID, process3.ID},
 		}
 		bundle2ID, err := testDB.SetProcessBundle(bundle2)
@@ -201,18 +202,17 @@ func TestProcessBundles(t *testing.T) {
 	t.Run("TestAddProcessesToBundle", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
-		publishedCensus := setupTestPrerequisites1(c, testDB)
+		census := setupTestPrerequisites1(c, testDB)
 
 		// Create test processes
-		process1 := createTestProcess(c, testDB, testProcessID, publishedCensus)
-		process2 := createTestProcess(c, testDB, testProcessID2, publishedCensus)
-		process3 := createTestProcess(c, testDB, testProcessID3, publishedCensus)
+		process1 := createTestProcess(c, testDB, testProcessID, census)
+		process2 := createTestProcess(c, testDB, testProcessID2, census)
+		process3 := createTestProcess(c, testDB, testProcessID3, census)
 
 		// Create a process bundle with one process
 		bundle := &ProcessesBundle{
 			OrgAddress: testOrgAddress,
-			Census:     publishedCensus.Census,
-			CensusRoot: publishedCensus.Root,
+			Census:     *census,
 			Processes:  []internal.HexBytes{process1.ID},
 		}
 		bundleID, err := testDB.SetProcessBundle(bundle)
@@ -267,17 +267,16 @@ func TestProcessBundles(t *testing.T) {
 	t.Run("TestDelProcessBundle", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
-		publishedCensus := setupTestPrerequisites1(c, testDB)
+		census := setupTestPrerequisites1(c, testDB)
 
 		// Create test processes
-		process1 := createTestProcess(c, testDB, testProcessID, publishedCensus)
-		process2 := createTestProcess(c, testDB, testProcessID2, publishedCensus)
+		process1 := createTestProcess(c, testDB, testProcessID, census)
+		process2 := createTestProcess(c, testDB, testProcessID2, census)
 
 		// Create a process bundle
 		bundle := &ProcessesBundle{
 			OrgAddress: testOrgAddress,
-			Census:     publishedCensus.Census,
-			CensusRoot: publishedCensus.Root,
+			Census:     *census,
 			Processes:  []internal.HexBytes{process1.ID, process2.ID},
 		}
 		bundleID, err := testDB.SetProcessBundle(bundle)
