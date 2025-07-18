@@ -238,6 +238,27 @@ const (
 // OrgMemberTwoFaFields is a list of fields that can be used for two-factor authentication.
 type OrgMemberTwoFaFields []OrgMemberTwoFaField
 
+// Contains checks if the field is present in the OrgMemberAuthFields.
+func (f OrgMemberTwoFaFields) Contains(field OrgMemberTwoFaField) bool {
+	for _, v := range f {
+		if v == field {
+			return true
+		}
+	}
+	return false
+}
+
+func (f OrgMemberTwoFaFields) GetCensusType() CensusType {
+	if f.Contains(OrgMemberTwoFaFieldPhone) && f.Contains(OrgMemberTwoFaFieldEmail) {
+		return CensusTypeSMSorMail
+	} else if f.Contains(OrgMemberTwoFaFieldPhone) {
+		return CensusTypeSMS
+	} else if f.Contains(OrgMemberTwoFaFieldEmail) {
+		return CensusTypeMail
+	}
+	return CensusTypeAuthOnly
+}
+
 type OrgMemberAggregationResults struct {
 	// MemberIDs is a list of member IDs that are result of the aggregation
 	Members []primitive.ObjectID `json:"memberIds" bson:"memberIds"`
