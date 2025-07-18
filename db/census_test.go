@@ -24,10 +24,14 @@ func TestSetGroupCensus(t *testing.T) {
 		err := testDB.SetOrganization(org)
 		c.Assert(err, qt.IsNil)
 
+		// Defone TwoFaFields for the census
+
 		// Test with empty groupID (should fallback to SetCensus behavior)
 		census := &Census{
 			OrgAddress: testOrgAddress,
-			Type:       CensusTypeMail,
+			TwoFaFields: OrgMemberTwoFaFields{
+				OrgMemberTwoFaFieldEmail,
+			},
 		}
 
 		// Call SetGroupCensus with empty groupID
@@ -59,7 +63,9 @@ func TestSetGroupCensus(t *testing.T) {
 		// Test with empty orgAddress
 		invalidCensus := &Census{
 			OrgAddress: common.Address{},
-			Type:       CensusTypeMail,
+			TwoFaFields: OrgMemberTwoFaFields{
+				OrgMemberTwoFaFieldEmail,
+			},
 		}
 		_, err = testDB.SetGroupCensus(invalidCensus, "some-group-id", nil)
 		c.Assert(err, qt.Equals, ErrInvalidData)
@@ -67,7 +73,9 @@ func TestSetGroupCensus(t *testing.T) {
 		// Test with non-existent organization
 		nonExistentCensus := &Census{
 			OrgAddress: testNonExistentOrg,
-			Type:       CensusTypeMail,
+			TwoFaFields: OrgMemberTwoFaFields{
+				OrgMemberTwoFaFieldEmail,
+			},
 		}
 		_, err = testDB.SetGroupCensus(nonExistentCensus, "some-group-id", nil)
 		c.Assert(err, qt.Not(qt.IsNil))
@@ -76,7 +84,9 @@ func TestSetGroupCensus(t *testing.T) {
 		// Test with non-existent group
 		nonExistentGroupCensus := &Census{
 			OrgAddress: testOrgAddress,
-			Type:       CensusTypeMail,
+			TwoFaFields: OrgMemberTwoFaFields{
+				OrgMemberTwoFaFieldEmail,
+			},
 		}
 		nonExistentGroupID := primitive.NewObjectID().Hex()
 		_, err = testDB.SetGroupCensus(nonExistentGroupCensus, nonExistentGroupID, nil)
@@ -86,7 +96,9 @@ func TestSetGroupCensus(t *testing.T) {
 		// Test with invalid groupID format
 		invalidGroupCensus := &Census{
 			OrgAddress: testOrgAddress,
-			Type:       CensusTypeMail,
+			TwoFaFields: OrgMemberTwoFaFields{
+				OrgMemberTwoFaFieldEmail,
+			},
 		}
 		_, err = testDB.SetGroupCensus(invalidGroupCensus, "invalid-group-id-format", nil)
 		c.Assert(err, qt.Not(qt.IsNil))
@@ -157,7 +169,9 @@ func TestSetGroupCensus(t *testing.T) {
 		// Test with valid organization but group belonging to different organization
 		census1 := &Census{
 			OrgAddress: testOrgAddress,
-			Type:       CensusTypeMail,
+			TwoFaFields: OrgMemberTwoFaFields{
+				OrgMemberTwoFaFieldEmail,
+			},
 		}
 		_, err = testDB.SetGroupCensus(census1, group2ID, participantIDs)
 		c.Assert(err, qt.Not(qt.IsNil))
@@ -166,7 +180,9 @@ func TestSetGroupCensus(t *testing.T) {
 		// Test with valid group and organization combination
 		census2 := &Census{
 			OrgAddress: testOrgAddress,
-			Type:       CensusTypeMail,
+			TwoFaFields: OrgMemberTwoFaFields{
+				OrgMemberTwoFaFieldEmail,
+			},
 		}
 		censusID, err := testDB.SetGroupCensus(census2, group1ID, participantIDs)
 		c.Assert(err, qt.IsNil)
@@ -216,7 +232,9 @@ func TestSetGroupCensus(t *testing.T) {
 		// Test creating new census with group
 		census := &Census{
 			OrgAddress: testOrgAddress,
-			Type:       CensusTypeMail,
+			TwoFaFields: OrgMemberTwoFaFields{
+				OrgMemberTwoFaFieldEmail,
+			},
 		}
 		censusID, err := testDB.SetGroupCensus(census, groupID, partipantIDs)
 		c.Assert(err, qt.IsNil)
@@ -232,6 +250,9 @@ func TestSetGroupCensus(t *testing.T) {
 
 		// Test updating existing census with group
 		createdCensus.Type = CensusTypeSMS
+		createdCensus.TwoFaFields = OrgMemberTwoFaFields{
+			OrgMemberTwoFaFieldPhone,
+		}
 
 		// Ensure different UpdatedAt timestamp
 		time.Sleep(time.Millisecond)
@@ -299,7 +320,9 @@ func TestSetGroupCensus(t *testing.T) {
 		// Test with empty participantIDs array (no participants added)
 		census1 := &Census{
 			OrgAddress: testOrgAddress,
-			Type:       CensusTypeMail,
+			TwoFaFields: OrgMemberTwoFaFields{
+				OrgMemberTwoFaFieldEmail,
+			},
 		}
 		censusID1, err := testDB.SetGroupCensus(census1, groupID, nil)
 		c.Assert(err, qt.IsNil)
@@ -312,7 +335,9 @@ func TestSetGroupCensus(t *testing.T) {
 		// Test with valid participantIDs
 		census2 := &Census{
 			OrgAddress: testOrgAddress,
-			Type:       CensusTypeMail,
+			TwoFaFields: OrgMemberTwoFaFields{
+				OrgMemberTwoFaFieldEmail,
+			},
 		}
 		participantIDs := []primitive.ObjectID{member1.ID, member2.ID}
 		censusID2, err := testDB.SetGroupCensus(census2, groupID, participantIDs)
@@ -342,7 +367,9 @@ func TestCensus(t *testing.T) {
 		// Test with non-existent organization
 		nonExistentCensus := &Census{
 			OrgAddress: testNonExistentOrg,
-			Type:       CensusTypeMail,
+			TwoFaFields: OrgMemberTwoFaFields{
+				OrgMemberTwoFaFieldEmail,
+			},
 		}
 		_, err := testDB.SetCensus(nonExistentCensus)
 		c.Assert(err, qt.Not(qt.IsNil))
@@ -360,7 +387,9 @@ func TestCensus(t *testing.T) {
 		// Test with invalid data
 		invalidCensus := &Census{
 			OrgAddress: testNonExistentOrg,
-			Type:       CensusTypeMail,
+			TwoFaFields: OrgMemberTwoFaFields{
+				OrgMemberTwoFaFieldEmail,
+			},
 		}
 		_, err = testDB.SetCensus(invalidCensus)
 		c.Assert(err, qt.Equals, ErrInvalidData)
@@ -368,7 +397,9 @@ func TestCensus(t *testing.T) {
 		// Test creating a new census
 		census := &Census{
 			OrgAddress: testOrgAddress,
-			Type:       CensusTypeMail,
+			TwoFaFields: OrgMemberTwoFaFields{
+				OrgMemberTwoFaFieldEmail,
+			},
 		}
 
 		// Create new census
@@ -385,6 +416,9 @@ func TestCensus(t *testing.T) {
 
 		// Test updating an existing census
 		createdCensus.Type = CensusTypeSMS
+		createdCensus.TwoFaFields = OrgMemberTwoFaFields{
+			OrgMemberTwoFaFieldPhone,
+		}
 
 		// Ensure different UpdatedAt timestamp
 		time.Sleep(time.Millisecond)
@@ -416,7 +450,9 @@ func TestCensus(t *testing.T) {
 		// Create a census to delete
 		census := &Census{
 			OrgAddress: testOrgAddress,
-			Type:       CensusTypeMail,
+			TwoFaFields: OrgMemberTwoFaFields{
+				OrgMemberTwoFaFieldEmail,
+			},
 		}
 
 		// Create new census
@@ -460,7 +496,9 @@ func TestCensus(t *testing.T) {
 		// Create a census to retrieve
 		census := &Census{
 			OrgAddress: testOrgAddress,
-			Type:       CensusTypeMail,
+			TwoFaFields: OrgMemberTwoFaFields{
+				OrgMemberTwoFaFieldEmail,
+			},
 		}
 
 		// Create new census
@@ -503,7 +541,9 @@ func TestCensus(t *testing.T) {
 		// Create a census for the organization
 		firstCensus := &Census{
 			OrgAddress: testOrgAddress,
-			Type:       CensusTypeMail,
+			TwoFaFields: OrgMemberTwoFaFields{
+				OrgMemberTwoFaFieldEmail,
+			},
 		}
 		firstCensusID, err := testDB.SetCensus(firstCensus)
 		c.Assert(err, qt.IsNil)
@@ -519,7 +559,9 @@ func TestCensus(t *testing.T) {
 		// Create another census for the organization
 		secondCensus := &Census{
 			OrgAddress: testOrgAddress,
-			Type:       CensusTypeSMS,
+			TwoFaFields: OrgMemberTwoFaFields{
+				OrgMemberTwoFaFieldPhone,
+			},
 		}
 		secondCensusID, err := testDB.SetCensus(secondCensus)
 		c.Assert(err, qt.IsNil)
@@ -554,7 +596,9 @@ func TestCensus(t *testing.T) {
 		// Test SetCensus with zero address - should fail
 		zeroAddrCensus := &Census{
 			OrgAddress: common.Address{}, // Zero address
-			Type:       CensusTypeMail,
+			TwoFaFields: OrgMemberTwoFaFields{
+				OrgMemberTwoFaFieldEmail,
+			},
 		}
 		_, err := testDB.SetCensus(zeroAddrCensus)
 		c.Assert(err, qt.Equals, ErrInvalidData)
