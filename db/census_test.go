@@ -194,6 +194,12 @@ func TestSetGroupCensus(t *testing.T) {
 		c.Assert(createdCensus.OrgAddress, qt.Equals, testOrgAddress)
 		c.Assert(createdCensus.Type, qt.Equals, CensusTypeMail)
 		c.Assert(createdCensus.GroupID.Hex(), qt.Equals, group1ID)
+
+		// Verify that the group was updated with the census ID
+		group, err := testDB.OrganizationMemberGroup(group1ID, testOrgAddress)
+		c.Assert(err, qt.IsNil)
+		c.Assert(group.CensusIDs, qt.HasLen, 1)
+		c.Assert(group.CensusIDs[0], qt.Equals, censusID)
 	})
 
 	t.Run("CensusCreation", func(_ *testing.T) {

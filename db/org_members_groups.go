@@ -16,7 +16,10 @@ import (
 )
 
 // OrgMembersGroup returns an organization members group
-func (ms *MongoStorage) OrganizationMemberGroup(groupID string, orgAddress common.Address) (*OrganizationMemberGroup, error) {
+func (ms *MongoStorage) OrganizationMemberGroup(
+	groupID string,
+	orgAddress common.Address,
+) (*OrganizationMemberGroup, error) {
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return nil, ErrInvalidData
 	}
@@ -232,6 +235,26 @@ func (ms *MongoStorage) UpdateOrganizationMemberGroup(
 	}
 
 	return nil
+}
+
+// AddOrganizationMemberGroupCensus adds a census to an organization member group
+func (ms *MongoStorage) addOrganizationMemberGroupCensus(
+	ctx context.Context, groupID string, orgAddress common.Address, censusID string,
+) error {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return ErrInvalidData
+	}
+
+	objID, err := primitive.ObjectIDFromHex(groupID)
+	if err != nil {
+		return fmt.Errorf("invalid group ID: %w", err)
+	}
+
+	// update the group with the census ID
+	filter := bson.M{"_id": objID, "orgAddress": orgAddress}
+	update := bson.D{{Key: "$addToSet", Value: bson.M{"censusIds": censusID}}}
+	_, err = ms.orgMemberGroups.UpdateOne(ctx, filter, update)
+	return err
 }
 
 // DeleteOrganizationMemberGroup deletes an organization member group by its ID
