@@ -143,6 +143,11 @@ func (ms *MongoStorage) SetGroupCensus(
 		return "", err
 	}
 
+	// update the group with the census ID
+	if err := ms.addOrganizationMemberGroupCensus(ctx, group.ID.Hex(), census.OrgAddress, census.ID.Hex()); err != nil {
+		return "", fmt.Errorf("error updating group with census ID: %w", err)
+	}
+
 	// set the participants for the census
 	if len(participantIDs) > 0 {
 		if err := ms.setBulkCensusParticipant(ctx, census.ID.Hex(), participantIDs); err != nil {
