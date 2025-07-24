@@ -232,7 +232,7 @@ type OrgMemberTwoFaField string
 
 const (
 	OrgMemberTwoFaFieldEmail OrgMemberTwoFaField = "email"
-	OrgMemberTwoFaFieldPhone OrgMemberTwoFaField = "phone"
+	OrgMemberTwoFaFieldPhone OrgMemberTwoFaField = "hashedPhone"
 )
 
 // OrgMemberTwoFaFields is a list of fields that can be used for two-factor authentication.

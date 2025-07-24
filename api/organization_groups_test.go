@@ -661,7 +661,7 @@ func TestOrganizationGroups(t *testing.T) {
 				db.OrgMemberAuthFieldsMemberNumber, // This will have duplicates
 			},
 		}
-		resp, code = testRequest(
+		dupResp := requestAndParseWithAssertCode[map[string]any](http.StatusBadRequest,
 			t,
 			http.MethodPost,
 			adminToken,
@@ -672,10 +672,9 @@ func TestOrganizationGroups(t *testing.T) {
 			groupID,
 			"validate",
 		)
-		c.Assert(code, qt.Equals, http.StatusBadRequest, qt.Commentf("response: %s", resp))
 
 		// The response should contain information about the duplicates
-		aggregationResults := decodeNestedFieldAs[db.OrgMemberAggregationResults](c, resp, "data")
+		aggregationResults := decodeNestedFieldAs[db.OrgMemberAggregationResults](c, dupResp, "data")
 		c.Assert(
 			len(aggregationResults.Duplicates) > 0,
 			qt.Equals,
@@ -689,7 +688,7 @@ func TestOrganizationGroups(t *testing.T) {
 				db.OrgMemberTwoFaFieldEmail, // One member has empty email
 			},
 		}
-		resp, code = testRequest(
+		emptyFieldResp := requestAndParseWithAssertCode[map[string]any](http.StatusBadRequest,
 			t,
 			http.MethodPost,
 			adminToken,
@@ -700,10 +699,9 @@ func TestOrganizationGroups(t *testing.T) {
 			groupID,
 			"validate",
 		)
-		c.Assert(code, qt.Equals, http.StatusBadRequest, qt.Commentf("response: %s", resp))
 
 		// The response should contain information about the empty fields
-		aggregationResults = decodeNestedFieldAs[db.OrgMemberAggregationResults](c, resp, "data")
+		aggregationResults = decodeNestedFieldAs[db.OrgMemberAggregationResults](c, emptyFieldResp, "data")
 		c.Assert(
 			len(aggregationResults.MissingData) > 0,
 			qt.Equals,

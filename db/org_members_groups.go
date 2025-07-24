@@ -329,7 +329,7 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 	// 2) Fetch all matching docs
 	cur, err := ms.getGroupMembersFields(ctx, orgAddress, groupID, authFields, twoFaFields)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("getGroupMembersFields: %w", err)
 	}
 	defer func() {
 		if err := cur.Close(ctx); err != nil {
