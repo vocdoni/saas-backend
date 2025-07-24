@@ -6,6 +6,7 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/db"
 )
 
 func TestOrganizationGroups(t *testing.T) {
@@ -486,6 +487,300 @@ func TestOrganizationGroups(t *testing.T) {
 			groupID,
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+	})
+
+	t.Run("ValidateOrganizationMemberGroup", func(t *testing.T) {
+		c := qt.New(t)
+
+		// First, add members with duplicate member numbers to test validation
+		duplicateMembers := &apicommon.AddMembersRequest{
+			Members: []apicommon.OrgMember{
+				{
+					MemberNumber: "P007", // Same member number
+					Name:         "Duplicate User7 A",
+					Email:        "duplicate7a@example.com",
+					Phone:        "+34777777111",
+					Password:     "password7a",
+				},
+				{
+					MemberNumber: "P007", // Same member number
+					Name:         "Duplicate User7 B",
+					Email:        "duplicate7b@example.com",
+					Phone:        "+34777777222",
+					Password:     "password7b",
+				},
+			},
+		}
+
+		// Add duplicate members to the organization
+		resp, code = testRequest(
+			t,
+			http.MethodPost,
+			adminToken,
+			duplicateMembers,
+			"organizations",
+			orgAddress.String(),
+			"members",
+		)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+		// Add a member with empty email to test validation
+		emptyFieldMember := &apicommon.AddMembersRequest{
+			Members: []apicommon.OrgMember{
+				{
+					MemberNumber: "P008",
+					Name:         "Empty Email User",
+					Email:        "", // Empty email
+					Phone:        "+34888888888",
+					Password:     "password888",
+				},
+			},
+		}
+
+		// Add member with empty field to the organization
+		resp, code = testRequest(
+			t,
+			http.MethodPost,
+			adminToken,
+			emptyFieldMember,
+			"organizations",
+			orgAddress.String(),
+			"members",
+		)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+		// Get all members to create a group with them
+		resp, code = testRequest(
+			t,
+			http.MethodGet,
+			adminToken,
+			nil,
+			"organizations",
+			orgAddress.String(),
+			"members",
+		)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+		var allMembersResponse apicommon.OrganizationMembersResponse
+		err := parseJSON(resp, &allMembersResponse)
+		c.Assert(err, qt.IsNil)
+
+		// Create a group with all members including duplicates and empty fields
+		var allMemberIDs []string
+		for _, member := range allMembersResponse.Members {
+			allMemberIDs = append(allMemberIDs, member.ID)
+		}
+
+		testGroupRequest := &apicommon.CreateOrganizationMemberGroupRequest{
+			Title:       "Validation Test Group",
+			Description: "A group for testing validation",
+			MemberIDs:   allMemberIDs,
+		}
+
+		resp, code = testRequest(
+			t,
+			http.MethodPost,
+			adminToken,
+			testGroupRequest,
+			"organizations",
+			orgAddress.String(),
+			"groups",
+		)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+		var testGroup apicommon.OrganizationMemberGroupInfo
+		err = parseJSON(resp, &testGroup)
+		c.Assert(err, qt.IsNil)
+		c.Assert(testGroup.ID, qt.Not(qt.Equals), "")
+
+		groupID := testGroup.ID
+
+		// Test 1: Validate with valid auth fields (should succeed)
+		validRequest := &apicommon.ValidateMemberGroupRequest{
+			AuthFields: db.OrgMemberAuthFields{
+				db.OrgMemberAuthFieldsName,
+			},
+		}
+		resp, code = testRequest(
+			t,
+			http.MethodPost,
+			adminToken,
+			validRequest,
+			"organizations",
+			orgAddress.String(),
+			"groups",
+			groupID,
+			"validate",
+		)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+		// Test 2: Validate with valid two-factor fields (should succeed)
+		validTwoFaRequest := &apicommon.ValidateMemberGroupRequest{
+			TwoFaFields: db.OrgMemberTwoFaFields{
+				db.OrgMemberTwoFaFieldPhone,
+			},
+		}
+		resp, code = testRequest(
+			t,
+			http.MethodPost,
+			adminToken,
+			validTwoFaRequest,
+			"organizations",
+			orgAddress.String(),
+			"groups",
+			groupID,
+			"validate",
+		)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+		// Test 3: Validate with both auth fields and two-factor fields (should succeed)
+		combinedRequest := &apicommon.ValidateMemberGroupRequest{
+			AuthFields: db.OrgMemberAuthFields{
+				db.OrgMemberAuthFieldsName,
+			},
+			TwoFaFields: db.OrgMemberTwoFaFields{
+				db.OrgMemberTwoFaFieldPhone,
+			},
+		}
+		resp, code = testRequest(
+			t,
+			http.MethodPost,
+			adminToken,
+			combinedRequest,
+			"organizations",
+			orgAddress.String(),
+			"groups",
+			groupID,
+			"validate",
+		)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+		// Test 4: Validate with duplicate auth field (should fail)
+		duplicateRequest := &apicommon.ValidateMemberGroupRequest{
+			AuthFields: db.OrgMemberAuthFields{
+				db.OrgMemberAuthFieldsMemberNumber, // This will have duplicates
+			},
+		}
+		resp, code = testRequest(
+			t,
+			http.MethodPost,
+			adminToken,
+			duplicateRequest,
+			"organizations",
+			orgAddress.String(),
+			"groups",
+			groupID,
+			"validate",
+		)
+		c.Assert(code, qt.Equals, http.StatusBadRequest, qt.Commentf("response: %s", resp))
+
+		// The response should contain information about the duplicates
+		aggregationResults := decodeNestedFieldAs[db.OrgMemberAggregationResults](c, resp, "data")
+		c.Assert(
+			len(aggregationResults.Duplicates) > 0,
+			qt.Equals,
+			true,
+			qt.Commentf("Expected duplicates in aggregationResults: %+v", aggregationResults),
+		)
+
+		// Test 5: Validate with empty field (should fail)
+		emptyFieldRequest := &apicommon.ValidateMemberGroupRequest{
+			TwoFaFields: db.OrgMemberTwoFaFields{
+				db.OrgMemberTwoFaFieldEmail, // One member has empty email
+			},
+		}
+		resp, code = testRequest(
+			t,
+			http.MethodPost,
+			adminToken,
+			emptyFieldRequest,
+			"organizations",
+			orgAddress.String(),
+			"groups",
+			groupID,
+			"validate",
+		)
+		c.Assert(code, qt.Equals, http.StatusBadRequest, qt.Commentf("response: %s", resp))
+
+		// The response should contain information about the empty fields
+		aggregationResults = decodeNestedFieldAs[db.OrgMemberAggregationResults](c, resp, "data")
+		c.Assert(
+			len(aggregationResults.MissingData) > 0,
+			qt.Equals,
+			true,
+			qt.Commentf("Expected missing data in aggregationResults: %+v", aggregationResults),
+		)
+
+		// Test 6: Validate with neither auth fields nor two-factor fields (should fail)
+		emptyRequest := &apicommon.ValidateMemberGroupRequest{}
+		resp, code = testRequest(
+			t,
+			http.MethodPost,
+			adminToken,
+			emptyRequest,
+			"organizations",
+			orgAddress.String(),
+			"groups",
+			groupID,
+			"validate",
+		)
+		c.Assert(code, qt.Equals, http.StatusBadRequest, qt.Commentf("response: %s", resp))
+
+		// Test 7: Validate without authentication (should fail)
+		_, code = testRequest(
+			t,
+			http.MethodPost,
+			"",
+			validRequest,
+			"organizations",
+			orgAddress.String(),
+			"groups",
+			groupID,
+			"validate",
+		)
+		c.Assert(code, qt.Equals, http.StatusUnauthorized)
+
+		// Test 8: Validate with non-admin user (should fail)
+		nonAdminToken := testCreateUser(t, "nonadminpassword123")
+		_, code = testRequest(
+			t,
+			http.MethodPost,
+			nonAdminToken,
+			validRequest,
+			"organizations",
+			orgAddress.String(),
+			"groups",
+			groupID,
+			"validate",
+		)
+		c.Assert(code, qt.Equals, http.StatusUnauthorized)
+
+		// Test 9: Validate with invalid group ID (should fail)
+		_, code = testRequest(
+			t,
+			http.MethodPost,
+			adminToken,
+			validRequest,
+			"organizations",
+			orgAddress.String(),
+			"groups",
+			"nonexistentgroupid",
+			"validate",
+		)
+		c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+
+		// Clean up: Delete the group created for this test
+		_, code = testRequest(
+			t,
+			http.MethodDelete,
+			adminToken,
+			nil,
+			"organizations",
+			orgAddress.String(),
+			"groups",
+			groupID,
+		)
+		c.Assert(code, qt.Equals, http.StatusOK)
 	})
 
 	// Clean up: Delete the members
