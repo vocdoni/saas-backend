@@ -357,6 +357,17 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 		if err := cur.Decode(&bm); err != nil {
 			return nil, err
 		}
+		log.Warnf("%+v = %+v", m, bm)
+
+		// if n := len(m.HashedPhone); n > 0 {
+		// 	b := m.HashedPhone
+		// 	if n > 6 {
+		// 		b = b[n-6:]
+		// 	}
+		// 	bm[string(OrgMemberTwoFaFieldPhone)] = string(b)
+		// }
+
+		log.Warnf("%+v = %+v", m, bm)
 
 		// if any of the fields are empty, add to missing data
 		// and continue to the next member
@@ -439,6 +450,7 @@ func (ms *MongoStorage) getGroupMembersFields(
 	for _, f := range twoFaFields {
 		proj = append(proj, bson.E{Key: string(f), Value: 1})
 	}
+	// proj = append(proj, bson.E{Key: string("hashedPhone"), Value: 1})
 	findOpts := options.Find().SetProjection(proj)
 
 	// 2) Fetch all matching docs
