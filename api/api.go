@@ -313,6 +313,9 @@ func (a *API) initRouter() http.Handler {
 		// publish census
 		log.Infow("new route", "method", "POST", "path", censusPublishEndpoint)
 		r.Post(censusPublishEndpoint, a.publishCensusHandler)
+		// publish group census
+		log.Infow("new route", "method", "POST", "path", censusGroupPublishEndpoint)
+		r.Post(censusGroupPublishEndpoint, a.publishCensusGroupHandler)
 		// PROCESS ROUTES
 		log.Infow("new route", "method", "POST", "path", processEndpoint)
 		r.Post(processEndpoint, a.createProcessHandler)

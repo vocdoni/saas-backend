@@ -119,6 +119,8 @@ const (
 	censusAddParticipantsJobStatusEndpoint = "/census/job/{jobid}"
 	// POST /census/{id}/publish to publish a census
 	censusPublishEndpoint = "/census/{id}/publish"
+	// POST /census/{id}/group/{groupid}/publish to publish a group census
+	censusGroupPublishEndpoint = "/census/{id}/group/{groupid}/publish"
 
 	// process routes
 	// POST /process/{processId} to create a new process
