@@ -329,3 +329,102 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 		Root: cspSignerPubKey,
 	})
 }
+
+// publishCensusGroupHandler godoc
+//
+//	@Summary		Publish a group-based census for voting
+//	@Description	Publish a census based on a specific organization members group for voting. Requires Manager/Admin role.
+//	@Description	Returns published census with credentials.
+//	@Tags			census
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id		path		string	true	"Census ID"
+//	@Param			groupId	path		string	true	"Group ID"
+//	@Success		200		{object}	apicommon.PublishedCensusResponse
+//	@Failure		400		{object}	errors.Error	"Invalid census ID or group ID"
+//	@Failure		401		{object}	errors.Error	"Unauthorized"
+//	@Failure		404		{object}	errors.Error	"Census not found"
+//	@Failure		500		{object}	errors.Error	"Internal server error"
+func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) {
+	censusID := internal.HexBytes{}
+	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
+		errors.ErrMalformedURLParam.Withf("wrong census ID").Write(w)
+		return
+	}
+
+	groupID := internal.HexBytes{}
+	if err := groupID.ParseString(chi.URLParam(r, "groupId")); err != nil {
+		errors.ErrMalformedURLParam.Withf("wrong group ID").Write(w)
+		return
+	}
+
+	// get the user from the request context
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+
+	// retrieve census
+	census, err := a.db.Census(censusID.String())
+	if err != nil {
+		errors.ErrCensusNotFound.Write(w)
+		return
+	}
+
+	// check the user has the necessary permissions
+	if !user.HasRoleFor(census.OrgAddress, db.ManagerRole) && !user.HasRoleFor(census.OrgAddress, db.AdminRole) {
+		errors.ErrUnauthorized.Withf("user does not have the necessary permissions in the organization").Write(w)
+		return
+	}
+
+	if len(census.Published.Root) > 0 {
+		// if the census is already published, return the censusInfo
+		apicommon.HTTPWriteJSON(w, &apicommon.PublishedCensusResponse{
+			URI:  census.Published.URI,
+			Root: census.Published.Root,
+		})
+		return
+	}
+
+	// if group-based census retrieve the IDs  retrieve members and add them to the census
+	group, err := a.db.OrganizationMemberGroup(groupID.String(), census.OrgAddress)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if len(group.MemberIDs) == 0 {
+		errors.ErrInvalidCensusData.Withf("no valid members found for the census").Write(w)
+		return
+	}
+
+	if _, err = a.db.PopulateGroupCensus(census, group.ID.Hex(), group.MemberIDs); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
+	// if census.Type == CensusTypeSMSOrMail || census.Type == CenT {
+	// build the census and store it
+	cspSignerPubKey := a.account.PubKey // TODO: use a different key based on the censusID
+	switch census.Type {
+	case CensusTypeSMSOrMail, CensusTypeMail, CensusTypeSMS:
+		census.Published.Root = cspSignerPubKey
+		census.Published.URI = a.serverURL + "/process"
+		census.Published.CreatedAt = time.Now()
+
+	default:
+		errors.ErrCensusTypeNotFound.Write(w)
+		return
+	}
+
+	if _, err := a.db.SetCensus(census); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
+	apicommon.HTTPWriteJSON(w, &apicommon.PublishedCensusResponse{
+		URI:  census.Published.URI,
+		Root: cspSignerPubKey,
+	})
+}
