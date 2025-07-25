@@ -66,10 +66,6 @@ definitions:
         items:
           $ref: '#/definitions/db.OrgMemberAuthField'
         type: array
-      groupID:
-        description: Optional for creating a census based on an organization member
-          group
-        type: string
       orgAddress:
         description: Organization address
         items:
@@ -841,6 +837,19 @@ definitions:
       valid:
         description: Whether the verification is valid
         type: boolean
+    type: object
+  apicommon.ValidateMemberGroupRequest:
+    properties:
+      authFields:
+        description: Defines which member data should be used for authentication
+        items:
+          $ref: '#/definitions/db.OrgMemberAuthField'
+        type: array
+      twoFaFields:
+        description: Defines which member data should be used for two-factor authentication
+        items:
+          $ref: '#/definitions/db.OrgMemberTwoFaField'
+        type: array
     type: object
   db.BulkCensusParticipantStatus:
     properties:
@@ -23127,6 +23136,57 @@ paths:
       security:
       - BearerAuth: []
       summary: Get the list of members with details of an organization member group
+      tags:
+      - organizations
+  /organizations/{address}/groups/{groupID}/validate:
+    post:
+      consumes:
+      - application/json
+      description: Checks the AuthFields for duplicates or empty fields and the TwoFaFields
+        for empty ones.
+      parameters:
+      - description: Organization address
+        in: path
+        name: address
+        required: true
+        type: string
+      - description: Group ID
+        in: path
+        name: groupID
+        required: true
+        type: string
+      - description: Members validation request
+        in: body
+        name: members
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.ValidateMemberGroupRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization or group not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Validate organization group members data
       tags:
       - organizations
   /organizations/{address}/member:
