@@ -231,6 +231,17 @@ type ListOrganizationMemberGroupResponse struct {
 	Members []OrgMember `json:"members"`
 }
 
+// ValidateMemberGroupRequest validates the request for creating or updating an organization member group.
+// Validates that either AuthFields or TwoFaFields are provided and checks for duplicates or empty fields.
+// swagger:model ValidateMemberGroupRequest
+type ValidateMemberGroupRequest struct {
+	// Defines which member data should be used for authentication
+	AuthFields db.OrgMemberAuthFields `json:"authFields,omitempty"`
+
+	// Defines which member data should be used for two-factor authentication
+	TwoFaFields db.OrgMemberTwoFaFields `json:"twoFaFields,omitempty"`
+}
+
 // UserInfo represents user information and is used for user registration.
 // swagger:model UserInfo
 type UserInfo struct {
@@ -695,9 +706,6 @@ type OrganizationCensus struct {
 type CreateCensusRequest struct {
 	// Organization address
 	OrgAddress common.Address `json:"orgAddress"`
-
-	// Optional for creating a census based on an organization member group
-	GroupID string `json:"groupID,omitempty"`
 
 	// Optional for defining which member data should be used for authentication
 	AuthFields db.OrgMemberAuthFields `json:"authFields,omitempty"`

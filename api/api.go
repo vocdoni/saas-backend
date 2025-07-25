@@ -284,6 +284,9 @@ func (a *API) initRouter() http.Handler {
 		// delete an organization member group
 		log.Infow("new route", "method", "DELETE", "path", organizationGroupEndpoint)
 		r.Delete(organizationGroupEndpoint, a.deleteOrganizationMemberGroupHandler)
+		// validate the member data of an organization member group
+		log.Infow("new route", "method", "POST", "path", organizationGroupValidateEndpoint)
+		r.Post(organizationGroupValidateEndpoint, a.organizationMemberGroupValidateHandler)
 
 		// handle stripe checkout session
 		log.Infow("new route", "method", "POST", "path", subscriptionsCheckout)
@@ -310,6 +313,9 @@ func (a *API) initRouter() http.Handler {
 		// publish census
 		log.Infow("new route", "method", "POST", "path", censusPublishEndpoint)
 		r.Post(censusPublishEndpoint, a.publishCensusHandler)
+		// publish group census
+		log.Infow("new route", "method", "POST", "path", censusGroupPublishEndpoint)
+		r.Post(censusGroupPublishEndpoint, a.publishCensusGroupHandler)
 		// PROCESS ROUTES
 		log.Infow("new route", "method", "POST", "path", processEndpoint)
 		r.Post(processEndpoint, a.createProcessHandler)

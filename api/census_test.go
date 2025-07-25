@@ -240,58 +240,7 @@ func TestCensus(t *testing.T) {
 	// Test 4.3: Test with invalid census ID
 	requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, adminToken, nil, censusEndpoint, "invalid-id", "publish")
 
-	// Test 5: Test group-based census creation
-	// First, create a member group
-	groupRequest := &apicommon.CreateOrganizationMemberGroupRequest{
-		Title:       "Test Group",
-		Description: "A test group for census creation",
-		MemberIDs:   []string{}, // We'll need to get member IDs from the organization
-	}
-
-	// Get organization members to add to the group
-	orgMembersResponse := requestAndParse[apicommon.OrganizationMembersResponse](
-		t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "members",
-	)
-	c.Assert(len(orgMembersResponse.Members), qt.Equals, 6)
-
-	// Add member IDs to the group request
-	for _, member := range orgMembersResponse.Members {
-		groupRequest.MemberIDs = append(groupRequest.MemberIDs, member.ID)
-	}
-
-	// Create the group
-	createdGroup := requestAndParse[apicommon.OrganizationMemberGroupInfo](t, http.MethodPost, adminToken, groupRequest,
-		"organizations", orgAddress.String(), "groups")
-	c.Assert(createdGroup.ID, qt.Not(qt.Equals), "")
-
-	// Test 5.1: Create a census based on the group
-	groupCensusInfo := &apicommon.CreateCensusRequest{
-		OrgAddress: orgAddress,
-		GroupID:    createdGroup.ID,
-		AuthFields: db.OrgMemberAuthFields{
-			db.OrgMemberAuthFieldsMemberNumber,
-			db.OrgMemberAuthFieldsName,
-		},
-	}
-	groupCensusResponse := requestAndParse[apicommon.CreateCensusResponse](t, http.MethodPost, adminToken, groupCensusInfo,
-		censusEndpoint)
-	c.Assert(groupCensusResponse.ID, qt.Not(qt.Equals), "")
-
-	groupCensusID := groupCensusResponse.ID
-	t.Logf("Created group-based census with ID: %s\n", groupCensusID)
-
-	// Test 5.2: Test with invalid group ID
-	invalidGroupCensusInfo := &apicommon.CreateCensusRequest{
-		OrgAddress: orgAddress,
-		GroupID:    "invalid-group-id",
-		AuthFields: db.OrgMemberAuthFields{
-			db.OrgMemberAuthFieldsMemberNumber,
-		},
-	}
-	requestAndAssertCode(http.StatusInternalServerError, t, http.MethodPost, adminToken, invalidGroupCensusInfo, censusEndpoint)
-
-	// Test 6: Test census creation with duplicate auth field values
+	// Test 5: Test with manager user permissions
 	// Add members with duplicate member numbers to test validation
 	duplicateMembers := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
@@ -323,43 +272,21 @@ func TestCensus(t *testing.T) {
 	requestAndAssertCode(http.StatusOK, t, http.MethodPost, adminToken, duplicateMembers,
 		"organizations", orgAddress.String(), "members")
 
-	// Create a new group with all members including duplicates
-	allMembersResponse := requestAndParse[apicommon.OrganizationMembersResponse](
-		t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "members",
-	)
+	// Fetch updated organization members (needed for the server-side validation)
+	requestAndAssertCode(http.StatusOK, t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "members")
 
-	var allMemberIDs []string
-	for _, member := range allMembersResponse.Members {
-		allMemberIDs = append(allMemberIDs, member.ID)
-	}
-
-	duplicateGroupRequest := &apicommon.CreateOrganizationMemberGroupRequest{
-		Title:       "Duplicate Test Group",
-		Description: "A group with duplicate member numbers",
-		MemberIDs:   allMemberIDs,
-	}
-
-	duplicateGroup := requestAndParse[apicommon.OrganizationMemberGroupInfo](
-		t, http.MethodPost, adminToken, duplicateGroupRequest,
-		"organizations", orgAddress.String(), "groups",
-	)
-
-	// Test 6.1: Try to create a census with duplicate member number auth field (should fail)
+	// Test 6.1: Create a census with members having duplicate member numbers
+	// Note: After simplification, duplicate validation has been removed from the handler
 	duplicateCensusInfo := &apicommon.CreateCensusRequest{
 		OrgAddress: orgAddress,
-		GroupID:    duplicateGroup.ID,
 		AuthFields: db.OrgMemberAuthFields{
-			db.OrgMemberAuthFieldsMemberNumber, // This will have duplicates
+			db.OrgMemberAuthFieldsMemberNumber, // Has duplicates, but now accepted
 		},
 	}
-	duplicateCensusResponse := requestAndParseWithAssertCode[map[string]any](http.StatusBadRequest,
+	duplicateCensusResponse := requestAndParse[apicommon.CreateCensusResponse](
 		t, http.MethodPost, adminToken, duplicateCensusInfo, censusEndpoint)
-
-	// The response should contain information about the duplicates
-	aggregationResults := decodeNestedFieldAs[db.OrgMemberAggregationResults](c, duplicateCensusResponse, "data")
-	c.Assert(aggregationResults.Duplicates, qt.HasLen, len(duplicateMembers.Members),
-		qt.Commentf("aggregationResults: %+v", aggregationResults))
+	c.Assert(duplicateCensusResponse.ID, qt.Not(qt.Equals), "")
 
 	// Test 7: Test census creation with empty auth field values
 	// Add a member with empty email to test validation
@@ -379,43 +306,21 @@ func TestCensus(t *testing.T) {
 	requestAndAssertCode(http.StatusOK, t, http.MethodPost, adminToken, emptyFieldMember,
 		"organizations", orgAddress.String(), "members")
 
-	// Create a group with the empty field member
-	updatedMembersResponse := requestAndParse[apicommon.OrganizationMembersResponse](
-		t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "members",
-	)
+	// Fetch updated organization members (needed for the server-side validation)
+	requestAndAssertCode(http.StatusOK, t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "members")
 
-	var updatedMemberIDs []string
-	for _, member := range updatedMembersResponse.Members {
-		updatedMemberIDs = append(updatedMemberIDs, member.ID)
-	}
-
-	emptyFieldGroupRequest := &apicommon.CreateOrganizationMemberGroupRequest{
-		Title:       "Empty Field Test Group",
-		Description: "A group with empty email field",
-		MemberIDs:   updatedMemberIDs,
-	}
-
-	emptyFieldGroup := requestAndParse[apicommon.OrganizationMemberGroupInfo](
-		t, http.MethodPost, adminToken, emptyFieldGroupRequest,
-		"organizations", orgAddress.String(), "groups",
-	)
-
-	// Test 7.1: Try to create a census with email twoFa field when some members have empty emails (should fail)
+	// Test 7.1: Create a census with email twoFa field when some members have empty emails
+	// Note: After simplification, empty field validation has been removed from the handler
 	emptyFieldCensusInfo := &apicommon.CreateCensusRequest{
 		OrgAddress: orgAddress,
-		GroupID:    emptyFieldGroup.ID,
 		TwoFaFields: db.OrgMemberTwoFaFields{
-			db.OrgMemberTwoFaFieldEmail, // This will have empty values
+			db.OrgMemberTwoFaFieldEmail, // Has empty values, but now accepted
 		},
 	}
-	emptyFieldCensusResponse := requestAndParseWithAssertCode[map[string]any](http.StatusBadRequest,
+	emptyFieldCensusResponse := requestAndParse[apicommon.CreateCensusResponse](
 		t, http.MethodPost, adminToken, emptyFieldCensusInfo, censusEndpoint)
-
-	// The response should contain information about the empty fields
-	aggregationResults = decodeNestedFieldAs[db.OrgMemberAggregationResults](c, emptyFieldCensusResponse, "data")
-	c.Assert(aggregationResults.MissingData, qt.HasLen, len(emptyFieldMember.Members),
-		qt.Commentf("aggregationResults: %+v", aggregationResults))
+	c.Assert(emptyFieldCensusResponse.ID, qt.Not(qt.Equals), "")
 
 	// Test 8: Create a user with manager role and test permissions
 	// Create a second user

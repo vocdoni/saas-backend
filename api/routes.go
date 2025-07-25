@@ -87,6 +87,8 @@ const (
 	organizationGroupEndpoint = "/organizations/{address}/groups/{groupID}"
 	// GET /organizations/{address}/groups/{groupID}/members to get the members of an organization member group
 	organizationGroupMembersEndpoint = "/organizations/{address}/groups/{groupID}/members"
+	// POST /organizations/{address}/groups/{groupID}/validate to validate the member data of an organization member group
+	organizationGroupValidateEndpoint = "/organizations/{address}/groups/{groupID}/validate"
 
 	// subscription routes
 	// GET /subscriptions to get the subscriptions of an organization
@@ -117,6 +119,8 @@ const (
 	censusAddParticipantsJobStatusEndpoint = "/census/job/{jobid}"
 	// POST /census/{id}/publish to publish a census
 	censusPublishEndpoint = "/census/{id}/publish"
+	// POST /census/{id}/group/{groupid}/publish to publish a group census
+	censusGroupPublishEndpoint = "/census/{id}/group/{groupid}/publish"
 
 	// process routes
 	// POST /process/{processId} to create a new process
