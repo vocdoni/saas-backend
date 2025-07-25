@@ -360,7 +360,7 @@ func (ms *MongoStorage) processOrgMemberBatches(
 
 		// Update job stats
 		job = BulkOrgMembersJob{
-			Progress: ((job.Added + added) / job.Total) * 100,
+			Progress: int(float64(job.Added+added) / float64(job.Total) * 100),
 			Total:    job.Total,
 			Added:    job.Added + added,
 			Errors:   append(job.Errors, errs...),
