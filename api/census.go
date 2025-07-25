@@ -11,6 +11,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/dvote/util"
 )
@@ -109,6 +110,97 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 
 	apicommon.HTTPWriteJSON(w, apicommon.CreateCensusResponse{
 		ID: censusID,
+	})
+}
+
+// updateCensusHandler godoc
+//
+//	@Summary		Update an existing census
+//	@Description	Update an existing census for an organization. Requires Manager/Admin role.
+//	@Description	Validates that either AuthFields or TwoFaFields are provided and checks for duplicates or empty fields.
+//	@Tags			census
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id		path		string						true	"Census ID"
+//	@Param			request	body		apicommon.CreateCensusRequest 	true	"Census information"
+//	@Success		200		{object}	apicommon.CreateCensusResponse
+//	@Failure		400		{object}	errors.Error					"Invalid input data or missing required fields"
+//	@Failure		401		{object}	errors.Error					"Unauthorized"
+//	@Failure		404		{object}	errors.Error					"Census not found"
+//	@Failure		500		{object}	errors.Error					"Internal server error"
+//	@Router			/census/{id} [put]
+func (a *API) updateCensusHandler(w http.ResponseWriter, r *http.Request) {
+	censusID := internal.HexBytes{}
+	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
+		errors.ErrMalformedURLParam.Withf("wrong census ID").Write(w)
+		return
+	}
+
+	// Parse request
+	censusInfo := &apicommon.CreateCensusRequest{}
+	if err := json.NewDecoder(r.Body).Decode(&censusInfo); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+
+	// get the user from the request context
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+
+	// check the user has the necessary permissions
+	census, err := a.db.Census(censusID.String())
+	if err != nil {
+		errors.ErrCensusNotFound.Write(w)
+		return
+	}
+	if !user.HasRoleFor(census.OrgAddress, db.ManagerRole) && !user.HasRoleFor(census.OrgAddress, db.AdminRole) {
+		errors.ErrUnauthorized.Withf("user does not have the necessary permissions in the organization").Write(w)
+		return
+	}
+
+	if len(censusInfo.AuthFields) == 0 && len(censusInfo.TwoFaFields) == 0 {
+		errors.ErrInvalidData.Withf("missing both AuthFields and TwoFaFields").Write(w)
+		return
+	}
+	// check the org members to verify that the OrgMemberAuthFields can be used for authentication
+	aggregationResults, err := a.db.CheckGroupMembersFields(
+		census.OrgAddress,
+		census.GroupID.Hex(),
+		censusInfo.AuthFields,
+		censusInfo.TwoFaFields,
+	)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if len(aggregationResults.Duplicates) > 0 || len(aggregationResults.MissingData) > 0 {
+		errors.ErrInvalidCensusData.WithData(aggregationResults).Write(w)
+		return
+	}
+
+	census.AuthFields = censusInfo.AuthFields
+	census.TwoFaFields = censusInfo.TwoFaFields
+	var updatedCensusID string
+
+	if census.GroupID.Hex() != "" {
+		if len(aggregationResults.Members) == 0 {
+			errors.ErrInvalidCensusData.Withf("no valid members found for the census").Write(w)
+			return
+		}
+		updatedCensusID, err = a.db.SetGroupCensus(census, census.GroupID.Hex(), aggregationResults.Members)
+	} else {
+		updatedCensusID, err = a.db.SetCensus(census)
+	}
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	apicommon.HTTPWriteJSON(w, apicommon.CreateCensusResponse{
+		ID: updatedCensusID,
 	})
 }
 
@@ -328,6 +420,32 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 			Root: census.Published.Root,
 		})
 		return
+	}
+
+	// if group-based census retrieve the IDs  retrieve members and add them to the census
+	if census.GroupID.Hex() != "" {
+		group, err := a.db.OrganizationMemberGroup(census.GroupID.Hex(), census.OrgAddress)
+		if err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+		if len(group.MemberIDs) == 0 {
+			errors.ErrInvalidCensusData.Withf("no valid members found for the census").Write(w)
+			return
+		}
+		// TODO this conversion should not take place in the api code
+		memberOIDs := make([]primitive.ObjectID, len(group.MemberIDs))
+		for i, id := range group.MemberIDs {
+			memberOIDs[i], err = primitive.ObjectIDFromHex(id)
+			if err != nil {
+				errors.ErrGenericInternalServerError.Withf("invalid member ID %s: %v", id, err).Write(w)
+				return
+			}
+		}
+		if _, err = a.db.SetGroupCensus(census, census.GroupID.Hex(), memberOIDs); err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
 	}
 
 	// if census.Type == CensusTypeSMSOrMail || census.Type == CenT {
