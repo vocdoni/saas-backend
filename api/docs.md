@@ -49,6 +49,7 @@
   - [🔄 Update Organization Member Group](#-update-organization-member-group)
   - [❌ Delete Organization Member Group](#-delete-organization-member-group)
   - [📋 List Organization Member Group Members](#-list-organization-member-group-members)
+  - [✅ Validate Organization Member Group Data](#-validate-organization-member-group-data)
   - [🤠 Available organization members roles](#-available-organization-members-roles)
   - [🏛️ Available organization types](#-available-organization-types)
 - [🏦 Plans](#-plans)
@@ -1462,6 +1463,76 @@ Get the list of members with details of an organization member group. Requires a
 | `401` | `40001` | `user is not admin of organization` |
 | `400` | `40005` | `group ID is required` |
 | `400` | `40005` | `group not found` |
+| `400` | `40011` | `no organization provided` |
+| `404` | `40009` | `organization not found` |
+| `500` | `50002` | `internal server error` |
+
+### ✅ Validate Organization Member Group Data
+
+* **Path** `/organizations/{address}/groups/{groupID}/validate`
+* **Method** `POST`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Description**
+Validates that either AuthFields or TwoFaFields are provided or members in the specified group. Checks the AuthFields for duplicates or empty fields and the TwoFaFields for empty ones. Requires admin or manager role.
+
+**Possible values for authFields:**
+- "name" - Member's name
+- "surname" - Member's surname
+- "memberNumber" - Member's unique number
+- "nationalID" - Member's national ID
+- "birthDate" - Member's birth date
+
+**Possible values for twoFaFields:**
+- "email" - Member's email address
+- "phone" - Member's phone number
+
+* **Request body**
+```json
+{
+  "authFields": [
+    "name",
+    "memberNumber",
+    "nationalID"
+  ],
+  "twoFaFields": [
+    "email",
+    "phone"
+  ]
+}
+```
+
+* **Response**
+```json
+"OK"
+```
+
+* **Error Response**
+In case of empty or duplicate fields, the error code `40005` is returned with the IDs of the corresponding members
+```json
+{
+  "error": {
+    "code": 40005,
+    "message": "Invalid input data",
+    "data": {
+      "members": ["id5","id6","id7"], // member ids with valid data
+      "missingData": ["id1","id2"],
+      "duplicates": ["id3","id4"]
+    }
+  }
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `401` | `40001` | `user is not admin of organization` |
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40005` | `group ID is required` |
+| `400` | `40005` | `missing both AuthFields and TwoFaFields` |
+| `400` | `40005` | `invalid input data` |
 | `400` | `40011` | `no organization provided` |
 | `404` | `40009` | `organization not found` |
 | `500` | `50002` | `internal server error` |

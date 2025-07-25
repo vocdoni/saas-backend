@@ -423,3 +423,77 @@ func (a *API) listOrganizationMemberGroupsHandler(w http.ResponseWriter, r *http
 		Members:     membersResponse,
 	})
 }
+
+// organizationMemberGroupValidateHandler godoc
+//
+//	@Summary		Validate organization group members data
+//	@Description	Checks the AuthFields for duplicates or empty fields and the TwoFaFields for empty ones.
+//	@Tags			organizations
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			address	path		string								true	"Organization address"
+//	@Param			groupID	path		string								true	"Group ID"
+//	@Param			members	body		apicommon.ValidateMemberGroupRequest	true	"Members validation request"
+//	@Success		200		{string}	string			"OK"
+//	@Failure		400		{object}	errors.Error	"Invalid input data"
+//	@Failure		401		{object}	errors.Error	"Unauthorized"
+//	@Failure		404		{object}	errors.Error	"Organization or group not found"
+//	@Failure		500		{object}	errors.Error	"Internal server error"
+//
+// @Router			/organizations/{address}/groups/{groupID}/validate [post]
+func (a *API) organizationMemberGroupValidateHandler(w http.ResponseWriter, r *http.Request) {
+	// get the group ID from the request path
+	groupID := chi.URLParam(r, "groupID")
+	if groupID == "" {
+		errors.ErrInvalidData.Withf("group ID is required").Write(w)
+		return
+	}
+	// get the user from the request context
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	// get the organization info from the request context
+	org, _, ok := a.organizationFromRequest(r)
+	if !ok {
+		errors.ErrNoOrganizationProvided.Write(w)
+		return
+	}
+	if !user.HasRoleFor(org.Address, db.AdminRole) && !user.HasRoleFor(org.Address, db.ManagerRole) {
+		// if the user is not admin or manager of the organization, return an error
+		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		return
+	}
+
+	var membersRequest apicommon.ValidateMemberGroupRequest
+	if err := json.NewDecoder(r.Body).Decode(&membersRequest); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+
+	if len(membersRequest.AuthFields) == 0 && len(membersRequest.TwoFaFields) == 0 {
+		errors.ErrInvalidData.Withf("missing both AuthFields and TwoFaFields").Write(w)
+		return
+	}
+
+	// check the org members to veriy tha the OrgMemberAuthFields can be used for authentication
+	aggregationResults, err := a.db.CheckGroupMembersFields(
+		org.Address,
+		groupID,
+		membersRequest.AuthFields,
+		membersRequest.TwoFaFields,
+	)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if len(aggregationResults.Duplicates) > 0 || len(aggregationResults.MissingData) > 0 {
+		// if there are incorrect members, return an error with the IDs of the incorrect members
+		errors.ErrInvalidData.WithData(aggregationResults).Write(w)
+		return
+	}
+
+	apicommon.HTTPWriteOK(w)
+}
