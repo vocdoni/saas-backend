@@ -284,6 +284,9 @@ func (a *API) initRouter() http.Handler {
 		// delete an organization member group
 		log.Infow("new route", "method", "DELETE", "path", organizationGroupEndpoint)
 		r.Delete(organizationGroupEndpoint, a.deleteOrganizationMemberGroupHandler)
+		// validate the member data of an organization member group
+		log.Infow("new route", "method", "POST", "path", organizationGroupValidateEndpoint)
+		r.Post(organizationGroupValidateEndpoint, a.organizationMemberGroupValidateHandler)
 
 		// handle stripe checkout session
 		log.Infow("new route", "method", "POST", "path", subscriptionsCheckout)

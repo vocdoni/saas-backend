@@ -87,6 +87,8 @@ const (
 	organizationGroupEndpoint = "/organizations/{address}/groups/{groupID}"
 	// GET /organizations/{address}/groups/{groupID}/members to get the members of an organization member group
 	organizationGroupMembersEndpoint = "/organizations/{address}/groups/{groupID}/members"
+	// POST /organizations/{address}/groups/{groupID}/validate to validate the member data of an organization member group
+	organizationGroupValidateEndpoint = "/organizations/{address}/groups/{groupID}/validate"
 
 	// subscription routes
 	// GET /subscriptions to get the subscriptions of an organization
