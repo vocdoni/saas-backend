@@ -82,12 +82,12 @@ func (ms *MongoStorage) SetPublishedCensus(censusID, uri string, root internal.H
 	return ms.SetCensus(census)
 }
 
-// SetGroupCensus creates a new census for an organization
+// PopulateGroupCensus creates a new census for an organization
 // Returns the hex representation of the census
-func (ms *MongoStorage) SetGroupCensus(
+func (ms *MongoStorage) PopulateGroupCensus(
 	census *Census,
 	groupID string,
-	participantIDs []primitive.ObjectID,
+	participantIDs []string,
 ) (string, error) {
 	if groupID == "" {
 		return ms.SetCensus(census)
@@ -99,6 +99,15 @@ func (ms *MongoStorage) SetGroupCensus(
 
 	if census.OrgAddress.Cmp(common.Address{}) == 0 {
 		return "", ErrInvalidData
+	}
+
+	participantOIDs := make([]primitive.ObjectID, len(participantIDs))
+	for i, id := range participantIDs {
+		var err error
+		participantOIDs[i], err = primitive.ObjectIDFromHex(id)
+		if err != nil {
+			return "", fmt.Errorf("invalid member ID %s: %v", id, err)
+		}
 	}
 
 	ms.keysLock.Lock()
@@ -150,7 +159,7 @@ func (ms *MongoStorage) SetGroupCensus(
 
 	// set the participants for the census
 	if len(participantIDs) > 0 {
-		if err := ms.setBulkCensusParticipant(ctx, census.ID.Hex(), participantIDs); err != nil {
+		if err := ms.setBulkCensusParticipant(ctx, census.ID.Hex(), participantOIDs); err != nil {
 			return "", fmt.Errorf("error setting census participants: %w", err)
 		}
 	}

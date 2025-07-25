@@ -254,7 +254,6 @@ func main() {
 		"/census",
 		apicommon.CreateCensusRequest{
 			OrgAddress: orgResp.Address,
-			GroupID:    groupResp.ID,
 			AuthFields: db.OrgMemberAuthFields{
 				"email",
 				"memberNumber",
