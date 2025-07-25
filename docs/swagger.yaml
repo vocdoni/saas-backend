@@ -81,10 +81,6 @@ definitions:
         items:
           $ref: '#/definitions/db.OrgMemberTwoFaField'
         type: array
-      type:
-        allOf:
-        - $ref: '#/definitions/db.CensusType'
-        description: Type of census to create
     type: object
   apicommon.CreateCensusResponse:
     properties:

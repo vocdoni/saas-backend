@@ -43,6 +43,7 @@ func (ms *MongoStorage) SetCensus(census *Census) (string, error) {
 		census.ID = primitive.NewObjectID()
 		census.CreatedAt = time.Now()
 	}
+	census.Type = census.TwoFaFields.GetCensusType()
 
 	updateDoc, err := dynamicUpdateDocument(census, nil)
 	if err != nil {
@@ -129,6 +130,7 @@ func (ms *MongoStorage) SetGroupCensus(
 		census.ID = primitive.NewObjectID()
 		census.CreatedAt = time.Now()
 	}
+	census.Type = census.TwoFaFields.GetCensusType()
 
 	updateDoc, err := dynamicUpdateDocument(census, nil)
 	if err != nil {
@@ -139,6 +141,11 @@ func (ms *MongoStorage) SetGroupCensus(
 	_, err = ms.censuses.UpdateOne(ctx, filter, updateDoc, opts)
 	if err != nil {
 		return "", err
+	}
+
+	// update the group with the census ID
+	if err := ms.addOrganizationMemberGroupCensus(ctx, group.ID.Hex(), census.OrgAddress, census.ID.Hex()); err != nil {
+		return "", fmt.Errorf("error updating group with census ID: %w", err)
 	}
 
 	// set the participants for the census
