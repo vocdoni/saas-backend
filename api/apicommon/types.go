@@ -707,9 +707,6 @@ type CreateCensusRequest struct {
 	// Organization address
 	OrgAddress common.Address `json:"orgAddress"`
 
-	// Optional for creating a census based on an organization member group
-	GroupID string `json:"groupID,omitempty"`
-
 	// Optional for defining which member data should be used for authentication
 	AuthFields db.OrgMemberAuthFields `json:"authFields,omitempty"`
 

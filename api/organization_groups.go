@@ -432,16 +432,16 @@ func (a *API) listOrganizationMemberGroupsHandler(w http.ResponseWriter, r *http
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string								true	"Organization address"
-//	@Param			groupID	path		string								true	"Group ID"
+//	@Param			address	path		string									true	"Organization address"
+//	@Param			groupID	path		string									true	"Group ID"
 //	@Param			members	body		apicommon.ValidateMemberGroupRequest	true	"Members validation request"
-//	@Success		200		{string}	string			"OK"
-//	@Failure		400		{object}	errors.Error	"Invalid input data"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		404		{object}	errors.Error	"Organization or group not found"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Success		200		{string}	string									"OK"
+//	@Failure		400		{object}	errors.Error							"Invalid input data"
+//	@Failure		401		{object}	errors.Error							"Unauthorized"
+//	@Failure		404		{object}	errors.Error							"Organization or group not found"
+//	@Failure		500		{object}	errors.Error							"Internal server error"
 //
-// @Router			/organizations/{address}/groups/{groupID}/validate [post]
+//	@Router			/organizations/{address}/groups/{groupID}/validate [post]
 func (a *API) organizationMemberGroupValidateHandler(w http.ResponseWriter, r *http.Request) {
 	// get the group ID from the request path
 	groupID := chi.URLParam(r, "groupID")
