@@ -368,17 +368,20 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 
 		// if the key is already seen, add to duplicates
 		// and continue to the next member
-		key := buildKey(bm, authFields)
-		if val, seen := seenKeys[key]; seen {
-			duplicates[m.ID] = struct{}{}
-			duplicates[val] = struct{}{}
-			continue
+		if len(authFields) > 0 {
+			key := buildKey(bm, authFields)
+			if val, seen := seenKeys[key]; seen {
+				duplicates[m.ID] = struct{}{}
+				duplicates[val] = struct{}{}
+				continue
+			}
+			// neither empty nor duplicate, so we add it to the seen keys
+			seenKeys[key] = m.ID
 		}
 
-		// neither empty nor duplicate, so we add it to the seen keys
-		seenKeys[key] = m.ID
-		// append the member ID to the results
+		// if thedata pass all checkss  append the member ID to the results
 		results.Members = append(results.Members, m.ID)
+
 	}
 	if err := cur.Err(); err != nil {
 		return nil, err
