@@ -67,22 +67,6 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrInvalidData.Withf("missing both AuthFields and TwoFaFields").Write(w)
 		return
 	}
-	// check the org members to veriy tha the OrgMemberAuthFields can be used for authentication
-	aggregationResults, err := a.db.CheckGroupMembersFields(
-		censusInfo.OrgAddress,
-		censusInfo.GroupID,
-		censusInfo.AuthFields,
-		censusInfo.TwoFaFields,
-	)
-	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-	if len(aggregationResults.Duplicates) > 0 || len(aggregationResults.MissingData) > 0 {
-		// if there are incorrect members, return an error with the IDs of the incorrect members
-		errors.ErrInvalidCensusData.WithData(aggregationResults).Write(w)
-		return
-	}
 
 	census := &db.Census{
 		OrgAddress:  censusInfo.OrgAddress,
@@ -90,18 +74,9 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 		TwoFaFields: censusInfo.TwoFaFields,
 		CreatedAt:   time.Now(),
 	}
-	var censusID string
-	if censusInfo.GroupID != "" {
-		// In the group-based census, we need to be sure that there are members to be added
-		if len(aggregationResults.Members) == 0 {
-			errors.ErrInvalidCensusData.Withf("no valid members found for the census").Write(w)
-			return
-		}
-		censusID, err = a.db.SetGroupCensus(census, censusInfo.GroupID, aggregationResults.Members)
-	} else {
-		// In the regular census, members will be added later so we just create the DB entry
-		censusID, err = a.db.SetCensus(census)
-	}
+
+	// In the regular census, members will be added later so we just create the DB entry
+	censusID, err := a.db.SetCensus(census)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return

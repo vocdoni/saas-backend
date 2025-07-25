@@ -1944,9 +1944,8 @@ Accepting files uploaded by forms as such:
 * **Headers**
   * `Authentication: Bearer <user_token>`
 * **Description**
-  Creates a new census for an organization. Requires any role in the organization.
-  Creates either a regular census or a group-based census if GroupID is provided.
-  Validates that either AuthFields or TwoFaFields are provided and checks for duplicates or empty fields.
+  Creates a new census for an organization. Requires Manager/Admin role.
+  Validates that either AuthFields or TwoFaFields are provided.
   
   **Possible values for authFields:**
   - "name" - Member's name
@@ -1964,7 +1963,6 @@ Accepting files uploaded by forms as such:
 {
   "type": "sms_or_mail",
   "orgAddress": "0x...",
-  "groupID": "group_id_hex",  // Optional: for creating a census based on an organization member group
   "authFields": [             // At least one of authFields or twoFaFields must be provided
     "name",
     "memberNumber",
@@ -1982,15 +1980,6 @@ Returns the census ID
 ```json
 {
   "ID": "67bdfcfaeeb24a44660ec461"
-}
-```
-
-* **Error Response**
-In case of empty or duplicate fields, the error code `40030` is returned with the IDs of the corresponding members
-```json
-{
-  "missingData": ["id1","id2"],
-  "duplicates": ["id3","id4"]
 }
 ```
 
