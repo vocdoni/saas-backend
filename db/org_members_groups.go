@@ -329,7 +329,7 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 	// 2) Fetch all matching docs
 	cur, err := ms.getGroupMembersFields(ctx, orgAddress, groupID, authFields, twoFaFields)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("getGroupMembersFields: %w", err)
 	}
 	defer func() {
 		if err := cur.Close(ctx); err != nil {
@@ -357,6 +357,17 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 		if err := cur.Decode(&bm); err != nil {
 			return nil, err
 		}
+		log.Warnf("%+v = %+v", m, bm)
+
+		// if n := len(m.HashedPhone); n > 0 {
+		// 	b := m.HashedPhone
+		// 	if n > 6 {
+		// 		b = b[n-6:]
+		// 	}
+		// 	bm[string(OrgMemberTwoFaFieldPhone)] = string(b)
+		// }
+
+		log.Warnf("%+v = %+v", m, bm)
 
 		// append the member ID to the results
 		results.Members = append(results.Members, m.ID)
@@ -442,6 +453,7 @@ func (ms *MongoStorage) getGroupMembersFields(
 	for _, f := range twoFaFields {
 		proj = append(proj, bson.E{Key: string(f), Value: 1})
 	}
+	// proj = append(proj, bson.E{Key: string("hashedPhone"), Value: 1})
 	findOpts := options.Find().SetProjection(proj)
 
 	// 2) Fetch all matching docs
