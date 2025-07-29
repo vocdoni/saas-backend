@@ -332,6 +332,107 @@ func TestCensus(t *testing.T) {
 	// Add the user as a manager to the organization
 	// This would require implementing a helper to add a user to an organization with a specific role
 	// For now, we'll skip this test as it would require additional API endpoints not covered in this test file
+
+	// Test 9: Publish Group Census
+	t.Run("PublishGroupCensus", func(t *testing.T) {
+		c := qt.New(t)
+
+		// Create a group with the existing members
+		// Get the members to get their IDs
+		orgMembersResp := requestAndParse[apicommon.OrganizationMembersResponse](
+			t, http.MethodGet, adminToken, nil,
+			"organizations", orgAddress.String(), "members")
+
+		// Take the first two members for our group
+		c.Assert(len(orgMembersResp.Members) >= 2, qt.IsTrue,
+			qt.Commentf("Not enough members for testing, need at least 2"))
+
+		memberIDs := []string{
+			orgMembersResp.Members[0].ID,
+			orgMembersResp.Members[1].ID,
+		}
+
+		// Create the group
+		createGroupReq := &apicommon.CreateOrganizationMemberGroupRequest{
+			Title:       "Test Census Group",
+			Description: "Group for testing census publishing",
+			MemberIDs:   memberIDs,
+		}
+
+		groupResp := requestAndParse[apicommon.OrganizationMemberGroupInfo](
+			t, http.MethodPost, adminToken, createGroupReq,
+			"organizations", orgAddress.String(), "groups")
+
+		c.Assert(groupResp.ID, qt.Not(qt.Equals), "")
+		groupID := groupResp.ID
+		t.Logf("Created member group with ID: %s", groupID)
+
+		// Create a new empty census
+		groupCensusInfo := &apicommon.CreateCensusRequest{
+			OrgAddress: orgAddress,
+			AuthFields: db.OrgMemberAuthFields{
+				db.OrgMemberAuthFieldsMemberNumber,
+				db.OrgMemberAuthFieldsName,
+			},
+			TwoFaFields: db.OrgMemberTwoFaFields{
+				db.OrgMemberTwoFaFieldEmail,
+			},
+		}
+
+		groupCensusResp := requestAndParse[apicommon.CreateCensusResponse](
+			t, http.MethodPost, adminToken, groupCensusInfo, censusEndpoint)
+		c.Assert(groupCensusResp.ID, qt.Not(qt.Equals), "")
+		groupCensusID := groupCensusResp.ID
+		t.Logf("Created group census with ID: %s", groupCensusID)
+
+		// Test 9.1: Successful group census publication
+		publishedGroupCensus := requestAndParse[apicommon.PublishedCensusResponse](
+			t, http.MethodPost, adminToken, nil,
+			censusEndpoint, groupCensusID, "group", groupID, "publish")
+
+		c.Assert(publishedGroupCensus.URI, qt.Not(qt.Equals), "")
+		c.Assert(publishedGroupCensus.Root, qt.Not(qt.Equals), "")
+		t.Logf("Published group census with URI: %s and Root: %s",
+			publishedGroupCensus.URI, publishedGroupCensus.Root)
+
+		// Test 9.2: Test with already published census
+		// Publishing again should return the same information
+		publishedAgain := requestAndParse[apicommon.PublishedCensusResponse](
+			t, http.MethodPost, adminToken, nil,
+			censusEndpoint, groupCensusID, "group", groupID, "publish")
+
+		c.Assert(publishedAgain.URI, qt.Equals, publishedGroupCensus.URI)
+		c.Assert(publishedAgain.Root.String(), qt.Equals, publishedGroupCensus.Root.String())
+
+		// Test 9.3: Test with no authentication
+		requestAndAssertCode(http.StatusUnauthorized,
+			t, http.MethodPost, "", nil,
+			censusEndpoint, groupCensusID, "group", groupID, "publish")
+
+		// Test 9.4: Test with invalid census ID
+		requestAndAssertCode(http.StatusBadRequest,
+			t, http.MethodPost, adminToken, nil,
+			censusEndpoint, "invalid-id", "group", groupID, "publish")
+
+		// Test 9.5: Test with invalid group ID
+		requestAndAssertCode(http.StatusBadRequest,
+			t, http.MethodPost, adminToken, nil,
+			censusEndpoint, groupCensusID, "group", "invalid-id", "publish")
+
+		// Test 9.6: Test with non-existent census
+		nonExistentCensusID := "000000000000000000000000" // Valid format but doesn't exist
+		requestAndAssertCode(http.StatusNotFound,
+			t, http.MethodPost, adminToken, nil,
+			censusEndpoint, nonExistentCensusID, "group", groupID, "publish")
+
+		// Test 9.7: Test with non-admin user
+		// Create a third user who isn't admin of the organization
+		nonAdminToken := testCreateUser(t, "nonadminpassword123")
+		// Non-admin should not be able to publish group census
+		requestAndAssertCode(http.StatusUnauthorized,
+			t, http.MethodPost, nonAdminToken, nil,
+			censusEndpoint, groupCensusID, "group", groupID, "publish")
+	})
 }
 
 // Helper function to parse JSON responses
