@@ -354,7 +354,7 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	groupID := internal.HexBytes{}
-	if err := groupID.ParseString(chi.URLParam(r, "groupId")); err != nil {
+	if err := groupID.ParseString(chi.URLParam(r, "groupid")); err != nil {
 		errors.ErrMalformedURLParam.Withf("wrong group ID").Write(w)
 		return
 	}
