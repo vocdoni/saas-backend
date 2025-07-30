@@ -843,6 +843,13 @@ func (p *OrgMember) ToDb(orgAddress common.Address) db.OrgMember {
 			log.Warnf("Failed to convert member ID %s to ObjectID: %v", p.ID, err)
 		}
 	}
+
+	var phone *db.Phone
+	if p.Phone != "" {
+		phone = db.NewPhone(p.Phone)
+		phone.HashWithOrgAddress(orgAddress)
+	}
+
 	return db.OrgMember{
 		ID:             id,
 		OrgAddress:     orgAddress,
@@ -853,19 +860,17 @@ func (p *OrgMember) ToDb(orgAddress common.Address) db.OrgMember {
 		BirthDate:      p.BirthDate,
 		ParsedBirtDate: parsedBirthDate,
 		Email:          p.Email,
-		Phone:          p.Phone,
+		Phone:          phone,
 		Password:       p.Password,
 		Other:          p.Other,
 	}
 }
 
 func OrgMemberFromDb(p db.OrgMember) OrgMember {
-	hashedPhone := string(p.HashedPhone)
-	if len(hashedPhone) > 0 {
-		// If the phone is hashed, we return the last 6 characters
-		hashedPhone = hashedPhone[len(hashedPhone)-6:]
+	phoneStr := ""
+	if p.Phone != nil {
+		phoneStr = p.Phone.String() // This returns the masked version
 	}
-	// if p.BirthDate != nil {
 
 	return OrgMember{
 		ID:           p.ID.Hex(),
@@ -875,7 +880,7 @@ func OrgMemberFromDb(p db.OrgMember) OrgMember {
 		NationalID:   p.NationalID,
 		BirthDate:    p.BirthDate,
 		Email:        p.Email,
-		Phone:        hashedPhone,
+		Phone:        phoneStr,
 		Other:        p.Other,
 	}
 }
