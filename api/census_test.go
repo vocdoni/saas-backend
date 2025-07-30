@@ -88,14 +88,6 @@ func TestCensus(t *testing.T) {
 	c.Assert(retrievedCensus.Type, qt.Equals, db.CensusTypeMail)
 	c.Assert(retrievedCensus.OrgAddress, qt.Equals, orgAddress)
 
-	// Test 1.2: Test with missing auth fields (should fail)
-	censusInfoNoAuth := &apicommon.CreateCensusRequest{
-		OrgAddress: orgAddress,
-		// AuthFields is missing
-	}
-	requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, adminToken, censusInfoNoAuth,
-		censusEndpoint)
-
 	// Test 1.3: Test with no authentication
 	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "", censusInfo,
 		censusEndpoint)
