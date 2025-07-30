@@ -593,7 +593,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		member2 := &OrgMember{
 			OrgAddress:   testOrgAddress,
 			Email:        "member2@test.com",
-			Phone:        "+34678909091",
+			Phone:        NewPhone("+34678909091"),
 			MemberNumber: "member456",
 			Name:         "Jane",
 			Surname:      "Doe",
@@ -606,7 +606,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		member3 := &OrgMember{
 			OrgAddress:   testOrgAddress,
 			Email:        "member3@test.com",
-			Phone:        "+34678909092",
+			Phone:        NewPhone("+34678909092"),
 			MemberNumber: testMemberNumber, // Same as member1
 			Name:         testName,         // Same as member1
 			Surname:      "Smith",          // Same as member1
@@ -619,7 +619,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		member4 := &OrgMember{
 			OrgAddress:   testOrgAddress,
 			Email:        "member4@test.com",
-			Phone:        "+34678909093",
+			Phone:        NewPhone("+34678909093"),
 			MemberNumber: "", // Empty memberNumber
 			Name:         "", // Empty name
 			Surname:      "Johnson",
@@ -810,12 +810,12 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(results, qt.Not(qt.IsNil))
 
-		// Test 11: Test with empty values in twoFaFields
-		// Create a member with empty phone
+		// Test 11: Test with invalid values in twoFaFields
+		// Create a member with empty phone, and another pair with duplicate phone
 		memberWithEmptyPhone := &OrgMember{
 			OrgAddress:   testOrgAddress,
 			Email:        "empty_phone@test.com",
-			Phone:        "", // Empty phone
+			Phone:        NewPhone(""), // Empty phone
 			MemberNumber: "empty_phone_123",
 			Name:         "Empty",
 			Surname:      "Phone",
@@ -824,12 +824,36 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		emptyPhoneMemberID, err := testDB.SetOrgMember(testSalt, memberWithEmptyPhone)
 		c.Assert(err, qt.IsNil)
 
-		// Create a group with this member
+		memberWithDupPhone1 := &OrgMember{
+			OrgAddress:   testOrgAddress,
+			Email:        "dup_phone1@test.com",
+			Phone:        NewPhone("+34698111222"), // Dup phone
+			MemberNumber: "dup_phone1_123",
+			Name:         "Dup",
+			Surname:      "Phone1",
+			Password:     testPassword,
+		}
+		dupPhone1MemberID, err := testDB.SetOrgMember(testSalt, memberWithDupPhone1)
+		c.Assert(err, qt.IsNil)
+
+		memberWithDupPhone2 := &OrgMember{
+			OrgAddress:   testOrgAddress,
+			Email:        "dup_phone2@test.com",
+			Phone:        NewPhone("+34698111222"), // Dup phone
+			MemberNumber: "dup_phone2_123",
+			Name:         "Dup",
+			Surname:      "Phone2",
+			Password:     testPassword,
+		}
+		dupPhone2MemberID, err := testDB.SetOrgMember(testSalt, memberWithDupPhone2)
+		c.Assert(err, qt.IsNil)
+
+		// Create a group with these members
 		emptyPhoneGroup := &OrganizationMemberGroup{
 			OrgAddress:  testOrgAddress,
-			Title:       "Empty Phone Group",
-			Description: "Group with member having empty phone",
-			MemberIDs:   []string{emptyPhoneMemberID},
+			Title:       "Invalid Phones Group",
+			Description: "Group with member having empty or dup phones",
+			MemberIDs:   []string{emptyPhoneMemberID, dupPhone1MemberID, dupPhone2MemberID},
 		}
 		emptyPhoneGroupID, err := testDB.CreateOrganizationMemberGroup(emptyPhoneGroup)
 		c.Assert(err, qt.IsNil)
@@ -844,7 +868,8 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		results, err = testDB.CheckGroupMembersFields(testOrgAddress, emptyPhoneGroupID, authFields, twoFaFields)
 		c.Assert(err, qt.IsNil)
 		c.Assert(results, qt.Not(qt.IsNil))
-		c.Assert(len(results.MissingData) > 0, qt.Equals, true) // Should detect empty phone
+		c.Assert(results.MissingData, qt.HasLen, 1) // Should detect empty phone
+		c.Assert(results.Duplicates, qt.HasLen, 2)  // Should detect duplicate phones
 
 		// Convert ObjectIDs to hex strings for easier comparison
 		emptyIDs = make([]string, len(results.MissingData))

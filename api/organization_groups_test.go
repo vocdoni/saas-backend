@@ -405,14 +405,14 @@ func TestOrganizationGroups(t *testing.T) {
 					MemberNumber: "P007", // Same member number
 					Name:         "Duplicate User7 A",
 					Email:        "duplicate7a@example.com",
-					Phone:        "+34777777111",
+					Phone:        "+34698777111",
 					Password:     "password7a",
 				},
 				{
 					MemberNumber: "P007", // Same member number
 					Name:         "Duplicate User7 B",
 					Email:        "duplicate7b@example.com",
-					Phone:        "+34777777222",
+					Phone:        "+34698777222",
 					Password:     "password7b",
 				},
 			},
@@ -422,46 +422,7 @@ func TestOrganizationGroups(t *testing.T) {
 		requestAndAssertCode(http.StatusOK, t, http.MethodPost, adminToken, duplicateMembers,
 			"organizations", orgAddress.String(), "members")
 
-		// Add a member with empty email to test validation
-		emptyFieldMember := &apicommon.AddMembersRequest{
-			Members: []apicommon.OrgMember{
-				{
-					MemberNumber: "P008",
-					Name:         "Empty Email User",
-					Email:        "p0007@mail.com",
-					Phone:        "", // Empty phone
-					Password:     "password888",
-				},
-			},
-		}
-
-		// Add member with empty field to the organization
-		requestAndAssertCode(http.StatusOK, t, http.MethodPost, adminToken, emptyFieldMember,
-			"organizations", orgAddress.String(), "members")
-
-		// Get all members to create a group with them
-		allMembersResponse := requestAndParse[apicommon.OrganizationMembersResponse](
-			t, http.MethodGet, adminToken, nil,
-			"organizations", orgAddress.String(), "members")
-
-		// Create a group with all members including duplicates and empty fields
-		var allMemberIDs []string
-		for _, member := range allMembersResponse.Members {
-			allMemberIDs = append(allMemberIDs, member.ID)
-		}
-
-		testGroupRequest := &apicommon.CreateOrganizationMemberGroupRequest{
-			Title:       "Validation Test Group",
-			Description: "A group for testing validation",
-			MemberIDs:   allMemberIDs,
-		}
-
-		testGroup := requestAndParse[apicommon.OrganizationMemberGroupInfo](
-			t, http.MethodPost, adminToken, testGroupRequest,
-			"organizations", orgAddress.String(), "groups")
-		c.Assert(testGroup.ID, qt.Not(qt.Equals), "")
-
-		groupID := testGroup.ID
+		groupID := createGroupWithAllCurrentMembers(t, adminToken, orgAddress.String())
 
 		// Test 1: Validate with valid auth fields (should succeed)
 		validRequest := &apicommon.ValidateMemberGroupRequest{
@@ -481,7 +442,7 @@ func TestOrganizationGroups(t *testing.T) {
 		requestAndAssertCode(http.StatusOK, t, http.MethodPost, adminToken, validTwoFaRequest,
 			"organizations", orgAddress.String(), "groups", groupID, "validate")
 
-		// Test 3: Validate with both auth fields and two-factor fields (should fail)
+		// Test 3: Validate with both auth fields and two-factor fields (should succeed)
 		combinedRequest := &apicommon.ValidateMemberGroupRequest{
 			AuthFields: db.OrgMemberAuthFields{
 				db.OrgMemberAuthFieldsName,
@@ -490,8 +451,27 @@ func TestOrganizationGroups(t *testing.T) {
 				db.OrgMemberTwoFaFieldPhone,
 			},
 		}
-		requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, adminToken, combinedRequest,
+		requestAndAssertCode(http.StatusOK, t, http.MethodPost, adminToken, combinedRequest,
 			"organizations", orgAddress.String(), "groups", groupID, "validate")
+
+		// Add a member with empty phone to test validation
+		emptyFieldMember := &apicommon.AddMembersRequest{
+			Members: []apicommon.OrgMember{
+				{
+					MemberNumber: "P008",
+					Name:         "Empty Phone User",
+					Email:        "p0008@mail.com",
+					Phone:        "", // Empty phone
+					Password:     "password888",
+				},
+			},
+		}
+
+		// Add member with empty field to the organization
+		requestAndAssertCode(http.StatusOK, t, http.MethodPost, adminToken, emptyFieldMember,
+			"organizations", orgAddress.String(), "members")
+
+		groupID = createGroupWithAllCurrentMembers(t, adminToken, orgAddress.String())
 
 		// Test 4: Validate with duplicate auth field (should fail)
 		duplicateRequest := &apicommon.ValidateMemberGroupRequest{
@@ -499,17 +479,9 @@ func TestOrganizationGroups(t *testing.T) {
 				db.OrgMemberAuthFieldsMemberNumber, // This will have duplicates
 			},
 		}
-		duplicateResponse := requestAndParseWithAssertCode[map[string]any](
-			http.StatusBadRequest,
-			t,
-			http.MethodPost,
-			adminToken,
-			duplicateRequest,
-			"organizations",
-			orgAddress.String(),
-			"groups",
-			groupID,
-			"validate",
+		duplicateResponse := requestAndParseWithAssertCode[map[string]any](http.StatusBadRequest, t,
+			http.MethodPost, adminToken, duplicateRequest,
+			"organizations", orgAddress.String(), "groups", groupID, "validate",
 		)
 
 		// The response should contain information about the duplicates
@@ -542,10 +514,7 @@ func TestOrganizationGroups(t *testing.T) {
 
 		// The response should contain information about the empty fields
 		aggregationResults = decodeNestedFieldAs[db.OrgMemberAggregationResults](c, emptyFieldResponse, "data")
-		c.Assert(
-			len(aggregationResults.MissingData) > 0,
-			qt.Equals,
-			true,
+		c.Assert(aggregationResults.MissingData, qt.HasLen, 1,
 			qt.Commentf("Expected missing data in aggregationResults: %+v", aggregationResults),
 		)
 
@@ -582,4 +551,30 @@ func TestOrganizationGroups(t *testing.T) {
 	}
 	requestAndAssertCode(http.StatusOK, t, http.MethodDelete, adminToken, deleteRequest,
 		"organizations", orgAddress.String(), "members")
+}
+
+func createGroupWithAllCurrentMembers(t *testing.T, adminToken, orgAddress string) string {
+	// Get all members to create a group with them
+	allMembersResponse := requestAndParse[apicommon.OrganizationMembersResponse](
+		t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress, "members")
+
+	// Create a group with all members
+	var allMemberIDs []string
+	for _, member := range allMembersResponse.Members {
+		allMemberIDs = append(allMemberIDs, member.ID)
+	}
+
+	testGroupRequest := &apicommon.CreateOrganizationMemberGroupRequest{
+		Title:       "Validation Test Group",
+		Description: "A group for testing validation",
+		MemberIDs:   allMemberIDs,
+	}
+
+	testGroup := requestAndParse[apicommon.OrganizationMemberGroupInfo](
+		t, http.MethodPost, adminToken, testGroupRequest,
+		"organizations", orgAddress, "groups")
+	qt.Assert(t, testGroup.ID, qt.Not(qt.Equals), "")
+
+	return testGroup.ID
 }

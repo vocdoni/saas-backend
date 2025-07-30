@@ -36,13 +36,10 @@ func (ms *MongoStorage) SetOrgMember(salt string, orgMember *OrgMember) (string,
 		return "", fmt.Errorf("organization not found: %w", err)
 	}
 
-	if orgMember.Phone != "" {
-		// normalize and store only the hashed phone
-		normalizedPhone, err := internal.SanitizeAndVerifyPhoneNumber(orgMember.Phone)
-		if err == nil {
-			orgMember.HashedPhone = internal.HashOrgData(orgMember.OrgAddress, normalizedPhone)
-		}
-		orgMember.Phone = ""
+	// Phone handling is now done by the Phone type itself
+	if orgMember.Phone != nil && !orgMember.Phone.IsEmpty() {
+		// Ensure the phone has the correct org address for hashing
+		orgMember.Phone.HashWithOrgAddress(orgMember.OrgAddress)
 	}
 	if orgMember.Password != "" {
 		// store only the hashed password
@@ -192,15 +189,15 @@ func prepareOrgMember(member *OrgMember, orgAddress common.Address, salt string,
 		}
 	}
 
-	// Hash phone if valid
-	if member.Phone != "" {
-		normalizedPhone, err := internal.SanitizeAndVerifyPhoneNumber(member.Phone)
-		if err == nil {
-			member.HashedPhone = internal.HashOrgData(orgAddress, normalizedPhone)
+	// Phone handling is now done by the Phone type itself
+	if member.Phone != nil && !member.Phone.IsEmpty() {
+		if err := member.Phone.Validate(); err != nil {
+			errors = append(errors, fmt.Errorf("invalid phone: %s %v", member.Phone, err))
+			member.Phone = nil
 		} else {
-			errors = append(errors, fmt.Errorf("could not sanitize phone number: %s %v", member.Phone, err))
+			// Ensure the phone has the correct org address for hashing
+			member.Phone.HashWithOrgAddress(orgAddress)
 		}
-		member.Phone = ""
 	}
 
 	// Hash password if present
