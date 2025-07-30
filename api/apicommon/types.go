@@ -731,6 +731,16 @@ type PublishedCensusResponse struct {
 	Root internal.HexBytes `json:"root" bson:"root" swaggertype:"string" format:"hex" example:"deadbeef"`
 }
 
+// PublishCensusGroupRequest represents a request to publish a census group.
+// swagger:model PublishCensusGroupRequest
+type PublishCensusGroupRequest struct {
+	// Optional for defining which member data should be used for authentication
+	AuthFields db.OrgMemberAuthFields `json:"authFields,omitempty"`
+
+	// Optional for defining which member data should be used for two-factor authentication
+	TwoFaFields db.OrgMemberTwoFaFields `json:"twoFaFields,omitempty"`
+}
+
 // OrganizationCensusFromDB converts a db.Census to an OrganizationCensus.
 func OrganizationCensusFromDB(census *db.Census) OrganizationCensus {
 	if census == nil {

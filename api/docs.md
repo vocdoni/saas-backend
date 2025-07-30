@@ -69,6 +69,7 @@
   - [🔍 Check Add Members Job Status](#-check-add-members-job-status)
   - [📢 Publish Census](#-publish-census)
   - [📋 Get Published Census Info](#-get-published-census-info)
+  - [📢 Publish Group Census](#-publish-group-census)
 - [🔄 Process](#-process)
   - [🆕 Create Process](#-create-process)
   - [ℹ️ Get Process Info](#-get-process-info)
@@ -2144,6 +2145,49 @@ Publishes a census, making it available for voting. Requires Manager or Admin ro
 | HTTP Status | Error code | Message |
 |:---:|:---:|:---|
 | `400` | `40010` | `malformed URL parameter` |
+| `500` | `50002` | `internal server error` |
+
+### 📢 Publish Group Census
+
+* **Path** `/census/{id}/publish/group/{groupid}`
+* **Method** `POST`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Description**
+  Publishes a census based on a specific organization members group for voting. Requires Manager/Admin role.
+  Returns published census with credentials.
+
+* **Request body**
+```json
+{
+  "authFields": [             // At least one of authFields or twoFaFields must be provided
+    "name",
+    "memberNumber",
+    "nationalID"
+  ],
+  "twoFaFields": [            // Optional: defines which member data should be used for two-factor authentication
+    "email",
+    "phone"
+  ]
+}
+```
+
+* **Response**
+```json
+{
+  "uri": "https://example.com/process/",
+  "root": "public_key"
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40004` | `malformed JSON body` |
+| `400` | `40010` | `invalid census ID or group ID` |
+| `404` | `40404` | `census not found` |
 | `500` | `50002` | `internal server error` |
 
 ## 🔄 Process

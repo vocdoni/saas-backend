@@ -334,13 +334,15 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id		path		string	true	"Census ID"
-//	@Param			groupId	path		string	true	"Group ID"
+//	@Param			id		path		string								true	"Census ID"
+//	@Param			groupId	path		string								true	"Group ID"
+//	@Param			request	body		apicommon.PublishCensusGroupRequest	true	"Census authentication configuration"
 //	@Success		200		{object}	apicommon.PublishedCensusResponse
 //	@Failure		400		{object}	errors.Error	"Invalid census ID or group ID"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
 //	@Failure		404		{object}	errors.Error	"Census not found"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Router			/census/{id}/publish/group/{groupid} [post]
 func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) {
 	censusID := internal.HexBytes{}
 	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
@@ -374,6 +376,15 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Parse request
+	publishInfo := &apicommon.PublishCensusGroupRequest{}
+	if err := json.NewDecoder(r.Body).Decode(&publishInfo); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	census.AuthFields = publishInfo.AuthFields
+	census.TwoFaFields = publishInfo.TwoFaFields
+
 	if len(census.Published.Root) > 0 {
 		// if the census is already published, return the censusInfo
 		apicommon.HTTPWriteJSON(w, &apicommon.PublishedCensusResponse{
@@ -402,13 +413,12 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 	// if census.Type == CensusTypeSMSOrMail || census.Type == CenT {
 	// build the census and store it
 	cspSignerPubKey := a.account.PubKey // TODO: use a different key based on the censusID
-	switch census.Type {
-	case CensusTypeSMSOrMail, CensusTypeMail, CensusTypeSMS:
+	if len(census.TwoFaFields) > 0 {
 		census.Published.Root = cspSignerPubKey
 		census.Published.URI = a.serverURL + "/process"
 		census.Published.CreatedAt = time.Now()
-
-	default:
+	} else {
+		// non CSP censuses
 		errors.ErrCensusTypeNotFound.Write(w)
 		return
 	}

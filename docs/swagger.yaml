@@ -533,6 +533,20 @@ definitions:
           $ref: '#/definitions/apicommon.OrganizationUser'
         type: array
     type: object
+  apicommon.PublishCensusGroupRequest:
+    properties:
+      authFields:
+        description: Optional for defining which member data should be used for authentication
+        items:
+          $ref: '#/definitions/db.OrgMemberAuthField'
+        type: array
+      twoFaFields:
+        description: Optional for defining which member data should be used for two-factor
+          authentication
+        items:
+          $ref: '#/definitions/db.OrgMemberTwoFaField'
+        type: array
+    type: object
   apicommon.PublishedCensusResponse:
     properties:
       root:
@@ -22619,6 +22633,58 @@ paths:
       security:
       - BearerAuth: []
       summary: Publish a census for voting
+      tags:
+      - census
+  /census/{id}/publish/group/{groupid}:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Publish a census based on a specific organization members group for voting. Requires Manager/Admin role.
+        Returns published census with credentials.
+      parameters:
+      - description: Census ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Group ID
+        in: path
+        name: groupId
+        required: true
+        type: string
+      - description: Census authentication configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.PublishCensusGroupRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.PublishedCensusResponse'
+        "400":
+          description: Invalid census ID or group ID
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Census not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Publish a group-based census for voting
       tags:
       - census
   /census/job/{jobid}:

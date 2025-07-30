@@ -377,9 +377,20 @@ func TestCensus(t *testing.T) {
 		groupCensusID := groupCensusResp.ID
 		t.Logf("Created group census with ID: %s", groupCensusID)
 
+		// Create the request body with authentication and two-factor fields
+		publishGroupRequest := &apicommon.PublishCensusGroupRequest{
+			AuthFields: db.OrgMemberAuthFields{
+				db.OrgMemberAuthFieldsMemberNumber,
+				db.OrgMemberAuthFieldsName,
+			},
+			TwoFaFields: db.OrgMemberTwoFaFields{
+				db.OrgMemberTwoFaFieldEmail,
+			},
+		}
+
 		// Test 9.1: Successful group census publication
 		publishedGroupCensus := requestAndParse[apicommon.PublishedCensusResponse](
-			t, http.MethodPost, adminToken, nil,
+			t, http.MethodPost, adminToken, publishGroupRequest,
 			censusEndpoint, groupCensusID, "group", groupID, "publish")
 
 		c.Assert(publishedGroupCensus.URI, qt.Not(qt.Equals), "")
@@ -390,7 +401,7 @@ func TestCensus(t *testing.T) {
 		// Test 9.2: Test with already published census
 		// Publishing again should return the same information
 		publishedAgain := requestAndParse[apicommon.PublishedCensusResponse](
-			t, http.MethodPost, adminToken, nil,
+			t, http.MethodPost, adminToken, publishGroupRequest,
 			censusEndpoint, groupCensusID, "group", groupID, "publish")
 
 		c.Assert(publishedAgain.URI, qt.Equals, publishedGroupCensus.URI)
@@ -398,23 +409,23 @@ func TestCensus(t *testing.T) {
 
 		// Test 9.3: Test with no authentication
 		requestAndAssertCode(http.StatusUnauthorized,
-			t, http.MethodPost, "", nil,
+			t, http.MethodPost, "", publishGroupRequest,
 			censusEndpoint, groupCensusID, "group", groupID, "publish")
 
 		// Test 9.4: Test with invalid census ID
 		requestAndAssertCode(http.StatusBadRequest,
-			t, http.MethodPost, adminToken, nil,
+			t, http.MethodPost, adminToken, publishGroupRequest,
 			censusEndpoint, "invalid-id", "group", groupID, "publish")
 
 		// Test 9.5: Test with invalid group ID
 		requestAndAssertCode(http.StatusBadRequest,
-			t, http.MethodPost, adminToken, nil,
+			t, http.MethodPost, adminToken, publishGroupRequest,
 			censusEndpoint, groupCensusID, "group", "invalid-id", "publish")
 
 		// Test 9.6: Test with non-existent census
 		nonExistentCensusID := "000000000000000000000000" // Valid format but doesn't exist
 		requestAndAssertCode(http.StatusNotFound,
-			t, http.MethodPost, adminToken, nil,
+			t, http.MethodPost, adminToken, publishGroupRequest,
 			censusEndpoint, nonExistentCensusID, "group", groupID, "publish")
 
 		// Test 9.7: Test with non-admin user
@@ -422,7 +433,7 @@ func TestCensus(t *testing.T) {
 		nonAdminToken := testCreateUser(t, "nonadminpassword123")
 		// Non-admin should not be able to publish group census
 		requestAndAssertCode(http.StatusUnauthorized,
-			t, http.MethodPost, nonAdminToken, nil,
+			t, http.MethodPost, nonAdminToken, publishGroupRequest,
 			censusEndpoint, groupCensusID, "group", groupID, "publish")
 	})
 }
