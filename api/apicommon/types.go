@@ -732,6 +732,9 @@ type PublishedCensusResponse struct {
 
 	// Merkle root of the census
 	Root internal.HexBytes `json:"root" bson:"root" swaggertype:"string" format:"hex" example:"deadbeef"`
+
+	// Size of the published census
+	Size int64 `json:"size"`
 }
 
 // PublishCensusGroupRequest represents a request to publish a census group.

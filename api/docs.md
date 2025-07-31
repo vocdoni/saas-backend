@@ -2176,7 +2176,8 @@ Publishes a census, making it available for voting. Requires Manager or Admin ro
 ```json
 {
   "uri": "https://example.com/process/",
-  "root": "public_key"
+  "root": "public_key",
+  "size": 10
 }
 ```
 

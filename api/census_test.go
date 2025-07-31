@@ -395,6 +395,7 @@ func TestCensus(t *testing.T) {
 
 		c.Assert(publishedGroupCensus.URI, qt.Not(qt.Equals), "")
 		c.Assert(publishedGroupCensus.Root, qt.Not(qt.Equals), "")
+		c.Assert(publishedGroupCensus.Size, qt.Equals, int64(2)) // 2 members in the group
 		t.Logf("Published group census with URI: %s and Root: %s",
 			publishedGroupCensus.URI, publishedGroupCensus.Root)
 
