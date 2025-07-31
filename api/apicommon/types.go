@@ -691,6 +691,9 @@ type OrganizationCensus struct {
 	// Organization address
 	OrgAddress common.Address `json:"orgAddress"`
 
+	// Size of the census
+	Size int64 `json:"size"`
+
 	// Optional for creating a census based on an organization member group
 	GroupID string `json:"groupID,omitempty"`
 
@@ -750,6 +753,7 @@ func OrganizationCensusFromDB(census *db.Census) OrganizationCensus {
 		ID:          census.ID.Hex(),
 		Type:        census.Type,
 		OrgAddress:  census.OrgAddress,
+		Size:        census.Size,
 		GroupID:     census.GroupID.Hex(),
 		AuthFields:  census.AuthFields,
 		TwoFaFields: census.TwoFaFields,

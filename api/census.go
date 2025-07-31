@@ -412,9 +412,18 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 
 	// if census.Type == CensusTypeSMSOrMail || census.Type == CenT {
 	// build the census and store it
-	cspSignerPubKey := a.account.PubKey // TODO: use a different key based on the censusID
+	cspSignerPubKey, err := a.csp.PubKey()
+	if err != nil {
+		errors.ErrGenericInternalServerError.Withf("failed to get CSP public key").Write(w)
+		return
+	}
+	var rootHex internal.HexBytes
+	if err := rootHex.ParseString(cspSignerPubKey.String()); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
 	if len(census.TwoFaFields) > 0 {
-		census.Published.Root = cspSignerPubKey
+		census.Published.Root = rootHex
 		census.Published.URI = a.serverURL + "/process"
 		census.Published.CreatedAt = time.Now()
 	} else {
@@ -430,6 +439,6 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 
 	apicommon.HTTPWriteJSON(w, &apicommon.PublishedCensusResponse{
 		URI:  census.Published.URI,
-		Root: cspSignerPubKey,
+		Root: rootHex,
 	})
 }
