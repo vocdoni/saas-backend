@@ -13,42 +13,6 @@ func TestPopulateGroupCensus(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
 
-	t.Run("FallbackToSetCensus", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
-		// Create test organization first
-		org := &Organization{
-			Address:   testOrgAddress,
-			Active:    true,
-			CreatedAt: time.Now(),
-		}
-		err := testDB.SetOrganization(org)
-		c.Assert(err, qt.IsNil)
-
-		// Defone TwoFaFields for the census
-
-		// Test with empty groupID (should fallback to SetCensus behavior)
-		census := &Census{
-			OrgAddress: testOrgAddress,
-			TwoFaFields: OrgMemberTwoFaFields{
-				OrgMemberTwoFaFieldEmail,
-			},
-		}
-
-		// Call PopulateGroupCensus with empty groupID
-		censusID, err := testDB.PopulateGroupCensus(census, "", nil)
-		c.Assert(err, qt.IsNil)
-		c.Assert(censusID, qt.Not(qt.Equals), "")
-
-		// Verify the census was created correctly
-		createdCensus, err := testDB.Census(censusID)
-		c.Assert(err, qt.IsNil)
-		c.Assert(createdCensus.OrgAddress, qt.Equals, testOrgAddress)
-		c.Assert(createdCensus.Type, qt.Equals, CensusTypeMail)
-		c.Assert(createdCensus.CreatedAt.IsZero(), qt.IsFalse)
-		// GroupID should be empty since we didn't specify a group
-		c.Assert(createdCensus.GroupID, qt.Equals, primitive.NilObjectID)
-	})
-
 	t.Run("InputValidation", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Create test organization first
@@ -156,6 +120,8 @@ func TestPopulateGroupCensus(t *testing.T) {
 		}
 		group1ID, err := testDB.CreateOrganizationMemberGroup(group1)
 		c.Assert(err, qt.IsNil)
+		group1OID, err := primitive.ObjectIDFromHex(group1ID)
+		c.Assert(err, qt.IsNil)
 
 		// Create a group for org2
 		group2 := &OrganizationMemberGroup{
@@ -179,18 +145,20 @@ func TestPopulateGroupCensus(t *testing.T) {
 		c.Assert(err.Error(), qt.Contains, "invalid data provided")
 
 		// Test with valid group and organization combination
+		census2ID := primitive.NewObjectID()
 		census2 := &Census{
+			ID:         census2ID,
+			GroupID:    group1OID,
 			OrgAddress: testOrgAddress,
 			TwoFaFields: OrgMemberTwoFaFields{
 				OrgMemberTwoFaFieldEmail,
 			},
 		}
-		censusID, err := testDB.PopulateGroupCensus(census2, group1ID, participantIDStrs)
+		_, err = testDB.PopulateGroupCensus(census2, group1ID, participantIDStrs)
 		c.Assert(err, qt.IsNil)
-		c.Assert(censusID, qt.Not(qt.Equals), "")
 
 		// Verify the census was created correctly with the group ID
-		createdCensus, err := testDB.Census(censusID)
+		createdCensus, err := testDB.Census(census2ID.Hex())
 		c.Assert(err, qt.IsNil)
 		c.Assert(createdCensus.OrgAddress, qt.Equals, testOrgAddress)
 		c.Assert(createdCensus.Type, qt.Equals, CensusTypeMail)
@@ -200,7 +168,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 		group, err := testDB.OrganizationMemberGroup(group1ID, testOrgAddress)
 		c.Assert(err, qt.IsNil)
 		c.Assert(group.CensusIDs, qt.HasLen, 1)
-		c.Assert(group.CensusIDs[0], qt.Equals, censusID)
+		c.Assert(group.CensusIDs[0], qt.Equals, census2ID.Hex())
 	})
 
 	t.Run("CensusCreation", func(_ *testing.T) {
@@ -223,7 +191,6 @@ func TestPopulateGroupCensus(t *testing.T) {
 		memberID, err := testDB.SetOrgMember(testSalt, member)
 		c.Assert(err, qt.IsNil)
 		c.Assert(err, qt.IsNil)
-		participantIDStrs := []string{memberID}
 
 		// Create a group
 		group := &OrganizationMemberGroup{
@@ -234,15 +201,18 @@ func TestPopulateGroupCensus(t *testing.T) {
 		}
 		groupID, err := testDB.CreateOrganizationMemberGroup(group)
 		c.Assert(err, qt.IsNil)
+		groupOID, err := primitive.ObjectIDFromHex(groupID)
+		c.Assert(err, qt.IsNil)
 
 		// Test creating new census with group
 		census := &Census{
+			GroupID:    groupOID,
 			OrgAddress: testOrgAddress,
 			TwoFaFields: OrgMemberTwoFaFields{
 				OrgMemberTwoFaFieldEmail,
 			},
 		}
-		censusID, err := testDB.PopulateGroupCensus(census, groupID, participantIDStrs)
+		censusID, err := testDB.SetCensus(census)
 		c.Assert(err, qt.IsNil)
 		c.Assert(censusID, qt.Not(qt.Equals), "")
 
@@ -264,12 +234,12 @@ func TestPopulateGroupCensus(t *testing.T) {
 		time.Sleep(time.Millisecond)
 
 		// Update census
-		updatedID, err := testDB.PopulateGroupCensus(createdCensus, groupID, nil)
+		inserted, err := testDB.PopulateGroupCensus(createdCensus, groupID, nil)
 		c.Assert(err, qt.IsNil)
-		c.Assert(updatedID, qt.Equals, censusID)
+		c.Assert(inserted, qt.Equals, int64(0))
 
 		// Verify the census was updated correctly
-		updatedCensus, err := testDB.Census(updatedID)
+		updatedCensus, err := testDB.Census(createdCensus.ID.Hex())
 		c.Assert(err, qt.IsNil)
 		c.Assert(updatedCensus.Type, qt.Equals, CensusTypeSMS)
 		c.Assert(updatedCensus.GroupID.Hex(), qt.Equals, groupID)
@@ -324,33 +294,40 @@ func TestPopulateGroupCensus(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Test with empty participantIDs array (no participants added)
+		censusOID1 := primitive.NewObjectID()
+
 		census1 := &Census{
+			ID:         censusOID1,
 			OrgAddress: testOrgAddress,
 			TwoFaFields: OrgMemberTwoFaFields{
 				OrgMemberTwoFaFieldEmail,
 			},
 		}
-		censusID1, err := testDB.PopulateGroupCensus(census1, groupID, nil)
+		inserted, err := testDB.PopulateGroupCensus(census1, groupID, nil)
 		c.Assert(err, qt.IsNil)
+		c.Assert(inserted, qt.Equals, int64(0))
 
 		// Verify no participants were added
-		participants1, err := testDB.CensusParticipants(censusID1)
+		participants1, err := testDB.CensusParticipants(censusOID1.Hex())
 		c.Assert(err, qt.IsNil)
 		c.Assert(participants1, qt.HasLen, 0)
 
 		// Test with valid participantIDs
+		censusOID2 := primitive.NewObjectID()
 		census2 := &Census{
+			ID:         censusOID2,
 			OrgAddress: testOrgAddress,
 			TwoFaFields: OrgMemberTwoFaFields{
 				OrgMemberTwoFaFieldEmail,
 			},
 		}
 		participantIDStrs := []string{member1.ID.Hex(), member2.ID.Hex()}
-		censusID2, err := testDB.PopulateGroupCensus(census2, groupID, participantIDStrs)
+		inserted2, err := testDB.PopulateGroupCensus(census2, groupID, participantIDStrs)
 		c.Assert(err, qt.IsNil)
+		c.Assert(inserted2, qt.Equals, int64(2))
 
 		// Verify participants were added
-		participants2, err := testDB.CensusParticipants(censusID2)
+		participants2, err := testDB.CensusParticipants(censusOID2.Hex())
 		c.Assert(err, qt.IsNil)
 		c.Assert(participants2, qt.HasLen, 2)
 

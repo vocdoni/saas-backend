@@ -518,7 +518,7 @@ func (ms *MongoStorage) setBulkCensusParticipant(
 	bulkOpts := options.BulkWrite().SetOrdered(false)
 
 	results, err := ms.censusParticipants.BulkWrite(ctx, docs, bulkOpts)
-	return results.InsertedCount, err
+	return results.UpsertedCount, err
 }
 
 // CensusParticipants retrieves all the census participants for a given census.
