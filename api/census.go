@@ -405,7 +405,8 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if _, err = a.db.PopulateGroupCensus(census, group.ID.Hex(), group.MemberIDs); err != nil {
+	inserted, err := a.db.PopulateGroupCensus(census, group.ID.Hex(), group.MemberIDs)
+	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
@@ -440,5 +441,6 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 	apicommon.HTTPWriteJSON(w, &apicommon.PublishedCensusResponse{
 		URI:  census.Published.URI,
 		Root: rootHex,
+		Size: inserted,
 	})
 }
