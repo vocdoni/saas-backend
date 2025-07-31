@@ -482,7 +482,7 @@ func (ms *MongoStorage) SetBulkCensusOrgMemberParticipant(
 
 func (ms *MongoStorage) setBulkCensusParticipant(
 	ctx context.Context, censusID string, memberIDs []primitive.ObjectID,
-) error {
+) (int64, error) {
 	currentTime := time.Now()
 	docs := make([]mongo.WriteModel, 0, len(memberIDs))
 	for _, pid := range memberIDs {
@@ -517,8 +517,8 @@ func (ms *MongoStorage) setBulkCensusParticipant(
 	// Unordered makes it continue on errors (e.g., one dup)
 	bulkOpts := options.BulkWrite().SetOrdered(false)
 
-	_, err := ms.censusParticipants.BulkWrite(ctx, docs, bulkOpts)
-	return err
+	results, err := ms.censusParticipants.BulkWrite(ctx, docs, bulkOpts)
+	return results.InsertedCount, err
 }
 
 // CensusParticipants retrieves all the census participants for a given census.

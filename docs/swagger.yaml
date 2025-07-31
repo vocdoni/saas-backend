@@ -293,6 +293,9 @@ definitions:
         items:
           type: integer
         type: array
+      size:
+        description: Size of the census
+        type: integer
       twoFaFields:
         description: Optional for defining which member data should be used for two-factor
           authentication
@@ -896,6 +899,8 @@ definitions:
         type: array
       published:
         $ref: '#/definitions/db.PublishedCensus'
+      size:
+        type: integer
       type:
         $ref: '#/definitions/db.CensusType'
       updatedAt:

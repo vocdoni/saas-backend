@@ -141,6 +141,19 @@ func (ms *MongoStorage) PopulateGroupCensus(
 	}
 	census.Type = census.TwoFaFields.GetCensusType()
 
+	// update the group with the census ID
+	if err := ms.addOrganizationMemberGroupCensus(ctx, group.ID.Hex(), census.OrgAddress, census.ID.Hex()); err != nil {
+		return "", fmt.Errorf("error updating group with census ID: %w", err)
+	}
+
+	// set the participants for the census
+	if len(participantIDs) > 0 {
+		insertedCount, err := ms.setBulkCensusParticipant(ctx, census.ID.Hex(), participantOIDs)
+		if err != nil {
+			return "", fmt.Errorf("error setting census participants: %w", err)
+		}
+		census.Size = insertedCount
+	}
 	updateDoc, err := dynamicUpdateDocument(census, nil)
 	if err != nil {
 		return "", err
@@ -150,18 +163,6 @@ func (ms *MongoStorage) PopulateGroupCensus(
 	_, err = ms.censuses.UpdateOne(ctx, filter, updateDoc, opts)
 	if err != nil {
 		return "", err
-	}
-
-	// update the group with the census ID
-	if err := ms.addOrganizationMemberGroupCensus(ctx, group.ID.Hex(), census.OrgAddress, census.ID.Hex()); err != nil {
-		return "", fmt.Errorf("error updating group with census ID: %w", err)
-	}
-
-	// set the participants for the census
-	if len(participantIDs) > 0 {
-		if err := ms.setBulkCensusParticipant(ctx, census.ID.Hex(), participantOIDs); err != nil {
-			return "", fmt.Errorf("error setting census participants: %w", err)
-		}
 	}
 	return census.ID.Hex(), nil
 }
