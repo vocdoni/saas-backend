@@ -402,13 +402,10 @@ func validatePhone(phone *string) error {
 // validateAuthRequest validates the authentication request data
 func validateAuthRequest(req *AuthRequest) error {
 	// Check request participant ID
-	err := validateParticipantID(req.ParticipantID)
-	if err != nil {
-		return err
-	}
+	// TODO: Add correct validations
 
 	// Check request contact information
-	err = validateContactInfo(req.Email, req.Phone)
+	err := validateContactInfo(req.Email, req.Phone)
 	if err != nil {
 		return err
 	}
@@ -424,7 +421,7 @@ func validateAuthRequest(req *AuthRequest) error {
 }
 
 // getCensusAndOrgMember retrieves the census and org member information
-func (c *CSPHandlers) getCensusAndOrgMember(censusID string, participantID string) (*db.Census, *db.OrgMember, error) {
+func (c *CSPHandlers) getCensusAndOrgMember(inputMember *db.OrgMember, censusID string) (*db.Census, *db.OrgMember, error) {
 	// Get census information
 	census, err := c.mainDB.Census(censusID)
 	if err != nil {
@@ -434,8 +431,11 @@ func (c *CSPHandlers) getCensusAndOrgMember(censusID string, participantID strin
 		return nil, nil, errors.ErrGenericInternalServerError.WithErr(err)
 	}
 
+	loginHash := db.HashAuthTwoFaFields(*inputMember, census.AuthFields, census.TwoFaFields)
+
 	// Check the participant is in the census
-	if _, err := c.mainDB.CensusParticipantByMemberNumber(censusID, participantID, census.OrgAddress); err != nil {
+	censuParticipant, err := c.mainDB.CensusParticipantByLoginHash(censusID, loginHash, census.OrgAddress)
+	if err != nil {
 		if err == db.ErrNotFound {
 			return nil, nil, errors.ErrUnauthorized.Withf("participant not found in the census")
 		}
@@ -443,7 +443,7 @@ func (c *CSPHandlers) getCensusAndOrgMember(censusID string, participantID strin
 	}
 
 	// Fetch the correspoding org member
-	orgMember, err := c.mainDB.OrgMemberByMemberNumber(census.OrgAddress, participantID)
+	orgMember, err := c.mainDB.OrgMemberByMemberNumber(census.OrgAddress, censuParticipant.ParticipantID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get org member: %w", err)
 	}
@@ -539,14 +539,20 @@ func (c *CSPHandlers) authFirstStep(
 		return nil, err
 	}
 
-	// Get census and participant information
-	census, orgMember, err := c.getCensusAndOrgMember(censusID, req.ParticipantID)
-	if err != nil {
-		return nil, err
+	// create an empty member and assing the input data where applicable
+	inputMember := &db.OrgMember{
+		Name:         req.Name,
+		Surname:      req.Surname,
+		MemberNumber: req.MemberNumber,
+		NationalID:   req.NationalID,
+		BirthDate:    req.BirthDate,
+		Email:        req.Email,
+		Phone:        req.Phone,
 	}
 
-	// Verify password if provided
-	if err := c.verifyPassword(req.Password, orgMember.HashedPass); err != nil {
+	// Get census and participant information
+	census, orgMember, err := c.getCensusAndOrgMember(inputMember, censusID)
+	if err != nil {
 		return nil, err
 	}
 

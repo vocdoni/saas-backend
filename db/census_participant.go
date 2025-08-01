@@ -162,6 +162,42 @@ func (ms *MongoStorage) CensusParticipantByMemberNumber(
 	return participant, nil
 }
 
+// CensusParticipantByLoginHash retrieves a census participant from the database based on
+// the login data hash and censusID. Returns ErrNotFound if the participant doesn't exist.
+// TODO add the index
+func (ms *MongoStorage) CensusParticipantByLoginHash(
+	censusID string,
+	loginHash []byte,
+	orgAddress common.Address,
+) (*CensusParticipant, error) {
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	// validate input
+	if len(loginHash) == 0 || len(censusID) == 0 {
+		return nil, ErrInvalidData
+	}
+
+	// prepare filter for find
+	filter := bson.M{
+		"loginHash": loginHash,
+		"censusId":  censusID,
+	}
+
+	// find the participant
+	participant := &CensusParticipant{}
+	err := ms.censusParticipants.FindOne(ctx, filter).Decode(participant)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get census participant: %w", err)
+	}
+
+	return participant, nil
+}
+
 // DelCensusParticipant removes a census participant from the database.
 // Returns nil if the participant was successfully deleted or didn't exist.
 func (ms *MongoStorage) DelCensusParticipant(censusID, participantID string) error {
@@ -475,19 +511,26 @@ func (ms *MongoStorage) SetBulkCensusOrgMemberParticipant(
 }
 
 func (ms *MongoStorage) setBulkCensusParticipant(
-	ctx context.Context, censusID string, memberIDs []primitive.ObjectID,
+	ctx context.Context, censusID, groupID string, orgAddress common.Address, authFields OrgMemberAuthFields, twoFaFields OrgMemberTwoFaFields,
 ) (int64, error) {
+	_, members, err := ms.ListOrganizationMemberGroup(groupID, orgAddress, 0, 0)
+	if err != nil {
+		return 0, fmt.Errorf("error retrieving group members: %w", err)
+	}
+
 	currentTime := time.Now()
-	docs := make([]mongo.WriteModel, 0, len(memberIDs))
-	for _, pid := range memberIDs {
+
+	docs := make([]mongo.WriteModel, 0, len(members))
+	for _, member := range members {
 		// Create participant filter and document
-		id := pid.Hex()
+		id := member.ID.Hex()
 		censusParticipantsFilter := bson.M{
 			"participantID": id,
 			"censusId":      censusID,
 		}
 		participantDoc := &CensusParticipant{
 			ParticipantID: id,
+			LoginHash:     HashAuthTwoFaFields(*member, authFields, twoFaFields),
 			CensusID:      censusID,
 			CreatedAt:     currentTime,
 			UpdatedAt:     currentTime,
