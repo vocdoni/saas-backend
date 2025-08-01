@@ -5,6 +5,7 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -228,7 +229,7 @@ func TestCensusParticipant(t *testing.T) {
 				{
 					MemberNumber: "test1",
 					Email:        "test1@example.com",
-					Phone:        "1234567890",
+					Phone:        NewPhone("1234567890"),
 					Password:     "password1",
 				},
 			}
@@ -245,7 +246,7 @@ func TestCensusParticipant(t *testing.T) {
 				{
 					MemberNumber: "test1",
 					Email:        "test1@example.com",
-					Phone:        "1234567890",
+					Phone:        NewPhone("1234567890"),
 					Password:     "password1",
 				},
 			}
@@ -264,13 +265,13 @@ func TestCensusParticipant(t *testing.T) {
 				{
 					MemberNumber: "test1",
 					Email:        "test1@example.com",
-					Phone:        "1234567890",
+					Phone:        NewPhone("+34698111111"),
 					Password:     "password1",
 				},
 				{
 					MemberNumber: "test2",
 					Email:        "test2@example.com",
-					Phone:        "0987654321",
+					Phone:        NewPhone("+34698222222"),
 					Password:     "password2",
 				},
 			}
@@ -292,8 +293,7 @@ func TestCensusParticipant(t *testing.T) {
 				member, err := testDB.OrgMemberByMemberNumber(testOrgAddress, p.MemberNumber)
 				c.Assert(err, qt.IsNil)
 				c.Assert(member.Email, qt.Not(qt.Equals), "")
-				c.Assert(member.Phone, qt.Equals, "")
-				c.Assert(member.HashedPhone, qt.Not(qt.Equals), "")
+				c.Assert(member.Phone.GetHashed(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, p.Phone.original))
 				c.Assert(member.Password, qt.Equals, "")
 				c.Assert(member.HashedPass, qt.Not(qt.Equals), "")
 				c.Assert(member.CreatedAt.IsZero(), qt.IsFalse)
@@ -312,13 +312,13 @@ func TestCensusParticipant(t *testing.T) {
 				{
 					MemberNumber: "update1",
 					Email:        "update1@example.com",
-					Phone:        "1234567890",
+					Phone:        NewPhone("+34698123456"),
 					Password:     "password1",
 				},
 				{
 					MemberNumber: "update2",
 					Email:        "update2@example.com",
-					Phone:        "0987654321",
+					Phone:        NewPhone("+34698654321"),
 					Password:     "password2",
 				},
 			}
@@ -344,7 +344,7 @@ func TestCensusParticipant(t *testing.T) {
 			member1, err := testDB.OrgMemberByMemberNumber(testOrgAddress, members[1].MemberNumber)
 			c.Assert(err, qt.IsNil)
 			members[1].ID = member1.ID
-			members[1].Phone = "1111111111"
+			members[1].Phone = NewPhone("+34698111111")
 
 			progressChan, err = testDB.SetBulkCensusOrgMemberParticipant("test_salt", censusID, members)
 			c.Assert(err, qt.IsNil)
@@ -359,12 +359,11 @@ func TestCensusParticipant(t *testing.T) {
 			c.Assert(lastProgress.Progress, qt.Equals, 100)
 
 			// Verify updates
-			for i, p := range members {
+			for _, p := range members {
 				member, err := testDB.OrgMemberByMemberNumber(testOrgAddress, p.MemberNumber)
 				c.Assert(err, qt.IsNil)
-				c.Assert(member.Email, qt.Equals, members[i].Email)
-				c.Assert(member.Phone, qt.Equals, "")
-				c.Assert(member.HashedPhone, qt.Not(qt.Equals), "")
+				c.Assert(member.Email, qt.Equals, p.Email)
+				c.Assert(member.Phone.GetHashed(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, p.Phone.original))
 			}
 		})
 	})

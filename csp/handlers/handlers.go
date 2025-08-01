@@ -467,14 +467,6 @@ func verifyEmail(email string, storedEmail string) error {
 	return nil
 }
 
-// verifyPhone checks if the provided phone matches the member's hashed phone
-func verifyPhone(orgAddress common.Address, phone string, hashedPhone []byte) error {
-	if !bytes.Equal(internal.HashOrgData(orgAddress, phone), hashedPhone) {
-		return errors.ErrUnauthorized.Withf("invalid user phone")
-	}
-	return nil
-}
-
 // handleEmailContact verifies the email and returns the appropriate contact method
 func handleEmailContact(
 	email string,
@@ -490,9 +482,9 @@ func handleEmailContact(
 func handlePhoneContact(
 	orgAddress common.Address,
 	phone string,
-	hashedPhone []byte,
+	memberPhone *db.Phone,
 ) (string, notifications.ChallengeType, error) {
-	if err := verifyPhone(orgAddress, phone, hashedPhone); err != nil {
+	if err := memberPhone.Matches(phone, orgAddress); err != nil {
 		return "", "", err
 	}
 	return phone, notifications.SMSChallenge, nil
@@ -509,7 +501,7 @@ func determineContactMethod(
 		return handleEmailContact(req.Email, member.Email)
 
 	case db.CensusTypeSMS:
-		return handlePhoneContact(census.OrgAddress, req.Phone, member.HashedPhone)
+		return handlePhoneContact(census.OrgAddress, req.Phone, member.Phone)
 
 	case db.CensusTypeSMSorMail:
 		if req.Email != "" {
@@ -517,7 +509,7 @@ func determineContactMethod(
 		}
 
 		if req.Phone != "" {
-			return handlePhoneContact(census.OrgAddress, req.Phone, member.HashedPhone)
+			return handlePhoneContact(census.OrgAddress, req.Phone, member.Phone)
 		}
 	}
 

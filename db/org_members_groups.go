@@ -381,7 +381,6 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 
 		// if thedata pass all checkss  append the member ID to the results
 		results.Members = append(results.Members, m.ID)
-
 	}
 	if err := cur.Err(); err != nil {
 		return nil, err

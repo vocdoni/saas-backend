@@ -212,16 +212,10 @@ func prepareMember(member *OrgMember, orgAddress common.Address, salt string, cu
 	member.OrgAddress = orgAddress
 	member.CreatedAt = currentTime
 
-	// Hash phone if valid
-	if member.Phone != "" {
-		pn, err := internal.SanitizeAndVerifyPhoneNumber(member.Phone)
-		if err != nil {
-			log.Warnw("invalid phone number", "phone", member.Phone)
-			member.Phone = ""
-		} else {
-			member.HashedPhone = internal.HashOrgData(orgAddress, pn)
-			member.Phone = ""
-		}
+	// Phone handling is now done by the Phone type itself
+	if member.Phone != nil && !member.Phone.IsEmpty() {
+		// Ensure the phone has the correct org address for hashing
+		member.Phone.HashWithOrgAddress(orgAddress)
 	}
 
 	// Hash password if present

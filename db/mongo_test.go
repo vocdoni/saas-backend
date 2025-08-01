@@ -19,6 +19,7 @@ var (
 	testThirdOrgAddress   = common.Address{0xca, 0xfe, 0x03}
 	testFourthOrgAddress  = common.Address{0xca, 0xfe, 0x04}
 	testNonExistentOrg    = common.Address{0x01, 0x02, 0x03, 0x04}
+	testPhone             = NewPhone("+34678909090")
 )
 
 const (
@@ -28,7 +29,6 @@ const (
 	testDBLastName   = "User"
 	testMemberNumber = "member123"
 	testMemberEmail  = "member@test.com"
-	testPhone        = "+34678909090"
 	testName         = "Test Member"
 	testPassword     = "testpass123"
 	testSalt         = "testSalt"
