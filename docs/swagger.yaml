@@ -59,6 +59,17 @@ definitions:
         format: hex
         type: string
     type: object
+  apicommon.CensusParticipantsResponse:
+    properties:
+      censusId:
+        description: Unique identifier for the census
+        type: string
+      memberIds:
+        description: List of member IDs of the participants
+        items:
+          type: string
+        type: array
+    type: object
   apicommon.CreateCensusRequest:
     properties:
       authFields:
@@ -22601,6 +22612,46 @@ paths:
       security:
       - BearerAuth: []
       summary: Add participants to a census
+      tags:
+      - census
+  /census/{id}/participants:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve participants of a census by ID. Requires Manager/Admin
+        role.
+      parameters:
+      - description: Census ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.CensusParticipantsResponse'
+        "400":
+          description: Invalid census ID
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Census not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get census participants
       tags:
       - census
   /census/{id}/publish:

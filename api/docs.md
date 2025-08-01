@@ -70,6 +70,7 @@
   - [📢 Publish Census](#-publish-census)
   - [📋 Get Published Census Info](#-get-published-census-info)
   - [📢 Publish Group Census](#-publish-group-census)
+  - [👥 Get Census Participants](#-get-census-participants)
 - [🔄 Process](#-process)
   - [🆕 Create Process](#-create-process)
   - [ℹ️ Get Process Info](#-get-process-info)
@@ -2188,6 +2189,32 @@ Publishes a census, making it available for voting. Requires Manager or Admin ro
 | `401` | `40001` | `user not authorized` |
 | `400` | `40004` | `malformed JSON body` |
 | `400` | `40010` | `invalid census ID or group ID` |
+| `404` | `40404` | `census not found` |
+| `500` | `50002` | `internal server error` |
+
+### 👥 Get Census Participants
+
+* **Path** `/census/{id}/participants`
+* **Method** `GET`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+* **Description**
+  Retrieve participants of a census by ID. Requires Manager/Admin role.
+
+* **Response**
+```json
+{
+  "censusID": "census_id_string",
+  "memberIDs": ["member_id_1", "member_id_2", "member_id_3"]
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `400` | `40010` | `malformed URL parameter` |
 | `404` | `40404` | `census not found` |
 | `500` | `50002` | `internal server error` |
 

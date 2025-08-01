@@ -444,3 +444,65 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 		Size: inserted,
 	})
 }
+
+// censusParticipantsHandler godoc
+//
+//	@Summary		Get census participants
+//	@Description	Retrieve participants of a census by ID. Requires Manager/Admin role.
+//	@Tags			census
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string	true	"Census ID"
+//	@Success		200	{object}	apicommon.CensusParticipantsResponse
+//	@Failure		400	{object}	errors.Error	"Invalid census ID"
+//	@Failure		401	{object}	errors.Error	"Unauthorized"
+//	@Failure		404	{object}	errors.Error	"Census not found"
+//	@Failure		500	{object}	errors.Error	"Internal server error"
+//	@Router			/census/{id}/participants [get]
+func (a *API) censusParticipantsHandler(w http.ResponseWriter, r *http.Request) {
+	censusID := internal.HexBytes{}
+	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
+		errors.ErrMalformedURLParam.Withf("wrong census ID").Write(w)
+		return
+	}
+
+	// retrieve census
+	census, err := a.db.Census(censusID.String())
+	if err != nil {
+		if err == db.ErrNotFound {
+			errors.ErrCensusNotFound.Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
+	// get the user from the request context
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+
+	// check the user has the necessary permissions
+	if !user.HasRoleFor(census.OrgAddress, db.ManagerRole) && !user.HasRoleFor(census.OrgAddress, db.AdminRole) {
+		errors.ErrUnauthorized.Withf("user does not have the necessary permissions in the organization").Write(w)
+		return
+	}
+
+	participants, err := a.db.CensusParticipants(censusID.String())
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	participantMemberIDs := make([]string, len(participants))
+	for i, p := range participants {
+		participantMemberIDs[i] = p.ParticipantID
+	}
+
+	apicommon.HTTPWriteJSON(w, &apicommon.CensusParticipantsResponse{
+		CensusID:  censusID.String(),
+		MemberIDs: participantMemberIDs,
+	})
+}

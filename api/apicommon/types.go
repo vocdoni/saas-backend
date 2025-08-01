@@ -747,6 +747,15 @@ type PublishCensusGroupRequest struct {
 	TwoFaFields db.OrgMemberTwoFaFields `json:"twoFaFields,omitempty"`
 }
 
+// CensusParticipantsResponse returns the memberIDs of the participants of a census.
+// swagger:model CensusParticipantsResponse
+type CensusParticipantsResponse struct {
+	// Unique identifier for the census
+	CensusID string `json:"censusId"`
+	// List of member IDs of the participants
+	MemberIDs []string `json:"memberIds"`
+}
+
 // OrganizationCensusFromDB converts a db.Census to an OrganizationCensus.
 func OrganizationCensusFromDB(census *db.Census) OrganizationCensus {
 	if census == nil {
