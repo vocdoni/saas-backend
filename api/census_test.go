@@ -399,6 +399,14 @@ func TestCensus(t *testing.T) {
 		t.Logf("Published group census with URI: %s and Root: %s",
 			publishedGroupCensus.URI, publishedGroupCensus.Root)
 
+		// Verify that the census participants are correctly set
+		participantsResp := requestAndParse[apicommon.CensusParticipantsResponse](
+			t, http.MethodGet, adminToken, nil,
+			censusEndpoint, groupCensusID, "participants")
+		c.Assert(len(participantsResp.MemberIDs), qt.Equals, 2)
+		c.Assert(participantsResp.MemberIDs[0], qt.Equals, memberIDs[0])
+		c.Assert(participantsResp.MemberIDs[1], qt.Equals, memberIDs[1])
+
 		// Test 9.2: Test with already published census
 		// Publishing again should return the same information
 		publishedAgain := requestAndParse[apicommon.PublishedCensusResponse](
