@@ -893,6 +893,10 @@ definitions:
     type: object
   db.Census:
     properties:
+      authFields:
+        items:
+          $ref: '#/definitions/db.OrgMemberAuthField'
+        type: array
       createdAt:
         type: string
       groupId:
@@ -903,18 +907,14 @@ definitions:
         items:
           type: integer
         type: array
-      orgMemberAuthFields:
-        items:
-          $ref: '#/definitions/db.OrgMemberAuthField'
-        type: array
-      orgMemberTwoFaFields:
-        items:
-          $ref: '#/definitions/db.OrgMemberTwoFaField'
-        type: array
       published:
         $ref: '#/definitions/db.PublishedCensus'
       size:
         type: integer
+      twoFaFields:
+        items:
+          $ref: '#/definitions/db.OrgMemberTwoFaField'
+        type: array
       type:
         $ref: '#/definitions/db.CensusType'
       updatedAt:

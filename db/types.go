@@ -181,8 +181,8 @@ type Census struct {
 	Size        int64                `json:"size" bson:"size"`
 	GroupID     primitive.ObjectID   `json:"groupId" bson:"groupId"`
 	Published   PublishedCensus      `json:"published" bson:"published"`
-	AuthFields  OrgMemberAuthFields  `json:"orgMemberAuthFields" bson:"orgMemberAuthFields"`
-	TwoFaFields OrgMemberTwoFaFields `json:"orgMemberTwoFaFields" bson:"orgMemberTwoFaFields"`
+	AuthFields  OrgMemberAuthFields  `json:"authFields" bson:"orgMemberAuthFields"`
+	TwoFaFields OrgMemberTwoFaFields `json:"twoFaFields" bson:"orgMemberTwoFaFields"`
 
 	CreatedAt time.Time `json:"createdAt" bson:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt" bson:"updatedAt"`

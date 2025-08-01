@@ -411,7 +411,6 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// if census.Type == CensusTypeSMSOrMail || census.Type == CenT {
 	// build the census and store it
 	cspSignerPubKey, err := a.csp.PubKey()
 	if err != nil {
@@ -423,15 +422,15 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	if len(census.TwoFaFields) > 0 {
-		census.Published.Root = rootHex
-		census.Published.URI = a.serverURL + "/process"
-		census.Published.CreatedAt = time.Now()
-	} else {
+	if len(census.TwoFaFields) == 0 && len(census.AuthFields) == 0 {
 		// non CSP censuses
 		errors.ErrCensusTypeNotFound.Write(w)
 		return
 	}
+
+	census.Published.Root = rootHex
+	census.Published.URI = a.serverURL + "/process"
+	census.Published.CreatedAt = time.Now()
 
 	if _, err := a.db.SetCensus(census); err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
