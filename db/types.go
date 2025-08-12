@@ -523,3 +523,27 @@ func (p *Phone) HashWithOrgAddress(orgAddress common.Address) {
 		}
 	}
 }
+
+// JobType represents the type of import job
+type JobType string
+
+const (
+	// JobTypeOrgMembers represents organization member import jobs
+	JobTypeOrgMembers JobType = "org_members"
+	// JobTypeCensusParticipants represents census participant import jobs
+	JobTypeCensusParticipants JobType = "census_participants"
+)
+
+// Job represents a persistent import job with its results and errors.
+// This allows clients to query job status and errors even after server restarts.
+type Job struct {
+	ID          primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	JobID       string             `json:"jobId" bson:"jobId"`           // The hex job ID
+	Type        JobType            `json:"type" bson:"type"`             // Job type constant
+	OrgAddress  common.Address     `json:"orgAddress" bson:"orgAddress"` // For authorization
+	Total       int                `json:"total" bson:"total"`           // Total items processed
+	Added       int                `json:"added" bson:"added"`           // Items successfully added
+	Errors      []string           `json:"errors" bson:"errors"`         // All errors encountered
+	CreatedAt   time.Time          `json:"createdAt" bson:"createdAt"`
+	CompletedAt time.Time          `json:"completedAt" bson:"completedAt"`
+}

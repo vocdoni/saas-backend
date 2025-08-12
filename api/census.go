@@ -199,10 +199,27 @@ func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Reques
 
 	// if async create a new job identifier
 	jobID := internal.HexBytes(util.RandomBytes(16))
+
+	// Create persistent job record
+	if err := a.db.CreateJob(jobID.String(), db.JobTypeCensusParticipants, census.OrgAddress, len(members.Members)); err != nil {
+		log.Warnw("failed to create persistent job record", "error", err, "jobId", jobID.String())
+		// Continue with in-memory only (fallback)
+	}
+
 	go func() {
 		for p := range progressChan {
 			// We need to drain the channel to avoid blocking
 			addParticipantsToCensusWorkers.Store(jobID.String(), p)
+
+			// When job completes, persist final results
+			if p.Progress == 100 {
+				// we pass CompleteJob an empty errors slice, because SetBulkCensusOrgMemberParticipant
+				// doesn't collect errors, it only reports progress over the channel.
+				if err := a.db.CompleteJob(jobID.String(), p.Added, []string{}); err != nil {
+					log.Warnw("failed to persist job completion", "error", err, "jobId", jobID.String())
+				}
+				addParticipantsToCensusWorkers.Delete(jobID.String())
+			}
 		}
 	}()
 
@@ -222,31 +239,41 @@ func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Reques
 //	@Failure		400		{object}	errors.Error	"Invalid job ID"
 //	@Failure		404		{object}	errors.Error	"Job not found"
 //	@Router			/census/job/{jobid} [get]
-func (*API) censusAddParticipantsJobStatusHandler(w http.ResponseWriter, r *http.Request) {
+func (a *API) censusAddParticipantsJobStatusHandler(w http.ResponseWriter, r *http.Request) {
 	jobID := internal.HexBytes{}
 	if err := jobID.ParseString(chi.URLParam(r, "jobid")); err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid job ID").Write(w)
 		return
 	}
 
+	// First check in-memory for active jobs
 	if v, ok := addParticipantsToCensusWorkers.Load(jobID.String()); ok {
 		p, ok := v.(*db.BulkCensusParticipantStatus)
 		if !ok {
 			errors.ErrGenericInternalServerError.Withf("invalid job status type").Write(w)
 			return
 		}
-		if p.Progress == 100 {
-			go func() {
-				// Schedule the deletion of the job after 60 seconds
-				time.Sleep(60 * time.Second)
-				addParticipantsToCensusWorkers.Delete(jobID.String())
-			}()
-		}
 		apicommon.HTTPWriteJSON(w, p)
 		return
 	}
 
-	errors.ErrJobNotFound.Withf("%s", jobID.String()).Write(w)
+	// If not in memory, check database for completed jobs
+	job, err := a.db.Job(jobID.String())
+	if err != nil {
+		if err == db.ErrNotFound {
+			errors.ErrJobNotFound.Withf("%s", jobID.String()).Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.Withf("failed to get job: %v", err).Write(w)
+		return
+	}
+
+	// Return persistent job data in the same format as BulkCensusParticipantStatus
+	apicommon.HTTPWriteJSON(w, &db.BulkCensusParticipantStatus{
+		Progress: 100, // Completed jobs are always 100%
+		Total:    job.Total,
+		Added:    job.Added,
+	})
 }
 
 // publishCensusHandler godoc
