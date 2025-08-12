@@ -50,6 +50,7 @@ type MongoStorage struct {
 	processBundles      *mongo.Collection
 	cspTokens           *mongo.Collection
 	cspTokensStatus     *mongo.Collection
+	jobs                *mongo.Collection
 }
 
 type Options struct {

@@ -181,10 +181,24 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 
 	// if async create a new job identifier
 	jobID := internal.HexBytes(util.RandomBytes(16))
+
+	// Create persistent job record
+	if err := a.db.CreateJob(jobID.String(), db.JobTypeOrgMembers, org.Address, len(members.Members)); err != nil {
+		log.Warnw("failed to create persistent job record", "error", err, "jobId", jobID.String())
+		// Continue with in-memory only (fallback)
+	}
+
 	go func() {
 		for p := range progressChan {
 			// Store progress updates in a map that is read by another endpoint to check a job status
 			addMembersToOrgWorkers.Store(jobID.String(), p)
+
+			// When job completes, persist final results
+			if p.Progress == 100 {
+				if err := a.db.CompleteJob(jobID.String(), p.Added, p.ErrorsAsStrings()); err != nil {
+					log.Warnw("failed to persist job completion", "error", err, "jobId", jobID.String())
+				}
+			}
 		}
 	}()
 
@@ -207,13 +221,14 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
 //	@Failure		404		{object}	errors.Error	"Job not found"
 //	@Router			/organizations/{address}/members/job/{jobid} [get]
-func (*API) addOrganizationMembersJobStatusHandler(w http.ResponseWriter, r *http.Request) {
+func (a *API) addOrganizationMembersJobStatusHandler(w http.ResponseWriter, r *http.Request) {
 	jobID := internal.HexBytes{}
 	if err := jobID.ParseString(chi.URLParam(r, "jobid")); err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid job ID").Write(w)
 		return
 	}
 
+	// First check in-memory for active jobs
 	if v, ok := addMembersToOrgWorkers.Load(jobID.String()); ok {
 		p, ok := v.(*db.BulkOrgMembersJob)
 		if !ok {
@@ -236,7 +251,24 @@ func (*API) addOrganizationMembersJobStatusHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
-	errors.ErrJobNotFound.Withf("%s", jobID.String()).Write(w)
+	// If not in memory, check database for completed jobs
+	job, err := a.db.Job(jobID.String())
+	if err != nil {
+		if err == db.ErrNotFound {
+			errors.ErrJobNotFound.Withf("%s", jobID.String()).Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.Withf("failed to get job: %v", err).Write(w)
+		return
+	}
+
+	// Return persistent job data
+	apicommon.HTTPWriteJSON(w, apicommon.AddMembersJobResponse{
+		Added:    uint32(job.Added),
+		Errors:   job.Errors,
+		Progress: 100, // Completed jobs are always 100%
+		Total:    uint32(job.Total),
+	})
 }
 
 // deleteOrganizationMembersHandler godoc
