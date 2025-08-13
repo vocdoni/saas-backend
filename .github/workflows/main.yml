@@ -18,12 +18,9 @@ jobs:
           go-version: 1.24.x
           cache: true
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v7
-        ### golangci-lint will take much time if loading multiple linters in .golangci.yml
+        uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.0
-          args: --timeout 5m --verbose
-          skip-cache: true
+          version: v2.4
           only-new-issues: true
 
   test:
