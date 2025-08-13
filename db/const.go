@@ -22,8 +22,15 @@ const (
 	CodeTypeOrgInviteUpdate CodeType = "organization_invite_update"
 )
 
-// writableRoles is a map that contains if the role is writable or not
-var writableRoles = map[UserRole]bool{
+// organizationWritePermissions is a map that contains if the role has organization write permission
+var organizationWritePermissions = map[UserRole]bool{
+	AdminRole:   true,
+	ManagerRole: false,
+	ViewerRole:  false,
+}
+
+// processWritePermissions is a map that contains if the role has process write permission
+var processWritePermissions = map[UserRole]bool{
 	AdminRole:   true,
 	ManagerRole: true,
 	ViewerRole:  false,
@@ -36,9 +43,14 @@ var UserRolesNames = map[UserRole]string{
 	ViewerRole:  "Viewer",
 }
 
-// HasWriteAccess function checks if the user role has write access
-func HasWriteAccess(role UserRole) bool {
-	return writableRoles[role]
+// HasOrganizationWritePermission function checks if the user role has organization write permission
+func HasOrganizationWritePermission(role UserRole) bool {
+	return organizationWritePermissions[role]
+}
+
+// HasProcessWritePermission function checks if the user role has process write permission
+func HasProcessWritePermission(role UserRole) bool {
+	return processWritePermissions[role]
 }
 
 // validOrganizationTypes is a map that contains the valid organization types
