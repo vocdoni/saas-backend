@@ -529,9 +529,10 @@ func (*API) organizationRolesHandler(w http.ResponseWriter, _ *http.Request) {
 	availableRoles := []*apicommon.OrganizationRole{}
 	for role, name := range db.UserRolesNames {
 		availableRoles = append(availableRoles, &apicommon.OrganizationRole{
-			Role:            string(role),
-			Name:            name,
-			WritePermission: db.HasWriteAccess(role),
+			Role:                        string(role),
+			Name:                        name,
+			OrganizationWritePermission: db.HasOrganizationWritePermission(role),
+			ProcessWritePermission:      db.HasProcessWritePermission(role),
 		})
 	}
 	apicommon.HTTPWriteJSON(w, &apicommon.OrganizationRoleList{Roles: availableRoles})

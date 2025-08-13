@@ -978,4 +978,46 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(errorResp.Error, qt.Contains, "max users reached")
 	})
+
+	t.Run("OrganizationRoles", func(t *testing.T) {
+		// Test the GET /organizations/roles endpoint to verify the new permission structure
+		resp, code := testRequest(t, http.MethodGet, "", nil, "organizations", "roles")
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+		var roles apicommon.OrganizationRoleList
+		err := parseJSON(resp, &roles)
+		c.Assert(err, qt.IsNil)
+
+		// Verify we have the expected roles
+		c.Assert(len(roles.Roles), qt.Equals, 3) // Admin, Manager, Viewer
+
+		// Create a map for easier verification
+		roleMap := make(map[string]*apicommon.OrganizationRole)
+		for _, role := range roles.Roles {
+			roleMap[role.Role] = role
+		}
+
+		// Verify Admin role permissions
+		adminRole, exists := roleMap["admin"]
+		c.Assert(exists, qt.IsTrue, qt.Commentf("Admin role not found"))
+		c.Assert(adminRole.Name, qt.Equals, "Admin")
+		c.Assert(adminRole.OrganizationWritePermission, qt.IsTrue)
+		c.Assert(adminRole.ProcessWritePermission, qt.IsTrue)
+
+		// Verify Manager role permissions
+		managerRole, exists := roleMap["manager"]
+		c.Assert(exists, qt.IsTrue, qt.Commentf("Manager role not found"))
+		c.Assert(managerRole.Name, qt.Equals, "Manager")
+		c.Assert(managerRole.OrganizationWritePermission, qt.IsFalse)
+		c.Assert(managerRole.ProcessWritePermission, qt.IsTrue)
+
+		// Verify Viewer role permissions
+		viewerRole, exists := roleMap["viewer"]
+		c.Assert(exists, qt.IsTrue, qt.Commentf("Viewer role not found"))
+		c.Assert(viewerRole.Name, qt.Equals, "Viewer")
+		c.Assert(viewerRole.OrganizationWritePermission, qt.IsFalse)
+		c.Assert(viewerRole.ProcessWritePermission, qt.IsFalse)
+
+		t.Logf("Organization roles response: %s", resp)
+	})
 }
