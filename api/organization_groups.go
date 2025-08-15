@@ -9,6 +9,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"go.vocdoni.io/dvote/log"
 )
 
 // organizationMemberGroupsHandler godoc
@@ -155,7 +156,7 @@ func (a *API) organizationMemberGroupHandler(w http.ResponseWriter, r *http.Requ
 // createOrganizationMemberGroupHandler godoc
 //
 //	@Summary		Create an organization member group
-//	@Description	Create an organization member group with the given members
+//	@Description	Create an organization member group with the given members or all members
 //	@Description	Needs admin or manager role
 //	@Tags			organizations
 //	@Accept			json
@@ -194,10 +195,31 @@ func (a *API) createOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
+	var memberIDs []string
+	var err error
+
+	// Check if we should include all members
+	if toCreate.IncludeAllMembers {
+		// Get all member IDs from the database
+		memberIDs, err = a.db.GetAllOrgMemberIDs(org.Address)
+		if err != nil {
+			errors.ErrGenericInternalServerError.Withf("could not get all org member IDs: %v", err).Write(w)
+			return
+		}
+		log.Infow("creating group with all organization members",
+			"org", org.Address.Hex(),
+			"count", len(memberIDs),
+			"user", user.Email,
+			"title", toCreate.Title)
+	} else {
+		// Use the provided member IDs
+		memberIDs = toCreate.MemberIDs
+	}
+
 	newMemberGroup := &db.OrganizationMemberGroup{
 		Title:       toCreate.Title,
 		Description: toCreate.Description,
-		MemberIDs:   toCreate.MemberIDs,
+		MemberIDs:   memberIDs,
 		OrgAddress:  org.Address,
 	}
 

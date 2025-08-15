@@ -118,6 +118,7 @@ func (ms *MongoStorage) CreateOrganizationMemberGroup(group *OrganizationMemberG
 		}
 		return "", fmt.Errorf("organization not found: %w", err)
 	}
+
 	// check that the members are valid
 	err := ms.validateOrgMembers(ctx, group.OrgAddress, group.MemberIDs)
 	if err != nil {
