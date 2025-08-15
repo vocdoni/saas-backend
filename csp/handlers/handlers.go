@@ -385,12 +385,12 @@ func validateEmail(email string) error {
 }
 
 // validatePhone validates and sanitizes the phone number if provided
-func validatePhone(phone *string) error {
+func (c *CSPHandlers) validatePhone(phone *string, orgAddress common.Address) error {
 	if len(*phone) == 0 {
 		return nil
 	}
 
-	sanitizedPhone, err := internal.SanitizeAndVerifyPhoneNumber(*phone)
+	sanitizedPhone, err := internal.SanitizeAndVerifyPhoneNumber(*phone, c.mainDB.OrganizationCountry(orgAddress))
 	if err != nil {
 		log.Warnw("invalid phone number format", "phone", *phone, "error", err)
 		return errors.ErrInvalidUserData.Withf("invalid phone number format")
@@ -400,7 +400,7 @@ func validatePhone(phone *string) error {
 }
 
 // validateAuthRequest validates the authentication request data
-func validateAuthRequest(req *AuthRequest) error {
+func (c *CSPHandlers) validateAuthRequest(req *AuthRequest, orgAddress common.Address) error {
 	// Check request participant ID
 	err := validateParticipantID(req.ParticipantID)
 	if err != nil {
@@ -420,7 +420,7 @@ func validateAuthRequest(req *AuthRequest) error {
 	}
 
 	// Validate phone if provided
-	return validatePhone(&req.Phone)
+	return c.validatePhone(&req.Phone, orgAddress)
 }
 
 // getCensusAndOrgMember retrieves the census and org member information
@@ -543,13 +543,13 @@ func (c *CSPHandlers) authFirstStep(
 		return nil, errors.ErrMalformedBody.Withf("invalid JSON request")
 	}
 
-	if err := validateAuthRequest(&req); err != nil {
+	// Get census and participant information first to get the organization address
+	census, orgMember, err := c.getCensusAndOrgMember(censusID, req.ParticipantID)
+	if err != nil {
 		return nil, err
 	}
 
-	// Get census and participant information
-	census, orgMember, err := c.getCensusAndOrgMember(censusID, req.ParticipantID)
-	if err != nil {
+	if err := c.validateAuthRequest(&req, census.OrgAddress); err != nil {
 		return nil, err
 	}
 

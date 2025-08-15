@@ -27,9 +27,16 @@ func ValidEmail(email string) bool {
 	return emailRegex.MatchString(email)
 }
 
-// SanitizeAndVerifyPhoneNumber helper function allows to sanitize and verify a phone number.
-func SanitizeAndVerifyPhoneNumber(phone string) (string, error) {
-	pn, err := phonenumbers.Parse(phone, DefaultPhoneCountry)
+// SanitizeAndVerifyPhoneNumber helper function allows to sanitize and verify a phone number
+// using a specific country code as the default for numbers without country codes.
+// If country is the empty string, it falls back to internal.DefaultPhoneCountry
+func SanitizeAndVerifyPhoneNumber(phone, country string) (string, error) {
+	// Use default country if country is empty
+	if country == "" {
+		country = DefaultPhoneCountry
+	}
+
+	pn, err := phonenumbers.Parse(phone, country)
 	if err != nil {
 		return "", fmt.Errorf("invalid phone number %s: %w", phone, err)
 	}

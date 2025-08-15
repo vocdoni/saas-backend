@@ -169,6 +169,16 @@ func (ms *MongoStorage) OrganizationUsers(address common.Address) ([]User, error
 	return users, nil
 }
 
+// OrganizationCountry method returns the organization country.
+// In case of error (the organization doesn't exist, etc) returns an empty string.
+func (ms *MongoStorage) OrganizationCountry(address common.Address) string {
+	org, err := ms.Organization(address)
+	if err != nil {
+		return ""
+	}
+	return org.Country
+}
+
 // UpdateOrganizationUserRole method updates the role of the user in the
 // organization with the given address.
 func (ms *MongoStorage) UpdateOrganizationUserRole(address common.Address, userID uint64, newRole UserRole) error {

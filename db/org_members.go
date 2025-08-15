@@ -38,7 +38,8 @@ func (ms *MongoStorage) SetOrgMember(salt string, orgMember *OrgMember) (string,
 
 	if orgMember.Phone != "" {
 		// normalize and store only the hashed phone
-		normalizedPhone, err := internal.SanitizeAndVerifyPhoneNumber(orgMember.Phone)
+		normalizedPhone, err := internal.SanitizeAndVerifyPhoneNumber(orgMember.Phone,
+			ms.OrganizationCountry(orgMember.OrgAddress))
 		if err == nil {
 			orgMember.HashedPhone = internal.HashOrgData(orgMember.OrgAddress, normalizedPhone)
 		}
@@ -173,7 +174,8 @@ func (ms *MongoStorage) validateBulkOrgMembers(
 }
 
 // prepareOrgMember processes a member for storage
-func prepareOrgMember(member *OrgMember, orgAddress common.Address, salt string, currentTime time.Time) []error {
+func prepareOrgMember(member *OrgMember, orgAddress common.Address, salt string, currentTime time.Time, country string,
+) []error {
 	var errors []error
 
 	// Assign a new internal ID if not provided
@@ -194,7 +196,7 @@ func prepareOrgMember(member *OrgMember, orgAddress common.Address, salt string,
 
 	// Hash phone if valid
 	if member.Phone != "" {
-		normalizedPhone, err := internal.SanitizeAndVerifyPhoneNumber(member.Phone)
+		normalizedPhone, err := internal.SanitizeAndVerifyPhoneNumber(member.Phone, country)
 		if err == nil {
 			member.HashedPhone = internal.HashOrgData(orgAddress, normalizedPhone)
 		} else {
@@ -226,13 +228,14 @@ func (ms *MongoStorage) createOrgMemberBulkOperations(
 	orgAddress common.Address,
 	salt string,
 	currentTime time.Time,
+	country string,
 ) (int, []error) {
 	var bulkOps []mongo.WriteModel
 	var errors []error
 
 	for _, member := range members {
 		// Prepare the member
-		validationErrors := prepareOrgMember(&member, orgAddress, salt, currentTime)
+		validationErrors := prepareOrgMember(&member, orgAddress, salt, currentTime, country)
 		errors = append(errors, validationErrors...)
 
 		// Create filter for existing members and update document
@@ -356,6 +359,7 @@ func (ms *MongoStorage) processOrgMemberBatches(
 			orgAddress,
 			salt,
 			currentTime,
+			ms.OrganizationCountry(orgAddress),
 		)
 
 		// Update job stats
