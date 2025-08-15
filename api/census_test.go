@@ -219,6 +219,64 @@ func TestCensus(t *testing.T) {
 	c.Assert(jobStatus.Added, qt.Equals, 2) // We added 2 members
 	c.Assert(jobStatus.Total, qt.Equals, 2)
 
+	// Test 3.6: Test jobs endpoint - basic functionality
+	jobsResponse := requestAndParse[apicommon.JobsResponse](
+		t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "jobs")
+	c.Assert(len(jobsResponse.Jobs), qt.Equals, 1, qt.Commentf("expected 1 job (the census participants job)"))
+	c.Assert(jobsResponse.TotalPages, qt.Equals, 1)
+	c.Assert(jobsResponse.CurrentPage, qt.Equals, 1)
+
+	// Verify the job details
+	job := jobsResponse.Jobs[0]
+	c.Assert(job.Type, qt.Equals, db.JobTypeCensusParticipants)
+	c.Assert(job.Total, qt.Equals, 2)
+	c.Assert(job.Added, qt.Equals, 2)
+	c.Assert(job.Completed, qt.Equals, true)
+	c.Assert(job.CreatedAt.IsZero(), qt.Equals, false)
+	c.Assert(job.CompletedAt.IsZero(), qt.Equals, false)
+	c.Assert(job.JobID, qt.Equals, jobIDHex.String())
+	t.Logf("Found job: ID=%s, Type=%s, Total=%d, Added=%d, Completed=%t",
+		job.JobID, job.Type, job.Total, job.Added, job.Completed)
+
+	// Test 3.7: Test jobs endpoint - pagination and filtering
+	// Test with pagination
+	jobsResponsePaged := requestAndParse[apicommon.JobsResponse](
+		t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "jobs?page=1&pageSize=1")
+	c.Assert(len(jobsResponsePaged.Jobs), qt.Equals, 1)
+	c.Assert(jobsResponsePaged.TotalPages, qt.Equals, 1)
+	c.Assert(jobsResponsePaged.CurrentPage, qt.Equals, 1)
+
+	// Test with job type filter
+	jobsResponseFiltered := requestAndParse[apicommon.JobsResponse](
+		t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "jobs?type=census_participants")
+	c.Assert(len(jobsResponseFiltered.Jobs), qt.Equals, 1)
+	c.Assert(jobsResponseFiltered.Jobs[0].Type, qt.Equals, db.JobTypeCensusParticipants)
+
+	// Test with different job type filter (should return empty)
+	jobsResponseEmpty := requestAndParse[apicommon.JobsResponse](
+		t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "jobs?type=org_members")
+	c.Assert(len(jobsResponseEmpty.Jobs), qt.Equals, 0, qt.Commentf("should be empty for org_members filter"))
+
+	// Test 3.8: Test jobs endpoint - authorization and error cases
+	// Test with no authentication
+	requestAndAssertCode(http.StatusUnauthorized,
+		t, http.MethodGet, "", nil,
+		"organizations", orgAddress.String(), "jobs")
+
+	// Test with invalid organization address
+	requestAndAssertCode(http.StatusBadRequest,
+		t, http.MethodGet, adminToken, nil,
+		"organizations", "invalid-address", "jobs")
+
+	// Test with invalid job type filter
+	requestAndAssertCode(http.StatusBadRequest,
+		t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "jobs?type=invalid_type")
+
 	// Test 4: Publish census
 	// Test 4.1: Test with valid data
 	publishedCensus := requestAndParse[apicommon.PublishedCensusResponse](t, http.MethodPost, adminToken, nil,
