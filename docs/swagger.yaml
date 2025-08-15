@@ -168,8 +168,12 @@ definitions:
     type: object
   apicommon.DeleteMembersRequest:
     properties:
+      all:
+        description: Delete all members of the organization
+        type: boolean
       ids:
-        description: List of member internal ids numbers to delete
+        description: List of member internal ids numbers to delete (optional if All
+          is true)
         items:
           type: string
         type: array
@@ -23425,15 +23429,15 @@ paths:
     delete:
       consumes:
       - application/json
-      description: Delete multiple members from an organization. Requires Manager/Admin
-        role.
+      description: Delete multiple members from an organization or all members. Requires
+        Manager/Admin role.
       parameters:
       - description: Organization address
         in: path
         name: address
         required: true
         type: string
-      - description: Member IDs to delete
+      - description: Member IDs to delete or all flag
         in: body
         name: request
         required: true
