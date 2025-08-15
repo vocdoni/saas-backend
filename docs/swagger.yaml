@@ -180,6 +180,50 @@ definitions:
         description: Number of members deleted
         type: integer
     type: object
+  apicommon.JobInfo:
+    properties:
+      added:
+        description: Items successfully processed
+        type: integer
+      completed:
+        description: Whether the job is completed
+        type: boolean
+      completedAt:
+        description: Job completion timestamp (zero if not completed)
+        type: string
+      createdAt:
+        description: Job creation timestamp
+        type: string
+      errors:
+        description: List of errors encountered
+        items:
+          type: string
+        type: array
+      jobId:
+        description: Unique job identifier
+        type: string
+      total:
+        description: Total items to process
+        type: integer
+      type:
+        allOf:
+        - $ref: '#/definitions/db.JobType'
+        description: Type of job
+    type: object
+  apicommon.JobsResponse:
+    properties:
+      currentPage:
+        description: Current page number
+        type: integer
+      jobs:
+        description: List of jobs
+        items:
+          $ref: '#/definitions/apicommon.JobInfo'
+        type: array
+      totalPages:
+        description: Total number of pages
+        type: integer
+    type: object
   apicommon.ListOrganizationMemberGroupResponse:
     properties:
       currentPage:
@@ -956,6 +1000,14 @@ definitions:
       whiteLabel:
         type: boolean
     type: object
+  db.JobType:
+    enum:
+    - org_members
+    - census_participants
+    type: string
+    x-enum-varnames:
+    - JobTypeOrgMembers
+    - JobTypeCensusParticipants
   db.OrgMemberAuthField:
     enum:
     - name
@@ -23315,6 +23367,58 @@ paths:
       security:
       - BearerAuth: []
       summary: Validate organization group members data
+      tags:
+      - organizations
+  /organizations/{address}/jobs:
+    get:
+      consumes:
+      - application/json
+      description: Get the list of import jobs for an organization with pagination
+        support
+      parameters:
+      - description: Organization address
+        in: path
+        name: address
+        required: true
+        type: string
+      - description: 'Page number (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - description: 'Number of items per page (default: 10)'
+        in: query
+        name: pageSize
+        type: integer
+      - description: Filter by job type (org_members or census_participants)
+        in: query
+        name: type
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.JobsResponse'
+        "400":
+          description: Invalid input
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get organization jobs
       tags:
       - organizations
   /organizations/{address}/member:
