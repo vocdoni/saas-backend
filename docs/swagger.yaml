@@ -100,8 +100,12 @@ definitions:
       description:
         description: Description of the group
         type: string
+      includeAllMembers:
+        description: Include all members of the organization in the group
+        type: boolean
       memberIds:
-        description: The IDs of the members to add to the group
+        description: The IDs of the members to add to the group (optional if IncludeAllMembers
+          is true)
         items:
           type: string
         type: array
@@ -23034,7 +23038,7 @@ paths:
       consumes:
       - application/json
       description: |-
-        Create an organization member group with the given members
+        Create an organization member group with the given members or all members
         Needs admin or manager role
       parameters:
       - description: Organization address

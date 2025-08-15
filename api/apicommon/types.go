@@ -173,8 +173,10 @@ type CreateOrganizationMemberGroupRequest struct {
 	Title string `json:"title"`
 	// Description of the group
 	Description string `json:"description"`
-	// The IDs of the members to add to the group
-	MemberIDs []string `json:"memberIds"`
+	// The IDs of the members to add to the group (optional if IncludeAllMembers is true)
+	MemberIDs []string `json:"memberIds,omitempty"`
+	// Include all members of the organization in the group
+	IncludeAllMembers bool `json:"includeAllMembers,omitempty"`
 }
 
 // OrganizationMemberGroupInfo represents detailed information about an organization member group.
