@@ -490,6 +490,32 @@ func (ms *MongoStorage) DeleteOrgMembers(orgAddress common.Address, ids []string
 	return int(result.DeletedCount), nil
 }
 
+// DeleteAllOrgMembers removes all members from an organization
+func (ms *MongoStorage) DeleteAllOrgMembers(orgAddress common.Address) (int, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return 0, ErrInvalidData
+	}
+
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// create the filter for the delete operation - only organization address
+	filter := bson.M{
+		"orgAddress": orgAddress,
+	}
+
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+
+	result, err := ms.orgMembers.DeleteMany(ctx, filter)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete all orgMembers: %w", err)
+	}
+
+	return int(result.DeletedCount), nil
+}
+
 // validateOrgMembers checks if the provided member IDs are valid
 func (ms *MongoStorage) validateOrgMembers(ctx context.Context, orgAddress common.Address, members []string) error {
 	if len(members) == 0 {

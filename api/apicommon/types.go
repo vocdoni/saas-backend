@@ -799,8 +799,10 @@ func (r *AddMembersRequest) DbOrgMembers(orgAddress common.Address) []db.OrgMemb
 }
 
 type DeleteMembersRequest struct {
-	// List of member internal ids numbers to delete
-	IDs []string `json:"ids"`
+	// List of member internal ids numbers to delete (optional if All is true)
+	IDs []string `json:"ids,omitempty"`
+	// Delete all members of the organization
+	All bool `json:"all,omitempty"`
 }
 
 type DeleteMembersResponse struct {

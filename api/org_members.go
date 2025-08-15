@@ -242,13 +242,13 @@ func (*API) addOrganizationMembersJobStatusHandler(w http.ResponseWriter, r *htt
 // deleteOrganizationMembersHandler godoc
 //
 //	@Summary		Delete organization members
-//	@Description	Delete multiple members from an organization. Requires Manager/Admin role.
+//	@Description	Delete multiple members from an organization or all members. Requires Manager/Admin role.
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			address	path		string							true	"Organization address"
-//	@Param			request	body		apicommon.DeleteMembersRequest	true	"Member IDs to delete"
+//	@Param			request	body		apicommon.DeleteMembersRequest	true	"Member IDs to delete or all flag"
 //	@Success		200		{object}	apicommon.DeleteMembersResponse
 //	@Failure		400		{object}	errors.Error	"Invalid input data"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
@@ -275,19 +275,38 @@ func (a *API) deleteOrganizationMembersHandler(w http.ResponseWriter, r *http.Re
 	// get memberIds from the request body
 	members := &apicommon.DeleteMembersRequest{}
 	if err := json.NewDecoder(r.Body).Decode(members); err != nil {
-		errors.ErrMalformedBody.Withf("error decoding member IDs").Write(w)
+		errors.ErrMalformedBody.Withf("error decoding member request").Write(w)
 		return
 	}
-	// check if there are member IDs to delete
-	if len(members.IDs) == 0 {
-		apicommon.HTTPWriteJSON(w, &apicommon.DeleteMembersResponse{Count: 0})
-		return
+
+	var deleted int
+	var err error
+
+	// check if we should delete all members
+	if members.All {
+		// delete all org members from the database
+		deleted, err = a.db.DeleteAllOrgMembers(org.Address)
+		if err != nil {
+			errors.ErrGenericInternalServerError.Withf("could not delete all org members: %v", err).Write(w)
+			return
+		}
+		log.Infow("deleted all organization members",
+			"org", org.Address.Hex(),
+			"count", deleted,
+			"user", user.Email)
+	} else {
+		// check if there are member IDs to delete
+		if len(members.IDs) == 0 {
+			apicommon.HTTPWriteJSON(w, &apicommon.DeleteMembersResponse{Count: 0})
+			return
+		}
+		// delete specific org members from the database
+		deleted, err = a.db.DeleteOrgMembers(org.Address, members.IDs)
+		if err != nil {
+			errors.ErrGenericInternalServerError.Withf("could not delete org members: %v", err).Write(w)
+			return
+		}
 	}
-	// delete the org members from the database
-	deleted, err := a.db.DeleteOrgMembers(org.Address, members.IDs)
-	if err != nil {
-		errors.ErrGenericInternalServerError.Withf("could not delete org members: %v", err).Write(w)
-		return
-	}
+
 	apicommon.HTTPWriteJSON(w, &apicommon.DeleteMembersResponse{Count: deleted})
 }
