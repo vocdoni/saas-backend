@@ -203,7 +203,7 @@ type BulkCensusParticipantStatus struct {
 // - Setting the creation timestamp
 // - Hashing sensitive data (email, phone, password)
 // - Clearing the original sensitive data
-func prepareMember(member *OrgMember, orgAddress common.Address, salt string, currentTime time.Time) {
+func prepareMember(member *OrgMember, orgAddress common.Address, salt string, currentTime time.Time, country string) {
 	// Assign a new internal ID if not provided
 	if member.ID == primitive.NilObjectID {
 		member.ID = primitive.NewObjectID()
@@ -214,7 +214,7 @@ func prepareMember(member *OrgMember, orgAddress common.Address, salt string, cu
 
 	// Hash phone if valid
 	if member.Phone != "" {
-		pn, err := internal.SanitizeAndVerifyPhoneNumber(member.Phone)
+		pn, err := internal.SanitizeAndVerifyPhoneNumber(member.Phone, country)
 		if err != nil {
 			log.Warnw("invalid phone number", "phone", member.Phone)
 			member.Phone = ""
@@ -238,13 +238,14 @@ func createCensusParticipantBulkOperations(
 	censusID string,
 	salt string,
 	currentTime time.Time,
+	country string,
 ) (orgMembersOps []mongo.WriteModel, censusParticipantOps []mongo.WriteModel) {
 	var bulkOrgMembersOps []mongo.WriteModel
 	var bulkCensusParticipantsOps []mongo.WriteModel
 
 	for _, orgMember := range orgMembers {
 		// Prepare the member
-		prepareMember(&orgMember, orgAddress, salt, currentTime)
+		prepareMember(&orgMember, orgAddress, salt, currentTime, country)
 
 		// Create member filter and update document
 		memberFilter := bson.M{
@@ -432,6 +433,7 @@ func (ms *MongoStorage) processBatches(
 			censusID,
 			salt,
 			currentTime,
+			ms.OrganizationCountry(census.OrgAddress),
 		)
 
 		// Process the batch and get number of added members
