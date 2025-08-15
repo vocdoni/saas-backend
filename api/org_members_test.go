@@ -8,6 +8,7 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -317,6 +318,135 @@ func TestOrganizationMembers(t *testing.T) {
 	c.Assert(jobStatus.Errors[1], qt.Matches, ".*invalid-phone.*")
 	c.Assert(jobStatus.Errors[2], qt.Matches, ".*invalid-birthdate.*")
 
+	// Test 5.1: Test jobs endpoint - basic functionality
+	jobsResponse := requestAndParse[apicommon.JobsResponse](
+		t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "jobs")
+	c.Assert(len(jobsResponse.Jobs), qt.Equals, 1, qt.Commentf("expected 1 job (the org_members job)"))
+	c.Assert(jobsResponse.TotalPages, qt.Equals, 1)
+	c.Assert(jobsResponse.CurrentPage, qt.Equals, 1)
+
+	// Verify the job details
+	job := jobsResponse.Jobs[0]
+	c.Assert(job.Type, qt.Equals, db.JobTypeOrgMembers)
+	c.Assert(job.Total, qt.Equals, 2)
+	c.Assert(job.Added, qt.Equals, 2)
+	c.Assert(job.Completed, qt.Equals, true)
+	c.Assert(job.CreatedAt.IsZero(), qt.Equals, false)
+	c.Assert(job.CompletedAt.IsZero(), qt.Equals, false)
+	c.Assert(job.JobID, qt.Equals, jobIDHex.String())
+	c.Assert(len(job.Errors), qt.Equals, 3) // Should have the validation errors
+	t.Logf("Found org_members job: ID=%s, Type=%s, Total=%d, Added=%d, Completed=%t, Errors=%d",
+		job.JobID, job.Type, job.Total, job.Added, job.Completed, len(job.Errors))
+
+	// Test 5.2: Test jobs endpoint - pagination and filtering
+	// Test with pagination
+	jobsResponsePaged := requestAndParse[apicommon.JobsResponse](
+		t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "jobs?page=1&pageSize=1")
+	c.Assert(len(jobsResponsePaged.Jobs), qt.Equals, 1)
+	c.Assert(jobsResponsePaged.TotalPages, qt.Equals, 1)
+	c.Assert(jobsResponsePaged.CurrentPage, qt.Equals, 1)
+
+	// Test with job type filter for org_members
+	jobsResponseFiltered := requestAndParse[apicommon.JobsResponse](
+		t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "jobs?type=org_members")
+	c.Assert(len(jobsResponseFiltered.Jobs), qt.Equals, 1)
+	c.Assert(jobsResponseFiltered.Jobs[0].Type, qt.Equals, db.JobTypeOrgMembers)
+
+	// Test with different job type filter (should return empty)
+	jobsResponseEmpty := requestAndParse[apicommon.JobsResponse](
+		t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "jobs?type=census_participants")
+	c.Assert(len(jobsResponseEmpty.Jobs), qt.Equals, 0, qt.Commentf("should be empty for census_participants filter"))
+
+	// Test 5.3: Test jobs endpoint - authorization and error cases
+	// Test with no authentication
+	requestAndAssertCode(http.StatusUnauthorized,
+		t, http.MethodGet, "", nil,
+		"organizations", orgAddress.String(), "jobs")
+
+	// Test with invalid organization address
+	requestAndAssertCode(http.StatusBadRequest,
+		t, http.MethodGet, adminToken, nil,
+		"organizations", "invalid-address", "jobs")
+
+	// Test with invalid job type filter
+	requestAndAssertCode(http.StatusBadRequest,
+		t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "jobs?type=invalid_type")
+
+	// Test 5.4: Create another async job to test multiple jobs scenario
+	anotherAsyncMembers := &apicommon.AddMembersRequest{
+		Members: []apicommon.OrgMember{
+			{
+				MemberNumber: "P010",
+				Name:         "Test",
+				Surname:      "User10",
+				Email:        "test10@example.com",
+				Phone:        "+34600000010",
+				Password:     "password10",
+			},
+		},
+	}
+
+	// Create second async job
+	asyncResponse2 := requestAndParse[apicommon.AddMembersResponse](
+		t, http.MethodPost, adminToken, anotherAsyncMembers,
+		"organizations", orgAddress.String(), "members?async=true")
+	c.Assert(asyncResponse2.JobID, qt.Not(qt.IsNil))
+
+	// Convert the job ID to a hex string
+	var jobIDHex2 internal.HexBytes
+	jobIDHex2.SetBytes(asyncResponse2.JobID)
+	t.Logf("Second async job ID: %s\n", jobIDHex2.String())
+
+	// Wait for second job to complete
+	completed2 := false
+	for attempts := 0; attempts < maxAttempts && !completed2; attempts++ {
+		jobStatus2 := requestAndParse[apicommon.AddMembersJobResponse](
+			t, http.MethodGet, adminToken, nil,
+			"organizations", orgAddress.String(), "members", "job", jobIDHex2.String())
+
+		if jobStatus2.Progress == 100 {
+			completed2 = true
+		} else {
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	c.Assert(completed2, qt.Equals, true, qt.Commentf("Second job did not complete within expected time"))
+
+	// Test multiple jobs - should now have 2 jobs
+	multipleJobsResponse := requestAndParse[apicommon.JobsResponse](
+		t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "jobs")
+	c.Assert(len(multipleJobsResponse.Jobs), qt.Equals, 2, qt.Commentf("expected 2 jobs"))
+	c.Assert(multipleJobsResponse.TotalPages, qt.Equals, 1)
+
+	// Verify jobs are sorted by creation date (newest first)
+	// The second job should be first in the list
+	c.Assert(multipleJobsResponse.Jobs[0].JobID, qt.Equals, jobIDHex2.String())
+	c.Assert(multipleJobsResponse.Jobs[1].JobID, qt.Equals, jobIDHex.String())
+
+	// Test pagination with multiple jobs
+	paginatedJobsResponse := requestAndParse[apicommon.JobsResponse](
+		t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "jobs?page=1&pageSize=1")
+	c.Assert(len(paginatedJobsResponse.Jobs), qt.Equals, 1)
+	c.Assert(paginatedJobsResponse.TotalPages, qt.Equals, 2)
+	c.Assert(paginatedJobsResponse.CurrentPage, qt.Equals, 1)
+	c.Assert(paginatedJobsResponse.Jobs[0].JobID, qt.Equals, jobIDHex2.String()) // Should be the newest job
+
+	// Test second page
+	paginatedJobsResponse2 := requestAndParse[apicommon.JobsResponse](
+		t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "jobs?page=2&pageSize=1")
+	c.Assert(len(paginatedJobsResponse2.Jobs), qt.Equals, 1)
+	c.Assert(paginatedJobsResponse2.TotalPages, qt.Equals, 2)
+	c.Assert(paginatedJobsResponse2.CurrentPage, qt.Equals, 2)
+	c.Assert(paginatedJobsResponse2.Jobs[0].JobID, qt.Equals, jobIDHex.String()) // Should be the older job
+
 	// Test 6: Get organization members with pagination
 	// Test 6.1: Test with page=1 and pageSize=2
 	membersResponse = requestAndParse[apicommon.OrganizationMembersResponse](
@@ -367,5 +497,5 @@ func TestOrganizationMembers(t *testing.T) {
 	membersResponse = requestAndParse[apicommon.OrganizationMembersResponse](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "members")
-	c.Assert(len(membersResponse.Members), qt.Equals, 5, qt.Commentf("expected 5 members remaining (7 total - 2 deleted)"))
+	c.Assert(len(membersResponse.Members), qt.Equals, 6, qt.Commentf("expected 6 members remaining (8 total - 2 deleted)"))
 }

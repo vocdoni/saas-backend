@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -453,4 +454,93 @@ func (a *API) organizationCreateTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	apicommon.HTTPWriteOK(w)
+}
+
+// organizationJobsHandler godoc
+//
+//	@Summary		Get organization jobs
+//	@Description	Get the list of import jobs for an organization with pagination support
+//	@Tags			organizations
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			address		path		string	true	"Organization address"
+//	@Param			page		query		integer	false	"Page number (default: 1)"
+//	@Param			pageSize	query		integer	false	"Number of items per page (default: 10)"
+//	@Param			type		query		string	false	"Filter by job type (org_members or census_participants)"
+//	@Success		200			{object}	apicommon.JobsResponse
+//	@Failure		400			{object}	errors.Error	"Invalid input"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		404			{object}	errors.Error	"Organization not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{address}/jobs [get]
+func (a *API) organizationJobsHandler(w http.ResponseWriter, r *http.Request) {
+	// get the user from the request context
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	// get the organization info from the request context
+	org, _, ok := a.organizationFromRequest(r)
+	if !ok {
+		errors.ErrNoOrganizationProvided.Write(w)
+		return
+	}
+	// check the user has the necessary permissions
+	if !user.HasRoleFor(org.Address, db.ManagerRole) && !user.HasRoleFor(org.Address, db.AdminRole) {
+		errors.ErrUnauthorized.Withf("user is not admin or manager of organization").Write(w)
+		return
+	}
+
+	// Parse pagination parameters from query string
+	page := 1      // Default page number
+	pageSize := 10 // Default page size
+
+	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
+		if pageVal, err := strconv.Atoi(pageStr); err == nil && pageVal > 0 {
+			page = pageVal
+		}
+	}
+
+	if pageSizeStr := r.URL.Query().Get("pageSize"); pageSizeStr != "" {
+		if pageSizeVal, err := strconv.Atoi(pageSizeStr); err == nil && pageSizeVal > 0 && pageSizeVal <= 100 {
+			pageSize = pageSizeVal
+		}
+	}
+
+	// Parse job type filter
+	var jobType *db.JobType
+	if typeStr := r.URL.Query().Get("type"); typeStr != "" {
+		switch typeStr {
+		case string(db.JobTypeOrgMembers):
+			t := db.JobTypeOrgMembers
+			jobType = &t
+		case string(db.JobTypeCensusParticipants):
+			t := db.JobTypeCensusParticipants
+			jobType = &t
+		default:
+			errors.ErrMalformedURLParam.Withf("invalid job type: %s", typeStr).Write(w)
+			return
+		}
+	}
+
+	// retrieve the jobs with pagination
+	totalPages, jobs, err := a.db.Jobs(org.Address, page, pageSize, jobType)
+	if err != nil {
+		errors.ErrGenericInternalServerError.Withf("could not get jobs: %v", err).Write(w)
+		return
+	}
+
+	// convert the jobs to the response format
+	jobsResponse := make([]apicommon.JobInfo, 0, len(jobs))
+	for _, job := range jobs {
+		jobsResponse = append(jobsResponse, apicommon.JobFromDB(&job))
+	}
+
+	apicommon.HTTPWriteJSON(w, &apicommon.JobsResponse{
+		TotalPages:  totalPages,
+		CurrentPage: page,
+		Jobs:        jobsResponse,
+	})
 }

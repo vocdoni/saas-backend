@@ -287,6 +287,9 @@ func (a *API) initRouter() http.Handler {
 		// validate the member data of an organization member group
 		log.Infow("new route", "method", "POST", "path", organizationGroupValidateEndpoint)
 		r.Post(organizationGroupValidateEndpoint, a.organizationMemberGroupValidateHandler)
+		// get organization jobs
+		log.Infow("new route", "method", "GET", "path", organizationJobsEndpoint)
+		r.Get(organizationJobsEndpoint, a.organizationJobsHandler)
 
 		// handle stripe checkout session
 		log.Infow("new route", "method", "POST", "path", subscriptionsCheckout)

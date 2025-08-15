@@ -1094,3 +1094,61 @@ type CreateOrganizationTicketRequest struct {
 	// Body of the ticket
 	Description string `json:"description"`
 }
+
+// JobInfo represents a job in the API response.
+// swagger:model JobInfo
+type JobInfo struct {
+	// Unique job identifier
+	JobID string `json:"jobId"`
+
+	// Type of job
+	Type db.JobType `json:"type"`
+
+	// Total items to process
+	Total int `json:"total"`
+
+	// Items successfully processed
+	Added int `json:"added"`
+
+	// List of errors encountered
+	Errors []string `json:"errors"`
+
+	// Job creation timestamp
+	CreatedAt time.Time `json:"createdAt"`
+
+	// Job completion timestamp (zero if not completed)
+	CompletedAt time.Time `json:"completedAt"`
+
+	// Whether the job is completed
+	Completed bool `json:"completed"`
+}
+
+// JobsResponse represents the response for listing organization jobs.
+// swagger:model JobsResponse
+type JobsResponse struct {
+	// Total number of pages
+	TotalPages int `json:"totalPages"`
+
+	// Current page number
+	CurrentPage int `json:"currentPage"`
+
+	// List of jobs
+	Jobs []JobInfo `json:"jobs"`
+}
+
+// JobFromDB converts a db.Job to a JobInfo.
+func JobFromDB(job *db.Job) JobInfo {
+	if job == nil {
+		return JobInfo{}
+	}
+	return JobInfo{
+		JobID:       job.JobID,
+		Type:        job.Type,
+		Total:       job.Total,
+		Added:       job.Added,
+		Errors:      job.Errors,
+		CreatedAt:   job.CreatedAt,
+		CompletedAt: job.CompletedAt,
+		Completed:   !job.CompletedAt.IsZero(),
+	}
+}
