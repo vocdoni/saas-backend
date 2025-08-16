@@ -5,7 +5,7 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"github.com/vocdoni/saas-backend/internal"
 )
 
 const (
@@ -85,7 +85,7 @@ func TestOrganizationInvites(t *testing.T) {
 		c.Assert(updatedInvitation.Expiration.Truncate(time.Second).UTC(), qt.Equals, newExpires.Truncate(time.Second).UTC())
 
 		// Test updating invitation with non-existent ID
-		nonExistentID, err := primitive.ObjectIDFromHex("5f50cf9b8b5cf3b5e1c8a1a1")
+		nonExistentID, err := internal.ObjectIDFromHex("5f50cf9b8b5cf3b5e1c8a1a1")
 		c.Assert(err, qt.IsNil)
 		nonExistentInvite := &OrganizationInvite{
 			ID:         nonExistentID,

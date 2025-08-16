@@ -13,6 +13,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/internal"
 )
 
 // isObjectNameRgx is a regular expression to match object names.
@@ -170,11 +171,15 @@ func objectURL(baseURL, objectID string) string {
 }
 
 // objectIDfromURL returns the objectID from the given URL. If the URL is not an
-// object URL, it returns an empty string and false.
-func objectIDfromName(url string) (string, bool) {
-	objectID := isObjectNameRgx.FindStringSubmatch(url)
-	if len(objectID) != 3 {
-		return "", false
+// object URL, it returns a NilObjectID and false.
+func objectIDfromName(url string) (internal.ObjectID, bool) {
+	matches := isObjectNameRgx.FindStringSubmatch(url)
+	if len(matches) != 3 {
+		return internal.NilObjectID, false
 	}
-	return objectID[1], true
+	objectID, err := internal.ObjectIDFromHex(matches[1])
+	if err != nil {
+		return internal.NilObjectID, false
+	}
+	return objectID, true
 }

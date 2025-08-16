@@ -11,6 +11,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 )
 
 // TestLanguageParameterInEmails tests that the lang parameter is correctly processed
@@ -60,7 +61,7 @@ func TestLanguageParameterInEmails(t *testing.T) {
 		createGroupReq := apicommon.CreateOrganizationMemberGroupRequest{
 			Title:       "Language Test Group",
 			Description: "Group for testing language parameter",
-			MemberIDs:   []string{memberID},
+			MemberIDs:   []internal.ObjectID{memberID},
 		}
 
 		groupResp := requestAndParse[apicommon.OrganizationMemberGroupInfo](
@@ -77,7 +78,7 @@ func TestLanguageParameterInEmails(t *testing.T) {
 
 		requestAndParse[map[string]any](
 			t, "POST", token, publishGroupRequest,
-			"census", censusID, "group", groupID, "publish")
+			"census", censusID.String(), "group", groupID.String(), "publish")
 
 		// Create a mock process ID for the bundle
 		processID := make([]byte, 32)

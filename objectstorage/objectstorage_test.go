@@ -10,6 +10,7 @@ import (
 	qt "github.com/frankban/quicktest"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/test"
 )
 
@@ -103,11 +104,11 @@ func TestObjectStorage(t *testing.T) {
 		c := qt.New(t)
 
 		// Test with empty objectID
-		_, err := client.Get("")
+		_, err := client.Get(internal.NilObjectID)
 		c.Assert(err, qt.Equals, ErrorInvalidObjectID)
 
 		// Test with non-existent objectID
-		_, err = client.Get("nonexistent")
+		_, err = client.Get(internal.NewObjectID())
 		c.Assert(err, qt.Equals, ErrorObjectNotFound)
 
 		// Test with valid objectID
@@ -165,8 +166,10 @@ func TestObjectStorage(t *testing.T) {
 		// Store objects directly in the database
 		err = testDB.SetObject(objectID1, "test1@example.com", "image/jpeg", jpegData1)
 		c.Assert(err, qt.IsNil)
+
 		err = testDB.SetObject(objectID2, "test2@example.com", "image/jpeg", jpegData2)
 		c.Assert(err, qt.IsNil)
+
 		err = testDB.SetObject(objectID3, "test3@example.com", "image/jpeg", jpegData3)
 		c.Assert(err, qt.IsNil)
 
@@ -174,29 +177,29 @@ func TestObjectStorage(t *testing.T) {
 		_, err = clientWithCache.Get(objectID1)
 		c.Assert(err, qt.IsNil)
 		// Verify it's in the cache
-		_, ok := clientWithCache.cache.Get(objectID1)
+		_, ok := clientWithCache.cache.Get(objectID1.String())
 		c.Assert(ok, qt.IsTrue)
 
 		// Get the second object to cache it
 		_, err = clientWithCache.Get(objectID2)
 		c.Assert(err, qt.IsNil)
 		// Verify it's in the cache
-		_, ok = clientWithCache.cache.Get(objectID2)
+		_, ok = clientWithCache.cache.Get(objectID2.String())
 		c.Assert(ok, qt.IsTrue)
 
 		// Get the third object to cache it
 		_, err = clientWithCache.Get(objectID3)
 		c.Assert(err, qt.IsNil)
 		// Verify it's in the cache
-		_, ok = clientWithCache.cache.Get(objectID3)
+		_, ok = clientWithCache.cache.Get(objectID3.String())
 		c.Assert(ok, qt.IsTrue)
 
 		// The first object should be evicted from the cache
-		_, ok = clientWithCache.cache.Get(objectID1)
+		_, ok = clientWithCache.cache.Get(objectID1.String())
 		c.Assert(ok, qt.IsFalse)
 
 		// The second object should still be in the cache
-		_, ok = clientWithCache.cache.Get(objectID2)
+		_, ok = clientWithCache.cache.Get(objectID2.String())
 		c.Assert(ok, qt.IsTrue)
 	})
 
@@ -207,15 +210,15 @@ func TestObjectStorage(t *testing.T) {
 		data := []byte("test data")
 		objectID, err := calculateObjectID(data)
 		c.Assert(err, qt.IsNil)
-		c.Assert(objectID, qt.Not(qt.Equals), "")
-		c.Assert(objectID, qt.HasLen, 24) // 12 bytes in hex = 24 characters
+		c.Assert(objectID, qt.HasLen, 12)
+		c.Assert(objectID.IsZero(), qt.Not(qt.IsTrue))
 
 		// Test with empty data
 		emptyData := []byte{}
 		objectID, err = calculateObjectID(emptyData)
 		c.Assert(err, qt.IsNil)
-		c.Assert(objectID, qt.Not(qt.Equals), "")
-		c.Assert(objectID, qt.HasLen, 24)
+		c.Assert(objectID, qt.HasLen, 12)
+		c.Assert(objectID.IsZero(), qt.Not(qt.IsTrue))
 
 		// Test that different data produces different IDs
 		data2 := []byte("different data")

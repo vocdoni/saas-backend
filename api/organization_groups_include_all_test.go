@@ -6,6 +6,7 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/internal"
 )
 
 func TestCreateGroupWithAllMembers(t *testing.T) {
@@ -63,7 +64,7 @@ func TestCreateGroupWithAllMembers(t *testing.T) {
 	// Get the group details to verify all members were included
 	groupDetails := requestAndParse[apicommon.OrganizationMemberGroupInfo](
 		t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "groups", groupResponse.ID)
+		"organizations", orgAddress.String(), "groups", groupResponse.ID.String())
 	c.Assert(groupDetails.MemberIDs, qt.HasLen, 3)
 	c.Assert(groupDetails.Title, qt.Equals, "All Members Group")
 	c.Assert(groupDetails.Description, qt.Equals, "A group containing all organization members")
@@ -156,7 +157,7 @@ func TestCreateGroupSpecificMembersStillWorks(t *testing.T) {
 	createGroupReq := &apicommon.CreateOrganizationMemberGroupRequest{
 		Title:       "Specific Members Group",
 		Description: "A group with specific members",
-		MemberIDs:   []string{membersResponse.Members[0].ID},
+		MemberIDs:   []internal.ObjectID{membersResponse.Members[0].ID},
 	}
 
 	groupResponse := requestAndParse[apicommon.OrganizationMemberGroupInfo](
@@ -167,7 +168,7 @@ func TestCreateGroupSpecificMembersStillWorks(t *testing.T) {
 	// Get the group details to verify only one member was included
 	groupDetails := requestAndParse[apicommon.OrganizationMemberGroupInfo](
 		t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "groups", groupResponse.ID)
+		"organizations", orgAddress.String(), "groups", groupResponse.ID.String())
 	c.Assert(groupDetails.MemberIDs, qt.HasLen, 1)
 	c.Assert(groupDetails.MemberIDs[0], qt.Equals, membersResponse.Members[0].ID)
 }
@@ -218,6 +219,6 @@ func TestCreateGroupWithLargeNumberOfMembers(t *testing.T) {
 	// Get the group details to verify all members were included
 	groupDetails := requestAndParse[apicommon.OrganizationMemberGroupInfo](
 		t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "groups", groupResponse.ID)
+		"organizations", orgAddress.String(), "groups", groupResponse.ID.String())
 	c.Assert(groupDetails.MemberIDs, qt.HasLen, 50)
 }

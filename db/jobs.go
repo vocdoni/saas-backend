@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -21,8 +21,8 @@ func (ms *MongoStorage) SetJob(job *Job) error {
 	defer ms.keysLock.Unlock()
 
 	// If no ID is set, create a new one
-	if job.ID == primitive.NilObjectID {
-		job.ID = primitive.NewObjectID()
+	if job.ID == internal.NilObjectID {
+		job.ID = internal.NewObjectID()
 	}
 
 	// Create update document
@@ -32,7 +32,7 @@ func (ms *MongoStorage) SetJob(job *Job) error {
 	}
 
 	// Upsert the job
-	filter := bson.M{"jobId": job.JobID}
+	filter := bson.M{"_id": job.ID}
 	opts := options.Update().SetUpsert(true)
 	_, err = ms.jobs.UpdateOne(ctx, filter, updateDoc, opts)
 	if err != nil {
@@ -43,12 +43,12 @@ func (ms *MongoStorage) SetJob(job *Job) error {
 }
 
 // Job retrieves a job by its jobId.
-func (ms *MongoStorage) Job(jobID string) (*Job, error) {
+func (ms *MongoStorage) Job(jobID internal.ObjectID) (*Job, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	var job Job
-	filter := bson.M{"jobId": jobID}
+	filter := bson.M{"_id": jobID}
 	err := ms.jobs.FindOne(ctx, filter).Decode(&job)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
@@ -61,9 +61,9 @@ func (ms *MongoStorage) Job(jobID string) (*Job, error) {
 }
 
 // CreateJob creates a new job record with initial data.
-func (ms *MongoStorage) CreateJob(jobID string, jobType JobType, orgAddress common.Address, total int) error {
+func (ms *MongoStorage) CreateJob(jobID internal.ObjectID, jobType JobType, orgAddress common.Address, total int) error {
 	job := &Job{
-		JobID:      jobID,
+		ID:         jobID,
 		Type:       jobType,
 		OrgAddress: orgAddress,
 		Total:      total,
@@ -76,14 +76,14 @@ func (ms *MongoStorage) CreateJob(jobID string, jobType JobType, orgAddress comm
 }
 
 // CompleteJob updates a job with final results when it completes.
-func (ms *MongoStorage) CompleteJob(jobID string, added int, errors []string) error {
+func (ms *MongoStorage) CompleteJob(jobID internal.ObjectID, added int, errors []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
-	filter := bson.M{"jobId": jobID}
+	filter := bson.M{"_id": jobID}
 	update := bson.M{
 		"$set": bson.M{
 			"added":       added,

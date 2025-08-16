@@ -5,12 +5,10 @@ import (
 	"net/http"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/subscriptions"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // createProcessHandler godoc
@@ -22,7 +20,7 @@ import (
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			request	body		apicommon.CreateProcessRequest	true	"Process creation information"
-//	@Success		200		{object}	primitive.ObjectID				"Process ID"
+//	@Success		200		{object}	internal.ObjectID				"Process ID"
 //	@Failure		400		{object}	errors.Error					"Invalid input data"
 //	@Failure		401		{object}	errors.Error					"Unauthorized"
 //	@Failure		404		{object}	errors.Error					"Published census not found"
@@ -56,9 +54,9 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var orgAddress common.Address
-	if processInfo.CensusID != nil {
+	if !processInfo.CensusID.IsZero() {
 		var err error
-		census, err := a.db.Census(processInfo.CensusID.String())
+		census, err := a.db.Census(processInfo.CensusID)
 		if err != nil {
 			if err == db.ErrNotFound {
 				errors.ErrMalformedURLParam.Withf("invalid census provided").Write(w)
@@ -88,7 +86,7 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// if it's a new draft process
-	if process.Address.Equals(nil) && process.ID == primitive.NilObjectID {
+	if process.Address.Equals(nil) && process.ID.IsZero() {
 		if err := a.subscriptions.OrgHasPermission(process.OrgAddress, subscriptions.CreateDraft); err != nil {
 			if apierr, ok := err.(errors.Error); ok {
 				apierr.Write(w)
@@ -125,14 +123,9 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		500			{object}	errors.Error					"Internal server error"
 //	@Router			/process/{processId} [put]
 func (a *API) updateProcessHandler(w http.ResponseWriter, r *http.Request) {
-	processID := chi.URLParam(r, "processId")
-	if processID == "" {
-		errors.ErrMalformedURLParam.Withf("missing process ID").Write(w)
-		return
-	}
-	parsedID, err := primitive.ObjectIDFromHex(processID)
+	processID, err := apicommon.ProcessIDFromRequest(r)
 	if err != nil {
-		errors.ErrMalformedURLParam.Withf("invalid process ID").Write(w)
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
 
@@ -150,7 +143,7 @@ func (a *API) updateProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existingProcess, err := a.db.Process(parsedID)
+	existingProcess, err := a.db.Process(processID)
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrProcessNotFound.Write(w)
@@ -174,8 +167,8 @@ func (a *API) updateProcessHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var census *db.Census
-	if !processInfo.CensusID.Equals(nil) {
-		census, err = a.db.Census(processInfo.CensusID.String())
+	if !processInfo.CensusID.IsZero() {
+		census, err = a.db.Census(processInfo.CensusID)
 		if err != nil {
 			if err == db.ErrNotFound {
 				errors.ErrMalformedURLParam.Withf("census not found").Write(w)
@@ -218,18 +211,12 @@ func (a *API) updateProcessHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/process/{processId} [get]
 func (a *API) processInfoHandler(w http.ResponseWriter, r *http.Request) {
-	processID := chi.URLParam(r, "processId")
-	if len(processID) == 0 {
-		errors.ErrMalformedURLParam.Withf("missing process ID").Write(w)
-		return
-	}
-	parsedID, err := primitive.ObjectIDFromHex(processID)
+	processID, err := apicommon.ProcessIDFromRequest(r)
 	if err != nil {
-		errors.ErrMalformedURLParam.Withf("invalid process ID").Write(w)
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
-
-	process, err := a.db.Process(parsedID)
+	process, err := a.db.Process(processID)
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrProcessNotFound.Write(w)
@@ -312,14 +299,9 @@ func (a *API) organizationListProcessDraftsHandler(w http.ResponseWriter, r *htt
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/process/{processId} [delete]
 func (a *API) deleteProcessHandler(w http.ResponseWriter, r *http.Request) {
-	processID := chi.URLParam(r, "processId")
-	if processID == "" {
-		errors.ErrMalformedURLParam.Withf("missing process ID").Write(w)
-		return
-	}
-	parsedID, err := primitive.ObjectIDFromHex(processID)
+	processID, err := apicommon.ProcessIDFromRequest(r)
 	if err != nil {
-		errors.ErrMalformedURLParam.Withf("invalid process ID").Write(w)
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
 
@@ -330,7 +312,7 @@ func (a *API) deleteProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existingProcess, err := a.db.Process(parsedID)
+	existingProcess, err := a.db.Process(processID)
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrProcessNotFound.Withf("process not found").Write(w)
@@ -347,7 +329,7 @@ func (a *API) deleteProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = a.db.DelProcess(parsedID)
+	err = a.db.DelProcess(processID)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return

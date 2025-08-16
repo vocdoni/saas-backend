@@ -11,43 +11,42 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.vocdoni.io/dvote/log"
 )
 
 // SetCensus creates a new census for an organization
 // Returns the hex representation of the census
-func (ms *MongoStorage) SetCensus(census *Census) (string, error) {
+func (ms *MongoStorage) SetCensus(census *Census) (internal.ObjectID, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	if census.OrgAddress.Cmp(common.Address{}) == 0 {
-		return "", ErrInvalidData
+		return internal.NilObjectID, ErrInvalidData
 	}
 	// check that the org exists
 	_, err := ms.Organization(census.OrgAddress)
 	if err != nil {
 		if err == ErrNotFound {
-			return "", ErrInvalidData
+			return internal.NilObjectID, ErrInvalidData
 		}
-		return "", fmt.Errorf("organization not found: %w", err)
+		return internal.NilObjectID, fmt.Errorf("organization not found: %w", err)
 	}
 
-	if census.ID != primitive.NilObjectID {
+	if census.ID != internal.NilObjectID {
 		// if the census exists, update it with the new data
 		census.UpdatedAt = time.Now()
 	} else {
 		// if the census doesn't exist, create its id
-		census.ID = primitive.NewObjectID()
+		census.ID = internal.NewObjectID()
 		census.CreatedAt = time.Now()
 	}
 	census.Type = census.TwoFaFields.GetCensusType()
 
 	updateDoc, err := dynamicUpdateDocument(census, nil)
 	if err != nil {
-		return "", err
+		return internal.NilObjectID, err
 	}
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
@@ -55,24 +54,22 @@ func (ms *MongoStorage) SetCensus(census *Census) (string, error) {
 	opts := options.Update().SetUpsert(true)
 	_, err = ms.censuses.UpdateOne(ctx, filter, updateDoc, opts)
 	if err != nil {
-		return "", err
+		return internal.NilObjectID, err
 	}
 
-	return census.ID.Hex(), nil
+	return census.ID, nil
 }
 
 // SetPublished census updates the PublishedCensus field of a census
-func (ms *MongoStorage) SetPublishedCensus(censusID, uri string, root internal.HexBytes) (string, error) {
-	if len(censusID) == 0 || len(uri) == 0 || len(root) == 0 {
-		return "", ErrInvalidData
+func (ms *MongoStorage) SetPublishedCensus(censusID internal.ObjectID, uri string, root internal.HexBytes) (
+	internal.ObjectID, error,
+) {
+	if censusID.IsZero() || len(uri) == 0 || len(root) == 0 {
+		return internal.NilObjectID, ErrInvalidData
 	}
 
-	censusOID, err := primitive.ObjectIDFromHex(censusID)
-	if err != nil {
-		return "", ErrInvalidData
-	}
 	census := &Census{
-		ID: censusOID,
+		ID: censusID,
 		Published: PublishedCensus{
 			Root: root,
 			URI:  uri,
@@ -82,11 +79,11 @@ func (ms *MongoStorage) SetPublishedCensus(censusID, uri string, root internal.H
 	return ms.SetCensus(census)
 }
 
-// PopulateGroupCensus creates a new census for an organization
-// Returns the hex representation of the census
+// PopulateGroupCensus creates a new census for an organization.
+// Returns the resulting census size.
 func (ms *MongoStorage) PopulateGroupCensus(
 	census *Census,
-	groupID string,
+	groupID internal.ObjectID,
 ) (int64, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -107,12 +104,12 @@ func (ms *MongoStorage) PopulateGroupCensus(
 		return 0, fmt.Errorf("error retrieving organization: %w", err)
 	}
 
-	if census.ID != primitive.NilObjectID {
+	if census.ID != internal.NilObjectID {
 		// if the census exists, update it with the new data
 		census.UpdatedAt = time.Now()
 	} else {
 		// if the census doesn't exist, create its id
-		census.ID = primitive.NewObjectID()
+		census.ID = internal.NewObjectID()
 		census.CreatedAt = time.Now()
 	}
 	census.Type = census.TwoFaFields.GetCensusType()
@@ -131,12 +128,12 @@ func (ms *MongoStorage) PopulateGroupCensus(
 
 	census.GroupID = group.ID
 	// update the group with the census ID
-	if err := ms.addOrganizationMemberGroupCensus(ctx, group.ID.Hex(), census.OrgAddress, census.ID.Hex()); err != nil {
+	if err := ms.addOrganizationMemberGroupCensus(ctx, group.ID, census.OrgAddress, census.ID); err != nil {
 		return 0, fmt.Errorf("error updating group with census ID: %w", err)
 	}
 
 	// set the participants for the census
-	insertedCount, err := ms.setBulkCensusParticipant(ctx, census.ID.Hex(),
+	insertedCount, err := ms.setBulkCensusParticipant(ctx, census.ID,
 		groupID, census.OrgAddress, census.AuthFields, census.TwoFaFields)
 	if err != nil {
 		return 0, fmt.Errorf("error setting census participants: %w", err)
@@ -157,12 +154,10 @@ func (ms *MongoStorage) PopulateGroupCensus(
 }
 
 // DeleteCensus removes a census and all its members
-func (ms *MongoStorage) DelCensus(censusID string) error {
-	objID, err := primitive.ObjectIDFromHex(censusID)
-	if err != nil {
+func (ms *MongoStorage) DelCensus(censusID internal.ObjectID) error {
+	if censusID.IsZero() {
 		return ErrInvalidData
 	}
-
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
@@ -170,24 +165,22 @@ func (ms *MongoStorage) DelCensus(censusID string) error {
 	defer cancel()
 
 	// delete the census from the database using the ID
-	filter := bson.M{"_id": objID}
-	_, err = ms.censuses.DeleteOne(ctx, filter)
+	filter := bson.M{"_id": censusID}
+	_, err := ms.censuses.DeleteOne(ctx, filter)
 	return err
 }
 
 // Census retrieves a census from the DB based on its ID
-func (ms *MongoStorage) Census(censusID string) (*Census, error) {
-	objID, err := primitive.ObjectIDFromHex(censusID)
-	if err != nil {
+func (ms *MongoStorage) Census(censusID internal.ObjectID) (*Census, error) {
+	if censusID.IsZero() {
 		return nil, ErrInvalidData
 	}
-
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	census := &Census{}
-	err = ms.censuses.FindOne(ctx, bson.M{"_id": objID}).Decode(census)
+	err := ms.censuses.FindOne(ctx, bson.M{"_id": censusID}).Decode(census)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get census: %w", err)
 	}

@@ -2,7 +2,6 @@ package objectstorage
 
 import (
 	"crypto/md5"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +9,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 )
 
 var (
@@ -83,13 +83,13 @@ func New(conf *Config) (*Client, error) {
 // and if not found, retrieves it from the database. The objectID is a string
 // that can have a directory-like notation (e.g., "folder-path/hello-world.txt").
 // Returns the object or an error if not found or invalid.
-func (osc *Client) Get(objectID string) (*db.Object, error) {
-	if objectID == "" {
+func (osc *Client) Get(objectID internal.ObjectID) (*db.Object, error) {
+	if objectID.IsZero() {
 		return nil, ErrorInvalidObjectID
 	}
 
 	// check if the object is in the cache
-	if object, ok := osc.cache.Get(objectID); ok {
+	if object, ok := osc.cache.Get(objectID.String()); ok {
 		return &object, nil
 	}
 
@@ -102,7 +102,7 @@ func (osc *Client) Get(objectID string) (*db.Object, error) {
 	}
 
 	// store the object in the cache
-	osc.cache.Add(objectID, *object)
+	osc.cache.Add(objectID.String(), *object)
 
 	return object, nil
 }
@@ -134,6 +134,7 @@ func (osc *Client) Put(data io.Reader, size int64, user string) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("error calculating objectID: %w", err)
 	}
+
 	// store the object in the database
 	if err := osc.db.SetObject(objectID, user, filetype, buff); err != nil {
 		return "", fmt.Errorf("cannot set object: %w", err)
@@ -144,12 +145,12 @@ func (osc *Client) Put(data io.Reader, size int64, user string) (string, error) 
 
 // calculateObjectID calculates the objectID from the given data. The objectID
 // is the first 12 bytes of the md5 hash of the data. If an error occurs, it
-// returns an empty string and the error.
-func calculateObjectID(data []byte) (string, error) {
+// returns a NilObjectID and the error.
+func calculateObjectID(data []byte) (internal.ObjectID, error) {
 	md5hash := md5.New()
 	if _, err := md5hash.Write(data); err != nil {
-		return "", fmt.Errorf("cannot calculate hash: %w", err)
+		return internal.NilObjectID, fmt.Errorf("cannot calculate hash: %w", err)
 	}
 	bhash := md5hash.Sum(nil)[:12]
-	return hex.EncodeToString(bhash), nil
+	return internal.ObjectID(bhash), nil
 }

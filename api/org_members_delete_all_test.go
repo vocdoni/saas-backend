@@ -6,6 +6,7 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/internal"
 )
 
 func TestDeleteAllOrganizationMembers(t *testing.T) {
@@ -119,7 +120,7 @@ func TestDeleteAllOrganizationMembersDeletesGroups(t *testing.T) {
 	// Create a group with two of the members
 	groupReq := &apicommon.CreateOrganizationMemberGroupRequest{
 		Title:     "Test Group",
-		MemberIDs: []string{membersResponse.Members[0].ID, membersResponse.Members[1].ID},
+		MemberIDs: []internal.ObjectID{membersResponse.Members[0].ID, membersResponse.Members[1].ID},
 	}
 
 	groupInfo := requestAndParseWithAssertCode[apicommon.OrganizationMemberGroupInfo](
@@ -134,9 +135,9 @@ func TestDeleteAllOrganizationMembersDeletesGroups(t *testing.T) {
 	)
 
 	// verify the group was created
-	c.Assert(groupInfo.ID, qt.Not(qt.Equals), "")
+	c.Assert(groupInfo.ID.IsZero(), qt.Not(qt.IsTrue))
 	groupMembersResp := requestAndParse[apicommon.ListOrganizationMemberGroupResponse](t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "groups", groupInfo.ID, "members",
+		"organizations", orgAddress.String(), "groups", groupInfo.ID.String(), "members",
 	)
 	c.Assert(groupMembersResp.Members, qt.HasLen, 2)
 	c.Assert(groupMembersResp.Pagination.CurrentPage, qt.Equals, int64(1))
@@ -162,7 +163,7 @@ func TestDeleteAllOrganizationMembersDeletesGroups(t *testing.T) {
 	// Verify that querying groups/{groupid}/members doesn't return anything weird
 	{
 		groupMembersResp := requestAndParse[apicommon.ListOrganizationMemberGroupResponse](t, http.MethodGet, adminToken, nil,
-			"organizations", orgAddress.String(), "groups", groupInfo.ID, "members",
+			"organizations", orgAddress.String(), "groups", groupInfo.ID.String(), "members",
 		)
 		c.Assert(groupMembersResp.Members, qt.HasLen, 0)
 		c.Assert(groupMembersResp.Pagination.CurrentPage, qt.Equals, int64(1))
@@ -259,7 +260,7 @@ func TestDeleteSpecificMembersStillWorks(t *testing.T) {
 
 	// Delete only the first member by ID
 	deleteSpecificReq := &apicommon.DeleteMembersRequest{
-		IDs: []string{membersResponse.Members[0].ID},
+		IDs: []internal.ObjectID{membersResponse.Members[0].ID},
 	}
 
 	deleteResponse := requestAndParse[apicommon.DeleteMembersResponse](

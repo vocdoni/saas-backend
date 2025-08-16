@@ -292,7 +292,7 @@ func TestCSPVoting(t *testing.T) {
 					"organizations", orgAddress.String(), "members")
 
 				// Create member IDs list for the group
-				memberIDs := make([]string, len(orgMembersResp.Members))
+				memberIDs := make([]internal.ObjectID, len(orgMembersResp.Members))
 				for i, member := range orgMembersResp.Members {
 					memberIDs[i] = member.ID
 				}
@@ -322,7 +322,7 @@ func TestCSPVoting(t *testing.T) {
 
 				publishedGroupCensus := requestAndParse[apicommon.PublishedCensusResponse](
 					t, http.MethodPost, token, publishGroupRequest,
-					"census", censusID, "group", groupID, "publish")
+					"census", censusID.String(), "group", groupID.String(), "publish")
 
 				t.Logf("Published group census with URI: %s", publishedGroupCensus.URI)
 
@@ -474,7 +474,7 @@ func TestCSPVoting(t *testing.T) {
 
 						requestAndParse[apicommon.PublishedCensusResponse](
 							t, http.MethodPost, token, publishGroupRequest,
-							"census", noMemberNumCensusID, "group", groupID, "publish")
+							"census", noMemberNumCensusID.String(), "group", groupID.String(), "publish")
 
 						noMemberNumBundleID, _ := testCreateBundle(t, token, noMemberNumCensusID, [][]byte{processID})
 
@@ -503,13 +503,13 @@ func TestCSPVoting(t *testing.T) {
 
 						// Should fail to validate org member group data when memberNumber is required
 						resp, code := testRequest(t, http.MethodPost, token, validateGroupRequest,
-							"organizations", orgAddress.String(), "groups", groupID, "validate")
+							"organizations", orgAddress.String(), "groups", groupID.String(), "validate")
 						c.Assert(code, qt.Equals, http.StatusBadRequest,
 							qt.Commentf("expected bad request when memberNumber required but missing, got %d: %s", code, resp))
 
 						// Should be able to create census even when memberNumber is required but missing
 						resp, code = testRequest(t, http.MethodPost, token, publishGroupRequest,
-							"census", noMemberNumCensusID, "group", groupID, "publish")
+							"census", noMemberNumCensusID.String(), "group", groupID.String(), "publish")
 						c.Assert(code, qt.Equals, http.StatusOK,
 							qt.Commentf("expected bad request when memberNumber required but missing, got %d: %s", code, resp))
 
@@ -524,7 +524,7 @@ func TestCSPVoting(t *testing.T) {
 
 						requestAndParse[apicommon.PublishedCensusResponse](
 							t, http.MethodPost, token, publishGroupRequest,
-							"census", withMemberNumCensusID, "group", groupID, "publish")
+							"census", withMemberNumCensusID.String(), "group", groupID.String(), "publish")
 
 						withMemberNumBundleID, _ := testCreateBundle(t, token, withMemberNumCensusID, [][]byte{processID})
 
@@ -554,7 +554,7 @@ func TestCSPVoting(t *testing.T) {
 
 						requestAndParse[apicommon.PublishedCensusResponse](
 							t, http.MethodPost, token, publishGroupRequest,
-							"census", authOnlyCensusID, "group", groupID, "publish")
+							"census", authOnlyCensusID.String(), "group", groupID.String(), "publish")
 
 						authOnlyBundleID, _ := testCreateBundle(t, token, authOnlyCensusID, [][]byte{processID})
 
@@ -596,7 +596,7 @@ func TestCSPVoting(t *testing.T) {
 
 						requestAndParse[apicommon.PublishedCensusResponse](
 							t, http.MethodPost, token, publishGroupRequest,
-							"census", smsCensusID, "group", groupID, "publish")
+							"census", smsCensusID.String(), "group", groupID.String(), "publish")
 
 						smsBundleID, _ := testCreateBundle(t, token, smsCensusID, [][]byte{processID})
 
@@ -633,7 +633,7 @@ func TestCSPVoting(t *testing.T) {
 
 						requestAndParse[apicommon.PublishedCensusResponse](
 							t, http.MethodPost, token, publishGroupRequest,
-							"census", complexCensusID, "group", groupID, "publish")
+							"census", complexCensusID.String(), "group", groupID.String(), "publish")
 
 						complexBundleID, _ := testCreateBundle(t, token, complexCensusID, [][]byte{processID})
 
@@ -831,7 +831,7 @@ func TestCSPVoting(t *testing.T) {
 
 					requestAndParse[apicommon.PublishedCensusResponse](
 						t, http.MethodPost, token, publishGroupRequest,
-						"census", bothMethodsCensusID, "group", groupID, "publish")
+						"census", bothMethodsCensusID.String(), "group", groupID.String(), "publish")
 
 					bothMethodsBundleID, _ := testCreateBundle(t, token, bothMethodsCensusID, [][]byte{processID})
 

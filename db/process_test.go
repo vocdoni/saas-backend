@@ -7,7 +7,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 var (
@@ -45,8 +44,7 @@ func setupTestPrerequisites1(c *qt.C, db *MongoStorage) *Census {
 	}
 	censusID, err := db.SetCensus(census)
 	c.Assert(err, qt.IsNil)
-	census.ID, err = primitive.ObjectIDFromHex(censusID)
-	c.Assert(err, qt.IsNil)
+	census.ID = censusID
 
 	return census
 }
@@ -68,7 +66,7 @@ func TestProcess(t *testing.T) {
 		}
 
 		census := &Census{
-			ID:         primitive.NewObjectID(),
+			ID:         internal.NewObjectID(),
 			OrgAddress: testNonExistentOrg,
 			Type:       CensusTypeMail,
 			Published: PublishedCensus{
@@ -106,7 +104,7 @@ func TestProcess(t *testing.T) {
 		retrieved, err := testDB.Process(pid)
 		c.Assert(err, qt.IsNil)
 		c.Assert(retrieved, qt.Not(qt.IsNil))
-		c.Assert(retrieved.ID, qt.Not(qt.Equals), primitive.NilObjectID)
+		c.Assert(retrieved.ID.IsZero(), qt.Not(qt.IsTrue))
 		c.Assert(retrieved.OrgAddress, qt.Equals, testOrgAddress)
 		c.Assert(retrieved.Census.Published.URI, qt.Equals, testProcessURI)
 		c.Assert(retrieved.Census.Published.Root, qt.DeepEquals, rootHex)
@@ -139,8 +137,7 @@ func TestProcess(t *testing.T) {
 		}
 		nonPublishedCensusID, err := testDB.SetCensus(nonPublishedCensus)
 		c.Assert(err, qt.IsNil)
-		nonPublishedCensus.ID, err = primitive.ObjectIDFromHex(nonPublishedCensusID)
-		c.Assert(err, qt.IsNil)
+		nonPublishedCensus.ID = nonPublishedCensusID
 		invalidProcess := &Process{
 			Address:    testProcessID,
 			OrgAddress: testOrgAddress,
@@ -175,7 +172,7 @@ func TestProcess(t *testing.T) {
 		c.Assert(err, qt.Not(qt.IsNil))
 
 		// test delete with empty ID
-		err = testDB.DelProcess(primitive.NilObjectID)
+		err = testDB.DelProcess(internal.NilObjectID)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 	})
 
