@@ -10,7 +10,6 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -174,7 +173,7 @@ type CreateOrganizationMemberGroupRequest struct {
 	// Description of the group
 	Description string `json:"description"`
 	// The IDs of the members to add to the group (optional if IncludeAllMembers is true)
-	MemberIDs []string `json:"memberIds,omitempty"`
+	MemberIDs []internal.ObjectID `json:"memberIds,omitempty"`
 	// Include all members of the organization in the group
 	IncludeAllMembers bool `json:"includeAllMembers,omitempty"`
 }
@@ -183,7 +182,7 @@ type CreateOrganizationMemberGroupRequest struct {
 // swagger:model OrganizationMemberGroupInfo
 type OrganizationMemberGroupInfo struct {
 	// Unique identifier for the group
-	ID string `json:"id,omitempty" bson:"_id"`
+	ID internal.ObjectID `json:"id,omitempty" bson:"_id"`
 	// Title of the group
 	Title string `json:"title,omitempty" bson:"title"`
 	// Description of the group
@@ -193,9 +192,9 @@ type OrganizationMemberGroupInfo struct {
 	// Last updated timestamp
 	UpdatedAt time.Time `json:"updatedAt,omitempty" bson:"updatedAt"`
 	// List of member IDs in the group
-	MemberIDs []string `json:"memberIds,omitempty" bson:"memberIds"`
+	MemberIDs []internal.ObjectID `json:"memberIds,omitempty" bson:"memberIds"`
 	// List of census IDs associated with the group
-	CensusIDs []string `json:"censusIds,omitempty" bson:"censusIds"`
+	CensusIDs []internal.ObjectID `json:"censusIds,omitempty" bson:"censusIds"`
 	// Count of members in the group
 	MembersCount int `json:"membersCount,omitempty" bson:"membersCount"`
 }
@@ -220,9 +219,9 @@ type UpdateOrganizationMemberGroupsRequest struct {
 	// Updated Description
 	Description string `json:"description"`
 	// The IDs of the members to add to the group
-	AddMembers []string `json:"addMembers"`
+	AddMembers []internal.ObjectID `json:"addMembers"`
 	// The IDs of the members to remove from the group
-	RemoveMembers []string `json:"removeMembers"`
+	RemoveMembers []internal.ObjectID `json:"removeMembers"`
 }
 
 // ListOrganizationMemberGroupResponse represents the response for listing the members of an  organization group.
@@ -275,7 +274,7 @@ type UserInfo struct {
 // swagger:model OrganizationInvite
 type OrganizationInvite struct {
 	// Unique identifier for the invitation
-	ID string `json:"id"`
+	ID internal.ObjectID `json:"id"`
 
 	// Email address of the invitee
 	Email string `json:"email"`
@@ -688,7 +687,7 @@ type MemberNotification struct {
 // swagger:model OrganizationCensus
 type OrganizationCensus struct {
 	// Unique identifier for the census
-	ID string `json:"censusId"`
+	ID internal.ObjectID `json:"censusId"`
 
 	// Type of census
 	Type db.CensusType `json:"type"`
@@ -700,7 +699,7 @@ type OrganizationCensus struct {
 	Size int64 `json:"size"`
 
 	// Optional for creating a census based on an organization member group
-	GroupID string `json:"groupID,omitempty"`
+	GroupID internal.ObjectID `json:"groupID,omitempty"`
 
 	// Optional for defining which member data should be used for authentication
 	AuthFields db.OrgMemberAuthFields `json:"authFields,omitempty"`
@@ -726,7 +725,7 @@ type CreateCensusRequest struct {
 // swagger:model CreateCensusResponse
 type CreateCensusResponse struct {
 	// Unique identifier for the census
-	ID string `json:"id,omitempty"`
+	ID internal.ObjectID `json:"id,omitempty"`
 }
 
 // PublishedCensusResponse represents a published census.
@@ -756,9 +755,9 @@ type PublishCensusGroupRequest struct {
 // swagger:model CensusParticipantsResponse
 type CensusParticipantsResponse struct {
 	// Unique identifier for the census
-	CensusID string `json:"censusId"`
+	CensusID internal.ObjectID `json:"censusId"`
 	// List of member IDs of the participants
-	MemberIDs []string `json:"memberIds"`
+	MemberIDs []internal.ObjectID `json:"memberIds"`
 }
 
 // OrganizationCensusFromDB converts a db.Census to an OrganizationCensus.
@@ -767,11 +766,11 @@ func OrganizationCensusFromDB(census *db.Census) OrganizationCensus {
 		return OrganizationCensus{}
 	}
 	return OrganizationCensus{
-		ID:          census.ID.Hex(),
+		ID:          census.ID,
 		Type:        census.Type,
 		OrgAddress:  census.OrgAddress,
 		Size:        census.Size,
-		GroupID:     census.GroupID.Hex(),
+		GroupID:     census.GroupID,
 		AuthFields:  census.AuthFields,
 		TwoFaFields: census.TwoFaFields,
 	}
@@ -802,7 +801,7 @@ func (r *AddMembersRequest) ToDB() []*db.OrgMember {
 
 type DeleteMembersRequest struct {
 	// List of member internal ids numbers to delete (optional if All is true)
-	IDs []string `json:"ids,omitempty"`
+	IDs []internal.ObjectID `json:"ids,omitempty"`
 	// Delete all members of the organization
 	All bool `json:"all,omitempty"`
 }
@@ -817,7 +816,8 @@ type DeleteMembersResponse struct {
 // swagger:model OrgMember
 type OrgMember struct {
 	// Member's internal unique internal ID
-	ID string `json:"id"`
+	ID internal.ObjectID `json:"id"`
+
 	// Unique member number as defined by the organization
 	MemberNumber string `json:"memberNumber"`
 
@@ -858,20 +858,9 @@ func (p *OrgMember) ToDB() *db.OrgMember {
 			log.Warnf("Failed to parse birth date %s for member %s: %v", p.BirthDate, p.MemberNumber, err)
 		}
 	}
-	// TODO: this could happen right during UnmarshalJSON,
-	// if apicommon.OrgMember.ID is an ObjectID rather than a string.
-	id := primitive.NilObjectID
-	if len(p.ID) > 0 {
-		// Convert the ID from string to ObjectID
-		var err error
-		id, err = primitive.ObjectIDFromHex(p.ID)
-		if err != nil {
-			log.Warnf("Failed to convert member ID %s to ObjectID: %v", p.ID, err)
-		}
-	}
 
 	return &db.OrgMember{
-		ID:             id,
+		ID:             p.ID,
 		MemberNumber:   p.MemberNumber,
 		Name:           p.Name,
 		Surname:        p.Surname,
@@ -887,7 +876,7 @@ func (p *OrgMember) ToDB() *db.OrgMember {
 
 func OrgMemberFromDb(p db.OrgMember) OrgMember {
 	return OrgMember{
-		ID:           p.ID.Hex(),
+		ID:           p.ID,
 		MemberNumber: p.MemberNumber,
 		Name:         p.Name,
 		Surname:      p.Surname,
@@ -951,7 +940,7 @@ type CreateProcessRequest struct {
 	PublishedCensusURI string `json:"censusUri"`
 
 	// Census ID
-	CensusID internal.HexBytes `json:"censusId" swaggertype:"string" format:"hex" example:"deadbeef"`
+	CensusID internal.ObjectID `json:"censusId" swaggertype:"string" format:"hex" example:"deadbeef"`
 
 	// Additional metadata for the process
 	// Can be any key-value pairs
@@ -962,7 +951,7 @@ type CreateProcessRequest struct {
 // swagger:model InitiateAuthRequest
 type InitiateAuthRequest struct {
 	// Unique participant ID
-	ParticipantID string `json:"participantId"`
+	ParticipantID internal.ObjectID `json:"participantId"`
 
 	// Participant's email address (optional)
 	Email string `json:"email,omitempty"`
@@ -1029,7 +1018,7 @@ type SignRequest struct {
 // swagger:model CreateProcessBundleRequest
 type CreateProcessBundleRequest struct {
 	// Census ID
-	CensusID string `json:"censusId"`
+	CensusID internal.ObjectID `json:"censusId"`
 
 	// List of process IDs to include in the bundle
 	Processes []string `json:"processes"`

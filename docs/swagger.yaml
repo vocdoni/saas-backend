@@ -22595,7 +22595,7 @@ paths:
       summary: Create a new census
       tags:
       - census
-  /census/{id}:
+  /census/{censusId}:
     get:
       consumes:
       - application/json
@@ -22604,7 +22604,7 @@ paths:
       parameters:
       - description: Census ID
         in: path
-        name: id
+        name: censusId
         required: true
         type: string
       produces:
@@ -22636,7 +22636,7 @@ paths:
       parameters:
       - description: Census ID
         in: path
-        name: id
+        name: censusId
         required: true
         type: string
       - description: Process asynchronously and return job ID
@@ -22677,7 +22677,7 @@ paths:
       summary: Add participants to a census
       tags:
       - census
-  /census/{id}/participants:
+  /census/{censusId}/participants:
     get:
       consumes:
       - application/json
@@ -22686,7 +22686,7 @@ paths:
       parameters:
       - description: Census ID
         in: path
-        name: id
+        name: censusId
         required: true
         type: string
       produces:
@@ -22717,7 +22717,7 @@ paths:
       summary: Get census participants
       tags:
       - census
-  /census/{id}/publish:
+  /census/{censusId}/publish:
     post:
       consumes:
       - application/json
@@ -22726,7 +22726,7 @@ paths:
       parameters:
       - description: Census ID
         in: path
-        name: id
+        name: censusId
         required: true
         type: string
       produces:
@@ -22757,7 +22757,7 @@ paths:
       summary: Publish a census for voting
       tags:
       - census
-  /census/{id}/publish/group/{groupid}:
+  /census/{censusId}/publish/group/{groupId}:
     post:
       consumes:
       - application/json
@@ -22767,7 +22767,7 @@ paths:
       parameters:
       - description: Census ID
         in: path
-        name: id
+        name: censusId
         required: true
         type: string
       - description: Group ID
@@ -22809,7 +22809,7 @@ paths:
       summary: Publish a group-based census for voting
       tags:
       - census
-  /census/job/{jobid}:
+  /census/job/{jobId}:
     get:
       consumes:
       - application/json
@@ -22819,7 +22819,7 @@ paths:
       parameters:
       - description: Job ID
         in: path
-        name: jobid
+        name: jobId
         required: true
         type: string
       produces:
@@ -23132,7 +23132,7 @@ paths:
       summary: Create an organization member group
       tags:
       - organizations
-  /organizations/{address}/groups/{groupID}:
+  /organizations/{address}/groups/{groupId}:
     delete:
       consumes:
       - application/json
@@ -23145,7 +23145,7 @@ paths:
         type: string
       - description: Group ID
         in: path
-        name: groupID
+        name: groupId
         required: true
         type: string
       produces:
@@ -23190,7 +23190,7 @@ paths:
         type: string
       - description: Group ID
         in: path
-        name: groupID
+        name: groupId
         required: true
         type: string
       produces:
@@ -23235,7 +23235,7 @@ paths:
         type: string
       - description: Group ID
         in: path
-        name: groupID
+        name: groupId
         required: true
         type: string
       - description: Group info to update
@@ -23272,7 +23272,7 @@ paths:
       summary: Update an organization member group
       tags:
       - organizations
-  /organizations/{address}/groups/{groupID}/members:
+  /organizations/{address}/groups/{groupId}/members:
     get:
       consumes:
       - application/json
@@ -23287,7 +23287,7 @@ paths:
         type: string
       - description: Group ID
         in: path
-        name: groupID
+        name: groupId
         required: true
         type: string
       - description: Page number for pagination
@@ -23326,7 +23326,7 @@ paths:
       summary: Get the list of members with details of an organization member group
       tags:
       - organizations
-  /organizations/{address}/groups/{groupID}/validate:
+  /organizations/{address}/groups/{groupId}/validate:
     post:
       consumes:
       - application/json
@@ -23340,7 +23340,7 @@ paths:
         type: string
       - description: Group ID
         in: path
-        name: groupID
+        name: groupId
         required: true
         type: string
       - description: Members validation request
@@ -23563,7 +23563,7 @@ paths:
       summary: Add members to an organization
       tags:
       - organizations
-  /organizations/{address}/members/job/{jobid}:
+  /organizations/{address}/members/job/{jobId}:
     get:
       consumes:
       - application/json
@@ -23578,7 +23578,7 @@ paths:
         type: string
       - description: Job ID
         in: path
-        name: jobid
+        name: jobId
         required: true
         type: string
       produces:
@@ -23775,7 +23775,7 @@ paths:
       summary: Invite a new user to an organization
       tags:
       - organizations
-  /organizations/{address}/users/{userid}:
+  /organizations/{address}/users/{userId}:
     delete:
       consumes:
       - application/json
@@ -23789,7 +23789,7 @@ paths:
         type: string
       - description: User ID
         in: path
-        name: userid
+        name: userId
         required: true
         type: string
       produces:
@@ -23833,7 +23833,7 @@ paths:
         type: string
       - description: User ID
         in: path
-        name: userid
+        name: userId
         required: true
         type: string
       - description: Update user role information

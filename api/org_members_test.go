@@ -10,7 +10,6 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 func TestOrganizationMembers(t *testing.T) {
@@ -110,7 +109,7 @@ func TestOrganizationMembers(t *testing.T) {
 
 	// Test 2.5: Test with members missing some of the new optional fields
 	// Generate a new test member ID
-	pedroID := primitive.NewObjectID().Hex()
+	pedroID := internal.NewObjectID()
 	membersWithMissingFields := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
 			{
@@ -463,7 +462,7 @@ func TestOrganizationMembers(t *testing.T) {
 	// Test 7: Delete members
 	// Test 7.1: Test with valid member IDs
 	deleteRequest := &apicommon.DeleteMembersRequest{
-		IDs: []string{
+		IDs: []internal.ObjectID{
 			membersResponse.Members[0].ID,
 			membersResponse.Members[1].ID,
 		},
@@ -486,7 +485,7 @@ func TestOrganizationMembers(t *testing.T) {
 
 	// Test 7.4: Test with empty member IDs list
 	emptyDeleteRequest := &apicommon.DeleteMembersRequest{
-		IDs: []string{},
+		IDs: []internal.ObjectID{},
 	}
 	emptyDeleteResponse := requestAndParse[apicommon.DeleteMembersResponse](
 		t, http.MethodDelete, adminToken, emptyDeleteRequest,

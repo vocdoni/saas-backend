@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.vocdoni.io/dvote/log"
@@ -22,8 +22,8 @@ func (ms *MongoStorage) SetJob(job *Job) error {
 	defer ms.keysLock.Unlock()
 
 	// If no ID is set, create a new one
-	if job.ID == primitive.NilObjectID {
-		job.ID = primitive.NewObjectID()
+	if job.ID == internal.NilObjectID {
+		job.ID = internal.NewObjectID()
 	}
 
 	// Create update document
