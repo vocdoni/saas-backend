@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.vocdoni.io/dvote/log"
 )
@@ -47,7 +47,7 @@ func (ms *MongoStorage) CreateInvitation(invite *OrganizationInvite) error {
 	if !IsValidUserRole(invite.Role) {
 		return fmt.Errorf("invalid role")
 	}
-	invite.ID = primitive.NewObjectID()
+	invite.ID = internal.NewObjectID()
 	// insert the invitation in the database
 	_, err = ms.organizationInvites.InsertOne(ctx, invite)
 	// check if the user is already invited to the organization, the error is
@@ -66,7 +66,7 @@ func (ms *MongoStorage) CreateInvitation(invite *OrganizationInvite) error {
 
 // Invitation returns the invitation for the given ID.
 func (ms *MongoStorage) Invitation(invitationID string) (*OrganizationInvite, error) {
-	objID, err := primitive.ObjectIDFromHex(invitationID)
+	objID, err := internal.ObjectIDFromHex(invitationID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid invitation ID: %w", err)
 	}
@@ -90,7 +90,7 @@ func (ms *MongoStorage) UpdateInvitation(invite *OrganizationInvite) error {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	if invite.ID == primitive.NilObjectID {
+	if invite.ID == internal.NilObjectID {
 		return fmt.Errorf("invitation ID cannot be empty")
 	}
 	updateDoc, err := dynamicUpdateDocument(invite, nil)
@@ -174,7 +174,7 @@ func (ms *MongoStorage) deleteInvitationHelper(filter bson.M) error {
 
 // DeleteInvitation removes the invitation from the database by its ID.
 func (ms *MongoStorage) DeleteInvitation(invitationID string) error {
-	objID, err := primitive.ObjectIDFromHex(invitationID)
+	objID, err := internal.ObjectIDFromHex(invitationID)
 	if err != nil {
 		return fmt.Errorf("invalid invitation ID: %w", err)
 	}
