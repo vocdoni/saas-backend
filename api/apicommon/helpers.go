@@ -87,6 +87,17 @@ func UserIDFromRequest(r *http.Request) (uint64, error) {
 	return userID, nil
 }
 
+// BundleIDFromRequest extracts and validates BundleID from URL parameters.
+// It returns the BundleID as internal.HexBytes or an error if the parameter
+// is missing or invalid.
+func BundleIDFromRequest(r *http.Request) (internal.HexBytes, error) {
+	bundleID := internal.HexBytes{}
+	if err := bundleID.ParseString(chi.URLParam(r, "bundleId")); err != nil {
+		return nil, fmt.Errorf("invalid bundle ID: %w", err)
+	}
+	return bundleID, nil
+}
+
 // HTTPWriteJSON helper function allows to write a JSON response.
 func HTTPWriteJSON(w http.ResponseWriter, data any) {
 	w.Header().Set("Content-Type", "application/json")

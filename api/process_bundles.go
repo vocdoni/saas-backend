@@ -168,15 +168,9 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/process/bundle/{bundleId} [put]
 func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request) {
-	bundleIDStr := chi.URLParam(r, "bundleId")
-	if bundleIDStr == "" {
-		errors.ErrMalformedURLParam.Withf("missing bundle ID").Write(w)
-		return
-	}
-
-	var bundleID internal.HexBytes
-	if err := bundleID.ParseString(bundleIDStr); err != nil {
-		errors.ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
+	bundleID, err := apicommon.BundleIDFromRequest(r)
+	if err != nil {
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
 
@@ -206,7 +200,7 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 
 	if len(req.Processes) == 0 {
 		apicommon.HTTPWriteJSON(w, apicommon.CreateProcessBundleResponse{
-			URI:  "/process/bundle/" + bundleIDStr,
+			URI:  "/process/bundle/" + bundleID.String(),
 			Root: bundle.Census.Published.Root,
 		})
 		return
@@ -242,7 +236,7 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	apicommon.HTTPWriteJSON(w, apicommon.CreateProcessBundleResponse{
-		URI:  "/process/bundle/" + bundleIDStr,
+		URI:  "/process/bundle/" + bundleID.String(),
 		Root: bundle.Census.Published.Root,
 	})
 }
@@ -262,15 +256,9 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/process/bundle/{bundleId} [get]
 func (a *API) processBundleInfoHandler(w http.ResponseWriter, r *http.Request) {
-	bundleIDStr := chi.URLParam(r, "bundleId")
-	if bundleIDStr == "" {
-		errors.ErrMalformedURLParam.Withf("missing bundle ID").Write(w)
-		return
-	}
-
-	var bundleID internal.HexBytes
-	if err := bundleID.ParseString(bundleIDStr); err != nil {
-		errors.ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
+	bundleID, err := apicommon.BundleIDFromRequest(r)
+	if err != nil {
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
 
@@ -303,19 +291,13 @@ func (a *API) processBundleInfoHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		500				{object}	errors.Error	"Internal server error"
 //	@Router			/process/bundle/{bundleId}/{participantId} [get]
 func (a *API) processBundleParticipantInfoHandler(w http.ResponseWriter, r *http.Request) {
-	bundleIDStr := chi.URLParam(r, "bundleId")
-	if bundleIDStr == "" {
-		errors.ErrMalformedURLParam.Withf("missing bundle ID").Write(w)
+	bundleID, err := apicommon.BundleIDFromRequest(r)
+	if err != nil {
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
 
-	var bundleID internal.HexBytes
-	if err := bundleID.ParseString(bundleIDStr); err != nil {
-		errors.ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
-		return
-	}
-
-	_, err := a.db.ProcessBundle(bundleID)
+	_, err = a.db.ProcessBundle(bundleID)
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrMalformedURLParam.Withf("bundle not found").Write(w)

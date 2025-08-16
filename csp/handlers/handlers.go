@@ -42,16 +42,6 @@ func New(c *csp.CSP, mainDB *db.MongoStorage) *CSPHandlers {
 	}
 }
 
-// parseBundleID parses the bundle ID from the URL parameters
-func parseBundleID(w http.ResponseWriter, r *http.Request) (*internal.HexBytes, bool) {
-	bundleID := new(internal.HexBytes)
-	if err := bundleID.ParseString(chi.URLParam(r, "bundleId")); err != nil {
-		errors.ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
-		return nil, false
-	}
-	return bundleID, true
-}
-
 // parseAuthStep parses the authentication step from the URL parameters
 func parseAuthStep(w http.ResponseWriter, r *http.Request) (int, bool) {
 	stepString := chi.URLParam(r, "step")
@@ -131,8 +121,9 @@ func (c *CSPHandlers) handleAuthStep(w http.ResponseWriter, r *http.Request,
 //	@Router			/process/bundle/{bundleId}/auth/{step} [post]
 func (c *CSPHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse the bundle ID and authentication step
-	bundleID, ok := parseBundleID(w, r)
-	if !ok {
+	bundleID, err := apicommon.BundleIDFromRequest(r)
+	if err != nil {
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
 
@@ -142,13 +133,13 @@ func (c *CSPHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Get the bundle
-	bundle, ok := c.getBundle(w, *bundleID)
+	bundle, ok := c.getBundle(w, bundleID)
 	if !ok {
 		return
 	}
 
 	// Handle the authentication step
-	c.handleAuthStep(w, r, step, *bundleID, bundle.Census.ID.Hex())
+	c.handleAuthStep(w, r, step, bundleID, bundle.Census.ID.Hex())
 }
 
 // parseSignRequest parses the sign request from the request body
@@ -251,13 +242,14 @@ func (c *CSPHandlers) signAndRespond(w http.ResponseWriter, authToken, address, 
 //	@Router			/process/bundle/{bundleId}/sign [post]
 func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse the bundle ID
-	bundleID, ok := parseBundleID(w, r)
-	if !ok {
+	bundleID, err := apicommon.BundleIDFromRequest(r)
+	if err != nil {
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
 
 	// Get the bundle
-	bundle, ok := c.getBundle(w, *bundleID)
+	bundle, ok := c.getBundle(w, bundleID)
 	if !ok {
 		return
 	}
