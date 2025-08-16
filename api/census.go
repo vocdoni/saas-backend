@@ -89,16 +89,16 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 //	@Tags			census
 //	@Accept			json
 //	@Produce		json
-//	@Param			id	path		string	true	"Census ID"
-//	@Success		200	{object}	apicommon.OrganizationCensus
-//	@Failure		400	{object}	errors.Error	"Invalid census ID"
-//	@Failure		404	{object}	errors.Error	"Census not found"
-//	@Failure		500	{object}	errors.Error	"Internal server error"
-//	@Router			/census/{id} [get]
+//	@Param			censusId	path		string	true	"Census ID"
+//	@Success		200			{object}	apicommon.OrganizationCensus
+//	@Failure		400			{object}	errors.Error	"Invalid census ID"
+//	@Failure		404			{object}	errors.Error	"Census not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/census/{censusId} [get]
 func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
-	censusID := internal.HexBytes{}
-	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
-		errors.ErrMalformedURLParam.Withf("wrong census ID").Write(w)
+	censusID, err := apicommon.CensusIDFromRequest(r)
+	if err != nil {
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
 	census, err := a.db.Census(censusID.String())
@@ -117,19 +117,19 @@ func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id		path		string						true	"Census ID"
-//	@Param			async	query		boolean						false	"Process asynchronously and return job ID"
-//	@Param			request	body		apicommon.AddMembersRequest	true	"Participants to add"
-//	@Success		200		{object}	apicommon.AddMembersResponse
-//	@Failure		400		{object}	errors.Error	"Invalid input data"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		404		{object}	errors.Error	"Census not found"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/census/{id} [post]
+//	@Param			censusId	path		string						true	"Census ID"
+//	@Param			async		query		boolean						false	"Process asynchronously and return job ID"
+//	@Param			request		body		apicommon.AddMembersRequest	true	"Participants to add"
+//	@Success		200			{object}	apicommon.AddMembersResponse
+//	@Failure		400			{object}	errors.Error	"Invalid input data"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		404			{object}	errors.Error	"Census not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/census/{censusId} [post]
 func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Request) {
-	censusID := internal.HexBytes{}
-	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
-		errors.ErrMalformedURLParam.Withf("wrong census ID").Write(w)
+	censusID, err := apicommon.CensusIDFromRequest(r)
+	if err != nil {
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
 	// get the user from the request context
@@ -257,17 +257,17 @@ func (*API) censusAddParticipantsJobStatusHandler(w http.ResponseWriter, r *http
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id	path		string	true	"Census ID"
-//	@Success		200	{object}	apicommon.PublishedCensusResponse
-//	@Failure		400	{object}	errors.Error	"Invalid census ID"
-//	@Failure		401	{object}	errors.Error	"Unauthorized"
-//	@Failure		404	{object}	errors.Error	"Census not found"
-//	@Failure		500	{object}	errors.Error	"Internal server error"
-//	@Router			/census/{id}/publish [post]
+//	@Param			censusId	path		string	true	"Census ID"
+//	@Success		200			{object}	apicommon.PublishedCensusResponse
+//	@Failure		400			{object}	errors.Error	"Invalid census ID"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		404			{object}	errors.Error	"Census not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/census/{censusId}/publish [post]
 func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
-	censusID := internal.HexBytes{}
-	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
-		errors.ErrMalformedURLParam.Withf("wrong census ID").Write(w)
+	censusID, err := apicommon.CensusIDFromRequest(r)
+	if err != nil {
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
 
@@ -334,19 +334,19 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id		path		string								true	"Census ID"
-//	@Param			groupId	path		string								true	"Group ID"
-//	@Param			request	body		apicommon.PublishCensusGroupRequest	true	"Census authentication configuration"
-//	@Success		200		{object}	apicommon.PublishedCensusResponse
-//	@Failure		400		{object}	errors.Error	"Invalid census ID or group ID"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		404		{object}	errors.Error	"Census not found"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/census/{id}/publish/group/{groupid} [post]
+//	@Param			censusId	path		string								true	"Census ID"
+//	@Param			groupId		path		string								true	"Group ID"
+//	@Param			request		body		apicommon.PublishCensusGroupRequest	true	"Census authentication configuration"
+//	@Success		200			{object}	apicommon.PublishedCensusResponse
+//	@Failure		400			{object}	errors.Error	"Invalid census ID or group ID"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		404			{object}	errors.Error	"Census not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/census/{censusId}/publish/group/{groupid} [post]
 func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) {
-	censusID := internal.HexBytes{}
-	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
-		errors.ErrMalformedURLParam.Withf("wrong census ID").Write(w)
+	censusID, err := apicommon.CensusIDFromRequest(r)
+	if err != nil {
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
 
@@ -452,17 +452,17 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id	path		string	true	"Census ID"
-//	@Success		200	{object}	apicommon.CensusParticipantsResponse
-//	@Failure		400	{object}	errors.Error	"Invalid census ID"
-//	@Failure		401	{object}	errors.Error	"Unauthorized"
-//	@Failure		404	{object}	errors.Error	"Census not found"
-//	@Failure		500	{object}	errors.Error	"Internal server error"
-//	@Router			/census/{id}/participants [get]
+//	@Param			censusId	path		string	true	"Census ID"
+//	@Success		200			{object}	apicommon.CensusParticipantsResponse
+//	@Failure		400			{object}	errors.Error	"Invalid census ID"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		404			{object}	errors.Error	"Census not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/census/{censusId}/participants [get]
 func (a *API) censusParticipantsHandler(w http.ResponseWriter, r *http.Request) {
-	censusID := internal.HexBytes{}
-	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
-		errors.ErrMalformedURLParam.Withf("wrong census ID").Write(w)
+	censusID, err := apicommon.CensusIDFromRequest(r)
+	if err != nil {
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
 

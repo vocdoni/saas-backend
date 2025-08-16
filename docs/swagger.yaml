@@ -22532,7 +22532,7 @@ paths:
       summary: Create a new census
       tags:
       - census
-  /census/{id}:
+  /census/{censusId}:
     get:
       consumes:
       - application/json
@@ -22541,7 +22541,7 @@ paths:
       parameters:
       - description: Census ID
         in: path
-        name: id
+        name: censusId
         required: true
         type: string
       produces:
@@ -22573,7 +22573,7 @@ paths:
       parameters:
       - description: Census ID
         in: path
-        name: id
+        name: censusId
         required: true
         type: string
       - description: Process asynchronously and return job ID
@@ -22614,7 +22614,7 @@ paths:
       summary: Add participants to a census
       tags:
       - census
-  /census/{id}/participants:
+  /census/{censusId}/participants:
     get:
       consumes:
       - application/json
@@ -22623,7 +22623,7 @@ paths:
       parameters:
       - description: Census ID
         in: path
-        name: id
+        name: censusId
         required: true
         type: string
       produces:
@@ -22654,7 +22654,7 @@ paths:
       summary: Get census participants
       tags:
       - census
-  /census/{id}/publish:
+  /census/{censusId}/publish:
     post:
       consumes:
       - application/json
@@ -22663,7 +22663,7 @@ paths:
       parameters:
       - description: Census ID
         in: path
-        name: id
+        name: censusId
         required: true
         type: string
       produces:
@@ -22694,7 +22694,7 @@ paths:
       summary: Publish a census for voting
       tags:
       - census
-  /census/{id}/publish/group/{groupid}:
+  /census/{censusId}/publish/group/{groupid}:
     post:
       consumes:
       - application/json
@@ -22704,7 +22704,7 @@ paths:
       parameters:
       - description: Census ID
         in: path
-        name: id
+        name: censusId
         required: true
         type: string
       - description: Group ID

@@ -33,6 +33,17 @@ func ProcessIDFromRequest(r *http.Request) (internal.HexBytes, error) {
 	return processID, nil
 }
 
+// CensusIDFromRequest extracts and validates CensusID from URL parameters.
+// It returns the CensusID as internal.HexBytes or an error if the parameter
+// is missing or invalid.
+func CensusIDFromRequest(r *http.Request) (internal.HexBytes, error) {
+	censusID := internal.HexBytes{}
+	if err := censusID.ParseString(chi.URLParam(r, "censusId")); err != nil {
+		return nil, fmt.Errorf("invalid census ID: %w", err)
+	}
+	return censusID, nil
+}
+
 // HTTPWriteJSON helper function allows to write a JSON response.
 func HTTPWriteJSON(w http.ResponseWriter, data any) {
 	w.Header().Set("Content-Type", "application/json")

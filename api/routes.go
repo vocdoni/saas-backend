@@ -112,17 +112,17 @@ const (
 	// census routes
 	// POST /census to create a new census
 	censusEndpoint = "/census"
-	// GET /census/{id} to get census information
-	// POST /census/{id} to add members to census
-	censusIDEndpoint = "/census/{id}"
+	// GET /census/{censusId} to get census information
+	// POST /census/{censusId} to add members to census
+	censusIDEndpoint = "/census/{censusId}"
 	// GET /census/check/{jobid} to check the status of the add members job
 	censusAddParticipantsJobStatusEndpoint = "/census/job/{jobid}"
-	// POST /census/{id}/publish to publish a census
-	censusPublishEndpoint = "/census/{id}/publish"
-	// POST /census/{id}/group/{groupid}/publish to publish a group census
-	censusGroupPublishEndpoint = "/census/{id}/group/{groupid}/publish"
-	// GET /census/{id}/participants to get the census participants
-	censusParticipantsEndpoint = "/census/{id}/participants"
+	// POST /census/{censusId}/publish to publish a census
+	censusPublishEndpoint = "/census/{censusId}/publish"
+	// POST /census/{censusId}/group/{groupid}/publish to publish a group census
+	censusGroupPublishEndpoint = "/census/{censusId}/group/{groupid}/publish"
+	// GET /census/{censusId}/participants to get the census participants
+	censusParticipantsEndpoint = "/census/{censusId}/participants"
 
 	// process routes
 	// POST /process/{processId} to create a new process
