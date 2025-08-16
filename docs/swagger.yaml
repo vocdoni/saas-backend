@@ -23660,7 +23660,7 @@ paths:
       summary: Invite a new user to an organization
       tags:
       - organizations
-  /organizations/{address}/users/{userid}:
+  /organizations/{address}/users/{userId}:
     delete:
       consumes:
       - application/json
@@ -23674,7 +23674,7 @@ paths:
         type: string
       - description: User ID
         in: path
-        name: userid
+        name: userId
         required: true
         type: string
       produces:
@@ -23718,7 +23718,7 @@ paths:
         type: string
       - description: User ID
         in: path
-        name: userid
+        name: userId
         required: true
         type: string
       - description: Update user role information

@@ -54,12 +54,12 @@ const (
 	organizationAcceptUserEndpoint = "/organizations/{address}/users/accept"
 	// GET /organizations/{address}/users/pending to get the pending users
 	organizationPendingUsersEndpoint = "/organizations/{address}/users/pending"
-	// DELETE /organizations/{address}/users/pending/{userid} to delete the a pending invitation
+	// DELETE /organizations/{address}/users/pending/{invitationID} to delete the a pending invitation
 	organizationHandlePendingInvitationEndpoint = "/organizations/{address}/users/pending/{invitationID}"
-	// PUT /organizations/{address}/users/{userid} to update the role of an  organization user
-	organizationUpdateUserEndpoint = "/organizations/{address}/users/{userid}"
-	// DELETE /organizations/{address}/users/{userid} to remove user from  an organization
-	organizationDeleteUserEndpoint = "/organizations/{address}/users/{userid}"
+	// PUT /organizations/{address}/users/{userId} to update the role of an  organization user
+	organizationUpdateUserEndpoint = "/organizations/{address}/users/{userId}"
+	// DELETE /organizations/{address}/users/{userId} to remove user from  an organization
+	organizationDeleteUserEndpoint = "/organizations/{address}/users/{userId}"
 	// GET /organizations/roles to get the available organization user roles
 	organizationRolesEndpoint = "/organizations/roles"
 	// GET /organizations/types to get the available organization types

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/db"
@@ -69,6 +70,21 @@ func JobIDFromRequest(r *http.Request) (internal.HexBytes, error) {
 		return nil, fmt.Errorf("invalid job ID: %w", err)
 	}
 	return jobID, nil
+}
+
+// UserIDFromRequest extracts and validates UserID from URL parameters.
+// It returns the UserID as uint64 or an error if the parameter
+// is missing or invalid.
+func UserIDFromRequest(r *http.Request) (uint64, error) {
+	userIDStr := chi.URLParam(r, "userId")
+	if userIDStr == "" {
+		return 0, fmt.Errorf("user ID is required")
+	}
+	userID, err := strconv.ParseUint(userIDStr, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid user ID: %w", err)
+	}
+	return userID, nil
 }
 
 // HTTPWriteJSON helper function allows to write a JSON response.

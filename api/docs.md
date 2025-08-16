@@ -873,7 +873,7 @@ Update the code, link and expiration time of a pending invitation to an organiza
 
 ### 🔄 Update organization user role
 
-* **Path** `/organizations/{address}/users/{userid}`
+* **Path** `/organizations/{address}/users/{userId}`
 * **Method** `PUT`
 * **Headers**
   * `Authentication: Bearer <user_token>`
@@ -906,7 +906,7 @@ Update the role of a user in an organization. Only admins of the organization ca
 
 ### ❌ Remove organization user
 
-* **Path** `/organizations/{address}/users/{userid}`
+* **Path** `/organizations/{address}/users/{userId}`
 * **Method** `DELETE`
 * **Headers**
   * `Authentication: Bearer <user_token>`
