@@ -3,9 +3,12 @@ package apicommon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -17,6 +20,17 @@ func UserFromContext(ctx context.Context) (*db.User, bool) {
 		return &rawUser, ok
 	}
 	return nil, false
+}
+
+// ProcessIDFromRequest extracts and validates ProcessID from URL parameters.
+// It returns the ProcessID as internal.HexBytes or an error if the parameter
+// is missing or invalid.
+func ProcessIDFromRequest(r *http.Request) (internal.HexBytes, error) {
+	processID := internal.HexBytes{}
+	if err := processID.ParseString(chi.URLParam(r, "processId")); err != nil {
+		return nil, fmt.Errorf("invalid process ID: %w", err)
+	}
+	return processID, nil
 }
 
 // HTTPWriteJSON helper function allows to write a JSON response.

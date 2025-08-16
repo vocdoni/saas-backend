@@ -4,11 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
-	"github.com/vocdoni/saas-backend/internal"
 )
 
 // createProcessHandler godoc
@@ -29,9 +27,9 @@ import (
 //	@Failure		500			{object}	errors.Error					"Internal server error"
 //	@Router			/process/{processId} [post]
 func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
-	processID := internal.HexBytes{}
-	if err := processID.ParseString(chi.URLParam(r, "processId")); err != nil {
-		errors.ErrMalformedURLParam.Withf("missing process ID").Write(w)
+	processID, err := apicommon.ProcessIDFromRequest(r)
+	if err != nil {
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
 
@@ -111,13 +109,13 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/process/{processId} [get]
 func (a *API) processInfoHandler(w http.ResponseWriter, r *http.Request) {
-	processID := chi.URLParam(r, "processId")
-	if len(processID) == 0 {
-		errors.ErrMalformedURLParam.Withf("missing process ID").Write(w)
+	processID, err := apicommon.ProcessIDFromRequest(r)
+	if err != nil {
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
 
-	process, err := a.db.Process([]byte(processID))
+	process, err := a.db.Process(processID)
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrMalformedURLParam.Withf("process not found").Write(w)
