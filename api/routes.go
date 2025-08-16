@@ -72,8 +72,8 @@ const (
 	organizationMembersEndpoint = "/organizations/{address}/members"
 	// POST /organizations/{address}/members to add new members
 	organizationAddMembersEndpoint = "/organizations/{address}/members"
-	// GET /organizations/{address}/members/check/{jobid} to check the status of the add members job
-	organizationAddMembersJobStatusEndpoint = "/organizations/{address}/members/job/{jobid}"
+	// GET /organizations/{address}/members/check/{jobId} to check the status of the add members job
+	organizationAddMembersJobStatusEndpoint = "/organizations/{address}/members/job/{jobId}"
 	// DELETE /organizations/{address}/members to delete members
 	organizationDeleteMembersEndpoint = "/organizations/{address}/members"
 	// POST/PUT/GET/DELETE /organizations/{address}/meta to add/set/get/delete the organization metadata
@@ -115,8 +115,8 @@ const (
 	// GET /census/{censusId} to get census information
 	// POST /census/{censusId} to add members to census
 	censusIDEndpoint = "/census/{censusId}"
-	// GET /census/check/{jobid} to check the status of the add members job
-	censusAddParticipantsJobStatusEndpoint = "/census/job/{jobid}"
+	// GET /census/check/{jobId} to check the status of the add members job
+	censusAddParticipantsJobStatusEndpoint = "/census/job/{jobId}"
 	// POST /census/{censusId}/publish to publish a census
 	censusPublishEndpoint = "/census/{censusId}/publish"
 	// POST /census/{censusId}/group/{groupId}/publish to publish a group census

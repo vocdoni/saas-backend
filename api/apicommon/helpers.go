@@ -60,6 +60,17 @@ func GroupIDFromRequest(r *http.Request) (primitive.ObjectID, error) {
 	return groupID, nil
 }
 
+// JobIDFromRequest extracts and validates JobID from URL parameters.
+// It returns the JobID as internal.HexBytes or an error if the parameter
+// is missing or invalid.
+func JobIDFromRequest(r *http.Request) (internal.HexBytes, error) {
+	jobID := internal.HexBytes{}
+	if err := jobID.ParseString(chi.URLParam(r, "jobId")); err != nil {
+		return nil, fmt.Errorf("invalid job ID: %w", err)
+	}
+	return jobID, nil
+}
+
 // HTTPWriteJSON helper function allows to write a JSON response.
 func HTTPWriteJSON(w http.ResponseWriter, data any) {
 	w.Header().Set("Content-Type", "application/json")

@@ -22746,7 +22746,7 @@ paths:
       summary: Publish a group-based census for voting
       tags:
       - census
-  /census/job/{jobid}:
+  /census/job/{jobId}:
     get:
       consumes:
       - application/json
@@ -22756,7 +22756,7 @@ paths:
       parameters:
       - description: Job ID
         in: path
-        name: jobid
+        name: jobId
         required: true
         type: string
       produces:
@@ -23448,7 +23448,7 @@ paths:
       summary: Add members to an organization
       tags:
       - organizations
-  /organizations/{address}/members/job/{jobid}:
+  /organizations/{address}/members/job/{jobId}:
     get:
       consumes:
       - application/json
@@ -23463,7 +23463,7 @@ paths:
         type: string
       - description: Job ID
         in: path
-        name: jobid
+        name: jobId
         required: true
         type: string
       produces:

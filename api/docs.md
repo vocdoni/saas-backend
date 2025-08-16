@@ -1165,7 +1165,7 @@ Adds multiple members to an organization. Requires Manager or Admin role for the
 
 ### 🔍 Check Add Members Job Status
 
-* **Path** `/organizations/{address}/members/job/{jobid}`
+* **Path** `/organizations/{address}/members/job/{jobId}`
 * **Method** `GET`
 * **Headers**
   * `Authentication: Bearer <user_token>`
@@ -2070,7 +2070,7 @@ Adds multiple members to a census in bulk. Requires Manager or Admin role for th
 
 ### 🔍 Check Add Members Job Status
 
-* **Path** `/census/job/{jobid}`
+* **Path** `/census/job/{jobId}`
 * **Method** `GET`
 * **Response**
 ```json

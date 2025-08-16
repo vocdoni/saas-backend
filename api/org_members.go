@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
@@ -201,16 +200,16 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			address	path		string	true	"Organization address"
-//	@Param			jobid	path		string	true	"Job ID"
+//	@Param			jobId	path		string	true	"Job ID"
 //	@Success		200		{object}	apicommon.AddMembersJobResponse
 //	@Failure		400		{object}	errors.Error	"Invalid job ID"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
 //	@Failure		404		{object}	errors.Error	"Job not found"
-//	@Router			/organizations/{address}/members/job/{jobid} [get]
+//	@Router			/organizations/{address}/members/job/{jobId} [get]
 func (*API) addOrganizationMembersJobStatusHandler(w http.ResponseWriter, r *http.Request) {
-	jobID := internal.HexBytes{}
-	if err := jobID.ParseString(chi.URLParam(r, "jobid")); err != nil {
-		errors.ErrMalformedURLParam.Withf("invalid job ID").Write(w)
+	jobID, err := apicommon.JobIDFromRequest(r)
+	if err != nil {
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
 
