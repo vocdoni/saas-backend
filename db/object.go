@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -14,7 +15,11 @@ import (
 // intended for s3-like storage.
 
 // Object retrieves an object from the MongoDB collection by its ID.
-func (ms *MongoStorage) Object(id string) (*Object, error) {
+func (ms *MongoStorage) Object(id internal.ObjectID) (*Object, error) {
+	if id.IsZero() {
+		return nil, ErrInvalidData
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
@@ -33,7 +38,11 @@ func (ms *MongoStorage) Object(id string) (*Object, error) {
 // SetObject sets the object data for the given objectID. If the
 // object does not exist, it will be created with the given data, otherwise it
 // will be updated.
-func (ms *MongoStorage) SetObject(objectID, user, contentType string, data []byte) error {
+func (ms *MongoStorage) SetObject(objectID internal.ObjectID, user, contentType string, data []byte) error {
+	if objectID.IsZero() {
+		return ErrInvalidData
+	}
+
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -56,7 +65,11 @@ func (ms *MongoStorage) SetObject(objectID, user, contentType string, data []byt
 }
 
 // RemoveObject removes the object data for the given objectID.
-func (ms *MongoStorage) RemoveObject(objectID string) error {
+func (ms *MongoStorage) RemoveObject(objectID internal.ObjectID) error {
+	if objectID.IsZero() {
+		return ErrInvalidData
+	}
+
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
