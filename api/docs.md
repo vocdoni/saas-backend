@@ -1291,7 +1291,7 @@ Get the list of groups and their info of the organization. Does not return the m
 
 ### 🔍 Get Organization Member Group
 
-* **Path** `/organizations/{address}/groups/{groupID}`
+* **Path** `/organizations/{address}/groups/{groupId}`
 * **Method** `GET`
 * **Headers**
   * `Authentication: Bearer <user_token>`
@@ -1362,7 +1362,7 @@ Create an organization member group with the given members. Requires admin or ma
 
 ### 🔄 Update Organization Member Group
 
-* **Path** `/organizations/{address}/groups/{groupID}`
+* **Path** `/organizations/{address}/groups/{groupId}`
 * **Method** `PUT`
 * **Headers**
   * `Authentication: Bearer <user_token>`
@@ -1399,7 +1399,7 @@ Update an organization member group changing the info, and adding or removing me
 
 ### ❌ Delete Organization Member Group
 
-* **Path** `/organizations/{address}/groups/{groupID}`
+* **Path** `/organizations/{address}/groups/{groupId}`
 * **Method** `DELETE`
 * **Headers**
   * `Authentication: Bearer <user_token>`
@@ -1425,7 +1425,7 @@ Delete an organization member group by its ID. Requires admin or manager role.
 
 ### 📋 List Organization Member Group Members
 
-* **Path** `/organizations/{address}/groups/{groupID}/members`
+* **Path** `/organizations/{address}/groups/{groupId}/members`
 * **Method** `GET`
 * **Headers**
   * `Authentication: Bearer <user_token>`
@@ -1471,7 +1471,7 @@ Get the list of members with details of an organization member group. Requires a
 
 ### ✅ Validate Organization Member Group Data
 
-* **Path** `/organizations/{address}/groups/{groupID}/validate`
+* **Path** `/organizations/{address}/groups/{groupId}/validate`
 * **Method** `POST`
 * **Headers**
   * `Authentication: Bearer <user_token>`

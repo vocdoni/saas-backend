@@ -82,11 +82,11 @@ func (ms *MongoStorage) SetPublishedCensus(censusID, uri string, root internal.H
 	return ms.SetCensus(census)
 }
 
-// PopulateGroupCensus creates a new census for an organization
-// Returns the hex representation of the census
+// PopulateGroupCensus creates a new census for an organization.
+// Returns the resulting census size.
 func (ms *MongoStorage) PopulateGroupCensus(
 	census *Census,
-	groupID string,
+	groupID primitive.ObjectID,
 	participantIDs []string,
 ) (int64, error) {
 	// create a context with a timeout
@@ -127,20 +127,18 @@ func (ms *MongoStorage) PopulateGroupCensus(
 	}
 	census.Type = census.TwoFaFields.GetCensusType()
 
-	if groupID != "" {
-		// check that the group exists
-		group, err := ms.OrganizationMemberGroup(groupID, census.OrgAddress)
-		if err != nil {
-			if err == ErrNotFound {
-				return 0, ErrInvalidData
-			}
-			return 0, fmt.Errorf("error retrieving organization group: %w", err)
+	// check that the group exists
+	group, err := ms.OrganizationMemberGroup(groupID, census.OrgAddress)
+	if err != nil {
+		if err == ErrNotFound {
+			return 0, ErrInvalidData
 		}
-		census.GroupID = group.ID
-		// update the group with the census ID
-		if err := ms.addOrganizationMemberGroupCensus(ctx, group.ID.Hex(), census.OrgAddress, census.ID.Hex()); err != nil {
-			return 0, fmt.Errorf("error updating group with census ID: %w", err)
-		}
+		return 0, fmt.Errorf("error retrieving organization group: %w", err)
+	}
+	census.GroupID = group.ID
+	// update the group with the census ID
+	if err := ms.addOrganizationMemberGroupCensus(ctx, group.ID, census.OrgAddress, census.ID.Hex()); err != nil {
+		return 0, fmt.Errorf("error updating group with census ID: %w", err)
 	}
 
 	// set the participants for the census

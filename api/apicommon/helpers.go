@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -42,6 +43,21 @@ func CensusIDFromRequest(r *http.Request) (internal.HexBytes, error) {
 		return nil, fmt.Errorf("invalid census ID: %w", err)
 	}
 	return censusID, nil
+}
+
+// GroupIDFromRequest extracts and validates GroupID from URL parameters.
+// It returns the GroupID as primitive.ObjectID or an error if the parameter
+// is missing or invalid.
+func GroupIDFromRequest(r *http.Request) (primitive.ObjectID, error) {
+	groupIDStr := chi.URLParam(r, "groupId")
+	if groupIDStr == "" {
+		return primitive.NilObjectID, fmt.Errorf("group ID is required")
+	}
+	groupID, err := primitive.ObjectIDFromHex(groupIDStr)
+	if err != nil {
+		return primitive.NilObjectID, fmt.Errorf("invalid group ID: %w", err)
+	}
+	return groupID, nil
 }
 
 // HTTPWriteJSON helper function allows to write a JSON response.

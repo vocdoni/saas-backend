@@ -107,7 +107,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 
 		t.Run("NonExistentGroup", func(_ *testing.T) {
 			// Test getting non-existent group
-			nonExistentID := primitive.NewObjectID().Hex()
+			nonExistentID := primitive.NewObjectID()
 			_, err := testDB.OrganizationMemberGroup(nonExistentID, testOrgAddress)
 			c.Assert(err, qt.Equals, ErrNotFound)
 		})
@@ -286,7 +286,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 
 		t.Run("NonExistentGroup", func(_ *testing.T) {
 			// Test updating non-existent group
-			nonExistentID := primitive.NewObjectID().Hex()
+			nonExistentID := primitive.NewObjectID()
 			err := testDB.UpdateOrganizationMemberGroup(
 				nonExistentID, testOrgAddress,
 				"Updated Title", "Updated Description",
@@ -393,7 +393,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 
 		t.Run("NonExistentGroup", func(_ *testing.T) {
 			// Test deleting non-existent group
-			nonExistentID := primitive.NewObjectID().Hex()
+			nonExistentID := primitive.NewObjectID()
 			err := testDB.DeleteOrganizationMemberGroup(nonExistentID, testOrgAddress)
 			c.Assert(err, qt.IsNil) // Should not error for non-existent group
 		})
@@ -450,7 +450,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 
 		t.Run("NonExistentGroup", func(_ *testing.T) {
 			// Test listing members of non-existent group
-			nonExistentID := primitive.NewObjectID().Hex()
+			nonExistentID := primitive.NewObjectID()
 			_, _, err := testDB.ListOrganizationMemberGroup(nonExistentID, testOrgAddress, 1, 10)
 			c.Assert(err, qt.Not(qt.IsNil))
 		})
@@ -546,7 +546,8 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test OrganizationMemberGroup with zero address - should fail
-		_, err = testDB.OrganizationMemberGroup("some-id", common.Address{})
+		someGroupID := primitive.NewObjectID()
+		_, err = testDB.OrganizationMemberGroup(someGroupID, common.Address{})
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test OrganizationMemberGroups with zero address - should fail
@@ -554,15 +555,15 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test UpdateOrganizationMemberGroup with zero address - should fail
-		err = testDB.UpdateOrganizationMemberGroup("some-id", common.Address{}, "title", "desc", nil, nil)
+		err = testDB.UpdateOrganizationMemberGroup(someGroupID, common.Address{}, "title", "desc", nil, nil)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test DeleteOrganizationMemberGroup with zero address - should fail
-		err = testDB.DeleteOrganizationMemberGroup("some-id", common.Address{})
+		err = testDB.DeleteOrganizationMemberGroup(someGroupID, common.Address{})
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test ListOrganizationMemberGroup with zero address - should fail
-		_, _, err = testDB.ListOrganizationMemberGroup("some-id", common.Address{}, 1, 10)
+		_, _, err = testDB.ListOrganizationMemberGroup(someGroupID, common.Address{}, 1, 10)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 	})
 
@@ -733,7 +734,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		c.Assert(err, qt.Not(qt.IsNil)) // Should return an error for empty auth fields
 
 		// Test 6: Edge case - non-existent group ID
-		nonExistentGroupID := primitive.NewObjectID().Hex()
+		nonExistentGroupID := primitive.NewObjectID()
 		_, err = testDB.CheckGroupMembersFields(testOrgAddress, nonExistentGroupID, authFields, twoFaFields)
 		c.Assert(err, qt.Not(qt.IsNil)) // Should return an error for non-existent group
 

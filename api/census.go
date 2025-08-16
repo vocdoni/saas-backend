@@ -342,7 +342,7 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
 //	@Failure		404			{object}	errors.Error	"Census not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
-//	@Router			/census/{censusId}/publish/group/{groupid} [post]
+//	@Router			/census/{censusId}/publish/group/{groupId} [post]
 func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) {
 	censusID, err := apicommon.CensusIDFromRequest(r)
 	if err != nil {
@@ -350,9 +350,10 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	groupID := internal.HexBytes{}
-	if err := groupID.ParseString(chi.URLParam(r, "groupid")); err != nil {
-		errors.ErrMalformedURLParam.Withf("wrong group ID").Write(w)
+	// get the group ID from the request path
+	groupID, err := apicommon.GroupIDFromRequest(r)
+	if err != nil {
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
 
@@ -395,7 +396,7 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// if group-based census retrieve the IDs  retrieve members and add them to the census
-	group, err := a.db.OrganizationMemberGroup(groupID.String(), census.OrgAddress)
+	group, err := a.db.OrganizationMemberGroup(groupID, census.OrgAddress)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
@@ -405,7 +406,7 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	inserted, err := a.db.PopulateGroupCensus(census, group.ID.Hex(), group.MemberIDs)
+	inserted, err := a.db.PopulateGroupCensus(census, group.ID, group.MemberIDs)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return

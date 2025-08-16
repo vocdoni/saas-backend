@@ -203,9 +203,9 @@ func TestOrganizationGroups(t *testing.T) {
 		c.Assert(len(groupInfo.MemberIDs), qt.Not(qt.Equals), 0)
 
 		// Test 6: Try to get a non-existent group
-		requestAndAssertCode(http.StatusInternalServerError,
+		requestAndAssertCode(http.StatusBadRequest,
 			t, http.MethodGet, adminToken, nil,
-			"organizations", orgAddress.String(), "groups", "nonexistentgroupid")
+			"organizations", orgAddress.String(), "groups", "00000000000000000000dead")
 	})
 
 	t.Run("UpdateOrganizationMemberGroup", func(t *testing.T) {
@@ -297,7 +297,7 @@ func TestOrganizationGroups(t *testing.T) {
 		// Test 6: Try to update a non-existent group
 		requestAndAssertCode(http.StatusInternalServerError,
 			t, http.MethodPut, adminToken, updateRequest,
-			"organizations", orgAddress.String(), "groups", "nonexistentgroupid")
+			"organizations", orgAddress.String(), "groups", "00000000000000000000dead")
 	})
 
 	t.Run("ListOrganizationMemberGroupMembers", func(t *testing.T) {
@@ -337,7 +337,7 @@ func TestOrganizationGroups(t *testing.T) {
 		// Test 5: Try to list members of a non-existent group
 		requestAndAssertCode(http.StatusInternalServerError,
 			t, http.MethodGet, adminToken, nil,
-			"organizations", orgAddress.String(), "groups", "nonexistentgroupid", "members")
+			"organizations", orgAddress.String(), "groups", "00000000000000000000dead", "members")
 	})
 
 	t.Run("DeleteOrganizationMemberGroup", func(t *testing.T) {
@@ -385,10 +385,10 @@ func TestOrganizationGroups(t *testing.T) {
 			t, http.MethodDelete, nonAdminToken, nil,
 			"organizations", orgAddress.String(), "groups", groupID)
 
-		// Test 4: Try to delete a non-existent group
-		requestAndAssertCode(http.StatusInternalServerError,
+		// Test 4: Try to delete a non-existent group (does nothing but returns OK)
+		requestAndAssertCode(http.StatusOK,
 			t, http.MethodDelete, adminToken, nil,
-			"organizations", orgAddress.String(), "groups", "nonexistentgroupid")
+			"organizations", orgAddress.String(), "groups", "00000000000000000000dead")
 
 		// Clean up: Delete the group created for this test
 		requestAndAssertCode(http.StatusOK, t, http.MethodDelete, adminToken, nil,
@@ -563,9 +563,9 @@ func TestOrganizationGroups(t *testing.T) {
 		requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, nonAdminToken, validRequest,
 			"organizations", orgAddress.String(), "groups", groupID, "validate")
 
-		// Test 9: Validate with invalid group ID (should fail)
+		// Test 9: Validate with non-existent group ID (should fail)
 		requestAndAssertCode(http.StatusInternalServerError, t, http.MethodPost, adminToken, validRequest,
-			"organizations", orgAddress.String(), "groups", "nonexistentgroupid", "validate")
+			"organizations", orgAddress.String(), "groups", "00000000000000000000dead", "validate")
 
 		// Clean up: Delete the group created for this test
 		requestAndAssertCode(http.StatusOK, t, http.MethodDelete, adminToken, nil,

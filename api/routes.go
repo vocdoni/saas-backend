@@ -83,12 +83,12 @@ const (
 	// POST/GET /organizations/{address}/groups to create a new organization member group or get the
 	// list of groups of an organization
 	organizationGroupsEndpoint = "/organizations/{address}/groups"
-	// PUT/DELETE /organizations/{address}/groups/{groupID} to update or delete an organization member group
-	organizationGroupEndpoint = "/organizations/{address}/groups/{groupID}"
-	// GET /organizations/{address}/groups/{groupID}/members to get the members of an organization member group
-	organizationGroupMembersEndpoint = "/organizations/{address}/groups/{groupID}/members"
-	// POST /organizations/{address}/groups/{groupID}/validate to validate the member data of an organization member group
-	organizationGroupValidateEndpoint = "/organizations/{address}/groups/{groupID}/validate"
+	// PUT/DELETE /organizations/{address}/groups/{groupId} to update or delete an organization member group
+	organizationGroupEndpoint = "/organizations/{address}/groups/{groupId}"
+	// GET /organizations/{address}/groups/{groupId}/members to get the members of an organization member group
+	organizationGroupMembersEndpoint = "/organizations/{address}/groups/{groupId}/members"
+	// POST /organizations/{address}/groups/{groupId}/validate to validate the member data of an organization member group
+	organizationGroupValidateEndpoint = "/organizations/{address}/groups/{groupId}/validate"
 
 	// subscription routes
 	// GET /subscriptions to get the subscriptions of an organization
@@ -119,8 +119,8 @@ const (
 	censusAddParticipantsJobStatusEndpoint = "/census/job/{jobid}"
 	// POST /census/{censusId}/publish to publish a census
 	censusPublishEndpoint = "/census/{censusId}/publish"
-	// POST /census/{censusId}/group/{groupid}/publish to publish a group census
-	censusGroupPublishEndpoint = "/census/{censusId}/group/{groupid}/publish"
+	// POST /census/{censusId}/group/{groupId}/publish to publish a group census
+	censusGroupPublishEndpoint = "/census/{censusId}/group/{groupId}/publish"
 	// GET /census/{censusId}/participants to get the census participants
 	censusParticipantsEndpoint = "/census/{censusId}/participants"
 

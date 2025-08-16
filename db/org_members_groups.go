@@ -17,18 +17,17 @@ import (
 
 // OrgMembersGroup returns an organization members group
 func (ms *MongoStorage) OrganizationMemberGroup(
-	groupID string,
+	groupID primitive.ObjectID,
 	orgAddress common.Address,
 ) (*OrganizationMemberGroup, error) {
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return nil, ErrInvalidData
 	}
-	objID, err := primitive.ObjectIDFromHex(groupID)
-	if err != nil {
+	if groupID.IsZero() {
 		return nil, ErrInvalidData
 	}
 
-	filter := bson.M{"_id": objID, "orgAddress": orgAddress}
+	filter := bson.M{"_id": groupID, "orgAddress": orgAddress}
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
@@ -102,26 +101,26 @@ func (ms *MongoStorage) OrganizationMemberGroups(
 }
 
 // CreateOrganizationMemberGroup Creates an organization member group
-func (ms *MongoStorage) CreateOrganizationMemberGroup(group *OrganizationMemberGroup) (string, error) {
+func (ms *MongoStorage) CreateOrganizationMemberGroup(group *OrganizationMemberGroup) (primitive.ObjectID, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	if group == nil || group.OrgAddress.Cmp(common.Address{}) == 0 || len(group.MemberIDs) == 0 {
-		return "", ErrInvalidData
+		return primitive.NilObjectID, ErrInvalidData
 	}
 
 	// check that the organization exists
 	if _, err := ms.fetchOrganizationFromDB(ctx, group.OrgAddress); err != nil {
 		if err == ErrNotFound {
-			return "", ErrInvalidData
+			return primitive.NilObjectID, ErrInvalidData
 		}
-		return "", fmt.Errorf("organization not found: %w", err)
+		return primitive.NilObjectID, fmt.Errorf("organization not found: %w", err)
 	}
 	// check that the members are valid
 	err := ms.validateOrgMembers(ctx, group.OrgAddress, group.MemberIDs)
 	if err != nil {
-		return "", err
+		return primitive.NilObjectID, err
 	}
 	// create the group id
 	group.ID = primitive.NewObjectID()
@@ -135,19 +134,22 @@ func (ms *MongoStorage) CreateOrganizationMemberGroup(group *OrganizationMemberG
 
 	// insert the group into the database
 	if _, err := ms.orgMemberGroups.InsertOne(ctx, *group); err != nil {
-		return "", fmt.Errorf("could not create organization members group: %w", err)
+		return primitive.NilObjectID, fmt.Errorf("could not create organization members group: %w", err)
 	}
-	return group.ID.Hex(), nil
+	return group.ID, nil
 }
 
 // UpdateOrganizationMemberGroup updates an organization members group by adding
 // and/or removing members. If a member exists in both lists, it will be removed
 // TODO allow to update the rest of the fields as well. Maybe a different function?
 func (ms *MongoStorage) UpdateOrganizationMemberGroup(
-	groupID string, orgAddress common.Address,
+	groupID primitive.ObjectID, orgAddress common.Address,
 	title, description string, addedMembers, removedMembers []string,
 ) error {
 	if orgAddress.Cmp(common.Address{}) == 0 {
+		return ErrInvalidData
+	}
+	if groupID.IsZero() {
 		return ErrInvalidData
 	}
 	group, err := ms.OrganizationMemberGroup(groupID, orgAddress)
@@ -160,10 +162,6 @@ func (ms *MongoStorage) UpdateOrganizationMemberGroup(
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	objID, err := primitive.ObjectIDFromHex(groupID)
-	if err != nil {
-		return err
-	}
 
 	// check that the addedMembers contains valid IDs from the orgMembers collection
 	if len(addedMembers) > 0 {
@@ -173,7 +171,7 @@ func (ms *MongoStorage) UpdateOrganizationMemberGroup(
 		}
 	}
 
-	filter := bson.M{"_id": objID, "orgAddress": orgAddress}
+	filter := bson.M{"_id": groupID, "orgAddress": orgAddress}
 
 	// Only lock the mutex during the actual database operations
 	ms.keysLock.Lock()
@@ -239,44 +237,37 @@ func (ms *MongoStorage) UpdateOrganizationMemberGroup(
 
 // AddOrganizationMemberGroupCensus adds a census to an organization member group
 func (ms *MongoStorage) addOrganizationMemberGroupCensus(
-	ctx context.Context, groupID string, orgAddress common.Address, censusID string,
+	ctx context.Context, groupID primitive.ObjectID, orgAddress common.Address, censusID string,
 ) error {
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return ErrInvalidData
 	}
 
-	objID, err := primitive.ObjectIDFromHex(groupID)
-	if err != nil {
-		return fmt.Errorf("invalid group ID: %w", err)
-	}
-
 	// update the group with the census ID
-	filter := bson.M{"_id": objID, "orgAddress": orgAddress}
+	filter := bson.M{"_id": groupID, "orgAddress": orgAddress}
 	update := bson.D{{Key: "$addToSet", Value: bson.M{"censusIds": censusID}}}
-	_, err = ms.orgMemberGroups.UpdateOne(ctx, filter, update)
+	_, err := ms.orgMemberGroups.UpdateOne(ctx, filter, update)
 	return err
 }
 
 // DeleteOrganizationMemberGroup deletes an organization member group by its ID
-func (ms *MongoStorage) DeleteOrganizationMemberGroup(groupID string, orgAddress common.Address) error {
+func (ms *MongoStorage) DeleteOrganizationMemberGroup(groupID primitive.ObjectID, orgAddress common.Address) error {
 	if orgAddress.Cmp(common.Address{}) == 0 {
+		return ErrInvalidData
+	}
+	if groupID.IsZero() {
 		return ErrInvalidData
 	}
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	objID, err := primitive.ObjectIDFromHex(groupID)
-	if err != nil {
-		return fmt.Errorf("invalid group ID: %w", err)
-	}
-
 	// Only lock the mutex during the actual database operations
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
 	// delete the group from the database
-	filter := bson.M{"_id": objID, "orgAddress": orgAddress}
+	filter := bson.M{"_id": groupID, "orgAddress": orgAddress}
 	if _, err := ms.orgMemberGroups.DeleteOne(ctx, filter); err != nil {
 		return fmt.Errorf("could not delete organization members group: %w", err)
 	}
@@ -285,10 +276,13 @@ func (ms *MongoStorage) DeleteOrganizationMemberGroup(groupID string, orgAddress
 
 // ListOrganizationMemberGroup lists all the members of an organization member group and the total number of members
 func (ms *MongoStorage) ListOrganizationMemberGroup(
-	groupID string, orgAddress common.Address,
+	groupID primitive.ObjectID, orgAddress common.Address,
 	page, pageSize int64,
 ) (int, []*OrgMember, error) {
 	if orgAddress.Cmp(common.Address{}) == 0 {
+		return 0, nil, ErrInvalidData
+	}
+	if groupID.IsZero() {
 		return 0, nil, ErrInvalidData
 	}
 	// get the group
@@ -312,7 +306,7 @@ func (ms *MongoStorage) ListOrganizationMemberGroup(
 // The authFields are checked for missing data and duplicates while the twoFaFields are only checked for missing data
 func (ms *MongoStorage) CheckGroupMembersFields(
 	orgAddress common.Address,
-	groupID string,
+	groupID primitive.ObjectID,
 	authFields OrgMemberAuthFields,
 	twoFaFields OrgMemberTwoFaFields,
 ) (*OrgMemberAggregationResults, error) {
@@ -396,7 +390,7 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 func (ms *MongoStorage) getGroupMembersFields(
 	ctx context.Context,
 	orgAddress common.Address,
-	groupID string,
+	groupID primitive.ObjectID,
 	authFields OrgMemberAuthFields,
 	twoFaFields OrgMemberTwoFaFields,
 ) (*mongo.Cursor, error) {
@@ -406,7 +400,7 @@ func (ms *MongoStorage) getGroupMembersFields(
 	}
 	// in case a groupID is provided, fetch the group and its members and
 	// extend the filter to include only those members
-	if len(groupID) > 0 {
+	if !groupID.IsZero() {
 		group, err := ms.OrganizationMemberGroup(groupID, orgAddress)
 		if err != nil {
 			if err == ErrNotFound {

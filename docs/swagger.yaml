@@ -22694,7 +22694,7 @@ paths:
       summary: Publish a census for voting
       tags:
       - census
-  /census/{censusId}/publish/group/{groupid}:
+  /census/{censusId}/publish/group/{groupId}:
     post:
       consumes:
       - application/json
@@ -23069,7 +23069,7 @@ paths:
       summary: Create an organization member group
       tags:
       - organizations
-  /organizations/{address}/groups/{groupID}:
+  /organizations/{address}/groups/{groupId}:
     delete:
       consumes:
       - application/json
@@ -23082,7 +23082,7 @@ paths:
         type: string
       - description: Group ID
         in: path
-        name: groupID
+        name: groupId
         required: true
         type: string
       produces:
@@ -23127,7 +23127,7 @@ paths:
         type: string
       - description: Group ID
         in: path
-        name: groupID
+        name: groupId
         required: true
         type: string
       produces:
@@ -23172,7 +23172,7 @@ paths:
         type: string
       - description: Group ID
         in: path
-        name: groupID
+        name: groupId
         required: true
         type: string
       - description: Group info to update
@@ -23209,7 +23209,7 @@ paths:
       summary: Update an organization member group
       tags:
       - organizations
-  /organizations/{address}/groups/{groupID}/members:
+  /organizations/{address}/groups/{groupId}/members:
     get:
       consumes:
       - application/json
@@ -23224,7 +23224,7 @@ paths:
         type: string
       - description: Group ID
         in: path
-        name: groupID
+        name: groupId
         required: true
         type: string
       - description: Page number for pagination
@@ -23263,7 +23263,7 @@ paths:
       summary: Get the list of members with details of an organization member group
       tags:
       - organizations
-  /organizations/{address}/groups/{groupID}/validate:
+  /organizations/{address}/groups/{groupId}/validate:
     post:
       consumes:
       - application/json
@@ -23277,7 +23277,7 @@ paths:
         type: string
       - description: Group ID
         in: path
-        name: groupID
+        name: groupId
         required: true
         type: string
       - description: Members validation request
