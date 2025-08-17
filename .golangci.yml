@@ -13,6 +13,8 @@ linters:
       rules:
       - name: line-length-limit # lll is already run by golangci-lint
         disabled: true
+      - name: unnecessary-format # we prefer fmt.Errorf rather than errors.New
+        disabled: true
       - name: function-length # test funcs are usually long and complex, and that's ok
         exclude: ["**/*_test.go"]
       - name: cognitive-complexity # test funcs are usually long and complex, and that's ok
