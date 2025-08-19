@@ -400,55 +400,26 @@ func validatePhone(phone *string) error {
 }
 
 // validateAuthRequest validates the authentication request data
-func validateAuthRequest(req *AuthRequest) error {
+func validateAuthRequest(req *AuthRequest, census *db.Census) error {
 	// Check request participant ID
 	// TODO: Add correct validations
 
-	// Check request contact information
-	err := validateContactInfo(req.Email, req.Phone)
-	if err != nil {
-		return err
+	// Only require contact information if the census has two-factor fields
+	if len(census.TwoFaFields) > 0 {
+		err := validateContactInfo(req.Email, req.Phone)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Validate email if provided
-	err = validateEmail(req.Email)
+	err := validateEmail(req.Email)
 	if err != nil {
 		return err
 	}
 
 	// Validate phone if provided
 	return validatePhone(&req.Phone)
-}
-
-// getCensusAndOrgMember retrieves the census and org member information
-func (c *CSPHandlers) getCensusAndOrgMember(inputMember *db.OrgMember, censusID string) (*db.Census, *db.OrgMember, error) {
-	// Get census information
-	census, err := c.mainDB.Census(censusID)
-	if err != nil {
-		if err == db.ErrNotFound {
-			return nil, nil, errors.ErrCensusNotFound
-		}
-		return nil, nil, errors.ErrGenericInternalServerError.WithErr(err)
-	}
-
-	loginHash := db.HashAuthTwoFaFields(*inputMember, census.AuthFields, census.TwoFaFields)
-
-	// Check the participant is in the census
-	censuParticipant, err := c.mainDB.CensusParticipantByLoginHash(censusID, loginHash, census.OrgAddress)
-	if err != nil {
-		if err == db.ErrNotFound {
-			return nil, nil, errors.ErrUnauthorized.Withf("participant not found in the census")
-		}
-		return nil, nil, errors.ErrGenericInternalServerError.WithErr(err)
-	}
-
-	// Fetch the correspoding org member
-	orgMember, err := c.mainDB.OrgMemberByMemberNumber(census.OrgAddress, censuParticipant.ParticipantID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get org member: %w", err)
-	}
-
-	return census, orgMember, nil
 }
 
 // verifyPassword checks if the provided password matches the member's hashed password
@@ -529,13 +500,23 @@ func (c *CSPHandlers) authFirstStep(
 	bundleID internal.HexBytes,
 	censusID string,
 ) (internal.HexBytes, error) {
-	// Parse and validate request
+	// Parse request
 	var req AuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return nil, errors.ErrMalformedBody.Withf("invalid JSON request")
 	}
 
-	if err := validateAuthRequest(&req); err != nil {
+	// Get census information first (needed for validation)
+	census, err := c.mainDB.Census(censusID)
+	if err != nil {
+		if err == db.ErrNotFound {
+			return nil, errors.ErrCensusNotFound
+		}
+		return nil, errors.ErrGenericInternalServerError.WithErr(err)
+	}
+
+	// Validate request with census information
+	if err := validateAuthRequest(&req, census); err != nil {
 		return nil, err
 	}
 
@@ -550,10 +531,22 @@ func (c *CSPHandlers) authFirstStep(
 		Phone:        req.Phone,
 	}
 
-	// Get census and participant information
-	census, orgMember, err := c.getCensusAndOrgMember(inputMember, censusID)
+	// Get participant information using the already retrieved census
+	loginHash := db.HashAuthTwoFaFields(*inputMember, census.AuthFields, census.TwoFaFields)
+
+	// Check the participant is in the census
+	censuParticipant, err := c.mainDB.CensusParticipantByLoginHash(censusID, loginHash, census.OrgAddress)
 	if err != nil {
-		return nil, err
+		if err == db.ErrNotFound {
+			return nil, errors.ErrUnauthorized.Withf("participant not found in the census")
+		}
+		return nil, errors.ErrGenericInternalServerError.WithErr(err)
+	}
+
+	// Fetch the corresponding org member using the participant ID (which is the ObjectID hex string)
+	orgMember, err := c.mainDB.OrgMember(census.OrgAddress, censuParticipant.ParticipantID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get org member: %w", err)
 	}
 
 	// Determine contact method based on census type

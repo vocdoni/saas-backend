@@ -579,8 +579,8 @@ func testCSPAuthenticate(t *testing.T, bundleID, participantID, email string) in
 
 	// Step 1: Initiate authentication (auth/0)
 	authReq := &handlers.AuthRequest{
-		ParticipantID: participantID,
-		Email:         email,
+		MemberNumber: participantID,
+		Email:        email,
 	}
 	authResp := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", authReq, "process", "bundle", bundleID, "auth", "0")
 	c.Assert(authResp.AuthToken, qt.Not(qt.Equals), "", qt.Commentf("auth token is empty"))
