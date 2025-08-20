@@ -100,7 +100,7 @@ func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
-	census, err := a.db.Census(censusID.String())
+	census, err := a.db.Census(censusID)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
@@ -141,7 +141,7 @@ func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Reques
 	async := r.URL.Query().Get("async") == "true"
 
 	// retrieve census
-	census, err := a.db.Census(censusID.String())
+	census, err := a.db.Census(censusID)
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrMalformedURLParam.Withf("census not found").Write(w)
@@ -170,7 +170,7 @@ func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Reques
 	// add the org members as census participants in the database
 	progressChan, err := a.db.SetBulkCensusOrgMemberParticipant(
 		passwordSalt,
-		censusID.String(),
+		censusID,
 		members.DbOrgMembers(census.OrgAddress),
 	)
 	if err != nil {
@@ -185,7 +185,7 @@ func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Reques
 			lastProgress = p
 			// Just drain the channel until it's closed
 			log.Debugw("census add participants",
-				"census", censusID.String(),
+				"census", censusID,
 				"org", census.OrgAddress,
 				"progress", p.Progress,
 				"added", p.Added,
@@ -278,7 +278,7 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// retrieve census
-	census, err := a.db.Census(censusID.String())
+	census, err := a.db.Census(censusID)
 	if err != nil {
 		errors.ErrCensusNotFound.Write(w)
 		return
@@ -364,7 +364,7 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// retrieve census
-	census, err := a.db.Census(censusID.String())
+	census, err := a.db.Census(censusID)
 	if err != nil {
 		errors.ErrCensusNotFound.Write(w)
 		return
@@ -467,7 +467,7 @@ func (a *API) censusParticipantsHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// retrieve census
-	census, err := a.db.Census(censusID.String())
+	census, err := a.db.Census(censusID)
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrCensusNotFound.Write(w)
@@ -490,18 +490,18 @@ func (a *API) censusParticipantsHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	participants, err := a.db.CensusParticipants(censusID.String())
+	participants, err := a.db.CensusParticipants(censusID)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	participantMemberIDs := make([]string, len(participants))
+	participantMemberIDs := make([]internal.ObjectID, len(participants))
 	for i, p := range participants {
 		participantMemberIDs[i] = p.ParticipantID
 	}
 
 	apicommon.HTTPWriteJSON(w, &apicommon.CensusParticipantsResponse{
-		CensusID:  censusID.String(),
+		CensusID:  censusID,
 		MemberIDs: participantMemberIDs,
 	})
 }

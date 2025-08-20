@@ -10,7 +10,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.vocdoni.io/dvote/log"
@@ -18,22 +17,22 @@ import (
 
 // SetOrgMember creates a new orgMembers for an organization
 // requires an existing organization
-func (ms *MongoStorage) SetOrgMember(salt string, orgMember *OrgMember) (string, error) {
+func (ms *MongoStorage) SetOrgMember(salt string, orgMember *OrgMember) (internal.ObjectID, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	if orgMember.OrgAddress.Cmp(common.Address{}) == 0 {
-		return "", ErrInvalidData
+		return internal.NilObjectID, ErrInvalidData
 	}
 
 	// check that the org exists
 	_, err := ms.Organization(orgMember.OrgAddress)
 	if err != nil {
 		if err == ErrNotFound {
-			return "", ErrInvalidData
+			return internal.NilObjectID, ErrInvalidData
 		}
-		return "", fmt.Errorf("organization not found: %w", err)
+		return internal.NilObjectID, fmt.Errorf("organization not found: %w", err)
 	}
 
 	if orgMember.Phone != "" {
@@ -50,17 +49,17 @@ func (ms *MongoStorage) SetOrgMember(salt string, orgMember *OrgMember) (string,
 		orgMember.Password = ""
 	}
 
-	if orgMember.ID != primitive.NilObjectID {
+	if orgMember.ID != internal.NilObjectID {
 		// if the orgMember exists, update it with the new data
 		orgMember.UpdatedAt = time.Now()
 	} else {
 		// if the orgMember doesn't exist, create the corresponding id
-		orgMember.ID = primitive.NewObjectID()
+		orgMember.ID = internal.NewObjectID()
 		orgMember.CreatedAt = time.Now()
 	}
 	updateDoc, err := dynamicUpdateDocument(orgMember, nil)
 	if err != nil {
-		return "", err
+		return internal.NilObjectID, err
 	}
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
@@ -68,19 +67,14 @@ func (ms *MongoStorage) SetOrgMember(salt string, orgMember *OrgMember) (string,
 	opts := options.Update().SetUpsert(true)
 	_, err = ms.orgMembers.UpdateOne(ctx, filter, updateDoc, opts)
 	if err != nil {
-		return "", err
+		return internal.NilObjectID, err
 	}
 
-	return orgMember.ID.Hex(), nil
+	return orgMember.ID, nil
 }
 
 // DeleteOrgMember removes a orgMember
-func (ms *MongoStorage) DelOrgMember(id string) error {
-	objID, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		return ErrInvalidData
-	}
-
+func (ms *MongoStorage) DelOrgMember(id internal.ObjectID) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
@@ -88,24 +82,19 @@ func (ms *MongoStorage) DelOrgMember(id string) error {
 	defer cancel()
 
 	// delete the orgMember from the database using the ID
-	filter := bson.M{"_id": objID}
-	_, err = ms.orgMembers.DeleteOne(ctx, filter)
+	filter := bson.M{"_id": id}
+	_, err := ms.orgMembers.DeleteOne(ctx, filter)
 	return err
 }
 
 // OrgMember retrieves a orgMember from the DB based on it ID
-func (ms *MongoStorage) OrgMember(orgAddress common.Address, id string) (*OrgMember, error) {
-	objID, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		return nil, ErrInvalidData
-	}
-
+func (ms *MongoStorage) OrgMember(orgAddress common.Address, id internal.ObjectID) (*OrgMember, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	orgMember := &OrgMember{}
-	if err = ms.orgMembers.FindOne(ctx, bson.M{"_id": objID, "orgAddress": orgAddress}).Decode(orgMember); err != nil {
+	if err := ms.orgMembers.FindOne(ctx, bson.M{"_id": id, "orgAddress": orgAddress}).Decode(orgMember); err != nil {
 		return nil, fmt.Errorf("failed to get orgMember: %w", err)
 	}
 
@@ -177,8 +166,8 @@ func prepareOrgMember(member *OrgMember, orgAddress common.Address, salt string,
 	var errors []error
 
 	// Assign a new internal ID if not provided
-	if member.ID == primitive.NilObjectID {
-		member.ID = primitive.NewObjectID()
+	if member.ID == internal.NilObjectID {
+		member.ID = internal.NewObjectID()
 	}
 	member.OrgAddress = orgAddress
 	member.CreatedAt = currentTime
@@ -245,7 +234,7 @@ func (ms *MongoStorage) createOrgMemberBulkOperations(
 		if err != nil {
 			log.Warnw("failed to create update document for member",
 				"error", err, "ID", member.ID)
-			errors = append(errors, fmt.Errorf("member %s: %w", member.ID.Hex(), err))
+			errors = append(errors, fmt.Errorf("member %s: %w", member.ID, err))
 			continue // Skip this member but continue with others
 		}
 
@@ -275,7 +264,7 @@ func (ms *MongoStorage) createOrgMemberBulkOperations(
 		log.Warnw("error during bulk operation on members batch", "error", err)
 		firstID := members[0].ID
 		lastID := members[len(members)-1].ID
-		errors = append(errors, fmt.Errorf("batch %s - %s: %w", firstID.Hex(), lastID.Hex(), err))
+		errors = append(errors, fmt.Errorf("batch %s - %s: %w", firstID, lastID, err))
 	}
 
 	return int(result.ModifiedCount + result.UpsertedCount), errors
@@ -456,23 +445,13 @@ func (ms *MongoStorage) OrgMembers(orgAddress common.Address, page, pageSize int
 	return totalPages, orgMembers, nil
 }
 
-func (ms *MongoStorage) DeleteOrgMembers(orgAddress common.Address, ids []string) (int, error) {
+func (ms *MongoStorage) DeleteOrgMembers(orgAddress common.Address, ids []internal.ObjectID) (int, error) {
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return 0, ErrInvalidData
 	}
 	if len(ids) == 0 {
 		return 0, nil
 	}
-	// Convert string IDs to ObjectIDs
-	var oids []primitive.ObjectID
-	for _, id := range ids {
-		objID, err := primitive.ObjectIDFromHex(id)
-		if err != nil {
-			return 0, fmt.Errorf("invalid member ID %s: %w", id, ErrInvalidData)
-		}
-		oids = append(oids, objID)
-	}
-
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -481,7 +460,7 @@ func (ms *MongoStorage) DeleteOrgMembers(orgAddress common.Address, ids []string
 	filter := bson.M{
 		"orgAddress": orgAddress,
 		"_id": bson.M{
-			"$in": oids,
+			"$in": ids,
 		},
 	}
 
@@ -494,23 +473,13 @@ func (ms *MongoStorage) DeleteOrgMembers(orgAddress common.Address, ids []string
 }
 
 // validateOrgMembers checks if the provided member IDs are valid
-func (ms *MongoStorage) validateOrgMembers(ctx context.Context, orgAddress common.Address, members []string) error {
+func (ms *MongoStorage) validateOrgMembers(ctx context.Context, orgAddress common.Address, members []internal.ObjectID) error {
 	if len(members) == 0 {
 		return fmt.Errorf("no members provided")
 	}
 
-	// Convert string IDs to ObjectIDs
-	var objectIDs []primitive.ObjectID
-	for _, id := range members {
-		objID, err := primitive.ObjectIDFromHex(id)
-		if err != nil {
-			return fmt.Errorf("invalid ObjectID format: %s", id)
-		}
-		objectIDs = append(objectIDs, objID)
-	}
-
 	cursor, err := ms.orgMembers.Find(ctx, bson.M{
-		"_id":        bson.M{"$in": objectIDs},
+		"_id":        bson.M{"$in": members},
 		"orgAddress": orgAddress,
 	})
 	if err != nil {
@@ -528,9 +497,9 @@ func (ms *MongoStorage) validateOrgMembers(ctx context.Context, orgAddress commo
 	}
 
 	// Create a map of found IDs for quick lookup
-	foundMap := make(map[string]bool)
+	foundMap := make(map[internal.ObjectID]bool)
 	for _, member := range found {
-		foundMap[member.ID.Hex()] = true
+		foundMap[member.ID] = true
 	}
 
 	// Check if all requested IDs were found
@@ -545,7 +514,7 @@ func (ms *MongoStorage) validateOrgMembers(ctx context.Context, orgAddress commo
 // getOrgMembersByIDs retrieves organization members by their IDs
 func (ms *MongoStorage) orgMembersByIDs(
 	orgAddress common.Address,
-	memberIDs []string,
+	memberIDs []internal.ObjectID,
 	page, pageSize int64,
 ) (int, []*OrgMember, error) {
 	if len(memberIDs) == 0 {
@@ -556,18 +525,8 @@ func (ms *MongoStorage) orgMembersByIDs(
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	// Convert string IDs to ObjectIDs
-	var objectIDs []primitive.ObjectID
-	for _, id := range memberIDs {
-		objID, err := primitive.ObjectIDFromHex(id)
-		if err != nil {
-			return 0, nil, fmt.Errorf("invalid ObjectID format: %s", id)
-		}
-		objectIDs = append(objectIDs, objID)
-	}
-
 	filter := bson.M{
-		"_id":        bson.M{"$in": objectIDs},
+		"_id":        bson.M{"$in": memberIDs},
 		"orgAddress": orgAddress,
 	}
 

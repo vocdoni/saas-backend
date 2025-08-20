@@ -10,6 +10,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 )
 
 var (
@@ -129,12 +130,24 @@ func (osc *Client) Put(data io.Reader, size int64, userID string) (string, error
 		return "ObjectFileType", ErrorFileTypeNotSupported
 	}
 
-	objectID, err := calculateObjectID(buff)
+	objectIDStr, err := calculateObjectID(buff)
 	if err != nil {
 		return "", fmt.Errorf("error calculating objectID: %w", err)
 	}
+
+	// Convert string IDs to ObjectIDs
+	objectID, err := internal.ObjectIDFromHex(objectIDStr)
+	if err != nil {
+		return "", fmt.Errorf("error converting objectID: %w", err)
+	}
+
+	userObjectID, err := internal.ObjectIDFromHex(userID)
+	if err != nil {
+		return "", fmt.Errorf("error converting userID: %w", err)
+	}
+
 	// store the object in the database
-	if err := osc.db.SetObject(objectID, userID, filetype, buff); err != nil {
+	if err := osc.db.SetObject(objectID, userObjectID, filetype, buff); err != nil {
 		return "", fmt.Errorf("cannot set object: %w", err)
 	}
 	// return objectURL(osc.serverURL, objectID, fileExtension), nil

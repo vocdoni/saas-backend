@@ -7,6 +7,7 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 )
 
 func TestOrganizationGroups(t *testing.T) {
@@ -64,7 +65,7 @@ func TestOrganizationGroups(t *testing.T) {
 	c.Assert(len(membersResponse.Members), qt.Equals, 2, qt.Commentf("expected 2 members"))
 
 	// Store participant IDs for later use
-	var participant1ID, participant2ID string
+	var participant1ID, participant2ID internal.ObjectID
 	for _, p := range membersResponse.Members {
 		switch p.MemberNumber {
 		case "P001":
@@ -102,7 +103,7 @@ func TestOrganizationGroups(t *testing.T) {
 		"organizations", orgAddress.String(), "members")
 	c.Assert(len(membersResponse.Members), qt.Equals, 3, qt.Commentf("expected 3 members"))
 
-	var participant3ID string
+	var participant3ID internal.ObjectID
 	for _, p := range membersResponse.Members {
 		if p.MemberNumber == "P003" {
 			participant3ID = p.ID
@@ -116,7 +117,7 @@ func TestOrganizationGroups(t *testing.T) {
 		createRequest := &apicommon.CreateOrganizationMemberGroupRequest{
 			Title:       "Test Group",
 			Description: "This is a test group",
-			MemberIDs:   []string{participant1ID, participant2ID},
+			MemberIDs:   []internal.ObjectID{participant1ID, participant2ID},
 		}
 		groupInfo := requestAndParse[apicommon.OrganizationMemberGroupInfo](
 			t, http.MethodPost, adminToken, createRequest,
@@ -140,16 +141,6 @@ func TestOrganizationGroups(t *testing.T) {
 			t, http.MethodPost, adminToken, createRequest,
 			"organizations", "invalid-address", "groups")
 
-		// Test 5: Create a group with invalid member IDs
-		invalidRequest := &apicommon.CreateOrganizationMemberGroupRequest{
-			Title:       "Invalid Group",
-			Description: "This group has invalid member IDs",
-			MemberIDs:   []string{"invalid-id", "not-a-number"},
-		}
-		requestAndAssertCode(http.StatusInternalServerError,
-			t, http.MethodPost, adminToken, invalidRequest,
-			"organizations", orgAddress.String(), "groups")
-
 		// Save the group ID for later tests
 		groupID := groupInfo.ID
 
@@ -157,7 +148,7 @@ func TestOrganizationGroups(t *testing.T) {
 		createRequest = &apicommon.CreateOrganizationMemberGroupRequest{
 			Title:       "Single Member Group",
 			Description: "This group has only one member",
-			MemberIDs:   []string{participant1ID},
+			MemberIDs:   []internal.ObjectID{participant1ID},
 		}
 		singleMemberGroupInfo := requestAndParse[apicommon.OrganizationMemberGroupInfo](
 			t, http.MethodPost, adminToken, createRequest,
@@ -196,7 +187,7 @@ func TestOrganizationGroups(t *testing.T) {
 		// Test 5: Get a specific group by ID
 		groupInfo := requestAndParse[apicommon.OrganizationMemberGroupInfo](
 			t, http.MethodGet, adminToken, nil,
-			"organizations", orgAddress.String(), "groups", firstGroupID)
+			"organizations", orgAddress.String(), "groups", firstGroupID.String())
 		c.Assert(groupInfo.ID, qt.Equals, firstGroupID)
 		c.Assert(groupInfo.Title, qt.Not(qt.Equals), "")
 		c.Assert(groupInfo.Description, qt.Not(qt.Equals), "")
@@ -224,12 +215,12 @@ func TestOrganizationGroups(t *testing.T) {
 		}
 		requestAndAssertCode(http.StatusOK,
 			t, http.MethodPut, adminToken, updateRequest,
-			"organizations", orgAddress.String(), "groups", groupID)
+			"organizations", orgAddress.String(), "groups", groupID.String())
 
 		// Verify the update was successful
 		updatedGroup := requestAndParse[apicommon.OrganizationMemberGroupInfo](
 			t, http.MethodGet, adminToken, nil,
-			"organizations", orgAddress.String(), "groups", groupID)
+			"organizations", orgAddress.String(), "groups", groupID.String())
 		c.Assert(updatedGroup.Title, qt.Equals, "Updated Group Title")
 		c.Assert(updatedGroup.Description, qt.Equals, "Updated group description")
 
@@ -237,16 +228,16 @@ func TestOrganizationGroups(t *testing.T) {
 		updateRequest = &apicommon.UpdateOrganizationMemberGroupsRequest{
 			Title:       updatedGroup.Title,
 			Description: updatedGroup.Description,
-			AddMembers:  []string{participant3ID},
+			AddMembers:  []internal.ObjectID{participant3ID},
 		}
 		requestAndAssertCode(http.StatusOK,
 			t, http.MethodPut, adminToken, updateRequest,
-			"organizations", orgAddress.String(), "groups", groupID)
+			"organizations", orgAddress.String(), "groups", groupID.String())
 
 		// Verify the participant was added
 		updatedGroup = requestAndParse[apicommon.OrganizationMemberGroupInfo](
 			t, http.MethodGet, adminToken, nil,
-			"organizations", orgAddress.String(), "groups", groupID)
+			"organizations", orgAddress.String(), "groups", groupID.String())
 
 		// Check if the new participant ID is in the group's member IDs
 		found := false
@@ -262,16 +253,16 @@ func TestOrganizationGroups(t *testing.T) {
 		updateRequest = &apicommon.UpdateOrganizationMemberGroupsRequest{
 			Title:         updatedGroup.Title,
 			Description:   updatedGroup.Description,
-			RemoveMembers: []string{participant3ID},
+			RemoveMembers: []internal.ObjectID{participant3ID},
 		}
 		requestAndAssertCode(http.StatusOK,
 			t, http.MethodPut, adminToken, updateRequest,
-			"organizations", orgAddress.String(), "groups", groupID)
+			"organizations", orgAddress.String(), "groups", groupID.String())
 
 		// Verify the participant was removed
 		updatedGroup = requestAndParse[apicommon.OrganizationMemberGroupInfo](
 			t, http.MethodGet, adminToken, nil,
-			"organizations", orgAddress.String(), "groups", groupID)
+			"organizations", orgAddress.String(), "groups", groupID.String())
 
 		// Check that the participant ID is no longer in the group's member IDs
 		found = false
@@ -286,13 +277,13 @@ func TestOrganizationGroups(t *testing.T) {
 		// Test 4: Try to update a group without authentication
 		requestAndAssertCode(http.StatusUnauthorized,
 			t, http.MethodPut, "", updateRequest,
-			"organizations", orgAddress.String(), "groups", groupID)
+			"organizations", orgAddress.String(), "groups", groupID.String())
 
 		// Test 5: Try to update a group with a non-admin user
 		nonAdminToken := testCreateUser(t, "nonadminpassword123")
 		requestAndAssertCode(http.StatusUnauthorized,
 			t, http.MethodPut, nonAdminToken, updateRequest,
-			"organizations", orgAddress.String(), "groups", groupID)
+			"organizations", orgAddress.String(), "groups", groupID.String())
 
 		// Test 6: Try to update a non-existent group
 		requestAndAssertCode(http.StatusInternalServerError,
@@ -312,7 +303,7 @@ func TestOrganizationGroups(t *testing.T) {
 		// Test 1: List members of a group
 		membersResponse := requestAndParse[apicommon.ListOrganizationMemberGroupResponse](
 			t, http.MethodGet, adminToken, nil,
-			"organizations", orgAddress.String(), "groups", groupID, "members")
+			"organizations", orgAddress.String(), "groups", groupID.String(), "members")
 		// We can't assert the exact number of members since it depends on previous tests
 		// but we can check that the response structure is correct
 		c.Assert(membersResponse.CurrentPage, qt.Not(qt.Equals), 0)
@@ -320,19 +311,19 @@ func TestOrganizationGroups(t *testing.T) {
 		// Test 2: List members with pagination
 		membersResponse = requestAndParse[apicommon.ListOrganizationMemberGroupResponse](
 			t, http.MethodGet, adminToken, nil,
-			"organizations", orgAddress.String(), "groups", groupID, "members", "?page=1&pageSize=5")
+			"organizations", orgAddress.String(), "groups", groupID.String(), "members", "?page=1&pageSize=5")
 		c.Assert(membersResponse.CurrentPage, qt.Equals, 1)
 
 		// Test 3: Try to list members without authentication
 		requestAndAssertCode(http.StatusUnauthorized,
 			t, http.MethodGet, "", nil,
-			"organizations", orgAddress.String(), "groups", groupID, "members")
+			"organizations", orgAddress.String(), "groups", groupID.String(), "members")
 
 		// Test 4: Try to list members with a non-admin user
 		nonAdminToken := testCreateUser(t, "nonadminpassword123")
 		requestAndAssertCode(http.StatusUnauthorized,
 			t, http.MethodGet, nonAdminToken, nil,
-			"organizations", orgAddress.String(), "groups", groupID, "members")
+			"organizations", orgAddress.String(), "groups", groupID.String(), "members")
 
 		// Test 5: Try to list members of a non-existent group
 		requestAndAssertCode(http.StatusInternalServerError,
@@ -345,7 +336,7 @@ func TestOrganizationGroups(t *testing.T) {
 		createRequest := &apicommon.CreateOrganizationMemberGroupRequest{
 			Title:       "Group to Delete",
 			Description: "This group will be deleted",
-			MemberIDs:   []string{participant1ID},
+			MemberIDs:   []internal.ObjectID{participant1ID},
 		}
 		groupInfo := requestAndParse[apicommon.OrganizationMemberGroupInfo](
 			t, http.MethodPost, adminToken, createRequest,
@@ -356,19 +347,19 @@ func TestOrganizationGroups(t *testing.T) {
 
 		// Test 1: Delete the group
 		requestAndAssertCode(http.StatusOK, t, http.MethodDelete, adminToken, nil,
-			"organizations", orgAddress.String(), "groups", groupID)
+			"organizations", orgAddress.String(), "groups", groupID.String())
 
 		// Verify the group was deleted by trying to get it
 		requestAndAssertCode(http.StatusBadRequest,
 			t, http.MethodGet, adminToken, nil,
-			"organizations", orgAddress.String(), "groups", groupID)
+			"organizations", orgAddress.String(), "groups", groupID.String())
 
 		// Test 2: Try to delete a group without authentication
 		// First create another group
 		createRequest = &apicommon.CreateOrganizationMemberGroupRequest{
 			Title:       "Another Group to Delete",
 			Description: "This group will be used for unauthorized delete test",
-			MemberIDs:   []string{participant1ID},
+			MemberIDs:   []internal.ObjectID{participant1ID},
 		}
 		groupInfo = requestAndParse[apicommon.OrganizationMemberGroupInfo](
 			t, http.MethodPost, adminToken, createRequest,
@@ -377,13 +368,13 @@ func TestOrganizationGroups(t *testing.T) {
 
 		requestAndAssertCode(http.StatusUnauthorized,
 			t, http.MethodDelete, "", nil,
-			"organizations", orgAddress.String(), "groups", groupID)
+			"organizations", orgAddress.String(), "groups", groupID.String())
 
 		// Test 3: Try to delete a group with a non-admin user
 		nonAdminToken := testCreateUser(t, "nonadminpassword123")
 		requestAndAssertCode(http.StatusUnauthorized,
 			t, http.MethodDelete, nonAdminToken, nil,
-			"organizations", orgAddress.String(), "groups", groupID)
+			"organizations", orgAddress.String(), "groups", groupID.String())
 
 		// Test 4: Try to delete a non-existent group (does nothing but returns OK)
 		requestAndAssertCode(http.StatusOK,
@@ -392,7 +383,7 @@ func TestOrganizationGroups(t *testing.T) {
 
 		// Clean up: Delete the group created for this test
 		requestAndAssertCode(http.StatusOK, t, http.MethodDelete, adminToken, nil,
-			"organizations", orgAddress.String(), "groups", groupID)
+			"organizations", orgAddress.String(), "groups", groupID.String())
 	})
 
 	t.Run("ValidateOrganizationMemberGroup", func(t *testing.T) {
@@ -445,7 +436,7 @@ func TestOrganizationGroups(t *testing.T) {
 			"organizations", orgAddress.String(), "members")
 
 		// Create a group with all members including duplicates and empty fields
-		var allMemberIDs []string
+		var allMemberIDs []internal.ObjectID
 		for _, member := range allMembersResponse.Members {
 			allMemberIDs = append(allMemberIDs, member.ID)
 		}
@@ -470,7 +461,7 @@ func TestOrganizationGroups(t *testing.T) {
 			},
 		}
 		requestAndAssertCode(http.StatusOK, t, http.MethodPost, adminToken, validRequest,
-			"organizations", orgAddress.String(), "groups", groupID, "validate")
+			"organizations", orgAddress.String(), "groups", groupID.String(), "validate")
 
 		// Test 2: Validate with valid two-factor fields (should succeed)
 		validTwoFaRequest := &apicommon.ValidateMemberGroupRequest{
@@ -479,7 +470,7 @@ func TestOrganizationGroups(t *testing.T) {
 			},
 		}
 		requestAndAssertCode(http.StatusOK, t, http.MethodPost, adminToken, validTwoFaRequest,
-			"organizations", orgAddress.String(), "groups", groupID, "validate")
+			"organizations", orgAddress.String(), "groups", groupID.String(), "validate")
 
 		// Test 3: Validate with both auth fields and two-factor fields (should fail)
 		combinedRequest := &apicommon.ValidateMemberGroupRequest{
@@ -491,7 +482,7 @@ func TestOrganizationGroups(t *testing.T) {
 			},
 		}
 		requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, adminToken, combinedRequest,
-			"organizations", orgAddress.String(), "groups", groupID, "validate")
+			"organizations", orgAddress.String(), "groups", groupID.String(), "validate")
 
 		// Test 4: Validate with duplicate auth field (should fail)
 		duplicateRequest := &apicommon.ValidateMemberGroupRequest{
@@ -508,7 +499,7 @@ func TestOrganizationGroups(t *testing.T) {
 			"organizations",
 			orgAddress.String(),
 			"groups",
-			groupID,
+			groupID.String(),
 			"validate",
 		)
 
@@ -536,7 +527,7 @@ func TestOrganizationGroups(t *testing.T) {
 			"organizations",
 			orgAddress.String(),
 			"groups",
-			groupID,
+			groupID.String(),
 			"validate",
 		)
 
@@ -552,29 +543,29 @@ func TestOrganizationGroups(t *testing.T) {
 		// Test 6: Validate with neither auth fields nor two-factor fields (should fail)
 		emptyRequest := &apicommon.ValidateMemberGroupRequest{}
 		requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, adminToken, emptyRequest,
-			"organizations", orgAddress.String(), "groups", groupID, "validate")
+			"organizations", orgAddress.String(), "groups", groupID.String(), "validate")
 
 		// Test 7: Validate without authentication (should fail)
 		requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "", validRequest,
-			"organizations", orgAddress.String(), "groups", groupID, "validate")
+			"organizations", orgAddress.String(), "groups", groupID.String(), "validate")
 
 		// Test 8: Validate with non-admin user (should fail)
 		nonAdminToken := testCreateUser(t, "nonadminpassword123")
 		requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, nonAdminToken, validRequest,
-			"organizations", orgAddress.String(), "groups", groupID, "validate")
+			"organizations", orgAddress.String(), "groups", groupID.String(), "validate")
 
 		// Test 9: Validate with non-existent group ID (should fail)
-		requestAndAssertCode(http.StatusInternalServerError, t, http.MethodPost, adminToken, validRequest,
+		requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, adminToken, validRequest,
 			"organizations", orgAddress.String(), "groups", "00000000000000000000dead", "validate")
 
 		// Clean up: Delete the group created for this test
 		requestAndAssertCode(http.StatusOK, t, http.MethodDelete, adminToken, nil,
-			"organizations", orgAddress.String(), "groups", groupID)
+			"organizations", orgAddress.String(), "groups", groupID.String())
 	})
 
 	// Clean up: Delete the members
 	deleteRequest := &apicommon.DeleteMembersRequest{
-		IDs: []string{
+		IDs: []internal.ObjectID{
 			membersResponse.Members[0].ID,
 			membersResponse.Members[1].ID,
 			membersResponse.Members[2].ID,

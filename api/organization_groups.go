@@ -77,7 +77,7 @@ func (a *API) organizationMemberGroupsHandler(w http.ResponseWriter, r *http.Req
 	}
 	for _, group := range groups {
 		memberGroups.Groups = append(memberGroups.Groups, &apicommon.OrganizationMemberGroupInfo{
-			ID:           group.ID.Hex(),
+			ID:           group.ID,
 			Title:        group.Title,
 			Description:  group.Description,
 			CreatedAt:    group.CreatedAt,
@@ -141,7 +141,7 @@ func (a *API) organizationMemberGroupHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	apicommon.HTTPWriteJSON(w, &apicommon.OrganizationMemberGroupInfo{
-		ID:          group.ID.Hex(),
+		ID:          group.ID,
 		Title:       group.Title,
 		Description: group.Description,
 		MemberIDs:   group.MemberIDs,
@@ -210,7 +210,7 @@ func (a *API) createOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 		return
 	}
 	apicommon.HTTPWriteJSON(w, &apicommon.OrganizationMemberGroupInfo{
-		ID: groupID.Hex(),
+		ID: groupID,
 	})
 }
 
@@ -485,7 +485,7 @@ func (a *API) organizationMemberGroupValidateHandler(w http.ResponseWriter, r *h
 		membersRequest.TwoFaFields,
 	)
 	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
 	if len(aggregationResults.Duplicates) > 0 || len(aggregationResults.MissingData) > 0 {

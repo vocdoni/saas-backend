@@ -14,6 +14,7 @@ import (
 
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 )
 
 // Config holds the script configuration
@@ -226,7 +227,7 @@ func main() {
 	// 4 Create a group of members
 	fmt.Println("\n4. Creating group of members...")
 	groupName := "Test Group"
-	groupMembersIDs := make([]string, 0, len(orgMembersResp.Members))
+	groupMembersIDs := make([]internal.ObjectID, 0, len(orgMembersResp.Members))
 	for _, member := range orgMembersResp.Members {
 		groupMembersIDs = append(groupMembersIDs, member.ID)
 	}

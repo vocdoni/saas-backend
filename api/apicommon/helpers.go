@@ -10,7 +10,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -35,30 +34,37 @@ func ProcessIDFromRequest(r *http.Request) (internal.HexBytes, error) {
 	return processID, nil
 }
 
-// CensusIDFromRequest extracts and validates CensusID from URL parameters.
-// It returns the CensusID as internal.HexBytes or an error if the parameter
-// is missing or invalid.
-func CensusIDFromRequest(r *http.Request) (internal.HexBytes, error) {
-	censusID := internal.HexBytes{}
-	if err := censusID.ParseString(chi.URLParam(r, "censusId")); err != nil {
-		return nil, fmt.Errorf("invalid census ID: %w", err)
+func objectIDFromRequest(r *http.Request, key string) (internal.ObjectID, error) {
+	paramStr := chi.URLParam(r, key)
+	if paramStr == "" {
+		return internal.NilObjectID, fmt.Errorf("param %s is required", key)
 	}
-	return censusID, nil
+	groupID, err := internal.ObjectIDFromHex(paramStr)
+	if err != nil {
+		return internal.NilObjectID, fmt.Errorf("invalid %s: %w", key, err)
+	}
+	return groupID, nil
+}
+
+// CensusIDFromRequest extracts and validates CensusID from URL parameters.
+// It returns the CensusID as internal.ObjectID or an error if the parameter
+// is missing or invalid.
+func CensusIDFromRequest(r *http.Request) (internal.ObjectID, error) {
+	return objectIDFromRequest(r, "censusId")
 }
 
 // GroupIDFromRequest extracts and validates GroupID from URL parameters.
-// It returns the GroupID as primitive.ObjectID or an error if the parameter
+// It returns the GroupID as internal.ObjectID or an error if the parameter
 // is missing or invalid.
-func GroupIDFromRequest(r *http.Request) (primitive.ObjectID, error) {
-	groupIDStr := chi.URLParam(r, "groupId")
-	if groupIDStr == "" {
-		return primitive.NilObjectID, fmt.Errorf("group ID is required")
-	}
-	groupID, err := primitive.ObjectIDFromHex(groupIDStr)
-	if err != nil {
-		return primitive.NilObjectID, fmt.Errorf("invalid group ID: %w", err)
-	}
-	return groupID, nil
+func GroupIDFromRequest(r *http.Request) (internal.ObjectID, error) {
+	return objectIDFromRequest(r, "groupId")
+}
+
+// BundleIDFromRequest extracts and validates GroupID from URL parameters.
+// It returns the GroupID as internal.ObjectID or an error if the parameter
+// is missing or invalid.
+func BundleIDFromRequest(r *http.Request) (internal.ObjectID, error) {
+	return objectIDFromRequest(r, "bundleId")
 }
 
 // JobIDFromRequest extracts and validates JobID from URL parameters.
@@ -85,17 +91,6 @@ func UserIDFromRequest(r *http.Request) (uint64, error) {
 		return 0, fmt.Errorf("invalid user ID: %w", err)
 	}
 	return userID, nil
-}
-
-// BundleIDFromRequest extracts and validates BundleID from URL parameters.
-// It returns the BundleID as internal.HexBytes or an error if the parameter
-// is missing or invalid.
-func BundleIDFromRequest(r *http.Request) (internal.HexBytes, error) {
-	bundleID := internal.HexBytes{}
-	if err := bundleID.ParseString(chi.URLParam(r, "bundleId")); err != nil {
-		return nil, fmt.Errorf("invalid bundle ID: %w", err)
-	}
-	return bundleID, nil
 }
 
 // HTTPWriteJSON helper function allows to write a JSON response.

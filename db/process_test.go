@@ -6,7 +6,6 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 var (
@@ -44,8 +43,7 @@ func setupTestPrerequisites1(c *qt.C, db *MongoStorage) *Census {
 	}
 	censusID, err := db.SetCensus(census)
 	c.Assert(err, qt.IsNil)
-	census.ID, err = primitive.ObjectIDFromHex(censusID)
-	c.Assert(err, qt.IsNil)
+	census.ID = censusID
 
 	return census
 }
@@ -66,7 +64,7 @@ func TestProcess(t *testing.T) {
 		}
 
 		census := &Census{
-			ID:         primitive.NewObjectID(),
+			ID:         internal.NewObjectID(),
 			OrgAddress: testNonExistentOrg,
 			Type:       CensusTypeMail,
 			Published: PublishedCensus{
@@ -143,8 +141,7 @@ func TestProcess(t *testing.T) {
 		}
 		nonPublishedCensusID, err := testDB.SetCensus(nonPublishedCensus)
 		c.Assert(err, qt.IsNil)
-		nonPublishedCensus.ID, err = primitive.ObjectIDFromHex(nonPublishedCensusID)
-		c.Assert(err, qt.IsNil)
+		nonPublishedCensus.ID = nonPublishedCensusID
 		invalidProcess = &Process{
 			ID:         testProcessID,
 			OrgAddress: testOrgAddress,

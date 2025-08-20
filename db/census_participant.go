@@ -8,7 +8,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.vocdoni.io/dvote/log"
@@ -90,7 +89,7 @@ func (ms *MongoStorage) SetCensusParticipant(participant *CensusParticipant) err
 
 // CensusParticipant retrieves a census participant from the database based on
 // participantID and censusID. Returns ErrNotFound if the participant doesn't exist.
-func (ms *MongoStorage) CensusParticipant(censusID, id string) (*CensusParticipant, error) {
+func (ms *MongoStorage) CensusParticipant(censusID, id internal.ObjectID) (*CensusParticipant, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
@@ -122,7 +121,7 @@ func (ms *MongoStorage) CensusParticipant(censusID, id string) (*CensusParticipa
 // CensusParticipantByMemberNumber retrieves a census participant from the database based on
 // memberNumber and censusID. Returns ErrNotFound if the participant doesn't exist.
 func (ms *MongoStorage) CensusParticipantByMemberNumber(
-	censusID string,
+	censusID internal.ObjectID,
 	memberNumber string,
 	orgAddress common.Address,
 ) (*CensusParticipant, error) {
@@ -145,7 +144,7 @@ func (ms *MongoStorage) CensusParticipantByMemberNumber(
 
 	// prepare filter for find
 	filter := bson.M{
-		"participantID": orgMember.ID.Hex(),
+		"participantID": orgMember.ID,
 		"censusId":      censusID,
 	}
 
@@ -164,7 +163,7 @@ func (ms *MongoStorage) CensusParticipantByMemberNumber(
 
 // DelCensusParticipant removes a census participant from the database.
 // Returns nil if the participant was successfully deleted or didn't exist.
-func (ms *MongoStorage) DelCensusParticipant(censusID, participantID string) error {
+func (ms *MongoStorage) DelCensusParticipant(censusID, participantID internal.ObjectID) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
@@ -205,8 +204,8 @@ type BulkCensusParticipantStatus struct {
 // - Clearing the original sensitive data
 func prepareMember(member *OrgMember, orgAddress common.Address, salt string, currentTime time.Time) {
 	// Assign a new internal ID if not provided
-	if member.ID == primitive.NilObjectID {
-		member.ID = primitive.NewObjectID()
+	if member.ID == internal.NilObjectID {
+		member.ID = internal.NewObjectID()
 	}
 
 	member.OrgAddress = orgAddress
@@ -235,7 +234,7 @@ func prepareMember(member *OrgMember, orgAddress common.Address, salt string, cu
 func createCensusParticipantBulkOperations(
 	orgMembers []OrgMember,
 	orgAddress common.Address,
-	censusID string,
+	censusID internal.ObjectID,
 	salt string,
 	currentTime time.Time,
 ) (orgMembersOps []mongo.WriteModel, censusParticipantOps []mongo.WriteModel) {
@@ -268,11 +267,11 @@ func createCensusParticipantBulkOperations(
 
 		// Create participant filter and document
 		censusParticipantsFilter := bson.M{
-			"participantID": orgMember.ID.Hex(),
+			"participantID": orgMember.ID,
 			"censusId":      censusID,
 		}
 		participantDoc := &CensusParticipant{
-			ParticipantID: orgMember.ID.Hex(),
+			ParticipantID: orgMember.ID,
 			CensusID:      censusID,
 			CreatedAt:     currentTime,
 		}
@@ -281,7 +280,7 @@ func createCensusParticipantBulkOperations(
 		updateParticipantDoc, err := dynamicUpdateDocument(participantDoc, nil)
 		if err != nil {
 			log.Warnw("failed to create update document for participant",
-				"error", err, "participantID", orgMember.ID.Hex())
+				"error", err, "participantID", orgMember.ID)
 			continue
 		}
 
@@ -362,7 +361,7 @@ func startProgressReporter(
 // validateBulkCensusParticipant validates the input parameters for bulk census participant
 // and returns the census if valid
 func (ms *MongoStorage) validateBulkCensusParticipant(
-	censusID string,
+	censusID internal.ObjectID,
 	orgMembersSize int,
 ) (*Census, error) {
 	// Early returns for invalid input
@@ -390,7 +389,7 @@ func (ms *MongoStorage) validateBulkCensusParticipant(
 func (ms *MongoStorage) processBatches(
 	orgMembers []OrgMember,
 	census *Census,
-	censusID string,
+	censusID internal.ObjectID,
 	salt string,
 	progressChan chan<- *BulkCensusParticipantStatus,
 ) {
@@ -457,7 +456,7 @@ func (ms *MongoStorage) processBatches(
 // Returns a channel that sends the percentage of members processed every 10 seconds.
 // This function must be called in a goroutine.
 func (ms *MongoStorage) SetBulkCensusOrgMemberParticipant(
-	salt, censusID string, orgMembers []OrgMember,
+	salt string, censusID internal.ObjectID, orgMembers []OrgMember,
 ) (chan *BulkCensusParticipantStatus, error) {
 	progressChan := make(chan *BulkCensusParticipantStatus, 10)
 
@@ -481,19 +480,18 @@ func (ms *MongoStorage) SetBulkCensusOrgMemberParticipant(
 }
 
 func (ms *MongoStorage) setBulkCensusParticipant(
-	ctx context.Context, censusID string, memberIDs []primitive.ObjectID,
+	ctx context.Context, censusID internal.ObjectID, memberIDs []internal.ObjectID,
 ) (int64, error) {
 	currentTime := time.Now()
 	docs := make([]mongo.WriteModel, 0, len(memberIDs))
 	for _, pid := range memberIDs {
 		// Create participant filter and document
-		id := pid.Hex()
 		censusParticipantsFilter := bson.M{
-			"participantID": id,
+			"participantID": pid,
 			"censusId":      censusID,
 		}
 		participantDoc := &CensusParticipant{
-			ParticipantID: id,
+			ParticipantID: pid,
 			CensusID:      censusID,
 			CreatedAt:     currentTime,
 			UpdatedAt:     currentTime,
@@ -503,7 +501,7 @@ func (ms *MongoStorage) setBulkCensusParticipant(
 		updateParticipantDoc, err := dynamicUpdateDocument(participantDoc, nil)
 		if err != nil {
 			log.Warnw("failed to create update document for participant",
-				"error", err, "participantID", id)
+				"error", err, "participantID", pid)
 			continue
 		}
 
@@ -522,13 +520,13 @@ func (ms *MongoStorage) setBulkCensusParticipant(
 }
 
 // CensusParticipants retrieves all the census participants for a given census.
-func (ms *MongoStorage) CensusParticipants(censusID string) ([]CensusParticipant, error) {
+func (ms *MongoStorage) CensusParticipants(censusID internal.ObjectID) ([]CensusParticipant, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	// validate input
-	if len(censusID) == 0 {
+	if censusID.IsZero() {
 		return nil, ErrInvalidData
 	}
 

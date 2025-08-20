@@ -7,7 +7,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 type User struct {
@@ -142,24 +141,24 @@ type OrganizationCounters struct {
 }
 
 type OrganizationInvite struct {
-	ID                  primitive.ObjectID `json:"id" bson:"_id,omitempty"`
-	InvitationCode      string             `json:"invitationCode" bson:"invitationCode"`
-	OrganizationAddress common.Address     `json:"organizationAddress" bson:"organizationAddress"`
-	CurrentUserID       uint64             `json:"currentUserID" bson:"currentUserID"`
-	NewUserEmail        string             `json:"newUserEmail" bson:"newUserEmail"`
-	Role                UserRole           `json:"role" bson:"role"`
-	Expiration          time.Time          `json:"expiration" bson:"expiration"`
+	ID                  internal.ObjectID `json:"id" bson:"_id,omitempty"`
+	InvitationCode      string            `json:"invitationCode" bson:"invitationCode"`
+	OrganizationAddress common.Address    `json:"organizationAddress" bson:"organizationAddress"`
+	CurrentUserID       uint64            `json:"currentUserID" bson:"currentUserID"`
+	NewUserEmail        string            `json:"newUserEmail" bson:"newUserEmail"`
+	Role                UserRole          `json:"role" bson:"role"`
+	Expiration          time.Time         `json:"expiration" bson:"expiration"`
 }
 
 // Object represents a user uploaded object Includes user defined ID and the data
 // as a byte array.
 type Object struct {
-	ID          string    `json:"id" bson:"_id"`
-	Name        string    `json:"name" bson:"name"`
-	Data        []byte    `json:"data" bson:"data" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
-	CreatedAt   time.Time `json:"createdAt" bson:"createdAt"`
-	UserID      string    `json:"userId" bson:"userId"`
-	ContentType string    `json:"contentType" bson:"contentType"`
+	ID          internal.ObjectID `json:"id" bson:"_id"`
+	Name        string            `json:"name" bson:"name"`
+	Data        []byte            `json:"data" bson:"data" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
+	CreatedAt   time.Time         `json:"createdAt" bson:"createdAt"`
+	UserID      internal.ObjectID `json:"userId" bson:"userId"`
+	ContentType string            `json:"contentType" bson:"contentType"`
 }
 
 // CensusType defines the type of census.
@@ -175,11 +174,11 @@ const (
 
 // Census represents the information of a set of census participants
 type Census struct {
-	ID          primitive.ObjectID   `json:"id" bson:"_id,omitempty"`
+	ID          internal.ObjectID    `json:"id" bson:"_id,omitempty"`
 	OrgAddress  common.Address       `json:"orgAddress" bson:"orgAddress"`
 	Type        CensusType           `json:"type" bson:"type"`
 	Size        int64                `json:"size" bson:"size"`
-	GroupID     primitive.ObjectID   `json:"groupId" bson:"groupId"`
+	GroupID     internal.ObjectID    `json:"groupId" bson:"groupId"`
 	Published   PublishedCensus      `json:"published" bson:"published"`
 	AuthFields  OrgMemberAuthFields  `json:"authFields" bson:"orgMemberAuthFields"`
 	TwoFaFields OrgMemberTwoFaFields `json:"twoFaFields" bson:"orgMemberTwoFaFields"`
@@ -195,7 +194,7 @@ type Census struct {
 //nolint:lll
 type OrgMember struct {
 	// Also referred to as member UID
-	ID primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	ID internal.ObjectID `json:"id" bson:"_id,omitempty"`
 	// OrgAddress can be used for future sharding
 	OrgAddress     common.Address `json:"orgAddress" bson:"orgAddress"`
 	Email          string         `json:"email" bson:"email"`
@@ -262,33 +261,33 @@ func (f OrgMemberTwoFaFields) GetCensusType() CensusType {
 
 type OrgMemberAggregationResults struct {
 	// MemberIDs is a list of member IDs that are result of the aggregation
-	Members []primitive.ObjectID `json:"memberIds" bson:"memberIds"`
+	Members []internal.ObjectID `json:"memberIds" bson:"memberIds"`
 	// Duplicates is a list of member IDs that were found to be duplicates
-	Duplicates []primitive.ObjectID `json:"duplicates" bson:"duplicates"`
+	Duplicates []internal.ObjectID `json:"duplicates" bson:"duplicates"`
 	// MissingData is a list of member IDs that had columns found to be empty
-	MissingData []primitive.ObjectID `json:"missingData" bson:"missingData"`
+	MissingData []internal.ObjectID `json:"missingData" bson:"missingData"`
 }
 
 // An Organization members' group is a precursor of a census, and is simply a
 // collection of members that are grouped together for a specific purpose
 type OrganizationMemberGroup struct {
-	ID          primitive.ObjectID `json:"id" bson:"_id,omitempty"`
-	OrgAddress  common.Address     `json:"orgAddress" bson:"orgAddress"`
-	Title       string             `json:"title" bson:"title"`
-	Description string             `json:"description" bson:"description"`
-	MemberIDs   []string           `json:"memberIds" bson:"memberIds"`
-	CreatedAt   time.Time          `json:"createdAt" bson:"createdAt"`
-	UpdatedAt   time.Time          `json:"updatedAt" bson:"updatedAt"`
-	CensusIDs   []string           `json:"censusIds" bson:"censusIds"`
+	ID          internal.ObjectID   `json:"id" bson:"_id,omitempty"`
+	OrgAddress  common.Address      `json:"orgAddress" bson:"orgAddress"`
+	Title       string              `json:"title" bson:"title"`
+	Description string              `json:"description" bson:"description"`
+	MemberIDs   []internal.ObjectID `json:"memberIds" bson:"memberIds"`
+	CreatedAt   time.Time           `json:"createdAt" bson:"createdAt"`
+	UpdatedAt   time.Time           `json:"updatedAt" bson:"updatedAt"`
+	CensusIDs   []internal.ObjectID `json:"censusIds" bson:"censusIds"`
 }
 
 // Relates an OrgMember to a Census
 // The censusID is the hex format in string of the objectID
 type CensusParticipant struct {
-	ParticipantID string    `json:"participantID" bson:"participantID"`
-	CensusID      string    `json:"censusId" bson:"censusId"`
-	CreatedAt     time.Time `json:"createdAt" bson:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt" bson:"updatedAt"`
+	ParticipantID internal.ObjectID `json:"participantID" bson:"participantID"`
+	CensusID      internal.ObjectID `json:"censusId" bson:"censusId"`
+	CreatedAt     time.Time         `json:"createdAt" bson:"createdAt"`
+	UpdatedAt     time.Time         `json:"updatedAt" bson:"updatedAt"`
 }
 
 // Represents a published census as a census is represented in the vochain
@@ -316,7 +315,7 @@ type Process struct {
 //
 //nolint:lll
 type ProcessesBundle struct {
-	ID         primitive.ObjectID  `json:"id" bson:"_id,omitempty"`                                                               // Unique identifier for the bundle
+	ID         internal.ObjectID   `json:"id" bson:"_id,omitempty"`                                                               // Unique identifier for the bundle
 	Census     Census              `json:"census" bson:"census"`                                                                  // The census associated with this bundle
 	OrgAddress common.Address      `json:"orgAddress" bson:"orgAddress"`                                                          // The organization that owns this bundle
 	Processes  []internal.HexBytes `json:"processes" bson:"processes" swaggertype:"array,string" format:"hex" example:"deadbeef"` // Array of process IDs included in this bundle

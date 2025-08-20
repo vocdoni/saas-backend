@@ -83,7 +83,7 @@ func TestCensus(t *testing.T) {
 
 	// Verify the census was created correctly by retrieving it
 	retrievedCensus := requestAndParse[apicommon.OrganizationCensus](t, http.MethodGet, adminToken, nil,
-		censusEndpoint, censusID)
+		censusEndpoint, censusID.String())
 	c.Assert(retrievedCensus.ID, qt.Equals, censusID)
 	c.Assert(retrievedCensus.Type, qt.Equals, db.CensusTypeMail)
 	c.Assert(retrievedCensus.OrgAddress, qt.Equals, orgAddress)
@@ -139,11 +139,11 @@ func TestCensus(t *testing.T) {
 	}
 
 	addedResponse := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, adminToken, censusMembers,
-		censusEndpoint, censusID)
+		censusEndpoint, censusID.String())
 	c.Assert(addedResponse.Added, qt.Equals, uint32(2))
 
 	// Test 3.2: Test with no authentication
-	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "", censusMembers, censusEndpoint, censusID)
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "", censusMembers, censusEndpoint, censusID.String())
 
 	// Test 3.3: Test with invalid census ID
 	requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, adminToken, censusMembers,
@@ -153,7 +153,7 @@ func TestCensus(t *testing.T) {
 	emptyMembersList := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{},
 	}
-	requestAndAssertCode(http.StatusOK, t, http.MethodPost, adminToken, emptyMembersList, censusEndpoint, censusID)
+	requestAndAssertCode(http.StatusOK, t, http.MethodPost, adminToken, emptyMembersList, censusEndpoint, censusID.String())
 
 	// Test 3.5: Test with async=true flag
 	asyncMembers := &apicommon.AddMembersRequest{
@@ -185,7 +185,7 @@ func TestCensus(t *testing.T) {
 
 	// Make the request with async=true and verify the response contains a job ID
 	asyncResponse := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, adminToken, asyncMembers,
-		censusEndpoint, censusID+"?async=true")
+		censusEndpoint, censusID.String()+"?async=true")
 	c.Assert(len(asyncResponse.JobID), qt.Equals, 16) // JobID should be 16 bytes
 
 	// Convert the job ID to a hex string for the API call
@@ -222,12 +222,12 @@ func TestCensus(t *testing.T) {
 	// Test 4: Publish census
 	// Test 4.1: Test with valid data
 	publishedCensus := requestAndParse[apicommon.PublishedCensusResponse](t, http.MethodPost, adminToken, nil,
-		censusEndpoint, censusID, "publish")
+		censusEndpoint, censusID.String(), "publish")
 	c.Assert(publishedCensus.URI, qt.Not(qt.Equals), "")
 	c.Assert(publishedCensus.Root, qt.Not(qt.Equals), "")
 
 	// Test 4.2: Test with no authentication
-	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "", nil, censusEndpoint, censusID, "publish")
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "", nil, censusEndpoint, censusID.String(), "publish")
 
 	// Test 4.3: Test with invalid census ID
 	requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, adminToken, nil, censusEndpoint, "invalid-id", "publish")
@@ -339,7 +339,7 @@ func TestCensus(t *testing.T) {
 		c.Assert(len(orgMembersResp.Members) >= 2, qt.IsTrue,
 			qt.Commentf("Not enough members for testing, need at least 2"))
 
-		memberIDs := []string{
+		memberIDs := []internal.ObjectID{
 			orgMembersResp.Members[0].ID,
 			orgMembersResp.Members[1].ID,
 		}
@@ -391,7 +391,7 @@ func TestCensus(t *testing.T) {
 		// Test 9.1: Successful group census publication
 		publishedGroupCensus := requestAndParse[apicommon.PublishedCensusResponse](
 			t, http.MethodPost, adminToken, publishGroupRequest,
-			censusEndpoint, groupCensusID, "group", groupID, "publish")
+			censusEndpoint, groupCensusID.String(), "group", groupID.String(), "publish")
 
 		c.Assert(publishedGroupCensus.URI, qt.Not(qt.Equals), "")
 		c.Assert(publishedGroupCensus.Root, qt.Not(qt.Equals), "")
@@ -402,7 +402,7 @@ func TestCensus(t *testing.T) {
 		// Verify that the census participants are correctly set
 		participantsResp := requestAndParse[apicommon.CensusParticipantsResponse](
 			t, http.MethodGet, adminToken, nil,
-			censusEndpoint, groupCensusID, "participants")
+			censusEndpoint, groupCensusID.String(), "participants")
 		c.Assert(len(participantsResp.MemberIDs), qt.Equals, 2)
 		c.Assert(participantsResp.MemberIDs[0], qt.Equals, memberIDs[0])
 		c.Assert(participantsResp.MemberIDs[1], qt.Equals, memberIDs[1])
@@ -411,7 +411,7 @@ func TestCensus(t *testing.T) {
 		// Publishing again should return the same information
 		publishedAgain := requestAndParse[apicommon.PublishedCensusResponse](
 			t, http.MethodPost, adminToken, publishGroupRequest,
-			censusEndpoint, groupCensusID, "group", groupID, "publish")
+			censusEndpoint, groupCensusID.String(), "group", groupID.String(), "publish")
 
 		c.Assert(publishedAgain.URI, qt.Equals, publishedGroupCensus.URI)
 		c.Assert(publishedAgain.Root.String(), qt.Equals, publishedGroupCensus.Root.String())
@@ -419,23 +419,23 @@ func TestCensus(t *testing.T) {
 		// Test 9.3: Test with no authentication
 		requestAndAssertCode(http.StatusUnauthorized,
 			t, http.MethodPost, "", publishGroupRequest,
-			censusEndpoint, groupCensusID, "group", groupID, "publish")
+			censusEndpoint, groupCensusID.String(), "group", groupID.String(), "publish")
 
 		// Test 9.4: Test with invalid census ID
 		requestAndAssertCode(http.StatusBadRequest,
 			t, http.MethodPost, adminToken, publishGroupRequest,
-			censusEndpoint, "invalid-id", "group", groupID, "publish")
+			censusEndpoint, "invalid-id", "group", groupID.String(), "publish")
 
 		// Test 9.5: Test with invalid group ID
 		requestAndAssertCode(http.StatusBadRequest,
 			t, http.MethodPost, adminToken, publishGroupRequest,
-			censusEndpoint, groupCensusID, "group", "invalid-id", "publish")
+			censusEndpoint, groupCensusID.String(), "group", "invalid-id", "publish")
 
 		// Test 9.6: Test with non-existent census
 		nonExistentCensusID := "000000000000000000000000" // Valid format but doesn't exist
 		requestAndAssertCode(http.StatusNotFound,
 			t, http.MethodPost, adminToken, publishGroupRequest,
-			censusEndpoint, nonExistentCensusID, "group", groupID, "publish")
+			censusEndpoint, nonExistentCensusID, "group", groupID.String(), "publish")
 
 		// Test 9.7: Test with non-admin user
 		// Create a third user who isn't admin of the organization
@@ -443,7 +443,7 @@ func TestCensus(t *testing.T) {
 		// Non-admin should not be able to publish group census
 		requestAndAssertCode(http.StatusUnauthorized,
 			t, http.MethodPost, nonAdminToken, publishGroupRequest,
-			censusEndpoint, groupCensusID, "group", groupID, "publish")
+			censusEndpoint, groupCensusID.String(), "group", groupID.String(), "publish")
 	})
 }
 

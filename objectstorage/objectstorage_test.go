@@ -10,6 +10,7 @@ import (
 	qt "github.com/frankban/quicktest"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/test"
 )
 
@@ -125,7 +126,11 @@ func TestObjectStorage(t *testing.T) {
 		// but instead returns a formatted string with extension
 		actualID, err := calculateObjectID(jpegData)
 		c.Assert(err, qt.IsNil)
-		err = testDB.SetObject(actualID, "test@example.com", "image/jpeg", jpegData)
+		actualObjectID, err := internal.ObjectIDFromHex(actualID)
+		c.Assert(err, qt.IsNil)
+		userObjectID, err := internal.ObjectIDFromHex("test@example.com")
+		c.Assert(err, qt.IsNil)
+		err = testDB.SetObject(actualObjectID, userObjectID, "image/jpeg", jpegData)
 		c.Assert(err, qt.IsNil)
 
 		// Now get the object
@@ -163,11 +168,25 @@ func TestObjectStorage(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Store objects directly in the database
-		err = testDB.SetObject(objectID1, "test1@example.com", "image/jpeg", jpegData1)
+		objID1, err := internal.ObjectIDFromHex(objectID1)
 		c.Assert(err, qt.IsNil)
-		err = testDB.SetObject(objectID2, "test2@example.com", "image/jpeg", jpegData2)
+		userID1, err := internal.ObjectIDFromHex("test1@example.com")
 		c.Assert(err, qt.IsNil)
-		err = testDB.SetObject(objectID3, "test3@example.com", "image/jpeg", jpegData3)
+		err = testDB.SetObject(objID1, userID1, "image/jpeg", jpegData1)
+		c.Assert(err, qt.IsNil)
+
+		objID2, err := internal.ObjectIDFromHex(objectID2)
+		c.Assert(err, qt.IsNil)
+		userID2, err := internal.ObjectIDFromHex("test2@example.com")
+		c.Assert(err, qt.IsNil)
+		err = testDB.SetObject(objID2, userID2, "image/jpeg", jpegData2)
+		c.Assert(err, qt.IsNil)
+
+		objID3, err := internal.ObjectIDFromHex(objectID3)
+		c.Assert(err, qt.IsNil)
+		userID3, err := internal.ObjectIDFromHex("test3@example.com")
+		c.Assert(err, qt.IsNil)
+		err = testDB.SetObject(objID3, userID3, "image/jpeg", jpegData3)
 		c.Assert(err, qt.IsNil)
 
 		// Get the first object to cache it

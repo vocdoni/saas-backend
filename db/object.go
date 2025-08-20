@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -33,7 +34,7 @@ func (ms *MongoStorage) Object(id string) (*Object, error) {
 // SetObject sets the object data for the given objectID. If the
 // object does not exist, it will be created with the given data, otherwise it
 // will be updated.
-func (ms *MongoStorage) SetObject(objectID, userID, contentType string, data []byte) error {
+func (ms *MongoStorage) SetObject(objectID, userID internal.ObjectID, contentType string, data []byte) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)

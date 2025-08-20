@@ -96,7 +96,7 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		apicommon.HTTPWriteJSON(w, apicommon.CreateProcessBundleResponse{
-			URI:  a.serverURL + "/process/bundle/" + bundleID.Hex(),
+			URI:  a.serverURL + "/process/bundle/" + bundleID.String(),
 			Root: rootHex,
 		})
 		return
@@ -145,7 +145,7 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	apicommon.HTTPWriteJSON(w, apicommon.CreateProcessBundleResponse{
-		URI:  a.serverURL + "/process/bundle/" + bundleID.Hex(),
+		URI:  a.serverURL + "/process/bundle/" + bundleID.String(),
 		Root: rootHex,
 	})
 }

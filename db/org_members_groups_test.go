@@ -6,12 +6,12 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"github.com/vocdoni/saas-backend/internal"
 )
 
 const testGroupMemberNumber = "member123"
 
-func setupTestOrgMembersGroupPrerequisites(t *testing.T, memberSuffix string) (*Organization, []string) {
+func setupTestOrgMembersGroupPrerequisites(t *testing.T, memberSuffix string) (*Organization, []internal.ObjectID) {
 	// Create test organization
 	org := &Organization{
 		Address:   testOrgAddress,
@@ -25,7 +25,7 @@ func setupTestOrgMembersGroupPrerequisites(t *testing.T, memberSuffix string) (*
 	}
 
 	// Create test members with unique IDs
-	memberIDs := make([]string, 3)
+	memberIDs := make([]internal.ObjectID, 3)
 	for i := 0; i < 3; i++ {
 		memberNumber := testGroupMemberNumber + memberSuffix + "_" + string(rune('1'+i))
 		member := &OrgMember{
@@ -70,7 +70,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 				OrgAddress:  testOrgAddress,
 				Title:       "Test Group",
 				Description: "Test Description",
-				MemberIDs:   []string{"invalid_member_id"},
+				MemberIDs:   []internal.ObjectID{internal.NewObjectID()},
 			}
 			_, err = testDB.CreateOrganizationMemberGroup(invalidMemberGroup)
 			c.Assert(err, qt.Not(qt.IsNil))
@@ -107,7 +107,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 
 		t.Run("NonExistentGroup", func(_ *testing.T) {
 			// Test getting non-existent group
-			nonExistentID := primitive.NewObjectID()
+			nonExistentID := internal.NewObjectID()
 			_, err := testDB.OrganizationMemberGroup(nonExistentID, testOrgAddress)
 			c.Assert(err, qt.Equals, ErrNotFound)
 		})
@@ -206,7 +206,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			c.Assert(err, qt.IsNil)
 
 			// Create members for different organization
-			diffMemberIDs := make([]string, 2)
+			diffMemberIDs := make([]internal.ObjectID, 2)
 			for i := 0; i < 2; i++ {
 				memberNumber := "diff_member_" + string(rune('1'+i))
 				member := &OrgMember{
@@ -269,7 +269,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		_, memberIDs := setupTestOrgMembersGroupPrerequisites(t, "_update")
 
 		// Create additional members for testing updates
-		additionalMemberIDs := make([]string, 2)
+		additionalMemberIDs := make([]internal.ObjectID, 2)
 		for i := 0; i < 2; i++ {
 			memberNumber := "additional_" + string(rune('1'+i))
 			member := &OrgMember{
@@ -286,7 +286,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 
 		t.Run("NonExistentGroup", func(_ *testing.T) {
 			// Test updating non-existent group
-			nonExistentID := primitive.NewObjectID()
+			nonExistentID := internal.NewObjectID()
 			err := testDB.UpdateOrganizationMemberGroup(
 				nonExistentID, testOrgAddress,
 				"Updated Title", "Updated Description",
@@ -337,7 +337,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			err = testDB.UpdateOrganizationMemberGroup(
 				groupID, testOrgAddress,
 				"", "",
-				additionalMemberIDs, []string{memberIDs[0]},
+				additionalMemberIDs, []internal.ObjectID{memberIDs[0]},
 			)
 			c.Assert(err, qt.IsNil)
 
@@ -380,7 +380,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			err = testDB.UpdateOrganizationMemberGroup(
 				groupID, testOrgAddress,
 				"", "",
-				[]string{"invalid_member_id"}, nil,
+				[]internal.ObjectID{internal.NewObjectID()}, nil,
 			)
 			c.Assert(err, qt.Not(qt.IsNil))
 		})
@@ -393,7 +393,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 
 		t.Run("NonExistentGroup", func(_ *testing.T) {
 			// Test deleting non-existent group
-			nonExistentID := primitive.NewObjectID()
+			nonExistentID := internal.NewObjectID()
 			err := testDB.DeleteOrganizationMemberGroup(nonExistentID, testOrgAddress)
 			c.Assert(err, qt.IsNil) // Should not error for non-existent group
 		})
@@ -450,7 +450,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 
 		t.Run("NonExistentGroup", func(_ *testing.T) {
 			// Test listing members of non-existent group
-			nonExistentID := primitive.NewObjectID()
+			nonExistentID := internal.NewObjectID()
 			_, _, err := testDB.ListOrganizationMemberGroup(nonExistentID, testOrgAddress, 1, 10)
 			c.Assert(err, qt.Not(qt.IsNil))
 		})
@@ -540,13 +540,13 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			OrgAddress:  common.Address{}, // Zero address
 			Title:       "Test Group",
 			Description: "Test Description",
-			MemberIDs:   []string{"some-id"},
+			MemberIDs:   []internal.ObjectID{internal.NewObjectID()},
 		}
 		_, err := testDB.CreateOrganizationMemberGroup(zeroAddrGroup)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test OrganizationMemberGroup with zero address - should fail
-		someGroupID := primitive.NewObjectID()
+		someGroupID := internal.NewObjectID()
 		_, err = testDB.OrganizationMemberGroup(someGroupID, common.Address{})
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
@@ -635,7 +635,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			OrgAddress:  testOrgAddress,
 			Title:       "All Members",
 			Description: "Group containing all test members",
-			MemberIDs:   []string{member1ID, member2ID, member3ID, member4ID},
+			MemberIDs:   []internal.ObjectID{member1ID, member2ID, member3ID, member4ID},
 		}
 		allMembersGroupID, err := testDB.CreateOrganizationMemberGroup(allMembersGroup)
 		c.Assert(err, qt.IsNil)
@@ -645,7 +645,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			OrgAddress:  testOrgAddress,
 			Title:       "Duplicates Group",
 			Description: "Group containing members with duplicate fields",
-			MemberIDs:   []string{member1ID, member3ID},
+			MemberIDs:   []internal.ObjectID{member1ID, member3ID},
 		}
 		duplicatesGroupID, err := testDB.CreateOrganizationMemberGroup(duplicatesGroup)
 		c.Assert(err, qt.IsNil)
@@ -655,7 +655,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			OrgAddress:  testOrgAddress,
 			Title:       "Valid Group",
 			Description: "Group containing only valid members",
-			MemberIDs:   []string{member2ID},
+			MemberIDs:   []internal.ObjectID{member2ID},
 		}
 		validGroupID, err := testDB.CreateOrganizationMemberGroup(validGroup)
 		c.Assert(err, qt.IsNil)
@@ -689,14 +689,8 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		// Should find duplicates (member1 and member3 have same name+surname+memberNumber)
 		c.Assert(len(results.Duplicates) >= 2, qt.Equals, true)
 
-		// Convert ObjectIDs to hex strings for easier comparison
-		duplicateIDs := make([]string, len(results.Duplicates))
-		for i, id := range results.Duplicates {
-			duplicateIDs[i] = id.Hex()
-		}
-
 		// Check that member1 and member3 IDs are in the duplicates list
-		c.Assert(contains(duplicateIDs, member1ID) && contains(duplicateIDs, member3ID), qt.Equals, true)
+		c.Assert(contains(results.Duplicates, member1ID) && contains(results.Duplicates, member3ID), qt.Equals, true)
 
 		// Test 3: Empty field detection using all members group
 		authFields = OrgMemberAuthFields{
@@ -711,14 +705,8 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		// Should find missing data (member4 has empty name and memberNumber)
 		c.Assert(len(results.MissingData) > 0, qt.Equals, true)
 
-		// Convert ObjectIDs to hex strings for easier comparison
-		emptyIDs := make([]string, len(results.MissingData))
-		for i, id := range results.MissingData {
-			emptyIDs[i] = id.Hex()
-		}
-
 		// Check that member4 ID is in the missing data list
-		c.Assert(contains(emptyIDs, member4ID), qt.Equals, true)
+		c.Assert(contains(results.MissingData, member4ID), qt.Equals, true)
 
 		// Test 4: Edge case - invalid organization address
 		_, err = testDB.CheckGroupMembersFields(common.Address{}, validGroupID, authFields, twoFaFields)
@@ -734,7 +722,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		c.Assert(err, qt.Not(qt.IsNil)) // Should return an error for empty auth fields
 
 		// Test 6: Edge case - non-existent group ID
-		nonExistentGroupID := primitive.NewObjectID()
+		nonExistentGroupID := internal.NewObjectID()
 		_, err = testDB.CheckGroupMembersFields(testOrgAddress, nonExistentGroupID, authFields, twoFaFields)
 		c.Assert(err, qt.Not(qt.IsNil)) // Should return an error for non-existent group
 
@@ -763,7 +751,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			OrgAddress:  testFourthOrgAddress,
 			Title:       "Other Group",
 			Description: "Group from different organization",
-			MemberIDs:   []string{otherMemberID},
+			MemberIDs:   []internal.ObjectID{otherMemberID},
 		}
 		otherGroupID, err := testDB.CreateOrganizationMemberGroup(otherGroup)
 		c.Assert(err, qt.IsNil)
@@ -830,7 +818,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			OrgAddress:  testOrgAddress,
 			Title:       "Empty Phone Group",
 			Description: "Group with member having empty phone",
-			MemberIDs:   []string{emptyPhoneMemberID},
+			MemberIDs:   []internal.ObjectID{emptyPhoneMemberID},
 		}
 		emptyPhoneGroupID, err := testDB.CreateOrganizationMemberGroup(emptyPhoneGroup)
 		c.Assert(err, qt.IsNil)
@@ -847,13 +835,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		c.Assert(results, qt.Not(qt.IsNil))
 		c.Assert(len(results.MissingData) > 0, qt.Equals, true) // Should detect empty phone
 
-		// Convert ObjectIDs to hex strings for easier comparison
-		emptyIDs = make([]string, len(results.MissingData))
-		for i, id := range results.MissingData {
-			emptyIDs[i] = id.Hex()
-		}
-
 		// Check that the member with empty phone is in the missing data list
-		c.Assert(contains(emptyIDs, emptyPhoneMemberID), qt.Equals, true)
+		c.Assert(contains(results.MissingData, emptyPhoneMemberID), qt.Equals, true)
 	})
 }

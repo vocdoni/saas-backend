@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.vocdoni.io/dvote/log"
@@ -17,7 +17,7 @@ import (
 
 // OrgMembersGroup returns an organization members group
 func (ms *MongoStorage) OrganizationMemberGroup(
-	groupID primitive.ObjectID,
+	groupID internal.ObjectID,
 	orgAddress common.Address,
 ) (*OrganizationMemberGroup, error) {
 	if orgAddress.Cmp(common.Address{}) == 0 {
@@ -101,32 +101,32 @@ func (ms *MongoStorage) OrganizationMemberGroups(
 }
 
 // CreateOrganizationMemberGroup Creates an organization member group
-func (ms *MongoStorage) CreateOrganizationMemberGroup(group *OrganizationMemberGroup) (primitive.ObjectID, error) {
+func (ms *MongoStorage) CreateOrganizationMemberGroup(group *OrganizationMemberGroup) (internal.ObjectID, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
 	if group == nil || group.OrgAddress.Cmp(common.Address{}) == 0 || len(group.MemberIDs) == 0 {
-		return primitive.NilObjectID, ErrInvalidData
+		return internal.NilObjectID, ErrInvalidData
 	}
 
 	// check that the organization exists
 	if _, err := ms.fetchOrganizationFromDB(ctx, group.OrgAddress); err != nil {
 		if err == ErrNotFound {
-			return primitive.NilObjectID, ErrInvalidData
+			return internal.NilObjectID, ErrInvalidData
 		}
-		return primitive.NilObjectID, fmt.Errorf("organization not found: %w", err)
+		return internal.NilObjectID, fmt.Errorf("organization not found: %w", err)
 	}
 	// check that the members are valid
 	err := ms.validateOrgMembers(ctx, group.OrgAddress, group.MemberIDs)
 	if err != nil {
-		return primitive.NilObjectID, err
+		return internal.NilObjectID, err
 	}
 	// create the group id
-	group.ID = primitive.NewObjectID()
+	group.ID = internal.NewObjectID()
 	group.CreatedAt = time.Now()
 	group.UpdatedAt = time.Now()
-	group.CensusIDs = make([]string, 0)
+	group.CensusIDs = make([]internal.ObjectID, 0)
 
 	// Only lock the mutex during the actual database operations
 	ms.keysLock.Lock()
@@ -134,7 +134,7 @@ func (ms *MongoStorage) CreateOrganizationMemberGroup(group *OrganizationMemberG
 
 	// insert the group into the database
 	if _, err := ms.orgMemberGroups.InsertOne(ctx, *group); err != nil {
-		return primitive.NilObjectID, fmt.Errorf("could not create organization members group: %w", err)
+		return internal.NilObjectID, fmt.Errorf("could not create organization members group: %w", err)
 	}
 	return group.ID, nil
 }
@@ -143,8 +143,8 @@ func (ms *MongoStorage) CreateOrganizationMemberGroup(group *OrganizationMemberG
 // and/or removing members. If a member exists in both lists, it will be removed
 // TODO allow to update the rest of the fields as well. Maybe a different function?
 func (ms *MongoStorage) UpdateOrganizationMemberGroup(
-	groupID primitive.ObjectID, orgAddress common.Address,
-	title, description string, addedMembers, removedMembers []string,
+	groupID internal.ObjectID, orgAddress common.Address,
+	title, description string, addedMembers, removedMembers []internal.ObjectID,
 ) error {
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return ErrInvalidData
@@ -204,7 +204,7 @@ func (ms *MongoStorage) UpdateOrganizationMemberGroup(
 	// Now handle member updates if needed
 	if len(addedMembers) > 0 || len(removedMembers) > 0 {
 		// Calculate the final list of members
-		finalMembers := make([]string, 0, len(updatedGroup.MemberIDs)+len(addedMembers))
+		finalMembers := make([]internal.ObjectID, 0, len(updatedGroup.MemberIDs)+len(addedMembers))
 
 		// Add existing members that aren't in the removedMembers list
 		for _, id := range updatedGroup.MemberIDs {
@@ -237,7 +237,7 @@ func (ms *MongoStorage) UpdateOrganizationMemberGroup(
 
 // AddOrganizationMemberGroupCensus adds a census to an organization member group
 func (ms *MongoStorage) addOrganizationMemberGroupCensus(
-	ctx context.Context, groupID primitive.ObjectID, orgAddress common.Address, censusID string,
+	ctx context.Context, groupID internal.ObjectID, orgAddress common.Address, censusID internal.ObjectID,
 ) error {
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return ErrInvalidData
@@ -251,7 +251,7 @@ func (ms *MongoStorage) addOrganizationMemberGroupCensus(
 }
 
 // DeleteOrganizationMemberGroup deletes an organization member group by its ID
-func (ms *MongoStorage) DeleteOrganizationMemberGroup(groupID primitive.ObjectID, orgAddress common.Address) error {
+func (ms *MongoStorage) DeleteOrganizationMemberGroup(groupID internal.ObjectID, orgAddress common.Address) error {
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return ErrInvalidData
 	}
@@ -276,7 +276,7 @@ func (ms *MongoStorage) DeleteOrganizationMemberGroup(groupID primitive.ObjectID
 
 // ListOrganizationMemberGroup lists all the members of an organization member group and the total number of members
 func (ms *MongoStorage) ListOrganizationMemberGroup(
-	groupID primitive.ObjectID, orgAddress common.Address,
+	groupID internal.ObjectID, orgAddress common.Address,
 	page, pageSize int64,
 ) (int, []*OrgMember, error) {
 	if orgAddress.Cmp(common.Address{}) == 0 {
@@ -306,7 +306,7 @@ func (ms *MongoStorage) ListOrganizationMemberGroup(
 // The authFields are checked for missing data and duplicates while the twoFaFields are only checked for missing data
 func (ms *MongoStorage) CheckGroupMembersFields(
 	orgAddress common.Address,
-	groupID primitive.ObjectID,
+	groupID internal.ObjectID,
 	authFields OrgMemberAuthFields,
 	twoFaFields OrgMemberTwoFaFields,
 ) (*OrgMemberAggregationResults, error) {
@@ -332,13 +332,13 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 	}()
 
 	results := OrgMemberAggregationResults{
-		Members:     make([]primitive.ObjectID, 0),
-		Duplicates:  make([]primitive.ObjectID, 0),
-		MissingData: make([]primitive.ObjectID, 0),
+		Members:     make([]internal.ObjectID, 0),
+		Duplicates:  make([]internal.ObjectID, 0),
+		MissingData: make([]internal.ObjectID, 0),
 	}
 
-	seenKeys := make(map[string]primitive.ObjectID, cur.RemainingBatchLength())
-	duplicates := make(map[primitive.ObjectID]struct{}, 0)
+	seenKeys := make(map[string]internal.ObjectID, cur.RemainingBatchLength())
+	duplicates := make(map[internal.ObjectID]struct{}, 0)
 
 	// 4) Iterate and detect
 	for cur.Next(ctx) {
@@ -390,7 +390,7 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 func (ms *MongoStorage) getGroupMembersFields(
 	ctx context.Context,
 	orgAddress common.Address,
-	groupID primitive.ObjectID,
+	groupID internal.ObjectID,
 	authFields OrgMemberAuthFields,
 	twoFaFields OrgMemberTwoFaFields,
 ) (*mongo.Cursor, error) {
@@ -412,14 +412,7 @@ func (ms *MongoStorage) getGroupMembersFields(
 		if len(group.MemberIDs) == 0 {
 			return nil, fmt.Errorf("no members in group %s for organization %s", groupID, orgAddress)
 		}
-		objectIDs := make([]primitive.ObjectID, len(group.MemberIDs))
-		for i, id := range group.MemberIDs {
-			objID, err := primitive.ObjectIDFromHex(id)
-			if err != nil {
-				return nil, fmt.Errorf("invalid member ID %s: %w", id, ErrInvalidData)
-			}
-			objectIDs[i] = objID
-		}
+		objectIDs := group.MemberIDs
 		if len(objectIDs) > 0 {
 			filter = append(filter, bson.E{Key: "_id", Value: bson.M{"$in": objectIDs}})
 		}
@@ -442,8 +435,8 @@ func (ms *MongoStorage) getGroupMembersFields(
 	return ms.orgMembers.Find(ctx, filter, findOpts)
 }
 
-// Helper function to check if a string is in a slice
-func contains(slice []string, item string) bool {
+// Helper function to check if an item is in a slice (generic version)
+func contains[T comparable](slice []T, item T) bool {
 	for _, s := range slice {
 		if s == item {
 			return true

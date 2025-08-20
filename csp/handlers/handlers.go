@@ -54,7 +54,7 @@ func parseAuthStep(w http.ResponseWriter, r *http.Request) (int, bool) {
 }
 
 // getBundle retrieves the bundle from the database
-func (c *CSPHandlers) getBundle(w http.ResponseWriter, bundleID internal.HexBytes) (*db.ProcessesBundle, bool) {
+func (c *CSPHandlers) getBundle(w http.ResponseWriter, bundleID internal.ObjectID) (*db.ProcessesBundle, bool) {
 	bundle, err := c.mainDB.ProcessBundle(bundleID)
 	if err != nil {
 		if err == db.ErrNotFound {
@@ -76,7 +76,7 @@ func (c *CSPHandlers) getBundle(w http.ResponseWriter, bundleID internal.HexByte
 
 // handleAuthStep handles the authentication step and writes the response
 func (c *CSPHandlers) handleAuthStep(w http.ResponseWriter, r *http.Request,
-	step int, bundleID internal.HexBytes, censusID string,
+	step int, bundleID internal.ObjectID, censusID internal.ObjectID,
 ) {
 	var authToken internal.HexBytes
 	var err error
@@ -139,7 +139,7 @@ func (c *CSPHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Handle the authentication step
-	c.handleAuthStep(w, r, step, bundleID, bundle.Census.ID.Hex())
+	c.handleAuthStep(w, r, step, bundleID, bundle.Census.ID)
 }
 
 // parseSignRequest parses the sign request from the request body
@@ -180,7 +180,7 @@ func findProcessInBundle(bundle *db.ProcessesBundle, processID internal.HexBytes
 }
 
 // checkCensusParticipant checks if the participant is in the census
-func (c *CSPHandlers) checkCensusParticipant(w http.ResponseWriter, censusID string, userID string) bool {
+func (c *CSPHandlers) checkCensusParticipant(w http.ResponseWriter, censusID internal.ObjectID, userID string) bool {
 	// Get census information
 	census, err := c.mainDB.Census(censusID)
 	if err != nil {
@@ -274,7 +274,7 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Check if the participant is in the census
-	if !c.checkCensusParticipant(w, bundle.Census.ID.Hex(), string(auth.UserID)) {
+	if !c.checkCensusParticipant(w, bundle.Census.ID, string(auth.UserID)) {
 		return
 	}
 
@@ -416,7 +416,7 @@ func validateAuthRequest(req *AuthRequest) error {
 }
 
 // getCensusAndOrgMember retrieves the census and org member information
-func (c *CSPHandlers) getCensusAndOrgMember(censusID string, participantID string) (*db.Census, *db.OrgMember, error) {
+func (c *CSPHandlers) getCensusAndOrgMember(censusID internal.ObjectID, participantID string) (*db.Census, *db.OrgMember, error) {
 	// Get census information
 	census, err := c.mainDB.Census(censusID)
 	if err != nil {
@@ -526,8 +526,8 @@ func determineContactMethod(
 // token in the second step.
 func (c *CSPHandlers) authFirstStep(
 	r *http.Request,
-	bundleID internal.HexBytes,
-	censusID string,
+	bundleID internal.ObjectID,
+	censusID internal.ObjectID,
 ) (internal.HexBytes, error) {
 	// Parse and validate request
 	var req AuthRequest
@@ -557,7 +557,8 @@ func (c *CSPHandlers) authFirstStep(
 	}
 
 	// Generate the token
-	return c.csp.BundleAuthToken(bundleID, internal.HexBytes(orgMember.MemberNumber), toDestinations, challengeType)
+	return c.csp.BundleAuthToken(internal.HexBytesFromString(bundleID.String()),
+		internal.HexBytes(orgMember.MemberNumber), toDestinations, challengeType)
 }
 
 // authSecondStep is the second step of the authentication process. It

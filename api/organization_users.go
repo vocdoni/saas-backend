@@ -506,7 +506,7 @@ func (a *API) pendingOrganizationUsersHandler(w http.ResponseWriter, r *http.Req
 	invitationsList := make([]*apicommon.OrganizationInvite, 0, len(invitations))
 	for _, invitation := range invitations {
 		invitationsList = append(invitationsList, &apicommon.OrganizationInvite{
-			ID:         invitation.ID.Hex(),
+			ID:         invitation.ID,
 			Email:      invitation.NewUserEmail,
 			Role:       string(invitation.Role),
 			Expiration: invitation.Expiration,

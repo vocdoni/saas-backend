@@ -5,7 +5,6 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 var (
@@ -58,7 +57,7 @@ func TestProcessBundles(t *testing.T) {
 		nonExistentBundle := &ProcessesBundle{
 			OrgAddress: testNonExistentOrg,
 			Census: Census{
-				ID:         primitive.NewObjectID(),
+				ID:         internal.NewObjectID(),
 				OrgAddress: testNonExistentOrg,
 				Type:       CensusTypeMail,
 				Published: PublishedCensus{
@@ -85,7 +84,7 @@ func TestProcessBundles(t *testing.T) {
 		retrieved, err := testDB.ProcessBundle(bundleID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(retrieved, qt.Not(qt.IsNil))
-		c.Assert(retrieved.ID.Hex(), qt.Equals, bundleID.String())
+		c.Assert(retrieved.ID, qt.Equals, bundleID.String())
 		c.Assert(retrieved.Processes, qt.HasLen, 2)
 		c.Assert(retrieved.Processes[0], qt.DeepEquals, process1.ID)
 		c.Assert(retrieved.Processes[1], qt.DeepEquals, process2.ID)
@@ -143,9 +142,9 @@ func TestProcessBundles(t *testing.T) {
 		c.Assert(bundles, qt.HasLen, 2)
 
 		// Verify the bundle IDs match
-		bundleIDs := []string{bundles[0].ID.Hex(), bundles[1].ID.Hex()}
-		c.Assert(bundleIDs, qt.Contains, bundle1ID.String())
-		c.Assert(bundleIDs, qt.Contains, bundle2ID.String())
+		bundleIDs := []internal.ObjectID{bundles[0].ID, bundles[1].ID}
+		c.Assert(bundleIDs, qt.Contains, bundle1ID)
+		c.Assert(bundleIDs, qt.Contains, bundle2ID)
 	})
 
 	t.Run("TestProcessBundlesByProcess", func(_ *testing.T) {
@@ -184,19 +183,19 @@ func TestProcessBundles(t *testing.T) {
 		bundles, err := testDB.ProcessBundlesByProcess(testProcessID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(bundles, qt.HasLen, 1)
-		c.Assert(bundles[0].ID.Hex(), qt.Equals, bundle1ID.String())
+		c.Assert(bundles[0].ID, qt.Equals, bundle1ID.String())
 
 		bundles, err = testDB.ProcessBundlesByProcess(testProcessID2)
 		c.Assert(err, qt.IsNil)
 		c.Assert(bundles, qt.HasLen, 2)
-		bundleIDs := []string{bundles[0].ID.Hex(), bundles[1].ID.Hex()}
-		c.Assert(bundleIDs, qt.Contains, bundle1ID.String())
-		c.Assert(bundleIDs, qt.Contains, bundle2ID.String())
+		bundleIDs := []internal.ObjectID{bundles[0].ID, bundles[1].ID}
+		c.Assert(bundleIDs, qt.Contains, bundle1ID)
+		c.Assert(bundleIDs, qt.Contains, bundle2ID)
 
 		bundles, err = testDB.ProcessBundlesByProcess(testProcessID3)
 		c.Assert(err, qt.IsNil)
 		c.Assert(bundles, qt.HasLen, 1)
-		c.Assert(bundles[0].ID.Hex(), qt.Equals, bundle2ID.String())
+		c.Assert(bundles[0].ID, qt.Equals, bundle2ID)
 	})
 
 	t.Run("TestAddProcessesToBundle", func(_ *testing.T) {
@@ -219,7 +218,7 @@ func TestProcessBundles(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Test with invalid bundle ID
-		err = testDB.AddProcessesToBundle(nil, []internal.HexBytes{process2.ID})
+		err = testDB.AddProcessesToBundle(internal.NilObjectID, []internal.HexBytes{process2.ID})
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test with empty processes array
@@ -283,7 +282,7 @@ func TestProcessBundles(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Test with invalid bundle ID
-		err = testDB.DelProcessBundle(nil)
+		err = testDB.DelProcessBundle(internal.NilObjectID)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test deleting the bundle

@@ -495,7 +495,7 @@ func testCreateCensus(
 	orgAddress common.Address,
 	authFields db.OrgMemberAuthFields,
 	twoFaFields db.OrgMemberTwoFaFields,
-) string {
+) internal.ObjectID {
 	c := qt.New(t)
 
 	// Create a new census
@@ -514,7 +514,7 @@ func testCreateCensus(
 
 // testAddMembersToCensus adds members to the given census.
 // It returns the number of members added.
-func testAddMembersToCensus(t *testing.T, token, censusID string, members []apicommon.OrgMember) uint32 {
+func testAddMembersToCensus(t *testing.T, token string, censusID internal.ObjectID, members []apicommon.OrgMember) uint32 {
 	c := qt.New(t)
 
 	// Add members to the census
@@ -522,7 +522,7 @@ func testAddMembersToCensus(t *testing.T, token, censusID string, members []apic
 		Members: members,
 	}
 	addedResponse := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, token, membersReq,
-		censusEndpoint, censusID)
+		censusEndpoint, censusID.String())
 	c.Assert(addedResponse.Added, qt.Equals, uint32(len(members)),
 		qt.Commentf("expected %d members, got %d", len(members), addedResponse.Added))
 
@@ -531,12 +531,12 @@ func testAddMembersToCensus(t *testing.T, token, censusID string, members []apic
 
 // testPublishCensus publishes the given census.
 // It returns the published census URI and root.
-func testPublishCensus(t *testing.T, token, censusID string) (uri string, root string) {
+func testPublishCensus(t *testing.T, token string, censusID internal.ObjectID) (uri string, root string) {
 	c := qt.New(t)
 
 	// Publish the census
 	publishedCensus := requestAndParse[apicommon.PublishedCensusResponse](t, http.MethodPost, token, nil,
-		censusEndpoint, censusID, "publish")
+		censusEndpoint, censusID.String(), "publish")
 	c.Assert(publishedCensus.URI, qt.Not(qt.Equals), "", qt.Commentf("published census URI is empty"))
 	c.Assert(publishedCensus.Root, qt.Not(qt.Equals), "", qt.Commentf("published census root is empty"))
 
@@ -546,7 +546,9 @@ func testPublishCensus(t *testing.T, token, censusID string) (uri string, root s
 
 // testCreateBundle creates a new process bundle with the given census ID and process IDs.
 // It returns the bundle ID and root.
-func testCreateBundle(t *testing.T, token, censusID string, processIDs [][]byte) (bundleID string, root string) {
+func testCreateBundle(t *testing.T, token string, censusID internal.ObjectID, processIDs [][]byte) (
+	bundleID string, root string,
+) {
 	c := qt.New(t)
 
 	// Convert process IDs to hex strings
@@ -566,7 +568,7 @@ func testCreateBundle(t *testing.T, token, censusID string, processIDs [][]byte)
 
 	// Extract the bundle ID from the URI
 	bundleURI := bundleResp.URI
-	bundleIDStr := bundleURI[len(bundleURI)-len(censusID):]
+	bundleIDStr := bundleURI[len(bundleURI)-len(internal.NilObjectID.String()):]
 
 	t.Logf("Created bundle with ID: %s and Root: %s", bundleIDStr, bundleResp.Root)
 	return bundleIDStr, bundleResp.Root.String()
