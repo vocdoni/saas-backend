@@ -482,9 +482,15 @@ func determineContactMethod(
 		if req.Phone != "" {
 			return handlePhoneContact(census.OrgAddress, req.Phone, member.Phone)
 		}
-	}
 
-	return "", "", errors.ErrNotSupported.Withf("invalid census type")
+		// If neither email nor phone is provided for SMS or Mail census
+		return "", "", errors.ErrInvalidUserData.Withf("no valid contact method provided")
+	case db.CensusTypeAuthOnly:
+		// For auth-only censuses, no contact method or challenge is needed
+		return "", "", nil
+	default:
+		return "", "", errors.ErrNotSupported.Withf("invalid census type")
+	}
 }
 
 // authFirstStep is the first step of the authentication process. It receives
@@ -570,12 +576,26 @@ func (c *CSPHandlers) authSecondStep(r *http.Request) (internal.HexBytes, error)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return nil, errors.ErrMalformedBody.Withf("invalid JSON request")
 	}
-	err := c.csp.VerifyBundleAuthToken(req.AuthToken, req.AuthData[0])
-	if err == nil {
-		return req.AuthToken, nil
+
+	// For tokens that require challenge verification, check if AuthData is provided
+	if len(req.AuthData) == 0 {
+		// Check if this is an auth-only token that's already verified
+		auth, err := c.csp.Storage.CSPAuth(req.AuthToken)
+		if err != nil {
+			return nil, errors.ErrUnauthorized.WithErr(err)
+		}
+
+		// Only allow pre-verified tokens if they're from auth-only censuses
+		if auth.Verified {
+			return req.AuthToken, nil
+		}
+
+		return nil, errors.ErrInvalidUserData.Withf("challenge solution required")
 	}
 
-	switch err {
+	switch err := c.csp.VerifyBundleAuthToken(req.AuthToken, req.AuthData[0]); err {
+	case nil:
+		return req.AuthToken, nil
 	case csp.ErrInvalidAuthToken, csp.ErrInvalidSolution, csp.ErrChallengeCodeFailure:
 		return nil, errors.ErrUnauthorized.WithErr(err)
 	case csp.ErrUserUnknown, csp.ErrUserNotBelongsToBundle:
