@@ -384,21 +384,6 @@ func validateEmail(email string) error {
 	return nil
 }
 
-// validatePhone validates and sanitizes the phone number if provided
-func validatePhone(phone *string) error {
-	if len(*phone) == 0 {
-		return nil
-	}
-
-	sanitizedPhone, err := internal.SanitizeAndVerifyPhoneNumber(*phone)
-	if err != nil {
-		log.Warnw("invalid phone number format", "phone", *phone, "error", err)
-		return errors.ErrInvalidUserData.Withf("invalid phone number format")
-	}
-	*phone = sanitizedPhone
-	return nil
-}
-
 // validateAuthRequest validates the authentication request data
 func validateAuthRequest(req *AuthRequest, census *db.Census) error {
 	// Check request participant ID
@@ -406,7 +391,7 @@ func validateAuthRequest(req *AuthRequest, census *db.Census) error {
 
 	// Only require contact information if the census has two-factor fields
 	if len(census.TwoFaFields) > 0 {
-		err := validateContactInfo(req.Email, req.Phone)
+		err := validateContactInfo(req.Email, req.Phone.String())
 		if err != nil {
 			return err
 		}
@@ -417,9 +402,7 @@ func validateAuthRequest(req *AuthRequest, census *db.Census) error {
 	if err != nil {
 		return err
 	}
-
-	// Validate phone if provided
-	return validatePhone(&req.Phone)
+	return nil
 }
 
 // verifyPassword checks if the provided password matches the member's hashed password
@@ -472,15 +455,15 @@ func determineContactMethod(
 		return handleEmailContact(req.Email, member.Email)
 
 	case db.CensusTypeSMS:
-		return handlePhoneContact(census.OrgAddress, req.Phone, member.Phone)
+		return handlePhoneContact(census.OrgAddress, req.Phone.String(), member.Phone)
 
 	case db.CensusTypeSMSorMail:
 		if req.Email != "" {
 			return handleEmailContact(req.Email, member.Email)
 		}
 
-		if req.Phone != "" {
-			return handlePhoneContact(census.OrgAddress, req.Phone, member.Phone)
+		if !req.Phone.IsEmpty() {
+			return handlePhoneContact(census.OrgAddress, req.Phone.String(), member.Phone)
 		}
 
 		// If neither email nor phone is provided for SMS or Mail census
@@ -526,8 +509,9 @@ func (c *CSPHandlers) authFirstStep(
 		return nil, err
 	}
 
-	// create an empty member and assing the input data where applicable
+	// create an empty member and assign the input data where applicable
 	inputMember := &db.OrgMember{
+		OrgAddress:   census.OrgAddress,
 		Name:         req.Name,
 		Surname:      req.Surname,
 		MemberNumber: req.MemberNumber,

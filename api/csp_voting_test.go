@@ -494,7 +494,7 @@ func TestCSPVoting(t *testing.T) {
 						authReq := &handlers.AuthRequest{
 							Name:         "John",
 							MemberNumber: "P001",
-							Phone:        "+34612345601",
+							Phone:        db.NewPhone("+34612345601"),
 						}
 						authResp := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", authReq, "process", "bundle", smsBundleID, "auth", "0")
 						c.Assert(authResp.AuthToken, qt.Not(qt.Equals), "")
