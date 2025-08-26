@@ -527,22 +527,22 @@ func TestCSPVoting(t *testing.T) {
 
 						// Should be able to authenticate with all required fields
 						authReq := &handlers.AuthRequest{
-							Name:       "Alice",
-							Surname:    "Johnson",
-							NationalID: "34567890C",
-							BirthDate:  "1992-10-22",
-							Email:      "alice.johnson@example.com",
+							Name:       "John",
+							Surname:    "Doe",
+							NationalID: "12345678A",
+							BirthDate:  "1990-01-01",
+							Email:      "john.doe@example.com",
 						}
 						authResp := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", authReq, "process", "bundle", complexBundleID, "auth", "0")
 						c.Assert(authResp.AuthToken, qt.Not(qt.Equals), "")
 
 						// Should fail if any required field is missing or wrong
 						wrongAuthReq := &handlers.AuthRequest{
-							Name:       "Alice",
-							Surname:    "Johnson",
+							Name:       "John",
+							Surname:    "Doe",
 							NationalID: "WRONG_ID",
-							BirthDate:  "1992-10-22",
-							Email:      "alice.johnson@example.com",
+							BirthDate:  "1990-01-01",
+							Email:      "john.doe@example.com",
 						}
 						resp, code := testRequest(t, http.MethodPost, "", wrongAuthReq, "process", "bundle", complexBundleID, "auth", "0")
 						c.Assert(code, qt.Equals, http.StatusUnauthorized, qt.Commentf("expected unauthorized for wrong national ID, got %d: %s", code, resp))
