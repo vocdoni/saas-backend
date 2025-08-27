@@ -284,6 +284,9 @@ func HashAuthTwoFaFields(memberData OrgMember, authFields OrgMemberAuthFields, t
 			data = append(data, memberData.NationalID)
 		case OrgMemberAuthFieldsBirthDate:
 			data = append(data, memberData.BirthDate)
+		default:
+			// Ignore unknown fields
+			continue
 		}
 	}
 	for _, field := range twoFaFields {
@@ -293,6 +296,9 @@ func HashAuthTwoFaFields(memberData OrgMember, authFields OrgMemberAuthFields, t
 		case OrgMemberTwoFaFieldPhone:
 			memberData.Phone.HashWithOrgAddress(memberData.OrgAddress)
 			data = append(data, string(memberData.Phone.GetHashed()))
+		default:
+			// Ignore unknown fields
+			continue
 		}
 	}
 	slices.Sort(data)

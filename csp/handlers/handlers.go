@@ -394,25 +394,11 @@ func validateAuthRequest(req *AuthRequest, census *db.Census) error {
 
 	// Only require contact information if the census has two-factor fields
 	if len(census.TwoFaFields) > 0 {
-		err := validateContactInfo(req.Email, req.Phone.String())
-		if err != nil {
-			return err
-		}
+		return validateContactInfo(req.Email, req.Phone.String())
 	}
 
 	// Validate email if provided
-	if err := validateEmail(req.Email); err != nil {
-		return err
-	}
-	return nil
-}
-
-// verifyPassword checks if the provided password matches the member's hashed password
-func (c *CSPHandlers) verifyPassword(password string, hashedPass []byte) error {
-	if password != "" && !bytes.Equal(internal.HashPassword(c.csp.PasswordSalt, password), hashedPass) {
-		return fmt.Errorf("invalid user data")
-	}
-	return nil
+	return validateEmail(req.Email)
 }
 
 // verifyEmail checks if the provided email matches the member's stored email
