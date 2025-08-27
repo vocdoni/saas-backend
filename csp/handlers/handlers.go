@@ -525,7 +525,7 @@ func (c *CSPHandlers) authFirstStep(
 	loginHash := db.HashAuthTwoFaFields(*inputMember, census.AuthFields, census.TwoFaFields)
 
 	// Check the participant is in the census
-	censuParticipant, err := c.mainDB.CensusParticipantByLoginHash(censusID, loginHash, census.OrgAddress)
+	censuParticipant, err := c.mainDB.CensusParticipantByLoginHash(censusID, loginHash)
 	if err != nil {
 		if err == db.ErrNotFound {
 			return nil, errors.ErrUnauthorized.Withf("participant not found in the census")
