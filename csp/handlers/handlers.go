@@ -114,9 +114,10 @@ func (c *CSPHandlers) handleAuthStep(w http.ResponseWriter, r *http.Request,
 //	@Summary		Authenticate for a process bundle
 //	@Description	Handle authentication for a process bundle. There are two steps in the authentication process:
 //	@Description	- Step 0: The user sends the participant ID and contact information (email or phone).
-//	@Description	If valid, the server sends a challenge to the user with a token.
+//	@Description	  If valid, the server sends a challenge to the user with a token.
 //	@Description	- Step 1: The user sends the token and challenge solution back to the server.
-//	@Description	If valid, the token is marked as verified and returned.
+//	@Description	  If valid, the token is marked as verified and returned.
+//	@Description	For auth-only censuses, verification may not require a challenge solution.
 //	@Tags			process
 //	@Accept			json
 //	@Produce		json
@@ -238,15 +239,17 @@ func (c *CSPHandlers) signAndRespond(w http.ResponseWriter, authToken, address, 
 //	@Summary		Sign a process in a bundle
 //	@Description	Sign a process in a bundle. Requires a verified token. The server signs the address with the user data
 //	@Description	and returns the signature. Once signed, the process is marked as consumed and cannot be signed again.
+//	@Description	The signing process includes verifying that the participant is in the census, that the process is part of
+//	@Description	the bundle, and that the authentication token is valid and verified.
 //	@Tags			process
 //	@Accept			json
 //	@Produce		json
 //	@Param			bundleId	path		string					true	"Bundle ID"
-//	@Param			request		body		handlers.SignRequest	true	"Sign request with process ID, auth token, and payload"
+//	@Param			request		body		handlers.SignRequest	true	"Sign request with process ID, auth token, and payload (address)"
 //	@Success		200			{object}	handlers.AuthResponse
 //	@Failure		400			{object}	errors.Error	"Invalid input data"
 //	@Failure		401			{object}	errors.Error	"Unauthorized or invalid token"
-//	@Failure		404			{object}	errors.Error	"Bundle not found"
+//	@Failure		404			{object}	errors.Error	"Bundle not found or process not in bundle"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/process/bundle/{bundleId}/sign [post]
 func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) {
@@ -398,8 +401,7 @@ func validateAuthRequest(req *AuthRequest, census *db.Census) error {
 	}
 
 	// Validate email if provided
-	err := validateEmail(req.Email)
-	if err != nil {
+	if err := validateEmail(req.Email); err != nil {
 		return err
 	}
 	return nil
@@ -484,6 +486,13 @@ func determineContactMethod(
 // destination and the challenge type. It returns the token and an error if
 // any. It sends the challenge to the user (email or SMS) to verify the user
 // token in the second step.
+//
+// The function first validates the request data against census information,
+// then attempts to find the participant in the census using the login hash
+// generated from the provided fields. If found, it determines the appropriate
+// contact method (email, SMS, or none for auth-only censuses) based on the
+// census type and provided contact information. Finally, it generates and
+// returns an authentication token that will be used in the second step.
 func (c *CSPHandlers) authFirstStep(
 	r *http.Request,
 	bundleID internal.HexBytes,
@@ -552,9 +561,14 @@ func (c *CSPHandlers) authFirstStep(
 // authSecondStep is the second step of the authentication process. It
 // receives the request and checks the token and the challenge solution
 // against the server data. If the data is valid, it returns the token and
-// an error if any. It the solution is valid, the token is marked as verified
+// an error if any. If the solution is valid, the token is marked as verified
 // and returned to the user. The user can use the token to sign the bundle
 // processes.
+//
+// For auth-only tokens that don't require challenge verification, the function
+// checks if the token is already verified. Otherwise, it verifies the challenge
+// solution provided in AuthData against the stored challenge. It handles various
+// error cases such as invalid tokens, incorrect solutions, and storage failures.
 func (c *CSPHandlers) authSecondStep(r *http.Request) (internal.HexBytes, error) {
 	var req AuthChallengeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
