@@ -87,7 +87,6 @@ func (ms *MongoStorage) SetPublishedCensus(censusID, uri string, root internal.H
 func (ms *MongoStorage) PopulateGroupCensus(
 	census *Census,
 	groupID string,
-	participantIDs []string,
 ) (int64, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -95,15 +94,6 @@ func (ms *MongoStorage) PopulateGroupCensus(
 
 	if census.OrgAddress.Cmp(common.Address{}) == 0 {
 		return 0, ErrInvalidData
-	}
-
-	participantOIDs := make([]primitive.ObjectID, len(participantIDs))
-	for i, id := range participantIDs {
-		var err error
-		participantOIDs[i], err = primitive.ObjectIDFromHex(id)
-		if err != nil {
-			return 0, fmt.Errorf("invalid member ID %s: %v", id, err)
-		}
 	}
 
 	ms.keysLock.Lock()
@@ -127,25 +117,24 @@ func (ms *MongoStorage) PopulateGroupCensus(
 	}
 	census.Type = census.TwoFaFields.GetCensusType()
 
-	if groupID != "" {
-		// check that the group exists
-		group, err := ms.OrganizationMemberGroup(groupID, census.OrgAddress)
-		if err != nil {
-			if err == ErrNotFound {
-				return 0, ErrInvalidData
-			}
-			return 0, fmt.Errorf("error retrieving organization group: %w", err)
+	// check that the group exists
+	group, err := ms.OrganizationMemberGroup(groupID, census.OrgAddress)
+	if err != nil {
+		if err == ErrNotFound {
+			return 0, ErrInvalidData
 		}
-		census.GroupID = group.ID
-		// update the group with the census ID
-		if err := ms.addOrganizationMemberGroupCensus(ctx, group.ID.Hex(), census.OrgAddress, census.ID.Hex()); err != nil {
-			return 0, fmt.Errorf("error updating group with census ID: %w", err)
-		}
+		return 0, fmt.Errorf("error retrieving organization group: %w", err)
+	}
+	census.GroupID = group.ID
+	// update the group with the census ID
+	if err := ms.addOrganizationMemberGroupCensus(ctx, group.ID.Hex(), census.OrgAddress, census.ID.Hex()); err != nil {
+		return 0, fmt.Errorf("error updating group with census ID: %w", err)
 	}
 
 	// set the participants for the census
-	if len(participantIDs) > 0 {
-		insertedCount, err := ms.setBulkCensusParticipant(ctx, census.ID.Hex(), participantOIDs)
+	if len(group.MemberIDs) > 0 {
+		insertedCount, err := ms.setBulkCensusParticipant(ctx, census.ID.Hex(),
+			groupID, census.OrgAddress, census.AuthFields, census.TwoFaFields)
 		if err != nil {
 			return 0, fmt.Errorf("error setting census participants: %w", err)
 		}

@@ -270,6 +270,16 @@ func (ms *MongoStorage) createIndexes() error {
 		return fmt.Errorf("failed to create index on censusId and participantID for censusParticipants: %w", err)
 	}
 
+	// index for the censusId and loginhash
+	if _, err := ms.censusParticipants.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "censusId", Value: 1},  // 1 for ascending order
+			{Key: "loginHash", Value: 1}, // 1 for ascending order
+		},
+	}); err != nil {
+		return fmt.Errorf("failed to create index on censusId and loginHash for censusParticipants: %w", err)
+	}
+
 	// unique index over userID and processID
 	if _, err := ms.cspTokensStatus.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{

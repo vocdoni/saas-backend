@@ -1,6 +1,8 @@
 package db
 
 import (
+	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -366,5 +368,149 @@ func TestCensusParticipant(t *testing.T) {
 				c.Assert(member.Phone.GetHashed(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, p.Phone.original))
 			}
 		})
+	})
+
+	t.Run("CensusParticipantByLoginHash", func(_ *testing.T) {
+		c.Assert(testDB.Reset(), qt.IsNil)
+		// Setup prerequisites
+		member, _, censusID := setupTestCensusParticipantPrerequisites(t, "_loginHash")
+
+		// Set auth fields and two-factor auth fields
+		authFields := OrgMemberAuthFields{OrgMemberAuthFieldsMemberNumber, OrgMemberAuthFieldsName}
+		twoFaFields := OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail}
+
+		// Update the member with additional information for testing login hash
+		member.Name = "Test User"
+		_, err := testDB.SetOrgMember("test_salt", member)
+		c.Assert(err, qt.IsNil)
+
+		// Generate login hash
+		loginHash := HashAuthTwoFaFields(*member, authFields, twoFaFields)
+		c.Assert(loginHash, qt.Not(qt.IsNil))
+
+		// Create participant with login hash
+		participant := &CensusParticipant{
+			ParticipantID: member.ID.Hex(),
+			CensusID:      censusID,
+			LoginHash:     loginHash,
+		}
+		err = testDB.SetCensusParticipant(participant)
+		c.Assert(err, qt.IsNil)
+
+		t.Run("InvalidData", func(_ *testing.T) {
+			// Test with empty login hash
+			_, err := testDB.CensusParticipantByLoginHash(censusID, []byte{})
+			c.Assert(err, qt.Equals, ErrInvalidData)
+
+			// Test with empty census ID
+			_, err = testDB.CensusParticipantByLoginHash("", loginHash)
+			c.Assert(err, qt.Equals, ErrInvalidData)
+		})
+
+		t.Run("NonExistentParticipant", func(_ *testing.T) {
+			// Test with non-existent login hash
+			nonExistentHash := []byte("nonexistenthash")
+			_, err := testDB.CensusParticipantByLoginHash(censusID, nonExistentHash)
+			c.Assert(err, qt.Equals, ErrNotFound)
+		})
+
+		t.Run("ExistingParticipant", func(_ *testing.T) {
+			// Test successful retrieval
+			retrievedParticipant, err := testDB.CensusParticipantByLoginHash(censusID, loginHash)
+			c.Assert(err, qt.IsNil)
+			c.Assert(retrievedParticipant.CensusID, qt.Equals, censusID)
+			c.Assert(retrievedParticipant.ParticipantID, qt.Equals, member.ID.Hex())
+		})
+	})
+
+	t.Run("SetBulkCensusParticipant", func(_ *testing.T) {
+		c.Assert(testDB.Reset(), qt.IsNil)
+
+		// Create organization and census
+		org := &Organization{
+			Address:   testOrgAddress,
+			Active:    true,
+			CreatedAt: time.Now(),
+		}
+		err := testDB.SetOrganization(org)
+		c.Assert(err, qt.IsNil)
+
+		// Create census
+		census := &Census{
+			OrgAddress:  testOrgAddress,
+			Type:        CensusTypeMail,
+			AuthFields:  OrgMemberAuthFields{OrgMemberAuthFieldsMemberNumber, OrgMemberAuthFieldsName},
+			TwoFaFields: OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail},
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		}
+		censusID, err := testDB.SetCensus(census)
+		c.Assert(err, qt.IsNil)
+
+		// Create members first
+		memberIDs := make([]string, 0, 3)
+		for i := 1; i <= 3; i++ {
+			member := &OrgMember{
+				ID:           primitive.NewObjectID(),
+				OrgAddress:   testOrgAddress,
+				MemberNumber: fmt.Sprintf("bulk-login-%d", i),
+				Name:         fmt.Sprintf("Bulk User %d", i),
+				Email:        fmt.Sprintf("bulk%d@example.com", i),
+				CreatedAt:    time.Now(),
+				UpdatedAt:    time.Now(),
+			}
+			_, err := testDB.SetOrgMember("test_salt", member)
+			c.Assert(err, qt.IsNil)
+
+			memberIDs = append(memberIDs, member.ID.Hex())
+		}
+
+		// Create members group with the members
+		group := &OrganizationMemberGroup{
+			OrgAddress: testOrgAddress,
+			Title:      "Test Group",
+			CreatedAt:  time.Now(),
+			UpdatedAt:  time.Now(),
+			MemberIDs:  memberIDs,
+		}
+		groupID, err := testDB.CreateOrganizationMemberGroup(group)
+		c.Assert(err, qt.IsNil)
+
+		// Update census with group ID
+		objID, err := primitive.ObjectIDFromHex(groupID)
+		c.Assert(err, qt.IsNil)
+		census.GroupID = objID
+		_, err = testDB.SetCensus(census)
+		c.Assert(err, qt.IsNil)
+
+		// Test setBulkCensusParticipant
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		upsertCount, err := testDB.setBulkCensusParticipant(
+			ctx,
+			censusID,
+			groupID,
+			testOrgAddress,
+			census.AuthFields,
+			census.TwoFaFields,
+		)
+		c.Assert(err, qt.IsNil)
+		c.Assert(upsertCount, qt.Equals, int64(3))
+
+		// Get all participants
+		participants, err := testDB.CensusParticipants(censusID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(len(participants), qt.Equals, 3)
+
+		// Verify login hash exists for each participant
+		for _, participant := range participants {
+			c.Assert(participant.LoginHash, qt.Not(qt.IsNil))
+
+			// Verify we can retrieve participant by login hash
+			found, err := testDB.CensusParticipantByLoginHash(censusID, participant.LoginHash)
+			c.Assert(err, qt.IsNil)
+			c.Assert(found.ParticipantID, qt.Equals, participant.ParticipantID)
+		}
 	})
 }

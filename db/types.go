@@ -4,8 +4,10 @@ package db
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -264,6 +266,45 @@ func (f OrgMemberTwoFaFields) GetCensusType() CensusType {
 	return CensusTypeAuthOnly
 }
 
+// HashAuthTwoFaFields helper function receives as input the data of a member and
+// the auth and twoFa field and produces a sha256 hash of the concatenation of the
+// data that are included in the fields. The data are ordered by the field names
+// in order to make the hash reproducible.
+func HashAuthTwoFaFields(memberData OrgMember, authFields OrgMemberAuthFields, twoFaFields OrgMemberTwoFaFields) []byte {
+	data := make([]string, 0, len(twoFaFields)+len(authFields))
+	for _, field := range authFields {
+		switch field {
+		case OrgMemberAuthFieldsName:
+			data = append(data, memberData.Name)
+		case OrgMemberAuthFieldsSurname:
+			data = append(data, memberData.Surname)
+		case OrgMemberAuthFieldsMemberNumber:
+			data = append(data, memberData.MemberNumber)
+		case OrgMemberAuthFieldsNationalID:
+			data = append(data, memberData.NationalID)
+		case OrgMemberAuthFieldsBirthDate:
+			data = append(data, memberData.BirthDate)
+		default:
+			// Ignore unknown fields
+			continue
+		}
+	}
+	for _, field := range twoFaFields {
+		switch field {
+		case OrgMemberTwoFaFieldEmail:
+			data = append(data, memberData.Email)
+		case OrgMemberTwoFaFieldPhone:
+			memberData.Phone.HashWithOrgAddress(memberData.OrgAddress)
+			data = append(data, string(memberData.Phone.GetHashed()))
+		default:
+			// Ignore unknown fields
+			continue
+		}
+	}
+	slices.Sort(data)
+	return sha256.New().Sum(fmt.Append(nil, data))
+}
+
 type OrgMemberAggregationResults struct {
 	// MemberIDs is a list of member IDs that are result of the aggregation
 	Members []primitive.ObjectID `json:"memberIds" bson:"memberIds"`
@@ -291,6 +332,7 @@ type OrganizationMemberGroup struct {
 type CensusParticipant struct {
 	ParticipantID string    `json:"participantID" bson:"participantID"`
 	CensusID      string    `json:"censusId" bson:"censusId"`
+	LoginHash     []byte    `json:"loginHash" bson:"loginHash" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 	CreatedAt     time.Time `json:"createdAt" bson:"createdAt"`
 	UpdatedAt     time.Time `json:"updatedAt" bson:"updatedAt"`
 }

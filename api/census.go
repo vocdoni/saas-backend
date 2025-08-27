@@ -394,18 +394,7 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// if group-based census retrieve the IDs  retrieve members and add them to the census
-	group, err := a.db.OrganizationMemberGroup(groupID.String(), census.OrgAddress)
-	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-	if len(group.MemberIDs) == 0 {
-		errors.ErrInvalidCensusData.Withf("no valid members found for the census").Write(w)
-		return
-	}
-
-	inserted, err := a.db.PopulateGroupCensus(census, group.ID.Hex(), group.MemberIDs)
+	inserted, err := a.db.PopulateGroupCensus(census, groupID.String())
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return

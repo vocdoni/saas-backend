@@ -24503,6 +24503,7 @@ paths:
         If valid, the server sends a challenge to the user with a token.
         - Step 1: The user sends the token and challenge solution back to the server.
         If valid, the token is marked as verified and returned.
+        For auth-only censuses, verification may not require a challenge solution.
       parameters:
       - description: Bundle ID
         in: path
@@ -24552,13 +24553,15 @@ paths:
       description: |-
         Sign a process in a bundle. Requires a verified token. The server signs the address with the user data
         and returns the signature. Once signed, the process is marked as consumed and cannot be signed again.
+        The signing process includes verifying that the participant is in the census, that the process is part of
+        the bundle, and that the authentication token is valid and verified.
       parameters:
       - description: Bundle ID
         in: path
         name: bundleId
         required: true
         type: string
-      - description: Sign request with process ID, auth token, and payload
+      - description: Sign request with process ID, auth token, and payload (address)
         in: body
         name: request
         required: true
@@ -24580,7 +24583,7 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
-          description: Bundle not found
+          description: Bundle not found or process not in bundle
           schema:
             $ref: '#/definitions/errors.Error'
         "500":

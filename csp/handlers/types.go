@@ -5,6 +5,7 @@ package handlers
 import (
 	"time"
 
+	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 )
 
@@ -14,10 +15,13 @@ import (
 // password is required for password-based authentication, but not for OTP
 // authentication. For OTP authentication, the email or phone is required.
 type AuthRequest struct {
-	ParticipantID string `json:"participantId,omitempty"`
-	Email         string `json:"email,omitempty"`
-	Phone         string `json:"phone,omitempty"`
-	Password      string `json:"password,omitempty"`
+	Name         string    `json:"name"`
+	Surname      string    `json:"surname"`
+	MemberNumber string    `json:"memberNumber"`
+	NationalID   string    `json:"nationalID"`
+	BirthDate    string    `json:"birthDate"`
+	Email        string    `json:"email"`
+	Phone        *db.Phone `json:"phone"`
 }
 
 // AuthResponse defines the payload for the authentication response, including

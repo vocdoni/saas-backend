@@ -31,7 +31,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 				OrgMemberTwoFaFieldEmail,
 			},
 		}
-		_, err = testDB.PopulateGroupCensus(invalidCensus, "some-group-id", nil)
+		_, err = testDB.PopulateGroupCensus(invalidCensus, "some-group-id")
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test with non-existent organization
@@ -41,7 +41,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 				OrgMemberTwoFaFieldEmail,
 			},
 		}
-		_, err = testDB.PopulateGroupCensus(nonExistentCensus, "some-group-id", nil)
+		_, err = testDB.PopulateGroupCensus(nonExistentCensus, "some-group-id")
 		c.Assert(err, qt.Not(qt.IsNil))
 		c.Assert(err.Error(), qt.Contains, "invalid data provided")
 
@@ -53,7 +53,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 			},
 		}
 		nonExistentGroupID := primitive.NewObjectID().Hex()
-		_, err = testDB.PopulateGroupCensus(nonExistentGroupCensus, nonExistentGroupID, nil)
+		_, err = testDB.PopulateGroupCensus(nonExistentGroupCensus, nonExistentGroupID)
 		c.Assert(err, qt.Not(qt.IsNil))
 		c.Assert(err.Error(), qt.Contains, "invalid data provided")
 
@@ -64,7 +64,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 				OrgMemberTwoFaFieldEmail,
 			},
 		}
-		_, err = testDB.PopulateGroupCensus(invalidGroupCensus, "invalid-group-id-format", nil)
+		_, err = testDB.PopulateGroupCensus(invalidGroupCensus, "invalid-group-id-format")
 		c.Assert(err, qt.Not(qt.IsNil))
 	})
 
@@ -95,8 +95,6 @@ func TestPopulateGroupCensus(t *testing.T) {
 		}
 		member1ID, err := testDB.SetOrgMember(testSalt, member1)
 		c.Assert(err, qt.IsNil)
-		member1OID, err := primitive.ObjectIDFromHex(member1ID)
-		c.Assert(err, qt.IsNil)
 
 		// Create members for org2
 		member2 := &OrgMember{
@@ -106,10 +104,6 @@ func TestPopulateGroupCensus(t *testing.T) {
 		}
 		member2ID, err := testDB.SetOrgMember(testSalt, member2)
 		c.Assert(err, qt.IsNil)
-		member2OID, err := primitive.ObjectIDFromHex(member2ID)
-		c.Assert(err, qt.IsNil)
-		// Convert ObjectIDs to strings for the updated function signature
-		participantIDStrs := []string{member1OID.Hex(), member2OID.Hex()}
 
 		// Create a group for org1
 		group1 := &OrganizationMemberGroup{
@@ -140,7 +134,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 				OrgMemberTwoFaFieldEmail,
 			},
 		}
-		_, err = testDB.PopulateGroupCensus(census1, group2ID, participantIDStrs)
+		_, err = testDB.PopulateGroupCensus(census1, group2ID)
 		c.Assert(err, qt.Not(qt.IsNil))
 		c.Assert(err.Error(), qt.Contains, "invalid data provided")
 
@@ -154,7 +148,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 				OrgMemberTwoFaFieldEmail,
 			},
 		}
-		_, err = testDB.PopulateGroupCensus(census2, group1ID, participantIDStrs)
+		_, err = testDB.PopulateGroupCensus(census2, group1ID)
 		c.Assert(err, qt.IsNil)
 
 		// Verify the census was created correctly with the group ID
@@ -234,9 +228,9 @@ func TestPopulateGroupCensus(t *testing.T) {
 		time.Sleep(time.Millisecond)
 
 		// Update census
-		inserted, err := testDB.PopulateGroupCensus(createdCensus, groupID, nil)
+		inserted, err := testDB.PopulateGroupCensus(createdCensus, groupID)
 		c.Assert(err, qt.IsNil)
-		c.Assert(inserted, qt.Equals, int64(0))
+		c.Assert(inserted, qt.Equals, int64(1))
 
 		// Verify the census was updated correctly
 		updatedCensus, err := testDB.Census(createdCensus.ID.Hex())
@@ -267,9 +261,6 @@ func TestPopulateGroupCensus(t *testing.T) {
 		member1ID, err := testDB.SetOrgMember(testSalt, member1)
 		c.Assert(err, qt.IsNil)
 		c.Assert(member1ID, qt.Not(qt.Equals), "")
-		member1ObjID, err := primitive.ObjectIDFromHex(member1ID)
-		c.Assert(err, qt.IsNil)
-		member1.ID = member1ObjID
 
 		member2 := &OrgMember{
 			OrgAddress: testOrgAddress,
@@ -279,40 +270,17 @@ func TestPopulateGroupCensus(t *testing.T) {
 		member2ID, err := testDB.SetOrgMember(testSalt, member2)
 		c.Assert(err, qt.IsNil)
 		c.Assert(member2ID, qt.Not(qt.Equals), "")
-		member2ObjID, err := primitive.ObjectIDFromHex(member2ID)
-		c.Assert(err, qt.IsNil)
-		member2.ID = member2ObjID
 
-		// Create a group with one of the members
-		group := &OrganizationMemberGroup{
+		// Test with group that has one member
+		singleMemberGroup := &OrganizationMemberGroup{
 			OrgAddress:  testOrgAddress,
-			Title:       "Test Group",
-			Description: "Test Group Description",
+			Title:       "Single Member Group",
+			Description: "Single Member Group Description",
 			MemberIDs:   []string{member1ID},
 		}
-		groupID, err := testDB.CreateOrganizationMemberGroup(group)
+		singleGroupID, err := testDB.CreateOrganizationMemberGroup(singleMemberGroup)
 		c.Assert(err, qt.IsNil)
 
-		// Test with empty participantIDs array (no participants added)
-		censusOID1 := primitive.NewObjectID()
-
-		census1 := &Census{
-			ID:         censusOID1,
-			OrgAddress: testOrgAddress,
-			TwoFaFields: OrgMemberTwoFaFields{
-				OrgMemberTwoFaFieldEmail,
-			},
-		}
-		inserted, err := testDB.PopulateGroupCensus(census1, groupID, nil)
-		c.Assert(err, qt.IsNil)
-		c.Assert(inserted, qt.Equals, int64(0))
-
-		// Verify no participants were added
-		participants1, err := testDB.CensusParticipants(censusOID1.Hex())
-		c.Assert(err, qt.IsNil)
-		c.Assert(participants1, qt.HasLen, 0)
-
-		// Test with valid participantIDs
 		censusOID2 := primitive.NewObjectID()
 		census2 := &Census{
 			ID:         censusOID2,
@@ -321,23 +289,50 @@ func TestPopulateGroupCensus(t *testing.T) {
 				OrgMemberTwoFaFieldEmail,
 			},
 		}
-		participantIDStrs := []string{member1.ID.Hex(), member2.ID.Hex()}
-		inserted2, err := testDB.PopulateGroupCensus(census2, groupID, participantIDStrs)
+		inserted2, err := testDB.PopulateGroupCensus(census2, singleGroupID)
 		c.Assert(err, qt.IsNil)
-		c.Assert(inserted2, qt.Equals, int64(2))
+		c.Assert(inserted2, qt.Equals, int64(1))
 
-		// Verify participants were added
+		// Verify one participant was added
 		participants2, err := testDB.CensusParticipants(censusOID2.Hex())
 		c.Assert(err, qt.IsNil)
-		c.Assert(participants2, qt.HasLen, 2)
+		c.Assert(participants2, qt.HasLen, 1)
+		c.Assert(participants2[0].ParticipantID, qt.Equals, member1ID)
+
+		// Test with group that has multiple members
+		multiMemberGroup := &OrganizationMemberGroup{
+			OrgAddress:  testOrgAddress,
+			Title:       "Multi Member Group",
+			Description: "Multi Member Group Description",
+			MemberIDs:   []string{member1ID, member2ID},
+		}
+		multiGroupID, err := testDB.CreateOrganizationMemberGroup(multiMemberGroup)
+		c.Assert(err, qt.IsNil)
+
+		censusOID3 := primitive.NewObjectID()
+		census3 := &Census{
+			ID:         censusOID3,
+			OrgAddress: testOrgAddress,
+			TwoFaFields: OrgMemberTwoFaFields{
+				OrgMemberTwoFaFieldEmail,
+			},
+		}
+		inserted3, err := testDB.PopulateGroupCensus(census3, multiGroupID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(inserted3, qt.Equals, int64(2))
+
+		// Verify both participants were added
+		participants3, err := testDB.CensusParticipants(censusOID3.Hex())
+		c.Assert(err, qt.IsNil)
+		c.Assert(participants3, qt.HasLen, 2)
 
 		// Verify the correct participants were added
 		participantMap := make(map[string]bool)
-		for _, p := range participants2 {
+		for _, p := range participants3 {
 			participantMap[p.ParticipantID] = true
 		}
-		c.Assert(participantMap[member1.ID.Hex()], qt.IsTrue)
-		c.Assert(participantMap[member2.ID.Hex()], qt.IsTrue)
+		c.Assert(participantMap[member1ID], qt.IsTrue)
+		c.Assert(participantMap[member2ID], qt.IsTrue)
 	})
 }
 
