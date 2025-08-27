@@ -84,6 +84,8 @@ func (e Error) Write(w http.ResponseWriter) {
 			log.Infow(errMsg)
 		case "warn":
 			log.Warnw(errMsg)
+		default:
+			log.Debugw(errMsg) // Default to debug level for unknown log levels
 		}
 	}
 

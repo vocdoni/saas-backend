@@ -148,6 +148,8 @@ func (p *Subscriptions) HasTxPermission(
 		if !user.HasRoleFor(org.Address, db.AdminRole) && !user.HasRoleFor(org.Address, db.ManagerRole) {
 			return false, fmt.Errorf("user does not have admin role")
 		}
+	default:
+		return false, fmt.Errorf("unsupported txtype")
 	}
 	return true, nil
 }
@@ -177,6 +179,7 @@ func (p *Subscriptions) HasDBPermission(userEmail string, orgAddress common.Addr
 			return false, fmt.Errorf("user does not have admin role")
 		}
 		return true, nil
+	default:
+		return false, fmt.Errorf("permission not found")
 	}
-	return false, fmt.Errorf("permission not found")
 }
