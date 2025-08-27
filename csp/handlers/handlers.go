@@ -114,9 +114,9 @@ func (c *CSPHandlers) handleAuthStep(w http.ResponseWriter, r *http.Request,
 //	@Summary		Authenticate for a process bundle
 //	@Description	Handle authentication for a process bundle. There are two steps in the authentication process:
 //	@Description	- Step 0: The user sends the participant ID and contact information (email or phone).
-//	@Description	  If valid, the server sends a challenge to the user with a token.
+//	@Description	If valid, the server sends a challenge to the user with a token.
 //	@Description	- Step 1: The user sends the token and challenge solution back to the server.
-//	@Description	  If valid, the token is marked as verified and returned.
+//	@Description	If valid, the token is marked as verified and returned.
 //	@Description	For auth-only censuses, verification may not require a challenge solution.
 //	@Tags			process
 //	@Accept			json
