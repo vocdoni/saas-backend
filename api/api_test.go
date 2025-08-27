@@ -512,38 +512,6 @@ func testCreateCensus(
 	return createdCensus.ID
 }
 
-// testAddMembersToCensus adds members to the given census.
-// It returns the number of members added.
-func testAddMembersToCensus(t *testing.T, token, censusID string, members []apicommon.OrgMember) uint32 {
-	c := qt.New(t)
-
-	// Add members to the census
-	membersReq := &apicommon.AddMembersRequest{
-		Members: members,
-	}
-	addedResponse := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, token, membersReq,
-		censusEndpoint, censusID)
-	c.Assert(addedResponse.Added, qt.Equals, uint32(len(members)),
-		qt.Commentf("expected %d members, got %d", len(members), addedResponse.Added))
-
-	return addedResponse.Added
-}
-
-// testPublishCensus publishes the given census.
-// It returns the published census URI and root.
-func testPublishCensus(t *testing.T, token, censusID string) (uri string, root string) {
-	c := qt.New(t)
-
-	// Publish the census
-	publishedCensus := requestAndParse[apicommon.PublishedCensusResponse](t, http.MethodPost, token, nil,
-		censusEndpoint, censusID, "publish")
-	c.Assert(publishedCensus.URI, qt.Not(qt.Equals), "", qt.Commentf("published census URI is empty"))
-	c.Assert(publishedCensus.Root, qt.Not(qt.Equals), "", qt.Commentf("published census root is empty"))
-
-	t.Logf("Published census with URI: %s and Root: %s", publishedCensus.URI, publishedCensus.Root)
-	return publishedCensus.URI, publishedCensus.Root.String()
-}
-
 // testCreateBundle creates a new process bundle with the given census ID and process IDs.
 // It returns the bundle ID and root.
 func testCreateBundle(t *testing.T, token, censusID string, processIDs [][]byte) (bundleID string, root string) {
@@ -570,55 +538,6 @@ func testCreateBundle(t *testing.T, token, censusID string, processIDs [][]byte)
 
 	t.Logf("Created bundle with ID: %s and Root: %s", bundleIDStr, bundleResp.Root)
 	return bundleIDStr, bundleResp.Root.String()
-}
-
-// testCSPAuthenticate performs the CSP authentication flow for a member.
-// It returns the verified auth token.
-func testCSPAuthenticate(t *testing.T, bundleID, participantID, email string) internal.HexBytes {
-	c := qt.New(t)
-
-	// Step 1: Initiate authentication (auth/0)
-	authReq := &handlers.AuthRequest{
-		MemberNumber: participantID,
-		Email:        email,
-	}
-	authResp := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", authReq, "process", "bundle", bundleID, "auth", "0")
-	c.Assert(authResp.AuthToken, qt.Not(qt.Equals), "", qt.Commentf("auth token is empty"))
-
-	t.Logf("Received auth token: %s", authResp.AuthToken.String())
-
-	// Step 2: Get the OTP code from the email with retries
-	var mailBody string
-	var err error
-	maxRetries := 10
-	for i := 0; i < maxRetries; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		mailBody, err = testMailService.FindEmail(ctx, email)
-		cancel()
-		if err == nil {
-			break
-		}
-		t.Logf("Waiting for email, attempt %d/%d...", i+1, maxRetries)
-		time.Sleep(500 * time.Millisecond)
-	}
-	c.Assert(err, qt.IsNil, qt.Commentf("failed to receive email after %d attempts", maxRetries))
-
-	// Extract the OTP code from the email
-	otpCode := extractOTPFromEmail(mailBody)
-	c.Assert(otpCode, qt.Not(qt.Equals), "", qt.Commentf("failed to extract OTP code from email"))
-	t.Logf("Extracted OTP code: %s", otpCode)
-
-	// Step 3: Verify authentication (auth/1)
-	authChallengeReq := &handlers.AuthChallengeRequest{
-		AuthToken: authResp.AuthToken,
-		AuthData:  []string{otpCode},
-	}
-	verifyResp := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", authChallengeReq,
-		"process", "bundle", bundleID, "auth", "1")
-	c.Assert(verifyResp.AuthToken, qt.Not(qt.Equals), "", qt.Commentf("verified auth token is empty"))
-
-	t.Logf("Authentication verified with token: %s", verifyResp.AuthToken.String())
-	return verifyResp.AuthToken
 }
 
 // testCSPSign signs a payload with the CSP using the given auth token and process ID.
@@ -687,22 +606,6 @@ func extractOTPFromEmail(mailBody string) string {
 		return matches[0]
 	}
 	return ""
-}
-
-// testGenerateTestMembers generates a list of test members.
-// It returns the list of members.
-func testGenerateTestMembers(count int) []apicommon.OrgMember {
-	members := make([]apicommon.OrgMember, count)
-	for i := 0; i < count; i++ {
-		id := fmt.Sprintf("P%03d", i+1)
-		members[i] = apicommon.OrgMember{
-			MemberNumber: id,
-			Name:         fmt.Sprintf("Test User %d", i+1),
-			Email:        fmt.Sprintf("%s@example.com", id),
-			Phone:        fmt.Sprintf("+346123456%02d", i+1),
-		}
-	}
-	return members
 }
 
 // requestAndParse makes a request and parses the JSON response.
