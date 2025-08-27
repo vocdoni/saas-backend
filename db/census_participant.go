@@ -168,7 +168,6 @@ func (ms *MongoStorage) CensusParticipantByMemberNumber(
 func (ms *MongoStorage) CensusParticipantByLoginHash(
 	censusID string,
 	loginHash []byte,
-	orgAddress common.Address,
 ) (*CensusParticipant, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -511,7 +510,8 @@ func (ms *MongoStorage) SetBulkCensusOrgMemberParticipant(
 }
 
 func (ms *MongoStorage) setBulkCensusParticipant(
-	ctx context.Context, censusID, groupID string, orgAddress common.Address, authFields OrgMemberAuthFields, twoFaFields OrgMemberTwoFaFields,
+	ctx context.Context, censusID, groupID string, orgAddress common.Address,
+	authFields OrgMemberAuthFields, twoFaFields OrgMemberTwoFaFields,
 ) (int64, error) {
 	_, members, err := ms.ListOrganizationMemberGroup(groupID, orgAddress, 0, 0)
 	if err != nil {

@@ -373,7 +373,7 @@ func TestCensusParticipant(t *testing.T) {
 	t.Run("CensusParticipantByLoginHash", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
-		member, census, censusID := setupTestCensusParticipantPrerequisites(t, "_loginHash")
+		member, _, censusID := setupTestCensusParticipantPrerequisites(t, "_loginHash")
 
 		// Set auth fields and two-factor auth fields
 		authFields := OrgMemberAuthFields{OrgMemberAuthFieldsMemberNumber, OrgMemberAuthFieldsName}
@@ -399,24 +399,24 @@ func TestCensusParticipant(t *testing.T) {
 
 		t.Run("InvalidData", func(_ *testing.T) {
 			// Test with empty login hash
-			_, err := testDB.CensusParticipantByLoginHash(censusID, []byte{}, census.OrgAddress)
+			_, err := testDB.CensusParticipantByLoginHash(censusID, []byte{})
 			c.Assert(err, qt.Equals, ErrInvalidData)
 
 			// Test with empty census ID
-			_, err = testDB.CensusParticipantByLoginHash("", loginHash, census.OrgAddress)
+			_, err = testDB.CensusParticipantByLoginHash("", loginHash)
 			c.Assert(err, qt.Equals, ErrInvalidData)
 		})
 
 		t.Run("NonExistentParticipant", func(_ *testing.T) {
 			// Test with non-existent login hash
 			nonExistentHash := []byte("nonexistenthash")
-			_, err := testDB.CensusParticipantByLoginHash(censusID, nonExistentHash, census.OrgAddress)
+			_, err := testDB.CensusParticipantByLoginHash(censusID, nonExistentHash)
 			c.Assert(err, qt.Equals, ErrNotFound)
 		})
 
 		t.Run("ExistingParticipant", func(_ *testing.T) {
 			// Test successful retrieval
-			retrievedParticipant, err := testDB.CensusParticipantByLoginHash(censusID, loginHash, census.OrgAddress)
+			retrievedParticipant, err := testDB.CensusParticipantByLoginHash(censusID, loginHash)
 			c.Assert(err, qt.IsNil)
 			c.Assert(retrievedParticipant.CensusID, qt.Equals, censusID)
 			c.Assert(retrievedParticipant.ParticipantID, qt.Equals, member.ID.Hex())
@@ -508,7 +508,7 @@ func TestCensusParticipant(t *testing.T) {
 			c.Assert(participant.LoginHash, qt.Not(qt.IsNil))
 
 			// Verify we can retrieve participant by login hash
-			found, err := testDB.CensusParticipantByLoginHash(censusID, participant.LoginHash, testOrgAddress)
+			found, err := testDB.CensusParticipantByLoginHash(censusID, participant.LoginHash)
 			c.Assert(err, qt.IsNil)
 			c.Assert(found.ParticipantID, qt.Equals, participant.ParticipantID)
 		}

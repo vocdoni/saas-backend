@@ -133,8 +133,8 @@ func (ms *MongoStorage) PopulateGroupCensus(
 
 	// set the participants for the census
 	if len(group.MemberIDs) > 0 {
-
-		insertedCount, err := ms.setBulkCensusParticipant(ctx, census.ID.Hex(), groupID, census.OrgAddress, census.AuthFields, census.TwoFaFields)
+		insertedCount, err := ms.setBulkCensusParticipant(ctx, census.ID.Hex(),
+			groupID, census.OrgAddress, census.AuthFields, census.TwoFaFields)
 		if err != nil {
 			return 0, fmt.Errorf("error setting census participants: %w", err)
 		}

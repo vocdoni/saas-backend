@@ -405,7 +405,8 @@ func TestCSPVoting(t *testing.T) {
 							// Missing both email and phone
 						}
 						resp, code := testRequest(t, http.MethodPost, "", authReq, "process", "bundle", bundleID, "auth", "0")
-						c.Assert(code, qt.Equals, http.StatusBadRequest, qt.Commentf("expected bad request for missing contact info, got %d: %s", code, resp))
+						c.Assert(code, qt.Equals, http.StatusBadRequest,
+							qt.Commentf("expected bad request for missing contact info, got %d: %s", code, resp))
 					})
 
 					// Test case 7: Try to verify with invalid OTP code
@@ -454,7 +455,9 @@ func TestCSPVoting(t *testing.T) {
 						authReq := &handlers.AuthRequest{
 							MemberNumber: "P001",
 						}
-						authResp := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", authReq, "process", "bundle", authOnlyBundleID, "auth", "0")
+						authResp := requestAndParse[handlers.AuthResponse](t,
+							http.MethodPost, "", authReq,
+							"process", "bundle", authOnlyBundleID, "auth", "0")
 						c.Assert(authResp.AuthToken, qt.Not(qt.Equals), "")
 
 						// Should be able to verify immediately (no challenge)
@@ -494,9 +497,11 @@ func TestCSPVoting(t *testing.T) {
 						authReq := &handlers.AuthRequest{
 							Name:         "John",
 							MemberNumber: "P001",
-							Phone:        "+34612345601",
+							Phone:        db.NewPhone("+34612345601"),
 						}
-						authResp := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", authReq, "process", "bundle", smsBundleID, "auth", "0")
+						authResp := requestAndParse[handlers.AuthResponse](t,
+							http.MethodPost, "", authReq,
+							"process", "bundle", smsBundleID, "auth", "0")
 						c.Assert(authResp.AuthToken, qt.Not(qt.Equals), "")
 					})
 
@@ -527,25 +532,29 @@ func TestCSPVoting(t *testing.T) {
 
 						// Should be able to authenticate with all required fields
 						authReq := &handlers.AuthRequest{
-							Name:       "Alice",
-							Surname:    "Johnson",
-							NationalID: "34567890C",
-							BirthDate:  "1992-10-22",
-							Email:      "alice.johnson@example.com",
+							Name:       "John",
+							Surname:    "Doe",
+							NationalID: "12345678A",
+							BirthDate:  "1990-01-01",
+							Email:      "john.doe@example.com",
 						}
-						authResp := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", authReq, "process", "bundle", complexBundleID, "auth", "0")
+						authResp := requestAndParse[handlers.AuthResponse](t,
+							http.MethodPost, "", authReq,
+							"process", "bundle", complexBundleID, "auth", "0")
 						c.Assert(authResp.AuthToken, qt.Not(qt.Equals), "")
 
 						// Should fail if any required field is missing or wrong
 						wrongAuthReq := &handlers.AuthRequest{
-							Name:       "Alice",
-							Surname:    "Johnson",
+							Name:       "John",
+							Surname:    "Doe",
 							NationalID: "WRONG_ID",
-							BirthDate:  "1992-10-22",
-							Email:      "alice.johnson@example.com",
+							BirthDate:  "1990-01-01",
+							Email:      "john.doe@example.com",
 						}
-						resp, code := testRequest(t, http.MethodPost, "", wrongAuthReq, "process", "bundle", complexBundleID, "auth", "0")
-						c.Assert(code, qt.Equals, http.StatusUnauthorized, qt.Commentf("expected unauthorized for wrong national ID, got %d: %s", code, resp))
+						resp, code := testRequest(t, http.MethodPost, "", wrongAuthReq,
+							"process", "bundle", complexBundleID, "auth", "0")
+						c.Assert(code, qt.Equals, http.StatusUnauthorized,
+							qt.Commentf("expected unauthorized for wrong national ID, got %d: %s", code, resp))
 					})
 				})
 

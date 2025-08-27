@@ -28,6 +28,12 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 	if len(uID) == 0 {
 		return nil, ErrNoUserID
 	}
+
+	// For auth-only cases (no challenge type and no destination), create a pre-verified token
+	if to == "" && ctype == "" {
+		return c.createAuthOnlyToken(bID, uID)
+	}
+
 	// get last token for the user and bundle
 	lastToken, err := c.Storage.LastCSPAuth(uID, bID)
 	if err != nil && err != db.ErrTokenNotFound {
@@ -161,6 +167,64 @@ func (*CSP) verifySolution(uID, bID internal.HexBytes, solution string) bool {
 	code := otp.At(0)
 	// compare the generated code with the solution
 	return code == solution
+}
+
+// createAuthOnlyToken creates a pre-verified token for auth-only censuses
+// that don't require challenge verification. It generates a token and immediately
+// marks it as verified.
+func (c *CSP) createAuthOnlyToken(bID, uID internal.HexBytes) (internal.HexBytes, error) {
+	// get last token for the user and bundle
+	lastToken, err := c.Storage.LastCSPAuth(uID, bID)
+	if err != nil && err != db.ErrTokenNotFound {
+		log.Warnw("error getting last token",
+			"userID", uID,
+			"bundleID", bID,
+			"error", err)
+		return nil, ErrStorageFailure
+	}
+	// check if the last token was created less than the cooldown time
+	if lastToken != nil && time.Since(lastToken.CreatedAt) < c.notificationCoolDownTime {
+		log.Warnw("cooldown time not reached",
+			"userID", uID,
+			"bundleID", bID)
+		return nil, ErrAttemptCoolDownTime
+	}
+
+	// generate a new token (we don't need the code for auth-only)
+	bToken, err := uuid.New().MarshalBinary()
+	if err != nil {
+		log.Warnw("error marshalling token",
+			"error", err,
+			"userID", uID,
+			"bundleID", bID)
+		return nil, ErrInvalidAuthToken
+	}
+
+	// create the new token
+	if err := c.Storage.SetCSPAuth(bToken, uID, bID); err != nil {
+		log.Warnw("error setting new token",
+			"userID", uID,
+			"bundleID", bID,
+			"error", err)
+		return nil, ErrStorageFailure
+	}
+
+	// immediately verify the token since no challenge is needed
+	if err := c.Storage.VerifyCSPAuth(bToken); err != nil {
+		log.Warnw("error verifying auth-only token",
+			"userID", uID,
+			"bundleID", bID,
+			"token", bToken,
+			"error", err)
+		return nil, ErrStorageFailure
+	}
+
+	log.Debugw("new auth-only token created and verified",
+		"userID", uID,
+		"bundleID", bID,
+		"token", bToken)
+
+	return bToken, nil
 }
 
 // otpSecret method generates a new OTP secret for a user and a bundle. The

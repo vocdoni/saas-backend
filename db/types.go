@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -290,10 +291,12 @@ func HashAuthTwoFaFields(memberData OrgMember, authFields OrgMemberAuthFields, t
 		case OrgMemberTwoFaFieldEmail:
 			data = append(data, memberData.Email)
 		case OrgMemberTwoFaFieldPhone:
-			data = append(data, memberData.Phone)
+			memberData.Phone.HashWithOrgAddress(memberData.OrgAddress)
+			data = append(data, string(memberData.Phone.GetHashed()))
 		}
 	}
-	return sha256.New().Sum([]byte(fmt.Sprintf("%v", data)))
+	slices.Sort(data)
+	return sha256.New().Sum(fmt.Append(nil, data))
 }
 
 type OrgMemberAggregationResults struct {
