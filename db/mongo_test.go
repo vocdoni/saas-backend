@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -34,8 +33,6 @@ const (
 	testSalt         = "testSalt"
 	invitationCode   = "abc123"
 	newUserEmail     = "inviteme@email.com"
-	testURI          = "test_uri"
-	testRoot         = "test_root"
 )
 
 func TestMain(m *testing.M) {
@@ -62,7 +59,7 @@ func TestMain(m *testing.M) {
 		panic(fmt.Sprintf("failed to create new MongoDB connection: %v", err))
 	}
 
-	code := m.Run()
+	m.Run()
 
 	// close the database connection
 	testDB.Close()
@@ -71,6 +68,4 @@ func TestMain(m *testing.M) {
 	if err := dbContainer.Terminate(ctx); err != nil {
 		panic(fmt.Sprintf("failed to stop MongoDB container: %v", err))
 	}
-
-	os.Exit(code)
 }
