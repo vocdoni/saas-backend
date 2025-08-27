@@ -2524,9 +2524,11 @@ Retrieves information about a process bundle by its ID, including the associated
 ```json
 {
   "memberNumber": "012345",
+  "name": "John",
+  "surname": "Doe",
+  "nationalID": "12345678A",
+  "birthDate": "1990-05-15",
   "email": "member@example.com",  // Optional: Required if using email authentication
-  "phone": "+1234567890",             // Optional: Required if using phone authentication
-  "password": "secretpass1234"        // Optional: Required if using password authentication
 }
 ```
 
@@ -2548,23 +2550,36 @@ Retrieves information about a process bundle by its ID, including the associated
 * **Response (Step 1)**
 ```json
 {
-  "tokenR": "base64-encoded-token"
+  "authToken": "uuid-string"
 }
 ```
 
 * **Description**
-Two-step authentication process for voters participating in a bundle of processes. Similar to the regular two-factor authentication but for bundles. Step 0 initiates the authentication process and returns an auth token. Step 1 completes the authentication by providing the verification code or other authentication data.
+Two-step authentication process for voters participating in a bundle of processes:
+
+1. **Step 0**: The user provides identifying information (fields depend on what the census requires for authentication). If valid, the server:
+   - Verifies the participant is in the census using the login hash generated from the provided fields
+   - Determines the appropriate contact method based on census type (email, SMS, or none for auth-only censuses)
+   - Sends a challenge to the user's contact method (except for auth-only censuses)
+   - Returns an auth token for use in Step 1
+
+2. **Step 1**: The user submits the auth token along with:
+   - For censuses that require challenge verification: the verification code received via email/SMS
+   - For auth-only censuses: no challenge solution required if the token is already verified
+
+If valid, the token is marked as verified and returned. The verified token can then be used for signing processes in the bundle.
 
 * **Errors**
 
 | HTTP Status | Error code | Message |
 |:---:|:---:|:---|
 | `400` | `40004` | `malformed JSON body` |
+| `400` | `40005` | `invalid user data` |
 | `400` | `40010` | `malformed URL parameter` |
 | `400` | `40011` | `missing bundle ID` |
 | `400` | `40012` | `wrong step ID` |
-| `401` | `40001` | `user not authorized` |
 | `400` | `40013` | `bundle has no processes` |
+| `401` | `40001` | `user not authorized` |
 | `500` | `50002` | `internal server error` |
 
 ### ✍️ Process Bundle Signing
@@ -2574,9 +2589,9 @@ Two-step authentication process for voters participating in a bundle of processe
 * **Request Body** 
 ```json
 {
-  "tokenR": "base64-encoded-token",
-  "payload": "base64-encoded-payload",
-  "electionId": "hex-string"
+  "authToken": "uuid-string",
+  "processID": "hex-string-process-id",
+  "payload": "hex-string-address"
 }
 ```
 
@@ -2588,7 +2603,14 @@ Two-step authentication process for voters participating in a bundle of processe
 ```
 
 * **Description**
-Signs a payload for a process bundle using two-factor authentication. Requires a valid tokenR obtained from the process bundle authentication. The signing uses the first process in the bundle for the signature.
+Signs a process in a bundle. This endpoint performs several verification steps:
+
+1. Verifies the auth token is valid and has been verified through the authentication process
+2. Confirms that the requested process is part of the bundle
+3. Verifies that the participant associated with the token is in the census
+4. Signs the provided address (payload) with the user's cryptographic key
+
+Once signed, the process is marked as consumed and cannot be signed again with the same token.
 
 * **Errors**
 
@@ -2599,6 +2621,8 @@ Signs a payload for a process bundle using two-factor authentication. Requires a
 | `400` | `40011` | `missing bundle ID` |
 | `400` | `40013` | `bundle has no processes` |
 | `401` | `40001` | `user not authorized` |
+| `401` | `40001` | `process not found in bundle` |
+| `401` | `40001` | `participant not found in the census` |
 | `500` | `50002` | `internal server error` |
 
 ### 📋 Get Process Bundle Member Info
