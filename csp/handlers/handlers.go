@@ -276,6 +276,10 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
+	if !auth.Verified {
+		errors.ErrUnauthorized.Withf("token not verified").Write(w)
+		return
+	}
 
 	// Find the process in the bundle
 	processID, found := findProcessInBundle(bundle, req.ProcessID)
@@ -284,10 +288,10 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Check if the participant is in the census
-	if !c.checkCensusParticipant(w, bundle.Census.ID.Hex(), string(auth.UserID)) {
-		return
-	}
+	// // Check if the participant is in the census
+	// if !c.checkCensusParticipant(w, bundle.Census.ID.Hex(), string(auth.UserID)) {
+	// 	return
+	// }
 
 	// Parse the address from the payload
 	address, ok := parseAddress(w, req.Payload)
@@ -541,7 +545,7 @@ func (c *CSPHandlers) authFirstStep(
 	}
 
 	// Generate the token
-	return c.csp.BundleAuthToken(bundleID, internal.HexBytes(orgMember.MemberNumber), toDestinations, challengeType)
+	return c.csp.BundleAuthToken(bundleID, internal.HexBytes(orgMember.ID.Hex()), toDestinations, challengeType)
 }
 
 // authSecondStep is the second step of the authentication process. It
