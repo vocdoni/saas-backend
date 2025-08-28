@@ -42,7 +42,7 @@ func testCSPAuthenticateWithFields(t *testing.T, bundleID string, authReq *handl
 				break
 			}
 			t.Logf("Waiting for email, attempt %d/%d...", i+1, maxRetries)
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(1000 * time.Millisecond)
 		}
 		c.Assert(err, qt.IsNil, qt.Commentf("failed to receive email after %d attempts", maxRetries))
 
@@ -253,6 +253,15 @@ func TestCSPVoting(t *testing.T) {
 						Email:        "charlie.brown@example.com",
 						Phone:        "+34612345605",
 					},
+					{
+						Name:         "David",
+						Surname:      "Garcia",
+						MemberNumber: "", // Member without a memberNumber
+						NationalID:   "67890123F",
+						BirthDate:    "1993-07-25",
+						Email:        "david.garcia@example.com",
+						Phone:        "+34612345606",
+					},
 				}
 
 				// Add members to the organization first
@@ -426,6 +435,87 @@ func TestCSPVoting(t *testing.T) {
 						}
 						resp, code := testRequest(t, http.MethodPost, "", authChallengeReq, "process", "bundle", bundleID, "auth", "1")
 						c.Assert(code, qt.Equals, http.StatusUnauthorized, qt.Commentf("expected unauthorized, got %d: %s", code, resp))
+					})
+
+					// Test case 8: Member without memberNumber doesn't disrupt authentication when not required
+					t.Run("Member Without MemberNumber", func(_ *testing.T) {
+						// Create a census without memberNumber in AuthFields
+						noMemberNumAuthFields := db.OrgMemberAuthFields{
+							db.OrgMemberAuthFieldsName,
+							db.OrgMemberAuthFieldsSurname,
+						}
+						emailTwoFaFields := db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail}
+
+						// Create an empty census
+						noMemberNumCensusID := testCreateCensus(t, token, orgAddress, noMemberNumAuthFields, emailTwoFaFields)
+
+						// Publish the group-based census using the existing group
+						publishGroupRequest := &apicommon.PublishCensusGroupRequest{
+							AuthFields:  noMemberNumAuthFields,
+							TwoFaFields: emailTwoFaFields,
+						}
+
+						requestAndParse[apicommon.PublishedCensusResponse](
+							t, http.MethodPost, token, publishGroupRequest,
+							"census", noMemberNumCensusID, "group", groupID, "publish")
+
+						noMemberNumBundleID, _ := testCreateBundle(t, token, noMemberNumCensusID, [][]byte{processID})
+
+						// Should be able to authenticate David Garcia (who has no memberNumber) when memberNumber isn't required
+						authReq := &handlers.AuthRequest{
+							Name:    "David",
+							Surname: "Garcia",
+							Email:   "david.garcia@example.com",
+						}
+						authResp := requestAndParse[handlers.AuthResponse](t,
+							http.MethodPost, "", authReq,
+							"process", "bundle", noMemberNumBundleID, "auth", "0")
+						c.Assert(authResp.AuthToken, qt.Not(qt.Equals), "", qt.Commentf("auth token should not be empty"))
+
+						// Now create a census that requires memberNumber
+						withMemberNumAuthFields := db.OrgMemberAuthFields{
+							db.OrgMemberAuthFieldsName,
+							db.OrgMemberAuthFieldsSurname,
+							db.OrgMemberAuthFieldsMemberNumber,
+						}
+
+						validateGroupRequest := &apicommon.ValidateMemberGroupRequest{
+							AuthFields:  withMemberNumAuthFields,
+							TwoFaFields: emailTwoFaFields,
+						}
+
+						// Should fail to validate org member group data when memberNumber is required
+						resp, code := testRequest(t, http.MethodPost, token, validateGroupRequest,
+							"organizations", orgAddress.String(), "groups", groupID, "validate")
+						c.Assert(code, qt.Equals, http.StatusBadRequest,
+							qt.Commentf("expected bad request when memberNumber required but missing, got %d: %s", code, resp))
+
+						// Should be able to create census even when memberNumber is required but missing
+						resp, code = testRequest(t, http.MethodPost, token, publishGroupRequest,
+							"census", noMemberNumCensusID, "group", groupID, "publish")
+						c.Assert(code, qt.Equals, http.StatusOK,
+							qt.Commentf("expected bad request when memberNumber required but missing, got %d: %s", code, resp))
+
+						// Create an empty census
+						withMemberNumCensusID := testCreateCensus(t, token, orgAddress, withMemberNumAuthFields, emailTwoFaFields)
+
+						// Publish the group-based census
+						publishGroupRequest = &apicommon.PublishCensusGroupRequest{
+							AuthFields:  withMemberNumAuthFields,
+							TwoFaFields: emailTwoFaFields,
+						}
+
+						requestAndParse[apicommon.PublishedCensusResponse](
+							t, http.MethodPost, token, publishGroupRequest,
+							"census", withMemberNumCensusID, "group", groupID, "publish")
+
+						withMemberNumBundleID, _ := testCreateBundle(t, token, withMemberNumCensusID, [][]byte{processID})
+
+						// Should not fail to authenticate David Garcia when memberNumber is required
+						resp, code = testRequest(t, http.MethodPost, "", authReq,
+							"process", "bundle", withMemberNumBundleID, "auth", "0")
+						c.Assert(code, qt.Equals, http.StatusOK,
+							qt.Commentf("expected unauthorized when memberNumber required but not provided, got %d: %s", code, resp))
 					})
 				})
 
