@@ -133,7 +133,7 @@ func TestObjectStorage(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(object, qt.Not(qt.IsNil))
 		c.Assert(object.Data, qt.DeepEquals, jpegData)
-		c.Assert(object.UserID, qt.Equals, "test@example.com")
+		c.Assert(object.User, qt.Equals, "test@example.com")
 		c.Assert(object.ContentType, qt.Equals, "image/jpeg")
 	})
 

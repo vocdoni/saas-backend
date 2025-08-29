@@ -107,12 +107,13 @@ func (osc *Client) Get(objectID string) (*db.Object, error) {
 	return object, nil
 }
 
-// uploadObject uploads the object image with the given objectID, associated to
-// the user with the given userFID and the community with the given communityID.
-// If the objectID is empty, it calculates the objectID from the data. It returns
+// Put uploads a object image associated to a user (free-form string)
+//
+//	It calculates the objectID from the data and uses that as filename. It returns
+//
 // the URL of the uploaded object image. It stores the object in the database.
 // If an error occurs, it returns an empty string and the error.
-func (osc *Client) Put(data io.Reader, size int64, userID string) (string, error) {
+func (osc *Client) Put(data io.Reader, size int64, user string) (string, error) {
 	// Create a buffer of the appropriate size
 	buff := make([]byte, size)
 	_, err := data.Read(buff)
@@ -134,7 +135,7 @@ func (osc *Client) Put(data io.Reader, size int64, userID string) (string, error
 		return "", fmt.Errorf("error calculating objectID: %w", err)
 	}
 	// store the object in the database
-	if err := osc.db.SetObject(objectID, userID, filetype, buff); err != nil {
+	if err := osc.db.SetObject(objectID, user, filetype, buff); err != nil {
 		return "", fmt.Errorf("cannot set object: %w", err)
 	}
 	// return objectURL(osc.serverURL, objectID, fileExtension), nil
