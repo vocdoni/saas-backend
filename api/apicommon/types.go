@@ -106,8 +106,11 @@ type OrganizationRole struct {
 	// Human-readable name of the role
 	Name string `json:"name"`
 
-	// Whether this role has write permissions
-	WritePermission bool `json:"writePermission"`
+	// Whether this role has organization write permission
+	OrganizationWritePermission bool `json:"organizationWritePermission"`
+
+	// Whether this role has process write permission
+	ProcessWritePermission bool `json:"processWritePermission"`
 }
 
 // OrganizationRoleList represents a list of organization roles.

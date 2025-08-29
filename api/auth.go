@@ -123,9 +123,9 @@ func (*API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *http.
 	}
 	// get the addresses of the organizations where the user has write access
 	for _, org := range user.Organizations {
-		// check if the user has write access to the organization based on the
+		// check if the user has organization write permission to the organization based on the
 		// role of the user in the organization
-		if db.HasWriteAccess(org.Role) {
+		if db.HasOrganizationWritePermission(org.Role) {
 			userAddresses.Addresses = append(userAddresses.Addresses, org.Address)
 		}
 	}

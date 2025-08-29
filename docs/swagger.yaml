@@ -482,12 +482,15 @@ definitions:
       name:
         description: Human-readable name of the role
         type: string
+      organizationWritePermission:
+        description: Whether this role has organization write permission
+        type: boolean
+      processWritePermission:
+        description: Whether this role has process write permission
+        type: boolean
       role:
         description: Role identifier
         type: string
-      writePermission:
-        description: Whether this role has write permissions
-        type: boolean
     type: object
   apicommon.OrganizationRoleList:
     properties:
