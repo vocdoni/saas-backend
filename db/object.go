@@ -33,7 +33,7 @@ func (ms *MongoStorage) Object(id string) (*Object, error) {
 // SetObject sets the object data for the given objectID. If the
 // object does not exist, it will be created with the given data, otherwise it
 // will be updated.
-func (ms *MongoStorage) SetObject(objectID, userID, contentType string, data []byte) error {
+func (ms *MongoStorage) SetObject(objectID, user, contentType string, data []byte) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -42,7 +42,7 @@ func (ms *MongoStorage) SetObject(objectID, userID, contentType string, data []b
 		ID:          objectID,
 		Data:        data,
 		CreatedAt:   time.Now(),
-		UserID:      userID,
+		User:        user,
 		ContentType: contentType,
 	}
 	opts := options.ReplaceOptions{}
