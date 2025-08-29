@@ -34,6 +34,7 @@ func (ms *MongoStorage) collectionsMap() map[string]**mongo.Collection {
 		"processBundles":      &ms.processBundles,
 		"cspTokens":           &ms.cspTokens,
 		"cspTokensStatus":     &ms.cspTokensStatus,
+		"jobs":                &ms.jobs,
 	}
 }
 
@@ -325,6 +326,21 @@ func (ms *MongoStorage) createIndexes() error {
 		}); err != nil {
 			return fmt.Errorf("failed to create index on %s for orgMembers: %w", idx.field, err)
 		}
+	}
+
+	// create an index for the jobId field on jobs (must be unique)
+	if _, err := ms.jobs.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "jobId", Value: 1}}, // 1 for ascending order
+		Options: options.Index().SetUnique(true),
+	}); err != nil {
+		return fmt.Errorf("failed to create index on jobId for jobs: %w", err)
+	}
+
+	// create an index for the orgAddress field on jobs
+	if _, err := ms.jobs.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "orgAddress", Value: 1}}, // 1 for ascending order
+	}); err != nil {
+		return fmt.Errorf("failed to create index on orgAddress for jobs: %w", err)
 	}
 
 	return nil
