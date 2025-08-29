@@ -66,11 +66,11 @@ func TestProcess(t *testing.T) {
 		},
 	}
 
-	resp, code := testRequest(t, http.MethodPost, adminToken, members, censusEndpoint, censusID)
+	resp, code := testRequest(t, http.MethodPost, adminToken, members, censusEndpoint, censusID.String())
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Publish the census
-	resp, code = testRequest(t, http.MethodPost, adminToken, nil, censusEndpoint, censusID, "publish")
+	resp, code = testRequest(t, http.MethodPost, adminToken, nil, censusEndpoint, censusID.String(), "publish")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	var publishedCensus apicommon.PublishedCensusResponse
@@ -88,14 +88,10 @@ func TestProcess(t *testing.T) {
 	censusRoot := publishedCensus.Root
 	c.Assert(err, qt.IsNil)
 
-	censusIDBytes := internal.HexBytes{}
-	err = censusIDBytes.ParseString(censusID)
-	c.Assert(err, qt.IsNil)
-
 	processInfo := &apicommon.CreateProcessRequest{
 		PublishedCensusRoot: censusRoot,
 		PublishedCensusURI:  publishedCensus.URI,
-		CensusID:            censusIDBytes,
+		CensusID:            censusID,
 		Metadata:            []byte(`{"title":"Test Process","description":"This is a test process"}`),
 	}
 
