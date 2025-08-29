@@ -490,6 +490,80 @@ func (ms *MongoStorage) DeleteOrgMembers(orgAddress common.Address, ids []string
 	return int(result.DeletedCount), nil
 }
 
+// DeleteAllOrgMembers removes all members from an organization
+func (ms *MongoStorage) DeleteAllOrgMembers(orgAddress common.Address) (int, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return 0, ErrInvalidData
+	}
+
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// create the filter for the delete operation - only organization address
+	filter := bson.M{
+		"orgAddress": orgAddress,
+	}
+
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+
+	result, err := ms.orgMembers.DeleteMany(ctx, filter)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete all orgMembers: %w", err)
+	}
+
+	return int(result.DeletedCount), nil
+}
+
+// GetAllOrgMemberIDs retrieves all member IDs for an organization
+func (ms *MongoStorage) GetAllOrgMemberIDs(orgAddress common.Address) ([]string, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return nil, ErrInvalidData
+	}
+
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	// Create filter for the organization
+	filter := bson.M{
+		"orgAddress": orgAddress,
+	}
+
+	// Only select the _id field for efficiency
+	projection := bson.M{
+		"_id": 1,
+	}
+
+	cursor, err := ms.orgMembers.Find(ctx, filter, options.Find().SetProjection(projection))
+	if err != nil {
+		return nil, fmt.Errorf("failed to find org members: %w", err)
+	}
+	defer func() {
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("error closing cursor", "error", err)
+		}
+	}()
+
+	var memberIDs []string
+	for cursor.Next(ctx) {
+		var member struct {
+			ID primitive.ObjectID `bson:"_id"`
+		}
+		if err := cursor.Decode(&member); err != nil {
+			return nil, fmt.Errorf("failed to decode member ID: %w", err)
+		}
+		memberIDs = append(memberIDs, member.ID.Hex())
+	}
+
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("cursor error: %w", err)
+	}
+
+	return memberIDs, nil
+}
+
 // validateOrgMembers checks if the provided member IDs are valid
 func (ms *MongoStorage) validateOrgMembers(ctx context.Context, orgAddress common.Address, members []string) error {
 	if len(members) == 0 {

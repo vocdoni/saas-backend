@@ -107,7 +107,7 @@ func (ms *MongoStorage) CreateOrganizationMemberGroup(group *OrganizationMemberG
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	if group == nil || group.OrgAddress.Cmp(common.Address{}) == 0 || len(group.MemberIDs) == 0 {
+	if group == nil || group.OrgAddress.Cmp(common.Address{}) == 0 {
 		return "", ErrInvalidData
 	}
 
@@ -118,11 +118,15 @@ func (ms *MongoStorage) CreateOrganizationMemberGroup(group *OrganizationMemberG
 		}
 		return "", fmt.Errorf("organization not found: %w", err)
 	}
-	// check that the members are valid
-	err := ms.validateOrgMembers(ctx, group.OrgAddress, group.MemberIDs)
-	if err != nil {
-		return "", err
+
+	// check that the members are valid (only if there are members to validate)
+	if len(group.MemberIDs) > 0 {
+		err := ms.validateOrgMembers(ctx, group.OrgAddress, group.MemberIDs)
+		if err != nil {
+			return "", err
+		}
 	}
+
 	// create the group id
 	group.ID = primitive.NewObjectID()
 	group.CreatedAt = time.Now()
