@@ -63,18 +63,13 @@ func TestOrganizationGroups(t *testing.T) {
 		"organizations", orgAddress.String(), "members")
 	c.Assert(len(membersResponse.Members), qt.Equals, 2, qt.Commentf("expected 2 members"))
 
+	membersMap := make(map[string]apicommon.OrgMember)
 	// Store participant IDs for later use
-	var participant1ID, participant2ID string
 	for _, p := range membersResponse.Members {
-		switch p.MemberNumber {
-		case "P001":
-			participant1ID = p.ID
-		case "P002":
-			participant2ID = p.ID
-		}
+		membersMap[p.MemberNumber] = p
 	}
-	c.Assert(participant1ID, qt.Not(qt.Equals), "", qt.Commentf("Participant 1 not found"))
-	c.Assert(participant2ID, qt.Not(qt.Equals), "", qt.Commentf("Participant 2 not found"))
+	c.Assert(membersMap["P001"], qt.Not(qt.Equals), "", qt.Commentf("Participant 1 not found"))
+	c.Assert(membersMap["P002"], qt.Not(qt.Equals), "", qt.Commentf("Participant 2 not found"))
 
 	// Add a third participant
 	members3 := &apicommon.AddMembersRequest{
@@ -102,21 +97,18 @@ func TestOrganizationGroups(t *testing.T) {
 		"organizations", orgAddress.String(), "members")
 	c.Assert(len(membersResponse.Members), qt.Equals, 3, qt.Commentf("expected 3 members"))
 
-	var participant3ID string
+	// Store participant IDs for later use
 	for _, p := range membersResponse.Members {
-		if p.MemberNumber == "P003" {
-			participant3ID = p.ID
-			break
-		}
+		membersMap[p.MemberNumber] = p
 	}
-	c.Assert(participant3ID, qt.Not(qt.Equals), "", qt.Commentf("Participant 3 not found"))
+	c.Assert(membersMap["P003"], qt.Not(qt.Equals), "", qt.Commentf("Participant 3 not found"))
 
 	t.Run("CreateOrganizationMemberGroup", func(t *testing.T) {
 		// Test 1: Create a new group with the two members
 		createRequest := &apicommon.CreateOrganizationMemberGroupRequest{
 			Title:       "Test Group",
 			Description: "This is a test group",
-			MemberIDs:   []string{participant1ID, participant2ID},
+			MemberIDs:   []string{membersMap["P001"].ID, membersMap["P002"].ID},
 		}
 		groupInfo := requestAndParse[apicommon.OrganizationMemberGroupInfo](
 			t, http.MethodPost, adminToken, createRequest,
@@ -157,7 +149,7 @@ func TestOrganizationGroups(t *testing.T) {
 		createRequest = &apicommon.CreateOrganizationMemberGroupRequest{
 			Title:       "Single Member Group",
 			Description: "This group has only one member",
-			MemberIDs:   []string{participant1ID},
+			MemberIDs:   []string{membersMap["P001"].ID},
 		}
 		singleMemberGroupInfo := requestAndParse[apicommon.OrganizationMemberGroupInfo](
 			t, http.MethodPost, adminToken, createRequest,
@@ -237,7 +229,7 @@ func TestOrganizationGroups(t *testing.T) {
 		updateRequest = &apicommon.UpdateOrganizationMemberGroupsRequest{
 			Title:       updatedGroup.Title,
 			Description: updatedGroup.Description,
-			AddMembers:  []string{participant3ID},
+			AddMembers:  []string{membersMap["P003"].ID},
 		}
 		requestAndAssertCode(http.StatusOK,
 			t, http.MethodPut, adminToken, updateRequest,
@@ -251,7 +243,7 @@ func TestOrganizationGroups(t *testing.T) {
 		// Check if the new participant ID is in the group's member IDs
 		found := false
 		for _, id := range updatedGroup.MemberIDs {
-			if id == participant3ID {
+			if id == membersMap["P003"].ID {
 				found = true
 				break
 			}
@@ -262,7 +254,7 @@ func TestOrganizationGroups(t *testing.T) {
 		updateRequest = &apicommon.UpdateOrganizationMemberGroupsRequest{
 			Title:         updatedGroup.Title,
 			Description:   updatedGroup.Description,
-			RemoveMembers: []string{participant3ID},
+			RemoveMembers: []string{membersMap["P003"].ID},
 		}
 		requestAndAssertCode(http.StatusOK,
 			t, http.MethodPut, adminToken, updateRequest,
@@ -276,7 +268,7 @@ func TestOrganizationGroups(t *testing.T) {
 		// Check that the participant ID is no longer in the group's member IDs
 		found = false
 		for _, id := range updatedGroup.MemberIDs {
-			if id == participant3ID {
+			if id == membersMap["P003"].ID {
 				found = true
 				break
 			}
@@ -345,7 +337,7 @@ func TestOrganizationGroups(t *testing.T) {
 		createRequest := &apicommon.CreateOrganizationMemberGroupRequest{
 			Title:       "Group to Delete",
 			Description: "This group will be deleted",
-			MemberIDs:   []string{participant1ID},
+			MemberIDs:   []string{membersMap["P001"].ID},
 		}
 		groupInfo := requestAndParse[apicommon.OrganizationMemberGroupInfo](
 			t, http.MethodPost, adminToken, createRequest,
@@ -368,7 +360,7 @@ func TestOrganizationGroups(t *testing.T) {
 		createRequest = &apicommon.CreateOrganizationMemberGroupRequest{
 			Title:       "Another Group to Delete",
 			Description: "This group will be used for unauthorized delete test",
-			MemberIDs:   []string{participant1ID},
+			MemberIDs:   []string{membersMap["P001"].ID},
 		}
 		groupInfo = requestAndParse[apicommon.OrganizationMemberGroupInfo](
 			t, http.MethodPost, adminToken, createRequest,

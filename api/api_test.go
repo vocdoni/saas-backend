@@ -293,7 +293,7 @@ func TestMain(m *testing.M) {
 	}
 	log.Infow("API server started", "host", testHost, "port", testPort)
 	// run the tests
-	os.Exit(m.Run())
+	m.Run()
 }
 
 // request sends a request to the API service and returns the response body and status code.

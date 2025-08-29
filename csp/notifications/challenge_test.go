@@ -2,7 +2,6 @@ package notifications
 
 import (
 	"context"
-	"os"
 	"regexp"
 	"testing"
 
@@ -55,7 +54,7 @@ func TestMain(m *testing.M) {
 	}); err != nil {
 		panic(err)
 	}
-	os.Exit(m.Run())
+	m.Run()
 }
 
 func TestNewChallengeSent(t *testing.T) {

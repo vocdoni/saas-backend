@@ -2,7 +2,6 @@ package csp
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/vocdoni/saas-backend/internal"
@@ -13,12 +12,10 @@ import (
 )
 
 const (
-	testUserEmail     = "user@test.com"
-	testUserExtraData = "extraData"
-	testUserPhone     = "+346787878"
-	adminEmail        = "admin@test.com"
-	adminUser         = "admin"
-	adminPass         = "admin123"
+	testUserEmail = "user@test.com"
+	adminEmail    = "admin@test.com"
+	adminUser     = "admin"
+	adminPass     = "admin123"
 )
 
 var (
@@ -79,5 +76,5 @@ func TestMain(m *testing.M) {
 	if err := mailtemplates.Load(); err != nil {
 		panic(err)
 	}
-	os.Exit(m.Run())
+	m.Run()
 }

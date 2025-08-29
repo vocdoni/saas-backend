@@ -212,8 +212,9 @@ func (*Account) validateSetProcessTx(txSetProcess *models.SetProcessTx) error {
 		if txSetProcess.Duration == nil {
 			return errors.ErrInvalidTxFormat.With("missing duration field")
 		}
+	default:
+		return errors.ErrInvalidTxFormat.With("unsupported txtype")
 	}
-
 	return nil
 }
 
