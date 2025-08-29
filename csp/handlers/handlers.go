@@ -189,28 +189,6 @@ func findProcessInBundle(bundle *db.ProcessesBundle, processID internal.HexBytes
 	return nil, false
 }
 
-// checkCensusParticipant checks if the participant is in the census
-func (c *CSPHandlers) checkCensusParticipant(w http.ResponseWriter, censusID string, userID string) bool {
-	// Get census information
-	census, err := c.mainDB.Census(censusID)
-	if err != nil {
-		if err == db.ErrNotFound {
-			return false
-		}
-		return false
-	}
-	if _, err := c.mainDB.CensusParticipantByMemberNumber(censusID, userID, census.OrgAddress); err != nil {
-		if err == db.ErrNotFound {
-			errors.ErrUnauthorized.Withf("participant not found in the census").Write(w)
-			return false
-		}
-		log.Warnw("error getting census participant", "error", err)
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return false
-	}
-	return true
-}
-
 // parseAddress parses the address from the payload
 func parseAddress(w http.ResponseWriter, payload string) (*internal.HexBytes, bool) {
 	address := new(internal.HexBytes)
@@ -365,14 +343,6 @@ func (c *CSPHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Requ
 		Nullifier: state.GenerateNullifier(common.BytesToAddress(cspProcess.ConsumedAddress), *processID),
 		At:        cspProcess.ConsumedAt,
 	})
-}
-
-// validateParticipantID checks if the participant ID is provided
-func validateParticipantID(participantID string) error {
-	if len(participantID) == 0 {
-		return errors.ErrInvalidUserData.Withf("participant ID not provided")
-	}
-	return nil
 }
 
 // validateContactInfo checks if at least one contact method is provided
