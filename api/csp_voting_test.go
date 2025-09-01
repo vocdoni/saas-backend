@@ -120,7 +120,6 @@ func TestCSPVoting(t *testing.T) {
 			RenewalDate:     time.Now().Add(time.Hour * 24),
 			LastPaymentDate: time.Now(),
 			Active:          true,
-			MaxCensusSize:   1000,
 		})
 		c.Assert(err, qt.IsNil)
 

@@ -128,7 +128,6 @@ type OrganizationSubscription struct {
 	RenewalDate     time.Time `json:"renewalDate" bson:"renewalDate"`
 	LastPaymentDate time.Time `json:"lastPaymentDate" bson:"lastPaymentDate"`
 	Active          bool      `json:"active" bson:"active"`
-	MaxCensusSize   int       `json:"maxCensusSize" bson:"maxCensusSize"`
 	Email           string    `json:"email" bson:"email"`
 }
 

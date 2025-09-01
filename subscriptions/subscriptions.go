@@ -134,7 +134,7 @@ func (p *Subscriptions) HasTxPermission(
 			return false, fmt.Errorf("user does not have admin role")
 		}
 		newProcess := tx.GetNewProcess()
-		if newProcess.Process.MaxCensusSize > uint64(org.Subscription.MaxCensusSize) {
+		if newProcess.Process.MaxCensusSize > uint64(plan.Organization.MaxCensus) {
 			return false, fmt.Errorf("MaxCensusSize is greater than the allowed")
 		}
 		if org.Counters.Processes >= plan.Organization.MaxProcesses {

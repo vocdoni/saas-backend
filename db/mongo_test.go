@@ -54,12 +54,8 @@ func TestMain(m *testing.M) {
 		panic(fmt.Sprintf("failed to get MongoDB endpoint: %v", err))
 	}
 
-	plans, err := ReadPlanJSON()
-	if err != nil {
-		panic(fmt.Sprintf("failed to read plan JSON: %v", err))
-	}
-
-	testDB, err = New(mongoURI, test.RandomDatabaseName(), plans)
+	// Use nil plans since we now fetch plans dynamically from Stripe
+	testDB, err = New(mongoURI, test.RandomDatabaseName(), nil)
 	if err != nil {
 		panic(fmt.Sprintf("failed to create new MongoDB connection: %v", err))
 	}

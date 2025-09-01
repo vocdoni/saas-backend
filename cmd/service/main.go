@@ -20,7 +20,6 @@ import (
 	"github.com/vocdoni/saas-backend/notifications/smtp"
 	"github.com/vocdoni/saas-backend/notifications/twilio"
 	"github.com/vocdoni/saas-backend/objectstorage"
-	"github.com/vocdoni/saas-backend/stripe"
 	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
@@ -89,18 +88,14 @@ func main() {
 	oauthServiceURL := viper.GetString("oauthServiceURL")
 
 	log.Init("debug", "stdout", os.Stderr)
-	// init Stripe client
-	if stripeAPISecret == "" && stripeWebhookSecret == "" {
+
+	// Validate Stripe configuration
+	if stripeAPISecret == "" || stripeWebhookSecret == "" {
 		log.Fatalf("stripeApiSecret and stripeWebhookSecret are required")
 	}
-	stripe.Init(stripeAPISecret, stripeWebhookSecret)
-	availablePlans, err := stripe.GetPlans()
-	if err != nil || len(availablePlans) == 0 {
-		log.Fatalf("could not get the available plans: %v", err)
-	}
 
-	// initialize the MongoDB database
-	database, err := db.New(mongoURL, mongoDB, availablePlans)
+	// initialize the MongoDB database (fresh plans will be loaded by Stripe service)
+	database, err := db.New(mongoURL, mongoDB, db.PlansStub)
 	if err != nil {
 		log.Fatalf("could not create the MongoDB database: %v", err)
 	}

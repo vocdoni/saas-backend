@@ -127,7 +127,7 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	// get the async flag
-	async := r.URL.Query().Get("async") == "true"
+	async := r.URL.Query().Get("async") == "true" //nolint:goconst
 
 	// retrieve census
 	// check the user has the necessary permissions

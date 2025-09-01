@@ -587,7 +587,6 @@ func SubscriptionDetailsFromDB(details *db.OrganizationSubscription) Subscriptio
 		RenewalDate:     details.RenewalDate,
 		LastPaymentDate: details.LastPaymentDate,
 		Active:          details.Active,
-		MaxCensusSize:   details.MaxCensusSize,
 		Email:           details.Email,
 	}
 }
