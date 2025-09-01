@@ -2,13 +2,11 @@ package db
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"slices"
 	"time"
 
-	root "github.com/vocdoni/saas-backend"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -382,23 +380,4 @@ func dynamicUpdateDocument(item any, alwaysUpdateTags []string) (bson.M, error) 
 		}
 	}
 	return bson.M{"$set": update}, nil
-}
-
-// ReadPlanJSON reads a JSON file with an array of subscriptions
-// and return it as a Plan array
-func ReadPlanJSON() ([]*Plan, error) {
-	file, err := root.Assets.Open("assets/plans.json")
-	if err != nil {
-		return nil, err
-	}
-
-	// Create a JSON decoder
-	decoder := json.NewDecoder(file)
-
-	var plans []*Plan
-	err = decoder.Decode(&plans)
-	if err != nil {
-		return nil, err
-	}
-	return plans, nil
 }

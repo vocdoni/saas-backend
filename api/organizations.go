@@ -125,10 +125,9 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		TokensRemaining: 0,
 		Parent:          parentOrg,
 		Subscription: db.OrganizationSubscription{
-			PlanID:        defaultPlan.ID,
-			StartDate:     time.Now(),
-			Active:        true,
-			MaxCensusSize: defaultPlan.Organization.MaxCensus,
+			PlanID:    defaultPlan.ID,
+			StartDate: time.Now(),
+			Active:    true,
 		},
 	}
 	if err := a.db.SetOrganization(dbOrg); err != nil {
