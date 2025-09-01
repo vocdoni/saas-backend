@@ -70,3 +70,31 @@ var SupportNotification = MailTemplate{
 		{{.Description}}`,
 	},
 }
+
+// MembersImportCompletionNotification is the notification to be sent when
+// a members import process is completed.
+var MembersImportCompletionNotification = MailTemplate{
+	File: "members_import_done",
+	Placeholder: notifications.Notification{
+		Subject: "Members import completed for {{.OrganizationName}}",
+		PlainBody: `Hello {{.UserName}},
+
+Your members import for organization "{{.OrganizationName}}" has been completed.
+
+Import Summary:
+- Total members processed: {{.TotalMembers}}
+- Successfully added: {{.AddedMembers}}
+- Errors: {{.ErrorCount}}
+
+{{if .Errors}}
+Error details:
+{{range .Errors}}• {{.}}
+{{end}}
+{{end}}
+
+Completed at: {{.CompletedAt}}
+
+Best regards,
+The Vocdoni Team`,
+	},
+}
