@@ -114,6 +114,7 @@ type API struct {
 	objectStorage   *objectstorage.Client
 	csp             *csp.CSP
 	oauthServiceURL string
+	stripeHandlers  *StripeHandlers
 }
 
 // New creates a new API HTTP server. It does not start the server. Use Start() for that.

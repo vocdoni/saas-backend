@@ -183,9 +183,45 @@ func TestMain(m *testing.M) {
 	// set reset db env var to true
 	_ = os.Setenv("VOCDONI_MONGO_RESET_DB", "true")
 	// create a new MongoDB connection with the test database
-	plans, err := db.ReadPlanJSON()
-	if err != nil {
-		panic(err)
+	// Create a simple default plan for tests
+	plans := []*db.Plan{
+		{
+			ID:            1,
+			Name:          "Free Plan",
+			StartingPrice: 0,
+			StripeID:      "prod_test_free",
+			StripePriceID: "price_test_free",
+			Default:       true,
+			Organization: db.PlanLimits{
+				Users:        1,
+				SubOrgs:      0,
+				MaxProcesses: 1,
+				MaxCensus:    100,
+				MaxDuration:  30,
+				CustomURL:    false,
+				Drafts:       1,
+			},
+			VotingTypes: db.VotingTypes{
+				Single:     true,
+				Multiple:   false,
+				Approval:   false,
+				Cumulative: false,
+				Ranked:     false,
+				Weighted:   false,
+			},
+			Features: db.Features{
+				Anonymous:       false,
+				Overwrite:       false,
+				LiveResults:     true,
+				Personalization: false,
+				EmailReminder:   false,
+				SmsNotification: false,
+				WhiteLabel:      false,
+				LiveStreaming:   false,
+				PhoneSupport:    false,
+			},
+			CensusSizeTiers: []db.PlanTier{},
+		},
 	}
 	if testDB, err = db.New(mongoURI, test.RandomDatabaseName(), plans); err != nil {
 		panic(err)

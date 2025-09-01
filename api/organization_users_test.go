@@ -122,7 +122,7 @@ func TestOrganizationUsers(t *testing.T) {
 		plans, err := testDB.Plans()
 		c.Assert(err, qt.IsNil)
 		c.Assert(len(plans), qt.Not(qt.Equals), 0)
-		orgPlan := plans[1]
+		orgPlan := plans[0]
 
 		err = testDB.SetOrganizationSubscription(newOrgAddress, &db.OrganizationSubscription{
 			PlanID:          orgPlan.ID,
