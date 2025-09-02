@@ -517,7 +517,11 @@ func (ms *MongoStorage) setBulkCensusParticipant(
 	if err != nil {
 		return 0, fmt.Errorf("error retrieving group members: %w", err)
 	}
+	if len(members) == 0 {
+		return 0, nil // nothing to do
+	}
 
+	// prepare filter for upsert
 	currentTime := time.Now()
 
 	docs := make([]mongo.WriteModel, 0, len(members))

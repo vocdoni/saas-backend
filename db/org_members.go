@@ -568,13 +568,6 @@ func (ms *MongoStorage) orgMembersByIDs(
 		"orgAddress": orgAddress,
 	}
 
-	// Count total documents
-	totalCount, err := ms.orgMembers.CountDocuments(ctx, filter)
-	if err != nil {
-		return 0, nil, err
-	}
-	totalPages := int(math.Ceil(float64(totalCount) / float64(pageSize)))
-
 	// Calculate skip value based on page and pageSize
 	skip := (page - 1) * pageSize
 
@@ -587,6 +580,7 @@ func (ms *MongoStorage) orgMembersByIDs(
 	if err != nil {
 		return 0, nil, fmt.Errorf("failed to find org members: %w", err)
 	}
+	totalPages := int(math.Ceil(float64(cursor.RemainingBatchLength()) / float64(pageSize)))
 	defer func() {
 		if err := cursor.Close(ctx); err != nil {
 			log.Warnw("error closing cursor", "error", err)
