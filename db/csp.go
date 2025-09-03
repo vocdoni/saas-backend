@@ -24,9 +24,9 @@ type CSPAuth struct {
 
 // CSPProcess is the status of a process in a bundle of processes for a user
 type CSPProcess struct {
-	ID              internal.HexBytes `json:"id" bson:"_id"` // hash(userID + processID)
-	UserID          internal.HexBytes `json:"userID" bson:"userid"`
-	ProcessID       internal.HexBytes `json:"processID" bson:"processid"`
+	ID              internal.HexBytes `json:"id" bson:"_id"` // hash(UserID + ProcessID)
+	UserID          internal.HexBytes `json:"userId" bson:"userid"`
+	ProcessID       internal.HexBytes `json:"processId" bson:"processid"`
 	Consumed        bool              `json:"consumed" bson:"consumed"`
 	ConsumedToken   internal.HexBytes `json:"consumedToken" bson:"consumedtoken"`
 	ConsumedAt      time.Time         `json:"consumedAt" bson:"consumedat"`
