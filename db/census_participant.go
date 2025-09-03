@@ -486,7 +486,7 @@ func (ms *MongoStorage) processBatches(
 // Returns a channel that sends the percentage of members processed every 10 seconds.
 // This function must be called in a goroutine.
 func (ms *MongoStorage) SetBulkCensusOrgMemberParticipant(
-	salt, censusID string, orgMembers []OrgMember,
+	org *Organization, salt, censusID string, orgMembers []OrgMember,
 ) (chan *BulkCensusParticipantStatus, error) {
 	progressChan := make(chan *BulkCensusParticipantStatus, 10)
 

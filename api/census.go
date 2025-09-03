@@ -177,9 +177,10 @@ func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Reques
 
 	// add the org members as census participants in the database
 	progressChan, err := a.db.SetBulkCensusOrgMemberParticipant(
+		org,
 		passwordSalt,
 		censusID.String(),
-		members.DbOrgMembers(org),
+		members.ToDB(),
 	)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)

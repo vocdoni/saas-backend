@@ -217,7 +217,7 @@ func TestCensusParticipant(t *testing.T) {
 
 		t.Run("EmptyMembers", func(_ *testing.T) {
 			// Test with empty members
-			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant("test_salt", censusID, nil)
+			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", censusID, nil)
 			c.Assert(err, qt.IsNil)
 
 			// Channel should be closed immediately for empty members
@@ -235,7 +235,7 @@ func TestCensusParticipant(t *testing.T) {
 					Password:     "password1",
 				},
 			}
-			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant("test_salt", "", members)
+			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", "", members)
 			c.Assert(err, qt.Equals, ErrInvalidData)
 
 			// Channel should be closed immediately for invalid data
@@ -253,7 +253,7 @@ func TestCensusParticipant(t *testing.T) {
 				},
 			}
 			// Test with non-existent census
-			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant("test_salt", primitive.NewObjectID().Hex(), members)
+			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", primitive.NewObjectID().Hex(), members)
 			c.Assert(err, qt.Not(qt.IsNil))
 
 			// Channel should be closed immediately for non-existent census
@@ -278,7 +278,7 @@ func TestCensusParticipant(t *testing.T) {
 				},
 			}
 
-			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant("test_salt", censusID, members)
+			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", censusID, members)
 			c.Assert(err, qt.IsNil)
 			c.Assert(progressChan, qt.Not(qt.IsNil))
 
@@ -326,7 +326,7 @@ func TestCensusParticipant(t *testing.T) {
 			}
 
 			// Create initial members
-			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant("test_salt", censusID, members)
+			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", censusID, members)
 			c.Assert(err, qt.IsNil)
 			c.Assert(progressChan, qt.Not(qt.IsNil))
 
@@ -348,7 +348,7 @@ func TestCensusParticipant(t *testing.T) {
 			members[1].ID = member1.ID
 			members[1].Phone = NewPhone("+34698111111")
 
-			progressChan, err = testDB.SetBulkCensusOrgMemberParticipant("test_salt", censusID, members)
+			progressChan, err = testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", censusID, members)
 			c.Assert(err, qt.IsNil)
 			c.Assert(progressChan, qt.Not(qt.IsNil))
 

@@ -22,6 +22,11 @@ var (
 	testPhone             = NewPhone("+34678909090")
 )
 
+var testOrg = &Organization{
+	Address: testOrgAddress,
+	Country: "ES",
+}
+
 const (
 	testDBUserEmail  = "test@example.com"
 	testDBUserPass   = "testpass123"

@@ -191,7 +191,7 @@ func TestOrgMembers(t *testing.T) {
 		}
 
 		// Perform bulk upsert
-		progressChan, err := testDB.SetBulkOrgMembers(testSalt, members)
+		progressChan, err := testDB.SetBulkOrgMembers(testOrg, testSalt, members)
 		c.Assert(err, qt.IsNil)
 
 		// Wait for the operation to complete and get the final status
@@ -224,7 +224,7 @@ func TestOrgMembers(t *testing.T) {
 		members[1].Phone = NewPhone("+34678678971")
 
 		// Perform bulk upsert again
-		progressChan, err = testDB.SetBulkOrgMembers(testSalt, members)
+		progressChan, err = testDB.SetBulkOrgMembers(testOrg, testSalt, members)
 		c.Assert(err, qt.IsNil)
 
 		// Wait for the operation to complete and get the final status
@@ -250,15 +250,11 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(updatedMember2.Name, qt.Equals, "Test Member 2")
 
 		// Test with empty organization address
-		members = append(members, OrgMember{
-			OrgAddress:   common.Address{},
-			Email:        testMemberEmail,
-			Phone:        testPhone,
-			MemberNumber: testMemberNumber,
-			Name:         testName,
-			Password:     testPassword,
-		})
-		_, err = testDB.SetBulkOrgMembers(testSalt, members)
+		testOrgWithEmptyAddress := &Organization{
+			Address: common.Address{},
+			Country: "ES",
+		}
+		_, err = testDB.SetBulkOrgMembers(testOrgWithEmptyAddress, testSalt, members)
 		c.Assert(err, qt.Not(qt.IsNil))
 	})
 

@@ -345,12 +345,19 @@ func (ms *MongoStorage) processOrgMemberBatches(
 // Returns a channel that sends the percentage of members processed every 10 seconds.
 // This function must be called in a goroutine.
 func (ms *MongoStorage) SetBulkOrgMembers(
+	org *Organization,
 	salt string,
 	orgMembers []OrgMember,
 ) (chan *BulkOrgMembersJob, error) {
 	// Early returns for invalid input
 	if len(orgMembers) == 0 {
 		return nil, nil // Not an error, just no work to do
+	}
+	if org.Address.Cmp(common.Address{}) == 0 {
+		return nil, ErrInvalidData
+	}
+	for _, m := range orgMembers {
+		m.OrgAddress = org.Address
 	}
 
 	// Start processing in a goroutine

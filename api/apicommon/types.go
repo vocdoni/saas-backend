@@ -789,11 +789,11 @@ type AddMembersRequest struct {
 	Members []OrgMember `json:"members"`
 }
 
-// DbOrgMembers converts the members in the request to db.OrgMember objects.
-func (r *AddMembersRequest) DbOrgMembers(org *db.Organization) []db.OrgMember {
+// ToDB converts the members in the request to db.OrgMember objects.
+func (r *AddMembersRequest) ToDB() []db.OrgMember {
 	members := make([]db.OrgMember, 0, len(r.Members))
 	for _, p := range r.Members {
-		members = append(members, p.ToDb(org))
+		members = append(members, p.ToDB())
 	}
 	return members
 }
@@ -842,8 +842,9 @@ type OrgMember struct {
 	Other map[string]any `json:"other"`
 }
 
-// ToDb converts an OrgMember to a db.OrgMember.
-func (p *OrgMember) ToDb(org *db.Organization) db.OrgMember {
+// ToDB converts an OrgMember to a db.OrgMember.
+func (p *OrgMember) ToDB() db.OrgMember {
+	// TODO: delay this parsing, so that it happens in batch validation
 	parsedBirthDate := time.Time{}
 	if len(p.BirthDate) > 0 {
 		// Parse the birth date from string to time.Time
@@ -853,6 +854,7 @@ func (p *OrgMember) ToDb(org *db.Organization) db.OrgMember {
 			log.Warnf("Failed to parse birth date %s for member %s: %v", p.BirthDate, p.MemberNumber, err)
 		}
 	}
+	// TODO: makes this happen earlier,
 	id := primitive.NilObjectID
 	if len(p.ID) > 0 {
 		// Convert the ID from string to ObjectID
@@ -866,12 +868,10 @@ func (p *OrgMember) ToDb(org *db.Organization) db.OrgMember {
 	var phone *db.Phone
 	if p.Phone != "" {
 		phone = db.NewPhone(p.Phone)
-		phone.HashWithOrgAddress(org.Address)
 	}
 
 	return db.OrgMember{
 		ID:             id,
-		OrgAddress:     org.Address,
 		MemberNumber:   p.MemberNumber,
 		Name:           p.Name,
 		Surname:        p.Surname,
