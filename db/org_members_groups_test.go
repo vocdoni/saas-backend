@@ -879,5 +879,58 @@ func TestOrganizationMemberGroup(t *testing.T) {
 
 		// Check that the member with empty phone is in the missing data list
 		c.Assert(contains(emptyIDs, emptyPhoneMemberID), qt.Equals, true)
+
+		// Test 12: Bug fix - AuthFields + 2faFields should create composite key for uniqueness
+		// Create members with same auth fields but different 2fa fields
+		member1SameAuth := &OrgMember{
+			OrgAddress:   testOrgAddress,
+			Email:        "john@company.com", // Different
+			Phone:        NewPhone("+34698000001"),
+			MemberNumber: "unique_auth_1",
+			Name:         "John",  // Same
+			Surname:      "Smith", // Same
+			Password:     testPassword,
+		}
+		sameAuth1ID, err := testDB.SetOrgMember(testSalt, member1SameAuth)
+		c.Assert(err, qt.IsNil)
+
+		member2SameAuth := &OrgMember{
+			OrgAddress:   testOrgAddress,
+			Email:        "john@personal.com", // Different
+			Phone:        NewPhone("+34698000002"),
+			MemberNumber: "unique_auth_2",
+			Name:         "John",  // Same
+			Surname:      "Smith", // Same
+			Password:     testPassword,
+		}
+		sameAuth2ID, err := testDB.SetOrgMember(testSalt, member2SameAuth)
+		c.Assert(err, qt.IsNil)
+
+		// Create a group with these members
+		sameAuthGroup := &OrganizationMemberGroup{
+			OrgAddress:  testOrgAddress,
+			Title:       "Same Auth Different 2FA Group",
+			Description: "Group with members having same auth fields but different 2FA fields",
+			MemberIDs:   []string{sameAuth1ID, sameAuth2ID},
+		}
+		sameAuthGroupID, err := testDB.CreateOrganizationMemberGroup(sameAuthGroup)
+		c.Assert(err, qt.IsNil)
+
+		// Test with composite key validation (Name+Surname as authFields and Email as 2faField)
+		authFields = OrgMemberAuthFields{
+			OrgMemberAuthFieldsName,
+			OrgMemberAuthFieldsSurname,
+		}
+		twoFaFields = OrgMemberTwoFaFields{
+			OrgMemberTwoFaFieldEmail,
+		}
+
+		// Before fix: These would be flagged as duplicates based on name+surname
+		// After fix: These should NOT be duplicates because emails are different
+		results, err = testDB.CheckGroupMembersFields(testOrgAddress, sameAuthGroupID, authFields, twoFaFields)
+		c.Assert(err, qt.IsNil)
+		c.Assert(results, qt.Not(qt.IsNil))
+		c.Assert(len(results.Duplicates), qt.Equals, 0, qt.Commentf("Should NOT detect duplicates when 2FA fields make members unique"))
+		c.Assert(len(results.Members), qt.Equals, 2, qt.Commentf("Should include both members as valid"))
 	})
 }
