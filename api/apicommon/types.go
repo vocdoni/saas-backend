@@ -865,16 +865,6 @@ func (p *OrgMember) ToDB() db.OrgMember {
 		}
 	}
 
-	var hashedPhone *db.HashedPhone
-	if p.Phone != "" {
-		phone := db.NewPhone(p.Phone)
-		var err error
-		hashedPhone, err = db.NewHashedPhone(phone, org)
-		if err != nil {
-			log.Warnf("Failed to hash phone number for member %s: %v", p.MemberNumber, err)
-		}
-	}
-
 	return db.OrgMember{
 		ID:             id,
 		MemberNumber:   p.MemberNumber,
@@ -884,7 +874,7 @@ func (p *OrgMember) ToDB() db.OrgMember {
 		BirthDate:      p.BirthDate,
 		ParsedBirtDate: parsedBirthDate,
 		Email:          p.Email,
-		Phone:          hashedPhone,
+		PlaintextPhone: db.NewPhone(p.Phone),
 		Password:       p.Password,
 		Other:          p.Other,
 	}
