@@ -168,8 +168,8 @@ func prepareOrgMember(member *OrgMember, salt string, currentTime time.Time) []e
 
 	// Phone handling is now done by the Phone type itself
 	if member.Phone != nil && !member.Phone.IsEmpty() {
-		if err := member.Phone.Validate(); err != nil {
-			errors = append(errors, fmt.Errorf("invalid phone: %s %v", member.Phone, err))
+		if err := member.PlaintextPhone.Validate(); err != nil {
+			errors = append(errors, fmt.Errorf("invalid phone: %s %v", member.PlaintextPhone, err))
 			member.Phone = nil
 		} else {
 			// Ensure the phone has the correct org address for hashing

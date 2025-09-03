@@ -206,7 +206,8 @@ type OrgMember struct {
 	// OrgAddress can be used for future sharding
 	OrgAddress     common.Address `json:"orgAddress" bson:"orgAddress"`
 	Email          string         `json:"email" bson:"email"`
-	Phone          *Phone         `json:"phone" bson:"phone"`
+	Phone          *HashedPhone   `json:"phone" bson:"phone"`
+	PlaintextPhone *Phone         `json:"-"`
 	MemberNumber   string         `json:"memberNumber" bson:"memberNumber"`
 	NationalID     string         `json:"nationalID" bson:"nationalID"`
 	Name           string         `json:"name" bson:"name"`
@@ -294,8 +295,9 @@ func HashAuthTwoFaFields(memberData OrgMember, authFields OrgMemberAuthFields, t
 		case OrgMemberTwoFaFieldEmail:
 			data = append(data, memberData.Email)
 		case OrgMemberTwoFaFieldPhone:
-			memberData.Phone.HashWithOrgAddress(memberData.OrgAddress)
-			data = append(data, string(memberData.Phone.GetHashed()))
+			if memberData.Phone != nil && !memberData.Phone.IsEmpty() {
+				data = append(data, string(memberData.Phone.hash))
+			}
 		default:
 			// Ignore unknown fields
 			continue
@@ -368,133 +370,32 @@ type ProcessesBundle struct {
 	Processes  []internal.HexBytes `json:"processes" bson:"processes" swaggertype:"array,string" format:"hex" example:"deadbeef"` // Array of process IDs included in this bundle
 }
 
-// Phone represents a phone number that is stored hashed in the database
-// but appears as a regular string in the API
+// Phone represents a plaintext phone number (used in API/CSP layers)
 type Phone struct {
-	original string // The original phone number (only kept in memory)
-	hashed   []byte // The hashed version (stored in DB)
-	isHashed bool   // Whether this phone is already hashed
+	raw string // Raw phone number from client
 }
 
-// NewPhone creates a new Phone from a plain phone number
+// NewPhone creates a new Phone from a plaintext phone number
 func NewPhone(phoneNumber string) *Phone {
-	if phoneNumber == "" {
-		return &Phone{}
-	}
-
-	// Sanitize and verify the phone number
-	normalized, err := internal.SanitizeAndVerifyPhoneNumber(phoneNumber)
-	if err != nil {
-		return &Phone{original: phoneNumber} // Keep original even if invalid
-	}
-
-	return &Phone{
-		original: normalized,
-		isHashed: false,
-	}
+	return &Phone{raw: phoneNumber}
 }
 
-// String returns a masked version of the phone for display
+// String returns the raw phone number
 func (p *Phone) String() string {
 	if p == nil {
 		return ""
 	}
-
-	if p.original != "" && !p.isHashed {
-		return p.original // Return original if we have it
-	}
-
-	if len(p.hashed) > 0 {
-		// Return last 6 characters of hex representation for display
-		hexHash := fmt.Sprintf("%x", p.hashed)
-		if len(hexHash) >= 6 {
-			return "***" + hexHash[len(hexHash)-6:]
-		}
-		return "***" + hexHash
-	}
-
-	return ""
-}
-
-// GetOriginal returns the original phone number if available
-// This should only be used for 2FA purposes
-func (p *Phone) GetOriginal() string {
-	if p == nil {
-		return ""
-	}
-	return p.original
-}
-
-// GetHashed returns the hashed phone bytes
-func (p *Phone) GetHashed() []byte {
-	if p == nil {
-		return nil
-	}
-	return p.hashed
+	return p.raw
 }
 
 // IsEmpty returns true if the phone is empty
 func (p *Phone) IsEmpty() bool {
-	if p == nil {
-		return true
-	}
-	return len(p.hashed) == 0 && p.original == ""
-}
-
-// Matches checks if a given phone number matches this hashed phone
-func (p *Phone) Matches(phoneNumber string, orgAddress common.Address) error {
-	if p == nil || p.IsEmpty() {
-		return fmt.Errorf("nil phone")
-	}
-
-	normalized, err := internal.SanitizeAndVerifyPhoneNumber(phoneNumber)
-	if err != nil {
-		return err
-	}
-
-	if !bytes.Equal(p.hashed, internal.HashOrgData(orgAddress, normalized)) {
-		return fmt.Errorf("phone doesn't match stored hash")
-	}
-
-	return nil
-}
-
-// Validate checks if a given phone number is valid
-func (p *Phone) Validate() error {
-	_, err := internal.SanitizeAndVerifyPhoneNumber(p.original)
-	return err
-}
-
-// MarshalBSONValue implements the bson.ValueMarshaler interface
-func (p *Phone) MarshalBSONValue() (bsontype.Type, []byte, error) {
-	if p == nil || p.IsEmpty() {
-		return bson.TypeNull, nil, nil
-	}
-	// Store as binary data in the database
-	return bson.MarshalValue(p.hashed)
-}
-
-// UnmarshalBSONValue implements the bson.ValueUnmarshaler interface
-func (p *Phone) UnmarshalBSONValue(t bsontype.Type, data []byte) error {
-	if t == bson.TypeNull {
-		*p = Phone{}
-		return nil
-	}
-
-	var hashedPhone []byte
-	if err := bson.UnmarshalValue(t, data, &hashedPhone); err != nil {
-		return err
-	}
-
-	p.hashed = hashedPhone
-	p.isHashed = true
-	return nil
+	return p == nil || p.raw == ""
 }
 
 // MarshalJSON implements the json.Marshaler interface
 func (p *Phone) MarshalJSON() ([]byte, error) {
-	// Return the display version for API responses
-	return json.Marshal(p.String())
+	return json.Marshal(p.raw)
 }
 
 // UnmarshalJSON implements the json.Unmarshaler interface
@@ -503,23 +404,89 @@ func (p *Phone) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &phoneStr); err != nil {
 		return err
 	}
-
-	p.original = phoneStr
-	p.isHashed = false
+	p.raw = phoneStr
 	return nil
 }
 
-// HashWithOrgAddress prepares the hashed version of the phone.
-func (p *Phone) HashWithOrgAddress(orgAddress common.Address) {
-	if p == nil {
-		return
+// HashedPhone represents a hashed phone number for database storage
+type HashedPhone struct {
+	hash []byte // The hashed phone number
+}
+
+// NewHashedPhone creates a HashedPhone from a Phone, orgAddress, and country code
+func NewHashedPhone(phone *Phone, organization *Organization) (*HashedPhone, error) {
+	if phone == nil || phone.IsEmpty() {
+		return &HashedPhone{}, nil
 	}
 
-	// If we have an original phone but no hash, generate the hash
-	if p.original != "" && len(p.hashed) == 0 {
-		normalized, err := internal.SanitizeAndVerifyPhoneNumber(p.original)
-		if err == nil {
-			p.hashed = internal.HashOrgData(orgAddress, normalized)
-		}
+	// Normalize and hash in one operation
+	normalized, err := internal.SanitizeAndVerifyPhoneNumber(phone.raw, organization.Country)
+	if err != nil {
+		return nil, err
 	}
+
+	return &HashedPhone{
+		hash: internal.HashOrgData(organization.Address, normalized),
+	}, nil
+}
+
+// Matches checks if a Phone matches this hashed phone
+func (hp *HashedPhone) Matches(phone *Phone, orgAddress common.Address, countryCode string) bool {
+	if hp == nil || phone == nil || phone.IsEmpty() {
+		return false
+	}
+
+	normalized, err := internal.SanitizeAndVerifyPhoneNumber(phone.raw, countryCode)
+	if err != nil {
+		return false
+	}
+
+	expectedHash := internal.HashOrgData(orgAddress, normalized)
+	return bytes.Equal(hp.hash, expectedHash)
+}
+
+// String returns masked hash for display
+func (hp *HashedPhone) String() string {
+	if hp == nil || len(hp.hash) == 0 {
+		return ""
+	}
+	hexHash := fmt.Sprintf("%x", hp.hash)
+	if len(hexHash) >= 6 {
+		return "***" + hexHash[len(hexHash)-6:]
+	}
+	return "***" + hexHash
+}
+
+// IsEmpty returns true if hash is empty
+func (hp *HashedPhone) IsEmpty() bool {
+	return hp == nil || len(hp.hash) == 0
+}
+
+// MarshalBSONValue implements the bson.ValueMarshaler interface
+func (hp *HashedPhone) MarshalBSONValue() (bsontype.Type, []byte, error) {
+	if hp == nil || hp.IsEmpty() {
+		return bson.TypeNull, nil, nil
+	}
+	return bson.MarshalValue(hp.hash)
+}
+
+// UnmarshalBSONValue implements the bson.ValueUnmarshaler interface
+func (hp *HashedPhone) UnmarshalBSONValue(t bsontype.Type, data []byte) error {
+	if t == bson.TypeNull {
+		*hp = HashedPhone{}
+		return nil
+	}
+
+	var hashedPhone []byte
+	if err := bson.UnmarshalValue(t, data, &hashedPhone); err != nil {
+		return err
+	}
+
+	hp.hash = hashedPhone
+	return nil
+}
+
+// MarshalJSON implements the json.Marshaler interface (returns display version)
+func (hp *HashedPhone) MarshalJSON() ([]byte, error) {
+	return json.Marshal(hp.String())
 }
