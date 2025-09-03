@@ -173,6 +173,7 @@ func TestOrgMembers(t *testing.T) {
 		// Test bulk insert of new members
 		members := []OrgMember{
 			{
+				OrgAddress:   testOrgAddress,
 				Email:        testMemberEmail,
 				Phone:        testPhone,
 				MemberNumber: testMemberNumber,
@@ -180,6 +181,7 @@ func TestOrgMembers(t *testing.T) {
 				Password:     testPassword,
 			},
 			{
+				OrgAddress:   testOrgAddress,
 				Email:        "member2@test.com",
 				Phone:        NewPhone("+34678678978"),
 				MemberNumber: "member456",
@@ -189,7 +191,7 @@ func TestOrgMembers(t *testing.T) {
 		}
 
 		// Perform bulk upsert
-		progressChan, err := testDB.SetBulkOrgMembers(testOrgAddress, testSalt, members)
+		progressChan, err := testDB.SetBulkOrgMembers(testSalt, members)
 		c.Assert(err, qt.IsNil)
 
 		// Wait for the operation to complete and get the final status
@@ -222,7 +224,7 @@ func TestOrgMembers(t *testing.T) {
 		members[1].Phone = NewPhone("+34678678971")
 
 		// Perform bulk upsert again
-		progressChan, err = testDB.SetBulkOrgMembers(testOrgAddress, testSalt, members)
+		progressChan, err = testDB.SetBulkOrgMembers(testSalt, members)
 		c.Assert(err, qt.IsNil)
 
 		// Wait for the operation to complete and get the final status
@@ -248,7 +250,15 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(updatedMember2.Name, qt.Equals, "Test Member 2")
 
 		// Test with empty organization address
-		_, err = testDB.SetBulkOrgMembers(common.Address{}, testSalt, members)
+		members = append(members, OrgMember{
+			OrgAddress:   common.Address{},
+			Email:        testMemberEmail,
+			Phone:        testPhone,
+			MemberNumber: testMemberNumber,
+			Name:         testName,
+			Password:     testPassword,
+		})
+		_, err = testDB.SetBulkOrgMembers(testSalt, members)
 		c.Assert(err, qt.Not(qt.IsNil))
 	})
 

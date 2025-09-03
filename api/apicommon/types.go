@@ -866,7 +866,7 @@ func (p *OrgMember) ToDb(org *db.Organization) db.OrgMember {
 	var phone *db.Phone
 	if p.Phone != "" {
 		phone = db.NewPhone(p.Phone)
-		phone.HashWithOrgAddress(orgAddress)
+		phone.HashWithOrgAddress(org.Address)
 	}
 
 	return db.OrgMember{

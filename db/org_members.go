@@ -173,7 +173,7 @@ func prepareOrgMember(member *OrgMember, salt string, currentTime time.Time) []e
 			member.Phone = nil
 		} else {
 			// Ensure the phone has the correct org address for hashing
-			member.Phone.HashWithOrgAddress(orgAddress)
+			member.Phone.HashWithOrgAddress(member.OrgAddress)
 		}
 	}
 
