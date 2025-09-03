@@ -369,7 +369,7 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 		// if the key is already seen, add to duplicates
 		// and continue to the next member
 		if len(authFields) > 0 {
-			key := buildKey(bm, authFields)
+			key := buildCompositeKey(bm, authFields, twoFaFields)
 			if val, seen := seenKeys[key]; seen {
 				duplicates[m.ID] = struct{}{}
 				duplicates[val] = struct{}{}
@@ -477,12 +477,25 @@ func hasEmptyFields[T ~string](bm bson.M, fields []T) bool {
 	return false
 }
 
-// buildKey constructs a composite key from the values of specified fields in the BSON document.
-// The values are concatenated with "|" as a delimiter.
-func buildKey[T ~string](bm bson.M, fields []T) string {
-	keyParts := make([]string, len(fields))
-	for i, f := range fields {
-		keyParts[i] = fmt.Sprint(bm[string(f)])
+// buildCompositeKey constructs a composite key from both auth and 2FA fields.
+// Values are concatenated with "|" as delimiter, auth fields first, then 2FA fields.
+func buildCompositeKey(bm bson.M, authFields OrgMemberAuthFields, twoFaFields OrgMemberTwoFaFields) string {
+	totalFields := len(authFields) + len(twoFaFields)
+	if totalFields == 0 {
+		return ""
 	}
+
+	keyParts := make([]string, 0, totalFields)
+
+	// Add auth field values
+	for _, f := range authFields {
+		keyParts = append(keyParts, fmt.Sprint(bm[string(f)]))
+	}
+
+	// Add 2FA field values
+	for _, f := range twoFaFields {
+		keyParts = append(keyParts, fmt.Sprint(bm[string(f)]))
+	}
+
 	return strings.Join(keyParts, "|")
 }
