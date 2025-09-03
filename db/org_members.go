@@ -147,37 +147,14 @@ func (j *BulkOrgMembersJob) ErrorsAsStrings() []string {
 	return s
 }
 
-// validateBulkOrgMembers validates the input parameters for bulk org members
-func (ms *MongoStorage) validateBulkOrgMembers(
-	orgAddress common.Address,
-	orgMembers []OrgMember,
-) (*Organization, error) {
-	// Early returns for invalid input
-	if len(orgMembers) == 0 {
-		return nil, nil // Not an error, just no work to do
-	}
-	if orgAddress.Cmp(common.Address{}) == 0 {
-		return nil, ErrInvalidData
-	}
-
-	// Check that the organization exists
-	org, err := ms.Organization(orgAddress)
-	if err != nil {
-		return nil, err
-	}
-
-	return org, nil
-}
-
 // prepareOrgMember processes a member for storage
-func prepareOrgMember(member *OrgMember, orgAddress common.Address, salt string, currentTime time.Time) []error {
+func prepareOrgMember(member *OrgMember, salt string, currentTime time.Time) []error {
 	var errors []error
 
 	// Assign a new internal ID if not provided
 	if member.ID == primitive.NilObjectID {
 		member.ID = primitive.NewObjectID()
 	}
-	member.OrgAddress = orgAddress
 	member.CreatedAt = currentTime
 
 	// check if mail is valid
@@ -220,7 +197,6 @@ func prepareOrgMember(member *OrgMember, orgAddress common.Address, salt string,
 // and returns the number of members added (or updated) and any errors encountered.
 func (ms *MongoStorage) createOrgMemberBulkOperations(
 	members []OrgMember,
-	orgAddress common.Address,
 	salt string,
 	currentTime time.Time,
 ) (int, []error) {
@@ -229,13 +205,13 @@ func (ms *MongoStorage) createOrgMemberBulkOperations(
 
 	for _, member := range members {
 		// Prepare the member
-		validationErrors := prepareOrgMember(&member, orgAddress, salt, currentTime)
+		validationErrors := prepareOrgMember(&member, salt, currentTime)
 		errors = append(errors, validationErrors...)
 
 		// Create filter for existing members and update document
 		filter := bson.M{
 			"_id":        member.ID,
-			"orgAddress": orgAddress,
+			"orgAddress": member.OrgAddress,
 		}
 
 		updateDoc, err := dynamicUpdateDocument(member, nil)
@@ -311,7 +287,6 @@ func startOrgMemberProgressReporter(
 // processOrgMemberBatches processes members in batches and sends progress updates
 func (ms *MongoStorage) processOrgMemberBatches(
 	orgMembers []OrgMember,
-	orgAddress common.Address,
 	salt string,
 	progressChan chan<- *BulkOrgMembersJob,
 ) {
@@ -350,7 +325,6 @@ func (ms *MongoStorage) processOrgMemberBatches(
 		// Process the batch and get number of added members
 		added, errs := ms.createOrgMemberBulkOperations(
 			orgMembers[start:end],
-			orgAddress,
 			salt,
 			currentTime,
 		)
@@ -371,21 +345,17 @@ func (ms *MongoStorage) processOrgMemberBatches(
 // Returns a channel that sends the percentage of members processed every 10 seconds.
 // This function must be called in a goroutine.
 func (ms *MongoStorage) SetBulkOrgMembers(
-	orgAddress common.Address, salt string,
+	salt string,
 	orgMembers []OrgMember,
 ) (chan *BulkOrgMembersJob, error) {
-	progressChan := make(chan *BulkOrgMembersJob, 10)
-
-	// Validate input parameters
-	org, err := ms.validateBulkOrgMembers(orgAddress, orgMembers)
-	if err != nil || org == nil {
-		close(progressChan)
-		return progressChan, err
+	// Early returns for invalid input
+	if len(orgMembers) == 0 {
+		return nil, nil // Not an error, just no work to do
 	}
 
 	// Start processing in a goroutine
-	go ms.processOrgMemberBatches(orgMembers, orgAddress, salt, progressChan)
-
+	progressChan := make(chan *BulkOrgMembersJob, 10)
+	go ms.processOrgMemberBatches(orgMembers, salt, progressChan)
 	return progressChan, nil
 }
 

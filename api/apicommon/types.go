@@ -790,10 +790,10 @@ type AddMembersRequest struct {
 }
 
 // DbOrgMembers converts the members in the request to db.OrgMember objects.
-func (r *AddMembersRequest) DbOrgMembers(orgAddress common.Address) []db.OrgMember {
+func (r *AddMembersRequest) DbOrgMembers(org *db.Organization) []db.OrgMember {
 	members := make([]db.OrgMember, 0, len(r.Members))
 	for _, p := range r.Members {
-		members = append(members, p.ToDb(orgAddress))
+		members = append(members, p.ToDb(org))
 	}
 	return members
 }
@@ -843,7 +843,7 @@ type OrgMember struct {
 }
 
 // ToDb converts an OrgMember to a db.OrgMember.
-func (p *OrgMember) ToDb(orgAddress common.Address) db.OrgMember {
+func (p *OrgMember) ToDb(org *db.Organization) db.OrgMember {
 	parsedBirthDate := time.Time{}
 	if len(p.BirthDate) > 0 {
 		// Parse the birth date from string to time.Time
@@ -871,7 +871,7 @@ func (p *OrgMember) ToDb(orgAddress common.Address) db.OrgMember {
 
 	return db.OrgMember{
 		ID:             id,
-		OrgAddress:     orgAddress,
+		OrgAddress:     org.Address,
 		MemberNumber:   p.MemberNumber,
 		Name:           p.Name,
 		Surname:        p.Surname,

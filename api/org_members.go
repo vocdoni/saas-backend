@@ -149,9 +149,8 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 	}
 	// add the org members to the database
 	progressChan, err := a.db.SetBulkOrgMembers(
-		org.Address,
 		passwordSalt,
-		members.DbOrgMembers(org.Address),
+		members.DbOrgMembers(org),
 	)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
