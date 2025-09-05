@@ -95,7 +95,6 @@ var mockPlans = []*db.Plan{
 			LiveStreaming:   false,
 			PhoneSupport:    false,
 		},
-		CensusSizeTiers: []db.PlanTier{},
 	},
 	{
 		ID:            2,
@@ -132,7 +131,6 @@ var mockPlans = []*db.Plan{
 			LiveStreaming:   true,
 			PhoneSupport:    true,
 		},
-		CensusSizeTiers: []db.PlanTier{},
 	},
 }
 
