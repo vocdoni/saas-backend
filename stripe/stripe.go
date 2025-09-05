@@ -144,7 +144,6 @@ func GetPriceByID(priceID string) *stripeapi.Price {
 			Query: fmt.Sprintf("active:'true' AND lookup_key:'%s'", priceID),
 		},
 	}
-	params.AddExpand("data.tiers")
 	if results := stripePrice.Search(params); results.Next() {
 		return results.Price()
 	}
@@ -152,12 +151,11 @@ func GetPriceByID(priceID string) *stripeapi.Price {
 }
 
 // GetProductByID retrieves a Stripe product by its ID.
-// It expands the default price and its tiers in the response.
+// It expands the default price in the response.
 // Returns the product object and any error encountered.
 func GetProductByID(productID string) (*stripeapi.Product, error) {
 	params := &stripeapi.ProductParams{}
 	params.AddExpand("default_price")
-	params.AddExpand("default_price.tiers")
 	product, err := stripeProduct.Get(productID, params)
 	if err != nil {
 		return nil, err
@@ -206,21 +204,6 @@ func extractPlanMetadata(product *stripeapi.Product) (
 	return organizationData, votingTypesData, featuresData, nil
 }
 
-// processPriceTiers converts Stripe price tiers to application-specific plan tiers.
-func processPriceTiers(priceTiers []*stripeapi.PriceTier) []stripeDB.PlanTier {
-	var tiers []stripeDB.PlanTier
-	for _, tier := range priceTiers {
-		if tier.UpTo == 0 {
-			continue
-		}
-		tiers = append(tiers, stripeDB.PlanTier{
-			Amount: tier.FlatAmount,
-			UpTo:   tier.UpTo,
-		})
-	}
-	return tiers
-}
-
 // processProduct converts a Stripe product to an application-specific plan.
 func processProduct(index int, productID string, product *stripeapi.Product) (*stripeDB.Plan, error) {
 	organizationData, votingTypesData, featuresData, err := extractPlanMetadata(product)
@@ -229,24 +212,17 @@ func processProduct(index int, productID string, product *stripeapi.Product) (*s
 	}
 
 	price := product.DefaultPrice
-	startingPrice := price.UnitAmount
-	if len(price.Tiers) > 0 {
-		startingPrice = price.Tiers[0].FlatAmount
-	}
-
-	tiers := processPriceTiers(price.Tiers)
 
 	return &stripeDB.Plan{
-		ID:              uint64(index + 1),
-		Name:            product.Name,
-		StartingPrice:   startingPrice,
-		StripeID:        productID,
-		StripePriceID:   price.ID,
-		Default:         price.Metadata["Default"] == "true",
-		Organization:    organizationData,
-		VotingTypes:     votingTypesData,
-		Features:        featuresData,
-		CensusSizeTiers: tiers,
+		ID:            uint64(index + 1),
+		Name:          product.Name,
+		StartingPrice: price.UnitAmount,
+		StripeID:      productID,
+		StripePriceID: price.ID,
+		Default:       price.Metadata["Default"] == "true",
+		Organization:  organizationData,
+		VotingTypes:   votingTypesData,
+		Features:      featuresData,
 	}, nil
 }
 

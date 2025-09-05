@@ -1760,16 +1760,6 @@ In case of empty or duplicate fields, the error code `40005` is returned with th
         "smsNotification":false
       }
     },
-     "censusSizeTiers": [
-    {
-     "flatAmount":9900,
-     "upTo":100
-    },
-    {
-     "flatAmount":79900,
-     "upTo":1500
-    }
-  ],
     ...
   ]
 }
@@ -1806,16 +1796,6 @@ In case of empty or duplicate fields, the error code `40005` is returned with th
     "emailReminder":true,
     "smsNotification":false
   },
-  "censusSizeTiers": [
-    {
-     "flatAmount":9900,
-     "upTo":100
-    },
-    {
-     "flatAmount":79900,
-     "upTo":1500
-    }
-  ],
 }
 ```
 

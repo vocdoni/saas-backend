@@ -302,15 +302,10 @@ func processProductToPlan(index int, productID string, product *stripeapi.Produc
 	// This is a simplified version - in the full implementation, you'd parse metadata
 	// For now, we'll create a basic plan structure
 	price := product.DefaultPrice
-	startingPrice := price.UnitAmount
-	if len(price.Tiers) > 0 {
-		startingPrice = price.Tiers[0].FlatAmount
-	}
-
 	return &db.Plan{
 		ID:            uint64(index + 1),
 		Name:          product.Name,
-		StartingPrice: startingPrice,
+		StartingPrice: price.UnitAmount,
 		StripeID:      productID,
 		StripePriceID: price.ID,
 		Default:       price.Metadata["Default"] == "true",

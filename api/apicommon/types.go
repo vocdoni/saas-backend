@@ -444,9 +444,6 @@ type SubscriptionPlan struct {
 
 	// Features available in this plan
 	Features SubscriptionFeatures `json:"features"`
-
-	// Census size tiers and pricing
-	CensusSizeTiers []SubscriptionPlanTier `json:"censusSizeTiers"`
 }
 
 // SubscriptionPlanFromDB converts a db.Plan to a SubscriptionPlan.
@@ -454,24 +451,16 @@ func SubscriptionPlanFromDB(plan *db.Plan) SubscriptionPlan {
 	if plan == nil {
 		return SubscriptionPlan{}
 	}
-	tiers := make([]SubscriptionPlanTier, 0, len(plan.CensusSizeTiers))
-	for _, t := range plan.CensusSizeTiers {
-		tiers = append(tiers, SubscriptionPlanTier{
-			Amount: t.Amount,
-			UpTo:   t.UpTo,
-		})
-	}
 	return SubscriptionPlan{
-		ID:              plan.ID,
-		Name:            plan.Name,
-		StripeID:        plan.StripeID,
-		StripePriceID:   plan.StripePriceID,
-		StartingPrice:   plan.StartingPrice,
-		Default:         plan.Default,
-		Organization:    SubscriptionPlanLimits(plan.Organization),
-		VotingTypes:     SubscriptionVotingTypes(plan.VotingTypes),
-		Features:        SubscriptionFeatures(plan.Features),
-		CensusSizeTiers: tiers,
+		ID:            plan.ID,
+		Name:          plan.Name,
+		StripeID:      plan.StripeID,
+		StripePriceID: plan.StripePriceID,
+		StartingPrice: plan.StartingPrice,
+		Default:       plan.Default,
+		Organization:  SubscriptionPlanLimits(plan.Organization),
+		VotingTypes:   SubscriptionVotingTypes(plan.VotingTypes),
+		Features:      SubscriptionFeatures(plan.Features),
 	}
 }
 

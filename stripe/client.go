@@ -72,7 +72,6 @@ func (*Client) GetCustomerByEmail(_ context.Context, email string) (*stripeapi.C
 func (*Client) GetProduct(_ context.Context, productID string) (*stripeapi.Product, error) {
 	params := &stripeapi.ProductParams{}
 	params.AddExpand("default_price")
-	params.AddExpand("default_price.tiers")
 
 	product, err := stripeproduct.Get(productID, params)
 	if err != nil {
@@ -88,7 +87,6 @@ func (*Client) GetPrice(_ context.Context, lookupKey string) (*stripeapi.Price, 
 			Query: fmt.Sprintf("active:'true' AND lookup_key:'%s'", lookupKey),
 		},
 	}
-	params.AddExpand("data.tiers")
 
 	results := stripeprice.Search(params)
 	if !results.Next() {

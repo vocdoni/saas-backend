@@ -113,16 +113,15 @@ type Features struct {
 }
 
 type Plan struct {
-	ID              uint64      `json:"id" bson:"_id"`
-	Name            string      `json:"name" bson:"name"`
-	StripeID        string      `json:"stripeID" bson:"stripeID"`
-	StripePriceID   string      `json:"stripePriceID" bson:"stripePriceID"`
-	StartingPrice   int64       `json:"startingPrice" bson:"startingPrice"`
-	Default         bool        `json:"default" bson:"default"`
-	Organization    PlanLimits  `json:"organization" bson:"organization"`
-	VotingTypes     VotingTypes `json:"votingTypes" bson:"votingTypes"`
-	Features        Features    `json:"features" bson:"features"`
-	CensusSizeTiers []PlanTier  `json:"censusSizeTiers" bson:"censusSizeTiers"`
+	ID            uint64      `json:"id" bson:"_id"`
+	Name          string      `json:"name" bson:"name"`
+	StripeID      string      `json:"stripeID" bson:"stripeID"`
+	StripePriceID string      `json:"stripePriceID" bson:"stripePriceID"`
+	StartingPrice int64       `json:"startingPrice" bson:"startingPrice"`
+	Default       bool        `json:"default" bson:"default"`
+	Organization  PlanLimits  `json:"organization" bson:"organization"`
+	VotingTypes   VotingTypes `json:"votingTypes" bson:"votingTypes"`
+	Features      Features    `json:"features" bson:"features"`
 }
 
 type PlanTier struct {
