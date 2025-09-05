@@ -37,23 +37,23 @@ func (ms *MongoStorage) SetPlan(plan *Plan) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if plan.ID > 0 {
-		if plan.ID >= nextID {
-			return 0, ErrInvalidData
-		}
-		updateDoc, err := dynamicUpdateDocument(plan, nil)
-		if err != nil {
-			return 0, err
-		}
-		// set upsert to true to create the document if it doesn't exist
-		if _, err := ms.plans.UpdateOne(ctx, bson.M{"_id": plan.ID}, updateDoc); err != nil {
-			return 0, err
-		}
-	} else {
+	if plan.ID >= nextID {
+		return 0, ErrInvalidData
+	}
+	if plan.ID == 0 {
 		plan.ID = nextID
 		if _, err := ms.plans.InsertOne(ctx, plan); err != nil {
 			return 0, err
 		}
+		return plan.ID, nil
+	}
+	updateDoc, err := dynamicUpdateDocument(plan, nil)
+	if err != nil {
+		return 0, err
+	}
+	// set upsert to true to create the document if it doesn't exist
+	if _, err := ms.plans.UpdateOne(ctx, bson.M{"_id": plan.ID}, updateDoc); err != nil {
+		return 0, err
 	}
 	return plan.ID, nil
 }
