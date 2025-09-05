@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -233,52 +232,26 @@ type BulkCensusParticipantStatus struct {
 	Added    int `json:"added"`
 }
 
-// prepareMember processes a member for storage by:
-// - Setting the organization address
-// - Setting the creation timestamp
-// - Hashing sensitive data (email, phone, password)
-// - Clearing the original sensitive data
-func prepareMember(member *OrgMember, orgAddress common.Address, salt string, currentTime time.Time) {
-	// Assign a new internal ID if not provided
-	if member.ID == primitive.NilObjectID {
-		member.ID = primitive.NewObjectID()
-	}
-
-	member.OrgAddress = orgAddress
-	member.CreatedAt = currentTime
-
-	// Phone handling is now done by the Phone type itself
-	if member.Phone != nil && !member.Phone.IsEmpty() {
-		// Ensure the phone has the correct org address for hashing
-		member.Phone.HashWithOrgAddress(orgAddress)
-	}
-
-	// Hash password if present
-	if member.Password != "" {
-		member.HashedPass = internal.HashPassword(salt, member.Password)
-		member.Password = ""
-	}
-}
-
 // createCensusParticipantBulkOperations creates the bulk write operations for members and participants
 func createCensusParticipantBulkOperations(
-	orgMembers []OrgMember,
-	orgAddress common.Address,
-	censusID string,
+	orgMembers []*OrgMember,
+	org *Organization,
+	censusID primitive.ObjectID,
 	salt string,
 	currentTime time.Time,
 ) (orgMembersOps []mongo.WriteModel, censusParticipantOps []mongo.WriteModel) {
 	var bulkOrgMembersOps []mongo.WriteModel
 	var bulkCensusParticipantsOps []mongo.WriteModel
 
-	for _, orgMember := range orgMembers {
+	for _, m := range orgMembers {
 		// Prepare the member
-		prepareMember(&orgMember, orgAddress, salt, currentTime)
+		orgMember, _ := prepareOrgMember(org, m, salt, currentTime)
+		// TODO: handle prepareOrgMember []error, pass them back to client
 
 		// Create member filter and update document
 		memberFilter := bson.M{
 			"_id":        orgMember.ID,
-			"orgAddress": orgAddress,
+			"orgAddress": orgMember.OrgAddress,
 		}
 
 		updateOrgMembersDoc, err := dynamicUpdateDocument(orgMember, nil)
@@ -298,12 +271,14 @@ func createCensusParticipantBulkOperations(
 		// Create participant filter and document
 		censusParticipantsFilter := bson.M{
 			"participantID": orgMember.ID.Hex(),
-			"censusId":      censusID,
+			"censusId":      censusID.Hex(),
 		}
+
+		// Create document for $set operation (without CreatedAt)
 		participantDoc := &CensusParticipant{
 			ParticipantID: orgMember.ID.Hex(),
-			CensusID:      censusID,
-			CreatedAt:     currentTime,
+			CensusID:      censusID.Hex(),
+			UpdatedAt:     currentTime,
 		}
 
 		// Create participant update document
@@ -314,10 +289,26 @@ func createCensusParticipantBulkOperations(
 			continue
 		}
 
+		// Extract the $set part from the update document with type checking
+		setDoc, ok := updateParticipantDoc["$set"].(bson.M)
+		if !ok {
+			log.Warnw("failed to extract $set document for participant",
+				"error", "invalid $set type", "participantID", orgMember.ID.Hex())
+			continue
+		}
+
+		// Create combined update document with both $set and $setOnInsert
+		combinedUpdateDoc := bson.M{
+			"$set": setDoc,
+			"$setOnInsert": bson.M{
+				"createdAt": currentTime,
+			},
+		}
+
 		// Create participant upsert model
 		upsertCensusParticipantsModel := mongo.NewUpdateOneModel().
 			SetFilter(censusParticipantsFilter).
-			SetUpdate(updateParticipantDoc).
+			SetUpdate(combinedUpdateDoc).
 			SetUpsert(true)
 		bulkCensusParticipantsOps = append(bulkCensusParticipantsOps, upsertCensusParticipantsModel)
 	}
@@ -417,9 +408,9 @@ func (ms *MongoStorage) validateBulkCensusParticipant(
 
 // processBatches processes members in batches and sends progress updates
 func (ms *MongoStorage) processBatches(
-	orgMembers []OrgMember,
+	orgMembers []*OrgMember,
+	org *Organization,
 	census *Census,
-	censusID string,
 	salt string,
 	progressChan chan<- *BulkCensusParticipantStatus,
 ) {
@@ -457,8 +448,8 @@ func (ms *MongoStorage) processBatches(
 		// Create bulk operations for this batch
 		bulkOrgMembersOps, bulkCensusParticipantOps := createCensusParticipantBulkOperations(
 			orgMembers[i:end],
-			census.OrgAddress,
-			censusID,
+			org,
+			census.ID,
 			salt,
 			currentTime,
 		)
@@ -486,7 +477,7 @@ func (ms *MongoStorage) processBatches(
 // Returns a channel that sends the percentage of members processed every 10 seconds.
 // This function must be called in a goroutine.
 func (ms *MongoStorage) SetBulkCensusOrgMemberParticipant(
-	salt, censusID string, orgMembers []OrgMember,
+	org *Organization, salt, censusID string, orgMembers []*OrgMember,
 ) (chan *BulkCensusParticipantStatus, error) {
 	progressChan := make(chan *BulkCensusParticipantStatus, 10)
 
@@ -504,7 +495,7 @@ func (ms *MongoStorage) SetBulkCensusOrgMemberParticipant(
 	}
 
 	// Start processing in a goroutine
-	go ms.processBatches(orgMembers, census, censusID, salt, progressChan)
+	go ms.processBatches(orgMembers, org, census, salt, progressChan)
 
 	return progressChan, nil
 }
@@ -536,7 +527,6 @@ func (ms *MongoStorage) setBulkCensusParticipant(
 			ParticipantID: id,
 			LoginHash:     HashAuthTwoFaFields(*member, authFields, twoFaFields),
 			CensusID:      censusID,
-			CreatedAt:     currentTime,
 			UpdatedAt:     currentTime,
 		}
 
@@ -548,10 +538,26 @@ func (ms *MongoStorage) setBulkCensusParticipant(
 			continue
 		}
 
+		// Extract the $set part from the update document with type checking
+		setDoc, ok := updateParticipantDoc["$set"].(bson.M)
+		if !ok {
+			log.Warnw("failed to extract $set document for participant",
+				"error", "invalid $set type", "participantID", member.ID.Hex())
+			continue
+		}
+
+		// Create combined update document with both $set and $setOnInsert
+		combinedUpdateDoc := bson.M{
+			"$set": setDoc,
+			"$setOnInsert": bson.M{
+				"createdAt": currentTime,
+			},
+		}
+
 		// Create participant upsert model
 		upsertCensusParticipantsModel := mongo.NewUpdateOneModel().
 			SetFilter(censusParticipantsFilter).
-			SetUpdate(updateParticipantDoc).
+			SetUpdate(combinedUpdateDoc).
 			SetUpsert(true)
 		docs = append(docs, upsertCensusParticipantsModel)
 	}

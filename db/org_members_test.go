@@ -24,12 +24,12 @@ func TestOrgMembers(t *testing.T) {
 
 		// Test creating a new member
 		member := &OrgMember{
-			OrgAddress:   testOrgAddress,
-			Email:        testMemberEmail,
-			Phone:        testPhone,
-			MemberNumber: testMemberNumber,
-			Name:         testName,
-			Password:     testPassword,
+			OrgAddress:     testOrgAddress,
+			Email:          testMemberEmail,
+			PlaintextPhone: testPlaintextPhone,
+			MemberNumber:   testMemberNumber,
+			Name:           testName,
+			Password:       testPassword,
 		}
 
 		// Create new member
@@ -41,7 +41,7 @@ func TestOrgMembers(t *testing.T) {
 		createdMember, err := testDB.OrgMember(testOrgAddress, memberOID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(createdMember.Email, qt.Equals, testMemberEmail)
-		c.Assert(createdMember.Phone.GetHashed(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, testPhone.original))
+		c.Assert(createdMember.Phone.Bytes(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, testPlaintextPhone))
 		c.Assert(createdMember.MemberNumber, qt.Equals, member.MemberNumber)
 		c.Assert(createdMember.Name, qt.Equals, testName)
 		c.Assert(createdMember.HashedPass, qt.DeepEquals, internal.HashPassword(testSalt, testPassword))
@@ -49,9 +49,9 @@ func TestOrgMembers(t *testing.T) {
 
 		// Test updating an existing member
 		newName := "Updated Name"
-		newPhone := NewPhone("+34655432100")
+		newPhone := "+34655432100"
 		createdMember.Name = newName
-		createdMember.Phone = newPhone
+		createdMember.PlaintextPhone = newPhone
 
 		// Update member
 		updatedID, err := testDB.SetOrgMember(testSalt, createdMember)
@@ -62,17 +62,17 @@ func TestOrgMembers(t *testing.T) {
 		updatedMember, err := testDB.OrgMember(testOrgAddress, updatedID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(updatedMember.Name, qt.Equals, newName)
-		c.Assert(updatedMember.Phone.GetHashed(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, newPhone.original))
+		c.Assert(updatedMember.Phone.Bytes(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, newPhone))
 		c.Assert(updatedMember.CreatedAt, qt.Equals, createdMember.CreatedAt)
 
 		duplicateMember := &OrgMember{
-			ID:           updatedMember.ID, // Use the same ID to simulate a duplicate
-			OrgAddress:   testOrgAddress,
-			Email:        testMemberEmail,
-			Phone:        testPhone,
-			MemberNumber: testMemberNumber,
-			Name:         testName,
-			Password:     testPassword,
+			ID:             updatedMember.ID, // Use the same ID to simulate a duplicate
+			OrgAddress:     testOrgAddress,
+			Email:          testMemberEmail,
+			PlaintextPhone: testPlaintextPhone,
+			MemberNumber:   testMemberNumber,
+			Name:           testName,
+			Password:       testPassword,
 		}
 
 		// Attempt to update member
@@ -171,25 +171,27 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Test bulk insert of new members
-		members := []OrgMember{
+		members := []*OrgMember{
 			{
-				Email:        testMemberEmail,
-				Phone:        testPhone,
-				MemberNumber: testMemberNumber,
-				Name:         testName,
-				Password:     testPassword,
+				OrgAddress:     testOrgAddress,
+				Email:          testMemberEmail,
+				PlaintextPhone: testPlaintextPhone,
+				MemberNumber:   testMemberNumber,
+				Name:           testName,
+				Password:       testPassword,
 			},
 			{
-				Email:        "member2@test.com",
-				Phone:        NewPhone("+34678678978"),
-				MemberNumber: "member456",
-				Name:         "Test Member 2",
-				Password:     "testpass456",
+				OrgAddress:     testOrgAddress,
+				Email:          "member2@test.com",
+				PlaintextPhone: "+34678678978",
+				MemberNumber:   "member456",
+				Name:           "Test Member 2",
+				Password:       "testpass456",
 			},
 		}
 
 		// Perform bulk upsert
-		progressChan, err := testDB.SetBulkOrgMembers(testOrgAddress, testSalt, members)
+		progressChan, err := testDB.SetBulkOrgMembers(testOrg, members, testSalt)
 		c.Assert(err, qt.IsNil)
 
 		// Wait for the operation to complete and get the final status
@@ -207,22 +209,22 @@ func TestOrgMembers(t *testing.T) {
 		// Verify both members were created with hashed fields
 		member1, err := testDB.OrgMemberByMemberNumber(testOrgAddress, testMemberNumber)
 		c.Assert(err, qt.IsNil)
-		c.Assert(member1.Phone.GetHashed(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, testPhone.original))
+		c.Assert(member1.Phone.Bytes(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, testPlaintextPhone))
 		c.Assert(member1.HashedPass, qt.DeepEquals, internal.HashPassword(testSalt, testPassword))
 
 		member2, err := testDB.OrgMemberByMemberNumber(testOrgAddress, members[1].MemberNumber)
 		c.Assert(err, qt.IsNil)
-		c.Assert(member2.Phone.GetHashed(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, members[1].Phone.original))
+		c.Assert(member2.Phone.Bytes(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, members[1].PlaintextPhone))
 		c.Assert(member2.HashedPass, qt.DeepEquals, internal.HashPassword(testSalt, members[1].Password))
 
 		// Test updating existing members
 		members[0].ID = member1.ID // Use the existing ID for the first member
 		members[0].Name = "Updated Name"
 		members[1].ID = member2.ID // Use the existing ID for the second member
-		members[1].Phone = NewPhone("+34678678971")
+		members[1].PlaintextPhone = "+34678678971"
 
 		// Perform bulk upsert again
-		progressChan, err = testDB.SetBulkOrgMembers(testOrgAddress, testSalt, members)
+		progressChan, err = testDB.SetBulkOrgMembers(testOrg, members, testSalt)
 		c.Assert(err, qt.IsNil)
 
 		// Wait for the operation to complete and get the final status
@@ -244,11 +246,15 @@ func TestOrgMembers(t *testing.T) {
 
 		updatedMember2, err := testDB.OrgMemberByMemberNumber(testOrgAddress, "member456")
 		c.Assert(err, qt.IsNil)
-		c.Assert(updatedMember2.Phone.GetHashed(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, members[1].Phone.original))
+		c.Assert(updatedMember2.Phone.Bytes(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, members[1].PlaintextPhone))
 		c.Assert(updatedMember2.Name, qt.Equals, "Test Member 2")
 
 		// Test with empty organization address
-		_, err = testDB.SetBulkOrgMembers(common.Address{}, testSalt, members)
+		testOrgWithEmptyAddress := &Organization{
+			Address: common.Address{},
+			Country: "ES",
+		}
+		_, err = testDB.SetBulkOrgMembers(testOrgWithEmptyAddress, members, testSalt)
 		c.Assert(err, qt.Not(qt.IsNil))
 	})
 

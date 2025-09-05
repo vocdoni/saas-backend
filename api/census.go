@@ -168,11 +168,18 @@ func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Reques
 		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{Added: 0})
 		return
 	}
+	org, err := a.db.Organization(census.OrgAddress)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
 	// add the org members as census participants in the database
 	progressChan, err := a.db.SetBulkCensusOrgMemberParticipant(
+		org,
 		passwordSalt,
 		censusID.String(),
-		members.DbOrgMembers(census.OrgAddress),
+		members.ToDB(),
 	)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)

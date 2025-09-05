@@ -70,7 +70,7 @@ func TestSanitizePhone(t *testing.T) {
 
 	for _, tt := range tests {
 		c.Run(tt.name, func(c *quicktest.C) {
-			got, err := SanitizeAndVerifyPhoneNumber(tt.phone)
+			got, err := SanitizeAndVerifyPhoneNumber(tt.phone, "")
 
 			if tt.wantErr {
 				c.Assert(err, quicktest.IsNotNil)
@@ -85,12 +85,12 @@ func TestSanitizePhone(t *testing.T) {
 	c.Run("same output with and without default country code", func(c *quicktest.C) {
 		// Phone number without country code
 		phoneWithoutCC := "623456789"
-		resultWithoutCC, err := SanitizeAndVerifyPhoneNumber(phoneWithoutCC)
+		resultWithoutCC, err := SanitizeAndVerifyPhoneNumber(phoneWithoutCC, "")
 		c.Assert(err, quicktest.IsNil)
 
 		// Same phone number with country code
 		phoneWithCC := fmt.Sprintf("+%d%s", defaultCC, phoneWithoutCC)
-		resultWithCC, err := SanitizeAndVerifyPhoneNumber(phoneWithCC)
+		resultWithCC, err := SanitizeAndVerifyPhoneNumber(phoneWithCC, "")
 		c.Assert(err, quicktest.IsNil)
 
 		// Both should result in the same sanitized number

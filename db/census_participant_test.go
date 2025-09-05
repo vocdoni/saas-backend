@@ -217,7 +217,7 @@ func TestCensusParticipant(t *testing.T) {
 
 		t.Run("EmptyMembers", func(_ *testing.T) {
 			// Test with empty members
-			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant("test_salt", censusID, nil)
+			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", censusID, nil)
 			c.Assert(err, qt.IsNil)
 
 			// Channel should be closed immediately for empty members
@@ -227,15 +227,15 @@ func TestCensusParticipant(t *testing.T) {
 
 		t.Run("InvalidData", func(_ *testing.T) {
 			// Test with empty census ID
-			members := []OrgMember{
+			members := []*OrgMember{
 				{
-					MemberNumber: "test1",
-					Email:        "test1@example.com",
-					Phone:        NewPhone("1234567890"),
-					Password:     "password1",
+					MemberNumber:   "test1",
+					Email:          "test1@example.com",
+					PlaintextPhone: "1234567890",
+					Password:       "password1",
 				},
 			}
-			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant("test_salt", "", members)
+			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", "", members)
 			c.Assert(err, qt.Equals, ErrInvalidData)
 
 			// Channel should be closed immediately for invalid data
@@ -244,16 +244,16 @@ func TestCensusParticipant(t *testing.T) {
 		})
 
 		t.Run("NonExistentCensus", func(_ *testing.T) {
-			members := []OrgMember{
+			members := []*OrgMember{
 				{
-					MemberNumber: "test1",
-					Email:        "test1@example.com",
-					Phone:        NewPhone("1234567890"),
-					Password:     "password1",
+					MemberNumber:   "test1",
+					Email:          "test1@example.com",
+					PlaintextPhone: "1234567890",
+					Password:       "password1",
 				},
 			}
 			// Test with non-existent census
-			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant("test_salt", primitive.NewObjectID().Hex(), members)
+			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", primitive.NewObjectID().Hex(), members)
 			c.Assert(err, qt.Not(qt.IsNil))
 
 			// Channel should be closed immediately for non-existent census
@@ -263,22 +263,22 @@ func TestCensusParticipant(t *testing.T) {
 
 		t.Run("SuccessfulBulkCreation", func(_ *testing.T) {
 			// Test successful bulk creation
-			members := []OrgMember{
+			members := []*OrgMember{
 				{
-					MemberNumber: "test1",
-					Email:        "test1@example.com",
-					Phone:        NewPhone("+34698111111"),
-					Password:     "password1",
+					MemberNumber:   "test1",
+					Email:          "test1@example.com",
+					PlaintextPhone: "+34698111111",
+					Password:       "password1",
 				},
 				{
-					MemberNumber: "test2",
-					Email:        "test2@example.com",
-					Phone:        NewPhone("+34698222222"),
-					Password:     "password2",
+					MemberNumber:   "test2",
+					Email:          "test2@example.com",
+					PlaintextPhone: "+34698222222",
+					Password:       "password2",
 				},
 			}
 
-			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant("test_salt", censusID, members)
+			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", censusID, members)
 			c.Assert(err, qt.IsNil)
 			c.Assert(progressChan, qt.Not(qt.IsNil))
 
@@ -292,10 +292,10 @@ func TestCensusParticipant(t *testing.T) {
 
 			// Verify members were created with hashed data
 			for _, p := range members {
-				member, err := testDB.OrgMemberByMemberNumber(testOrgAddress, p.MemberNumber)
+				member, err := testDB.OrgMemberByMemberNumber(testOrg.Address, p.MemberNumber)
 				c.Assert(err, qt.IsNil)
 				c.Assert(member.Email, qt.Not(qt.Equals), "")
-				c.Assert(member.Phone.GetHashed(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, p.Phone.original))
+				c.Assert(member.Phone.Bytes(), qt.DeepEquals, internal.HashOrgData(testOrg.Address, p.PlaintextPhone))
 				c.Assert(member.Password, qt.Equals, "")
 				c.Assert(member.HashedPass, qt.Not(qt.Equals), "")
 				c.Assert(member.CreatedAt.IsZero(), qt.IsFalse)
@@ -310,23 +310,23 @@ func TestCensusParticipant(t *testing.T) {
 
 		t.Run("UpdateExistingMembers", func(_ *testing.T) {
 			// Create members first
-			members := []OrgMember{
+			members := []*OrgMember{
 				{
-					MemberNumber: "update1",
-					Email:        "update1@example.com",
-					Phone:        NewPhone("+34698123456"),
-					Password:     "password1",
+					MemberNumber:   "update1",
+					Email:          "update1@example.com",
+					PlaintextPhone: "+34698123456",
+					Password:       "password1",
 				},
 				{
-					MemberNumber: "update2",
-					Email:        "update2@example.com",
-					Phone:        NewPhone("+34698654321"),
-					Password:     "password2",
+					MemberNumber:   "update2",
+					Email:          "update2@example.com",
+					PlaintextPhone: "+34698654321",
+					Password:       "password2",
 				},
 			}
 
 			// Create initial members
-			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant("test_salt", censusID, members)
+			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", censusID, members)
 			c.Assert(err, qt.IsNil)
 			c.Assert(progressChan, qt.Not(qt.IsNil))
 
@@ -346,9 +346,9 @@ func TestCensusParticipant(t *testing.T) {
 			member1, err := testDB.OrgMemberByMemberNumber(testOrgAddress, members[1].MemberNumber)
 			c.Assert(err, qt.IsNil)
 			members[1].ID = member1.ID
-			members[1].Phone = NewPhone("+34698111111")
+			members[1].PlaintextPhone = "+34698111111"
 
-			progressChan, err = testDB.SetBulkCensusOrgMemberParticipant("test_salt", censusID, members)
+			progressChan, err = testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", censusID, members)
 			c.Assert(err, qt.IsNil)
 			c.Assert(progressChan, qt.Not(qt.IsNil))
 
@@ -365,7 +365,7 @@ func TestCensusParticipant(t *testing.T) {
 				member, err := testDB.OrgMemberByMemberNumber(testOrgAddress, p.MemberNumber)
 				c.Assert(err, qt.IsNil)
 				c.Assert(member.Email, qt.Equals, p.Email)
-				c.Assert(member.Phone.GetHashed(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, p.Phone.original))
+				c.Assert(member.Phone.Bytes(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, p.PlaintextPhone))
 			}
 		})
 	})
@@ -511,6 +511,149 @@ func TestCensusParticipant(t *testing.T) {
 			found, err := testDB.CensusParticipantByLoginHash(censusID, participant.LoginHash)
 			c.Assert(err, qt.IsNil)
 			c.Assert(found.ParticipantID, qt.Equals, participant.ParticipantID)
+		}
+	})
+}
+
+// TestCreateCensusParticipantBulkOperationsFiltering specifically tests the filtering functionality
+// in the createCensusParticipantBulkOperations function, focusing on ensuring
+// that "participantID": orgMember.ID.Hex() works correctly for upserts
+func TestCreateCensusParticipantBulkOperationsFiltering(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
+
+	c.Assert(testDB.Reset(), qt.IsNil)
+
+	// Create organization
+	org := &Organization{
+		Address:   testOrgAddress,
+		Active:    true,
+		CreatedAt: time.Now(),
+	}
+	err := testDB.SetOrganization(org)
+	c.Assert(err, qt.IsNil)
+
+	// Create a census
+	census := &Census{
+		ID:         primitive.NewObjectID(),
+		OrgAddress: testOrgAddress,
+		Type:       CensusTypeMail,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	}
+	censusID, err := testDB.SetCensus(census)
+	c.Assert(err, qt.IsNil)
+
+	// Create test members
+	members := []*OrgMember{
+		{
+			ID:           primitive.NewObjectID(),
+			OrgAddress:   testOrgAddress,
+			MemberNumber: "filter-test-1",
+			Email:        "filter1@example.com",
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		},
+		{
+			ID:           primitive.NewObjectID(),
+			OrgAddress:   testOrgAddress,
+			MemberNumber: "filter-test-2",
+			Email:        "filter2@example.com",
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		},
+	}
+
+	// Save members to DB
+	for _, member := range members {
+		_, err = testDB.SetOrgMember("test_salt", member)
+		c.Assert(err, qt.IsNil)
+	}
+
+	// Get the census ObjectID
+	censusObjID, err := primitive.ObjectIDFromHex(censusID)
+	c.Assert(err, qt.IsNil)
+
+	t.Run("InitialCreation", func(_ *testing.T) {
+		// Create bulk operations
+		bulkOrgMembersOps, bulkCensusParticipantOps := createCensusParticipantBulkOperations(
+			members,
+			org,
+			censusObjID,
+			"test_salt",
+			time.Now(),
+		)
+
+		// Verify operations were created correctly
+		c.Assert(len(bulkOrgMembersOps), qt.Equals, 2)
+		c.Assert(len(bulkCensusParticipantOps), qt.Equals, 2)
+
+		// Process the batch
+		added := testDB.processBatch(bulkOrgMembersOps, bulkCensusParticipantOps)
+		c.Assert(added, qt.Equals, 2)
+
+		// Verify participants were created with correct IDs
+		for _, member := range members {
+			participant, err := testDB.CensusParticipant(censusID, member.ID.Hex())
+			c.Assert(err, qt.IsNil)
+			c.Assert(participant.ParticipantID, qt.Equals, member.ID.Hex())
+			c.Assert(participant.CensusID, qt.Equals, censusID)
+		}
+
+		// Count total participants - should be exactly 2
+		participants, err := testDB.CensusParticipants(censusID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(len(participants), qt.Equals, 2)
+	})
+
+	t.Run("UpsertFunctionality", func(_ *testing.T) {
+		// Store creation times to verify updates
+		originalParticipants := make(map[string]CensusParticipant)
+		participants, err := testDB.CensusParticipants(censusID)
+		c.Assert(err, qt.IsNil)
+		for _, p := range participants {
+			originalParticipants[p.ParticipantID] = p
+		}
+
+		// Wait a moment to ensure timestamps will differ
+		time.Sleep(10 * time.Millisecond)
+
+		// Update the same members - this should trigger upsert
+		currentTime := time.Now()
+		bulkOrgMembersOps, bulkCensusParticipantOps := createCensusParticipantBulkOperations(
+			members,
+			org,
+			censusObjID,
+			"test_salt",
+			currentTime,
+		)
+
+		// Process the batch again - should update existing participants
+		added := testDB.processBatch(bulkOrgMembersOps, bulkCensusParticipantOps)
+		c.Assert(added, qt.Equals, 2)
+
+		// Verify participants were updated, not duplicated
+		participants, err = testDB.CensusParticipants(censusID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(len(participants), qt.Equals, 2) // Still only 2 participants
+
+		// Check that each participant's ParticipantID matches a member's ID.Hex()
+		// and that timestamps are properly updated
+		for _, participant := range participants {
+			original, exists := originalParticipants[participant.ParticipantID]
+			c.Assert(exists, qt.IsTrue)
+
+			c.Assert(original.CreatedAt, qt.Equals, participant.CreatedAt)         // CreatedAt should be unchanged
+			c.Assert(original.UpdatedAt, qt.Not(qt.Equals), participant.UpdatedAt) // UpdatedAt should be changed
+
+			foundMatch := false
+			for _, member := range members {
+				if participant.ParticipantID == member.ID.Hex() {
+					foundMatch = true
+					break
+				}
+			}
+			c.Assert(foundMatch, qt.IsTrue, qt.Commentf("ParticipantID should match a member's ID.Hex()"))
 		}
 	})
 }
