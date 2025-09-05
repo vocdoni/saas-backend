@@ -127,7 +127,7 @@ func New(conf *Config) *API {
 		conf.ObjectStorage.ServerURL = conf.ServerURL
 	}
 
-	return &API{
+	api := &API{
 		db:              conf.DB,
 		auth:            jwtauth.New("HS256", []byte(conf.Secret), nil),
 		host:            conf.Host,
@@ -145,6 +145,14 @@ func New(conf *Config) *API {
 		csp:             conf.CSP,
 		oauthServiceURL: conf.OAuthServiceURL,
 	}
+
+	// Initialize Stripe service
+	if err := api.InitializeStripeService(); err != nil {
+		log.Errorf("failed to initialize Stripe service: %v", err)
+		// Don't fail completely, but log the error
+	}
+
+	return api
 }
 
 // Start starts the API HTTP server (non blocking).
@@ -291,13 +299,15 @@ func (a *API) initRouter() http.Handler {
 
 		// handle stripe checkout session
 		log.Infow("new route", "method", "POST", "path", subscriptionsCheckout)
-		r.Post(subscriptionsCheckout, a.createSubscriptionCheckoutHandler)
+		r.Post(subscriptionsCheckout, a.stripeHandlers.CreateSubscriptionCheckout)
 		// get stripe checkout session info
 		log.Infow("new route", "method", "GET", "path", subscriptionsCheckoutSession)
-		r.Get(subscriptionsCheckoutSession, a.checkoutSessionHandler)
+		r.Get(subscriptionsCheckoutSession, a.stripeHandlers.GetCheckoutSession)
 		// get stripe subscription portal session info
 		log.Infow("new route", "method", "GET", "path", subscriptionsPortal)
-		r.Get(subscriptionsPortal, a.createSubscriptionPortalSessionHandler)
+		r.Get(subscriptionsPortal, func(w http.ResponseWriter, r *http.Request) {
+			a.stripeHandlers.CreateSubscriptionPortalSession(w, r, a)
+		})
 		// upload an image to the object storage
 		log.Infow("new route", "method", "POST", "path", objectStorageUploadTypedEndpoint)
 		r.Post(objectStorageUploadTypedEndpoint, a.objectStorage.UploadImageWithFormHandler)
@@ -381,7 +391,7 @@ func (a *API) initRouter() http.Handler {
 		r.Get(planInfoEndpoint, a.planInfoHandler)
 		// handle stripe webhook
 		log.Infow("new route", "method", "POST", "path", subscriptionsWebhook)
-		r.Post(subscriptionsWebhook, a.handleWebhook)
+		r.Post(subscriptionsWebhook, a.stripeHandlers.HandleWebhook)
 		// upload an image to the object storage
 		log.Infow("new route", "method", "GET", "path", objectStorageDownloadTypedEndpoint)
 		r.Get(objectStorageDownloadTypedEndpoint, a.objectStorage.DownloadImageInlineHandler)

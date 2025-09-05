@@ -16,6 +16,11 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
+// Constants for webhook handling
+const (
+	MaxBodyBytes = int64(65536) //revive:disable:unexported-naming
+)
+
 // StripeHandlers contains the Stripe service and handles HTTP requests
 type StripeHandlers struct {
 	service *stripe.Service
@@ -42,6 +47,12 @@ func NewStripeHandlers(service *stripe.Service) *StripeHandlers {
 //	@Failure		500		{string}	string	"Internal Server Error"
 //	@Router			/subscriptions/webhook [post]
 func (h *StripeHandlers) HandleWebhook(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.service == nil {
+		log.Errorf("stripe webhook: Stripe service not available")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+
 	// Read and validate the request body
 	r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
 	payload, err := io.ReadAll(r.Body)
@@ -100,6 +111,11 @@ func (h *StripeHandlers) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 //	@Failure		500		{object}	errors.Error					"Internal server error"
 //	@Router			/subscriptions/checkout [post]
 func (h *StripeHandlers) CreateSubscriptionCheckout(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.service == nil {
+		errors.ErrStripeError.Withf("Stripe service not available").Write(w)
+		return
+	}
+
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)

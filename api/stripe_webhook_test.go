@@ -374,12 +374,16 @@ func TestWebhookEndpointUnit(t *testing.T) {
 	// Create a mock API instance for testing handlers
 	api := &API{db: testDB}
 
+	// Initialize Stripe service for the API
+	err := api.InitializeStripeService()
+	c.Assert(err, qt.IsNil)
+
 	// Create test setup
 	token := testCreateUser(t, testPass)
 	orgAddress := testCreateOrganization(t, token)
 	testOrgAddress = orgAddress
 
-	_, err := testDB.SetPlan(&db.Plan{
+	_, err = testDB.SetPlan(&db.Plan{
 		Name:     "Essential Plan",
 		StripeID: testProductID,
 		Default:  false,
@@ -394,7 +398,7 @@ func TestWebhookEndpointUnit(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 
 		w := httptest.NewRecorder()
-		api.handleWebhook(w, req)
+		api.stripeHandlers.HandleWebhook(w, req)
 
 		c.Assert(w.Code, qt.Equals, http.StatusBadRequest)
 	})
@@ -411,7 +415,7 @@ func TestWebhookEndpointUnit(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 
 		w := httptest.NewRecorder()
-		api.handleWebhook(w, req)
+		api.stripeHandlers.HandleWebhook(w, req)
 
 		// Should fail due to signature verification, but documents the flow
 		c.Assert(w.Code, qt.Equals, http.StatusBadRequest)

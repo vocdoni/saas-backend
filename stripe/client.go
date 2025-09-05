@@ -255,6 +255,19 @@ type CheckoutSessionStatus struct {
 	SubscriptionStatus string `json:"subscription_status"`
 }
 
+// SubscriptionInfo represents the information related to a Stripe subscription
+// that are relevant for the application.
+type SubscriptionInfo struct {
+	ID                  string
+	Status              string
+	ProductID           string
+	Quantity            int
+	OrganizationAddress common.Address
+	CustomerEmail       string
+	StartDate           time.Time
+	EndDate             time.Time
+}
+
 // InvoiceInfo represents invoice information extracted from events
 type InvoiceInfo struct {
 	ID                  string
