@@ -791,11 +791,11 @@ type AddMembersRequest struct {
 	Members []OrgMember `json:"members"`
 }
 
-// DbOrgMembers converts the members in the request to db.OrgMember objects.
-func (r *AddMembersRequest) DbOrgMembers(orgAddress common.Address) []db.OrgMember {
-	members := make([]db.OrgMember, 0, len(r.Members))
+// ToDB converts the members in the request to db.OrgMember objects.
+func (r *AddMembersRequest) ToDB() []*db.OrgMember {
+	members := make([]*db.OrgMember, 0, len(r.Members))
 	for _, p := range r.Members {
-		members = append(members, p.ToDb(orgAddress))
+		members = append(members, p.ToDB())
 	}
 	return members
 }
@@ -846,8 +846,9 @@ type OrgMember struct {
 	Other map[string]any `json:"other"`
 }
 
-// ToDb converts an OrgMember to a db.OrgMember.
-func (p *OrgMember) ToDb(orgAddress common.Address) db.OrgMember {
+// ToDB converts an OrgMember to a db.OrgMember.
+func (p *OrgMember) ToDB() *db.OrgMember {
+	// TODO: delay this parsing, so that it happens during batch validation
 	parsedBirthDate := time.Time{}
 	if len(p.BirthDate) > 0 {
 		// Parse the birth date from string to time.Time
@@ -857,6 +858,8 @@ func (p *OrgMember) ToDb(orgAddress common.Address) db.OrgMember {
 			log.Warnf("Failed to parse birth date %s for member %s: %v", p.BirthDate, p.MemberNumber, err)
 		}
 	}
+	// TODO: this could happen right during UnmarshalJSON,
+	// if apicommon.OrgMember.ID is an ObjectID rather than a string.
 	id := primitive.NilObjectID
 	if len(p.ID) > 0 {
 		// Convert the ID from string to ObjectID
@@ -867,15 +870,8 @@ func (p *OrgMember) ToDb(orgAddress common.Address) db.OrgMember {
 		}
 	}
 
-	var phone *db.Phone
-	if p.Phone != "" {
-		phone = db.NewPhone(p.Phone)
-		phone.HashWithOrgAddress(orgAddress)
-	}
-
-	return db.OrgMember{
+	return &db.OrgMember{
 		ID:             id,
-		OrgAddress:     orgAddress,
 		MemberNumber:   p.MemberNumber,
 		Name:           p.Name,
 		Surname:        p.Surname,
@@ -883,18 +879,13 @@ func (p *OrgMember) ToDb(orgAddress common.Address) db.OrgMember {
 		BirthDate:      p.BirthDate,
 		ParsedBirtDate: parsedBirthDate,
 		Email:          p.Email,
-		Phone:          phone,
+		PlaintextPhone: p.Phone,
 		Password:       p.Password,
 		Other:          p.Other,
 	}
 }
 
 func OrgMemberFromDb(p db.OrgMember) OrgMember {
-	phoneStr := ""
-	if p.Phone != nil {
-		phoneStr = p.Phone.String() // This returns the masked version
-	}
-
 	return OrgMember{
 		ID:           p.ID.Hex(),
 		MemberNumber: p.MemberNumber,
@@ -903,7 +894,7 @@ func OrgMemberFromDb(p db.OrgMember) OrgMember {
 		NationalID:   p.NationalID,
 		BirthDate:    p.BirthDate,
 		Email:        p.Email,
-		Phone:        phoneStr,
+		Phone:        p.Phone.String(), // This returns either "" or the masked hash
 		Other:        p.Other,
 	}
 }

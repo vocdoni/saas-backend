@@ -578,52 +578,52 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		// Create members with various field combinations for testing
 		// Member 1: All fields valid
 		member1 := &OrgMember{
-			OrgAddress:   testOrgAddress,
-			Email:        testMemberEmail,
-			Phone:        testPhone,
-			MemberNumber: testMemberNumber,
-			Name:         testName,
-			Surname:      "Smith",
-			Password:     testPassword,
+			OrgAddress:     testOrgAddress,
+			Email:          testMemberEmail,
+			PlaintextPhone: testPlaintextPhone,
+			MemberNumber:   testMemberNumber,
+			Name:           testName,
+			Surname:        "Smith",
+			Password:       testPassword,
 		}
 		member1ID, err := testDB.SetOrgMember(testSalt, member1)
 		c.Assert(err, qt.IsNil)
 
 		// Member 2: All fields valid (different from member1)
 		member2 := &OrgMember{
-			OrgAddress:   testOrgAddress,
-			Email:        "member2@test.com",
-			Phone:        NewPhone("+34678909091"),
-			MemberNumber: "member456",
-			Name:         "Jane",
-			Surname:      "Doe",
-			Password:     testPassword,
+			OrgAddress:     testOrgAddress,
+			Email:          "member2@test.com",
+			PlaintextPhone: "+34678909091",
+			MemberNumber:   "member456",
+			Name:           "Jane",
+			Surname:        "Doe",
+			Password:       testPassword,
 		}
 		member2ID, err := testDB.SetOrgMember(testSalt, member2)
 		c.Assert(err, qt.IsNil)
 
 		// Member 3: Duplicate fields with member1 (same name, surname, memberNumber)
 		member3 := &OrgMember{
-			OrgAddress:   testOrgAddress,
-			Email:        "member3@test.com",
-			Phone:        NewPhone("+34678909092"),
-			MemberNumber: testMemberNumber, // Same as member1
-			Name:         testName,         // Same as member1
-			Surname:      "Smith",          // Same as member1
-			Password:     testPassword,
+			OrgAddress:     testOrgAddress,
+			Email:          "member3@test.com",
+			PlaintextPhone: "+34678909092",
+			MemberNumber:   testMemberNumber, // Same as member1
+			Name:           testName,         // Same as member1
+			Surname:        "Smith",          // Same as member1
+			Password:       testPassword,
 		}
 		member3ID, err := testDB.SetOrgMember(testSalt, member3)
 		c.Assert(err, qt.IsNil)
 
 		// Member 4: Empty fields
 		member4 := &OrgMember{
-			OrgAddress:   testOrgAddress,
-			Email:        "member4@test.com",
-			Phone:        NewPhone("+34678909093"),
-			MemberNumber: "", // Empty memberNumber
-			Name:         "", // Empty name
-			Surname:      "Johnson",
-			Password:     testPassword,
+			OrgAddress:     testOrgAddress,
+			Email:          "member4@test.com",
+			PlaintextPhone: "+34678909093",
+			MemberNumber:   "", // Empty memberNumber
+			Name:           "", // Empty name
+			Surname:        "Johnson",
+			Password:       testPassword,
 		}
 		member4ID, err := testDB.SetOrgMember(testSalt, member4)
 		c.Assert(err, qt.IsNil)
@@ -813,37 +813,37 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		// Test 11: Test with invalid values in twoFaFields
 		// Create a member with empty phone, and another pair with duplicate phone
 		memberWithEmptyPhone := &OrgMember{
-			OrgAddress:   testOrgAddress,
-			Email:        "empty_phone@test.com",
-			Phone:        NewPhone(""), // Empty phone
-			MemberNumber: "empty_phone_123",
-			Name:         "Empty",
-			Surname:      "Phone",
-			Password:     testPassword,
+			OrgAddress:     testOrgAddress,
+			Email:          "empty_phone@test.com",
+			PlaintextPhone: "", // Empty phone
+			MemberNumber:   "empty_phone_123",
+			Name:           "Empty",
+			Surname:        "Phone",
+			Password:       testPassword,
 		}
 		emptyPhoneMemberID, err := testDB.SetOrgMember(testSalt, memberWithEmptyPhone)
 		c.Assert(err, qt.IsNil)
 
 		memberWithDupPhone1 := &OrgMember{
-			OrgAddress:   testOrgAddress,
-			Email:        "dup_phone1@test.com",
-			Phone:        NewPhone("+34698111222"), // Dup phone
-			MemberNumber: "dup_phone1_123",
-			Name:         "Dup",
-			Surname:      "Phone1",
-			Password:     testPassword,
+			OrgAddress:     testOrgAddress,
+			Email:          "dup_phone1@test.com",
+			PlaintextPhone: "+34698111222", // Dup phone
+			MemberNumber:   "dup_phone1_123",
+			Name:           "Dup",
+			Surname:        "Phone1",
+			Password:       testPassword,
 		}
 		dupPhone1MemberID, err := testDB.SetOrgMember(testSalt, memberWithDupPhone1)
 		c.Assert(err, qt.IsNil)
 
 		memberWithDupPhone2 := &OrgMember{
-			OrgAddress:   testOrgAddress,
-			Email:        "dup_phone2@test.com",
-			Phone:        NewPhone("+34698111222"), // Dup phone
-			MemberNumber: "dup_phone2_123",
-			Name:         "Dup",
-			Surname:      "Phone2",
-			Password:     testPassword,
+			OrgAddress:     testOrgAddress,
+			Email:          "dup_phone2@test.com",
+			PlaintextPhone: "+34698111222", // Dup phone
+			MemberNumber:   "dup_phone2_123",
+			Name:           "Dup",
+			Surname:        "Phone2",
+			Password:       testPassword,
 		}
 		dupPhone2MemberID, err := testDB.SetOrgMember(testSalt, memberWithDupPhone2)
 		c.Assert(err, qt.IsNil)
@@ -883,25 +883,25 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		// Test 12: Bug fix - AuthFields + 2faFields should create composite key for uniqueness
 		// Create members with same auth fields but different 2fa fields
 		member1SameAuth := &OrgMember{
-			OrgAddress:   testOrgAddress,
-			Email:        "john@company.com", // Different
-			Phone:        NewPhone("+34698000001"),
-			MemberNumber: "unique_auth_1",
-			Name:         "John",  // Same
-			Surname:      "Smith", // Same
-			Password:     testPassword,
+			OrgAddress:     testOrgAddress,
+			Email:          "john@company.com", // Different
+			PlaintextPhone: "+34698000001",
+			MemberNumber:   "unique_auth_1",
+			Name:           "John",  // Same
+			Surname:        "Smith", // Same
+			Password:       testPassword,
 		}
 		sameAuth1ID, err := testDB.SetOrgMember(testSalt, member1SameAuth)
 		c.Assert(err, qt.IsNil)
 
 		member2SameAuth := &OrgMember{
-			OrgAddress:   testOrgAddress,
-			Email:        "john@personal.com", // Different
-			Phone:        NewPhone("+34698000002"),
-			MemberNumber: "unique_auth_2",
-			Name:         "John",  // Same
-			Surname:      "Smith", // Same
-			Password:     testPassword,
+			OrgAddress:     testOrgAddress,
+			Email:          "john@personal.com", // Different
+			PlaintextPhone: "+34698000002",
+			MemberNumber:   "unique_auth_2",
+			Name:           "John",  // Same
+			Surname:        "Smith", // Same
+			Password:       testPassword,
 		}
 		sameAuth2ID, err := testDB.SetOrgMember(testSalt, member2SameAuth)
 		c.Assert(err, qt.IsNil)

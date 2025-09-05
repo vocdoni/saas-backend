@@ -368,7 +368,7 @@ func validateAuthRequest(req *AuthRequest, census *db.Census) error {
 
 	// Only require contact information if the census has two-factor fields
 	if len(census.TwoFaFields) > 0 {
-		return validateContactInfo(req.Email, req.Phone.String())
+		return validateContactInfo(req.Email, req.Phone)
 	}
 
 	// Validate email if provided
@@ -396,12 +396,17 @@ func handleEmailContact(
 
 // handlePhoneContact verifies the phone and returns the appropriate contact method
 func handlePhoneContact(
-	orgAddress common.Address,
+	org *db.Organization,
 	phone string,
-	memberPhone *db.Phone,
+	memberHashedPhone db.HashedPhone,
 ) (string, notifications.ChallengeType, error) {
-	if err := memberPhone.Matches(phone, orgAddress); err != nil {
+	hashedPhone, err := db.NewHashedPhone(phone, org)
+	if err != nil {
 		return "", "", err
+	}
+
+	if !memberHashedPhone.Matches(hashedPhone) {
+		return "", "", errors.ErrUnauthorized.Withf("user phone doesn't match")
 	}
 	return phone, notifications.SMSChallenge, nil
 }
@@ -409,6 +414,7 @@ func handlePhoneContact(
 // determineContactMethod determines the contact method based on the census type and request data
 func determineContactMethod(
 	census *db.Census,
+	org *db.Organization,
 	req *AuthRequest,
 	member *db.OrgMember,
 ) (string, notifications.ChallengeType, error) {
@@ -417,15 +423,15 @@ func determineContactMethod(
 		return handleEmailContact(req.Email, member.Email)
 
 	case db.CensusTypeSMS:
-		return handlePhoneContact(census.OrgAddress, req.Phone.String(), member.Phone)
+		return handlePhoneContact(org, req.Phone, member.Phone)
 
 	case db.CensusTypeSMSorMail:
 		if req.Email != "" {
 			return handleEmailContact(req.Email, member.Email)
 		}
 
-		if !req.Phone.IsEmpty() {
-			return handlePhoneContact(census.OrgAddress, req.Phone.String(), member.Phone)
+		if req.Phone != "" {
+			return handlePhoneContact(org, req.Phone, member.Phone)
 		}
 
 		// If neither email nor phone is provided for SMS or Mail census
@@ -464,7 +470,7 @@ func (c *CSPHandlers) authFirstStep(
 		return nil, errors.ErrMalformedBody.Withf("invalid JSON request")
 	}
 
-	// Get census information first (needed for validation)
+	// Get census and org information first (needed for validation)
 	census, err := c.mainDB.Census(censusID)
 	if err != nil {
 		if err == db.ErrNotFound {
@@ -473,9 +479,22 @@ func (c *CSPHandlers) authFirstStep(
 		return nil, errors.ErrGenericInternalServerError.WithErr(err)
 	}
 
+	org, err := c.mainDB.Organization(census.OrgAddress)
+	if err != nil {
+		if err == db.ErrNotFound {
+			return nil, errors.ErrOrganizationNotFound
+		}
+		return nil, errors.ErrGenericInternalServerError.WithErr(err)
+	}
+
 	// Validate request with census information
 	if err := validateAuthRequest(&req, census); err != nil {
 		return nil, err
+	}
+
+	phone, err := db.NewHashedPhone(req.Phone, org)
+	if err != nil {
+		return nil, errors.ErrInvalidData.WithErr(err)
 	}
 
 	// create an empty member and assign the input data where applicable
@@ -487,7 +506,7 @@ func (c *CSPHandlers) authFirstStep(
 		NationalID:   req.NationalID,
 		BirthDate:    req.BirthDate,
 		Email:        req.Email,
-		Phone:        req.Phone,
+		Phone:        phone,
 	}
 
 	// Get participant information using the already retrieved census
@@ -509,7 +528,7 @@ func (c *CSPHandlers) authFirstStep(
 	}
 
 	// Determine contact method based on census type
-	toDestinations, challengeType, err := determineContactMethod(census, &req, orgMember)
+	toDestinations, challengeType, err := determineContactMethod(census, org, &req, orgMember)
 	if err != nil {
 		return nil, err
 	}

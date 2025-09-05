@@ -18,8 +18,13 @@ var (
 	testThirdOrgAddress   = common.Address{0xca, 0xfe, 0x03}
 	testFourthOrgAddress  = common.Address{0xca, 0xfe, 0x04}
 	testNonExistentOrg    = common.Address{0x01, 0x02, 0x03, 0x04}
-	testPhone             = NewPhone("+34678909090")
+	testPlaintextPhone    = "+34678909090"
 )
+
+var testOrg = &Organization{
+	Address: testOrgAddress,
+	Country: "ES",
+}
 
 const (
 	testDBUserEmail  = "test@example.com"

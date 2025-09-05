@@ -587,7 +587,7 @@ func TestCSPVoting(t *testing.T) {
 						authReq := &handlers.AuthRequest{
 							Name:         "John",
 							MemberNumber: "P001",
-							Phone:        db.NewPhone("+34612345601"),
+							Phone:        "+34612345601",
 						}
 						authResp := requestAndParse[handlers.AuthResponse](t,
 							http.MethodPost, "", authReq,

@@ -181,7 +181,7 @@ func TestOrganizationMeta(t *testing.T) {
 		Meta: map[string]any{
 			"contact": map[string]any{
 				"email": "info@example.com",
-				"phone": "+34123456789",
+				"phone": "+34600456789",
 				"address": map[string]any{
 					"street":     "Gran Via",
 					"city":       "Madrid",
@@ -214,7 +214,7 @@ func TestOrganizationMeta(t *testing.T) {
 	contact, ok := complexMeta.Meta["contact"].(map[string]any)
 	c.Assert(ok, qt.IsTrue)
 	c.Assert(contact["email"], qt.Equals, "info@example.com")
-	c.Assert(contact["phone"], qt.Equals, "+34123456789")
+	c.Assert(contact["phone"], qt.Equals, "+34600456789")
 
 	address, ok := contact["address"].(map[string]any)
 	c.Assert(ok, qt.IsTrue)
@@ -235,7 +235,7 @@ func TestOrganizationMeta(t *testing.T) {
 		Meta: map[string]any{
 			"contact": map[string]any{
 				"email":   "info@example.com", // Preserve original field
-				"phone":   "+34987654321",     // Update phone
+				"phone":   "+34600654321",     // Update phone
 				"website": "www.example.com",  // Add new field
 				"address": map[string]any{ // Preserve nested object
 					"street":     "Gran Via",
@@ -272,7 +272,7 @@ func TestOrganizationMeta(t *testing.T) {
 	// Verify updated nested fields
 	contact, ok = updatedNestedMeta.Meta["contact"].(map[string]any)
 	c.Assert(ok, qt.IsTrue)
-	c.Assert(contact["phone"], qt.Equals, "+34987654321")      // Updated field
+	c.Assert(contact["phone"], qt.Equals, "+34600654321")      // Updated field
 	c.Assert(contact["website"], qt.Equals, "www.example.com") // New field
 
 	// Verify original nested fields remain intact

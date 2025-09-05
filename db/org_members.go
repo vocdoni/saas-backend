@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"net/mail"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -23,12 +24,8 @@ func (ms *MongoStorage) SetOrgMember(salt string, orgMember *OrgMember) (string,
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	if orgMember.OrgAddress.Cmp(common.Address{}) == 0 {
-		return "", ErrInvalidData
-	}
-
 	// check that the org exists
-	_, err := ms.Organization(orgMember.OrgAddress)
+	org, err := ms.Organization(orgMember.OrgAddress)
 	if err != nil {
 		if err == ErrNotFound {
 			return "", ErrInvalidData
@@ -36,39 +33,25 @@ func (ms *MongoStorage) SetOrgMember(salt string, orgMember *OrgMember) (string,
 		return "", fmt.Errorf("organization not found: %w", err)
 	}
 
-	// Phone handling is now done by the Phone type itself
-	if orgMember.Phone != nil && !orgMember.Phone.IsEmpty() {
-		// Ensure the phone has the correct org address for hashing
-		orgMember.Phone.HashWithOrgAddress(orgMember.OrgAddress)
-	}
-	if orgMember.Password != "" {
-		// store only the hashed password
-		orgMember.HashedPass = internal.HashPassword(salt, orgMember.Password)
-		orgMember.Password = ""
+	member, errs := prepareOrgMember(org, orgMember, salt, time.Now())
+	if len(errs) != 0 {
+		return "", fmt.Errorf("%s", strings.Join(errorsAsStrings(errs), ", "))
 	}
 
-	if orgMember.ID != primitive.NilObjectID {
-		// if the orgMember exists, update it with the new data
-		orgMember.UpdatedAt = time.Now()
-	} else {
-		// if the orgMember doesn't exist, create the corresponding id
-		orgMember.ID = primitive.NewObjectID()
-		orgMember.CreatedAt = time.Now()
-	}
-	updateDoc, err := dynamicUpdateDocument(orgMember, nil)
+	updateDoc, err := dynamicUpdateDocument(member, nil)
 	if err != nil {
 		return "", err
 	}
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
-	filter := bson.M{"_id": orgMember.ID}
+	filter := bson.M{"_id": member.ID}
 	opts := options.Update().SetUpsert(true)
 	_, err = ms.orgMembers.UpdateOne(ctx, filter, updateDoc, opts)
 	if err != nil {
 		return "", err
 	}
 
-	return orgMember.ID.Hex(), nil
+	return member.ID.Hex(), nil
 }
 
 // DeleteOrgMember removes a orgMember
@@ -139,65 +122,58 @@ type BulkOrgMembersJob struct {
 	Errors   []error
 }
 
+// ErrorsAsStrings returns the errors as a slice of strings
 func (j *BulkOrgMembersJob) ErrorsAsStrings() []string {
+	return errorsAsStrings(j.Errors)
+}
+
+// errorsAsStrings converts a slice of errors to a slice of strings
+func errorsAsStrings(errs []error) []string {
 	s := []string{}
-	for _, err := range j.Errors {
+	for _, err := range errs {
 		s = append(s, err.Error())
 	}
 	return s
 }
 
-// validateBulkOrgMembers validates the input parameters for bulk org members
-func (ms *MongoStorage) validateBulkOrgMembers(
-	orgAddress common.Address,
-	orgMembers []OrgMember,
-) (*Organization, error) {
-	// Early returns for invalid input
-	if len(orgMembers) == 0 {
-		return nil, nil // Not an error, just no work to do
-	}
-	if orgAddress.Cmp(common.Address{}) == 0 {
-		return nil, ErrInvalidData
-	}
-
-	// Check that the organization exists
-	org, err := ms.Organization(orgAddress)
-	if err != nil {
-		return nil, err
-	}
-
-	return org, nil
-}
-
-// prepareOrgMember processes a member for storage
-func prepareOrgMember(member *OrgMember, orgAddress common.Address, salt string, currentTime time.Time) []error {
+// prepareOrgMember processes a member for storage by:
+//   - Setting the organization address
+//   - Setting the creation timestamp
+//   - Hashing sensitive data (email, phone, password)
+//   - Not including original sensitive data
+func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime time.Time) (
+	*OrgMember, []error,
+) {
+	member := *m
 	var errors []error
 
 	// Assign a new internal ID if not provided
 	if member.ID == primitive.NilObjectID {
 		member.ID = primitive.NewObjectID()
+		member.CreatedAt = currentTime
+	} else {
+		member.UpdatedAt = currentTime
 	}
-	member.OrgAddress = orgAddress
-	member.CreatedAt = currentTime
+	member.OrgAddress = org.Address
 
 	// check if mail is valid
 	if member.Email != "" {
 		if _, err := mail.ParseAddress(member.Email); err != nil {
-			errors = append(errors, fmt.Errorf("could not parse from email: %s %v", member.Email, err))
+			errors = append(errors, fmt.Errorf("could not parse email: %s %v", member.Email, err))
 			// If email is invalid, set it to empty and store the error
 			member.Email = ""
 		}
 	}
 
-	// Phone handling is now done by the Phone type itself
-	if member.Phone != nil && !member.Phone.IsEmpty() {
-		if err := member.Phone.Validate(); err != nil {
-			errors = append(errors, fmt.Errorf("invalid phone: %s %v", member.Phone, err))
-			member.Phone = nil
+	// Hash phone if present
+	if member.PlaintextPhone != "" {
+		phone, err := NewHashedPhone(member.PlaintextPhone, org)
+		if err != nil {
+			errors = append(errors, fmt.Errorf("invalid phone %q: %w", member.PlaintextPhone, err))
 		} else {
-			// Ensure the phone has the correct org address for hashing
-			member.Phone.HashWithOrgAddress(orgAddress)
+			member.Phone = phone
 		}
+		member.PlaintextPhone = ""
 	}
 
 	// Hash password if present
@@ -213,29 +189,29 @@ func prepareOrgMember(member *OrgMember, orgAddress common.Address, salt string,
 			member.BirthDate = "" // Reset invalid birthdate
 		}
 	}
-	return errors
+	return &member, errors
 }
 
 // createOrgMemberBulkOperations creates a batch of members using bulk write operations,
 // and returns the number of members added (or updated) and any errors encountered.
 func (ms *MongoStorage) createOrgMemberBulkOperations(
-	members []OrgMember,
-	orgAddress common.Address,
+	org *Organization,
+	members []*OrgMember,
 	salt string,
 	currentTime time.Time,
 ) (int, []error) {
 	var bulkOps []mongo.WriteModel
 	var errors []error
 
-	for _, member := range members {
+	for _, m := range members {
 		// Prepare the member
-		validationErrors := prepareOrgMember(&member, orgAddress, salt, currentTime)
+		member, validationErrors := prepareOrgMember(org, m, salt, currentTime)
 		errors = append(errors, validationErrors...)
 
 		// Create filter for existing members and update document
 		filter := bson.M{
 			"_id":        member.ID,
-			"orgAddress": orgAddress,
+			"orgAddress": member.OrgAddress,
 		}
 
 		updateDoc, err := dynamicUpdateDocument(member, nil)
@@ -310,8 +286,8 @@ func startOrgMemberProgressReporter(
 
 // processOrgMemberBatches processes members in batches and sends progress updates
 func (ms *MongoStorage) processOrgMemberBatches(
-	orgMembers []OrgMember,
-	orgAddress common.Address,
+	org *Organization,
+	orgMembers []*OrgMember,
 	salt string,
 	progressChan chan<- *BulkOrgMembersJob,
 ) {
@@ -349,8 +325,8 @@ func (ms *MongoStorage) processOrgMemberBatches(
 
 		// Process the batch and get number of added members
 		added, errs := ms.createOrgMemberBulkOperations(
+			org,
 			orgMembers[start:end],
-			orgAddress,
 			salt,
 			currentTime,
 		)
@@ -366,26 +342,23 @@ func (ms *MongoStorage) processOrgMemberBatches(
 }
 
 // SetBulkOrgMembers adds multiple organization members to the database in batches of 200 entries
-// and updates already existing members (decided by combination of internal id and orgAddress)
-// Requires an existing organization
+// and updates already existing members (decided by combination of internal id and orgAddress).
+// Requires an existing organization.
 // Returns a channel that sends the percentage of members processed every 10 seconds.
 // This function must be called in a goroutine.
-func (ms *MongoStorage) SetBulkOrgMembers(
-	orgAddress common.Address, salt string,
-	orgMembers []OrgMember,
+func (ms *MongoStorage) SetBulkOrgMembers(org *Organization, members []*OrgMember, salt string,
 ) (chan *BulkOrgMembersJob, error) {
-	progressChan := make(chan *BulkOrgMembersJob, 10)
-
-	// Validate input parameters
-	org, err := ms.validateBulkOrgMembers(orgAddress, orgMembers)
-	if err != nil || org == nil {
-		close(progressChan)
-		return progressChan, err
+	// Early returns for invalid input
+	if len(members) == 0 {
+		return nil, nil // Not an error, just no work to do
+	}
+	if org.Address.Cmp(common.Address{}) == 0 {
+		return nil, ErrInvalidData
 	}
 
 	// Start processing in a goroutine
-	go ms.processOrgMemberBatches(orgMembers, orgAddress, salt, progressChan)
-
+	progressChan := make(chan *BulkOrgMembersJob, 10)
+	go ms.processOrgMemberBatches(org, members, salt, progressChan)
 	return progressChan, nil
 }
 

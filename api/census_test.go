@@ -37,7 +37,7 @@ func TestCensus(t *testing.T) {
 				MemberNumber: "P001",
 				Name:         "Alice Doe",
 				Email:        "alice.doe@example.com",
-				Phone:        "+34111111111",
+				Phone:        "+34611111111",
 				Password:     "password111",
 				Other: map[string]any{
 					"department": "Engineering",
@@ -48,7 +48,7 @@ func TestCensus(t *testing.T) {
 				MemberNumber: "P002",
 				Name:         "Bob Smith",
 				Email:        "bob.smith@example.com",
-				Phone:        "+34222222222",
+				Phone:        "+34622222222",
 				Password:     "password222",
 				Other: map[string]any{
 					"department": "Marketing",
@@ -117,7 +117,7 @@ func TestCensus(t *testing.T) {
 				MemberNumber: "P003",
 				Name:         "Carla Johnson",
 				Email:        "carla.johnson@example.com",
-				Phone:        "+34333333333",
+				Phone:        "+34633333333",
 				Password:     "password333",
 				Other: map[string]any{
 					"department": "Sales",
@@ -128,7 +128,7 @@ func TestCensus(t *testing.T) {
 				MemberNumber: "P004",
 				Name:         "Diego Brown",
 				Email:        "diego.brown@example.com",
-				Phone:        "+34444444444",
+				Phone:        "+34644444444",
 				Password:     "password444",
 				Other: map[string]any{
 					"department": "HR",
@@ -162,7 +162,7 @@ func TestCensus(t *testing.T) {
 				MemberNumber: "P005",
 				Name:         "Elsa Smith",
 				Email:        "elsa.smith@example.com",
-				Phone:        "+34555555555",
+				Phone:        "+34655555555",
 				Password:     "password555",
 				Other: map[string]any{
 					"department": "Sales",
@@ -298,21 +298,21 @@ func TestCensus(t *testing.T) {
 				MemberNumber: "P007", // Same member number
 				Name:         "Duplicate User7 A",
 				Email:        "duplicate7a@example.com",
-				Phone:        "+34777777111",
+				Phone:        "+34677777111",
 				Password:     "password7a",
 			},
 			{
 				MemberNumber: "P007", // Same member number
 				Name:         "Duplicate User7 B",
 				Email:        "duplicate7b@example.com",
-				Phone:        "+34777777222",
+				Phone:        "+34677777222",
 				Password:     "password7b",
 			},
 			{
 				MemberNumber: "P007", // Same member number
 				Name:         "Duplicate User7 C",
 				Email:        "duplicate7c@example.com",
-				Phone:        "+34777777333",
+				Phone:        "+34677777333",
 				Password:     "password7c",
 			},
 		},
@@ -346,7 +346,7 @@ func TestCensus(t *testing.T) {
 				MemberNumber: "P008",
 				Name:         "Empty Email User",
 				Email:        "", // Empty email
-				Phone:        "+34888888888",
+				Phone:        "+34688888888",
 				Password:     "password888",
 			},
 		},

@@ -217,7 +217,7 @@ func TestCensusParticipant(t *testing.T) {
 
 		t.Run("EmptyMembers", func(_ *testing.T) {
 			// Test with empty members
-			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant("test_salt", censusID, nil)
+			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", censusID, nil)
 			c.Assert(err, qt.IsNil)
 
 			// Channel should be closed immediately for empty members
@@ -227,15 +227,15 @@ func TestCensusParticipant(t *testing.T) {
 
 		t.Run("InvalidData", func(_ *testing.T) {
 			// Test with empty census ID
-			members := []OrgMember{
+			members := []*OrgMember{
 				{
-					MemberNumber: "test1",
-					Email:        "test1@example.com",
-					Phone:        NewPhone("1234567890"),
-					Password:     "password1",
+					MemberNumber:   "test1",
+					Email:          "test1@example.com",
+					PlaintextPhone: "1234567890",
+					Password:       "password1",
 				},
 			}
-			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant("test_salt", "", members)
+			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", "", members)
 			c.Assert(err, qt.Equals, ErrInvalidData)
 
 			// Channel should be closed immediately for invalid data
@@ -244,16 +244,16 @@ func TestCensusParticipant(t *testing.T) {
 		})
 
 		t.Run("NonExistentCensus", func(_ *testing.T) {
-			members := []OrgMember{
+			members := []*OrgMember{
 				{
-					MemberNumber: "test1",
-					Email:        "test1@example.com",
-					Phone:        NewPhone("1234567890"),
-					Password:     "password1",
+					MemberNumber:   "test1",
+					Email:          "test1@example.com",
+					PlaintextPhone: "1234567890",
+					Password:       "password1",
 				},
 			}
 			// Test with non-existent census
-			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant("test_salt", primitive.NewObjectID().Hex(), members)
+			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", primitive.NewObjectID().Hex(), members)
 			c.Assert(err, qt.Not(qt.IsNil))
 
 			// Channel should be closed immediately for non-existent census
@@ -263,22 +263,22 @@ func TestCensusParticipant(t *testing.T) {
 
 		t.Run("SuccessfulBulkCreation", func(_ *testing.T) {
 			// Test successful bulk creation
-			members := []OrgMember{
+			members := []*OrgMember{
 				{
-					MemberNumber: "test1",
-					Email:        "test1@example.com",
-					Phone:        NewPhone("+34698111111"),
-					Password:     "password1",
+					MemberNumber:   "test1",
+					Email:          "test1@example.com",
+					PlaintextPhone: "+34698111111",
+					Password:       "password1",
 				},
 				{
-					MemberNumber: "test2",
-					Email:        "test2@example.com",
-					Phone:        NewPhone("+34698222222"),
-					Password:     "password2",
+					MemberNumber:   "test2",
+					Email:          "test2@example.com",
+					PlaintextPhone: "+34698222222",
+					Password:       "password2",
 				},
 			}
 
-			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant("test_salt", censusID, members)
+			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", censusID, members)
 			c.Assert(err, qt.IsNil)
 			c.Assert(progressChan, qt.Not(qt.IsNil))
 
@@ -292,10 +292,10 @@ func TestCensusParticipant(t *testing.T) {
 
 			// Verify members were created with hashed data
 			for _, p := range members {
-				member, err := testDB.OrgMemberByMemberNumber(testOrgAddress, p.MemberNumber)
+				member, err := testDB.OrgMemberByMemberNumber(testOrg.Address, p.MemberNumber)
 				c.Assert(err, qt.IsNil)
 				c.Assert(member.Email, qt.Not(qt.Equals), "")
-				c.Assert(member.Phone.GetHashed(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, p.Phone.original))
+				c.Assert(member.Phone.Bytes(), qt.DeepEquals, internal.HashOrgData(testOrg.Address, p.PlaintextPhone))
 				c.Assert(member.Password, qt.Equals, "")
 				c.Assert(member.HashedPass, qt.Not(qt.Equals), "")
 				c.Assert(member.CreatedAt.IsZero(), qt.IsFalse)
@@ -310,23 +310,23 @@ func TestCensusParticipant(t *testing.T) {
 
 		t.Run("UpdateExistingMembers", func(_ *testing.T) {
 			// Create members first
-			members := []OrgMember{
+			members := []*OrgMember{
 				{
-					MemberNumber: "update1",
-					Email:        "update1@example.com",
-					Phone:        NewPhone("+34698123456"),
-					Password:     "password1",
+					MemberNumber:   "update1",
+					Email:          "update1@example.com",
+					PlaintextPhone: "+34698123456",
+					Password:       "password1",
 				},
 				{
-					MemberNumber: "update2",
-					Email:        "update2@example.com",
-					Phone:        NewPhone("+34698654321"),
-					Password:     "password2",
+					MemberNumber:   "update2",
+					Email:          "update2@example.com",
+					PlaintextPhone: "+34698654321",
+					Password:       "password2",
 				},
 			}
 
 			// Create initial members
-			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant("test_salt", censusID, members)
+			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", censusID, members)
 			c.Assert(err, qt.IsNil)
 			c.Assert(progressChan, qt.Not(qt.IsNil))
 
@@ -346,9 +346,9 @@ func TestCensusParticipant(t *testing.T) {
 			member1, err := testDB.OrgMemberByMemberNumber(testOrgAddress, members[1].MemberNumber)
 			c.Assert(err, qt.IsNil)
 			members[1].ID = member1.ID
-			members[1].Phone = NewPhone("+34698111111")
+			members[1].PlaintextPhone = "+34698111111"
 
-			progressChan, err = testDB.SetBulkCensusOrgMemberParticipant("test_salt", censusID, members)
+			progressChan, err = testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", censusID, members)
 			c.Assert(err, qt.IsNil)
 			c.Assert(progressChan, qt.Not(qt.IsNil))
 
@@ -365,7 +365,7 @@ func TestCensusParticipant(t *testing.T) {
 				member, err := testDB.OrgMemberByMemberNumber(testOrgAddress, p.MemberNumber)
 				c.Assert(err, qt.IsNil)
 				c.Assert(member.Email, qt.Equals, p.Email)
-				c.Assert(member.Phone.GetHashed(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, p.Phone.original))
+				c.Assert(member.Phone.Bytes(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, p.PlaintextPhone))
 			}
 		})
 	})
