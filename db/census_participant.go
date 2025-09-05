@@ -270,13 +270,15 @@ func createCensusParticipantBulkOperations(
 
 		// Create participant filter and document
 		censusParticipantsFilter := bson.M{
-			"participantID": orgMember.ID,
-			"censusId":      censusID,
+			"participantID": orgMember.ID.Hex(),
+			"censusId":      censusID.Hex(),
 		}
+
+		// Create document for $set operation (without CreatedAt)
 		participantDoc := &CensusParticipant{
 			ParticipantID: orgMember.ID.Hex(),
 			CensusID:      censusID.Hex(),
-			CreatedAt:     currentTime,
+			UpdatedAt:     currentTime,
 		}
 
 		// Create participant update document
@@ -287,10 +289,26 @@ func createCensusParticipantBulkOperations(
 			continue
 		}
 
+		// Extract the $set part from the update document with type checking
+		setDoc, ok := updateParticipantDoc["$set"].(bson.M)
+		if !ok {
+			log.Warnw("failed to extract $set document for participant",
+				"error", "invalid $set type", "participantID", orgMember.ID.Hex())
+			continue
+		}
+
+		// Create combined update document with both $set and $setOnInsert
+		combinedUpdateDoc := bson.M{
+			"$set": setDoc,
+			"$setOnInsert": bson.M{
+				"createdAt": currentTime,
+			},
+		}
+
 		// Create participant upsert model
 		upsertCensusParticipantsModel := mongo.NewUpdateOneModel().
 			SetFilter(censusParticipantsFilter).
-			SetUpdate(updateParticipantDoc).
+			SetUpdate(combinedUpdateDoc).
 			SetUpsert(true)
 		bulkCensusParticipantsOps = append(bulkCensusParticipantsOps, upsertCensusParticipantsModel)
 	}
@@ -509,7 +527,6 @@ func (ms *MongoStorage) setBulkCensusParticipant(
 			ParticipantID: id,
 			LoginHash:     HashAuthTwoFaFields(*member, authFields, twoFaFields),
 			CensusID:      censusID,
-			CreatedAt:     currentTime,
 			UpdatedAt:     currentTime,
 		}
 
@@ -521,10 +538,26 @@ func (ms *MongoStorage) setBulkCensusParticipant(
 			continue
 		}
 
+		// Extract the $set part from the update document with type checking
+		setDoc, ok := updateParticipantDoc["$set"].(bson.M)
+		if !ok {
+			log.Warnw("failed to extract $set document for participant",
+				"error", "invalid $set type", "participantID", member.ID.Hex())
+			continue
+		}
+
+		// Create combined update document with both $set and $setOnInsert
+		combinedUpdateDoc := bson.M{
+			"$set": setDoc,
+			"$setOnInsert": bson.M{
+				"createdAt": currentTime,
+			},
+		}
+
 		// Create participant upsert model
 		upsertCensusParticipantsModel := mongo.NewUpdateOneModel().
 			SetFilter(censusParticipantsFilter).
-			SetUpdate(updateParticipantDoc).
+			SetUpdate(combinedUpdateDoc).
 			SetUpsert(true)
 		docs = append(docs, upsertCensusParticipantsModel)
 	}
