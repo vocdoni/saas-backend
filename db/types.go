@@ -140,7 +140,7 @@ type OrganizationCounters struct {
 }
 
 type OrganizationInvite struct {
-	ID                  primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	ID                  primitive.ObjectID `json:"id" bson:"_id"`
 	InvitationCode      string             `json:"invitationCode" bson:"invitationCode"`
 	OrganizationAddress common.Address     `json:"organizationAddress" bson:"organizationAddress"`
 	CurrentUserID       uint64             `json:"currentUserID" bson:"currentUserID"`
@@ -173,7 +173,7 @@ const (
 
 // Census represents the information of a set of census participants
 type Census struct {
-	ID          primitive.ObjectID   `json:"id" bson:"_id,omitempty"`
+	ID          primitive.ObjectID   `json:"id" bson:"_id"`
 	OrgAddress  common.Address       `json:"orgAddress" bson:"orgAddress"`
 	Type        CensusType           `json:"type" bson:"type"`
 	Size        int64                `json:"size" bson:"size"`
@@ -193,7 +193,7 @@ type Census struct {
 //nolint:lll
 type OrgMember struct {
 	// Also referred to as member UID
-	ID primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	ID primitive.ObjectID `json:"id" bson:"_id"`
 	// OrgAddress can be used for future sharding
 	OrgAddress     common.Address `json:"orgAddress" bson:"orgAddress"`
 	Email          string         `json:"email" bson:"email"`
@@ -310,7 +310,7 @@ type OrgMemberAggregationResults struct {
 // An Organization members' group is a precursor of a census, and is simply a
 // collection of members that are grouped together for a specific purpose
 type OrganizationMemberGroup struct {
-	ID          primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	ID          primitive.ObjectID `json:"id" bson:"_id"`
 	OrgAddress  common.Address     `json:"orgAddress" bson:"orgAddress"`
 	Title       string             `json:"title" bson:"title"`
 	Description string             `json:"description" bson:"description"`
@@ -355,7 +355,7 @@ type Process struct {
 //
 //nolint:lll
 type ProcessesBundle struct {
-	ID         primitive.ObjectID  `json:"id" bson:"_id,omitempty"`                                                               // Unique identifier for the bundle
+	ID         primitive.ObjectID  `json:"id" bson:"_id"`                                                                         // Unique identifier for the bundle
 	Census     Census              `json:"census" bson:"census"`                                                                  // The census associated with this bundle
 	OrgAddress common.Address      `json:"orgAddress" bson:"orgAddress"`                                                          // The organization that owns this bundle
 	Processes  []internal.HexBytes `json:"processes" bson:"processes" swaggertype:"array,string" format:"hex" example:"deadbeef"` // Array of process IDs included in this bundle
@@ -424,7 +424,7 @@ const (
 // Job represents a persistent import job with its results and errors.
 // This allows clients to query job status and errors even after server restarts.
 type Job struct {
-	ID          primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	ID          primitive.ObjectID `json:"id" bson:"_id"`
 	JobID       string             `json:"jobId" bson:"jobId"`           // The hex job ID
 	Type        JobType            `json:"type" bson:"type"`             // Job type constant
 	OrgAddress  common.Address     `json:"orgAddress" bson:"orgAddress"` // For authorization
