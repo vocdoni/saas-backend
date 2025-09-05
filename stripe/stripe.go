@@ -22,10 +22,10 @@ import (
 
 // ProductsIDs contains the Stripe product IDs for different subscription tiers
 var ProductsIDs = []string{
-	"prod_R3LTVsjklmuQAL", // Essential
-	"prod_R0kTryoMNl8I19", // Premium
-	"prod_RFObcbvED7MYbz", // Free
-	"prod_RHurAb3OjkgJRy", // Custom
+	"prod_R3LTVsjklmuQAL", // Essential // PlanID=1
+	"prod_R0kTryoMNl8I19", // Premium   // PlanID=2
+	"prod_RFObcbvED7MYbz", // Free      // PlanID=3
+	"prod_RHurAb3OjkgJRy", // Custom    // PlanID=4
 }
 
 // ReturnStatus represents the response structure for checkout session status
