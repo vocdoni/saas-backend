@@ -909,7 +909,7 @@ type AddMembersResponse struct {
 	Errors []string `json:"errors"`
 
 	// Job ID for tracking the addition process
-	JobID internal.HexBytes `json:"jobId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	JobID internal.ObjectID `json:"jobId,omitempty"`
 }
 
 // AddMembersJobResponse defines the response for the status of an async job of member addition
@@ -1083,7 +1083,7 @@ type CreateOrganizationTicketRequest struct {
 // swagger:model JobInfo
 type JobInfo struct {
 	// Unique job identifier
-	JobID string `json:"jobId"`
+	JobID internal.ObjectID `json:"jobId"`
 
 	// Type of job
 	Type db.JobType `json:"type"`
@@ -1126,7 +1126,7 @@ func JobFromDB(job *db.Job) JobInfo {
 		return JobInfo{}
 	}
 	return JobInfo{
-		JobID:       job.JobID,
+		JobID:       job.ID,
 		Type:        job.Type,
 		Total:       job.Total,
 		Added:       job.Added,

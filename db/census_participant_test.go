@@ -513,7 +513,7 @@ func TestCensusParticipant(t *testing.T) {
 
 // TestCreateCensusParticipantBulkOperationsFiltering specifically tests the filtering functionality
 // in the createCensusParticipantBulkOperations function, focusing on ensuring
-// that "participantID": orgMember.ID.Hex() works correctly for upserts
+// that "participantID": orgMember.ID works correctly for upserts
 func TestCreateCensusParticipantBulkOperationsFiltering(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
@@ -587,7 +587,7 @@ func TestCreateCensusParticipantBulkOperationsFiltering(t *testing.T) {
 		for _, member := range members {
 			participant, err := testDB.CensusParticipant(censusID, member.ID)
 			c.Assert(err, qt.IsNil)
-			c.Assert(participant.ParticipantID, qt.Equals, member.ID.Hex())
+			c.Assert(participant.ParticipantID, qt.Equals, member.ID)
 			c.Assert(participant.CensusID, qt.Equals, censusID)
 		}
 
@@ -628,7 +628,7 @@ func TestCreateCensusParticipantBulkOperationsFiltering(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(len(participants), qt.Equals, 2) // Still only 2 participants
 
-		// Check that each participant's ParticipantID matches a member's ID.Hex()
+		// Check that each participant's ParticipantID matches a member's ID
 		// and that timestamps are properly updated
 		for _, participant := range participants {
 			original, exists := originalParticipants[participant.ParticipantID]
@@ -644,7 +644,7 @@ func TestCreateCensusParticipantBulkOperationsFiltering(t *testing.T) {
 					break
 				}
 			}
-			c.Assert(foundMatch, qt.IsTrue, qt.Commentf("ParticipantID should match a member's ID.Hex()"))
+			c.Assert(foundMatch, qt.IsTrue, qt.Commentf("ParticipantID should match a member's ID"))
 		}
 	})
 }

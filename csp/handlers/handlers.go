@@ -527,7 +527,7 @@ func (c *CSPHandlers) authFirstStep(
 
 	// Generate the token
 	return c.csp.BundleAuthToken(internal.HexBytesFromString(bundleID.String()),
-		internal.HexBytes(orgMember.ID.Hex()), toDestinations, challengeType)
+		internal.HexBytes(orgMember.ID.String()), toDestinations, challengeType)
 }
 
 // authSecondStep is the second step of the authentication process. It

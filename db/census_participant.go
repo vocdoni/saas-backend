@@ -278,7 +278,7 @@ func createCensusParticipantBulkOperations(
 		participantDoc := &CensusParticipant{
 			ParticipantID: orgMember.ID,
 			CensusID:      censusID,
-			CreatedAt:     currentTime,
+			UpdatedAt:     currentTime,
 		}
 
 		// Create participant update document
@@ -293,7 +293,7 @@ func createCensusParticipantBulkOperations(
 		setDoc, ok := updateParticipantDoc["$set"].(bson.M)
 		if !ok {
 			log.Warnw("failed to extract $set document for participant",
-				"error", "invalid $set type", "participantID", orgMember.ID.Hex())
+				"error", "invalid $set type", "participantID", orgMember.ID)
 			continue
 		}
 
@@ -541,7 +541,7 @@ func (ms *MongoStorage) setBulkCensusParticipant(
 		setDoc, ok := updateParticipantDoc["$set"].(bson.M)
 		if !ok {
 			log.Warnw("failed to extract $set document for participant",
-				"error", "invalid $set type", "participantID", member.ID.Hex())
+				"error", "invalid $set type", "participantID", member.ID)
 			continue
 		}
 

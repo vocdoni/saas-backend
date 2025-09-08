@@ -6,6 +6,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -14,7 +15,7 @@ func TestJobOperations(t *testing.T) {
 	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
 
 	// Test data
-	jobID := "test-job-123"
+	jobID := internal.NewObjectID()
 	jobType := JobTypeOrgMembers
 	orgAddress := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	total := 100
@@ -27,7 +28,7 @@ func TestJobOperations(t *testing.T) {
 	job, err := testDB.Job(jobID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(job, qt.IsNotNil)
-	c.Assert(job.JobID, qt.Equals, jobID)
+	c.Assert(job.ID, qt.Equals, jobID)
 	c.Assert(job.Type, qt.Equals, jobType)
 	c.Assert(job.OrgAddress, qt.Equals, orgAddress)
 	c.Assert(job.Total, qt.Equals, total)
@@ -50,7 +51,7 @@ func TestJobOperations(t *testing.T) {
 	c.Assert(job.CompletedAt.IsZero(), qt.IsFalse)
 
 	// Test non-existent job
-	_, err = testDB.Job("non-existent-job")
+	_, err = testDB.Job(internal.NewObjectID())
 	c.Assert(err, qt.Equals, ErrNotFound)
 }
 
@@ -60,7 +61,7 @@ func TestSetJob(t *testing.T) {
 
 	// Test data
 	job := &Job{
-		JobID:       "test-job-456",
+		ID:          internal.NewObjectID(),
 		Type:        JobTypeCensusParticipants,
 		OrgAddress:  common.HexToAddress("0x9876543210987654321098765432109876543210"),
 		Total:       50,
@@ -82,7 +83,7 @@ func TestSetJob(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 
 	// Verify update
-	retrievedJob, err := testDB.Job(job.JobID)
+	retrievedJob, err := testDB.Job(job.ID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(retrievedJob.Added, qt.Equals, 30)
 	c.Assert(len(retrievedJob.Errors), qt.Equals, 2)

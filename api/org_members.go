@@ -12,7 +12,6 @@ import (
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/log"
-	"go.vocdoni.io/dvote/util"
 )
 
 // addMembersToOrgWorkers is a map of job identifiers to the progress of adding members to a census.
@@ -175,23 +174,23 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	// if async create a new job identifier
-	jobID := internal.HexBytes(util.RandomBytes(16))
+	jobID := internal.NewObjectID()
 
 	// Create persistent job record
-	if err := a.db.CreateJob(jobID.String(), db.JobTypeOrgMembers, org.Address, len(members.Members)); err != nil {
-		log.Warnw("failed to create persistent job record", "error", err, "jobId", jobID.String())
+	if err := a.db.CreateJob(jobID, db.JobTypeOrgMembers, org.Address, len(members.Members)); err != nil {
+		log.Warnw("failed to create persistent job record", "error", err, "jobId", jobID)
 		// Continue with in-memory only (fallback)
 	}
 
 	go func() {
 		for p := range progressChan {
 			// Store progress updates in a map that is read by another endpoint to check a job status
-			addMembersToOrgWorkers.Store(jobID.String(), p)
+			addMembersToOrgWorkers.Store(jobID, p)
 
 			// When job completes, persist final results
 			if p.Progress == 100 {
-				if err := a.db.CompleteJob(jobID.String(), p.Added, p.ErrorsAsStrings()); err != nil {
-					log.Warnw("failed to persist job completion", "error", err, "jobId", jobID.String())
+				if err := a.db.CompleteJob(jobID, p.Added, p.ErrorsAsStrings()); err != nil {
+					log.Warnw("failed to persist job completion", "error", err, "jobId", jobID)
 				}
 			}
 		}
@@ -224,7 +223,7 @@ func (a *API) addOrganizationMembersJobStatusHandler(w http.ResponseWriter, r *h
 	}
 
 	// First check in-memory for active jobs
-	if v, ok := addMembersToOrgWorkers.Load(jobID.String()); ok {
+	if v, ok := addMembersToOrgWorkers.Load(jobID); ok {
 		p, ok := v.(*db.BulkOrgMembersJob)
 		if !ok {
 			errors.ErrGenericInternalServerError.Withf("invalid job status type").Write(w)
@@ -234,7 +233,7 @@ func (a *API) addOrganizationMembersJobStatusHandler(w http.ResponseWriter, r *h
 			go func() {
 				// Schedule the deletion of the job after 60 seconds
 				time.Sleep(60 * time.Second)
-				addMembersToOrgWorkers.Delete(jobID.String())
+				addMembersToOrgWorkers.Delete(jobID)
 			}()
 		}
 		apicommon.HTTPWriteJSON(w, apicommon.AddMembersJobResponse{
@@ -247,10 +246,10 @@ func (a *API) addOrganizationMembersJobStatusHandler(w http.ResponseWriter, r *h
 	}
 
 	// If not in memory, check database for completed jobs
-	job, err := a.db.Job(jobID.String())
+	job, err := a.db.Job(jobID)
 	if err != nil {
 		if err == db.ErrNotFound {
-			errors.ErrJobNotFound.Withf("%s", jobID.String()).Write(w)
+			errors.ErrJobNotFound.Withf("%s", jobID).Write(w)
 			return
 		}
 		errors.ErrGenericInternalServerError.Withf("failed to get job: %v", err).Write(w)

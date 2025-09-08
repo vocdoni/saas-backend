@@ -11,7 +11,6 @@ import (
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/log"
-	"go.vocdoni.io/dvote/util"
 )
 
 const (
@@ -204,27 +203,27 @@ func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	// if async create a new job identifier
-	jobID := internal.HexBytes(util.RandomBytes(16))
+	jobID := internal.NewObjectID()
 
 	// Create persistent job record
-	if err := a.db.CreateJob(jobID.String(), db.JobTypeCensusParticipants, census.OrgAddress, len(members.Members)); err != nil {
-		log.Warnw("failed to create persistent job record", "error", err, "jobId", jobID.String())
+	if err := a.db.CreateJob(jobID, db.JobTypeCensusParticipants, census.OrgAddress, len(members.Members)); err != nil {
+		log.Warnw("failed to create persistent job record", "error", err, "jobId", jobID)
 		// Continue with in-memory only (fallback)
 	}
 
 	go func() {
 		for p := range progressChan {
 			// We need to drain the channel to avoid blocking
-			addParticipantsToCensusWorkers.Store(jobID.String(), p)
+			addParticipantsToCensusWorkers.Store(jobID, p)
 
 			// When job completes, persist final results
 			if p.Progress == 100 {
 				// we pass CompleteJob an empty errors slice, because SetBulkCensusOrgMemberParticipant
 				// doesn't collect errors, it only reports progress over the channel.
-				if err := a.db.CompleteJob(jobID.String(), p.Added, []string{}); err != nil {
+				if err := a.db.CompleteJob(jobID, p.Added, []string{}); err != nil {
 					log.Warnw("failed to persist job completion", "error", err, "jobId", jobID.String())
 				}
-				addParticipantsToCensusWorkers.Delete(jobID.String())
+				addParticipantsToCensusWorkers.Delete(jobID)
 			}
 		}
 	}()
@@ -253,7 +252,7 @@ func (a *API) censusAddParticipantsJobStatusHandler(w http.ResponseWriter, r *ht
 	}
 
 	// First check in-memory for active jobs
-	if v, ok := addParticipantsToCensusWorkers.Load(jobID.String()); ok {
+	if v, ok := addParticipantsToCensusWorkers.Load(jobID); ok {
 		p, ok := v.(*db.BulkCensusParticipantStatus)
 		if !ok {
 			errors.ErrGenericInternalServerError.Withf("invalid job status type").Write(w)
@@ -264,10 +263,10 @@ func (a *API) censusAddParticipantsJobStatusHandler(w http.ResponseWriter, r *ht
 	}
 
 	// If not in memory, check database for completed jobs
-	job, err := a.db.Job(jobID.String())
+	job, err := a.db.Job(jobID)
 	if err != nil {
 		if err == db.ErrNotFound {
-			errors.ErrJobNotFound.Withf("%s", jobID.String()).Write(w)
+			errors.ErrJobNotFound.Withf("%s", jobID).Write(w)
 			return
 		}
 		errors.ErrGenericInternalServerError.Withf("failed to get job: %v", err).Write(w)

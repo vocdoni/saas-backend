@@ -186,12 +186,9 @@ func TestCensus(t *testing.T) {
 	// Make the request with async=true and verify the response contains a job ID
 	asyncResponse := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, adminToken, asyncMembers,
 		censusEndpoint, censusID.String()+"?async=true")
-	c.Assert(len(asyncResponse.JobID), qt.Equals, 16) // JobID should be 16 bytes
+	c.Assert(len(asyncResponse.JobID), qt.Equals, 12) // JobID should be 12 bytes
 
-	// Convert the job ID to a hex string for the API call
-	var jobIDHex internal.HexBytes
-	jobIDHex.SetBytes(asyncResponse.JobID)
-	t.Logf("Async job ID: %s\n", jobIDHex.String())
+	t.Logf("Async job ID: %s\n", asyncResponse.JobID)
 
 	// Check the job progress
 	var (
@@ -202,7 +199,7 @@ func TestCensus(t *testing.T) {
 	// Poll the job status until it's complete or max attempts reached
 	for range maxAttempts {
 		jobStatus = requestAndParse[db.BulkCensusParticipantStatus](t, http.MethodGet, adminToken, nil,
-			"census", "job", jobIDHex.String())
+			"census", "job", asyncResponse.JobID.String())
 
 		t.Logf("Job progress: %d%%, Added: %d, Total: %d\n",
 			jobStatus.Progress, jobStatus.Added, jobStatus.Total)
@@ -235,7 +232,7 @@ func TestCensus(t *testing.T) {
 	c.Assert(job.Completed, qt.Equals, true)
 	c.Assert(job.CreatedAt.IsZero(), qt.Equals, false)
 	c.Assert(job.CompletedAt.IsZero(), qt.Equals, false)
-	c.Assert(job.JobID, qt.Equals, jobIDHex.String())
+	c.Assert(job.JobID, qt.Equals, asyncResponse.JobID)
 	t.Logf("Found job: ID=%s, Type=%s, Total=%d, Added=%d, Completed=%t",
 		job.JobID, job.Type, job.Total, job.Added, job.Completed)
 

@@ -432,8 +432,7 @@ const (
 // Job represents a persistent import job with its results and errors.
 // This allows clients to query job status and errors even after server restarts.
 type Job struct {
-	ID          internal.ObjectID `json:"id" bson:"_id,omitempty"`
-	JobID       string            `json:"jobId" bson:"jobId"`           // The hex job ID
+	ID          internal.ObjectID `json:"id" bson:"_id"`                // The hex job ID
 	Type        JobType           `json:"type" bson:"type"`             // Job type constant
 	OrgAddress  common.Address    `json:"orgAddress" bson:"orgAddress"` // For authorization
 	Total       int               `json:"total" bson:"total"`           // Total items processed

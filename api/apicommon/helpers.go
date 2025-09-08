@@ -68,14 +68,10 @@ func BundleIDFromRequest(r *http.Request) (internal.ObjectID, error) {
 }
 
 // JobIDFromRequest extracts and validates JobID from URL parameters.
-// It returns the JobID as internal.HexBytes or an error if the parameter
+// It returns the JobID as internal.ObjectID or an error if the parameter
 // is missing or invalid.
-func JobIDFromRequest(r *http.Request) (internal.HexBytes, error) {
-	jobID := internal.HexBytes{}
-	if err := jobID.ParseString(chi.URLParam(r, "jobId")); err != nil {
-		return nil, fmt.Errorf("invalid job ID: %w", err)
-	}
-	return jobID, nil
+func JobIDFromRequest(r *http.Request) (internal.ObjectID, error) {
+	return objectIDFromRequest(r, "jobId")
 }
 
 // UserIDFromRequest extracts and validates UserID from URL parameters.
