@@ -909,7 +909,7 @@ type AddMembersResponse struct {
 	Errors []string `json:"errors"`
 
 	// Job ID for tracking the addition process
-	JobID internal.ObjectID `json:"jobId,omitempty"`
+	JobID internal.ObjectID `json:"jobId,omitempty" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 }
 
 // AddMembersJobResponse defines the response for the status of an async job of member addition
