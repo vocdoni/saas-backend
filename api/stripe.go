@@ -267,7 +267,7 @@ func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if checkout.Amount == 0 || checkout.Address.Cmp(common.Address{}) == 0 {
+	if checkout.Address.Cmp(common.Address{}) == 0 {
 		errors.ErrMalformedBody.Withf("Missing required fields").Write(w)
 		return
 	}
@@ -294,7 +294,7 @@ func (a *API) createSubscriptionCheckoutHandler(w http.ResponseWriter, r *http.R
 	}
 
 	session, err := stripe.CreateSubscriptionCheckoutSession(
-		plan.StripePriceID, checkout.ReturnURL, checkout.Address.String(), org.Creator, checkout.Locale, checkout.Amount)
+		plan.StripePriceID, checkout.ReturnURL, checkout.Address.String(), org.Creator, checkout.Locale)
 	if err != nil {
 		errors.ErrStripeError.Withf("Cannot create session: %v", err).Write(w)
 		return

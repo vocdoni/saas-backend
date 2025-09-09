@@ -449,9 +449,6 @@ type SubscriptionPlan struct {
 
 	// Features available in this plan
 	Features SubscriptionFeatures `json:"features"`
-
-	// Census size tiers and pricing
-	CensusSizeTiers []SubscriptionPlanTier `json:"censusSizeTiers"`
 }
 
 // SubscriptionPlanFromDB converts a db.Plan to a SubscriptionPlan.
@@ -459,24 +456,16 @@ func SubscriptionPlanFromDB(plan *db.Plan) SubscriptionPlan {
 	if plan == nil {
 		return SubscriptionPlan{}
 	}
-	tiers := make([]SubscriptionPlanTier, 0, len(plan.CensusSizeTiers))
-	for _, t := range plan.CensusSizeTiers {
-		tiers = append(tiers, SubscriptionPlanTier{
-			Amount: t.Amount,
-			UpTo:   t.UpTo,
-		})
-	}
 	return SubscriptionPlan{
-		ID:              plan.ID,
-		Name:            plan.Name,
-		StripeID:        plan.StripeID,
-		StripePriceID:   plan.StripePriceID,
-		StartingPrice:   plan.StartingPrice,
-		Default:         plan.Default,
-		Organization:    SubscriptionPlanLimits(plan.Organization),
-		VotingTypes:     SubscriptionVotingTypes(plan.VotingTypes),
-		Features:        SubscriptionFeatures(plan.Features),
-		CensusSizeTiers: tiers,
+		ID:            plan.ID,
+		Name:          plan.Name,
+		StripeID:      plan.StripeID,
+		StripePriceID: plan.StripePriceID,
+		StartingPrice: plan.StartingPrice,
+		Default:       plan.Default,
+		Organization:  SubscriptionPlanLimits(plan.Organization),
+		VotingTypes:   SubscriptionVotingTypes(plan.VotingTypes),
+		Features:      SubscriptionFeatures(plan.Features),
 	}
 }
 
@@ -559,17 +548,6 @@ type SubscriptionFeatures struct {
 
 	// Whether eligible for phone support
 	PhoneSupport bool `json:"phoneSupport"`
-}
-
-// SubscriptionPlanTier represents a pricing tier of a subscription plan.
-// It is the mirror struct of db.PlanTier.
-// swagger:model SubscriptionPlanTier
-type SubscriptionPlanTier struct {
-	// Price amount in cents
-	Amount int64 `json:"amount"`
-
-	// Maximum census size for this tier
-	UpTo int64 `json:"upTo"`
 }
 
 // SubscriptionDetails represents the details of an organization's subscription.
@@ -656,9 +634,6 @@ type SubscriptionCheckout struct {
 
 	// URL to return to after checkout
 	ReturnURL string `json:"returnURL"`
-
-	// Amount in cents
-	Amount int64 `json:"amount"`
 
 	// Organization address
 	Address common.Address `json:"address"`

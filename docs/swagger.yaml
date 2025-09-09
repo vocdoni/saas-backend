@@ -637,9 +637,6 @@ definitions:
         items:
           type: integer
         type: array
-      amount:
-        description: Amount in cents
-        type: integer
       locale:
         description: Locale for the checkout page
         type: string
@@ -706,11 +703,6 @@ definitions:
     type: object
   apicommon.SubscriptionPlan:
     properties:
-      censusSizeTiers:
-        description: Census size tiers and pricing
-        items:
-          $ref: '#/definitions/apicommon.SubscriptionPlanTier'
-        type: array
       default:
         description: Whether this is the default plan
         type: boolean
@@ -764,15 +756,6 @@ definitions:
         type: integer
       users:
         description: Maximum number of users allowed
-        type: integer
-    type: object
-  apicommon.SubscriptionPlanTier:
-    properties:
-      amount:
-        description: Price amount in cents
-        type: integer
-      upTo:
-        description: Maximum census size for this tier
         type: integer
     type: object
   apicommon.SubscriptionUsage:
@@ -1040,10 +1023,6 @@ definitions:
     - OrgMemberTwoFaFieldPhone
   db.Plan:
     properties:
-      censusSizeTiers:
-        items:
-          $ref: '#/definitions/db.PlanTier'
-        type: array
       default:
         type: boolean
       features:
@@ -1079,13 +1058,6 @@ definitions:
       subOrgs:
         type: integer
       users:
-        type: integer
-    type: object
-  db.PlanTier:
-    properties:
-      amount:
-        type: integer
-      upTo:
         type: integer
     type: object
   db.Process:
