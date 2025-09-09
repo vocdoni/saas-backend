@@ -220,7 +220,6 @@ Content-Type: application/json
   "lookupKey": 1,
   "returnURL": "https://example.com/return",
   "address": "user@mail.com",
-  "amount": 1000
 }
 
 ### Get checkout session info

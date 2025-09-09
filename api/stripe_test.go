@@ -23,7 +23,6 @@ func TestStripeAPI(t *testing.T) {
 			checkoutReq := &apicommon.SubscriptionCheckout{
 				LookupKey: 1,
 				ReturnURL: "https://example.com/return",
-				Amount:    1000,
 				Address:   common.Address{}, // Zero address
 				Locale:    "en",
 			}
@@ -39,7 +38,6 @@ func TestStripeAPI(t *testing.T) {
 			checkoutReq := &apicommon.SubscriptionCheckout{
 				LookupKey: 1,
 				ReturnURL: "https://example.com/return",
-				Amount:    1000,
 				Address:   orgAddress, // Valid address
 				Locale:    "en",
 			}
@@ -54,26 +52,6 @@ func TestStripeAPI(t *testing.T) {
 				// Should not be a "Missing required fields" error
 				c.Assert(errorResp["error"], qt.Not(qt.Contains), "Missing required fields")
 			}
-		})
-
-		t.Run("MissingAmount", func(t *testing.T) {
-			// Test with zero amount - should fail
-			checkoutReq := &apicommon.SubscriptionCheckout{
-				LookupKey: 1,
-				ReturnURL: "https://example.com/return",
-				Amount:    0, // Zero amount
-				Address:   orgAddress,
-				Locale:    "en",
-			}
-
-			resp, status := testRequest(t, http.MethodPost, token, checkoutReq, "subscriptions", "checkout")
-			c.Assert(status, qt.Equals, http.StatusBadRequest, qt.Commentf("response: %s", resp))
-
-			// Verify the error message indicates missing required fields
-			var errorResp map[string]any
-			err := json.Unmarshal(resp, &errorResp)
-			c.Assert(err, qt.IsNil)
-			c.Assert(errorResp["error"], qt.Contains, "Missing required fields")
 		})
 	})
 }

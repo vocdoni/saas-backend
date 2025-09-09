@@ -206,21 +206,6 @@ func extractPlanMetadata(product *stripeapi.Product) (
 	return organizationData, votingTypesData, featuresData, nil
 }
 
-// processPriceTiers converts Stripe price tiers to application-specific plan tiers.
-func processPriceTiers(priceTiers []*stripeapi.PriceTier) []stripeDB.PlanTier {
-	var tiers []stripeDB.PlanTier
-	for _, tier := range priceTiers {
-		if tier.UpTo == 0 {
-			continue
-		}
-		tiers = append(tiers, stripeDB.PlanTier{
-			Amount: tier.FlatAmount,
-			UpTo:   tier.UpTo,
-		})
-	}
-	return tiers
-}
-
 // processProduct converts a Stripe product to an application-specific plan.
 func processProduct(index int, productID string, product *stripeapi.Product) (*stripeDB.Plan, error) {
 	organizationData, votingTypesData, featuresData, err := extractPlanMetadata(product)
@@ -228,25 +213,16 @@ func processProduct(index int, productID string, product *stripeapi.Product) (*s
 		return nil, err
 	}
 
-	price := product.DefaultPrice
-	startingPrice := price.UnitAmount
-	if len(price.Tiers) > 0 {
-		startingPrice = price.Tiers[0].FlatAmount
-	}
-
-	tiers := processPriceTiers(price.Tiers)
-
 	return &stripeDB.Plan{
-		ID:              uint64(index + 1),
-		Name:            product.Name,
-		StartingPrice:   startingPrice,
-		StripeID:        productID,
-		StripePriceID:   price.ID,
-		Default:         price.Metadata["Default"] == "true",
-		Organization:    organizationData,
-		VotingTypes:     votingTypesData,
-		Features:        featuresData,
-		CensusSizeTiers: tiers,
+		ID:            uint64(index + 1),
+		Name:          product.Name,
+		StartingPrice: product.DefaultPrice.UnitAmount,
+		StripeID:      productID,
+		StripePriceID: product.DefaultPrice.ID,
+		Default:       product.DefaultPrice.Metadata["Default"] == "true",
+		Organization:  organizationData,
+		VotingTypes:   votingTypesData,
+		Features:      featuresData,
 	}, nil
 }
 
@@ -281,7 +257,7 @@ func GetPlans() ([]*stripeDB.Plan, error) {
 // Overview of stripe checkout mechanics: https://docs.stripe.com/checkout/custom/quickstart
 // API description https://docs.stripe.com/api/checkout/sessions
 func CreateSubscriptionCheckoutSession(
-	priceID, returnURL, address, email, locale string, amount int64,
+	priceID, returnURL, address, email, locale string,
 ) (*stripeapi.CheckoutSession, error) {
 	if len(locale) == 0 {
 		locale = "auto"
@@ -296,7 +272,7 @@ func CreateSubscriptionCheckoutSession(
 		LineItems: []*stripeapi.CheckoutSessionLineItemParams{
 			{
 				Price:    stripeapi.String(priceID),
-				Quantity: stripeapi.Int64(amount),
+				Quantity: stripeapi.Int64(1),
 			},
 		},
 		// UI mode is set to embedded, since the client is integrated in our UI
