@@ -10,7 +10,6 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 func TestOrganizationMembers(t *testing.T) {
@@ -110,7 +109,7 @@ func TestOrganizationMembers(t *testing.T) {
 
 	// Test 2.5: Test with members missing some of the new optional fields
 	// Generate a new test member ID
-	pedroID := primitive.NewObjectID().Hex()
+	pedroID := internal.NewObjectID()
 	membersWithMissingFields := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
 			{
@@ -276,12 +275,9 @@ func TestOrganizationMembers(t *testing.T) {
 		t, http.MethodPost, adminToken, asyncMembers,
 		"organizations", orgAddress.String(), "members?async=true")
 	c.Assert(asyncResponse.JobID, qt.Not(qt.IsNil))
-	c.Assert(len(asyncResponse.JobID), qt.Equals, 16) // JobID should be 16 bytes
+	c.Assert(len(asyncResponse.JobID), qt.Equals, 12) // JobID should be 12 bytes
 
-	// Convert the job ID to a hex string for the API call
-	var jobIDHex internal.HexBytes
-	jobIDHex.SetBytes(asyncResponse.JobID)
-	t.Logf("Async job ID: %s\n", jobIDHex.String())
+	t.Logf("Async job ID: %s\n", asyncResponse.JobID)
 
 	// Test 5: Check the job progress
 	var (
@@ -295,7 +291,7 @@ func TestOrganizationMembers(t *testing.T) {
 	for attempts < maxAttempts && !completed {
 		jobStatus = requestAndParse[apicommon.AddMembersJobResponse](
 			t, http.MethodGet, adminToken, nil,
-			"organizations", orgAddress.String(), "members", "job", jobIDHex.String())
+			"organizations", orgAddress.String(), "members", "job", asyncResponse.JobID.String())
 
 		t.Logf("Job progress: %d%%, Added: %d, Total: %d, Errors: %d\n",
 			jobStatus.Progress, jobStatus.Added, jobStatus.Total, len(jobStatus.Errors))
@@ -334,7 +330,7 @@ func TestOrganizationMembers(t *testing.T) {
 	c.Assert(job.Completed, qt.Equals, true)
 	c.Assert(job.CreatedAt.IsZero(), qt.Equals, false)
 	c.Assert(job.CompletedAt.IsZero(), qt.Equals, false)
-	c.Assert(job.JobID, qt.Equals, jobIDHex.String())
+	c.Assert(job.JobID, qt.Equals, asyncResponse.JobID)
 	c.Assert(len(job.Errors), qt.Equals, 3) // Should have the validation errors
 	t.Logf("Found org_members job: ID=%s, Type=%s, Total=%d, Added=%d, Completed=%t, Errors=%d",
 		job.JobID, job.Type, job.Total, job.Added, job.Completed, len(job.Errors))
@@ -397,17 +393,14 @@ func TestOrganizationMembers(t *testing.T) {
 		"organizations", orgAddress.String(), "members?async=true")
 	c.Assert(asyncResponse2.JobID, qt.Not(qt.IsNil))
 
-	// Convert the job ID to a hex string
-	var jobIDHex2 internal.HexBytes
-	jobIDHex2.SetBytes(asyncResponse2.JobID)
-	t.Logf("Second async job ID: %s\n", jobIDHex2.String())
+	t.Logf("Second async job ID: %s\n", asyncResponse2.JobID.String())
 
 	// Wait for second job to complete
 	completed2 := false
 	for attempts := 0; attempts < maxAttempts && !completed2; attempts++ {
 		jobStatus2 := requestAndParse[apicommon.AddMembersJobResponse](
 			t, http.MethodGet, adminToken, nil,
-			"organizations", orgAddress.String(), "members", "job", jobIDHex2.String())
+			"organizations", orgAddress.String(), "members", "job", asyncResponse2.JobID.String())
 
 		if jobStatus2.Progress == 100 {
 			completed2 = true
@@ -426,8 +419,8 @@ func TestOrganizationMembers(t *testing.T) {
 
 	// Verify jobs are sorted by creation date (newest first)
 	// The second job should be first in the list
-	c.Assert(multipleJobsResponse.Jobs[0].JobID, qt.Equals, jobIDHex2.String())
-	c.Assert(multipleJobsResponse.Jobs[1].JobID, qt.Equals, jobIDHex.String())
+	c.Assert(multipleJobsResponse.Jobs[0].JobID, qt.Equals, asyncResponse2.JobID)
+	c.Assert(multipleJobsResponse.Jobs[1].JobID, qt.Equals, asyncResponse.JobID)
 
 	// Test pagination with multiple jobs
 	paginatedJobsResponse := requestAndParse[apicommon.JobsResponse](
@@ -436,7 +429,7 @@ func TestOrganizationMembers(t *testing.T) {
 	c.Assert(len(paginatedJobsResponse.Jobs), qt.Equals, 1)
 	c.Assert(paginatedJobsResponse.TotalPages, qt.Equals, 2)
 	c.Assert(paginatedJobsResponse.CurrentPage, qt.Equals, 1)
-	c.Assert(paginatedJobsResponse.Jobs[0].JobID, qt.Equals, jobIDHex2.String()) // Should be the newest job
+	c.Assert(paginatedJobsResponse.Jobs[0].JobID, qt.Equals, asyncResponse2.JobID) // Should be the newest job
 
 	// Test second page
 	paginatedJobsResponse2 := requestAndParse[apicommon.JobsResponse](
@@ -445,7 +438,7 @@ func TestOrganizationMembers(t *testing.T) {
 	c.Assert(len(paginatedJobsResponse2.Jobs), qt.Equals, 1)
 	c.Assert(paginatedJobsResponse2.TotalPages, qt.Equals, 2)
 	c.Assert(paginatedJobsResponse2.CurrentPage, qt.Equals, 2)
-	c.Assert(paginatedJobsResponse2.Jobs[0].JobID, qt.Equals, jobIDHex.String()) // Should be the older job
+	c.Assert(paginatedJobsResponse2.Jobs[0].JobID, qt.Equals, asyncResponse.JobID) // Should be the older job
 
 	// Test 6: Get organization members with pagination
 	// Test 6.1: Test with page=1 and pageSize=2
@@ -463,7 +456,7 @@ func TestOrganizationMembers(t *testing.T) {
 	// Test 7: Delete members
 	// Test 7.1: Test with valid member IDs
 	deleteRequest := &apicommon.DeleteMembersRequest{
-		IDs: []string{
+		IDs: []internal.ObjectID{
 			membersResponse.Members[0].ID,
 			membersResponse.Members[1].ID,
 		},
@@ -486,7 +479,7 @@ func TestOrganizationMembers(t *testing.T) {
 
 	// Test 7.4: Test with empty member IDs list
 	emptyDeleteRequest := &apicommon.DeleteMembersRequest{
-		IDs: []string{},
+		IDs: []internal.ObjectID{},
 	}
 	emptyDeleteResponse := requestAndParse[apicommon.DeleteMembersResponse](
 		t, http.MethodDelete, adminToken, emptyDeleteRequest,

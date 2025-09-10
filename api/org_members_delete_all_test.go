@@ -6,6 +6,7 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/internal"
 )
 
 func TestDeleteAllOrganizationMembers(t *testing.T) {
@@ -153,7 +154,7 @@ func TestDeleteSpecificMembersStillWorks(t *testing.T) {
 
 	// Delete only the first member by ID
 	deleteSpecificReq := &apicommon.DeleteMembersRequest{
-		IDs: []string{membersResponse.Members[0].ID},
+		IDs: []internal.ObjectID{membersResponse.Members[0].ID},
 	}
 
 	deleteResponse := requestAndParse[apicommon.DeleteMembersResponse](
