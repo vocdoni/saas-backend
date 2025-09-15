@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
@@ -48,8 +47,8 @@ func NewStripeHandlers(service *stripe.Service) *StripeHandlers {
 //	@Router			/subscriptions/webhook [post]
 func (h *StripeHandlers) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	if h == nil || h.service == nil {
-		log.Errorf("stripe webhook: Stripe service not available")
-		w.WriteHeader(http.StatusServiceUnavailable)
+		log.Errorf("stripe webhook: stripe service not available")
+		errors.ErrStripeWebhookError.With("stripe service not available").Write(w)
 		return
 	}
 
@@ -58,7 +57,7 @@ func (h *StripeHandlers) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	payload, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Errorf("stripe webhook: error reading request body: %s", err.Error())
-		w.WriteHeader(http.StatusBadRequest)
+		errors.ErrStripeWebhookError.With("error reading request body").Write(w)
 		return
 	}
 
@@ -66,33 +65,18 @@ func (h *StripeHandlers) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	signatureHeader := r.Header.Get("Stripe-Signature")
 	if signatureHeader == "" {
 		log.Errorf("stripe webhook: missing Stripe-Signature header")
-		w.WriteHeader(http.StatusBadRequest)
+		errors.ErrStripeWebhookError.With("missing Stripe-Signature header").Write(w)
 		return
 	}
 
 	// Process the webhook event
-	if err := h.service.ProcessWebhookEvent(payload, signatureHeader); err != nil {
+	if err := h.service.HandleWebhookEvent(payload, signatureHeader); err != nil {
 		log.Errorf("stripe webhook: failed to process event: %v", err)
-
-		// Check if it's a validation error (client error) or server error
-		if stripeErr, ok := err.(*stripe.StripeError); ok {
-			switch stripeErr.Code {
-			case "webhook_validation", "invalid_event":
-				w.WriteHeader(http.StatusBadRequest)
-			case "organization_not_found", "plan_not_found":
-				// These are business logic errors that shouldn't cause retries
-				w.WriteHeader(http.StatusOK)
-			default:
-				w.WriteHeader(http.StatusInternalServerError)
-			}
-		} else {
-			w.WriteHeader(http.StatusInternalServerError)
-		}
+		errors.ErrStripeWebhookError.With("failed to process event").Write(w)
 		return
 	}
 
-	// Success
-	w.WriteHeader(http.StatusOK)
+	apicommon.HTTPWriteOK(w)
 }
 
 // createSubscriptionCheckoutHandler godoc
@@ -112,7 +96,7 @@ func (h *StripeHandlers) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 //	@Router			/subscriptions/checkout [post]
 func (h *StripeHandlers) CreateSubscriptionCheckout(w http.ResponseWriter, r *http.Request) {
 	if h == nil || h.service == nil {
-		errors.ErrStripeError.Withf("Stripe service not available").Write(w)
+		errors.ErrStripeError.Withf("stripe service not available").Write(w)
 		return
 	}
 
@@ -129,7 +113,7 @@ func (h *StripeHandlers) CreateSubscriptionCheckout(w http.ResponseWriter, r *ht
 	}
 
 	if checkout.Address.Cmp(common.Address{}) == 0 {
-		errors.ErrMalformedBody.Withf("Missing required fields").Write(w)
+		errors.ErrMalformedBody.Withf("missing required fields").Write(w)
 		return
 	}
 
@@ -147,7 +131,7 @@ func (h *StripeHandlers) CreateSubscriptionCheckout(w http.ResponseWriter, r *ht
 	)
 	if err != nil {
 		log.Errorf("failed to create checkout session: %v", err)
-		errors.ErrStripeError.Withf("Cannot create session: %v", err).Write(w)
+		errors.ErrStripeError.Withf("cannot create checkout session: %v", err).Write(w)
 		return
 	}
 
@@ -184,7 +168,7 @@ func (h *StripeHandlers) GetCheckoutSession(w http.ResponseWriter, r *http.Reque
 	status, err := h.service.GetCheckoutSession(sessionID)
 	if err != nil {
 		log.Errorf("failed to get checkout session: %v", err)
-		errors.ErrStripeError.Withf("Cannot get session: %v", err).Write(w)
+		errors.ErrStripeError.Withf("cannot get checkout session: %v", err).Write(w)
 		return
 	}
 
@@ -228,7 +212,7 @@ func (h *StripeHandlers) CreateSubscriptionPortalSession(w http.ResponseWriter, 
 	session, err := h.service.CreatePortalSession(org.Creator)
 	if err != nil {
 		log.Errorf("failed to create portal session: %v", err)
-		errors.ErrStripeError.Withf("Cannot create customer portal session: %v", err).Write(w)
+		errors.ErrStripeError.Withf("cannot create customer portal session: %v", err).Write(w)
 		return
 	}
 
@@ -241,51 +225,6 @@ func (h *StripeHandlers) CreateSubscriptionPortalSession(w http.ResponseWriter, 
 	apicommon.HTTPWriteJSON(w, data)
 }
 
-// Repository adapter to make db.MongoStorage compatible with stripe.Repository
-type RepositoryAdapter struct {
-	db *db.MongoStorage
-}
-
-// NewRepositoryAdapter creates a new repository adapter
-func NewRepositoryAdapter(database *db.MongoStorage) *RepositoryAdapter {
-	return &RepositoryAdapter{db: database}
-}
-
-// Organization implements stripe.Repository
-func (r *RepositoryAdapter) Organization(address common.Address) (*db.Organization, error) {
-	return r.db.Organization(address)
-}
-
-// SetOrganization implements stripe.Repository
-func (r *RepositoryAdapter) SetOrganization(org *db.Organization) error {
-	return r.db.SetOrganization(org)
-}
-
-// SetOrganizationSubscription implements stripe.Repository
-func (r *RepositoryAdapter) SetOrganizationSubscription(address common.Address, subscription *db.OrganizationSubscription) error {
-	return r.db.SetOrganizationSubscription(address, subscription)
-}
-
-// Plan implements stripe.Repository
-func (r *RepositoryAdapter) Plan(planID uint64) (*db.Plan, error) {
-	return r.db.Plan(planID)
-}
-
-// PlanByStripeID implements stripe.Repository
-func (r *RepositoryAdapter) PlanByStripeID(stripeID string) (*db.Plan, error) {
-	return r.db.PlanByStripeID(stripeID)
-}
-
-// DefaultPlan implements stripe.Repository
-func (r *RepositoryAdapter) DefaultPlan() (*db.Plan, error) {
-	return r.db.DefaultPlan()
-}
-
-// SetPlan implements stripe.Repository
-func (r *RepositoryAdapter) SetPlan(plan *db.Plan) (uint64, error) {
-	return r.db.SetPlan(plan)
-}
-
 // InitializeStripeService initializes the Stripe service with proper configuration
 func (a *API) InitializeStripeService() error {
 	// Create Stripe configuration
@@ -294,14 +233,8 @@ func (a *API) InitializeStripeService() error {
 		return err
 	}
 
-	// Create repository adapter
-	repository := NewRepositoryAdapter(a.db)
-
-	// Create event store (in production, use Redis or database)
-	eventStore := stripe.NewMemoryEventStore(24 * time.Hour)
-
 	// Create service
-	service, err := stripe.NewService(config, repository, eventStore)
+	service, err := stripe.NewService(config, a.db)
 	if err != nil {
 		return err
 	}
