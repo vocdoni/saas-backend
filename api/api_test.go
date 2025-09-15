@@ -18,7 +18,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
-	stripeapi "github.com/stripe/stripe-go/v82"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp"
@@ -64,19 +63,10 @@ const (
 	testOAuthServiceURL = "http://test-oauth-service"
 )
 
-// Test fixtures for Stripe webhook events
 var (
-	mockCustomer = &stripeapi.Customer{
-		ID:    "cus_test123",
-		Email: "test@example.com",
-	}
-	mockSubscriptionID   = "sub_1234567890"
-	mockPremiumProductID = "prod_test_premium" // Premium Annual Subscription Plan
-	mockPremiumPlanID    = uint64(2)
-)
+	mockPlans = []*db.Plan{mockFreePlan, mockEssentialPlan, mockPremiumPlan}
 
-var mockPlans = []*db.Plan{
-	{
+	mockFreePlan = &db.Plan{
 		ID:                   1,
 		Name:                 "Free Plan",
 		StripeID:             "prod_test_free",
@@ -115,15 +105,15 @@ var mockPlans = []*db.Plan{
 			LiveStreaming:   false,
 			PhoneSupport:    false,
 		},
-	},
-	{
-		ID:                   mockPremiumPlanID,
-		Name:                 "Premium Annual Subscription Plan",
-		StripeID:             mockPremiumProductID,
-		StripeMonthlyPriceID: "price_month_test_premium",
-		MonthlyPrice:         4990,
-		StripeYearlyPriceID:  "price_year_test_premium",
-		YearlyPrice:          49900,
+	}
+	mockEssentialPlan = &db.Plan{
+		ID:                   2,
+		Name:                 "Essential Annual Subscription Plan",
+		StripeID:             "prod_test_essential",
+		StripeMonthlyPriceID: "price_month_test_essential",
+		MonthlyPrice:         1990,
+		StripeYearlyPriceID:  "price_year_test_essential",
+		YearlyPrice:          19900,
 		Default:              false,
 		Organization: db.PlanLimits{
 			Users:        5,
@@ -155,8 +145,46 @@ var mockPlans = []*db.Plan{
 			LiveStreaming:   true,
 			PhoneSupport:    true,
 		},
-	},
-}
+	}
+	mockPremiumPlan = &db.Plan{
+		ID:                   3,
+		Name:                 "Premium Annual Subscription Plan",
+		StripeID:             "prod_test_premium",
+		StripeMonthlyPriceID: "price_month_test_premium",
+		MonthlyPrice:         4990,
+		StripeYearlyPriceID:  "price_year_test_premium",
+		YearlyPrice:          49900,
+		Default:              false,
+		Organization: db.PlanLimits{
+			Users:        10,
+			SubOrgs:      2,
+			MaxProcesses: 40,
+			MaxCensus:    20000,
+			MaxDuration:  180,
+			CustomURL:    false,
+			Drafts:       false,
+		},
+		VotingTypes: db.VotingTypes{
+			Single:     true,
+			Multiple:   true,
+			Approval:   true,
+			Cumulative: true,
+			Ranked:     false,
+			Weighted:   true,
+		},
+		Features: db.Features{
+			Anonymous:       true,
+			Overwrite:       true,
+			LiveResults:     true,
+			Personalization: true,
+			EmailReminder:   false,
+			TwoFaSms:        0,
+			WhiteLabel:      true,
+			LiveStreaming:   true,
+			PhoneSupport:    true,
+		},
+	}
+)
 
 // testPort is the port used for the API tests.
 var testPort int

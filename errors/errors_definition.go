@@ -80,4 +80,5 @@ var (
 	ErrStripeError                 = Error{Code: 50005, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("server error: payment processing failed"), LogLevel: "error"}
 	ErrInternalStorageError        = Error{Code: 50006, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("server error: storage operation failed"), LogLevel: "error"}
 	ErrOAuthServerConnectionFailed = Error{Code: 50007, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("server error: OAuth server connection failed"), LogLevel: "error"}
+	ErrStripeWebhookError          = Error{Code: 50008, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("server error: stripe webhook failed"), LogLevel: "error"}
 )
