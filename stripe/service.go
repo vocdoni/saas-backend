@@ -6,66 +6,44 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	stripeapi "github.com/stripe/stripe-go/v82"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"go.vocdoni.io/dvote/log"
 )
 
-// Repository defines the database operations needed by the Stripe service
-type Repository interface {
-	Organization(address common.Address) (*db.Organization, error)
-	SetOrganization(org *db.Organization) error
-	SetOrganizationSubscription(address common.Address, subscription *db.OrganizationSubscription) error
-	Plan(planID uint64) (*db.Plan, error)
-	PlanByStripeID(stripeID string) (*db.Plan, error)
-	DefaultPlan() (*db.Plan, error)
-	SetPlan(plan *db.Plan) (uint64, error)
-}
-
-// EventStore defines the interface for storing and checking webhook events for idempotency
-type EventStore interface {
-	EventExists(eventID string) bool
-	MarkProcessed(eventID string) error
-}
-
 // Service provides the main business logic for Stripe operations
 type Service struct {
-	client      *Client
-	repository  Repository
-	eventStore  EventStore
-	lockManager *LockManager
-	config      *Config
+	client          *Client
+	db              *db.MongoStorage
+	processedEvents sync.Map // map[string]time.Time
+	lockManager     *LockManager
+	config          *Config
 }
 
 // NewService creates a new Stripe service
-func NewService(config *Config, repository Repository, eventStore EventStore) (*Service, error) {
+func NewService(config *Config, database *db.MongoStorage) (*Service, error) {
 	if config == nil {
 		return nil, fmt.Errorf("config is required")
 	}
-	if repository == nil {
-		return nil, fmt.Errorf("repository is required")
+	if database == nil {
+		return nil, fmt.Errorf("database is required")
 	}
-	if eventStore == nil {
-		return nil, fmt.Errorf("eventStore is required")
-	}
-
-	client := NewClient(config)
-	lockManager := NewLockManager()
 
 	return &Service{
-		client:      client,
-		repository:  repository,
-		eventStore:  eventStore,
-		lockManager: lockManager,
+		client:      NewClient(config),
+		db:          database,
+		lockManager: NewLockManager(),
 		config:      config,
 	}, nil
 }
 
-// ProcessWebhookEvent processes a webhook event with idempotency and proper locking
-func (s *Service) ProcessWebhookEvent(payload []byte, signatureHeader string) error {
+// HandleWebhookEvent processes a webhook event with idempotency
+func (s *Service) HandleWebhookEvent(payload []byte, signatureHeader string) error {
 	// Validate and parse the event
 	event, err := s.client.ValidateWebhookEvent(payload, signatureHeader)
 	if err != nil {
@@ -73,41 +51,41 @@ func (s *Service) ProcessWebhookEvent(payload []byte, signatureHeader string) er
 	}
 
 	// Check if event was already processed (idempotency)
-	if s.eventStore.EventExists(event.ID) {
+	if _, alreadyProcessed := s.processedEvents.Load(event.ID); alreadyProcessed {
 		log.Debugf("stripe webhook: event %s already processed, skipping", event.ID)
 		return nil
 	}
 
 	// Process the event based on its type
-	var processingErr error
+	if err := s.HandleEvent(event); err != nil {
+		return err
+	}
+
+	// Mark event as processed if successful
+	s.processedEvents.Store(event.ID, time.Now())
+
+	return nil
+}
+
+func (s *Service) HandleEvent(event *stripeapi.Event) error {
 	switch event.Type {
 	case stripeapi.EventTypeCustomerSubscriptionCreated,
 		stripeapi.EventTypeCustomerSubscriptionUpdated,
 		stripeapi.EventTypeCustomerSubscriptionDeleted:
-		processingErr = s.handleSubscription(event)
+		return s.handleSubscription(event)
 	case stripeapi.EventTypeInvoicePaymentSucceeded:
-		processingErr = s.handleInvoicePayment(event)
+		return s.handleInvoicePayment(event)
 	case stripeapi.EventTypeProductUpdated:
-		processingErr = s.handleProductUpdate(event)
+		return s.handleProductUpdate(event)
 	default:
-		log.Debugf("stripe webhook: received unhandled event type %s (event %s)", event.Type, event.ID)
-		// For unknown events, we still mark them as processed to avoid reprocessing
+		log.Debugf("stripe webhook: received unhandled event type %s (id %s)", event.Type, event.ID)
+		return nil
 	}
-
-	// Mark event as processed if successful
-	if processingErr == nil {
-		if err := s.eventStore.MarkProcessed(event.ID); err != nil {
-			log.Errorf("stripe webhook: failed to mark event %s as processed: %v", event.ID, err)
-			// Don't return error here as the event was processed successfully
-		}
-	}
-
-	return processingErr
 }
 
 // handleSubscription processes a subscription creation or update event
 func (s *Service) handleSubscription(event *stripeapi.Event) error {
-	subscriptionInfo, err := s.client.ParseSubscriptionFromEvent(event)
+	subscriptionInfo, err := parseSubscriptionFromEvent(event)
 	if err != nil {
 		return fmt.Errorf("failed to parse subscription from event: %w", err)
 	}
@@ -117,11 +95,10 @@ func (s *Service) handleSubscription(event *stripeapi.Event) error {
 	defer unlock()
 
 	// Get organization
-	org, err := s.repository.Organization(subscriptionInfo.OrgAddress)
+	org, err := s.db.Organization(subscriptionInfo.OrgAddress)
 	if err != nil || org == nil {
-		return NewStripeError("organization_not_found",
-			fmt.Sprintf("organization %s not found for subscription %s",
-				subscriptionInfo.OrgAddress, subscriptionInfo.ID), err)
+		return fmt.Errorf("organization %s not found for subscription %s: %v",
+			subscriptionInfo.OrgAddress, subscriptionInfo.ID, err)
 	}
 
 	// Handle different subscription statuses
@@ -140,11 +117,10 @@ func (s *Service) handleSubscription(event *stripeapi.Event) error {
 // handleSubscriptionCreateOrUpdate handles creating (or updating) a subscription.
 func (s *Service) handleSubscriptionCreateOrUpdate(subscriptionInfo *SubscriptionInfo, org *db.Organization) error {
 	// Get plan by Stripe product ID
-	plan, err := s.repository.PlanByStripeID(subscriptionInfo.ProductID)
+	plan, err := s.db.PlanByStripeID(subscriptionInfo.ProductID)
 	if err != nil || plan == nil {
-		return NewStripeError("plan_not_found",
-			fmt.Sprintf("plan with Stripe ID %s not found for subscription %s",
-				subscriptionInfo.ProductID, subscriptionInfo.ID), err)
+		return fmt.Errorf("plan with Stripe ID %s not found for subscription %s: %v",
+			subscriptionInfo.ProductID, subscriptionInfo.ID, err)
 	}
 
 	org.Subscription.PlanID = plan.ID
@@ -156,15 +132,14 @@ func (s *Service) handleSubscriptionCreateOrUpdate(subscriptionInfo *Subscriptio
 	org.Subscription.Email = subscriptionInfo.Customer.Email
 
 	// Save subscription
-	if err := s.repository.SetOrganization(org); err != nil {
-		return NewStripeError("database_error",
-			fmt.Sprintf("failed to save subscription %s (planID=%d, status=%s) for organization %s",
-				subscriptionInfo.ID, plan.ID, subscriptionInfo.Status, subscriptionInfo.OrgAddress), err)
+	if err := s.db.SetOrganization(org); err != nil {
+		return fmt.Errorf("failed to save subscription %s (planID=%d, status=%s) for organization %s: %v",
+			subscriptionInfo.ID, plan.ID, subscriptionInfo.Status, subscriptionInfo.OrgAddress, err)
 	}
 
 	// Update if needed customer metadata with organization address
-	if len(subscriptionInfo.Customer.Metadata["address"]) > 0 {
-		return NewStripeError("metadata_mismatch", "customer metadata address mismatch", nil)
+	if subscriptionInfo.Customer.Metadata["address"] != "" {
+		return fmt.Errorf("customer metadata address mismatch")
 	}
 	if err := s.client.UpdateCustomerMetadata(
 		subscriptionInfo.Customer.ID,
@@ -181,9 +156,9 @@ func (s *Service) handleSubscriptionCreateOrUpdate(subscriptionInfo *Subscriptio
 // handleSubscriptionCancellation handles a canceled subscription by switching to the default plan
 func (s *Service) handleSubscriptionCancellation(subscriptionID string, org *db.Organization) error {
 	// Get default plan
-	defaultPlan, err := s.repository.DefaultPlan()
+	defaultPlan, err := s.db.DefaultPlan()
 	if err != nil || defaultPlan == nil {
-		return NewStripeError("plan_not_found", "default plan not found", err)
+		return fmt.Errorf("default plan not found: %v", err)
 	}
 
 	// Create subscription with default plan
@@ -195,10 +170,9 @@ func (s *Service) handleSubscriptionCancellation(subscriptionID string, org *db.
 		Active:               true,
 	}
 
-	if err := s.repository.SetOrganizationSubscription(org.Address, orgSubscription); err != nil {
-		return NewStripeError("database_error",
-			fmt.Sprintf("failed to cancel subscription %s for organization %s",
-				subscriptionID, org.Address), err)
+	if err := s.db.SetOrganizationSubscription(org.Address, orgSubscription); err != nil {
+		return fmt.Errorf("failed to cancel subscription %s for organization %s: %v",
+			subscriptionID, org.Address, err)
 	}
 
 	log.Infof("stripe webhook: subscription %s canceled for organization %s, switched to default plan",
@@ -208,7 +182,7 @@ func (s *Service) handleSubscriptionCancellation(subscriptionID string, org *db.
 
 // handleInvoicePayment processes a successful payment event
 func (s *Service) handleInvoicePayment(event *stripeapi.Event) error {
-	invoiceInfo, err := s.client.ParseInvoiceFromEvent(event)
+	invoiceInfo, err := parseInvoiceFromEvent(event)
 	if err != nil {
 		return fmt.Errorf("failed to parse invoice from event: %w", err)
 	}
@@ -218,19 +192,17 @@ func (s *Service) handleInvoicePayment(event *stripeapi.Event) error {
 	defer unlock()
 
 	// Get organization
-	org, err := s.repository.Organization(invoiceInfo.OrgAddress)
+	org, err := s.db.Organization(invoiceInfo.OrgAddress)
 	if err != nil || org == nil {
-		return NewStripeError("organization_not_found",
-			fmt.Sprintf("organization %s not found for payment %s",
-				invoiceInfo.OrgAddress, invoiceInfo.ID), err)
+		return fmt.Errorf("organization %s not found for payment %s: %v",
+			invoiceInfo.OrgAddress, invoiceInfo.ID, err)
 	}
 
 	// Update last payment date
 	org.Subscription.LastPaymentDate = invoiceInfo.PaymentTime
-	if err := s.repository.SetOrganization(org); err != nil {
-		return NewStripeError("database_error",
-			fmt.Sprintf("failed to update payment date for organization %s",
-				invoiceInfo.OrgAddress), err)
+	if err := s.db.SetOrganization(org); err != nil {
+		return fmt.Errorf("failed to update payment date for organization %s: %v",
+			invoiceInfo.OrgAddress, err)
 	}
 
 	log.Infof("stripe webhook: payment %s processed for organization %s",
@@ -240,13 +212,13 @@ func (s *Service) handleInvoicePayment(event *stripeapi.Event) error {
 
 // handleProductUpdate processes a product update event
 func (s *Service) handleProductUpdate(event *stripeapi.Event) error {
-	product, err := s.client.ParseProductFromEvent(event)
+	product, err := parseProductFromEvent(event)
 	if err != nil {
 		return fmt.Errorf("failed to parse product from event: %w", err)
 	}
 
 	// Get the existing plan by Stripe product ID
-	existingPlan, err := s.repository.PlanByStripeID(product.ID)
+	existingPlan, err := s.db.PlanByStripeID(product.ID)
 	if err != nil || existingPlan == nil {
 		// If plan doesn't exist in our database, we can skip this update
 		// This might happen if the product is not one of our configured plans
@@ -266,9 +238,8 @@ func (s *Service) handleProductUpdate(event *stripeapi.Event) error {
 	}
 
 	// Update the plan in the database
-	if _, err := s.repository.SetPlan(updatedPlan); err != nil {
-		return NewStripeError("database_error",
-			fmt.Sprintf("failed to update plan for product %s", product.ID), err)
+	if _, err := s.db.SetPlan(updatedPlan); err != nil {
+		return fmt.Errorf("failed to update plan for product %s: %v", product.ID, err)
 	}
 
 	log.Infof("stripe webhook: product %s updated, plan %d refreshed", product.ID, updatedPlan.ID)
@@ -280,14 +251,14 @@ func (s *Service) CreateCheckoutSessionWithLookupKey(
 	lookupKey uint64, billingPeriod, returnURL string, orgAddress common.Address, locale string,
 ) (*stripeapi.CheckoutSession, error) {
 	// Resolve the lookup key to get the plan
-	plan, err := s.repository.Plan(lookupKey)
+	plan, err := s.db.Plan(lookupKey)
 	if err != nil {
-		return nil, NewStripeError("plan_not_found", fmt.Sprintf("plan with lookup key %d not found", lookupKey), err)
+		return nil, errors.ErrStripeError.Withf("plan with lookup key %d not found: %v", lookupKey, err)
 	}
 
-	org, err := s.repository.Organization(orgAddress)
+	org, err := s.db.Organization(orgAddress)
 	if err != nil {
-		return nil, NewStripeError("org_not_found", fmt.Sprintf("organization %s not found", orgAddress), err)
+		return nil, errors.ErrStripeError.Withf("organization %s not found: %v", orgAddress, err)
 	}
 
 	// Determine if the organization is eligible for a free trial based on
@@ -312,8 +283,7 @@ func (s *Service) CreateCheckoutSessionWithLookupKey(
 	} else if billingPeriod == string(db.BillingPeriodAnnual) && plan.StripeYearlyPriceID != "" {
 		params.PriceID = plan.StripeYearlyPriceID
 	} else {
-		return nil, NewStripeError("invalid_billing_period",
-			fmt.Sprintf("invalid billing period %s for plan %d", billingPeriod, plan.ID), nil)
+		return nil, errors.ErrStripeError.Withf("invalid billing period %s for plan %d", billingPeriod, plan.ID)
 	}
 
 	return s.client.CreateCheckoutSession(params)
@@ -421,7 +391,7 @@ func processProductToPlan(planID uint64, product *stripeapi.Product, prices []st
 func extractPlanMetadata[T any](metadataValue string) (T, error) {
 	var result T
 	if err := json.Unmarshal([]byte(metadataValue), &result); err != nil {
-		return result, fmt.Errorf("error parsing plan metadata JSON: %s", err.Error())
+		return result, fmt.Errorf("error parsing plan metadata JSON: %w", err)
 	}
 	return result, nil
 }
