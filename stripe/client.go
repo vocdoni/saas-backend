@@ -1,12 +1,8 @@
 package stripe
 
 import (
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"time"
 
-	"github.com/ethereum/go-ethereum/common"
 	stripeapi "github.com/stripe/stripe-go/v81"
 	stripeportalsession "github.com/stripe/stripe-go/v81/billingportal/session"
 	stripecheckoutsession "github.com/stripe/stripe-go/v81/checkout/session"
@@ -14,12 +10,12 @@ import (
 	stripeprice "github.com/stripe/stripe-go/v81/price"
 	stripeproduct "github.com/stripe/stripe-go/v81/product"
 	stripewebhook "github.com/stripe/stripe-go/v81/webhook"
+	"github.com/vocdoni/saas-backend/errors"
 )
 
 // Client wraps the Stripe API client with additional functionality
 type Client struct {
-	config     *Config
-	httpClient *http.Client
+	config *Config
 }
 
 // NewClient creates a new Stripe client with the given configuration
@@ -28,9 +24,6 @@ func NewClient(config *Config) *Client {
 
 	return &Client{
 		config: config,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
 	}
 }
 
@@ -38,7 +31,7 @@ func NewClient(config *Config) *Client {
 func (c *Client) ValidateWebhookEvent(payload []byte, signatureHeader string) (*stripeapi.Event, error) {
 	event, err := stripewebhook.ConstructEvent(payload, signatureHeader, c.config.WebhookSecret)
 	if err != nil {
-		return nil, NewStripeError("webhook_validation", "webhook signature validation failed", err)
+		return nil, errors.ErrMalformedBody.Withf("webhook signature validation failed: %v", err)
 	}
 	return &event, nil
 }
@@ -48,7 +41,7 @@ func (*Client) GetCustomer(customerID string) (*stripeapi.Customer, error) {
 	params := &stripeapi.CustomerParams{}
 	customer, err := stripecustomer.Get(customerID, params)
 	if err != nil {
-		return nil, NewStripeError("api_call_failed", "failed to get customer", err)
+		return nil, errors.ErrStripeError.Withf("failed to get customer: %v", err)
 	}
 	return customer, nil
 }
@@ -61,7 +54,7 @@ func (*Client) GetCustomerByEmail(email string) (*stripeapi.Customer, error) {
 
 	customers := stripecustomer.List(params)
 	if !customers.Next() {
-		return nil, NewStripeError("customer_not_found", fmt.Sprintf("customer with email %s not found", email), nil)
+		return nil, errors.ErrUserNotFound.Withf("customer with email %s not found", email)
 	}
 
 	return customers.Customer(), nil
@@ -74,7 +67,7 @@ func (*Client) GetProduct(productID string) (*stripeapi.Product, error) {
 
 	product, err := stripeproduct.Get(productID, params)
 	if err != nil {
-		return nil, NewStripeError("api_call_failed", "failed to get product", err)
+		return nil, errors.ErrStripeError.Withf("failed to get product: %v", err)
 	}
 	return product, nil
 }
@@ -89,7 +82,7 @@ func (*Client) GetPrice(lookupKey string) (*stripeapi.Price, error) {
 
 	results := stripeprice.Search(params)
 	if !results.Next() {
-		return nil, NewStripeError("price_not_found", fmt.Sprintf("price with lookup key %s not found", lookupKey), nil)
+		return nil, errors.ErrPlanNotFound.Withf("price with lookup key %s not found", lookupKey)
 	}
 
 	return results.Price(), nil
@@ -145,7 +138,7 @@ func (*Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeapi.
 
 	session, err := stripecheckoutsession.New(checkoutParams)
 	if err != nil {
-		return nil, NewStripeError("api_call_failed", "failed to create checkout session", err)
+		return nil, errors.ErrStripeError.Withf("failed to create checkout session: %v", err)
 	}
 
 	return session, nil
@@ -158,7 +151,7 @@ func (*Client) GetCheckoutSession(sessionID string) (*CheckoutSessionStatus, err
 
 	session, err := stripecheckoutsession.Get(sessionID, params)
 	if err != nil {
-		return nil, NewStripeError("api_call_failed", "failed to get checkout session", err)
+		return nil, errors.ErrStripeError.Withf("failed to get checkout session: %v", err)
 	}
 
 	status := &CheckoutSessionStatus{
@@ -183,78 +176,10 @@ func (c *Client) CreatePortalSession(customerEmail string) (*stripeapi.BillingPo
 
 	session, err := stripeportalsession.New(params)
 	if err != nil {
-		return nil, NewStripeError("api_call_failed", "failed to create portal session", err)
+		return nil, errors.ErrStripeError.Withf("failed to create portal session: %v", err)
 	}
 
 	return session, nil
-}
-
-// ParseSubscriptionFromEvent extracts subscription information from a webhook event
-func (c *Client) ParseSubscriptionFromEvent(event *stripeapi.Event) (*SubscriptionInfo, error) {
-	var subscription stripeapi.Subscription
-	if err := json.Unmarshal(event.Data.Raw, &subscription); err != nil {
-		return nil, NewStripeError("invalid_event", "failed to parse subscription from event", err)
-	}
-
-	customer, err := c.GetCustomer(subscription.Customer.ID)
-	if err != nil {
-		return nil, err
-	}
-
-	orgAddress := common.HexToAddress(subscription.Metadata["address"])
-	if orgAddress.Cmp(common.Address{}) == 0 {
-		return nil, NewStripeError("invalid_event", "subscription missing address metadata", nil)
-	}
-
-	if len(subscription.Items.Data) == 0 {
-		return nil, NewStripeError("invalid_event", "subscription has no items", nil)
-	}
-
-	return &SubscriptionInfo{
-		ID:            subscription.ID,
-		Status:        subscription.Status,
-		ProductID:     subscription.Items.Data[0].Plan.Product.ID,
-		OrgAddress:    orgAddress,
-		CustomerEmail: customer.Email,
-		StartDate:     time.Unix(subscription.CurrentPeriodStart, 0),
-		EndDate:       time.Unix(subscription.CurrentPeriodEnd, 0),
-	}, nil
-}
-
-// ParseInvoiceFromEvent extracts invoice information from a webhook event
-func (*Client) ParseInvoiceFromEvent(event *stripeapi.Event) (*InvoiceInfo, error) {
-	var invoice stripeapi.Invoice
-	if err := json.Unmarshal(event.Data.Raw, &invoice); err != nil {
-		return nil, NewStripeError("invalid_event", "failed to parse invoice from event", err)
-	}
-
-	if invoice.EffectiveAt == 0 {
-		return nil, NewStripeError("invalid_event", "invoice missing effective date", nil)
-	}
-
-	if invoice.SubscriptionDetails == nil {
-		return nil, NewStripeError("invalid_event", "invoice missing subscription details", nil)
-	}
-	orgAddress := common.HexToAddress(invoice.SubscriptionDetails.Metadata["address"])
-	if orgAddress.Cmp(common.Address{}) == 0 {
-		return nil, NewStripeError("invalid_event", "invoice missing address metadata", nil)
-	}
-
-	return &InvoiceInfo{
-		ID:          invoice.ID,
-		PaymentTime: time.Unix(invoice.EffectiveAt, 0),
-		OrgAddress:  orgAddress,
-	}, nil
-}
-
-// ParseProductFromEvent extracts product information from a webhook event
-func (*Client) ParseProductFromEvent(event *stripeapi.Event) (*stripeapi.Product, error) {
-	var product stripeapi.Product
-	if err := json.Unmarshal(event.Data.Raw, &product); err != nil {
-		return nil, NewStripeError("invalid_event", "failed to parse product from event", err)
-	}
-
-	return &product, nil
 }
 
 // CheckoutSessionParams holds parameters for creating a checkout session
@@ -272,23 +197,4 @@ type CheckoutSessionStatus struct {
 	Status             string `json:"status"`
 	CustomerEmail      string `json:"customer_email"`
 	SubscriptionStatus string `json:"subscription_status"`
-}
-
-// SubscriptionInfo represents the information related to a Stripe subscription
-// that are relevant for the application.
-type SubscriptionInfo struct {
-	ID            string
-	Status        stripeapi.SubscriptionStatus
-	ProductID     string
-	OrgAddress    common.Address
-	CustomerEmail string
-	StartDate     time.Time
-	EndDate       time.Time
-}
-
-// InvoiceInfo represents invoice information extracted from events
-type InvoiceInfo struct {
-	ID          string
-	PaymentTime time.Time
-	OrgAddress  common.Address
 }
