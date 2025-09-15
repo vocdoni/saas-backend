@@ -127,7 +127,7 @@ func New(conf *Config) *API {
 		conf.ObjectStorage.ServerURL = conf.ServerURL
 	}
 
-	api := &API{
+	return &API{
 		db:              conf.DB,
 		auth:            jwtauth.New("HS256", []byte(conf.Secret), nil),
 		host:            conf.Host,
@@ -145,14 +145,6 @@ func New(conf *Config) *API {
 		csp:             conf.CSP,
 		oauthServiceURL: conf.OAuthServiceURL,
 	}
-
-	// Initialize Stripe service
-	if err := api.InitializeStripeService(); err != nil {
-		log.Errorf("failed to initialize Stripe service: %v", err)
-		// Don't fail completely, but log the error
-	}
-
-	return api
 }
 
 // Start starts the API HTTP server (non blocking).
@@ -185,6 +177,12 @@ func (a *API) initRouter() http.Handler {
 
 	a.csp.PasswordSalt = passwordSalt
 	cspHandlers := handlers.New(a.csp, a.db)
+
+	// Initialize Stripe service
+	if err := a.InitializeStripeService(); err != nil {
+		log.Errorf("failed to initialize Stripe service: %v", err)
+		// Don't fail completely, but log the error
+	}
 
 	// protected routes
 	r.Group(func(r chi.Router) {

@@ -59,17 +59,10 @@ const (
 	testOAuthServiceURL = "http://test-oauth-service"
 )
 
-// Test fixtures for Stripe webhook events
 var (
-	mockCustomerID       = "cus_test123"
-	mockCustomerEmail    = "test@example.com"
-	mockSubscriptionID   = "sub_1234567890"
-	mockPremiumProductID = "prod_test_premium" // Premium Annual Subscription Plan
-	mockPremiumPlanID    = uint64(2)
-)
+	mockPlans = []*db.Plan{mockFreePlan, mockEssentialPlan, mockPremiumPlan}
 
-var mockPlans = []*db.Plan{
-	{
+	mockFreePlan = &db.Plan{
 		ID:            1,
 		Name:          "Free Plan",
 		StripeID:      "prod_test_free",
@@ -104,12 +97,12 @@ var mockPlans = []*db.Plan{
 			LiveStreaming:   false,
 			PhoneSupport:    false,
 		},
-	},
-	{
-		ID:            mockPremiumPlanID,
-		Name:          "Premium Annual Subscription Plan",
-		StripeID:      mockPremiumProductID,
-		StripePriceID: "price_test_premium",
+	}
+	mockEssentialPlan = &db.Plan{
+		ID:            2,
+		Name:          "Essential Annual Subscription Plan",
+		StripeID:      "prod_test_essential",
+		StripePriceID: "price_test_essential",
 		StartingPrice: 49900,
 		Default:       false,
 		Organization: db.PlanLimits{
@@ -140,8 +133,44 @@ var mockPlans = []*db.Plan{
 			LiveStreaming:   true,
 			PhoneSupport:    true,
 		},
-	},
-}
+	}
+	mockPremiumPlan = &db.Plan{
+		ID:            3,
+		Name:          "Premium Annual Subscription Plan",
+		StripeID:      "prod_test_premium",
+		StripePriceID: "price_test_premium",
+		StartingPrice: 49900,
+		Default:       false,
+		Organization: db.PlanLimits{
+			Users:        10,
+			SubOrgs:      2,
+			MaxProcesses: 40,
+			MaxCensus:    20000,
+			MaxDuration:  180,
+			CustomURL:    false,
+			Drafts:       10,
+		},
+		VotingTypes: db.VotingTypes{
+			Single:     true,
+			Multiple:   true,
+			Approval:   true,
+			Cumulative: true,
+			Ranked:     false,
+			Weighted:   true,
+		},
+		Features: db.Features{
+			Anonymous:       true,
+			Overwrite:       true,
+			LiveResults:     true,
+			Personalization: true,
+			EmailReminder:   false,
+			SmsNotification: false,
+			WhiteLabel:      true,
+			LiveStreaming:   true,
+			PhoneSupport:    true,
+		},
+	}
+)
 
 // testPort is the port used for the API tests.
 var testPort int
