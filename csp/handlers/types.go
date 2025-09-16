@@ -50,16 +50,16 @@ type SignRequest struct {
 }
 
 // ConsumedAddressRequest defines the payload for the request to get the
-// if a token was consumed and which address was used. It includes the
+// if a token was used and which address was used. It includes the
 // authToken to query the information.
 type ConsumedAddressRequest struct {
 	AuthToken internal.HexBytes `json:"authToken" swaggertype:"string" format:"hex" example:"deadbeef"`
 }
 
 // ConsumedAddressResponse defines the payload for the response to the
-// request to get the if a token was consumed and which address was used.
+// request to get the if a token was used and which address was used.
 // It includes the address, the nullifier, and the timestamp of the
-// consumption.
+// usage.
 type ConsumedAddressResponse struct {
 	Address   internal.HexBytes `json:"authToken" swaggertype:"string" format:"hex" example:"deadbeef"`
 	Nullifier internal.HexBytes `json:"nullifier" swaggertype:"string" format:"hex" example:"deadbeef"`

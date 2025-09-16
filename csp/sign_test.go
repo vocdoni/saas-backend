@@ -113,7 +113,9 @@ func TestPrepareSaltedKeySigner(t *testing.T) {
 		// verify the token
 		c.Assert(csp.Storage.VerifyCSPAuth(testToken), qt.IsNil)
 		// consume the process
-		c.Assert(csp.Storage.ConsumeCSPProcess(testToken, testPID, testAddress), qt.IsNil)
+		for i := 0; i <= 10; i++ {
+			c.Assert(csp.Storage.ConsumeCSPProcess(testToken, testPID, testAddress), qt.IsNil)
+		}
 		_, _, _, err := csp.prepareSaltedKeySigner(testToken, testAddress, testPID)
 		c.Assert(err, qt.ErrorIs, ErrProcessAlreadyConsumed)
 	})
@@ -212,10 +214,11 @@ func TestFinishSaltedKeySigner(t *testing.T) {
 
 		status, err := csp.Storage.CSPProcess(testToken, testPID)
 		c.Assert(err, qt.IsNil)
-		c.Assert(status.Consumed, qt.IsTrue)
-		c.Assert(status.ConsumedToken, qt.DeepEquals, testToken)
-		c.Assert(status.ConsumedAddress, qt.DeepEquals, testAddress)
-		c.Assert(status.ConsumedAt.IsZero(), qt.IsFalse)
-		c.Assert(status.ConsumedAt.After(time.Now().Add(-time.Second)), qt.IsTrue)
+		c.Assert(status.Used, qt.IsTrue)
+		c.Assert(status.UsedToken, qt.DeepEquals, testToken)
+		c.Assert(status.UsedAddress, qt.DeepEquals, testAddress)
+		c.Assert(status.UsedAt.IsZero(), qt.IsFalse)
+		c.Assert(status.UsedAt.After(time.Now().Add(-time.Second)), qt.IsTrue)
+		c.Assert(status.TimesVoted, qt.Equals, 1)
 	})
 }
