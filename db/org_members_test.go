@@ -6,7 +6,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 func TestOrgMembers(t *testing.T) {
@@ -109,10 +108,6 @@ func TestOrgMembers(t *testing.T) {
 		memberOID, err := testDB.SetOrgMember(testSalt, member)
 		c.Assert(err, qt.IsNil)
 
-		// Test deleting with invalid ID
-		err = testDB.DelOrgMember("invalid-id")
-		c.Assert(err, qt.Equals, ErrInvalidData)
-
 		// Test deleting with valid ID
 		err = testDB.DelOrgMember(memberOID)
 		c.Assert(err, qt.IsNil)
@@ -130,10 +125,6 @@ func TestOrgMembers(t *testing.T) {
 		}
 		err := testDB.SetOrganization(organization)
 		c.Assert(err, qt.IsNil)
-
-		// Test getting member with invalid ID
-		_, err = testDB.OrgMember(testOrgAddress, "invalid-id")
-		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Create a member to retrieve
 		member := &OrgMember{
@@ -156,7 +147,7 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(retrievedMember.CreatedAt, qt.Not(qt.IsNil))
 
 		// Test getting non-existent member
-		nonExistentID := primitive.NewObjectID().Hex()
+		nonExistentID := internal.NewObjectID()
 		_, err = testDB.OrgMember(testOrgAddress, nonExistentID)
 		c.Assert(err, qt.Not(qt.IsNil))
 	})
@@ -272,7 +263,7 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test OrgMember with zero address - should fail
-		_, err = testDB.OrgMember(common.Address{}, "some-id")
+		_, err = testDB.OrgMember(common.Address{}, internal.NewObjectID())
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test OrgMembers with zero address - should fail
@@ -280,7 +271,7 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test DeleteOrgMembers with zero address - should fail
-		_, err = testDB.DeleteOrgMembers(common.Address{}, []string{"some-id"})
+		_, err = testDB.DeleteOrgMembers(common.Address{}, []internal.ObjectID{internal.NewObjectID()})
 		c.Assert(err, qt.Equals, ErrInvalidData)
 	})
 }
