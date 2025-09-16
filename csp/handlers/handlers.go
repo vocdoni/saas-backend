@@ -332,16 +332,16 @@ func (c *CSPHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Requ
 		errors.ErrUnauthorized.WithErr(err).Write(w)
 		return
 	}
-	// check if the process has been consumed and return error if not
-	if !cspProcess.Consumed {
+	// check if the address has voted at least one time and return error if not
+	if !cspProcess.Used {
 		errors.ErrUserNoVoted.Write(w)
 		return
 	}
 	// return the address used to sign the process and the nullifier
 	apicommon.HTTPWriteJSON(w, &ConsumedAddressResponse{
-		Address:   cspProcess.ConsumedAddress,
-		Nullifier: state.GenerateNullifier(common.BytesToAddress(cspProcess.ConsumedAddress), *processID),
-		At:        cspProcess.ConsumedAt,
+		Address:   cspProcess.UsedAddress,
+		Nullifier: state.GenerateNullifier(common.BytesToAddress(cspProcess.UsedAddress), *processID),
+		At:        cspProcess.UsedAt,
 	})
 }
 

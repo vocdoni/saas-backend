@@ -24,13 +24,14 @@ type CSPAuth struct {
 
 // CSPProcess is the status of a process in a bundle of processes for a user
 type CSPProcess struct {
-	ID              internal.HexBytes `json:"id" bson:"_id"` // hash(userID + processID)
-	UserID          internal.HexBytes `json:"userID" bson:"userid"`
-	ProcessID       internal.HexBytes `json:"processID" bson:"processid"`
-	Consumed        bool              `json:"consumed" bson:"consumed"`
-	ConsumedToken   internal.HexBytes `json:"consumedToken" bson:"consumedtoken"`
-	ConsumedAt      time.Time         `json:"consumedAt" bson:"consumedat"`
-	ConsumedAddress internal.HexBytes `json:"consumedAddress" bson:"consumedaddress"`
+	ID          internal.HexBytes `json:"id" bson:"_id"` // hash(userID + processID)
+	UserID      internal.HexBytes `json:"userID" bson:"userid"`
+	ProcessID   internal.HexBytes `json:"processID" bson:"processid"`
+	Used        bool              `json:"used" bson:"consumed"`
+	UsedToken   internal.HexBytes `json:"usedToken" bson:"consumedtoken"`
+	UsedAt      time.Time         `json:"usedAt" bson:"consumedat"`
+	UsedAddress internal.HexBytes `json:"usedAddress" bson:"consumedaddress"`
+	TimesVoted  int               `json:"timesVoted" bson:"timesVoted"`
 }
 
 // SetCSPAuth method stores a new CSP authentication token for a user and a
@@ -158,14 +159,14 @@ func (ms *MongoStorage) IsCSPProcessConsumed(userID, processID internal.HexBytes
 		return false, err
 	}
 	// check if the token is verified
-	tokenData, err := ms.fetchCSPAuthFromDB(ctx, currentStatus.ConsumedToken)
+	tokenData, err := ms.fetchCSPAuthFromDB(ctx, currentStatus.UsedToken)
 	if err != nil {
 		return false, err
 	}
 	if !tokenData.Verified {
 		return false, ErrTokenNotVerified
 	}
-	return currentStatus.Consumed, nil
+	return currentStatus.TimesVoted > MaxVoteOverwritesPerProcess, nil
 }
 
 // ConsumeCSPProcess method consumes a CSP process for a user. It returns an
@@ -195,18 +196,27 @@ func (ms *MongoStorage) ConsumeCSPProcess(token, processID, address internal.Hex
 		return err
 	}
 	// check if the token is already consumed
-	if tokenStatus != nil && tokenStatus.Consumed {
+	if tokenStatus != nil && tokenStatus.TimesVoted > MaxVoteOverwritesPerProcess {
 		return ErrProcessAlreadyConsumed
+	}
+	timesVoted := 1
+	if tokenStatus != nil {
+		timesVoted = tokenStatus.TimesVoted + 1
+		// check if the address is the same as the previous one used to vote
+		if tokenStatus.UsedAddress != nil && !tokenStatus.UsedAddress.Equals(address) {
+			return ErrInvalidData
+		}
 	}
 	// prepare the document to update
 	updateDoc, err := dynamicUpdateDocument(CSPProcess{
-		ID:              id,
-		UserID:          tokenData.UserID,
-		ProcessID:       processID,
-		Consumed:        true,
-		ConsumedAt:      time.Now(),
-		ConsumedToken:   token,
-		ConsumedAddress: address,
+		ID:          id,
+		UserID:      tokenData.UserID,
+		ProcessID:   processID,
+		Used:        true,
+		UsedAt:      time.Now(),
+		UsedToken:   token,
+		UsedAddress: address,
+		TimesVoted:  timesVoted,
 	}, nil)
 	if err != nil {
 		return errors.Join(ErrPrepareDocument, err)

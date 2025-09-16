@@ -20,6 +20,8 @@ const (
 	CodeTypePasswordReset   CodeType = "password_reset"
 	CodeTypeOrgInvite       CodeType = "organization_invite"
 	CodeTypeOrgInviteUpdate CodeType = "organization_invite_update"
+	// max vote overwrites per process
+	MaxVoteOverwritesPerProcess = 10
 )
 
 // organizationWritePermissions is a map that contains if the role has organization write permission

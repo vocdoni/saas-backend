@@ -119,17 +119,37 @@ func TestCSPProcess(t *testing.T) {
 		c.Assert(err, qt.ErrorIs, ErrTokenNotFound)
 	})
 
-	c.Run("consume token", func(c *qt.C) {
+	c.Run("vote once correctly", func(c *qt.C) {
 		// set the token and consume it
 		c.Assert(testDB.SetCSPAuth(testAuthToken, testUserID, testCSPBundleID), qt.IsNil)
 		c.Assert(testDB.ConsumeCSPProcess(testAuthToken, testCSPProcessID, testUserAddress), qt.IsNil)
 		status, err := testDB.CSPProcess(testAuthToken, testCSPProcessID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(status.ProcessID, qt.DeepEquals, testCSPProcessID)
-		c.Assert(status.Consumed, qt.IsTrue)
-		c.Assert(status.ConsumedToken, qt.DeepEquals, testAuthToken)
-		c.Assert(status.ConsumedAddress, qt.DeepEquals, testUserAddress)
-		c.Assert(status.ConsumedAt.IsZero(), qt.IsFalse)
+		c.Assert(status.Used, qt.IsTrue)
+		c.Assert(status.UsedToken, qt.DeepEquals, testAuthToken)
+		c.Assert(status.UsedAddress, qt.DeepEquals, testUserAddress)
+		c.Assert(status.UsedAt.IsZero(), qt.IsFalse)
+		c.Assert(status.TimesVoted, qt.Equals, 1)
+	})
+
+	c.Run("cannot consume with different address", func(c *qt.C) {
+		c.Assert(testDB.ConsumeCSPProcess(testAuthToken, testCSPProcessID, internal.RandomBytes(16)), qt.ErrorIs, ErrInvalidData)
+	})
+
+	c.Run("consume token", func(c *qt.C) {
+		// set the token and consume it
+		for i := 1; i <= 10; i++ {
+			c.Assert(testDB.ConsumeCSPProcess(testAuthToken, testCSPProcessID, testUserAddress), qt.IsNil)
+			status, err := testDB.CSPProcess(testAuthToken, testCSPProcessID)
+			c.Assert(err, qt.IsNil)
+			c.Assert(status.ProcessID, qt.DeepEquals, testCSPProcessID)
+			c.Assert(status.Used, qt.IsTrue)
+			c.Assert(status.UsedToken, qt.DeepEquals, testAuthToken)
+			c.Assert(status.UsedAddress, qt.DeepEquals, testUserAddress)
+			c.Assert(status.UsedAt.IsZero(), qt.IsFalse)
+			c.Assert(status.TimesVoted, qt.Equals, i+1)
+		}
 		// try to consume it again to check it fails
 		c.Assert(testDB.ConsumeCSPProcess(testAuthToken, testCSPProcessID, testUserAddress), qt.ErrorIs, ErrProcessAlreadyConsumed)
 	})
