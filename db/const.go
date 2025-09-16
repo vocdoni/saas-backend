@@ -23,6 +23,8 @@ const (
 
 	// max census size allowed for user test purposes
 	TestMaxCensusSize = 10
+	// max vote overwrites per process
+	MaxVoteOverwritesPerProcess = 10
 )
 
 // organizationWritePermissions is a map that contains if the role has organization write permission
