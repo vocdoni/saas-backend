@@ -49,6 +49,9 @@ func main() {
 	flag.String("stripeApiSecret", "", "Stripe API secret")
 	flag.String("stripeWebhookSecret", "", "Stripe Webhook secret")
 	flag.String("oauthServiceURL", "http://oauth.vocdoni.net", "OAuth service URL")
+	flag.Bool("skip-migrations", false, "Skip database migrations")
+	flag.Bool("migrate-only", false, "Run database migrations and exit")
+	flag.String("migrations-dir", "migrations", "Database migration files directory")
 	// parse flags
 	flag.Parse()
 	// initialize Viper
@@ -100,6 +103,27 @@ func main() {
 		log.Fatalf("could not create the MongoDB database: %v", err)
 	}
 	defer database.Close()
+
+	// Run database migrations by default (unless explicitly skipped)
+	skipMigrations := viper.GetBool("skip-migrations")
+	migrateOnly := viper.GetBool("migrate-only")
+	migrationsDir := viper.GetString("migrations-dir")
+
+	if !skipMigrations {
+		log.Infow("running database migrations", "dir", migrationsDir)
+		if err := database.RunMigrations(migrationsDir); err != nil {
+			log.Fatalf("migration failed: %v", err)
+		}
+		log.Infow("migrations completed successfully")
+	} else {
+		log.Warnw("skipping database migrations - this may cause issues if schema is outdated")
+	}
+
+	// If migrate-only flag is set, exit after running migrations
+	if migrateOnly {
+		log.Infow("migrate-only mode, exiting after migrations")
+		return
+	}
 	// create the remote API client
 	apiClient, err := apiclient.New(apiEndpoint)
 	if err != nil {
