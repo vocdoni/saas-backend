@@ -233,4 +233,136 @@ func TestSignTxHandler(t *testing.T) {
 			runAPITestCase(c, tt)
 		}
 	})
+
+	c.Run("newProcessTx", func(c *qt.C) {
+		authHeaders := map[string]string{
+			"Authorization": fmt.Sprintf("Bearer %s", loginRespData.Token),
+		}
+
+		// Get initial organization to check counters
+		org, err := testDB.Organization(mainOrgAddress)
+		c.Assert(err, qt.IsNil)
+		initialProcessCounter := org.Counters.Processes
+
+		// Create a valid process with MaxCensusSize greater than TestMaxCensusSize
+		validLargeProcessTx := &models.Tx{
+			Payload: &models.Tx_NewProcess{
+				NewProcess: &models.NewProcessTx{
+					Txtype: models.TxType_NEW_PROCESS, // Add the required Txtype
+					Process: &models.Process{
+						EntityId:      mainOrgAddress.Bytes(),
+						MaxCensusSize: uint64(15), // Greater than TestMaxCensusSize (10)
+						Duration:      86400,      // 1 day in seconds
+						EnvelopeType: &models.EnvelopeType{
+							Serial:         true,
+							Anonymous:      false,
+							EncryptedVotes: false,
+							UniqueValues:   false,
+							CostFromWeight: false,
+						},
+						VoteOptions: &models.ProcessVoteOptions{
+							MaxCount:          1,
+							MaxValue:          1,
+							MaxVoteOverwrites: 1,
+							MaxTotalCost:      0,
+							CostExponent:      0,
+						},
+					},
+				},
+			},
+		}
+		bValidLargeProcessTx, err := proto.Marshal(validLargeProcessTx)
+		c.Assert(err, qt.IsNil)
+
+		// Create a valid process with MaxCensusSize less than TestMaxCensusSize
+		validSmallProcessTx := &models.Tx{
+			Payload: &models.Tx_NewProcess{
+				NewProcess: &models.NewProcessTx{
+					Txtype: models.TxType_NEW_PROCESS, // Add the required Txtype
+					Process: &models.Process{
+						EntityId:      mainOrgAddress.Bytes(),
+						MaxCensusSize: uint64(5), // Less than TestMaxCensusSize (10)
+						Duration:      86400,     // 1 day in seconds
+						EnvelopeType: &models.EnvelopeType{
+							Serial:         true,
+							Anonymous:      false,
+							EncryptedVotes: false,
+							UniqueValues:   false,
+							CostFromWeight: false,
+						},
+						VoteOptions: &models.ProcessVoteOptions{
+							MaxCount:          1,
+							MaxValue:          1,
+							MaxVoteOverwrites: 1,
+							MaxTotalCost:      0,
+							CostExponent:      0,
+						},
+					},
+				},
+			},
+		}
+		bValidSmallProcessTx, err := proto.Marshal(validSmallProcessTx)
+		c.Assert(err, qt.IsNil)
+
+		// Create a process with nil Process field
+		nilProcessTx := &models.Tx{
+			Payload: &models.Tx_NewProcess{
+				NewProcess: &models.NewProcessTx{
+					Txtype:  models.TxType_NEW_PROCESS, // Add the required Txtype
+					Process: nil,                       // Missing Process field
+				},
+			},
+		}
+		bNilProcessTx, err := proto.Marshal(nilProcessTx)
+		c.Assert(err, qt.IsNil)
+
+		tests := []apiTestCase{
+			{
+				name:    "validLargeProcess",
+				uri:     testURL(signTxEndpoint),
+				method:  http.MethodPost,
+				headers: authHeaders,
+				body: mustMarshal(&apicommon.TransactionData{
+					Address:   mainOrgAddress,
+					TxPayload: bValidLargeProcessTx,
+				}),
+				expectedStatus: http.StatusOK,
+			},
+			{
+				name:    "validSmallProcess",
+				uri:     testURL(signTxEndpoint),
+				method:  http.MethodPost,
+				headers: authHeaders,
+				body: mustMarshal(&apicommon.TransactionData{
+					Address:   mainOrgAddress,
+					TxPayload: bValidSmallProcessTx,
+				}),
+				expectedStatus: http.StatusOK,
+			},
+			{
+				name:    "nilProcess",
+				uri:     testURL(signTxEndpoint),
+				method:  http.MethodPost,
+				headers: authHeaders,
+				body: mustMarshal(&apicommon.TransactionData{
+					Address:   mainOrgAddress,
+					TxPayload: bNilProcessTx,
+				}),
+				expectedBody:   mustMarshal(errors.ErrInvalidTxFormat.With("missing fields")),
+				expectedStatus: http.StatusBadRequest,
+			},
+		}
+
+		// Run the tests
+		for _, tt := range tests {
+			runAPITestCase(c, tt)
+		}
+
+		// Verify that the process counter was incremented only for the large process
+		org, err = testDB.Organization(mainOrgAddress)
+		c.Assert(err, qt.IsNil)
+
+		// Check if the counter was incremented by 1 (only the validLargeProcess should increment it)
+		c.Assert(org.Counters.Processes, qt.Equals, initialProcessCounter+1)
+	})
 }

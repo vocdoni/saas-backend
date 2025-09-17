@@ -102,11 +102,16 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 
 	// if isNewProcess and everything went well so far update the organization process counter
 	if *txType == models.TxType_NEW_PROCESS {
-		org.Counters.Processes++
-		if err := a.db.SetOrganization(org); err != nil {
-			errors.ErrGenericInternalServerError.Withf("could not update organization process counter: %v", err).Write(w)
-			return
+		newProcess := tx.GetNewProcess()
+		// do not count processes with less than TestMaxCensusSize for user testing
+		if newProcess.Process.MaxCensusSize > uint64(db.TestMaxCensusSize) {
+			org.Counters.Processes++
+			if err := a.db.SetOrganization(org); err != nil {
+				errors.ErrGenericInternalServerError.Withf("could not update organization process counter: %v", err).Write(w)
+				return
+			}
 		}
+
 	}
 
 	// sign the tx

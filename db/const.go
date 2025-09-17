@@ -20,6 +20,9 @@ const (
 	CodeTypePasswordReset   CodeType = "password_reset"
 	CodeTypeOrgInvite       CodeType = "organization_invite"
 	CodeTypeOrgInviteUpdate CodeType = "organization_invite_update"
+
+	// max census size allowed for user test purposes
+	TestMaxCensusSize = 10
 )
 
 // organizationWritePermissions is a map that contains if the role has organization write permission
