@@ -11,22 +11,21 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-// MigrationProvider is an interface for providing MongoDB database access to migrations
-type MigrationProvider interface {
-	GetDatabase() *mongo.Database
-}
+// Global variable to store the current MongoDB provider for migrations
+// This is a workaround for goose's SQL-centric architecture
+var currentMongoDB *MongoStorage
 
-// Implement MigrationProvider for MongoStorage
-func (ms *MongoStorage) GetDatabase() *mongo.Database {
-	return ms.DBClient.Database(ms.database)
+// GetMongoDB returns the current MongoDB database for use in migrations
+func GetMongoDB() *mongo.Database {
+	if currentMongoDB == nil {
+		panic("currentMongoDB not set - migrations must be run through MongoStorage.RunMigrations()")
+	}
+	return currentMongoDB.DBClient.Database(currentMongoDB.database)
 }
 
 // RunMigrations executes all pending database migrations
-func (ms *MongoStorage) RunMigrations(migrationDir string) error {
-	log.Infow("starting database migrations", "dir", migrationDir)
-
-	// Set up goose with a custom provider for MongoDB
-	goose.SetBaseFS(nil)
+func (ms *MongoStorage) RunMigrations(migrationsDir string) error {
+	log.Infow("starting database migrations", "dir", migrationsDir)
 
 	// Create a context with timeout for migrations
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -46,10 +45,10 @@ func (ms *MongoStorage) RunMigrations(migrationDir string) error {
 	goose.SetDialect("sqlite3") // We use sqlite3 as the dialect but override the operations
 
 	// Store the MongoDB connection in a global variable that migrations can access
-	currentMongoProvider = ms
+	currentMongoDB = ms
 
 	// Run the migrations
-	if err := goose.UpContext(ctx, db, migrationDir); err != nil {
+	if err := goose.UpContext(ctx, db, migrationsDir); err != nil {
 		return fmt.Errorf("failed to run migrations: %w", err)
 	}
 
@@ -71,7 +70,7 @@ func (ms *MongoStorage) RunMigrationsDown(migrationDir string, steps int) error 
 	defer db.Close()
 
 	goose.SetDialect("sqlite3")
-	currentMongoProvider = ms
+	currentMongoDB = ms
 
 	if steps > 0 {
 		for i := 0; i < steps; i++ {
@@ -98,19 +97,7 @@ func (ms *MongoStorage) GetMigrationStatus(migrationDir string) error {
 	defer db.Close()
 
 	goose.SetDialect("sqlite3")
-	currentMongoProvider = ms
+	currentMongoDB = ms
 
 	return goose.Status(db, migrationDir)
-}
-
-// Global variable to store the current MongoDB provider for migrations
-// This is a workaround for goose's SQL-centric architecture
-var currentMongoProvider MigrationProvider
-
-// GetMongoDB returns the current MongoDB database for use in migrations
-func GetMongoDB() *mongo.Database {
-	if currentMongoProvider == nil {
-		panic("MongoDB provider not set - migrations must be run through MongoStorage.RunMigrations()")
-	}
-	return currentMongoProvider.GetDatabase()
 }

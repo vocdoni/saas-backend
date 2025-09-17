@@ -124,15 +124,10 @@ func New(url, database string, plans []*Plan) (*MongoStorage, error) {
 	if err := ms.initCollections(ms.database); err != nil {
 		return nil, err
 	}
-	// if reset flag is enabled, Reset drops the database documents and recreates indexes
-	// else, just init collections and create indexes
+	// if reset flag is enabled, Reset drops the database documents
+	// else, just init collections
 	if reset := os.Getenv("VOCDONI_MONGO_RESET_DB"); reset != "" {
 		if err := ms.Reset(); err != nil {
-			return nil, err
-		}
-	} else {
-		// create indexes
-		if err := ms.createIndexes(); err != nil {
 			return nil, err
 		}
 	}
@@ -161,12 +156,7 @@ func (ms *MongoStorage) Reset() error {
 		}
 	}
 	// init the collections
-	if err := ms.initCollections(ms.database); err != nil {
-		return err
-	}
-
-	// create indexes
-	return ms.createIndexes()
+	return ms.initCollections(ms.database)
 }
 
 func (ms *MongoStorage) String() string {

@@ -1,4 +1,4 @@
-package main
+package migrations
 
 import (
 	"context"
@@ -14,7 +14,7 @@ func init() {
 	goose.AddMigrationContext(upAddUserPreferences, downAddUserPreferences)
 }
 
-func upAddUserPreferences(ctx context.Context, tx *sql.Tx) error {
+func upAddUserPreferences(ctx context.Context, _ *sql.Tx) error {
 	// Get MongoDB database connection
 	database := db.GetMongoDB()
 
@@ -44,7 +44,7 @@ func upAddUserPreferences(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-func downAddUserPreferences(ctx context.Context, tx *sql.Tx) error {
+func downAddUserPreferences(ctx context.Context, _ *sql.Tx) error {
 	// Get MongoDB database connection
 	database := db.GetMongoDB()
 

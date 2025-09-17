@@ -23,6 +23,9 @@ import (
 	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
+
+	// Invoke init() functions within migrations pkg.
+	_ "github.com/vocdoni/saas-backend/migrations"
 )
 
 func main() {
@@ -51,7 +54,6 @@ func main() {
 	flag.String("oauthServiceURL", "http://oauth.vocdoni.net", "OAuth service URL")
 	flag.Bool("skip-migrations", false, "Skip database migrations")
 	flag.Bool("migrate-only", false, "Run database migrations and exit")
-	flag.String("migrations-dir", "migrations", "Database migration files directory")
 	// parse flags
 	flag.Parse()
 	// initialize Viper
@@ -107,11 +109,10 @@ func main() {
 	// Run database migrations by default (unless explicitly skipped)
 	skipMigrations := viper.GetBool("skip-migrations")
 	migrateOnly := viper.GetBool("migrate-only")
-	migrationsDir := viper.GetString("migrations-dir")
 
 	if !skipMigrations {
-		log.Infow("running database migrations", "dir", migrationsDir)
-		if err := database.RunMigrations(migrationsDir); err != nil {
+		log.Infow("running database migrations", "dir", ".")
+		if err := database.RunMigrations("."); err != nil {
 			log.Fatalf("migration failed: %v", err)
 		}
 		log.Infow("migrations completed successfully")
