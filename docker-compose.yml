@@ -14,6 +14,10 @@ services:
     sysctls:
       net.core.somaxconn: 8128
     restart: ${RESTART:-unless-stopped}
+    volumes:
+      - ./backend:/app/backend
+      - /home/user/go/pkg/mod/github.com/wasmerio/:/home/user/go/pkg/mod/github.com/wasmerio/
+      - /tmp/.vochain-zkCircuits/:/root/.cache/vocdoni/zkCircuits/
     depends_on:
       - mongo
 
@@ -39,6 +43,17 @@ services:
       ME_CONFIG_MONGODB_ADMINUSERNAME: root
       ME_CONFIG_MONGODB_ADMINPASSWORD: vocdoni
       ME_CONFIG_MONGODB_URL: mongodb://root:vocdoni@mongo:27017/
+
+  mailpit:
+    image: axllent/mailpit
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # Web UI
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: true
+      MP_SMTP_TLS_CERT: sans:mailpit
+      MP_SMTP_TLS_KEY: sans:mailpit
+      MP_VERBOSE: true
 
 volumes:
   mongodb: {}
