@@ -19,7 +19,7 @@ import (
 func TestSign(t *testing.T) {
 	c := qt.New(t)
 
-	testDB, err := db.New(testMongoURI, test.RandomDatabaseName(), nil)
+	testDB, err := db.New(testMongoURI, test.RandomDatabaseName())
 	c.Assert(err, qt.IsNil)
 
 	ctx := context.Background()
@@ -54,7 +54,7 @@ func TestSign(t *testing.T) {
 func TestPrepareSaltedKeySigner(t *testing.T) {
 	c := qt.New(t)
 
-	testDB, err := db.New(testMongoURI, test.RandomDatabaseName(), nil)
+	testDB, err := db.New(testMongoURI, test.RandomDatabaseName())
 	c.Assert(err, qt.IsNil)
 
 	ctx := context.Background()
@@ -159,7 +159,7 @@ func TestPrepareSaltedKeySigner(t *testing.T) {
 func TestFinishSaltedKeySigner(t *testing.T) {
 	c := qt.New(t)
 
-	testDB, err := db.New(testMongoURI, test.RandomDatabaseName(), nil)
+	testDB, err := db.New(testMongoURI, test.RandomDatabaseName())
 	c.Assert(err, qt.IsNil)
 
 	ctx := context.Background()

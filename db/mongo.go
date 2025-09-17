@@ -51,6 +51,7 @@ type MongoStorage struct {
 	cspTokens           *mongo.Collection
 	cspTokensStatus     *mongo.Collection
 	jobs                *mongo.Collection
+	migrations          *mongo.Collection
 }
 
 type Options struct {
@@ -58,7 +59,7 @@ type Options struct {
 	Database string
 }
 
-func New(url, database string, plans []*Plan) (*MongoStorage, error) {
+func New(url, database string) (*MongoStorage, error) {
 	var err error
 	ms := &MongoStorage{}
 	if url == "" {
@@ -117,22 +118,15 @@ func New(url, database string, plans []*Plan) (*MongoStorage, error) {
 	}
 	// init the database client
 	ms.DBClient = client
-	if len(plans) > 0 {
-		ms.stripePlans = plans
-	}
-	// init the collections
-	if err := ms.initCollections(ms.database); err != nil {
-		return nil, err
-	}
-	// if reset flag is enabled, Reset drops the database documents and recreates indexes
-	// else, just init collections and create indexes
+	// if reset flag is enabled, Reset drops the database documents
+	// else, just init collections
 	if reset := os.Getenv("VOCDONI_MONGO_RESET_DB"); reset != "" {
 		if err := ms.Reset(); err != nil {
 			return nil, err
 		}
 	} else {
-		// create indexes
-		if err := ms.createIndexes(); err != nil {
+		// init the collections and migrations
+		if err := ms.init(); err != nil {
 			return nil, err
 		}
 	}
@@ -160,13 +154,8 @@ func (ms *MongoStorage) Reset() error {
 			}
 		}
 	}
-	// init the collections
-	if err := ms.initCollections(ms.database); err != nil {
-		return err
-	}
-
-	// create indexes
-	return ms.createIndexes()
+	// init the collections and migrations
+	return ms.init()
 }
 
 func (ms *MongoStorage) String() string {

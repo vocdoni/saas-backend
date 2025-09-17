@@ -28,7 +28,7 @@ func TestObjectStorage(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 
 	// Create a new MongoDB connection with a random database name
-	testDB, err := db.New(mongoURI, test.RandomDatabaseName(), nil)
+	testDB, err := db.New(mongoURI, test.RandomDatabaseName())
 	c.Assert(err, qt.IsNil)
 	defer testDB.Close()
 

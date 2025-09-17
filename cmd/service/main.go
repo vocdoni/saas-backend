@@ -94,8 +94,8 @@ func main() {
 		log.Fatalf("stripeApiSecret and stripeWebhookSecret are required")
 	}
 
-	// initialize the MongoDB database (fresh plans will be loaded by Stripe service)
-	database, err := db.New(mongoURL, mongoDB, db.PlansStub)
+	// initialize the MongoDB database
+	database, err := db.New(mongoURL, mongoDB)
 	if err != nil {
 		log.Fatalf("could not create the MongoDB database: %v", err)
 	}

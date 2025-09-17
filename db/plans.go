@@ -10,10 +10,6 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-// PlansStub contains 4 plans stubs, so they can be overwritten
-// with SetPlan when stripe is initialized.
-var PlansStub = []*Plan{{ID: 1}, {ID: 2}, {ID: 3}, {ID: 4}}
-
 // nextPlanID internal method returns the next available subsbscription ID. If an error
 // occurs, it returns the error. This method must be called with the keysLock
 // held.
