@@ -19,7 +19,7 @@ import (
 
 func TestBundleAuthToken(t *testing.T) {
 	c := qt.New(t)
-	testDB, err := db.New(testMongoURI, test.RandomDatabaseName(), nil)
+	testDB, err := db.New(testMongoURI, test.RandomDatabaseName())
 	c.Assert(err, qt.IsNil)
 
 	ctx := context.Background()
@@ -84,7 +84,7 @@ func TestBundleAuthToken(t *testing.T) {
 func TestVerifyBundleAuthToken(t *testing.T) {
 	c := qt.New(t)
 
-	testDB, err := db.New(testMongoURI, test.RandomDatabaseName(), nil)
+	testDB, err := db.New(testMongoURI, test.RandomDatabaseName())
 	c.Assert(err, qt.IsNil)
 
 	ctx := context.Background()

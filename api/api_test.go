@@ -24,9 +24,13 @@ import (
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
+	"github.com/vocdoni/saas-backend/migrations"
 	"github.com/vocdoni/saas-backend/notifications/smtp"
 	"github.com/vocdoni/saas-backend/subscriptions"
 	"github.com/vocdoni/saas-backend/test"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/log"
@@ -258,10 +262,29 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
+
+	// overwrite "stub_plans" migration to inject instead mockPlans
+	migrations.AddMigration(3, "mock_plans",
+		func(ctx context.Context, database *mongo.Database) error {
+			for _, p := range mockPlans {
+				filter := bson.M{"_id": p.ID}
+				update := bson.M{"$set": p}
+				opts := options.Update().SetUpsert(true)
+				if _, err := database.Collection("plans").UpdateOne(ctx, filter, update, opts); err != nil {
+					return fmt.Errorf("failed to upsert plan with ID %d: %w", p.ID, err)
+				}
+			}
+			return nil
+		},
+		func(ctx context.Context, database *mongo.Database) error {
+			_, err := database.Collection("plans").DeleteMany(ctx, bson.D{})
+			return err
+		})
+
 	// set reset db env var to true
 	_ = os.Setenv("VOCDONI_MONGO_RESET_DB", "true")
 	// create a new MongoDB connection with the test database
-	if testDB, err = db.New(mongoURI, test.RandomDatabaseName(), mockPlans); err != nil {
+	if testDB, err = db.New(mongoURI, test.RandomDatabaseName()); err != nil {
 		panic(err)
 	}
 	defer testDB.Close()

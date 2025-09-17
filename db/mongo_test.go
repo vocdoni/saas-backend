@@ -9,7 +9,10 @@ import (
 	"github.com/vocdoni/saas-backend/test"
 )
 
-var testDB *MongoStorage
+var (
+	testDB   *MongoStorage
+	mongoURI string
+)
 
 // Common test constants
 var (
@@ -49,13 +52,13 @@ func TestMain(m *testing.M) {
 	}
 
 	// get the MongoDB connection string
-	mongoURI, err := dbContainer.Endpoint(ctx, "mongodb")
+	mongoURI, err = dbContainer.Endpoint(ctx, "mongodb")
 	if err != nil {
 		panic(fmt.Sprintf("failed to get MongoDB endpoint: %v", err))
 	}
 
 	// Use nil plans since we now fetch plans dynamically from Stripe
-	testDB, err = New(mongoURI, test.RandomDatabaseName(), nil)
+	testDB, err = New(mongoURI, test.RandomDatabaseName())
 	if err != nil {
 		panic(fmt.Sprintf("failed to create new MongoDB connection: %v", err))
 	}
