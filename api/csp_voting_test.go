@@ -261,6 +261,24 @@ func TestCSPVoting(t *testing.T) {
 						Email:        "david.garcia@example.com",
 						Phone:        "+34612345606",
 					},
+					{
+						Name:         "Eva",
+						Surname:      "Martinez",
+						MemberNumber: "P007",
+						NationalID:   "78901234G",
+						BirthDate:    "1987-11-30",
+						Email:        "", // Member without an email
+						Phone:        "+34612345607",
+					},
+					{
+						Name:         "Frank",
+						Surname:      "Lopez",
+						MemberNumber: "P008",
+						NationalID:   "89012345H",
+						BirthDate:    "1991-04-18",
+						Email:        "frank.lopez@example.com",
+						Phone:        "", // Member without a phone number
+					},
 				}
 
 				// Add members to the organization first
@@ -787,6 +805,104 @@ func TestCSPVoting(t *testing.T) {
 						// This should fail at the blockchain level
 						_, _, err = vocdoniClient.SendTx(signAndMarshalTx(t, &tx, &user6))
 						c.Assert(err, qt.Not(qt.IsNil), qt.Commentf("expected error for forged signature"))
+					})
+				})
+
+				// Test case 4: Email and Phone both supported for 2FA
+				t.Run("Email and Phone 2FA Census", func(_ *testing.T) {
+					// Define auth fields and both email and phone for two-factor authentication
+					authFields := db.OrgMemberAuthFields{
+						db.OrgMemberAuthFieldsName,
+						db.OrgMemberAuthFieldsMemberNumber,
+					}
+					bothTwoFaFields := db.OrgMemberTwoFaFields{
+						db.OrgMemberTwoFaFieldEmail,
+						db.OrgMemberTwoFaFieldPhone,
+					}
+
+					// Create a new census with both email and phone as 2FA methods
+					bothMethodsCensusID := testCreateCensus(t, token, orgAddress, authFields, bothTwoFaFields)
+
+					// Publish the group-based census using the existing group
+					publishGroupRequest := &apicommon.PublishCensusGroupRequest{
+						AuthFields:  authFields,
+						TwoFaFields: bothTwoFaFields,
+					}
+
+					requestAndParse[apicommon.PublishedCensusResponse](
+						t, http.MethodPost, token, publishGroupRequest,
+						"census", bothMethodsCensusID, "group", groupID, "publish")
+
+					bothMethodsBundleID, _ := testCreateBundle(t, token, bothMethodsCensusID, [][]byte{processID})
+
+					// Test 1: User with only email should be able to authenticate
+					t.Run("User with Email Only", func(_ *testing.T) {
+						// Use John Doe who has email but we'll only provide the email for 2FA
+						authReq := &handlers.AuthRequest{
+							Name:         "Frank",
+							MemberNumber: "P008",
+							Email:        "frank.lopez@example.com",
+							// No phone provided
+						}
+						authResp := requestAndParse[handlers.AuthResponse](t,
+							http.MethodPost, "", authReq,
+							"process", "bundle", bothMethodsBundleID, "auth", "0")
+						c.Assert(authResp.AuthToken, qt.Not(qt.Equals), "", qt.Commentf("auth token should not be empty"))
+					})
+
+					// Test 2: User with only phone should be able to authenticate
+					t.Run("User with Phone Only", func(_ *testing.T) {
+						// Use Jane Smith who has phone but we'll only provide the phone for 2FA
+						authReq := &handlers.AuthRequest{
+							Name:         "Eva",
+							MemberNumber: "P007",
+							Phone:        "+34612345607",
+							// No email provided
+						}
+						authResp := requestAndParse[handlers.AuthResponse](t,
+							http.MethodPost, "", authReq,
+							"process", "bundle", bothMethodsBundleID, "auth", "0")
+						c.Assert(authResp.AuthToken, qt.Not(qt.Equals), "", qt.Commentf("auth token should not be empty"))
+					})
+
+					// Test 3: User with both email and phone should be able to authenticate with either
+					t.Run("User with Both Email and Phone", func(_ *testing.T) {
+						// Use Alice Johnson who has both email and phone
+						// First try with just email
+						authReq := &handlers.AuthRequest{
+							Name:         "John",
+							MemberNumber: "P001",
+							Email:        "john.doe@example.com",
+							// No phone provided
+						}
+						authResp := requestAndParse[handlers.AuthResponse](t,
+							http.MethodPost, "", authReq,
+							"process", "bundle", bothMethodsBundleID, "auth", "0")
+						c.Assert(authResp.AuthToken, qt.Not(qt.Equals), "", qt.Commentf("auth token should not be empty"))
+
+						// Then try with just phone
+						authReq = &handlers.AuthRequest{
+							Name:         "Jane",
+							MemberNumber: "P002",
+							Phone:        "+34612345602",
+							// No email provided
+						}
+						authResp = requestAndParse[handlers.AuthResponse](t,
+							http.MethodPost, "", authReq,
+							"process", "bundle", bothMethodsBundleID, "auth", "0")
+						c.Assert(authResp.AuthToken, qt.Not(qt.Equals), "", qt.Commentf("auth token should not be empty"))
+
+						// Finally try with both email and phone
+						authReq = &handlers.AuthRequest{
+							Name:         "Alice",
+							MemberNumber: "P003",
+							Email:        "alice.johnson@example.com",
+							Phone:        "+34612345603",
+						}
+						authResp = requestAndParse[handlers.AuthResponse](t,
+							http.MethodPost, "", authReq,
+							"process", "bundle", bothMethodsBundleID, "auth", "0")
+						c.Assert(authResp.AuthToken, qt.Not(qt.Equals), "", qt.Commentf("auth token should not be empty"))
 					})
 				})
 			})

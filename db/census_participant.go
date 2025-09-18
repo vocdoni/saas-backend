@@ -196,6 +196,57 @@ func (ms *MongoStorage) CensusParticipantByLoginHash(
 	return participant, nil
 }
 
+// CensusParticipantByLoginHashOrEmailorPhone is an extension of CensusParticipantByLoginHash for
+// the case when the census has 2FA enabled with both email and phone but only one of them is available.
+// It calculates the login hash for the available field and tries to find the participant.
+func (ms *MongoStorage) CensusParticipantByLoginHashOrEmailorPhone(
+	censusID string,
+	authFields OrgMemberAuthFields,
+	twoFaFields OrgMemberTwoFaFields,
+	member OrgMember,
+) (*CensusParticipant, error) {
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	// validate input
+	if len(censusID) == 0 {
+		return nil, ErrInvalidData
+	}
+
+	// prepare filter for find
+	filter := bson.M{
+		"loginHash": HashAuthTwoFaFields(member, authFields, twoFaFields),
+		"censusId":  censusID,
+	}
+
+	// find the participant
+	participant := &CensusParticipant{}
+	err := ms.censusParticipants.FindOne(ctx, filter).Decode(participant)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			if len(member.Email) > 0 && member.Phone.IsEmpty() {
+				filter = bson.M{
+					"loginHashEmail": HashAuthTwoFaFields(member, authFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail}),
+					"censusId":       censusID,
+				}
+			} else if len(member.Email) == 0 && !member.Phone.IsEmpty() {
+				filter = bson.M{
+					"loginHashPhone": HashAuthTwoFaFields(member, authFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldPhone}),
+					"censusId":       censusID,
+				}
+			}
+			err := ms.censusParticipants.FindOne(ctx, filter).Decode(participant)
+			if err != nil {
+				if err == mongo.ErrNoDocuments {
+					return nil, ErrNotFound
+				}
+				return nil, fmt.Errorf("failed to get census participant: %w", err)
+			}
+		}
+	}
+	return participant, nil
+}
+
 // DelCensusParticipant removes a census participant from the database.
 // Returns nil if the participant was successfully deleted or didn't exist.
 func (ms *MongoStorage) DelCensusParticipant(censusID, participantID string) error {
@@ -530,6 +581,10 @@ func (ms *MongoStorage) setBulkCensusParticipant(
 			UpdatedAt:     currentTime,
 		}
 
+		if len(twoFaFields) == 2 && len(member.Email) > 0 && !member.Phone.IsEmpty() {
+			participantDoc.LoginHashPhone = HashAuthTwoFaFields(*member, authFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldPhone})
+			participantDoc.LoginHashEmail = HashAuthTwoFaFields(*member, authFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail})
+		}
 		// Create participant update document
 		updateParticipantDoc, err := dynamicUpdateDocument(participantDoc, nil)
 		if err != nil {
