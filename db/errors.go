@@ -16,8 +16,8 @@ var (
 	ErrProcessNotFound = fmt.Errorf("process not found")
 	// ErrBadInputs is returned if the inputs provided to the function are invalid
 	ErrBadInputs = fmt.Errorf("bad inputs")
-	// ErrProcessAlreadyConsumed is returned if the process has already been consumed by the user
-	ErrProcessAlreadyConsumed = fmt.Errorf("token already consumed")
+	// ErrTokenAlreadyConsumed is returned if the process has already been consumed by the user
+	ErrTokenAlreadyConsumed = fmt.Errorf("token already consumed")
 	// ErrTokenNotVerified is returned if the token has not been verified
 	ErrTokenNotVerified = fmt.Errorf("token not verified")
 	// ErrInvalidConfig is returned if the configuration provided is invalid

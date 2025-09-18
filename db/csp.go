@@ -146,11 +146,15 @@ func (ms *MongoStorage) CSPProcess(token, processID internal.HexBytes) (*CSPProc
 func (ms *MongoStorage) IsCSPProcessConsumed(userID, processID internal.HexBytes) (bool, error) {
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
+	return ms.isCSPProcessConsumed(cspAuthTokenStatusID(userID, processID))
+}
+
+func (ms *MongoStorage) isCSPProcessConsumed(cspProcessID internal.HexBytes) (bool, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// try to find the token status by id
-	currentStatus, err := ms.fetchCSPProcessFromDB(ctx, cspAuthTokenStatusID(userID, processID))
+	currentStatus, err := ms.fetchCSPProcessFromDB(ctx, cspProcessID)
 	if err != nil {
 		if err == ErrTokenNotFound {
 			return false, nil
@@ -165,7 +169,35 @@ func (ms *MongoStorage) IsCSPProcessConsumed(userID, processID internal.HexBytes
 	if !tokenData.Verified {
 		return false, ErrTokenNotVerified
 	}
-	return currentStatus.TimesVoted > MaxVoteOverwritesPerProcess, nil
+	return currentStatus.TimesVoted >= MaxVoteOverwritesPerProcess, nil
+}
+
+// fetchTokenStatus returns the current token status in a given process.
+// If the token hasn't yet voted in this process, returns a stub CSPProcess (with ID, UserID and ProcessID filled in).
+// If the token has been used (voted) too many times, it returns ErrTokenAlreadyConsumed.
+// If the token doesn't exist at all, returns ErrTokenNotFound.
+func (ms *MongoStorage) fetchTokenStatus(ctx context.Context, token, processID internal.HexBytes) (*CSPProcess, error) {
+	// check if the token exists
+	tokenData, err := ms.fetchCSPAuthFromDB(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+	id := cspAuthTokenStatusID(tokenData.UserID, processID)
+	// get the token status
+	tokenStatus, err := ms.fetchCSPProcessFromDB(ctx, id)
+	// token exists but hasn't yet been used in this Process,
+	// return a stub tokenStatus
+	if errors.Is(err, ErrTokenNotFound) {
+		return &CSPProcess{
+			ID:        id,
+			UserID:    tokenData.UserID,
+			ProcessID: processID,
+		}, nil
+	} else if err != nil {
+		return nil, err
+	}
+
+	return tokenStatus, nil
 }
 
 // ConsumeCSPProcess method consumes a CSP process for a user. It returns an
@@ -182,46 +214,38 @@ func (ms *MongoStorage) ConsumeCSPProcess(token, processID, address internal.Hex
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	// check if the token exists
-	tokenData, err := ms.fetchCSPAuthFromDB(ctx, token)
+
+	tokenStatus, err := ms.fetchTokenStatus(ctx, token, processID)
 	if err != nil {
 		return err
 	}
-	// calculate the status id
-	id := cspAuthTokenStatusID(tokenData.UserID, processID)
-	// get the token status
-	tokenStatus, err := ms.fetchCSPProcessFromDB(ctx, id)
-	if err != nil && !errors.Is(err, ErrTokenNotFound) {
-		return err
+	// check if the address is the same as the previous one used to vote
+	if tokenStatus.UsedAddress != nil && !tokenStatus.UsedAddress.Equals(address) {
+		return ErrInvalidData
 	}
 	// check if the token is already consumed
-	if tokenStatus != nil && tokenStatus.TimesVoted > MaxVoteOverwritesPerProcess {
-		return ErrProcessAlreadyConsumed
+	if tokenStatus.TimesVoted >= MaxVoteOverwritesPerProcess {
+		return ErrTokenAlreadyConsumed
 	}
-	timesVoted := 1
-	if tokenStatus != nil {
-		timesVoted = tokenStatus.TimesVoted + 1
-		// check if the address is the same as the previous one used to vote
-		if tokenStatus.UsedAddress != nil && !tokenStatus.UsedAddress.Equals(address) {
-			return ErrInvalidData
-		}
-	}
+	// increase counter
+	tokenStatus.TimesVoted++
+
 	// prepare the document to update
 	updateDoc, err := dynamicUpdateDocument(CSPProcess{
-		ID:          id,
-		UserID:      tokenData.UserID,
+		ID:          tokenStatus.ID,
+		UserID:      tokenStatus.UserID,
 		ProcessID:   processID,
 		UsedAt:      time.Now(),
 		UsedToken:   token,
 		UsedAddress: address,
-		TimesVoted:  timesVoted,
+		TimesVoted:  tokenStatus.TimesVoted,
 	}, nil)
 	if err != nil {
 		return errors.Join(ErrPrepareDocument, err)
 	}
 	// set the filter and update options to create the document if it does not
 	// exist
-	filter := bson.M{"_id": id}
+	filter := bson.M{"_id": tokenStatus.ID}
 	opts := options.Update().SetUpsert(true)
 	// update the token status
 	if _, err = ms.cspTokensStatus.UpdateOne(ctx, filter, updateDoc, opts); err != nil {
