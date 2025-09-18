@@ -149,6 +149,6 @@ func TestCSPProcess(t *testing.T) {
 			c.Assert(status.TimesVoted, qt.Equals, i+1)
 		}
 		// try to consume it again to check it fails
-		c.Assert(testDB.ConsumeCSPProcess(testAuthToken, testCSPProcessID, testUserAddress), qt.ErrorIs, ErrProcessAlreadyConsumed)
+		c.Assert(testDB.ConsumeCSPProcess(testAuthToken, testCSPProcessID, testUserAddress), qt.ErrorIs, ErrTokenAlreadyConsumed)
 	})
 }
