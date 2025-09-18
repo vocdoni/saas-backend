@@ -1004,7 +1004,7 @@ definitions:
     - name
     - surname
     - memberNumber
-    - nationalID
+    - nationalId
     - birthDate
     type: string
     x-enum-varnames:
