@@ -27,7 +27,6 @@ type CSPProcess struct {
 	ID          internal.HexBytes `json:"id" bson:"_id"` // hash(userID + processID)
 	UserID      internal.HexBytes `json:"userID" bson:"userid"`
 	ProcessID   internal.HexBytes `json:"processID" bson:"processid"`
-	Used        bool              `json:"used" bson:"consumed"`
 	UsedToken   internal.HexBytes `json:"usedToken" bson:"consumedtoken"`
 	UsedAt      time.Time         `json:"usedAt" bson:"consumedat"`
 	UsedAddress internal.HexBytes `json:"usedAddress" bson:"consumedaddress"`
@@ -212,7 +211,6 @@ func (ms *MongoStorage) ConsumeCSPProcess(token, processID, address internal.Hex
 		ID:          id,
 		UserID:      tokenData.UserID,
 		ProcessID:   processID,
-		Used:        true,
 		UsedAt:      time.Now(),
 		UsedToken:   token,
 		UsedAddress: address,
