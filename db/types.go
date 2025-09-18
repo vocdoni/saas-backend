@@ -322,12 +322,16 @@ type OrganizationMemberGroup struct {
 
 // Relates an OrgMember to a Census
 // The censusID is the hex format in string of the objectID
+//
+//nolint:lll
 type CensusParticipant struct {
-	ParticipantID string    `json:"participantID" bson:"participantID"`
-	CensusID      string    `json:"censusId" bson:"censusId"`
-	LoginHash     []byte    `json:"loginHash" bson:"loginHash" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
-	CreatedAt     time.Time `json:"createdAt" bson:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt" bson:"updatedAt"`
+	ParticipantID  string    `json:"participantID" bson:"participantID"`
+	CensusID       string    `json:"censusId" bson:"censusId"`
+	LoginHash      []byte    `json:"loginHash" bson:"loginHash" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
+	LoginHashPhone []byte    `json:"loginHashPhone" bson:"loginHashPhone" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
+	LoginHashEmail []byte    `json:"loginHashEmail" bson:"loginHashEmail" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
+	CreatedAt      time.Time `json:"createdAt" bson:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt" bson:"updatedAt"`
 }
 
 // Represents a published census as a census is represented in the vochain

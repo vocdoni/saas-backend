@@ -509,11 +509,13 @@ func (c *CSPHandlers) authFirstStep(
 		Phone:        phone,
 	}
 
-	// Get participant information using the already retrieved census
-	loginHash := db.HashAuthTwoFaFields(*inputMember, census.AuthFields, census.TwoFaFields)
-
 	// Check the participant is in the census
-	censuParticipant, err := c.mainDB.CensusParticipantByLoginHash(censusID, loginHash)
+	censusParticipant, err := c.mainDB.CensusParticipantByLoginHashOrEmailorPhone(
+		censusID,
+		census.AuthFields,
+		census.TwoFaFields,
+		*inputMember,
+	)
 	if err != nil {
 		if err == db.ErrNotFound {
 			return nil, errors.ErrUnauthorized.Withf("participant not found in the census")
@@ -522,7 +524,7 @@ func (c *CSPHandlers) authFirstStep(
 	}
 
 	// Fetch the corresponding org member using the participant ID (which is the ObjectID hex string)
-	orgMember, err := c.mainDB.OrgMember(census.OrgAddress, censuParticipant.ParticipantID)
+	orgMember, err := c.mainDB.OrgMember(census.OrgAddress, censusParticipant.ParticipantID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get org member: %w", err)
 	}
