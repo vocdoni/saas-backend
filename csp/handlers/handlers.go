@@ -334,7 +334,7 @@ func (c *CSPHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Requ
 	}
 	// check if the address has voted at least one time and return error if not
 	if !cspProcess.Used {
-		errors.ErrUserNoVoted.Write(w)
+		errors.ErrUserHasNotVotedYet.Write(w)
 		return
 	}
 	// return the address used to sign the process and the nullifier
