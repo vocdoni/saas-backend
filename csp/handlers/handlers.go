@@ -332,7 +332,7 @@ func (c *CSPHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Requ
 		errors.ErrUnauthorized.WithErr(err).Write(w)
 		return
 	}
-	// check if the address has voted at least one time and return error if not
+	// check if the address has voted at least once and return error if not
 	if !cspProcess.Used {
 		errors.ErrUserHasNotVotedYet.Write(w)
 		return
