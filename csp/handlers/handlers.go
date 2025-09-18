@@ -333,7 +333,7 @@ func (c *CSPHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	// check if the address has voted at least once and return error if not
-	if !cspProcess.Used {
+	if cspProcess.TimesVoted == 0 {
 		errors.ErrUserHasNotVotedYet.Write(w)
 		return
 	}
