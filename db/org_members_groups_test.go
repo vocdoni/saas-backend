@@ -880,6 +880,105 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		// Check that the member with empty phone is in the missing data list
 		c.Assert(contains(emptyIDs, emptyPhoneMemberID), qt.Equals, true)
 
+		// Test 12: When both email and phone are chosen as twoFa fields, each member should have at least one of them
+		// Create members with different combinations of email and phone
+		memberWithOnlyEmail := &OrgMember{
+			OrgAddress:     testOrgAddress,
+			Email:          "only_email@test.com", // Has email
+			PlaintextPhone: "",                    // No phone
+			MemberNumber:   "only_email_123",
+			Name:           "Only",
+			Surname:        "Email",
+			Password:       testPassword,
+		}
+		onlyEmailMemberID, err := testDB.SetOrgMember(testSalt, memberWithOnlyEmail)
+		c.Assert(err, qt.IsNil)
+
+		memberWithOnlyPhone := &OrgMember{
+			OrgAddress:     testOrgAddress,
+			Email:          "",             // No email
+			PlaintextPhone: "+34698111333", // Has phone
+			MemberNumber:   "only_phone_123",
+			Name:           "Only",
+			Surname:        "Phone",
+			Password:       testPassword,
+		}
+		onlyPhoneMemberID, err := testDB.SetOrgMember(testSalt, memberWithOnlyPhone)
+		c.Assert(err, qt.IsNil)
+
+		memberWithBoth := &OrgMember{
+			OrgAddress:     testOrgAddress,
+			Email:          "both@test.com", // Has email
+			PlaintextPhone: "+34698111444",  // Has phone
+			MemberNumber:   "both_123",
+			Name:           "Has",
+			Surname:        "Both",
+			Password:       testPassword,
+		}
+		bothMemberID, err := testDB.SetOrgMember(testSalt, memberWithBoth)
+		c.Assert(err, qt.IsNil)
+
+		memberWithNone := &OrgMember{
+			OrgAddress:     testOrgAddress,
+			Email:          "", // No email
+			PlaintextPhone: "", // No phone
+			MemberNumber:   "none_123",
+			Name:           "Has",
+			Surname:        "None",
+			Password:       testPassword,
+		}
+		noneMemberID, err := testDB.SetOrgMember(testSalt, memberWithNone)
+		c.Assert(err, qt.IsNil)
+
+		// Create a group with these members
+		twoFaGroup := &OrganizationMemberGroup{
+			OrgAddress:  testOrgAddress,
+			Title:       "TwoFa Test Group",
+			Description: "Group with members having email, phone, both or none",
+			MemberIDs:   []string{onlyEmailMemberID, onlyPhoneMemberID, bothMemberID, noneMemberID},
+		}
+		twoFaGroupID, err := testDB.CreateOrganizationMemberGroup(twoFaGroup)
+		c.Assert(err, qt.IsNil)
+
+		// Test when both email and phone are set as twoFa fields
+		authFields = OrgMemberAuthFields{
+			OrgMemberAuthFieldsName,
+		}
+		twoFaFields = OrgMemberTwoFaFields{
+			OrgMemberTwoFaFieldEmail,
+			OrgMemberTwoFaFieldPhone,
+		}
+		results, err = testDB.CheckGroupMembersFields(testOrgAddress, twoFaGroupID, authFields, twoFaFields)
+		c.Assert(err, qt.IsNil)
+		c.Assert(results, qt.Not(qt.IsNil))
+
+		// Should include members with email only, phone only, and both
+		c.Assert(len(results.Members), qt.Equals, 3)
+
+		// Convert Members IDs to hex strings for easier comparison
+		memberIDs := make([]string, len(results.Members))
+		for i, id := range results.Members {
+			memberIDs[i] = id.Hex()
+		}
+
+		// Members with only email, only phone, or both should be considered valid
+		c.Assert(contains(memberIDs, onlyEmailMemberID), qt.Equals, true)
+		c.Assert(contains(memberIDs, onlyPhoneMemberID), qt.Equals, true)
+		c.Assert(contains(memberIDs, bothMemberID), qt.Equals, true)
+
+		// Convert MissingData IDs to hex strings for easier comparison
+		missingDataIDs := make([]string, len(results.MissingData))
+		for i, id := range results.MissingData {
+			missingDataIDs[i] = id.Hex()
+		}
+
+		// Member with neither email nor phone should be in missing data
+		c.Assert(contains(missingDataIDs, noneMemberID), qt.Equals, true)
+		c.Assert(len(results.MissingData), qt.Equals, 1)
+
+		// There should be no duplicates
+		c.Assert(len(results.Duplicates), qt.Equals, 0)
+
 		// Test 12: Bug fix - AuthFields + 2faFields should create composite key for uniqueness
 		// Create members with same auth fields but different 2fa fields
 		member1SameAuth := &OrgMember{

@@ -118,7 +118,6 @@ func (ms *MongoStorage) CreateOrganizationMemberGroup(group *OrganizationMemberG
 		}
 		return "", fmt.Errorf("organization not found: %w", err)
 	}
-
 	// check that the members are valid
 	err := ms.validateOrgMembers(ctx, group.OrgAddress, group.MemberIDs)
 	if err != nil {
@@ -309,8 +308,8 @@ func (ms *MongoStorage) ListOrganizationMemberGroup(
 // CheckOrgMemberAuthFields checks if the provided orgFields are valid for authentication
 // Checks the entire member base of an organization creating a projection that contains only
 // the provided auth fields and verifies that the resulting data do not have duplicates or
-// missing fields. Returns the corrsponding informative errors concerning duplicates or columns with empty values
-// The authFields are checked for missing data and duplicates while the twoFaFields are only checked for missing data
+// missing fields. Returns the corresponding informative errors concerning duplicates or columns with empty values.
+// Both authFields and twoFaFields are checked for missing data.
 func (ms *MongoStorage) CheckGroupMembersFields(
 	orgAddress common.Address,
 	groupID string,
@@ -362,7 +361,12 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 		// if any of the fields are empty, add to missing data
 		// and continue to the next member
 		// we do not check for duplicates in empty rows
-		if hasEmptyFields(bm, authFields) || hasEmptyFields(bm, twoFaFields) {
+		if hasAnyEmptyField(bm, authFields) {
+			results.MissingData = append(results.MissingData, m.ID)
+			continue
+		}
+
+		if len(twoFaFields) > 0 && hasAllEmptyTwoFaFields(bm, twoFaFields) {
 			results.MissingData = append(results.MissingData, m.ID)
 			continue
 		}
@@ -467,8 +471,8 @@ func mapKeysToSlice[T comparable, V any](m map[T]V) []T {
 	return keys
 }
 
-// hasEmptyFields returns true if any of the specified fields in the BSON document are empty or nil.
-func hasEmptyFields[T ~string](bm bson.M, fields []T) bool {
+// hasAnyEmptyField returns true if any of the specified fields in the BSON document are empty or nil.
+func hasAnyEmptyField[T ~string](bm bson.M, fields []T) bool {
 	for _, f := range fields {
 		val := fmt.Sprint(bm[string(f)])
 		if val == "" || bm[string(f)] == nil {
@@ -476,6 +480,16 @@ func hasEmptyFields[T ~string](bm bson.M, fields []T) bool {
 		}
 	}
 	return false
+}
+
+// hasAllEmptyField returns true if any of the specified fields in the BSON document are empty or nil.
+func hasAllEmptyTwoFaFields[T ~string](bm bson.M, fields []T) bool {
+	for _, f := range fields {
+		if bm[string(f)] != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // buildCompositeKey constructs a composite key from both auth and 2FA fields.
