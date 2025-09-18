@@ -219,7 +219,7 @@ const (
 	OrgMemberAuthFieldsName         OrgMemberAuthField = "name"
 	OrgMemberAuthFieldsSurname      OrgMemberAuthField = "surname"
 	OrgMemberAuthFieldsMemberNumber OrgMemberAuthField = "memberNumber"
-	OrgMemberAuthFieldsNationalID   OrgMemberAuthField = "nationalID"
+	OrgMemberAuthFieldsNationalID   OrgMemberAuthField = "nationalId"
 	OrgMemberAuthFieldsBirthDate    OrgMemberAuthField = "birthDate"
 )
 
