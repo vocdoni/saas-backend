@@ -400,7 +400,12 @@ func handlePhoneContact(
 	phone string,
 	memberHashedPhone db.HashedPhone,
 ) (string, notifications.ChallengeType, error) {
-	hashedPhone, err := db.NewHashedPhone(phone, org)
+	normalized, err := internal.SanitizeAndVerifyPhoneNumber(phone, org.Country)
+	if err != nil {
+		return "", "", err
+	}
+
+	hashedPhone, err := db.NewHashedPhone(normalized, org)
 	if err != nil {
 		return "", "", err
 	}
@@ -408,7 +413,7 @@ func handlePhoneContact(
 	if !memberHashedPhone.Matches(hashedPhone) {
 		return "", "", errors.ErrUnauthorized.Withf("user phone doesn't match")
 	}
-	return phone, notifications.SMSChallenge, nil
+	return normalized, notifications.SMSChallenge, nil
 }
 
 // determineContactMethod determines the contact method based on the census type and request data
