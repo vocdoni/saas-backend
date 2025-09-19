@@ -214,7 +214,7 @@ func TestCSPVoting(t *testing.T) {
 						NationalID:   "12345678A",
 						BirthDate:    "1990-01-01",
 						Email:        "john.doe@example.com",
-						Phone:        "+34612345601",
+						Phone:        "612345601", // phone without country code should be handled gracefully
 					},
 					{
 						Name:         "Jane",
