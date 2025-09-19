@@ -262,7 +262,7 @@
                 <div class="email-container">
                     
                     <div class="header">
-                        <img src="./images/vocdoni_logo_mailing.png" 
+                        <img src="https://raw.githubusercontent.com/vocdoni/ui-scaffold/develop/public/assets/mailing/vocdoni_logo_mailing.png" 
                              alt="Vocdoni Logo" 
                              class="logo" 
                              width="100" 
@@ -280,13 +280,13 @@
                             </p>
                             
                             <div class="verification-code">
-                                <p class="verification-code-text">{{VERIFICATION_CODE}}</p>
+                                <p class="verification-code-text">{{.Code}}</p>
                                 <p class="verification-code-label">Verification Code</p>
                             </div>
                             
                             <p class="body-text">Or click the button below:</p>
                             
-                            <a href="{{VERIFICATION_URL}}" class="cta-button" target="_blank" rel="noopener">
+                            <a href="{{.Link}}" class="cta-button" target="_blank" rel="noopener">
                                 Verify my account
                             </a>
                             
