@@ -1,563 +1,315 @@
-<!DOCTYPE html
-    PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml"
-    xmlns:o="urn:schemas-microsoft-com:office:office" lang="en">
-
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" lang="en">
 <head>
-    <title></title>
+    <title>Verify Your Vocdoni Account</title>
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-    <!--[if !mso]>-->
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-    <!--<![endif]-->
     <meta name="x-apple-disable-message-reformatting" content="" />
-    <meta content="target-densitydpi=device-dpi" name="viewport" />
-    <meta content="true" name="HandheldFriendly" />
-    <meta content="width=device-width" name="viewport" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="format-detection" content="telephone=no, date=no, address=no, email=no, url=no" />
+    
+    <div style="display: none; max-height: 0; overflow: hidden;">
+        Complete your Vocdoni account setup by verifying your email address
+    </div>
+    
     <style type="text/css">
-        table {
-            border-collapse: separate;
-            table-layout: fixed;
-            mso-table-lspace: 0pt;
-            mso-table-rspace: 0pt
+        #outlook a { padding: 0; }
+        .ReadMsgBody { width: 100%; }
+        .ExternalClass { width: 100%; }
+        .ExternalClass, .ExternalClass p, .ExternalClass span, .ExternalClass font, .ExternalClass td, .ExternalClass div {
+            line-height: 100%;
         }
-
-        table td {
-            border-collapse: collapse
-        }
-
-        .ExternalClass {
-            width: 100%
-        }
-
-        .ExternalClass,
-        .ExternalClass p,
-        .ExternalClass span,
-        .ExternalClass font,
-        .ExternalClass td,
-        .ExternalClass div {
-            line-height: 100%
-        }
-
-        .gmail-mobile-forced-width {
-            display: none;
-            display: none !important;
-        }
-
-        body,
-        a,
-        li,
-        p,
-        h1,
-        h2,
-        h3 {
-            -ms-text-size-adjust: 100%;
+        
+        body, table, td, p, a, li, blockquote {
             -webkit-text-size-adjust: 100%;
+            -ms-text-size-adjust: 100%;
         }
-
-        html {
-            -webkit-text-size-adjust: none !important
+        
+        table, td {
+            mso-table-lspace: 0pt;
+            mso-table-rspace: 0pt;
         }
-
-        body,
-        #innerTable {
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale
-        }
-
-        #innerTable img+div {
-            display: none;
-            display: none !important
-        }
-
+        
         img {
-            Margin: 0;
-            padding: 0;
-            -ms-interpolation-mode: bicubic
-        }
-
-        h1,
-        h2,
-        h3,
-        p,
-        a {
-            line-height: inherit;
-            overflow-wrap: normal;
-            white-space: normal;
-            word-break: break-word
-        }
-
-        a {
-            text-decoration: none
-        }
-
-        h1,
-        h2,
-        h3,
-        p {
-            min-width: 100% !important;
-            width: 100% !important;
-            max-width: 100% !important;
-            display: inline-block !important;
+            -ms-interpolation-mode: bicubic;
             border: 0;
-            padding: 0;
-            margin: 0
-        }
-
-        a[x-apple-data-detectors] {
-            color: inherit !important;
-            text-decoration: none !important;
-            font-size: inherit !important;
-            font-family: inherit !important;
-            font-weight: inherit !important;
-            line-height: inherit !important
-        }
-
-        u+#body a {
-            color: inherit;
+            height: auto;
+            line-height: 100%;
+            outline: none;
             text-decoration: none;
-            font-size: inherit;
-            font-family: inherit;
-            font-weight: inherit;
-            line-height: inherit;
         }
-
-        a[href^="mailto"],
-        a[href^="tel"],
-        a[href^="sms"] {
-            color: inherit;
-            text-decoration: none
+        
+        body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background-color: #000000;
+            font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        .email-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #000000;
+        }
+        
+        .email-content {
+            background-color: #ffffff;
+            border-radius: 13px;
+            margin: 40px 15px;
+            overflow: hidden;
+        }
+        
+        .header {
+            text-align: center;
+            padding: 40px 0;
+        }
+        
+        .logo {
+            width: 100px;
+            height: 100px;
+            display: block;
+            margin: 0 auto;
+        }
+        
+        .main-content {
+            padding: 40px 25px;
+            text-align: left;
+        }
+        
+        .heading {
+            font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-size: 39px;
+            font-weight: 800;
+            line-height: 41px;
+            letter-spacing: -1.2px;
+            color: #000000;
+            margin: 0 0 25px 0;
+        }
+        
+        .body-text {
+            font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-size: 14px;
+            font-weight: 500;
+            line-height: 22px;
+            letter-spacing: -0.56px;
+            color: #000000;
+            margin: 0 0 25px 0;
+        }
+        
+        .verification-code {
+            background-color: #f8f9fa;
+            border: 2px dashed #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            margin: 25px 0;
+        }
+        
+        .verification-code-text {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 24px;
+            font-weight: bold;
+            color: #000000;
+            letter-spacing: 4px;
+            margin: 0;
+        }
+        
+        .verification-code-label {
+            font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-size: 12px;
+            color: #6c757d;
+            margin: 5px 0 0 0;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .cta-button {
+            display: inline-block;
+            background-color: #000000;
+            color: #ffffff !important;
+            text-decoration: none;
+            padding: 12px 20px;
+            border-radius: 14px;
+            font-family: 'Albert Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: -0.6px;
+            text-align: center;
+            margin: 25px 0;
+            transition: background-color 0.3s ease;
+        }
+        
+        .cta-button:hover {
+            background-color: #333333 !important;
+        }
+        
+        .footer {
+            padding: 30px 0;
+            text-align: center;
+        }
+        
+        .footer-text {
+            font-family: 'Albert Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-size: 12px;
+            line-height: 21px;
+            color: #aaaaaa;
+            margin: 0 0 15px 0;
+        }
+        
+        .footer-link {
+            color: #d4d4d4 !important;
+            text-decoration: none;
+            font-weight: 700;
+        }
+        
+        .footer-link:hover {
+            color: #ffffff !important;
+        }
+        
+        @media only screen and (max-width: 480px) {
+            .email-content {
+                margin: 20px 10px;
+            }
+            
+            .main-content {
+                padding: 30px 20px;
+            }
+            
+            .heading {
+                font-size: 28px;
+                line-height: 32px;
+                letter-spacing: -0.8px;
+            }
+            
+            .body-text {
+                font-size: 16px;
+                line-height: 24px;
+            }
+            
+            .verification-code-text {
+                font-size: 20px;
+                letter-spacing: 2px;
+            }
+            
+            .cta-button {
+                display: block;
+                width: 100%;
+                box-sizing: border-box;
+            }
+        }
+        
+        @media (prefers-color-scheme: dark) {
+            .email-content {
+                background-color: #1a1a1a !important;
+            }
+            
+            .heading {
+                color: #ffffff !important;
+            }
+            
+            .body-text {
+                color: #e0e0e0 !important;
+            }
+            
+            .verification-code {
+                background-color: #2a2a2a !important;
+                border-color: #404040 !important;
+            }
+            
+            .verification-code-text {
+                color: #ffffff !important;
+            }
+            
+            .verification-code-label {
+                color: #a0a0a0 !important;
+            }
+            
+            .cta-button {
+                background-color: #ffffff !important;
+                color: #000000 !important;
+            }
+            
+            .cta-button:hover {
+                background-color: #e0e0e0 !important;
+            }
+        }
+        
+        .outlook-fix {
+            mso-table-lspace: 0pt;
+            mso-table-rspace: 0pt;
+            border-collapse: collapse;
+        }
+        
+        .outlook-dpi-fix {
+            mso-line-height-rule: exactly;
         }
     </style>
-    <style type="text/css">
-        @media (min-width: 481px) {
-            .hd {
-                display: none !important
-            }
-        }
-    </style>
-    <style type="text/css">
-        @media (max-width: 480px) {
-            .hm {
-                display: none !important
-            }
-        }
-    </style>
-    <style type="text/css">
-        @media (max-width: 480px) {
-
-            .t26,
-            .t29 {
-                mso-line-height-alt: 0px !important;
-                line-height: 0 !important;
-                display: none !important
-            }
-
-            .t27 {
-                padding-top: 43px !important;
-                border-radius: 0 !important;
-                width: 400px !important
-            }
-
-            .t5 {
-                line-height: 28px !important;
-                font-size: 24px !important
-            }
-
-            .t12,
-            .t14 {
-                line-height: 32px !important;
-                mso-text-raise: 5px !important
-            }
-
-            .t12 {
-                font-size: 14px !important
-            }
-
-            .t18 {
-                mso-line-height-alt: 40px !important;
-                line-height: 40px !important;
-                display: block !important
-            }
-
-            .t23 {
-                mso-line-height-alt: 26px !important;
-                line-height: 26px !important
-            }
-
-            .t24 {
-                width: 340px !important
-            }
-        }
-    </style>
-    <style type="text/css">
-        @media (max-width: 480px) {
-            [class~="x_t26"] {
-                mso-line-height-alt: 0px !important;
-                line-height: 0px !important;
-                display: none !important;
-            }
-
-            [class~="x_t29"] {
-                mso-line-height-alt: 0px !important;
-                line-height: 0px !important;
-                display: none !important;
-            }
-
-            [class~="x_t27"] {
-                padding-top: 43px !important;
-                border-top-left-radius: 0px !important;
-                border-top-right-radius: 0px !important;
-                border-bottom-right-radius: 0px !important;
-                border-bottom-left-radius: 0px !important;
-                width: 400px !important;
-            }
-
-            [class~="x_t5"] {
-                line-height: 28px !important;
-                font-size: 24px !important;
-            }
-
-            [class~="x_t14"] {
-                line-height: 32px !important;
-                mso-text-raise: 5px !important;
-            }
-
-            [class~="x_t12"] {
-                line-height: 32px !important;
-                font-size: 14px !important;
-                mso-text-raise: 5px !important;
-            }
-
-            [class~="x_t18"] {
-                mso-line-height-alt: 40px !important;
-                line-height: 40px !important;
-                display: block !important;
-            }
-
-            [class~="x_t23"] {
-                mso-line-height-alt: 26px !important;
-                line-height: 26px !important;
-            }
-
-            [class~="x_t24"] {
-                width: 340px !important;
-            }
-        }
-    </style>
-    <!--[if !mso]>-->
-    <link
-        href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@600;700&amp;family=Inter:wght@500&amp;family=Albert+Sans:wght@500;700&amp;family=Lato:wght@400;700&amp;display=swap"
-        rel="stylesheet" type="text/css" />
-    <!--<![endif]-->
-    <!--[if mso]>
-<xml>
-<o:OfficeDocumentSettings>
-<o:AllowPNG/>
-<o:PixelsPerInch>96</o:PixelsPerInch>
-</o:OfficeDocumentSettings>
-</xml>
-<![endif]-->
+    
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;800&family=Albert+Sans:wght@400;600;700&display=swap" rel="stylesheet" type="text/css" />
 </head>
 
-<body id=body class=t40 style="min-width:100%;Margin:0px;padding:0px;background-color:#F0F0F0;">
-    <div class=t39 style="background-color:#F0F0F0;">
-        <table role=presentation width=100% cellpadding=0 cellspacing=0 border=0 align=center>
-            <tr>
-                <td class=t38
-                    style="font-size:0;line-height:0;mso-line-height-rule:exactly;background-color:#F0F0F0;background-image:none;"
-                    valign=top align=center>
-                    <!--[if mso]>
-<v:background xmlns:v="urn:schemas-microsoft-com:vml" fill="true" stroke="false">
-<v:fill color=#F0F0F0/>
-</v:background>
-<![endif]-->
-                    <table role=presentation width=100% cellpadding=0 cellspacing=0 border=0 align=center id=innerTable>
-                        <tr>
-                            <td>
-                                <div class=t26
-                                    style="mso-line-height-rule:exactly;mso-line-height-alt:70px;line-height:70px;font-size:1px;display:block;">
-                                    &nbsp;&nbsp;</div>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td align=center>
-                                <table class=t28 role=presentation cellpadding=0 cellspacing=0
-                                    style="Margin-left:auto;Margin-right:auto;">
-                                    <tr>
-                                        <!--[if mso]>
-<td width=600 class=t27 style="background-color:#FFFFFF;overflow:hidden;padding:50px 40px 40px 40px;border-radius:20px 20px 20px 20px;">
-<![endif]-->
-                                        <!--[if !mso]>-->
-                                        <td class=t27
-                                            style="background-color:#FFFFFF;overflow:hidden;width:520px;padding:50px 40px 40px 40px;border-radius:20px 20px 20px 20px;">
-                                            <!--<![endif]-->
-                                            <table role=presentation width=100% cellpadding=0 cellspacing=0
-                                                style="width:100% !important;">
-                                                <tr>
-                                                    <td align=center>
-                                                        <table class=t2 role=presentation cellpadding=0 cellspacing=0
-                                                            style="Margin-left:auto;Margin-right:auto;">
-                                                            <tr>
-                                                                <!--[if mso]>
-<td width=160 class=t1>
-<![endif]-->
-                                                                <!--[if !mso]>-->
-                                                                <td class=t1 style="width:160px;">
-                                                                    <!--<![endif]-->
-                                                                    <a href="#" style="font-size:0px;"
-                                                                        target=_blank><img class=t0
-                                                                            style="display:block;border:0;height:auto;width:100%;Margin:0;max-width:100%;"
-                                                                            width=160 height=34.3125 alt=""
-                                                                            src="https://63d169ae-ca86-413d-ad95-3757c5d884a8.b-cdn.net/e/057afd58-8fe3-44c0-9dd1-bb8c2351ffe1/8e585437-510d-4534-a2f7-770b7040974d.png" /></a>
-                                                                </td>
-                                                            </tr>
-                                                        </table>
-                                                    </td>
-                                                </tr>
-                                                <tr>
-                                                    <td>
-                                                        <div class=t3
-                                                            style="mso-line-height-rule:exactly;mso-line-height-alt:40px;line-height:40px;font-size:1px;display:block;">
-                                                            &nbsp;&nbsp;</div>
-                                                    </td>
-                                                </tr>
-                                                <tr>
-                                                    <td align=center>
-                                                        <table class=t7 role=presentation cellpadding=0 cellspacing=0
-                                                            style="Margin-left:auto;Margin-right:auto;">
-                                                            <tr>
-                                                                <!--[if mso]>
-<td width=339 class=t6>
-<![endif]-->
-                                                                <!--[if !mso]>-->
-                                                                <td class=t6 style="width:339px;">
-                                                                    <!--<![endif]-->
-                                                                    <h1 class=t5
-                                                                        style="margin:0;Margin:0;font-family:Fira Sans,BlinkMacSystemFont,Segoe UI,Helvetica Neue,Arial,sans-serif;line-height:52px;font-weight:600;font-style:normal;font-size:48px;text-decoration:none;text-transform:none;letter-spacing:-1.2px;direction:ltr;color:#111111;text-align:center;mso-line-height-rule:exactly;mso-text-raise:1px;">
-                                                                        Please verify your email <span class=t4
-                                                                            style="margin:0;Margin:0;font-size:28px;mso-line-height-rule:exactly;">😀</span>
-                                                                    </h1>
-                                                                </td>
-                                                            </tr>
-                                                        </table>
-                                                    </td>
-                                                </tr>
-                                                <tr>
-                                                    <td>
-                                                        <div class=t9
-                                                            style="mso-line-height-rule:exactly;mso-line-height-alt:17px;line-height:17px;font-size:1px;display:block;">
-                                                            &nbsp;&nbsp;</div>
-                                                    </td>
-                                                </tr>
-                                                <tr>
-                                                    <td align=center>
-                                                        <table class=t11 role=presentation cellpadding=0 cellspacing=0
-                                                            style="Margin-left:auto;Margin-right:auto;">
-                                                            <tr>
-                                                                <!--[if mso]>
-<td width=308 class=t10>
-<![endif]-->
-                                                                <!--[if !mso]>-->
-                                                                <td class=t10 style="width:308px;">
-                                                                    <!--<![endif]-->
-                                                                    <p class=t8
-                                                                        style="margin:0;Margin:0;font-family:Inter,BlinkMacSystemFont,Segoe UI,Helvetica Neue,Arial,sans-serif;line-height:22px;font-weight:500;font-style:normal;font-size:15px;text-decoration:none;text-transform:none;letter-spacing:-0.6px;direction:ltr;color:#424040;text-align:center;mso-line-height-rule:exactly;mso-text-raise:2px;">
-                                                                        To use Vocdoni SaaS, click the verification
-                                                                        button. This helps keep your account secure.</p>
-                                                                </td>
-                                                            </tr>
-                                                        </table>
-                                                    </td>
-                                                </tr>
-                                                <tr>
-                                                    <td>
-                                                        <div class=t13
-                                                            style="mso-line-height-rule:exactly;mso-line-height-alt:40px;line-height:40px;font-size:1px;display:block;">
-                                                            &nbsp;&nbsp;</div>
-                                                    </td>
-                                                </tr>
-                                                <tr>
-                                                    <td align=center>
-                                                        <table class=t15 role=presentation cellpadding=0 cellspacing=0
-                                                            style="Margin-left:auto;Margin-right:auto;">
-                                                            <tr>
-                                                                <!--[if mso]>
-<td width=308 class=t14 style="background-color:#3B7318;overflow:hidden;text-align:center;line-height:58px;mso-line-height-rule:exactly;mso-text-raise:11px;border-radius:14px 14px 14px 14px;">
-<![endif]-->
-                                                                <!--[if !mso]>-->
-                                                                <td class=t14
-                                                                    style="background-color:#3B7318;overflow:hidden;width:308px;text-align:center;line-height:58px;mso-line-height-rule:exactly;mso-text-raise:11px;border-radius:14px 14px 14px 14px;">
-                                                                    <!--<![endif]-->
-                                                                    <a class=t12 href="{{.Link}}"
-                                                                        style="display:block;margin:0;Margin:0;font-family:Fira Sans,BlinkMacSystemFont,Segoe UI,Helvetica Neue,Arial,sans-serif;line-height:58px;font-weight:700;font-style:normal;font-size:21px;text-decoration:none;letter-spacing:-0.5px;direction:ltr;color:#FFFFFF;text-align:center;mso-line-height-rule:exactly;mso-text-raise:11px;"
-                                                                        target=_blank>Verify my account</a>
-                                                                </td>
-                                                            </tr>
-                                                        </table>
-                                                    </td>
-                                                </tr>
-                                                <tr>
-                                                    <td>
-                                                        <div class=t16
-                                                            style="mso-line-height-rule:exactly;mso-line-height-alt:60px;line-height:60px;font-size:1px;display:block;">
-                                                            &nbsp;&nbsp;</div>
-                                                    </td>
-                                                </tr>
-                                                <tr>
-                                                    <td align=center>
-                                                        <table class=t20 role=presentation cellpadding=0 cellspacing=0
-                                                            style="Margin-left:auto;Margin-right:auto;">
-                                                            <tr>
-                                                                <!--[if mso]>
-<td width=318 class=t19>
-<![endif]-->
-                                                                <!--[if !mso]>-->
-                                                                <td class=t19 style="width:318px;">
-                                                                    <!--<![endif]-->
-                                                                    <p class=t17
-                                                                        style="margin:0;Margin:0;font-family:Inter,BlinkMacSystemFont,Segoe UI,Helvetica Neue,Arial,sans-serif;line-height:22px;font-weight:500;font-style:normal;font-size:18px;text-decoration:none;text-transform:none;letter-spacing:-0.6px;direction:ltr;color:#424040;text-align:center;mso-line-height-rule:exactly;mso-text-raise:2px;">
-                                                                        Your verifiaction code is:</p>
-                                                                    <p class=t17
-                                                                        style="background:#ccc;margin:22px 0;Margin:22px 0;font-family:Inter,BlinkMacSystemFont,Segoe UI,Helvetica Neue,Arial,sans-serif;line-height:42px;font-weight:500;font-style:normal;font-size:18px;text-decoration:none;text-transform:none;letter-spacing:-0.6px;direction:ltr;color:#000;text-align:center;mso-line-height-rule:exactly;mso-text-raise:2px;">
-                                                                        {{.Code}}</p>
-                                                                </td>
-                                                            </tr>
-                                                        </table>
-                                                    </td>
-                                                </tr>
-                                    </tr>
-                                    <tr>
-                                        <td>
-                                            <div class=t16
-                                                style="mso-line-height-rule:exactly;mso-line-height-alt:60px;line-height:60px;font-size:1px;display:block;">
-                                                &nbsp;&nbsp;</div>
-                                        </td>
-                                    </tr>
-                                    <!--[if !mso]>-->
-                                    <tr>
-                                        <td>
-                                            <div class=t18
-                                                style="mso-line-height-rule:exactly;font-size:1px;display:none;">
-                                                &nbsp;&nbsp;</div>
-                                        </td>
-                                    </tr>
-                                    <!--<![endif]-->
-                                    <tr>
-                                        <td align=center>
-                                            <table class=t20 role=presentation cellpadding=0 cellspacing=0
-                                                style="Margin-left:auto;Margin-right:auto;">
-                                                <tr>
-                                                    <!--[if mso]>
-<td width=318 class=t19>
-<![endif]-->
-                                                    <!--[if !mso]>-->
-                                                    <td class=t19 style="width:318px;">
-                                                        <!--<![endif]-->
-                                                        <p class=t17
-                                                            style="margin:0;Margin:0;font-family:Inter,BlinkMacSystemFont,Segoe UI,Helvetica Neue,Arial,sans-serif;line-height:22px;font-weight:500;font-style:normal;font-size:14px;text-decoration:none;text-transform:none;letter-spacing:-0.6px;direction:ltr;color:#424040;text-align:center;mso-line-height-rule:exactly;mso-text-raise:2px;">
-                                                            You&#39;re receiving this email because you have
-                                                            an account in Vocdoni App. If you are not sure
-                                                            why you&#39;re receiving this, please contact us
-                                                            by replying to this email.</p>
-                                                    </td>
-                                                </tr>
-                                            </table>
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <td>
-                                            <div class=t23
-                                                style="mso-line-height-rule:exactly;mso-line-height-alt:30px;line-height:30px;font-size:1px;display:block;">
-                                                &nbsp;&nbsp;</div>
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <td align=center>
-                                            <table class=t25 role=presentation cellpadding=0 cellspacing=0
-                                                style="Margin-left:auto;Margin-right:auto;">
-                                                <tr>
-                                                    <!--[if mso]>
-<td width=420 class=t24 style="background-color:#F2EFF3;overflow:hidden;padding:20px 30px 20px 30px;border-radius:8px 8px 8px 8px;">
-<![endif]-->
-                                                    <!--[if !mso]>-->
-                                                    <td class=t24
-                                                        style="background-color:#F2EFF3;overflow:hidden;width:360px;padding:20px 30px 20px 30px;border-radius:8px 8px 8px 8px;">
-                                                        <!--<![endif]-->
-                                                        <p class=t22
-                                                            style="margin:0;Margin:0;font-family:Albert Sans,BlinkMacSystemFont,Segoe UI,Helvetica Neue,Arial,sans-serif;line-height:18px;font-weight:500;font-style:normal;font-size:12px;text-decoration:none;text-transform:none;direction:ltr;color:#84828E;text-align:center;mso-line-height-rule:exactly;mso-text-raise:2px;">
-                                                            By joining <span class=t21
-                                                                style="margin:0;Margin:0;font-weight:700;mso-line-height-rule:exactly;">Vocdoni</span>,
-                                                            you&#39;re now part of a global digital voting
-                                                            protocol that&#39;s secure, verifiable,
-                                                            auditable, and private. Experience the future of
-                                                            elections with a platform designed to protect
-                                                            your vote and ensure transparency, all while
-                                                            being accessible and affordable.</p>
-                                                    </td>
-                                                </tr>
-                                            </table>
-                                        </td>
-                                    </tr>
-                                </table>
-                            </td>
-                        </tr>
-                    </table>
-                </td>
-            </tr>
-            <tr>
-                <td>
-                    <div class=t29
-                        style="mso-line-height-rule:exactly;mso-line-height-alt:70px;line-height:70px;font-size:1px;display:block;">
-                        &nbsp;&nbsp;</div>
-                </td>
-            </tr>
-            <tr>
-                <td align=center>
-                    <table class=t36 role=presentation cellpadding=0 cellspacing=0
-                        style="Margin-left:auto;Margin-right:auto;">
-                        <tr>
-                            <!--[if mso]>
-<td width=350 class=t35>
-<![endif]-->
-                            <!--[if !mso]>-->
-                            <td class=t35 style="width:350px;">
-                                <!--<![endif]-->
-                                <p class=t34
-                                    style="margin:0;Margin:0;font-family:Lato,BlinkMacSystemFont,Segoe UI,Helvetica Neue,Arial,sans-serif;line-height:22px;font-weight:400;font-style:normal;font-size:12px;text-decoration:none;text-transform:none;direction:ltr;color:#BBBBBB;text-align:center;mso-line-height-rule:exactly;mso-text-raise:3px;">
-                                    <span class=t31 style="margin:0;Margin:0;mso-line-height-rule:exactly;"><span
-                                            class=t30
-                                            style="margin:0;Margin:0;font-weight:700;mso-line-height-rule:exactly;">Vocdoni</span></span>
-                                    is a global digital voting protocol designed to make every vote
-                                    verifiable, secure, and auditable. Our platform is GDPR-compliant,
-                                    ensuring your privacy while offering a reliable and affordable solution
-                                    for digital elections worldwide.<br /><br /><span class=t33
-                                        style="margin:0;Margin:0;mso-line-height-rule:exactly;"><span class=t32
-                                            style="margin:0;Margin:0;font-style:italic;mso-line-height-rule:exactly;">Vocdoni
-                                            Association. All rights reserved</span></span>
-                                </p>
-                            </td>
-                        </tr>
-                    </table>
-                </td>
-            </tr>
-            <tr>
-                <td>
-                    <div class=t37
-                        style="mso-line-height-rule:exactly;mso-line-height-alt:60px;line-height:60px;font-size:1px;display:block;">
-                        &nbsp;&nbsp;</div>
-                </td>
-            </tr>
-        </table>
-        </td>
+<body>
+    <div class="gmail-fix" style="display: none; white-space: nowrap; font: 15px courier; line-height: 0;">
+        &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;
+    </div>
+    
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" class="outlook-fix">
+        <tr>
+            <td style="background-color: #000000;">
+                <div class="email-container">
+                    
+                    <div class="header">
+                        <img src="./images/vocdoni_logo_mailing.png" 
+                             alt="Vocdoni Logo" 
+                             class="logo" 
+                             width="100" 
+                             height="100" />
+                    </div>
+                    
+                    <div class="email-content">
+                        <div class="main-content">
+                            
+                            <h1 class="heading">Please verify your account</h1>
+                            
+                            <p class="body-text">
+                                You are receiving this email because you registered an account at Vocdoni App. 
+                                To finish setting things up, confirm your email by using this verification code:
+                            </p>
+                            
+                            <div class="verification-code">
+                                <p class="verification-code-text">{{VERIFICATION_CODE}}</p>
+                                <p class="verification-code-label">Verification Code</p>
+                            </div>
+                            
+                            <p class="body-text">Or click the button below:</p>
+                            
+                            <a href="{{VERIFICATION_URL}}" class="cta-button" target="_blank" rel="noopener">
+                                Verify my account
+                            </a>
+                            
+                        </div>
+                    </div>
+                    
+                    <div class="footer">
+                        <p class="footer-text">
+                            You're receiving this email because you're signing up for an account on the Vocdoni App. 
+                            If you didn't request this or are unsure why you got it, please disregard the message or 
+                            <a href="mailto:info@vocdoni.org" class="footer-link">contact us</a>.
+                        </p>
+                        
+                        <p class="footer-text">
+                            <a href="https://vocdoni.io" class="footer-link" target="_blank" rel="noopener">Vocdoni</a> 
+                            (Synergize SL). All rights reserved
+                        </p>
+                    </div>
+                    
+                </div>
+            </td>
         </tr>
-        </table>
-    </div>
-    <div class="gmail-mobile-forced-width" style="white-space: nowrap; font: 15px courier; line-height: 0;">&nbsp;
-        &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;
-        &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;
-    </div>
+    </table>
+    
 </body>
-
 </html>
