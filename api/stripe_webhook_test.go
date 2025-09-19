@@ -393,7 +393,7 @@ func TestProductUpdatedWebhookUnit(t *testing.T) {
 		c.Assert(refreshedPlan.VotingTypes.Weighted, qt.IsFalse)
 		c.Assert(refreshedPlan.Features.Personalization, qt.IsTrue)
 		c.Assert(refreshedPlan.Features.EmailReminder, qt.IsTrue)
-		c.Assert(refreshedPlan.Features.SmsNotification, qt.IsFalse)
+		c.Assert(refreshedPlan.Features.TwoFaSms, qt.Equals, 0) // Default value as not set in metadata
 
 		// Verify the ID was preserved
 		c.Assert(refreshedPlan.ID, qt.Equals, existingPlan.ID)

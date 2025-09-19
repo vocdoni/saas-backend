@@ -79,14 +79,14 @@ type Organization struct {
 }
 
 type PlanLimits struct {
-	Users        int `json:"users" bson:"users"`
+	Users        int `json:"teamMembers" bson:"users"`
 	SubOrgs      int `json:"subOrgs" bson:"subOrgs"`
 	MaxProcesses int `json:"maxProcesses" bson:"maxProcesses"`
 	MaxCensus    int `json:"maxCensus" bson:"maxCensus"`
 	// Max process duration in days
-	MaxDuration int  `json:"maxDuration" bson:"maxDuration"`
+	MaxDuration int  `json:"maxDaysDuration" bson:"maxDuration"`
 	CustomURL   bool `json:"customURL" bson:"customURL"`
-	Drafts      int  `json:"drafts" bson:"drafts"`
+	Drafts      bool `json:"drafts" bson:"drafts"`
 }
 
 type VotingTypes struct {
@@ -104,7 +104,8 @@ type Features struct {
 	LiveResults     bool `json:"liveResults" bson:"liveResults"`
 	Personalization bool `json:"personalization" bson:"personalization"`
 	EmailReminder   bool `json:"emailReminder" bson:"emailReminder"`
-	SmsNotification bool `json:"smsNotification" bson:"smsNotification"`
+	TwoFaSms        int  `json:"2FAsms" bson:"twoFaSms"`
+	TwoFaEmail      int  `json:"2FAemail" bson:"twoFaEmail"`
 	WhiteLabel      bool `json:"whiteLabel" bson:"whiteLabel"`
 	LiveStreaming   bool `json:"liveStreaming" bson:"liveStreaming"`
 	PhoneSupport    bool `json:"phoneSupport" bson:"phoneSupport"`

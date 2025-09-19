@@ -474,7 +474,7 @@ func SubscriptionPlanFromDB(plan *db.Plan) SubscriptionPlan {
 // swagger:model SubscriptionPlanLimits
 type SubscriptionPlanLimits struct {
 	// Maximum number of users allowed
-	Users int `json:"users"`
+	Users int `json:"teamMembers"`
 
 	// Maximum number of sub-organizations allowed
 	SubOrgs int `json:"subOrgs"`
@@ -486,13 +486,13 @@ type SubscriptionPlanLimits struct {
 	MaxCensus int `json:"maxCensus"`
 
 	// Maximum duration of voting processes in days
-	MaxDuration int `json:"maxDuration"`
+	MaxDuration int `json:"maxDaysDuration"`
 
 	// Whether custom URLs are allowed
 	CustomURL bool `json:"customURL"`
 
-	// Maximum number of draft processes allowed
-	Drafts int `json:"drafts"`
+	// Whether draft processes allowed
+	Drafts bool `json:"drafts"`
 }
 
 // SubscriptionVotingTypes represents the voting types available in a subscription plan.
@@ -537,8 +537,11 @@ type SubscriptionFeatures struct {
 	// Whether email reminders are available
 	EmailReminder bool `json:"emailReminder"`
 
-	// Whether SMS notifications are available
-	SmsNotification bool `json:"smsNotification"`
+	// Two-factor authentication sms limit
+	TwoFaSms int `json:"2FAsms"`
+
+	// Two-factor authentication email limit
+	TwoFaEmail int `json:"2FAemail"`
 
 	// Whether white labeling is available
 	WhiteLabel bool `json:"whiteLabel"`

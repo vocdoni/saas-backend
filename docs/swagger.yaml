@@ -673,6 +673,12 @@ definitions:
     type: object
   apicommon.SubscriptionFeatures:
     properties:
+      2FAemail:
+        description: Two-factor authentication email limit
+        type: integer
+      2FAsms:
+        description: Two-factor authentication sms limit
+        type: integer
       anonymous:
         description: Whether anonymous voting is available
         type: boolean
@@ -693,9 +699,6 @@ definitions:
         type: boolean
       phoneSupport:
         description: Whether eligible for phone support
-        type: boolean
-      smsNotification:
-        description: Whether SMS notifications are available
         type: boolean
       whiteLabel:
         description: Whether white labeling is available
@@ -740,12 +743,12 @@ definitions:
         description: Whether custom URLs are allowed
         type: boolean
       drafts:
-        description: Maximum number of draft processes allowed
-        type: integer
+        description: Whether draft processes allowed
+        type: boolean
       maxCensus:
         description: Maximum number of census allowed
         type: integer
-      maxDuration:
+      maxDaysDuration:
         description: Maximum duration of voting processes in days
         type: integer
       maxProcesses:
@@ -754,7 +757,7 @@ definitions:
       subOrgs:
         description: Maximum number of sub-organizations allowed
         type: integer
-      users:
+      teamMembers:
         description: Maximum number of users allowed
         type: integer
     type: object
@@ -972,6 +975,10 @@ definitions:
     - CensusTypeSMSorMail
   db.Features:
     properties:
+      2FAemail:
+        type: integer
+      2FAsms:
+        type: integer
       anonymous:
         type: boolean
       emailReminder:
@@ -985,8 +992,6 @@ definitions:
       personalization:
         type: boolean
       phoneSupport:
-        type: boolean
-      smsNotification:
         type: boolean
       whiteLabel:
         type: boolean
@@ -1047,17 +1052,17 @@ definitions:
       customURL:
         type: boolean
       drafts:
-        type: integer
+        type: boolean
       maxCensus:
         type: integer
-      maxDuration:
+      maxDaysDuration:
         description: Max process duration in days
         type: integer
       maxProcesses:
         type: integer
       subOrgs:
         type: integer
-      users:
+      teamMembers:
         type: integer
     type: object
   db.Process:
