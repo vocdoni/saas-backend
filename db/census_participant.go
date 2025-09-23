@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -161,10 +162,10 @@ func (ms *MongoStorage) CensusParticipantByMemberNumber(
 	return participant, nil
 }
 
-// CensusParticipantByLoginHash retrieves a census participant from the database based on
+// censusParticipantByLoginHash retrieves a census participant from the database based on
 // the login data hash and censusID. Returns ErrNotFound if the participant doesn't exist.
 // TODO add the index
-func (ms *MongoStorage) CensusParticipantByLoginHash(
+func (ms *MongoStorage) censusParticipantByLoginHash(
 	censusID string,
 	loginHash []byte,
 ) (*CensusParticipant, error) {
@@ -186,11 +187,51 @@ func (ms *MongoStorage) CensusParticipantByLoginHash(
 	// find the participant
 	participant := &CensusParticipant{}
 	err := ms.censusParticipants.FindOne(ctx, filter).Decode(participant)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, ErrNotFound
+	}
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			return nil, ErrNotFound
+		return nil, err
+	}
+	return participant, nil
+}
+
+// CensusParticipantByLoginHash retrieves a census participant from the database based on
+// the member email or phone. Returns ErrNotFound if the participant doesn't exist.
+func (ms *MongoStorage) censusParticipantByEmailOrPhone(
+	censusID string,
+	authFields OrgMemberAuthFields,
+	member OrgMember,
+) (*CensusParticipant, error) {
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	// prepare filter for find
+	var filter bson.M
+	switch {
+	case member.Email != "" && member.Phone.IsEmpty():
+		filter = bson.M{
+			"loginHashEmail": HashAuthTwoFaFields(member, authFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail}),
+			"censusId":       censusID,
 		}
-		return nil, fmt.Errorf("failed to get census participant: %w", err)
+	case member.Email == "" && !member.Phone.IsEmpty():
+		filter = bson.M{
+			"loginHashPhone": HashAuthTwoFaFields(member, authFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldPhone}),
+			"censusId":       censusID,
+		}
+	default:
+		return nil, fmt.Errorf("member has neither phone nor email")
+	}
+
+	// find the participant
+	participant := &CensusParticipant{}
+	err := ms.censusParticipants.FindOne(ctx, filter).Decode(participant)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
 	}
 
 	return participant, nil
@@ -205,45 +246,22 @@ func (ms *MongoStorage) CensusParticipantByLoginHashOrEmailorPhone(
 	twoFaFields OrgMemberTwoFaFields,
 	member OrgMember,
 ) (*CensusParticipant, error) {
-	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
 	// validate input
 	if len(censusID) == 0 {
 		return nil, ErrInvalidData
 	}
 
-	// prepare filter for find
-	filter := bson.M{
-		"loginHash": HashAuthTwoFaFields(member, authFields, twoFaFields),
-		"censusId":  censusID,
-	}
-
-	// find the participant
-	participant := &CensusParticipant{}
-	err := ms.censusParticipants.FindOne(ctx, filter).Decode(participant)
-	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			if len(member.Email) > 0 && member.Phone.IsEmpty() {
-				filter = bson.M{
-					"loginHashEmail": HashAuthTwoFaFields(member, authFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail}),
-					"censusId":       censusID,
-				}
-			} else if len(member.Email) == 0 && !member.Phone.IsEmpty() {
-				filter = bson.M{
-					"loginHashPhone": HashAuthTwoFaFields(member, authFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldPhone}),
-					"censusId":       censusID,
-				}
-			}
-			err := ms.censusParticipants.FindOne(ctx, filter).Decode(participant)
-			if err != nil {
-				if err == mongo.ErrNoDocuments {
-					return nil, ErrNotFound
-				}
-				return nil, fmt.Errorf("failed to get census participant: %w", err)
-			}
+	participant, err := ms.censusParticipantByLoginHash(censusID, HashAuthTwoFaFields(member, authFields, twoFaFields))
+	if errors.Is(err, ErrNotFound) {
+		participant, err = ms.censusParticipantByEmailOrPhone(censusID, authFields, member)
+		if errors.Is(err, ErrNotFound) {
+			return nil, err
 		}
 	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get census participant: %w", err)
+	}
+
 	return participant, nil
 }
 
