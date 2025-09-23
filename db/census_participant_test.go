@@ -399,24 +399,24 @@ func TestCensusParticipant(t *testing.T) {
 
 		t.Run("InvalidData", func(_ *testing.T) {
 			// Test with empty login hash
-			_, err := testDB.CensusParticipantByLoginHash(censusID, []byte{})
+			_, err := testDB.censusParticipantByLoginHash(censusID, []byte{})
 			c.Assert(err, qt.Equals, ErrInvalidData)
 
 			// Test with empty census ID
-			_, err = testDB.CensusParticipantByLoginHash("", loginHash)
+			_, err = testDB.censusParticipantByLoginHash("", loginHash)
 			c.Assert(err, qt.Equals, ErrInvalidData)
 		})
 
 		t.Run("NonExistentParticipant", func(_ *testing.T) {
 			// Test with non-existent login hash
 			nonExistentHash := []byte("nonexistenthash")
-			_, err := testDB.CensusParticipantByLoginHash(censusID, nonExistentHash)
+			_, err := testDB.censusParticipantByLoginHash(censusID, nonExistentHash)
 			c.Assert(err, qt.Equals, ErrNotFound)
 		})
 
 		t.Run("ExistingParticipant", func(_ *testing.T) {
 			// Test successful retrieval
-			retrievedParticipant, err := testDB.CensusParticipantByLoginHash(censusID, loginHash)
+			retrievedParticipant, err := testDB.censusParticipantByLoginHash(censusID, loginHash)
 			c.Assert(err, qt.IsNil)
 			c.Assert(retrievedParticipant.CensusID, qt.Equals, censusID)
 			c.Assert(retrievedParticipant.ParticipantID, qt.Equals, member.ID.Hex())
@@ -508,7 +508,7 @@ func TestCensusParticipant(t *testing.T) {
 			c.Assert(participant.LoginHash, qt.Not(qt.IsNil))
 
 			// Verify we can retrieve participant by login hash
-			found, err := testDB.CensusParticipantByLoginHash(censusID, participant.LoginHash)
+			found, err := testDB.censusParticipantByLoginHash(censusID, participant.LoginHash)
 			c.Assert(err, qt.IsNil)
 			c.Assert(found.ParticipantID, qt.Equals, participant.ParticipantID)
 		}
