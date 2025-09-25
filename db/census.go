@@ -125,6 +125,10 @@ func (ms *MongoStorage) PopulateGroupCensus(
 		}
 		return 0, fmt.Errorf("error retrieving organization group: %w", err)
 	}
+	if len(group.MemberIDs) == 0 {
+		return 0, fmt.Errorf("group has no members")
+	}
+
 	census.GroupID = group.ID
 	// update the group with the census ID
 	if err := ms.addOrganizationMemberGroupCensus(ctx, group.ID.Hex(), census.OrgAddress, census.ID.Hex()); err != nil {
@@ -132,14 +136,13 @@ func (ms *MongoStorage) PopulateGroupCensus(
 	}
 
 	// set the participants for the census
-	if len(group.MemberIDs) > 0 {
-		insertedCount, err := ms.setBulkCensusParticipant(ctx, census.ID.Hex(),
-			groupID, census.OrgAddress, census.AuthFields, census.TwoFaFields)
-		if err != nil {
-			return 0, fmt.Errorf("error setting census participants: %w", err)
-		}
-		census.Size = insertedCount
+	insertedCount, err := ms.setBulkCensusParticipant(ctx, census.ID.Hex(),
+		groupID, census.OrgAddress, census.AuthFields, census.TwoFaFields)
+	if err != nil {
+		return 0, fmt.Errorf("error setting census participants: %w", err)
 	}
+	census.Size = insertedCount
+
 	updateDoc, err := dynamicUpdateDocument(census, nil)
 	if err != nil {
 		return 0, err

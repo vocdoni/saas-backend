@@ -165,6 +165,56 @@ func TestPopulateGroupCensus(t *testing.T) {
 		c.Assert(group.CensusIDs[0], qt.Equals, census2ID.Hex())
 	})
 
+	t.Run("PopulateGroupCensusWithEmptyGroup", func(_ *testing.T) {
+		c.Assert(testDB.Reset(), qt.IsNil)
+
+		// Create test organizations
+		org1 := &Organization{
+			Address:   testOrgAddress,
+			Active:    true,
+			CreatedAt: time.Now(),
+		}
+		err := testDB.SetOrganization(org1)
+		c.Assert(err, qt.IsNil)
+
+		// Create members for org1
+		member1 := &OrgMember{
+			OrgAddress: testOrgAddress,
+			Email:      "member1@example.com",
+			Name:       "Member 1",
+		}
+		member1ID, err := testDB.SetOrgMember(testSalt, member1)
+		c.Assert(err, qt.IsNil)
+
+		// Create a group with one member, then remove the member
+		group := &OrganizationMemberGroup{
+			OrgAddress:  testOrgAddress,
+			Title:       "Empty Group",
+			Description: "Test empty group",
+			MemberIDs:   []string{member1ID},
+		}
+		groupID, err := testDB.CreateOrganizationMemberGroup(group)
+		c.Assert(err, qt.IsNil)
+
+		// Remove the member to make it empty
+		err = testDB.UpdateOrganizationMemberGroup(
+			groupID, testOrgAddress,
+			"", "",
+			nil, []string{member1ID}, // Remove the only member
+		)
+		c.Assert(err, qt.IsNil)
+
+		// Test with valid organization but group belonging to different organization
+		census1 := &Census{
+			OrgAddress: testOrgAddress,
+			TwoFaFields: OrgMemberTwoFaFields{
+				OrgMemberTwoFaFieldEmail,
+			},
+		}
+		_, err = testDB.PopulateGroupCensus(census1, groupID)
+		c.Assert(err, qt.ErrorMatches, "group has no members")
+	})
+
 	t.Run("CensusCreation", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Create test organization
