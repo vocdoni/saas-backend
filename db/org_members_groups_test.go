@@ -511,8 +511,13 @@ func TestOrganizationMemberGroup(t *testing.T) {
 
 			count, members, err = testDB.ListOrganizationMemberGroup(groupID, testOrgAddress, 2, 1)
 			c.Assert(err, qt.IsNil)
-			c.Assert(count, qt.Equals, len(memberIDs))
-			c.Assert(members, qt.HasLen, 1)
+			c.Assert(count, qt.Equals, 3)   // Expect 3 pages when page size is 1
+			c.Assert(members, qt.HasLen, 1) // But only one member returned
+
+			count, members, err = testDB.ListOrganizationMemberGroup(groupID, testOrgAddress, 0, 0)
+			c.Assert(err, qt.IsNil)
+			c.Assert(count, qt.Equals, 1) // Expect all members listed in 1 page
+			c.Assert(members, qt.HasLen, len(memberIDs))
 		})
 
 		t.Run("WrongOrganization", func(_ *testing.T) {
