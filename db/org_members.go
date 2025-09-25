@@ -655,8 +655,10 @@ func (ms *MongoStorage) orgMembersByIDs(
 	if err != nil {
 		return 0, nil, err
 	}
-	totalPages := int(math.Ceil(float64(totalCount) / float64(pageSize)))
-
+	totalPages := 1 // by default, with pageSize == 0, we fetch all members in one page
+	if pageSize > 0 {
+		totalPages = int(math.Ceil(float64(totalCount) / float64(pageSize)))
+	}
 	// Calculate skip value based on page and pageSize
 	skip := (page - 1) * pageSize
 
