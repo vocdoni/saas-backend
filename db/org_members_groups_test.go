@@ -481,6 +481,18 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			c.Assert(members, qt.HasLen, 0)
 		})
 
+		t.Run("CreateEmptyGroup", func(_ *testing.T) {
+			// Create a group with no member, should fail
+			group := &OrganizationMemberGroup{
+				OrgAddress:  testOrgAddress,
+				Title:       "Empty Group",
+				Description: "Test empty group",
+				MemberIDs:   []string{},
+			}
+			_, err := testDB.CreateOrganizationMemberGroup(group)
+			c.Assert(err, qt.ErrorMatches, "invalid data provided")
+		})
+
 		t.Run("GroupWithMembers", func(_ *testing.T) {
 			// Create a group with members
 			group := &OrganizationMemberGroup{
