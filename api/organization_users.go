@@ -353,22 +353,22 @@ func (a *API) updatePendingUserInvitationHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
+	if invitation.OrganizationAddress != org.Address {
+		errors.ErrInvalidData.Withf("invitation is not for this organization").Write(w)
+	}
+
 	// create the updated invitation
 	orgInvite := &db.OrganizationInvite{
 		ID:                  invitation.ID,
-		OrganizationAddress: org.Address,
+		OrganizationAddress: invitation.OrganizationAddress,
 		NewUserEmail:        invitation.NewUserEmail,
-		Role:                db.UserRole(invitation.Role),
+		Role:                invitation.Role,
 		CurrentUserID:       user.ID,
 	}
 	// generate the verification code and the verification link
 	code, link, err := a.generateVerificationCodeAndLink(orgInvite, db.CodeTypeOrgInviteUpdate)
 	if err != nil {
-		if err == db.ErrAlreadyExists {
-			errors.ErrDuplicateConflict.With("user is already invited to the organization").Write(w)
-			return
-		}
-		errors.ErrGenericInternalServerError.Withf("could not create the invite: %v", err).Write(w)
+		errors.ErrGenericInternalServerError.Withf("could not regenerate code for the invite: %v", err).Write(w)
 		return
 	}
 

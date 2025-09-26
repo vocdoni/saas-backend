@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 )
 
 func TestOrganizationUsers(t *testing.T) {
@@ -698,7 +699,7 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(anotherInvitationID, qt.Not(qt.Equals), "")
 
 		// Try to update the invitation from the wrong organization
-		_, code = testRequest(
+		errResp := requestAndParseWithAssertCode[errors.Error](http.StatusBadRequest,
 			t,
 			http.MethodPut,
 			adminToken,
@@ -709,7 +710,7 @@ func TestOrganizationUsers(t *testing.T) {
 			"pending",
 			anotherInvitationID,
 		)
-		c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+		c.Assert(errResp.Code, qt.Equals, errors.ErrInvalidData.Code)
 
 		// Clean up: Delete the invitations
 		resp, code = testRequest(
