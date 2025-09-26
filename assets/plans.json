@@ -123,7 +123,7 @@
             "maxProcesses": 50,
             "maxCensus": 10000,
             "maxDuration": 365,
-            "customPlan": false,
+            "customPlan": true,
             "customURL": true,
             "drafts": 20
         },
