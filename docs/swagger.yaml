@@ -739,6 +739,9 @@ definitions:
     type: object
   apicommon.SubscriptionPlanLimits:
     properties:
+      customPlan:
+        description: Whether this is a custom plan
+        type: boolean
       customURL:
         description: Whether custom URLs are allowed
         type: boolean
