@@ -12,6 +12,7 @@
             "maxProcesses": 10,
             "maxCensus": 2500,
             "maxDuration": 14,
+            "customPlan": false,
             "customURL": false,
             "drafts": 1
         },
@@ -48,6 +49,7 @@
             "maxProcesses": 20,
             "maxCensus": 10000,
             "maxDuration": 90,
+            "customPlan": false,
             "customURL": false,
             "drafts": 5
         },
@@ -84,6 +86,7 @@
             "maxProcesses": 10,
             "maxCensus": 50,
             "maxDuration": 7,
+            "customPlan": false,
             "customURL": false,
             "drafts": 0
         },
@@ -120,6 +123,7 @@
             "maxProcesses": 50,
             "maxCensus": 10000,
             "maxDuration": 365,
+            "customPlan": false,
             "customURL": true,
             "drafts": 20
         },

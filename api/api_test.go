@@ -88,6 +88,7 @@ var mockPlans = []*db.Plan{
 			MaxDuration:  7,
 			CustomURL:    false,
 			Drafts:       false,
+			CustomPlan:   false,
 		},
 		VotingTypes: db.VotingTypes{
 			Single:     true,

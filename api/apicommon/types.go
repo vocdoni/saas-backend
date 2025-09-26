@@ -493,6 +493,9 @@ type SubscriptionPlanLimits struct {
 
 	// Whether draft processes allowed
 	Drafts bool `json:"drafts"`
+
+	// Wether this is a custom plan
+	CustomPlan bool `json:"customPlan"`
 }
 
 // SubscriptionVotingTypes represents the voting types available in a subscription plan.
