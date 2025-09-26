@@ -214,7 +214,6 @@ func TestFinishSaltedKeySigner(t *testing.T) {
 
 		status, err := csp.Storage.CSPProcess(testToken, testPID)
 		c.Assert(err, qt.IsNil)
-		c.Assert(status.Used, qt.IsTrue)
 		c.Assert(status.UsedToken, qt.DeepEquals, testToken)
 		c.Assert(status.UsedAddress, qt.DeepEquals, testAddress)
 		c.Assert(status.UsedAt.IsZero(), qt.IsFalse)

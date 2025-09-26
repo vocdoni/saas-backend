@@ -126,7 +126,6 @@ func TestCSPProcess(t *testing.T) {
 		status, err := testDB.CSPProcess(testAuthToken, testCSPProcessID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(status.ProcessID, qt.DeepEquals, testCSPProcessID)
-		c.Assert(status.Used, qt.IsTrue)
 		c.Assert(status.UsedToken, qt.DeepEquals, testAuthToken)
 		c.Assert(status.UsedAddress, qt.DeepEquals, testUserAddress)
 		c.Assert(status.UsedAt.IsZero(), qt.IsFalse)
@@ -144,13 +143,12 @@ func TestCSPProcess(t *testing.T) {
 			status, err := testDB.CSPProcess(testAuthToken, testCSPProcessID)
 			c.Assert(err, qt.IsNil)
 			c.Assert(status.ProcessID, qt.DeepEquals, testCSPProcessID)
-			c.Assert(status.Used, qt.IsTrue)
 			c.Assert(status.UsedToken, qt.DeepEquals, testAuthToken)
 			c.Assert(status.UsedAddress, qt.DeepEquals, testUserAddress)
 			c.Assert(status.UsedAt.IsZero(), qt.IsFalse)
 			c.Assert(status.TimesVoted, qt.Equals, i+1)
 		}
 		// try to consume it again to check it fails
-		c.Assert(testDB.ConsumeCSPProcess(testAuthToken, testCSPProcessID, testUserAddress), qt.ErrorIs, ErrProcessAlreadyConsumed)
+		c.Assert(testDB.ConsumeCSPProcess(testAuthToken, testCSPProcessID, testUserAddress), qt.ErrorIs, ErrTokenAlreadyConsumed)
 	})
 }
