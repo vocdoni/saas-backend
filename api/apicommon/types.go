@@ -494,7 +494,7 @@ type SubscriptionPlanLimits struct {
 	// Whether draft processes allowed
 	Drafts bool `json:"drafts"`
 
-	// Wether this is a custom plan
+	// Whether this is a custom plan
 	CustomPlan bool `json:"customPlan"`
 }
 
