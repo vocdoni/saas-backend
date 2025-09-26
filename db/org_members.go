@@ -486,6 +486,10 @@ func (ms *MongoStorage) DeleteAllOrgMembers(orgAddress common.Address) (int, err
 		return 0, fmt.Errorf("failed to delete all orgMembers: %w", err)
 	}
 
+	if _, err := ms.orgMemberGroups.DeleteMany(ctx, filter); err != nil {
+		return 0, fmt.Errorf("failed to delete all orgMember groups: %w", err)
+	}
+
 	return int(result.DeletedCount), nil
 }
 
