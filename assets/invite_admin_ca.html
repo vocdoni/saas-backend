@@ -1,7 +1,7 @@
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" lang="en">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" lang="ca">
 <head>
-    <title>Verification Code - Vocdoni</title>
+    <title>Uneix-te a Vocdoni - Invitació d'Administrador</title>
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
@@ -10,7 +10,7 @@
     <meta name="format-detection" content="telephone=no, date=no, address=no, email=no, url=no" />
     
     <div style="display: none; max-height: 0; overflow: hidden;">
-        Your verification code for Vocdoni
+        Has estat convidat a unir-te a Vocdoni com a administrador
     </div>
     
     <style type="text/css">
@@ -76,21 +76,32 @@
         
         .main-content {
             padding: 40px 25px;
+            text-align: left;
+        }
+        
+        .heading {
+            font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-size: 39px;
+            font-weight: 800;
+            line-height: 41px;
+            letter-spacing: -1.2px;
+            color: #000000;
+            margin: 0 0 25px 0;
             text-align: center;
         }
         
         .body-text {
             font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-            font-size: 18px;
+            font-size: 14px;
             font-weight: 500;
             line-height: 22px;
-            letter-spacing: -0.6px;
-            color: #424040;
+            letter-spacing: -0.56px;
+            color: #000000;
             margin: 0 0 25px 0;
             text-align: center;
         }
         
-        .verification-code {
+        .invitation-code {
             background-color: #f8f9fa;
             border: 2px dashed #dee2e6;
             border-radius: 8px;
@@ -99,13 +110,42 @@
             margin: 25px 0;
         }
         
-        .verification-code-text {
+        .invitation-code-text {
             font-family: 'Courier New', Courier, monospace;
             font-size: 24px;
             font-weight: bold;
             color: #000000;
             letter-spacing: 4px;
             margin: 0;
+        }
+        
+        .invitation-code-label {
+            font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-size: 12px;
+            color: #6c757d;
+            margin: 5px 0 0 0;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .cta-button {
+            display: inline-block;
+            background-color: #000000;
+            color: #ffffff !important;
+            text-decoration: none;
+            padding: 12px 20px;
+            border-radius: 14px;
+            font-family: 'Albert Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: -0.6px;
+            text-align: center;
+            margin: 25px 0;
+            transition: background-color 0.3s ease;
+        }
+        
+        .cta-button:hover {
+            background-color: #333333 !important;
         }
         
         .footer {
@@ -140,14 +180,26 @@
                 padding: 30px 20px;
             }
             
+            .heading {
+                font-size: 28px;
+                line-height: 32px;
+                letter-spacing: -0.8px;
+            }
+            
             .body-text {
                 font-size: 16px;
                 line-height: 24px;
             }
             
-            .verification-code-text {
+            .invitation-code-text {
                 font-size: 20px;
                 letter-spacing: 2px;
+            }
+            
+            .cta-button {
+                display: block;
+                width: 100%;
+                box-sizing: border-box;
             }
         }
         
@@ -156,17 +208,34 @@
                 background-color: #1a1a1a !important;
             }
             
+            .heading {
+                color: #ffffff !important;
+            }
+            
             .body-text {
                 color: #e0e0e0 !important;
             }
             
-            .verification-code {
+            .invitation-code {
                 background-color: #2a2a2a !important;
                 border-color: #404040 !important;
             }
             
-            .verification-code-text {
+            .invitation-code-text {
                 color: #ffffff !important;
+            }
+            
+            .invitation-code-label {
+                color: #a0a0a0 !important;
+            }
+            
+            .cta-button {
+                background-color: #ffffff !important;
+                color: #000000 !important;
+            }
+            
+            .cta-button:hover {
+                background-color: #e0e0e0 !important;
             }
         }
         
@@ -205,12 +274,25 @@
                     <div class="email-content">
                         <div class="main-content">
                             
+                            <h1 class="heading">Has estat convidat a unir-te a Vocdoni</h1>
+                            
                             <p class="body-text">
-                                Your verification code is:
+                                L'organització {{.Organization}} t'ha convidat a unir-te a la seva plataforma de votació.
                             </p>
                             
-                            <div class="verification-code">
-                                <p class="verification-code-text">{{.Code}}</p>
+                            <div style="text-align: center;">
+                                <a href="{{.Link}}" class="cta-button" target="_blank" rel="noopener">
+                                    Uneix-te ara
+                                </a>
+                            </div>
+                            
+                            <p class="body-text">
+                                Si l'enllaç no funciona, aquí tens el teu codi d'invitació:
+                            </p>
+                            
+                            <div class="invitation-code">
+                                <p class="invitation-code-text">{{.Code}}</p>
+                                <p class="invitation-code-label">Codi d'Invitació</p>
                             </div>
                             
                         </div>
@@ -218,14 +300,14 @@
                     
                     <div class="footer">
                         <p class="footer-text">
-                            You're receiving an OTP code for Vocdoni App. 
-                            If you have questions about this request, please 
-                            <a href="mailto:info@vocdoni.org" class="footer-link">contact us</a>.
+                            Estàs rebent aquest correu perquè has estat convidat a unir-te a una organització a l'aplicació Vocdoni. 
+                            Si no esperaves aquesta invitació o no saps per què l'has rebut, si us plau ignora aquest missatge o 
+                            <a href="mailto:info@vocdoni.org" class="footer-link">posa't en contacte amb nosaltres</a>.
                         </p>
                         
                         <p class="footer-text">
                             <a href="https://vocdoni.io" class="footer-link" target="_blank" rel="noopener">Vocdoni</a> 
-                            (Synergize SL). All rights reserved
+                            (Synergize SL). Tots els drets reservats
                         </p>
                     </div>
                     

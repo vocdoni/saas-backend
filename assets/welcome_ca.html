@@ -1,7 +1,7 @@
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" lang="en">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" lang="ca">
 <head>
-    <title>New Support Request - Vocdoni</title>
+    <title>Benvingut a Vocdoni</title>
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
@@ -10,7 +10,7 @@
     <meta name="format-detection" content="telephone=no, date=no, address=no, email=no, url=no" />
     
     <div style="display: none; max-height: 0; overflow: hidden;">
-        You have a new support request from {{.Email}}
+        Benvingut a Vocdoni! Comença el teu viatge de votació digital segura
     </div>
     
     <style type="text/css">
@@ -74,6 +74,24 @@
             margin: 0 auto;
         }
         
+        .hero-image {
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            border-radius: 13px 13px 0 0;
+            overflow: hidden;
+            display: block;
+        }
+        
+        .hero-image img {
+            width: 100%;
+            height: auto;
+            display: block;
+            border-radius: 13px 13px 0 0;
+            margin: 0;
+            padding: 0;
+        }
+        
         .main-content {
             padding: 40px 25px;
             text-align: left;
@@ -87,6 +105,7 @@
             letter-spacing: -1.2px;
             color: #000000;
             margin: 0 0 25px 0;
+            text-align: center;
         }
         
         .body-text {
@@ -99,58 +118,54 @@
             margin: 0 0 25px 0;
         }
         
-        .support-details {
-            background-color: #f8f9fa;
-            border: 2px solid #dee2e6;
-            border-radius: 8px;
-            padding: 25px;
+        .feature-list {
             margin: 25px 0;
         }
         
-        .support-field {
+        .feature-item {
             font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
             font-size: 14px;
-            line-height: 24px;
+            font-weight: 500;
+            line-height: 22px;
+            letter-spacing: -0.56px;
             color: #000000;
             margin: 0 0 15px 0;
         }
         
-        .support-field:last-child {
-            margin-bottom: 0;
-        }
-        
-        .field-label {
+        .feature-title {
             font-weight: 700;
             color: #000000;
         }
         
-        .field-value {
-            font-weight: 500;
-            color: #333333;
+        .welcome-image {
+            text-align: center;
+            margin: 25px 0;
         }
         
-        .email-link {
-            color: #0066cc !important;
+        .welcome-image img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+        }
+        
+        .cta-button {
+            display: inline-block;
+            background-color: #000000;
+            color: #ffffff !important;
             text-decoration: none;
+            padding: 12px 20px;
+            border-radius: 14px;
+            font-family: 'Albert Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: -0.6px;
+            text-align: center;
+            margin: 25px 0;
+            transition: background-color 0.3s ease;
         }
         
-        .email-link:hover {
-            text-decoration: underline;
-        }
-        
-        .description-section {
-            margin-top: 20px;
-            padding-top: 20px;
-            border-top: 1px solid #dee2e6;
-        }
-        
-        .description-text {
-            font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-            font-size: 14px;
-            line-height: 22px;
-            color: #333333;
-            margin: 10px 0 0 0;
-            white-space: pre-wrap;
+        .cta-button:hover {
+            background-color: #333333 !important;
         }
         
         .footer {
@@ -191,18 +206,15 @@
                 letter-spacing: -0.8px;
             }
             
-            .body-text {
+            .body-text, .feature-item {
                 font-size: 16px;
                 line-height: 24px;
             }
             
-            .support-details {
-                padding: 20px;
-            }
-            
-            .support-field {
-                font-size: 14px;
-                line-height: 22px;
+            .cta-button {
+                display: block;
+                width: 100%;
+                box-sizing: border-box;
             }
         }
         
@@ -215,33 +227,21 @@
                 color: #ffffff !important;
             }
             
-            .body-text {
+            .body-text, .feature-item {
                 color: #e0e0e0 !important;
             }
             
-            .support-details {
-                background-color: #2a2a2a !important;
-                border-color: #404040 !important;
-            }
-            
-            .support-field {
-                color: #e0e0e0 !important;
-            }
-            
-            .field-label {
+            .feature-title {
                 color: #ffffff !important;
             }
             
-            .field-value {
-                color: #d0d0d0 !important;
+            .cta-button {
+                background-color: #ffffff !important;
+                color: #000000 !important;
             }
             
-            .description-text {
-                color: #d0d0d0 !important;
-            }
-            
-            .description-section {
-                border-top-color: #404040 !important;
+            .cta-button:hover {
+                background-color: #e0e0e0 !important;
             }
         }
         
@@ -278,57 +278,77 @@
                     </div>
                     
                     <div class="email-content">
+                        <div class="hero-image">
+                            <img src="https://tomato-giant-grasshopper-196.mypinata.cloud/ipfs/bafkreibyld3ourpil7wwiac3wvvxo2taq33s27sk7xl4jwsvkoalxfcg3m" 
+                                 alt="Vocdoni Hero" 
+                                 width="800" 
+                                 height="auto" />
+                        </div>
                         <div class="main-content">
                             
-                            <h1 class="heading">You have a new support request</h1>
+                            <h1 class="heading">Benvingut a Vocdoni!</h1>
                             
                             <p class="body-text">
-                                A new support request has been submitted through the Vocdoni platform. 
-                                Do not reply to this email, we will contact you shortly.
+                                Estem contents de que t'uneixis a nosaltres en la nostra missió per expandir el vot digital sigui segur, transparent i fàcil per a tot tipus d'organitzacions.
                             </p>
                             
-                            <div class="support-details">
-                                <div class="support-field">
-                                    <span class="field-label">Title:</span> 
-                                    <span class="field-value">{{.Title}}</span>
+                            <p class="body-text">
+                                Amb l'<strong>aplicació Vocdoni</strong>, pots crear i executar votacions adaptades a les teves necessitats, amb les més altes garanties de privacitat, compliment legal i verificabilitat. El millor de tot és que pots començar immediatament amb el nostre pla gratuït, que et permet crear votacions i provar totes les funcions gairebé sense límits.
+                            </p>
+                            
+                            <p class="body-text">
+                                <strong>Per què t'encantarà Vocdoni:</strong>
+                            </p>
+                            
+                            <div class="feature-list">
+                                <div class="feature-item">
+                                    <span class="feature-title">• Configuració ràpida:</span> Crea la teva primera votació en només minuts.
                                 </div>
                                 
-                                <div class="support-field">
-                                    <span class="field-label">Type:</span> 
-                                    <span class="field-value">{{.Type}}</span>
+                                <div class="feature-item">
+                                    <span class="feature-title">• Dissenyat per ser segur:</span> Verificabilitat d'extrem a extrem, amb privacitat i tecnologia a prova de manipulacions.
                                 </div>
                                 
-                                <div class="support-field">
-                                    <span class="field-label">User:</span> 
-                                    <a href="mailto:{{.Email}}" class="email-link field-value">{{.Email}}</a>
+                                <div class="feature-item">
+                                    <span class="feature-title">• Escalable:</span> Dissenyat per satisfer les necessitats de governança de tot tipus d'organitzacions, des de petits grups fins a grans institucions.
                                 </div>
                                 
-                                <div class="support-field">
-                                    <span class="field-label">Organization:</span> 
-                                    <span class="field-value">{{.Organization}}</span>
-                                </div>
-                                
-                                <div class="description-section">
-                                    <div class="support-field">
-                                        <span class="field-label">Description:</span>
-                                    </div>
-                                    <div class="description-text">{{.Description}}</div>
+                                <div class="feature-item">
+                                    <span class="feature-title">• Assequible:</span> El nostre programari està entre els més competitius del mercat. Creus que has trobat un millor preu? Ens encantaria saber-ho!
                                 </div>
                             </div>
+                            
+                            <div style="text-align: center;">
+                                <a href="{{.Link}}" class="cta-button" target="_blank" rel="noopener">
+                                    🗳️ Crea la teva primera votació!
+                                </a>
+                            </div>
+                            
+                            <p class="body-text">
+                                Necessites ajuda? Estarem encantats de guiar-te. <strong><a href="https://cal.com/ferran-vocdoni/first" style="color: #000000; text-decoration: underline;" target="_blank" rel="noopener">Reserva una trucada gratuïta de 15 minuts</a></strong> amb el nostre equip.
+                            </p>
+                            
+                            <p class="body-text">
+                                Gràcies per unir-te a nosaltres, junts estem construint una democràcia digital més transparent.
+                            </p>
+                            
+                            <p class="body-text">
+                                L'equip de Vocdoni
+                            </p>
                             
                         </div>
                     </div>
                     
                     <div class="footer">
                         <p class="footer-text">
-                            You're receiving this email because a support request was submitted through the Vocdoni App. 
-                            If you have questions about this request, please 
-                            <a href="mailto:info@vocdoni.org" class="footer-link">contact us</a>.
+                            Estàs rebent aquest correu perquè t'estàs registrant per a un compte a l'aplicació Vocdoni. 
+                            Si no has sol·licitat això o no saps per què l'has rebut, si us plau ignora aquest missatge o 
+                            <a href="mailto:info@vocdoni.org" class="footer-link">posa't en contacte amb nosaltres</a>.
                         </p>
                         
                         <p class="footer-text">
                             <a href="https://vocdoni.io" class="footer-link" target="_blank" rel="noopener">Vocdoni</a> 
-                            (Synergize SL). All rights reserved
+                            (Synergize SL). Tots els drets reservats
                         </p>
                     </div>
                     

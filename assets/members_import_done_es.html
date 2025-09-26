@@ -1,7 +1,7 @@
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" lang="en">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" lang="es">
 <head>
-    <title>Verification Code - Vocdoni</title>
+    <title>Importación de Miembros Completada - Vocdoni</title>
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
@@ -10,7 +10,7 @@
     <meta name="format-detection" content="telephone=no, date=no, address=no, email=no, url=no" />
     
     <div style="display: none; max-height: 0; overflow: hidden;">
-        Your verification code for Vocdoni
+        La importación de los miembros de tu organización se ha completado exitosamente
     </div>
     
     <style type="text/css">
@@ -76,36 +76,47 @@
         
         .main-content {
             padding: 40px 25px;
-            text-align: center;
+            text-align: left;
+        }
+        
+        .heading {
+            font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-size: 39px;
+            font-weight: 800;
+            line-height: 41px;
+            letter-spacing: -1.2px;
+            color: #000000;
+            margin: 0 0 25px 0;
         }
         
         .body-text {
             font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-            font-size: 18px;
+            font-size: 14px;
             font-weight: 500;
             line-height: 22px;
-            letter-spacing: -0.6px;
-            color: #424040;
+            letter-spacing: -0.56px;
+            color: #000000;
             margin: 0 0 25px 0;
-            text-align: center;
         }
         
-        .verification-code {
-            background-color: #f8f9fa;
-            border: 2px dashed #dee2e6;
-            border-radius: 8px;
-            padding: 20px;
+        .cta-button {
+            display: inline-block;
+            background-color: #000000;
+            color: #ffffff !important;
+            text-decoration: none;
+            padding: 12px 20px;
+            border-radius: 14px;
+            font-family: 'Albert Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: -0.6px;
             text-align: center;
             margin: 25px 0;
+            transition: background-color 0.3s ease;
         }
         
-        .verification-code-text {
-            font-family: 'Courier New', Courier, monospace;
-            font-size: 24px;
-            font-weight: bold;
-            color: #000000;
-            letter-spacing: 4px;
-            margin: 0;
+        .cta-button:hover {
+            background-color: #333333 !important;
         }
         
         .footer {
@@ -140,14 +151,21 @@
                 padding: 30px 20px;
             }
             
+            .heading {
+                font-size: 28px;
+                line-height: 32px;
+                letter-spacing: -0.8px;
+            }
+            
             .body-text {
                 font-size: 16px;
                 line-height: 24px;
             }
             
-            .verification-code-text {
-                font-size: 20px;
-                letter-spacing: 2px;
+            .cta-button {
+                display: block;
+                width: 100%;
+                box-sizing: border-box;
             }
         }
         
@@ -156,17 +174,21 @@
                 background-color: #1a1a1a !important;
             }
             
+            .heading {
+                color: #ffffff !important;
+            }
+            
             .body-text {
                 color: #e0e0e0 !important;
             }
             
-            .verification-code {
-                background-color: #2a2a2a !important;
-                border-color: #404040 !important;
+            .cta-button {
+                background-color: #ffffff !important;
+                color: #000000 !important;
             }
             
-            .verification-code-text {
-                color: #ffffff !important;
+            .cta-button:hover {
+                background-color: #e0e0e0 !important;
             }
         }
         
@@ -205,27 +227,30 @@
                     <div class="email-content">
                         <div class="main-content">
                             
+                            <h1 class="heading">Importación de miembros completada</h1>
+                            
                             <p class="body-text">
-                                Your verification code is:
+                                ¡Buenas noticias! La importación de los miembros de {{.Organization}} se ha completado exitosamente. 
+                                Ahora puedes regresar a la aplicación para revisar los miembros importados y gestionar tu organización.
                             </p>
                             
-                            <div class="verification-code">
-                                <p class="verification-code-text">{{.Code}}</p>
-                            </div>
+                            <a href="{{.Link}}" class="cta-button" target="_blank" rel="noopener">
+                                Revisar importación de miembros
+                            </a>
                             
                         </div>
                     </div>
                     
                     <div class="footer">
                         <p class="footer-text">
-                            You're receiving an OTP code for Vocdoni App. 
-                            If you have questions about this request, please 
-                            <a href="mailto:info@vocdoni.org" class="footer-link">contact us</a>.
+                            Estás recibiendo este correo porque eres usuario de la aplicación Vocdoni. 
+                            Si tienes preguntas sobre esta notificación, por favor 
+                            <a href="mailto:info@vocdoni.org" class="footer-link">ponte en contacto con nosotros</a>.
                         </p>
                         
                         <p class="footer-text">
                             <a href="https://vocdoni.io" class="footer-link" target="_blank" rel="noopener">Vocdoni</a> 
-                            (Synergize SL). All rights reserved
+                            (Synergize SL). Todos los derechos reservados
                         </p>
                     </div>
                     
