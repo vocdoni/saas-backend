@@ -87,6 +87,7 @@ type PlanLimits struct {
 	MaxDuration int  `json:"maxDaysDuration" bson:"maxDuration"`
 	CustomURL   bool `json:"customURL" bson:"customURL"`
 	Drafts      bool `json:"drafts" bson:"drafts"`
+	CustomPlan  bool `json:"customPlan" bson:"customPlan"`
 }
 
 type VotingTypes struct {
