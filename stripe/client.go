@@ -7,13 +7,13 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	stripeapi "github.com/stripe/stripe-go/v81"
-	stripeportalsession "github.com/stripe/stripe-go/v81/billingportal/session"
-	stripecheckoutsession "github.com/stripe/stripe-go/v81/checkout/session"
-	stripecustomer "github.com/stripe/stripe-go/v81/customer"
-	stripeprice "github.com/stripe/stripe-go/v81/price"
-	stripeproduct "github.com/stripe/stripe-go/v81/product"
-	stripewebhook "github.com/stripe/stripe-go/v81/webhook"
+	stripeapi "github.com/stripe/stripe-go/v82"
+	stripeportalsession "github.com/stripe/stripe-go/v82/billingportal/session"
+	stripecheckoutsession "github.com/stripe/stripe-go/v82/checkout/session"
+	stripecustomer "github.com/stripe/stripe-go/v82/customer"
+	stripeprice "github.com/stripe/stripe-go/v82/price"
+	stripeproduct "github.com/stripe/stripe-go/v82/product"
+	stripewebhook "github.com/stripe/stripe-go/v82/webhook"
 )
 
 // Client wraps the Stripe API client with additional functionality
@@ -216,8 +216,8 @@ func (c *Client) ParseSubscriptionFromEvent(event *stripeapi.Event) (*Subscripti
 		ProductID:     subscription.Items.Data[0].Plan.Product.ID,
 		OrgAddress:    orgAddress,
 		CustomerEmail: customer.Email,
-		StartDate:     time.Unix(subscription.CurrentPeriodStart, 0),
-		EndDate:       time.Unix(subscription.CurrentPeriodEnd, 0),
+		StartDate:     time.Unix(subscription.Items.Data[0].CurrentPeriodStart, 0),
+		EndDate:       time.Unix(subscription.Items.Data[0].CurrentPeriodEnd, 0),
 	}, nil
 }
 
@@ -232,10 +232,10 @@ func (*Client) ParseInvoiceFromEvent(event *stripeapi.Event) (*InvoiceInfo, erro
 		return nil, NewStripeError("invalid_event", "invoice missing effective date", nil)
 	}
 
-	if invoice.SubscriptionDetails == nil {
+	if invoice.Parent.SubscriptionDetails == nil || invoice.Parent.Type != "subscription_details" {
 		return nil, NewStripeError("invalid_event", "invoice missing subscription details", nil)
 	}
-	orgAddress := common.HexToAddress(invoice.SubscriptionDetails.Metadata["address"])
+	orgAddress := common.HexToAddress(invoice.Parent.SubscriptionDetails.Metadata["address"])
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return nil, NewStripeError("invalid_event", "invoice missing address metadata", nil)
 	}

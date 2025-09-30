@@ -18,7 +18,6 @@ require (
 	github.com/nyaruka/phonenumbers v1.5.0
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.19.0
-	github.com/stripe/stripe-go/v81 v81.0.0
 	github.com/testcontainers/testcontainers-go v0.35.0
 	github.com/twilio/twilio-go v1.23.0
 	github.com/xlzd/gotp v0.1.0
@@ -29,7 +28,10 @@ require (
 	google.golang.org/protobuf v1.36.4
 )
 
-require github.com/arnaucube/go-blindsecp256k1 v0.0.0-20211204171003-644e7408753f
+require (
+	github.com/arnaucube/go-blindsecp256k1 v0.0.0-20211204171003-644e7408753f
+	github.com/stripe/stripe-go/v82 v82.5.1
+)
 
 require (
 	github.com/cpuguy83/go-md2man/v2 v2.0.6 // indirect

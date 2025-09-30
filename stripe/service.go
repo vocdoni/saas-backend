@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	stripeapi "github.com/stripe/stripe-go/v81"
+	stripeapi "github.com/stripe/stripe-go/v82"
 	"github.com/vocdoni/saas-backend/db"
 	"go.vocdoni.io/dvote/log"
 )
