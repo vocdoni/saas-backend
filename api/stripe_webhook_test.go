@@ -8,7 +8,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
-	stripeapi "github.com/stripe/stripe-go/v81"
+	stripeapi "github.com/stripe/stripe-go/v82"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/stripe"
 )
@@ -17,11 +17,9 @@ import (
 func createTestSubscriptionCreatedEventWithCustom(orgAddress common.Address, productID string) *stripeapi.Event {
 	// Create actual Stripe subscription object
 	subscription := &stripeapi.Subscription{
-		ID:                 mockSubscriptionID,
-		Object:             "subscription",
-		Status:             stripeapi.SubscriptionStatusActive,
-		CurrentPeriodStart: time.Now().Unix(),
-		CurrentPeriodEnd:   time.Now().Add(30 * 24 * time.Hour).Unix(),
+		ID:     mockSubscriptionID,
+		Object: "subscription",
+		Status: stripeapi.SubscriptionStatusActive,
 		Customer: &stripeapi.Customer{
 			ID:    mockCustomerID,
 			Email: mockCustomerEmail,
@@ -32,7 +30,9 @@ func createTestSubscriptionCreatedEventWithCustom(orgAddress common.Address, pro
 		Items: &stripeapi.SubscriptionItemList{
 			Data: []*stripeapi.SubscriptionItem{
 				{
-					Quantity: 1000,
+					CurrentPeriodStart: time.Now().Unix(),
+					CurrentPeriodEnd:   time.Now().Add(30 * 24 * time.Hour).Unix(),
+					Quantity:           1000,
 					Plan: &stripeapi.Plan{
 						Product: &stripeapi.Product{
 							ID: productID,
@@ -62,9 +62,12 @@ func createTestPaymentSucceededEvent(orgAddress common.Address) *stripeapi.Event
 		ID:          "in_test123",
 		Object:      "invoice",
 		EffectiveAt: time.Now().Unix(),
-		SubscriptionDetails: &stripeapi.InvoiceSubscriptionDetails{
-			Metadata: map[string]string{
-				"address": orgAddress.String(),
+		Parent: &stripeapi.InvoiceParent{
+			Type: "subscripcion_details",
+			SubscriptionDetails: &stripeapi.InvoiceParentSubscriptionDetails{
+				Metadata: map[string]string{
+					"address": orgAddress.String(),
+				},
 			},
 		},
 	}
@@ -130,13 +133,17 @@ func mockGetSubscriptionInfoFromEvent(event stripeapi.Event) (*stripe.Subscripti
 
 // StripeInvoiceEvent represents the structure of a Stripe invoice webhook event
 type StripeInvoiceEvent struct {
-	ID                  string   `json:"id"`
-	EffectiveAt         int64    `json:"effective_at"`
-	SubscriptionDetails struct { //revive:disable-line:nested-structs
-		Metadata struct { //revive:disable-line:nested-structs
-			Address string `json:"address"`
-		} `json:"metadata"`
-	} `json:"subscription_details"`
+	ID          string   `json:"id"`
+	EffectiveAt int64    `json:"effective_at"`
+	Parent      struct { //revive:disable-line:nested-structs
+		Type string `json:"type"`
+
+		SubscriptionDetails struct { //revive:disable-line:nested-structs
+			Metadata struct { //revive:disable-line:nested-structs
+				Address string `json:"address"`
+			} `json:"metadata"`
+		} `json:"subscription_details"`
+	} `json:"parent"`
 }
 
 // mockGetInvoiceInfoFromEvent creates a mock invoice info without calling Stripe API
@@ -148,7 +155,7 @@ func mockGetInvoiceInfoFromEvent(event stripeapi.Event) (time.Time, string, erro
 	}
 
 	effectiveAt := time.Unix(invoice.EffectiveAt, 0)
-	address := invoice.SubscriptionDetails.Metadata.Address
+	address := invoice.Parent.SubscriptionDetails.Metadata.Address
 
 	return effectiveAt, address, nil
 }
