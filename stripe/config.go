@@ -46,20 +46,20 @@ func NewConfig() (*Config, error) {
 	// Default plan configuration - can be overridden via environment
 	plans := [PlanCount]PlanConfig{
 		PlanTypeEssential: {
-			ProductID: getEnvOrDefault("STRIPE_ESSENTIAL_PRODUCT_ID", "prod_R3LTVsjklmuQAL"),
-			PriceID:   getEnvOrDefault("STRIPE_ESSENTIAL_PRICE_ID", "price_1QevgGDW6VLep8WGmICzD3mQ"),
+			ProductID: getEnvOrDefault("STRIPE_ESSENTIAL_PRODUCT_ID", "prod_T7otvdbt7MpK8f"),
+			PriceID:   getEnvOrDefault("STRIPE_ESSENTIAL_PRICE_ID", "price_1SBZFGDVLCZ006PWHZJVPSc2"),
 		},
 		PlanTypePremium: {
-			ProductID: getEnvOrDefault("STRIPE_PREMIUM_PRODUCT_ID", "prod_R0kTryoMNl8I19"),
-			PriceID:   getEnvOrDefault("STRIPE_PREMIUM_PRICE_ID", "price_1QevTjDW6VLep8WGk9tevmL8"),
+			ProductID: getEnvOrDefault("STRIPE_PREMIUM_PRODUCT_ID", "prod_T7p24o8zSFM26b"),
+			PriceID:   getEnvOrDefault("STRIPE_PREMIUM_PRICE_ID", "price_1SBZOiDVLCZ006PWlIFR0Ezb"),
 		},
 		PlanTypeFree: {
-			ProductID: getEnvOrDefault("STRIPE_FREE_PRODUCT_ID", "prod_RFObcbvED7MYbz"),
-			PriceID:   getEnvOrDefault("STRIPE_FREE_PRICE_ID", "price_1QMtoJDW6VLep8WGC2vsJ2CV"),
+			ProductID: getEnvOrDefault("STRIPE_FREE_PRODUCT_ID", "prod_T7p0GQJLxXDxZT"),
+			PriceID:   getEnvOrDefault("STRIPE_FREE_PRICE_ID", "price_1SBZMgDVLCZ006PWFJdE08zo"),
 		},
 		PlanTypeCustom: {
-			ProductID: getEnvOrDefault("STRIPE_CUSTOM_PRODUCT_ID", "prod_RHurAb3OjkgJRy"),
-			PriceID:   getEnvOrDefault("STRIPE_CUSTOM_PRICE_ID", "price_1QPL1VDW6VLep8WGKUf8A3BC"),
+			ProductID: getEnvOrDefault("STRIPE_CUSTOM_PRODUCT_ID", "prod_T7pH46AnyE6ydC"),
+			PriceID:   getEnvOrDefault("STRIPE_CUSTOM_PRICE_ID", "price_1SBZcXDVLCZ006PWV1cr2cIH"),
 		},
 	}
 
