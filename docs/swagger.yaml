@@ -1052,6 +1052,8 @@ definitions:
     type: object
   db.PlanLimits:
     properties:
+      customPlan:
+        type: boolean
       customURL:
         type: boolean
       drafts:
