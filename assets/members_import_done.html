@@ -201,6 +201,128 @@
         .outlook-dpi-fix {
             mso-line-height-rule: exactly;
         }
+        
+        /* Summary and Error Styles */
+        .summary-box {
+            background-color: #f8f9fa;
+            border-left: 4px solid #000000;
+            padding: 25px;
+            margin: 30px 0;
+            border-radius: 8px;
+        }
+        
+        .summary-title {
+            font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-size: 18px;
+            font-weight: 800;
+            color: #000000;
+            margin: 0 0 20px 0;
+        }
+        
+        .summary-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding: 8px 0;
+        }
+        
+        .summary-label {
+            font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-size: 14px;
+            font-weight: 600;
+            color: #555555;
+        }
+        
+        .summary-value {
+            font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-size: 14px;
+            font-weight: 800;
+            color: #000000;
+        }
+        
+        .success {
+            color: #28a745 !important;
+        }
+        
+        .error {
+            color: #dc3545 !important;
+        }
+        
+        .error-list {
+            background-color: #fff5f5;
+            border: 1px solid #fed7d7;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 25px 0;
+        }
+        
+        .error-list h4 {
+            font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-size: 16px;
+            font-weight: 800;
+            color: #c53030;
+            margin: 0 0 15px 0;
+        }
+        
+        .error-list ul {
+            margin: 0;
+            padding-left: 20px;
+        }
+        
+        .error-list li {
+            font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-size: 14px;
+            font-weight: 500;
+            line-height: 20px;
+            color: #742a2a;
+            margin-bottom: 8px;
+        }
+        
+        .timestamp {
+            font-family: 'Albert Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-size: 12px;
+            font-style: italic;
+            color: #888888;
+            margin-top: 20px;
+            text-align: center;
+        }
+        
+        @media (prefers-color-scheme: dark) {
+            .summary-box {
+                background-color: #2a2a2a !important;
+                border-left-color: #ffffff !important;
+            }
+            
+            .summary-title {
+                color: #ffffff !important;
+            }
+            
+            .summary-label {
+                color: #cccccc !important;
+            }
+            
+            .summary-value {
+                color: #ffffff !important;
+            }
+            
+            .error-list {
+                background-color: #3a1f1f !important;
+                border-color: #5a3a3a !important;
+            }
+            
+            .error-list h4 {
+                color: #ff6b6b !important;
+            }
+            
+            .error-list li {
+                color: #ffcccc !important;
+            }
+            
+            .timestamp {
+                color: #aaaaaa !important;
+            }
+        }
     </style>
     
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;800&family=Albert+Sans:wght@400;600;700&display=swap" rel="stylesheet" type="text/css" />
@@ -230,9 +352,48 @@
                             <h1 class="heading">Members import completed</h1>
                             
                             <p class="body-text">
-                                Great news! The import of {{.Organization}} members has been completed successfully. 
-                                You can now return to the app to review the imported members and manage your organization.
+                                Hello <strong>{{.UserName}}</strong>,
                             </p>
+                            
+                            <p class="body-text">
+                                Your member import for organization "<strong>{{.Organization}}</strong>" has been completed successfully.
+                            </p>
+                            
+                            <div class="summary-box">
+                                <h3 class="summary-title">Import Summary</h3>
+                                
+                                <div class="summary-item">
+                                    <span class="summary-label">Total members processed:</span>
+                                    <span class="summary-value"><strong>{{.TotalMembers}}</strong></span>
+                                </div>
+                                
+                                <div class="summary-item">
+                                    <span class="summary-label">Successfully added:</span>
+                                    <span class="summary-value success"><strong>{{.AddedMembers}}</strong></span>
+                                </div>
+                                
+                                <div class="summary-item">
+                                    <span class="summary-label">Errors encountered:</span>
+                                    <span class="summary-value {{if gt .ErrorCount 0}}error{{else}}success{{end}}">
+                                        <strong>{{.ErrorCount}}</strong>
+                                    </span>
+                                </div>
+                            </div>
+
+                            {{if .Errors}}
+                            <div class="error-list">
+                                <h4>Error Details</h4>
+                                <ul>
+                                    {{range .Errors}}
+                                    <li>{{.}}</li>
+                                    {{end}}
+                                </ul>
+                            </div>
+                            {{end}}
+
+                            <div class="timestamp">
+                                Completed at: {{.CompletedAt}}
+                            </div>
                             
                             <a href="{{.Link}}" class="cta-button" target="_blank" rel="noopener">
                                 Review members import
