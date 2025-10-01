@@ -131,7 +131,7 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	// check the role is valid
-	if valid := db.IsValidUserRole(db.UserRole(invite.Role)); !valid {
+	if valid := db.IsValidUserRole(invite.Role); !valid {
 		errors.ErrInvalidUserData.Withf("invalid role").Write(w)
 		return
 	}
@@ -509,7 +509,7 @@ func (a *API) pendingOrganizationUsersHandler(w http.ResponseWriter, r *http.Req
 		invitationsList = append(invitationsList, &apicommon.OrganizationInvite{
 			ID:         invitation.ID.Hex(),
 			Email:      invitation.NewUserEmail,
-			Role:       string(invitation.Role),
+			Role:       invitation.Role,
 			Expiration: invitation.Expiration,
 		})
 	}

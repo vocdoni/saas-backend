@@ -281,7 +281,7 @@ type OrganizationInvite struct {
 	Email string `json:"email"`
 
 	// Role to be assigned to the invitee
-	Role string `json:"role"`
+	Role db.UserRole `json:"role"`
 
 	// Expiration time of the invitation
 	Expiration time.Time `json:"expiration"`

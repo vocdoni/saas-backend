@@ -452,8 +452,9 @@ definitions:
         description: Unique identifier for the invitation
         type: string
       role:
+        allOf:
+        - $ref: '#/definitions/db.UserRole'
         description: Role to be assigned to the invitee
-        type: string
     type: object
   apicommon.OrganizationInviteList:
     properties:
@@ -1121,6 +1122,16 @@ definitions:
       uri:
         type: string
     type: object
+  db.UserRole:
+    enum:
+    - admin
+    - manager
+    - viewer
+    type: string
+    x-enum-varnames:
+    - AdminRole
+    - ManagerRole
+    - ViewerRole
   db.VotingTypes:
     properties:
       approval:
