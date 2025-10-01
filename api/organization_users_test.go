@@ -50,7 +50,7 @@ func TestOrganizationUsers(t *testing.T) {
 	// Invite the second user to the organization as a viewer
 	inviteRequest := &apicommon.OrganizationInvite{
 		Email: userInfo.Email,
-		Role:  string(db.ViewerRole),
+		Role:  db.ViewerRole,
 	}
 	resp, code = testRequest(
 		t,
@@ -160,7 +160,7 @@ func TestOrganizationUsers(t *testing.T) {
 					adminToken,
 					&apicommon.OrganizationInvite{
 						Email: fmt.Sprintf("user-%s@example.com", uuid.New().String()),
-						Role:  string(db.ViewerRole),
+						Role:  db.ViewerRole,
 					},
 					"organizations",
 					newOrgAddress.String(),
@@ -368,7 +368,7 @@ func TestOrganizationUsers(t *testing.T) {
 		// Invite the user to the organization
 		inviteRequest := &apicommon.OrganizationInvite{
 			Email: userToRemoveInfo.Email,
-			Role:  string(db.ViewerRole),
+			Role:  db.ViewerRole,
 		}
 		resp, code = testRequest(
 			t,
@@ -539,7 +539,7 @@ func TestOrganizationUsers(t *testing.T) {
 		// Invite the user to the organization
 		inviteRequest := &apicommon.OrganizationInvite{
 			Email: userToInviteEmail,
-			Role:  string(db.ViewerRole),
+			Role:  db.ViewerRole,
 		}
 		resp, code := testRequest(
 			t,
@@ -664,7 +664,7 @@ func TestOrganizationUsers(t *testing.T) {
 		// Invite the user to the second organization
 		inviteRequest = &apicommon.OrganizationInvite{
 			Email: userToInviteEmail,
-			Role:  string(db.ViewerRole),
+			Role:  db.ViewerRole,
 		}
 		resp, code = testRequest(
 			t,
@@ -751,7 +751,7 @@ func TestOrganizationUsers(t *testing.T) {
 		// Invite the user to the organization
 		inviteRequest := &apicommon.OrganizationInvite{
 			Email: userToInviteEmail,
-			Role:  string(db.ViewerRole),
+			Role:  db.ViewerRole,
 		}
 		resp, code := testRequest(
 			t,
@@ -870,7 +870,7 @@ func TestOrganizationUsers(t *testing.T) {
 		// Invite the user to the second organization
 		inviteRequest = &apicommon.OrganizationInvite{
 			Email: userToInviteEmail,
-			Role:  string(db.ViewerRole),
+			Role:  db.ViewerRole,
 		}
 		resp, code = testRequest(
 			t,
@@ -957,7 +957,7 @@ func TestOrganizationUsers(t *testing.T) {
 		// Try to invite a user to the organization (should fail with "max users reached")
 		inviteRequest := &apicommon.OrganizationInvite{
 			Email: "maxusers@example.com",
-			Role:  string(db.ViewerRole),
+			Role:  db.ViewerRole,
 		}
 		resp, code := testRequest(
 			t,
