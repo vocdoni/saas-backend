@@ -132,6 +132,7 @@ func (*Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeapi.
 				"address": params.OrgAddress,
 			},
 		},
+		AllowPromotionCodes: stripeapi.Bool(true),
 		// The locale is being used to configure the language of the embedded client
 		Locale: stripeapi.String(params.Locale),
 	}
