@@ -1,7 +1,7 @@
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" lang="en">
 <head>
-    <title>Verification Code - Vocdoni</title>
+    <title>Verify Your Vocdoni Account</title>
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
@@ -10,7 +10,7 @@
     <meta name="format-detection" content="telephone=no, date=no, address=no, email=no, url=no" />
     
     <div style="display: none; max-height: 0; overflow: hidden;">
-        Your verification code for Vocdoni
+        Complete your Vocdoni account setup by verifying your email address
     </div>
     
     <style type="text/css">
@@ -76,18 +76,27 @@
         
         .main-content {
             padding: 40px 25px;
-            text-align: center;
+            text-align: left;
+        }
+        
+        .heading {
+            font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-size: 39px;
+            font-weight: 800;
+            line-height: 41px;
+            letter-spacing: -1.2px;
+            color: #000000;
+            margin: 0 0 25px 0;
         }
         
         .body-text {
             font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-            font-size: 18px;
+            font-size: 14px;
             font-weight: 500;
             line-height: 22px;
-            letter-spacing: -0.6px;
-            color: #424040;
+            letter-spacing: -0.56px;
+            color: #000000;
             margin: 0 0 25px 0;
-            text-align: center;
         }
         
         .verification-code {
@@ -106,6 +115,35 @@
             color: #000000;
             letter-spacing: 4px;
             margin: 0;
+        }
+        
+        .verification-code-label {
+            font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-size: 12px;
+            color: #6c757d;
+            margin: 5px 0 0 0;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .cta-button {
+            display: inline-block;
+            background-color: #000000;
+            color: #ffffff !important;
+            text-decoration: none;
+            padding: 12px 20px;
+            border-radius: 14px;
+            font-family: 'Albert Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: -0.6px;
+            text-align: center;
+            margin: 25px 0;
+            transition: background-color 0.3s ease;
+        }
+        
+        .cta-button:hover {
+            background-color: #333333 !important;
         }
         
         .footer {
@@ -140,6 +178,12 @@
                 padding: 30px 20px;
             }
             
+            .heading {
+                font-size: 28px;
+                line-height: 32px;
+                letter-spacing: -0.8px;
+            }
+            
             .body-text {
                 font-size: 16px;
                 line-height: 24px;
@@ -149,11 +193,21 @@
                 font-size: 20px;
                 letter-spacing: 2px;
             }
+            
+            .cta-button {
+                display: block;
+                width: 100%;
+                box-sizing: border-box;
+            }
         }
         
         @media (prefers-color-scheme: dark) {
             .email-content {
                 background-color: #1a1a1a !important;
+            }
+            
+            .heading {
+                color: #ffffff !important;
             }
             
             .body-text {
@@ -167,6 +221,19 @@
             
             .verification-code-text {
                 color: #ffffff !important;
+            }
+            
+            .verification-code-label {
+                color: #a0a0a0 !important;
+            }
+            
+            .cta-button {
+                background-color: #ffffff !important;
+                color: #000000 !important;
+            }
+            
+            .cta-button:hover {
+                background-color: #e0e0e0 !important;
             }
         }
         
@@ -205,27 +272,37 @@
                     <div class="email-content">
                         <div class="main-content">
                             
+                            <h1 class="heading">Por favor, verifica tu cuenta</h1>
+                            
                             <p class="body-text">
-                                Your verification code is:
+                                Estás recibiendo este correo porque te has registrado en Vocdoni App. 
+                                Por favor, confirma tu correo introduciendo este código de verificación:
                             </p>
                             
                             <div class="verification-code">
                                 <p class="verification-code-text">{{.Code}}</p>
+                                <p class="verification-code-label">CÓDIGO DE VERIFICACIÓN</p>
                             </div>
+                            
+                            <p class="body-text">O bien haz clic en el siguiente botón:</p>
+                            
+                            <a href="{{.Link}}" class="cta-button" target="_blank" rel="noopener">
+                                Verifica mi cuenta
+                            </a>
                             
                         </div>
                     </div>
                     
                     <div class="footer">
                         <p class="footer-text">
-                            You're receiving an OTP code for Vocdoni App. 
-                            If you have questions about this request, please 
-                            <a href="mailto:info@vocdoni.org" class="footer-link">contact us</a>.
+                            Estás recibiendo este correo porque te estás dando de alta en la aplicación Vocdoni. 
+                            Si no solicitaste este registro o no sabes por qué lo recibiste, ignora este mensaje o 
+                            <a href="mailto:info@vocdoni.org" class="footer-link">ponte en contacto con nosotros</a>.
                         </p>
                         
                         <p class="footer-text">
                             <a href="https://vocdoni.io" class="footer-link" target="_blank" rel="noopener">Vocdoni</a> 
-                            (Synergize SL). All rights reserved
+                            (Synergize SL). Todos los derechos reservados
                         </p>
                     </div>
                     
