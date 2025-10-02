@@ -10,6 +10,12 @@ type MetadataKey string
 // UserMetadataKey is the key used to store the user in the context.
 const UserMetadataKey MetadataKey = "user"
 
+// LangMetadataKey is the key used to store the language in the context.
+const LangMetadataKey MetadataKey = "lang"
+
+// DefaultLang is the default language
+const DefaultLang = "en"
+
 // VerificationCodeExpiration is the duration of the verification code
 // before it is invalidated
 var VerificationCodeExpiration = 3 * time.Minute

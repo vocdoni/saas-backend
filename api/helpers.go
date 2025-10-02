@@ -78,6 +78,15 @@ func (a *API) buildWebAppURL(path string, params map[string]any) (string, error)
 	return url.String(), nil
 }
 
+// getLanguageFromContext extracts the language from the request context.
+// Returns apicommon.DefaultLang as default if no language is found.
+func (*API) getLanguageFromContext(ctx context.Context) string {
+	if lang, ok := ctx.Value(apicommon.LangMetadataKey).(string); ok && lang != "" {
+		return lang
+	}
+	return apicommon.DefaultLang // default fallback
+}
+
 // generateVerificationCodeAndLink method generates and stores in the database
 // a new verification code for the target provided according to the database
 // code type selected. Then it generates a verification link to the web app

@@ -61,6 +61,7 @@ const (
 	adminPass  = "admin123"
 
 	testOAuthServiceURL = "http://test-oauth-service"
+	testWebAppURL       = "https://mock.vocdoni.app"
 )
 
 var (
@@ -420,6 +421,7 @@ func TestMain(m *testing.M) {
 		Subscriptions:       subscriptionsService,
 		CSP:                 testCSP,
 		OAuthServiceURL:     testOAuthServiceURL,
+		WebAppURL:           testWebAppURL,
 	}).Start()
 	// wait for the API to start
 	if err := pingAPI(testURL(pingEndpoint), 5); err != nil {

@@ -30,7 +30,7 @@ func init() {
 	}
 	// wrap the mail template execution to force plain body and set the regex
 	// needle as the verification code
-	testTemplateExec := func(mt mailtemplates.MailTemplate) (*notifications.Notification, error) {
+	testTemplateExec := func(mt mailtemplates.LocalizedTemplate) (*notifications.Notification, error) {
 		n, err := mt.ExecTemplate(struct {
 			Code string
 			Link string
@@ -43,7 +43,7 @@ func init() {
 		return n, nil
 	}
 	// compose notification with the verification code regex needle
-	verifyNotification, err := testTemplateExec(mailtemplates.VerifyAccountNotification)
+	verifyNotification, err := testTemplateExec(mailtemplates.VerifyAccountNotification.Localized("en"))
 	if err != nil {
 		panic(err)
 	}
@@ -51,7 +51,7 @@ func init() {
 	// compile the regex
 	verificationCodeRgx = regexp.MustCompile(strings.Split(verifyNotification.PlainBody, "\n")[0])
 	// compose notification with the password reset code regex needle
-	passwordResetNotification, err := testTemplateExec(mailtemplates.PasswordResetNotification)
+	passwordResetNotification, err := testTemplateExec(mailtemplates.PasswordResetNotification.Localized("en"))
 	if err != nil {
 		panic(err)
 	}

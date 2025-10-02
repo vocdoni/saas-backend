@@ -7,6 +7,7 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 )
 
@@ -14,7 +15,7 @@ func TestNotificationChallengeQueue(t *testing.T) {
 	c := qt.New(t)
 	// create a notification without to address to force an error during the
 	// sending
-	notification, err := mailtemplates.VerifyOTPCodeNotification.ExecPlain(struct {
+	notification, err := mailtemplates.VerifyOTPCodeNotification.Localized(apicommon.DefaultLang).ExecPlain(struct {
 		Code string
 	}{"123456"})
 	c.Assert(err, qt.IsNil)
@@ -91,7 +92,8 @@ func TestNotificationChallengeQueue(t *testing.T) {
 		go queue.Start()
 
 		c.Assert(mailtemplates.Load(), qt.IsNil)
-		nc, err := NewNotificationChallenge(EmailChallenge, []byte("user"), []byte("bundle"), testUserEmail, "123456")
+		nc, err := NewNotificationChallenge(EmailChallenge, apicommon.DefaultLang,
+			[]byte("user"), []byte("bundle"), testUserEmail, "123456")
 		c.Assert(err, qt.IsNil)
 		c.Assert(queue.Push(nc), qt.IsNil)
 	outer:
@@ -103,7 +105,8 @@ func TestNotificationChallengeQueue(t *testing.T) {
 				mailBody, err := testMailService.FindEmail(context.Background(), testUserEmail)
 				c.Assert(err, qt.IsNil)
 				// parse the email body to get the verification code
-				seedNotification, err := mailtemplates.VerifyOTPCodeNotification.ExecPlain(struct{ Code string }{`(.{6})`})
+				seedNotification, err := mailtemplates.VerifyOTPCodeNotification.Localized(apicommon.DefaultLang).
+					ExecPlain(struct{ Code string }{`(.{6})`})
 				c.Assert(err, qt.IsNil)
 				rgxNotification := regexp.MustCompile(seedNotification.PlainBody)
 				// verify the user
