@@ -19,7 +19,7 @@ import (
 // attempt number. It composes the notification challenge and pushes it to
 // the queue to be sent. It returns the token as HexBytes.
 func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
-	ctype notifications.ChallengeType,
+	ctype notifications.ChallengeType, lang string,
 ) (internal.HexBytes, error) {
 	// check the input parameters
 	if len(bID) == 0 {
@@ -68,7 +68,7 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 		"bundleID", bID,
 		"token", token)
 	// compose the notification challenge
-	ch, err := notifications.NewNotificationChallenge(ctype, uID, bID, to, code)
+	ch, err := notifications.NewNotificationChallenge(ctype, lang, uID, bID, to, code)
 	if err != nil {
 		log.Warnw("error composing notification challenge",
 			"userID", uID,

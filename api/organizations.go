@@ -428,6 +428,7 @@ func (a *API) organizationCreateTicket(w http.ResponseWriter, r *http.Request) {
 		errors.ErrEmailMalformed.With("invalid user email address").Write(w)
 		return
 	}
+	lang := a.getLanguageFromContext(r.Context())
 	notification, err := mailtemplates.SupportNotification.ExecTemplate(
 		struct {
 			Type         string
@@ -436,6 +437,7 @@ func (a *API) organizationCreateTicket(w http.ResponseWriter, r *http.Request) {
 			Description  string
 			Email        string
 		}{ticketReq.TicketType, org.Address, ticketReq.Title, ticketReq.Description, user.Email},
+		lang,
 	)
 	if err != nil {
 		log.Warnw("could not execute support notification template", "error", err)

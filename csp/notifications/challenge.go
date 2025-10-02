@@ -87,7 +87,7 @@ func (nc *NotificationChallenge) Send(ctx context.Context, service notifications
 // NewNotificationChallenge creates a new notification challenge based on the
 // provided parameters. It returns an error if the notification could not be
 // created.
-func NewNotificationChallenge(cType ChallengeType, uID, bID internal.HexBytes, to, code string) (
+func NewNotificationChallenge(cType ChallengeType, cLang string, uID, bID internal.HexBytes, to, code string) (
 	*NotificationChallenge, error,
 ) {
 	if uID == nil || bID == nil || to == "" || code == "" {
@@ -95,7 +95,7 @@ func NewNotificationChallenge(cType ChallengeType, uID, bID internal.HexBytes, t
 	}
 	n, err := mailtemplates.VerifyOTPCodeNotification.ExecTemplate(struct {
 		Code string
-	}{code})
+	}{code}, cLang)
 	if err != nil {
 		return nil, errors.Join(ErrCreateNotification, err)
 	}

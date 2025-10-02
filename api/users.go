@@ -92,7 +92,7 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// send the verification mail to the user email with the verification code
 	// and the verification link
-	if err := a.sendMail(r.Context(), userInfo.Email,
+	if err := a.sendLocalizedMail(r.Context(), userInfo.Email,
 		mailtemplates.VerifyAccountNotification, struct {
 			Code string
 			Link string
@@ -304,7 +304,7 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 	}
 	// send the verification mail to the user email with the verification code
 	// and the verification link
-	if err := a.sendMail(r.Context(), user.Email, mailtemplates.VerifyAccountNotification,
+	if err := a.sendLocalizedMail(r.Context(), user.Email, mailtemplates.VerifyAccountNotification,
 		struct {
 			Code string
 			Link string
@@ -536,7 +536,7 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 		}
 		// send the password reset mail to the user email with the verification
 		// code and the verification link
-		if err := a.sendMail(r.Context(), user.Email, mailtemplates.PasswordResetNotification,
+		if err := a.sendLocalizedMail(r.Context(), user.Email, mailtemplates.PasswordResetNotification,
 			struct {
 				Code string
 				Link string

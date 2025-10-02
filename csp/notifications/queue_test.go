@@ -16,7 +16,7 @@ func TestNotificationChallengeQueue(t *testing.T) {
 	// sending
 	notification, err := mailtemplates.VerifyOTPCodeNotification.ExecPlain(struct {
 		Code string
-	}{"123456"})
+	}{"123456"}, "en")
 	c.Assert(err, qt.IsNil)
 
 	c.Run("retries reached", func(c *qt.C) {
@@ -91,7 +91,7 @@ func TestNotificationChallengeQueue(t *testing.T) {
 		go queue.Start()
 
 		c.Assert(mailtemplates.Load(), qt.IsNil)
-		nc, err := NewNotificationChallenge(EmailChallenge, []byte("user"), []byte("bundle"), testUserEmail, "123456")
+		nc, err := NewNotificationChallenge(EmailChallenge, "en", []byte("user"), []byte("bundle"), testUserEmail, "123456")
 		c.Assert(err, qt.IsNil)
 		c.Assert(queue.Push(nc), qt.IsNil)
 	outer:
@@ -103,7 +103,7 @@ func TestNotificationChallengeQueue(t *testing.T) {
 				mailBody, err := testMailService.FindEmail(context.Background(), testUserEmail)
 				c.Assert(err, qt.IsNil)
 				// parse the email body to get the verification code
-				seedNotification, err := mailtemplates.VerifyOTPCodeNotification.ExecPlain(struct{ Code string }{`(.{6})`})
+				seedNotification, err := mailtemplates.VerifyOTPCodeNotification.ExecPlain(struct{ Code string }{`(.{6})`}, "en")
 				c.Assert(err, qt.IsNil)
 				rgxNotification := regexp.MustCompile(seedNotification.PlainBody)
 				// verify the user

@@ -43,7 +43,7 @@ func init() {
 		return n, nil
 	}
 	// compose notification with the verification code regex needle
-	verifyNotification, err := testTemplateExec(mailtemplates.VerifyAccountNotification)
+	verifyNotification, err := testTemplateExec(mailtemplates.VerifyAccountNotification.GetTemplate("en"))
 	if err != nil {
 		panic(err)
 	}
@@ -51,7 +51,7 @@ func init() {
 	// compile the regex
 	verificationCodeRgx = regexp.MustCompile(strings.Split(verifyNotification.PlainBody, "\n")[0])
 	// compose notification with the password reset code regex needle
-	passwordResetNotification, err := testTemplateExec(mailtemplates.PasswordResetNotification)
+	passwordResetNotification, err := testTemplateExec(mailtemplates.PasswordResetNotification.GetTemplate("en"))
 	if err != nil {
 		panic(err)
 	}
