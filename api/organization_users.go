@@ -174,7 +174,7 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 	}
 	// send the invitation mail to invited user email with the invite code and
 	// the invite link
-	if err := a.sendMail(r.Context(), invite.Email, mailtemplates.InviteNotification,
+	if err := a.sendLocalizedMail(r.Context(), invite.Email, mailtemplates.InviteNotification,
 		struct {
 			Organization common.Address
 			Code         string
@@ -382,7 +382,7 @@ func (a *API) updatePendingUserInvitationHandler(w http.ResponseWriter, r *http.
 
 	// send the invitation mail to invited user email with the invite code and
 	// the invite link
-	if err := a.sendMail(r.Context(), orgInvite.NewUserEmail, mailtemplates.InviteNotification,
+	if err := a.sendLocalizedMail(r.Context(), orgInvite.NewUserEmail, mailtemplates.InviteNotification,
 		struct {
 			Organization common.Address
 			Code         string

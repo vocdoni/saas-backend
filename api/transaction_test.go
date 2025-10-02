@@ -21,7 +21,7 @@ const (
 	// VerificationCodeLength is the length of the verification code in bytes
 	VerificationCodeLength = 3
 	// VerificationCodeTextBody is the body of the verification code email
-	VerificationCodeTextBody = "Your Vocdoni verification code is: "
+	VerificationCodeTextBody = "Your Voxdoni verification code is: "
 )
 
 func TestSignTxHandler(t *testing.T) {
