@@ -1,0 +1,5 @@
+subject: "Codi de verificació de Vocdoni"
+body: |
+  El teu codi de verificació de Vocdoni és: {{.Code}}
+
+  També pots utilitzar aquest enllaç per verificar el teu compte: {{.Link}}

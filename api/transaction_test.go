@@ -51,6 +51,7 @@ func TestSignTxHandler(t *testing.T) {
 	// create a regex to find the verification code in the email
 	mailCodeRgx := regexp.MustCompile(fmt.Sprintf(`%s(.{%d})`, VerificationCodeTextBody, VerificationCodeLength*2))
 	mailCode := mailCodeRgx.FindStringSubmatch(signupMailBody)
+	c.Assert(mailCode, qt.HasLen, 2)
 	// verify the user
 	verifyJSON := mustMarshal(&apicommon.UserVerification{
 		Email: testEmail,

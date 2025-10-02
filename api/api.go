@@ -182,6 +182,8 @@ func (a *API) initRouter() http.Handler {
 	r.Use(middleware.Throttle(100))
 	r.Use(middleware.ThrottleBacklog(5000, 40000, 60*time.Second))
 	r.Use(middleware.Timeout(45 * time.Second))
+	// set lang param in context
+	r.Use(a.setLang)
 
 	a.csp.PasswordSalt = passwordSalt
 	cspHandlers := handlers.New(a.csp, a.db)
