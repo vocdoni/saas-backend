@@ -1,0 +1,5 @@
+subject: "Vocdoni organization invitation"
+body: |
+  Your code to join '{{.Organization}}' organization is: {{.Code}}
+
+  You can also use this link to join the organization: {{.Link}}

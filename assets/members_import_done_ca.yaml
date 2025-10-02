@@ -1,0 +1,21 @@
+subject: "Importació de membres completada per {{.OrganizationName}}"
+body: |
+  Hola {{.UserName}},
+
+  La importació de membres per a l'organització "{{.OrganizationName}}" s'ha completat.
+
+  Resum de la importació:
+  - Total de membres processats: {{.TotalMembers}}
+  - Afegits correctament: {{.AddedMembers}}
+  - Errors trobats: {{.ErrorCount}}
+
+  {{if .Errors}}
+  Detalls dels errors:
+  {{range .Errors}}• {{.}}
+  {{end}}
+  {{end}}
+
+  Completat el: {{.CompletedAt}}
+
+  Salutacions cordials,  
+  L'equip de Vocdoni

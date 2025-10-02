@@ -5,7 +5,6 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
-	"github.com/vocdoni/saas-backend/notifications"
 )
 
 func TestMailTemplateLoading(t *testing.T) {
@@ -22,19 +21,20 @@ func TestMailTemplateLoading(t *testing.T) {
 		c.Assert(len(available) > 0, qt.IsTrue)
 
 		// Check that expected template files are loaded
-		expectedTemplates := []TemplateFile{
+		expectedTemplates := []TemplateKey{
 			"verification_account",
 			"verification_code_otp",
 			"forgot_password",
 			"invite_admin",
 			"support",
 			"members_import_done",
-			"welcome",
 		}
 
 		for _, templateFile := range expectedTemplates {
-			_, exists := available[templateFile]
-			c.Assert(exists, qt.IsTrue, qt.Commentf("template %s should be available", templateFile))
+			for _, lang := range []string{"en", "es", "ca"} {
+				_, exists := available[TemplateKey(string(templateFile)+"_"+lang)]
+				c.Assert(exists, qt.IsTrue, qt.Commentf("template %s should be available", templateFile))
+			}
 		}
 	})
 
@@ -52,9 +52,8 @@ func TestMailTemplateLoading(t *testing.T) {
 		// Verify returned map structure
 		for templateFile, path := range available {
 			c.Assert(string(templateFile), qt.Not(qt.Equals), "")
-			c.Assert(path, qt.Not(qt.Equals), "")
-			c.Assert(path, qt.Contains, "assets/")
-			c.Assert(path, qt.Contains, ".html")
+			c.Assert(path.HTMLFile, qt.Contains, "assets/")
+			c.Assert(path.HTMLFile, qt.Contains, ".html")
 		}
 	})
 }
@@ -66,18 +65,18 @@ func TestVerifyAccountNotification(t *testing.T) {
 	err := Load()
 	c.Assert(err, qt.IsNil)
 
-	template := VerifyAccountNotification
+	template := VerifyAccountNotification.Localized("en")
 
 	t.Run("TemplateStructure", func(_ *testing.T) {
 		c := qt.New(t)
 
 		// Test template field values
-		c.Assert(string(template.File), qt.Equals, "verification_account")
-		c.Assert(template.Placeholder.Subject, qt.Equals, "Vocdoni verification code")
-		c.Assert(template.WebAppURI, qt.Equals, "/account/verify")
-		c.Assert(template.Placeholder.PlainBody, qt.Contains, "Your Vocdoni verification code is:")
-		c.Assert(template.Placeholder.PlainBody, qt.Contains, "{{.Code}}")
-		c.Assert(template.Placeholder.PlainBody, qt.Contains, "{{.Link}}")
+		plaintext, err := template.Plaintext()
+		c.Assert(err, qt.IsNil)
+		c.Assert(plaintext.Subject, qt.Equals, "Verify Your Vocdoni Account")
+		c.Assert(plaintext.Body, qt.Contains, "Your Vocdoni verification code is:")
+		c.Assert(plaintext.Body, qt.Contains, "{{.Code}}")
+		c.Assert(plaintext.Body, qt.Contains, "{{.Link}}")
 	})
 
 	t.Run("ExecPlain", func(_ *testing.T) {
@@ -98,7 +97,7 @@ func TestVerifyAccountNotification(t *testing.T) {
 		c.Assert(notification, qt.Not(qt.IsNil))
 
 		// Verify subject is populated
-		c.Assert(notification.Subject, qt.Equals, "Vocdoni verification code")
+		c.Assert(notification.Subject, qt.Equals, "Verify Your Vocdoni Account")
 
 		// Verify plain body is populated with data
 		c.Assert(notification.PlainBody, qt.Contains, "123456")
@@ -127,7 +126,7 @@ func TestVerifyAccountNotification(t *testing.T) {
 		// Verify both HTML body and plain body are populated
 		c.Assert(notification.Body, qt.Not(qt.Equals), "")
 		c.Assert(notification.PlainBody, qt.Not(qt.Equals), "")
-		c.Assert(notification.Subject, qt.Equals, "Vocdoni verification code")
+		c.Assert(notification.Subject, qt.Equals, "Verify Your Vocdoni Account")
 
 		// HTML body should contain the data
 		c.Assert(notification.Body, qt.Contains, "123456")
@@ -142,18 +141,18 @@ func TestPasswordResetNotification(t *testing.T) {
 	err := Load()
 	c.Assert(err, qt.IsNil)
 
-	template := PasswordResetNotification
+	template := PasswordResetNotification.Localized("en")
 
 	t.Run("TemplateStructure", func(_ *testing.T) {
 		c := qt.New(t)
 
 		// Test template field values
-		c.Assert(string(template.File), qt.Equals, "forgot_password")
-		c.Assert(template.Placeholder.Subject, qt.Equals, "Vocdoni password reset")
-		c.Assert(template.WebAppURI, qt.Equals, "/account/password/reset")
-		c.Assert(template.Placeholder.PlainBody, qt.Contains, "Your Vocdoni password reset code is:")
-		c.Assert(template.Placeholder.PlainBody, qt.Contains, "{{.Code}}")
-		c.Assert(template.Placeholder.PlainBody, qt.Contains, "{{.Link}}")
+		plaintext, err := template.Plaintext()
+		c.Assert(err, qt.IsNil)
+		c.Assert(plaintext.Subject, qt.Equals, "Vocdoni password reset")
+		c.Assert(plaintext.Body, qt.Contains, "Your Vocdoni password reset code is:")
+		c.Assert(plaintext.Body, qt.Contains, "{{.Code}}")
+		c.Assert(plaintext.Body, qt.Contains, "{{.Link}}")
 	})
 
 	t.Run("ExecTemplate", func(_ *testing.T) {
@@ -188,18 +187,18 @@ func TestInviteNotification(t *testing.T) {
 	err := Load()
 	c.Assert(err, qt.IsNil)
 
-	template := InviteNotification
+	template := InviteNotification.Localized("en")
 
 	t.Run("TemplateStructure", func(_ *testing.T) {
 		c := qt.New(t)
 
 		// Test template field values
-		c.Assert(string(template.File), qt.Equals, "invite_admin")
-		c.Assert(template.Placeholder.Subject, qt.Equals, "Vocdoni organization invitation")
-		c.Assert(template.WebAppURI, qt.Equals, "/account/invite")
-		c.Assert(template.Placeholder.PlainBody, qt.Contains, "You code to join to '{{.Organization}}' organization is:")
-		c.Assert(template.Placeholder.PlainBody, qt.Contains, "{{.Code}}")
-		c.Assert(template.Placeholder.PlainBody, qt.Contains, "{{.Link}}")
+		plaintext, err := template.Plaintext()
+		c.Assert(err, qt.IsNil)
+		c.Assert(plaintext.Subject, qt.Equals, "Vocdoni organization invitation")
+		c.Assert(plaintext.Body, qt.Contains, "Your code to join '{{.Organization}}' organization is:")
+		c.Assert(plaintext.Body, qt.Contains, "{{.Code}}")
+		c.Assert(plaintext.Body, qt.Contains, "{{.Link}}")
 	})
 
 	t.Run("ExecTemplate", func(_ *testing.T) {
@@ -238,20 +237,21 @@ func TestSupportNotification(t *testing.T) {
 	err := Load()
 	c.Assert(err, qt.IsNil)
 
-	template := SupportNotification
+	template := SupportNotification.Localized("en")
 
 	t.Run("TemplateStructure", func(_ *testing.T) {
 		c := qt.New(t)
 
 		// Test template field values
-		c.Assert(string(template.File), qt.Equals, "support")
-		c.Assert(template.Placeholder.Subject, qt.Contains, "New {{.Type}} Ticket from {{.Email}}: {{.Title}}")
-		c.Assert(template.Placeholder.PlainBody, qt.Contains, "You have a new support request:")
-		c.Assert(template.Placeholder.PlainBody, qt.Contains, "{{.Title}}")
-		c.Assert(template.Placeholder.PlainBody, qt.Contains, "{{.Type}}")
-		c.Assert(template.Placeholder.PlainBody, qt.Contains, "{{.Email}}")
-		c.Assert(template.Placeholder.PlainBody, qt.Contains, "{{.Organization}}")
-		c.Assert(template.Placeholder.PlainBody, qt.Contains, "{{.Description}}")
+		plaintext, err := template.Plaintext()
+		c.Assert(err, qt.IsNil)
+		c.Assert(plaintext.Subject, qt.Contains, "New {{.Type}} Ticket from {{.Email}}: {{.Title}}")
+		c.Assert(plaintext.Body, qt.Contains, "You have a new support request:")
+		c.Assert(plaintext.Body, qt.Contains, "{{.Title}}")
+		c.Assert(plaintext.Body, qt.Contains, "{{.Type}}")
+		c.Assert(plaintext.Body, qt.Contains, "{{.Email}}")
+		c.Assert(plaintext.Body, qt.Contains, "{{.Organization}}")
+		c.Assert(plaintext.Body, qt.Contains, "{{.Description}}")
 	})
 
 	t.Run("ExecTemplate", func(_ *testing.T) {
@@ -301,19 +301,20 @@ func TestMembersImportCompletionNotification(t *testing.T) {
 	err := Load()
 	c.Assert(err, qt.IsNil)
 
-	template := MembersImportCompletionNotification
+	template := MembersImportCompletionNotification.Localized("en")
 
 	t.Run("TemplateStructure", func(_ *testing.T) {
 		c := qt.New(t)
+		plaintext, err := template.Plaintext()
+		c.Assert(err, qt.IsNil)
 
 		// Test template field values
-		c.Assert(string(template.File), qt.Equals, "members_import_done")
-		c.Assert(template.Placeholder.Subject, qt.Contains, "Members import completed for {{.OrganizationName}}")
-		c.Assert(template.Placeholder.PlainBody, qt.Contains, "Hello {{.UserName}}")
-		c.Assert(template.Placeholder.PlainBody, qt.Contains, "{{.TotalMembers}}")
-		c.Assert(template.Placeholder.PlainBody, qt.Contains, "{{.AddedMembers}}")
-		c.Assert(template.Placeholder.PlainBody, qt.Contains, "{{.ErrorCount}}")
-		c.Assert(template.Placeholder.PlainBody, qt.Contains, "{{.CompletedAt}}")
+		c.Assert(plaintext.Subject, qt.Contains, "Members import completed for {{.OrganizationName}}")
+		c.Assert(plaintext.Body, qt.Contains, "Hello {{.UserName}}")
+		c.Assert(plaintext.Body, qt.Contains, "{{.TotalMembers}}")
+		c.Assert(plaintext.Body, qt.Contains, "{{.AddedMembers}}")
+		c.Assert(plaintext.Body, qt.Contains, "{{.ErrorCount}}")
+		c.Assert(plaintext.Body, qt.Contains, "{{.CompletedAt}}")
 	})
 
 	t.Run("ExecTemplate_Success", func(_ *testing.T) {
@@ -400,16 +401,17 @@ func TestVerifyOTPCodeNotification(t *testing.T) {
 	err := Load()
 	c.Assert(err, qt.IsNil)
 
-	template := VerifyOTPCodeNotification
+	template := VerifyOTPCodeNotification.Localized("ca")
 
 	t.Run("TemplateStructure", func(_ *testing.T) {
 		c := qt.New(t)
+		plaintext, err := template.Plaintext()
+		c.Assert(err, qt.IsNil)
 
 		// Test template field values
-		c.Assert(string(template.File), qt.Equals, "verification_code_otp")
-		c.Assert(template.Placeholder.Subject, qt.Equals, "Codi de Verificació - Vocdoni")
-		c.Assert(template.Placeholder.PlainBody, qt.Contains, "El teu codi de verificació és:")
-		c.Assert(template.Placeholder.PlainBody, qt.Contains, "{{.Code}}")
+		c.Assert(plaintext.Subject, qt.Equals, "Codi de Verificació - Vocdoni")
+		c.Assert(plaintext.Body, qt.Contains, "El teu codi de verificació és:")
+		c.Assert(plaintext.Body, qt.Contains, "{{.Code}}")
 	})
 
 	t.Run("ExecTemplate", func(_ *testing.T) {
@@ -448,52 +450,15 @@ func TestMailTemplateExecution(t *testing.T) {
 		c := qt.New(t)
 
 		// Create template with nonexistent file
-		template := MailTemplate{
-			File: "nonexistent_template",
-			Placeholder: notifications.Notification{
-				Subject:   "Test Subject",
-				PlainBody: "Test Body",
-			},
+		template := LocalizedTemplate{
+			HTMLFile: "assets/nonexistent_template_en.html",
+			YAMLFile: "assets/nonexistent_template_en.yaml",
 		}
 
 		// Execute template should fail
 		_, err := template.ExecTemplate(struct{}{})
 		c.Assert(err, qt.Not(qt.IsNil))
-		c.Assert(err.Error(), qt.Contains, "template not found")
-	})
-
-	t.Run("ExecPlain_EmptyPlaceholder", func(_ *testing.T) {
-		c := qt.New(t)
-
-		// Create template with empty placeholder
-		template := MailTemplate{
-			File:        "verification_account",
-			Placeholder: notifications.Notification{},
-		}
-
-		// Execute plain template
-		notification, err := template.ExecPlain(struct{}{})
-		c.Assert(err, qt.IsNil)
-		c.Assert(notification, qt.Not(qt.IsNil))
-		c.Assert(notification.PlainBody, qt.Equals, "")
-		c.Assert(notification.Subject, qt.Equals, "")
-	})
-
-	t.Run("ExecPlain_InvalidTemplate", func(_ *testing.T) {
-		c := qt.New(t)
-
-		// Create template with invalid template syntax
-		template := MailTemplate{
-			File: "verification_account",
-			Placeholder: notifications.Notification{
-				Subject:   "Invalid {{.MissingCloseBrace",
-				PlainBody: "Valid body",
-			},
-		}
-
-		// Execute plain template should fail
-		_, err := template.ExecPlain(struct{}{})
-		c.Assert(err, qt.Not(qt.IsNil))
+		c.Assert(err.Error(), qt.Contains, "file does not exist")
 	})
 
 	t.Run("ExecTemplate_WithComplexData", func(_ *testing.T) {
@@ -523,7 +488,7 @@ func TestMailTemplateExecution(t *testing.T) {
 		}
 
 		// Execute template
-		notification, err := template.ExecTemplate(data)
+		notification, err := template.Localized("en").ExecTemplate(data)
 		c.Assert(err, qt.IsNil)
 		c.Assert(notification, qt.Not(qt.IsNil))
 		c.Assert(notification.PlainBody, qt.Contains, "Complex User")
@@ -545,10 +510,10 @@ func TestMailTemplateIntegration(t *testing.T) {
 		c.Assert(len(available) > 0, qt.IsTrue)
 
 		// Test multiple template executions
-		templates := []MailTemplate{
-			VerifyAccountNotification,
-			PasswordResetNotification,
-			InviteNotification,
+		templates := []LocalizedTemplate{
+			VerifyAccountNotification.Localized("en"),
+			PasswordResetNotification.Localized("en"),
+			InviteNotification.Localized("en"),
 		}
 
 		testData := struct {
@@ -563,7 +528,7 @@ func TestMailTemplateIntegration(t *testing.T) {
 
 		for _, template := range templates {
 			notification, err := template.ExecTemplate(testData)
-			c.Assert(err, qt.IsNil, qt.Commentf("failed for template %s", template.File))
+			c.Assert(err, qt.IsNil, qt.Commentf("failed for template %s", template.HTMLFile))
 			c.Assert(notification, qt.Not(qt.IsNil))
 			c.Assert(notification.Subject, qt.Not(qt.Equals), "")
 			c.Assert(notification.Body, qt.Not(qt.Equals), "")
@@ -588,7 +553,7 @@ func TestMailTemplateIntegration(t *testing.T) {
 		}
 
 		// Execute template
-		notification, err := template.ExecTemplate(data)
+		notification, err := template.Localized("en").ExecTemplate(data)
 		c.Assert(err, qt.IsNil)
 		c.Assert(notification, qt.Not(qt.IsNil))
 

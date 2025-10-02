@@ -60,24 +60,24 @@ func TestMain(m *testing.M) {
 func TestNewChallengeSent(t *testing.T) {
 	c := qt.New(t)
 	// invalid inputs
-	_, err := NewNotificationChallenge(EmailChallenge, nil, []byte("bundle"), testUserEmail, "123456")
+	_, err := NewNotificationChallenge(EmailChallenge, "en", nil, []byte("bundle"), testUserEmail, "123456")
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
-	_, err = NewNotificationChallenge(EmailChallenge, []byte("user"), nil, testUserEmail, "123456")
+	_, err = NewNotificationChallenge(EmailChallenge, "en", []byte("user"), nil, testUserEmail, "123456")
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
-	_, err = NewNotificationChallenge(EmailChallenge, []byte("user"), []byte("bundle"), "", "123456")
+	_, err = NewNotificationChallenge(EmailChallenge, "en", []byte("user"), []byte("bundle"), "", "123456")
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
-	_, err = NewNotificationChallenge(EmailChallenge, []byte("user"), []byte("bundle"), testUserEmail, "")
+	_, err = NewNotificationChallenge(EmailChallenge, "en", []byte("user"), []byte("bundle"), testUserEmail, "")
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
 	// invalid notification template
-	_, err = NewNotificationChallenge(EmailChallenge, []byte("user"), []byte("bundle"), testUserEmail, "123456")
+	_, err = NewNotificationChallenge(EmailChallenge, "en", []byte("user"), []byte("bundle"), testUserEmail, "123456")
 	c.Assert(err, qt.ErrorIs, ErrCreateNotification)
 	// load email templates
 	c.Assert(mailtemplates.Load(), qt.IsNil)
 	// invalid notification type
-	_, err = NewNotificationChallenge("invalid", []byte("user"), []byte("bundle"), testUserEmail, "123456")
+	_, err = NewNotificationChallenge("invalid", "en", []byte("user"), []byte("bundle"), testUserEmail, "123456")
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationType)
 	// valid notification
-	ch, err := NewNotificationChallenge(EmailChallenge, []byte("user"), []byte("bundle"), testUserEmail, "123456")
+	ch, err := NewNotificationChallenge(EmailChallenge, "en", []byte("user"), []byte("bundle"), testUserEmail, "123456")
 	c.Assert(err, qt.IsNil)
 	c.Assert(ch, qt.Not(qt.IsNil))
 	c.Assert(ch.Type, qt.Equals, EmailChallenge)
@@ -94,7 +94,7 @@ func TestNewChallengeSent(t *testing.T) {
 	mailBody, err := testMailService.FindEmail(context.Background(), testUserEmail)
 	c.Assert(err, qt.IsNil)
 	// parse the email body to get the verification code
-	seedNotification, err := mailtemplates.VerifyOTPCodeNotification.ExecPlain(struct{ Code string }{`(.{6})`})
+	seedNotification, err := mailtemplates.VerifyOTPCodeNotification.Localized("en").ExecPlain(struct{ Code string }{`(.{6})`})
 	c.Assert(err, qt.IsNil)
 	rgxNotification := regexp.MustCompile(seedNotification.PlainBody)
 	// verify the user

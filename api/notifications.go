@@ -9,12 +9,12 @@ import (
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 )
 
-// sendMail method sends a notification to the email provided. It requires the
-// email template and the data to fill it. It executes the mail template with
-// the data to get the notification and sends it with the recipient email
-// address provided. It returns an error if the mail service is available and
-// the notification could not be sent or the email address is invalid. If the
-// mail service is not available, it does nothing.
+// sendMail method sends a localized notification to the email provided.
+// It requires the localized email template and the data to fill it. It extracts
+// the language from the context and executes the appropriate template variant.
+// It returns an error if the mail service is available and the notification could
+// not be sent or the email address is invalid. If the mail service is not available,
+// it does nothing.
 func (a *API) sendMail(ctx context.Context, to string, mail mailtemplates.MailTemplate, data any) error {
 	if a.mail != nil {
 		ctx, cancel := context.WithTimeout(ctx, time.Second*10)
@@ -23,8 +23,10 @@ func (a *API) sendMail(ctx context.Context, to string, mail mailtemplates.MailTe
 		if !internal.ValidEmail(to) {
 			return fmt.Errorf("invalid email address")
 		}
-		// execute the mail template to get the notification
-		notification, err := mail.ExecTemplate(data)
+		// get the language from context
+		lang := a.getLanguageFromContext(ctx)
+		// execute the localized mail template to get the notification
+		notification, err := mail.Localized(lang).ExecTemplate(data)
 		if err != nil {
 			return err
 		}
