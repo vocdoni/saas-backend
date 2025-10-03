@@ -283,7 +283,8 @@ func (ms *MongoStorage) DeleteOrganizationMemberGroup(groupID string, orgAddress
 	return nil
 }
 
-// ListOrganizationMemberGroup lists all the members of an organization member group and the total number of members
+// ListOrganizationMemberGroup lists all the members of an organization member group (paginated)
+// and the total number of pages
 func (ms *MongoStorage) ListOrganizationMemberGroup(
 	groupID string, orgAddress common.Address,
 	page, pageSize int64,
