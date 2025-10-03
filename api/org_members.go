@@ -26,6 +26,7 @@ var addMembersToOrgWorkers sync.Map
 type MembersImportCompletionData struct {
 	OrganizationName string
 	UserName         string
+	Link             string
 	TotalMembers     int
 	AddedMembers     int
 	ErrorCount       int
@@ -39,6 +40,11 @@ func (a *API) sendMembersImportCompletionEmail(userEmail, userName, orgName stri
 		return // Email service not configured
 	}
 
+	link, err := a.buildWebAppURL("/admin/memberbase/", nil)
+	if err != nil {
+		log.Errorf("failed to build web app URL for members import completion email: %v", err)
+	}
+
 	// Import the mailtemplates package dynamically to avoid import issues
 	// We'll use the sendMail method which handles the template execution
 	data := MembersImportCompletionData{
@@ -46,6 +52,7 @@ func (a *API) sendMembersImportCompletionEmail(userEmail, userName, orgName stri
 		UserName:         userName,
 		TotalMembers:     progress.Total,
 		AddedMembers:     progress.Added,
+		Link:             link,
 		ErrorCount:       len(progress.Errors),
 		Errors:           progress.ErrorsAsStrings(),
 		CompletedAt:      time.Now(),
