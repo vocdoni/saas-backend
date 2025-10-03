@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
+	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/dvote/util"
 )
@@ -19,6 +21,59 @@ import (
 // addMembersToOrgWorkers is a map of job identifiers to the progress of adding members to a census.
 // This is used to check the progress of the job.
 var addMembersToOrgWorkers sync.Map
+
+// MembersImportCompletionData represents the data structure for members import completion email template
+type MembersImportCompletionData struct {
+	OrganizationName string
+	UserName         string
+	Link             string
+	TotalMembers     int
+	AddedMembers     int
+	ErrorCount       int
+	Errors           []string
+	CompletedAt      time.Time
+}
+
+// sendMembersImportCompletionEmail sends an email notification when members import is completed
+func (a *API) sendMembersImportCompletionEmail(userEmail, userName, orgName string, progress *db.BulkOrgMembersJob) {
+	if a.mail == nil {
+		return // Email service not configured
+	}
+
+	link, err := a.buildWebAppURL("/admin/memberbase/", nil)
+	if err != nil {
+		log.Errorf("failed to build web app URL for members import completion email: %v", err)
+	}
+
+	// Import the mailtemplates package dynamically to avoid import issues
+	// We'll use the sendMail method which handles the template execution
+	data := MembersImportCompletionData{
+		OrganizationName: orgName,
+		UserName:         userName,
+		TotalMembers:     progress.Total,
+		AddedMembers:     progress.Added,
+		Link:             link,
+		ErrorCount:       len(progress.Errors),
+		Errors:           progress.ErrorsAsStrings(),
+		CompletedAt:      time.Now(),
+	}
+
+	// Create a background context for email sending
+	ctx := context.Background()
+
+	// We need to import mailtemplates here to use the template
+	// For now, let's create a simple notification structure
+	if err := a.sendMail(ctx, userEmail, mailtemplates.MembersImportCompletionNotification, data); err != nil {
+		log.Errorf("failed to send members import completion email to %s for org %s: %v", userEmail, orgName, err)
+	} else {
+		log.Infow("members import completion email sent",
+			"user", userEmail,
+			"org", orgName,
+			"added", progress.Added,
+			"total", progress.Total,
+			"errors", len(progress.Errors))
+	}
+}
 
 // organizationMembersHandler godoc
 //
@@ -167,6 +222,14 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 				"total", p.Total,
 				"errors", len(p.Errors))
 		}
+
+		// Send completion email notification
+		orgName := org.Subdomain
+		if orgName == "" {
+			orgName = org.Address.Hex()
+		}
+		go a.sendMembersImportCompletionEmail(user.Email, user.FirstName+" "+user.LastName, orgName, lastProgress)
+
 		// Return the number of members added
 		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{
 			Added:  uint32(lastProgress.Added),
@@ -184,8 +247,18 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 		// Continue with in-memory only (fallback)
 	}
 
+	// Capture user and org info for the async goroutine
+	userEmail := user.Email
+	userName := user.FirstName + " " + user.LastName
+	orgName := org.Subdomain
+	if orgName == "" {
+		orgName = org.Address.Hex()
+	}
+
 	go func() {
+		var lastProgress *db.BulkOrgMembersJob
 		for p := range progressChan {
+			lastProgress = p
 			// Store progress updates in a map that is read by another endpoint to check a job status
 			addMembersToOrgWorkers.Store(jobID.String(), p)
 
@@ -195,6 +268,11 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 					log.Warnw("failed to persist job completion", "error", err, "jobId", jobID.String())
 				}
 			}
+		}
+
+		// Send completion email notification when async job is done
+		if lastProgress != nil {
+			a.sendMembersImportCompletionEmail(userEmail, userName, orgName, lastProgress)
 		}
 	}()
 
