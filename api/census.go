@@ -139,7 +139,7 @@ func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// get the async flag
-	async := r.URL.Query().Get("async") == "true"
+	async := r.URL.Query().Get("async") == "true" //nolint:goconst
 
 	// retrieve census
 	census, err := a.db.Census(censusID.String())

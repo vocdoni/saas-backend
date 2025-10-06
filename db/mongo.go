@@ -30,10 +30,9 @@ const (
 
 // MongoStorage uses an external MongoDB service for stoting the user data and election details.
 type MongoStorage struct {
-	database    string
-	DBClient    *mongo.Client
-	keysLock    sync.RWMutex
-	stripePlans []*Plan
+	database string
+	DBClient *mongo.Client
+	keysLock sync.RWMutex
 
 	users               *mongo.Collection
 	verifications       *mongo.Collection
