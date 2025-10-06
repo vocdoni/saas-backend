@@ -111,7 +111,6 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-
 	}
 
 	// sign the tx
