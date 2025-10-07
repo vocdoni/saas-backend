@@ -460,6 +460,37 @@ func (ms *MongoStorage) DeleteOrgMembers(orgAddress common.Address, ids []string
 		return 0, fmt.Errorf("failed to delete orgMembers: %w", err)
 	}
 
+	// Convert ObjectIDs to string IDs for group updates (groups store member IDs as strings)
+	var stringIDs []string
+	for _, oid := range oids {
+		stringIDs = append(stringIDs, oid.Hex())
+	}
+
+	// Update all groups to remove the deleted member IDs from their MemberIDs arrays
+	groupFilter := bson.M{
+		"orgAddress": orgAddress,
+		"memberIds": bson.M{
+			"$in": stringIDs,
+		},
+	}
+
+	// Use $pull to remove the deleted member IDs from all groups that contain them
+	groupUpdate := bson.M{
+		"$pull": bson.M{
+			"memberIds": bson.M{
+				"$in": stringIDs,
+			},
+		},
+		"$set": bson.M{
+			"updatedAt": time.Now(),
+		},
+	}
+
+	_, err = ms.orgMemberGroups.UpdateMany(ctx, groupFilter, groupUpdate)
+	if err != nil {
+		return 0, fmt.Errorf("failed to update groups after deleting orgMembers: %w", err)
+	}
+
 	return int(result.DeletedCount), nil
 }
 
