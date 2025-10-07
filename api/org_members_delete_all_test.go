@@ -155,11 +155,12 @@ func TestDeleteAllOrganizationMembersDeletesGroups(t *testing.T) {
 		"organizations", orgAddress.String(), "members")
 	c.Assert(len(membersResponse.Members), qt.Equals, 0)
 
-	// Verify the group was also deleted
+	// Verify the group was NOT deleted but left empty
 	groupsResponse := requestAndParse[apicommon.OrganizationMemberGroupsResponse](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "groups")
-	c.Assert(len(groupsResponse.Groups), qt.Equals, 0)
+	c.Assert(groupsResponse.Groups, qt.HasLen, 1)
+	c.Assert(groupsResponse.Groups[0].MemberIDs, qt.HasLen, 0)
 }
 
 func TestDeleteAllOrganizationMembersEmpty(t *testing.T) {
