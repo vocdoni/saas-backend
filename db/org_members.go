@@ -517,8 +517,20 @@ func (ms *MongoStorage) DeleteAllOrgMembers(orgAddress common.Address) (int, err
 		return 0, fmt.Errorf("failed to delete all orgMembers: %w", err)
 	}
 
-	if _, err := ms.orgMemberGroups.DeleteMany(ctx, filter); err != nil {
-		return 0, fmt.Errorf("failed to delete all orgMember groups: %w", err)
+	// Update all groups to remove the deleted member IDs
+	groupFilter := bson.M{
+		"orgAddress": orgAddress,
+	}
+	groupUpdate := bson.M{
+		"$set": bson.M{
+			"memberIds": []string{},
+			"updatedAt": time.Now(),
+		},
+	}
+
+	_, err = ms.orgMemberGroups.UpdateMany(ctx, groupFilter, groupUpdate)
+	if err != nil {
+		return 0, fmt.Errorf("failed to update groups after deleting all orgMembers: %w", err)
 	}
 
 	return int(result.DeletedCount), nil
