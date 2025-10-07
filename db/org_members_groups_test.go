@@ -1044,4 +1044,76 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		c.Assert(len(results.Duplicates), qt.Equals, 0, qt.Commentf("Should NOT detect duplicates when 2FA fields make members unique"))
 		c.Assert(len(results.Members), qt.Equals, 2, qt.Commentf("Should include both members as valid"))
 	})
+
+	// Test DeleteOrgMembers with automatic group cleanup
+	// When members are deleted, they should be removed from all groups
+	t.Run("DeleteMembersWithGroupCleanup", func(_ *testing.T) {
+		c.Assert(testDB.Reset(), qt.IsNil)
+		// Setup prerequisites - this creates 3 members
+		_, existingMemberIDs := setupTestOrgMembersGroupPrerequisites(t, "_delete_test")
+
+		// Create a group with all 3 existing members
+		testGroup := &OrganizationMemberGroup{
+			OrgAddress:  testOrgAddress,
+			Title:       "Delete Test Group",
+			Description: "Group to test member deletion functionality",
+			MemberIDs:   existingMemberIDs, // All 3 members
+		}
+		testGroupID, err := testDB.CreateOrganizationMemberGroup(testGroup)
+		c.Assert(err, qt.IsNil)
+
+		// Create another group with only the first 2 members
+		anotherTestGroup := &OrganizationMemberGroup{
+			OrgAddress:  testOrgAddress,
+			Title:       "Another Delete Test Group",
+			Description: "Another group to test member deletion functionality",
+			MemberIDs:   existingMemberIDs[:2], // Only first 2 members
+		}
+		anotherTestGroupID, err := testDB.CreateOrganizationMemberGroup(anotherTestGroup)
+		c.Assert(err, qt.IsNil)
+
+		// Verify initial state - both groups should have their expected members
+		group1, err := testDB.OrganizationMemberGroup(testGroupID, testOrgAddress)
+		c.Assert(err, qt.IsNil)
+		c.Assert(group1.MemberIDs, qt.HasLen, 3)
+
+		group2, err := testDB.OrganizationMemberGroup(anotherTestGroupID, testOrgAddress)
+		c.Assert(err, qt.IsNil)
+		c.Assert(group2.MemberIDs, qt.HasLen, 2)
+
+		// Delete the first 2 members (indices 0 and 1)
+		membersToDelete := existingMemberIDs[:2]
+		deletedCount, err := testDB.DeleteOrgMembers(testOrgAddress, membersToDelete)
+		c.Assert(err, qt.IsNil)
+		c.Assert(deletedCount, qt.Equals, 2)
+
+		// Verify that the deleted members no longer exist in the database
+		for _, deletedMemberID := range membersToDelete {
+			_, err := testDB.OrgMember(testOrgAddress, deletedMemberID)
+			c.Assert(err, qt.Not(qt.IsNil)) // Should return error for deleted member
+		}
+
+		// Verify that the remaining member still exists
+		remainingMember := existingMemberIDs[2]
+		_, err = testDB.OrgMember(testOrgAddress, remainingMember)
+		c.Assert(err, qt.IsNil) // Should not return error for existing member
+
+		// Verify that groups have been automatically updated
+		// Group 1 should now have 1 member (the 3rd member)
+		updatedGroup1, err := testDB.OrganizationMemberGroup(testGroupID, testOrgAddress)
+		c.Assert(err, qt.IsNil)
+		c.Assert(updatedGroup1.MemberIDs, qt.HasLen, 1)
+		c.Assert(updatedGroup1.MemberIDs, qt.Contains, remainingMember)
+
+		// Group 2 should now have been deleted as it has no members left
+		updatedGroup2, err := testDB.OrganizationMemberGroup(anotherTestGroupID, testOrgAddress)
+		c.Assert(err, qt.IsNil)
+		c.Assert(updatedGroup2.MemberIDs, qt.HasLen, 0)
+
+		// Verify that deleted member IDs are not in any group
+		for _, deletedMemberID := range membersToDelete {
+			c.Assert(updatedGroup1.MemberIDs, qt.Not(qt.Contains), deletedMemberID)
+			c.Assert(updatedGroup2.MemberIDs, qt.Not(qt.Contains), deletedMemberID)
+		}
+	})
 }
