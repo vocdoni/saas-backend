@@ -113,6 +113,27 @@ func (*Client) GetPrice(lookupKey string) (*stripeapi.Price, error) {
 	return results.Price(), nil
 }
 
+// GetProductPrices retrieves all active prices for a given product ID
+func (*Client) GetProductPrices(productID string) ([]stripeapi.Price, error) {
+	var prices []stripeapi.Price
+
+	params := &stripeapi.PriceListParams{
+		Product: stripeapi.String(productID),
+		Active:  stripeapi.Bool(true),
+	}
+	params.Filters.AddFilter("limit", "", "100") // Adjust limit as needed
+
+	i := stripeprice.List(params)
+	for i.Next() {
+		prices = append(prices, *i.Price())
+	}
+	if err := i.Err(); err != nil {
+		return nil, NewStripeError("api_call_failed", "failed to list prices", err)
+	}
+
+	return prices, nil
+}
+
 // CreateCheckoutSession creates a new checkout session for subscription
 // It configures the session with the specified price, amount return URL, and subscription metadata.
 // The email provided is used in order to uniquely distinguish the customer on the Stripe side.
@@ -148,6 +169,7 @@ func (c *Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeap
 			Metadata: map[string]string{
 				"address": params.OrgAddress,
 			},
+			TrialPeriodDays: stripeapi.Int64(15),
 		},
 		AllowPromotionCodes:      stripeapi.Bool(true),
 		BillingAddressCollection: stripeapi.String(string(stripeapi.CheckoutSessionBillingAddressCollectionRequired)),
@@ -234,7 +256,7 @@ func (c *Client) ParseSubscriptionFromEvent(event *stripeapi.Event) (*Subscripti
 		return nil, NewStripeError("invalid_event", "subscription has no items", nil)
 	}
 
-	return &SubscriptionInfo{
+	subscriptionInfo := &SubscriptionInfo{
 		ID:            subscription.ID,
 		Status:        subscription.Status,
 		ProductID:     subscription.Items.Data[0].Plan.Product.ID,
@@ -242,7 +264,13 @@ func (c *Client) ParseSubscriptionFromEvent(event *stripeapi.Event) (*Subscripti
 		CustomerEmail: customer.Email,
 		StartDate:     time.Unix(subscription.Items.Data[0].CurrentPeriodStart, 0),
 		EndDate:       time.Unix(subscription.Items.Data[0].CurrentPeriodEnd, 0),
-	}, nil
+	}
+
+	if subscription.Items.Data[0].Price.Type == stripeapi.PriceTypeRecurring {
+		subscriptionInfo.BillingPeriod = string(subscription.Items.Data[0].Price.Recurring.Interval)
+	}
+
+	return subscriptionInfo, nil
 }
 
 // ParseInvoiceFromEvent extracts invoice information from a webhook event
@@ -303,6 +331,7 @@ type CheckoutSessionStatus struct {
 type SubscriptionInfo struct {
 	ID            string
 	Status        stripeapi.SubscriptionStatus
+	BillingPeriod string
 	ProductID     string
 	OrgAddress    common.Address
 	CustomerEmail string

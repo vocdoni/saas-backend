@@ -74,12 +74,14 @@ var (
 
 var mockPlans = []*db.Plan{
 	{
-		ID:            1,
-		Name:          "Free Plan",
-		StripeID:      "prod_test_free",
-		StripePriceID: "price_test_free",
-		StartingPrice: 0,
-		Default:       true,
+		ID:                   1,
+		Name:                 "Free Plan",
+		StripeID:             "prod_test_free",
+		StripeMonthlyPriceID: "price_month_test_free",
+		MonthlyPrice:         0,
+		StripeYearlyPriceID:  "price_year_test_free",
+		YearlyPrice:          0,
+		Default:              true,
 		Organization: db.PlanLimits{
 			Users:        1,
 			SubOrgs:      0,
@@ -112,12 +114,14 @@ var mockPlans = []*db.Plan{
 		},
 	},
 	{
-		ID:            mockPremiumPlanID,
-		Name:          "Premium Annual Subscription Plan",
-		StripeID:      mockPremiumProductID,
-		StripePriceID: "price_test_premium",
-		StartingPrice: 49900,
-		Default:       false,
+		ID:                   mockPremiumPlanID,
+		Name:                 "Premium Annual Subscription Plan",
+		StripeID:             mockPremiumProductID,
+		StripeMonthlyPriceID: "price_month_test_premium",
+		MonthlyPrice:         4990,
+		StripeYearlyPriceID:  "price_year_test_premium",
+		YearlyPrice:          49900,
+		Default:              false,
 		Organization: db.PlanLimits{
 			Users:        5,
 			SubOrgs:      1,

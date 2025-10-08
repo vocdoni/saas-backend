@@ -432,6 +432,18 @@ type SubscriptionPlan struct {
 	// Stripe product ID
 	StripeID string `json:"stripeId"`
 
+	// Stripe monthly price ID
+	StripeMonthlyPriceID string `json:"stripeMonthlyPriceId"`
+
+	// Monthly price
+	MonthlyPrice int64 `json:"monthlyPrice"`
+
+	// Stripe yearly price ID
+	StripeYearlyPriceID string `json:"stripeYearlyPriceId"`
+
+	// Yearly price
+	YearlyPrice int64 `json:"yearlyPrice"`
+
 	// Stripe price ID
 	StripePriceID string `json:"stripePriceId"`
 
@@ -457,15 +469,17 @@ func SubscriptionPlanFromDB(plan *db.Plan) SubscriptionPlan {
 		return SubscriptionPlan{}
 	}
 	return SubscriptionPlan{
-		ID:            plan.ID,
-		Name:          plan.Name,
-		StripeID:      plan.StripeID,
-		StripePriceID: plan.StripePriceID,
-		StartingPrice: plan.StartingPrice,
-		Default:       plan.Default,
-		Organization:  SubscriptionPlanLimits(plan.Organization),
-		VotingTypes:   SubscriptionVotingTypes(plan.VotingTypes),
-		Features:      SubscriptionFeatures(plan.Features),
+		ID:                   plan.ID,
+		Name:                 plan.Name,
+		StripeID:             plan.StripeID,
+		StripeMonthlyPriceID: plan.StripeMonthlyPriceID,
+		MonthlyPrice:         plan.MonthlyPrice,
+		StripeYearlyPriceID:  plan.StripeYearlyPriceID,
+		YearlyPrice:          plan.YearlyPrice,
+		Default:              plan.Default,
+		Organization:         SubscriptionPlanLimits(plan.Organization),
+		VotingTypes:          SubscriptionVotingTypes(plan.VotingTypes),
+		Features:             SubscriptionFeatures(plan.Features),
 	}
 }
 
@@ -636,6 +650,9 @@ func SubscriptionUsageFromDB(usage *db.OrganizationCounters) SubscriptionUsage {
 type SubscriptionCheckout struct {
 	// Plan lookup key
 	LookupKey uint64 `json:"lookupKey"`
+
+	// Billinh period (e.g., "month" or "year")
+	BillingPeriod string `json:"billingPeriod"`
 
 	// URL to return to after checkout
 	ReturnURL string `json:"returnURL"`

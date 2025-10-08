@@ -141,6 +141,7 @@ func (h *StripeHandlers) CreateSubscriptionCheckout(w http.ResponseWriter, r *ht
 	// Create checkout session by resolving the lookup key to get the plan
 	session, err := h.service.CreateCheckoutSessionWithLookupKey(
 		checkout.LookupKey,
+		checkout.BillingPeriod,
 		checkout.ReturnURL,
 		checkout.Address,
 		checkout.Locale,

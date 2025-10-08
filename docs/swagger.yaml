@@ -638,6 +638,9 @@ definitions:
         items:
           type: integer
         type: array
+      billingPeriod:
+        description: Billinh period (e.g., "month" or "year")
+        type: string
       locale:
         description: Locale for the checkout page
         type: string
@@ -717,6 +720,9 @@ definitions:
       id:
         description: Unique identifier for the plan
         type: integer
+      monthlyPrice:
+        description: Monthly price
+        type: integer
       name:
         description: Human-readable name of the plan
         type: string
@@ -730,13 +736,22 @@ definitions:
       stripeId:
         description: Stripe product ID
         type: string
+      stripeMonthlyPriceId:
+        description: Stripe monthly price ID
+        type: string
       stripePriceId:
         description: Stripe price ID
+        type: string
+      stripeYearlyPriceId:
+        description: Stripe yearly price ID
         type: string
       votingTypes:
         allOf:
         - $ref: '#/definitions/apicommon.SubscriptionVotingTypes'
         description: Voting types available in this plan
+      yearlyPrice:
+        description: Yearly price
+        type: integer
     type: object
   apicommon.SubscriptionPlanLimits:
     properties:
@@ -1032,6 +1047,10 @@ definitions:
     - OrgMemberTwoFaFieldPhone
   db.Plan:
     properties:
+      MonthlyPrice:
+        type: integer
+      YearlyPrice:
+        type: integer
       default:
         type: boolean
       features:
@@ -1042,11 +1061,11 @@ definitions:
         type: string
       organization:
         $ref: '#/definitions/db.PlanLimits'
-      startingPrice:
-        type: integer
       stripeID:
         type: string
-      stripePriceID:
+      stripeMonthlyPriceID:
+        type: string
+      stripeYearlyPriceID:
         type: string
       votingTypes:
         $ref: '#/definitions/db.VotingTypes'
