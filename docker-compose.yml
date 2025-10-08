@@ -9,6 +9,8 @@ services:
       - VOCDONI_MONGOURL=mongodb://root:vocdoni@mongo:27017/saasdb
     build:
       context: ./
+      dockerfile: dev.dockerfile
+
     ports:
       - ${VOCDONI_PORT}:${VOCDONI_PORT}
     sysctls:
@@ -17,6 +19,13 @@ services:
     depends_on:
       - mongo
 
+    develop:
+      watch:
+        - action: sync+restart
+          path: .
+          target: /src
+          ignore:
+            - .git
   mongo:
     image: mongo
     restart: ${RESTART:-unless-stopped}
@@ -26,7 +35,6 @@ services:
       - MONGO_INITDB_ROOT_USERNAME=root
       - MONGO_INITDB_ROOT_PASSWORD=vocdoni
       - MONGO_INITDB_DATABASE=saasdb
-
     volumes:
       - mongodb:/data/mongodb
 
@@ -42,6 +50,3 @@ services:
 
 volumes:
   mongodb: {}
-
-
-
