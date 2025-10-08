@@ -121,7 +121,7 @@ func (*Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeapi.
 			},
 		},
 		// UI mode is set to embedded, since the client is integrated in our UI
-		UIMode: stripeapi.String(string(stripeapi.CheckoutSessionUIModeEmbedded)),
+		UIMode: stripeapi.String(string(stripeapi.CheckoutSessionUIModeCustom)),
 		// Automatic tax calculation is enabled
 		AutomaticTax: &stripeapi.CheckoutSessionAutomaticTaxParams{
 			Enabled: stripeapi.Bool(true),
@@ -132,7 +132,8 @@ func (*Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeapi.
 				"address": params.OrgAddress,
 			},
 		},
-		AllowPromotionCodes: stripeapi.Bool(true),
+		AllowPromotionCodes:      stripeapi.Bool(true),
+		BillingAddressCollection: stripeapi.String(string(stripeapi.CheckoutSessionBillingAddressCollectionRequired)),
 		// The locale is being used to configure the language of the embedded client
 		Locale: stripeapi.String(params.Locale),
 	}
@@ -140,8 +141,6 @@ func (*Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeapi.
 	// The returnURL is used to redirect the user after the payment is completed
 	if params.ReturnURL != "" {
 		checkoutParams.ReturnURL = stripeapi.String(params.ReturnURL + "/{CHECKOUT_SESSION_ID}")
-	} else {
-		checkoutParams.RedirectOnCompletion = stripeapi.String("never")
 	}
 
 	session, err := stripecheckoutsession.New(checkoutParams)
