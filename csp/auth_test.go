@@ -33,29 +33,29 @@ func TestBundleAuthToken(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 
 	c.Run("empty bundleID", func(c *qt.C) {
-		_, err := csp.BundleAuthToken(nil, testUserID, testUserEmail, notifications.EmailChallenge)
+		_, err := csp.BundleAuthToken(nil, testUserID, testUserEmail, notifications.EmailChallenge, "en")
 		c.Assert(err, qt.ErrorIs, ErrNoBundleID)
 	})
 
 	c.Run("empty userID", func(c *qt.C) {
-		_, err := csp.BundleAuthToken(testBundleID, nil, testUserEmail, notifications.EmailChallenge)
+		_, err := csp.BundleAuthToken(testBundleID, nil, testUserEmail, notifications.EmailChallenge, "en")
 		c.Assert(err, qt.ErrorIs, ErrNoUserID)
 	})
 
 	c.Run("notification cooldown reached", func(c *qt.C) {
 		c.Cleanup(func() { _ = csp.Storage.Reset() })
 		// generate a valid token
-		_, err := csp.BundleAuthToken(testBundleID, testUserID, "", notifications.EmailChallenge)
+		_, err := csp.BundleAuthToken(testBundleID, testUserID, "", notifications.EmailChallenge, "en")
 		c.Assert(err, qt.ErrorIs, ErrNotificationFailure)
 		// try to generate a new token before the cooldown time
-		_, err = csp.BundleAuthToken(testBundleID, testUserID, "", notifications.EmailChallenge)
+		_, err = csp.BundleAuthToken(testBundleID, testUserID, "", notifications.EmailChallenge, "en")
 		c.Assert(err, qt.ErrorIs, ErrAttemptCoolDownTime)
 	})
 
 	c.Run("success test", func(c *qt.C) {
 		c.Cleanup(func() { _ = csp.Storage.Reset() })
 		bundleID := internal.HexBytes(testBundleID)
-		token, err := csp.BundleAuthToken(testBundleID, testUserID, testUserEmail, notifications.EmailChallenge)
+		token, err := csp.BundleAuthToken(testBundleID, testUserID, testUserEmail, notifications.EmailChallenge, "en")
 		c.Assert(err, qt.IsNil)
 		c.Assert(token, qt.Not(qt.IsNil))
 		// calculate expected code and token
@@ -71,7 +71,7 @@ func TestBundleAuthToken(t *testing.T) {
 		mailBody, err := testMailService.FindEmail(context.Background(), testUserEmail)
 		c.Assert(err, qt.IsNil)
 		// parse the email body to get the verification code
-		seedNotification, err := mailtemplates.VerifyOTPCodeNotification.ExecPlain(struct{ Code string }{`(.{6})`})
+		seedNotification, err := mailtemplates.VerifyOTPCodeNotification.Localized("en").ExecPlain(struct{ Code string }{`(.{6})`})
 		c.Assert(err, qt.IsNil)
 		rgxNotification := regexp.MustCompile(seedNotification.PlainBody)
 		// verify the user

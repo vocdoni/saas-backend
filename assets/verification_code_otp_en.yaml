@@ -1,0 +1,3 @@
+subject: "Verification Code - Vocdoni"
+body: |
+  Your verification code is: {{.Code}}

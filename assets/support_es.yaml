@@ -1,0 +1,11 @@
+subject: "Nuevo Ticket {{.Type}} de {{.Email}}: {{.Title}}"
+body: |
+  Tienes una nueva solicitud de soporte:
+
+  Título: {{.Title}}
+  Tipo: {{.Type}}
+  Usuario: {{.Email}}
+  Organización: {{.Organization}}
+
+  Descripción:
+  {{.Description}}

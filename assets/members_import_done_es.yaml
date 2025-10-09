@@ -1,0 +1,21 @@
+subject: "Importación de miembros completada para {{.OrganizationName}}"
+body: |
+  Hola {{.UserName}},
+
+  La importación de miembros para la organización "{{.OrganizationName}}" se ha completado exitosamente.
+
+  Resumen de la importación:
+  - Total de miembros procesados: {{.TotalMembers}}
+  - Agregados correctamente: {{.AddedMembers}}
+  - Errores encontrados: {{.ErrorCount}}
+
+  {{if .Errors}}
+  Detalles de los errores:
+  {{range .Errors}}• {{.}}
+  {{end}}
+  {{end}}
+
+  Completado el: {{.CompletedAt}}
+
+  Saludos cordiales,  
+  El equipo de Vocdoni

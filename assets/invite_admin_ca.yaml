@@ -1,0 +1,5 @@
+subject: "Invitació a organització de Vocdoni"
+body: |
+  El teu codi per unir-te a l'organització '{{.Organization}}' és: {{.Code}}
+
+  També pots utilitzar aquest enllaç per unir-te a l'organització: {{.Link}}

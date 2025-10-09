@@ -474,6 +474,10 @@ func (c *CSPHandlers) authFirstStep(
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return nil, errors.ErrMalformedBody.Withf("invalid JSON request")
 	}
+	lang := "en"
+	if l, ok := r.Context().Value(apicommon.LangMetadataKey).(string); ok && l != "" {
+		lang = l
+	}
 
 	// Get census and org information first (needed for validation)
 	census, err := c.mainDB.Census(censusID)
@@ -541,7 +545,7 @@ func (c *CSPHandlers) authFirstStep(
 	}
 
 	// Generate the token
-	return c.csp.BundleAuthToken(bundleID, internal.HexBytes(orgMember.ID.Hex()), toDestinations, challengeType)
+	return c.csp.BundleAuthToken(bundleID, internal.HexBytes(orgMember.ID.Hex()), toDestinations, challengeType, lang)
 }
 
 // authSecondStep is the second step of the authentication process. It

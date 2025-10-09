@@ -1,0 +1,3 @@
+subject: "Codi de Verificació - Vocdoni"
+body: |
+  El teu codi de verificació és: {{.Code}}

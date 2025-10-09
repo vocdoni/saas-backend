@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/jwtauth/v5"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -56,6 +57,24 @@ func (a *API) authenticator(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), apicommon.UserMetadataKey, *user)
 		// token is authenticated, pass it through with the new context with the
 		// user information
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// setLang is a middleware that sets the lang parameter in the request context
+// and passes it to the next handler.
+func (*API) setLang(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		// get the lang from URL params
+		if lang := chi.URLParam(r, string(apicommon.LangMetadataKey)); lang != "" {
+			ctx = context.WithValue(r.Context(), apicommon.LangMetadataKey, lang)
+		}
+		// get the lang from query params
+		if lang := r.URL.Query().Get(string(apicommon.LangMetadataKey)); lang != "" {
+			ctx = context.WithValue(r.Context(), apicommon.LangMetadataKey, lang)
+		}
+		// add lang to the context
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
