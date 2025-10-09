@@ -67,6 +67,24 @@ func (*Client) GetCustomerByEmail(email string) (*stripeapi.Customer, error) {
 	return customers.Customer(), nil
 }
 
+// GetCustomerByAddress retrieves a customer by the organization EVM address
+func (*Client) GetCustomerByAddress(address string) (*stripeapi.Customer, error) {
+	query := fmt.Sprintf("metadata['address']:'%s'", address)
+
+	customers := stripecustomer.Search(&stripeapi.CustomerSearchParams{
+		SearchParams: stripeapi.SearchParams{
+			Query: query,
+			Limit: stripeapi.Int64(1),
+		},
+	})
+
+	if !customers.Next() {
+		return nil, NewStripeError("customer_not_found", fmt.Sprintf("customer with address %s not found", address), nil)
+	}
+
+	return customers.Customer(), nil
+}
+
 // GetProduct retrieves a product by ID with expanded default price
 func (*Client) GetProduct(productID string) (*stripeapi.Product, error) {
 	params := &stripeapi.ProductParams{}
@@ -102,7 +120,7 @@ func (*Client) GetPrice(lookupKey string) (*stripeapi.Price, error) {
 // Returns the created checkout session and any error encountered.
 // Overview of stripe checkout mechanics: https://docs.stripe.com/checkout/custom/quickstart
 // API description https://docs.stripe.com/api/checkout/sessions
-func (*Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeapi.CheckoutSession, error) {
+func (c *Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeapi.CheckoutSession, error) {
 	if params.Locale == "" {
 		params.Locale = "auto"
 	}
@@ -112,8 +130,7 @@ func (*Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeapi.
 
 	checkoutParams := &stripeapi.CheckoutSessionParams{
 		// Subscription mode
-		Mode:          stripeapi.String(string(stripeapi.CheckoutSessionModeSubscription)),
-		CustomerEmail: &params.CustomerEmail,
+		Mode: stripeapi.String(string(stripeapi.CheckoutSessionModeSubscription)),
 		LineItems: []*stripeapi.CheckoutSessionLineItemParams{
 			{
 				Price:    stripeapi.String(params.PriceID),
@@ -136,6 +153,13 @@ func (*Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeapi.
 		BillingAddressCollection: stripeapi.String(string(stripeapi.CheckoutSessionBillingAddressCollectionRequired)),
 		// The locale is being used to configure the language of the embedded client
 		Locale: stripeapi.String(params.Locale),
+	}
+
+	customer, err := c.GetCustomerByAddress(params.OrgAddress)
+	if err != nil {
+		checkoutParams.CustomerEmail = stripeapi.String(params.CustomerEmail)
+	} else {
+		checkoutParams.Customer = &customer.ID
 	}
 
 	// The returnURL is used to redirect the user after the payment is completed
