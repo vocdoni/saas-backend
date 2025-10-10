@@ -651,7 +651,7 @@ type SubscriptionCheckout struct {
 	// Plan lookup key
 	LookupKey uint64 `json:"lookupKey"`
 
-	// Billinh period (e.g., "month" or "year")
+	// Billing period (e.g., "month" or "year")
 	BillingPeriod string `json:"billingPeriod"`
 
 	// URL to return to after checkout

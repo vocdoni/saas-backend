@@ -18,6 +18,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
+	stripeapi "github.com/stripe/stripe-go/v82"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp"
@@ -65,8 +66,10 @@ const (
 
 // Test fixtures for Stripe webhook events
 var (
-	mockCustomerID       = "cus_test123"
-	mockCustomerEmail    = "test@example.com"
+	mockCustomer = &stripeapi.Customer{
+		ID:    "cus_test123",
+		Email: "test@example.com",
+	}
 	mockSubscriptionID   = "sub_1234567890"
 	mockPremiumProductID = "prod_test_premium" // Premium Annual Subscription Plan
 	mockPremiumPlanID    = uint64(2)

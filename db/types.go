@@ -117,9 +117,9 @@ type Plan struct {
 	Name                 string      `json:"name" bson:"name"`
 	StripeID             string      `json:"stripeID" bson:"stripeID"`
 	StripeMonthlyPriceID string      `json:"stripeMonthlyPriceID" bson:"stripeMonthlyPriceID"`
-	MonthlyPrice         int64       `json:"MonthlyPrice" bson:"MonthlyPrice"`
+	MonthlyPrice         int64       `json:"monthlyPrice" bson:"monthlyPrice"`
 	StripeYearlyPriceID  string      `json:"stripeYearlyPriceID" bson:"stripeYearlyPriceID"`
-	YearlyPrice          int64       `json:"YearlyPrice" bson:"YearlyPrice"`
+	YearlyPrice          int64       `json:"yearlyPrice" bson:"yearlyPrice"`
 	Default              bool        `json:"default" bson:"default"`
 	Organization         PlanLimits  `json:"organization" bson:"organization"`
 	VotingTypes          VotingTypes `json:"votingTypes" bson:"votingTypes"`
@@ -137,7 +137,7 @@ const (
 
 type OrganizationSubscription struct {
 	PlanID               uint64        `json:"planID" bson:"planID"`
-	StripeSubscirptionID string        `json:"stripeSubscriptionID" bson:"stripeSubscriptionID"`
+	StripeSubscriptionID string        `json:"stripeSubscriptionID" bson:"stripeSubscriptionID"`
 	BillingPeriod        BillingPeriod `json:"billingPeriod" bson:"billingPeriod"`
 	StartDate            time.Time     `json:"startDate" bson:"startDate"`
 	RenewalDate          time.Time     `json:"renewalDate" bson:"renewalDate"`

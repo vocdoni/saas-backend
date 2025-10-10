@@ -14,6 +14,7 @@ import (
 	stripeprice "github.com/stripe/stripe-go/v82/price"
 	stripeproduct "github.com/stripe/stripe-go/v82/product"
 	stripewebhook "github.com/stripe/stripe-go/v82/webhook"
+	"github.com/vocdoni/saas-backend/db"
 )
 
 // Client wraps the Stripe API client with additional functionality
@@ -67,13 +68,23 @@ func (*Client) GetCustomerByEmail(email string) (*stripeapi.Customer, error) {
 	return customers.Customer(), nil
 }
 
+// UpdateCustomerMetadata updates a customer's metadata
+func (*Client) UpdateCustomerMetadata(customerID string, metadata map[string]string) error {
+	params := &stripeapi.CustomerParams{
+		Metadata: metadata,
+	}
+	_, err := stripecustomer.Update(customerID, params)
+	if err != nil {
+		return NewStripeError("api_call_failed", "failed to update customer metadata", err)
+	}
+	return nil
+}
+
 // GetCustomerByAddress retrieves a customer by the organization EVM address
 func (*Client) GetCustomerByAddress(address string) (*stripeapi.Customer, error) {
-	query := fmt.Sprintf("metadata['address']:'%s'", address)
-
 	customers := stripecustomer.Search(&stripeapi.CustomerSearchParams{
 		SearchParams: stripeapi.SearchParams{
-			Query: query,
+			Query: fmt.Sprintf("metadata['address']:'%s'", address),
 			Limit: stripeapi.Int64(1),
 		},
 	})
@@ -257,17 +268,17 @@ func (c *Client) ParseSubscriptionFromEvent(event *stripeapi.Event) (*Subscripti
 	}
 
 	subscriptionInfo := &SubscriptionInfo{
-		ID:            subscription.ID,
-		Status:        subscription.Status,
-		ProductID:     subscription.Items.Data[0].Plan.Product.ID,
-		OrgAddress:    orgAddress,
-		CustomerEmail: customer.Email,
-		StartDate:     time.Unix(subscription.Items.Data[0].CurrentPeriodStart, 0),
-		EndDate:       time.Unix(subscription.Items.Data[0].CurrentPeriodEnd, 0),
+		ID:         subscription.ID,
+		Status:     subscription.Status,
+		ProductID:  subscription.Items.Data[0].Plan.Product.ID,
+		OrgAddress: orgAddress,
+		Customer:   customer,
+		StartDate:  time.Unix(subscription.Items.Data[0].CurrentPeriodStart, 0),
+		EndDate:    time.Unix(subscription.Items.Data[0].CurrentPeriodEnd, 0),
 	}
 
 	if subscription.Items.Data[0].Price.Type == stripeapi.PriceTypeRecurring {
-		subscriptionInfo.BillingPeriod = string(subscription.Items.Data[0].Price.Recurring.Interval)
+		subscriptionInfo.BillingPeriod = db.BillingPeriod((subscription.Items.Data[0].Price.Recurring.Interval))
 	}
 
 	return subscriptionInfo, nil
@@ -331,10 +342,10 @@ type CheckoutSessionStatus struct {
 type SubscriptionInfo struct {
 	ID            string
 	Status        stripeapi.SubscriptionStatus
-	BillingPeriod string
+	BillingPeriod db.BillingPeriod
 	ProductID     string
 	OrgAddress    common.Address
-	CustomerEmail string
+	Customer      *stripeapi.Customer
 	StartDate     time.Time
 	EndDate       time.Time
 }

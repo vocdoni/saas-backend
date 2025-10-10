@@ -21,8 +21,8 @@ func createTestSubscriptionCreatedEventWithCustom(orgAddress common.Address, pro
 		Object: "subscription",
 		Status: stripeapi.SubscriptionStatusActive,
 		Customer: &stripeapi.Customer{
-			ID:    mockCustomerID,
-			Email: mockCustomerEmail,
+			ID:    mockCustomer.ID,
+			Email: mockCustomer.Email,
 		},
 		Metadata: map[string]string{
 			"address": orgAddress.String(),
@@ -121,13 +121,13 @@ func mockGetSubscriptionInfoFromEvent(event stripeapi.Event) (*stripe.Subscripti
 	}
 
 	return &stripe.SubscriptionInfo{
-		ID:            subscription.ID,
-		Status:        subscription.Status,
-		ProductID:     subscription.Items.Data[0].Plan.Product.ID,
-		OrgAddress:    common.HexToAddress(subscription.Metadata.Address),
-		CustomerEmail: mockCustomerEmail,
-		StartDate:     time.Unix(subscription.CurrentPeriodStart, 0),
-		EndDate:       time.Unix(subscription.CurrentPeriodEnd, 0),
+		ID:         subscription.ID,
+		Status:     subscription.Status,
+		ProductID:  subscription.Items.Data[0].Plan.Product.ID,
+		OrgAddress: common.HexToAddress(subscription.Metadata.Address),
+		Customer:   mockCustomer,
+		StartDate:  time.Unix(subscription.CurrentPeriodStart, 0),
+		EndDate:    time.Unix(subscription.CurrentPeriodEnd, 0),
 	}, nil
 }
 
@@ -202,7 +202,7 @@ func TestWebhookProcessingUnit(t *testing.T) {
 			StartDate:   stripeSubscriptionInfo.StartDate,
 			RenewalDate: stripeSubscriptionInfo.EndDate,
 			Active:      stripeSubscriptionInfo.Status == "active",
-			Email:       stripeSubscriptionInfo.CustomerEmail,
+			Email:       stripeSubscriptionInfo.Customer.Email,
 		}
 
 		// Set organization subscription
@@ -216,11 +216,11 @@ func TestWebhookProcessingUnit(t *testing.T) {
 		// Debug: Print what we got vs what we expected
 		t.Logf("Expected PlanID: %d, Got PlanID: %d", dbSubscription.ID, updatedOrg.Subscription.PlanID)
 		t.Logf("Expected Active: %t, Got Active: %t", true, updatedOrg.Subscription.Active)
-		t.Logf("Expected Email: %s, Got Email: %s", mockCustomerEmail, updatedOrg.Subscription.Email)
+		t.Logf("Expected Email: %s, Got Email: %s", mockCustomer.Email, updatedOrg.Subscription.Email)
 
 		c.Assert(updatedOrg.Subscription.PlanID, qt.Equals, dbSubscription.ID)
 		c.Assert(updatedOrg.Subscription.Active, qt.IsTrue)
-		c.Assert(updatedOrg.Subscription.Email, qt.Equals, mockCustomerEmail)
+		c.Assert(updatedOrg.Subscription.Email, qt.Equals, mockCustomer.Email)
 	})
 
 	t.Run("SubscriptionCanceledUnit", func(*testing.T) {

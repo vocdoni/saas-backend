@@ -147,12 +147,12 @@ func (s *Service) handleSubscriptionCreateOrUpdate(subscriptionInfo *Subscriptio
 	}
 
 	org.Subscription.PlanID = plan.ID
-	org.Subscription.StripeSubscirptionID = subscriptionInfo.ID
+	org.Subscription.StripeSubscriptionID = subscriptionInfo.ID
 	org.Subscription.BillingPeriod = db.BillingPeriod(subscriptionInfo.BillingPeriod)
 	org.Subscription.StartDate = subscriptionInfo.StartDate
 	org.Subscription.RenewalDate = subscriptionInfo.EndDate
 	org.Subscription.Active = (subscriptionInfo.Status == stripeapi.SubscriptionStatusActive)
-	org.Subscription.Email = subscriptionInfo.CustomerEmail
+	org.Subscription.Email = subscriptionInfo.Customer.Email
 
 	// Save subscription
 	if err := s.repository.SetOrganization(org); err != nil {
@@ -161,6 +161,17 @@ func (s *Service) handleSubscriptionCreateOrUpdate(subscriptionInfo *Subscriptio
 				subscriptionInfo.ID, plan.ID, subscriptionInfo.Status, subscriptionInfo.OrgAddress), err)
 	}
 
+	// Update if needed customer metadata with organization address
+	if len(subscriptionInfo.Customer.Metadata["address"]) > 0 {
+		return NewStripeError("metadata_mismatch", "customer metadata address mismatch", nil)
+	}
+	if err := s.client.UpdateCustomerMetadata(
+		subscriptionInfo.Customer.ID,
+		map[string]string{"address": subscriptionInfo.OrgAddress.String()},
+	); err != nil {
+		log.Warnf("stripe webhook: failed to update customer %s metadata: %v",
+			subscriptionInfo.Customer.ID, err)
+	}
 	log.Infof("stripe webhook: subscription %s (planID=%d, status=%s) saved for organization %s",
 		subscriptionInfo.ID, plan.ID, subscriptionInfo.Status, subscriptionInfo.OrgAddress)
 	return nil
@@ -177,7 +188,7 @@ func (s *Service) handleSubscriptionCancellation(subscriptionID string, org *db.
 	// Create subscription with default plan
 	orgSubscription := &db.OrganizationSubscription{
 		PlanID:               defaultPlan.ID,
-		StripeSubscirptionID: "",
+		StripeSubscriptionID: "",
 		StartDate:            time.Now(),
 		LastPaymentDate:      org.Subscription.LastPaymentDate,
 		Active:               true,
@@ -287,9 +298,9 @@ func (s *Service) CreateCheckoutSessionWithLookupKey(
 		Quantity:      1,
 	}
 
-	if billingPeriod == string(db.BillingPeriodMonthly) && len(plan.StripeMonthlyPriceID) > 0 {
+	if billingPeriod == string(db.BillingPeriodMonthly) && plan.StripeMonthlyPriceID != "" {
 		params.PriceID = plan.StripeMonthlyPriceID
-	} else if billingPeriod == string(db.BillingPeriodAnnual) && len(plan.StripeYearlyPriceID) > 0 {
+	} else if billingPeriod == string(db.BillingPeriodAnnual) && plan.StripeYearlyPriceID != "" {
 		params.PriceID = plan.StripeYearlyPriceID
 	} else {
 		return nil, NewStripeError("invalid_billing_period",
@@ -372,15 +383,15 @@ func processProductToPlan(planID uint64, product *stripeapi.Product, prices []st
 	}
 
 	for _, price := range prices {
-		if price.Type == stripeapi.PriceTypeRecurring {
-			if price.Recurring.Interval == stripeapi.PriceRecurringIntervalYear {
-				plan.StripeYearlyPriceID = price.ID
-				plan.YearlyPrice = price.UnitAmount
-			}
-			if price.Recurring.Interval == stripeapi.PriceRecurringIntervalMonth {
-				plan.StripeMonthlyPriceID = price.ID
-				plan.MonthlyPrice = price.UnitAmount
-			}
+		switch price.Recurring.Interval {
+		case stripeapi.PriceRecurringIntervalYear:
+			plan.StripeYearlyPriceID = price.ID
+			plan.YearlyPrice = price.UnitAmount
+		case stripeapi.PriceRecurringIntervalMonth:
+			plan.StripeMonthlyPriceID = price.ID
+			plan.MonthlyPrice = price.UnitAmount
+		default:
+			// Ignore non-recurring prices
 		}
 	}
 	if len(plan.StripeMonthlyPriceID) == 0 || len(plan.StripeYearlyPriceID) == 0 {
