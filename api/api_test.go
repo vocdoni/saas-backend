@@ -18,6 +18,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
+	stripeapi "github.com/stripe/stripe-go/v82"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp"
@@ -65,8 +66,10 @@ const (
 
 // Test fixtures for Stripe webhook events
 var (
-	mockCustomerID       = "cus_test123"
-	mockCustomerEmail    = "test@example.com"
+	mockCustomer = &stripeapi.Customer{
+		ID:    "cus_test123",
+		Email: "test@example.com",
+	}
 	mockSubscriptionID   = "sub_1234567890"
 	mockPremiumProductID = "prod_test_premium" // Premium Annual Subscription Plan
 	mockPremiumPlanID    = uint64(2)
@@ -74,12 +77,14 @@ var (
 
 var mockPlans = []*db.Plan{
 	{
-		ID:            1,
-		Name:          "Free Plan",
-		StripeID:      "prod_test_free",
-		StripePriceID: "price_test_free",
-		StartingPrice: 0,
-		Default:       true,
+		ID:                   1,
+		Name:                 "Free Plan",
+		StripeID:             "prod_test_free",
+		StripeMonthlyPriceID: "price_month_test_free",
+		MonthlyPrice:         0,
+		StripeYearlyPriceID:  "price_year_test_free",
+		YearlyPrice:          0,
+		Default:              true,
 		Organization: db.PlanLimits{
 			Users:        1,
 			SubOrgs:      0,
@@ -112,12 +117,14 @@ var mockPlans = []*db.Plan{
 		},
 	},
 	{
-		ID:            mockPremiumPlanID,
-		Name:          "Premium Annual Subscription Plan",
-		StripeID:      mockPremiumProductID,
-		StripePriceID: "price_test_premium",
-		StartingPrice: 49900,
-		Default:       false,
+		ID:                   mockPremiumPlanID,
+		Name:                 "Premium Annual Subscription Plan",
+		StripeID:             mockPremiumProductID,
+		StripeMonthlyPriceID: "price_month_test_premium",
+		MonthlyPrice:         4990,
+		StripeYearlyPriceID:  "price_year_test_premium",
+		YearlyPrice:          49900,
+		Default:              false,
 		Organization: db.PlanLimits{
 			Users:        5,
 			SubOrgs:      1,

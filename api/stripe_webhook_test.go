@@ -21,8 +21,8 @@ func createTestSubscriptionCreatedEventWithCustom(orgAddress common.Address, pro
 		Object: "subscription",
 		Status: stripeapi.SubscriptionStatusActive,
 		Customer: &stripeapi.Customer{
-			ID:    mockCustomerID,
-			Email: mockCustomerEmail,
+			ID:    mockCustomer.ID,
+			Email: mockCustomer.Email,
 		},
 		Metadata: map[string]string{
 			"address": orgAddress.String(),
@@ -121,13 +121,13 @@ func mockGetSubscriptionInfoFromEvent(event stripeapi.Event) (*stripe.Subscripti
 	}
 
 	return &stripe.SubscriptionInfo{
-		ID:            subscription.ID,
-		Status:        subscription.Status,
-		ProductID:     subscription.Items.Data[0].Plan.Product.ID,
-		OrgAddress:    common.HexToAddress(subscription.Metadata.Address),
-		CustomerEmail: mockCustomerEmail,
-		StartDate:     time.Unix(subscription.CurrentPeriodStart, 0),
-		EndDate:       time.Unix(subscription.CurrentPeriodEnd, 0),
+		ID:         subscription.ID,
+		Status:     subscription.Status,
+		ProductID:  subscription.Items.Data[0].Plan.Product.ID,
+		OrgAddress: common.HexToAddress(subscription.Metadata.Address),
+		Customer:   mockCustomer,
+		StartDate:  time.Unix(subscription.CurrentPeriodStart, 0),
+		EndDate:    time.Unix(subscription.CurrentPeriodEnd, 0),
 	}, nil
 }
 
@@ -202,7 +202,7 @@ func TestWebhookProcessingUnit(t *testing.T) {
 			StartDate:   stripeSubscriptionInfo.StartDate,
 			RenewalDate: stripeSubscriptionInfo.EndDate,
 			Active:      stripeSubscriptionInfo.Status == "active",
-			Email:       stripeSubscriptionInfo.CustomerEmail,
+			Email:       stripeSubscriptionInfo.Customer.Email,
 		}
 
 		// Set organization subscription
@@ -216,11 +216,11 @@ func TestWebhookProcessingUnit(t *testing.T) {
 		// Debug: Print what we got vs what we expected
 		t.Logf("Expected PlanID: %d, Got PlanID: %d", dbSubscription.ID, updatedOrg.Subscription.PlanID)
 		t.Logf("Expected Active: %t, Got Active: %t", true, updatedOrg.Subscription.Active)
-		t.Logf("Expected Email: %s, Got Email: %s", mockCustomerEmail, updatedOrg.Subscription.Email)
+		t.Logf("Expected Email: %s, Got Email: %s", mockCustomer.Email, updatedOrg.Subscription.Email)
 
 		c.Assert(updatedOrg.Subscription.PlanID, qt.Equals, dbSubscription.ID)
 		c.Assert(updatedOrg.Subscription.Active, qt.IsTrue)
-		c.Assert(updatedOrg.Subscription.Email, qt.Equals, mockCustomerEmail)
+		c.Assert(updatedOrg.Subscription.Email, qt.Equals, mockCustomer.Email)
 	})
 
 	t.Run("SubscriptionCanceledUnit", func(*testing.T) {
@@ -370,15 +370,17 @@ func TestProductUpdatedWebhookUnit(t *testing.T) {
 
 		// Create updated plan
 		updatedPlan := &db.Plan{
-			ID:            existingPlan.ID, // Preserve the original ID
-			Name:          product.Name,
-			StartingPrice: product.DefaultPrice.UnitAmount,
-			StripeID:      product.ID,
-			StripePriceID: product.DefaultPrice.ID,
-			Default:       isDefaultPlan(&product),
-			Organization:  organizationData,
-			VotingTypes:   votingTypesData,
-			Features:      featuresData,
+			ID:                   existingPlan.ID, // Preserve the original ID
+			Name:                 product.Name,
+			StripeMonthlyPriceID: "price_month_test_premium-updated",
+			StripeYearlyPriceID:  existingPlan.StripeYearlyPriceID,
+			MonthlyPrice:         existingPlan.MonthlyPrice + 1000, // Simulate a change
+			YearlyPrice:          existingPlan.YearlyPrice,
+			StripeID:             product.ID,
+			Default:              isDefaultPlan(&product),
+			Organization:         organizationData,
+			VotingTypes:          votingTypesData,
+			Features:             featuresData,
 		}
 
 		// Update the plan in the database
@@ -392,8 +394,11 @@ func TestProductUpdatedWebhookUnit(t *testing.T) {
 
 		// Verify updated data
 		c.Assert(refreshedPlan.Name, qt.Equals, "Updated Premium Plan")
-		c.Assert(refreshedPlan.StartingPrice, qt.Equals, int64(2999))
-		c.Assert(refreshedPlan.StripePriceID, qt.Equals, "price_updated_test")
+		c.Assert(refreshedPlan.StripeMonthlyPriceID, qt.Equals, "price_month_test_premium-updated")
+		c.Assert(refreshedPlan.MonthlyPrice, qt.Equals, existingPlan.MonthlyPrice+1000)   // Changed
+		c.Assert(refreshedPlan.StripeYearlyPriceID, qt.Equals, "price_year_test_premium") // Unchanged
+		c.Assert(refreshedPlan.YearlyPrice, qt.Equals, existingPlan.YearlyPrice)          // Unchanged
+		// Verify metadata fields
 		c.Assert(refreshedPlan.Organization.MaxCensus, qt.Equals, 2000)
 		c.Assert(refreshedPlan.VotingTypes.Approval, qt.IsTrue)
 		c.Assert(refreshedPlan.VotingTypes.Ranked, qt.IsTrue)
