@@ -394,7 +394,7 @@ func processProductToPlan(planID uint64, product *stripeapi.Product, prices []st
 			// Ignore non-recurring prices
 		}
 	}
-	if len(plan.StripeMonthlyPriceID) == 0 || len(plan.StripeYearlyPriceID) == 0 {
+	if plan.StripeMonthlyPriceID == "" || plan.StripeYearlyPriceID == "" {
 		return nil, fmt.Errorf("both monthly and yearly prices are required for plan %s", product.ID)
 	}
 
