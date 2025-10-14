@@ -182,8 +182,15 @@ func (c *Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeap
 			},
 			TrialPeriodDays: stripeapi.Int64(15),
 		},
+		CustomerUpdate: &stripeapi.CheckoutSessionCustomerUpdateParams{
+			Name:    stripeapi.String("auto"),
+			Address: stripeapi.String("auto"),
+		},
+		TaxIDCollection: &stripeapi.CheckoutSessionTaxIDCollectionParams{
+			Enabled: stripeapi.Bool(true),
+		},
 		AllowPromotionCodes:      stripeapi.Bool(true),
-		BillingAddressCollection: stripeapi.String(string(stripeapi.CheckoutSessionBillingAddressCollectionRequired)),
+		BillingAddressCollection: stripeapi.String(string(stripeapi.CheckoutSessionBillingAddressCollectionAuto)),
 		// The locale is being used to configure the language of the embedded client
 		Locale: stripeapi.String(params.Locale),
 	}
