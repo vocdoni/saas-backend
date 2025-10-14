@@ -182,10 +182,6 @@ func (c *Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeap
 			},
 			TrialPeriodDays: stripeapi.Int64(15),
 		},
-		CustomerUpdate: &stripeapi.CheckoutSessionCustomerUpdateParams{
-			Name:    stripeapi.String("auto"),
-			Address: stripeapi.String("auto"),
-		},
 		TaxIDCollection: &stripeapi.CheckoutSessionTaxIDCollectionParams{
 			Enabled: stripeapi.Bool(true),
 		},
@@ -204,6 +200,10 @@ func (c *Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeap
 		checkoutParams.CustomerEmail = stripeapi.String(params.CustomerEmail)
 	} else {
 		checkoutParams.Customer = &customer.ID
+		checkoutParams.CustomerUpdate = &stripeapi.CheckoutSessionCustomerUpdateParams{
+			Name:    stripeapi.String("auto"),
+			Address: stripeapi.String("auto"),
+		}
 	}
 
 	// The returnURL is used to redirect the user after the payment is completed
