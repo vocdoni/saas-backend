@@ -121,6 +121,7 @@ type Plan struct {
 	StripeYearlyPriceID  string      `json:"stripeYearlyPriceID" bson:"stripeYearlyPriceID"`
 	YearlyPrice          int64       `json:"yearlyPrice" bson:"yearlyPrice"`
 	Default              bool        `json:"default" bson:"default"`
+	FreeTrialDays        int         `json:"freeTrialDays" bson:"freeTrialDays"`
 	Organization         PlanLimits  `json:"organization" bson:"organization"`
 	VotingTypes          VotingTypes `json:"votingTypes" bson:"votingTypes"`
 	Features             Features    `json:"features" bson:"features"`

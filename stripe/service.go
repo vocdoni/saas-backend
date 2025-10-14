@@ -259,7 +259,7 @@ func (s *Service) handleProductUpdate(event *stripeapi.Event) error {
 	}
 
 	// Update the plan with new product information
-	updatedPlan, err := processProductToPlan(existingPlan.ID, product, prices)
+	updatedPlan, err := s.processProductToPlan(existingPlan.ID, product, prices)
 	if err != nil {
 		return fmt.Errorf("failed to process updated product %s: %w", product.ID, err)
 	}
@@ -344,7 +344,7 @@ func (s *Service) GetPlansFromStripe() ([]*db.Plan, error) {
 			return nil, fmt.Errorf("failed to get prices for product %s: %w", p.ProductID, err)
 		}
 
-		plan, err := processProductToPlan(uint64(i), product, prices)
+		plan, err := s.processProductToPlan(uint64(i), product, prices)
 		if err != nil {
 			return nil, fmt.Errorf("failed to process product %s: %w", p.ProductID, err)
 		}
@@ -356,7 +356,11 @@ func (s *Service) GetPlansFromStripe() ([]*db.Plan, error) {
 }
 
 // processProductToPlan converts a Stripe product to a database plan
-func processProductToPlan(planID uint64, product *stripeapi.Product, prices []stripeapi.Price) (*db.Plan, error) {
+func (s *Service) processProductToPlan(
+	planID uint64,
+	product *stripeapi.Product,
+	prices []stripeapi.Price,
+) (*db.Plan, error) {
 	organizationData, err := extractPlanMetadata[db.PlanLimits](product.Metadata["organization"])
 	if err != nil {
 		return nil, err
@@ -373,13 +377,14 @@ func processProductToPlan(planID uint64, product *stripeapi.Product, prices []st
 	}
 
 	plan := &db.Plan{
-		ID:           planID,
-		Name:         product.Name,
-		StripeID:     product.ID,
-		Default:      isDefaultPlan(product),
-		Organization: organizationData,
-		VotingTypes:  votingTypesData,
-		Features:     featuresData,
+		ID:            planID,
+		Name:          product.Name,
+		StripeID:      product.ID,
+		Default:       isDefaultPlan(product),
+		Organization:  organizationData,
+		FreeTrialDays: s.config.FreeTrialDays,
+		VotingTypes:   votingTypesData,
+		Features:      featuresData,
 	}
 
 	for _, price := range prices {

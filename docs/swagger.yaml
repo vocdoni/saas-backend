@@ -1051,6 +1051,8 @@ definitions:
         type: boolean
       features:
         $ref: '#/definitions/db.Features'
+      freeTrialDays:
+        type: integer
       id:
         type: integer
       monthlyPrice:

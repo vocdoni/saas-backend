@@ -3,6 +3,7 @@ package stripe
 import (
 	"fmt"
 	"os"
+	"strconv"
 )
 
 // PlanType represents the different subscription plan types
@@ -18,6 +19,8 @@ const (
 	PlanTypeCustom
 )
 
+const FreeTrialDays = 15
+
 // PlanConfig holds Stripe product and price configuration
 type PlanConfig struct {
 	ProductID string `yaml:"product_id" json:"product_id"`
@@ -28,6 +31,7 @@ type Config struct {
 	APIKey        string                `yaml:"api_key" json:"api_key"`
 	WebhookSecret string                `yaml:"webhook_secret" json:"webhook_secret"`
 	Plans         [PlanCount]PlanConfig `yaml:"plans" json:"plans"`
+	FreeTrialDays int                   `yaml:"free_trial_days" json:"free_trial_days"`
 }
 
 // NewConfig creates a new Stripe configuration from environment variables
@@ -40,6 +44,13 @@ func NewConfig() (*Config, error) {
 	webhookSecret := os.Getenv("VOCDONI_STRIPEWEBHOOKSECRET")
 	if webhookSecret == "" {
 		return nil, fmt.Errorf("VOCDONI_STRIPEWEBHOOKSECRET environment variable is required")
+	}
+
+	freeTrialDays := FreeTrialDays
+	if value := os.Getenv("VOCDONI_STRIPEFREETRIALDAYS"); value != "" {
+		if days, err := strconv.Atoi(value); err == nil && days > 0 {
+			freeTrialDays = days
+		}
 	}
 
 	// Default plan configuration - can be overridden via environment
@@ -62,6 +73,7 @@ func NewConfig() (*Config, error) {
 		APIKey:        apiKey,
 		WebhookSecret: webhookSecret,
 		Plans:         plans,
+		FreeTrialDays: freeTrialDays,
 	}, nil
 }
 
