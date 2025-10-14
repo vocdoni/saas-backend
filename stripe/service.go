@@ -289,6 +289,10 @@ func (s *Service) CreateCheckoutSessionWithLookupKey(
 		return nil, NewStripeError("org_not_found", fmt.Sprintf("organization %s not found", orgAddress), err)
 	}
 
+	// Determine if the organization is eligible for a free trial based on
+	// if they already made a subscription and request a yearly plan
+	freeTrialEligible := org.Subscription.LastPaymentDate.IsZero() && billingPeriod == string(db.BillingPeriodAnnual)
+
 	// Create checkout session parameters with the resolved Stripe price ID
 	params := &CheckoutSessionParams{
 		ReturnURL:     returnURL,
@@ -296,6 +300,7 @@ func (s *Service) CreateCheckoutSessionWithLookupKey(
 		CustomerEmail: org.Creator,
 		Locale:        locale,
 		Quantity:      1,
+		HasFreeTrial:  freeTrialEligible,
 	}
 
 	if billingPeriod == string(db.BillingPeriodMonthly) && plan.StripeMonthlyPriceID != "" {
