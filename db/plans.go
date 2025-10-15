@@ -47,7 +47,7 @@ func (ms *MongoStorage) SetPlan(plan *Plan) (uint64, error) {
 		}
 		return plan.ID, nil
 	}
-	updateDoc, err := dynamicUpdateDocument(plan, nil)
+	updateDoc, err := dynamicUpdateDocument(plan, []string{"freeTrialDays"})
 	if err != nil {
 		return 0, err
 	}

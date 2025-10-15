@@ -113,24 +113,38 @@ type Features struct {
 }
 
 type Plan struct {
-	ID            uint64      `json:"id" bson:"_id"`
-	Name          string      `json:"name" bson:"name"`
-	StripeID      string      `json:"stripeID" bson:"stripeID"`
-	StripePriceID string      `json:"stripePriceID" bson:"stripePriceID"`
-	StartingPrice int64       `json:"startingPrice" bson:"startingPrice"`
-	Default       bool        `json:"default" bson:"default"`
-	Organization  PlanLimits  `json:"organization" bson:"organization"`
-	VotingTypes   VotingTypes `json:"votingTypes" bson:"votingTypes"`
-	Features      Features    `json:"features" bson:"features"`
+	ID                   uint64      `json:"id" bson:"_id"`
+	Name                 string      `json:"name" bson:"name"`
+	StripeID             string      `json:"stripeID" bson:"stripeID"`
+	StripeMonthlyPriceID string      `json:"stripeMonthlyPriceID" bson:"stripeMonthlyPriceID"`
+	MonthlyPrice         int64       `json:"monthlyPrice" bson:"monthlyPrice"`
+	StripeYearlyPriceID  string      `json:"stripeYearlyPriceID" bson:"stripeYearlyPriceID"`
+	YearlyPrice          int64       `json:"yearlyPrice" bson:"yearlyPrice"`
+	Default              bool        `json:"default" bson:"default"`
+	FreeTrialDays        int         `json:"freeTrialDays" bson:"freeTrialDays"`
+	Organization         PlanLimits  `json:"organization" bson:"organization"`
+	VotingTypes          VotingTypes `json:"votingTypes" bson:"votingTypes"`
+	Features             Features    `json:"features" bson:"features"`
 }
 
+type BillingPeriod string
+
+const (
+	// BillingPeriodMonthly indicates that the plan is billed monthly
+	BillingPeriodMonthly BillingPeriod = "month"
+	// BillingPeriodAnnual indicates that the plan is billed annually
+	BillingPeriodAnnual BillingPeriod = "year"
+)
+
 type OrganizationSubscription struct {
-	PlanID          uint64    `json:"planID" bson:"planID"`
-	StartDate       time.Time `json:"startDate" bson:"startDate"`
-	RenewalDate     time.Time `json:"renewalDate" bson:"renewalDate"`
-	LastPaymentDate time.Time `json:"lastPaymentDate" bson:"lastPaymentDate"`
-	Active          bool      `json:"active" bson:"active"`
-	Email           string    `json:"email" bson:"email"`
+	PlanID               uint64        `json:"planID" bson:"planID"`
+	StripeSubscriptionID string        `json:"stripeSubscriptionID" bson:"stripeSubscriptionID"`
+	BillingPeriod        BillingPeriod `json:"billingPeriod" bson:"billingPeriod"`
+	StartDate            time.Time     `json:"startDate" bson:"startDate"`
+	RenewalDate          time.Time     `json:"renewalDate" bson:"renewalDate"`
+	LastPaymentDate      time.Time     `json:"lastPaymentDate" bson:"lastPaymentDate"`
+	Active               bool          `json:"active" bson:"active"`
+	Email                string        `json:"email" bson:"email"`
 }
 
 type OrganizationCounters struct {

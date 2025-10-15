@@ -14,6 +14,7 @@ import (
 	stripeprice "github.com/stripe/stripe-go/v82/price"
 	stripeproduct "github.com/stripe/stripe-go/v82/product"
 	stripewebhook "github.com/stripe/stripe-go/v82/webhook"
+	"github.com/vocdoni/saas-backend/db"
 )
 
 // Client wraps the Stripe API client with additional functionality
@@ -67,6 +68,34 @@ func (*Client) GetCustomerByEmail(email string) (*stripeapi.Customer, error) {
 	return customers.Customer(), nil
 }
 
+// UpdateCustomerMetadata updates a customer's metadata
+func (*Client) UpdateCustomerMetadata(customerID string, metadata map[string]string) error {
+	params := &stripeapi.CustomerParams{
+		Metadata: metadata,
+	}
+	_, err := stripecustomer.Update(customerID, params)
+	if err != nil {
+		return NewStripeError("api_call_failed", "failed to update customer metadata", err)
+	}
+	return nil
+}
+
+// GetCustomerByAddress retrieves a customer by the organization EVM address
+func (*Client) GetCustomerByAddress(address string) (*stripeapi.Customer, error) {
+	customers := stripecustomer.Search(&stripeapi.CustomerSearchParams{
+		SearchParams: stripeapi.SearchParams{
+			Query: fmt.Sprintf("metadata['address']:'%s'", address),
+			Limit: stripeapi.Int64(1),
+		},
+	})
+
+	if !customers.Next() {
+		return nil, NewStripeError("customer_not_found", fmt.Sprintf("customer with address %s not found", address), nil)
+	}
+
+	return customers.Customer(), nil
+}
+
 // GetProduct retrieves a product by ID with expanded default price
 func (*Client) GetProduct(productID string) (*stripeapi.Product, error) {
 	params := &stripeapi.ProductParams{}
@@ -95,6 +124,27 @@ func (*Client) GetPrice(lookupKey string) (*stripeapi.Price, error) {
 	return results.Price(), nil
 }
 
+// GetProductPrices retrieves all active prices for a given product ID
+func (*Client) GetProductPrices(productID string) ([]stripeapi.Price, error) {
+	var prices []stripeapi.Price
+
+	params := &stripeapi.PriceListParams{
+		Product: stripeapi.String(productID),
+		Active:  stripeapi.Bool(true),
+	}
+	params.Filters.AddFilter("limit", "", "100") // Adjust limit as needed
+
+	i := stripeprice.List(params)
+	for i.Next() {
+		prices = append(prices, *i.Price())
+	}
+	if err := i.Err(); err != nil {
+		return nil, NewStripeError("api_call_failed", "failed to list prices", err)
+	}
+
+	return prices, nil
+}
+
 // CreateCheckoutSession creates a new checkout session for subscription
 // It configures the session with the specified price, amount return URL, and subscription metadata.
 // The email provided is used in order to uniquely distinguish the customer on the Stripe side.
@@ -102,7 +152,7 @@ func (*Client) GetPrice(lookupKey string) (*stripeapi.Price, error) {
 // Returns the created checkout session and any error encountered.
 // Overview of stripe checkout mechanics: https://docs.stripe.com/checkout/custom/quickstart
 // API description https://docs.stripe.com/api/checkout/sessions
-func (*Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeapi.CheckoutSession, error) {
+func (c *Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeapi.CheckoutSession, error) {
 	if params.Locale == "" {
 		params.Locale = "auto"
 	}
@@ -112,8 +162,7 @@ func (*Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeapi.
 
 	checkoutParams := &stripeapi.CheckoutSessionParams{
 		// Subscription mode
-		Mode:          stripeapi.String(string(stripeapi.CheckoutSessionModeSubscription)),
-		CustomerEmail: &params.CustomerEmail,
+		Mode: stripeapi.String(string(stripeapi.CheckoutSessionModeSubscription)),
 		LineItems: []*stripeapi.CheckoutSessionLineItemParams{
 			{
 				Price:    stripeapi.String(params.PriceID),
@@ -121,7 +170,7 @@ func (*Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeapi.
 			},
 		},
 		// UI mode is set to embedded, since the client is integrated in our UI
-		UIMode: stripeapi.String(string(stripeapi.CheckoutSessionUIModeEmbedded)),
+		UIMode: stripeapi.String(string(stripeapi.CheckoutSessionUIModeCustom)),
 		// Automatic tax calculation is enabled
 		AutomaticTax: &stripeapi.CheckoutSessionAutomaticTaxParams{
 			Enabled: stripeapi.Bool(true),
@@ -132,16 +181,33 @@ func (*Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeapi.
 				"address": params.OrgAddress,
 			},
 		},
-		AllowPromotionCodes: stripeapi.Bool(true),
+		TaxIDCollection: &stripeapi.CheckoutSessionTaxIDCollectionParams{
+			Enabled: stripeapi.Bool(true),
+		},
+		AllowPromotionCodes:      stripeapi.Bool(true),
+		BillingAddressCollection: stripeapi.String(string(stripeapi.CheckoutSessionBillingAddressCollectionAuto)),
 		// The locale is being used to configure the language of the embedded client
 		Locale: stripeapi.String(params.Locale),
+	}
+
+	if params.FreeTrialDays > 0 {
+		checkoutParams.SubscriptionData.TrialPeriodDays = stripeapi.Int64(int64(params.FreeTrialDays))
+	}
+
+	customer, err := c.GetCustomerByAddress(params.OrgAddress)
+	if err != nil {
+		checkoutParams.CustomerEmail = stripeapi.String(params.CustomerEmail)
+	} else {
+		checkoutParams.Customer = &customer.ID
+		checkoutParams.CustomerUpdate = &stripeapi.CheckoutSessionCustomerUpdateParams{
+			Name:    stripeapi.String("auto"),
+			Address: stripeapi.String("auto"),
+		}
 	}
 
 	// The returnURL is used to redirect the user after the payment is completed
 	if params.ReturnURL != "" {
 		checkoutParams.ReturnURL = stripeapi.String(params.ReturnURL + "/{CHECKOUT_SESSION_ID}")
-	} else {
-		checkoutParams.RedirectOnCompletion = stripeapi.String("never")
 	}
 
 	session, err := stripecheckoutsession.New(checkoutParams)
@@ -211,15 +277,21 @@ func (c *Client) ParseSubscriptionFromEvent(event *stripeapi.Event) (*Subscripti
 		return nil, NewStripeError("invalid_event", "subscription has no items", nil)
 	}
 
-	return &SubscriptionInfo{
-		ID:            subscription.ID,
-		Status:        subscription.Status,
-		ProductID:     subscription.Items.Data[0].Plan.Product.ID,
-		OrgAddress:    orgAddress,
-		CustomerEmail: customer.Email,
-		StartDate:     time.Unix(subscription.Items.Data[0].CurrentPeriodStart, 0),
-		EndDate:       time.Unix(subscription.Items.Data[0].CurrentPeriodEnd, 0),
-	}, nil
+	subscriptionInfo := &SubscriptionInfo{
+		ID:         subscription.ID,
+		Status:     subscription.Status,
+		ProductID:  subscription.Items.Data[0].Plan.Product.ID,
+		OrgAddress: orgAddress,
+		Customer:   customer,
+		StartDate:  time.Unix(subscription.Items.Data[0].CurrentPeriodStart, 0),
+		EndDate:    time.Unix(subscription.Items.Data[0].CurrentPeriodEnd, 0),
+	}
+
+	if subscription.Items.Data[0].Price.Type == stripeapi.PriceTypeRecurring {
+		subscriptionInfo.BillingPeriod = db.BillingPeriod((subscription.Items.Data[0].Price.Recurring.Interval))
+	}
+
+	return subscriptionInfo, nil
 }
 
 // ParseInvoiceFromEvent extracts invoice information from a webhook event
@@ -266,6 +338,7 @@ type CheckoutSessionParams struct {
 	CustomerEmail string
 	Locale        string
 	Quantity      int64
+	FreeTrialDays int
 }
 
 // CheckoutSessionStatus represents the status of a checkout session
@@ -280,9 +353,10 @@ type CheckoutSessionStatus struct {
 type SubscriptionInfo struct {
 	ID            string
 	Status        stripeapi.SubscriptionStatus
+	BillingPeriod db.BillingPeriod
 	ProductID     string
 	OrgAddress    common.Address
-	CustomerEmail string
+	Customer      *stripeapi.Customer
 	StartDate     time.Time
 	EndDate       time.Time
 }
