@@ -382,13 +382,14 @@ func processProductToPlan(planID uint64, product *stripeapi.Product, prices []st
 	}
 
 	plan := &db.Plan{
-		ID:           planID,
-		Name:         product.Name,
-		StripeID:     product.ID,
-		Default:      isDefaultPlan(product),
-		Organization: organizationData,
-		VotingTypes:  votingTypesData,
-		Features:     featuresData,
+		ID:            planID,
+		Name:          product.Name,
+		StripeID:      product.ID,
+		Default:       isDefaultPlan(product),
+		Organization:  organizationData,
+		VotingTypes:   votingTypesData,
+		Features:      featuresData,
+		FreeTrialDays: 0,
 	}
 
 	for _, price := range prices {
