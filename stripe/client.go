@@ -190,8 +190,8 @@ func (c *Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeap
 		Locale: stripeapi.String(params.Locale),
 	}
 
-	if params.HasFreeTrial {
-		checkoutParams.SubscriptionData.TrialPeriodDays = stripeapi.Int64(int64(c.config.FreeTrialDays))
+	if params.FreeTrialDays > 0 {
+		checkoutParams.SubscriptionData.TrialPeriodDays = stripeapi.Int64(int64(params.FreeTrialDays))
 	}
 
 	customer, err := c.GetCustomerByAddress(params.OrgAddress)
@@ -338,7 +338,7 @@ type CheckoutSessionParams struct {
 	CustomerEmail string
 	Locale        string
 	Quantity      int64
-	HasFreeTrial  bool
+	FreeTrialDays int
 }
 
 // CheckoutSessionStatus represents the status of a checkout session

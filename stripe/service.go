@@ -5,6 +5,7 @@ package stripe
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -259,7 +260,7 @@ func (s *Service) handleProductUpdate(event *stripeapi.Event) error {
 	}
 
 	// Update the plan with new product information
-	updatedPlan, err := s.processProductToPlan(existingPlan.ID, product, prices)
+	updatedPlan, err := processProductToPlan(existingPlan.ID, product, prices)
 	if err != nil {
 		return fmt.Errorf("failed to process updated product %s: %w", product.ID, err)
 	}
@@ -291,7 +292,10 @@ func (s *Service) CreateCheckoutSessionWithLookupKey(
 
 	// Determine if the organization is eligible for a free trial based on
 	// if they already made a subscription and request a yearly plan
-	freeTrialEligible := org.Subscription.LastPaymentDate.IsZero() && billingPeriod == string(db.BillingPeriodAnnual)
+	freeTrialDays := 0
+	if org.Subscription.LastPaymentDate.IsZero() && billingPeriod == string(db.BillingPeriodAnnual) {
+		freeTrialDays = plan.FreeTrialDays
+	}
 
 	// Create checkout session parameters with the resolved Stripe price ID
 	params := &CheckoutSessionParams{
@@ -300,7 +304,7 @@ func (s *Service) CreateCheckoutSessionWithLookupKey(
 		CustomerEmail: org.Creator,
 		Locale:        locale,
 		Quantity:      1,
-		HasFreeTrial:  freeTrialEligible,
+		FreeTrialDays: freeTrialDays,
 	}
 
 	if billingPeriod == string(db.BillingPeriodMonthly) && plan.StripeMonthlyPriceID != "" {
@@ -349,7 +353,7 @@ func (s *Service) GetPlansFromStripe() ([]*db.Plan, error) {
 			return nil, fmt.Errorf("failed to get prices for product %s: %w", p.ProductID, err)
 		}
 
-		plan, err := s.processProductToPlan(uint64(i), product, prices)
+		plan, err := processProductToPlan(uint64(i), product, prices)
 		if err != nil {
 			return nil, fmt.Errorf("failed to process product %s: %w", p.ProductID, err)
 		}
@@ -361,11 +365,7 @@ func (s *Service) GetPlansFromStripe() ([]*db.Plan, error) {
 }
 
 // processProductToPlan converts a Stripe product to a database plan
-func (s *Service) processProductToPlan(
-	planID uint64,
-	product *stripeapi.Product,
-	prices []stripeapi.Price,
-) (*db.Plan, error) {
+func processProductToPlan(planID uint64, product *stripeapi.Product, prices []stripeapi.Price) (*db.Plan, error) {
 	organizationData, err := extractPlanMetadata[db.PlanLimits](product.Metadata["organization"])
 	if err != nil {
 		return nil, err
@@ -382,14 +382,13 @@ func (s *Service) processProductToPlan(
 	}
 
 	plan := &db.Plan{
-		ID:            planID,
-		Name:          product.Name,
-		StripeID:      product.ID,
-		Default:       isDefaultPlan(product),
-		Organization:  organizationData,
-		FreeTrialDays: s.config.FreeTrialDays,
-		VotingTypes:   votingTypesData,
-		Features:      featuresData,
+		ID:           planID,
+		Name:         product.Name,
+		StripeID:     product.ID,
+		Default:      isDefaultPlan(product),
+		Organization: organizationData,
+		VotingTypes:  votingTypesData,
+		Features:     featuresData,
 	}
 
 	for _, price := range prices {
@@ -397,6 +396,11 @@ func (s *Service) processProductToPlan(
 		case stripeapi.PriceRecurringIntervalYear:
 			plan.StripeYearlyPriceID = price.ID
 			plan.YearlyPrice = price.UnitAmount
+			if price.Metadata["freeTrialDays"] != "" {
+				if days, err := strconv.Atoi(price.Metadata["freeTrialDays"]); err == nil && days >= 0 {
+					plan.FreeTrialDays = days
+				}
+			}
 		case stripeapi.PriceRecurringIntervalMonth:
 			plan.StripeMonthlyPriceID = price.ID
 			plan.MonthlyPrice = price.UnitAmount
