@@ -180,7 +180,6 @@ func (c *Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeap
 			Metadata: map[string]string{
 				"address": params.OrgAddress,
 			},
-			TrialPeriodDays: stripeapi.Int64(15),
 		},
 		TaxIDCollection: &stripeapi.CheckoutSessionTaxIDCollectionParams{
 			Enabled: stripeapi.Bool(true),
