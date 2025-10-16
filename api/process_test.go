@@ -8,6 +8,7 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/util"
 )
@@ -180,6 +181,33 @@ func TestDraftProcess(t *testing.T) {
 		c.Assert(processDraftsResp.Processes, qt.HasLen, 1)
 	}
 
+	// Step 1.5: Try to create another process with draft=true (should fail due to free plan limit)
+	{
+		// Generate a random process ID
+		processID := internal.HexBytes(util.RandomBytes(32))
+		t.Logf("Generated process ID for another draft test: %s\n", processID.String())
+
+		initialMetadata := []byte(`{"title":"Draft Process 2","description":"This is another draft process"}`)
+		draftProcessInfo := &apicommon.CreateProcessRequest{
+			PublishedCensusRoot: publishedCensus.Root,
+			PublishedCensusURI:  publishedCensus.URI,
+			CensusID:            censusIDBytes,
+			Metadata:            initialMetadata,
+			Draft:               true, // Mark as draft
+		}
+
+		errResp := requestAndParseWithAssertCode[errors.Error](http.StatusBadRequest,
+			t, http.MethodPost, adminToken, draftProcessInfo, "process", processID.String())
+		c.Assert(errResp.Code, qt.Equals, errors.ErrMaxDraftsReached.Code)
+
+		// Verify the list of draft processes still contains only 1 item
+		{
+			processDraftsResp := requestAndParse[apicommon.ListOrganizationProcesses](t,
+				http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "processes", "drafts")
+			c.Assert(processDraftsResp.Processes, qt.HasLen, 1)
+		}
+	}
+
 	// Step 2: Update the process with new metadata and draft=false
 	updatedMetadata := []byte(`{"title":"Updated Process","description":"This is no longer a draft process"}`)
 	updatedProcessInfo := &apicommon.CreateProcessRequest{
@@ -226,4 +254,40 @@ func TestDraftProcess(t *testing.T) {
 	resp, code = testRequest(t, http.MethodPost, adminToken, finalProcessInfo, "process", processID.String())
 	c.Assert(code, qt.Equals, http.StatusConflict, qt.Commentf("Should fail with conflict error, got: %d, response: %s", code, resp))
 	t.Log("Successfully verified that updating a non-draft process fails")
+
+	// Step 4: Try to create another process with draft=true (should now succeed)
+	{
+		// Generate a random process ID
+		processID := internal.HexBytes(util.RandomBytes(32))
+		t.Logf("Generated process ID for another draft test: %s\n", processID.String())
+
+		initialMetadata := []byte(`{"title":"Draft Process 3","description":"This is yet another draft process"}`)
+		draftProcessInfo := &apicommon.CreateProcessRequest{
+			PublishedCensusRoot: publishedCensus.Root,
+			PublishedCensusURI:  publishedCensus.URI,
+			CensusID:            censusIDBytes,
+			Metadata:            initialMetadata,
+			Draft:               true, // Mark as draft
+		}
+		resp, code := testRequest(t, http.MethodPost, adminToken, draftProcessInfo, "process", processID.String())
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+		t.Log("Successfully created draft process")
+
+		// Verify the process was created and is in draft mode
+		resp, code = testRequest(t, http.MethodGet, adminToken, nil, "process", processID.String())
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+		var createdProcess db.Process
+		err = parseJSON(resp, &createdProcess)
+		c.Assert(err, qt.IsNil)
+		c.Assert(createdProcess.Draft, qt.Equals, true, qt.Commentf("Process should be in draft mode"))
+		t.Log("Verified process is in draft mode")
+
+		// Verify the list of draft processes contains 1 item
+		{
+			processDraftsResp := requestAndParse[apicommon.ListOrganizationProcesses](t,
+				http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "processes", "drafts")
+			c.Assert(processDraftsResp.Processes, qt.HasLen, 1)
+		}
+	}
 }
