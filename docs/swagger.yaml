@@ -780,13 +780,18 @@ definitions:
         description: Whether custom URLs are allowed
         type: boolean
       drafts:
-        description: Whether draft processes allowed
+        description: |-
+          Whether draft processes allowed.
+          DEPRECATED: use MaxDrafts instead
         type: boolean
       maxCensus:
         description: Maximum number of census allowed
         type: integer
       maxDaysDuration:
         description: Maximum duration of voting processes in days
+        type: integer
+      maxDrafts:
+        description: How many draft processes are allowed
         type: integer
       maxProcesses:
         description: Maximum number of voting processes allowed
@@ -1097,11 +1102,14 @@ definitions:
       customURL:
         type: boolean
       drafts:
+        description: 'DEPRECATED: use MaxDrafts instead'
         type: boolean
       maxCensus:
         type: integer
       maxDaysDuration:
         description: Max process duration in days
+        type: integer
+      maxDrafts:
         type: integer
       maxProcesses:
         type: integer

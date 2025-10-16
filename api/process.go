@@ -86,6 +86,38 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 		process.Address = processInfo.Address
 	}
 
+	// if it's a new draft process
+	if process.Address.Equals(nil) && process.ID == primitive.NilObjectID {
+		// Check if the organization has a subscription
+		org, err := a.db.Organization(process.OrgAddress)
+		if err != nil {
+			errors.ErrOrganizationNotFound.WithErr(err).Write(w)
+			return
+		}
+
+		if org.Subscription.PlanID == 0 {
+			errors.ErrNoOrganizationSubscription.With("can't create draft process").Write(w)
+			return
+		}
+
+		plan, err := a.db.Plan(org.Subscription.PlanID)
+		if err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+
+		count, err := a.db.CountProcesses(process.OrgAddress, db.DraftOnly)
+		if err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+
+		if count >= int64(plan.Organization.MaxDrafts) {
+			errors.ErrMaxDraftsReached.Withf("(%d)", plan.Organization.MaxDrafts).Write(w)
+			return
+		}
+	}
+
 	processID, err := a.db.SetProcess(process)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
