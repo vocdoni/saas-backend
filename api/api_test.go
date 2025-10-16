@@ -23,6 +23,7 @@ import (
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/migrations"
 	"github.com/vocdoni/saas-backend/notifications/smtp"
@@ -83,7 +84,7 @@ var (
 			MaxCensus:    50,
 			MaxDuration:  7,
 			CustomURL:    false,
-			Drafts:       false,
+			MaxDrafts:    0,
 			CustomPlan:   false,
 		},
 		VotingTypes: db.VotingTypes{
@@ -123,7 +124,7 @@ var (
 			MaxCensus:    10000,
 			MaxDuration:  90,
 			CustomURL:    false,
-			Drafts:       true,
+			MaxDrafts:    5,
 			CustomPlan:   false,
 		},
 		VotingTypes: db.VotingTypes{
@@ -163,7 +164,7 @@ var (
 			MaxCensus:    20000,
 			MaxDuration:  180,
 			CustomURL:    false,
-			Drafts:       false,
+			MaxDrafts:    10,
 		},
 		VotingTypes: db.VotingTypes{
 			Single:     true,
@@ -768,4 +769,12 @@ func requestAndParseWithAssertCode[T any](expectedCode int, t *testing.T, method
 func requestAndAssertCode(expectedCode int, t *testing.T, method, jwt string, jsonBody any, urlPath ...string) {
 	resp, code := testRequest(t, method, jwt, jsonBody, urlPath...)
 	qt.Assert(t, code, qt.Equals, expectedCode, qt.Commentf("response: %s", resp))
+}
+
+// requestAndAssertError makes a request and asserts the expected response matches error.
+// It takes the expected status code as the first parameter, followed by the same parameters as testRequest.
+func requestAndAssertError(expectedError errors.Error, t *testing.T, method, jwt string, jsonBody any, urlPath ...string) {
+	errResp := requestAndParseWithAssertCode[errors.Error](expectedError.HTTPstatus,
+		t, method, jwt, jsonBody, urlPath...)
+	qt.Assert(t, errResp.Code, qt.Equals, expectedError.Code)
 }

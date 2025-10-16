@@ -7,6 +7,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"go.vocdoni.io/proto/build/go/models"
 )
 
@@ -52,6 +53,7 @@ type DBInterface interface {
 	UserByEmail(email string) (*db.User, error)
 	Organization(address common.Address) (*db.Organization, error)
 	OrganizationWithParent(address common.Address) (*db.Organization, *db.Organization, error)
+	CountProcesses(orgAddress common.Address, draft db.DraftFilter) (int64, error)
 }
 
 // Subscriptions is the service that manages the organization permissions based on
@@ -190,5 +192,38 @@ func (p *Subscriptions) HasDBPermission(userEmail string, orgAddress common.Addr
 		return true, nil
 	default:
 		return false, fmt.Errorf("permission not found")
+	}
+}
+
+// OrgHasPermission checks if the org has permission to perform the given action
+func (p *Subscriptions) OrgHasPermission(orgAddress common.Address, permission DBPermission) error {
+	switch permission {
+	case CreateDraft:
+		// Check if the organization has a subscription
+		org, err := p.db.Organization(orgAddress)
+		if err != nil {
+			return errors.ErrOrganizationNotFound.WithErr(err)
+		}
+
+		if org.Subscription.PlanID == 0 {
+			return errors.ErrNoOrganizationSubscription.With("can't create draft process")
+		}
+
+		plan, err := p.db.Plan(org.Subscription.PlanID)
+		if err != nil {
+			return errors.ErrGenericInternalServerError.WithErr(err)
+		}
+
+		count, err := p.db.CountProcesses(orgAddress, db.DraftOnly)
+		if err != nil {
+			return errors.ErrGenericInternalServerError.WithErr(err)
+		}
+
+		if count >= int64(plan.Organization.MaxDrafts) {
+			return errors.ErrMaxDraftsReached.Withf("(%d)", plan.Organization.MaxDrafts)
+		}
+		return nil
+	default:
+		return fmt.Errorf("permission not found")
 	}
 }

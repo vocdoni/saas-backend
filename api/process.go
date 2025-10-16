@@ -9,6 +9,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -84,6 +85,18 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 	process.OrgAddress = orgAddress
 	if !processInfo.Address.Equals(nil) {
 		process.Address = processInfo.Address
+	}
+
+	// if it's a new draft process
+	if process.Address.Equals(nil) && process.ID == primitive.NilObjectID {
+		if err := a.subscriptions.OrgHasPermission(process.OrgAddress, subscriptions.CreateDraft); err != nil {
+			if apierr, ok := err.(errors.Error); ok {
+				apierr.Write(w)
+				return
+			}
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
 	}
 
 	processID, err := a.db.SetProcess(process)

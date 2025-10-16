@@ -204,3 +204,7 @@ func (m *mockMongoStorage) OrganizationWithParent(address common.Address) (
 	}
 	return org, nil, nil
 }
+
+func (*mockMongoStorage) CountProcesses(_ common.Address, _ db.DraftFilter) (int64, error) {
+	return 0, nil
+}

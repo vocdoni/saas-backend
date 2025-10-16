@@ -780,8 +780,8 @@ definitions:
         description: Whether custom URLs are allowed
         type: boolean
       drafts:
-        description: Whether draft processes allowed
-        type: boolean
+        description: How many draft processes are allowed
+        type: integer
       maxCensus:
         description: Maximum number of census allowed
         type: integer
@@ -1097,7 +1097,7 @@ definitions:
       customURL:
         type: boolean
       drafts:
-        type: boolean
+        type: integer
       maxCensus:
         type: integer
       maxDaysDuration:
