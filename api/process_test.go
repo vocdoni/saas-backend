@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
@@ -94,9 +95,9 @@ func TestProcess(t *testing.T) {
 	orgAddress, censusID, _ := testCreateOrgAndCensus(t, adminToken)
 
 	// Test 1: Create a process
-	// Generate a random process ID
-	processID := internal.HexBytes(util.RandomBytes(32))
-	t.Logf("Generated process ID: %s\n", processID.String())
+	// Generate a mock process address
+	processAddress := internal.HexBytes(util.RandomBytes(32))
+	t.Logf("Generated process ID: %s\n", processAddress.String())
 
 	// Test 1.1: Test with valid data
 	censusIDBytes := internal.HexBytes{}
@@ -106,6 +107,7 @@ func TestProcess(t *testing.T) {
 	processInfo := &apicommon.CreateProcessRequest{
 		OrgAddress: orgAddress,
 		CensusID:   censusIDBytes,
+		Address:    processAddress,
 		Metadata:   map[string]any{"title": "Test Process", "description": "This is a test process"},
 	}
 
@@ -174,95 +176,130 @@ func TestDraftProcess(t *testing.T) {
 	err := censusIDBytes.ParseString(censusID)
 	c.Assert(err, qt.IsNil)
 
-	// Step 1: Create a process with draft=true
-	initialMetadata := map[string]any{
-		"title":       "Draft Process",
-		"description": "This is a draft process",
-	}
 	draftProcessInfo := &apicommon.CreateProcessRequest{
 		OrgAddress: orgAddress,
 		CensusID:   censusIDBytes,
-		Metadata:   initialMetadata,
+		Metadata: map[string]any{
+			"title":       "Draft Process",
+			"description": "This is a draft process",
+		},
 	}
 
-	pid := requestAndParseWithAssertCode[string](
-		http.StatusOK,
-		t,
-		http.MethodPost,
-		adminToken,
-		draftProcessInfo,
-		"process",
-	)
-	t.Log("Successfully created draft process")
+	{
+		// Step 0: Try to create a process with draft=true (should fail because free plan has drafts=0)
+		requestAndAssertError(errors.ErrMaxDraftsReached,
+			t, http.MethodPost, adminToken, draftProcessInfo, "process")
+	}
 
-	// Verify the process was created and is in draft mode
-	resp, code := testRequest(t, http.MethodGet, adminToken, nil, "process", pid)
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+	{
+		// Subscribe the organization to Essential plan
+		err := testDB.SetOrganizationSubscription(orgAddress, &db.OrganizationSubscription{
+			PlanID:          mockEssentialPlan.ID,
+			StartDate:       time.Now(),
+			RenewalDate:     time.Now().Add(time.Hour * 24),
+			LastPaymentDate: time.Now(),
+			Active:          true,
+		})
+		c.Assert(err, qt.IsNil)
+	}
 
-	var createdProcess db.Process
-	err = parseJSON(resp, &createdProcess)
-	c.Assert(err, qt.IsNil)
-	c.Assert(createdProcess.Address, qt.IsNil, qt.Commentf("Process should be a draft (have no vochain address)"))
-	t.Log("Verified process is a draft")
+	// Step 1: Create a process with draft=true
+	maxDrafts := mockEssentialPlan.Organization.MaxDrafts
+	pids := make([]string, maxDrafts)
+	for i := range maxDrafts {
+		pids[i] = requestAndParseWithAssertCode[string](http.StatusOK,
+			t, http.MethodPost, adminToken, draftProcessInfo, "process")
+		t.Log("Successfully created draft process")
 
-	// Verify the list of draft processes contains 1 item
+		// Verify the process was created and is in draft mode
+		{
+			createdProcess := requestAndParse[db.Process](t,
+				http.MethodGet, adminToken, nil, "process", pids[i])
+			c.Assert(createdProcess.Address, qt.IsNil, qt.Commentf("Process should be a draft (have no vochain address)"))
+			t.Log("Verified process is a draft")
+		}
+	}
+
+	// Verify the list of draft processes contains maxDrafts items
 	{
 		processDraftsResp := requestAndParse[apicommon.ListOrganizationProcesses](t,
 			http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "processes", "drafts")
-		c.Assert(processDraftsResp.Processes, qt.HasLen, 1)
+		c.Assert(processDraftsResp.Processes, qt.HasLen, maxDrafts)
 	}
 
-	// Step 2: Update the process with new metadata and draft=false
-	updatedMetadata := map[string]any{
-		"title":       "Updated Process",
-		"description": "This is no longer a draft process",
+	// Step 1.5: Try to create another process with draft=true (should fail due to free plan limit)
+	{
+		requestAndAssertError(errors.ErrMaxDraftsReached,
+			t, http.MethodPost, adminToken, draftProcessInfo, "process")
+
+		// Verify the list of draft processes still contains only maxDrafts items
+		{
+			processDraftsResp := requestAndParse[apicommon.ListOrganizationProcesses](t,
+				http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "processes", "drafts")
+			c.Assert(processDraftsResp.Processes, qt.HasLen, maxDrafts)
+		}
 	}
-	updatedProcessInfo := &apicommon.UpdateProcessRequest{
-		CensusID: censusIDBytes,
-		Metadata: updatedMetadata,
-		Address:  randomAddress[:], // No longer a draft
+
+	// Step 2: Update a process with new metadata and draft=false
+	{
+		updatedProcessInfo := &apicommon.UpdateProcessRequest{
+			Address: randomAddress[:], // No longer a draft
+			Metadata: map[string]any{
+				"title":       "Updated Process",
+				"description": "This is no longer a draft process",
+			},
+		}
+		requestAndAssertCode(http.StatusOK,
+			t, http.MethodPut, adminToken, updatedProcessInfo, "process", pids[0])
+		t.Log("Successfully updated process and set draft=false")
+
+		// Verify the process was updated and is no longer in draft mode
+		updatedProcess := requestAndParse[db.Process](t,
+			http.MethodGet, adminToken, nil, "process", pids[0])
+		c.Assert(updatedProcess.Address, qt.IsNotNil, qt.Commentf("Process should no longer be a draft"))
+		c.Assert(updatedProcess.Metadata, qt.DeepEquals, updatedProcessInfo.Metadata, qt.Commentf("Process metadata should be updated"))
+		t.Log("Verified process is no longer in draft mode and metadata was updated")
 	}
 
-	resp, code = testRequest(t, http.MethodPut, adminToken, updatedProcessInfo, "process", pid)
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-	t.Log("Successfully updated process and set draft=false")
-
-	// Verify the process was updated and is no longer in draft mode
-	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "process", pid)
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	var updatedProcess db.Process
-	err = parseJSON(resp, &updatedProcess)
-	c.Assert(err, qt.IsNil)
-	c.Assert(updatedProcess.Address, qt.IsNotNil, qt.Commentf("Process should no longer be a draft"))
-	c.Assert(updatedProcess.Metadata, qt.DeepEquals, updatedMetadata, qt.Commentf("Process metadata should be updated"))
-	t.Log("Verified process is no longer in draft mode and metadata was updated")
-
-	// Verify the list of draft processes is now empty
+	// Verify the list of draft processes is now maxDrafts-1
 	{
 		processDraftsResp := requestAndParse[apicommon.ListOrganizationProcesses](t,
 			http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "processes", "drafts")
-		c.Assert(processDraftsResp.Processes, qt.HasLen, 0)
-		c.Assert(processDraftsResp.Pagination.TotalItems, qt.Equals, int64(0))
+		c.Assert(processDraftsResp.Processes, qt.HasLen, maxDrafts-1)
+		c.Assert(processDraftsResp.Pagination.TotalItems, qt.Equals, int64(maxDrafts-1))
 	}
 
 	// Step 3: Try to update the process again, which should fail since it's no longer in draft mode
+	{
+		finalProcessInfo := &apicommon.CreateProcessRequest{
+			CensusID: censusIDBytes,
+			Metadata: map[string]any{
+				"title":       "Final Process",
+				"description": "This update should fail",
+			}, // Try to update metadata (should fail)
+			Address: common.HexToAddress(internal.RandomHex(1000000)).Bytes(), // Try to update address (should fail)
+		}
 
-	// Genereate another mock Vochain Address
-	finalRandomAddress := common.HexToAddress(internal.RandomHex(1000000))
-
-	finalMetadata := map[string]any{
-		"title":       "Final Process",
-		"description": "This update should fail",
+		requestAndAssertError(errors.ErrDuplicateConflict,
+			t, http.MethodPut, adminToken, finalProcessInfo, "process", pids[0])
+		t.Log("Successfully verified that updating a non-draft process fails")
 	}
-	finalProcessInfo := &apicommon.CreateProcessRequest{
-		CensusID: censusIDBytes,
-		Metadata: finalMetadata,         // Try to update metadata (should fail)
-		Address:  finalRandomAddress[:], // Try to update address (should fail)
-	}
 
-	errResp := requestAndParseWithAssertCode[errors.Error](http.StatusConflict,
-		t, http.MethodPut, adminToken, finalProcessInfo, "process", pid)
-	c.Assert(errResp.Code, qt.Equals, errors.ErrDuplicateConflict.Code)
-	t.Log("Successfully verified that updating a non-draft process fails")
+	// Step 4: Try to create another process with draft=true (should now succeed)
+	{
+		pid := requestAndParseWithAssertCode[string](http.StatusOK,
+			t, http.MethodPost, adminToken, draftProcessInfo, "process")
+		t.Log("Successfully created draft process")
+
+		// Verify the process was created and is in draft mode
+		createdProcess := requestAndParse[db.Process](t,
+			http.MethodGet, adminToken, nil, "process", pid)
+		c.Assert(createdProcess.Address, qt.IsNil, qt.Commentf("Process should be a draft (have no vochain address)"))
+		t.Log("Verified process is a draft")
+
+		// Verify the list of draft processes contains maxDrafts items
+		processDraftsResp := requestAndParse[apicommon.ListOrganizationProcesses](t,
+			http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "processes", "drafts")
+		c.Assert(processDraftsResp.Processes, qt.HasLen, maxDrafts)
+	}
 }

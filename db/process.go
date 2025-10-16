@@ -16,7 +16,6 @@ import (
 // If the process already exists and is in draft mode, it will be updated.
 func (ms *MongoStorage) SetProcess(process *Process) (primitive.ObjectID, error) {
 	// validate input
-	// either OrgAddress or Census.ID cannot be empty in order to connect to an organization
 	if (process.OrgAddress.Cmp(common.Address{}) == 0) {
 		return primitive.NilObjectID, ErrInvalidData
 	}
@@ -43,19 +42,14 @@ func (ms *MongoStorage) SetProcess(process *Process) (primitive.ObjectID, error)
 		}
 	}
 
-	if process.ID == primitive.NilObjectID {
-		// if the process doesn't exist, create its id
-		process.ID = primitive.NewObjectID()
-	}
-
-	updateDoc, err := dynamicUpdateDocument(process, []string{"draft"})
-	if err != nil {
-		return primitive.NilObjectID, fmt.Errorf("failed to create update document: %w", err)
-	}
-
 	if process.ID.IsZero() {
 		// if the process doesn't exist, create its id
 		process.ID = primitive.NewObjectID()
+	}
+
+	updateDoc, err := dynamicUpdateDocument(process, nil)
+	if err != nil {
+		return primitive.NilObjectID, fmt.Errorf("failed to create update document: %w", err)
 	}
 
 	// create a context with a timeout
@@ -154,4 +148,31 @@ func (ms *MongoStorage) ListProcesses(orgAddress common.Address, page, limit int
 	}
 
 	return paginatedDocuments[Process](ms.processes, page, limit, filter, options.Find())
+}
+
+// CountProcesses counts all processes from the DB for an organization
+func (ms *MongoStorage) CountProcesses(orgAddress common.Address, draft DraftFilter) (int64, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return 0, ErrInvalidData
+	}
+
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	// Create filter - draft processes have nil address, published processes have non-nil address
+	filter := bson.M{
+		"orgAddress": orgAddress,
+	}
+	switch draft {
+	case DraftOnly:
+		filter["address"] = bson.M{"$eq": nil}
+	case PublishedOnly:
+		filter["address"] = bson.M{"$ne": nil}
+	default:
+		// no filter
+	}
+
+	// Count total documents
+	return ms.processes.CountDocuments(ctx, filter)
 }
