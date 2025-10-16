@@ -45,8 +45,8 @@ var (
 	ErrVerificationCodeValid   = Error{Code: 40017, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("verification code is still valid")}
 	ErrStorageInvalidObject    = Error{Code: 40024, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid storage object or parameters")}
 	ErrNotSupported            = Error{Code: 40025, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("feature not supported")}
-	ErrUserNoVoted             = Error{Code: 40026, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("user has not voted yet"), LogLevel: "info"}
-	ErrInvalidData             = Error{Code: 40027, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid data provided")}
+	ErrUserNoVoted             = Error{Code: 40036, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("user has not voted yet"), LogLevel: "info"}
+	ErrInvalidData             = Error{Code: 40037, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid data provided")}
 	ErrInvalidCensusData       = Error{Code: 40030, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid census data provided")}
 
 	// Transaction errors (400)
