@@ -1,11 +1,8 @@
 package stripe
 
 import (
-	"encoding/json"
 	"fmt"
-	"time"
 
-	"github.com/ethereum/go-ethereum/common"
 	stripeapi "github.com/stripe/stripe-go/v82"
 	stripeportalsession "github.com/stripe/stripe-go/v82/billingportal/session"
 	stripecheckoutsession "github.com/stripe/stripe-go/v82/checkout/session"
@@ -13,7 +10,6 @@ import (
 	stripeprice "github.com/stripe/stripe-go/v82/price"
 	stripeproduct "github.com/stripe/stripe-go/v82/product"
 	stripewebhook "github.com/stripe/stripe-go/v82/webhook"
-	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 )
 
@@ -252,79 +248,6 @@ func (c *Client) CreatePortalSession(customerEmail string) (*stripeapi.BillingPo
 	return session, nil
 }
 
-// parseSubscriptionFromEvent extracts subscription information from a webhook event
-func parseSubscriptionFromEvent(event *stripeapi.Event) (*SubscriptionInfo, error) {
-	var subscription stripeapi.Subscription
-	if err := json.Unmarshal(event.Data.Raw, &subscription); err != nil {
-		return nil, fmt.Errorf("failed to parse subscription from event: %v", err)
-	}
-
-	orgAddress := common.HexToAddress(subscription.Metadata["address"])
-	if orgAddress.Cmp(common.Address{}) == 0 {
-		return nil, fmt.Errorf("subscription missing address metadata")
-	}
-
-	if len(subscription.Items.Data) == 0 {
-		return nil, fmt.Errorf("subscription has no items")
-	}
-
-	subscriptionInfo := &SubscriptionInfo{
-		ID:         subscription.ID,
-		Status:     subscription.Status,
-		ProductID:  subscription.Items.Data[0].Plan.Product.ID,
-		OrgAddress: orgAddress,
-		Customer:   subscription.Customer,
-		StartDate:  time.Unix(subscription.Items.Data[0].CurrentPeriodStart, 0),
-		EndDate:    time.Unix(subscription.Items.Data[0].CurrentPeriodEnd, 0),
-	}
-
-	if subscription.Items.Data[0].Price.Type == stripeapi.PriceTypeRecurring {
-		subscriptionInfo.BillingPeriod = db.BillingPeriod((subscription.Items.Data[0].Price.Recurring.Interval))
-	}
-
-	return subscriptionInfo, nil
-}
-
-// parseInvoiceFromEvent extracts invoice information from a webhook event
-func parseInvoiceFromEvent(event *stripeapi.Event) (*InvoiceInfo, error) {
-	var invoice stripeapi.Invoice
-	if err := json.Unmarshal(event.Data.Raw, &invoice); err != nil {
-		return nil, fmt.Errorf("failed to parse invoice from event: %v", err)
-	}
-
-	if invoice.EffectiveAt == 0 {
-		return nil, fmt.Errorf("invoice missing effective date")
-	}
-
-	if invoice.Parent.SubscriptionDetails == nil {
-		return nil, fmt.Errorf("invoice missing subscription details")
-	}
-	orgAddress := common.HexToAddress(invoice.Parent.SubscriptionDetails.Metadata["address"])
-	if orgAddress.Cmp(common.Address{}) == 0 {
-		return nil, fmt.Errorf("invoice missing address metadata")
-	}
-
-	if invoice.Status != stripeapi.InvoiceStatusPaid {
-		return nil, fmt.Errorf("invoice is not paid")
-	}
-
-	return &InvoiceInfo{
-		ID:          invoice.ID,
-		PaymentTime: time.Unix(invoice.EffectiveAt, 0),
-		OrgAddress:  orgAddress,
-	}, nil
-}
-
-// parseProductFromEvent extracts product information from a webhook event
-func parseProductFromEvent(event *stripeapi.Event) (*stripeapi.Product, error) {
-	var product stripeapi.Product
-	if err := json.Unmarshal(event.Data.Raw, &product); err != nil {
-		return nil, fmt.Errorf("failed to parse product from event: %v", err)
-	}
-
-	return &product, nil
-}
-
 // CheckoutSessionParams holds parameters for creating a checkout session
 type CheckoutSessionParams struct {
 	PriceID       string
@@ -341,24 +264,4 @@ type CheckoutSessionStatus struct {
 	Status             string `json:"status"`
 	CustomerEmail      string `json:"customer_email"`
 	SubscriptionStatus string `json:"subscription_status"`
-}
-
-// SubscriptionInfo represents the information related to a Stripe subscription
-// that are relevant for the application.
-type SubscriptionInfo struct {
-	ID            string
-	Status        stripeapi.SubscriptionStatus
-	BillingPeriod db.BillingPeriod
-	ProductID     string
-	OrgAddress    common.Address
-	Customer      *stripeapi.Customer
-	StartDate     time.Time
-	EndDate       time.Time
-}
-
-// InvoiceInfo represents invoice information extracted from events
-type InvoiceInfo struct {
-	ID          string
-	PaymentTime time.Time
-	OrgAddress  common.Address
 }
