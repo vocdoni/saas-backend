@@ -239,6 +239,9 @@ func (a *API) initRouter() http.Handler {
 		// get organization censuses
 		log.Infow("new route", "method", "GET", "path", organizationCensusesEndpoint)
 		r.Get(organizationCensusesEndpoint, a.organizationCensusesHandler)
+		// get organization draft processes
+		log.Infow("new route", "method", "GET", "path", organizationListProcessDraftsEndpoint)
+		r.Get(organizationListProcessDraftsEndpoint, a.organizationListProcessDraftsHandler)
 		// pending organization invitations
 		log.Infow("new route", "method", "GET", "path", organizationPendingUsersEndpoint)
 		r.Get(organizationPendingUsersEndpoint, a.pendingOrganizationUsersHandler)

@@ -162,6 +162,9 @@ definitions:
       censusUri:
         description: URI of the published census
         type: string
+      draft:
+        description: Whether this process is a draft (not yet pushed to the vochain)
+        type: boolean
       metadata:
         description: |-
           Additional metadata for the process
@@ -241,6 +244,20 @@ definitions:
         description: List of organization group members
         items:
           $ref: '#/definitions/apicommon.OrgMember'
+        type: array
+      totalPages:
+        description: Total number of pages
+        type: integer
+    type: object
+  apicommon.ListOrganizationProcesses:
+    properties:
+      currentPage:
+        description: Current page number
+        type: integer
+      processes:
+        description: List of organization processes
+        items:
+          $ref: '#/definitions/db.Process'
         type: array
       totalPages:
         description: Total number of pages
@@ -1096,6 +1113,8 @@ definitions:
     properties:
       census:
         $ref: '#/definitions/db.Census'
+      draft:
+        type: boolean
       id:
         example: deadbeef
         format: hex
@@ -2381,6 +2400,29 @@ paths:
       summary: Check the progress of adding members
       tags:
       - organizations
+  /organizations/{address}/processes/drafts:
+    get:
+      consumes:
+      - application/json
+      description: Returns a list of voting process drafts.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ListOrganizationProcesses'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Get paginated list of process drafts
+      tags:
+      - process
   /organizations/{address}/subscription:
     get:
       consumes:
@@ -3131,7 +3173,9 @@ paths:
     post:
       consumes:
       - application/json
-      description: Create a new voting process. Requires Manager/Admin role.
+      description: |-
+        Create a new voting process. Requires Manager/Admin role.
+        When draft=true, the process can be updated (overwritten).
       parameters:
       - description: Process ID
         in: path
