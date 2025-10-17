@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"sync"
 	"time"
 
@@ -111,34 +110,17 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Parse pagination parameters from query string
-	page := 1      // Default page number
-	pageSize := 10 // Default page size
-	search := ""   // Default search term
-
-	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
-		if pageVal, err := strconv.Atoi(pageStr); err == nil && pageVal > 0 {
-			page = pageVal
-		}
-	}
-
-	if pageSizeStr := r.URL.Query().Get("pageSize"); pageSizeStr != "" {
-		if pageSizeVal, err := strconv.Atoi(pageSizeStr); err == nil && pageSizeVal >= 0 {
-			pageSize = pageSizeVal
-		}
-	}
-
+	search := "" // Default search term
 	if searchStr := r.URL.Query().Get("search"); searchStr != "" {
 		search = searchStr
 	}
 
-	// retrieve the orgMembers with pagination
-	pages, members, err := a.db.OrgMembers(org.Address, page, pageSize, search)
+	pagination := apicommon.PaginationFromRequest(r)
+	totalItems, members, err := a.db.OrgMembers(org.Address, pagination.CurrentPage, pagination.PageSize, search)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not get org members: %v", err).Write(w)
 		return
 	}
-
 	// convert the orgMembers to the response format
 	membersResponse := make([]apicommon.OrgMember, 0, len(members))
 	for _, p := range members {
@@ -146,9 +128,8 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	apicommon.HTTPWriteJSON(w, &apicommon.OrganizationMembersResponse{
-		Pages:   pages,
-		Page:    page,
-		Members: membersResponse,
+		Members:    membersResponse,
+		Pagination: pagination.CalculateTotal(totalItems),
 	})
 }
 

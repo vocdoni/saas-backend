@@ -228,6 +228,9 @@ definitions:
         items:
           $ref: '#/definitions/apicommon.JobInfo'
         type: array
+      pageSize:
+        description: Page size
+        type: integer
       totalPages:
         description: Total number of pages
         type: integer
@@ -242,6 +245,9 @@ definitions:
         items:
           $ref: '#/definitions/apicommon.OrgMember'
         type: array
+      pageSize:
+        description: Page size
+        type: integer
       totalPages:
         description: Total number of pages
         type: integer
@@ -505,22 +511,28 @@ definitions:
         items:
           $ref: '#/definitions/apicommon.OrganizationMemberGroupInfo'
         type: array
+      pageSize:
+        description: Page size
+        type: integer
       totalPages:
         description: Total number of pages
         type: integer
     type: object
   apicommon.OrganizationMembersResponse:
     properties:
+      currentPage:
+        description: Current page number
+        type: integer
       members:
-        description: Total number of members in the organization
+        description: Total members in the organization
         items:
           $ref: '#/definitions/apicommon.OrgMember'
         type: array
-      page:
-        description: Current page number
+      pageSize:
+        description: Page size
         type: integer
-      pages:
-        description: Total number of pages available
+      totalPages:
+        description: Total number of pages
         type: integer
     type: object
   apicommon.OrganizationMetaResponse:

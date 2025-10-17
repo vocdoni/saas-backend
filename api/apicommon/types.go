@@ -3,6 +3,7 @@ package apicommon
 //revive:disable:max-public-structs
 
 import (
+	"math"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -13,6 +14,24 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.vocdoni.io/dvote/log"
 )
+
+// Pagination contains all the values needed for the UI to easily organize the returned data
+type Pagination struct {
+	// Total number of pages
+	TotalPages int64 `json:"totalPages"`
+	// Current page number
+	CurrentPage int64 `json:"currentPage"`
+	// Page size
+	PageSize int64 `json:"pageSize"`
+}
+
+func (p *Pagination) CalculateTotal(totalItems int64) Pagination {
+	p.TotalPages = int64(math.Ceil(float64(totalItems) / float64(p.PageSize)))
+	if p.TotalPages == 0 {
+		p.CurrentPage = 0
+	}
+	return *p
+}
 
 // OrganizationInfo represents an organization in the API.
 // swagger:model OrganizationInfo
@@ -203,12 +222,9 @@ type OrganizationMemberGroupInfo struct {
 // OrganizationMemberGroupsResponse represents the response for listing organization member groups.
 // swagger:model OrganizationMemberGroupsResponse
 type OrganizationMemberGroupsResponse struct {
-	// Total number of pages
-	TotalPages int `json:"totalPages"`
-	// Current page number
-	CurrentPage int `json:"currentPage"`
 	// List of organization member groups
 	Groups []*OrganizationMemberGroupInfo `json:"groups"`
+	Pagination
 }
 
 // UpdateOrganizationMemberGroupsRequest represents a request to update an organization member group
@@ -228,12 +244,9 @@ type UpdateOrganizationMemberGroupsRequest struct {
 // ListOrganizationMemberGroupResponse represents the response for listing the members of an  organization group.
 // swagger:model ListOrganizationMemberGroupResponse
 type ListOrganizationMemberGroupResponse struct {
-	// Total number of pages
-	TotalPages int `json:"totalPages"`
-	// Current page number
-	CurrentPage int `json:"currentPage"`
 	// List of organization group members
 	Members []OrgMember `json:"members"`
+	Pagination
 }
 
 // ValidateMemberGroupRequest validates the request for creating or updating an organization member group.
@@ -897,14 +910,9 @@ func OrgMemberFromDb(p db.OrgMember) OrgMember {
 }
 
 type OrganizationMembersResponse struct {
-	// Total number of pages available
-	Pages int `json:"pages"`
-
-	// Current page number
-	Page int `json:"page"`
-
-	// Total number of members in the organization
+	// Total members in the organization
 	Members []OrgMember `json:"members"`
+	Pagination
 }
 
 // AddMembersResponse defines the response for successful member addition
@@ -1118,14 +1126,9 @@ type JobInfo struct {
 // JobsResponse represents the response for listing organization jobs.
 // swagger:model JobsResponse
 type JobsResponse struct {
-	// Total number of pages
-	TotalPages int `json:"totalPages"`
-
-	// Current page number
-	CurrentPage int `json:"currentPage"`
-
 	// List of jobs
 	Jobs []JobInfo `json:"jobs"`
+	Pagination
 }
 
 // JobFromDB converts a db.Job to a JobInfo.

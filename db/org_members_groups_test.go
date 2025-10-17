@@ -158,10 +158,10 @@ func TestOrganizationMemberGroup(t *testing.T) {
 
 		t.Run("EmptyList", func(_ *testing.T) {
 			// Test getting groups for organization with no groups
-			totalPages, groups, err := testDB.OrganizationMemberGroups(testOrgAddress, 1, 10)
+			totalItems, groups, err := testDB.OrganizationMemberGroups(testOrgAddress, 1, 10)
 			c.Assert(err, qt.IsNil)
 			c.Assert(groups, qt.HasLen, 0)
-			c.Assert(totalPages, qt.Equals, 0)
+			c.Assert(totalItems, qt.Equals, int64(0))
 		})
 
 		t.Run("MultipleGroups", func(_ *testing.T) {
@@ -178,10 +178,10 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			}
 
 			// Test getting all groups for the organization
-			totalPages, groups, err := testDB.OrganizationMemberGroups(testOrgAddress, 1, 10)
+			totalItems, groups, err := testDB.OrganizationMemberGroups(testOrgAddress, 1, 10)
 			c.Assert(err, qt.IsNil)
 			c.Assert(groups, qt.HasLen, 3)
-			c.Assert(totalPages, qt.Equals, 1)
+			c.Assert(totalItems, qt.Equals, int64(3))
 
 			// Verify each group has the correct organization address
 			for _, group := range groups {
@@ -477,7 +477,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			// List members
 			count, members, err := testDB.ListOrganizationMemberGroup(groupID, testOrgAddress, 1, 10)
 			c.Assert(err, qt.IsNil)
-			c.Assert(count, qt.Equals, 0)
+			c.Assert(count, qt.Equals, int64(0))
 			c.Assert(members, qt.HasLen, 0)
 		})
 
@@ -507,8 +507,8 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			// List all members
 			count, members, err := testDB.ListOrganizationMemberGroup(groupID, testOrgAddress, 1, 10)
 			c.Assert(err, qt.IsNil)
-			c.Assert(count, qt.Equals, 1) // Expect 1 page since all members fit in one page
-			c.Assert(members, qt.HasLen, len(memberIDs))
+			c.Assert(count, qt.Equals, int64(len(memberIDs)))
+			c.Assert(members, qt.HasLen, len(memberIDs)) // Expect all 3 members to fit in one page
 
 			// Verify each member is from the correct organization
 			for _, member := range members {
@@ -518,17 +518,17 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			// Test pagination
 			count, members, err = testDB.ListOrganizationMemberGroup(groupID, testOrgAddress, 1, 1)
 			c.Assert(err, qt.IsNil)
-			c.Assert(count, qt.Equals, 3)   // Expect 3 pages when page size is 1
+			c.Assert(count, qt.Equals, int64(len(memberIDs)))
 			c.Assert(members, qt.HasLen, 1) // But only one member returned
 
 			count, members, err = testDB.ListOrganizationMemberGroup(groupID, testOrgAddress, 2, 1)
 			c.Assert(err, qt.IsNil)
-			c.Assert(count, qt.Equals, 3)   // Expect 3 pages when page size is 1
+			c.Assert(count, qt.Equals, int64(len(memberIDs)))
 			c.Assert(members, qt.HasLen, 1) // But only one member returned
 
 			count, members, err = testDB.ListOrganizationMemberGroup(groupID, testOrgAddress, 0, 0)
 			c.Assert(err, qt.IsNil)
-			c.Assert(count, qt.Equals, 1) // Expect all members listed in 1 page
+			c.Assert(count, qt.Equals, int64(len(memberIDs)))
 			c.Assert(members, qt.HasLen, len(memberIDs))
 		})
 

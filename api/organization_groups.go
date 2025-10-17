@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -49,33 +48,16 @@ func (a *API) organizationMemberGroupsHandler(w http.ResponseWriter, r *http.Req
 		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
-
-	// Parse pagination parameters from query string
-	page := 1      // Default page number
-	pageSize := 10 // Default page size
-
-	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
-		if pageVal, err := strconv.Atoi(pageStr); err == nil && pageVal > 0 {
-			page = pageVal
-		}
-	}
-
-	if pageSizeStr := r.URL.Query().Get("pageSize"); pageSizeStr != "" {
-		if pageSizeVal, err := strconv.Atoi(pageSizeStr); err == nil && pageSizeVal > 0 {
-			pageSize = pageSizeVal
-		}
-	}
-
+	pagination := apicommon.PaginationFromRequest(r)
 	// send the organization back to the user
-	pages, groups, err := a.db.OrganizationMemberGroups(org.Address, page, pageSize)
+	totalItems, groups, err := a.db.OrganizationMemberGroups(org.Address, pagination.CurrentPage, pagination.PageSize)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not get organization members: %v", err).Write(w)
 		return
 	}
 	memberGroups := apicommon.OrganizationMemberGroupsResponse{
-		TotalPages:  pages,
-		CurrentPage: page,
-		Groups:      make([]*apicommon.OrganizationMemberGroupInfo, 0, len(groups)),
+		Groups:     make([]*apicommon.OrganizationMemberGroupInfo, 0, len(groups)),
+		Pagination: pagination.CalculateTotal(totalItems),
 	}
 	for _, group := range groups {
 		memberGroups.Groups = append(memberGroups.Groups, &apicommon.OrganizationMemberGroupInfo{
@@ -400,38 +382,15 @@ func (a *API) listOrganizationMemberGroupsHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	// Parse pagination parameters from query string
-	page := 1      // Default page number
-	pageSize := 10 // Default page size
-
-	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
-		if pageVal, err := strconv.Atoi(pageStr); err == nil && pageVal > 0 {
-			page = pageVal
-		}
-	}
-
-	if pageSizeStr := r.URL.Query().Get("pageSize"); pageSizeStr != "" {
-		if pageSizeVal, err := strconv.Atoi(pageSizeStr); err == nil && pageSizeVal > 0 {
-			pageSize = pageSizeVal
-		}
-	}
-
-	totalPages, members, err := a.db.ListOrganizationMemberGroup(groupID, org.Address, int64(page), int64(pageSize))
+	pagination := apicommon.PaginationFromRequest(r)
+	totalItems, members, err := a.db.ListOrganizationMemberGroup(groupID, org.Address,
+		pagination.CurrentPage, pagination.PageSize)
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrInvalidData.Withf("group not found").Write(w)
 			return
 		}
 		errors.ErrGenericInternalServerError.Withf("could not get organization member group members: %v", err).Write(w)
-		return
-	}
-	if totalPages == 0 {
-		// If no members are found, return an empty response
-		apicommon.HTTPWriteJSON(w, &apicommon.ListOrganizationMemberGroupResponse{
-			TotalPages:  totalPages,
-			CurrentPage: 0,
-			Members:     []apicommon.OrgMember{},
-		})
 		return
 	}
 	// convert the members to the response format
@@ -441,9 +400,8 @@ func (a *API) listOrganizationMemberGroupsHandler(w http.ResponseWriter, r *http
 	}
 
 	apicommon.HTTPWriteJSON(w, &apicommon.ListOrganizationMemberGroupResponse{
-		TotalPages:  totalPages,
-		CurrentPage: page,
-		Members:     membersResponse,
+		Members:    membersResponse,
+		Pagination: pagination.CalculateTotal(totalItems),
 	})
 }
 
