@@ -432,6 +432,7 @@ func (a *API) listOrganizationMemberGroupsHandler(w http.ResponseWriter, r *http
 			CurrentPage: 0,
 			Members:     []apicommon.OrgMember{},
 		})
+		return
 	}
 	// convert the members to the response format
 	membersResponse := make([]apicommon.OrgMember, 0, len(members))
