@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/vocdoni/saas-backend/db"
 	"go.vocdoni.io/dvote/log"
@@ -17,6 +18,29 @@ func UserFromContext(ctx context.Context) (*db.User, bool) {
 		return &rawUser, ok
 	}
 	return nil, false
+}
+
+// PaginationFromRequest parse pagination parameters from query string
+func PaginationFromRequest(r *http.Request) *Pagination {
+	pagination := &Pagination{
+		CurrentPage: 1,  // Default page number
+		PageSize:    10, // Default page size
+	}
+
+	// Parse pagination parameters from query string
+	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
+		if pageVal, err := strconv.ParseInt(pageStr, 10, 64); err == nil && pageVal > 0 {
+			pagination.CurrentPage = pageVal
+		}
+	}
+
+	if pageSizeStr := r.URL.Query().Get("pageSize"); pageSizeStr != "" {
+		if pageSizeVal, err := strconv.ParseInt(pageSizeStr, 10, 64); err == nil && pageSizeVal > 0 {
+			pagination.PageSize = pageSizeVal
+		}
+	}
+
+	return pagination
 }
 
 // HTTPWriteJSON helper function allows to write a JSON response.

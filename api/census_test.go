@@ -224,8 +224,8 @@ func TestCensus(t *testing.T) {
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "jobs")
 	c.Assert(len(jobsResponse.Jobs), qt.Equals, 1, qt.Commentf("expected 1 job (the census participants job)"))
-	c.Assert(jobsResponse.TotalPages, qt.Equals, 1)
-	c.Assert(jobsResponse.CurrentPage, qt.Equals, 1)
+	c.Assert(jobsResponse.TotalPages, qt.Equals, int64(1))
+	c.Assert(jobsResponse.CurrentPage, qt.Equals, int64(1))
 
 	// Verify the job details
 	job := jobsResponse.Jobs[0]
@@ -245,8 +245,8 @@ func TestCensus(t *testing.T) {
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "jobs?page=1&pageSize=1")
 	c.Assert(len(jobsResponsePaged.Jobs), qt.Equals, 1)
-	c.Assert(jobsResponsePaged.TotalPages, qt.Equals, 1)
-	c.Assert(jobsResponsePaged.CurrentPage, qt.Equals, 1)
+	c.Assert(jobsResponsePaged.TotalPages, qt.Equals, int64(1))
+	c.Assert(jobsResponsePaged.CurrentPage, qt.Equals, int64(1))
 
 	// Test with job type filter
 	jobsResponseFiltered := requestAndParse[apicommon.JobsResponse](

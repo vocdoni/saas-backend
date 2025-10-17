@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -492,22 +491,6 @@ func (a *API) organizationJobsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse pagination parameters from query string
-	page := 1      // Default page number
-	pageSize := 10 // Default page size
-
-	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
-		if pageVal, err := strconv.Atoi(pageStr); err == nil && pageVal > 0 {
-			page = pageVal
-		}
-	}
-
-	if pageSizeStr := r.URL.Query().Get("pageSize"); pageSizeStr != "" {
-		if pageSizeVal, err := strconv.Atoi(pageSizeStr); err == nil && pageSizeVal > 0 && pageSizeVal <= 100 {
-			pageSize = pageSizeVal
-		}
-	}
-
 	// Parse job type filter
 	var jobType *db.JobType
 	if typeStr := r.URL.Query().Get("type"); typeStr != "" {
@@ -524,8 +507,8 @@ func (a *API) organizationJobsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// retrieve the jobs with pagination
-	totalPages, jobs, err := a.db.Jobs(org.Address, page, pageSize, jobType)
+	pagination := apicommon.PaginationFromRequest(r)
+	totalItems, jobs, err := a.db.Jobs(org.Address, pagination.CurrentPage, pagination.PageSize, jobType)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not get jobs: %v", err).Write(w)
 		return
@@ -538,8 +521,7 @@ func (a *API) organizationJobsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	apicommon.HTTPWriteJSON(w, &apicommon.JobsResponse{
-		TotalPages:  totalPages,
-		CurrentPage: page,
-		Jobs:        jobsResponse,
+		Jobs:       jobsResponse,
+		Pagination: pagination.CalculateTotal(totalItems),
 	})
 }
