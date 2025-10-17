@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"fmt"
-	"math"
 	"net/mail"
 	"strings"
 	"time"
@@ -363,7 +362,7 @@ func (ms *MongoStorage) SetBulkOrgMembers(org *Organization, members []*OrgMembe
 }
 
 // OrgMembers retrieves paginated orgMembers for an organization from the DB
-func (ms *MongoStorage) OrgMembers(orgAddress common.Address, page, pageSize int, search string) (int, []OrgMember, error) {
+func (ms *MongoStorage) OrgMembers(orgAddress common.Address, page, limit int64, search string) (int64, []OrgMember, error) {
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return 0, nil, ErrInvalidData
 	}
@@ -386,15 +385,14 @@ func (ms *MongoStorage) OrgMembers(orgAddress common.Address, page, pageSize int
 		}
 	}
 
-	// Calculate skip value based on page and pageSize
-	skip := (page - 1) * pageSize
+	// Calculate skip value based on page and limit
+	skip := (page - 1) * limit
 
 	// Count total documents
 	totalCount, err := ms.orgMembers.CountDocuments(ctx, filter)
 	if err != nil {
 		return 0, nil, err
 	}
-	totalPages := int(math.Ceil(float64(totalCount) / float64(pageSize)))
 
 	sort := bson.D{
 		bson.E{Key: "name", Value: 1},
@@ -403,8 +401,8 @@ func (ms *MongoStorage) OrgMembers(orgAddress common.Address, page, pageSize int
 	// Set up options for pagination
 	findOptions := options.Find().
 		SetSort(sort). // Sort by createdAt in descending order
-		SetSkip(int64(skip)).
-		SetLimit(int64(pageSize))
+		SetSkip(skip).
+		SetLimit(limit)
 
 	// Execute the find operation with pagination
 	cursor, err := ms.orgMembers.Find(ctx, filter, findOptions)
@@ -423,7 +421,7 @@ func (ms *MongoStorage) OrgMembers(orgAddress common.Address, page, pageSize int
 		return 0, nil, fmt.Errorf("failed to decode orgMembers: %w", err)
 	}
 
-	return totalPages, orgMembers, nil
+	return totalCount, orgMembers, nil
 }
 
 func (ms *MongoStorage) DeleteOrgMembers(orgAddress common.Address, ids []string) (int, error) {
@@ -637,8 +635,8 @@ func (ms *MongoStorage) validateOrgMembers(ctx context.Context, orgAddress commo
 func (ms *MongoStorage) orgMembersByIDs(
 	orgAddress common.Address,
 	memberIDs []string,
-	page, pageSize int64,
-) (int, []*OrgMember, error) {
+	page, limit int64,
+) (int64, []*OrgMember, error) {
 	if len(memberIDs) == 0 {
 		return 0, nil, nil // No members to retrieve
 	}
@@ -667,17 +665,13 @@ func (ms *MongoStorage) orgMembersByIDs(
 	if err != nil {
 		return 0, nil, err
 	}
-	totalPages := 1 // by default, with pageSize == 0, we fetch all members in one page
-	if pageSize > 0 {
-		totalPages = int(math.Ceil(float64(totalCount) / float64(pageSize)))
-	}
-	// Calculate skip value based on page and pageSize
-	skip := (page - 1) * pageSize
+	// Calculate skip value based on page and limit
+	skip := (page - 1) * limit
 
 	// Set up options for pagination
 	findOptions := options.Find().
 		SetSkip(skip).
-		SetLimit(pageSize)
+		SetLimit(limit)
 
 	cursor, err := ms.orgMembers.Find(ctx, filter, findOptions)
 	if err != nil {
@@ -694,5 +688,5 @@ func (ms *MongoStorage) orgMembersByIDs(
 		return 0, nil, fmt.Errorf("failed to decode org members: %w", err)
 	}
 
-	return totalPages, members, nil
+	return totalCount, members, nil
 }

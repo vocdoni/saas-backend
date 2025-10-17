@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -22,14 +21,14 @@ import (
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address		path		string	true	"Organization address"
-//	@Param			page		query		integer	false	"Page number (default: 1)"
-//	@Param			pageSize	query		integer	false	"Number of items per page (default: 10)"
-//	@Success		200			{object}	apicommon.OrganizationMemberGroupsResponse
-//	@Failure		400			{object}	errors.Error	"Invalid input data"
-//	@Failure		401			{object}	errors.Error	"Unauthorized"
-//	@Failure		404			{object}	errors.Error	"Organization not found"
-//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Param			address	path		string	true	"Organization address"
+//	@Param			page	query		integer	false	"Page number (default: 1)"
+//	@Param			limit	query		integer	false	"Number of items per page (default: 10)"
+//	@Success		200		{object}	apicommon.OrganizationMemberGroupsResponse
+//	@Failure		400		{object}	errors.Error	"Invalid input data"
+//	@Failure		401		{object}	errors.Error	"Unauthorized"
+//	@Failure		404		{object}	errors.Error	"Organization not found"
+//	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/organizations/{address}/groups [get]
 func (a *API) organizationMemberGroupsHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
@@ -49,33 +48,26 @@ func (a *API) organizationMemberGroupsHandler(w http.ResponseWriter, r *http.Req
 		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
-
-	// Parse pagination parameters from query string
-	page := 1      // Default page number
-	pageSize := 10 // Default page size
-
-	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
-		if pageVal, err := strconv.Atoi(pageStr); err == nil && pageVal > 0 {
-			page = pageVal
-		}
+	params, err := parsePaginationParams(r.URL.Query().Get(ParamPage), r.URL.Query().Get(ParamLimit))
+	if err != nil {
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
+		return
 	}
-
-	if pageSizeStr := r.URL.Query().Get("pageSize"); pageSizeStr != "" {
-		if pageSizeVal, err := strconv.Atoi(pageSizeStr); err == nil && pageSizeVal > 0 {
-			pageSize = pageSizeVal
-		}
-	}
-
 	// send the organization back to the user
-	pages, groups, err := a.db.OrganizationMemberGroups(org.Address, page, pageSize)
+	totalItems, groups, err := a.db.OrganizationMemberGroups(org.Address, params.Page, params.Limit)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not get organization members: %v", err).Write(w)
 		return
 	}
+	pagination, err := calculatePagination(params.Page, params.Limit, totalItems)
+	if err != nil {
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
+		return
+	}
+
 	memberGroups := apicommon.OrganizationMemberGroupsResponse{
-		TotalPages:  pages,
-		CurrentPage: page,
-		Groups:      make([]*apicommon.OrganizationMemberGroupInfo, 0, len(groups)),
+		Pagination: pagination,
+		Groups:     make([]*apicommon.OrganizationMemberGroupInfo, 0, len(groups)),
 	}
 	for _, group := range groups {
 		memberGroups.Groups = append(memberGroups.Groups, &apicommon.OrganizationMemberGroupInfo{
@@ -365,15 +357,15 @@ func (a *API) deleteOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address		path		string	true	"Organization address"
-//	@Param			groupID		path		string	true	"Group ID"
-//	@Param			page		query		int		false	"Page number for pagination"
-//	@Param			pageSize	query		int		false	"Number of items per page"
-//	@Success		200			{object}	apicommon.ListOrganizationMemberGroupResponse
-//	@Failure		400			{object}	errors.Error	"Invalid input data"
-//	@Failure		401			{object}	errors.Error	"Unauthorized"
-//	@Failure		404			{object}	errors.Error	"Organization or group not found"
-//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Param			address	path		string	true	"Organization address"
+//	@Param			groupID	path		string	true	"Group ID"
+//	@Param			page	query		int		false	"Page number for pagination"
+//	@Param			limit	query		int		false	"Number of items per page"
+//	@Success		200		{object}	apicommon.ListOrganizationMemberGroupResponse
+//	@Failure		400		{object}	errors.Error	"Invalid input data"
+//	@Failure		401		{object}	errors.Error	"Unauthorized"
+//	@Failure		404		{object}	errors.Error	"Organization or group not found"
+//	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/organizations/{address}/groups/{groupID}/members [get]
 func (a *API) listOrganizationMemberGroupsHandler(w http.ResponseWriter, r *http.Request) {
 	// get the group ID from the request path
@@ -400,23 +392,13 @@ func (a *API) listOrganizationMemberGroupsHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	// Parse pagination parameters from query string
-	page := 1      // Default page number
-	pageSize := 10 // Default page size
-
-	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
-		if pageVal, err := strconv.Atoi(pageStr); err == nil && pageVal > 0 {
-			page = pageVal
-		}
+	params, err := parsePaginationParams(r.URL.Query().Get(ParamPage), r.URL.Query().Get(ParamLimit))
+	if err != nil {
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
+		return
 	}
-
-	if pageSizeStr := r.URL.Query().Get("pageSize"); pageSizeStr != "" {
-		if pageSizeVal, err := strconv.Atoi(pageSizeStr); err == nil && pageSizeVal > 0 {
-			pageSize = pageSizeVal
-		}
-	}
-
-	totalPages, members, err := a.db.ListOrganizationMemberGroup(groupID, org.Address, int64(page), int64(pageSize))
+	totalItems, members, err := a.db.ListOrganizationMemberGroup(groupID, org.Address,
+		params.Page, params.Limit)
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrInvalidData.Withf("group not found").Write(w)
@@ -425,25 +407,21 @@ func (a *API) listOrganizationMemberGroupsHandler(w http.ResponseWriter, r *http
 		errors.ErrGenericInternalServerError.Withf("could not get organization member group members: %v", err).Write(w)
 		return
 	}
-	if totalPages == 0 {
-		// If no members are found, return an empty response
-		apicommon.HTTPWriteJSON(w, &apicommon.ListOrganizationMemberGroupResponse{
-			TotalPages:  totalPages,
-			CurrentPage: 0,
-			Members:     []apicommon.OrgMember{},
-		})
-		return
-	}
 	// convert the members to the response format
 	membersResponse := make([]apicommon.OrgMember, 0, len(members))
 	for _, m := range members {
 		membersResponse = append(membersResponse, apicommon.OrgMemberFromDb(*m))
 	}
 
+	pagination, err := calculatePagination(params.Page, params.Limit, totalItems)
+	if err != nil {
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
+		return
+	}
+
 	apicommon.HTTPWriteJSON(w, &apicommon.ListOrganizationMemberGroupResponse{
-		TotalPages:  totalPages,
-		CurrentPage: page,
-		Members:     membersResponse,
+		Pagination: pagination,
+		Members:    membersResponse,
 	})
 }
 

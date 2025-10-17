@@ -220,31 +220,27 @@ definitions:
     type: object
   apicommon.JobsResponse:
     properties:
-      currentPage:
-        description: Current page number
-        type: integer
       jobs:
         description: List of jobs
         items:
           $ref: '#/definitions/apicommon.JobInfo'
         type: array
-      totalPages:
-        description: Total number of pages
-        type: integer
+      pagination:
+        allOf:
+        - $ref: '#/definitions/apicommon.Pagination'
+        description: Pagination fields
     type: object
   apicommon.ListOrganizationMemberGroupResponse:
     properties:
-      currentPage:
-        description: Current page number
-        type: integer
       members:
         description: List of organization group members
         items:
           $ref: '#/definitions/apicommon.OrgMember'
         type: array
-      totalPages:
-        description: Total number of pages
-        type: integer
+      pagination:
+        allOf:
+        - $ref: '#/definitions/apicommon.Pagination'
+        description: Pagination fields
     type: object
   apicommon.LoginResponse:
     properties:
@@ -497,31 +493,27 @@ definitions:
     type: object
   apicommon.OrganizationMemberGroupsResponse:
     properties:
-      currentPage:
-        description: Current page number
-        type: integer
       groups:
         description: List of organization member groups
         items:
           $ref: '#/definitions/apicommon.OrganizationMemberGroupInfo'
         type: array
-      totalPages:
-        description: Total number of pages
-        type: integer
+      pagination:
+        allOf:
+        - $ref: '#/definitions/apicommon.Pagination'
+        description: Pagination fields
     type: object
   apicommon.OrganizationMembersResponse:
     properties:
       members:
-        description: Total number of members in the organization
+        description: Total members in the organization
         items:
           $ref: '#/definitions/apicommon.OrgMember'
         type: array
-      page:
-        description: Current page number
-        type: integer
-      pages:
-        description: Total number of pages available
-        type: integer
+      pagination:
+        allOf:
+        - $ref: '#/definitions/apicommon.Pagination'
+        description: Pagination fields
     type: object
   apicommon.OrganizationMetaResponse:
     properties:
@@ -602,6 +594,19 @@ definitions:
         items:
           $ref: '#/definitions/apicommon.OrganizationUser'
         type: array
+    type: object
+  apicommon.Pagination:
+    properties:
+      currentPage:
+        type: integer
+      lastPage:
+        type: integer
+      nextPage:
+        type: integer
+      previousPage:
+        type: integer
+      totalItems:
+        type: integer
     type: object
   apicommon.PublishCensusGroupRequest:
     properties:
@@ -1832,7 +1837,7 @@ paths:
         type: integer
       - description: 'Number of items per page (default: 10)'
         in: query
-        name: pageSize
+        name: limit
         type: integer
       produces:
       - application/json
@@ -2072,7 +2077,7 @@ paths:
         type: integer
       - description: Number of items per page
         in: query
-        name: pageSize
+        name: limit
         type: integer
       produces:
       - application/json
@@ -2171,7 +2176,7 @@ paths:
         type: integer
       - description: 'Number of items per page (default: 10)'
         in: query
-        name: pageSize
+        name: limit
         type: integer
       - description: Filter by job type (org_members or census_participants)
         in: query
@@ -2264,7 +2269,7 @@ paths:
         type: integer
       - description: 'Number of items per page (default: 10)'
         in: query
-        name: pageSize
+        name: limit
         type: integer
       - description: Search term for member properties
         in: query

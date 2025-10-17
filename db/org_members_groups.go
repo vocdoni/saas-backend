@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
@@ -48,8 +47,8 @@ func (ms *MongoStorage) OrganizationMemberGroup(
 // OrganizationMemberGroups returns the list of an organization's members groups
 func (ms *MongoStorage) OrganizationMemberGroups(
 	orgAddress common.Address,
-	page, pageSize int,
-) (int, []*OrganizationMemberGroup, error) {
+	page, limit int64,
+) (int64, []*OrganizationMemberGroup, error) {
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return 0, nil, ErrInvalidData
 	}
@@ -64,15 +63,14 @@ func (ms *MongoStorage) OrganizationMemberGroups(
 	if err != nil {
 		return 0, nil, err
 	}
-	totalPages := int(math.Ceil(float64(totalCount) / float64(pageSize)))
 
-	// Calculate skip value based on page and pageSize
-	skip := (page - 1) * pageSize
+	// Calculate skip value based on page and limit
+	skip := (page - 1) * limit
 
 	// Set up options for pagination
 	findOptions := options.Find().
-		SetSkip(int64(skip)).
-		SetLimit(int64(pageSize))
+		SetSkip(skip).
+		SetLimit(limit)
 
 	// find the organization in the database
 	cursor, err := ms.orgMemberGroups.Find(ctx, filter, findOptions)
@@ -98,7 +96,7 @@ func (ms *MongoStorage) OrganizationMemberGroups(
 		return 0, nil, err
 	}
 
-	return totalPages, groups, nil
+	return totalCount, groups, nil
 }
 
 // CreateOrganizationMemberGroup Creates an organization member group
@@ -284,11 +282,10 @@ func (ms *MongoStorage) DeleteOrganizationMemberGroup(groupID string, orgAddress
 }
 
 // ListOrganizationMemberGroup lists all the members of an organization member group (paginated)
-// and the total number of pages
 func (ms *MongoStorage) ListOrganizationMemberGroup(
 	groupID string, orgAddress common.Address,
-	page, pageSize int64,
-) (int, []*OrgMember, error) {
+	page, limit int64,
+) (int64, []*OrgMember, error) {
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return 0, nil, ErrInvalidData
 	}
@@ -302,7 +299,7 @@ func (ms *MongoStorage) ListOrganizationMemberGroup(
 		orgAddress,
 		group.MemberIDs,
 		page,
-		pageSize,
+		limit,
 	)
 }
 

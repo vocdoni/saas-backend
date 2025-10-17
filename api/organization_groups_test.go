@@ -307,13 +307,13 @@ func TestOrganizationGroups(t *testing.T) {
 			"organizations", orgAddress.String(), "groups", groupID, "members")
 		// We can't assert the exact number of members since it depends on previous tests
 		// but we can check that the response structure is correct
-		c.Assert(membersResponse.CurrentPage, qt.Not(qt.Equals), 0)
+		c.Assert(membersResponse.Pagination.CurrentPage, qt.Equals, int64(1))
 
 		// Test 2: List members with pagination
 		membersResponse = requestAndParse[apicommon.ListOrganizationMemberGroupResponse](
 			t, http.MethodGet, adminToken, nil,
-			"organizations", orgAddress.String(), "groups", groupID, "members", "?page=1&pageSize=5")
-		c.Assert(membersResponse.CurrentPage, qt.Equals, 1)
+			"organizations", orgAddress.String(), "groups", groupID, "members", "?page=1&limit=5")
+		c.Assert(membersResponse.Pagination.CurrentPage, qt.Equals, int64(1))
 
 		// Test 3: Try to list members without authentication
 		requestAndAssertCode(http.StatusUnauthorized,

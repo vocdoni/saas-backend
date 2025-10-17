@@ -1026,7 +1026,7 @@ This request can be made only by organization admins.
   * `Authentication: Bearer <user_token>`
 * **Query params**
   * `page` - Page number (default: 1)
-  * `pageSize` - Number of items per page (default: 10)
+  * `limit` - Number of items per page (default: 10)
   * `search` - Search term
 * **Response**
 ```json
@@ -1258,7 +1258,7 @@ Creates a new support ticket for the organization. The user must have any role i
   * `Authentication: Bearer <user_token>`
 * **Query params**
   * `page` - Page number (default: 1)
-  * `pageSize` - Number of items per page (default: 10)
+  * `limit` - Number of items per page (default: 10)
 * **Description**
 Get the list of groups and their info of the organization. Does not return the members of the groups, only the groups themselves. Requires admin or manager role.
 
@@ -1431,7 +1431,7 @@ Delete an organization member group by its ID. Requires admin or manager role.
   * `Authentication: Bearer <user_token>`
 * **Query params**
   * `page` - Page number (default: 1)
-  * `pageSize` - Number of items per page (default: 10)
+  * `limit` - Number of items per page (default: 10)
 * **Description**
 Get the list of members with details of an organization member group. Requires admin or manager role.
 

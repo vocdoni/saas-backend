@@ -323,8 +323,8 @@ func TestOrganizationMembers(t *testing.T) {
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "jobs")
 	c.Assert(jobsResponse.Jobs, qt.HasLen, 1, qt.Commentf("expected 1 job (the org_members job)"))
-	c.Assert(jobsResponse.TotalPages, qt.Equals, 1)
-	c.Assert(jobsResponse.CurrentPage, qt.Equals, 1)
+	c.Assert(jobsResponse.Pagination.TotalItems, qt.Equals, int64(1))
+	c.Assert(jobsResponse.Pagination.CurrentPage, qt.Equals, int64(1))
 
 	// Verify the job details
 	job := jobsResponse.Jobs[0]
@@ -343,10 +343,10 @@ func TestOrganizationMembers(t *testing.T) {
 	// Test with pagination
 	jobsResponsePaged := requestAndParse[apicommon.JobsResponse](
 		t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "jobs?page=1&pageSize=1")
+		"organizations", orgAddress.String(), "jobs?page=1&limit=1")
 	c.Assert(jobsResponsePaged.Jobs, qt.HasLen, 1)
-	c.Assert(jobsResponsePaged.TotalPages, qt.Equals, 1)
-	c.Assert(jobsResponsePaged.CurrentPage, qt.Equals, 1)
+	c.Assert(jobsResponsePaged.Pagination.TotalItems, qt.Equals, int64(1))
+	c.Assert(jobsResponsePaged.Pagination.CurrentPage, qt.Equals, int64(1))
 
 	// Test with job type filter for org_members
 	jobsResponseFiltered := requestAndParse[apicommon.JobsResponse](
@@ -422,7 +422,11 @@ func TestOrganizationMembers(t *testing.T) {
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "jobs")
 	c.Assert(multipleJobsResponse.Jobs, qt.HasLen, 2, qt.Commentf("expected 2 jobs"))
-	c.Assert(multipleJobsResponse.TotalPages, qt.Equals, 1)
+	c.Assert(multipleJobsResponse.Pagination.TotalItems, qt.Equals, int64(2))
+	c.Assert(multipleJobsResponse.Pagination.PreviousPage, qt.IsNil)
+	c.Assert(multipleJobsResponse.Pagination.CurrentPage, qt.Equals, int64(1))
+	c.Assert(multipleJobsResponse.Pagination.NextPage, qt.IsNil)
+	c.Assert(multipleJobsResponse.Pagination.LastPage, qt.Equals, int64(1))
 
 	// Verify jobs are sorted by creation date (newest first)
 	// The second job should be first in the list
@@ -432,32 +436,38 @@ func TestOrganizationMembers(t *testing.T) {
 	// Test pagination with multiple jobs
 	paginatedJobsResponse := requestAndParse[apicommon.JobsResponse](
 		t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "jobs?page=1&pageSize=1")
+		"organizations", orgAddress.String(), "jobs?page=1&limit=1")
 	c.Assert(paginatedJobsResponse.Jobs, qt.HasLen, 1)
-	c.Assert(paginatedJobsResponse.TotalPages, qt.Equals, 2)
-	c.Assert(paginatedJobsResponse.CurrentPage, qt.Equals, 1)
+	c.Assert(paginatedJobsResponse.Pagination.TotalItems, qt.Equals, int64(2))
+	c.Assert(paginatedJobsResponse.Pagination.PreviousPage, qt.IsNil)
+	c.Assert(paginatedJobsResponse.Pagination.CurrentPage, qt.Equals, int64(1))
+	c.Assert(*paginatedJobsResponse.Pagination.NextPage, qt.Equals, int64(2))
+	c.Assert(paginatedJobsResponse.Pagination.LastPage, qt.Equals, int64(2))
 	c.Assert(paginatedJobsResponse.Jobs[0].JobID, qt.Equals, jobIDHex2.String()) // Should be the newest job
 
 	// Test second page
 	paginatedJobsResponse2 := requestAndParse[apicommon.JobsResponse](
 		t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "jobs?page=2&pageSize=1")
+		"organizations", orgAddress.String(), "jobs?page=2&limit=1")
 	c.Assert(paginatedJobsResponse2.Jobs, qt.HasLen, 1)
-	c.Assert(paginatedJobsResponse2.TotalPages, qt.Equals, 2)
-	c.Assert(paginatedJobsResponse2.CurrentPage, qt.Equals, 2)
+	c.Assert(paginatedJobsResponse2.Pagination.TotalItems, qt.Equals, int64(2))
+	c.Assert(*paginatedJobsResponse2.Pagination.PreviousPage, qt.Equals, int64(1))
+	c.Assert(paginatedJobsResponse2.Pagination.CurrentPage, qt.Equals, int64(2))
+	c.Assert(paginatedJobsResponse2.Pagination.NextPage, qt.IsNil)
+	c.Assert(paginatedJobsResponse2.Pagination.LastPage, qt.Equals, int64(2))
 	c.Assert(paginatedJobsResponse2.Jobs[0].JobID, qt.Equals, jobIDHex.String()) // Should be the older job
 
 	// Test 6: Get organization members with pagination
-	// Test 6.1: Test with page=1 and pageSize=2
+	// Test 6.1: Test with page=1 and limit=2
 	membersResponse = requestAndParse[apicommon.OrganizationMembersResponse](
 		t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "members?page=1&pageSize=2")
+		"organizations", orgAddress.String(), "members?page=1&limit=2")
 	c.Assert(membersResponse.Members, qt.HasLen, 2, qt.Commentf("expected 2 members with pagination"))
 
-	// Test 6.2: Test with page=2 and pageSize=2
+	// Test 6.2: Test with page=2 and limit=2
 	membersResponse = requestAndParse[apicommon.OrganizationMembersResponse](
 		t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "members?page=2&pageSize=2")
+		"organizations", orgAddress.String(), "members?page=2&limit=2")
 	c.Assert(membersResponse.Members, qt.HasLen, 2, qt.Commentf("expected 2 members on page 2"))
 
 	// Test 7: Delete members

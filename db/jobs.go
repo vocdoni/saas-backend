@@ -102,7 +102,7 @@ func (ms *MongoStorage) CompleteJob(jobID string, added int, errors []string) er
 }
 
 // Jobs retrieves paginated jobs for an organization from the database.
-func (ms *MongoStorage) Jobs(orgAddress common.Address, page, pageSize int, jobType *JobType) (int, []Job, error) {
+func (ms *MongoStorage) Jobs(orgAddress common.Address, page, limit int64, jobType *JobType) (int64, []Job, error) {
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return 0, nil, ErrInvalidData
 	}
@@ -126,17 +126,14 @@ func (ms *MongoStorage) Jobs(orgAddress common.Address, page, pageSize int, jobT
 		return 0, nil, fmt.Errorf("failed to count jobs: %w", err)
 	}
 
-	// Calculate total pages
-	totalPages := int((totalCount + int64(pageSize) - 1) / int64(pageSize))
-
-	// Calculate skip value based on page and pageSize
-	skip := (page - 1) * pageSize
+	// Calculate skip value based on page and limit
+	skip := (page - 1) * limit
 
 	// Set up options for pagination - sort by creation date descending (newest first)
 	findOptions := options.Find().
 		SetSort(bson.D{{Key: "createdAt", Value: -1}}).
-		SetSkip(int64(skip)).
-		SetLimit(int64(pageSize))
+		SetSkip(skip).
+		SetLimit(limit)
 
 	// Execute the find operation with pagination
 	cursor, err := ms.jobs.Find(ctx, filter, findOptions)
@@ -155,5 +152,5 @@ func (ms *MongoStorage) Jobs(orgAddress common.Address, page, pageSize int, jobT
 		return 0, nil, fmt.Errorf("failed to decode jobs: %w", err)
 	}
 
-	return totalPages, jobs, nil
+	return totalCount, jobs, nil
 }

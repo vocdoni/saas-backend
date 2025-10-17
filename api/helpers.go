@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -15,6 +17,18 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"go.vocdoni.io/dvote/util"
+)
+
+// These consts define the keywords for query (?param=), url (/url/param/) and POST params.
+// Note: In JS/TS acronyms like "ID" are camelCased as in "Id".
+const (
+	ParamPage  = "page"
+	ParamLimit = "limit"
+)
+
+var (
+	ErrPageNotFound    = fmt.Errorf("page not found")
+	ErrCantParseNumber = fmt.Errorf("cannot parse number")
 )
 
 // organizationFromRequest helper function allows to get the organization info
@@ -175,4 +189,111 @@ func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) 
 	// and the link parameters
 	verificationLink, err = a.buildWebAppURL(webAppURI, linkParams)
 	return verificationCode, verificationLink, err
+}
+
+// calculatePagination calculates PreviousPage, NextPage and LastPage.
+//
+// If page is negative or higher than LastPage, returns ErrPageNotFound
+func calculatePagination(page, limit, totalItems int64) (*apicommon.Pagination, error) {
+	lastp := int64(math.Ceil(float64(totalItems) / float64(limit)))
+	if totalItems == 0 {
+		lastp = 1
+	}
+
+	if page > lastp || page < 1 {
+		return nil, ErrPageNotFound
+	}
+
+	var prevp, nextp *int64
+	if page > 1 {
+		prevPage := page - 1
+		prevp = &prevPage
+	}
+	if page < lastp {
+		nextPage := page + 1
+		nextp = &nextPage
+	}
+
+	return &apicommon.Pagination{
+		TotalItems:   totalItems,
+		PreviousPage: prevp,
+		CurrentPage:  page,
+		NextPage:     nextp,
+		LastPage:     lastp,
+	}, nil
+}
+
+// parsePaginationParams returns a PaginationParams filled with the passed params
+func parsePaginationParams(paramPage, paramLimit string) (apicommon.PaginationParams, error) {
+	page, err := parsePage(paramPage)
+	if err != nil {
+		return apicommon.PaginationParams{}, err
+	}
+
+	limit, err := parseLimit(paramLimit)
+	if err != nil {
+		return apicommon.PaginationParams{}, err
+	}
+
+	return apicommon.PaginationParams{
+		Page:  page,
+		Limit: limit,
+	}, nil
+}
+
+// parseNumber parses a string into an int64.
+//
+// If the string is not parseable, returns an APIerror.
+//
+// The empty string "" is treated specially, returns 0 with no error.
+func parseNumber(s string) (int64, error) {
+	if s == "" {
+		return 0, nil
+	}
+	i, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, ErrCantParseNumber
+	}
+	return i, nil
+}
+
+// parsePage parses a string into an int.
+//
+// If the resulting int is negative or 0, returns ErrNoSuchPage.
+// If the string is not parseable, returns an APIerror.
+//
+// The empty string "" is treated specially, returns 1 with no error.
+func parsePage(s string) (int64, error) {
+	if s == "" {
+		return 1, nil
+	}
+	page, err := parseNumber(s)
+	if err != nil {
+		return 0, err
+	}
+	if page < 1 {
+		return 0, ErrPageNotFound
+	}
+	return page, nil
+}
+
+// parseLimit parses a string into an int.
+//
+// The empty string "" is treated specially, returns DefaultItemsPerPage with no error.
+// If the resulting int is higher than MaxItemsPerPage, returns MaxItemsPerPage.
+// If the resulting int is 0 or negative, returns DefaultItemsPerPage.
+//
+// If the string is not parseable, returns an APIerror.
+func parseLimit(s string) (int64, error) {
+	limit, err := parseNumber(s)
+	if err != nil {
+		return 0, err
+	}
+	if limit > apicommon.MaxItemsPerPage {
+		limit = apicommon.MaxItemsPerPage
+	}
+	if limit <= 0 {
+		limit = apicommon.DefaultItemsPerPage
+	}
+	return limit, nil
 }

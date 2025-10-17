@@ -14,6 +14,29 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
+const (
+	// DefaultItemsPerPage defines how many items per page are returned by the paginated endpoints,
+	// when the client doesn't specify a `limit` param
+	DefaultItemsPerPage = 10
+	// MaxItemsPerPage defines a ceiling for the `limit` param passed by the client
+	MaxItemsPerPage = 100
+)
+
+// Pagination contains all the values needed for the UI to easily organize the returned data
+type Pagination struct {
+	TotalItems   int64  `json:"totalItems"`
+	PreviousPage *int64 `json:"previousPage"`
+	CurrentPage  int64  `json:"currentPage"`
+	NextPage     *int64 `json:"nextPage"`
+	LastPage     int64  `json:"lastPage"`
+}
+
+// PaginationParams allows the client to request a specific page, and how many items per page
+type PaginationParams struct {
+	Page  int64 `json:"page,omitempty"`
+	Limit int64 `json:"limit,omitempty"`
+}
+
 // OrganizationInfo represents an organization in the API.
 // swagger:model OrganizationInfo
 type OrganizationInfo struct {
@@ -203,10 +226,8 @@ type OrganizationMemberGroupInfo struct {
 // OrganizationMemberGroupsResponse represents the response for listing organization member groups.
 // swagger:model OrganizationMemberGroupsResponse
 type OrganizationMemberGroupsResponse struct {
-	// Total number of pages
-	TotalPages int `json:"totalPages"`
-	// Current page number
-	CurrentPage int `json:"currentPage"`
+	// Pagination fields
+	Pagination *Pagination `json:"pagination"`
 	// List of organization member groups
 	Groups []*OrganizationMemberGroupInfo `json:"groups"`
 }
@@ -228,10 +249,8 @@ type UpdateOrganizationMemberGroupsRequest struct {
 // ListOrganizationMemberGroupResponse represents the response for listing the members of an  organization group.
 // swagger:model ListOrganizationMemberGroupResponse
 type ListOrganizationMemberGroupResponse struct {
-	// Total number of pages
-	TotalPages int `json:"totalPages"`
-	// Current page number
-	CurrentPage int `json:"currentPage"`
+	// Pagination fields
+	Pagination *Pagination `json:"pagination"`
 	// List of organization group members
 	Members []OrgMember `json:"members"`
 }
@@ -897,13 +916,9 @@ func OrgMemberFromDb(p db.OrgMember) OrgMember {
 }
 
 type OrganizationMembersResponse struct {
-	// Total number of pages available
-	Pages int `json:"pages"`
-
-	// Current page number
-	Page int `json:"page"`
-
-	// Total number of members in the organization
+	// Pagination fields
+	Pagination *Pagination `json:"pagination"`
+	// Total members in the organization
 	Members []OrgMember `json:"members"`
 }
 
@@ -1118,12 +1133,8 @@ type JobInfo struct {
 // JobsResponse represents the response for listing organization jobs.
 // swagger:model JobsResponse
 type JobsResponse struct {
-	// Total number of pages
-	TotalPages int `json:"totalPages"`
-
-	// Current page number
-	CurrentPage int `json:"currentPage"`
-
+	// Pagination fields
+	Pagination *Pagination `json:"pagination"`
 	// List of jobs
 	Jobs []JobInfo `json:"jobs"`
 }

@@ -122,7 +122,7 @@ func TestDeleteAllOrganizationMembersDeletesGroups(t *testing.T) {
 		MemberIDs: []string{membersResponse.Members[0].ID, membersResponse.Members[1].ID},
 	}
 
-	gropuInfo := requestAndParseWithAssertCode[apicommon.OrganizationMemberGroupInfo](
+	groupInfo := requestAndParseWithAssertCode[apicommon.OrganizationMemberGroupInfo](
 		http.StatusOK,
 		t,
 		http.MethodPost,
@@ -134,11 +134,13 @@ func TestDeleteAllOrganizationMembersDeletesGroups(t *testing.T) {
 	)
 
 	// verify the group was created
-	c.Assert(gropuInfo.ID, qt.Not(qt.Equals), "")
-	groupInfoResp := requestAndParse[apicommon.ListOrganizationMemberGroupResponse](t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "groups", gropuInfo.ID, "members",
+	c.Assert(groupInfo.ID, qt.Not(qt.Equals), "")
+	groupMembersResp := requestAndParse[apicommon.ListOrganizationMemberGroupResponse](t, http.MethodGet, adminToken, nil,
+		"organizations", orgAddress.String(), "groups", groupInfo.ID, "members",
 	)
-	c.Assert(groupInfoResp.Members, qt.HasLen, 2)
+	c.Assert(groupMembersResp.Members, qt.HasLen, 2)
+	c.Assert(groupMembersResp.Pagination.CurrentPage, qt.Equals, int64(1))
+	c.Assert(groupMembersResp.Pagination.TotalItems, qt.Equals, int64(2))
 
 	// Test deleting all members
 	deleteAllReq := &apicommon.DeleteMembersRequest{
@@ -154,6 +156,18 @@ func TestDeleteAllOrganizationMembersDeletesGroups(t *testing.T) {
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "members")
 	c.Assert(membersResponse.Members, qt.HasLen, 0)
+	c.Assert(membersResponse.Pagination.CurrentPage, qt.Equals, int64(1))
+	c.Assert(membersResponse.Pagination.TotalItems, qt.Equals, int64(0))
+
+	// Verify that querying groups/{groupid}/members doesn't return anything weird
+	{
+		groupMembersResp := requestAndParse[apicommon.ListOrganizationMemberGroupResponse](t, http.MethodGet, adminToken, nil,
+			"organizations", orgAddress.String(), "groups", groupInfo.ID, "members",
+		)
+		c.Assert(groupMembersResp.Members, qt.HasLen, 0)
+		c.Assert(groupMembersResp.Pagination.CurrentPage, qt.Equals, int64(1))
+		c.Assert(groupMembersResp.Pagination.TotalItems, qt.Equals, int64(0))
+	}
 
 	// Verify the group was NOT deleted but left empty
 	groupsResponse := requestAndParse[apicommon.OrganizationMemberGroupsResponse](

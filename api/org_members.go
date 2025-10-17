@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"sync"
 	"time"
 
@@ -83,14 +82,14 @@ func (a *API) sendMembersImportCompletionEmail(userEmail, userName, orgName stri
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address		path		string	true	"Organization address"
-//	@Param			page		query		integer	false	"Page number (default: 1)"
-//	@Param			pageSize	query		integer	false	"Number of items per page (default: 10)"
-//	@Param			search		query		string	false	"Search term for member properties"
-//	@Success		200			{object}	apicommon.OrganizationMembersResponse
-//	@Failure		400			{object}	errors.Error	"Invalid input"
-//	@Failure		401			{object}	errors.Error	"Unauthorized"
-//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Param			address	path		string	true	"Organization address"
+//	@Param			page	query		integer	false	"Page number (default: 1)"
+//	@Param			limit	query		integer	false	"Number of items per page (default: 10)"
+//	@Param			search	query		string	false	"Search term for member properties"
+//	@Success		200		{object}	apicommon.OrganizationMembersResponse
+//	@Failure		400		{object}	errors.Error	"Invalid input"
+//	@Failure		401		{object}	errors.Error	"Unauthorized"
+//	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/organizations/{address}/members [get]
 func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
@@ -111,44 +110,36 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Parse pagination parameters from query string
-	page := 1      // Default page number
-	pageSize := 10 // Default page size
-	search := ""   // Default search term
-
-	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
-		if pageVal, err := strconv.Atoi(pageStr); err == nil && pageVal > 0 {
-			page = pageVal
-		}
-	}
-
-	if pageSizeStr := r.URL.Query().Get("pageSize"); pageSizeStr != "" {
-		if pageSizeVal, err := strconv.Atoi(pageSizeStr); err == nil && pageSizeVal >= 0 {
-			pageSize = pageSizeVal
-		}
-	}
-
+	search := "" // Default search term
 	if searchStr := r.URL.Query().Get("search"); searchStr != "" {
 		search = searchStr
 	}
 
-	// retrieve the orgMembers with pagination
-	pages, members, err := a.db.OrgMembers(org.Address, page, pageSize, search)
+	params, err := parsePaginationParams(r.URL.Query().Get(ParamPage), r.URL.Query().Get(ParamLimit))
+	if err != nil {
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
+	}
+
+	totalItems, members, err := a.db.OrgMembers(org.Address, params.Page, params.Limit, search)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not get org members: %v", err).Write(w)
 		return
 	}
-
 	// convert the orgMembers to the response format
 	membersResponse := make([]apicommon.OrgMember, 0, len(members))
 	for _, p := range members {
 		membersResponse = append(membersResponse, apicommon.OrgMemberFromDb(p))
 	}
 
+	pagination, err := calculatePagination(params.Page, params.Limit, totalItems)
+	if err != nil {
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
+		return
+	}
+
 	apicommon.HTTPWriteJSON(w, &apicommon.OrganizationMembersResponse{
-		Pages:   pages,
-		Page:    page,
-		Members: membersResponse,
+		Pagination: pagination,
+		Members:    membersResponse,
 	})
 }
 
