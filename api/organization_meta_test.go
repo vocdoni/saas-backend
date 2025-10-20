@@ -95,7 +95,7 @@ func TestOrganizationMeta(t *testing.T) {
 	// Test for array values
 	locations, ok := retrievedMeta.Meta["locations"].([]any)
 	c.Assert(ok, qt.IsTrue)
-	c.Assert(len(locations), qt.Equals, 3)
+	c.Assert(locations, qt.HasLen, 3)
 	c.Assert(locations[0], qt.Equals, "Madrid")
 	c.Assert(locations[1], qt.Equals, "Barcelona")
 	c.Assert(locations[2], qt.Equals, "Valencia")
@@ -159,7 +159,7 @@ func TestOrganizationMeta(t *testing.T) {
 	// Verify locations array is still intact
 	locations, ok = updatedMeta.Meta["locations"].([]any)
 	c.Assert(ok, qt.IsTrue)
-	c.Assert(len(locations), qt.Equals, 3)
+	c.Assert(locations, qt.HasLen, 3)
 
 	// Count total fields to ensure only the specified fields were deleted
 	metaFieldCount = 0

@@ -32,7 +32,7 @@ func TestJobOperations(t *testing.T) {
 	c.Assert(job.OrgAddress, qt.Equals, orgAddress)
 	c.Assert(job.Total, qt.Equals, total)
 	c.Assert(job.Added, qt.Equals, 0)
-	c.Assert(len(job.Errors), qt.Equals, 0)
+	c.Assert(job.Errors, qt.HasLen, 0)
 	c.Assert(job.CreatedAt.IsZero(), qt.IsFalse)
 	c.Assert(job.CompletedAt.IsZero(), qt.IsTrue)
 
@@ -85,5 +85,5 @@ func TestSetJob(t *testing.T) {
 	retrievedJob, err := testDB.Job(job.JobID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(retrievedJob.Added, qt.Equals, 30)
-	c.Assert(len(retrievedJob.Errors), qt.Equals, 2)
+	c.Assert(retrievedJob.Errors, qt.HasLen, 2)
 }

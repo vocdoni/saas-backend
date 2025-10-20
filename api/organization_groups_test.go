@@ -61,7 +61,7 @@ func TestOrganizationGroups(t *testing.T) {
 	membersResponse := requestAndParse[apicommon.OrganizationMembersResponse](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "members")
-	c.Assert(len(membersResponse.Members), qt.Equals, 2, qt.Commentf("expected 2 members"))
+	c.Assert(membersResponse.Members, qt.HasLen, 2, qt.Commentf("expected 2 members"))
 
 	membersMap := make(map[string]apicommon.OrgMember)
 	// Store participant IDs for later use
@@ -95,7 +95,7 @@ func TestOrganizationGroups(t *testing.T) {
 	membersResponse = requestAndParse[apicommon.OrganizationMembersResponse](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "members")
-	c.Assert(len(membersResponse.Members), qt.Equals, 3, qt.Commentf("expected 3 members"))
+	c.Assert(membersResponse.Members, qt.HasLen, 3, qt.Commentf("expected 3 members"))
 
 	// Store participant IDs for later use
 	for _, p := range membersResponse.Members {
@@ -163,7 +163,7 @@ func TestOrganizationGroups(t *testing.T) {
 		groupsResponse := requestAndParse[apicommon.OrganizationMemberGroupsResponse](
 			t, http.MethodGet, adminToken, nil,
 			"organizations", orgAddress.String(), "groups")
-		c.Assert(len(groupsResponse.Groups), qt.Equals, 2) // We created two groups in the previous test (Test 1 and Test 6)
+		c.Assert(groupsResponse.Groups, qt.HasLen, 2) // We created two groups in the previous test (Test 1 and Test 6)
 
 		// Test 2: Try to get groups without authentication
 		requestAndAssertCode(http.StatusUnauthorized,

@@ -35,7 +35,7 @@ func TestOrganizationMembers(t *testing.T) {
 	emptyMembersResponse := requestAndParse[apicommon.OrganizationMembersResponse](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "members")
-	c.Assert(len(emptyMembersResponse.Members), qt.Equals, 0, qt.Commentf("expected empty members list"))
+	c.Assert(emptyMembersResponse.Members, qt.HasLen, 0, qt.Commentf("expected empty members list"))
 
 	// Test 1.2: Test with no authentication
 	requestAndAssertCode(http.StatusUnauthorized,
@@ -169,7 +169,7 @@ func TestOrganizationMembers(t *testing.T) {
 	membersResponse := requestAndParse[apicommon.OrganizationMembersResponse](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "members")
-	c.Assert(len(membersResponse.Members), qt.Equals, 5, qt.Commentf("expected 5 members (2 from Test 2.1 + 3 from Test 2.5)"))
+	c.Assert(membersResponse.Members, qt.HasLen, 5, qt.Commentf("expected 5 members (2 from Test 2.1 + 3 from Test 2.5)"))
 
 	// Verify that members with missing fields were stored correctly
 	// Find the member with missing surname (Carlos)
@@ -232,7 +232,7 @@ func TestOrganizationMembers(t *testing.T) {
 		resp, code := testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "members", test.filter)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 		c.Assert(json.Unmarshal(resp, &membersResponse), qt.IsNil)
-		c.Assert(len(membersResponse.Members), qt.Equals, test.results,
+		c.Assert(membersResponse.Members, qt.HasLen, test.results,
 			qt.Commentf("expected %d result(s) for filter %q", test.results, test.filter))
 	}
 
@@ -276,7 +276,7 @@ func TestOrganizationMembers(t *testing.T) {
 		t, http.MethodPost, adminToken, asyncMembers,
 		"organizations", orgAddress.String(), "members?async=true")
 	c.Assert(asyncResponse.JobID, qt.Not(qt.IsNil))
-	c.Assert(len(asyncResponse.JobID), qt.Equals, 16) // JobID should be 16 bytes
+	c.Assert(asyncResponse.JobID, qt.HasLen, 16) // JobID should be 16 bytes
 
 	// Convert the job ID to a hex string for the API call
 	var jobIDHex internal.HexBytes
@@ -322,7 +322,7 @@ func TestOrganizationMembers(t *testing.T) {
 	jobsResponse := requestAndParse[apicommon.JobsResponse](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "jobs")
-	c.Assert(len(jobsResponse.Jobs), qt.Equals, 1, qt.Commentf("expected 1 job (the org_members job)"))
+	c.Assert(jobsResponse.Jobs, qt.HasLen, 1, qt.Commentf("expected 1 job (the org_members job)"))
 	c.Assert(jobsResponse.TotalPages, qt.Equals, 1)
 	c.Assert(jobsResponse.CurrentPage, qt.Equals, 1)
 
@@ -335,7 +335,7 @@ func TestOrganizationMembers(t *testing.T) {
 	c.Assert(job.CreatedAt.IsZero(), qt.Equals, false)
 	c.Assert(job.CompletedAt.IsZero(), qt.Equals, false)
 	c.Assert(job.JobID, qt.Equals, jobIDHex.String())
-	c.Assert(len(job.Errors), qt.Equals, 3) // Should have the validation errors
+	c.Assert(job.Errors, qt.HasLen, 3) // Should have the validation errors
 	t.Logf("Found org_members job: ID=%s, Type=%s, Total=%d, Added=%d, Completed=%t, Errors=%d",
 		job.JobID, job.Type, job.Total, job.Added, job.Completed, len(job.Errors))
 
@@ -344,7 +344,7 @@ func TestOrganizationMembers(t *testing.T) {
 	jobsResponsePaged := requestAndParse[apicommon.JobsResponse](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "jobs?page=1&pageSize=1")
-	c.Assert(len(jobsResponsePaged.Jobs), qt.Equals, 1)
+	c.Assert(jobsResponsePaged.Jobs, qt.HasLen, 1)
 	c.Assert(jobsResponsePaged.TotalPages, qt.Equals, 1)
 	c.Assert(jobsResponsePaged.CurrentPage, qt.Equals, 1)
 
@@ -352,14 +352,14 @@ func TestOrganizationMembers(t *testing.T) {
 	jobsResponseFiltered := requestAndParse[apicommon.JobsResponse](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "jobs?type=org_members")
-	c.Assert(len(jobsResponseFiltered.Jobs), qt.Equals, 1)
+	c.Assert(jobsResponseFiltered.Jobs, qt.HasLen, 1)
 	c.Assert(jobsResponseFiltered.Jobs[0].Type, qt.Equals, db.JobTypeOrgMembers)
 
 	// Test with different job type filter (should return empty)
 	jobsResponseEmpty := requestAndParse[apicommon.JobsResponse](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "jobs?type=census_participants")
-	c.Assert(len(jobsResponseEmpty.Jobs), qt.Equals, 0, qt.Commentf("should be empty for census_participants filter"))
+	c.Assert(jobsResponseEmpty.Jobs, qt.HasLen, 0, qt.Commentf("should be empty for census_participants filter"))
 
 	// Test 5.3: Test jobs endpoint - authorization and error cases
 	// Test with no authentication
@@ -421,7 +421,7 @@ func TestOrganizationMembers(t *testing.T) {
 	multipleJobsResponse := requestAndParse[apicommon.JobsResponse](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "jobs")
-	c.Assert(len(multipleJobsResponse.Jobs), qt.Equals, 2, qt.Commentf("expected 2 jobs"))
+	c.Assert(multipleJobsResponse.Jobs, qt.HasLen, 2, qt.Commentf("expected 2 jobs"))
 	c.Assert(multipleJobsResponse.TotalPages, qt.Equals, 1)
 
 	// Verify jobs are sorted by creation date (newest first)
@@ -433,7 +433,7 @@ func TestOrganizationMembers(t *testing.T) {
 	paginatedJobsResponse := requestAndParse[apicommon.JobsResponse](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "jobs?page=1&pageSize=1")
-	c.Assert(len(paginatedJobsResponse.Jobs), qt.Equals, 1)
+	c.Assert(paginatedJobsResponse.Jobs, qt.HasLen, 1)
 	c.Assert(paginatedJobsResponse.TotalPages, qt.Equals, 2)
 	c.Assert(paginatedJobsResponse.CurrentPage, qt.Equals, 1)
 	c.Assert(paginatedJobsResponse.Jobs[0].JobID, qt.Equals, jobIDHex2.String()) // Should be the newest job
@@ -442,7 +442,7 @@ func TestOrganizationMembers(t *testing.T) {
 	paginatedJobsResponse2 := requestAndParse[apicommon.JobsResponse](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "jobs?page=2&pageSize=1")
-	c.Assert(len(paginatedJobsResponse2.Jobs), qt.Equals, 1)
+	c.Assert(paginatedJobsResponse2.Jobs, qt.HasLen, 1)
 	c.Assert(paginatedJobsResponse2.TotalPages, qt.Equals, 2)
 	c.Assert(paginatedJobsResponse2.CurrentPage, qt.Equals, 2)
 	c.Assert(paginatedJobsResponse2.Jobs[0].JobID, qt.Equals, jobIDHex.String()) // Should be the older job
@@ -452,13 +452,13 @@ func TestOrganizationMembers(t *testing.T) {
 	membersResponse = requestAndParse[apicommon.OrganizationMembersResponse](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "members?page=1&pageSize=2")
-	c.Assert(len(membersResponse.Members), qt.Equals, 2, qt.Commentf("expected 2 members with pagination"))
+	c.Assert(membersResponse.Members, qt.HasLen, 2, qt.Commentf("expected 2 members with pagination"))
 
 	// Test 6.2: Test with page=2 and pageSize=2
 	membersResponse = requestAndParse[apicommon.OrganizationMembersResponse](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "members?page=2&pageSize=2")
-	c.Assert(len(membersResponse.Members), qt.Equals, 2, qt.Commentf("expected 2 members on page 2"))
+	c.Assert(membersResponse.Members, qt.HasLen, 2, qt.Commentf("expected 2 members on page 2"))
 
 	// Test 7: Delete members
 	// Test 7.1: Test with valid member IDs
@@ -497,5 +497,5 @@ func TestOrganizationMembers(t *testing.T) {
 	membersResponse = requestAndParse[apicommon.OrganizationMembersResponse](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "members")
-	c.Assert(len(membersResponse.Members), qt.Equals, 6, qt.Commentf("expected 6 members remaining (8 total - 2 deleted)"))
+	c.Assert(membersResponse.Members, qt.HasLen, 6, qt.Commentf("expected 6 members remaining (8 total - 2 deleted)"))
 }

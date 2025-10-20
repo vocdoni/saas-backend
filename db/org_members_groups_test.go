@@ -684,9 +684,9 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		results, err := testDB.CheckGroupMembersFields(testOrgAddress, validGroupID, authFields, twoFaFields)
 		c.Assert(err, qt.IsNil)
 		c.Assert(results, qt.Not(qt.IsNil))
-		c.Assert(len(results.Members), qt.Equals, 1)     // Only 1 member in valid group
-		c.Assert(len(results.Duplicates), qt.Equals, 0)  // No duplicates for email
-		c.Assert(len(results.MissingData), qt.Equals, 0) // No missing data for email
+		c.Assert(results.Members, qt.HasLen, 1)     // Only 1 member in valid group
+		c.Assert(results.Duplicates, qt.HasLen, 0)  // No duplicates for email
+		c.Assert(results.MissingData, qt.HasLen, 0) // No missing data for email
 
 		// Test 2: Duplicate detection - check fields with known duplicates using duplicates group
 		authFields = OrgMemberAuthFields{
@@ -970,7 +970,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		c.Assert(results, qt.Not(qt.IsNil))
 
 		// Should include members with email only, phone only, and both
-		c.Assert(len(results.Members), qt.Equals, 3)
+		c.Assert(results.Members, qt.HasLen, 3)
 
 		// Convert Members IDs to hex strings for easier comparison
 		memberIDs := make([]string, len(results.Members))
@@ -991,10 +991,10 @@ func TestOrganizationMemberGroup(t *testing.T) {
 
 		// Member with neither email nor phone should be in missing data
 		c.Assert(contains(missingDataIDs, noneMemberID), qt.Equals, true)
-		c.Assert(len(results.MissingData), qt.Equals, 1)
+		c.Assert(results.MissingData, qt.HasLen, 1)
 
 		// There should be no duplicates
-		c.Assert(len(results.Duplicates), qt.Equals, 0)
+		c.Assert(results.Duplicates, qt.HasLen, 0)
 
 		// Test 12: Bug fix - AuthFields + 2faFields should create composite key for uniqueness
 		// Create members with same auth fields but different 2fa fields
@@ -1046,8 +1046,8 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		results, err = testDB.CheckGroupMembersFields(testOrgAddress, sameAuthGroupID, authFields, twoFaFields)
 		c.Assert(err, qt.IsNil)
 		c.Assert(results, qt.Not(qt.IsNil))
-		c.Assert(len(results.Duplicates), qt.Equals, 0, qt.Commentf("Should NOT detect duplicates when 2FA fields make members unique"))
-		c.Assert(len(results.Members), qt.Equals, 2, qt.Commentf("Should include both members as valid"))
+		c.Assert(results.Duplicates, qt.HasLen, 0, qt.Commentf("Should NOT detect duplicates when 2FA fields make members unique"))
+		c.Assert(results.Members, qt.HasLen, 2, qt.Commentf("Should include both members as valid"))
 	})
 
 	// Test DeleteOrgMembers with automatic group cleanup

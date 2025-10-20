@@ -98,7 +98,7 @@ func TestOrganizationUsers(t *testing.T) {
 	var users apicommon.OrganizationUsers
 	err = parseJSON(resp, &users)
 	c.Assert(err, qt.IsNil)
-	c.Assert(len(users.Users), qt.Equals, 2) // Admin + new user
+	c.Assert(users.Users, qt.HasLen, 2) // Admin + new user
 
 	// Find the user in the list
 	var userID uint64
@@ -210,7 +210,7 @@ func TestOrganizationUsers(t *testing.T) {
 		err = parseJSON(resp, &pendingInvites)
 		c.Assert(err, qt.IsNil)
 		expectedInvitesCount := min(nInvites, premiumPlan.Organization.Users)
-		c.Assert(len(pendingInvites.Invites), qt.Equals, expectedInvitesCount,
+		c.Assert(pendingInvites.Invites, qt.HasLen, expectedInvitesCount,
 			qt.Commentf("expected %d pending invitations, got %d", expectedInvitesCount, len(pendingInvites.Invites)))
 	})
 
@@ -423,7 +423,7 @@ func TestOrganizationUsers(t *testing.T) {
 		var users apicommon.OrganizationUsers
 		err = parseJSON(resp, &users)
 		c.Assert(err, qt.IsNil)
-		c.Assert(len(users.Users), qt.Equals, 2) // Admin + new user
+		c.Assert(users.Users, qt.HasLen, 2) // Admin + new user
 
 		// Find the user in the list
 		var userID uint64
@@ -455,7 +455,7 @@ func TestOrganizationUsers(t *testing.T) {
 		var updatedUsers apicommon.OrganizationUsers
 		err = parseJSON(resp, &updatedUsers)
 		c.Assert(err, qt.IsNil)
-		c.Assert(len(updatedUsers.Users), qt.Equals, 1) // Only admin remains
+		c.Assert(updatedUsers.Users, qt.HasLen, 1) // Only admin remains
 
 		// Test 2: Try to remove a user without authentication
 		_, code = testRequest(
@@ -568,7 +568,7 @@ func TestOrganizationUsers(t *testing.T) {
 		var pendingInvites apicommon.OrganizationInviteList
 		err := parseJSON(resp, &pendingInvites)
 		c.Assert(err, qt.IsNil)
-		c.Assert(len(pendingInvites.Invites), qt.Equals, 1)
+		c.Assert(pendingInvites.Invites, qt.HasLen, 1)
 		c.Assert(pendingInvites.Invites[0].Email, qt.Equals, userToInviteEmail)
 
 		// Get the invitation ID and initial expiration time
@@ -606,7 +606,7 @@ func TestOrganizationUsers(t *testing.T) {
 		var updatedPendingInvites apicommon.OrganizationInviteList
 		err = parseJSON(resp, &updatedPendingInvites)
 		c.Assert(err, qt.IsNil)
-		c.Assert(len(updatedPendingInvites.Invites), qt.Equals, 1)
+		c.Assert(updatedPendingInvites.Invites, qt.HasLen, 1)
 		c.Assert(updatedPendingInvites.Invites[0].Email, qt.Equals, userToInviteEmail)
 
 		// Verify the expiration time has been updated (should be later than the initial one)
@@ -693,7 +693,7 @@ func TestOrganizationUsers(t *testing.T) {
 		var anotherPendingInvites apicommon.OrganizationInviteList
 		err = parseJSON(resp, &anotherPendingInvites)
 		c.Assert(err, qt.IsNil)
-		c.Assert(len(anotherPendingInvites.Invites), qt.Equals, 1)
+		c.Assert(anotherPendingInvites.Invites, qt.HasLen, 1)
 
 		anotherInvitationID := anotherPendingInvites.Invites[0].ID
 		c.Assert(anotherInvitationID, qt.Not(qt.Equals), "")
@@ -780,7 +780,7 @@ func TestOrganizationUsers(t *testing.T) {
 		var pendingInvites apicommon.OrganizationInviteList
 		err := parseJSON(resp, &pendingInvites)
 		c.Assert(err, qt.IsNil)
-		c.Assert(len(pendingInvites.Invites), qt.Equals, 1)
+		c.Assert(pendingInvites.Invites, qt.HasLen, 1)
 		c.Assert(pendingInvites.Invites[0].Email, qt.Equals, userToInviteEmail)
 
 		// Get the invitation ID
@@ -816,7 +816,7 @@ func TestOrganizationUsers(t *testing.T) {
 
 		err = parseJSON(resp, &pendingInvites)
 		c.Assert(err, qt.IsNil)
-		c.Assert(len(pendingInvites.Invites), qt.Equals, 0)
+		c.Assert(pendingInvites.Invites, qt.HasLen, 0)
 
 		// Test 2: Try to delete a non-existent invitation
 		nonExistentID := "000000000000000000000000" // Invalid ObjectID format
@@ -899,7 +899,7 @@ func TestOrganizationUsers(t *testing.T) {
 		var anotherPendingInvites apicommon.OrganizationInviteList
 		err = parseJSON(resp, &anotherPendingInvites)
 		c.Assert(err, qt.IsNil)
-		c.Assert(len(anotherPendingInvites.Invites), qt.Equals, 1)
+		c.Assert(anotherPendingInvites.Invites, qt.HasLen, 1)
 
 		anotherInvitationID := anotherPendingInvites.Invites[0].ID
 		c.Assert(anotherInvitationID, qt.Not(qt.Equals), "")
@@ -990,7 +990,7 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Verify we have the expected roles
-		c.Assert(len(roles.Roles), qt.Equals, 3) // Admin, Manager, Viewer
+		c.Assert(roles.Roles, qt.HasLen, 3) // Admin, Manager, Viewer
 
 		// Create a map for easier verification
 		roleMap := make(map[string]*apicommon.OrganizationRole)
