@@ -49,6 +49,7 @@ func (osc *Client) processFile(w http.ResponseWriter, fileHeader *multipart.File
 	defer func() {
 		if err := file.Close(); err != nil {
 			errors.ErrStorageInvalidObject.Withf("cannot close file %s %v", fileHeader.Filename, err).Write(w)
+			return
 		}
 	}()
 

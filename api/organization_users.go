@@ -355,6 +355,7 @@ func (a *API) updatePendingUserInvitationHandler(w http.ResponseWriter, r *http.
 
 	if invitation.OrganizationAddress != org.Address {
 		errors.ErrInvalidData.Withf("invitation is not for this organization").Write(w)
+		return
 	}
 
 	// create the updated invitation
