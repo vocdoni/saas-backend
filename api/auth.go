@@ -202,6 +202,7 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, err := a.db.SetUser(user); err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
 		}
 		res.Registered = true
 	}
