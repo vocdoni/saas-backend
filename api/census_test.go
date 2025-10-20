@@ -186,7 +186,7 @@ func TestCensus(t *testing.T) {
 	// Make the request with async=true and verify the response contains a job ID
 	asyncResponse := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, adminToken, asyncMembers,
 		censusEndpoint, censusID+"?async=true")
-	c.Assert(len(asyncResponse.JobID), qt.Equals, 16) // JobID should be 16 bytes
+	c.Assert(asyncResponse.JobID, qt.HasLen, 16) // JobID should be 16 bytes
 
 	// Convert the job ID to a hex string for the API call
 	var jobIDHex internal.HexBytes
@@ -223,7 +223,7 @@ func TestCensus(t *testing.T) {
 	jobsResponse := requestAndParse[apicommon.JobsResponse](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "jobs")
-	c.Assert(len(jobsResponse.Jobs), qt.Equals, 1, qt.Commentf("expected 1 job (the census participants job)"))
+	c.Assert(jobsResponse.Jobs, qt.HasLen, 1, qt.Commentf("expected 1 job (the census participants job)"))
 	c.Assert(jobsResponse.TotalPages, qt.Equals, 1)
 	c.Assert(jobsResponse.CurrentPage, qt.Equals, 1)
 
@@ -244,7 +244,7 @@ func TestCensus(t *testing.T) {
 	jobsResponsePaged := requestAndParse[apicommon.JobsResponse](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "jobs?page=1&pageSize=1")
-	c.Assert(len(jobsResponsePaged.Jobs), qt.Equals, 1)
+	c.Assert(jobsResponsePaged.Jobs, qt.HasLen, 1)
 	c.Assert(jobsResponsePaged.TotalPages, qt.Equals, 1)
 	c.Assert(jobsResponsePaged.CurrentPage, qt.Equals, 1)
 
@@ -252,14 +252,14 @@ func TestCensus(t *testing.T) {
 	jobsResponseFiltered := requestAndParse[apicommon.JobsResponse](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "jobs?type=census_participants")
-	c.Assert(len(jobsResponseFiltered.Jobs), qt.Equals, 1)
+	c.Assert(jobsResponseFiltered.Jobs, qt.HasLen, 1)
 	c.Assert(jobsResponseFiltered.Jobs[0].Type, qt.Equals, db.JobTypeCensusParticipants)
 
 	// Test with different job type filter (should return empty)
 	jobsResponseEmpty := requestAndParse[apicommon.JobsResponse](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "jobs?type=org_members")
-	c.Assert(len(jobsResponseEmpty.Jobs), qt.Equals, 0, qt.Commentf("should be empty for org_members filter"))
+	c.Assert(jobsResponseEmpty.Jobs, qt.HasLen, 0, qt.Commentf("should be empty for org_members filter"))
 
 	// Test 3.8: Test jobs endpoint - authorization and error cases
 	// Test with no authentication
@@ -461,7 +461,7 @@ func TestCensus(t *testing.T) {
 		participantsResp := requestAndParse[apicommon.CensusParticipantsResponse](
 			t, http.MethodGet, adminToken, nil,
 			censusEndpoint, groupCensusID, "participants")
-		c.Assert(len(participantsResp.MemberIDs), qt.Equals, 2)
+		c.Assert(participantsResp.MemberIDs, qt.HasLen, 2)
 		c.Assert(participantsResp.MemberIDs[0], qt.Equals, memberIDs[0])
 		c.Assert(participantsResp.MemberIDs[1], qt.Equals, memberIDs[1])
 

@@ -208,14 +208,14 @@ func TestObjectStorage(t *testing.T) {
 		objectID, err := calculateObjectID(data)
 		c.Assert(err, qt.IsNil)
 		c.Assert(objectID, qt.Not(qt.Equals), "")
-		c.Assert(len(objectID), qt.Equals, 24) // 12 bytes in hex = 24 characters
+		c.Assert(objectID, qt.HasLen, 24) // 12 bytes in hex = 24 characters
 
 		// Test with empty data
 		emptyData := []byte{}
 		objectID, err = calculateObjectID(emptyData)
 		c.Assert(err, qt.IsNil)
 		c.Assert(objectID, qt.Not(qt.Equals), "")
-		c.Assert(len(objectID), qt.Equals, 24)
+		c.Assert(objectID, qt.HasLen, 24)
 
 		// Test that different data produces different IDs
 		data2 := []byte("different data")

@@ -52,7 +52,7 @@ func TestLanguageParameterInEmails(t *testing.T) {
 			t, "GET", token, nil,
 			"organizations", orgAddress.String(), "members")
 
-		c.Assert(len(orgMembersResp.Members), qt.Equals, 1, qt.Commentf("should have 1 member"))
+		c.Assert(orgMembersResp.Members, qt.HasLen, 1, qt.Commentf("should have 1 member"))
 
 		memberID := orgMembersResp.Members[0].ID
 

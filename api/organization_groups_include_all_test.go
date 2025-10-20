@@ -64,7 +64,7 @@ func TestCreateGroupWithAllMembers(t *testing.T) {
 	groupDetails := requestAndParse[apicommon.OrganizationMemberGroupInfo](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "groups", groupResponse.ID)
-	c.Assert(len(groupDetails.MemberIDs), qt.Equals, 3)
+	c.Assert(groupDetails.MemberIDs, qt.HasLen, 3)
 	c.Assert(groupDetails.Title, qt.Equals, "All Members Group")
 	c.Assert(groupDetails.Description, qt.Equals, "A group containing all organization members")
 }
@@ -150,7 +150,7 @@ func TestCreateGroupSpecificMembersStillWorks(t *testing.T) {
 	membersResponse := requestAndParse[apicommon.OrganizationMembersResponse](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "members")
-	c.Assert(len(membersResponse.Members), qt.Equals, 2)
+	c.Assert(membersResponse.Members, qt.HasLen, 2)
 
 	// Create a group with only the first member
 	createGroupReq := &apicommon.CreateOrganizationMemberGroupRequest{
@@ -168,7 +168,7 @@ func TestCreateGroupSpecificMembersStillWorks(t *testing.T) {
 	groupDetails := requestAndParse[apicommon.OrganizationMemberGroupInfo](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "groups", groupResponse.ID)
-	c.Assert(len(groupDetails.MemberIDs), qt.Equals, 1)
+	c.Assert(groupDetails.MemberIDs, qt.HasLen, 1)
 	c.Assert(groupDetails.MemberIDs[0], qt.Equals, membersResponse.Members[0].ID)
 }
 
@@ -219,5 +219,5 @@ func TestCreateGroupWithLargeNumberOfMembers(t *testing.T) {
 	groupDetails := requestAndParse[apicommon.OrganizationMemberGroupInfo](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "groups", groupResponse.ID)
-	c.Assert(len(groupDetails.MemberIDs), qt.Equals, 50)
+	c.Assert(groupDetails.MemberIDs, qt.HasLen, 50)
 }

@@ -501,7 +501,7 @@ func TestCensusParticipant(t *testing.T) {
 		// Get all participants
 		participants, err := testDB.CensusParticipants(censusID)
 		c.Assert(err, qt.IsNil)
-		c.Assert(len(participants), qt.Equals, 3)
+		c.Assert(participants, qt.HasLen, 3)
 
 		// Verify login hash exists for each participant
 		for _, participant := range participants {
@@ -585,8 +585,8 @@ func TestCreateCensusParticipantBulkOperationsFiltering(t *testing.T) {
 		)
 
 		// Verify operations were created correctly
-		c.Assert(len(bulkOrgMembersOps), qt.Equals, 2)
-		c.Assert(len(bulkCensusParticipantOps), qt.Equals, 2)
+		c.Assert(bulkOrgMembersOps, qt.HasLen, 2)
+		c.Assert(bulkCensusParticipantOps, qt.HasLen, 2)
 
 		// Process the batch
 		added := testDB.processBatch(bulkOrgMembersOps, bulkCensusParticipantOps)
@@ -603,7 +603,7 @@ func TestCreateCensusParticipantBulkOperationsFiltering(t *testing.T) {
 		// Count total participants - should be exactly 2
 		participants, err := testDB.CensusParticipants(censusID)
 		c.Assert(err, qt.IsNil)
-		c.Assert(len(participants), qt.Equals, 2)
+		c.Assert(participants, qt.HasLen, 2)
 	})
 
 	t.Run("UpsertFunctionality", func(_ *testing.T) {
@@ -635,7 +635,7 @@ func TestCreateCensusParticipantBulkOperationsFiltering(t *testing.T) {
 		// Verify participants were updated, not duplicated
 		participants, err = testDB.CensusParticipants(censusID)
 		c.Assert(err, qt.IsNil)
-		c.Assert(len(participants), qt.Equals, 2) // Still only 2 participants
+		c.Assert(participants, qt.HasLen, 2) // Still only 2 participants
 
 		// Check that each participant's ParticipantID matches a member's ID.Hex()
 		// and that timestamps are properly updated
