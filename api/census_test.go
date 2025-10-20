@@ -232,9 +232,9 @@ func TestCensus(t *testing.T) {
 	c.Assert(job.Type, qt.Equals, db.JobTypeCensusParticipants)
 	c.Assert(job.Total, qt.Equals, 2)
 	c.Assert(job.Added, qt.Equals, 2)
-	c.Assert(job.Completed, qt.Equals, true)
-	c.Assert(job.CreatedAt.IsZero(), qt.Equals, false)
-	c.Assert(job.CompletedAt.IsZero(), qt.Equals, false)
+	c.Assert(job.Completed, qt.IsTrue)
+	c.Assert(job.CreatedAt.IsZero(), qt.IsFalse)
+	c.Assert(job.CompletedAt.IsZero(), qt.IsFalse)
 	c.Assert(job.JobID, qt.Equals, jobIDHex.String())
 	t.Logf("Found job: ID=%s, Type=%s, Total=%d, Added=%d, Completed=%t",
 		job.JobID, job.Type, job.Total, job.Added, job.Completed)

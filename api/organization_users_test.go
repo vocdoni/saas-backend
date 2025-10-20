@@ -122,7 +122,7 @@ func TestOrganizationUsers(t *testing.T) {
 		// Subscribe the organization to a plan
 		plans, err := testDB.Plans()
 		c.Assert(err, qt.IsNil)
-		c.Assert(len(plans), qt.Not(qt.Equals), 0)
+		c.Assert(len(plans) > 0, qt.IsTrue)
 		premiumPlan := plans[1]
 		c.Assert(premiumPlan.Organization.Users > 1, qt.IsTrue)
 
