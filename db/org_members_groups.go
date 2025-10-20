@@ -52,51 +52,10 @@ func (ms *MongoStorage) OrganizationMemberGroups(
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return 0, nil, ErrInvalidData
 	}
-	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
 
 	filter := bson.M{"orgAddress": orgAddress}
 
-	// Count total documents
-	totalCount, err := ms.orgMemberGroups.CountDocuments(ctx, filter)
-	if err != nil {
-		return 0, nil, err
-	}
-
-	// Calculate skip value based on page and limit
-	skip := (page - 1) * limit
-
-	// Set up options for pagination
-	findOptions := options.Find().
-		SetSkip(skip).
-		SetLimit(limit)
-
-	// find the organization in the database
-	cursor, err := ms.orgMemberGroups.Find(ctx, filter, findOptions)
-	if err != nil {
-		return 0, nil, err
-	}
-	defer func() {
-		if err := cursor.Close(ctx); err != nil {
-			log.Warnw("error closing cursor", "error", err)
-		}
-	}()
-
-	var groups []*OrganizationMemberGroup
-	for cursor.Next(ctx) {
-		var group OrganizationMemberGroup
-		if err := cursor.Decode(&group); err != nil {
-			return 0, nil, err
-		}
-		groups = append(groups, &group)
-	}
-
-	if err := cursor.Err(); err != nil {
-		return 0, nil, err
-	}
-
-	return totalCount, groups, nil
+	return paginatedDocuments[*OrganizationMemberGroup](ms.orgMemberGroups, page, limit, filter, options.Find())
 }
 
 // CreateOrganizationMemberGroup Creates an organization member group

@@ -1,11 +1,14 @@
 package db
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.vocdoni.io/dvote/log"
 )
 
 // collectionsMap returns a map of collection names to their corresponding field pointers
@@ -78,4 +81,44 @@ func dynamicUpdateDocument(item any, alwaysUpdateTags []string) (bson.M, error) 
 		}
 	}
 	return bson.M{"$set": update}, nil
+}
+
+// paginatedDocuments returns totalCount of collection.CountDocuments()
+// and a slice of collection.Find(), filtered and paginated.
+func paginatedDocuments[T any](collection *mongo.Collection, page, limit int64,
+	filter any, findOptions *options.FindOptions,
+) (int64, []T, error) {
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	// Count total documents
+	totalCount, err := collection.CountDocuments(ctx, filter)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	// Calculate skip value based on page and limit
+	skip := (page - 1) * limit
+	// Set up options for pagination
+	opts := findOptions.SetSkip(skip).SetLimit(limit)
+
+	// Execute the find operation with pagination
+	cursor, err := collection.Find(ctx, filter, opts)
+	if err != nil {
+		return 0, nil, fmt.Errorf("failed to get documents: %w", err)
+	}
+	defer func() {
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("error closing cursor", "error", err)
+		}
+	}()
+
+	// Decode results
+	var list []T
+	if err = cursor.All(ctx, &list); err != nil {
+		return 0, nil, fmt.Errorf("failed to decode documents: %w", err)
+	}
+
+	return totalCount, list, nil
 }

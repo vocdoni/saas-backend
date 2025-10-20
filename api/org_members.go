@@ -128,7 +128,7 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 	// convert the orgMembers to the response format
 	membersResponse := make([]apicommon.OrgMember, 0, len(members))
 	for _, p := range members {
-		membersResponse = append(membersResponse, apicommon.OrgMemberFromDb(p))
+		membersResponse = append(membersResponse, apicommon.OrgMemberFromDb(*p))
 	}
 
 	pagination, err := calculatePagination(params.Page, params.Limit, totalItems)

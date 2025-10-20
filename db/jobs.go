@@ -10,7 +10,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.vocdoni.io/dvote/log"
 )
 
 // SetJob creates a new job record in the database or updates an existing one.
@@ -107,9 +106,6 @@ func (ms *MongoStorage) Jobs(orgAddress common.Address, page, limit int64, jobTy
 		return 0, nil, ErrInvalidData
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-
 	// Create filter
 	filter := bson.M{
 		"orgAddress": orgAddress,
@@ -120,37 +116,11 @@ func (ms *MongoStorage) Jobs(orgAddress common.Address, page, limit int64, jobTy
 		filter["type"] = *jobType
 	}
 
-	// Count total documents
-	totalCount, err := ms.jobs.CountDocuments(ctx, filter)
-	if err != nil {
-		return 0, nil, fmt.Errorf("failed to count jobs: %w", err)
-	}
-
-	// Calculate skip value based on page and limit
-	skip := (page - 1) * limit
-
-	// Set up options for pagination - sort by creation date descending (newest first)
+	// sort by creation date descending (newest first)
 	findOptions := options.Find().
-		SetSort(bson.D{{Key: "createdAt", Value: -1}}).
-		SetSkip(skip).
-		SetLimit(limit)
+		SetSort(bson.D{
+			{Key: "createdAt", Value: -1},
+		})
 
-	// Execute the find operation with pagination
-	cursor, err := ms.jobs.Find(ctx, filter, findOptions)
-	if err != nil {
-		return 0, nil, fmt.Errorf("failed to get jobs: %w", err)
-	}
-	defer func() {
-		if err := cursor.Close(ctx); err != nil {
-			log.Warnw("error closing cursor", "error", err)
-		}
-	}()
-
-	// Decode results
-	var jobs []Job
-	if err = cursor.All(ctx, &jobs); err != nil {
-		return 0, nil, fmt.Errorf("failed to decode jobs: %w", err)
-	}
-
-	return totalCount, jobs, nil
+	return paginatedDocuments[Job](ms.jobs, page, limit, filter, findOptions)
 }
