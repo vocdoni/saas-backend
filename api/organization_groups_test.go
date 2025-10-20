@@ -192,7 +192,7 @@ func TestOrganizationGroups(t *testing.T) {
 		c.Assert(groupInfo.ID, qt.Equals, firstGroupID)
 		c.Assert(groupInfo.Title, qt.Not(qt.Equals), "")
 		c.Assert(groupInfo.Description, qt.Not(qt.Equals), "")
-		c.Assert(len(groupInfo.MemberIDs), qt.Not(qt.Equals), 0)
+		c.Assert(len(groupInfo.MemberIDs) > 0, qt.IsTrue)
 
 		// Test 6: Try to get a non-existent group
 		requestAndAssertCode(http.StatusInternalServerError,
@@ -205,7 +205,7 @@ func TestOrganizationGroups(t *testing.T) {
 		groupsResponse := requestAndParse[apicommon.OrganizationMemberGroupsResponse](
 			t, http.MethodGet, adminToken, nil,
 			"organizations", orgAddress.String(), "groups")
-		c.Assert(len(groupsResponse.Groups), qt.Not(qt.Equals), 0)
+		c.Assert(len(groupsResponse.Groups) > 0, qt.IsTrue)
 
 		groupID := groupsResponse.Groups[0].ID
 
@@ -248,7 +248,7 @@ func TestOrganizationGroups(t *testing.T) {
 				break
 			}
 		}
-		c.Assert(found, qt.Equals, true, qt.Commentf("New participant not found in group"))
+		c.Assert(found, qt.IsTrue, qt.Commentf("New participant not found in group"))
 
 		// Test 3: Remove a participant from the group
 		updateRequest = &apicommon.UpdateOrganizationMemberGroupsRequest{
@@ -273,7 +273,7 @@ func TestOrganizationGroups(t *testing.T) {
 				break
 			}
 		}
-		c.Assert(found, qt.Equals, false, qt.Commentf("Removed participant still found in group"))
+		c.Assert(found, qt.IsFalse, qt.Commentf("Removed participant still found in group"))
 
 		// Test 4: Try to update a group without authentication
 		requestAndAssertCode(http.StatusUnauthorized,
@@ -297,7 +297,7 @@ func TestOrganizationGroups(t *testing.T) {
 		groupsResponse := requestAndParse[apicommon.OrganizationMemberGroupsResponse](
 			t, http.MethodGet, adminToken, nil,
 			"organizations", orgAddress.String(), "groups")
-		c.Assert(len(groupsResponse.Groups), qt.Not(qt.Equals), 0)
+		c.Assert(len(groupsResponse.Groups) > 0, qt.IsTrue)
 
 		groupID := groupsResponse.Groups[0].ID
 

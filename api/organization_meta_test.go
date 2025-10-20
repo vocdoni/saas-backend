@@ -59,7 +59,7 @@ func TestOrganizationMeta(t *testing.T) {
 	c.Assert(retrievedMeta.Meta["size"], qt.Equals, "Medium")
 	c.Assert(retrievedMeta.Meta["industry"], qt.Equals, "Technology")
 	c.Assert(retrievedMeta.Meta["founded"], qt.Equals, float64(2020)) // JSON numbers are parsed as float64
-	c.Assert(retrievedMeta.Meta["public"], qt.Equals, true)
+	c.Assert(retrievedMeta.Meta["public"], qt.IsTrue)
 
 	// Test 2.2: Test with no authentication
 	_, code = testRequest(t, http.MethodGet, "", nil, "organizations", orgAddress.String(), "meta")
@@ -104,7 +104,7 @@ func TestOrganizationMeta(t *testing.T) {
 	c.Assert(retrievedMeta.Meta["region"], qt.Equals, "Europe")       // Original field preserved
 	c.Assert(retrievedMeta.Meta["industry"], qt.Equals, "Technology") // Original field preserved
 	c.Assert(retrievedMeta.Meta["founded"], qt.Equals, float64(2020)) // Original field preserved
-	c.Assert(retrievedMeta.Meta["public"], qt.Equals, true)           // Original field preserved
+	c.Assert(retrievedMeta.Meta["public"], qt.IsTrue)                 // Original field preserved
 
 	// Count total fields to ensure no fields were lost
 	metaFieldCount := 0
@@ -146,14 +146,14 @@ func TestOrganizationMeta(t *testing.T) {
 
 	// Verify deleted fields are gone
 	_, hasIndustry := updatedMeta.Meta["industry"]
-	c.Assert(hasIndustry, qt.Equals, false) // Deleted field
+	c.Assert(hasIndustry, qt.IsFalse) // Deleted field
 	_, hasFounded := updatedMeta.Meta["founded"]
-	c.Assert(hasFounded, qt.Equals, false) // Deleted field
+	c.Assert(hasFounded, qt.IsFalse) // Deleted field
 
 	// Verify all other fields remain intact
 	c.Assert(updatedMeta.Meta["region"], qt.Equals, "Europe")        // Preserved field
 	c.Assert(updatedMeta.Meta["size"], qt.Equals, "Large")           // Preserved field
-	c.Assert(updatedMeta.Meta["public"], qt.Equals, true)            // Preserved field
+	c.Assert(updatedMeta.Meta["public"], qt.IsTrue)                  // Preserved field
 	c.Assert(updatedMeta.Meta["employees"], qt.Equals, float64(500)) // Preserved field
 
 	// Verify locations array is still intact

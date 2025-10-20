@@ -184,7 +184,7 @@ func TestOrganizationMembers(t *testing.T) {
 			break
 		}
 	}
-	c.Assert(carlosFound, qt.Equals, true, qt.Commentf("Carlos member should be found"))
+	c.Assert(carlosFound, qt.IsTrue, qt.Commentf("Carlos member should be found"))
 
 	// Find the member with missing NationalID (Maria)
 	var mariaFound bool
@@ -199,7 +199,7 @@ func TestOrganizationMembers(t *testing.T) {
 			break
 		}
 	}
-	c.Assert(mariaFound, qt.Equals, true, qt.Commentf("Maria member should be found"))
+	c.Assert(mariaFound, qt.IsTrue, qt.Commentf("Maria member should be found"))
 
 	// Find the member with missing MemberNumber (Pedro)
 	var pedroFound bool
@@ -213,7 +213,7 @@ func TestOrganizationMembers(t *testing.T) {
 			break
 		}
 	}
-	c.Assert(pedroFound, qt.Equals, true, qt.Commentf("Pedro member should be found"))
+	c.Assert(pedroFound, qt.IsTrue, qt.Commentf("Pedro member should be found"))
 
 	// Test 3.1: Get organization members (filtered)
 	for _, test := range []struct {
@@ -309,7 +309,7 @@ func TestOrganizationMembers(t *testing.T) {
 	}
 
 	// Verify the job completed successfully
-	c.Assert(completed, qt.Equals, true, qt.Commentf("Job did not complete within expected time"))
+	c.Assert(completed, qt.IsTrue, qt.Commentf("Job did not complete within expected time"))
 	c.Assert(jobStatus.Added, qt.Equals, uint32(2)) // We added 2 members
 	c.Assert(jobStatus.Total, qt.Equals, uint32(2))
 	c.Assert(jobStatus.Progress, qt.Equals, uint32(100))
@@ -331,9 +331,9 @@ func TestOrganizationMembers(t *testing.T) {
 	c.Assert(job.Type, qt.Equals, db.JobTypeOrgMembers)
 	c.Assert(job.Total, qt.Equals, 2)
 	c.Assert(job.Added, qt.Equals, 2)
-	c.Assert(job.Completed, qt.Equals, true)
-	c.Assert(job.CreatedAt.IsZero(), qt.Equals, false)
-	c.Assert(job.CompletedAt.IsZero(), qt.Equals, false)
+	c.Assert(job.Completed, qt.IsTrue)
+	c.Assert(job.CreatedAt.IsZero(), qt.IsFalse)
+	c.Assert(job.CompletedAt.IsZero(), qt.IsFalse)
 	c.Assert(job.JobID, qt.Equals, jobIDHex.String())
 	c.Assert(job.Errors, qt.HasLen, 3) // Should have the validation errors
 	t.Logf("Found org_members job: ID=%s, Type=%s, Total=%d, Added=%d, Completed=%t, Errors=%d",
@@ -415,7 +415,7 @@ func TestOrganizationMembers(t *testing.T) {
 			time.Sleep(100 * time.Millisecond)
 		}
 	}
-	c.Assert(completed2, qt.Equals, true, qt.Commentf("Second job did not complete within expected time"))
+	c.Assert(completed2, qt.IsTrue, qt.Commentf("Second job did not complete within expected time"))
 
 	// Test multiple jobs - should now have 2 jobs
 	multipleJobsResponse := requestAndParse[apicommon.JobsResponse](

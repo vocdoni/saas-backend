@@ -153,7 +153,7 @@ func TestOAuthLoginHandler(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(loginResp.Token, qt.Not(qt.Equals), "")
 	// Verify the user is created in the database
-	c.Assert(loginResp.Registered, qt.Equals, true)
+	c.Assert(loginResp.Registered, qt.IsTrue)
 
 	// Test login with the same user again (should authenticate the existing user)
 	resp, code = testRequest(t, http.MethodPost, "", validLoginReq, oauthLoginEndpoint)
@@ -164,7 +164,7 @@ func TestOAuthLoginHandler(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(loginResp.Token, qt.Not(qt.Equals), "")
 	// User should not be registered again
-	c.Assert(loginResp.Registered, qt.Equals, false)
+	c.Assert(loginResp.Registered, qt.IsFalse)
 
 	// Test with invalid user password (wrong UserOAuthSignature for existing user)
 	invalidExistingUserReq := &apicommon.OAuthLoginRequest{
