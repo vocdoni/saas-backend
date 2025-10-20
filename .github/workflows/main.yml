@@ -22,6 +22,8 @@ jobs:
         with:
           version: v2.4
           only-new-issues: true
+      - name: Check qt testing patterns
+        run: ./scripts/check-qt-patterns.sh
 
   test:
     runs-on: ubuntu-latest
