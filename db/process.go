@@ -7,46 +7,53 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // CreateProcess creates a new process for an organization
-func (ms *MongoStorage) SetProcess(process *Process) error {
-	if len(process.ID) == 0 || process.OrgAddress.Cmp(common.Address{}) == 0 || len(process.Census.ID) == 0 {
-		return ErrInvalidData
+func (ms *MongoStorage) SetProcess(process *Process) (string, error) {
+	if process.OrgAddress.Cmp(common.Address{}) == 0 {
+		return "", ErrInvalidData
 	}
 
 	// check that the org exists
 	if _, err := ms.Organization(process.OrgAddress); err != nil {
-		return fmt.Errorf("failed to get organization %s: %w", process.OrgAddress, err)
+		return "", fmt.Errorf("failed to get organization %s: %w", process.OrgAddress, err)
 	}
 	// check that the census exists
-	census, err := ms.Census(process.Census.ID.Hex())
-	if err != nil {
-		return fmt.Errorf("failed to get census: %w", err)
+	if !process.Census.ID.IsZero() {
+		census, err := ms.Census(process.Census.ID.Hex())
+		if err != nil {
+			return "", fmt.Errorf("failed to get census: %w", err)
+		}
+		if len(census.Published.Root) == 0 || len(census.Published.URI) == 0 {
+			return "", fmt.Errorf("census %s does not have a published root or URI", census.ID.Hex())
+		}
 	}
-	if len(census.Published.Root) == 0 || len(census.Published.URI) == 0 {
-		return fmt.Errorf("census %s does not have a published root or URI", census.ID.Hex())
-	}
-
-	// TODO create the census if not found?
 
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	if _, err := ms.processes.InsertOne(ctx, process); err != nil {
-		return fmt.Errorf("failed to create process: %w", err)
+	res, err := ms.processes.InsertOne(ctx, process)
+	if err != nil {
+		return "", fmt.Errorf("failed to create process: %w", err)
 	}
 
-	return nil
+	return res.InsertedID.(primitive.ObjectID).Hex(), nil
 }
 
 // DeleteProcess removes a process
-func (ms *MongoStorage) DelProcess(processID internal.HexBytes) error {
+func (ms *MongoStorage) DelProcess(processID string) error {
 	if len(processID) == 0 {
 		return ErrInvalidData
 	}
+	parsedID, err := primitive.ObjectIDFromHex(processID)
+	if err != nil {
+		return ErrInvalidData
+	}
+
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
@@ -54,14 +61,19 @@ func (ms *MongoStorage) DelProcess(processID internal.HexBytes) error {
 	defer cancel()
 
 	// delete the process from the database using the ID
-	filter := bson.M{"_id": processID}
-	_, err := ms.processes.DeleteOne(ctx, filter)
+	filter := bson.M{"_id": parsedID}
+	_, err = ms.processes.DeleteOne(ctx, filter)
 	return err
 }
 
 // Process retrieves a process from the DB based on its ID
-func (ms *MongoStorage) Process(processID internal.HexBytes) (*Process, error) {
-	if len(processID) == 0 {
+func (ms *MongoStorage) Process(processID string) (*Process, error) {
+	if processID == "" {
+		return nil, ErrInvalidData
+	}
+
+	parsedID, err := primitive.ObjectIDFromHex(processID)
+	if err != nil {
 		return nil, ErrInvalidData
 	}
 
@@ -70,7 +82,25 @@ func (ms *MongoStorage) Process(processID internal.HexBytes) (*Process, error) {
 	defer cancel()
 
 	process := &Process{}
-	if err := ms.processes.FindOne(ctx, bson.M{"_id": processID}).Decode(process); err != nil {
+	if err := ms.processes.FindOne(ctx, bson.M{"_id": parsedID}).Decode(process); err != nil {
+		return nil, fmt.Errorf("failed to get process: %w", err)
+	}
+
+	return process, nil
+}
+
+// Process retrieves a process from the DB based on its ID
+func (ms *MongoStorage) ProcessByAddress(address internal.HexBytes) (*Process, error) {
+	if len(address) == 0 {
+		return nil, ErrInvalidData
+	}
+
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	process := &Process{}
+	if err := ms.processes.FindOne(ctx, bson.M{"address": address}).Decode(process); err != nil {
 		return nil, fmt.Errorf("failed to get process: %w", err)
 	}
 
