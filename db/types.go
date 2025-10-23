@@ -364,10 +364,11 @@ type PublishedCensus struct {
 //
 //nolint:lll
 type Process struct {
-	ID         internal.HexBytes `json:"id" bson:"_id"  swaggertype:"string" format:"hex" example:"deadbeef"`
-	OrgAddress common.Address    `json:"orgAdress" bson:"orgAddress"`
-	Census     Census            `json:"census" bson:"census"`
-	Metadata   []byte            `json:"metadata,omitempty"  bson:"metadata"  swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
+	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	Address    internal.HexBytes  `json:"address" bson:"address"  swaggertype:"string" format:"hex" example:"deadbeef"`
+	OrgAddress common.Address     `json:"orgAdress" bson:"orgAddress"`
+	Census     Census             `json:"census" bson:"census"`
+	Metadata   map[string]any     `json:"metadata"  bson:"metadata"`
 }
 
 // ProcessesBundle represents a group of voting processes that share a common census.
@@ -378,7 +379,7 @@ type ProcessesBundle struct {
 	ID         primitive.ObjectID  `json:"id" bson:"_id"`                                                                         // Unique identifier for the bundle
 	Census     Census              `json:"census" bson:"census"`                                                                  // The census associated with this bundle
 	OrgAddress common.Address      `json:"orgAddress" bson:"orgAddress"`                                                          // The organization that owns this bundle
-	Processes  []internal.HexBytes `json:"processes" bson:"processes" swaggertype:"array,string" format:"hex" example:"deadbeef"` // Array of process IDs included in this bundle
+	Processes  []internal.HexBytes `json:"processes" bson:"processes" swaggertype:"array,string" format:"hex" example:"deadbeef"` // Array of process addresses included in this bundle
 }
 
 // HashedPhone represents a hashed phone number for database storage

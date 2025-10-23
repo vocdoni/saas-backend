@@ -13,7 +13,7 @@ var (
 	testProcessID       = internal.HexBytes("test_process_id")
 	testProcessRoot     = "0xabcde"
 	testProcessURI      = "test_process_uri"
-	testProcessMetadata = []byte("test_metadata")
+	testProcessMetadata = map[string]any{"key1": "value1", "key2": "value2"}
 )
 
 func setupTestPrerequisites1(c *qt.C, db *MongoStorage) *Census {
@@ -57,7 +57,7 @@ func TestProcess(t *testing.T) {
 	t.Run("TestSetAndGetProcess", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// test not found process
-		process, err := testDB.Process(testProcessID)
+		process, err := testDB.ProcessByAddress(testProcessID)
 		c.Assert(process, qt.IsNil)
 		c.Assert(err, qt.Not(qt.IsNil))
 		var rootHex internal.HexBytes
@@ -77,11 +77,11 @@ func TestProcess(t *testing.T) {
 
 		// Test with non-existent organization
 		nonExistentProcess := &Process{
-			ID:         testProcessID,
+			Address:    testProcessID,
 			OrgAddress: testNonExistentOrg,
 			Census:     *census,
 		}
-		err = testDB.SetProcess(nonExistentProcess)
+		_, err = testDB.SetProcess(nonExistentProcess)
 		c.Assert(err, qt.Not(qt.IsNil))
 		c.Assert(err.Error(), qt.Contains, "failed to get organization")
 
@@ -90,21 +90,21 @@ func TestProcess(t *testing.T) {
 
 		// create a new process
 		process = &Process{
-			ID:         testProcessID,
+			Address:    testProcessID,
 			OrgAddress: testOrgAddress,
 			Census:     *census,
 			Metadata:   testProcessMetadata,
 		}
 
 		// test setting the process
-		err = testDB.SetProcess(process)
+		pid, err := testDB.SetProcess(process)
 		c.Assert(err, qt.IsNil)
 
 		// test retrieving the process
-		retrieved, err := testDB.Process(testProcessID)
+		retrieved, err := testDB.Process(pid)
 		c.Assert(err, qt.IsNil)
 		c.Assert(retrieved, qt.Not(qt.IsNil))
-		c.Assert(retrieved.ID, qt.DeepEquals, testProcessID)
+		c.Assert(retrieved.ID, qt.Not(qt.Equals), primitive.NilObjectID)
 		c.Assert(retrieved.OrgAddress, qt.Equals, testOrgAddress)
 		c.Assert(retrieved.Census.Published.URI, qt.Equals, testProcessURI)
 		c.Assert(retrieved.Census.Published.Root, qt.DeepEquals, rootHex)
@@ -115,24 +115,7 @@ func TestProcess(t *testing.T) {
 	t.Run("TestSetProcessValidation", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		// Setup prerequisites
-		census := setupTestPrerequisites1(c, testDB)
-
-		// test with empty ID
-		invalidProcess := &Process{
-			OrgAddress: testOrgAddress,
-			Census:     *census,
-		}
-		err := testDB.SetProcess(invalidProcess)
-		c.Assert(err, qt.Equals, ErrInvalidData)
-
-		// test with empty OrgAddress
-		invalidProcess = &Process{
-			ID:     testProcessID,
-			Census: *census,
-		}
-		err = testDB.SetProcess(invalidProcess)
-		c.Assert(err, qt.Equals, ErrInvalidData)
-
+		_ = setupTestPrerequisites1(c, testDB)
 		// test with empty Census Published Root
 		nonPublishedCensus := &Census{
 			OrgAddress: testOrgAddress,
@@ -145,12 +128,12 @@ func TestProcess(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		nonPublishedCensus.ID, err = primitive.ObjectIDFromHex(nonPublishedCensusID)
 		c.Assert(err, qt.IsNil)
-		invalidProcess = &Process{
-			ID:         testProcessID,
+		invalidProcess := &Process{
+			Address:    testProcessID,
 			OrgAddress: testOrgAddress,
 			Census:     *nonPublishedCensus,
 		}
-		err = testDB.SetProcess(invalidProcess)
+		_, err = testDB.SetProcess(invalidProcess)
 		c.Assert(err, qt.IsNotNil)
 		c.Assert(err.Error(), qt.Contains, "does not have a published root or URI")
 	})
@@ -162,25 +145,24 @@ func TestProcess(t *testing.T) {
 
 		// create a process
 		process := &Process{
-			ID:         testProcessID,
+			Address:    testProcessID,
 			OrgAddress: testOrgAddress,
 			Census:     *census,
 		}
-		err := testDB.SetProcess(process)
+		pid, err := testDB.SetProcess(process)
 		c.Assert(err, qt.IsNil)
 
 		// test deleting the process
-		err = testDB.DelProcess(testProcessID)
+		err = testDB.DelProcess(pid)
 		c.Assert(err, qt.IsNil)
 
 		// verify it's deleted
-		retrieved, err := testDB.Process(testProcessID)
+		retrieved, err := testDB.ProcessByAddress(testProcessID)
 		c.Assert(retrieved, qt.IsNil)
 		c.Assert(err, qt.Not(qt.IsNil))
 
 		// test delete with empty ID
-		var emptyID internal.HexBytes
-		err = testDB.DelProcess(emptyID)
+		err = testDB.DelProcess(primitive.NilObjectID)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 	})
 }

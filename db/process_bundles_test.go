@@ -16,13 +16,14 @@ var (
 // Helper function to create a test process
 func createTestProcess(c *qt.C, db *MongoStorage, processID internal.HexBytes, census *Census) *Process {
 	process := &Process{
-		ID:         processID,
+		Address:    processID,
 		OrgAddress: testOrgAddress,
 		Census:     *census,
 		Metadata:   testProcessMetadata,
 	}
-	err := db.SetProcess(process)
+	pid, err := db.SetProcess(process)
 	c.Assert(err, qt.IsNil)
+	process.ID = pid
 	return process
 }
 
@@ -75,7 +76,7 @@ func TestProcessBundles(t *testing.T) {
 		bundle := &ProcessesBundle{
 			OrgAddress: testOrgAddress,
 			Census:     *census,
-			Processes:  []internal.HexBytes{process1.ID, process2.ID},
+			Processes:  []internal.HexBytes{process1.Address, process2.Address},
 		}
 		bundleID, err := testDB.SetProcessBundle(bundle)
 		c.Assert(err, qt.IsNil)
@@ -87,12 +88,12 @@ func TestProcessBundles(t *testing.T) {
 		c.Assert(retrieved, qt.Not(qt.IsNil))
 		c.Assert(retrieved.ID.Hex(), qt.Equals, bundleID.String())
 		c.Assert(retrieved.Processes, qt.HasLen, 2)
-		c.Assert(retrieved.Processes[0], qt.DeepEquals, process1.ID)
-		c.Assert(retrieved.Processes[1], qt.DeepEquals, process2.ID)
+		c.Assert(retrieved.Processes[0], qt.DeepEquals, process1.Address)
+		c.Assert(retrieved.Processes[1], qt.DeepEquals, process2.Address)
 
 		// Test updating an existing bundle
 		process3 := createTestProcess(c, testDB, testProcessID3, census)
-		retrieved.Processes = append(retrieved.Processes, process3.ID)
+		retrieved.Processes = append(retrieved.Processes, process3.Address)
 		updatedBundleID, err := testDB.SetProcessBundle(retrieved)
 		c.Assert(err, qt.IsNil)
 		c.Assert(updatedBundleID, qt.DeepEquals, bundleID)
@@ -102,7 +103,7 @@ func TestProcessBundles(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(updated, qt.Not(qt.IsNil))
 		c.Assert(updated.Processes, qt.HasLen, 3)
-		c.Assert(updated.Processes[2], qt.DeepEquals, process3.ID)
+		c.Assert(updated.Processes[2], qt.DeepEquals, process3.Address)
 	})
 
 	t.Run("TestProcessBundlesList", func(_ *testing.T) {
@@ -124,7 +125,7 @@ func TestProcessBundles(t *testing.T) {
 		bundle1 := &ProcessesBundle{
 			OrgAddress: testOrgAddress,
 			Census:     *census,
-			Processes:  []internal.HexBytes{process1.ID, process2.ID},
+			Processes:  []internal.HexBytes{process1.Address, process2.Address},
 		}
 		bundle1ID, err := testDB.SetProcessBundle(bundle1)
 		c.Assert(err, qt.IsNil)
@@ -132,7 +133,7 @@ func TestProcessBundles(t *testing.T) {
 		bundle2 := &ProcessesBundle{
 			OrgAddress: testOrgAddress,
 			Census:     *census,
-			Processes:  []internal.HexBytes{process2.ID, process3.ID},
+			Processes:  []internal.HexBytes{process2.Address, process3.Address},
 		}
 		bundle2ID, err := testDB.SetProcessBundle(bundle2)
 		c.Assert(err, qt.IsNil)
@@ -162,7 +163,7 @@ func TestProcessBundles(t *testing.T) {
 		bundle1 := &ProcessesBundle{
 			OrgAddress: testOrgAddress,
 			Census:     *census,
-			Processes:  []internal.HexBytes{process1.ID, process2.ID},
+			Processes:  []internal.HexBytes{process1.Address, process2.Address},
 		}
 		bundle1ID, err := testDB.SetProcessBundle(bundle1)
 		c.Assert(err, qt.IsNil)
@@ -170,7 +171,7 @@ func TestProcessBundles(t *testing.T) {
 		bundle2 := &ProcessesBundle{
 			OrgAddress: testOrgAddress,
 			Census:     *census,
-			Processes:  []internal.HexBytes{process2.ID, process3.ID},
+			Processes:  []internal.HexBytes{process2.Address, process3.Address},
 		}
 		bundle2ID, err := testDB.SetProcessBundle(bundle2)
 		c.Assert(err, qt.IsNil)
@@ -213,13 +214,13 @@ func TestProcessBundles(t *testing.T) {
 		bundle := &ProcessesBundle{
 			OrgAddress: testOrgAddress,
 			Census:     *census,
-			Processes:  []internal.HexBytes{process1.ID},
+			Processes:  []internal.HexBytes{process1.Address},
 		}
 		bundleID, err := testDB.SetProcessBundle(bundle)
 		c.Assert(err, qt.IsNil)
 
 		// Test with invalid bundle ID
-		err = testDB.AddProcessesToBundle(nil, []internal.HexBytes{process2.ID})
+		err = testDB.AddProcessesToBundle(nil, []internal.HexBytes{process2.Address})
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test with empty processes array
@@ -232,7 +233,7 @@ func TestProcessBundles(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Add processes to the bundle
-		err = testDB.AddProcessesToBundle(bundleID, []internal.HexBytes{process2.ID, process3.ID})
+		err = testDB.AddProcessesToBundle(bundleID, []internal.HexBytes{process2.Address, process3.Address})
 		c.Assert(err, qt.IsNil)
 
 		// Verify the processes were added
@@ -254,7 +255,7 @@ func TestProcessBundles(t *testing.T) {
 		c.Assert(processIDs, qt.Contains, string(testProcessID3))
 
 		// Test adding a process that already exists in the bundle (should not duplicate)
-		err = testDB.AddProcessesToBundle(bundleID, []internal.HexBytes{process2.ID})
+		err = testDB.AddProcessesToBundle(bundleID, []internal.HexBytes{process2.Address})
 		c.Assert(err, qt.IsNil)
 
 		// Verify no duplication occurred
@@ -277,7 +278,7 @@ func TestProcessBundles(t *testing.T) {
 		bundle := &ProcessesBundle{
 			OrgAddress: testOrgAddress,
 			Census:     *census,
-			Processes:  []internal.HexBytes{process1.ID, process2.ID},
+			Processes:  []internal.HexBytes{process1.Address, process2.Address},
 		}
 		bundleID, err := testDB.SetProcessBundle(bundle)
 		c.Assert(err, qt.IsNil)

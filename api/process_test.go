@@ -85,39 +85,49 @@ func TestProcess(t *testing.T) {
 	t.Logf("Generated process ID: %s\n", processID.String())
 
 	// Test 1.1: Test with valid data
-	censusRoot := publishedCensus.Root
-	c.Assert(err, qt.IsNil)
-
 	censusIDBytes := internal.HexBytes{}
 	err = censusIDBytes.ParseString(censusID)
 	c.Assert(err, qt.IsNil)
 
 	processInfo := &apicommon.CreateProcessRequest{
-		PublishedCensusRoot: censusRoot,
-		PublishedCensusURI:  publishedCensus.URI,
-		CensusID:            censusIDBytes,
-		Metadata:            []byte(`{"title":"Test Process","description":"This is a test process"}`),
+		CensusID: censusIDBytes,
+		Metadata: map[string]any{"title": "Test Process", "description": "This is a test process"},
 	}
 
-	resp, code = testRequest(t, http.MethodPost, adminToken, processInfo, "process", processID.String())
+	resp, code = testRequest(t, http.MethodPost, adminToken, processInfo, "process")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
-	// Test 1.2: Test with no authentication
-	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "", processInfo, "process", processID.String())
+	// Test 1.2: Test create with no authentication
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "", processInfo, "process")
 
-	// Test 1.3: Test with invalid process ID
-	_, code = testRequest(t, http.MethodPost, adminToken, processInfo, "process", "invalid-id")
-	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
-
-	// Test 1.4: Test with missing census root/ID
+	// Test 1.3: Test create with missing census ID
 	invalidProcessInfo := &apicommon.CreateProcessRequest{
-		PublishedCensusURI: publishedCensus.URI,
-		Metadata:           []byte(`{"title":"Test Process","description":"This is a test process"}`),
+		Metadata: map[string]any{"title": "Test Process", "description": "This is a test process"},
 	}
-	_, code = testRequest(t, http.MethodPost, adminToken, invalidProcessInfo, "process", processID.String())
+
+	requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, adminToken, invalidProcessInfo, "process")
+
+	// Test 1.4: Test create with invalid census ID
+	invalidCensusID := internal.HexBytes("invalid-id")
+	invalidProcessInfo2 := &apicommon.CreateProcessRequest{
+		CensusID: invalidCensusID,
+		Metadata: map[string]any{"title": "Test Process", "description": "This is a test process"},
+	}
+
+	_, code = testRequest(t, http.MethodPost, adminToken, invalidProcessInfo2, "process")
 	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
 
-	// Test 1.5: Test with invalid process ID
+	// Test 1.5: Test create process (should succeed)
+	pid := requestAndParseWithAssertCode[string](http.StatusOK, t, http.MethodPost, adminToken, processInfo, "process")
+	t.Logf("Created process with ID: %s\n", pid)
+
+	// Test 1.6: Test retrieve with invalid census ID
 	_, code = testRequest(t, http.MethodGet, adminToken, nil, "process", "invalid-id")
 	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+
+	// Test 1.7: Test retrieve with valid process ID
+	retrievedProcess := requestAndParse[db.Process](t, http.MethodGet, adminToken, nil, "process", pid)
+	c.Assert(retrievedProcess.ID.Hex(), qt.Equals, pid)
+	c.Assert(retrievedProcess.Metadata["title"], qt.Equals, "Test Process")
+	c.Assert(retrievedProcess.Metadata["description"], qt.Equals, "This is a test process")
 }

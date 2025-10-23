@@ -131,7 +131,7 @@ definitions:
         description: Census ID
         type: string
       processes:
-        description: List of process IDs to include in the bundle
+        description: List of process Addresses to include in the bundle
         items:
           type: string
         type: array
@@ -149,26 +149,27 @@ definitions:
     type: object
   apicommon.CreateProcessRequest:
     properties:
+      address:
+        description: Vochain ID/Address of the process
+        example: deadbeef
+        format: hex
+        type: string
       censusId:
         description: Census ID
         example: deadbeef
         format: hex
         type: string
-      censusRoot:
-        description: Merkle root of the published census
-        example: deadbeef
-        format: hex
-        type: string
-      censusUri:
-        description: URI of the published census
-        type: string
       metadata:
+        additionalProperties: {}
         description: |-
           Additional metadata for the process
           Can be any key-value pairs
-        example: aGVsbG8gd29ybGQ=
-        format: base64
-        type: string
+        type: object
+      orgAddress:
+        description: Organization address
+        items:
+          type: integer
+        type: array
     type: object
   apicommon.DeleteMembersRequest:
     properties:
@@ -1099,16 +1100,17 @@ definitions:
     type: object
   db.Process:
     properties:
-      census:
-        $ref: '#/definitions/db.Census'
-      id:
+      address:
         example: deadbeef
         format: hex
         type: string
-      metadata:
-        example: aGVsbG8gd29ybGQ=
-        format: base64
+      census:
+        $ref: '#/definitions/db.Census'
+      id:
         type: string
+      metadata:
+        additionalProperties: {}
+        type: object
       orgAdress:
         items:
           type: integer
@@ -1129,7 +1131,7 @@ definitions:
           type: integer
         type: array
       processes:
-        description: Array of process IDs included in this bundle
+        description: Array of process addresses included in this bundle
         example:
         - deadbeef
         items:
@@ -3099,6 +3101,50 @@ paths:
       summary: Get plan information
       tags:
       - plans
+  /process:
+    post:
+      consumes:
+      - application/json
+      description: Create a new voting process. Requires Manager/Admin role.
+      parameters:
+      - description: Process creation information
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.CreateProcessRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Process ID
+          schema:
+            type: string
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Published census not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Process already exists
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Create a new voting process
+      tags:
+      - process
   /process/{processId}:
     get:
       consumes:
@@ -3131,54 +3177,6 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Get process information
-      tags:
-      - process
-    post:
-      consumes:
-      - application/json
-      description: Create a new voting process. Requires Manager/Admin role.
-      parameters:
-      - description: Process ID
-        in: path
-        name: processId
-        required: true
-        type: string
-      - description: Process creation information
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/apicommon.CreateProcessRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "400":
-          description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Published census not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "409":
-          description: Process already exists
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Create a new voting process
       tags:
       - process
   /process/{processId}/sign-info:
