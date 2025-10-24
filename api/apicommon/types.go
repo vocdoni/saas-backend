@@ -236,6 +236,17 @@ type ListOrganizationMemberGroupResponse struct {
 	Members []OrgMember `json:"members"`
 }
 
+// ListOrganizationProcesses represents the response for listing the processes of an organization.
+// swagger:model ListOrganizationProcesses
+type ListOrganizationProcesses struct {
+	// Total number of pages
+	TotalPages int `json:"totalPages"`
+	// Current page number
+	CurrentPage int `json:"currentPage"`
+	// List of organization processes
+	Processes []db.Process `json:"processes"`
+}
+
 // ValidateMemberGroupRequest validates the request for creating or updating an organization member group.
 // Validates that either AuthFields or TwoFaFields are provided and checks for duplicates or empty fields.
 // swagger:model ValidateMemberGroupRequest
@@ -953,6 +964,26 @@ type CreateProcessRequest struct {
 	// Additional metadata for the process
 	// Can be any key-value pairs
 	Metadata map[string]any `json:"metadata"`
+
+	// Whether this process is a draft (not yet pushed to the vochain)
+	Draft bool `json:"draft,omitempty"`
+}
+
+// UpdateProcessRequest defines the payload for updating an existing voting process.
+// swagger:model UpdateProcessRequest
+type UpdateProcessRequest struct {
+	// Vochain ID/Address of the process
+	Address internal.HexBytes `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
+
+	// Census ID
+	CensusID internal.HexBytes `json:"censusId" swaggertype:"string" format:"hex" example:"deadbeef"`
+
+	// Additional metadata for the process
+	// Can be any key-value pairs
+	Metadata map[string]any `json:"metadata"`
+
+	// Whether this process is a draft (not yet pushed to the vochain)
+	Draft *bool `json:"draft"`
 }
 
 // InitiateAuthRequest defines the payload for participant authentication.

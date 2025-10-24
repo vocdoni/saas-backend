@@ -159,6 +159,9 @@ definitions:
         example: deadbeef
         format: hex
         type: string
+      draft:
+        description: Whether this process is a draft (not yet pushed to the vochain)
+        type: boolean
       metadata:
         additionalProperties: {}
         description: |-
@@ -242,6 +245,20 @@ definitions:
         description: List of organization group members
         items:
           $ref: '#/definitions/apicommon.OrgMember'
+        type: array
+      totalPages:
+        description: Total number of pages
+        type: integer
+    type: object
+  apicommon.ListOrganizationProcesses:
+    properties:
+      currentPage:
+        description: Current page number
+        type: integer
+      processes:
+        description: List of organization processes
+        items:
+          $ref: '#/definitions/db.Process'
         type: array
       totalPages:
         description: Total number of pages
@@ -1101,6 +1118,8 @@ definitions:
         type: string
       census:
         $ref: '#/definitions/db.Census'
+      draft:
+        type: boolean
       id:
         type: string
       metadata:
@@ -2383,6 +2402,29 @@ paths:
       summary: Check the progress of adding members
       tags:
       - organizations
+  /organizations/{address}/processes/drafts:
+    get:
+      consumes:
+      - application/json
+      description: Returns a list of voting process drafts.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ListOrganizationProcesses'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Get paginated list of process drafts
+      tags:
+      - process
   /organizations/{address}/subscription:
     get:
       consumes:
@@ -3102,11 +3144,6 @@ paths:
       - application/json
       description: Create a new voting process. Requires Manager/Admin role.
       parameters:
-      - description: Process ID
-        in: path
-        name: processId
-        required: true
-        type: string
       - description: Process creation information
         in: body
         name: request
@@ -3177,6 +3214,50 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Get process information
+      tags:
+      - process
+    put:
+      consumes:
+      - application/json
+      description: Update an existing voting process. Requires Manager/Admin role.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Process update information
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.CreateProcessRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Update an existing voting process
       tags:
       - process
   /process/{processId}/sign-info:

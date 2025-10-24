@@ -364,11 +364,12 @@ type PublishedCensus struct {
 //
 //nolint:lll
 type Process struct {
-	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	ID         primitive.ObjectID `json:"id" bson:"_id"`
 	Address    internal.HexBytes  `json:"address" bson:"address"  swaggertype:"string" format:"hex" example:"deadbeef"`
 	OrgAddress common.Address     `json:"orgAdress" bson:"orgAddress"`
 	Census     Census             `json:"census" bson:"census"`
 	Metadata   map[string]any     `json:"metadata"  bson:"metadata"`
+	Draft      bool               `json:"draft" bson:"draft"`
 }
 
 // ProcessesBundle represents a group of voting processes that share a common census.

@@ -3,16 +3,23 @@ package db
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.vocdoni.io/dvote/log"
 )
 
-// CreateProcess creates a new process for an organization
+// SetProcess creates a new process or updates an existing one for an organization.
+// If the process already exists and is in draft mode, it will be updated.
 func (ms *MongoStorage) SetProcess(process *Process) (string, error) {
-	if process.OrgAddress.Cmp(common.Address{}) == 0 {
+	// validate input
+	// either OrgAddress or Census.ID cannot be empty in order to connect to an organization
+	if (process.OrgAddress.Cmp(common.Address{}) == 0) {
 		return "", ErrInvalidData
 	}
 
@@ -29,6 +36,19 @@ func (ms *MongoStorage) SetProcess(process *Process) (string, error) {
 		if len(census.Published.Root) == 0 || len(census.Published.URI) == 0 {
 			return "", fmt.Errorf("census %s does not have a published root or URI", census.ID.Hex())
 		}
+		if census.OrgAddress.Cmp(process.OrgAddress) != 0 {
+			return "", fmt.Errorf("census %s does not belong to organization %s", census.ID.Hex(), process.OrgAddress.String())
+		}
+	}
+
+	if process.ID == primitive.NilObjectID {
+		// if the process doesn't exist, create its id
+		process.ID = primitive.NewObjectID()
+	}
+
+	updateDoc, err := dynamicUpdateDocument(process, []string{"draft"})
+	if err != nil {
+		return "", fmt.Errorf("failed to create update document: %w", err)
 	}
 
 	ms.keysLock.Lock()
@@ -36,12 +56,18 @@ func (ms *MongoStorage) SetProcess(process *Process) (string, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	res, err := ms.processes.InsertOne(ctx, process)
+	// Use ReplaceOne with upsert option to either update an existing process or insert a new one
+	filter := bson.M{"_id": process.ID}
+	opts := options.Update().SetUpsert(true)
+	res, err := ms.processes.UpdateOne(ctx, filter, updateDoc, opts)
 	if err != nil {
-		return "", fmt.Errorf("failed to create process: %w", err)
+		return "", fmt.Errorf("failed to create or update process: %w", err)
+	}
+	if res.UpsertedID == nil {
+		return "", nil
 	}
 
-	return res.InsertedID.(primitive.ObjectID).Hex(), nil
+	return res.UpsertedID.(primitive.ObjectID).Hex(), nil
 }
 
 // DeleteProcess removes a process
@@ -66,7 +92,7 @@ func (ms *MongoStorage) DelProcess(processID string) error {
 	return err
 }
 
-// Process retrieves a process from the DB based on its ID
+// / Process retrieves a process from the DB based on its ID
 func (ms *MongoStorage) Process(processID string) (*Process, error) {
 	if processID == "" {
 		return nil, ErrInvalidData
@@ -81,12 +107,15 @@ func (ms *MongoStorage) Process(processID string) (*Process, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	process := &Process{}
-	if err := ms.processes.FindOne(ctx, bson.M{"_id": parsedID}).Decode(process); err != nil {
+	process := Process{}
+	if err := ms.processes.FindOne(ctx, bson.M{"_id": parsedID}).Decode(&process); err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("failed to get process: %w", err)
 	}
 
-	return process, nil
+	return &process, nil
 }
 
 // Process retrieves a process from the DB based on its ID
@@ -101,8 +130,64 @@ func (ms *MongoStorage) ProcessByAddress(address internal.HexBytes) (*Process, e
 
 	process := &Process{}
 	if err := ms.processes.FindOne(ctx, bson.M{"address": address}).Decode(process); err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("failed to get process: %w", err)
 	}
 
 	return process, nil
+}
+
+// ListProcesses retrieves all processes from the DB for an organization
+func (ms *MongoStorage) ListProcesses(orgAddress common.Address, page, pageSize int, draft bool) (int, []Process, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return 0, nil, ErrInvalidData
+	}
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	// Create filter
+	filter := bson.M{
+		"orgAddress": orgAddress,
+		"draft":      draft,
+	}
+
+	// Calculate skip value based on page and pageSize
+	skip := (page - 1) * pageSize
+
+	// Count total documents
+	totalCount, err := ms.processes.CountDocuments(ctx, filter)
+	if err != nil {
+		return 0, nil, err
+	}
+	totalPages := int(math.Ceil(float64(totalCount) / float64(pageSize)))
+	sort := bson.D{
+		bson.E{Key: "_id", Value: 1},
+	}
+	// Set up options for pagination
+	findOptions := options.Find().
+		SetSort(sort). // Sort by _id in descending order
+		SetSkip(int64(skip)).
+		SetLimit(int64(pageSize))
+
+	// Execute the find operation with pagination
+	cursor, err := ms.processes.Find(ctx, filter, findOptions)
+	if err != nil {
+		return 0, nil, fmt.Errorf("failed to get processes: %w", err)
+	}
+	defer func() {
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("error closing cursor", "error", err)
+		}
+	}()
+
+	// Decode results
+	var processes []Process
+	if err = cursor.All(ctx, &processes); err != nil {
+		return 0, nil, fmt.Errorf("failed to decode processes: %w", err)
+	}
+
+	return totalPages, processes, nil
 }

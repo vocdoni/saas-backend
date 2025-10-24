@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
@@ -11,11 +12,11 @@ import (
 	"go.vocdoni.io/dvote/util"
 )
 
-func TestProcess(t *testing.T) {
+func testCreateOrgAndCensus(
+	t *testing.T,
+	adminToken string,
+) (common.Address, string, apicommon.PublishedCensusResponse) {
 	c := qt.New(t)
-
-	// Create a user with admin permissions
-	adminToken := testCreateUser(t, "adminpassword123")
 
 	// Verify the token works
 	user := requestAndParse[apicommon.UserInfo](t, http.MethodGet, adminToken, nil, usersMeEndpoint)
@@ -79,6 +80,18 @@ func TestProcess(t *testing.T) {
 	c.Assert(publishedCensus.URI, qt.Not(qt.Equals), "")
 	c.Assert(publishedCensus.Root, qt.Not(qt.Equals), "")
 
+	return orgAddress, censusID, publishedCensus
+}
+
+func TestProcess(t *testing.T) {
+	c := qt.New(t)
+
+	// Create a user with admin permissions
+	adminToken := testCreateUser(t, "adminpassword123")
+
+	// Create org and census
+	_, censusID, _ := testCreateOrgAndCensus(t, adminToken)
+
 	// Test 1: Create a process
 	// Generate a random process ID
 	processID := internal.HexBytes(util.RandomBytes(32))
@@ -86,7 +99,7 @@ func TestProcess(t *testing.T) {
 
 	// Test 1.1: Test with valid data
 	censusIDBytes := internal.HexBytes{}
-	err = censusIDBytes.ParseString(censusID)
+	err := censusIDBytes.ParseString(censusID)
 	c.Assert(err, qt.IsNil)
 
 	processInfo := &apicommon.CreateProcessRequest{
@@ -94,7 +107,7 @@ func TestProcess(t *testing.T) {
 		Metadata: map[string]any{"title": "Test Process", "description": "This is a test process"},
 	}
 
-	resp, code = testRequest(t, http.MethodPost, adminToken, processInfo, "process")
+	resp, code := testRequest(t, http.MethodPost, adminToken, processInfo, "process")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Test 1.2: Test create with no authentication
@@ -130,4 +143,97 @@ func TestProcess(t *testing.T) {
 	c.Assert(retrievedProcess.ID.Hex(), qt.Equals, pid)
 	c.Assert(retrievedProcess.Metadata["title"], qt.Equals, "Test Process")
 	c.Assert(retrievedProcess.Metadata["description"], qt.Equals, "This is a test process")
+}
+
+// TestDraftProcess tests the draft process functionality
+func TestDraftProcess(t *testing.T) {
+	c := qt.New(t)
+
+	// Create a user with admin permissions
+	adminToken := testCreateUser(t, "adminpassword123")
+
+	// Create org and census
+	orgAddress, censusID, _ := testCreateOrgAndCensus(t, adminToken)
+
+	// Generate a random process ID
+	processID := internal.HexBytes(util.RandomBytes(32))
+	t.Logf("Generated process ID for draft test: %s\n", processID.String())
+
+	censusIDBytes := internal.HexBytes{}
+	err := censusIDBytes.ParseString(censusID)
+	c.Assert(err, qt.IsNil)
+
+	// Step 1: Create a process with draft=true
+	initialMetadata := map[string]any{
+		"title":       "Draft Process",
+		"description": "This is a draft process",
+	}
+	draftProcessInfo := &apicommon.CreateProcessRequest{
+		OrgAddress: orgAddress,
+		CensusID:   censusIDBytes,
+		Metadata:   initialMetadata,
+		Draft:      true, // Mark as draft
+	}
+
+	pid := requestAndParseWithAssertCode[string](
+		http.StatusOK,
+		t,
+		http.MethodPost,
+		adminToken,
+		draftProcessInfo,
+		"process",
+	)
+	t.Log("Successfully created draft process")
+
+	// Verify the process was created and is in draft mode
+	resp, code := testRequest(t, http.MethodGet, adminToken, nil, "process", pid)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+	var createdProcess db.Process
+	err = parseJSON(resp, &createdProcess)
+	c.Assert(err, qt.IsNil)
+	c.Assert(createdProcess.Draft, qt.IsTrue, qt.Commentf("Process should be in draft mode"))
+	t.Log("Verified process is in draft mode")
+
+	// Verify the list of draft processes contains 1 item
+	{
+		processDraftsResp := requestAndParse[apicommon.ListOrganizationProcesses](t,
+			http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "processes", "drafts")
+		c.Assert(processDraftsResp.Processes, qt.HasLen, 1)
+	}
+
+	// Step 2: Update the process with new metadata and draft=false
+	updatedMetadata := map[string]any{
+		"title":       "Updated Process",
+		"description": "This is no longer a draft process",
+	}
+	draftFalse := false
+	updatedProcessInfo := &apicommon.UpdateProcessRequest{
+		CensusID: censusIDBytes,
+		Metadata: updatedMetadata,
+		Draft:    &draftFalse, // No longer a draft
+	}
+
+	resp, code = testRequest(t, http.MethodPut, adminToken, updatedProcessInfo, "process", pid)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+	t.Log("Successfully updated process and set draft=false")
+
+	// Verify the process was updated and is no longer in draft mode
+	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "process", pid)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+	var updatedProcess db.Process
+	err = parseJSON(resp, &updatedProcess)
+	c.Assert(err, qt.IsNil)
+	c.Assert(updatedProcess.Draft, qt.IsFalse, qt.Commentf("Process should no longer be in draft mode"))
+	c.Assert(updatedProcess.Metadata, qt.DeepEquals, updatedMetadata, qt.Commentf("Process metadata should be updated"))
+	t.Log("Verified process is no longer in draft mode and metadata was updated")
+
+	// Verify the list of draft processes is now empty
+	{
+		processDraftsResp := requestAndParse[apicommon.ListOrganizationProcesses](t,
+			http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "processes", "drafts")
+		c.Assert(processDraftsResp.Processes, qt.HasLen, 0)
+		c.Assert(processDraftsResp.TotalPages, qt.Equals, 0)
+	}
 }
