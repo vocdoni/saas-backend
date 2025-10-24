@@ -969,6 +969,23 @@ type CreateProcessRequest struct {
 	Draft bool `json:"draft,omitempty"`
 }
 
+// UpdateProcessRequest defines the payload for updating an existing voting process.
+// swagger:model UpdateProcessRequest
+type UpdateProcessRequest struct {
+	// Vochain ID/Address of the process
+	Address internal.HexBytes `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
+
+	// Census ID
+	CensusID internal.HexBytes `json:"censusId" swaggertype:"string" format:"hex" example:"deadbeef"`
+
+	// Additional metadata for the process
+	// Can be any key-value pairs
+	Metadata map[string]any `json:"metadata"`
+
+	// Whether this process is a draft (not yet pushed to the vochain)
+	Draft *bool `json:"draft"`
+}
+
 // InitiateAuthRequest defines the payload for participant authentication.
 // swagger:model InitiateAuthRequest
 type InitiateAuthRequest struct {

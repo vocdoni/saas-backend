@@ -36,6 +36,19 @@ func (ms *MongoStorage) SetProcess(process *Process) (string, error) {
 		if len(census.Published.Root) == 0 || len(census.Published.URI) == 0 {
 			return "", fmt.Errorf("census %s does not have a published root or URI", census.ID.Hex())
 		}
+		if census.OrgAddress.Cmp(process.OrgAddress) != 0 {
+			return "", fmt.Errorf("census %s does not belong to organization %s", census.ID.Hex(), process.OrgAddress.String())
+		}
+	}
+
+	if process.ID == primitive.NilObjectID {
+		// if the process doesn't exist, create its id
+		process.ID = primitive.NewObjectID()
+	}
+
+	updateDoc, err := dynamicUpdateDocument(process, []string{"draft"})
+	if err != nil {
+		return "", fmt.Errorf("failed to create update document: %w", err)
 	}
 
 	ms.keysLock.Lock()
@@ -44,14 +57,14 @@ func (ms *MongoStorage) SetProcess(process *Process) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// Use ReplaceOne with upsert option to either update an existing process or insert a new one
-	var filter bson.M
-	if !process.ID.IsZero() {
-		filter = bson.M{"_id": process.ID}
-	}
-	opts := options.Replace().SetUpsert(true)
-	res, err := ms.processes.ReplaceOne(ctx, filter, process, opts)
+	filter := bson.M{"_id": process.ID}
+	opts := options.Update().SetUpsert(true)
+	res, err := ms.processes.UpdateOne(ctx, filter, updateDoc, opts)
 	if err != nil {
 		return "", fmt.Errorf("failed to create or update process: %w", err)
+	}
+	if res.UpsertedID == nil {
+		return "", nil
 	}
 
 	return res.UpsertedID.(primitive.ObjectID).Hex(), nil
@@ -94,15 +107,15 @@ func (ms *MongoStorage) Process(processID string) (*Process, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	process := &Process{}
-	if err := ms.processes.FindOne(ctx, bson.M{"_id": parsedID}).Decode(process); err != nil {
+	process := Process{}
+	if err := ms.processes.FindOne(ctx, bson.M{"_id": parsedID}).Decode(&process); err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("failed to get process: %w", err)
 	}
 
-	return process, nil
+	return &process, nil
 }
 
 // Process retrieves a process from the DB based on its ID

@@ -56,6 +56,7 @@ func TestProcess(t *testing.T) {
 
 	t.Run("TestSetAndGetProcess", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
+		_ = setupTestPrerequisites1(c, testDB)
 		// test not found process
 		process, err := testDB.ProcessByAddress(testProcessID)
 		c.Assert(process, qt.IsNil)
@@ -94,6 +95,7 @@ func TestProcess(t *testing.T) {
 			OrgAddress: testOrgAddress,
 			Census:     *census,
 			Metadata:   testProcessMetadata,
+			Draft:      true,
 		}
 
 		// test setting the process
@@ -110,6 +112,28 @@ func TestProcess(t *testing.T) {
 		c.Assert(retrieved.Census.Published.Root, qt.DeepEquals, rootHex)
 		c.Assert(retrieved.Census.ID, qt.Equals, census.ID)
 		c.Assert(retrieved.Metadata, qt.DeepEquals, testProcessMetadata)
+		c.Assert(retrieved.Draft, qt.IsTrue)
+
+		// update a process
+		retrieved.Metadata["key1"] = "newvalue1"
+		_, err = testDB.SetProcess(retrieved)
+		c.Assert(err, qt.IsNil)
+
+		// retrieve updated process
+		updated, err := testDB.Process(pid)
+		c.Assert(err, qt.IsNil)
+		c.Assert(updated.Metadata["key1"], qt.Equals, "newvalue1")
+		// Draft field should remain true as we are not updating it
+		c.Assert(updated.Draft, qt.IsTrue)
+
+		updated.Draft = false
+		_, err = testDB.SetProcess(updated)
+		c.Assert(err, qt.IsNil)
+
+		// retrieve updated process
+		updated2, err := testDB.Process(pid)
+		c.Assert(err, qt.IsNil)
+		c.Assert(updated2.Draft, qt.IsFalse)
 	})
 
 	t.Run("TestSetProcessValidation", func(_ *testing.T) {

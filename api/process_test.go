@@ -12,7 +12,10 @@ import (
 	"go.vocdoni.io/dvote/util"
 )
 
-func testCreateOrgAndCensus(t *testing.T, adminToken string) (common.Address, string, apicommon.PublishedCensusResponse) {
+func testCreateOrgAndCensus(
+	t *testing.T,
+	adminToken string,
+) (common.Address, string, apicommon.PublishedCensusResponse) {
 	c := qt.New(t)
 
 	// Verify the token works
@@ -166,23 +169,30 @@ func TestDraftProcess(t *testing.T) {
 		"description": "This is a draft process",
 	}
 	draftProcessInfo := &apicommon.CreateProcessRequest{
-		CensusID: censusIDBytes,
-		Metadata: initialMetadata,
-		Draft:    true, // Mark as draft
+		OrgAddress: orgAddress,
+		CensusID:   censusIDBytes,
+		Metadata:   initialMetadata,
+		Draft:      true, // Mark as draft
 	}
 
-	resp, code := testRequest(t, http.MethodPost, adminToken, draftProcessInfo, "process", processID.String())
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+	pid := requestAndParseWithAssertCode[string](
+		http.StatusOK,
+		t,
+		http.MethodPost,
+		adminToken,
+		draftProcessInfo,
+		"process",
+	)
 	t.Log("Successfully created draft process")
 
 	// Verify the process was created and is in draft mode
-	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "process", processID.String())
+	resp, code := testRequest(t, http.MethodGet, adminToken, nil, "process", pid)
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	var createdProcess db.Process
 	err = parseJSON(resp, &createdProcess)
 	c.Assert(err, qt.IsNil)
-	c.Assert(createdProcess.Draft, qt.Equals, true, qt.Commentf("Process should be in draft mode"))
+	c.Assert(createdProcess.Draft, qt.IsTrue, qt.Commentf("Process should be in draft mode"))
 	t.Log("Verified process is in draft mode")
 
 	// Verify the list of draft processes contains 1 item
@@ -197,24 +207,25 @@ func TestDraftProcess(t *testing.T) {
 		"title":       "Updated Process",
 		"description": "This is no longer a draft process",
 	}
-	updatedProcessInfo := &apicommon.CreateProcessRequest{
+	draftFalse := false
+	updatedProcessInfo := &apicommon.UpdateProcessRequest{
 		CensusID: censusIDBytes,
 		Metadata: updatedMetadata,
-		Draft:    false, // No longer a draft
+		Draft:    &draftFalse, // No longer a draft
 	}
 
-	resp, code = testRequest(t, http.MethodPost, adminToken, updatedProcessInfo, "process", processID.String())
+	resp, code = testRequest(t, http.MethodPut, adminToken, updatedProcessInfo, "process", pid)
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 	t.Log("Successfully updated process and set draft=false")
 
 	// Verify the process was updated and is no longer in draft mode
-	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "process", processID.String())
+	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "process", pid)
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	var updatedProcess db.Process
 	err = parseJSON(resp, &updatedProcess)
 	c.Assert(err, qt.IsNil)
-	c.Assert(updatedProcess.Draft, qt.Equals, false, qt.Commentf("Process should no longer be in draft mode"))
+	c.Assert(updatedProcess.Draft, qt.IsFalse, qt.Commentf("Process should no longer be in draft mode"))
 	c.Assert(updatedProcess.Metadata, qt.DeepEquals, updatedMetadata, qt.Commentf("Process metadata should be updated"))
 	t.Log("Verified process is no longer in draft mode and metadata was updated")
 
@@ -225,19 +236,4 @@ func TestDraftProcess(t *testing.T) {
 		c.Assert(processDraftsResp.Processes, qt.HasLen, 0)
 		c.Assert(processDraftsResp.TotalPages, qt.Equals, 0)
 	}
-
-	// Step 3: Try to update the process again, which should fail since it's no longer in draft mode
-	finalMetadata := map[string]any{
-		"title":       "Final Process",
-		"description": "This update should fail",
-	}
-	finalProcessInfo := &apicommon.CreateProcessRequest{
-		CensusID: censusIDBytes,
-		Metadata: finalMetadata,
-		Draft:    true, // Try to set back to draft (should fail)
-	}
-
-	resp, code = testRequest(t, http.MethodPost, adminToken, finalProcessInfo, "process", processID.String())
-	c.Assert(code, qt.Equals, http.StatusConflict, qt.Commentf("Should fail with conflict error, got: %d, response: %s", code, resp))
-	t.Log("Successfully verified that updating a non-draft process fails")
 }

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
@@ -15,30 +16,23 @@ import (
 //
 //	@Summary		Create a new voting process
 //	@Description	Create a new voting process. Requires Manager/Admin role.
-//	@Description	When draft=true, the process can be updated (overwritten).
 //	@Tags			process
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			processId	path		string							true	"Process ID"
-//	@Param			request		body		apicommon.CreateProcessRequest	true	"Process creation information"
-//	@Success		200			{string}	string							"OK"
-//	@Failure		400			{object}	errors.Error					"Invalid input data"
-//	@Failure		401			{object}	errors.Error					"Unauthorized"
-//	@Failure		404			{object}	errors.Error					"Published census not found"
-//	@Failure		409			{object}	errors.Error					"Process already exists"
-//	@Failure		500			{object}	errors.Error					"Internal server error"
+//	@Param			request	body		apicommon.CreateProcessRequest	true	"Process creation information"
+//	@Success		200		{string}	string							"OK"
+//	@Failure		400		{object}	errors.Error					"Invalid input data"
+//	@Failure		401		{object}	errors.Error					"Unauthorized"
+//	@Failure		404		{object}	errors.Error					"Published census not found"
+//	@Failure		409		{object}	errors.Error					"Process already exists"
+//	@Failure		500		{object}	errors.Error					"Internal server error"
 //	@Router			/process [post]
 func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 	// parse the process info from the request body
 	processInfo := &apicommon.CreateProcessRequest{}
 	if err := json.NewDecoder(r.Body).Decode(&processInfo); err != nil {
 		errors.ErrMalformedBody.Write(w)
-		return
-	}
-
-	if processInfo.CensusID == nil {
-		errors.ErrMalformedBody.Withf("missing published census root or ID").Write(w)
 		return
 	}
 
@@ -49,39 +43,35 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	census, err := a.db.Census(processInfo.CensusID.String())
-	if err != nil {
-		if err == db.ErrNotFound {
-			errors.ErrMalformedURLParam.Withf("census not found").Write(w)
+	if processInfo.Draft && len(processInfo.OrgAddress) == 0 {
+		errors.ErrMalformedBody.Withf("draft processes must provide an org address").Write(w)
+		return
+	}
+
+	var orgAddress common.Address
+	var census *db.Census
+	if processInfo.CensusID != nil {
+		var err error
+		census, err = a.db.Census(processInfo.CensusID.String())
+		if err != nil {
+			if err == db.ErrNotFound {
+				errors.ErrMalformedURLParam.Withf("invalid census provided").Write(w)
+				return
+			}
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		orgAddress = census.OrgAddress
+	} else if len(processInfo.Address) > 0 {
+		orgAddress = common.HexToAddress(processInfo.Address.Address().Hex())
+	} else {
+		errors.ErrMalformedBody.Withf("either census ID or organization address must be provided").Write(w)
 		return
 	}
 
 	// check the user has the necessary permissions
-	if !user.HasRoleFor(census.OrgAddress, db.ManagerRole) && !user.HasRoleFor(census.OrgAddress, db.AdminRole) {
+	if !user.HasRoleFor(orgAddress, db.ManagerRole) && !user.HasRoleFor(orgAddress, db.AdminRole) {
 		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
-		return
-	}
-
-	// check if the process exists
-	existingProcess, err := a.db.Process(processID)
-	if err == nil {
-		// Process exists, check if it's in draft mode and can be overwritten
-		if !existingProcess.Draft {
-			errors.ErrDuplicateConflict.Withf("process already exists and is not in draft mode").Write(w)
-			return
-		}
-
-		// Check if the user has permission to modify this process
-		if !user.HasRoleFor(existingProcess.OrgAddress, db.ManagerRole) && !user.HasRoleFor(existingProcess.OrgAddress, db.AdminRole) {
-			errors.ErrUnauthorized.Withf("user is not admin or manager of the organization that owns this process").Write(w)
-			return
-		}
-	} else if err != db.ErrNotFound {
-		// Some other error occurred
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 
@@ -89,7 +79,7 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 	process := &db.Process{
 		Census:     *census,
 		Metadata:   processInfo.Metadata,
-		OrgAddress: census.OrgAddress,
+		OrgAddress: orgAddress,
 		Draft:      processInfo.Draft,
 	}
 	if len(processInfo.Address) > 0 {
@@ -103,6 +93,98 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	apicommon.HTTPWriteJSON(w, processID)
+}
+
+// updateProcessHandler godoc
+//
+//	@Summary		Update an existing voting process
+//	@Description	Update an existing voting process. Requires Manager/Admin role.
+//	@Tags			process
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			processId	path		string							true	"Process ID"
+//	@Param			request		body		apicommon.CreateProcessRequest	true	"Process update information"
+//	@Success		200			{string}	string							"OK"
+//	@Failure		400			{object}	errors.Error					"Invalid input data"
+//	@Failure		401			{object}	errors.Error					"Unauthorized"
+//	@Failure		404			{object}	errors.Error					"Process not found"
+//	@Failure		500			{object}	errors.Error					"Internal server error"
+//	@Router			/process/{processId} [put]
+func (a *API) updateProcessHandler(w http.ResponseWriter, r *http.Request) {
+	processID := chi.URLParam(r, "processId")
+	if len(processID) == 0 {
+		errors.ErrMalformedURLParam.Withf("missing process ID").Write(w)
+		return
+	}
+
+	// parse the process info from the request body
+	processInfo := &apicommon.UpdateProcessRequest{}
+	if err := json.NewDecoder(r.Body).Decode(&processInfo); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+
+	// get the user from the request context
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+
+	existingProcess, err := a.db.Process(processID)
+	if err != nil {
+		if err == db.ErrNotFound {
+			errors.ErrMalformedURLParam.Withf("process not found").Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
+	// check the user has the necessary permissions
+	if !user.HasRoleFor(existingProcess.OrgAddress, db.ManagerRole) &&
+		!user.HasRoleFor(existingProcess.OrgAddress, db.AdminRole) {
+		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		return
+	}
+
+	var census *db.Census
+	if processInfo.CensusID != nil {
+		census, err = a.db.Census(processInfo.CensusID.String())
+		if err != nil {
+			if err == db.ErrNotFound {
+				errors.ErrMalformedURLParam.Withf("census not found").Write(w)
+				return
+			}
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+	}
+
+	if processInfo.Draft != nil {
+		existingProcess.Draft = *processInfo.Draft
+	}
+
+	if len(processInfo.Metadata) > 0 {
+		existingProcess.Metadata = processInfo.Metadata
+	}
+
+	if len(processInfo.Address) > 0 {
+		existingProcess.Address = processInfo.Address
+	}
+
+	if len(processInfo.CensusID) > 0 {
+		existingProcess.Census = *census
+	}
+
+	_, err = a.db.SetProcess(existingProcess)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
+	apicommon.HTTPWriteJSON(w, "Process updated successfully")
 }
 
 // processInfoHandler godoc
