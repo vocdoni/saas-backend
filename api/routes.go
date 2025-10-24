@@ -128,6 +128,7 @@ const (
 
 	// process routes
 	// POST /process/{processId} to create a new process
+	processCreateEndpoint = "/process"
 	// GET /process/{processId} to get process information
 	processEndpoint = "/process/{processId}"
 	// POST /process/{processId}/auth to check if the voter is authorized

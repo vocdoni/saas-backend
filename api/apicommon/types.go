@@ -956,18 +956,18 @@ type AddMembersJobResponse struct {
 // CreateProcessRequest defines the payload for creating a new voting process.
 // swagger:model CreateProcessRequest
 type CreateProcessRequest struct {
-	// Merkle root of the published census
-	PublishedCensusRoot internal.HexBytes `json:"censusRoot" swaggertype:"string" format:"hex" example:"deadbeef"`
+	// Organization address
+	OrgAddress common.Address `json:"orgAddress"`
 
-	// URI of the published census
-	PublishedCensusURI string `json:"censusUri"`
+	// Vochain ID/Address of the process
+	Address internal.HexBytes `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
 
 	// Census ID
 	CensusID internal.HexBytes `json:"censusId" swaggertype:"string" format:"hex" example:"deadbeef"`
 
 	// Additional metadata for the process
 	// Can be any key-value pairs
-	Metadata []byte `json:"metadata,omitempty" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
+	Metadata map[string]any `json:"metadata"`
 }
 
 // InitiateAuthRequest defines the payload for participant authentication.
@@ -1043,7 +1043,7 @@ type CreateProcessBundleRequest struct {
 	// Census ID
 	CensusID string `json:"censusId"`
 
-	// List of process IDs to include in the bundle
+	// List of process Addresses to include in the bundle
 	Processes []string `json:"processes"`
 }
 
