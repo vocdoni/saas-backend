@@ -23,10 +23,7 @@ func createTestProcess(c *qt.C, db *MongoStorage, processID internal.HexBytes, c
 	}
 	pid, err := db.SetProcess(process)
 	c.Assert(err, qt.IsNil)
-	process.ID, err = primitive.ObjectIDFromHex(pid)
-	if err != nil {
-		c.Assert(err, qt.IsNil)
-	}
+	process.ID = pid
 	return process
 }
 

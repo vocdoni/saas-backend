@@ -162,8 +162,7 @@ func TestProcess(t *testing.T) {
 		c.Assert(err, qt.Not(qt.IsNil))
 
 		// test delete with empty ID
-		var emptyID string
-		err = testDB.DelProcess(emptyID)
+		err = testDB.DelProcess(primitive.NilObjectID)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 	})
 }

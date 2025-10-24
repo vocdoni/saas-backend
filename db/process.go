@@ -11,23 +11,23 @@ import (
 )
 
 // CreateProcess creates a new process for an organization
-func (ms *MongoStorage) SetProcess(process *Process) (string, error) {
+func (ms *MongoStorage) SetProcess(process *Process) (primitive.ObjectID, error) {
 	if process.OrgAddress.Cmp(common.Address{}) == 0 {
-		return "", ErrInvalidData
+		return primitive.NilObjectID, ErrInvalidData
 	}
 
 	// check that the org exists
 	if _, err := ms.Organization(process.OrgAddress); err != nil {
-		return "", fmt.Errorf("failed to get organization %s: %w", process.OrgAddress, err)
+		return primitive.NilObjectID, fmt.Errorf("failed to get organization %s: %w", process.OrgAddress, err)
 	}
 	// check that the census exists
 	if !process.Census.ID.IsZero() {
 		census, err := ms.Census(process.Census.ID.Hex())
 		if err != nil {
-			return "", fmt.Errorf("failed to get census: %w", err)
+			return primitive.NilObjectID, fmt.Errorf("failed to get census: %w", err)
 		}
 		if len(census.Published.Root) == 0 || len(census.Published.URI) == 0 {
-			return "", fmt.Errorf("census %s does not have a published root or URI", census.ID.Hex())
+			return primitive.NilObjectID, fmt.Errorf("census %s does not have a published root or URI", census.ID.Hex())
 		}
 	}
 
@@ -38,22 +38,17 @@ func (ms *MongoStorage) SetProcess(process *Process) (string, error) {
 	defer cancel()
 	res, err := ms.processes.InsertOne(ctx, process)
 	if err != nil {
-		return "", fmt.Errorf("failed to create process: %w", err)
+		return primitive.NilObjectID, fmt.Errorf("failed to create process: %w", err)
 	}
 
-	return res.InsertedID.(primitive.ObjectID).Hex(), nil
+	return res.InsertedID.(primitive.ObjectID), nil
 }
 
 // DeleteProcess removes a process
-func (ms *MongoStorage) DelProcess(processID string) error {
-	if len(processID) == 0 {
+func (ms *MongoStorage) DelProcess(processID primitive.ObjectID) error {
+	if processID == primitive.NilObjectID {
 		return ErrInvalidData
 	}
-	parsedID, err := primitive.ObjectIDFromHex(processID)
-	if err != nil {
-		return ErrInvalidData
-	}
-
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
@@ -61,19 +56,14 @@ func (ms *MongoStorage) DelProcess(processID string) error {
 	defer cancel()
 
 	// delete the process from the database using the ID
-	filter := bson.M{"_id": parsedID}
-	_, err = ms.processes.DeleteOne(ctx, filter)
+	filter := bson.M{"_id": processID}
+	_, err := ms.processes.DeleteOne(ctx, filter)
 	return err
 }
 
 // Process retrieves a process from the DB based on its ID
-func (ms *MongoStorage) Process(processID string) (*Process, error) {
-	if processID == "" {
-		return nil, ErrInvalidData
-	}
-
-	parsedID, err := primitive.ObjectIDFromHex(processID)
-	if err != nil {
+func (ms *MongoStorage) Process(processID primitive.ObjectID) (*Process, error) {
+	if processID == primitive.NilObjectID {
 		return nil, ErrInvalidData
 	}
 
@@ -82,7 +72,7 @@ func (ms *MongoStorage) Process(processID string) (*Process, error) {
 	defer cancel()
 
 	process := &Process{}
-	if err := ms.processes.FindOne(ctx, bson.M{"_id": parsedID}).Decode(process); err != nil {
+	if err := ms.processes.FindOne(ctx, bson.M{"_id": processID}).Decode(process); err != nil {
 		return nil, fmt.Errorf("failed to get process: %w", err)
 	}
 

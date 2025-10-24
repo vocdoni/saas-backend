@@ -8,6 +8,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // createProcessHandler godoc
@@ -101,8 +102,13 @@ func (a *API) processInfoHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrMalformedURLParam.Withf("missing process ID").Write(w)
 		return
 	}
+	parsedID, err := primitive.ObjectIDFromHex(processID)
+	if err != nil {
+		errors.ErrMalformedURLParam.Withf("invalid process ID").Write(w)
+		return
+	}
 
-	process, err := a.db.Process(processID)
+	process, err := a.db.Process(parsedID)
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrMalformedURLParam.Withf("process not found").Write(w)
