@@ -29,6 +29,7 @@ import (
 var (
 	// Authentication errors (401)
 	ErrUnauthorized            = Error{Code: 40001, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("authentication required"), LogLevel: "info"}
+	ErrNonOauthAccount         = Error{Code: 40101, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("account is not registered using OAuth"), LogLevel: "info"}
 	ErrUserNoVerified          = Error{Code: 40014, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("account email not verified"), LogLevel: "info"}
 	ErrVerificationCodeExpired = Error{Code: 40016, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("verification code has expired"), LogLevel: "info"}
 	ErrInvitationExpired       = Error{Code: 40019, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invitation code has expired"), LogLevel: "info"}

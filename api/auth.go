@@ -209,7 +209,7 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 	// Login
 	// check that the address generated password matches the one in the database
 	if pass := internal.HexHashPassword(passwordSalt, loginInfo.UserOAuthSignature); pass != user.Password {
-		errors.ErrUnauthorized.Write(w)
+		errors.ErrNonOauthAccount.Write(w)
 		return
 	}
 	// generate a new token with the user name as the subject
