@@ -65,6 +65,7 @@ var (
 	ErrCensusNotFound             = Error{Code: 40027, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("census not found")}
 	ErrCensusTypeNotFound         = Error{Code: 40028, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("census type not found")}
 	ErrCensusParticipantNotFound  = Error{Code: 40029, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("census participant not found")}
+	ErrProcessNotFound            = Error{Code: 40038, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("process not found")}
 
 	// Conflict errors (409)
 	ErrDuplicateConflict = Error{Code: 40901, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("resource already exists")}

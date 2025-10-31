@@ -3181,6 +3181,44 @@ paths:
       tags:
       - process
   /process/{processId}:
+    delete:
+      consumes:
+      - application/json
+      description: Delete a voting process. Requires Manager/Admin role.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid process ID
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Delete a voting process
+      tags:
+      - process
     get:
       consumes:
       - application/json

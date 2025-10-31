@@ -145,6 +145,16 @@ func TestProcess(t *testing.T) {
 	c.Assert(retrievedProcess.ID.Hex(), qt.Equals, pid)
 	c.Assert(retrievedProcess.Metadata["title"], qt.Equals, "Test Process")
 	c.Assert(retrievedProcess.Metadata["description"], qt.Equals, "This is a test process")
+
+	// Test 1.8: Test delete process
+	resp, code = testRequest(t, http.MethodDelete, adminToken, nil, "process", pid)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+	t.Log("Successfully deleted the process")
+
+	// Verify the process no longer exists
+	_, code = testRequest(t, http.MethodGet, adminToken, nil, "process", pid)
+	c.Assert(code, qt.Equals, http.StatusNotFound)
+	t.Log("Verified the process no longer exists after deletion")
 }
 
 // TestDraftProcess tests the draft process functionality
