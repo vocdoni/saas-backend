@@ -533,8 +533,12 @@ type SubscriptionPlanLimits struct {
 	// Whether custom URLs are allowed
 	CustomURL bool `json:"customURL"`
 
-	// Whether draft processes allowed
+	// Whether draft processes allowed.
+	// DEPRECATED: use MaxDrafts instead
 	Drafts bool `json:"drafts"`
+
+	// How many draft processes are allowed
+	MaxDrafts int `json:"maxDrafts"`
 
 	// Whether this is a custom plan
 	CustomPlan bool `json:"customPlan"`
