@@ -74,6 +74,7 @@
 - [🔄 Process](#-process)
   - [🆕 Create Process](#-create-process)
   - [ℹ️ Get Process Info](#-get-process-info)
+  - [🗑️ Delete Process](#-delete-process)
   - [🔐 Process Authentication](#-process-authentication)
   - [🔒 Two-Factor Authentication](#-two-factor-authentication)
   - [✍️ Two-Factor Signing](#-two-factor-signing)
@@ -2259,6 +2260,33 @@ Returns 201 Created on success
 | HTTP Status | Error code | Message |
 |:---:|:---:|:---|
 | `400` | `40010` | `malformed URL parameter` |
+| `500` | `50002` | `internal server error` |
+
+### 🗑️ Delete Process
+
+* **Path** `/process/{processId}`
+* **Method** `DELETE`
+* **Headers**
+  * `Authentication: Bearer <user_token>`
+
+* **Description**
+Deletes a voting process. Requires Manager or Admin role for the organization that owns the process. The process must exist and the user must have appropriate permissions.
+
+* **Response**
+```json
+"OK"
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `401` | `40001` | `user not authorized` |
+| `401` | `40001` | `user is not admin or manager of the organization that owns this process` |
+| `400` | `40010` | `malformed URL parameter` |
+| `400` | `40010` | `missing process ID` |
+| `400` | `40010` | `invalid process ID` |
+| `400` | `40010` | `process not found` |
 | `500` | `50002` | `internal server error` |
 
 ### 🔐 Process Authentication

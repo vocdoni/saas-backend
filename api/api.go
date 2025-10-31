@@ -341,6 +341,8 @@ func (a *API) initRouter() http.Handler {
 		r.Post(processCreateEndpoint, a.createProcessHandler)
 		log.Infow("new route", "method", "PUT", "path", processEndpoint)
 		r.Put(processEndpoint, a.updateProcessHandler)
+		log.Infow("new route", "method", "DELETE", "path", processEndpoint)
+		r.Delete(processEndpoint, a.deleteProcessHandler)
 		// PROCESS BUNDLE ROUTES (private)
 		log.Infow("new route", "method", "POST", "path", processBundleEndpoint)
 		r.Post(processBundleEndpoint, a.createProcessBundleHandler)
