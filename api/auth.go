@@ -90,10 +90,10 @@ func (a *API) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 	apicommon.HTTPWriteJSON(w, res)
 }
 
-// writableOrganizationAddressesHandler godoc
+// organizationAddressesHandler godoc
 //
-//	@Summary		Get writable organization addresses
-//	@Description	Get the list of organization addresses where the user has write access
+//	@Summary		Get a list of addresses the user belongs to
+//	@Description	Get the list of organization addresses the user belongs to
 //	@Tags			auth
 //	@Accept			json
 //	@Produce		json
@@ -103,9 +103,9 @@ func (a *API) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		404	{object}	errors.Error	"No organizations found"
 //	@Router			/auth/addresses [get]
 //
-// writableOrganizationAddressesHandler returns the list of addresses of the
-// organizations where the user has write access.
-func (*API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *http.Request) {
+// organizationAddressesHandler returns the list of addresses of the
+// organizations to which the authenticated user belongs
+func (*API) organizationAddressesHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
@@ -123,11 +123,7 @@ func (*API) writableOrganizationAddressesHandler(w http.ResponseWriter, r *http.
 	}
 	// get the addresses of the organizations where the user has write access
 	for _, org := range user.Organizations {
-		// check if the user has organization write permission to the organization based on the
-		// role of the user in the organization
-		if db.HasOrganizationWritePermission(org.Role) {
-			userAddresses.Addresses = append(userAddresses.Addresses, org.Address)
-		}
+		userAddresses.Addresses = append(userAddresses.Addresses, org.Address)
 	}
 	// write the response back to the user
 	apicommon.HTTPWriteJSON(w, userAddresses)
