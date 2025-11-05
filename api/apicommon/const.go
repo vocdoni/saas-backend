@@ -18,7 +18,7 @@ const DefaultLang = "en"
 
 // VerificationCodeExpiration is the duration of the verification code
 // before it is invalidated
-var VerificationCodeExpiration = 3 * time.Minute
+var VerificationCodeExpiration = 10 * time.Minute
 
 const (
 	// VerificationCodeLength is the length of the verification code in bytes
