@@ -97,8 +97,30 @@ func TestOAuthLoginHandler(t *testing.T) {
 		oauthLoginEndpoint)
 	c.Assert(invalidBodyResp.Code, qt.Equals, errors.ErrMalformedBody.Code)
 
-	// Test with invalid OAuth signature
+	// Test with invalid provider
 	email := fmt.Sprintf("oauth-user-%d@test.com", internal.RandomInt(10000))
+
+	invalidProviderReq := &apicommon.OAuthLoginRequest{
+		Email:              email,
+		FirstName:          "Test",
+		LastName:           "User",
+		Provider:           "invalid-provider",
+		OAuthSignature:     "some-signature",
+		UserOAuthSignature: "some-user-signature",
+		Address:            userAddress,
+	}
+
+	invalidProviderResp := requestAndParseWithAssertCode[errors.Error](
+		http.StatusBadRequest,
+		t,
+		http.MethodPost,
+		"",
+		invalidProviderReq,
+		oauthLoginEndpoint,
+	)
+	c.Assert(invalidProviderResp.Code, qt.Equals, errors.ErrInvalidOAuthProvider.Code)
+
+	// Test with invalid OAuth signature
 	invalidOAuthSignature := "invalid-signature"
 	userOAuthSignatureBytes, err := userSigner.SignEthereum([]byte(invalidOAuthSignature))
 	c.Assert(err, qt.IsNil)
@@ -107,6 +129,7 @@ func TestOAuthLoginHandler(t *testing.T) {
 		Email:              email,
 		FirstName:          "Test",
 		LastName:           "User",
+		Provider:           "google",
 		OAuthSignature:     invalidOAuthSignature,
 		UserOAuthSignature: hex.EncodeToString(userOAuthSignatureBytes),
 		Address:            userAddress,
@@ -123,6 +146,7 @@ func TestOAuthLoginHandler(t *testing.T) {
 		Email:              email,
 		FirstName:          "Test",
 		LastName:           "User",
+		Provider:           "google",
 		OAuthSignature:     oauthSignatureHex,
 		UserOAuthSignature: "invalid-user-signature",
 		Address:            userAddress,
@@ -139,6 +163,7 @@ func TestOAuthLoginHandler(t *testing.T) {
 		Email:              email,
 		FirstName:          "Test",
 		LastName:           "User",
+		Provider:           "google",
 		OAuthSignature:     oauthSignatureHex,
 		UserOAuthSignature: hex.EncodeToString(userOAuthSignatureBytes),
 		Address:            userAddress,
@@ -171,6 +196,7 @@ func TestOAuthLoginHandler(t *testing.T) {
 		Email:              email,
 		FirstName:          "Test",
 		LastName:           "User",
+		Provider:           "google",
 		OAuthSignature:     oauthSignatureHex,
 		UserOAuthSignature: "wrong-signature",
 		Address:            userAddress,
