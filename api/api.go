@@ -211,6 +211,8 @@ func (a *API) initRouter() http.Handler {
 
 		handle(r, http.MethodPost, authRefresTokenEndpoint, a.refreshTokenHandler)
 		handle(r, http.MethodGet, authAddressesEndpoint, a.organizationAddressesHandler)
+		handle(r, http.MethodPost, oauthLinkEndpoint, a.oauthLinkHandler)
+		handle(r, http.MethodDelete, oauthUnlinkEndpoint, a.oauthUnlinkHandler)
 		handle(r, http.MethodGet, usersMeEndpoint, a.userInfoHandler)
 		handle(r, http.MethodPut, usersMeEndpoint, a.updateUserInfoHandler)
 		handle(r, http.MethodPut, usersPasswordEndpoint, a.updateUserPasswordHandler)

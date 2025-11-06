@@ -15,14 +15,23 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
+// OAuthProvider represents OAuth authentication credentials for a specific provider
+type OAuthProvider struct {
+	ExternalID        string    `json:"externalID" bson:"externalID"`               // User's Ethereum address from OAuth service
+	SignatureHash     string    `json:"signatureHash" bson:"signatureHash"`         // Hashed UserOAuthSignature
+	LinkedAt          time.Time `json:"linkedAt" bson:"linkedAt"`                   // When this provider was first linked
+	LastAuthenticated time.Time `json:"lastAuthenticated" bson:"lastAuthenticated"` // Last successful authentication
+}
+
 type User struct {
-	ID            uint64             `json:"id" bson:"_id"`
-	Email         string             `json:"email" bson:"email"`
-	Password      string             `json:"password" bson:"password"`
-	FirstName     string             `json:"firstName" bson:"firstName"`
-	LastName      string             `json:"lastName" bson:"lastName"`
-	Organizations []OrganizationUser `json:"organizations" bson:"organizations"`
-	Verified      bool               `json:"verified" bson:"verified"`
+	ID            uint64                   `json:"id" bson:"_id"`
+	Email         string                   `json:"email" bson:"email"`
+	Password      string                   `json:"password" bson:"password"` // Empty string for OAuth-only users
+	FirstName     string                   `json:"firstName" bson:"firstName"`
+	LastName      string                   `json:"lastName" bson:"lastName"`
+	OAuth         map[string]OAuthProvider `json:"oauth,omitempty" bson:"oauth,omitempty"` // OAuth providers by name
+	Organizations []OrganizationUser       `json:"organizations" bson:"organizations"`
+	Verified      bool                     `json:"verified" bson:"verified"`
 }
 
 type CodeType string
