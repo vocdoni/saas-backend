@@ -191,6 +191,20 @@ func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) 
 	return verificationCode, verificationLink, err
 }
 
+// generateVerificationLink method generates a verification link for the user
+// provided using the code provided and the API web app configuration.
+// It returns the generated verification link and an error if the link
+// could not be generated.
+func (a *API) generateVerificationLink(user *db.User, code string) (string, error) {
+	webAppURI := mailtemplates.VerifyAccountNotification.WebAppURI
+	linkParams := map[string]any{
+		"email": user.Email,
+		"code":  code,
+	}
+
+	return a.buildWebAppURL(webAppURI, linkParams)
+}
+
 // calculatePagination calculates PreviousPage, NextPage and LastPage.
 //
 // If page is negative or higher than LastPage, returns ErrPageNotFound
