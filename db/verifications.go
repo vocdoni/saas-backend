@@ -77,8 +77,24 @@ func (ms *MongoStorage) SetVerificationCode(user *User, code string, t CodeType,
 		Code:       code,
 		Type:       t,
 		Expiration: exp,
+		Attempts:   1,
 	}
 	opts := options.Replace().SetUpsert(true)
 	_, err := ms.verifications.ReplaceOne(ctx, filter, verification, opts)
+	return err
+}
+
+// VerificationCodeIncrementAttempts method increments the number of attempts
+// for the verification code of the user provided. If an error occurs, it
+// returns the error.
+func (ms *MongoStorage) VerificationCodeIncrementAttempts(code string, t CodeType) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	filter := bson.M{"code": code, "type": t}
+	update := bson.M{"$inc": bson.M{"attempts": 1}}
+	_, err := ms.verifications.UpdateOne(ctx, filter, update)
 	return err
 }

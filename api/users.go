@@ -250,9 +250,8 @@ func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Req
 //	@Produce		json
 //	@Param			request	body		apicommon.UserVerification	true	"User email information"
 //	@Success		200		{string}	string						"OK"
-//	@Failure		400		{object}	errors.Error				"Invalid input data"
+//	@Failure		400		{object}	errors.Error				"Invalid input data, user already verified, or max resend attempts reached"
 //	@Failure		401		{object}	errors.Error				"Unauthorized"
-//	@Failure		409		{object}	errors.Error				"User already verified or verification code still valid"
 //	@Failure		500		{object}	errors.Error				"Internal server error"
 //	@Router			/users/verify/code [post]
 func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.Request) {
@@ -290,11 +289,44 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
-	// if the verification code is not expired, return an error
+	// if the verification code is not expired
 	if code.Expiration.After(time.Now()) {
-		errors.ErrVerificationCodeValid.Write(w)
+		// check if the maximum number of attempts has been reached for resending
+		if code.Attempts >= apicommon.VerificationCodeMaxAttempts {
+			errors.ErrVerificationMaxAttempts.WithData(apicommon.UserVerification{
+				Expiration: code.Expiration,
+			}).Write(w)
+			return
+		}
+		link, err := a.generateVerificationLink(user, code.Code)
+		if err != nil {
+			log.Warnw("could not generate verification link", "error", err)
+			errors.ErrGenericInternalServerError.Write(w)
+			return
+		}
+		// resend the existing verification code
+		if err := a.sendMail(r.Context(), user.Email, mailtemplates.VerifyAccountNotification,
+			struct {
+				Code string
+				Link string
+			}{code.Code, link},
+		); err != nil {
+			log.Warnw("could not resend verification code", "error", err)
+			errors.ErrGenericInternalServerError.Write(w)
+			return
+		}
+		if err = a.db.VerificationCodeIncrementAttempts(code.Code, db.CodeTypeVerifyAccount); err != nil {
+			log.Warnw("could not increment verification code attempts", "error", err)
+			errors.ErrGenericInternalServerError.Write(w)
+			return
+		}
+		// return the verification code information
+		apicommon.HTTPWriteJSON(w, apicommon.UserVerification{
+			Expiration: code.Expiration,
+		})
 		return
 	}
+
 	// generate a new verification code
 	newCode, link, err := a.generateVerificationCodeAndLink(user, db.CodeTypeVerifyAccount)
 	if err != nil {

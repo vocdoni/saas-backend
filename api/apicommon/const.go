@@ -20,6 +20,9 @@ const DefaultLang = "en"
 // before it is invalidated
 var VerificationCodeExpiration = 10 * time.Minute
 
+// VerificationCodeMaxAttempts is the maximum number of attempts to verify a code
+const VerificationCodeMaxAttempts = 3
+
 const (
 	// VerificationCodeLength is the length of the verification code in bytes
 	VerificationCodeLength = 3

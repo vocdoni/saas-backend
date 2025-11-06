@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -219,4 +220,159 @@ func TestUserWithOrganization(t *testing.T) {
 	resp, code = testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String())
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 	t.Logf("%s\n", resp)
+}
+
+func TestResendVerificationCodeHandler(t *testing.T) {
+	c := qt.New(t)
+
+	// Test invalid body
+	resp, code := testRequest(t, http.MethodPost, "", "invalid body", verifyUserCodeEndpoint)
+	c.Assert(code, qt.Equals, http.StatusBadRequest)
+	c.Assert(string(resp), qt.Contains, "40004")
+
+	// Test empty email
+	verification := &apicommon.UserVerification{
+		Email: "",
+	}
+	resp, code = testRequest(t, http.MethodPost, "", verification, verifyUserCodeEndpoint)
+	c.Assert(code, qt.Equals, http.StatusBadRequest)
+	c.Assert(string(resp), qt.Contains, "40005")
+
+	// Test non-existent user
+	verification.Email = "nonexistent@test.com"
+	resp, code = testRequest(t, http.MethodPost, "", verification, verifyUserCodeEndpoint)
+	c.Assert(code, qt.Equals, http.StatusUnauthorized)
+	c.Assert(string(resp), qt.Contains, "40001")
+
+	// Create a user and verify them to test already verified user scenario
+	userInfo := &apicommon.UserInfo{
+		Email:     "verified@test.com",
+		Password:  testPass,
+		FirstName: testFirstName,
+		LastName:  testLastName,
+	}
+	resp, code = testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+	// Get the verification code from the email and verify the user
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	mailBody, err := testMailService.FindEmail(ctx, "verified@test.com")
+	c.Assert(err, qt.IsNil)
+	verifyMailCode := verificationCodeRgx.FindStringSubmatch(mailBody)
+	c.Assert(len(verifyMailCode) > 1, qt.IsTrue)
+
+	// Verify the user
+	verificationCode := &apicommon.UserVerification{
+		Email: "verified@test.com",
+		Code:  verifyMailCode[1],
+	}
+	resp, code = testRequest(t, http.MethodPost, "", verificationCode, verifyUserEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+	// Test already verified user
+	verification.Email = "verified@test.com"
+	resp, code = testRequest(t, http.MethodPost, "", verification, verifyUserCodeEndpoint)
+	c.Assert(code, qt.Equals, http.StatusBadRequest)
+	c.Assert(string(resp), qt.Contains, "40015")
+
+	// Create an unverified user for testing active verification code scenarios
+	unverifiedUserInfo := &apicommon.UserInfo{
+		Email:     "unverified@test.com",
+		Password:  testPass,
+		FirstName: testFirstName,
+		LastName:  testLastName,
+	}
+	resp, code = testRequest(t, http.MethodPost, "", unverifiedUserInfo, usersEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+	// Clear the email from the first registration
+	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err = testMailService.FindEmail(ctx, "unverified@test.com")
+	c.Assert(err, qt.IsNil)
+
+	// Test resending verification code with active code (attempts remaining)
+	verification.Email = "unverified@test.com"
+	resp, code = testRequest(t, http.MethodPost, "", verification, verifyUserCodeEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+	// Parse the response to check expiration is returned
+	var resendResp apicommon.UserVerification
+	err = json.Unmarshal(resp, &resendResp)
+	c.Assert(err, qt.IsNil)
+	c.Assert(resendResp.Expiration.After(time.Now()), qt.IsTrue)
+
+	// Verify email was sent
+	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	mailBody, err = testMailService.FindEmail(ctx, "unverified@test.com")
+	c.Assert(err, qt.IsNil)
+	c.Assert(mailBody, qt.Not(qt.Equals), "")
+
+	// Test resending multiple times until max attempts
+	for i := 2; i < apicommon.VerificationCodeMaxAttempts; i++ {
+		resp, code = testRequest(t, http.MethodPost, "", verification, verifyUserCodeEndpoint)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("attempt %d response: %s", i+1, resp))
+	}
+
+	// Test max attempts reached
+	resp, code = testRequest(t, http.MethodPost, "", verification, verifyUserCodeEndpoint)
+	c.Assert(code, qt.Equals, http.StatusBadRequest)
+	c.Assert(string(resp), qt.Contains, "40017")
+
+	// Parse the error response to check expiration data is returned
+	var errorResp struct {
+		Code  int                        `json:"code"`
+		Error string                     `json:"error"`
+		Data  apicommon.UserVerification `json:"data"`
+	}
+	err = json.Unmarshal(resp, &errorResp)
+	c.Assert(err, qt.IsNil)
+	c.Assert(errorResp.Data.Expiration.After(time.Now()), qt.IsTrue)
+
+	// Test expired verification code scenario
+	// Temporarily set a very short expiration time
+	originalExpiration := apicommon.VerificationCodeExpiration
+	apicommon.VerificationCodeExpiration = 100 * time.Millisecond
+
+	// Create another user with short expiration time
+	expiredUserInfo := &apicommon.UserInfo{
+		Email:     "expired@test.com",
+		Password:  testPass,
+		FirstName: testFirstName,
+		LastName:  testLastName,
+	}
+	resp, code = testRequest(t, http.MethodPost, "", expiredUserInfo, usersEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+	// Wait for the verification code to expire
+	time.Sleep(200 * time.Millisecond)
+
+	// Test resending with expired code (should generate new code)
+	verification.Email = "expired@test.com"
+	resp, code = testRequest(t, http.MethodPost, "", verification, verifyUserCodeEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+	// Verify email was sent with new code
+	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	mailBody, err = testMailService.FindEmail(ctx, "expired@test.com")
+	c.Assert(err, qt.IsNil)
+	c.Assert(mailBody, qt.Not(qt.Equals), "")
+
+	// Extract the new verification code to ensure it works
+	newVerifyMailCode := verificationCodeRgx.FindStringSubmatch(mailBody)
+	c.Assert(len(newVerifyMailCode) > 1, qt.IsTrue)
+
+	// Verify the user can be verified with the new code
+	newVerification := &apicommon.UserVerification{
+		Email: "expired@test.com",
+		Code:  newVerifyMailCode[1],
+	}
+	resp, code = testRequest(t, http.MethodPost, "", newVerification, verifyUserEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+	// Restore original expiration time
+	apicommon.VerificationCodeExpiration = originalExpiration
 }

@@ -4162,15 +4162,12 @@ paths:
           schema:
             type: string
         "400":
-          description: Invalid input data
+          description: Invalid input data, user already verified, or max resend attempts
+            reached
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "409":
-          description: User already verified or verification code still valid
           schema:
             $ref: '#/definitions/errors.Error'
         "500":

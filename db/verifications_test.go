@@ -56,6 +56,7 @@ func TestVerifications(t *testing.T) {
 		code, err := testDB.UserVerificationCode(&User{ID: userID}, CodeTypeVerifyAccount)
 		c.Assert(err, qt.IsNil)
 		c.Assert(code.Code, qt.Equals, testCode)
+		c.Assert(code.Attempts, qt.Equals, 1)
 
 		testCode = "testCode2"
 		c.Assert(testDB.SetVerificationCode(&User{ID: userID}, testCode, CodeTypeVerifyAccount, time.Now()), qt.IsNil)
@@ -63,5 +64,27 @@ func TestVerifications(t *testing.T) {
 		code, err = testDB.UserVerificationCode(&User{ID: userID}, CodeTypeVerifyAccount)
 		c.Assert(err, qt.IsNil)
 		c.Assert(code.Code, qt.Equals, testCode)
+	})
+
+	t.Run("TestVerificationCodeIncrementAttempts", func(_ *testing.T) {
+		c.Assert(testDB.Reset(), qt.IsNil)
+		userID, err := testDB.SetUser(&User{
+			Email:     testUserEmail + "3",
+			Password:  testUserPass,
+			FirstName: testUserFirstName,
+			LastName:  testUserLastName,
+		})
+		c.Assert(err, qt.IsNil)
+
+		testCode := "testCode"
+		c.Assert(testDB.SetVerificationCode(&User{ID: userID}, testCode, CodeTypeVerifyAccount, time.Now()), qt.IsNil)
+		code, err := testDB.UserVerificationCode(&User{ID: userID}, CodeTypeVerifyAccount)
+		c.Assert(err, qt.IsNil)
+		c.Assert(code.Attempts, qt.Equals, 1)
+
+		c.Assert(testDB.VerificationCodeIncrementAttempts(testCode, CodeTypeVerifyAccount), qt.IsNil)
+		code, err = testDB.UserVerificationCode(&User{ID: userID}, CodeTypeVerifyAccount)
+		c.Assert(err, qt.IsNil)
+		c.Assert(code.Attempts, qt.Equals, 2)
 	})
 }

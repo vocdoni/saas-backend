@@ -32,6 +32,7 @@ type UserVerification struct {
 	Code       string    `json:"code" bson:"code"`
 	Type       CodeType  `json:"type" bson:"type"`
 	Expiration time.Time `json:"expiration" bson:"expiration"`
+	Attempts   int       `json:"attempts" bson:"attempts"`
 }
 
 // TODO this is the default role function while it should be
