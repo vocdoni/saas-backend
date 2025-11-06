@@ -140,7 +140,7 @@ func (a *API) updateProcessHandler(w http.ResponseWriter, r *http.Request) {
 	existingProcess, err := a.db.Process(parsedID)
 	if err != nil {
 		if err == db.ErrNotFound {
-			errors.ErrMalformedURLParam.Withf("process not found").Write(w)
+			errors.ErrProcessNotFound.Write(w)
 			return
 		}
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -219,7 +219,7 @@ func (a *API) processInfoHandler(w http.ResponseWriter, r *http.Request) {
 	process, err := a.db.Process(parsedID)
 	if err != nil {
 		if err == db.ErrNotFound {
-			errors.ErrMalformedURLParam.Withf("process not found").Write(w)
+			errors.ErrProcessNotFound.Write(w)
 			return
 		}
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -281,4 +281,64 @@ func (a *API) organizationListProcessDraftsHandler(w http.ResponseWriter, r *htt
 		Pagination: pagination,
 		Processes:  processes,
 	})
+}
+
+// deleteProcessHandler godoc
+//
+//	@Summary		Delete a voting process
+//	@Description	Delete a voting process. Requires Manager/Admin role.
+//	@Tags			process
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			processId	path		string			true	"Process ID"
+//	@Success		200			{string}	string			"OK"
+//	@Failure		400			{object}	errors.Error	"Invalid process ID"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		404			{object}	errors.Error	"Process not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/process/{processId} [delete]
+func (a *API) deleteProcessHandler(w http.ResponseWriter, r *http.Request) {
+	processID := chi.URLParam(r, "processId")
+	if processID == "" {
+		errors.ErrMalformedURLParam.Withf("missing process ID").Write(w)
+		return
+	}
+	parsedID, err := primitive.ObjectIDFromHex(processID)
+	if err != nil {
+		errors.ErrMalformedURLParam.Withf("invalid process ID").Write(w)
+		return
+	}
+
+	// get the user from the request context
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+
+	existingProcess, err := a.db.Process(parsedID)
+	if err != nil {
+		if err == db.ErrNotFound {
+			errors.ErrProcessNotFound.Withf("process not found").Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
+	// check the user has the necessary permissions
+	if !user.HasRoleFor(existingProcess.OrgAddress, db.ManagerRole) &&
+		!user.HasRoleFor(existingProcess.OrgAddress, db.AdminRole) {
+		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization that owns this process").Write(w)
+		return
+	}
+
+	err = a.db.DelProcess(parsedID)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
+	apicommon.HTTPWriteOK(w)
 }
