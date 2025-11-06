@@ -28,13 +28,19 @@ import (
 // so the Code and Message will actually be discarded, never sent to the client
 var (
 	// Authentication errors (401)
-	ErrUnauthorized            = Error{Code: 40001, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("authentication required"), LogLevel: "info"}
-	ErrNonOauthAccount         = Error{Code: 40101, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("account is not registered using OAuth"), LogLevel: "info"}
-	ErrUserNoVerified          = Error{Code: 40014, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("account email not verified"), LogLevel: "info"}
-	ErrVerificationCodeExpired = Error{Code: 40016, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("verification code has expired"), LogLevel: "info"}
-	ErrInvitationExpired       = Error{Code: 40019, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invitation code has expired"), LogLevel: "info"}
-	ErrinvalidLoginCredentials = Error{Code: 40102, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("invalid login credentials"), LogLevel: "info"}
-	ErrAttemptCoolDownTime     = Error{Code: 40103, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("attempt cooldown time not reached"), LogLevel: "info"}
+	ErrUnauthorized                          = Error{Code: 40001, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("authentication required"), LogLevel: "info"}
+	ErrNonOauthAccount                       = Error{Code: 40101, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("account is not registered using OAuth"), LogLevel: "info"}
+	ErrUserNoVerified                        = Error{Code: 40014, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("account email not verified"), LogLevel: "info"}
+	ErrVerificationCodeExpired               = Error{Code: 40016, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("verification code has expired"), LogLevel: "info"}
+	ErrInvitationExpired                     = Error{Code: 40019, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invitation code has expired"), LogLevel: "info"}
+	ErrInvalidLoginCredentials               = Error{Code: 40102, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("invalid login credentials"), LogLevel: "info"}
+	ErrAttemptCoolDownTime                   = Error{Code: 40103, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("attempt cooldown time not reached"), LogLevel: "info"}
+	ErrInvalidOAuthProvider                  = Error{Code: 40039, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid or unsupported OAuth provider"), LogLevel: "info"}
+	ErrOAuthUserCannotUsePasswordRecovery    = Error{Code: 40040, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("OAuth users cannot use password recovery"), LogLevel: "info"}
+	ErrCannotUnlinkLastAuthMethod            = Error{Code: 40041, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("cannot unlink last authentication method"), LogLevel: "info"}
+	ErrProviderAlreadyLinkedToThisAccount    = Error{Code: 40042, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("OAuth provider already linked to this account"), LogLevel: "info"}
+	ErrProviderNotLinked                     = Error{Code: 40043, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("OAuth provider not linked to this account"), LogLevel: "info"}
+	ErrProviderAlreadyLinkedToAnotherAccount = Error{Code: 40044, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("OAuth provider already linked to another account"), LogLevel: "info"}
 
 	// Validation errors (400)
 	ErrEmailMalformed          = Error{Code: 40002, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid email format")}
