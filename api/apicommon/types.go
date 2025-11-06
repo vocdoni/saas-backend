@@ -1089,6 +1089,8 @@ type OAuthLoginRequest struct {
 	FirstName string `json:"firstName"`
 	// User last name
 	LastName string `json:"lastName"`
+	// OAuth provider name (google, github, facebook)
+	Provider string `json:"provider"`
 	// The signature made by the OAuth service on top of the user email
 	OAuthSignature string `json:"oauthSignature"`
 	// The signature made by the user on on top of the oauth signature

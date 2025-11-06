@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/account"
@@ -12,6 +13,30 @@ import (
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 )
+
+// Supported OAuth providers
+const (
+	OAuthProviderGoogle   = "google"
+	OAuthProviderGitHub   = "github"
+	OAuthProviderFacebook = "facebook"
+)
+
+// validOAuthProviders is the list of supported OAuth providers
+var validOAuthProviders = []string{
+	OAuthProviderGoogle,
+	OAuthProviderGitHub,
+	OAuthProviderFacebook,
+}
+
+// isValidOAuthProvider checks if the provider is supported
+func isValidOAuthProvider(provider string) bool {
+	for _, p := range validOAuthProviders {
+		if p == provider {
+			return true
+		}
+	}
+	return false
+}
 
 // refreshTokenHandler godoc
 //
@@ -149,6 +174,11 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrMalformedBody.Write(w)
 		return
 	}
+	// validate provider
+	if !isValidOAuthProvider(loginInfo.Provider) {
+		errors.ErrInvalidOAuthProvider.Write(w)
+		return
+	}
 	// get the user information from the database by email
 	user, err := a.db.UserByEmail(loginInfo.Email)
 	if err != nil && err != db.ErrNotFound {
@@ -156,6 +186,7 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res := &apicommon.OAuthLoginResponse{}
+	now := time.Now()
 	// if the user doesn't exist, do oauth verification and on success create the new user
 	if err == db.ErrNotFound {
 		// Register the user
@@ -188,25 +219,50 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// genareate the new user and password and store it in the database
+		// create the new user with OAuth credentials
 		user = &db.User{
 			Email:     loginInfo.Email,
 			FirstName: loginInfo.FirstName,
 			LastName:  loginInfo.LastName,
-			Password:  internal.HexHashPassword(passwordSalt, loginInfo.UserOAuthSignature),
-			Verified:  true,
+			Password:  "", // OAuth-only users have empty password
+			OAuth: map[string]db.OAuthProvider{
+				loginInfo.Provider: {
+					ExternalID:        loginInfo.Address,
+					SignatureHash:     internal.HexHashPassword(passwordSalt, loginInfo.UserOAuthSignature),
+					LinkedAt:          now,
+					LastAuthenticated: now,
+				},
+			},
+			Verified: true,
 		}
 		if _, err := a.db.SetUser(user); err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
 		res.Registered = true
-	}
-	// Login
-	// check that the address generated password matches the one in the database
-	if pass := internal.HexHashPassword(passwordSalt, loginInfo.UserOAuthSignature); pass != user.Password {
-		errors.ErrNonOauthAccount.Write(w)
-		return
+	} else {
+		// Login existing user
+		// check that the user has OAuth credentials for this provider
+		if user.OAuth == nil {
+			user.OAuth = make(map[string]db.OAuthProvider)
+		}
+		oauthProvider, exists := user.OAuth[loginInfo.Provider]
+		if !exists {
+			errors.ErrNonOauthAccount.Write(w)
+			return
+		}
+		// verify the signature hash matches
+		if pass := internal.HexHashPassword(passwordSalt, loginInfo.UserOAuthSignature); pass != oauthProvider.SignatureHash {
+			errors.ErrUnauthorized.Write(w)
+			return
+		}
+		// update last authenticated timestamp
+		oauthProvider.LastAuthenticated = now
+		user.OAuth[loginInfo.Provider] = oauthProvider
+		if _, err := a.db.SetUser(user); err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
 	}
 	// generate a new token with the user name as the subject
 	login, err := a.buildLoginResponse(loginInfo.Email)
