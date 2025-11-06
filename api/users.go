@@ -509,6 +509,11 @@ func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) 
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
+	// check if user is OAuth-only (no password set)
+	if user.Password == "" {
+		errors.ErrOAuthUserCannotUsePasswordRecovery.Write(w)
+		return
+	}
 	userPasswords := &apicommon.UserPasswordUpdate{}
 	if err := json.NewDecoder(r.Body).Decode(userPasswords); err != nil {
 		errors.ErrMalformedBody.Write(w)
@@ -564,6 +569,12 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
+	// check if user is OAuth-only (no password set)
+	// return OK to avoid information leakage, but don't send email
+	if user.Password == "" {
+		apicommon.HTTPWriteOK(w)
 		return
 	}
 	// check the user is verified
@@ -624,6 +635,12 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
+
+	// check if user is OAuth-only (no password set)
+	if user.Password == "" {
+		errors.ErrOAuthUserCannotUsePasswordRecovery.Write(w)
 		return
 	}
 
