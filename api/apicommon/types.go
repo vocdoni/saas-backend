@@ -297,6 +297,12 @@ type UserInfo struct {
 	// Whether the user's email is verified
 	Verified bool `json:"verified,omitempty"`
 
+	// Whether the user has a password set (true if not OAuth-only)
+	HasPassword bool `json:"hasPassword"`
+
+	// List of OAuth providers linked to this account (e.g., ["google", "github"])
+	Providers []string `json:"providers"`
+
 	// Organizations the user belongs to
 	Organizations []*UserOrganization `json:"organizations"`
 }
@@ -1102,6 +1108,8 @@ type OAuthLoginRequest struct {
 	FirstName string `json:"firstName"`
 	// User last name
 	LastName string `json:"lastName"`
+	// OAuth provider name (google, github, facebook)
+	Provider string `json:"provider"`
 	// The signature made by the OAuth service on top of the user email
 	OAuthSignature string `json:"oauthSignature"`
 	// The signature made by the user on on top of the oauth signature
@@ -1119,6 +1127,19 @@ type OAuthLoginResponse struct {
 
 	// Whether the user had to be  registered
 	Registered bool `json:"registered"`
+}
+
+// OAuthLinkRequest defines the payload for linking an OAuth provider to an existing account.
+// swagger:model OAuthLinkRequest
+type OAuthLinkRequest struct {
+	// OAuth provider name (google, github, facebook)
+	Provider string `json:"provider"`
+	// The signature made by the OAuth service on top of the user email
+	OAuthSignature string `json:"oauthSignature"`
+	// The signature made by the user on top of the oauth signature
+	UserOAuthSignature string `json:"userOAuthSignature"`
+	// The address of the user
+	Address string `json:"address"`
 }
 
 // OAuthServiceAddressResponse defines the response from the OAuth service containing its address.
