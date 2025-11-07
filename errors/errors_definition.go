@@ -37,6 +37,10 @@ var (
 	ErrAttemptCoolDownTime                = Error{Code: 40103, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("attempt cooldown time not reached"), LogLevel: "info"}
 	ErrInvalidOAuthProvider               = Error{Code: 40039, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid or unsupported OAuth provider"), LogLevel: "info"}
 	ErrOAuthUserCannotUsePasswordRecovery = Error{Code: 40040, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("OAuth users cannot use password recovery"), LogLevel: "info"}
+	ErrCannotUnlinkLastAuthMethod         = Error{Code: 40041, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("cannot unlink last authentication method"), LogLevel: "info"}
+	ErrProviderAlreadyLinked              = Error{Code: 40042, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("OAuth provider already linked to this account"), LogLevel: "info"}
+	ErrProviderNotLinked                  = Error{Code: 40043, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("OAuth provider not linked to this account"), LogLevel: "info"}
+
 	// Validation errors (400)
 	ErrEmailMalformed          = Error{Code: 40002, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid email format")}
 	ErrPasswordTooShort        = Error{Code: 40003, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("password must be at least 8 characters")}

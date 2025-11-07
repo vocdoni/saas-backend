@@ -392,6 +392,11 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 			Organization: apicommon.OrganizationFromDB(org, parent),
 		})
 	}
+	// extract the list of linked OAuth providers
+	providers := make([]string, 0, len(user.OAuth))
+	for provider := range user.OAuth {
+		providers = append(providers, provider)
+	}
 	// return the user information
 	apicommon.HTTPWriteJSON(w, apicommon.UserInfo{
 		ID:            user.ID,
@@ -399,6 +404,8 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 		FirstName:     user.FirstName,
 		LastName:      user.LastName,
 		Verified:      user.Verified,
+		HasPassword:   user.Password != "",
+		Providers:     providers,
 		Organizations: userOrgs,
 	})
 }
@@ -569,12 +576,6 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		errors.ErrGenericInternalServerError.Write(w)
-		return
-	}
-	// check if user is OAuth-only (no password set)
-	// return OK to avoid information leakage, but don't send email
-	if user.Password == "" {
-		apicommon.HTTPWriteOK(w)
 		return
 	}
 	// check the user is verified
