@@ -207,6 +207,12 @@ func (a *API) initRouter() http.Handler {
 		// update user password
 		log.Infow("new route", "method", "PUT", "path", usersPasswordEndpoint)
 		r.Put(usersPasswordEndpoint, a.updateUserPasswordHandler)
+		// link OAuth provider
+		log.Infow("new route", "method", "POST", "path", oauthLinkEndpoint)
+		r.Post(oauthLinkEndpoint, a.oauthLinkHandler)
+		// unlink OAuth provider
+		log.Infow("new route", "method", "DELETE", "path", oauthUnlinkEndpoint)
+		r.Delete(oauthUnlinkEndpoint, a.oauthUnlinkHandler)
 		// sign a payload
 		log.Infow("new route", "method", "POST", "path", signTxEndpoint)
 		r.Post(signTxEndpoint, a.signTxHandler)
