@@ -1278,8 +1278,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: Get the list of organization addresses where the user has write
-        access
+      description: Get the list of organization addresses the user belongs to
       produces:
       - application/json
       responses:
@@ -1297,7 +1296,7 @@ paths:
             $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
-      summary: Get writable organization addresses
+      summary: Get a list of addresses the user belongs to
       tags:
       - auth
   /auth/login:
