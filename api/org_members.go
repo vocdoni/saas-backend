@@ -214,13 +214,6 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 				"errors", len(p.Errors))
 		}
 
-		// Send completion email notification
-		orgName := org.Subdomain
-		if orgName == "" {
-			orgName = org.Address.Hex()
-		}
-		go a.sendMembersImportCompletionEmail(user.Email, user.FirstName+" "+user.LastName, orgName, lastProgress)
-
 		// Return the number of members added
 		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{
 			Added:  uint32(lastProgress.Added),
