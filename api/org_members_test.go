@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"testing"
 	"time"
 
@@ -15,6 +17,9 @@ import (
 
 func TestOrganizationMembers(t *testing.T) {
 	c := qt.New(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	// Create a user with admin permissions
 	adminToken := testCreateUser(t, "adminpassword123")
@@ -87,6 +92,12 @@ func TestOrganizationMembers(t *testing.T) {
 		"organizations", orgAddress.String(), "members",
 	)
 	c.Assert(addedResponse.Added, qt.Equals, uint32(2))
+
+	time.Sleep(2 * time.Second)
+
+	// check that no email is received
+	_, err := testMailService.FindEmail(ctx, user.Email)
+	qt.Assert(t, err.Error(), qt.Equals, "EOF")
 
 	// Test 2.2: Test with no authentication
 	requestAndAssertCode(http.StatusUnauthorized,
@@ -317,6 +328,12 @@ func TestOrganizationMembers(t *testing.T) {
 	c.Assert(jobStatus.Errors[0], qt.Matches, ".*invalid-email.*")
 	c.Assert(jobStatus.Errors[1], qt.Matches, ".*invalid-phone.*")
 	c.Assert(jobStatus.Errors[2], qt.Matches, ".*invalid-birthdate.*")
+
+	// Check that the completion email was sent
+	mailBody, err := testMailService.FindEmail(ctx, user.Email)
+	qt.Assert(t, err, qt.IsNil)
+	c.Assert(mailBody, qt.Matches, regexp.MustCompile(`(?i)\s(has been completed)\s`),
+		qt.Commentf("mail content does not, got:\n%s", mailBody))
 
 	// Test 5.1: Test jobs endpoint - basic functionality
 	jobsResponse := requestAndParse[apicommon.JobsResponse](
