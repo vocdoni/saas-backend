@@ -383,6 +383,11 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 			Organization: apicommon.OrganizationFromDB(org, parent),
 		})
 	}
+	// extract the list of linked OAuth providers
+	providers := make([]string, 0, len(user.OAuth))
+	for provider := range user.OAuth {
+		providers = append(providers, provider)
+	}
 	// return the user information
 	apicommon.HTTPWriteJSON(w, apicommon.UserInfo{
 		ID:            user.ID,
@@ -390,6 +395,8 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 		FirstName:     user.FirstName,
 		LastName:      user.LastName,
 		Verified:      user.Verified,
+		HasPassword:   user.Password != "",
+		Providers:     providers,
 		Organizations: userOrgs,
 	})
 }
@@ -498,6 +505,11 @@ func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) 
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	// check if user is OAuth-only (no password set)
+	if user.Password == "" {
+		errors.ErrOAuthUserCannotUsePasswordRecovery.Write(w)
 		return
 	}
 	userPasswords := &apicommon.UserPasswordUpdate{}
@@ -617,7 +629,7 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
-	// hash and update the new password
+	// hash and update the new password (works for both password reset and first-time password setup)
 	user.Password = internal.HexHashPassword(passwordSalt, userPasswords.NewPassword)
 	if _, err := a.db.SetUser(user); err != nil {
 		log.Warnw("could not update user password", "error", err)

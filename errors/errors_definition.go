@@ -32,7 +32,12 @@ var (
 	ErrNonOauthAccount         = Error{Code: 40101, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("account is not registered using OAuth"), LogLevel: "info"}
 	ErrUserNoVerified          = Error{Code: 40014, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("account email not verified"), LogLevel: "info"}
 	ErrVerificationCodeExpired = Error{Code: 40016, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("verification code has expired"), LogLevel: "info"}
-	ErrInvitationExpired       = Error{Code: 40019, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invitation code has expired"), LogLevel: "info"}
+	ErrInvitationExpired                  = Error{Code: 40019, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invitation code has expired"), LogLevel: "info"}
+	ErrInvalidOAuthProvider               = Error{Code: 40039, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid or unsupported OAuth provider"), LogLevel: "info"}
+	ErrOAuthUserCannotUsePasswordRecovery = Error{Code: 40040, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("OAuth users cannot use password recovery"), LogLevel: "info"}
+	ErrCannotUnlinkLastAuthMethod         = Error{Code: 40041, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("cannot unlink last authentication method"), LogLevel: "info"}
+	ErrProviderAlreadyLinked              = Error{Code: 40042, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("OAuth provider already linked to this account"), LogLevel: "info"}
+	ErrProviderNotLinked                  = Error{Code: 40043, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("OAuth provider not linked to this account"), LogLevel: "info"}
 
 	// Validation errors (400)
 	ErrEmailMalformed          = Error{Code: 40002, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid email format")}
