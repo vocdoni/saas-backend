@@ -52,6 +52,7 @@ func (a *API) refreshTokenHandler(w http.ResponseWriter, r *http.Request) {
 //	@Success		200		{object}	apicommon.LoginResponse
 //	@Failure		400		{object}	errors.Error
 //	@Failure		401		{object}	errors.Error
+//	@Failure		500		{object}	errors.Error
 //	@Router			/auth/login [post]
 func (a *API) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 	// het the user info from the request body
@@ -64,7 +65,7 @@ func (a *API) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 	user, err := a.db.UserByEmail(loginInfo.Email)
 	if err != nil {
 		if err == db.ErrNotFound {
-			errors.ErrUnauthorized.Write(w)
+			errors.ErrinvalidLoginCredentials.Write(w)
 			return
 		}
 		errors.ErrGenericInternalServerError.Write(w)
@@ -72,7 +73,7 @@ func (a *API) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// check the password
 	if pass := internal.HexHashPassword(passwordSalt, loginInfo.Password); pass != user.Password {
-		errors.ErrUnauthorized.Write(w)
+		errors.ErrinvalidLoginCredentials.Write(w)
 		return
 	}
 	// check if the user is verified

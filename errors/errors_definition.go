@@ -33,6 +33,7 @@ var (
 	ErrUserNoVerified          = Error{Code: 40014, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("account email not verified"), LogLevel: "info"}
 	ErrVerificationCodeExpired = Error{Code: 40016, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("verification code has expired"), LogLevel: "info"}
 	ErrInvitationExpired       = Error{Code: 40019, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invitation code has expired"), LogLevel: "info"}
+	ErrinvalidLoginCredentials = Error{Code: 40102, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("invalid login credentials"), LogLevel: "info"}
 
 	// Validation errors (400)
 	ErrEmailMalformed          = Error{Code: 40002, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid email format")}
