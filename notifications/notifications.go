@@ -23,6 +23,7 @@ const (
 type Notification struct {
 	ToName         string `json:"toName"`
 	ToAddress      string `json:"toAddress"`
+	CCAddress      string `json:"ccAddress"`
 	ToNumber       string `json:"toNumber"`
 	Subject        string `json:"subject"`
 	Body           string `json:"body"`
