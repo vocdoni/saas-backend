@@ -445,6 +445,7 @@ func (a *API) organizationCreateTicket(w http.ResponseWriter, r *http.Request) {
 
 	notification.ToAddress = apicommon.SupportEmail
 	notification.ReplyTo = user.Email
+	notification.CCAddress = user.Email
 
 	// send an email to the support destination
 	if err := a.mail.SendNotification(r.Context(), notification); err != nil {

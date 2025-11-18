@@ -114,7 +114,7 @@ func (se *Email) composeBody(notification *notifications.Notification) ([]byte, 
 		if err != nil {
 			return nil, fmt.Errorf("could not parse cc email: %v", err)
 		}
-		headers.WriteString(fmt.Sprintf("cc: %s\r\n", cc.String()))
+		headers.WriteString(fmt.Sprintf("Cc: %s\r\n", cc.String()))
 	}
 	headers.WriteString(fmt.Sprintf("Subject: %s\r\n", notification.Subject))
 	if !notification.EnableTracking {
