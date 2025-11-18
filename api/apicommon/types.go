@@ -438,7 +438,7 @@ func OrganizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 // swagger:model OrganizationSubscriptionInfo
 type OrganizationSubscriptionInfo struct {
 	// Subscription details
-	SubcriptionDetails SubscriptionDetails `json:"subscriptionDetails"`
+	SubscriptionDetails SubscriptionDetails `json:"subscriptionDetails"`
 
 	// Current usage metrics
 	Usage SubscriptionUsage `json:"usage"`
