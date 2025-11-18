@@ -314,9 +314,9 @@ func (a *API) organizationSubscriptionHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	info := &apicommon.OrganizationSubscriptionInfo{
-		SubcriptionDetails: apicommon.SubscriptionDetailsFromDB(&org.Subscription),
-		Usage:              apicommon.SubscriptionUsageFromDB(&org.Counters),
-		Plan:               apicommon.SubscriptionPlanFromDB(plan),
+		SubscriptionDetails: apicommon.SubscriptionDetailsFromDB(&org.Subscription),
+		Usage:               apicommon.SubscriptionUsageFromDB(&org.Counters),
+		Plan:                apicommon.SubscriptionPlanFromDB(plan),
 	}
 	apicommon.HTTPWriteJSON(w, info)
 }

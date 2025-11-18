@@ -224,7 +224,7 @@ func TestOrganizationSubscriptionHandler(t *testing.T) {
 	var subInfo apicommon.OrganizationSubscriptionInfo
 	c.Assert(json.Unmarshal(resp, &subInfo), qt.IsNil)
 	c.Assert(subInfo.Plan, qt.Not(qt.IsNil))
-	c.Assert(subInfo.SubcriptionDetails, qt.Not(qt.IsNil))
+	c.Assert(subInfo.SubscriptionDetails, qt.Not(qt.IsNil))
 	c.Assert(subInfo.Usage, qt.Not(qt.IsNil))
 
 	// Test without authentication
