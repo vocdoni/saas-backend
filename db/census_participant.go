@@ -252,11 +252,8 @@ func (ms *MongoStorage) CensusParticipantByLoginHashOrEmailorPhone(
 	}
 
 	participant, err := ms.censusParticipantByLoginHash(censusID, HashAuthTwoFaFields(member, authFields, twoFaFields))
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, ErrNotFound) && len(twoFaFields) > 0 {
 		participant, err = ms.censusParticipantByEmailOrPhone(censusID, authFields, member)
-		if errors.Is(err, ErrNotFound) {
-			return nil, err
-		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get census participant: %w", err)
