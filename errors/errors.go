@@ -42,6 +42,11 @@ func (e Error) Error() string {
 	return e.Err.Error()
 }
 
+// Unwrap returns the error contained inside
+func (e Error) Unwrap() error {
+	return e.Err
+}
+
 // Write serializes a JSON msg using Error.Err and Error.Code
 // and passes that to http.Error(). It also logs the error with appropriate level.
 func (e Error) Write(w http.ResponseWriter) {
