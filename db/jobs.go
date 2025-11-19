@@ -21,7 +21,7 @@ func (ms *MongoStorage) SetJob(job *Job) error {
 	defer ms.keysLock.Unlock()
 
 	// If no ID is set, create a new one
-	if job.ID == internal.NilObjectID {
+	if job.ID.IsZero() {
 		job.ID = internal.NewObjectID()
 	}
 
@@ -42,7 +42,7 @@ func (ms *MongoStorage) SetJob(job *Job) error {
 	return nil
 }
 
-// Job retrieves a job by its jobId.
+// Job retrieves a job by its jobID.
 func (ms *MongoStorage) Job(jobID internal.ObjectID) (*Job, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()

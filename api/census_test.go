@@ -186,7 +186,7 @@ func TestCensus(t *testing.T) {
 	// Make the request with async=true and verify the response contains a job ID
 	asyncResponse := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, adminToken, asyncMembers,
 		censusEndpoint, censusID.String()+"?async=true")
-	c.Assert(asyncResponse.JobID, qt.HasLen, 12) // JobID should be 12 bytes
+	c.Assert(asyncResponse.JobID.IsZero(), qt.IsFalse)
 
 	t.Logf("Async job ID: %s\n", asyncResponse.JobID)
 

@@ -286,7 +286,6 @@ func TestOrganizationMembers(t *testing.T) {
 		t, http.MethodPost, adminToken, asyncMembers,
 		"organizations", orgAddress.String(), "members?async=true")
 	c.Assert(asyncResponse.JobID.IsZero(), qt.IsFalse)
-	c.Assert(asyncResponse.JobID, qt.HasLen, 12) // JobID should be 12 bytes
 
 	t.Logf("Async job ID: %s\n", asyncResponse.JobID)
 
@@ -418,6 +417,8 @@ func TestOrganizationMembers(t *testing.T) {
 		jobStatus2 := requestAndParse[apicommon.AddMembersJobResponse](
 			t, http.MethodGet, adminToken, nil,
 			"organizations", orgAddress.String(), "members", "job", asyncResponse2.JobID.String())
+		t.Logf("Job progress: %d%%, Added: %d, Total: %d, Errors: %d\n",
+			jobStatus.Progress, jobStatus.Added, jobStatus.Total, len(jobStatus.Errors))
 
 		if jobStatus2.Progress == 100 {
 			completed2 = true
