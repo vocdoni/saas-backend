@@ -73,7 +73,7 @@ func TestSetJob(t *testing.T) {
 	// Test SetJob (create)
 	err := testDB.SetJob(job)
 	c.Assert(err, qt.IsNil)
-	c.Assert(job.ID.IsZero(), qt.Not(qt.IsTrue))
+	c.Assert(job.ID.IsZero(), qt.IsFalse)
 
 	// Test SetJob (update)
 	job.Added = 30

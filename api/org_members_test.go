@@ -285,7 +285,7 @@ func TestOrganizationMembers(t *testing.T) {
 	asyncResponse := requestAndParse[apicommon.AddMembersResponse](
 		t, http.MethodPost, adminToken, asyncMembers,
 		"organizations", orgAddress.String(), "members?async=true")
-	c.Assert(asyncResponse.JobID, qt.Not(qt.IsNil))
+	c.Assert(asyncResponse.JobID.IsZero(), qt.IsFalse)
 	c.Assert(asyncResponse.JobID, qt.HasLen, 12) // JobID should be 12 bytes
 
 	t.Logf("Async job ID: %s\n", asyncResponse.JobID)

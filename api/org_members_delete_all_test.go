@@ -135,7 +135,7 @@ func TestDeleteAllOrganizationMembersDeletesGroups(t *testing.T) {
 	)
 
 	// verify the group was created
-	c.Assert(groupInfo.ID.IsZero(), qt.Not(qt.IsTrue))
+	c.Assert(groupInfo.ID.IsZero(), qt.IsFalse)
 	groupMembersResp := requestAndParse[apicommon.ListOrganizationMemberGroupResponse](t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "groups", groupInfo.ID.String(), "members",
 	)

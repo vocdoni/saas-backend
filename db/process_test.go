@@ -104,7 +104,7 @@ func TestProcess(t *testing.T) {
 		retrieved, err := testDB.Process(pid)
 		c.Assert(err, qt.IsNil)
 		c.Assert(retrieved, qt.Not(qt.IsNil))
-		c.Assert(retrieved.ID.IsZero(), qt.Not(qt.IsTrue))
+		c.Assert(retrieved.ID.IsZero(), qt.IsFalse)
 		c.Assert(retrieved.OrgAddress, qt.Equals, testOrgAddress)
 		c.Assert(retrieved.Census.Published.URI, qt.Equals, testProcessURI)
 		c.Assert(retrieved.Census.Published.Root, qt.DeepEquals, rootHex)
