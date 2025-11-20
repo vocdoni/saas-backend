@@ -144,11 +144,11 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// all pre-checks OK, now update the org users counter
-	if err := a.db.IncrementOrganizationUsersCounter(org.Address); err != nil {
-		errors.ErrGenericInternalServerError.Withf("increment users: %v", err).Write(w)
+	if err := a.subscriptions.OrgHasPermission(org.Address, subscriptions.InviteUser); err != nil {
+		errors.ErrUnauthorized.WithErr(err).Write(w) // TODO: fix double wrapping here
 		return
 	}
+
 	// create new invitation
 	orgInvite := &db.OrganizationInvite{
 		OrganizationAddress: org.Address,
@@ -159,16 +159,10 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 	// generate the verification code and the verification link
 	code, link, err := a.generateVerificationCodeAndLink(orgInvite, db.CodeTypeOrgInvite)
 	if err == db.ErrAlreadyExists {
-		if err := a.db.DecrementOrganizationUsersCounter(org.Address); err != nil {
-			log.Errorf("decrement users: %v", err)
-		}
 		errors.ErrDuplicateConflict.With("user is already invited to the organization").Write(w)
 		return
 	}
 	if err != nil {
-		if err := a.db.DecrementOrganizationUsersCounter(org.Address); err != nil {
-			log.Errorf("decrement users: %v", err)
-		}
 		errors.ErrGenericInternalServerError.Withf("could not create the invite: %v", err).Write(w)
 		return
 	}
@@ -458,12 +452,6 @@ func (a *API) deletePendingUserInvitationHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// update the org users counter
-	if err := a.db.DecrementOrganizationUsersCounter(org.Address); err != nil {
-		log.Errorf("decrement users: %v", err)
-		errors.ErrGenericInternalServerError.Withf("could not update organization users counter: %v", err).Write(w)
-		return
-	}
 	apicommon.HTTPWriteOK(w)
 }
 
@@ -668,11 +656,5 @@ func (a *API) removeOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// update the org users counter
-	if err := a.db.DecrementOrganizationUsersCounter(org.Address); err != nil {
-		log.Errorf("decrement users: %v", err)
-		errors.ErrGenericInternalServerError.Withf("could not update organization users counter: %v", err).Write(w)
-		return
-	}
 	apicommon.HTTPWriteOK(w)
 }

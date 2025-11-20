@@ -516,10 +516,10 @@ func SubscriptionPlanFromDB(plan *db.Plan) SubscriptionPlan {
 // swagger:model SubscriptionPlanLimits
 type SubscriptionPlanLimits struct {
 	// Maximum number of users allowed
-	Users int `json:"teamMembers"`
+	MaxTeamMembers int `json:"teamMembers"`
 
 	// Maximum number of sub-organizations allowed
-	SubOrgs int `json:"subOrgs"`
+	MaxSubOrgs int `json:"subOrgs"`
 
 	// Maximum number of voting processes allowed
 	MaxProcesses int `json:"maxProcesses"`
