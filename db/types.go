@@ -151,9 +151,6 @@ type OrganizationSubscription struct {
 type OrganizationCounters struct {
 	SentSMS    int `json:"sentSMS" bson:"sentSMS"`
 	SentEmails int `json:"sentEmails" bson:"sentEmails"`
-	SubOrgs    int `json:"subOrgs" bson:"subOrgs"`
-	Users      int `json:"users" bson:"users"`
-	Processes  int `json:"processes" bson:"processes"`
 }
 
 type OrganizationInvite struct {

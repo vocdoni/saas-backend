@@ -156,6 +156,9 @@ func (a *API) organizationInfoHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrNoOrganizationProvided.Write(w)
 		return
 	}
+	// TODO: call CountUsers, CountSubOrgs, CountProcesses methods
+	// (likely a helper that calls those and returns a SubscriptionUsage object)
+
 	// send the organization back to the user
 	apicommon.HTTPWriteJSON(w, apicommon.OrganizationFromDB(org, parent))
 }

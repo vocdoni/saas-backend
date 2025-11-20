@@ -34,6 +34,17 @@ func TestOrganizationUsers(t *testing.T) {
 	// Get the organization to verify it exists
 	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String())
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+	// Subscribe the organization to a plan
+	{
+		err := testDB.SetOrganizationSubscription(orgAddress, &db.OrganizationSubscription{
+			PlanID:          mockEssentialPlan.ID,
+			StartDate:       time.Now(),
+			RenewalDate:     time.Now().Add(time.Hour * 24),
+			LastPaymentDate: time.Now(),
+			Active:          true,
+		})
+		c.Assert(err, qt.IsNil)
+	}
 
 	// Create a second user to be invited to the organization
 	userToken := testCreateUser(t, "userpassword123")
@@ -120,14 +131,8 @@ func TestOrganizationUsers(t *testing.T) {
 		t.Logf("Created organization with address: %s\n", newOrgAddress.String())
 
 		// Subscribe the organization to a plan
-		plans, err := testDB.Plans()
-		c.Assert(err, qt.IsNil)
-		c.Assert(len(plans) > 0, qt.IsTrue)
-		premiumPlan := plans[1]
-		c.Assert(premiumPlan.Organization.MaxTeamMembers > 1, qt.IsTrue)
-
 		err = testDB.SetOrganizationSubscription(newOrgAddress, &db.OrganizationSubscription{
-			PlanID:          premiumPlan.ID,
+			PlanID:          mockEssentialPlan.ID,
 			StartDate:       time.Now(),
 			RenewalDate:     time.Now().Add(time.Hour * 24),
 			LastPaymentDate: time.Now(),
@@ -185,7 +190,7 @@ func TestOrganizationUsers(t *testing.T) {
 
 		// After our fix, we expect the counter to be correctly incremented by nInvites,
 		// but not exceed max allowed users of the subscribed plan
-		expectedCount := min(initialUserCount+nInvites, premiumPlan.Organization.MaxTeamMembers)
+		expectedCount := min(initialUserCount+nInvites, mockEssentialPlan.Organization.MaxTeamMembers)
 		t.Logf("Final users counter: %d (expected %d)",
 			finalOrg.Counters.Users, expectedCount)
 
@@ -209,7 +214,7 @@ func TestOrganizationUsers(t *testing.T) {
 		var pendingInvites apicommon.OrganizationInviteList
 		err = parseJSON(resp, &pendingInvites)
 		c.Assert(err, qt.IsNil)
-		expectedInvitesCount := min(nInvites, premiumPlan.Organization.MaxTeamMembers)
+		expectedInvitesCount := min(nInvites, mockEssentialPlan.Organization.MaxTeamMembers)
 		c.Assert(pendingInvites.Invites, qt.HasLen, expectedInvitesCount,
 			qt.Commentf("expected %d pending invitations, got %d", expectedInvitesCount, len(pendingInvites.Invites)))
 	})

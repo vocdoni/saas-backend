@@ -246,8 +246,8 @@ func (p *Subscriptions) OrgHasPermission(orgAddress common.Address, permission D
 			return errors.ErrGenericInternalServerError.WithErr(err)
 		}
 
-		if count >= int64(plan.Organization.SubOrgs) {
-			return errors.ErrMaxSubOrgsReached.Withf("(%d)", plan.Organization.SubOrgs)
+		if count >= int64(plan.Organization.MaxSubOrgs) {
+			return errors.ErrMaxSubOrgsReached.Withf("(%d)", plan.Organization.MaxSubOrgs)
 		}
 		return nil
 	default:
