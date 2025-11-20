@@ -75,6 +75,8 @@ var (
 	ErrOrganizationSubscriptionInactive = Error{Code: 40021, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("organization subscription is not active")}
 	ErrNoDefaultPlan                    = Error{Code: 40022, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("no default plan available")}
 	ErrMaxDraftsReached                 = Error{Code: 40031, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("max drafts reached")}
+	ErrMaxTeamMembersReached            = Error{Code: 40031, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("max team members reached")}
+	ErrMaxSubOrgsReached                = Error{Code: 40031, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("max sub orgs reached")}
 
 	// Server errors (500) - These should be used sparingly and only for true internal errors
 	ErrMarshalingServerJSONFailed  = Error{Code: 50001, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("server error: failed to process response"), LogLevel: "error"}

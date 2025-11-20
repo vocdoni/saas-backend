@@ -99,11 +99,6 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		parentOrg = orgInfo.Parent.Address
-		// update the parent organization counter
-		if err := a.db.IncrementOrganizationSubOrgsCounter(parentOrg); err != nil {
-			errors.ErrGenericInternalServerError.Withf("increment suborgs: %v", err).Write(w)
-			return
-		}
 	}
 	// create the organization
 	dbOrg := &db.Organization{
@@ -130,11 +125,6 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		},
 	}
 	if err := a.db.SetOrganization(dbOrg); err != nil {
-		if orgInfo.Parent != nil {
-			if err := a.db.DecrementOrganizationSubOrgsCounter(parentOrg); err != nil {
-				log.Errorf("decrement suborgs: %v", err)
-			}
-		}
 		if err == db.ErrAlreadyExists {
 			errors.ErrInvalidOrganizationData.WithErr(err).Write(w)
 			return

@@ -325,152 +325,32 @@ func (ms *MongoStorage) DeleteOrganizationMetaKeys(address common.Address, keysT
 	return nil
 }
 
-// IncrementOrganizationUsersCounter atomically increments the users counter for the organization with the given address.
-func (ms *MongoStorage) IncrementOrganizationUsersCounter(address common.Address) error {
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-
-	org, err := ms.Organization(address)
-	if err != nil {
-		return fmt.Errorf("could not get organization: %w", err)
+func (ms *MongoStorage) CountUsers(address common.Address) (int64, error) {
+	if address.Cmp(common.Address{}) == 0 {
+		return 0, ErrInvalidData
 	}
 
-	// Check if the organization has a subscription
-	if org.Subscription.PlanID == 0 {
-		return fmt.Errorf("organization has no subscription plan")
-	}
-
-	plan, err := ms.Plan(org.Subscription.PlanID)
-	if err != nil {
-		return fmt.Errorf("could not get organization plan: %w", err)
-	}
-
-	if org.Counters.Users >= plan.Organization.MaxTeamMembers {
-		return fmt.Errorf("max users reached (%d >= %d)", org.Counters.Users, plan.Organization.MaxTeamMembers)
-	}
-
-	// Create a context with a timeout
+	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	// Prepare the filter to find the organization
-	filter := bson.M{"_id": address}
-
-	// Use the $inc operator to atomically increment the users counter
-	update := bson.M{"$inc": bson.M{"counters.users": 1}}
-
-	// Update the organization in the database
-	result, err := ms.organizations.UpdateOne(ctx, filter, update)
-	if err != nil {
-		return fmt.Errorf("failed to increment users counter: %w", err)
+	// find the organization in the database
+	filter := bson.M{
+		"organizations": bson.M{
+			"$elemMatch": bson.M{
+				"_id": address,
+			},
+		},
 	}
 
-	if result.MatchedCount == 0 {
-		return fmt.Errorf("no organization found with address: %s", address)
-	}
-
-	return nil
+	// Count total documents
+	return ms.users.CountDocuments(ctx, filter)
 }
 
-// DecrementOrganizationUsersCounter atomically decrements the users counter for the organization with the given address.
-func (ms *MongoStorage) DecrementOrganizationUsersCounter(address common.Address) error {
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-
-	// Create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-
-	// Prepare the filter to find the organization
-	filter := bson.M{"_id": address}
-
-	// Use the $inc operator with a negative value to atomically decrement the users counter
-	update := bson.M{"$inc": bson.M{"counters.users": -1}}
-
-	// Update the organization in the database
-	result, err := ms.organizations.UpdateOne(ctx, filter, update)
-	if err != nil {
-		return fmt.Errorf("failed to decrement users counter: %w", err)
+func (ms *MongoStorage) CountSubOrgs(address common.Address) (int64, error) {
+	if address.Cmp(common.Address{}) == 0 {
+		return 0, ErrInvalidData
 	}
-
-	if result.MatchedCount == 0 {
-		return fmt.Errorf("no organization found with address: %s", address)
-	}
-
-	return nil
-}
-
-// IncrementOrganizationSubOrgsCounter atomically increments the suborgs counter for the organization with the given address.
-func (ms *MongoStorage) IncrementOrganizationSubOrgsCounter(address common.Address) error {
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-
-	org, err := ms.Organization(address)
-	if err != nil {
-		return fmt.Errorf("could not get organization: %v", err)
-	}
-
-	// Check if the organization has a subscription
-	if org.Subscription.PlanID == 0 {
-		return fmt.Errorf("organization has no subscription plan")
-	}
-
-	plan, err := ms.Plan(org.Subscription.PlanID)
-	if err != nil {
-		return fmt.Errorf("could not get organization plan: %v", err)
-	}
-
-	if org.Counters.SubOrgs >= plan.Organization.MaxSubOrgs {
-		return fmt.Errorf("max suborgs reached (%d >= %d)", org.Counters.SubOrgs, plan.Organization.MaxSubOrgs)
-	}
-
-	// Create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-
-	// Prepare the filter to find the organization
-	filter := bson.M{"_id": address}
-
-	// Use the $inc operator to atomically increment the suborgs counter
-	update := bson.M{"$inc": bson.M{"counters.subOrgs": 1}}
-
-	// Update the organization in the database
-	result, err := ms.organizations.UpdateOne(ctx, filter, update)
-	if err != nil {
-		return fmt.Errorf("failed to increment suborgs counter: %w", err)
-	}
-
-	if result.MatchedCount == 0 {
-		return fmt.Errorf("no organization found with address: %s", address)
-	}
-
-	return nil
-}
-
-// DecrementOrganizationSubOrgsCounter atomically decrements the suborgs counter for the organization with the given address.
-func (ms *MongoStorage) DecrementOrganizationSubOrgsCounter(address common.Address) error {
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-
-	// Create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-
-	// Prepare the filter to find the organization
-	filter := bson.M{"_id": address}
-
-	// Use the $inc operator with a negative value to atomically decrement the suborgs counter
-	update := bson.M{"$inc": bson.M{"counters.subOrgs": -1}}
-
-	// Update the organization in the database
-	result, err := ms.organizations.UpdateOne(ctx, filter, update)
-	if err != nil {
-		return fmt.Errorf("failed to decrement suborgs counter: %w", err)
-	}
-
-	if result.MatchedCount == 0 {
-		return fmt.Errorf("no organization found with address: %s", address)
-	}
-
-	return nil
+	// TBD
+	return 0, fmt.Errorf("not implemented")
 }

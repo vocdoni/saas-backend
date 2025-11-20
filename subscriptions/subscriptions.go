@@ -54,6 +54,9 @@ type DBInterface interface {
 	Organization(address common.Address) (*db.Organization, error)
 	OrganizationWithParent(address common.Address) (*db.Organization, *db.Organization, error)
 	CountProcesses(orgAddress common.Address, draft db.DraftFilter) (int64, error)
+	CountPendingInvitations(orgAddress common.Address) (int64, error)
+	CountUsers(orgAddress common.Address) (int64, error)
+	CountSubOrgs(orgAddress common.Address) (int64, error)
 }
 
 // Subscriptions is the service that manages the organization permissions based on
@@ -197,23 +200,22 @@ func (p *Subscriptions) HasDBPermission(userEmail string, orgAddress common.Addr
 
 // OrgHasPermission checks if the org has permission to perform the given action
 func (p *Subscriptions) OrgHasPermission(orgAddress common.Address, permission DBPermission) error {
+	org, err := p.db.Organization(orgAddress)
+	if err != nil {
+		return errors.ErrOrganizationNotFound.WithErr(err)
+	}
+
+	if org.Subscription.PlanID == 0 {
+		return errors.ErrNoOrganizationSubscription
+	}
+
+	plan, err := p.db.Plan(org.Subscription.PlanID)
+	if err != nil {
+		return errors.ErrGenericInternalServerError.WithErr(err)
+	}
+
 	switch permission {
 	case CreateDraft:
-		// Check if the organization has a subscription
-		org, err := p.db.Organization(orgAddress)
-		if err != nil {
-			return errors.ErrOrganizationNotFound.WithErr(err)
-		}
-
-		if org.Subscription.PlanID == 0 {
-			return errors.ErrNoOrganizationSubscription.With("can't create draft process")
-		}
-
-		plan, err := p.db.Plan(org.Subscription.PlanID)
-		if err != nil {
-			return errors.ErrGenericInternalServerError.WithErr(err)
-		}
-
 		count, err := p.db.CountProcesses(orgAddress, db.DraftOnly)
 		if err != nil {
 			return errors.ErrGenericInternalServerError.WithErr(err)
@@ -221,6 +223,31 @@ func (p *Subscriptions) OrgHasPermission(orgAddress common.Address, permission D
 
 		if count >= int64(plan.Organization.MaxDrafts) {
 			return errors.ErrMaxDraftsReached.Withf("(%d)", plan.Organization.MaxDrafts)
+		}
+		return nil
+	case InviteUser:
+		countInvites, err := p.db.CountPendingInvitations(orgAddress)
+		if err != nil {
+			return errors.ErrGenericInternalServerError.WithErr(err)
+		}
+
+		countUsers, err := p.db.CountUsers(orgAddress)
+		if err != nil {
+			return errors.ErrGenericInternalServerError.WithErr(err)
+		}
+
+		if countInvites+countUsers >= int64(plan.Organization.MaxTeamMembers) {
+			return errors.ErrMaxTeamMembersReached.Withf("(%d)", plan.Organization.MaxTeamMembers)
+		}
+		return nil
+	case CreateSubOrg:
+		count, err := p.db.CountSubOrgs(orgAddress)
+		if err != nil {
+			return errors.ErrGenericInternalServerError.WithErr(err)
+		}
+
+		if count >= int64(plan.Organization.SubOrgs) {
+			return errors.ErrMaxSubOrgsReached.Withf("(%d)", plan.Organization.SubOrgs)
 		}
 		return nil
 	default:

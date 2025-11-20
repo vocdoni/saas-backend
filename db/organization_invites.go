@@ -156,6 +156,15 @@ func (ms *MongoStorage) PendingInvitations(organizationAddress common.Address) (
 	return invitations, nil
 }
 
+func (ms *MongoStorage) CountPendingInvitations(organizationAddress common.Address) (int64, error) {
+	if organizationAddress.Cmp(common.Address{}) == 0 {
+		return 0, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	return ms.organizationInvites.CountDocuments(ctx, bson.M{"organizationAddress": organizationAddress})
+}
+
 // deleteInvitation is a helper function to delete an invitation based on the provided filter.
 func (ms *MongoStorage) deleteInvitationHelper(filter bson.M) error {
 	ms.keysLock.Lock()
