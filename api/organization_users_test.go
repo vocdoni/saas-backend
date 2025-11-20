@@ -124,7 +124,7 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(len(plans) > 0, qt.IsTrue)
 		premiumPlan := plans[1]
-		c.Assert(premiumPlan.Organization.Users > 1, qt.IsTrue)
+		c.Assert(premiumPlan.Organization.MaxTeamMembers > 1, qt.IsTrue)
 
 		err = testDB.SetOrganizationSubscription(newOrgAddress, &db.OrganizationSubscription{
 			PlanID:          premiumPlan.ID,
@@ -185,7 +185,7 @@ func TestOrganizationUsers(t *testing.T) {
 
 		// After our fix, we expect the counter to be correctly incremented by nInvites,
 		// but not exceed max allowed users of the subscribed plan
-		expectedCount := min(initialUserCount+nInvites, premiumPlan.Organization.Users)
+		expectedCount := min(initialUserCount+nInvites, premiumPlan.Organization.MaxTeamMembers)
 		t.Logf("Final users counter: %d (expected %d)",
 			finalOrg.Counters.Users, expectedCount)
 
@@ -209,7 +209,7 @@ func TestOrganizationUsers(t *testing.T) {
 		var pendingInvites apicommon.OrganizationInviteList
 		err = parseJSON(resp, &pendingInvites)
 		c.Assert(err, qt.IsNil)
-		expectedInvitesCount := min(nInvites, premiumPlan.Organization.Users)
+		expectedInvitesCount := min(nInvites, premiumPlan.Organization.MaxTeamMembers)
 		c.Assert(pendingInvites.Invites, qt.HasLen, expectedInvitesCount,
 			qt.Commentf("expected %d pending invitations, got %d", expectedInvitesCount, len(pendingInvites.Invites)))
 	})

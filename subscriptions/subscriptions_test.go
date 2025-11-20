@@ -130,8 +130,8 @@ func TestHasDBPermission(t *testing.T) {
 				ID:   1,
 				Name: "Test Plan",
 				Organization: db.PlanLimits{
-					Users:   10,
-					SubOrgs: 5,
+					MaxTeamMembers: 10,
+					MaxSubOrgs:     5,
 				},
 			},
 		},

@@ -345,8 +345,8 @@ func (ms *MongoStorage) IncrementOrganizationUsersCounter(address common.Address
 		return fmt.Errorf("could not get organization plan: %w", err)
 	}
 
-	if org.Counters.Users >= plan.Organization.Users {
-		return fmt.Errorf("max users reached (%d >= %d)", org.Counters.Users, plan.Organization.Users)
+	if org.Counters.Users >= plan.Organization.MaxTeamMembers {
+		return fmt.Errorf("max users reached (%d >= %d)", org.Counters.Users, plan.Organization.MaxTeamMembers)
 	}
 
 	// Create a context with a timeout
@@ -420,8 +420,8 @@ func (ms *MongoStorage) IncrementOrganizationSubOrgsCounter(address common.Addre
 		return fmt.Errorf("could not get organization plan: %v", err)
 	}
 
-	if org.Counters.SubOrgs >= plan.Organization.SubOrgs {
-		return fmt.Errorf("max suborgs reached (%d >= %d)", org.Counters.SubOrgs, plan.Organization.SubOrgs)
+	if org.Counters.SubOrgs >= plan.Organization.MaxSubOrgs {
+		return fmt.Errorf("max suborgs reached (%d >= %d)", org.Counters.SubOrgs, plan.Organization.MaxSubOrgs)
 	}
 
 	// Create a context with a timeout
