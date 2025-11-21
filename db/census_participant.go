@@ -113,7 +113,7 @@ func (ms *MongoStorage) CensusParticipant(censusID, id string) (*CensusParticipa
 		if err == mongo.ErrNoDocuments {
 			return nil, ErrNotFound
 		}
-		return nil, fmt.Errorf("failed to get census participant: %w", err)
+		return nil, fmt.Errorf("failed to get census participant by id: %w", err)
 	}
 
 	return participant, nil
@@ -156,7 +156,7 @@ func (ms *MongoStorage) CensusParticipantByMemberNumber(
 		if err == mongo.ErrNoDocuments {
 			return nil, ErrNotFound
 		}
-		return nil, fmt.Errorf("failed to get census participant: %w", err)
+		return nil, fmt.Errorf("failed to get census participant by member number: %w", err)
 	}
 
 	return participant, nil
@@ -256,7 +256,7 @@ func (ms *MongoStorage) CensusParticipantByLoginHashOrEmailorPhone(
 		participant, err = ms.censusParticipantByEmailOrPhone(censusID, authFields, member)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to get census participant: %w", err)
+		return nil, fmt.Errorf("failed to get census participant by login hash, email or phone: %w", err)
 	}
 
 	return participant, nil
@@ -666,7 +666,7 @@ func (ms *MongoStorage) CensusParticipants(censusID string) ([]CensusParticipant
 	}()
 	var participants []CensusParticipant
 	if err := cursor.All(ctx, &participants); err != nil {
-		return nil, fmt.Errorf("failed to get census participants: %w", err)
+		return nil, fmt.Errorf("failed to parse census participants: %w", err)
 	}
 
 	return participants, nil
