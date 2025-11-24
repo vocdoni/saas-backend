@@ -17,7 +17,7 @@ import (
 func testCreateOrgAndCensus(
 	t *testing.T,
 	adminToken string,
-) (common.Address, string, apicommon.PublishedCensusResponse) {
+) (common.Address, internal.ObjectID, apicommon.PublishedCensusResponse) {
 	c := qt.New(t)
 
 	// Verify the token works
@@ -69,11 +69,11 @@ func testCreateOrgAndCensus(
 		},
 	}
 
-	resp, code := testRequest(t, http.MethodPost, adminToken, members, censusEndpoint, censusID)
+	resp, code := testRequest(t, http.MethodPost, adminToken, members, censusEndpoint, censusID.String())
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Publish the census
-	resp, code = testRequest(t, http.MethodPost, adminToken, nil, censusEndpoint, censusID, "publish")
+	resp, code = testRequest(t, http.MethodPost, adminToken, nil, censusEndpoint, censusID.String(), "publish")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	var publishedCensus apicommon.PublishedCensusResponse
@@ -100,13 +100,10 @@ func TestProcess(t *testing.T) {
 	t.Logf("Generated process ID: %s\n", processAddress.String())
 
 	// Test 1.1: Test with valid data
-	censusIDBytes := internal.HexBytes{}
-	err := censusIDBytes.ParseString(censusID)
-	c.Assert(err, qt.IsNil)
 
 	processInfo := &apicommon.CreateProcessRequest{
 		OrgAddress: orgAddress,
-		CensusID:   censusIDBytes,
+		CensusID:   censusID,
 		Address:    processAddress,
 		Metadata:   map[string]any{"title": "Test Process", "description": "This is a test process"},
 	}
@@ -125,9 +122,8 @@ func TestProcess(t *testing.T) {
 	requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, adminToken, invalidProcessInfo, "process")
 
 	// Test 1.4: Test create with invalid census ID
-	invalidCensusID := internal.HexBytes("invalid-id")
 	invalidProcessInfo2 := &apicommon.CreateProcessRequest{
-		CensusID: invalidCensusID,
+		CensusID: internal.NilObjectID,
 		Metadata: map[string]any{"title": "Test Process", "description": "This is a test process"},
 	}
 
@@ -135,7 +131,7 @@ func TestProcess(t *testing.T) {
 	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
 
 	// Test 1.5: Test create process (should succeed)
-	pid := requestAndParseWithAssertCode[string](http.StatusOK, t, http.MethodPost, adminToken, processInfo, "process")
+	pid := requestAndParseWithAssertCode[internal.ObjectID](http.StatusOK, t, http.MethodPost, adminToken, processInfo, "process")
 	t.Logf("Created process with ID: %s\n", pid)
 
 	// Test 1.6: Test retrieve with invalid census ID
@@ -143,18 +139,18 @@ func TestProcess(t *testing.T) {
 	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
 
 	// Test 1.7: Test retrieve with valid process ID
-	retrievedProcess := requestAndParse[db.Process](t, http.MethodGet, adminToken, nil, "process", pid)
-	c.Assert(retrievedProcess.ID.Hex(), qt.Equals, pid)
+	retrievedProcess := requestAndParse[db.Process](t, http.MethodGet, adminToken, nil, "process", pid.String())
+	c.Assert(retrievedProcess.ID, qt.Equals, pid)
 	c.Assert(retrievedProcess.Metadata["title"], qt.Equals, "Test Process")
 	c.Assert(retrievedProcess.Metadata["description"], qt.Equals, "This is a test process")
 
 	// Test 1.8: Test delete process
-	resp, code = testRequest(t, http.MethodDelete, adminToken, nil, "process", pid)
+	resp, code = testRequest(t, http.MethodDelete, adminToken, nil, "process", pid.String())
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 	t.Log("Successfully deleted the process")
 
 	// Verify the process no longer exists
-	_, code = testRequest(t, http.MethodGet, adminToken, nil, "process", pid)
+	_, code = testRequest(t, http.MethodGet, adminToken, nil, "process", pid.String())
 	c.Assert(code, qt.Equals, http.StatusNotFound)
 	t.Log("Verified the process no longer exists after deletion")
 }
@@ -172,13 +168,9 @@ func TestDraftProcess(t *testing.T) {
 	// Genereate a mock Vochain Address
 	randomAddress := common.HexToAddress(internal.RandomHex(1000000))
 
-	censusIDBytes := internal.HexBytes{}
-	err := censusIDBytes.ParseString(censusID)
-	c.Assert(err, qt.IsNil)
-
 	draftProcessInfo := &apicommon.CreateProcessRequest{
 		OrgAddress: orgAddress,
-		CensusID:   censusIDBytes,
+		CensusID:   censusID,
 		Metadata: map[string]any{
 			"title":       "Draft Process",
 			"description": "This is a draft process",
@@ -272,7 +264,7 @@ func TestDraftProcess(t *testing.T) {
 	// Step 3: Try to update the process again, which should fail since it's no longer in draft mode
 	{
 		finalProcessInfo := &apicommon.CreateProcessRequest{
-			CensusID: censusIDBytes,
+			CensusID: censusID,
 			Metadata: map[string]any{
 				"title":       "Final Process",
 				"description": "This update should fail",

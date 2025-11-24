@@ -632,7 +632,7 @@ func testCreateCensus(
 	orgAddress common.Address,
 	authFields db.OrgMemberAuthFields,
 	twoFaFields db.OrgMemberTwoFaFields,
-) string {
+) internal.ObjectID {
 	c := qt.New(t)
 
 	// Create a new census
@@ -651,7 +651,9 @@ func testCreateCensus(
 
 // testCreateBundle creates a new process bundle with the given census ID and process IDs.
 // It returns the bundle ID and root.
-func testCreateBundle(t *testing.T, token, censusID string, processIDs [][]byte) (bundleID string, root string) {
+func testCreateBundle(t *testing.T, token string, censusID internal.ObjectID, processIDs [][]byte) (
+	bundleID string, root string,
+) {
 	c := qt.New(t)
 
 	// Convert process IDs to hex strings
@@ -671,7 +673,7 @@ func testCreateBundle(t *testing.T, token, censusID string, processIDs [][]byte)
 
 	// Extract the bundle ID from the URI
 	bundleURI := bundleResp.URI
-	bundleIDStr := bundleURI[len(bundleURI)-len(censusID):]
+	bundleIDStr := bundleURI[len(bundleURI)-len(internal.NilObjectID.String()):]
 
 	t.Logf("Created bundle with ID: %s and Root: %s", bundleIDStr, bundleResp.Root)
 	return bundleIDStr, bundleResp.Root.String()

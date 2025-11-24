@@ -54,12 +54,12 @@ const (
 	organizationAcceptUserEndpoint = "/organizations/{address}/users/accept"
 	// GET /organizations/{address}/users/pending to get the pending users
 	organizationPendingUsersEndpoint = "/organizations/{address}/users/pending"
-	// DELETE /organizations/{address}/users/pending/{userid} to delete the a pending invitation
+	// DELETE /organizations/{address}/users/pending/{invitationID} to delete the a pending invitation
 	organizationHandlePendingInvitationEndpoint = "/organizations/{address}/users/pending/{invitationID}"
-	// PUT /organizations/{address}/users/{userid} to update the role of an  organization user
-	organizationUpdateUserEndpoint = "/organizations/{address}/users/{userid}"
-	// DELETE /organizations/{address}/users/{userid} to remove user from  an organization
-	organizationDeleteUserEndpoint = "/organizations/{address}/users/{userid}"
+	// PUT /organizations/{address}/users/{userId} to update the role of an  organization user
+	organizationUpdateUserEndpoint = "/organizations/{address}/users/{userId}"
+	// DELETE /organizations/{address}/users/{userId} to remove user from  an organization
+	organizationDeleteUserEndpoint = "/organizations/{address}/users/{userId}"
 	// GET /organizations/roles to get the available organization user roles
 	organizationRolesEndpoint = "/organizations/roles"
 	// GET /organizations/types to get the available organization types
@@ -75,8 +75,8 @@ const (
 	organizationMembersEndpoint = "/organizations/{address}/members"
 	// POST /organizations/{address}/members to add new members
 	organizationAddMembersEndpoint = "/organizations/{address}/members"
-	// GET /organizations/{address}/members/check/{jobid} to check the status of the add members job
-	organizationAddMembersJobStatusEndpoint = "/organizations/{address}/members/job/{jobid}"
+	// GET /organizations/{address}/members/check/{jobId} to check the status of the add members job
+	organizationAddMembersJobStatusEndpoint = "/organizations/{address}/members/job/{jobId}"
 	// DELETE /organizations/{address}/members to delete members
 	organizationDeleteMembersEndpoint = "/organizations/{address}/members"
 	// POST/PUT/GET/DELETE /organizations/{address}/meta to add/set/get/delete the organization metadata
@@ -86,12 +86,12 @@ const (
 	// POST/GET /organizations/{address}/groups to create a new organization member group or get the
 	// list of groups of an organization
 	organizationGroupsEndpoint = "/organizations/{address}/groups"
-	// PUT/DELETE /organizations/{address}/groups/{groupID} to update or delete an organization member group
-	organizationGroupEndpoint = "/organizations/{address}/groups/{groupID}"
-	// GET /organizations/{address}/groups/{groupID}/members to get the members of an organization member group
-	organizationGroupMembersEndpoint = "/organizations/{address}/groups/{groupID}/members"
-	// POST /organizations/{address}/groups/{groupID}/validate to validate the member data of an organization member group
-	organizationGroupValidateEndpoint = "/organizations/{address}/groups/{groupID}/validate"
+	// PUT/DELETE /organizations/{address}/groups/{groupId} to update or delete an organization member group
+	organizationGroupEndpoint = "/organizations/{address}/groups/{groupId}"
+	// GET /organizations/{address}/groups/{groupId}/members to get the members of an organization member group
+	organizationGroupMembersEndpoint = "/organizations/{address}/groups/{groupId}/members"
+	// POST /organizations/{address}/groups/{groupId}/validate to validate the member data of an organization member group
+	organizationGroupValidateEndpoint = "/organizations/{address}/groups/{groupId}/validate"
 	// GET /organizations/{address}/jobs to list the organization import jobs
 	organizationJobsEndpoint = "/organizations/{address}/jobs"
 
@@ -117,17 +117,17 @@ const (
 	// census routes
 	// POST /census to create a new census
 	censusEndpoint = "/census"
-	// GET /census/{id} to get census information
-	// POST /census/{id} to add members to census
-	censusIDEndpoint = "/census/{id}"
-	// GET /census/check/{jobid} to check the status of the add members job
-	censusAddParticipantsJobStatusEndpoint = "/census/job/{jobid}"
-	// POST /census/{id}/publish to publish a census
-	censusPublishEndpoint = "/census/{id}/publish"
-	// POST /census/{id}/group/{groupid}/publish to publish a group census
-	censusGroupPublishEndpoint = "/census/{id}/group/{groupid}/publish"
-	// GET /census/{id}/participants to get the census participants
-	censusParticipantsEndpoint = "/census/{id}/participants"
+	// GET /census/{censusId} to get census information
+	// POST /census/{censusId} to add members to census
+	censusIDEndpoint = "/census/{censusId}"
+	// GET /census/check/{jobId} to check the status of the add members job
+	censusAddParticipantsJobStatusEndpoint = "/census/job/{jobId}"
+	// POST /census/{censusId}/publish to publish a census
+	censusPublishEndpoint = "/census/{censusId}/publish"
+	// POST /census/{censusId}/group/{groupId}/publish to publish a group census
+	censusGroupPublishEndpoint = "/census/{censusId}/group/{groupId}/publish"
+	// GET /census/{censusId}/participants to get the census participants
+	censusParticipantsEndpoint = "/census/{censusId}/participants"
 
 	// process routes
 	// POST /process/{processId} to create a new process

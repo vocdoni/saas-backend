@@ -7,17 +7,16 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // SetProcess creates a new process or updates an existing one for an organization.
 // If the process already exists and is in draft mode, it will be updated.
-func (ms *MongoStorage) SetProcess(process *Process) (primitive.ObjectID, error) {
+func (ms *MongoStorage) SetProcess(process *Process) (internal.ObjectID, error) {
 	// validate input
 	if (process.OrgAddress.Cmp(common.Address{}) == 0) {
-		return primitive.NilObjectID, ErrInvalidData
+		return internal.NilObjectID, ErrInvalidData
 	}
 
 	ms.keysLock.Lock()
@@ -25,31 +24,31 @@ func (ms *MongoStorage) SetProcess(process *Process) (primitive.ObjectID, error)
 
 	// check that the org exists
 	if _, err := ms.Organization(process.OrgAddress); err != nil {
-		return primitive.NilObjectID, fmt.Errorf("failed to get organization %s: %w", process.OrgAddress, err)
+		return internal.NilObjectID, fmt.Errorf("failed to get organization %s: %w", process.OrgAddress, err)
 	}
 	// check that the census exists
 	if !process.Census.ID.IsZero() {
-		census, err := ms.Census(process.Census.ID.Hex())
+		census, err := ms.Census(process.Census.ID)
 		if err != nil {
-			return primitive.NilObjectID, fmt.Errorf("failed to get census: %w", err)
+			return internal.NilObjectID, fmt.Errorf("failed to get census: %w", err)
 		}
 		if len(census.Published.Root) == 0 || len(census.Published.URI) == 0 {
-			return primitive.NilObjectID, fmt.Errorf("census %s does not have a published root or URI", census.ID.Hex())
+			return internal.NilObjectID, fmt.Errorf("census %s does not have a published root or URI", census.ID.String())
 		}
 		if census.OrgAddress.Cmp(process.OrgAddress) != 0 {
-			return primitive.NilObjectID, fmt.Errorf("census %s does not belong to organization %s",
-				census.ID.Hex(), process.OrgAddress.String())
+			return internal.NilObjectID, fmt.Errorf("census %s does not belong to organization %s",
+				census.ID.String(), process.OrgAddress.String())
 		}
 	}
 
 	if process.ID.IsZero() {
 		// if the process doesn't exist, create its id
-		process.ID = primitive.NewObjectID()
+		process.ID = internal.NewObjectID()
 	}
 
 	updateDoc, err := dynamicUpdateDocument(process, nil)
 	if err != nil {
-		return primitive.NilObjectID, fmt.Errorf("failed to create update document: %w", err)
+		return internal.NilObjectID, fmt.Errorf("failed to create update document: %w", err)
 	}
 
 	// create a context with a timeout
@@ -60,18 +59,18 @@ func (ms *MongoStorage) SetProcess(process *Process) (primitive.ObjectID, error)
 	opts := options.Update().SetUpsert(true)
 	res, err := ms.processes.UpdateOne(ctx, filter, updateDoc, opts)
 	if err != nil {
-		return primitive.NilObjectID, fmt.Errorf("failed to create or update process: %w", err)
+		return internal.NilObjectID, fmt.Errorf("failed to create or update process: %w", err)
 	}
 	if res.UpsertedID == nil {
-		return primitive.NilObjectID, nil
+		return internal.NilObjectID, nil
 	}
 
 	return process.ID, nil
 }
 
 // DeleteProcess removes a process
-func (ms *MongoStorage) DelProcess(processID primitive.ObjectID) error {
-	if processID == primitive.NilObjectID {
+func (ms *MongoStorage) DelProcess(processID internal.ObjectID) error {
+	if processID == internal.NilObjectID {
 		return ErrInvalidData
 	}
 	ms.keysLock.Lock()
@@ -87,8 +86,8 @@ func (ms *MongoStorage) DelProcess(processID primitive.ObjectID) error {
 }
 
 // Process retrieves a process from the DB based on its ID
-func (ms *MongoStorage) Process(processID primitive.ObjectID) (*Process, error) {
-	if processID == primitive.NilObjectID {
+func (ms *MongoStorage) Process(processID internal.ObjectID) (*Process, error) {
+	if processID == internal.NilObjectID {
 		return nil, ErrInvalidData
 	}
 

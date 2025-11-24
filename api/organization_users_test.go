@@ -586,7 +586,7 @@ func TestOrganizationUsers(t *testing.T) {
 			newOrgAddress.String(),
 			"users",
 			"pending",
-			invitationID, // Add invitationID as path parameter
+			invitationID.String(), // Add invitationID as path parameter
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
@@ -637,7 +637,7 @@ func TestOrganizationUsers(t *testing.T) {
 			newOrgAddress.String(),
 			"users",
 			"pending",
-			invitationID,
+			invitationID.String(),
 		)
 		c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
@@ -653,7 +653,7 @@ func TestOrganizationUsers(t *testing.T) {
 			newOrgAddress.String(),
 			"users",
 			"pending",
-			invitationID,
+			invitationID.String(),
 		)
 		c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
@@ -708,7 +708,7 @@ func TestOrganizationUsers(t *testing.T) {
 			newOrgAddress.String(), // Using first org to update invitation from second org
 			"users",
 			"pending",
-			anotherInvitationID,
+			anotherInvitationID.String(),
 		)
 		c.Assert(errResp.Code, qt.Equals, errors.ErrInvalidData.Code)
 
@@ -722,7 +722,7 @@ func TestOrganizationUsers(t *testing.T) {
 			newOrgAddress.String(),
 			"users",
 			"pending",
-			invitationID,
+			invitationID.String(),
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
@@ -735,7 +735,7 @@ func TestOrganizationUsers(t *testing.T) {
 			anotherOrgAddress.String(),
 			"users",
 			"pending",
-			anotherInvitationID,
+			anotherInvitationID.String(),
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 	})
@@ -797,7 +797,7 @@ func TestOrganizationUsers(t *testing.T) {
 			newOrgAddress.String(),
 			"users",
 			"pending",
-			invitationID, // Add invitationID as path parameter
+			invitationID.String(), // Add invitationID as path parameter
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
@@ -843,7 +843,7 @@ func TestOrganizationUsers(t *testing.T) {
 			newOrgAddress.String(),
 			"users",
 			"pending",
-			invitationID,
+			invitationID.String(),
 		)
 		c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
@@ -859,7 +859,7 @@ func TestOrganizationUsers(t *testing.T) {
 			newOrgAddress.String(),
 			"users",
 			"pending",
-			invitationID,
+			invitationID.String(),
 		)
 		c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
@@ -914,7 +914,7 @@ func TestOrganizationUsers(t *testing.T) {
 			newOrgAddress.String(), // Using first org to delete invitation from second org
 			"users",
 			"pending",
-			anotherInvitationID,
+			anotherInvitationID.String(),
 		)
 		c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
 
@@ -928,7 +928,7 @@ func TestOrganizationUsers(t *testing.T) {
 			anotherOrgAddress.String(),
 			"users",
 			"pending",
-			anotherInvitationID,
+			anotherInvitationID.String(),
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 	})

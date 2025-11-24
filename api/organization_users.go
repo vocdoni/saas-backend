@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -508,7 +507,7 @@ func (a *API) pendingOrganizationUsersHandler(w http.ResponseWriter, r *http.Req
 	invitationsList := make([]*apicommon.OrganizationInvite, 0, len(invitations))
 	for _, invitation := range invitations {
 		invitationsList = append(invitationsList, &apicommon.OrganizationInvite{
-			ID:         invitation.ID.Hex(),
+			ID:         invitation.ID,
 			Email:      invitation.NewUserEmail,
 			Role:       invitation.Role,
 			Expiration: invitation.Expiration,
@@ -548,7 +547,7 @@ func (*API) organizationRolesHandler(w http.ResponseWriter, _ *http.Request) {
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			address	path		string										true	"Organization address"
-//	@Param			userid	path		string										true	"User ID"
+//	@Param			userId	path		string										true	"User ID"
 //	@Param			request	body		apicommon.UpdateOrganizationUserRoleRequest	true	"Update user role information"
 //	@Success		200		{string}	string										"OK"
 //	@Failure		400		{object}	errors.Error								"Invalid input data"
@@ -558,7 +557,7 @@ func (*API) organizationRolesHandler(w http.ResponseWriter, _ *http.Request) {
 // Note: The implementation returns 200 OK even for non-existent users
 //
 //	@Failure		500		{object}	errors.Error								"Internal server error"
-//	@Router			/organizations/{address}/users/{userid} [put]
+//	@Router			/organizations/{address}/users/{userId} [put]
 func (a *API) updateOrganizationUserHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -577,15 +576,9 @@ func (a *API) updateOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	// get the user ID from the request path
-	userID := chi.URLParam(r, "userid")
-	if userID == "" {
-		errors.ErrMalformedBody.With("user ID not provided").Write(w)
-		return
-	}
-	// convert the user ID to the correct type
-	userIDInt, err := strconv.Atoi(userID)
+	userID, err := apicommon.UserIDFromRequest(r)
 	if err != nil {
-		errors.ErrMalformedBody.Withf("invalid user ID: %v", err).Write(w)
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
 
@@ -603,7 +596,7 @@ func (a *API) updateOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		errors.ErrInvalidUserData.Withf("invalid role").Write(w)
 		return
 	}
-	if err := a.db.UpdateOrganizationUserRole(org.Address, uint64(userIDInt), db.UserRole(update.Role)); err != nil {
+	if err := a.db.UpdateOrganizationUserRole(org.Address, userID, db.UserRole(update.Role)); err != nil {
 		errors.ErrInvalidUserData.Withf("user not found: %v", err).Write(w)
 		return
 	}
@@ -619,7 +612,7 @@ func (a *API) updateOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			address	path		string			true	"Organization address"
-//	@Param			userid	path		string			true	"User ID"
+//	@Param			userId	path		string			true	"User ID"
 //	@Success		200		{string}	string			"OK"
 //	@Failure		400		{object}	errors.Error	"Invalid input data"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
@@ -629,7 +622,7 @@ func (a *API) updateOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 //
 //	@Failure		400		{object}	errors.Error	"Invalid input data - User cannot remove itself"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/users/{userid} [delete]
+//	@Router			/organizations/{address}/users/{userId} [delete]
 func (a *API) removeOrganizationUserHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -648,22 +641,16 @@ func (a *API) removeOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	// get the user ID from the request path
-	userID := chi.URLParam(r, "userid")
-	if userID == "" {
-		errors.ErrMalformedBody.With("user ID not provided").Write(w)
-		return
-	}
-	// convert the user ID to the correct type
-	userIDInt, err := strconv.Atoi(userID)
+	userID, err := apicommon.UserIDFromRequest(r)
 	if err != nil {
-		errors.ErrMalformedBody.Withf("invalid user ID: %v", err).Write(w)
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
-	if uint64(userIDInt) == user.ID {
+	if userID == user.ID {
 		errors.ErrInvalidUserData.With("user cannot remove itself from the organization").Write(w)
 		return
 	}
-	if err := a.db.RemoveOrganizationUser(org.Address, uint64(userIDInt)); err != nil {
+	if err := a.db.RemoveOrganizationUser(org.Address, userID); err != nil {
 		errors.ErrInvalidUserData.Withf("user not found: %v", err).Write(w)
 		return
 	}
