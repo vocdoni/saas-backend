@@ -19,6 +19,7 @@ import (
 // These regexes are used to extract verification codes from emails
 var (
 	verificationCodeRgx *regexp.Regexp
+	verificationLinkRgx *regexp.Regexp
 	passwordResetRgx    *regexp.Regexp
 )
 
@@ -51,6 +52,7 @@ func init() {
 	// clean the notification body to get only the verification code and
 	// compile the regex
 	verificationCodeRgx = regexp.MustCompile(strings.Split(verifyNotification.PlainBody, "\n")[0])
+	verificationLinkRgx = regexp.MustCompile(`: (https?://\S+)`)
 	// compose notification with the password reset code regex needle
 	passwordResetNotification, err := testTemplateExec(mailtemplates.PasswordResetNotification.Localized("en"))
 	if err != nil {
@@ -156,6 +158,10 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	verifyMailCode := verificationCodeRgx.FindStringSubmatch(mailBody)
 	c.Assert(len(verifyMailCode) > 1, qt.IsTrue)
+	verifyMailLink := verificationLinkRgx.FindStringSubmatch(mailBody)
+	linkCode := strings.Split(strings.Split(verifyMailLink[1], "=")[1], "&")[0]
+	c.Assert(len(linkCode) > 1, qt.IsTrue)
+	c.Assert(len(linkCode) < 7, qt.IsTrue)
 
 	// Verify the user
 	verification := &apicommon.UserVerification{
@@ -261,6 +267,10 @@ func TestResendVerificationCodeHandler(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	verifyMailCode := verificationCodeRgx.FindStringSubmatch(mailBody)
 	c.Assert(len(verifyMailCode) > 1, qt.IsTrue)
+	verifyMailLink := verificationLinkRgx.FindStringSubmatch(mailBody)
+	linkCode := strings.Split(strings.Split(verifyMailLink[1], "=")[1], "&")[0]
+	c.Assert(len(linkCode) > 1, qt.IsTrue)
+	c.Assert(len(linkCode) < 7, qt.IsTrue)
 
 	// Verify the user
 	verificationCode := &apicommon.UserVerification{
@@ -309,6 +319,13 @@ func TestResendVerificationCodeHandler(t *testing.T) {
 	mailBody, err = testMailService.FindEmail(ctx, "unverified@test.com")
 	c.Assert(err, qt.IsNil)
 	c.Assert(mailBody, qt.Not(qt.Equals), "")
+	verifyMailCode = verificationCodeRgx.FindStringSubmatch(mailBody)
+	c.Assert(len(verifyMailCode) > 1, qt.IsTrue)
+	c.Assert(len(verifyMailCode) < 7, qt.IsTrue)
+	verifyMailLink = verificationLinkRgx.FindStringSubmatch(mailBody)
+	linkCode = strings.Split(strings.Split(verifyMailLink[1], "=")[1], "&")[0]
+	c.Assert(len(linkCode) > 1, qt.IsTrue)
+	c.Assert(len(linkCode) < 7, qt.IsTrue)
 
 	// Test resending multiple times until max attempts
 	for i := 2; i < apicommon.VerificationCodeMaxAttempts; i++ {

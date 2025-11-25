@@ -1,6 +1,8 @@
 package internal
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -99,4 +101,78 @@ func argon2hash(data, salt []byte) []byte {
 	argonTime := uint32(4)
 	argonThreads := uint8(8)
 	return argon2.IDKey([]byte(data), []byte(salt), argonTime, memory, argonThreads, 32)
+}
+
+// SealToken encrypts a token using AES-GCM with a key derived from argon2hash.
+// Returns the encrypted token (nonce + ciphertext).
+func SealToken(token, email, secret string) ([]byte, error) {
+	if token == "" || email == "" || secret == "" {
+		return nil, fmt.Errorf("token, email, and secret cannot be empty")
+	}
+
+	// Derive encryption key using existing argon2hash function
+	key := argon2hash([]byte(secret), []byte(email))
+
+	// Create AES cipher (key is already 32 bytes from argon2hash)
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	// Create GCM mode
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	// Generate random nonce using existing RandomBytes function
+	nonce := RandomBytes(gcm.NonceSize())
+
+	// Encrypt with email as additional data for binding
+	ciphertext := gcm.Seal(nil, nonce, []byte(token), []byte(email))
+
+	// Combine nonce + ciphertext
+	sealedToken := append(nonce, ciphertext...)
+	return sealedToken, nil
+}
+
+// OpenToken decrypts a token using AES-GCM with argon2hash.
+// Takes the sealed token (nonce + ciphertext) and returns the original token as string.
+func OpenToken(sealedToken []byte, email, secret string) (string, error) {
+	if len(sealedToken) == 0 || email == "" || secret == "" {
+		return "", fmt.Errorf("sealedToken, email, and secret cannot be empty")
+	}
+
+	// Derive the same encryption key using existing argon2hash
+	key := argon2hash([]byte(secret), []byte(email))
+
+	// Create AES cipher
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	// Create GCM mode
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	// Check minimum length (nonce + at least some ciphertext)
+	nonceSize := gcm.NonceSize()
+	if len(sealedToken) < nonceSize {
+		return "", fmt.Errorf("invalid encrypted data: too short")
+	}
+
+	// Extract nonce and ciphertext
+	nonce := sealedToken[:nonceSize]
+	ciphertext := sealedToken[nonceSize:]
+
+	// Decrypt with email as additional data
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, []byte(email))
+	if err != nil {
+		return "", fmt.Errorf("failed to decrypt token: %w", err)
+	}
+
+	return string(plaintext), nil
 }

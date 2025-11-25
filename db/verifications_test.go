@@ -5,6 +5,7 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/internal"
 )
 
 func TestVerifications(t *testing.T) {
@@ -24,12 +25,14 @@ func TestVerifications(t *testing.T) {
 		_, err = testDB.UserVerificationCode(&User{ID: userID}, CodeTypeVerifyAccount)
 		c.Assert(err, qt.Equals, ErrNotFound)
 
-		testCode := "testCode"
-		c.Assert(testDB.SetVerificationCode(&User{ID: userID}, testCode, CodeTypeVerifyAccount, time.Now()), qt.IsNil)
+		sealedCode, err := internal.SealToken("testCode", testUserEmail, "mock-app-secret")
+		c.Assert(err, qt.IsNil)
+
+		c.Assert(testDB.SetVerificationCode(&User{ID: userID}, sealedCode, CodeTypeVerifyAccount, time.Now()), qt.IsNil)
 
 		code, err := testDB.UserVerificationCode(&User{ID: userID}, CodeTypeVerifyAccount)
 		c.Assert(err, qt.IsNil)
-		c.Assert(code.Code, qt.Equals, testCode)
+		c.Assert(code.SealedCode, qt.DeepEquals, sealedCode)
 
 		c.Assert(testDB.VerifyUserAccount(&User{ID: userID}), qt.IsNil)
 		_, err = testDB.UserVerificationCode(&User{ID: userID}, CodeTypeVerifyAccount)
@@ -39,7 +42,11 @@ func TestVerifications(t *testing.T) {
 	t.Run("TestSetVerificationCode", func(_ *testing.T) {
 		c.Assert(testDB.Reset(), qt.IsNil)
 		nonExistingUserID := uint64(100)
-		err := testDB.SetVerificationCode(&User{ID: nonExistingUserID}, "testCode", CodeTypeVerifyAccount, time.Now())
+
+		sealedCode, err := internal.SealToken("testCode", testUserEmail, "mock-app-secret")
+		c.Assert(err, qt.IsNil)
+
+		err = testDB.SetVerificationCode(&User{ID: nonExistingUserID}, sealedCode, CodeTypeVerifyAccount, time.Now())
 		c.Assert(err, qt.Equals, ErrNotFound)
 
 		userID, err := testDB.SetUser(&User{
@@ -50,20 +57,20 @@ func TestVerifications(t *testing.T) {
 		})
 		c.Assert(err, qt.IsNil)
 
-		testCode := "testCode"
-		c.Assert(testDB.SetVerificationCode(&User{ID: userID}, testCode, CodeTypeVerifyAccount, time.Now()), qt.IsNil)
+		c.Assert(testDB.SetVerificationCode(&User{ID: userID}, sealedCode, CodeTypeVerifyAccount, time.Now()), qt.IsNil)
 
 		code, err := testDB.UserVerificationCode(&User{ID: userID}, CodeTypeVerifyAccount)
 		c.Assert(err, qt.IsNil)
-		c.Assert(code.Code, qt.Equals, testCode)
+		c.Assert(code.SealedCode, qt.DeepEquals, sealedCode)
 		c.Assert(code.Attempts, qt.Equals, 1)
 
-		testCode = "testCode2"
-		c.Assert(testDB.SetVerificationCode(&User{ID: userID}, testCode, CodeTypeVerifyAccount, time.Now()), qt.IsNil)
+		sealedCode2, err := internal.SealToken("testCode2", testUserEmail, "mock-app-secret")
+		c.Assert(err, qt.IsNil)
+		c.Assert(testDB.SetVerificationCode(&User{ID: userID}, sealedCode2, CodeTypeVerifyAccount, time.Now()), qt.IsNil)
 
 		code, err = testDB.UserVerificationCode(&User{ID: userID}, CodeTypeVerifyAccount)
 		c.Assert(err, qt.IsNil)
-		c.Assert(code.Code, qt.Equals, testCode)
+		c.Assert(code.SealedCode, qt.DeepEquals, sealedCode2)
 	})
 
 	t.Run("TestVerificationCodeIncrementAttempts", func(_ *testing.T) {
@@ -76,13 +83,14 @@ func TestVerifications(t *testing.T) {
 		})
 		c.Assert(err, qt.IsNil)
 
-		testCode := "testCode"
-		c.Assert(testDB.SetVerificationCode(&User{ID: userID}, testCode, CodeTypeVerifyAccount, time.Now()), qt.IsNil)
+		sealedCode, err := internal.SealToken("testCode", testUserEmail, "mock-app-secret")
+		c.Assert(err, qt.IsNil)
+		c.Assert(testDB.SetVerificationCode(&User{ID: userID}, sealedCode, CodeTypeVerifyAccount, time.Now()), qt.IsNil)
 		code, err := testDB.UserVerificationCode(&User{ID: userID}, CodeTypeVerifyAccount)
 		c.Assert(err, qt.IsNil)
 		c.Assert(code.Attempts, qt.Equals, 1)
 
-		c.Assert(testDB.VerificationCodeIncrementAttempts(testCode, CodeTypeVerifyAccount), qt.IsNil)
+		c.Assert(testDB.VerificationCodeIncrementAttempts(sealedCode, CodeTypeVerifyAccount), qt.IsNil)
 		code, err = testDB.UserVerificationCode(&User{ID: userID}, CodeTypeVerifyAccount)
 		c.Assert(err, qt.IsNil)
 		c.Assert(code.Attempts, qt.Equals, 2)

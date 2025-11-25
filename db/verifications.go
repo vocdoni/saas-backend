@@ -17,29 +17,6 @@ func (ms *MongoStorage) delVerificationCode(ctx context.Context, id uint64, t Co
 	return err
 }
 
-// UserByVerificationCode method returns the user with the given verification
-// code. If the user or the verification code doesn't exist, it returns a
-// specific error. If other errors occur, it returns the error. It checks the
-// user verification code in the verifications collection and returns the user
-// with the ID associated with the verification code.
-func (ms *MongoStorage) UserByVerificationCode(code string, t CodeType) (*User, error) {
-	ms.keysLock.RLock()
-	defer ms.keysLock.RUnlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-
-	result := ms.verifications.FindOne(ctx, bson.M{"code": code, "type": t})
-	verification := &UserVerification{}
-	if err := result.Decode(verification); err != nil {
-		if err == mongo.ErrNoDocuments {
-			return nil, ErrNotFound
-		}
-		return nil, err
-	}
-	return ms.fetchUserFromDB(ctx, verification.ID)
-}
-
 // UserVerificationCode returns the verification code for the user provided. If
 // the user has not a verification code, it returns an specific error, if other
 // error occurs, it returns the error.
@@ -61,7 +38,7 @@ func (ms *MongoStorage) UserVerificationCode(user *User, t CodeType) (*UserVerif
 // SetVerificationCode method sets the verification code for the user provided.
 // If the user already has a verification code, it updates it. If an error
 // occurs, it returns the error.
-func (ms *MongoStorage) SetVerificationCode(user *User, code string, t CodeType, exp time.Time) error {
+func (ms *MongoStorage) SetVerificationCode(user *User, sealedCode []byte, t CodeType, exp time.Time) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -74,7 +51,7 @@ func (ms *MongoStorage) SetVerificationCode(user *User, code string, t CodeType,
 	filter := bson.M{"_id": user.ID}
 	verification := &UserVerification{
 		ID:         user.ID,
-		Code:       code,
+		SealedCode: sealedCode,
 		Type:       t,
 		Expiration: exp,
 		Attempts:   1,
@@ -87,13 +64,13 @@ func (ms *MongoStorage) SetVerificationCode(user *User, code string, t CodeType,
 // VerificationCodeIncrementAttempts method increments the number of attempts
 // for the verification code of the user provided. If an error occurs, it
 // returns the error.
-func (ms *MongoStorage) VerificationCodeIncrementAttempts(code string, t CodeType) error {
+func (ms *MongoStorage) VerificationCodeIncrementAttempts(sealedCode []byte, t CodeType) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	filter := bson.M{"code": code, "type": t}
+	filter := bson.M{"sealedCode": sealedCode, "type": t}
 	update := bson.M{"$inc": bson.M{"attempts": 1}}
 	_, err := ms.verifications.UpdateOne(ctx, filter, update)
 	return err
