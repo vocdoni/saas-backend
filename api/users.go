@@ -148,8 +148,8 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrUserAlreadyVerified.Write(w)
 		return
 	}
-	// get the verification code from the database
-	code, err := a.db.UserVerificationCode(user, db.CodeTypeVerifyAccount)
+	// get the userVerification from the database
+	userVerification, err := a.db.UserVerificationCode(user, db.CodeTypeVerifyAccount)
 	if err != nil {
 		if err != db.ErrNotFound {
 			log.Warnw("could not get verification code", "error", err)
@@ -158,14 +158,18 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// check the verification code is not expired
-	if code.Expiration.Before(time.Now()) {
+	if userVerification.Expiration.Before(time.Now()) {
 		errors.ErrVerificationCodeExpired.Write(w)
 		return
 	}
 	// check the verification code is correct
-	hashCode := internal.HashVerificationCode(verification.Email, verification.Code)
-	if code.Code != hashCode {
-		errors.ErrUnauthorized.Write(w)
+	code, err := internal.OpenToken(userVerification.SealedCode, verification.Email, a.secret)
+	if err != nil {
+		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
+	if code != verification.Code {
+		errors.ErrUnauthorized.With("code mismatch").Write(w)
 		return
 	}
 	// verify the user account if the current verification code is valid and
@@ -224,8 +228,8 @@ func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Req
 		errors.ErrUserAlreadyVerified.Write(w)
 		return
 	}
-	// get the verification code from the database
-	code, err := a.db.UserVerificationCode(user, db.CodeTypeVerifyAccount)
+	// get the userVerification from the database
+	userVerification, err := a.db.UserVerificationCode(user, db.CodeTypeVerifyAccount)
 	if err != nil {
 		if err != db.ErrNotFound {
 			log.Warnw("could not get verification code", "error", err)
@@ -236,8 +240,8 @@ func (a *API) userVerificationCodeInfoHandler(w http.ResponseWriter, r *http.Req
 	// return the verification code information
 	apicommon.HTTPWriteJSON(w, apicommon.UserVerification{
 		Email:      user.Email,
-		Expiration: code.Expiration,
-		Valid:      code.Expiration.After(time.Now()),
+		Expiration: userVerification.Expiration,
+		Valid:      userVerification.Expiration.After(time.Now()),
 	})
 }
 
@@ -280,8 +284,8 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 		errors.ErrUserAlreadyVerified.Write(w)
 		return
 	}
-	// get the verification code from the database
-	code, err := a.db.UserVerificationCode(user, db.CodeTypeVerifyAccount)
+	// get the verification userVerification from the database
+	userVerification, err := a.db.UserVerificationCode(user, db.CodeTypeVerifyAccount)
 	if err != nil {
 		if err != db.ErrNotFound {
 			log.Warnw("could not get verification code", "error", err)
@@ -290,15 +294,20 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 	// if the verification code is not expired
-	if code.Expiration.After(time.Now()) {
+	if userVerification.Expiration.After(time.Now()) {
 		// check if the maximum number of attempts has been reached for resending
-		if code.Attempts >= apicommon.VerificationCodeMaxAttempts {
+		if userVerification.Attempts >= apicommon.VerificationCodeMaxAttempts {
 			errors.ErrVerificationMaxAttempts.WithData(apicommon.UserVerification{
-				Expiration: code.Expiration,
+				Expiration: userVerification.Expiration,
 			}).Write(w)
 			return
 		}
-		link, err := a.generateVerificationLink(user, code.Code)
+		code, err := internal.OpenToken(userVerification.SealedCode, user.Email, a.secret)
+		if err != nil {
+			errors.ErrGenericInternalServerError.Write(w)
+			return
+		}
+		link, err := a.generateVerificationLink(user, code)
 		if err != nil {
 			log.Warnw("could not generate verification link", "error", err)
 			errors.ErrGenericInternalServerError.Write(w)
@@ -309,20 +318,20 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 			struct {
 				Code string
 				Link string
-			}{code.Code, link},
+			}{code, link},
 		); err != nil {
 			log.Warnw("could not resend verification code", "error", err)
 			errors.ErrGenericInternalServerError.Write(w)
 			return
 		}
-		if err = a.db.VerificationCodeIncrementAttempts(code.Code, db.CodeTypeVerifyAccount); err != nil {
+		if err = a.db.VerificationCodeIncrementAttempts(userVerification.SealedCode, db.CodeTypeVerifyAccount); err != nil {
 			log.Warnw("could not increment verification code attempts", "error", err)
 			errors.ErrGenericInternalServerError.Write(w)
 			return
 		}
 		// return the verification code information
 		apicommon.HTTPWriteJSON(w, apicommon.UserVerification{
-			Expiration: code.Expiration,
+			Expiration: userVerification.Expiration,
 		})
 		return
 	}
@@ -606,17 +615,42 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrPasswordTooShort.Write(w)
 		return
 	}
-	// get the user information from the database by the verification code
-	hashCode := internal.HashVerificationCode(userPasswords.Email, userPasswords.Code)
-	user, err := a.db.UserByVerificationCode(hashCode, db.CodeTypePasswordReset)
+
+	// get the user information from the database by email
+	user, err := a.db.UserByEmail(userPasswords.Email)
 	if err != nil {
 		if err == db.ErrNotFound {
-			errors.ErrUnauthorized.Write(w)
+			errors.ErrUserNotFound.Write(w)
 			return
 		}
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
+
+	userVerification, err := a.db.UserVerificationCode(user, db.CodeTypePasswordReset)
+	if err != nil {
+		if err != db.ErrNotFound {
+			log.Warnw("could not get verification code", "error", err)
+		}
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+
+	// check the verification code is not expired
+	if userVerification.Expiration.Before(time.Now()) {
+		errors.ErrVerificationCodeExpired.Write(w)
+		return
+	}
+
+	code, err := internal.OpenToken(userVerification.SealedCode, userPasswords.Email, a.secret)
+	if err != nil {
+		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
+	if code != userPasswords.Code {
+		errors.ErrUnauthorized.With("code mismatch").Write(w)
+	}
+
 	// hash and update the new password
 	user.Password = internal.HexHashPassword(passwordSalt, userPasswords.NewPassword)
 	if _, err := a.db.SetUser(user); err != nil {

@@ -127,10 +127,13 @@ func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) 
 			return "", "", fmt.Errorf("invalid target type")
 		}
 		// generate the verification code for the user and the expiration time
-		hashCode := internal.HashVerificationCode(user.Email, verificationCode)
+		sealedCode, err := internal.SealToken(verificationCode, user.Email, a.secret)
+		if err != nil {
+			return "", "", err
+		}
 		exp := time.Now().Add(apicommon.VerificationCodeExpiration)
 		// store the verification code in the database
-		if err := a.db.SetVerificationCode(&db.User{ID: user.ID}, hashCode, codeType, exp); err != nil {
+		if err := a.db.SetVerificationCode(&db.User{ID: user.ID}, sealedCode, codeType, exp); err != nil {
 			return "", "", err
 		}
 		// set the web app URI and the link parameters

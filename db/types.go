@@ -29,7 +29,7 @@ type CodeType string
 
 type UserVerification struct {
 	ID         uint64    `json:"id" bson:"_id"`
-	Code       string    `json:"code" bson:"code"`
+	SealedCode []byte    `json:"sealedCode" bson:"sealedCode"`
 	Type       CodeType  `json:"type" bson:"type"`
 	Expiration time.Time `json:"expiration" bson:"expiration"`
 	Attempts   int       `json:"attempts" bson:"attempts"`
