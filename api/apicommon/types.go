@@ -875,12 +875,14 @@ type OrgMember struct {
 func (p *OrgMember) ToDB() *db.OrgMember {
 	// TODO: delay this parsing, so that it happens during batch validation
 	parsedBirthDate := time.Time{}
-	if len(p.BirthDate) > 0 {
+	birthDate := p.BirthDate
+	if len(birthDate) > 0 {
 		// Parse the birth date from string to time.Time
 		var err error
-		parsedBirthDate, err = time.Parse("2006-01-02", p.BirthDate)
+		parsedBirthDate, birthDate, err = db.ParseBirthDate(p.BirthDate)
 		if err != nil {
 			log.Warnf("Failed to parse birth date %s for member %s: %v", p.BirthDate, p.MemberNumber, err)
+			birthDate = p.BirthDate
 		}
 	}
 	// TODO: this could happen right during UnmarshalJSON,
