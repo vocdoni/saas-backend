@@ -375,7 +375,7 @@ func (ms *MongoStorage) OrgMembers(orgAddress common.Address, page, limit int64,
 		filter["$or"] = []bson.M{
 			{"email": bson.M{"$regex": search, "$options": "i"}},
 			{"memberNumber": bson.M{"$regex": search, "$options": "i"}},
-			{"nationalID": bson.M{"$regex": search, "$options": "i"}},
+			{"nationalId": bson.M{"$regex": search, "$options": "i"}},
 			{"name": bson.M{"$regex": search, "$options": "i"}},
 			{"surname": bson.M{"$regex": search, "$options": "i"}},
 			{"birthDate": bson.M{"$regex": search, "$options": "i"}},

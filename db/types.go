@@ -212,25 +212,44 @@ type OrgMember struct {
 	// Also referred to as member UID
 	ID primitive.ObjectID `json:"id" bson:"_id"`
 	// OrgAddress can be used for future sharding
-	OrgAddress     common.Address `json:"orgAddress" bson:"orgAddress"`
-	Email          string         `json:"email" bson:"email"`
-	Phone          HashedPhone    `json:"phone" bson:"phone"`
-	PlaintextPhone string         `json:"-" bson:"-"`
-	MemberNumber   string         `json:"memberNumber" bson:"memberNumber"`
-	NationalID     string         `json:"nationalID" bson:"nationalID"`
-	Name           string         `json:"name" bson:"name"`
-	Surname        string         `json:"surname" bson:"surname"`
-	BirthDate      string         `json:"birthDate" bson:"birthDate"`
-	ParsedBirtDate time.Time      `json:"parsedBirthDate" bson:"parsedBirthDate"`
-	Password       string         `json:"password" bson:"password"`
-	HashedPass     []byte         `json:"pass" bson:"pass" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
-	Other          map[string]any `json:"other" bson:"other"`
-	CreatedAt      time.Time      `json:"createdAt" bson:"createdAt"`
-	UpdatedAt      time.Time      `json:"updatedAt" bson:"updatedAt"`
+	OrgAddress      common.Address `json:"orgAddress" bson:"orgAddress"`
+	Email           string         `json:"email" bson:"email"`
+	Phone           HashedPhone    `json:"phone" bson:"phone"`
+	PlaintextPhone  string         `json:"-" bson:"-"`
+	MemberNumber    string         `json:"memberNumber" bson:"memberNumber"`
+	NationalID      string         `json:"nationalId" bson:"nationalId"`
+	Name            string         `json:"name" bson:"name"`
+	Surname         string         `json:"surname" bson:"surname"`
+	BirthDate       string         `json:"birthDate" bson:"birthDate"`
+	ParsedBirthDate time.Time      `json:"parsedBirthDate" bson:"parsedBirthDate"`
+	Password        string         `json:"password" bson:"password"`
+	HashedPass      []byte         `json:"pass" bson:"pass" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
+	Other           map[string]any `json:"other" bson:"other"`
+	CreatedAt       time.Time      `json:"createdAt" bson:"createdAt"`
+	UpdatedAt       time.Time      `json:"updatedAt" bson:"updatedAt"`
 }
 
 // OrgMemberAuthFields defines the fields that can be used for member authentication.
 type OrgMemberAuthField string
+
+// UnmarshalJSON validates JSON inputs for OrgMemberAuthField
+func (f *OrgMemberAuthField) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	switch OrgMemberAuthField(s) {
+	case OrgMemberAuthFieldsName,
+		OrgMemberAuthFieldsSurname,
+		OrgMemberAuthFieldsMemberNumber,
+		OrgMemberAuthFieldsNationalID,
+		OrgMemberAuthFieldsBirthDate:
+		*f = OrgMemberAuthField(s)
+		return nil
+	default:
+		return fmt.Errorf("invalid OrgMemberAuthField: %s", s)
+	}
+}
 
 const (
 	OrgMemberAuthFieldsName         OrgMemberAuthField = "name"
@@ -245,6 +264,21 @@ type OrgMemberAuthFields []OrgMemberAuthField
 
 // OrgMemberTwoFaField defines the fields that can be used for two-factor authentication.
 type OrgMemberTwoFaField string
+
+// UnmarshalJSON validates JSON inputs for OrgMemberTwoFaField
+func (f *OrgMemberTwoFaField) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	switch OrgMemberTwoFaField(s) {
+	case OrgMemberTwoFaFieldEmail, OrgMemberTwoFaFieldPhone:
+		*f = OrgMemberTwoFaField(s)
+		return nil
+	default:
+		return fmt.Errorf("invalid OrgMemberTwoFaField: %s", s)
+	}
+}
 
 const (
 	OrgMemberTwoFaFieldEmail OrgMemberTwoFaField = "email"

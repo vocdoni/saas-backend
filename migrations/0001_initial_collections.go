@@ -9,7 +9,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.vocdoni.io/dvote/log"
 )
 
 func init() {
@@ -149,32 +148,4 @@ func downInitialCollections(context.Context, *mongo.Database) error {
 	// Strictly speaking, this down func would Drop all created collections, but that's too risky/destructive.
 	// So we do nothing here. (the up func is idempotent anyway)
 	return nil
-}
-
-// listCollectionsInDB returns the names of the collections in the given database.
-// It uses the ListCollections method of the MongoDB client to get the
-// collections info and decode the names from the result.
-func listCollectionsInDB(ctx context.Context, database *mongo.Database) ([]string, error) {
-	collectionsCursor, err := database.ListCollections(ctx, bson.D{})
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if err := collectionsCursor.Close(ctx); err != nil {
-			log.Warnw("failed to close collections cursor", "error", err)
-		}
-	}()
-	collections := []bson.D{}
-	if err := collectionsCursor.All(ctx, &collections); err != nil {
-		return nil, err
-	}
-	names := []string{}
-	for _, col := range collections {
-		for _, v := range col {
-			if v.Key == "name" {
-				names = append(names, v.Value.(string))
-			}
-		}
-	}
-	return names, nil
 }

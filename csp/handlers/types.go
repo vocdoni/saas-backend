@@ -17,7 +17,7 @@ type AuthRequest struct {
 	Name         string `json:"name"`
 	Surname      string `json:"surname"`
 	MemberNumber string `json:"memberNumber"`
-	NationalID   string `json:"nationalID"`
+	NationalID   string `json:"nationalId"`
 	BirthDate    string `json:"birthDate"`
 	Email        string `json:"email"`
 	Phone        string `json:"phone"`

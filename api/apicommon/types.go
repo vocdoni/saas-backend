@@ -896,17 +896,17 @@ func (p *OrgMember) ToDB() *db.OrgMember {
 	}
 
 	return &db.OrgMember{
-		ID:             id,
-		MemberNumber:   p.MemberNumber,
-		Name:           p.Name,
-		Surname:        p.Surname,
-		NationalID:     p.NationalID,
-		BirthDate:      p.BirthDate,
-		ParsedBirtDate: parsedBirthDate,
-		Email:          p.Email,
-		PlaintextPhone: p.Phone,
-		Password:       p.Password,
-		Other:          p.Other,
+		ID:              id,
+		MemberNumber:    p.MemberNumber,
+		Name:            p.Name,
+		Surname:         p.Surname,
+		NationalID:      p.NationalID,
+		BirthDate:       p.BirthDate,
+		ParsedBirthDate: parsedBirthDate,
+		Email:           p.Email,
+		PlaintextPhone:  p.Phone,
+		Password:        p.Password,
+		Other:           p.Other,
 	}
 }
 
