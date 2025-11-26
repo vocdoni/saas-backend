@@ -72,26 +72,48 @@ func TestMigrations(t *testing.T) {
 		testDB.Close()
 	})
 
-	t.Run("Idempotency", func(*testing.T) {
-		c.Log("check that all migrations are idempotent (can run again on top of an up-to-date DB)")
-		c.Log("first drop migrations collection")
-		testDB, err := New(mongoURI, testDBName)
-		if err != nil {
-			panic(fmt.Sprintf("failed to create new MongoDB connection: %v", err))
-		}
-		err = testDB.migrations.Drop(context.TODO())
-		c.Assert(err, qt.IsNil)
-		testDB.Close()
+	t.Run("AllDownAndUp", func(*testing.T) {
+		{
+			testDB, err := New(mongoURI, testDBName)
+			if err != nil {
+				panic(fmt.Sprintf("failed to create new MongoDB connection: %v", err))
+			}
 
-		c.Log("now open DB again, and all migrations should run again")
-		testDB, err = New(mongoURI, testDBName)
-		if err != nil {
-			panic(fmt.Sprintf("failed to create new MongoDB connection: %v", err))
+			// Plans should be populated
+			{
+				plans, err := testDB.Plans()
+				c.Assert(err, qt.IsNil)
+				c.Assert(plans, qt.Not(qt.HasLen), 0)
+			}
+
+			err = testDB.RunMigrationsDown(len(migrations.SortedByVersionAsc()))
+			c.Assert(err, qt.IsNil)
+
+			// Plans should now be empty
+			{
+				plans, err := testDB.Plans()
+				c.Assert(err, qt.IsNil)
+				c.Assert(plans, qt.HasLen, 0)
+			}
+
+			testDB.Close()
 		}
-		orgFromDB, err := testDB.Organization(testOrgAddress)
-		c.Assert(err, qt.IsNil)
-		c.Assert(orgFromDB.Website, qt.Equals, "testorg.com")
-		testDB.Close()
+		{
+			c.Log("now open DB again, and all migrations should run again")
+			testDB, err := New(mongoURI, testDBName)
+			if err != nil {
+				panic(fmt.Sprintf("failed to create new MongoDB connection: %v", err))
+			}
+
+			// Plans should be populated again
+			{
+				plans, err := testDB.Plans()
+				c.Assert(err, qt.IsNil)
+				c.Assert(plans, qt.Not(qt.HasLen), 0)
+			}
+
+			testDB.Close()
+		}
 	})
 }
 
