@@ -903,7 +903,7 @@ func (p *OrgMember) ToDB() *db.OrgMember {
 		Name:            p.Name,
 		Surname:         p.Surname,
 		NationalID:      p.NationalID,
-		BirthDate:       p.BirthDate,
+		BirthDate:       birthDate,
 		ParsedBirthDate: parsedBirthDate,
 		Email:           p.Email,
 		PlaintextPhone:  p.Phone,
