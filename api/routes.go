@@ -13,6 +13,10 @@ const (
 	authLoginEndpoint = "/auth/login"
 	// POST /oauth/login to login verifying OAuth parameters and get a JWT token
 	oauthLoginEndpoint = "/oauth/login"
+	// POST /auth/oauth/link to link an OAuth provider to the authenticated account
+	oauthLinkEndpoint = "/auth/oauth/link"
+	// DELETE /auth/oauth/unlink/{provider} to unlink an OAuth provider from the authenticated account
+	oauthUnlinkEndpoint = "/auth/oauth/unlink/{provider}"
 	// GET /auth/addresses to get the writable organization addresses
 	authAddressesEndpoint = "/auth/addresses"
 

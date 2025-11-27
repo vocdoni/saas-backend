@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/account"
@@ -12,6 +13,30 @@ import (
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 )
+
+// Supported OAuth providers
+const (
+	OAuthProviderGoogle   = "google"
+	OAuthProviderGitHub   = "github"
+	OAuthProviderFacebook = "facebook"
+)
+
+// validOAuthProviders is the list of supported OAuth providers
+var validOAuthProviders = []string{
+	OAuthProviderGoogle,
+	OAuthProviderGitHub,
+	OAuthProviderFacebook,
+}
+
+// isValidOAuthProvider checks if the provider is supported
+func isValidOAuthProvider(provider string) bool {
+	for _, p := range validOAuthProviders {
+		if p == provider {
+			return true
+		}
+	}
+	return false
+}
 
 // refreshTokenHandler godoc
 //
@@ -150,6 +175,11 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrMalformedBody.Write(w)
 		return
 	}
+	// validate provider
+	if !isValidOAuthProvider(loginInfo.Provider) {
+		errors.ErrInvalidOAuthProvider.Write(w)
+		return
+	}
 	// get the user information from the database by email
 	user, err := a.db.UserByEmail(loginInfo.Email)
 	if err != nil && err != db.ErrNotFound {
@@ -157,6 +187,7 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res := &apicommon.OAuthLoginResponse{}
+	now := time.Now()
 	// if the user doesn't exist, do oauth verification and on success create the new user
 	if err == db.ErrNotFound {
 		// Register the user
@@ -189,25 +220,50 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// genareate the new user and password and store it in the database
+		// create the new user with OAuth credentials
 		user = &db.User{
 			Email:     loginInfo.Email,
 			FirstName: loginInfo.FirstName,
 			LastName:  loginInfo.LastName,
-			Password:  internal.HexHashPassword(passwordSalt, loginInfo.UserOAuthSignature),
-			Verified:  true,
+			Password:  "", // OAuth-only users have empty password
+			OAuth: map[string]db.OAuthProvider{
+				loginInfo.Provider: {
+					ExternalID:        loginInfo.Address,
+					SignatureHash:     internal.HexHashPassword(passwordSalt, loginInfo.UserOAuthSignature),
+					LinkedAt:          now,
+					LastAuthenticated: now,
+				},
+			},
+			Verified: true,
 		}
 		if _, err := a.db.SetUser(user); err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
 		res.Registered = true
-	}
-	// Login
-	// check that the address generated password matches the one in the database
-	if pass := internal.HexHashPassword(passwordSalt, loginInfo.UserOAuthSignature); pass != user.Password {
-		errors.ErrNonOauthAccount.Write(w)
-		return
+	} else {
+		// Login existing user
+		// check that the user has OAuth credentials for this provider
+		if user.OAuth == nil {
+			user.OAuth = make(map[string]db.OAuthProvider)
+		}
+		oauthProvider, exists := user.OAuth[loginInfo.Provider]
+		if !exists {
+			errors.ErrNonOauthAccount.Write(w)
+			return
+		}
+		// verify the signature hash matches
+		if pass := internal.HexHashPassword(passwordSalt, loginInfo.UserOAuthSignature); pass != oauthProvider.SignatureHash {
+			errors.ErrUnauthorized.Write(w)
+			return
+		}
+		// update last authenticated timestamp
+		oauthProvider.LastAuthenticated = now
+		user.OAuth[loginInfo.Provider] = oauthProvider
+		if _, err := a.db.SetUser(user); err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
 	}
 	// generate a new token with the user name as the subject
 	login, err := a.buildLoginResponse(loginInfo.Email)
@@ -219,4 +275,147 @@ func (a *API) oauthLoginHandler(w http.ResponseWriter, r *http.Request) {
 	res.Expirity = login.Expirity
 	// send the token back to the user
 	apicommon.HTTPWriteJSON(w, res)
+}
+
+// oauthLinkHandler godoc
+//
+//	@Summary		Link OAuth provider to account
+//	@Description	Link an OAuth provider to an existing authenticated account
+//	@Tags			auth
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			request	body		apicommon.OAuthLinkRequest	true	"OAuth link information"
+//	@Success		200		{string}	string						"OK"
+//	@Failure		400		{object}	errors.Error				"Invalid provider or provider already linked"
+//	@Failure		401		{object}	errors.Error				"Unauthorized or signature verification failed"
+//	@Failure		500		{object}	errors.Error				"Internal server error"
+//	@Router			/auth/oauth/link [post]
+func (a *API) oauthLinkHandler(w http.ResponseWriter, r *http.Request) {
+	// get the authenticated user from context
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	// get the link info from the request body
+	linkInfo := &apicommon.OAuthLinkRequest{}
+	if err := json.NewDecoder(r.Body).Decode(linkInfo); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	// validate provider
+	if !isValidOAuthProvider(linkInfo.Provider) {
+		errors.ErrInvalidOAuthProvider.Write(w)
+		return
+	}
+	// check if provider is already linked to this user
+	if user.OAuth == nil {
+		user.OAuth = make(map[string]db.OAuthProvider)
+	}
+	if _, exists := user.OAuth[linkInfo.Provider]; exists {
+		errors.ErrProviderAlreadyLinked.Write(w)
+		return
+	}
+	// verify OAuth signatures
+	// first verify the user's signature on the OAuth signature
+	if err := account.VerifySignature(linkInfo.OAuthSignature, linkInfo.UserOAuthSignature, linkInfo.Address); err != nil {
+		errors.ErrUnauthorized.WithErr(err).Write(w)
+		return
+	}
+	// fetch oauth service address and verify the OAuth service signature
+	resp, err := http.Get(fmt.Sprintf("%s/api/info/getAddress", a.oauthServiceURL))
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			fmt.Println("Error closing response body:", err)
+		}
+	}()
+	if err != nil {
+		errors.ErrOAuthServerConnectionFailed.WithErr(err).Write(w)
+		return
+	}
+	var result apicommon.OAuthServiceAddressResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	// verify the signature of the oauth service on the user's email
+	if err := account.VerifySignature(user.Email, linkInfo.OAuthSignature, result.Address); err != nil {
+		errors.ErrUnauthorized.WithErr(err).Write(w)
+		return
+	}
+	// Note: We skip checking if this OAuth account is linked to a different user
+	// because the OAuth service ensures the signature is valid for the current user's email
+	// all checks passed, link the provider
+	now := time.Now()
+	user.OAuth[linkInfo.Provider] = db.OAuthProvider{
+		ExternalID:        linkInfo.Address,
+		SignatureHash:     internal.HexHashPassword(passwordSalt, linkInfo.UserOAuthSignature),
+		LinkedAt:          now,
+		LastAuthenticated: now,
+	}
+	// save the updated user
+	if _, err := a.db.SetUser(user); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	apicommon.HTTPWriteOK(w)
+}
+
+// oauthUnlinkHandler godoc
+//
+//	@Summary		Unlink OAuth provider from account
+//	@Description	Unlink an OAuth provider from an authenticated account. Cannot unlink the last authentication method.
+//	@Tags			auth
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			provider	path		string	true	"OAuth provider name (google, github, facebook)"
+//	@Success		200			{string}	string	"OK"
+//	@Failure		400			{object}	errors.Error	"Invalid provider, provider not linked, or cannot unlink last auth method"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/auth/oauth/unlink/{provider} [delete]
+func (a *API) oauthUnlinkHandler(w http.ResponseWriter, r *http.Request) {
+	// get the authenticated user from context
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	// get the provider from the URL path
+	provider := r.PathValue("provider")
+	if provider == "" {
+		errors.ErrMalformedURLParam.With("provider parameter is required").Write(w)
+		return
+	}
+	// validate provider
+	if !isValidOAuthProvider(provider) {
+		errors.ErrInvalidOAuthProvider.Write(w)
+		return
+	}
+	// check if provider is linked to this user
+	if user.OAuth == nil {
+		user.OAuth = make(map[string]db.OAuthProvider)
+	}
+	if _, exists := user.OAuth[provider]; !exists {
+		errors.ErrProviderNotLinked.Write(w)
+		return
+	}
+	// security check: prevent unlinking the last authentication method
+	// user must have either a password or at least one other OAuth provider
+	hasPassword := user.Password != ""
+	hasOtherProviders := len(user.OAuth) > 1
+	if !hasPassword && !hasOtherProviders {
+		errors.ErrCannotUnlinkLastAuthMethod.Write(w)
+		return
+	}
+	// all checks passed, unlink the provider
+	delete(user.OAuth, provider)
+	// save the updated user
+	if _, err := a.db.SetUser(user); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	apicommon.HTTPWriteOK(w)
 }
