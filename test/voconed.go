@@ -41,6 +41,7 @@ func VoconedAPIURL(base string) string {
 
 // StartVoconedContainer starts a Voconed container for testing.
 // It returns the container and any error encountered during startup.
+// The caller is responsible for terminating the container.
 func StartVoconedContainer(ctx context.Context) (testcontainers.Container, error) {
 	dataDir := path.Join(os.TempDir(), "voconed-test-datadir")
 	exposedPort := fmt.Sprintf("%d/tcp", VoconedPort)
@@ -53,26 +54,25 @@ func StartVoconedContainer(ctx context.Context) (testcontainers.Container, error
 		fmt.Sprintf("--enableFaucet=%d", VocfaucetAmounts),
 		"--blockPeriod=1",
 	}
-	c, err := testcontainers.GenericContainer(ctx,
-		testcontainers.GenericContainerRequest{
-			ContainerRequest: testcontainers.ContainerRequest{
-				Image:           "ghcr.io/vocdoni/vocdoni-node:main",
-				Entrypoint:      []string{"/app/voconed"},
-				Cmd:             voconedCmd,
-				ImagePlatform:   "linux/amd64",
-				ExposedPorts:    []string{exposedPort},
-				WaitingFor:      wait.ForListeningPort(nat.Port(exposedPort)),
-				AlwaysPullImage: true,
-				HostConfigModifier: func(hc *container.HostConfig) {
-					hc.AutoRemove = false
-					// Set up a bind mount: hostPath:containerPath
-					hc.Binds = append(hc.Binds, fmt.Sprintf("%s:%s", dataDir, VoconedDataDir))
-				},
-			},
-			Started: true,
-		})
+
+	opts := []testcontainers.ContainerCustomizer{
+		testcontainers.WithImage("ghcr.io/vocdoni/vocdoni-node:main"),
+		testcontainers.WithImagePlatform("linux/amd64"),
+		testcontainers.WithEntrypoint("/app/voconed"),
+		testcontainers.WithCmd(voconedCmd...),
+		testcontainers.WithExposedPorts(exposedPort),
+		testcontainers.WithWaitStrategy(wait.ForListeningPort(nat.Port(exposedPort))),
+		testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) {
+			hc.AutoRemove = false
+			// Set up a bind mount: hostPath:containerPath
+			hc.Binds = append(hc.Binds, fmt.Sprintf("%s:%s", dataDir, VoconedDataDir))
+		}),
+		testcontainers.WithAlwaysPull(),
+	}
+
+	c, err := testcontainers.Run(ctx, "ghcr.io/vocdoni/vocdoni-node:main", opts...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to start voconed container: %w", err)
 	}
 	return c, nil
 }

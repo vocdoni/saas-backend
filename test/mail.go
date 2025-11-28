@@ -19,16 +19,20 @@ const (
 
 // StartMailService starts a MailHog container for testing email functionality.
 // It returns the container and any error encountered during startup.
+// The caller is responsible for terminating the container.
 func StartMailService(ctx context.Context) (testcontainers.Container, error) {
 	smtpPort := fmt.Sprintf("%s/tcp", MailSMTPPort)
 	apiPort := fmt.Sprintf("%s/tcp", MailAPIPort)
-	return testcontainers.GenericContainer(ctx,
-		testcontainers.GenericContainerRequest{
-			ContainerRequest: testcontainers.ContainerRequest{
-				Image:        "mailhog/mailhog",
-				ExposedPorts: []string{smtpPort, apiPort},
-				WaitingFor:   wait.ForListeningPort(MailSMTPPort),
-			},
-			Started: true,
-		})
+
+	opts := []testcontainers.ContainerCustomizer{
+		testcontainers.WithImage("mailhog/mailhog"),
+		testcontainers.WithExposedPorts(smtpPort, apiPort),
+		testcontainers.WithWaitStrategy(wait.ForListeningPort(MailSMTPPort)),
+	}
+
+	container, err := testcontainers.Run(ctx, "mailhog/mailhog", opts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start mail container: %w", err)
+	}
+	return container, nil
 }
