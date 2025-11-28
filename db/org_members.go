@@ -183,14 +183,12 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 
 	// Check that the birthdate is valid
 	if len(member.BirthDate) > 0 {
-		parsedDate, normalized, err := internal.ParseBirthDate(member.BirthDate)
+		var err error
+		member.ParsedBirthDate, member.BirthDate, err = internal.ParseBirthDate(member.BirthDate)
 		if err != nil {
 			errors = append(errors, err)
 			member.BirthDate = "" // Reset invalid birthdate
 			member.ParsedBirthDate = time.Time{}
-		} else {
-			member.BirthDate = normalized
-			member.ParsedBirthDate = parsedDate
 		}
 	}
 	return &member, errors
