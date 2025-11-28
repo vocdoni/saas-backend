@@ -7,23 +7,24 @@ import (
 	"math/big"
 
 	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/mongodb"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 // StartMongoContainer creates and starts an instance of the mongodb container
-func StartMongoContainer(ctx context.Context) (testcontainers.Container, error) {
-	return testcontainers.GenericContainer(ctx,
-		testcontainers.GenericContainerRequest{
-			ContainerRequest: testcontainers.ContainerRequest{
-				Image:        "mongo",
-				ExposedPorts: []string{"27017/tcp"},
-				WaitingFor: wait.ForAll(
-					wait.ForLog("Waiting for connections"),
-					wait.ForListeningPort("27017/tcp"),
-				),
-			},
-			Started: true,
-		})
+// The caller is responsible for terminating the container.
+func StartMongoContainer(ctx context.Context) (*mongodb.MongoDBContainer, error) {
+	opts := []testcontainers.ContainerCustomizer{
+		testcontainers.WithWaitStrategy(
+			wait.ForLog("Waiting for connections"),
+		),
+	}
+
+	mongodbContainer, err := mongodb.Run(ctx, "mongo:7", opts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start container: %w", err)
+	}
+	return mongodbContainer, nil
 }
 
 //

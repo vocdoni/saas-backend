@@ -52,7 +52,7 @@ func TestMain(m *testing.M) {
 	}
 
 	// get the MongoDB connection string
-	mongoURI, err = dbContainer.Endpoint(ctx, "mongodb")
+	mongoURI, err = dbContainer.ConnectionString(ctx)
 	if err != nil {
 		panic(fmt.Sprintf("failed to get MongoDB endpoint: %v", err))
 	}

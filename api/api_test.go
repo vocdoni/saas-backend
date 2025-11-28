@@ -297,7 +297,7 @@ func TestMain(m *testing.M) {
 	// ensure the container is stopped when the test finishes
 	defer func() { _ = dbContainer.Terminate(ctx) }()
 	// get the MongoDB connection string
-	mongoURI, err := dbContainer.Endpoint(ctx, "mongodb")
+	mongoURI, err := dbContainer.ConnectionString(ctx)
 	if err != nil {
 		panic(err)
 	}
