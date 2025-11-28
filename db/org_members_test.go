@@ -182,9 +182,12 @@ func TestOrgMembers(t *testing.T) {
 		} {
 			member := &OrgMember{
 				OrgAddress: testOrgAddress,
-				Email:      fmt.Sprintf("member-%s@test.com", strings.ReplaceAll(tc.in, "/", "-")),
-				Name:       "Test",
-				BirthDate:  tc.in,
+				Email: fmt.Sprintf(
+					"member-%s@test.com",
+					strings.ReplaceAll(strings.ReplaceAll(tc.in, " ", "-"), "/", "-"),
+				),
+				Name:      "Test",
+				BirthDate: tc.in,
 			}
 
 			id, err := testDB.SetOrgMember(testSalt, member)
