@@ -879,7 +879,7 @@ func (p *OrgMember) ToDB() *db.OrgMember {
 	if len(birthDate) > 0 {
 		// Parse the birth date from string to time.Time
 		var err error
-		parsedBirthDate, birthDate, err = db.ParseBirthDate(p.BirthDate)
+		parsedBirthDate, birthDate, err = internal.ParseBirthDate(p.BirthDate)
 		if err != nil {
 			log.Warnf("Failed to parse birth date %s for member %s: %v", p.BirthDate, p.MemberNumber, err)
 			birthDate = p.BirthDate
