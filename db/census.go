@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -59,27 +58,6 @@ func (ms *MongoStorage) SetCensus(census *Census) (string, error) {
 	}
 
 	return census.ID.Hex(), nil
-}
-
-// SetPublished census updates the PublishedCensus field of a census
-func (ms *MongoStorage) SetPublishedCensus(censusID, uri string, root internal.HexBytes) (string, error) {
-	if len(censusID) == 0 || len(uri) == 0 || len(root) == 0 {
-		return "", ErrInvalidData
-	}
-
-	censusOID, err := primitive.ObjectIDFromHex(censusID)
-	if err != nil {
-		return "", ErrInvalidData
-	}
-	census := &Census{
-		ID: censusOID,
-		Published: PublishedCensus{
-			Root: root,
-			URI:  uri,
-		},
-	}
-
-	return ms.SetCensus(census)
 }
 
 // PopulateGroupCensus creates a new census for an organization
