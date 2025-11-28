@@ -1,6 +1,8 @@
 package db
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -159,6 +161,46 @@ func TestOrgMembers(t *testing.T) {
 		nonExistentID := primitive.NewObjectID().Hex()
 		_, err = testDB.OrgMember(testOrgAddress, nonExistentID)
 		c.Assert(err, qt.Not(qt.IsNil))
+	})
+
+	t.Run("BirthDateParsing", func(_ *testing.T) {
+		c.Assert(testDB.Reset(), qt.IsNil)
+		organization := &Organization{Address: testOrgAddress}
+		c.Assert(testDB.SetOrganization(organization), qt.IsNil)
+
+		type birthTest struct {
+			in          string
+			want        string
+			expectError qt.Checker
+		}
+
+		for _, tc := range []birthTest{
+			{in: "03/02/2001", want: "2001-02-03", expectError: qt.IsNil},
+			{in: "03-02-2001", want: "2001-02-03", expectError: qt.IsNil},
+			{in: "2001 02 03", want: "2001-02-03", expectError: qt.IsNil},
+			{in: "12/31/2025", expectError: qt.IsNotNil},
+		} {
+			member := &OrgMember{
+				OrgAddress: testOrgAddress,
+				Email: fmt.Sprintf(
+					"member-%s@test.com",
+					strings.ReplaceAll(strings.ReplaceAll(tc.in, " ", "-"), "/", "-"),
+				),
+				Name:      "Test",
+				BirthDate: tc.in,
+			}
+
+			id, err := testDB.SetOrgMember(testSalt, member)
+			c.Assert(err, tc.expectError)
+			if tc.expectError != qt.IsNil {
+				continue
+			}
+
+			dbMember, err := testDB.OrgMember(testOrgAddress, id)
+			c.Assert(err, qt.IsNil)
+			c.Assert(dbMember.BirthDate, qt.Equals, tc.want)
+			c.Assert(dbMember.ParsedBirthDate.IsZero(), qt.IsFalse)
+		}
 	})
 
 	t.Run("SetBulkOrgMembers", func(_ *testing.T) {
