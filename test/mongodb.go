@@ -16,7 +16,10 @@ import (
 func StartMongoContainer(ctx context.Context) (*mongodb.MongoDBContainer, error) {
 	opts := []testcontainers.ContainerCustomizer{
 		testcontainers.WithWaitStrategy(
-			wait.ForLog("Waiting for connections"),
+			wait.ForAll(
+				wait.ForLog("Waiting for connections"),
+				wait.ForListeningPort("27017/tcp"),
+			),
 		),
 	}
 
