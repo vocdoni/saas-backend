@@ -11,11 +11,10 @@ import (
 )
 
 func init() {
-	AddMigration(5, "drop_verifications_and_replace_indexes",
-		upDropVerificationsAndReplaceIndexes, downDropVerificationsAndReplaceIndexes)
+	AddMigration(5, "rename_verifications_code", upRenameVerificationsCode, downRenameVerificationsCode)
 }
 
-func upDropVerificationsAndReplaceIndexes(ctx context.Context, database *mongo.Database) error {
+func upRenameVerificationsCode(ctx context.Context, database *mongo.Database) error {
 	// there's no way to convert code <-> sealedCode so we set all to expired
 	_, err := database.Collection("verifications").UpdateMany(ctx,
 		bson.M{"code": bson.M{"$exists": true}},
@@ -39,7 +38,7 @@ func upDropVerificationsAndReplaceIndexes(ctx context.Context, database *mongo.D
 		})
 }
 
-func downDropVerificationsAndReplaceIndexes(ctx context.Context, database *mongo.Database) error {
+func downRenameVerificationsCode(ctx context.Context, database *mongo.Database) error {
 	// there's no way to convert code <-> sealedCode so we set all to expired
 	_, err := database.Collection("verifications").UpdateMany(ctx,
 		bson.M{"sealedCode": bson.M{"$exists": true}},
