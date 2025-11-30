@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/go-units"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/mongodb"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -21,6 +23,16 @@ func StartMongoContainer(ctx context.Context) (*mongodb.MongoDBContainer, error)
 				wait.ForListeningPort("27017/tcp"),
 			),
 		),
+		// avoid `error in creating eventfd: Too many open files, errno: 24`
+		testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) {
+			hc.Ulimits = []*units.Ulimit{
+				{
+					Name: "nofile",
+					Hard: 65536, // Maximum file descriptors
+					Soft: 65536, // Current limit
+				},
+			}
+		}),
 	}
 
 	mongodbContainer, err := mongodb.Run(ctx, "mongo:7", opts...)
