@@ -47,10 +47,10 @@ func setupTestOrgMembersGroupPrerequisites(t *testing.T, memberSuffix string) (*
 
 func TestOrganizationMemberGroup(t *testing.T) {
 	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
 	t.Run("CreateOrganizationMemberGroup", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites
 		_, memberIDs := setupTestOrgMembersGroupPrerequisites(t, "_create")
 
@@ -101,7 +101,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 	})
 
 	t.Run("OrganizationMemberGroup", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites
 		_, memberIDs := setupTestOrgMembersGroupPrerequisites(t, "_get")
 
@@ -152,7 +152,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 	})
 
 	t.Run("OrganizationMemberGroups", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites
 		_, memberIDs := setupTestOrgMembersGroupPrerequisites(t, "_list")
 
@@ -192,7 +192,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		})
 
 		t.Run("DifferentOrganizations", func(_ *testing.T) {
-			c.Assert(testDB.Reset(), qt.IsNil)
+			c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 			// Setup prerequisites
 			_, memberIDs := setupTestOrgMembersGroupPrerequisites(t, "_diff_org")
 
@@ -264,7 +264,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 	})
 
 	t.Run("UpdateOrganizationMemberGroup", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites
 		_, memberIDs := setupTestOrgMembersGroupPrerequisites(t, "_update")
 
@@ -387,7 +387,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 	})
 
 	t.Run("DeleteOrganizationMemberGroup", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites
 		_, memberIDs := setupTestOrgMembersGroupPrerequisites(t, "_delete")
 
@@ -444,7 +444,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 	})
 
 	t.Run("ListOrganizationMemberGroup", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites
 		_, memberIDs := setupTestOrgMembersGroupPrerequisites(t, "_list_members")
 
@@ -550,7 +550,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 	})
 
 	t.Run("ZeroAddressValidation", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 		// Test CreateOrganizationMemberGroup with zero address - should fail
 		zeroAddrGroup := &OrganizationMemberGroup{
@@ -584,7 +584,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 	})
 
 	t.Run("CheckGroupMembersFields", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Create org
 		organization := &Organization{
 			Address: testOrgAddress,
@@ -1053,7 +1053,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 	// Test DeleteOrgMembers with automatic group cleanup
 	// When members are deleted, they should be removed from all groups
 	t.Run("DeleteMembersWithGroupCleanup", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites - this creates 3 members
 		_, existingMemberIDs := setupTestOrgMembersGroupPrerequisites(t, "_delete_test")
 

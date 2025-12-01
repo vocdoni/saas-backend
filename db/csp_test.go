@@ -20,7 +20,7 @@ var (
 
 func TestSetGetCSPAuth(t *testing.T) {
 	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
 	c.Run("nil token", func(c *qt.C) {
 		c.Assert(testDB.SetCSPAuth(nil, testUserID, testCSPBundleID), qt.ErrorIs, ErrBadInputs)
@@ -32,7 +32,7 @@ func TestSetGetCSPAuth(t *testing.T) {
 		c.Assert(testDB.SetCSPAuth(testAuthToken, testUserID, nil), qt.ErrorIs, ErrBadInputs)
 	})
 	c.Run("valid token", func(c *qt.C) {
-		c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		// set the token and check it was set
 		c.Assert(testDB.SetCSPAuth(testAuthToken, testUserID, testCSPBundleID), qt.IsNil)
 		token, err := testDB.CSPAuth(testAuthToken)
@@ -43,7 +43,7 @@ func TestSetGetCSPAuth(t *testing.T) {
 		c.Assert(token.Verified, qt.IsFalse)
 	})
 	c.Run("last token", func(c *qt.C) {
-		c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		// get non existing last token
 		_, err := testDB.LastCSPAuth(testUserID, testCSPBundleID)
 		c.Assert(err, qt.ErrorIs, ErrTokenNotFound)
@@ -79,7 +79,7 @@ func TestSetGetCSPAuth(t *testing.T) {
 
 func TestVerifyCSPAuth(t *testing.T) {
 	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
 	c.Run("nil token", func(c *qt.C) {
 		c.Assert(testDB.VerifyCSPAuth(nil), qt.ErrorIs, ErrBadInputs)
@@ -100,7 +100,7 @@ func TestVerifyCSPAuth(t *testing.T) {
 
 func TestCSPProcess(t *testing.T) {
 	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
 	c.Run("nil inputs", func(c *qt.C) {
 		c.Assert(testDB.ConsumeCSPProcess(nil, testCSPProcessID, testUserAddress), qt.ErrorIs, ErrBadInputs)

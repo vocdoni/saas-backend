@@ -58,10 +58,10 @@ func setupTestCensusParticipantPrerequisites(t *testing.T, memberSuffix string) 
 
 func TestCensusParticipant(t *testing.T) {
 	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
 	t.Run("SetCensusParticipant", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites
 		member, _, censusID := setupTestCensusParticipantPrerequisites(t, "_set")
 
@@ -133,7 +133,7 @@ func TestCensusParticipant(t *testing.T) {
 	})
 
 	t.Run("GetCensusParticipant", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites
 		member, _, censusID := setupTestCensusParticipantPrerequisites(t, "_get")
 		participantID := testParticipantID + "_get"
@@ -172,7 +172,7 @@ func TestCensusParticipant(t *testing.T) {
 	})
 
 	t.Run("DeleteCensusParticipant", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites
 		member, _, censusID := setupTestCensusParticipantPrerequisites(t, "_delete")
 
@@ -211,7 +211,7 @@ func TestCensusParticipant(t *testing.T) {
 	})
 
 	t.Run("BulkCensusParticipant", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites
 		_, _, censusID := setupTestCensusParticipantPrerequisites(t, "_bulk")
 
@@ -371,7 +371,7 @@ func TestCensusParticipant(t *testing.T) {
 	})
 
 	t.Run("CensusParticipantByLoginHash", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites
 		member, _, censusID := setupTestCensusParticipantPrerequisites(t, "_loginHash")
 
@@ -424,7 +424,7 @@ func TestCensusParticipant(t *testing.T) {
 	})
 
 	t.Run("SetBulkCensusParticipant", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 		// Create organization and census
 		org := &Organization{
@@ -520,9 +520,9 @@ func TestCensusParticipant(t *testing.T) {
 // that "participantID": orgMember.ID.Hex() works correctly for upserts
 func TestCreateCensusParticipantBulkOperationsFiltering(t *testing.T) {
 	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
-	c.Assert(testDB.Reset(), qt.IsNil)
+	c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 	// Create organization
 	org := &Organization{

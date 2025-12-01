@@ -11,7 +11,7 @@ import (
 
 func TestJobOperations(t *testing.T) {
 	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
 	// Test data
 	jobID := "test-job-123"
@@ -56,7 +56,7 @@ func TestJobOperations(t *testing.T) {
 
 func TestSetJob(t *testing.T) {
 	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
 	// Test data
 	job := &Job{

@@ -29,10 +29,10 @@ func createTestProcess(c *qt.C, db *MongoStorage, processID internal.HexBytes, c
 
 func TestProcessBundles(t *testing.T) {
 	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
 	t.Run("TestSetAndGetProcessBundle", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites
 		census := setupTestPrerequisites1(c, testDB)
 
@@ -107,7 +107,7 @@ func TestProcessBundles(t *testing.T) {
 	})
 
 	t.Run("TestProcessBundlesList", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites
 		census := setupTestPrerequisites1(c, testDB)
 
@@ -150,7 +150,7 @@ func TestProcessBundles(t *testing.T) {
 	})
 
 	t.Run("TestProcessBundlesByProcess", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites
 		census := setupTestPrerequisites1(c, testDB)
 
@@ -201,7 +201,7 @@ func TestProcessBundles(t *testing.T) {
 	})
 
 	t.Run("TestAddProcessesToBundle", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites
 		census := setupTestPrerequisites1(c, testDB)
 
@@ -266,7 +266,7 @@ func TestProcessBundles(t *testing.T) {
 	})
 
 	t.Run("TestDelProcessBundle", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites
 		census := setupTestPrerequisites1(c, testDB)
 

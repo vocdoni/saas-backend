@@ -14,11 +14,11 @@ const (
 
 func TestOrganizationInvites(t *testing.T) {
 	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 	expires := time.Now().Add(time.Hour)
 
 	t.Run("UpdateInvitation", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 		// Test updating invitation with empty ID
 		emptyIDInvite := &OrganizationInvite{
@@ -98,7 +98,7 @@ func TestOrganizationInvites(t *testing.T) {
 	})
 
 	t.Run("GetInvitation", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Test getting non-existent invitation
 		_, err := testDB.InvitationByCode(invitationCode)
 		c.Assert(err, qt.ErrorIs, ErrNotFound)
@@ -144,7 +144,7 @@ func TestOrganizationInvites(t *testing.T) {
 	})
 
 	t.Run("PendingInvitations", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// List invitations expecting none
 		invitations, err := testDB.PendingInvitations(testOrgAddress)
 		c.Assert(err, qt.IsNil)
@@ -201,7 +201,7 @@ func TestOrganizationInvites(t *testing.T) {
 	})
 
 	t.Run("DeleteInvitation", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Non existing invitation does not return an error on delete attempt
 		err := testDB.DeleteInvitationByCode(invitationCode)
 		c.Assert(err, qt.IsNil)
@@ -248,7 +248,7 @@ func TestOrganizationInvites(t *testing.T) {
 	})
 
 	t.Run("InvitationByEmail", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Test getting non-existent invitation by email
 		_, err := testDB.InvitationByEmail(newUserEmail)
 		c.Assert(err, qt.ErrorIs, ErrNotFound)
@@ -294,7 +294,7 @@ func TestOrganizationInvites(t *testing.T) {
 	})
 
 	t.Run("DeleteInvitationByEmail", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Non existing invitation does not return an error on delete attempt
 		err := testDB.DeleteInvitationByEmail(newUserEmail)
 		c.Assert(err, qt.IsNil)

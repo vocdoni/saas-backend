@@ -9,9 +9,9 @@ import (
 
 func TestOrganizations(t *testing.T) {
 	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 	t.Run("GetOrganization", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 		// test not found organization
 		address := testAnotherOrgAddress
@@ -43,7 +43,7 @@ func TestOrganizations(t *testing.T) {
 	})
 
 	t.Run("SetOrganization", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 		// create a new organization
 		address := testOrgAddress
@@ -83,7 +83,7 @@ func TestOrganizations(t *testing.T) {
 	})
 
 	t.Run("DeleteOrganization", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 		// create a new organization and delete it
 		address := testOrgAddress
@@ -103,7 +103,7 @@ func TestOrganizations(t *testing.T) {
 	})
 
 	t.Run("ReplaceCreatorEmail", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 		// create a new organization with a creator
 		address := testOrgAddress
@@ -134,7 +134,7 @@ func TestOrganizations(t *testing.T) {
 	})
 
 	t.Run("OrganizationsUsers", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 		// create a new organization with a creator
 		address := testOrgAddress
@@ -160,7 +160,7 @@ func TestOrganizations(t *testing.T) {
 	})
 
 	t.Run("AddOrganizationPlan", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 		// create a new organization
 		address := testOrgAddress
@@ -197,7 +197,7 @@ func TestOrganizations(t *testing.T) {
 	})
 
 	t.Run("UpdateOrganizationUserRole", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 		// Create a test user
 		userEmail := "roletest@example.com"
@@ -268,7 +268,7 @@ func TestOrganizations(t *testing.T) {
 	})
 
 	t.Run("RemoveOrganizationUser", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 		// Create a test user
 		userEmail := "usertest@example.com"
