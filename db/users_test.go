@@ -15,9 +15,9 @@ const (
 
 func TestUsers(t *testing.T) {
 	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 	t.Run("UserByEmail", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 		// test not found user
 		user, err := testDB.UserByEmail(testDBUserEmail)
@@ -43,7 +43,7 @@ func TestUsers(t *testing.T) {
 	})
 
 	t.Run("UserByID", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 		// test not found user
 		id := uint64(100)
@@ -74,7 +74,7 @@ func TestUsers(t *testing.T) {
 	})
 
 	t.Run("SetUser", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 		// trying to create a new user with invalid email
 		user := &User{
@@ -112,7 +112,7 @@ func TestUsers(t *testing.T) {
 	})
 
 	t.Run("DeleteUser", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 		// create a new user
 		user := &User{
@@ -146,7 +146,7 @@ func TestUsers(t *testing.T) {
 	})
 
 	t.Run("UserHasRoleInOrg", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 		// create a new user with some organizations
 		user := &User{
@@ -190,7 +190,7 @@ func TestUsers(t *testing.T) {
 	})
 
 	t.Run("VerifyUser", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 		nonExistingUserID := uint64(100)
 		c.Assert(testDB.VerifyUserAccount(&User{ID: nonExistingUserID}), qt.Equals, ErrNotFound)

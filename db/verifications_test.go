@@ -10,10 +10,10 @@ import (
 
 func TestVerifications(t *testing.T) {
 	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
 	t.Run("TestUserVerificationCode", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		userID, err := testDB.SetUser(&User{
 			Email:     testUserEmail,
 			Password:  testUserPass,
@@ -40,7 +40,7 @@ func TestVerifications(t *testing.T) {
 	})
 
 	t.Run("TestSetVerificationCode", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		nonExistingUserID := uint64(100)
 
 		sealedCode, err := internal.SealToken("testCode", testUserEmail, "mock-app-secret")
@@ -74,7 +74,7 @@ func TestVerifications(t *testing.T) {
 	})
 
 	t.Run("TestVerificationCodeIncrementAttempts", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		userID, err := testDB.SetUser(&User{
 			Email:     testUserEmail + "3",
 			Password:  testUserPass,

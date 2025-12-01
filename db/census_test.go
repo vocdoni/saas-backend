@@ -11,10 +11,10 @@ import (
 
 func TestPopulateGroupCensus(t *testing.T) {
 	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
 	t.Run("InputValidation", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Create test organization first
 		org := &Organization{
 			Address:   testOrgAddress,
@@ -69,7 +69,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 	})
 
 	t.Run("GroupValidation", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Create test organizations
 		org1 := &Organization{
 			Address:   testOrgAddress,
@@ -166,7 +166,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 	})
 
 	t.Run("PopulateGroupCensusWithEmptyGroup", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 		// Create test organizations
 		org1 := &Organization{
@@ -216,7 +216,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 	})
 
 	t.Run("CensusCreation", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Create test organization
 		org := &Organization{
 			Address:   testOrgAddress,
@@ -292,7 +292,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 	})
 
 	t.Run("ParticipantHandling", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Create test organization
 		org := &Organization{
 			Address:   testOrgAddress,
@@ -388,10 +388,10 @@ func TestPopulateGroupCensus(t *testing.T) {
 
 func TestCensus(t *testing.T) {
 	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
 	t.Run("SetCensus", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Test with non-existent organization
 		nonExistentCensus := &Census{
 			OrgAddress: testNonExistentOrg,
@@ -465,7 +465,7 @@ func TestCensus(t *testing.T) {
 	})
 
 	t.Run("DelCensus", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Create test organization first
 		org := &Organization{
 			Address:   testOrgAddress,
@@ -504,7 +504,7 @@ func TestCensus(t *testing.T) {
 	})
 
 	t.Run("GetCensus", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Create test organization first
 		org := &Organization{
 			Address:   testOrgAddress,
@@ -547,7 +547,7 @@ func TestCensus(t *testing.T) {
 	})
 
 	t.Run("CensusesByOrg", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Create test organization first
 		org := &Organization{
 			Address:   testOrgAddress,
@@ -619,7 +619,7 @@ func TestCensus(t *testing.T) {
 	})
 
 	t.Run("ZeroAddressValidation", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 		// Test SetCensus with zero address - should fail
 		zeroAddrCensus := &Census{

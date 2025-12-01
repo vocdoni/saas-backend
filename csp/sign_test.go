@@ -39,7 +39,7 @@ func TestSign(t *testing.T) {
 
 	c.Run("ecdsa salted success", func(c *qt.C) {
 		pid := internal.HexBytes(util.RandomBytes(32))
-		c.Cleanup(func() { _ = csp.Storage.Reset() })
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		// index the token
 		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID), qt.IsNil)
 		// verify the token
@@ -69,7 +69,7 @@ func TestPrepareSaltedKeySigner(t *testing.T) {
 
 	c.Run("not found token", func(c *qt.C) {
 		c.Cleanup(func() {
-			_ = csp.Storage.Reset()
+			c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 			csp.unlock(testUserID, testPID)
 		})
 		_, _, _, err := csp.prepareSaltedKeySigner(testToken, testAddress, testPID)
@@ -78,7 +78,7 @@ func TestPrepareSaltedKeySigner(t *testing.T) {
 
 	c.Run("user already signing", func(c *qt.C) {
 		c.Cleanup(func() {
-			_ = csp.Storage.Reset()
+			c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 			csp.unlock(testUserID, testPID)
 		})
 		// store the token and verify it
@@ -92,7 +92,7 @@ func TestPrepareSaltedKeySigner(t *testing.T) {
 
 	c.Run("token not verified", func(c *qt.C) {
 		c.Cleanup(func() {
-			_ = csp.Storage.Reset()
+			c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 			csp.unlock(testUserID, testPID)
 		})
 		// store the token
@@ -105,7 +105,7 @@ func TestPrepareSaltedKeySigner(t *testing.T) {
 
 	c.Run("process already consumed", func(c *qt.C) {
 		c.Cleanup(func() {
-			_ = csp.Storage.Reset()
+			c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 			csp.unlock(testUserID, testPID)
 		})
 		// store the token
@@ -122,7 +122,7 @@ func TestPrepareSaltedKeySigner(t *testing.T) {
 
 	c.Run("invalid salt pid", func(c *qt.C) {
 		c.Cleanup(func() {
-			_ = csp.Storage.Reset()
+			c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 			csp.unlock(testUserID, testPID)
 		})
 		// index the token
@@ -135,7 +135,7 @@ func TestPrepareSaltedKeySigner(t *testing.T) {
 
 	c.Run("success", func(c *qt.C) {
 		c.Cleanup(func() {
-			_ = csp.Storage.Reset()
+			c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 			csp.unlock(testUserID, testPID)
 		})
 		// index the token
@@ -178,7 +178,7 @@ func TestFinishSaltedKeySigner(t *testing.T) {
 	})
 
 	c.Run("token not verified", func(c *qt.C) {
-		c.Cleanup(func() { _ = csp.Storage.Reset() })
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		// store the token
 		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID), qt.IsNil)
 		err := csp.finishSaltedKeySigner(testToken, testAddress, testPID)
@@ -187,7 +187,7 @@ func TestFinishSaltedKeySigner(t *testing.T) {
 
 	c.Run("user not signing", func(c *qt.C) {
 		c.Cleanup(func() {
-			_ = csp.Storage.Reset()
+			c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 			defer csp.unlock(testUserID, testPID)
 		})
 		// store the token
@@ -200,7 +200,7 @@ func TestFinishSaltedKeySigner(t *testing.T) {
 
 	c.Run("success", func(c *qt.C) {
 		c.Cleanup(func() {
-			_ = csp.Storage.Reset()
+			c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 			defer csp.unlock(testUserID, testPID)
 		})
 		// store the token

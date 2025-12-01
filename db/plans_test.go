@@ -8,9 +8,9 @@ import (
 
 func TestPlans(t *testing.T) {
 	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 	t.Run("SetPlan", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 		plan := &Plan{
 			Name:     "Test Plan",
@@ -21,7 +21,7 @@ func TestPlans(t *testing.T) {
 	})
 
 	t.Run("GetPlan", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 		planID := uint64(123)
 		// Test not found plan
@@ -44,7 +44,7 @@ func TestPlans(t *testing.T) {
 	})
 
 	t.Run("DeletePlan", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 		// Create a new plan and delete it
 		plan := &Plan{

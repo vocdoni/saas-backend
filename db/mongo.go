@@ -117,18 +117,17 @@ func New(url, database string) (*MongoStorage, error) {
 	}
 	// init the database client
 	ms.DBClient = client
-	// if reset flag is enabled, Reset drops the database documents
-	// else, just init collections
+	// if reset flag is enabled, drop all collections before init
 	if reset := os.Getenv("VOCDONI_MONGO_RESET_DB"); reset != "" {
-		if err := ms.Reset(); err != nil {
-			return nil, err
-		}
-	} else {
-		// init the collections and migrations
-		if err := ms.init(); err != nil {
+		if err := ms.dropAllCollections(); err != nil {
 			return nil, err
 		}
 	}
+	// init the collections and migrations
+	if err := ms.init(); err != nil {
+		return nil, err
+	}
+
 	return ms, nil
 }
 
@@ -140,8 +139,9 @@ func (ms *MongoStorage) Close() {
 	}
 }
 
-func (ms *MongoStorage) Reset() error {
-	log.Infow("resetting database")
+// dropAllCollections drops all collections from database.
+func (ms *MongoStorage) dropAllCollections() error {
+	log.Infow("dropping all collections from database", "db", ms.database)
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
@@ -153,8 +153,36 @@ func (ms *MongoStorage) Reset() error {
 			}
 		}
 	}
-	// init the collections and migrations
-	return ms.init()
+
+	return nil
+}
+
+// DeleteAllDocuments removes all documents from all collections, except `plans` and `migrations`,
+// so it preserves all collection structures, indexes, and migration state.
+func (ms *MongoStorage) DeleteAllDocuments() error {
+	log.Infow("deleting all documents from database", "db", ms.database)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	var errs []error
+
+	for name, collectionPtr := range ms.collectionsMap() {
+		if name == "migrations" || name == "plans" {
+			continue
+		}
+		if *collectionPtr != nil {
+			if _, err := (*collectionPtr).DeleteMany(ctx, bson.D{}); err != nil {
+				errs = append(errs, fmt.Errorf("failed to clear collection %s: %w", name, err))
+				log.Warnw("failed to clear collection", "collection", name, "error", err)
+			}
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("failed to clear some collections: %v", errs)
+	}
+
+	return nil
 }
 
 func (ms *MongoStorage) String() string {

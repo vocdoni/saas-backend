@@ -13,10 +13,10 @@ import (
 
 func TestOrgMembers(t *testing.T) {
 	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
 	t.Run("SetOrgMember", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Create org
 		organization := &Organization{
 			Address: testOrgAddress,
@@ -91,7 +91,7 @@ func TestOrgMembers(t *testing.T) {
 	})
 
 	t.Run("DelOrgMember", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Create org
 		organization := &Organization{
 			Address: testOrgAddress,
@@ -125,7 +125,7 @@ func TestOrgMembers(t *testing.T) {
 	})
 
 	t.Run("GetOrgMember", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Create org
 		organization := &Organization{
 			Address: testOrgAddress,
@@ -164,7 +164,7 @@ func TestOrgMembers(t *testing.T) {
 	})
 
 	t.Run("BirthDateParsing", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		organization := &Organization{Address: testOrgAddress}
 		c.Assert(testDB.SetOrganization(organization), qt.IsNil)
 
@@ -204,7 +204,7 @@ func TestOrgMembers(t *testing.T) {
 	})
 
 	t.Run("SetBulkOrgMembers", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Create org
 		organization := &Organization{
 			Address: testOrgAddress,
@@ -301,7 +301,7 @@ func TestOrgMembers(t *testing.T) {
 	})
 
 	t.Run("ZeroAddressValidation", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
 		// Test SetOrgMember with zero address - should fail
 		zeroAddrMember := &OrgMember{

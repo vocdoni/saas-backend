@@ -44,7 +44,7 @@ func TestBundleAuthToken(t *testing.T) {
 	})
 
 	c.Run("notification cooldown reached", func(c *qt.C) {
-		c.Cleanup(func() { _ = csp.Storage.Reset() })
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		// generate a valid token
 		_, err := csp.BundleAuthToken(testBundleID, testUserID, "", notifications.EmailChallenge, apicommon.DefaultLang)
 		c.Assert(err, qt.ErrorIs, ErrNotificationFailure)
@@ -54,7 +54,7 @@ func TestBundleAuthToken(t *testing.T) {
 	})
 
 	c.Run("success test", func(c *qt.C) {
-		c.Cleanup(func() { _ = csp.Storage.Reset() })
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		bundleID := internal.HexBytes(testBundleID)
 		token, err := csp.BundleAuthToken(testBundleID, testUserID, testUserEmail, notifications.EmailChallenge, apicommon.DefaultLang)
 		c.Assert(err, qt.IsNil)
@@ -115,7 +115,7 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 	})
 
 	c.Run("solution not match", func(c *qt.C) {
-		c.Cleanup(func() { _ = csp.Storage.Reset() })
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		// create the token
 		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID), qt.IsNil)
 		// try to verify an invalid solution
@@ -124,7 +124,7 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 	})
 
 	c.Run("success", func(c *qt.C) {
-		c.Cleanup(func() { _ = csp.Storage.Reset() })
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		// create the token
 		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID), qt.IsNil)
 		// generate the code

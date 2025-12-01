@@ -53,10 +53,10 @@ func setupTestPrerequisites1(c *qt.C, db *MongoStorage) *Census {
 
 func TestProcess(t *testing.T) {
 	c := qt.New(t)
-	c.Cleanup(func() { c.Assert(testDB.Reset(), qt.IsNil) })
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
 	t.Run("TestSetAndGetProcess", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		_ = setupTestPrerequisites1(c, testDB)
 		// test not found process
 		process, err := testDB.ProcessByAddress(testProcessID)
@@ -126,7 +126,7 @@ func TestProcess(t *testing.T) {
 	})
 
 	t.Run("TestSetProcessValidation", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites
 		_ = setupTestPrerequisites1(c, testDB)
 		// test with empty Census Published Root
@@ -152,7 +152,7 @@ func TestProcess(t *testing.T) {
 	})
 
 	t.Run("TestDeleteProcess", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites
 		census := setupTestPrerequisites1(c, testDB)
 
@@ -180,7 +180,7 @@ func TestProcess(t *testing.T) {
 	})
 
 	t.Run("TestListProcesses", func(_ *testing.T) {
-		c.Assert(testDB.Reset(), qt.IsNil)
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		census := setupTestPrerequisites1(c, testDB)
 
 		// Create draft process (no address)

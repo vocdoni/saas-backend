@@ -27,7 +27,7 @@ const (
 func TestSignTxHandler(t *testing.T) {
 	c := qt.New(t)
 	defer func() {
-		if err := testDB.Reset(); err != nil {
+		if err := testDB.DeleteAllDocuments(); err != nil {
 			c.Logf("error resetting test database: %v", err)
 		}
 	}()
