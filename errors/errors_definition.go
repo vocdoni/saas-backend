@@ -50,6 +50,7 @@ var (
 	ErrUserNoVoted             = Error{Code: 40036, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("user has not voted yet"), LogLevel: "info"}
 	ErrInvalidData             = Error{Code: 40037, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid data provided")}
 	ErrInvalidCensusData       = Error{Code: 40030, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid census data provided")}
+	ErrCensusAlreadyPublished  = Error{Code: 40039, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("census is already published")}
 
 	// Transaction errors (400)
 	ErrCouldNotSignTransaction = Error{Code: 40006, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("transaction signing failed")}

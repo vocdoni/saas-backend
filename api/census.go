@@ -156,6 +156,13 @@ func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Reques
 		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
+
+	// a non-group-based census cannot be modified once published
+	if census.GroupID.IsZero() && len(census.Published.Root) > 0 {
+		errors.ErrCensusAlreadyPublished.Write(w)
+		return
+	}
+
 	// decode the participants from the request body
 	members := &apicommon.AddMembersRequest{}
 	if err := json.NewDecoder(r.Body).Decode(members); err != nil {
@@ -424,12 +431,12 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 		apicommon.HTTPWriteJSON(w, &apicommon.PublishedCensusResponse{
 			URI:  census.Published.URI,
 			Root: census.Published.Root,
+			Size: census.Size,
 		})
 		return
 	}
 
-	inserted, err := a.db.PopulateGroupCensus(census, groupID.String())
-	if err != nil {
+	if err := a.db.PopulateGroupCensus(census, groupID.String()); err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
@@ -462,8 +469,8 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 
 	apicommon.HTTPWriteJSON(w, &apicommon.PublishedCensusResponse{
 		URI:  census.Published.URI,
-		Root: rootHex,
-		Size: inserted,
+		Root: census.Published.Root,
+		Size: census.Size,
 	})
 }
 
