@@ -30,36 +30,13 @@ func TestCensus(t *testing.T) {
 	// Get the organization to verify it exists
 	requestAndAssertCode(http.StatusOK, t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String())
 
-	// First, add some organization members to test with
-	members := &apicommon.AddMembersRequest{
-		Members: []apicommon.OrgMember{
-			{
-				MemberNumber: "P001",
-				Name:         "Alice Doe",
-				Email:        "alice.doe@example.com",
-				Phone:        "+34611111111",
-				Password:     "password111",
-				Other: map[string]any{
-					"department": "Engineering",
-					"age":        30,
-				},
-			},
-			{
-				MemberNumber: "P002",
-				Name:         "Bob Smith",
-				Email:        "bob.smith@example.com",
-				Phone:        "+34622222222",
-				Password:     "password222",
-				Other: map[string]any{
-					"department": "Marketing",
-					"age":        28,
-				},
-			},
-		},
+	// First, add some organization membersAliceAndBob to test with
+	membersAliceAndBob := &apicommon.AddMembersRequest{
+		Members: []apicommon.OrgMember{memberAlice, memberBob},
 	}
 
 	// Add members to the organization first
-	requestAndAssertCode(http.StatusOK, t, http.MethodPost, adminToken, members,
+	requestAndAssertCode(http.StatusOK, t, http.MethodPost, adminToken, membersAliceAndBob,
 		"organizations", orgAddress.String(), "members")
 
 	// Test 1: Create a census
@@ -74,11 +51,7 @@ func TestCensus(t *testing.T) {
 			db.OrgMemberTwoFaFieldEmail,
 		},
 	}
-	createdCensusResponse := requestAndParse[apicommon.CreateCensusResponse](t, http.MethodPost, adminToken, censusInfo,
-		censusEndpoint)
-	c.Assert(createdCensusResponse.ID, qt.Not(qt.Equals), "")
-
-	censusID := createdCensusResponse.ID
+	censusID := createCensus(t, adminToken, censusInfo)
 	t.Logf("Created census with ID: %s\n", censusID)
 
 	// Verify the census was created correctly by retrieving it
@@ -110,82 +83,26 @@ func TestCensus(t *testing.T) {
 		censusEndpoint, "invalid-id")
 
 	// Test 3: Add members to census
-	// Test 3.1: Test with valid data (using the same members we added to the organization)
-	censusMembers := &apicommon.AddMembersRequest{
-		Members: []apicommon.OrgMember{
-			{
-				MemberNumber: "P003",
-				Name:         "Carla Johnson",
-				Email:        "carla.johnson@example.com",
-				Phone:        "+34633333333",
-				Password:     "password333",
-				Other: map[string]any{
-					"department": "Sales",
-					"age":        35,
-				},
-			},
-			{
-				MemberNumber: "P004",
-				Name:         "Diego Brown",
-				Email:        "diego.brown@example.com",
-				Phone:        "+34644444444",
-				Password:     "password444",
-				Other: map[string]any{
-					"department": "HR",
-					"age":        42,
-				},
-			},
-		},
-	}
-
-	addedResponse := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, adminToken, censusMembers,
-		censusEndpoint, censusID)
-	c.Assert(addedResponse.Added, qt.Equals, uint32(2))
+	// Test 3.1: Test with valid data
+	membersCarlaAndDiego := &apicommon.AddMembersRequest{Members: list(memberCarla, memberDiego)}
+	addMembersToCensus(t, adminToken, censusID, membersCarlaAndDiego)
 
 	// Test 3.2: Test with no authentication
-	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "", censusMembers, censusEndpoint, censusID)
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "", membersCarlaAndDiego, censusEndpoint, censusID)
 
 	// Test 3.3: Test with invalid census ID
-	requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, adminToken, censusMembers,
+	requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, adminToken, membersCarlaAndDiego,
 		censusEndpoint, "invalid-id")
 
 	// Test 3.4: Test with empty members list
-	emptyMembersList := &apicommon.AddMembersRequest{
-		Members: []apicommon.OrgMember{},
-	}
+	emptyMembersList := &apicommon.AddMembersRequest{Members: []apicommon.OrgMember{}}
 	requestAndAssertCode(http.StatusOK, t, http.MethodPost, adminToken, emptyMembersList, censusEndpoint, censusID)
 
 	// Test 3.5: Test with async=true flag
-	asyncMembers := &apicommon.AddMembersRequest{
-		Members: []apicommon.OrgMember{
-			{
-				MemberNumber: "P005",
-				Name:         "Elsa Smith",
-				Email:        "elsa.smith@example.com",
-				Phone:        "+34655555555",
-				Password:     "password555",
-				Other: map[string]any{
-					"department": "Sales",
-					"age":        35,
-				},
-			},
-			{
-				MemberNumber: "P006",
-				Name:         "Fabian Doe",
-				Email:        "fabian.doe@example.com",
-				Phone:        "+34666666666",
-				Password:     "password666",
-				Other: map[string]any{
-					"department": "HR",
-					"age":        42,
-				},
-			},
-		},
-	}
+	membersElsaAndFabian := &apicommon.AddMembersRequest{Members: list(memberElsa, memberFabian)}
 
 	// Make the request with async=true and verify the response contains a job ID
-	asyncResponse := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, adminToken, asyncMembers,
-		censusEndpoint, censusID+"?async=true")
+	asyncResponse := addMembersToCensus(t, adminToken, censusID+"?async=true", membersElsaAndFabian)
 	c.Assert(asyncResponse.JobID, qt.HasLen, 16) // JobID should be 16 bytes
 
 	// Convert the job ID to a hex string for the API call
@@ -293,29 +210,7 @@ func TestCensus(t *testing.T) {
 	// Test 5: Test with manager user permissions
 	// Add members with duplicate member numbers to test validation
 	duplicateMembers := &apicommon.AddMembersRequest{
-		Members: []apicommon.OrgMember{
-			{
-				MemberNumber: "P007", // Same member number
-				Name:         "Duplicate User7 A",
-				Email:        "duplicate7a@example.com",
-				Phone:        "+34677777111",
-				Password:     "password7a",
-			},
-			{
-				MemberNumber: "P007", // Same member number
-				Name:         "Duplicate User7 B",
-				Email:        "duplicate7b@example.com",
-				Phone:        "+34677777222",
-				Password:     "password7b",
-			},
-			{
-				MemberNumber: "P007", // Same member number
-				Name:         "Duplicate User7 C",
-				Email:        "duplicate7c@example.com",
-				Phone:        "+34677777333",
-				Password:     "password7c",
-			},
-		},
+		Members: membersWithDuplicateMemberID,
 	}
 
 	// Add duplicate members to the organization
@@ -341,15 +236,7 @@ func TestCensus(t *testing.T) {
 	// Test 7: Test census creation with empty auth field values
 	// Add a member with empty email to test validation
 	emptyFieldMember := &apicommon.AddMembersRequest{
-		Members: []apicommon.OrgMember{
-			{
-				MemberNumber: "P008",
-				Name:         "Empty Email User",
-				Email:        "", // Empty email
-				Phone:        "+34688888888",
-				Password:     "password888",
-			},
-		},
+		Members: []apicommon.OrgMember{memberWithEmptyEmail},
 	}
 
 	// Add member with empty field to the organization
@@ -521,4 +408,24 @@ func decodeNestedFieldAs[T any](c *qt.C, parsedJSON map[string]any, field string
 	err = json.Unmarshal(nestedFieldBytes, &nestedField)
 	c.Assert(err, qt.IsNil, qt.Commentf("%#v\n", parsedJSON[field]))
 	return nestedField
+}
+
+// createCensus creates a census and returns censusID
+func createCensus(t *testing.T, adminToken string, censusInfo *apicommon.CreateCensusRequest) string {
+	createdCensusResponse := requestAndParse[apicommon.CreateCensusResponse](t, http.MethodPost, adminToken, censusInfo,
+		censusEndpoint)
+	qt.Assert(t, createdCensusResponse.ID, qt.Not(qt.Equals), "")
+	return createdCensusResponse.ID
+}
+
+func addMembersToCensus(t *testing.T, adminToken string, censusID string, request *apicommon.AddMembersRequest,
+) apicommon.AddMembersResponse {
+	addedResponse := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, adminToken,
+		request, censusEndpoint, censusID)
+	qt.Assert(t, addedResponse.Added, qt.Equals, uint32(len(request.Members)))
+	return addedResponse
+}
+
+func list[T any](items ...T) []T {
+	return items
 }
