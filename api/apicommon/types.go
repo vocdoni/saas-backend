@@ -873,18 +873,6 @@ type OrgMember struct {
 
 // ToDB converts an OrgMember to a db.OrgMember.
 func (p *OrgMember) ToDB() *db.OrgMember {
-	// TODO: delay this parsing, so that it happens during batch validation
-	parsedBirthDate := time.Time{}
-	birthDate := p.BirthDate
-	if len(birthDate) > 0 {
-		// Parse the birth date from string to time.Time
-		var err error
-		parsedBirthDate, birthDate, err = internal.ParseBirthDate(p.BirthDate)
-		if err != nil {
-			log.Warnf("Failed to parse birth date %s for member %s: %v", p.BirthDate, p.MemberNumber, err)
-			birthDate = p.BirthDate
-		}
-	}
 	// TODO: this could happen right during UnmarshalJSON,
 	// if apicommon.OrgMember.ID is an ObjectID rather than a string.
 	id := primitive.NilObjectID
@@ -898,17 +886,16 @@ func (p *OrgMember) ToDB() *db.OrgMember {
 	}
 
 	return &db.OrgMember{
-		ID:              id,
-		MemberNumber:    p.MemberNumber,
-		Name:            p.Name,
-		Surname:         p.Surname,
-		NationalID:      p.NationalID,
-		BirthDate:       birthDate,
-		ParsedBirthDate: parsedBirthDate,
-		Email:           p.Email,
-		PlaintextPhone:  p.Phone,
-		Password:        p.Password,
-		Other:           p.Other,
+		ID:             id,
+		MemberNumber:   p.MemberNumber,
+		Name:           p.Name,
+		Surname:        p.Surname,
+		NationalID:     p.NationalID,
+		BirthDate:      p.BirthDate,
+		Email:          p.Email,
+		PlaintextPhone: p.Phone,
+		Password:       p.Password,
+		Other:          p.Other,
 	}
 }
 
