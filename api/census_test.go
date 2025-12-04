@@ -102,13 +102,9 @@ func TestCensus(t *testing.T) {
 	membersElsaAndFabian := &apicommon.AddMembersRequest{Members: list(memberElsa, memberFabian)}
 
 	// Make the request with async=true and verify the response contains a job ID
-	asyncResponse := addMembersToCensus(t, adminToken, censusID+"?async=true", membersElsaAndFabian)
-	c.Assert(asyncResponse.JobID, qt.HasLen, 16) // JobID should be 16 bytes
+	jobID := addMembersToCensusAsync(t, adminToken, censusID, membersElsaAndFabian)
 
-	// Convert the job ID to a hex string for the API call
-	var jobIDHex internal.HexBytes
-	jobIDHex.SetBytes(asyncResponse.JobID)
-	t.Logf("Async job ID: %s\n", jobIDHex.String())
+	t.Logf("Async job ID: %s\n", jobID.String())
 
 	// Check the job progress
 	var (
@@ -119,7 +115,7 @@ func TestCensus(t *testing.T) {
 	// Poll the job status until it's complete or max attempts reached
 	for range maxAttempts {
 		jobStatus = requestAndParse[db.BulkCensusParticipantStatus](t, http.MethodGet, adminToken, nil,
-			"census", "job", jobIDHex.String())
+			"census", "job", jobID.String())
 
 		t.Logf("Job progress: %d%%, Added: %d, Total: %d\n",
 			jobStatus.Progress, jobStatus.Added, jobStatus.Total)
@@ -152,7 +148,7 @@ func TestCensus(t *testing.T) {
 	c.Assert(job.Completed, qt.IsTrue)
 	c.Assert(job.CreatedAt.IsZero(), qt.IsFalse)
 	c.Assert(job.CompletedAt.IsZero(), qt.IsFalse)
-	c.Assert(job.JobID, qt.Equals, jobIDHex.String())
+	c.Assert(job.JobID, qt.Equals, jobID.String())
 	t.Logf("Found job: ID=%s, Type=%s, Total=%d, Added=%d, Completed=%t",
 		job.JobID, job.Type, job.Total, job.Added, job.Completed)
 
@@ -419,11 +415,18 @@ func createCensus(t *testing.T, adminToken string, censusInfo *apicommon.CreateC
 }
 
 func addMembersToCensus(t *testing.T, adminToken string, censusID string, request *apicommon.AddMembersRequest,
-) apicommon.AddMembersResponse {
-	addedResponse := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, adminToken,
+) {
+	response := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, adminToken,
 		request, censusEndpoint, censusID)
-	qt.Assert(t, addedResponse.Added, qt.Equals, uint32(len(request.Members)))
-	return addedResponse
+	qt.Assert(t, response.Added, qt.Equals, uint32(len(request.Members)))
+}
+
+func addMembersToCensusAsync(t *testing.T, adminToken string, censusID string, request *apicommon.AddMembersRequest,
+) internal.HexBytes {
+	response := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, adminToken,
+		request, censusEndpoint, censusID+"?async=true")
+	qt.Assert(t, response.JobID, qt.HasLen, 16) // JobID should be 16 bytes
+	return response.JobID
 }
 
 func list[T any](items ...T) []T {
