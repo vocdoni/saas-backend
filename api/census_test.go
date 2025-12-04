@@ -13,6 +13,8 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 )
 
+const censusRootLength = 33
+
 func TestCensus(t *testing.T) {
 	c := qt.New(t)
 
@@ -192,10 +194,8 @@ func TestCensus(t *testing.T) {
 
 	// Test 4: Publish census
 	// Test 4.1: Test with valid data
-	publishedCensus := requestAndParse[apicommon.PublishedCensusResponse](t, http.MethodPost, adminToken, nil,
-		censusEndpoint, censusID, "publish")
-	c.Assert(publishedCensus.URI, qt.Not(qt.Equals), "")
-	c.Assert(publishedCensus.Root, qt.Not(qt.Equals), "")
+	publishedCensus := publishCensus(t, adminToken, censusID)
+	c.Assert(publishedCensus.Size, qt.Equals, int64(len(membersCarlaAndDiego.Members)+len(membersElsaAndFabian.Members)))
 
 	// Test 4.2: Test with no authentication
 	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "", nil, censusEndpoint, censusID, "publish")
@@ -427,6 +427,14 @@ func addMembersToCensusAsync(t *testing.T, adminToken string, censusID string, r
 		request, censusEndpoint, censusID+"?async=true")
 	qt.Assert(t, response.JobID, qt.HasLen, 16) // JobID should be 16 bytes
 	return response.JobID
+}
+
+func publishCensus(t *testing.T, adminToken string, censusID string) apicommon.PublishedCensusResponse {
+	response := requestAndParse[apicommon.PublishedCensusResponse](t, http.MethodPost, adminToken, nil,
+		censusEndpoint, censusID, "publish")
+	qt.Assert(t, response.URI, qt.Not(qt.Equals), "")
+	qt.Assert(t, response.Root, qt.HasLen, censusRootLength)
+	return response
 }
 
 func list[T any](items ...T) []T {
