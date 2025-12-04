@@ -3,9 +3,11 @@ package apicommon
 //revive:disable:max-public-structs
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/google/uuid"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
@@ -867,6 +869,9 @@ type OrgMember struct {
 	// Member's password (for authentication)
 	Password string `json:"password,omitempty"`
 
+	// Member's census weight
+	Weight string `json:"weight,omitempty"`
+
 	// Additional custom fields
 	Other map[string]any `json:"other"`
 }
@@ -884,6 +889,16 @@ func (p *OrgMember) ToDB() *db.OrgMember {
 			log.Warnf("Failed to convert member ID %s to ObjectID: %v", p.ID, err)
 		}
 	}
+	// if the weight is provided convert it to int, defaults to 1
+	// we are performing the conversion here to avoid having a parsedweight field in the db
+	weight := uint64(1)
+	if p.Weight != "" {
+		// convert only if non-empty string since ParseUint64 returns 0 if empty string
+		var ok bool
+		if weight, ok = math.ParseUint64(p.Weight); !ok {
+			log.Warnf("Failed to convert member weight %s to int", p.Weight)
+		}
+	}
 
 	return &db.OrgMember{
 		ID:             id,
@@ -895,6 +910,7 @@ func (p *OrgMember) ToDB() *db.OrgMember {
 		Email:          p.Email,
 		PlaintextPhone: p.Phone,
 		Password:       p.Password,
+		Weight:         weight,
 		Other:          p.Other,
 	}
 }
@@ -910,6 +926,7 @@ func OrgMemberFromDb(p db.OrgMember) OrgMember {
 		Email:        p.Email,
 		Phone:        p.Phone.String(), // This returns either "" or the masked hash
 		Other:        p.Other,
+		Weight:       fmt.Sprintf("%d", p.Weight),
 	}
 }
 

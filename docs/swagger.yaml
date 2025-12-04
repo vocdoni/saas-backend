@@ -327,6 +327,9 @@ definitions:
       surname:
         description: Member's surname
         type: string
+      weight:
+        description: Member's census weight
+        type: string
     type: object
   apicommon.OrganizationAddMetaRequest:
     properties:

@@ -65,6 +65,7 @@ func TestOrganizationMembers(t *testing.T) {
 				Email:        "john.doe@example.com",
 				Phone:        "+34612345678",
 				Password:     "password123",
+				Weight:       "1",
 				Other: map[string]any{
 					"department": "Engineering",
 					"age":        30,
@@ -79,6 +80,7 @@ func TestOrganizationMembers(t *testing.T) {
 				Email:        "jane.smith@example.com",
 				Phone:        "+34698765432",
 				Password:     "password456",
+				Weight:       "0",
 				Other: map[string]any{
 					"department": "Marketing",
 					"age":        28,
@@ -122,6 +124,7 @@ func TestOrganizationMembers(t *testing.T) {
 	// Test 2.5: Test with members missing some of the new optional fields
 	// Generate a new test member ID
 	pedroID := primitive.NewObjectID().Hex()
+	joanID := primitive.NewObjectID().Hex()
 	membersWithMissingFields := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
 			{
@@ -133,6 +136,7 @@ func TestOrganizationMembers(t *testing.T) {
 				Email:      "carlos@example.com",
 				Phone:      "+34600111222",
 				Password:   "password999",
+				Weight:     "0",
 				Other: map[string]any{
 					"department": "Finance",
 				},
@@ -146,6 +150,7 @@ func TestOrganizationMembers(t *testing.T) {
 				Email:     "maria.garcia@example.com",
 				Phone:     "+34600333444",
 				Password:  "passwordxyz",
+				Weight:    "1",
 				Other: map[string]any{
 					"department": "Legal",
 				},
@@ -160,8 +165,24 @@ func TestOrganizationMembers(t *testing.T) {
 				Email:      "invalid-email",
 				Phone:      "invalid-phone",
 				Password:   "passwordabc",
+				Weight:     "2",
 				Other: map[string]any{
 					"department": "Operations",
+				},
+			},
+			{
+				ID:           joanID,
+				MemberNumber: "P007",
+				Name:         "Joan",
+				Surname:      "Lopez",
+				NationalID:   "22334455G",
+				BirthDate:    "1990-03-15",
+				Email:        "joan.lopez@example.com",
+				Phone:        "+34600444555",
+				Password:     "passworddef",
+				// Weight is missing, should default to 1 and no error produced
+				Other: map[string]any{
+					"department": "IT",
 				},
 			},
 		},
@@ -170,7 +191,7 @@ func TestOrganizationMembers(t *testing.T) {
 	missingFieldsResponse := requestAndParse[apicommon.AddMembersResponse](
 		t, http.MethodPost, adminToken, membersWithMissingFields,
 		"organizations", orgAddress.String(), "members")
-	c.Assert(missingFieldsResponse.Added, qt.Equals, uint32(3))
+	c.Assert(missingFieldsResponse.Added, qt.Equals, uint32(4))
 	c.Assert(missingFieldsResponse.Errors, qt.HasLen, 3)
 	c.Assert(missingFieldsResponse.Errors[0], qt.Matches, ".*invalid-email.*")
 	c.Assert(missingFieldsResponse.Errors[1], qt.Matches, ".*invalid-phone.*")
@@ -180,11 +201,11 @@ func TestOrganizationMembers(t *testing.T) {
 	membersResponse := requestAndParse[apicommon.OrganizationMembersResponse](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "members")
-	c.Assert(membersResponse.Members, qt.HasLen, 5, qt.Commentf("expected 5 members (2 from Test 2.1 + 3 from Test 2.5)"))
+	c.Assert(membersResponse.Members, qt.HasLen, 6, qt.Commentf("expected 5 members (2 from Test 2.1 + 3 from Test 2.5)"))
 
 	// Verify that members with missing fields were stored correctly
 	// Find the member with missing surname (Carlos)
-	var carlosFound bool
+	var carlosFound, mariaFound, pedroFound, joanFound bool
 	for _, member := range membersResponse.Members {
 		if member.MemberNumber == "P005" {
 			carlosFound = true
@@ -192,14 +213,8 @@ func TestOrganizationMembers(t *testing.T) {
 			c.Assert(member.Surname, qt.Equals, "") // Should be empty
 			c.Assert(member.NationalID, qt.Equals, "99887766E")
 			c.Assert(member.BirthDate, qt.Equals, "1985-07-10")
-			break
+			c.Assert(member.Weight, qt.Equals, "0")
 		}
-	}
-	c.Assert(carlosFound, qt.IsTrue, qt.Commentf("Carlos member should be found"))
-
-	// Find the member with missing NationalID (Maria)
-	var mariaFound bool
-	for _, member := range membersResponse.Members {
 		if member.MemberNumber == "P006" {
 			mariaFound = true
 			c.Assert(member.Name, qt.Equals, "Maria")
@@ -207,24 +222,29 @@ func TestOrganizationMembers(t *testing.T) {
 			c.Assert(member.NationalID, qt.Equals, "") // Should be empty
 			c.Assert(member.BirthDate, qt.Equals, "1992-11-25")
 			c.Assert(member.Phone, qt.Not(qt.Equals), "+34600333444") // Should be hashed, not the original string
-			break
-		}
-	}
-	c.Assert(mariaFound, qt.IsTrue, qt.Commentf("Maria member should be found"))
+			c.Assert(member.Weight, qt.Equals, "1")
 
-	// Find the member with missing MemberNumber (Pedro)
-	var pedroFound bool
-	for _, member := range membersResponse.Members {
+		}
 		if member.ID == pedroID {
 			pedroFound = true
 			c.Assert(member.Name, qt.Equals, "Pedro")
 			c.Assert(member.Surname, qt.Equals, "Martinez")
 			c.Assert(member.NationalID, qt.Equals, "44556677F")
 			c.Assert(member.MemberNumber, qt.Equals, "") // Should be empty
-			break
+			c.Assert(member.Weight, qt.Equals, "2")
+
+		}
+		if member.ID == joanID {
+			joanFound = true
+			c.Assert(member.Name, qt.Equals, "Joan")
+			c.Assert(member.Surname, qt.Equals, "Lopez")
+			c.Assert(member.Weight, qt.Equals, "1") // Should default to 1
 		}
 	}
+	c.Assert(carlosFound, qt.IsTrue, qt.Commentf("Carlos member should be found"))
+	c.Assert(mariaFound, qt.IsTrue, qt.Commentf("Maria member should be found"))
 	c.Assert(pedroFound, qt.IsTrue, qt.Commentf("Pedro member should be found"))
+	c.Assert(joanFound, qt.IsTrue, qt.Commentf("Joan member should be found"))
 
 	// Test 3.1: Get organization members (filtered)
 	for _, test := range []struct {
@@ -237,8 +257,8 @@ func TestOrganizationMembers(t *testing.T) {
 		{filter: "?search=5566", results: 1},        // NationalID
 		{filter: "?search=77", results: 2},          // NationalID
 		{filter: "?search=1992", results: 2},        // BirthDate
-		{filter: "?search=P00", results: 4},         // MemberNumber
-		{filter: "?search=example.com", results: 4}, // Email
+		{filter: "?search=P00", results: 5},         // MemberNumber
+		{filter: "?search=example.com", results: 5}, // Email
 	} {
 		resp, code := testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "members", test.filter)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
@@ -524,5 +544,5 @@ func TestOrganizationMembers(t *testing.T) {
 	membersResponse = requestAndParse[apicommon.OrganizationMembersResponse](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "members")
-	c.Assert(membersResponse.Members, qt.HasLen, 6, qt.Commentf("expected 6 members remaining (8 total - 2 deleted)"))
+	c.Assert(membersResponse.Members, qt.HasLen, 7, qt.Commentf("expected 7 members remaining (9 total - 2 deleted)"))
 }
