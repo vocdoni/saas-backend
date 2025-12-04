@@ -224,6 +224,7 @@ type OrgMember struct {
 	ParsedBirthDate time.Time      `json:"parsedBirthDate" bson:"parsedBirthDate"`
 	Password        string         `json:"password" bson:"password"`
 	HashedPass      []byte         `json:"pass" bson:"pass" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
+	Weight          uint64         `json:"weight" bson:"weight"`
 	Other           map[string]any `json:"other" bson:"other"`
 	CreatedAt       time.Time      `json:"createdAt" bson:"createdAt"`
 	UpdatedAt       time.Time      `json:"updatedAt" bson:"updatedAt"`
