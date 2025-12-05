@@ -65,6 +65,108 @@ const (
 	testWebAppURL       = "https://mock.vocdoni.app"
 )
 
+// mock members
+var (
+	memberAlice = apicommon.OrgMember{
+		MemberNumber: "P001",
+		Name:         "Alice Doe",
+		Email:        "alice.doe@example.com",
+		Phone:        "+34611111111",
+		Password:     "password111",
+		Other: map[string]any{
+			"department": "Engineering",
+			"age":        30,
+		},
+	}
+	memberBob = apicommon.OrgMember{
+		MemberNumber: "P002",
+		Name:         "Bob Smith",
+		Email:        "bob.smith@example.com",
+		Phone:        "+34622222222",
+		Password:     "password222",
+		Other: map[string]any{
+			"department": "Marketing",
+			"age":        28,
+		},
+	}
+	memberCarla = apicommon.OrgMember{
+		MemberNumber: "P003",
+		Name:         "Carla Johnson",
+		Email:        "carla.johnson@example.com",
+		Phone:        "+34633333333",
+		Password:     "password333",
+		Other: map[string]any{
+			"department": "Sales",
+			"age":        35,
+		},
+	}
+	memberDiego = apicommon.OrgMember{
+		MemberNumber: "P004",
+		Name:         "Diego Brown",
+		Email:        "diego.brown@example.com",
+		Phone:        "+34644444444",
+		Password:     "password444",
+		Other: map[string]any{
+			"department": "HR",
+			"age":        42,
+		},
+	}
+	memberElsa = apicommon.OrgMember{
+		MemberNumber: "P005",
+		Name:         "Elsa Smith",
+		Email:        "elsa.smith@example.com",
+		Phone:        "+34655555555",
+		Password:     "password555",
+		Other: map[string]any{
+			"department": "Sales",
+			"age":        35,
+		},
+	}
+
+	memberFabian = apicommon.OrgMember{
+		MemberNumber: "P006",
+		Name:         "Fabian Doe",
+		Email:        "fabian.doe@example.com",
+		Phone:        "+34666666666",
+		Password:     "password666",
+		Other: map[string]any{
+			"department": "HR",
+			"age":        42,
+		},
+	}
+	membersWithDuplicateMemberID = []apicommon.OrgMember{
+		{
+			MemberNumber: "P007", // Same member number
+			Name:         "Duplicate User7 A",
+			Email:        "duplicate7a@example.com",
+			Phone:        "+34677777111",
+			Password:     "password7a",
+		},
+		{
+			MemberNumber: "P007", // Same member number
+			Name:         "Duplicate User7 B",
+			Email:        "duplicate7b@example.com",
+			Phone:        "+34677777222",
+			Password:     "password7b",
+		},
+		{
+			MemberNumber: "P007", // Same member number
+			Name:         "Duplicate User7 C",
+			Email:        "duplicate7c@example.com",
+			Phone:        "+34677777333",
+			Password:     "password7c",
+		},
+	}
+
+	memberWithEmptyEmail = apicommon.OrgMember{
+		MemberNumber: "P008",
+		Name:         "Empty Email User",
+		Email:        "", // Empty email
+		Phone:        "+34688888888",
+		Password:     "password888",
+	}
+)
+
 var (
 	mockPlans = []*db.Plan{mockFreePlan, mockEssentialPlan, mockPremiumPlan}
 
