@@ -130,8 +130,8 @@ func TestHasDBPermission(t *testing.T) {
 				ID:   1,
 				Name: "Test Plan",
 				Organization: db.PlanLimits{
-					Users:   10,
-					SubOrgs: 5,
+					MaxTeamMembers: 10,
+					MaxSubOrgs:     5,
 				},
 			},
 		},
@@ -206,5 +206,17 @@ func (m *mockMongoStorage) OrganizationWithParent(address common.Address) (
 }
 
 func (*mockMongoStorage) CountProcesses(_ common.Address, _ db.DraftFilter) (int64, error) {
+	return 0, nil
+}
+
+func (*mockMongoStorage) CountUsers(_ common.Address) (int64, error) {
+	return 0, nil
+}
+
+func (*mockMongoStorage) CountPendingInvitations(_ common.Address) (int64, error) {
+	return 0, nil
+}
+
+func (*mockMongoStorage) CountSubOrgs(_ common.Address) (int64, error) {
 	return 0, nil
 }

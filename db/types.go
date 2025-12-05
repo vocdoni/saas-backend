@@ -80,10 +80,10 @@ type Organization struct {
 }
 
 type PlanLimits struct {
-	Users        int `json:"teamMembers" bson:"users"`
-	SubOrgs      int `json:"subOrgs" bson:"subOrgs"`
-	MaxProcesses int `json:"maxProcesses" bson:"maxProcesses"`
-	MaxCensus    int `json:"maxCensus" bson:"maxCensus"`
+	MaxTeamMembers int `json:"teamMembers" bson:"users"`
+	MaxSubOrgs     int `json:"subOrgs" bson:"subOrgs"`
+	MaxProcesses   int `json:"maxProcesses" bson:"maxProcesses"`
+	MaxCensus      int `json:"maxCensus" bson:"maxCensus"`
 	// Max process duration in days
 	MaxDuration int  `json:"maxDaysDuration" bson:"maxDuration"`
 	CustomURL   bool `json:"customURL" bson:"customURL"`
@@ -151,9 +151,6 @@ type OrganizationSubscription struct {
 type OrganizationCounters struct {
 	SentSMS    int `json:"sentSMS" bson:"sentSMS"`
 	SentEmails int `json:"sentEmails" bson:"sentEmails"`
-	SubOrgs    int `json:"subOrgs" bson:"subOrgs"`
-	Users      int `json:"users" bson:"users"`
-	Processes  int `json:"processes" bson:"processes"`
 }
 
 type OrganizationInvite struct {
