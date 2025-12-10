@@ -19,7 +19,7 @@ import (
 // attempt number. It composes the notification challenge and pushes it to
 // the queue to be sent. It returns the token as HexBytes.
 func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
-	ctype notifications.ChallengeType, lang string,
+	ctype notifications.ChallengeType, lang string, weight uint64,
 ) (internal.HexBytes, error) {
 	// check the input parameters
 	if len(bID) == 0 {
@@ -31,7 +31,7 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 
 	// For auth-only cases (no challenge type and no destination), create a pre-verified token
 	if to == "" && ctype == "" {
-		return c.createAuthOnlyToken(bID, uID)
+		return c.createAuthOnlyToken(bID, uID, weight)
 	}
 
 	// get last token for the user and bundle
@@ -56,10 +56,11 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 		return nil, err
 	}
 	// create the new token
-	if err := c.Storage.SetCSPAuth(token, uID, bID); err != nil {
+	if err := c.Storage.SetCSPAuth(token, uID, bID, weight); err != nil {
 		log.Warnw("error setting new token",
 			"userID", uID,
 			"bundleID", bID,
+			"weight", weight,
 			"error", err)
 		return nil, ErrStorageFailure
 	}
@@ -172,7 +173,7 @@ func (*CSP) verifySolution(uID, bID internal.HexBytes, solution string) bool {
 // createAuthOnlyToken creates a pre-verified token for auth-only censuses
 // that don't require challenge verification. It generates a token and immediately
 // marks it as verified.
-func (c *CSP) createAuthOnlyToken(bID, uID internal.HexBytes) (internal.HexBytes, error) {
+func (c *CSP) createAuthOnlyToken(bID, uID internal.HexBytes, weight uint64) (internal.HexBytes, error) {
 	// get last token for the user and bundle
 	lastToken, err := c.Storage.LastCSPAuth(uID, bID)
 	if err != nil && err != db.ErrTokenNotFound {
@@ -201,10 +202,11 @@ func (c *CSP) createAuthOnlyToken(bID, uID internal.HexBytes) (internal.HexBytes
 	}
 
 	// create the new token
-	if err := c.Storage.SetCSPAuth(bToken, uID, bID); err != nil {
+	if err := c.Storage.SetCSPAuth(bToken, uID, bID, weight); err != nil {
 		log.Warnw("error setting new token",
 			"userID", uID,
 			"bundleID", bID,
+			"weight", weight,
 			"error", err)
 		return nil, ErrStorageFailure
 	}
@@ -222,6 +224,7 @@ func (c *CSP) createAuthOnlyToken(bID, uID internal.HexBytes) (internal.HexBytes
 	log.Debugw("new auth-only token created and verified",
 		"userID", uID,
 		"bundleID", bID,
+		"weight", weight,
 		"token", bToken)
 
 	return bToken, nil

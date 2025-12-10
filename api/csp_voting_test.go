@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common/math"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp/handlers"
@@ -215,6 +216,7 @@ func TestCSPVoting(t *testing.T) {
 						BirthDate:    "1990-01-01",
 						Email:        "john.doe@example.com",
 						Phone:        "612345601", // phone without country code should be handled gracefully
+						Weight:       "1",
 					},
 					{
 						Name:         "Jane",
@@ -224,6 +226,7 @@ func TestCSPVoting(t *testing.T) {
 						BirthDate:    "1985-05-15",
 						Email:        "jane.smith@example.com",
 						Phone:        "+34612345602",
+						Weight:       "1",
 					},
 					{
 						Name:         "Alice",
@@ -233,6 +236,7 @@ func TestCSPVoting(t *testing.T) {
 						BirthDate:    "1992-10-22",
 						Email:        "alice.johnson@example.com",
 						Phone:        "+34612345603",
+						Weight:       "1",
 					},
 					{
 						Name:         "Bob",
@@ -242,6 +246,7 @@ func TestCSPVoting(t *testing.T) {
 						BirthDate:    "1988-03-10",
 						Email:        "bob.williams@example.com",
 						Phone:        "+34612345604",
+						Weight:       "1",
 					},
 					{
 						Name:         "Charlie",
@@ -251,6 +256,7 @@ func TestCSPVoting(t *testing.T) {
 						BirthDate:    "1995-12-03",
 						Email:        "charlie.brown@example.com",
 						Phone:        "+34612345605",
+						Weight:       "1",
 					},
 					{
 						Name:         "David",
@@ -260,6 +266,7 @@ func TestCSPVoting(t *testing.T) {
 						BirthDate:    "1993-07-25",
 						Email:        "david.garcia@example.com",
 						Phone:        "+34612345606",
+						Weight:       "1",
 					},
 					{
 						Name:         "Eva",
@@ -269,6 +276,7 @@ func TestCSPVoting(t *testing.T) {
 						BirthDate:    "1987-11-30",
 						Email:        "", // Member without an email
 						Phone:        "+34612345607",
+						Weight:       "1",
 					},
 					{
 						Name:         "Frank",
@@ -278,6 +286,27 @@ func TestCSPVoting(t *testing.T) {
 						BirthDate:    "1991-04-18",
 						Email:        "frank.lopez@example.com",
 						Phone:        "", // Member without a phone number
+						Weight:       "1",
+					},
+					{
+						Name:         "Grace",
+						Surname:      "Gonzalez",
+						MemberNumber: "P009",
+						NationalID:   "90123456I",
+						BirthDate:    "1989-09-09",
+						Email:        "grace.gonzalez@example.com",
+						Phone:        "+34612345609",
+						// Weight not specified, should default to 1
+					},
+					{
+						Name:         "Hannah",
+						Surname:      "Wilson",
+						MemberNumber: "P010",
+						NationalID:   "01234567J",
+						BirthDate:    "1994-06-14",
+						Email:        "hannah.wilson@example.com",
+						Phone:        "+34612345610",
+						Weight:       "0", // Member with weight 0
 					},
 				}
 
@@ -348,8 +377,11 @@ func TestCSPVoting(t *testing.T) {
 					// Sign the voter's address with the CSP
 					signature := testCSPSign(t, bundleID, authToken, processID, user1Addr)
 
+					weight, ok := math.ParseUint64(members[0].Weight)
+					c.Assert(ok, qt.IsTrue, qt.Commentf("Failed to convert member weight %s to int", members[0].Weight))
+
 					// Generate a vote proof with the signature
-					proof := testGenerateVoteProof(processID, user1Addr, signature)
+					proof := testGenerateVoteProof(processID, user1Addr, signature, weight)
 
 					// Cast a vote
 					votePackage := []byte("[\"1\"]") // Vote for option 1
@@ -685,8 +717,12 @@ func TestCSPVoting(t *testing.T) {
 						// Sign the voter's address with the CSP
 						signature := testCSPSign(t, bundleID, authToken, processID, user2Addr)
 
+						// Get weight for user 2
+						weight, ok := math.ParseUint64(members[2].Weight)
+						c.Assert(ok, qt.IsTrue, qt.Commentf("Failed to convert member weight %s to int", members[2].Weight))
+
 						// Generate a vote proof with the signature
-						proof := testGenerateVoteProof(processID, user2Addr, signature)
+						proof := testGenerateVoteProof(processID, user2Addr, signature, weight)
 
 						// Cast a vote
 						votePackage := []byte("[\"2\"]") // Vote for option 2
@@ -729,8 +765,12 @@ func TestCSPVoting(t *testing.T) {
 						// Sign the voter's address with the CSP
 						signature := testCSPSign(t, bundleID, authToken, processID, user4Addr)
 
+						// Get weight for user 3
+						weight, ok := math.ParseUint64(members[3].Weight)
+						c.Assert(ok, qt.IsTrue, qt.Commentf("Failed to convert member weight %s to int", members[3].Weight))
+
 						// Generate a vote proof with the signature
-						proof := testGenerateVoteProof(processID, user4Addr, signature)
+						proof := testGenerateVoteProof(processID, user4Addr, signature, weight)
 
 						// Cast a vote
 						votePackage := []byte("[\"1\"]") // Vote for option 1
@@ -750,8 +790,12 @@ func TestCSPVoting(t *testing.T) {
 						// regardless of which user is signing
 						signature5 := testCSPSign(t, bundleID, authToken5, processID, user4Addr)
 
+						// Get weight for user 4
+						weight, ok = math.ParseUint64(members[4].Weight)
+						c.Assert(ok, qt.IsTrue, qt.Commentf("Failed to convert member weight %s to int", members[4].Weight))
+
 						// Try to use user 5's signature with user 4's key (should fail)
-						invalidProof := testGenerateVoteProof(processID, user4Addr, signature5)
+						invalidProof := testGenerateVoteProof(processID, user4Addr, signature5, weight)
 
 						// This should fail at the blockchain level because the signature doesn't match the address
 						user4Copy := ethereum.SignKeys{}
@@ -788,7 +832,7 @@ func TestCSPVoting(t *testing.T) {
 						forgedSignature := internal.RandomBytes(65) // ECDSA signatures are 65 bytes
 
 						// Generate a vote proof with the forged signature
-						invalidProof := testGenerateVoteProof(processID, user6Addr, forgedSignature)
+						invalidProof := testGenerateVoteProof(processID, user6Addr, forgedSignature, 1)
 
 						// Try to cast a vote with the invalid proof
 						tx := models.Tx{

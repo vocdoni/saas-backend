@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"net/url"
 	"os"
@@ -697,15 +698,16 @@ func testCSPSign(t *testing.T, bundleID string, authToken, processID, payload in
 
 // testGenerateVoteProof generates a vote proof with the given signature, process ID, and voter address.
 // It returns the proof.
-func testGenerateVoteProof(processID, voterAddr, signature internal.HexBytes) *models.Proof {
+func testGenerateVoteProof(processID, voterAddr, signature internal.HexBytes, weight uint64) *models.Proof {
 	return &models.Proof{
 		Payload: &models.Proof_Ca{
 			Ca: &models.ProofCA{
 				Type:      models.ProofCA_ECDSA_PIDSALTED,
 				Signature: signature,
 				Bundle: &models.CAbundle{
-					ProcessId: processID,
-					Address:   voterAddr,
+					ProcessId:  processID,
+					Address:    voterAddr,
+					VoteWeight: big.NewInt(int64(weight)).Bytes(),
 				},
 			},
 		},

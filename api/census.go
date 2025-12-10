@@ -418,6 +418,7 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	census.AuthFields = publishInfo.AuthFields
 	census.TwoFaFields = publishInfo.TwoFaFields
+	census.Weighted = publishInfo.Weighted
 
 	if len(census.Published.Root) > 0 {
 		// if the census is already published, return the censusInfo

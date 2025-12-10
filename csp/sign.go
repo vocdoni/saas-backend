@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/vocdoni/saas-backend/csp/signers"
 	"github.com/vocdoni/saas-backend/csp/signers/saltedkey"
@@ -17,10 +18,14 @@ import (
 // Sign method signs a message with the given token, address and processID. It
 // returns the signature as HexBytes or an error if the signer type is invalid
 // or the signature fails.
-func (c *CSP) Sign(token, address, processID internal.HexBytes, signType signers.SignerType) (internal.HexBytes, error) {
+func (c *CSP) Sign(
+	token, address, processID internal.HexBytes,
+	weight uint64,
+	signType signers.SignerType,
+) (internal.HexBytes, error) {
 	switch signType {
 	case signers.SignerTypeECDSASalted:
-		userID, salt, message, err := c.prepareSaltedKeySigner(token, address, processID)
+		userID, salt, message, err := c.prepareSaltedKeySigner(token, address, processID, weight)
 		defer c.unlock(userID, processID)
 		if err != nil {
 			return nil, err
@@ -48,7 +53,7 @@ func (c *CSP) Sign(token, address, processID internal.HexBytes, signType signers
 // the salt as nil and the encoded CA as a message to sign.
 //
 //revive:disable:function-result-limit
-func (c *CSP) prepareSaltedKeySigner(token, address, processID internal.HexBytes) (
+func (c *CSP) prepareSaltedKeySigner(token, address, processID internal.HexBytes, weight uint64) (
 	internal.HexBytes, *[saltedkey.SaltSize]byte, internal.HexBytes, error,
 ) {
 	// get the data of the auth token and the user from the storage
@@ -78,10 +83,12 @@ func (c *CSP) prepareSaltedKeySigner(token, address, processID internal.HexBytes
 	if !authTokenData.Verified {
 		return nil, nil, nil, ErrAuthTokenNotVerified
 	}
+
 	// prepare the data for the signature
 	caBundle := &models.CAbundle{
-		ProcessId: processID,
-		Address:   address,
+		ProcessId:  processID,
+		Address:    address,
+		VoteWeight: big.NewInt(int64(weight)).Bytes(),
 	}
 	// encode the data to sign
 	signatureMsg, err := proto.Marshal(caBundle)

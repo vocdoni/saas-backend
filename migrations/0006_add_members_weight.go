@@ -19,7 +19,7 @@ func upAddMembersWeight(ctx context.Context, database *mongo.Database) error {
 		bson.M{"weight": bson.M{"$exists": false}},
 		bson.M{"$set": bson.M{"weight": 1}})
 	if err != nil {
-		return fmt.Errorf("failed to expire verifications: %w", err)
+		return fmt.Errorf("failed to add weight to orgMembers: %w", err)
 	}
 	return nil
 }

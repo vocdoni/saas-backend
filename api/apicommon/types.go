@@ -726,6 +726,9 @@ type OrganizationCensus struct {
 	// Size of the census
 	Size int64 `json:"size"`
 
+	// Weighted indicates if the census uses weighted voting
+	Weighted bool `json:"weighted"`
+
 	// Optional for creating a census based on an organization member group
 	GroupID string `json:"groupID,omitempty"`
 
@@ -777,6 +780,9 @@ type PublishCensusGroupRequest struct {
 
 	// Optional for defining which member data should be used for two-factor authentication
 	TwoFaFields db.OrgMemberTwoFaFields `json:"twoFaFields,omitempty"`
+
+	// Indicates if the census is weighted
+	Weighted bool `json:"weighted,omitempty"`
 }
 
 // CensusParticipantsResponse returns the memberIDs of the participants of a census.
