@@ -195,44 +195,24 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 }
 
 // createOrgMemberBulkOperations creates a batch of members using bulk write operations,
-// and returns the number of members added (or updated) and any errors encountered.
+// and returns the number of members added and any errors encountered.
 func (ms *MongoStorage) createOrgMemberBulkOperations(
 	org *Organization,
 	members []*OrgMember,
 	salt string,
 	currentTime time.Time,
 ) (int, []error) {
-	var bulkOps []mongo.WriteModel
+	var preparedMembers []any
 	var errors []error
 
 	for _, m := range members {
 		// Prepare the member
 		member, validationErrors := prepareOrgMember(org, m, salt, currentTime)
 		errors = append(errors, validationErrors...)
-
-		// Create filter for existing members and update document
-		filter := bson.M{
-			"_id":        member.ID,
-			"orgAddress": member.OrgAddress,
-		}
-
-		updateDoc, err := dynamicUpdateDocument(member, nil)
-		if err != nil {
-			log.Warnw("failed to create update document for member",
-				"error", err, "ID", member.ID)
-			errors = append(errors, fmt.Errorf("member %s: %w", member.ID.Hex(), err))
-			continue // Skip this member but continue with others
-		}
-
-		// Create upsert model
-		upsertModel := mongo.NewUpdateOneModel().
-			SetFilter(filter).
-			SetUpdate(updateDoc).
-			SetUpsert(true)
-		bulkOps = append(bulkOps, upsertModel)
+		preparedMembers = append(preparedMembers, member)
 	}
 
-	if len(bulkOps) == 0 {
+	if len(preparedMembers) == 0 {
 		return 0, errors
 	}
 
@@ -245,15 +225,15 @@ func (ms *MongoStorage) createOrgMemberBulkOperations(
 	defer batchCancel()
 
 	// Execute the bulk write operations
-	result, err := ms.orgMembers.BulkWrite(batchCtx, bulkOps)
+	result, err := ms.orgMembers.InsertMany(batchCtx, preparedMembers)
 	if err != nil {
-		log.Warnw("error during bulk operation on members batch", "error", err)
+		log.Warnw("error during bulk addition of members batch", "error", err)
 		firstID := members[0].ID
 		lastID := members[len(members)-1].ID
 		errors = append(errors, fmt.Errorf("batch %s - %s: %w", firstID.Hex(), lastID.Hex(), err))
 	}
 
-	return int(result.ModifiedCount + result.UpsertedCount), errors
+	return len(result.InsertedIDs), errors
 }
 
 // startOrgMemberProgressReporter starts a goroutine that reports progress periodically
@@ -286,8 +266,8 @@ func startOrgMemberProgressReporter(
 	}
 }
 
-// processOrgMemberBatches processes members in batches and sends progress updates
-func (ms *MongoStorage) processOrgMemberBatches(
+// addOrgMemberBatches processes new members in batches and sends progress updates
+func (ms *MongoStorage) addOrgMemberBatches(
 	org *Organization,
 	orgMembers []*OrgMember,
 	salt string,
@@ -343,12 +323,11 @@ func (ms *MongoStorage) processOrgMemberBatches(
 	}
 }
 
-// SetBulkOrgMembers adds multiple organization members to the database in batches of 200 entries
-// and updates already existing members (decided by combination of internal id and orgAddress).
+// AddBulkOrgMembers adds multiple organization members to the database in batches of 200 entries.
 // Requires an existing organization.
 // Returns a channel that sends the percentage of members processed every 10 seconds.
 // This function must be called in a goroutine.
-func (ms *MongoStorage) SetBulkOrgMembers(org *Organization, members []*OrgMember, salt string,
+func (ms *MongoStorage) AddBulkOrgMembers(org *Organization, members []*OrgMember, salt string,
 ) (chan *BulkOrgMembersJob, error) {
 	// Early returns for invalid input
 	if len(members) == 0 {
@@ -360,7 +339,7 @@ func (ms *MongoStorage) SetBulkOrgMembers(org *Organization, members []*OrgMembe
 
 	// Start processing in a goroutine
 	progressChan := make(chan *BulkOrgMembersJob, 10)
-	go ms.processOrgMemberBatches(org, members, salt, progressChan)
+	go ms.addOrgMemberBatches(org, members, salt, progressChan)
 	return progressChan, nil
 }
 
