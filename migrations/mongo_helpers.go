@@ -3,6 +3,7 @@ package migrations
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -47,6 +48,9 @@ func renameFieldAndReindex(
 	// 1) drop old indexes
 	for _, name := range oldIndexes {
 		if _, err := collection.Indexes().DropOne(ctx, name); err != nil {
+			if strings.Contains(err.Error(), "IndexNotFound") {
+				continue
+			}
 			return fmt.Errorf("failed to drop index %s for collection %s: %w",
 				name, collection.Name(), err)
 		}
