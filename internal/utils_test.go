@@ -305,7 +305,7 @@ func TestDecryptTokenFromHexErrors(t *testing.T) {
 		c.Assert(err, quicktest.IsNil)
 
 		// Tamper with the last byte of the hex string
-		copy(encrypted[:1], []byte{0xff})
+		copy(encrypted[:4], []byte{0xff, 0xff, 0xff, 0xff})
 
 		_, err = OpenToken(encrypted, email, secret)
 		c.Assert(err, quicktest.IsNotNil)
