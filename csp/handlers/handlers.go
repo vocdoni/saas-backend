@@ -521,7 +521,7 @@ func (c *CSPHandlers) authFirstStep(
 	}
 
 	// Check the participant is in the census
-	censusParticipant, err := c.mainDB.CensusParticipantByLoginHashOrEmailorPhone(
+	censusParticipant, err := c.mainDB.CensusParticipantByFields(
 		censusID,
 		census.AuthFields,
 		census.TwoFaFields,

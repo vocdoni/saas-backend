@@ -4,7 +4,6 @@ package db
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -291,12 +291,7 @@ type OrgMemberTwoFaFields []OrgMemberTwoFaField
 
 // Contains checks if the field is present in the OrgMemberAuthFields.
 func (f OrgMemberTwoFaFields) Contains(field OrgMemberTwoFaField) bool {
-	for _, v := range f {
-		if v == field {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(f, field)
 }
 
 func (f OrgMemberTwoFaFields) GetCensusType() CensusType {
@@ -310,24 +305,23 @@ func (f OrgMemberTwoFaFields) GetCensusType() CensusType {
 	return CensusTypeAuthOnly
 }
 
-// HashAuthTwoFaFields helper function receives as input the data of a member and
-// the auth and twoFa field and produces a sha256 hash of the concatenation of the
-// data that are included in the fields. The data are ordered by the field names
-// in order to make the hash reproducible.
-func HashAuthTwoFaFields(memberData OrgMember, authFields OrgMemberAuthFields, twoFaFields OrgMemberTwoFaFields) []byte {
-	data := make([]string, 0, len(twoFaFields)+len(authFields))
+// filterOnMemberFields helper function receives as input the data of a member and
+// the auth and twoFa field and produces a bson.M that filters on the
+// data that are included in the fields.
+func filterOnMemberFields(memberData OrgMember, authFields OrgMemberAuthFields, twoFaFields OrgMemberTwoFaFields) bson.M {
+	filter := bson.M{}
 	for _, field := range authFields {
 		switch field {
 		case OrgMemberAuthFieldsName:
-			data = append(data, memberData.Name)
+			filter[string(OrgMemberAuthFieldsName)] = memberData.Name
 		case OrgMemberAuthFieldsSurname:
-			data = append(data, memberData.Surname)
+			filter[string(OrgMemberAuthFieldsSurname)] = memberData.Surname
 		case OrgMemberAuthFieldsMemberNumber:
-			data = append(data, memberData.MemberNumber)
+			filter[string(OrgMemberAuthFieldsMemberNumber)] = memberData.MemberNumber
 		case OrgMemberAuthFieldsNationalID:
-			data = append(data, memberData.NationalID)
+			filter[string(OrgMemberAuthFieldsNationalID)] = memberData.NationalID
 		case OrgMemberAuthFieldsBirthDate:
-			data = append(data, memberData.BirthDate)
+			filter[string(OrgMemberAuthFieldsBirthDate)] = memberData.BirthDate
 		default:
 			// Ignore unknown fields
 			continue
@@ -336,18 +330,17 @@ func HashAuthTwoFaFields(memberData OrgMember, authFields OrgMemberAuthFields, t
 	for _, field := range twoFaFields {
 		switch field {
 		case OrgMemberTwoFaFieldEmail:
-			data = append(data, memberData.Email)
+			filter[string(OrgMemberTwoFaFieldEmail)] = memberData.Email
 		case OrgMemberTwoFaFieldPhone:
 			if !memberData.Phone.IsEmpty() {
-				data = append(data, string(memberData.Phone))
+				filter[string(OrgMemberTwoFaFieldPhone)] = memberData.Phone
 			}
 		default:
 			// Ignore unknown fields
 			continue
 		}
 	}
-	slices.Sort(data)
-	return sha256.New().Sum(fmt.Append(nil, data))
+	return filter
 }
 
 type OrgMemberAggregationResults struct {

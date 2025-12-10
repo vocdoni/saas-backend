@@ -363,7 +363,7 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 //
 //	@Summary		Publish a group-based census for voting
 //	@Description	Publish a census based on a specific organization members group for voting. Requires Manager/Admin role.
-//	@Description	Returns published census with credentials.
+//	@Description	Returns published census details.
 //	@Tags			census
 //	@Accept			json
 //	@Produce		json
