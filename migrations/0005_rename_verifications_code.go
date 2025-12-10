@@ -23,7 +23,7 @@ func upRenameVerificationsCode(ctx context.Context, database *mongo.Database) er
 		return fmt.Errorf("failed to expire verifications: %w", err)
 	}
 
-	return renameFieldAndReindex(ctx, database.Collection("verifications"), "sealedCode", "code",
+	return renameFieldAndReindex(ctx, database.Collection("verifications"), "code", "sealedCode",
 		[]string{
 			"code_1_type_1",
 		},
