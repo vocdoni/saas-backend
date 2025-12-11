@@ -16,8 +16,8 @@ func upAddCensusWeight(ctx context.Context, database *mongo.Database) error {
 	// add weight field with default false to all censuses
 	// if the field already exists, do not overwrite
 	_, err := database.Collection("censuses").UpdateMany(ctx,
-		bson.M{"weight": bson.M{"$exists": false}},
-		bson.M{"$set": bson.M{"weight": false}})
+		bson.M{"weighted": bson.M{"$exists": false}},
+		bson.M{"$set": bson.M{"weighted": false}})
 	if err != nil {
 		return fmt.Errorf("failed to add weight field to censuses: %w", err)
 	}
@@ -44,8 +44,8 @@ func downAddCensusWeight(ctx context.Context, database *mongo.Database) error {
 	// remove weight field from all censuses
 	// TODO check if this is the desired behavior since data will be lost
 	_, err = database.Collection("censuses").UpdateMany(ctx,
-		bson.M{"weight": bson.M{"$exists": true}},
-		bson.M{"$unset": bson.M{"weight": ""}})
+		bson.M{"weighted": bson.M{"$exists": true}},
+		bson.M{"$unset": bson.M{"weighted": ""}})
 	if err != nil {
 		return fmt.Errorf("failed to remove weight from censuses: %w", err)
 	}

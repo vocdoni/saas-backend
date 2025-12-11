@@ -24,7 +24,7 @@ var (
 	testRootKey     = new(internal.HexBytes).SetString("700e669712473377a92457f3ff2a4d8f6b17e139f127738018a80fe26983f410")
 	testUserID      = internal.HexBytes("userID")
 	testBundleID    = internal.HexBytes("bundleID")
-	testUserWeight  = uint64(1)
+	testUserWeight  = uint64(42)
 	testPID         = internal.HexBytes(util.RandomBytes(32))
 	testToken       = internal.HexBytes("token")
 	testAddress     = internal.HexBytes("address")

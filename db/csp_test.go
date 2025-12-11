@@ -14,7 +14,7 @@ var (
 	invalidAuthToken = internal.HexBytes(uuid.New().String())
 	testUserID       = internal.HexBytes([]byte("123456"))
 	testUserAddress  = internal.HexBytes([]byte("address"))
-	testUserWeight   = uint64(1)
+	testUserWeight   = uint64(42)
 	testCSPBundleID  = internal.HexBytes([]byte("bundleID"))
 	testCSPProcessID = internal.HexBytes([]byte("processID"))
 )
