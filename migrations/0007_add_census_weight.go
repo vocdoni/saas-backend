@@ -13,9 +13,17 @@ func init() {
 }
 
 func upAddCensusWeight(ctx context.Context, database *mongo.Database) error {
+	// add weight field with default 1 to all org members
+	_, err := database.Collection("orgMembers").UpdateMany(ctx,
+		bson.M{"weight": bson.M{"$exists": false}},
+		bson.M{"$set": bson.M{"weight": 1}})
+	if err != nil {
+		return fmt.Errorf("failed to add weight field to org members: %w", err)
+	}
+
 	// add weight field with default false to all censuses
 	// if the field already exists, do not overwrite
-	_, err := database.Collection("censuses").UpdateMany(ctx,
+	_, err = database.Collection("census").UpdateMany(ctx,
 		bson.M{"weighted": bson.M{"$exists": false}},
 		bson.M{"$set": bson.M{"weighted": false}})
 	if err != nil {
@@ -23,7 +31,7 @@ func upAddCensusWeight(ctx context.Context, database *mongo.Database) error {
 	}
 
 	// add weight field with default 1 to all csp auth tokens
-	_, err = database.Collection("csp_auth_tokens").UpdateMany(ctx,
+	_, err = database.Collection("cspTokens").UpdateMany(ctx,
 		bson.M{"weight": bson.M{"$exists": false}},
 		bson.M{"$set": bson.M{"weight": 1}})
 	if err != nil {
@@ -32,22 +40,7 @@ func upAddCensusWeight(ctx context.Context, database *mongo.Database) error {
 	return nil
 }
 
-func downAddCensusWeight(ctx context.Context, database *mongo.Database) error {
-	// remove weight field from all csp auth tokens
-	_, err := database.Collection("csp_auth_tokens").UpdateMany(ctx,
-		bson.M{"weight": bson.M{"$exists": true}},
-		bson.M{"$unset": bson.M{"weight": ""}})
-	if err != nil {
-		return fmt.Errorf("failed to remove weight from csp auth tokens: %w", err)
-	}
-
-	// remove weight field from all censuses
-	// TODO check if this is the desired behavior since data will be lost
-	_, err = database.Collection("censuses").UpdateMany(ctx,
-		bson.M{"weighted": bson.M{"$exists": true}},
-		bson.M{"$unset": bson.M{"weighted": ""}})
-	if err != nil {
-		return fmt.Errorf("failed to remove weight from censuses: %w", err)
-	}
+func downAddCensusWeight(_ context.Context, _ *mongo.Database) error {
+	// we do not remove anything to avoid data loss
 	return nil
 }
