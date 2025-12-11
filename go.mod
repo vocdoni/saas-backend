@@ -23,7 +23,7 @@ require (
 	github.com/xlzd/gotp v0.1.0
 	go.mongodb.org/mongo-driver v1.14.0
 	go.vocdoni.io/dvote v1.10.2-0.20250311164310-73bb2cd4fa42
-	go.vocdoni.io/proto v1.15.10
+	go.vocdoni.io/proto v1.15.12
 	golang.org/x/crypto v0.43.0
 	google.golang.org/protobuf v1.36.4
 )

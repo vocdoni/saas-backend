@@ -17,6 +17,7 @@ type CSPAuth struct {
 	Token      internal.HexBytes `json:"token" bson:"_id"`
 	UserID     internal.HexBytes `json:"userID" bson:"userid"`
 	BundleID   internal.HexBytes `json:"bundleID" bson:"bundleid"`
+	Weight     uint64            `json:"weight" bson:"weight"`
 	CreatedAt  time.Time         `json:"createdAt" bson:"createdat"`
 	Verified   bool              `json:"verified" bson:"verified"`
 	VerifiedAt time.Time         `json:"verifiedAt" bson:"verifiedat"`
@@ -37,7 +38,7 @@ type CSPProcess struct {
 // SetCSPAuth method stores a new CSP authentication token for a user and a
 // bundle of processes. It returns an error if the token, user ID or bundle
 // ID are nil.
-func (ms *MongoStorage) SetCSPAuth(token, userID, bundleID internal.HexBytes) error {
+func (ms *MongoStorage) SetCSPAuth(token, userID, bundleID internal.HexBytes, weight uint64) error {
 	if token == nil || userID == nil || bundleID == nil {
 		return ErrBadInputs
 	}
@@ -51,6 +52,7 @@ func (ms *MongoStorage) SetCSPAuth(token, userID, bundleID internal.HexBytes) er
 		Token:     token,
 		UserID:    userID,
 		BundleID:  bundleID,
+		Weight:    weight,
 		CreatedAt: time.Now(),
 		Verified:  false,
 	}); err != nil {

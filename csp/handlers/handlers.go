@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	errorspkg "errors" // TODO: rename our `errors` pkg to `apierror`
 	"fmt"
+	"math/big"
 	"net/http"
 	"strconv"
 	"strings"
@@ -201,10 +202,10 @@ func parseAddress(w http.ResponseWriter, payload string) (*internal.HexBytes, bo
 }
 
 // signAndRespond signs the request and sends the response
-func (c *CSPHandlers) signAndRespond(w http.ResponseWriter, authToken, address, processID internal.HexBytes) {
-	log.Debugw("new CSP sign request", "address", address, "procId", processID)
+func (c *CSPHandlers) signAndRespond(w http.ResponseWriter, authToken, address, processID, weight internal.HexBytes) {
+	log.Debugw("new CSP sign request", "address", address, "procId", processID, "weight", weight)
 
-	signature, err := c.csp.Sign(authToken, address, processID, signers.SignerTypeECDSASalted)
+	signature, err := c.csp.Sign(authToken, address, processID, weight, signers.SignerTypeECDSASalted)
 	if err != nil {
 		errors.ErrUnauthorized.WithErr(err).Write(w)
 		return
@@ -277,9 +278,8 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-
 	// Sign the request and send the response
-	c.signAndRespond(w, req.AuthToken, *address, processID)
+	c.signAndRespond(w, req.AuthToken, *address, processID, big.NewInt(int64(auth.Weight)).Bytes())
 }
 
 // ConsumedAddressHandler godoc
@@ -545,9 +545,14 @@ func (c *CSPHandlers) authFirstStep(
 	if err != nil {
 		return nil, err
 	}
+	// default weight to 1 if not set
+	weight := uint64(1)
+	if census.Weighted {
+		weight = orgMember.Weight
+	}
 
 	// Generate the token
-	return c.csp.BundleAuthToken(bundleID, internal.HexBytes(orgMember.ID.Hex()), toDestinations, challengeType, lang)
+	return c.csp.BundleAuthToken(bundleID, internal.HexBytes(orgMember.ID.Hex()), toDestinations, challengeType, lang, weight)
 }
 
 // authSecondStep is the second step of the authentication process. It

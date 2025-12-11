@@ -381,6 +381,9 @@ definitions:
         allOf:
         - $ref: '#/definitions/db.CensusType'
         description: Type of census
+      weighted:
+        description: Weighted indicates if the census uses weighted voting
+        type: boolean
     type: object
   apicommon.OrganizationCensuses:
     properties:
@@ -637,6 +640,9 @@ definitions:
         items:
           $ref: '#/definitions/db.OrgMemberTwoFaField'
         type: array
+      weighted:
+        description: Indicates if the census is weighted
+        type: boolean
     type: object
   apicommon.PublishedCensusResponse:
     properties:
@@ -1000,6 +1006,8 @@ definitions:
         $ref: '#/definitions/db.CensusType'
       updatedAt:
         type: string
+      weighted:
+        type: boolean
     type: object
   db.CensusType:
     enum:

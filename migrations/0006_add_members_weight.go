@@ -19,18 +19,12 @@ func upAddMembersWeight(ctx context.Context, database *mongo.Database) error {
 		bson.M{"weight": bson.M{"$exists": false}},
 		bson.M{"$set": bson.M{"weight": 1}})
 	if err != nil {
-		return fmt.Errorf("failed to expire verifications: %w", err)
+		return fmt.Errorf("failed to add weight to orgMembers: %w", err)
 	}
 	return nil
 }
 
-func downAddMembersWeight(ctx context.Context, database *mongo.Database) error {
-	// remove weight field from all orgMembers
-	_, err := database.Collection("orgMembers").UpdateMany(ctx,
-		bson.M{"weight": bson.M{"$exists": true}},
-		bson.M{"$unset": bson.M{"weight": ""}})
-	if err != nil {
-		return fmt.Errorf("failed to remove weight from orgMembers: %w", err)
-	}
+func downAddMembersWeight(_ context.Context, _ *mongo.Database) error {
+	// we do not remove anything to avoid data loss
 	return nil
 }

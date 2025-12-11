@@ -193,6 +193,7 @@ type Census struct {
 	ID          primitive.ObjectID   `json:"id" bson:"_id"`
 	OrgAddress  common.Address       `json:"orgAddress" bson:"orgAddress"`
 	Type        CensusType           `json:"type" bson:"type"`
+	Weighted    bool                 `json:"weighted" bson:"weighted"`
 	Size        int64                `json:"size" bson:"size"`
 	GroupID     primitive.ObjectID   `json:"groupId" bson:"groupId"`
 	Published   PublishedCensus      `json:"published" bson:"published"`

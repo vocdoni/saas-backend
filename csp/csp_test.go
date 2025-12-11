@@ -2,6 +2,7 @@ package csp
 
 import (
 	"context"
+	"math/big"
 	"testing"
 
 	"github.com/vocdoni/saas-backend/internal"
@@ -19,14 +20,16 @@ const (
 )
 
 var (
-	testMongoURI    string
-	testMailService *smtp.Email
-	testRootKey     = new(internal.HexBytes).SetString("700e669712473377a92457f3ff2a4d8f6b17e139f127738018a80fe26983f410")
-	testUserID      = internal.HexBytes("userID")
-	testBundleID    = internal.HexBytes("bundleID")
-	testPID         = internal.HexBytes(util.RandomBytes(32))
-	testToken       = internal.HexBytes("token")
-	testAddress     = internal.HexBytes("address")
+	testMongoURI        string
+	testMailService     *smtp.Email
+	testRootKey         = new(internal.HexBytes).SetString("700e669712473377a92457f3ff2a4d8f6b17e139f127738018a80fe26983f410")
+	testUserID          = internal.HexBytes("userID")
+	testBundleID        = internal.HexBytes("bundleID")
+	testUserWeight      = uint64(42)
+	testUserWeightBytes = big.NewInt(int64(testUserWeight)).Bytes()
+	testPID             = internal.HexBytes(util.RandomBytes(32))
+	testToken           = internal.HexBytes("token")
+	testAddress         = internal.HexBytes("address")
 )
 
 func TestMain(m *testing.M) {
