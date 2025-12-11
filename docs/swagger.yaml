@@ -1233,6 +1233,10 @@ definitions:
         example: deadbeef
         format: hex
         type: string
+      weight:
+        example: 2a
+        format: hex
+        type: string
     type: object
   handlers.ConsumedAddressRequest:
     properties:

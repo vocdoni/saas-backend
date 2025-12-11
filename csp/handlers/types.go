@@ -29,6 +29,7 @@ type AuthRequest struct {
 type AuthResponse struct {
 	AuthToken internal.HexBytes `json:"authToken,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	Signature internal.HexBytes `json:"signature,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Weight    internal.HexBytes `json:"weight,omitempty" swaggertype:"string" format:"hex" example:"2a"`
 }
 
 // AuthRequest defines the payload for finishing the authentication process.
