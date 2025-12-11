@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	errorspkg "errors" // TODO: rename our `errors` pkg to `apierror`
 	"fmt"
+	"math/big"
 	"net/http"
 	"strconv"
 	"strings"
@@ -201,7 +202,7 @@ func parseAddress(w http.ResponseWriter, payload string) (*internal.HexBytes, bo
 }
 
 // signAndRespond signs the request and sends the response
-func (c *CSPHandlers) signAndRespond(w http.ResponseWriter, authToken, address, processID internal.HexBytes, weight uint64) {
+func (c *CSPHandlers) signAndRespond(w http.ResponseWriter, authToken, address, processID, weight internal.HexBytes) {
 	log.Debugw("new CSP sign request", "address", address, "procId", processID, "weight", weight)
 
 	signature, err := c.csp.Sign(authToken, address, processID, weight, signers.SignerTypeECDSASalted)
@@ -278,7 +279,7 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// Sign the request and send the response
-	c.signAndRespond(w, req.AuthToken, *address, processID, auth.Weight)
+	c.signAndRespond(w, req.AuthToken, *address, processID, big.NewInt(int64(auth.Weight)).Bytes())
 }
 
 // ConsumedAddressHandler godoc
