@@ -70,7 +70,7 @@ func (c *CSP) prepareSaltedKeySigner(token, address, processID, weight internal.
 		case db.ErrTokenNotVerified:
 			return nil, nil, nil, ErrAuthTokenNotVerified
 		default:
-			return nil, nil, nil, ErrStorageFailure
+			return nil, nil, nil, ErrSign
 		}
 	} else if consumed {
 		return nil, nil, nil, ErrProcessAlreadyConsumed
@@ -118,14 +118,14 @@ func (c *CSP) finishSaltedKeySigner(token, address, processID internal.HexBytes)
 	// check if the process is already consumed for this user
 	if consumed, err := c.Storage.IsCSPProcessConsumed(authTokenData.UserID, processID); err != nil {
 		fmt.Println(err)
-		return ErrStorageFailure
+		return ErrSign
 	} else if consumed {
 		return ErrProcessAlreadyConsumed
 	}
 	// update the process data to mark it as consumed, and set the token used
 	if err := c.Storage.ConsumeCSPProcess(token, processID, address); err != nil {
 		log.Warn(err)
-		return ErrStorageFailure
+		return ErrSign
 	}
 	return nil
 }

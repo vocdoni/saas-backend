@@ -211,7 +211,7 @@ func (c *CSPHandlers) signAndRespond(w http.ResponseWriter, authToken, address, 
 		return
 	}
 
-	apicommon.HTTPWriteJSON(w, &AuthResponse{Signature: signature})
+	apicommon.HTTPWriteJSON(w, &AuthResponse{Signature: signature, Weight: weight})
 }
 
 // BundleSignHandler godoc
