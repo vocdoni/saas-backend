@@ -22,4 +22,6 @@ var (
 	ErrTokenNotVerified = fmt.Errorf("token not verified")
 	// ErrInvalidConfig is returned if the configuration provided is invalid
 	ErrInvalidConfig = fmt.Errorf("invalid configuration")
+	// ErrUpdateWouldCreateDuplicates is returned when trying to update an OrgMember
+	ErrUpdateWouldCreateDuplicates = fmt.Errorf("update would create duplicates")
 )

@@ -10,7 +10,9 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -539,4 +541,280 @@ func TestOrganizationMembers(t *testing.T) {
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "members")
 	c.Assert(membersResponse.Members, qt.HasLen, 7, qt.Commentf("expected 7 members remaining (9 total - 2 deleted)"))
+}
+
+func TestUpsertOrganizationMember(t *testing.T) {
+	c := qt.New(t)
+	c.Run("MemberNumber+Email", func(c *qt.C) {
+		loginToken := testCreateUser(t, "adminpassword123")
+		orgAddress := testCreateOrganization(t, loginToken)
+		members := newOrgMembers(3)
+		c.Logf("will add org members: %+v", members)
+		orgMembers := postOrgMembers(t, loginToken, orgAddress, members...)
+		c.Logf("resulting org members: %+v", orgMembers)
+
+		censusID, _, _ := createGroupBasedCensus(t, loginToken, orgAddress,
+			db.OrgMemberAuthFields{
+				db.OrgMemberAuthFieldsMemberNumber,
+			}, db.OrgMemberTwoFaFields{
+				db.OrgMemberTwoFaFieldEmail,
+			},
+			memberIDs(orgMembers)...)
+		bundleID, _ := postProcessBundle(t, loginToken, censusID, randomProcessID())
+
+		editedMember0 := orgMembers[0]
+		editedMember0.Phone = "" // unset Phone field since it contains the trimmed hash returned by API
+		editedMember0.Email = anotherEmail
+		c.Logf("putting member: %+v", editedMember0)
+		member0ID := putOrgMember(t, loginToken, orgAddress, editedMember0)
+		member := getOrgMember(t, loginToken, orgAddress, member0ID)
+		c.Logf("got member: %+v", member)
+
+		// MemberNumber+Email cannot all be the same as another member,
+		// but a subset of those is fine.
+		// So first set Email (and even Name, btw) to be the same as another member, should work
+		editedMember0.Email = members[1].Email
+		editedMember0.Name = members[1].Name
+		c.Logf("putting member: %+v", editedMember0)
+		putOrgMember(t, loginToken, orgAddress, editedMember0)
+
+		// but now setting MemberNumber to also be the same is not allowed.
+		editedMember0.MemberNumber = members[1].MemberNumber
+		c.Logf("putting member: %+v", editedMember0)
+		err := putOrgMemberAndExpectError(t, loginToken, orgAddress, editedMember0)
+		c.Assert(err.Code, qt.Equals, errors.ErrInvalidData.Code)
+		c.Assert(err, qt.ErrorMatches, ".*update would create duplicates.*")
+
+		// creating a new member with those same details should succeed
+		newMember := editedMember0
+		newMember.ID = ""
+		c.Logf("putting member: %+v", newMember)
+		putOrgMember(t, loginToken, orgAddress, newMember)
+
+		// updating another parameter of member0, like weight, should just work
+		editedMember0.MemberNumber = members[0].MemberNumber
+		editedMember0.Weight = "42"
+		c.Logf("putting member: %+v", editedMember0)
+		putOrgMember(t, loginToken, orgAddress, editedMember0)
+
+		// setting same Phone should be OK since it's not used in the census
+		editedMember0.Phone = members[1].Phone
+		c.Logf("putting member: %+v", editedMember0)
+		putOrgMember(t, loginToken, orgAddress, editedMember0)
+
+		c.Logf("resulting member: %+v", getOrgMember(t, loginToken, orgAddress, member0ID))
+
+		// Finally try authenticating, old values should fail
+		c.Assert(postProcessBundleAuth0AndExpectError(t, bundleID, &handlers.AuthRequest{
+			MemberNumber: members[0].MemberNumber,
+			Email:        members[0].Email,
+		}),
+			qt.ErrorMatches, errors.ErrUnauthorized.Err.Error()+".*")
+
+		// New values should work
+		testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
+			MemberNumber: editedMember0.MemberNumber,
+			Email:        editedMember0.Email,
+		})
+	})
+
+	c.Run("MemberNumber+Phone", func(c *qt.C) {
+		loginToken := testCreateUser(t, "adminpassword123")
+		orgAddress := testCreateOrganization(t, loginToken)
+		members := newOrgMembers(3)
+		c.Logf("will add org members: %+v", members)
+		orgMembers := postOrgMembers(t, loginToken, orgAddress, members...)
+		c.Logf("resulting org members: %+v", orgMembers)
+
+		censusID, _, _ := createGroupBasedCensus(t, loginToken, orgAddress,
+			db.OrgMemberAuthFields{
+				db.OrgMemberAuthFieldsMemberNumber,
+			}, db.OrgMemberTwoFaFields{
+				db.OrgMemberTwoFaFieldPhone,
+			},
+			memberIDs(orgMembers)...)
+
+		bundleID, _ := postProcessBundle(t, loginToken, censusID, randomProcessID())
+
+		// We had a weird bug regarding updating an OrgMember Email
+		// of a participant of a census with OrgMemberTwoFaFieldPhone, prevented auth
+		// so we wrote this test to catch regressions
+		testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
+			MemberNumber: members[0].MemberNumber,
+			Phone:        members[0].Phone,
+		})
+
+		// wait and try authenticating again, should work
+		time.Sleep(cspNotificationCoolDownTime)
+		testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
+			MemberNumber: members[0].MemberNumber,
+			Phone:        members[0].Phone,
+		})
+
+		// The census is TwoFaFieldPhone, so editing the email should be harmless
+		editedMember0 := orgMembers[0]
+		editedMember0.Phone = "" // unset Phone field since it contains the trimmed hash returned by API
+		editedMember0.Email = anotherEmail
+		c.Logf("putting member: %+v", editedMember0)
+		member0ID := putOrgMember(t, loginToken, orgAddress, editedMember0)
+		member := getOrgMember(t, loginToken, orgAddress, member0ID)
+		c.Logf("got member: %+v", member)
+
+		// Now wait and try authenticating again, should work
+		time.Sleep(cspNotificationCoolDownTime)
+		testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
+			MemberNumber: members[0].MemberNumber,
+			Phone:        members[0].Phone,
+		})
+	})
+
+	c.Run("AllAuthAndTwoFaFields", func(c *qt.C) {
+		loginToken := testCreateUser(t, "adminpassword123")
+		orgAddress := testCreateOrganization(t, loginToken)
+		members := newOrgMembers(3)
+		c.Logf("will add org members: %+v", members)
+		orgMembers := postOrgMembers(t, loginToken, orgAddress, members...)
+		c.Logf("resulting org members: %+v", orgMembers)
+
+		censusID, _, _ := createGroupBasedCensus(t, loginToken, orgAddress,
+			db.OrgMemberAuthFields{
+				db.OrgMemberAuthFieldsName,
+				db.OrgMemberAuthFieldsSurname,
+				db.OrgMemberAuthFieldsMemberNumber,
+				db.OrgMemberAuthFieldsNationalID,
+				db.OrgMemberAuthFieldsBirthDate,
+			}, db.OrgMemberTwoFaFields{
+				db.OrgMemberTwoFaFieldEmail,
+				db.OrgMemberTwoFaFieldPhone,
+			},
+			memberIDs(orgMembers)...)
+		bundleID, _ := postProcessBundle(t, loginToken, censusID, randomProcessID())
+
+		editedMember0 := orgMembers[0]
+		editedMember0.Phone = "" // unset Phone field since it contains the trimmed hash returned by API
+
+		// So first set all auth fields to be the same as another member, this should work
+		editedMember0.Name = members[1].Name
+		editedMember0.Surname = members[1].Surname
+		editedMember0.MemberNumber = members[1].MemberNumber
+		editedMember0.NationalID = members[1].NationalID
+		editedMember0.BirthDate = members[1].BirthDate
+		c.Logf("putting member: %+v", editedMember0)
+		putOrgMember(t, loginToken, orgAddress, editedMember0)
+
+		// but now setting same Phone too, is not allowed.
+		c.Run("SamePhone", func(c *qt.C) {
+			editedMember0.Phone = members[1].Phone
+			c.Logf("putting member: %+v", editedMember0)
+			err := putOrgMemberAndExpectError(t, loginToken, orgAddress, editedMember0)
+			c.Assert(err.Code, qt.Equals, errors.ErrInvalidData.Code)
+			c.Assert(err, qt.ErrorMatches, ".*update would create duplicates.*")
+		})
+
+		// setting same Email too, is also not allowed.
+		c.Run("SameEmail", func(c *qt.C) {
+			editedMember0.Phone = ""
+			editedMember0.Email = members[1].Email
+			c.Logf("putting member: %+v", editedMember0)
+			err := putOrgMemberAndExpectError(t, loginToken, orgAddress, editedMember0)
+			c.Assert(err.Code, qt.Equals, errors.ErrInvalidData.Code)
+			c.Assert(err, qt.ErrorMatches, ".*update would create duplicates.*")
+		})
+
+		// creating a new member with those same details should succeed
+		newMember := editedMember0
+		newMember.ID = ""
+		c.Logf("putting member: %+v", newMember)
+		putOrgMember(t, loginToken, orgAddress, newMember)
+
+		// updating another parameter of member0, like weight, should just work
+		editedMember0.Phone = ""
+		editedMember0.Email = ""
+		editedMember0.Weight = "42"
+		c.Logf("putting member: %+v", editedMember0)
+		putOrgMember(t, loginToken, orgAddress, editedMember0)
+
+		// setting same Phone and Email should be OK as long as Name is different
+		editedMember0.Name = members[0].Name
+		editedMember0.Email = members[1].Email
+		editedMember0.Phone = members[1].Phone
+		c.Logf("putting member: %+v", editedMember0)
+		putOrgMember(t, loginToken, orgAddress, editedMember0)
+
+		// Finally try authenticating, old values should fail
+		c.Assert(postProcessBundleAuth0AndExpectError(t, bundleID, &handlers.AuthRequest{
+			Name:         members[0].Name,
+			Surname:      members[0].Surname,
+			MemberNumber: members[0].MemberNumber,
+			NationalID:   members[0].NationalID,
+			BirthDate:    members[0].BirthDate,
+
+			Email: members[0].Email,
+			Phone: members[0].Phone,
+		}),
+			qt.ErrorMatches, errors.ErrUnauthorized.Err.Error()+".*")
+		c.Assert(postProcessBundleAuth0AndExpectError(t, bundleID, &handlers.AuthRequest{
+			Name:         members[0].Name,
+			Surname:      members[0].Surname,
+			MemberNumber: members[0].MemberNumber,
+			NationalID:   members[0].NationalID,
+			BirthDate:    members[0].BirthDate,
+
+			Phone: members[0].Phone,
+		}),
+			qt.ErrorMatches, errors.ErrUnauthorized.Err.Error()+".*")
+		c.Assert(postProcessBundleAuth0AndExpectError(t, bundleID, &handlers.AuthRequest{
+			Name:         members[0].Name,
+			Surname:      members[0].Surname,
+			MemberNumber: members[0].MemberNumber,
+			NationalID:   members[0].NationalID,
+			BirthDate:    members[0].BirthDate,
+
+			Email: members[0].Email,
+		}),
+			qt.ErrorMatches, errors.ErrUnauthorized.Err.Error()+".*")
+
+		// New values should work
+		testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
+			Name:         editedMember0.Name,
+			Surname:      editedMember0.Surname,
+			MemberNumber: editedMember0.MemberNumber,
+			NationalID:   editedMember0.NationalID,
+			BirthDate:    editedMember0.BirthDate,
+
+			Email: editedMember0.Email,
+			Phone: editedMember0.Phone,
+		})
+		time.Sleep(cspNotificationCoolDownTime)
+		testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
+			Name:         editedMember0.Name,
+			Surname:      editedMember0.Surname,
+			MemberNumber: editedMember0.MemberNumber,
+			NationalID:   editedMember0.NationalID,
+			BirthDate:    editedMember0.BirthDate,
+
+			Email: editedMember0.Email,
+		})
+		time.Sleep(cspNotificationCoolDownTime)
+		testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
+			Name:         editedMember0.Name,
+			Surname:      editedMember0.Surname,
+			MemberNumber: editedMember0.MemberNumber,
+			NationalID:   editedMember0.NationalID,
+			BirthDate:    editedMember0.BirthDate,
+
+			Phone: editedMember0.Phone,
+		})
+
+		// As well as member[1], should be able to auth just fine
+		testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
+			Name:         members[1].Name,
+			Surname:      members[1].Surname,
+			MemberNumber: members[1].MemberNumber,
+			NationalID:   members[1].NationalID,
+			BirthDate:    members[1].BirthDate,
+			Email:        members[1].Email,
+			Phone:        members[1].Phone,
+		})
+	})
 }

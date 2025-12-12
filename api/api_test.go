@@ -64,6 +64,10 @@ const (
 
 	testOAuthServiceURL = "http://test-oauth-service"
 	testWebAppURL       = "https://mock.vocdoni.app"
+
+	anotherEmail = "something-else@gmail.com"
+
+	cspNotificationCoolDownTime = time.Second * 5
 )
 
 var (
@@ -398,7 +402,7 @@ func TestMain(m *testing.M) {
 		DB:                       testDB,
 		MailService:              testMailService,
 		NotificationThrottleTime: time.Second,
-		NotificationCoolDownTime: time.Second * 5,
+		NotificationCoolDownTime: cspNotificationCoolDownTime,
 		RootKey:                  *rootKey,
 	})
 	if err != nil {
@@ -709,6 +713,13 @@ func postProcessBundleAuth0(t *testing.T, bundleID string, request *handlers.Aut
 	return resp.AuthToken
 }
 
+// postProcessBundleAuth0 authenticates with the CSP, expecting an error and returns it.
+func postProcessBundleAuth0AndExpectError(t *testing.T, bundleID string, request *handlers.AuthRequest, queryParams ...string,
+) errors.Error {
+	return requestAndExpectError(t, http.MethodPost, "", request,
+		processBundleAuthURL(bundleID, "0")+joinQueryParams(queryParams...))
+}
+
 // postProcessBundleAuth1 authenticates with the CSP (step 1) and returns the AuthToken.
 // Asserts that AuthToken is not empty.
 func postProcessBundleAuth1(t *testing.T, bundleID string, request *handlers.AuthChallengeRequest, queryParams ...string,
@@ -887,6 +898,28 @@ func postOrgMembers(t *testing.T, loginToken string, orgAddress common.Address, 
 func getOrgMembers(t *testing.T, adminToken string, orgAddress common.Address) apicommon.OrganizationMembersResponse {
 	return requestAndParse[apicommon.OrganizationMembersResponse](t, http.MethodGet, adminToken, nil,
 		organizationMembersURL(orgAddress.String()))
+}
+
+func getOrgMember(t *testing.T, adminToken string, orgAddress common.Address, memberID string) apicommon.OrgMember {
+	membersList := getOrgMembers(t, adminToken, orgAddress)
+	for _, m := range membersList.Members {
+		if m.ID == memberID {
+			return m
+		}
+	}
+	t.Fatalf("member %q not found", memberID)
+	return apicommon.OrgMember{}
+}
+
+func putOrgMember(t *testing.T, adminToken string, orgAddress common.Address, member apicommon.OrgMember) string {
+	resp := requestAndParse[apicommon.OrgMember](t, http.MethodPut, adminToken, member,
+		organizationMembersURL(orgAddress.String()))
+	return resp.ID
+}
+
+func putOrgMemberAndExpectError(t *testing.T, adminToken string, orgAddress common.Address, member apicommon.OrgMember,
+) errors.Error {
+	return requestAndExpectError(t, http.MethodPut, adminToken, member, organizationMembersURL(orgAddress.String()))
 }
 
 func postCensusAndExpectError(t *testing.T, adminToken string, censusInfo *apicommon.CreateCensusRequest) errors.Error {

@@ -75,6 +75,8 @@ const (
 	organizationMembersEndpoint = "/organizations/{address}/members"
 	// POST /organizations/{address}/members to add new members
 	organizationAddMembersEndpoint = "/organizations/{address}/members"
+	// PUT /organizations/{address}/members to create or update an organization member
+	organizationUpsertMemberEndpoint = "/organizations/{address}/members"
 	// GET /organizations/{address}/members/check/{jobid} to check the status of the add members job
 	organizationAddMembersJobStatusEndpoint = "/organizations/{address}/members/job/{jobid}"
 	// DELETE /organizations/{address}/members to delete members

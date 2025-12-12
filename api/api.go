@@ -230,6 +230,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodDelete, organizationHandlePendingInvitationEndpoint, a.deletePendingUserInvitationHandler)
 		handle(r, http.MethodGet, organizationMembersEndpoint, a.organizationMembersHandler)
 		handle(r, http.MethodPost, organizationAddMembersEndpoint, a.addOrganizationMembersHandler)
+		handle(r, http.MethodPut, organizationUpsertMemberEndpoint, a.upsertOrganizationMemberHandler)
 		handle(r, http.MethodGet, organizationAddMembersJobStatusEndpoint, a.addOrganizationMembersJobStatusHandler)
 		handle(r, http.MethodDelete, organizationDeleteMembersEndpoint, a.deleteOrganizationMembersHandler)
 		handle(r, http.MethodPost, organizationMetaEndpoint, a.addOrganizationMetaHandler)

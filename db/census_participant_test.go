@@ -451,7 +451,7 @@ func TestCensusParticipant(t *testing.T) {
 			OrgAddress:  testOrgAddress,
 			Type:        CensusTypeMail,
 			AuthFields:  OrgMemberAuthFields{OrgMemberAuthFieldsMemberNumber, OrgMemberAuthFieldsName},
-			TwoFaFields: OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail},
+			TwoFaFields: OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail, OrgMemberTwoFaFieldPhone},
 			CreatedAt:   time.Now(),
 			UpdatedAt:   time.Now(),
 		}
@@ -459,21 +459,22 @@ func TestCensusParticipant(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Create members first
-		memberIDs := make([]string, 0, 3)
-		for i := 1; i <= 3; i++ {
+		members := make([]*OrgMember, 0, 3)
+		for i := range 3 {
 			member := &OrgMember{
-				ID:           primitive.NewObjectID(),
-				OrgAddress:   testOrgAddress,
-				MemberNumber: fmt.Sprintf("bulk-login-%d", i),
-				Name:         fmt.Sprintf("Bulk User %d", i),
-				Email:        fmt.Sprintf("bulk%d@example.com", i),
-				CreatedAt:    time.Now(),
-				UpdatedAt:    time.Now(),
+				ID:             primitive.NewObjectID(),
+				OrgAddress:     testOrgAddress,
+				MemberNumber:   fmt.Sprintf("bulk-login-%d", i),
+				Name:           fmt.Sprintf("Bulk User %d", i),
+				Email:          fmt.Sprintf("bulk%d@example.com", i),
+				PlaintextPhone: fmt.Sprintf("+3469811111%d", i),
+				CreatedAt:      time.Now(),
+				UpdatedAt:      time.Now(),
 			}
 			_, err := testDB.SetOrgMember("test_salt", member)
 			c.Assert(err, qt.IsNil)
 
-			memberIDs = append(memberIDs, member.ID.Hex())
+			members = append(members, member)
 		}
 
 		// Create members group with the members
@@ -482,7 +483,11 @@ func TestCensusParticipant(t *testing.T) {
 			Title:      "Test Group",
 			CreatedAt:  time.Now(),
 			UpdatedAt:  time.Now(),
-			MemberIDs:  memberIDs,
+			MemberIDs: []string{
+				members[0].ID.Hex(),
+				members[1].ID.Hex(),
+				members[2].ID.Hex(),
+			},
 		}
 		groupID, err := testDB.CreateOrganizationMemberGroup(group)
 		c.Assert(err, qt.IsNil)
@@ -522,6 +527,60 @@ func TestCensusParticipant(t *testing.T) {
 			found, err := testDB.CensusParticipantByLoginHash(*census, *members[i])
 			c.Assert(err, qt.IsNil)
 			c.Assert(found.ParticipantID, qt.Equals, participant.ParticipantID)
+		}
+
+		// Now try to update the member in a way that would produce a duplicate, this must fail
+		member0, err := testDB.OrgMemberByMemberNumber(testOrgAddress, members[0].MemberNumber)
+		c.Assert(err, qt.IsNil)
+		// set member0 email and phone same as member1
+		member0.Name = members[1].Name
+		member0.MemberNumber = members[1].MemberNumber
+		member0.Email = members[1].Email
+		member0.PlaintextPhone = members[1].PlaintextPhone
+
+		{
+			_, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, member0, "test_salt")
+			c.Assert(err, qt.ErrorMatches, ".*update would create duplicates.*",
+				qt.Commentf("trying to UpdateOrgMember(%+v) should create a conflict with %+v", member0, members[1]))
+
+			member, err := testDB.OrgMemberByMemberNumber(testOrgAddress, members[0].MemberNumber)
+			c.Assert(err, qt.IsNil)
+			c.Assert(member.Email, qt.Equals, members[0].Email)
+		}
+
+		// second try to update in a way that would NOT produce a duplicate, should succeed
+		member1, err := testDB.OrgMemberByMemberNumber(testOrgAddress, members[1].MemberNumber)
+		c.Assert(err, qt.IsNil)
+		oldHashedPhone := member1.Phone
+		member1.PlaintextPhone = "+34698123321"
+		{
+			_, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, member1, "test_salt")
+			c.Assert(err, qt.IsNil)
+
+			member, err := testDB.OrgMemberByMemberNumber(testOrgAddress, members[1].MemberNumber)
+			c.Assert(err, qt.IsNil)
+			c.Assert(member.Phone, qt.Not(qt.DeepEquals), oldHashedPhone)
+		}
+
+		// Trying to add a NEW member with the same details that caused a conflict should also succeed,
+		// since duplicates in memberbase are allowed, and a new member is not part of any census
+		{
+			member0.ID = primitive.NilObjectID
+			newMemberID, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, member0, "test_salt")
+			c.Assert(err, qt.IsNil)
+			member, err := testDB.OrgMember(testOrgAddress, newMemberID.Hex())
+			c.Assert(err, qt.IsNil)
+			c.Assert(member.Email, qt.Equals, member0.Email)
+		}
+
+		// Passing an arbitrary (new) memberID should also work OK and create a new member
+		{
+			member0.ID = primitive.NewObjectID()
+			newMemberID, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, member0, "test_salt")
+			c.Assert(err, qt.IsNil)
+			member, err := testDB.OrgMember(testOrgAddress, newMemberID.Hex())
+			c.Assert(err, qt.IsNil)
+			c.Assert(member.Email, qt.Equals, member0.Email)
 		}
 	})
 }
