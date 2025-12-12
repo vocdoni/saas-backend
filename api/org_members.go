@@ -329,6 +329,64 @@ func (a *API) addOrganizationMembersJobStatusHandler(w http.ResponseWriter, r *h
 	})
 }
 
+// upsertOrganizationMemberHandler godoc
+//
+//	@Summary		Create or update an organization member
+//	@Description	Create or update an organization member. Requires Manager/Admin role.
+//	@Description	Automatically updates census participant hashes when member data changes.
+//	@Tags			organizations
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			address	path		string				true	"Organization address"
+//	@Param			request	body		apicommon.OrgMember	true	"Member data to insert or update"
+//	@Success		200		{object}	apicommon.OrgMember	"ID of member inserted or updated"
+//	@Failure		400		{object}	errors.Error		"Invalid input data"
+//	@Failure		401		{object}	errors.Error		"Unauthorized"
+//	@Failure		500		{object}	errors.Error		"Internal server error"
+//	@Router			/organizations/{address}/members [put]
+func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Request) {
+	// get the organization info from the request context
+	org, _, ok := a.organizationFromRequest(r)
+	if !ok {
+		errors.ErrNoOrganizationProvided.Write(w)
+		return
+	}
+	// get the user from the request context
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	// check the user has the necessary permissions
+	if !user.HasRoleFor(org.Address, db.ManagerRole) && !user.HasRoleFor(org.Address, db.AdminRole) {
+		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		return
+	}
+
+	// decode the member data from the request body
+	member := &apicommon.OrgMember{}
+	if err := json.NewDecoder(r.Body).Decode(member); err != nil {
+		log.Error(err)
+		errors.ErrMalformedBody.Withf("invalid member data").Write(w)
+		return
+	}
+
+	// upsert the member in the database
+	memberID, err := a.db.UpsertOrgMemberAndCensusParticipants(org, member.ToDB(), passwordSalt)
+	switch {
+	case errors.Is(err, db.ErrUpdateWouldCreateDuplicates):
+		errors.ErrInvalidData.WithErr(err).Write(w)
+		return
+	case err != nil:
+		errors.ErrGenericInternalServerError.Withf("could not upsert org member: %v", err).Write(w)
+		return
+	default:
+	}
+
+	apicommon.HTTPWriteJSON(w, apicommon.OrgMember{ID: memberID.Hex()})
+}
+
 // deleteOrganizationMembersHandler godoc
 //
 //	@Summary		Delete organization members

@@ -252,6 +252,8 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, organizationMembersEndpoint, a.organizationMembersHandler)
 		// add organization members
 		handle(r, http.MethodPost, organizationAddMembersEndpoint, a.addOrganizationMembersHandler)
+		// upsert organization member
+		handle(r, http.MethodPut, organizationUpsertMemberEndpoint, a.upsertOrganizationMemberHandler)
 		// check the status of the add members job
 		handle(r, http.MethodGet, organizationAddMembersJobStatusEndpoint, a.addOrganizationMembersJobStatusHandler)
 		// delete a set of organization members
