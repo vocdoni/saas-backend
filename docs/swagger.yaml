@@ -2376,6 +2376,48 @@ paths:
       summary: Add members to an organization
       tags:
       - organizations
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Create or update an organization member. Requires Manager/Admin role.
+        Automatically updates census participant hashes when member data changes.
+      parameters:
+      - description: Organization address
+        in: path
+        name: address
+        required: true
+        type: string
+      - description: Member data to insert or update
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.OrgMember'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: ID of member inserted or updated
+          schema:
+            $ref: '#/definitions/apicommon.OrgMember'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Create or update an organization member
+      tags:
+      - organizations
   /organizations/{address}/members/job/{jobid}:
     get:
       consumes:

@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/mail"
 	"strings"
 	"time"
@@ -341,6 +342,137 @@ func (ms *MongoStorage) AddBulkOrgMembers(org *Organization, members []*OrgMembe
 	progressChan := make(chan *BulkOrgMembersJob, 10)
 	go ms.addOrgMemberBatches(org, members, salt, progressChan)
 	return progressChan, nil
+}
+
+// UpsertOrgMemberAndCensusParticipants updates or inserts an organization member in the database.
+// In case of update, this method updates the loginHashes of this member in all censuses
+// of processes where this member is a participant.
+func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, member *OrgMember, salt string,
+) (primitive.ObjectID, error) {
+	if org.Address.Cmp(common.Address{}) == 0 {
+		return primitive.NilObjectID, ErrInvalidData
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+
+	// if this member exists already, check the orgAddress is not being changed
+	orgMemberInDB := &OrgMember{}
+	if err := ms.orgMembers.FindOne(ctx, bson.M{"_id": member.ID}).Decode(orgMemberInDB); err == nil {
+		if member.Phone.IsEmpty() { // fill in with the HashedPhone stored in db
+			member.Phone = orgMemberInDB.Phone
+		}
+		if orgMemberInDB.OrgAddress != org.Address {
+			return primitive.NilObjectID, fmt.Errorf("modifying orgAddress is not allowed")
+		}
+	}
+
+	preparedMember, validationErrors := prepareOrgMember(org, member, salt, time.Now())
+	if len(validationErrors) > 0 {
+		return primitive.NilObjectID, fmt.Errorf("errors: %s", errorsAsStrings(validationErrors))
+	}
+
+	// Update the census participants first, to bail out early in case this would create any duplicates conflict
+	if err := ms.updateCensusParticipantsForMember(ctx, preparedMember); err != nil {
+		return primitive.NilObjectID, fmt.Errorf("failed to update census participants: %w", err)
+	}
+
+	updateDoc, err := dynamicUpdateDocument(preparedMember, nil)
+	if err != nil {
+		return primitive.NilObjectID, err
+	}
+
+	filter := bson.M{"_id": preparedMember.ID}
+	opts := options.Update().SetUpsert(true)
+	_, err = ms.orgMembers.UpdateOne(ctx, filter, updateDoc, opts)
+	if err != nil {
+		return primitive.NilObjectID, fmt.Errorf("failed to upsert org member: %w", err)
+	}
+
+	return preparedMember.ID, nil
+}
+
+// updateCensusParticipantsForMember updates all census participants where participantID == orgMemberID
+func (ms *MongoStorage) updateCensusParticipantsForMember(ctx context.Context, member *OrgMember) error {
+	// Find all census participants for this member
+	cursor, err := ms.censusParticipants.Find(ctx, bson.M{"participantID": member.ID.Hex()})
+	if err != nil {
+		return fmt.Errorf("failed to find census participants: %w", err)
+	}
+	defer func() {
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("error closing cursor", "error", err)
+		}
+	}()
+
+	var participants []CensusParticipant
+	if err := cursor.All(ctx, &participants); err != nil {
+		return fmt.Errorf("failed to decode census participants: %w", err)
+	}
+
+	// Process each census participant
+	for _, participant := range participants {
+		// Get the census to find AuthFields and TwoFaFields
+		census, err := ms.Census(participant.CensusID)
+		if err != nil {
+			return fmt.Errorf("failed to get census %s: %w", participant.CensusID, err)
+		}
+
+		// Calculate new hashes based on census configuration
+		hashes := bson.M{}
+		hashes["loginHash"] = HashAuthTwoFaFields(*member, census.AuthFields, census.TwoFaFields)
+
+		// Calculate specific 2FA hashes if needed
+		if len(census.TwoFaFields) == 2 && len(member.Email) > 0 {
+			hashes["loginHashEmail"] = HashAuthTwoFaFields(*member, census.AuthFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail})
+		}
+		if len(census.TwoFaFields) == 2 && !member.Phone.IsEmpty() {
+			hashes["loginHashPhone"] = HashAuthTwoFaFields(*member, census.AuthFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldPhone})
+		}
+
+		findHashes := make([]bson.M, 0, len(hashes))
+		for k, v := range hashes {
+			findHashes = append(findHashes, bson.M{k: v})
+		}
+
+		// First "simulate" the update, checks that no conflicts would arise when trying to
+		// update all census participants where participantID == orgMemberID
+		findFilter := bson.M{
+			"participantID": bson.M{"$ne": participant.ParticipantID},
+			"censusId":      participant.CensusID,
+			"$or":           findHashes,
+		}
+		count, err := ms.censusParticipants.CountDocuments(ctx, findFilter)
+		if err != nil {
+			return fmt.Errorf("error counting documents for member %s in census %s: %w",
+				participant.ParticipantID, participant.CensusID, err)
+		}
+		if count > 0 {
+			return fmt.Errorf("member %s in census %s: %w",
+				participant.ParticipantID, participant.CensusID, ErrUpdateWouldCreateDuplicates)
+		}
+
+		// Update the census participant
+		participantFilter := bson.M{
+			"participantID": participant.ParticipantID,
+			"censusId":      participant.CensusID,
+		}
+		// Prepare update document for census participant
+		set := maps.Clone(hashes)
+		set["updatedAt"] = time.Now()
+		participantUpdate := bson.M{"$set": set}
+
+		_, err = ms.censusParticipants.UpdateOne(ctx, participantFilter, participantUpdate)
+		if err != nil {
+			return fmt.Errorf("failed to update census participant %s in census %s: %w",
+				participant.ParticipantID, participant.CensusID, err)
+		}
+	}
+
+	return nil
 }
 
 // OrgMembers retrieves paginated orgMembers for an organization from the DB
