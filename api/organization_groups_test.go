@@ -21,41 +21,11 @@ func TestOrganizationGroups(t *testing.T) {
 
 	// Create an organization
 	orgAddress := testCreateOrganization(t, adminToken)
-	t.Logf("Created organization with address: %s\n", orgAddress.String())
-
-	// Get the organization to verify it exists
-	requestAndAssertCode(http.StatusOK, t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String())
 
 	// Add members to the organization
-	members := &apicommon.AddMembersRequest{
-		Members: []apicommon.OrgMember{
-			{
-				MemberNumber: "P001",
-				Name:         "John Doe",
-				Email:        "john.doe@example.com",
-				Phone:        "+34612345678",
-				Password:     "password123",
-				Other: map[string]any{
-					"department": "Engineering",
-					"age":        30,
-				},
-			},
-			{
-				MemberNumber: "P002",
-				Name:         "Jane Smith",
-				Email:        "jane.smith@example.com",
-				Phone:        "+34698765432",
-				Password:     "password456",
-				Other: map[string]any{
-					"department": "Marketing",
-					"age":        28,
-				},
-			},
-		},
-	}
+	members := newOrgMembers(2)
 
-	requestAndAssertCode(http.StatusOK, t, http.MethodPost, adminToken, members,
-		"organizations", orgAddress.String(), "members")
+	postOrgMembers(t, adminToken, orgAddress, members...)
 
 	// Verify the members were added
 	membersResponse := requestAndParse[apicommon.OrganizationMembersResponse](
@@ -411,8 +381,7 @@ func TestOrganizationGroups(t *testing.T) {
 		}
 
 		// Add duplicate members to the organization
-		requestAndAssertCode(http.StatusOK, t, http.MethodPost, adminToken, duplicateMembers,
-			"organizations", orgAddress.String(), "members")
+		postOrgMembers(t, adminToken, orgAddress, duplicateMembers.Members...)
 
 		groupID := createGroupWithAllCurrentMembers(t, adminToken, orgAddress.String())
 
@@ -460,8 +429,7 @@ func TestOrganizationGroups(t *testing.T) {
 		}
 
 		// Add member with empty field to the organization
-		requestAndAssertCode(http.StatusOK, t, http.MethodPost, adminToken, emptyFieldMember,
-			"organizations", orgAddress.String(), "members")
+		postOrgMembers(t, adminToken, orgAddress, emptyFieldMember.Members...)
 
 		groupID = createGroupWithAllCurrentMembers(t, adminToken, orgAddress.String())
 

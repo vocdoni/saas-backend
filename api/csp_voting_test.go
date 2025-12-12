@@ -25,10 +25,7 @@ func testCSPAuthenticateWithFields(t *testing.T, bundleID string, authReq *handl
 	c := qt.New(t)
 
 	// Step 1: Initiate authentication (auth/0)
-	authResp := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", authReq, "process", "bundle", bundleID, "auth", "0")
-	c.Assert(authResp.AuthToken, qt.Not(qt.Equals), "", qt.Commentf("auth token is empty"))
-
-	t.Logf("Received auth token: %s", authResp.AuthToken.String())
+	authToken := postProcessBundleAuth0(t, bundleID, authReq)
 
 	// Step 2: Get the OTP code from the email with retries (if email is provided)
 	if authReq.Email != "" {
@@ -53,20 +50,14 @@ func testCSPAuthenticateWithFields(t *testing.T, bundleID string, authReq *handl
 		t.Logf("Extracted OTP code: %s", otpCode)
 
 		// Step 3: Verify authentication (auth/1)
-		authChallengeReq := &handlers.AuthChallengeRequest{
-			AuthToken: authResp.AuthToken,
+		return postProcessBundleAuth1(t, bundleID, &handlers.AuthChallengeRequest{
+			AuthToken: authToken,
 			AuthData:  []string{otpCode},
-		}
-		verifyResp := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", authChallengeReq,
-			"process", "bundle", bundleID, "auth", "1")
-		c.Assert(verifyResp.AuthToken, qt.Not(qt.Equals), "", qt.Commentf("verified auth token is empty"))
-
-		t.Logf("Authentication verified with token: %s", verifyResp.AuthToken.String())
-		return verifyResp.AuthToken
+		})
 	}
 
 	// For auth-only cases, return the initial token
-	return authResp.AuthToken
+	return authToken
 }
 
 // signAndMarshalTx signs a transaction with the given signer and marshals it to bytes.
@@ -108,7 +99,6 @@ func TestCSPVoting(t *testing.T) {
 
 		// Create an organization
 		orgAddress := testCreateOrganization(t, token)
-		t.Logf("Created organization with address: %s", orgAddress.String())
 
 		// Subscribe the organization to a plan
 		plans, err := testDB.Plans()
@@ -311,9 +301,7 @@ func TestCSPVoting(t *testing.T) {
 				}
 
 				// Add members to the organization first
-				membersRequest := &apicommon.AddMembersRequest{Members: members}
-				requestAndAssertCode(http.StatusOK, t, http.MethodPost, token, membersRequest,
-					"organizations", orgAddress.String(), "members")
+				postOrgMembers(t, token, orgAddress, members...)
 
 				// Get the organization members to obtain their IDs
 				orgMembersResp := requestAndParse[apicommon.OrganizationMembersResponse](
@@ -341,7 +329,7 @@ func TestCSPVoting(t *testing.T) {
 				t.Logf("Created member group with ID: %s", groupID)
 
 				// Create an empty census (without adding members directly)
-				censusID := testCreateCensus(t, token, orgAddress, authFields, twoFaFields)
+				censusID := postCensus(t, token, orgAddress, authFields, twoFaFields)
 
 				// Publish the group-based census using the correct endpoint
 				publishGroupRequest := &apicommon.PublishCensusGroupRequest{
@@ -356,7 +344,7 @@ func TestCSPVoting(t *testing.T) {
 				t.Logf("Published group census with URI: %s", publishedGroupCensus.URI)
 
 				// Create a bundle with the census and process
-				bundleID, _ := testCreateBundle(t, token, censusID, [][]byte{processID})
+				bundleID, _ := postProcessBundle(t, token, censusID, processID)
 
 				// Create a voting key for the member
 				t.Run("Authenticate and Vote", func(_ *testing.T) {
@@ -496,7 +484,7 @@ func TestCSPVoting(t *testing.T) {
 						emailTwoFaFields := db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail}
 
 						// Create an empty census
-						noMemberNumCensusID := testCreateCensus(t, token, orgAddress, noMemberNumAuthFields, emailTwoFaFields)
+						noMemberNumCensusID := postCensus(t, token, orgAddress, noMemberNumAuthFields, emailTwoFaFields)
 
 						// Publish the group-based census using the existing group
 						publishGroupRequest := &apicommon.PublishCensusGroupRequest{
@@ -508,7 +496,7 @@ func TestCSPVoting(t *testing.T) {
 							t, http.MethodPost, token, publishGroupRequest,
 							"census", noMemberNumCensusID, "group", groupID, "publish")
 
-						noMemberNumBundleID, _ := testCreateBundle(t, token, noMemberNumCensusID, [][]byte{processID})
+						noMemberNumBundleID, _ := postProcessBundle(t, token, noMemberNumCensusID, processID)
 
 						// Should be able to authenticate David Garcia (who has no memberNumber) when memberNumber isn't required
 						authReq := &handlers.AuthRequest{
@@ -546,7 +534,7 @@ func TestCSPVoting(t *testing.T) {
 							qt.Commentf("expected bad request when memberNumber required but missing, got %d: %s", code, resp))
 
 						// Create an empty census
-						withMemberNumCensusID := testCreateCensus(t, token, orgAddress, withMemberNumAuthFields, emailTwoFaFields)
+						withMemberNumCensusID := postCensus(t, token, orgAddress, withMemberNumAuthFields, emailTwoFaFields)
 
 						// Publish the group-based census
 						publishGroupRequest = &apicommon.PublishCensusGroupRequest{
@@ -558,7 +546,7 @@ func TestCSPVoting(t *testing.T) {
 							t, http.MethodPost, token, publishGroupRequest,
 							"census", withMemberNumCensusID, "group", groupID, "publish")
 
-						withMemberNumBundleID, _ := testCreateBundle(t, token, withMemberNumCensusID, [][]byte{processID})
+						withMemberNumBundleID, _ := postProcessBundle(t, token, withMemberNumCensusID, processID)
 
 						// Should not fail to authenticate David Garcia when memberNumber is required
 						resp, code = testRequest(t, http.MethodPost, "", authReq,
@@ -576,7 +564,7 @@ func TestCSPVoting(t *testing.T) {
 						emptyTwoFaFields := db.OrgMemberTwoFaFields{}
 
 						// Create an empty census
-						authOnlyCensusID := testCreateCensus(t, token, orgAddress, authOnlyFields, emptyTwoFaFields)
+						authOnlyCensusID := postCensus(t, token, orgAddress, authOnlyFields, emptyTwoFaFields)
 
 						// Publish the group-based census using the existing group
 						publishGroupRequest := &apicommon.PublishCensusGroupRequest{
@@ -588,7 +576,7 @@ func TestCSPVoting(t *testing.T) {
 							t, http.MethodPost, token, publishGroupRequest,
 							"census", authOnlyCensusID, "group", groupID, "publish")
 
-						authOnlyBundleID, _ := testCreateBundle(t, token, authOnlyCensusID, [][]byte{processID})
+						authOnlyBundleID, _ := postProcessBundle(t, token, authOnlyCensusID, processID)
 
 						// Should be able to authenticate with just member number
 						authReq := &handlers.AuthRequest{
@@ -618,7 +606,7 @@ func TestCSPVoting(t *testing.T) {
 						smsTwoFaFields := db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldPhone}
 
 						// Create an empty census
-						smsCensusID := testCreateCensus(t, token, orgAddress, smsAuthFields, smsTwoFaFields)
+						smsCensusID := postCensus(t, token, orgAddress, smsAuthFields, smsTwoFaFields)
 
 						// Publish the group-based census using the existing group
 						publishGroupRequest := &apicommon.PublishCensusGroupRequest{
@@ -630,7 +618,7 @@ func TestCSPVoting(t *testing.T) {
 							t, http.MethodPost, token, publishGroupRequest,
 							"census", smsCensusID, "group", groupID, "publish")
 
-						smsBundleID, _ := testCreateBundle(t, token, smsCensusID, [][]byte{processID})
+						smsBundleID, _ := postProcessBundle(t, token, smsCensusID, processID)
 
 						// Should be able to authenticate with name, member number, and phone
 						authReq := &handlers.AuthRequest{
@@ -655,7 +643,7 @@ func TestCSPVoting(t *testing.T) {
 						emailTwoFaFields := db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail}
 
 						// Create an empty census
-						complexCensusID := testCreateCensus(t, token, orgAddress, complexAuthFields, emailTwoFaFields)
+						complexCensusID := postCensus(t, token, orgAddress, complexAuthFields, emailTwoFaFields)
 
 						// Publish the group-based census using the existing group
 						publishGroupRequest := &apicommon.PublishCensusGroupRequest{
@@ -667,7 +655,7 @@ func TestCSPVoting(t *testing.T) {
 							t, http.MethodPost, token, publishGroupRequest,
 							"census", complexCensusID, "group", groupID, "publish")
 
-						complexBundleID, _ := testCreateBundle(t, token, complexCensusID, [][]byte{processID})
+						complexBundleID, _ := postProcessBundle(t, token, complexCensusID, processID)
 
 						// Should be able to authenticate with all required fields
 						authReq := &handlers.AuthRequest{
@@ -865,7 +853,7 @@ func TestCSPVoting(t *testing.T) {
 					}
 
 					// Create a new census with both email and phone as 2FA methods
-					bothMethodsCensusID := testCreateCensus(t, token, orgAddress, authFields, bothTwoFaFields)
+					bothMethodsCensusID := postCensus(t, token, orgAddress, authFields, bothTwoFaFields)
 
 					// Publish the group-based census using the existing group
 					publishGroupRequest := &apicommon.PublishCensusGroupRequest{
@@ -877,7 +865,7 @@ func TestCSPVoting(t *testing.T) {
 						t, http.MethodPost, token, publishGroupRequest,
 						"census", bothMethodsCensusID, "group", groupID, "publish")
 
-					bothMethodsBundleID, _ := testCreateBundle(t, token, bothMethodsCensusID, [][]byte{processID})
+					bothMethodsBundleID, _ := postProcessBundle(t, token, bothMethodsCensusID, processID)
 
 					// Test 1: User with only email should be able to authenticate
 					t.Run("User with Email Only", func(_ *testing.T) {

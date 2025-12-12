@@ -30,10 +30,6 @@ func TestOrganizationMembers(t *testing.T) {
 
 	// Create an organization
 	orgAddress := testCreateOrganization(t, adminToken)
-	t.Logf("Created organization with address: %s\n", orgAddress)
-
-	// Get the organization to verify it exists
-	requestAndAssertCode(http.StatusOK, t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String())
 
 	// Test 1: Get organization members (initially empty)
 	// Test 1.1: Test with valid organization address
@@ -223,7 +219,6 @@ func TestOrganizationMembers(t *testing.T) {
 			c.Assert(member.BirthDate, qt.Equals, "1992-11-25")
 			c.Assert(member.Phone, qt.Not(qt.Equals), "+34600333444") // Should be hashed, not the original string
 			c.Assert(member.Weight, qt.Equals, "1")
-
 		}
 		if member.ID == pedroID {
 			pedroFound = true
@@ -232,7 +227,6 @@ func TestOrganizationMembers(t *testing.T) {
 			c.Assert(member.NationalID, qt.Equals, "44556677F")
 			c.Assert(member.MemberNumber, qt.Equals, "") // Should be empty
 			c.Assert(member.Weight, qt.Equals, "2")
-
 		}
 		if member.ID == joanID {
 			joanFound = true

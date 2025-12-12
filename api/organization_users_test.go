@@ -29,11 +29,6 @@ func TestOrganizationUsers(t *testing.T) {
 
 	// Create an organization
 	orgAddress := testCreateOrganization(t, adminToken)
-	t.Logf("Created organization with address: %s\n", orgAddress.String())
-
-	// Get the organization to verify it exists
-	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String())
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Create a second user to be invited to the organization
 	userToken := testCreateUser(t, "userpassword123")
@@ -43,8 +38,7 @@ func TestOrganizationUsers(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	var userInfo apicommon.UserInfo
-	err := parseJSON(resp, &userInfo)
-	c.Assert(err, qt.IsNil)
+	c.Assert(json.Unmarshal(resp, &userInfo), qt.IsNil)
 	t.Logf("User ID: %d\n", userInfo.ID)
 
 	// Invite the second user to the organization as a viewer
@@ -96,8 +90,7 @@ func TestOrganizationUsers(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	var users apicommon.OrganizationUsers
-	err = parseJSON(resp, &users)
-	c.Assert(err, qt.IsNil)
+	c.Assert(json.Unmarshal(resp, &users), qt.IsNil)
 	c.Assert(users.Users, qt.HasLen, 2) // Admin + new user
 
 	// Find the user in the list
@@ -117,7 +110,6 @@ func TestOrganizationUsers(t *testing.T) {
 	t.Run("RaceConditionInviteUsers", func(t *testing.T) {
 		// Create a new organization for this test
 		newOrgAddress := testCreateOrganization(t, adminToken)
-		t.Logf("Created organization with address: %s\n", newOrgAddress.String())
 
 		// Subscribe the organization to a plan
 		plans, err := testDB.Plans()
@@ -139,8 +131,7 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		var initialOrg apicommon.OrganizationInfo
-		err = parseJSON(resp, &initialOrg)
-		c.Assert(err, qt.IsNil)
+		c.Assert(json.Unmarshal(resp, &initialOrg), qt.IsNil)
 
 		initialUserCount := initialOrg.Counters.Users
 		t.Logf("Initial users counter: %d", initialUserCount)
@@ -180,8 +171,7 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		var finalOrg apicommon.OrganizationInfo
-		err = parseJSON(resp, &finalOrg)
-		c.Assert(err, qt.IsNil)
+		c.Assert(json.Unmarshal(resp, &finalOrg), qt.IsNil)
 
 		// After our fix, we expect the counter to be correctly incremented by nInvites,
 		// but not exceed max allowed users of the subscribed plan
@@ -207,8 +197,7 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		var pendingInvites apicommon.OrganizationInviteList
-		err = parseJSON(resp, &pendingInvites)
-		c.Assert(err, qt.IsNil)
+		c.Assert(json.Unmarshal(resp, &pendingInvites), qt.IsNil)
 		expectedInvitesCount := min(nInvites, premiumPlan.Organization.Users)
 		c.Assert(pendingInvites.Invites, qt.HasLen, expectedInvitesCount,
 			qt.Commentf("expected %d pending invitations, got %d", expectedInvitesCount, len(pendingInvites.Invites)))
@@ -236,8 +225,7 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		var updatedUsers apicommon.OrganizationUsers
-		err = parseJSON(resp, &updatedUsers)
-		c.Assert(err, qt.IsNil)
+		c.Assert(json.Unmarshal(resp, &updatedUsers), qt.IsNil)
 
 		var updatedRole string
 		for _, user := range updatedUsers.Users {
@@ -276,8 +264,7 @@ func TestOrganizationUsers(t *testing.T) {
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
-		err = parseJSON(resp, &updatedUsers)
-		c.Assert(err, qt.IsNil)
+		c.Assert(json.Unmarshal(resp, &updatedUsers), qt.IsNil)
 
 		for _, user := range updatedUsers.Users {
 			if user.Info.ID == userID {
@@ -353,7 +340,6 @@ func TestOrganizationUsers(t *testing.T) {
 	t.Run("RemoveOrganizationUser", func(t *testing.T) {
 		// Create a new organization and user for this test
 		newOrgAddress := testCreateOrganization(t, adminToken)
-		t.Logf("Created organization with address: %s\n", newOrgAddress.String())
 
 		// Create a user to be removed
 		userToRemoveToken := testCreateUser(t, "removepassword123")
@@ -361,8 +347,7 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		var userToRemoveInfo apicommon.UserInfo
-		err := parseJSON(resp, &userToRemoveInfo)
-		c.Assert(err, qt.IsNil)
+		c.Assert(json.Unmarshal(resp, &userToRemoveInfo), qt.IsNil)
 		t.Logf("User to remove ID: %d\n", userToRemoveInfo.ID)
 
 		// Invite the user to the organization
@@ -421,8 +406,7 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		var users apicommon.OrganizationUsers
-		err = parseJSON(resp, &users)
-		c.Assert(err, qt.IsNil)
+		c.Assert(json.Unmarshal(resp, &users), qt.IsNil)
 		c.Assert(users.Users, qt.HasLen, 2) // Admin + new user
 
 		// Find the user in the list
@@ -453,8 +437,7 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		var updatedUsers apicommon.OrganizationUsers
-		err = parseJSON(resp, &updatedUsers)
-		c.Assert(err, qt.IsNil)
+		c.Assert(json.Unmarshal(resp, &updatedUsers), qt.IsNil)
 		c.Assert(updatedUsers.Users, qt.HasLen, 1) // Only admin remains
 
 		// Test 2: Try to remove a user without authentication
@@ -512,8 +495,7 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		var adminInfo apicommon.UserInfo
-		err = parseJSON(resp, &adminInfo)
-		c.Assert(err, qt.IsNil)
+		c.Assert(json.Unmarshal(resp, &adminInfo), qt.IsNil)
 
 		_, code = testRequest(
 			t,
@@ -531,7 +513,6 @@ func TestOrganizationUsers(t *testing.T) {
 	t.Run("UpdatePendingInvitation", func(t *testing.T) {
 		// Create a new organization for this test
 		newOrgAddress := testCreateOrganization(t, adminToken)
-		t.Logf("Created organization with address: %s\n", newOrgAddress.String())
 
 		// Create a user to be invited
 		userToInviteEmail := fmt.Sprintf("invite-%s@example.com", uuid.New().String())
@@ -566,8 +547,7 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		var pendingInvites apicommon.OrganizationInviteList
-		err := parseJSON(resp, &pendingInvites)
-		c.Assert(err, qt.IsNil)
+		c.Assert(json.Unmarshal(resp, &pendingInvites), qt.IsNil)
 		c.Assert(pendingInvites.Invites, qt.HasLen, 1)
 		c.Assert(pendingInvites.Invites[0].Email, qt.Equals, userToInviteEmail)
 
@@ -604,8 +584,7 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		var updatedPendingInvites apicommon.OrganizationInviteList
-		err = parseJSON(resp, &updatedPendingInvites)
-		c.Assert(err, qt.IsNil)
+		c.Assert(json.Unmarshal(resp, &updatedPendingInvites), qt.IsNil)
 		c.Assert(updatedPendingInvites.Invites, qt.HasLen, 1)
 		c.Assert(updatedPendingInvites.Invites[0].Email, qt.Equals, userToInviteEmail)
 
@@ -659,7 +638,6 @@ func TestOrganizationUsers(t *testing.T) {
 
 		// Test 5: Create another organization and invitation, then try to update it from the wrong organization
 		anotherOrgAddress := testCreateOrganization(t, adminToken)
-		t.Logf("Created another organization with address: %s\n", anotherOrgAddress.String())
 
 		// Invite the user to the second organization
 		inviteRequest = &apicommon.OrganizationInvite{
@@ -691,8 +669,7 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		var anotherPendingInvites apicommon.OrganizationInviteList
-		err = parseJSON(resp, &anotherPendingInvites)
-		c.Assert(err, qt.IsNil)
+		c.Assert(json.Unmarshal(resp, &anotherPendingInvites), qt.IsNil)
 		c.Assert(anotherPendingInvites.Invites, qt.HasLen, 1)
 
 		anotherInvitationID := anotherPendingInvites.Invites[0].ID
@@ -743,7 +720,6 @@ func TestOrganizationUsers(t *testing.T) {
 	t.Run("DeletePendingInvitation", func(t *testing.T) {
 		// Create a new organization for this test
 		newOrgAddress := testCreateOrganization(t, adminToken)
-		t.Logf("Created organization with address: %s\n", newOrgAddress.String())
 
 		// Create a user to be invited
 		userToInviteEmail := fmt.Sprintf("invite-%s@example.com", uuid.New().String())
@@ -778,8 +754,7 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		var pendingInvites apicommon.OrganizationInviteList
-		err := parseJSON(resp, &pendingInvites)
-		c.Assert(err, qt.IsNil)
+		c.Assert(json.Unmarshal(resp, &pendingInvites), qt.IsNil)
 		c.Assert(pendingInvites.Invites, qt.HasLen, 1)
 		c.Assert(pendingInvites.Invites[0].Email, qt.Equals, userToInviteEmail)
 
@@ -814,8 +789,7 @@ func TestOrganizationUsers(t *testing.T) {
 		)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
-		err = parseJSON(resp, &pendingInvites)
-		c.Assert(err, qt.IsNil)
+		c.Assert(json.Unmarshal(resp, &pendingInvites), qt.IsNil)
 		c.Assert(pendingInvites.Invites, qt.HasLen, 0)
 
 		// Test 2: Try to delete a non-existent invitation
@@ -865,7 +839,6 @@ func TestOrganizationUsers(t *testing.T) {
 
 		// Test 5: Create another organization and invitation, then try to delete it from the wrong organization
 		anotherOrgAddress := testCreateOrganization(t, adminToken)
-		t.Logf("Created another organization with address: %s\n", anotherOrgAddress.String())
 
 		// Invite the user to the second organization
 		inviteRequest = &apicommon.OrganizationInvite{
@@ -897,8 +870,7 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		var anotherPendingInvites apicommon.OrganizationInviteList
-		err = parseJSON(resp, &anotherPendingInvites)
-		c.Assert(err, qt.IsNil)
+		c.Assert(json.Unmarshal(resp, &anotherPendingInvites), qt.IsNil)
 		c.Assert(anotherPendingInvites.Invites, qt.HasLen, 1)
 
 		anotherInvitationID := anotherPendingInvites.Invites[0].ID
@@ -941,7 +913,6 @@ func TestOrganizationUsers(t *testing.T) {
 
 		// Create an organization
 		orgAddress := testCreateOrganization(t, adminToken)
-		t.Logf("Created organization with address: %s\n", orgAddress)
 
 		// Get the organization from the database
 		org, err := testDB.Organization(orgAddress)
@@ -986,8 +957,7 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		var roles apicommon.OrganizationRoleList
-		err := parseJSON(resp, &roles)
-		c.Assert(err, qt.IsNil)
+		c.Assert(json.Unmarshal(resp, &roles), qt.IsNil)
 
 		// Verify we have the expected roles
 		c.Assert(roles.Roles, qt.HasLen, 3) // Admin, Manager, Viewer

@@ -19,73 +19,22 @@ func TestLanguageParameterInEmails(t *testing.T) {
 	test := func(lang string) {
 		c := qt.New(t)
 
-		// Set up the test environment similar to TestCSPVoting
+		// Set up test environment with user, org, and census
 		token := testCreateUser(t, "superpassword123")
 		orgAddress := testCreateOrganization(t, token)
-
-		// Create a basic census and bundle for testing
-		authFields := db.OrgMemberAuthFields{
-			db.OrgMemberAuthFieldsName,
-			db.OrgMemberAuthFieldsSurname,
-			db.OrgMemberAuthFieldsMemberNumber,
-		}
-		twoFaFields := db.OrgMemberTwoFaFields{
-			db.OrgMemberTwoFaFieldEmail,
-		}
-		censusID := testCreateCensus(t, token, orgAddress, authFields, twoFaFields)
-		// Add a test member to the organization
-		member := apicommon.OrgMember{
-			Name:         "Juan",
-			Surname:      "Pérez",
-			MemberNumber: "ESP001",
-			Email:        fmt.Sprintf("testLang%s@example.com", lang),
-		}
-		members := []apicommon.OrgMember{member}
-
-		// Add members to the organization
-		membersRequest := apicommon.AddMembersRequest{Members: members}
-		requestAndAssertCode(200, t, "POST", token, membersRequest,
-			"organizations", orgAddress.String(), "members")
-
-		// Get the organization members to obtain their IDs
-		orgMembersResp := requestAndParse[apicommon.OrganizationMembersResponse](
-			t, "GET", token, nil,
-			"organizations", orgAddress.String(), "members")
-
-		c.Assert(orgMembersResp.Members, qt.HasLen, 1, qt.Commentf("should have 1 member"))
-
-		memberID := orgMembersResp.Members[0].ID
-
-		// Create a group with the member
-		createGroupReq := apicommon.CreateOrganizationMemberGroupRequest{
-			Title:       "Language Test Group",
-			Description: "Group for testing language parameter",
-			MemberIDs:   []string{memberID},
-		}
-
-		groupResp := requestAndParse[apicommon.OrganizationMemberGroupInfo](
-			t, "POST", token, createGroupReq,
-			"organizations", orgAddress.String(), "groups")
-
-		groupID := groupResp.ID
-
-		// Publish the group-based census
-		publishGroupRequest := apicommon.PublishCensusGroupRequest{
-			AuthFields:  authFields,
-			TwoFaFields: twoFaFields,
-		}
-
-		requestAndParse[map[string]any](
-			t, "POST", token, publishGroupRequest,
-			"census", censusID, "group", groupID, "publish")
-
-		// Create a mock process ID for the bundle
-		processID := make([]byte, 32)
-		for i := range processID {
-			processID[i] = byte(i)
-		}
-
-		bundleID, _ := testCreateBundle(t, token, censusID, [][]byte{processID})
+		member := newOrgMember()
+		addedMembers := postOrgMembers(t, token, orgAddress, member)
+		censusID, _, _ := createGroupBasedCensus(t, token, orgAddress,
+			db.OrgMemberAuthFields{
+				db.OrgMemberAuthFieldsName,
+				db.OrgMemberAuthFieldsSurname,
+				db.OrgMemberAuthFieldsMemberNumber,
+			},
+			db.OrgMemberTwoFaFields{
+				db.OrgMemberTwoFaFieldEmail,
+			},
+			addedMembers[0].ID)
+		bundleID, _ := postProcessBundle(t, token, censusID, randomProcessID())
 
 		// Test with Spanish language parameter
 		authReq := &handlers.AuthRequest{
