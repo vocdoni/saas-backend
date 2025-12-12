@@ -45,6 +45,38 @@ func renameFieldAndReindex(
 	oldIndexes []string,
 	newIndexes []mongo.IndexModel,
 ) error {
+	updateFunc := func() error {
+		// 2) rename docs (only where old exists and new doesn't)
+		filter := bson.M{
+			oldField: bson.M{"$exists": true},
+			newField: bson.M{"$exists": false},
+		}
+		update := bson.M{"$rename": bson.M{oldField: newField}}
+		if _, err := collection.UpdateMany(ctx, filter, update); err != nil {
+			return fmt.Errorf("failed to rename %s -> %s in %s: %w",
+				oldField, newField, collection.Name(), err)
+		}
+		return nil
+	}
+	return replaceIndexWithUpdateFunc(ctx, collection, oldIndexes, newIndexes, updateFunc)
+}
+
+func replaceIndex(
+	ctx context.Context,
+	collection *mongo.Collection,
+	oldIndexes []string,
+	newIndexes []mongo.IndexModel,
+) error {
+	return replaceIndexWithUpdateFunc(ctx, collection, oldIndexes, newIndexes, nil)
+}
+
+func replaceIndexWithUpdateFunc(
+	ctx context.Context,
+	collection *mongo.Collection,
+	oldIndexes []string,
+	newIndexes []mongo.IndexModel,
+	updateFunc func() error,
+) error {
 	// 1) drop old indexes
 	for _, name := range oldIndexes {
 		if _, err := collection.Indexes().DropOne(ctx, name); err != nil {
@@ -56,15 +88,10 @@ func renameFieldAndReindex(
 		}
 	}
 
-	// 2) rename docs (only where old exists and new doesn't)
-	filter := bson.M{
-		oldField: bson.M{"$exists": true},
-		newField: bson.M{"$exists": false},
-	}
-	update := bson.M{"$rename": bson.M{oldField: newField}}
-	if _, err := collection.UpdateMany(ctx, filter, update); err != nil {
-		return fmt.Errorf("failed to rename %s -> %s in %s: %w",
-			oldField, newField, collection.Name(), err)
+	if updateFunc != nil {
+		if err := updateFunc(); err != nil {
+			return err
+		}
 	}
 
 	// 3) create new indexes
