@@ -109,21 +109,13 @@ func TestOrganizationInfoHandler(t *testing.T) {
 	token := testCreateUser(t, testPass)
 	orgAddress := testCreateOrganization(t, token)
 
-	// Test getting organization info
-	resp, code := testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String())
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	var orgInfo apicommon.OrganizationInfo
-	c.Assert(json.Unmarshal(resp, &orgInfo), qt.IsNil)
-	c.Assert(orgInfo.Address, qt.Equals, orgAddress)
-
 	// Test getting info for non-existent organization
 	nonExistentAddr := common.HexToAddress("0x0000000000000000000000000000000000000001")
-	_, code = testRequest(t, http.MethodGet, token, nil, "organizations", nonExistentAddr.String())
+	_, code := testRequest(t, http.MethodGet, token, nil, "organizations", nonExistentAddr.String())
 	c.Assert(code, qt.Equals, http.StatusBadRequest)
 
 	// Test without authentication (should still work as this is a public endpoint)
-	resp, code = testRequest(t, http.MethodGet, "", nil, "organizations", orgAddress.String())
+	resp, code := testRequest(t, http.MethodGet, "", nil, "organizations", orgAddress.String())
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 }
 

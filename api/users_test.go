@@ -220,12 +220,7 @@ func TestUserWithOrganization(t *testing.T) {
 	t.Logf("%s\n", resp)
 
 	// Create an organization
-	orgAddress := testCreateOrganization(t, token)
-
-	// Get the organization
-	resp, code = testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String())
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-	t.Logf("%s\n", resp)
+	testCreateOrganization(t, token)
 }
 
 func TestResendVerificationCodeHandler(t *testing.T) {

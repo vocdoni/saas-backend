@@ -528,6 +528,11 @@ func testCreateOrganization(t *testing.T, jwt string) common.Address {
 	orgResp := requestAndParse[apicommon.OrganizationInfo](t, http.MethodPost, jwt, orgInfo, organizationsEndpoint)
 	qt.Assert(t, orgResp.Address, qt.Not(qt.Equals), "")
 
+	// Get the organization to verify it exists
+	requestAndAssertCode(http.StatusOK, t, http.MethodGet, jwt, nil, "organizations", orgResp.Address.String())
+
+	t.Logf("Created organization with address: %s\n", orgResp.Address)
+
 	return orgResp.Address
 }
 
