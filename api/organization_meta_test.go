@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -21,10 +22,6 @@ func TestOrganizationMeta(t *testing.T) {
 
 	// Create an organization
 	orgAddress := testCreateOrganization(t, adminToken)
-	t.Logf("Created organization with address: %s\n", orgAddress)
-
-	// Get the organization to verify it exists
-	requestAndAssertCode(http.StatusOK, t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String())
 
 	// Test 1: Add organization meta
 	// Test 1.1: Test with valid data
@@ -53,8 +50,7 @@ func TestOrganizationMeta(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	var retrievedMeta apicommon.OrganizationMetaResponse
-	err := parseJSON(resp, &retrievedMeta)
-	c.Assert(err, qt.IsNil)
+	c.Assert(json.Unmarshal(resp, &retrievedMeta), qt.IsNil)
 	c.Assert(retrievedMeta.Meta["region"], qt.Equals, "Europe")
 	c.Assert(retrievedMeta.Meta["size"], qt.Equals, "Medium")
 	c.Assert(retrievedMeta.Meta["industry"], qt.Equals, "Technology")
@@ -85,8 +81,7 @@ func TestOrganizationMeta(t *testing.T) {
 	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String(), "meta")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
-	err = parseJSON(resp, &retrievedMeta)
-	c.Assert(err, qt.IsNil)
+	c.Assert(json.Unmarshal(resp, &retrievedMeta), qt.IsNil)
 
 	// Verify updated and new fields
 	c.Assert(retrievedMeta.Meta["size"], qt.Equals, "Large")           // Updated field
@@ -141,8 +136,7 @@ func TestOrganizationMeta(t *testing.T) {
 
 	// Parse the response into a new variable to ensure we get fresh data
 	var updatedMeta apicommon.OrganizationMetaResponse
-	err = parseJSON(resp, &updatedMeta)
-	c.Assert(err, qt.IsNil)
+	c.Assert(json.Unmarshal(resp, &updatedMeta), qt.IsNil)
 
 	// Verify deleted fields are gone
 	_, hasIndustry := updatedMeta.Meta["industry"]
@@ -207,8 +201,7 @@ func TestOrganizationMeta(t *testing.T) {
 
 	// Parse the response into a new variable to ensure we get fresh data
 	var complexMeta apicommon.OrganizationMetaResponse
-	err = parseJSON(resp, &complexMeta)
-	c.Assert(err, qt.IsNil)
+	c.Assert(json.Unmarshal(resp, &complexMeta), qt.IsNil)
 
 	// Check nested objects
 	contact, ok := complexMeta.Meta["contact"].(map[string]any)
@@ -266,8 +259,7 @@ func TestOrganizationMeta(t *testing.T) {
 
 	// Parse the response into a new variable to ensure we get fresh data
 	var updatedNestedMeta apicommon.OrganizationMetaResponse
-	err = parseJSON(resp, &updatedNestedMeta)
-	c.Assert(err, qt.IsNil)
+	c.Assert(json.Unmarshal(resp, &updatedNestedMeta), qt.IsNil)
 
 	// Verify updated nested fields
 	contact, ok = updatedNestedMeta.Meta["contact"].(map[string]any)

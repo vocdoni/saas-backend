@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -26,10 +27,6 @@ func testCreateOrgAndCensus(
 
 	// Create an organization
 	orgAddress := testCreateOrganization(t, adminToken)
-	t.Logf("Created organization with address: %s\n", orgAddress.String())
-
-	// Get the organization to verify it exists
-	requestAndAssertCode(http.StatusOK, t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String())
 
 	// Create a census
 	authFields := db.OrgMemberAuthFields{}
@@ -38,7 +35,7 @@ func testCreateOrgAndCensus(
 		db.OrgMemberTwoFaFieldEmail,
 	}
 
-	censusID := testCreateCensus(t, adminToken, orgAddress, authFields, twoFaFields)
+	censusID := postCensus(t, adminToken, orgAddress, authFields, twoFaFields)
 	t.Logf("Created census with ID: %s\n", censusID)
 
 	// Add members to the census
@@ -77,8 +74,7 @@ func testCreateOrgAndCensus(
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	var publishedCensus apicommon.PublishedCensusResponse
-	err := parseJSON(resp, &publishedCensus)
-	c.Assert(err, qt.IsNil)
+	c.Assert(json.Unmarshal(resp, &publishedCensus), qt.IsNil)
 	c.Assert(publishedCensus.URI, qt.Not(qt.Equals), "")
 	c.Assert(publishedCensus.Root, qt.Not(qt.Equals), "")
 
