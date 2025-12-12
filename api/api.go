@@ -257,6 +257,9 @@ func (a *API) initRouter() http.Handler {
 		// add organization members
 		log.Infow("new route", "method", "POST", "path", organizationAddMembersEndpoint)
 		r.Post(organizationAddMembersEndpoint, a.addOrganizationMembersHandler)
+		// upsert organization member
+		log.Infow("new route", "method", "PUT", "path", organizationUpsertMemberEndpoint)
+		r.Patch(organizationUpsertMemberEndpoint, a.upsertOrganizationMemberHandler)
 		// check the status of the add members job
 		log.Infow("new route", "method", "GET", "path", organizationAddMembersJobStatusEndpoint)
 		r.Get(organizationAddMembersJobStatusEndpoint, a.addOrganizationMembersJobStatusHandler)

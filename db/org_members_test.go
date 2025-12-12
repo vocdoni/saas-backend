@@ -203,7 +203,7 @@ func TestOrgMembers(t *testing.T) {
 		}
 	})
 
-	t.Run("SetBulkOrgMembers", func(_ *testing.T) {
+	t.Run("UpdateOrgMember", func(_ *testing.T) {
 		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Create org
 		organization := &Organization{
@@ -265,20 +265,11 @@ func TestOrgMembers(t *testing.T) {
 		members[1].ID = member2.ID // Use the existing ID for the second member
 		members[1].PlaintextPhone = "+34678678971"
 
-		// Perform bulk upsert again
-		progressChan, err = testDB.AddBulkOrgMembers(testOrg, members, testSalt)
+		// Perform updates
+		_, err = testDB.UpsertOrgMemberAndCensusParticipants(testOrg, members[0], testSalt)
 		c.Assert(err, qt.IsNil)
-
-		// Wait for the operation to complete and get the final status
-		for status := range progressChan {
-			lastStatus = status
-		}
-
-		// Verify the operation completed successfully
-		c.Assert(lastStatus, qt.Not(qt.IsNil))
-		c.Assert(lastStatus.Progress, qt.Equals, 100)
-		c.Assert(lastStatus.Added, qt.Equals, 2) // Both documents should be updated
-		c.Assert(lastStatus.Errors, qt.HasLen, 0)
+		_, err = testDB.UpsertOrgMemberAndCensusParticipants(testOrg, members[1], testSalt)
+		c.Assert(err, qt.IsNil)
 
 		// Verify updates for both members
 		updatedMember1, err := testDB.OrgMemberByMemberNumber(testOrgAddress, testMemberNumber)

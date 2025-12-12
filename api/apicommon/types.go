@@ -851,8 +851,9 @@ type DeleteMembersResponse struct {
 type OrgMember struct {
 	// Member's internal unique internal ID
 	ID string `json:"id"`
+
 	// Unique member number as defined by the organization
-	MemberNumber string `json:"memberNumber"`
+	MemberNumber string `json:"memberNumber,omitempty"`
 
 	// Member's name
 	Name string `json:"name,omitempty"`
