@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -503,22 +502,4 @@ func TestCensus(t *testing.T) {
 			t, http.MethodPost, nonAdminToken, publishGroupRequest,
 			censusEndpoint, groupCensusID, "group", groupID, "publish")
 	})
-}
-
-// Helper function to parse JSON responses
-func parseJSON(data []byte, v any) error {
-	return json.Unmarshal(data, v)
-}
-
-func decodeNestedFieldAs[T any](c *qt.C, parsedJSON map[string]any, field string) T {
-	c.Assert(parsedJSON[field], qt.Not(qt.IsNil), qt.Commentf("no field %q in json %#v\n", parsedJSON))
-
-	// to decode field we need to Marshal and Unmarshal
-	nestedFieldBytes, err := json.Marshal(parsedJSON[field])
-	c.Assert(err, qt.IsNil)
-
-	var nestedField T
-	err = json.Unmarshal(nestedFieldBytes, &nestedField)
-	c.Assert(err, qt.IsNil, qt.Commentf("%#v\n", parsedJSON[field]))
-	return nestedField
 }
