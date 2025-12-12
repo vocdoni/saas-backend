@@ -361,7 +361,7 @@ func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, 
 	// if this member exists already, check the orgAddress is not being changed
 	orgMemberInDB := &OrgMember{}
 	if err := ms.orgMembers.FindOne(ctx, bson.M{"_id": member.ID}).Decode(orgMemberInDB); err == nil {
-		if member.OrgAddress != orgMemberInDB.OrgAddress {
+		if orgMemberInDB.OrgAddress != org.Address {
 			return primitive.NilObjectID, fmt.Errorf("modifying orgAddress is not allowed")
 		}
 	}

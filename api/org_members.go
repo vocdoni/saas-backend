@@ -364,24 +364,16 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// decode the passedMember data from the request body
-	passedMember := &apicommon.OrgMember{}
-	if err := json.NewDecoder(r.Body).Decode(passedMember); err != nil {
+	// decode the member data from the request body
+	member := &apicommon.OrgMember{}
+	if err := json.NewDecoder(r.Body).Decode(member); err != nil {
 		log.Error(err)
 		errors.ErrMalformedBody.Withf("invalid member data").Write(w)
 		return
 	}
 
-	// convert to database type
-	member := passedMember.ToDB()
-
-	if member.OrgAddress.Cmp(org.Address) != 0 {
-		errors.ErrMalformedBody.Withf("member orgAddress must match organization").Write(w)
-		return
-	}
-
 	// upsert the member in the database
-	memberID, err := a.db.UpsertOrgMemberAndCensusParticipants(org, member, passwordSalt)
+	memberID, err := a.db.UpsertOrgMemberAndCensusParticipants(org, member.ToDB(), passwordSalt)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not upsert org member: %v", err).Write(w)
 		return
