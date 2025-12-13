@@ -596,9 +596,11 @@ func (ms *MongoStorage) setBulkCensusParticipant(
 			UpdatedAt:     currentTime,
 		}
 
-		if len(twoFaFields) == 2 && len(member.Email) > 0 && !member.Phone.IsEmpty() {
-			participantDoc.LoginHashPhone = HashAuthTwoFaFields(*member, authFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldPhone})
+		if len(twoFaFields) == 2 && member.Email != "" {
 			participantDoc.LoginHashEmail = HashAuthTwoFaFields(*member, authFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail})
+		}
+		if len(twoFaFields) == 2 && !member.Phone.IsEmpty() {
+			participantDoc.LoginHashPhone = HashAuthTwoFaFields(*member, authFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldPhone})
 		}
 		// Create participant update document
 		updateParticipantDoc, err := dynamicUpdateDocument(participantDoc, nil)
