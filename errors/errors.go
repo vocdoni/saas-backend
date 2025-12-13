@@ -2,6 +2,7 @@ package errors
 
 import (
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"net/http"
 	"runtime"
@@ -12,7 +13,7 @@ import (
 // Error is used by handler functions to wrap errors, assigning a unique error code
 // and also specifying which HTTP Status should be used.
 type Error struct {
-	Err        error  // Original error
+	Err        error  `json:"error"` // Original error
 	Code       int    // Error code
 	HTTPstatus int    // HTTP status code to return
 	LogLevel   string // Log level for this error (defaults to "debug")
@@ -35,6 +36,26 @@ func (e Error) MarshalJSON() ([]byte, error) {
 			Code:  e.Code,
 			Data:  e.Data,
 		})
+}
+
+// UnmarshalJSON parses a JSON containing error, code and optionally data.
+//
+// Example input: {"error":"account not found","code":4003}
+func (e *Error) UnmarshalJSON(data []byte) error {
+	// This anon struct is needed to actually set the error string,
+	// since it wouldn't be unmarshaled otherwise. (cannot json.Unmarshal string into type error)
+	parsed := struct {
+		Error string `json:"error"`
+		Code  int    `json:"code"`
+		Data  any    `json:"data,omitempty"`
+	}{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return err
+	}
+	e.Err = fmt.Errorf("%s", parsed.Error)
+	e.Code = parsed.Code
+	e.Data = parsed.Data
+	return nil
 }
 
 // Error returns the Message contained inside the APIerror
@@ -148,4 +169,46 @@ func (e Error) WithData(data any) Error {
 		LogLevel:   e.LogLevel,
 		Data:       data,
 	}
+}
+
+// As finds the first error in err's tree that matches target, and if one is found, sets
+// target to that error value and returns true. Otherwise, it returns false.
+//
+// The tree consists of err itself, followed by the errors obtained by repeatedly
+// calling its Unwrap() error or Unwrap() []error method. When err wraps multiple
+// errors, As examines err followed by a depth-first traversal of its children.
+//
+// An error matches target if the error's concrete value is assignable to the value
+// pointed to by target, or if the error has a method As(any) bool such that
+// As(target) returns true. In the latter case, the As method is responsible for
+// setting target.
+//
+// An error type might provide an As method so it can be treated as if it were a
+// different error type.
+//
+// As panics if target is not a non-nil pointer to either a type that implements
+// error, or to any interface type.
+func As(err error, target any) bool {
+	return stderrors.As(err, target)
+}
+
+// Is reports whether any error in err's tree matches target.
+//
+// The tree consists of err itself, followed by the errors obtained by repeatedly
+// calling its Unwrap() error or Unwrap() []error method. When err wraps multiple
+// errors, Is examines err followed by a depth-first traversal of its children.
+//
+// An error is considered to match a target if it is equal to that target or if
+// it implements a method Is(error) bool such that Is(target) returns true.
+//
+// An error type might provide an Is method so it can be treated as equivalent
+// to an existing error. For example, if MyError defines
+//
+//	func (m MyError) Is(target error) bool { return target == fs.ErrExist }
+//
+// then Is(MyError{}, fs.ErrExist) returns true. See [syscall.Errno.Is] for
+// an example in the standard library. An Is method should only shallowly
+// compare err and the target and not call [Unwrap] on either.
+func Is(err error, target error) bool {
+	return stderrors.Is(err, target)
 }
