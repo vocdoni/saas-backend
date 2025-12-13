@@ -186,248 +186,115 @@ func (a *API) initRouter() http.Handler {
 		// Don't fail completely, but log the error
 	}
 
+	handle := func(r chi.Router, method, pattern string, h http.HandlerFunc) {
+		log.Infow("new route", "method", method, "path", pattern)
+		switch method {
+		case http.MethodGet:
+			r.Get(pattern, h)
+		case http.MethodPut:
+			r.Put(pattern, h)
+		case http.MethodPost:
+			r.Post(pattern, h)
+		case http.MethodDelete:
+			r.Delete(pattern, h)
+		default:
+			log.Errorf("unsupported method %s in api initRouter", method)
+		}
+	}
+
 	// protected routes
 	r.Group(func(r chi.Router) {
 		// seek, verify and validate JWT tokens
 		r.Use(jwtauth.Verifier(a.auth))
 		// handle valid JWT tokens
 		r.Use(a.authenticator)
-		// refresh the token
-		log.Infow("new route", "method", "POST", "path", authRefresTokenEndpoint)
-		r.Post(authRefresTokenEndpoint, a.refreshTokenHandler)
-		// organizations the user belongs to
-		log.Infow("new route", "method", "GET", "path", authAddressesEndpoint)
-		r.Get(authAddressesEndpoint, a.organizationAddressesHandler)
-		// get user information
-		log.Infow("new route", "method", "GET", "path", usersMeEndpoint)
-		r.Get(usersMeEndpoint, a.userInfoHandler)
-		// update user information
-		log.Infow("new route", "method", "PUT", "path", usersMeEndpoint)
-		r.Put(usersMeEndpoint, a.updateUserInfoHandler)
-		// update user password
-		log.Infow("new route", "method", "PUT", "path", usersPasswordEndpoint)
-		r.Put(usersPasswordEndpoint, a.updateUserPasswordHandler)
-		// sign a payload
-		log.Infow("new route", "method", "POST", "path", signTxEndpoint)
-		r.Post(signTxEndpoint, a.signTxHandler)
-		// sign a message
-		log.Infow("new route", "method", "POST", "path", signMessageEndpoint)
-		r.Post(signMessageEndpoint, a.signMessageHandler)
-		// create an organization
-		log.Infow("new route", "method", "POST", "path", organizationsEndpoint)
-		r.Post(organizationsEndpoint, a.createOrganizationHandler)
-		// create a route for those endpoints that include the organization
-		// address to get the organization data from the database
-		// update the organization
-		log.Infow("new route", "method", "PUT", "path", organizationEndpoint)
-		r.Put(organizationEndpoint, a.updateOrganizationHandler)
-		// get organization users
-		log.Infow("new route", "method", "GET", "path", organizationUsersEndpoint)
-		r.Get(organizationUsersEndpoint, a.organizationUsersHandler)
-		// get organization subscription
-		log.Infow("new route", "method", "GET", "path", organizationSubscriptionEndpoint)
-		r.Get(organizationSubscriptionEndpoint, a.organizationSubscriptionHandler)
-		// invite a new user to the organization
-		log.Infow("new route", "method", "POST", "path", organizationAddUserEndpoint)
-		r.Post(organizationAddUserEndpoint, a.inviteOrganizationUserHandler)
-		// update an organization's user role
-		log.Infow("new route", "method", "PUT", "path", organizationUpdateUserEndpoint)
-		r.Put(organizationUpdateUserEndpoint, a.updateOrganizationUserHandler)
-		// remove a user from an organization
-		log.Infow("new route", "method", "DELETE", "path", organizationDeleteUserEndpoint)
-		r.Delete(organizationDeleteUserEndpoint, a.removeOrganizationUserHandler)
-		// get organization censuses
-		log.Infow("new route", "method", "GET", "path", organizationCensusesEndpoint)
-		r.Get(organizationCensusesEndpoint, a.organizationCensusesHandler)
-		// get organization draft processes
-		log.Infow("new route", "method", "GET", "path", organizationListProcessDraftsEndpoint)
-		r.Get(organizationListProcessDraftsEndpoint, a.organizationListProcessDraftsHandler)
-		// pending organization invitations
-		log.Infow("new route", "method", "GET", "path", organizationPendingUsersEndpoint)
-		r.Get(organizationPendingUsersEndpoint, a.pendingOrganizationUsersHandler)
-		// update pending organization invitation
-		log.Infow("new route", "method", "PUT", "path", organizationHandlePendingInvitationEndpoint)
-		r.Put(organizationHandlePendingInvitationEndpoint, a.updatePendingUserInvitationHandler)
-		// delete pending organization invitation
-		log.Infow("new route", "method", "DELETE", "path", organizationHandlePendingInvitationEndpoint)
-		r.Delete(organizationHandlePendingInvitationEndpoint, a.deletePendingUserInvitationHandler)
-		// get organization members
-		log.Infow("new route", "method", "GET", "path", organizationMembersEndpoint)
-		r.Get(organizationMembersEndpoint, a.organizationMembersHandler)
-		// add organization members
-		log.Infow("new route", "method", "POST", "path", organizationAddMembersEndpoint)
-		r.Post(organizationAddMembersEndpoint, a.addOrganizationMembersHandler)
-		// check the status of the add members job
-		log.Infow("new route", "method", "GET", "path", organizationAddMembersJobStatusEndpoint)
-		r.Get(organizationAddMembersJobStatusEndpoint, a.addOrganizationMembersJobStatusHandler)
-		// delete a set of organization members
-		log.Infow("new route", "method", "DELETE", "path", organizationDeleteMembersEndpoint)
-		r.Delete(organizationDeleteMembersEndpoint, a.deleteOrganizationMembersHandler)
-		// add/overwrite organization meta information
-		log.Infow("new route", "method", "POST", "path", organizationMetaEndpoint)
-		r.Post(organizationMetaEndpoint, a.addOrganizationMetaHandler)
-		// update organization meta information
-		log.Infow("new route", "method", "PUT", "path", organizationMetaEndpoint)
-		r.Put(organizationMetaEndpoint, a.updateOrganizationMetaHandler)
-		// get organization meta information
-		log.Infow("new route", "method", "GET", "path", organizationMetaEndpoint)
-		r.Get(organizationMetaEndpoint, a.organizationMetaHandler)
-		// delete organization meta information
-		log.Infow("new route", "method", "DELETE", "path", organizationMetaEndpoint)
-		r.Delete(organizationMetaEndpoint, a.deleteOrganizationMetaHandler)
-		// create a new ticket for the organization
-		log.Infow("new route", "method", "POST", "path", organizationCreateTicketEndpoint)
-		r.Post(organizationCreateTicketEndpoint, a.organizationCreateTicket)
-		// create a new organization member group
-		log.Infow("new route", "method", "POST", "path", organizationGroupsEndpoint)
-		r.Post(organizationGroupsEndpoint, a.createOrganizationMemberGroupHandler)
-		// get organization member groups list
-		log.Infow("new route", "method", "GET", "path", organizationGroupsEndpoint)
-		r.Get(organizationGroupsEndpoint, a.organizationMemberGroupsHandler)
-		// get details of an organization member group
-		log.Infow("new route", "method", "GET", "path", organizationGroupEndpoint)
-		r.Get(organizationGroupEndpoint, a.organizationMemberGroupHandler)
-		// get members of an organization member group
-		log.Infow("new route", "method", "GET", "path", organizationGroupMembersEndpoint)
-		r.Get(organizationGroupMembersEndpoint, a.listOrganizationMemberGroupsHandler)
-		// update an organization member group
-		log.Infow("new route", "method", "PUT", "path", organizationGroupEndpoint)
-		r.Put(organizationGroupEndpoint, a.updateOrganizationMemberGroupHandler)
-		// delete an organization member group
-		log.Infow("new route", "method", "DELETE", "path", organizationGroupEndpoint)
-		r.Delete(organizationGroupEndpoint, a.deleteOrganizationMemberGroupHandler)
-		// validate the member data of an organization member group
-		log.Infow("new route", "method", "POST", "path", organizationGroupValidateEndpoint)
-		r.Post(organizationGroupValidateEndpoint, a.organizationMemberGroupValidateHandler)
-		// get organization jobs
-		log.Infow("new route", "method", "GET", "path", organizationJobsEndpoint)
-		r.Get(organizationJobsEndpoint, a.organizationJobsHandler)
 
-		// handle stripe checkout session
-		log.Infow("new route", "method", "POST", "path", subscriptionsCheckout)
-		r.Post(subscriptionsCheckout, a.stripeHandlers.CreateSubscriptionCheckout)
-		// get stripe checkout session info
-		log.Infow("new route", "method", "GET", "path", subscriptionsCheckoutSession)
-		r.Get(subscriptionsCheckoutSession, a.stripeHandlers.GetCheckoutSession)
-		// get stripe subscription portal session info
-		log.Infow("new route", "method", "GET", "path", subscriptionsPortal)
-		r.Get(subscriptionsPortal, func(w http.ResponseWriter, r *http.Request) {
+		handle(r, http.MethodPost, authRefresTokenEndpoint, a.refreshTokenHandler)
+		handle(r, http.MethodGet, authAddressesEndpoint, a.organizationAddressesHandler)
+		handle(r, http.MethodGet, usersMeEndpoint, a.userInfoHandler)
+		handle(r, http.MethodPut, usersMeEndpoint, a.updateUserInfoHandler)
+		handle(r, http.MethodPut, usersPasswordEndpoint, a.updateUserPasswordHandler)
+		handle(r, http.MethodPost, signTxEndpoint, a.signTxHandler)
+		handle(r, http.MethodPost, signMessageEndpoint, a.signMessageHandler)
+		handle(r, http.MethodPost, organizationsEndpoint, a.createOrganizationHandler)
+		handle(r, http.MethodPut, organizationEndpoint, a.updateOrganizationHandler)
+		handle(r, http.MethodGet, organizationUsersEndpoint, a.organizationUsersHandler)
+		handle(r, http.MethodGet, organizationSubscriptionEndpoint, a.organizationSubscriptionHandler)
+		handle(r, http.MethodPost, organizationAddUserEndpoint, a.inviteOrganizationUserHandler)
+		handle(r, http.MethodPut, organizationUpdateUserEndpoint, a.updateOrganizationUserHandler)
+		handle(r, http.MethodDelete, organizationDeleteUserEndpoint, a.removeOrganizationUserHandler)
+		handle(r, http.MethodGet, organizationCensusesEndpoint, a.organizationCensusesHandler)
+		handle(r, http.MethodGet, organizationListProcessDraftsEndpoint, a.organizationListProcessDraftsHandler)
+		handle(r, http.MethodGet, organizationPendingUsersEndpoint, a.pendingOrganizationUsersHandler)
+		handle(r, http.MethodPut, organizationHandlePendingInvitationEndpoint, a.updatePendingUserInvitationHandler)
+		handle(r, http.MethodDelete, organizationHandlePendingInvitationEndpoint, a.deletePendingUserInvitationHandler)
+		handle(r, http.MethodGet, organizationMembersEndpoint, a.organizationMembersHandler)
+		handle(r, http.MethodPost, organizationAddMembersEndpoint, a.addOrganizationMembersHandler)
+		handle(r, http.MethodGet, organizationAddMembersJobStatusEndpoint, a.addOrganizationMembersJobStatusHandler)
+		handle(r, http.MethodDelete, organizationDeleteMembersEndpoint, a.deleteOrganizationMembersHandler)
+		handle(r, http.MethodPost, organizationMetaEndpoint, a.addOrganizationMetaHandler)
+		handle(r, http.MethodPut, organizationMetaEndpoint, a.updateOrganizationMetaHandler)
+		handle(r, http.MethodGet, organizationMetaEndpoint, a.organizationMetaHandler)
+		handle(r, http.MethodDelete, organizationMetaEndpoint, a.deleteOrganizationMetaHandler)
+		handle(r, http.MethodPost, organizationCreateTicketEndpoint, a.organizationCreateTicket)
+		handle(r, http.MethodPost, organizationGroupsEndpoint, a.createOrganizationMemberGroupHandler)
+		handle(r, http.MethodGet, organizationGroupsEndpoint, a.organizationMemberGroupsHandler)
+		handle(r, http.MethodGet, organizationGroupEndpoint, a.organizationMemberGroupHandler)
+		handle(r, http.MethodGet, organizationGroupMembersEndpoint, a.listOrganizationMemberGroupsHandler)
+		handle(r, http.MethodPut, organizationGroupEndpoint, a.updateOrganizationMemberGroupHandler)
+		handle(r, http.MethodDelete, organizationGroupEndpoint, a.deleteOrganizationMemberGroupHandler)
+		handle(r, http.MethodPost, organizationGroupValidateEndpoint, a.organizationMemberGroupValidateHandler)
+		handle(r, http.MethodGet, organizationJobsEndpoint, a.organizationJobsHandler)
+		handle(r, http.MethodPost, subscriptionsCheckout, a.stripeHandlers.CreateSubscriptionCheckout)
+		handle(r, http.MethodGet, subscriptionsCheckoutSession, a.stripeHandlers.GetCheckoutSession)
+		handle(r, http.MethodGet, subscriptionsPortal, func(w http.ResponseWriter, r *http.Request) {
 			a.stripeHandlers.CreateSubscriptionPortalSession(w, r, a)
 		})
-		// upload an image to the object storage
-		log.Infow("new route", "method", "POST", "path", objectStorageUploadTypedEndpoint)
-		r.Post(objectStorageUploadTypedEndpoint, a.objectStorage.UploadImageWithFormHandler)
-		// CENSUS ROUTES
-		// create census
-		log.Infow("new route", "method", "POST", "path", censusEndpoint)
-		r.Post(censusEndpoint, a.createCensusHandler)
-		// add census participants
-		log.Infow("new route", "method", "POST", "path", censusIDEndpoint)
-		r.Post(censusIDEndpoint, a.addCensusParticipantsHandler)
-		// get census participants job
-		log.Infow("new route", "method", "GET", "path", censusAddParticipantsJobStatusEndpoint)
-		r.Get(censusAddParticipantsJobStatusEndpoint, a.censusAddParticipantsJobStatusHandler)
-		// publish census
-		log.Infow("new route", "method", "POST", "path", censusPublishEndpoint)
-		r.Post(censusPublishEndpoint, a.publishCensusHandler)
-		// publish group census
-		log.Infow("new route", "method", "POST", "path", censusGroupPublishEndpoint)
-		r.Post(censusGroupPublishEndpoint, a.publishCensusGroupHandler)
-		// get census participants
-		log.Infow("new route", "method", "GET", "path", censusParticipantsEndpoint)
-		r.Get(censusParticipantsEndpoint, a.censusParticipantsHandler)
-		// PROCESS ROUTES
-		log.Infow("new route", "method", "POST", "path", processCreateEndpoint)
-		r.Post(processCreateEndpoint, a.createProcessHandler)
-		log.Infow("new route", "method", "PUT", "path", processEndpoint)
-		r.Put(processEndpoint, a.updateProcessHandler)
-		log.Infow("new route", "method", "DELETE", "path", processEndpoint)
-		r.Delete(processEndpoint, a.deleteProcessHandler)
-		// PROCESS BUNDLE ROUTES (private)
-		log.Infow("new route", "method", "POST", "path", processBundleEndpoint)
-		r.Post(processBundleEndpoint, a.createProcessBundleHandler)
-		log.Infow("new route", "method", "PUT", "path", processBundleUpdateEndpoint)
-		r.Put(processBundleUpdateEndpoint, a.updateProcessBundleHandler)
+		handle(r, http.MethodPost, objectStorageUploadTypedEndpoint, a.objectStorage.UploadImageWithFormHandler)
+		handle(r, http.MethodPost, censusEndpoint, a.createCensusHandler)
+		handle(r, http.MethodPost, censusIDEndpoint, a.addCensusParticipantsHandler)
+		handle(r, http.MethodGet, censusAddParticipantsJobStatusEndpoint, a.censusAddParticipantsJobStatusHandler)
+		handle(r, http.MethodPost, censusPublishEndpoint, a.publishCensusHandler)
+		handle(r, http.MethodPost, censusGroupPublishEndpoint, a.publishCensusGroupHandler)
+		handle(r, http.MethodGet, censusParticipantsEndpoint, a.censusParticipantsHandler)
+		handle(r, http.MethodPost, processCreateEndpoint, a.createProcessHandler)
+		handle(r, http.MethodPut, processEndpoint, a.updateProcessHandler)
+		handle(r, http.MethodDelete, processEndpoint, a.deleteProcessHandler)
+		handle(r, http.MethodPost, processBundleEndpoint, a.createProcessBundleHandler)
+		handle(r, http.MethodPut, processBundleUpdateEndpoint, a.updateProcessBundleHandler)
 	})
 
 	// Public routes
 	r.Group(func(r chi.Router) {
-		r.Get("/ping", func(w http.ResponseWriter, _ *http.Request) {
+		handle(r, http.MethodGet, "/ping", func(w http.ResponseWriter, _ *http.Request) {
 			if _, err := w.Write([]byte(".")); err != nil {
 				log.Warnw("failed to write ping response", "error", err)
 			}
 		})
-		// login
-		log.Infow("new route", "method", "POST", "path", authLoginEndpoint)
-		r.Post(authLoginEndpoint, a.authLoginHandler)
-		// oauth login
-		log.Infow("new route", "method", "POST", "path", oauthLoginEndpoint)
-		r.Post(oauthLoginEndpoint, a.oauthLoginHandler)
-		// register user
-		log.Infow("new route", "method", "POST", "path", usersEndpoint)
-		r.Post(usersEndpoint, a.registerHandler)
-		// verify user
-		log.Infow("new route", "method", "POST", "path", verifyUserEndpoint)
-		r.Post(verifyUserEndpoint, a.verifyUserAccountHandler)
-		// get user verification code information
-		log.Infow("new route", "method", "GET", "path", verifyUserCodeEndpoint)
-		r.Get(verifyUserCodeEndpoint, a.userVerificationCodeInfoHandler)
-		// resend user verification code
-		log.Infow("new route", "method", "POST", "path", verifyUserCodeEndpoint)
-		r.Post(verifyUserCodeEndpoint, a.resendUserVerificationCodeHandler)
-		// request user password recovery
-		log.Infow("new route", "method", "POST", "path", usersRecoveryPasswordEndpoint)
-		r.Post(usersRecoveryPasswordEndpoint, a.recoverUserPasswordHandler)
-		// reset user password
-		log.Infow("new route", "method", "POST", "path", usersResetPasswordEndpoint)
-		r.Post(usersResetPasswordEndpoint, a.resetUserPasswordHandler)
-		// get organization information
-		log.Infow("new route", "method", "GET", "path", organizationEndpoint)
-		r.Get(organizationEndpoint, a.organizationInfoHandler)
-		// accept organization invitation
-		log.Infow("new route", "method", "POST", "path", organizationAcceptUserEndpoint)
-		r.Post(organizationAcceptUserEndpoint, a.acceptOrganizationUserInvitationHandler)
-		// get organization roles
-		log.Infow("new route", "method", "GET", "path", organizationRolesEndpoint)
-		r.Get(organizationRolesEndpoint, a.organizationRolesHandler)
-		// get organization types
-		log.Infow("new route", "method", "GET", "path", organizationTypesEndpoint)
-		r.Get(organizationTypesEndpoint, a.organizationsTypesHandler)
-		// get subscriptions
-		log.Infow("new route", "method", "GET", "path", plansEndpoint)
-		r.Get(plansEndpoint, a.plansHandler)
-		// get subscription info
-		log.Infow("new route", "method", "GET", "path", planInfoEndpoint)
-		r.Get(planInfoEndpoint, a.planInfoHandler)
-		// handle stripe webhook
-		log.Infow("new route", "method", "POST", "path", subscriptionsWebhook)
-		r.Post(subscriptionsWebhook, a.stripeHandlers.HandleWebhook)
-		// upload an image to the object storage
-		log.Infow("new route", "method", "GET", "path", objectStorageDownloadTypedEndpoint)
-		r.Get(objectStorageDownloadTypedEndpoint, a.objectStorage.DownloadImageInlineHandler)
-		// get census info
-		log.Infow("new route", "method", "GET", "path", censusIDEndpoint)
-		r.Get(censusIDEndpoint, a.censusInfoHandler)
-		// process info handler
-		log.Infow("new route", "method", "GET", "path", processEndpoint)
-		r.Get(processEndpoint, a.processInfoHandler)
-		// process sign info handler
-		log.Infow("new route", "method", "POST", "path", processSignInfoEndpoint)
-		r.Post(processSignInfoEndpoint, cspHandlers.ConsumedAddressHandler)
-		// process bundle info handler
-		log.Infow("new route", "method", "GET", "path", processBundleInfoEndpoint)
-		r.Get(processBundleInfoEndpoint, a.processBundleInfoHandler)
-		// process bundle auth handler
-		log.Infow("new route", "method", "POST", "path", processBundleAuthEndpoint)
-		// r.Post(processBundleAuthEndpoint, a.processBundleAuthHandler)
-		r.Post(processBundleAuthEndpoint, cspHandlers.BundleAuthHandler)
-		// process bundle sign handler
-		log.Infow("new route", "method", "POST", "path", processBundleSignEndpoint)
-		// r.Post(processBundleSignEndpoint, a.processBundleSignHandler)
-		r.Post(processBundleSignEndpoint, cspHandlers.BundleSignHandler)
-		// process bundle member info handler
-		log.Infow("new route", "method", "GET", "path", processBundleMemberEndpoint)
-		r.Get(processBundleMemberEndpoint, a.processBundleParticipantInfoHandler)
+
+		handle(r, http.MethodPost, authLoginEndpoint, a.authLoginHandler)
+		handle(r, http.MethodPost, oauthLoginEndpoint, a.oauthLoginHandler)
+		handle(r, http.MethodPost, usersEndpoint, a.registerHandler)
+		handle(r, http.MethodPost, verifyUserEndpoint, a.verifyUserAccountHandler)
+		handle(r, http.MethodGet, verifyUserCodeEndpoint, a.userVerificationCodeInfoHandler)
+		handle(r, http.MethodPost, verifyUserCodeEndpoint, a.resendUserVerificationCodeHandler)
+		handle(r, http.MethodPost, usersRecoveryPasswordEndpoint, a.recoverUserPasswordHandler)
+		handle(r, http.MethodPost, usersResetPasswordEndpoint, a.resetUserPasswordHandler)
+		handle(r, http.MethodGet, organizationEndpoint, a.organizationInfoHandler)
+		handle(r, http.MethodPost, organizationAcceptUserEndpoint, a.acceptOrganizationUserInvitationHandler)
+		handle(r, http.MethodGet, organizationRolesEndpoint, a.organizationRolesHandler)
+		handle(r, http.MethodGet, organizationTypesEndpoint, a.organizationsTypesHandler)
+		handle(r, http.MethodGet, plansEndpoint, a.plansHandler)
+		handle(r, http.MethodGet, planInfoEndpoint, a.planInfoHandler)
+		handle(r, http.MethodPost, subscriptionsWebhook, a.stripeHandlers.HandleWebhook)
+		handle(r, http.MethodGet, objectStorageDownloadTypedEndpoint, a.objectStorage.DownloadImageInlineHandler)
+		handle(r, http.MethodGet, censusIDEndpoint, a.censusInfoHandler)
+		handle(r, http.MethodGet, processEndpoint, a.processInfoHandler)
+		handle(r, http.MethodPost, processSignInfoEndpoint, cspHandlers.ConsumedAddressHandler)
+		handle(r, http.MethodGet, processBundleInfoEndpoint, a.processBundleInfoHandler)
+		handle(r, http.MethodPost, processBundleAuthEndpoint, cspHandlers.BundleAuthHandler)
+		handle(r, http.MethodPost, processBundleSignEndpoint, cspHandlers.BundleSignHandler)
+		handle(r, http.MethodGet, processBundleMemberEndpoint, a.processBundleParticipantInfoHandler)
 	})
 	a.router = r
 	return r
