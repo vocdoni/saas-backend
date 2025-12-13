@@ -1205,7 +1205,7 @@ definitions:
         type: integer
       data:
         description: Optional data to include in the error response
-      err:
+      error:
         description: Original error
       httpstatus:
         description: HTTP status code to return
