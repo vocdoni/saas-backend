@@ -108,7 +108,6 @@ func TestCSPVoting(t *testing.T) {
 
 		// Create an organization
 		orgAddress := testCreateOrganization(t, token)
-		t.Logf("Created organization with address: %s", orgAddress.String())
 
 		// Subscribe the organization to a plan
 		plans, err := testDB.Plans()

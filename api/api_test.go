@@ -66,6 +66,31 @@ const (
 	testWebAppURL       = "https://mock.vocdoni.app"
 )
 
+var mockMembers = []apicommon.OrgMember{
+	{
+		MemberNumber: "P001",
+		Name:         "Alice Doe",
+		Email:        "alice.doe@example.com",
+		Phone:        "+34611111111",
+		Password:     "password111",
+		Other: map[string]any{
+			"department": "Engineering",
+			"age":        30,
+		},
+	},
+	{
+		MemberNumber: "P002",
+		Name:         "Bob Smith",
+		Email:        "bob.smith@example.com",
+		Phone:        "+34622222222",
+		Password:     "password222",
+		Other: map[string]any{
+			"department": "Marketing",
+			"age":        28,
+		},
+	},
+}
+
 var (
 	mockPlans = []*db.Plan{mockFreePlan, mockEssentialPlan, mockPremiumPlan}
 
@@ -515,6 +540,10 @@ func testCreateUser(t *testing.T, password string) string {
 	loginResp := requestAndParse[apicommon.LoginResponse](t, http.MethodPost, "", loginInfo, authLoginEndpoint)
 	qt.Assert(t, loginResp.Token, qt.Not(qt.Equals), "")
 
+	// Verify the token works
+	adminUser := requestAndParse[apicommon.UserInfo](t, http.MethodGet, loginResp.Token, nil, usersMeEndpoint)
+	t.Logf("Admin user: %+v\n", adminUser)
+
 	return loginResp.Token
 }
 
@@ -527,6 +556,11 @@ func testCreateOrganization(t *testing.T, jwt string) common.Address {
 	}
 	orgResp := requestAndParse[apicommon.OrganizationInfo](t, http.MethodPost, jwt, orgInfo, organizationsEndpoint)
 	qt.Assert(t, orgResp.Address, qt.Not(qt.Equals), "")
+
+	// Get the organization to verify it exists
+	requestAndAssertCode(http.StatusOK, t, http.MethodGet, jwt, nil, "organizations", orgResp.Address.String())
+
+	t.Logf("Created organization with address: %s\n", orgResp.Address)
 
 	return orgResp.Address
 }
@@ -747,6 +781,33 @@ func extractOTPFromEmail(mailBody string) string {
 	return ""
 }
 
+// Helper function to parse JSON responses
+func parseJSON(data []byte, v any) error {
+	return json.Unmarshal(data, v)
+}
+
+// memberIDs returns a slice of all orgMembers[n].ID
+func memberIDs(orgMembers []apicommon.OrgMember) []string {
+	s := make([]string, 0, len(orgMembers))
+	for _, m := range orgMembers {
+		s = append(s, m.ID)
+	}
+	return s
+}
+
+func decodeNestedFieldAs[T any](c *qt.C, parsedJSON map[string]any, field string) T {
+	c.Assert(parsedJSON[field], qt.Not(qt.IsNil), qt.Commentf("no field %q in json %#v\n", parsedJSON))
+
+	// to decode field we need to Marshal and Unmarshal
+	nestedFieldBytes, err := json.Marshal(parsedJSON[field])
+	c.Assert(err, qt.IsNil)
+
+	var nestedField T
+	err = json.Unmarshal(nestedFieldBytes, &nestedField)
+	c.Assert(err, qt.IsNil, qt.Commentf("%#v\n", parsedJSON[field]))
+	return nestedField
+}
+
 // requestAndParse makes a request and parses the JSON response.
 // It takes the same parameters as testRequest plus a type parameter for the response.
 // Asserts the HTTP Status Code is 200 OK, and returns the parsed response of the specified type.
@@ -779,4 +840,123 @@ func requestAndAssertError(expectedError errors.Error, t *testing.T, method, jwt
 	errResp := requestAndParseWithAssertCode[errors.Error](expectedError.HTTPstatus,
 		t, method, jwt, jsonBody, urlPath...)
 	qt.Assert(t, errResp.Code, qt.Equals, expectedError.Code)
+}
+
+// requestAndExpectError makes a request, expecting to receive an error and returns it.
+func requestAndExpectError(t *testing.T, method, jwt string, jsonBody any, urlPath ...string) errors.Error {
+	resp, code := testRequest(t, method, jwt, jsonBody, urlPath...)
+	qt.Assert(t, code, qt.Not(qt.Equals), http.StatusOK, qt.Commentf("response: %s", resp))
+
+	var errResp errors.Error
+	err := json.Unmarshal(resp, &errResp)
+	qt.Assert(t, err, qt.IsNil, qt.Commentf("failed to parse response: %s", resp))
+
+	return errResp
+}
+
+// organizationMembers methods
+
+func postOrgMembers(t *testing.T, loginToken string, orgAddress common.Address, members ...apicommon.OrgMember,
+) []apicommon.OrgMember {
+	// Add members to the organization first
+	requestAndAssertCode(http.StatusOK, t, http.MethodPost, loginToken, &apicommon.AddMembersRequest{Members: members},
+		"organizations", orgAddress.String(), "members")
+
+	// Get the members and return them, so caller can get their IDs
+	orgMembersResp := getOrgMembers(t, loginToken, orgAddress)
+	return orgMembersResp.Members
+}
+
+func getOrgMember(t *testing.T, adminToken string, orgAddress common.Address, memberID string) apicommon.OrgMember {
+	membersList := getOrgMembers(t, adminToken, orgAddress)
+	for _, m := range membersList.Members {
+		if m.ID == memberID {
+			return m
+		}
+	}
+	t.Fatalf("member %q not found", memberID)
+	return apicommon.OrgMember{}
+}
+
+func getOrgMembers(t *testing.T, adminToken string, orgAddress common.Address) apicommon.OrganizationMembersResponse {
+	return requestAndParse[apicommon.OrganizationMembersResponse](t, http.MethodGet, adminToken, nil,
+		organizationMembersURL(orgAddress.String()))
+}
+
+func putOrgMember(t *testing.T, adminToken string, orgAddress common.Address, member apicommon.OrgMember) string {
+	resp := requestAndParse[apicommon.OrgMember](t, http.MethodPut, adminToken, member,
+		organizationMembersURL(orgAddress.String()))
+	return resp.ID
+}
+
+func putOrgMemberAndExpectError(t *testing.T, adminToken string, orgAddress common.Address, member apicommon.OrgMember,
+) errors.Error {
+	return requestAndExpectError(t, http.MethodPut, adminToken, member, organizationMembersURL(orgAddress.String()))
+}
+
+func createGroupBasedCensus(
+	t *testing.T,
+	token string,
+	orgAddress common.Address,
+	authFields db.OrgMemberAuthFields,
+	twoFaFields db.OrgMemberTwoFaFields,
+	memberIDs ...string,
+) string {
+	censusID := testCreateCensus(t, token, orgAddress, authFields, twoFaFields)
+
+	group := postGroup(t, token, orgAddress, memberIDs...)
+
+	census := postGroupCensus(t, token, censusID, group.ID,
+		&apicommon.PublishCensusGroupRequest{
+			AuthFields:  authFields,
+			TwoFaFields: twoFaFields,
+		})
+
+	qt.Assert(t, census.Size, qt.Equals, int64(len(memberIDs)))
+	return censusID
+}
+
+func postGroup(t *testing.T, token string, orgAddress common.Address, memberIDs ...string) apicommon.OrganizationMemberGroupInfo {
+	request := &apicommon.CreateOrganizationMemberGroupRequest{
+		Title:       "Test Census Group",
+		Description: "Group for testing census publishing",
+		MemberIDs:   memberIDs,
+	}
+	groupInfo := requestAndParse[apicommon.OrganizationMemberGroupInfo](t, http.MethodPost, token, request,
+		organizationGroupsURL(orgAddress.String()))
+	qt.Assert(t, groupInfo.ID, qt.Not(qt.Equals), "")
+	t.Logf("Created member group with ID: %s", groupInfo.ID)
+	return groupInfo
+}
+
+// postGroupCensus creates a new census based on the given groupID on the given organization address.
+// It returns the census details.
+func postGroupCensus(t *testing.T, loginToken string, censusID, groupID string, request *apicommon.PublishCensusGroupRequest,
+) apicommon.PublishedCensusResponse {
+	c := qt.New(t)
+
+	resp := requestAndParse[apicommon.PublishedCensusResponse](t, http.MethodPost, loginToken, request,
+		censusGroupPublishURL(censusID, groupID))
+
+	c.Assert(resp.URI, qt.Not(qt.Equals), "")
+	c.Assert(resp.Root, qt.Not(qt.Equals), "")
+	c.Logf("Published group census with URI: %s and Root: %s", resp.URI, resp.Root)
+	return resp
+}
+
+// URLs
+
+func organizationMembersURL(orgAddress string) string {
+	return strings.ReplaceAll(organizationMembersEndpoint, "{address}", orgAddress)
+}
+
+func organizationGroupsURL(orgAddress string) string {
+	return strings.ReplaceAll(organizationGroupsEndpoint, "{address}", orgAddress)
+}
+
+func censusGroupPublishURL(censusID, groupID string) string {
+	s := censusGroupPublishEndpoint
+	s = strings.ReplaceAll(s, "{id}", censusID)
+	s = strings.ReplaceAll(s, "{groupid}", groupID)
+	return s
 }

@@ -11,6 +11,7 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -30,10 +31,6 @@ func TestOrganizationMembers(t *testing.T) {
 
 	// Create an organization
 	orgAddress := testCreateOrganization(t, adminToken)
-	t.Logf("Created organization with address: %s\n", orgAddress)
-
-	// Get the organization to verify it exists
-	requestAndAssertCode(http.StatusOK, t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String())
 
 	// Test 1: Get organization members (initially empty)
 	// Test 1.1: Test with valid organization address
@@ -545,4 +542,135 @@ func TestOrganizationMembers(t *testing.T) {
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "members")
 	c.Assert(membersResponse.Members, qt.HasLen, 7, qt.Commentf("expected 7 members remaining (9 total - 2 deleted)"))
+}
+
+func TestUpsertOrganizationMember(t *testing.T) {
+	c := qt.New(t)
+	c.Run("MemberNumber+Name+Email", func(c *qt.C) {
+		loginToken := testCreateUser(t, "adminpassword123")
+		orgAddress := testCreateOrganization(t, loginToken)
+		c.Logf("will add mock members: %+v", mockMembers)
+		orgMembers := postOrgMembers(t, loginToken, orgAddress, mockMembers...)
+		c.Logf("resulting org members: %+v", orgMembers)
+
+		createGroupBasedCensus(t, loginToken, orgAddress,
+			db.OrgMemberAuthFields{
+				db.OrgMemberAuthFieldsMemberNumber,
+				db.OrgMemberAuthFieldsName,
+			}, db.OrgMemberTwoFaFields{
+				db.OrgMemberTwoFaFieldEmail,
+			},
+			memberIDs(orgMembers)...)
+
+		editedMember0 := orgMembers[0]
+		editedMember0.Phone = "" // unset Phone field since the client might not provide it
+		editedMember0.Email = "something-else@gmail.com"
+		c.Logf("putting member: %+v", editedMember0)
+		member0ID := putOrgMember(t, loginToken, orgAddress, editedMember0)
+		member := getOrgMember(t, loginToken, orgAddress, member0ID)
+		c.Logf("got member: %+v", member)
+
+		// MemberNumber+Name+Email cannot all be the same as another member,
+		// but a subset of those is fine.
+		// So first set Email and Name to be the same as another member, should work
+		editedMember0.Email = mockMembers[1].Email
+		editedMember0.Name = mockMembers[1].Name
+		c.Logf("putting member: %+v", editedMember0)
+		putOrgMember(t, loginToken, orgAddress, editedMember0)
+
+		// but now setting MemberNumber to also be the same is not allowed.
+		editedMember0.MemberNumber = mockMembers[1].MemberNumber
+		c.Logf("putting member: %+v", editedMember0)
+		err := putOrgMemberAndExpectError(t, loginToken, orgAddress, editedMember0)
+		c.Assert(err.Code, qt.Equals, errors.ErrInvalidData.Code)
+		c.Assert(err, qt.ErrorMatches, ".*update would create duplicates.*")
+
+		// creating a new member with those same details should succeed
+		newMember := editedMember0
+		newMember.ID = ""
+		c.Logf("putting member: %+v", newMember)
+		putOrgMember(t, loginToken, orgAddress, newMember)
+
+		// updating another parameter of member0, like weight, should just work
+		editedMember0.MemberNumber = mockMembers[0].MemberNumber
+		editedMember0.Weight = "42"
+		c.Logf("putting member: %+v", editedMember0)
+		putOrgMember(t, loginToken, orgAddress, editedMember0)
+
+		// setting same Phone should be OK since it's not used in the census
+		editedMember0.Phone = mockMembers[1].Phone
+		c.Logf("putting member: %+v", editedMember0)
+		putOrgMember(t, loginToken, orgAddress, editedMember0)
+	})
+
+	c.Run("Name+Email+Phone", func(c *qt.C) {
+		loginToken := testCreateUser(t, "adminpassword123")
+		orgAddress := testCreateOrganization(t, loginToken)
+		c.Logf("will add mock members: %+v", mockMembers)
+		orgMembers := postOrgMembers(t, loginToken, orgAddress, mockMembers...)
+		c.Logf("resulting org members: %+v", orgMembers)
+
+		createGroupBasedCensus(t, loginToken, orgAddress,
+			db.OrgMemberAuthFields{
+				db.OrgMemberAuthFieldsName,
+			}, db.OrgMemberTwoFaFields{
+				db.OrgMemberTwoFaFieldEmail,
+				db.OrgMemberTwoFaFieldPhone,
+			},
+			memberIDs(orgMembers)...)
+
+		editedMember0 := orgMembers[0]
+		editedMember0.Phone = "" // unset Phone field since the client might not provide it
+		editedMember0.Email = "something-else@gmail.com"
+		c.Logf("putting member: %+v", editedMember0)
+		member0ID := putOrgMember(t, loginToken, orgAddress, editedMember0)
+		member := getOrgMember(t, loginToken, orgAddress, member0ID)
+		c.Logf("got member: %+v", member)
+
+		// Name+Email cannot the same as another member,
+		// Name+Phone also not.
+		// So first set Name to be the same as another member, this should work
+		editedMember0.Name = mockMembers[1].Name
+		c.Logf("putting member: %+v", editedMember0)
+		putOrgMember(t, loginToken, orgAddress, editedMember0)
+
+		// but now setting same Phone too, is not allowed.
+		c.Run("SamePhone", func(c *qt.C) {
+			editedMember0.Phone = mockMembers[1].Phone
+			c.Logf("putting member: %+v", editedMember0)
+			err := putOrgMemberAndExpectError(t, loginToken, orgAddress, editedMember0)
+			c.Assert(err.Code, qt.Equals, errors.ErrInvalidData.Code)
+			c.Assert(err, qt.ErrorMatches, ".*update would create duplicates.*")
+		})
+
+		// setting same Email too, is also not allowed.
+		c.Run("SameEmail", func(c *qt.C) {
+			editedMember0.Phone = ""
+			editedMember0.Email = mockMembers[1].Email
+			c.Logf("putting member: %+v", editedMember0)
+			err := putOrgMemberAndExpectError(t, loginToken, orgAddress, editedMember0)
+			c.Assert(err.Code, qt.Equals, errors.ErrInvalidData.Code)
+			c.Assert(err, qt.ErrorMatches, ".*update would create duplicates.*")
+		})
+
+		// creating a new member with those same details should succeed
+		newMember := editedMember0
+		newMember.ID = ""
+		c.Logf("putting member: %+v", newMember)
+		putOrgMember(t, loginToken, orgAddress, newMember)
+
+		// updating another parameter of member0, like weight, should just work
+		editedMember0.Phone = ""
+		editedMember0.Email = ""
+		editedMember0.Weight = "42"
+		c.Logf("putting member: %+v", editedMember0)
+		putOrgMember(t, loginToken, orgAddress, editedMember0)
+
+		// setting same Phone and Email should be OK as long as Name is different
+		editedMember0.Name = mockMembers[0].Name
+		editedMember0.Email = mockMembers[1].Email
+		editedMember0.Phone = mockMembers[1].Phone
+		c.Logf("putting member: %+v", editedMember0)
+		putOrgMember(t, loginToken, orgAddress, editedMember0)
+	})
 }

@@ -29,11 +29,6 @@ func TestOrganizationUsers(t *testing.T) {
 
 	// Create an organization
 	orgAddress := testCreateOrganization(t, adminToken)
-	t.Logf("Created organization with address: %s\n", orgAddress.String())
-
-	// Get the organization to verify it exists
-	resp, code = testRequest(t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String())
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Create a second user to be invited to the organization
 	userToken := testCreateUser(t, "userpassword123")
@@ -117,7 +112,6 @@ func TestOrganizationUsers(t *testing.T) {
 	t.Run("RaceConditionInviteUsers", func(t *testing.T) {
 		// Create a new organization for this test
 		newOrgAddress := testCreateOrganization(t, adminToken)
-		t.Logf("Created organization with address: %s\n", newOrgAddress.String())
 
 		// Subscribe the organization to a plan
 		plans, err := testDB.Plans()
@@ -353,7 +347,6 @@ func TestOrganizationUsers(t *testing.T) {
 	t.Run("RemoveOrganizationUser", func(t *testing.T) {
 		// Create a new organization and user for this test
 		newOrgAddress := testCreateOrganization(t, adminToken)
-		t.Logf("Created organization with address: %s\n", newOrgAddress.String())
 
 		// Create a user to be removed
 		userToRemoveToken := testCreateUser(t, "removepassword123")
@@ -531,7 +524,6 @@ func TestOrganizationUsers(t *testing.T) {
 	t.Run("UpdatePendingInvitation", func(t *testing.T) {
 		// Create a new organization for this test
 		newOrgAddress := testCreateOrganization(t, adminToken)
-		t.Logf("Created organization with address: %s\n", newOrgAddress.String())
 
 		// Create a user to be invited
 		userToInviteEmail := fmt.Sprintf("invite-%s@example.com", uuid.New().String())
@@ -659,7 +651,6 @@ func TestOrganizationUsers(t *testing.T) {
 
 		// Test 5: Create another organization and invitation, then try to update it from the wrong organization
 		anotherOrgAddress := testCreateOrganization(t, adminToken)
-		t.Logf("Created another organization with address: %s\n", anotherOrgAddress.String())
 
 		// Invite the user to the second organization
 		inviteRequest = &apicommon.OrganizationInvite{
@@ -743,7 +734,6 @@ func TestOrganizationUsers(t *testing.T) {
 	t.Run("DeletePendingInvitation", func(t *testing.T) {
 		// Create a new organization for this test
 		newOrgAddress := testCreateOrganization(t, adminToken)
-		t.Logf("Created organization with address: %s\n", newOrgAddress.String())
 
 		// Create a user to be invited
 		userToInviteEmail := fmt.Sprintf("invite-%s@example.com", uuid.New().String())
@@ -865,7 +855,6 @@ func TestOrganizationUsers(t *testing.T) {
 
 		// Test 5: Create another organization and invitation, then try to delete it from the wrong organization
 		anotherOrgAddress := testCreateOrganization(t, adminToken)
-		t.Logf("Created another organization with address: %s\n", anotherOrgAddress.String())
 
 		// Invite the user to the second organization
 		inviteRequest = &apicommon.OrganizationInvite{
@@ -941,7 +930,6 @@ func TestOrganizationUsers(t *testing.T) {
 
 		// Create an organization
 		orgAddress := testCreateOrganization(t, adminToken)
-		t.Logf("Created organization with address: %s\n", orgAddress)
 
 		// Get the organization from the database
 		org, err := testDB.Organization(orgAddress)

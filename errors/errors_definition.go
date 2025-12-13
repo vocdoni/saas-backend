@@ -69,7 +69,8 @@ var (
 	ErrProcessNotFound            = Error{Code: 40038, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("process not found")}
 
 	// Conflict errors (409)
-	ErrDuplicateConflict = Error{Code: 40901, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("resource already exists")}
+	ErrDuplicateConflict           = Error{Code: 40901, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("resource already exists")}
+	ErrUpdateWouldCreateDuplicates = Error{Code: 40902, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("update would create duplicates")}
 
 	// Subscription errors (400)
 	ErrOrganizationSubscriptionInactive = Error{Code: 40021, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("organization subscription is not active")}

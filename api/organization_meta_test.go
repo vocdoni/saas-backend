@@ -21,10 +21,6 @@ func TestOrganizationMeta(t *testing.T) {
 
 	// Create an organization
 	orgAddress := testCreateOrganization(t, adminToken)
-	t.Logf("Created organization with address: %s\n", orgAddress)
-
-	// Get the organization to verify it exists
-	requestAndAssertCode(http.StatusOK, t, http.MethodGet, adminToken, nil, "organizations", orgAddress.String())
 
 	// Test 1: Add organization meta
 	// Test 1.1: Test with valid data
