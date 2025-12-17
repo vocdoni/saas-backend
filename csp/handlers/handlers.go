@@ -521,12 +521,7 @@ func (c *CSPHandlers) authFirstStep(
 	}
 
 	// Check the participant is in the census
-	censusParticipant, err := c.mainDB.CensusParticipantByLoginHashOrEmailorPhone(
-		censusID,
-		census.AuthFields,
-		census.TwoFaFields,
-		*inputMember,
-	)
+	censusParticipant, err := c.mainDB.CensusParticipantByLoginHash(*census, *inputMember)
 	if err != nil {
 		if errorspkg.Is(err, db.ErrNotFound) {
 			return nil, errors.ErrUnauthorized.Withf("participant not found in the census")

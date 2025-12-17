@@ -13,7 +13,7 @@ import (
 
 const testParticipantID = "member123"
 
-func setupTestCensusParticipantPrerequisites(t *testing.T, memberSuffix string) (*OrgMember, *Census, string) {
+func setupTestCensusParticipantPrerequisites(t *testing.T, memberSuffix string) (*OrgMember, *Census) {
 	// Create test organization
 	org := &Organization{
 		Address:   testOrgAddress,
@@ -43,17 +43,24 @@ func setupTestCensusParticipantPrerequisites(t *testing.T, memberSuffix string) 
 
 	// Create test census
 	census := &Census{
-		OrgAddress: testOrgAddress,
-		Type:       CensusTypeMail,
-		CreatedAt:  time.Now(),
-		UpdatedAt:  time.Now(),
+		OrgAddress:  testOrgAddress,
+		AuthFields:  OrgMemberAuthFields{OrgMemberAuthFieldsMemberNumber, OrgMemberAuthFieldsName},
+		TwoFaFields: OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail},
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 	censusID, err := testDB.SetCensus(census)
 	if err != nil {
 		t.Fatalf("failed to set census: %v", err)
 	}
 
-	return member, census, censusID
+	oid, err := primitive.ObjectIDFromHex(censusID)
+	if err != nil {
+		t.Fatalf("failed to ObjectIDFromHex: %v", err)
+	}
+	census.ID = oid
+
+	return member, census
 }
 
 func TestCensusParticipant(t *testing.T) {
@@ -63,19 +70,19 @@ func TestCensusParticipant(t *testing.T) {
 	t.Run("SetCensusParticipant", func(_ *testing.T) {
 		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites
-		member, _, censusID := setupTestCensusParticipantPrerequisites(t, "_set")
+		member, census := setupTestCensusParticipantPrerequisites(t, "_set")
 
 		// Test creating a new participant
 		participant := &CensusParticipant{
 			ParticipantID: member.ID.Hex(),
-			CensusID:      censusID,
+			CensusID:      census.ID.Hex(),
 		}
 
 		// Test with invalid data
 		t.Run("InvalidData", func(_ *testing.T) {
 			invalidParticipant := &CensusParticipant{
 				ParticipantID: "",
-				CensusID:      censusID,
+				CensusID:      census.ID.Hex(),
 			}
 			err := testDB.SetCensusParticipant(invalidParticipant)
 			c.Assert(err, qt.Equals, ErrInvalidData)
@@ -100,7 +107,7 @@ func TestCensusParticipant(t *testing.T) {
 		t.Run("NonExistentMember", func(_ *testing.T) {
 			nonExistentParticipantID := &CensusParticipant{
 				ParticipantID: "non-existent",
-				CensusID:      censusID,
+				CensusID:      census.ID.Hex(),
 			}
 			err := testDB.SetCensusParticipant(nonExistentParticipantID)
 			c.Assert(err, qt.Not(qt.IsNil))
@@ -112,9 +119,9 @@ func TestCensusParticipant(t *testing.T) {
 			c.Assert(err, qt.IsNil)
 
 			// Verify the participant was created correctly
-			createdParticipant, err := testDB.CensusParticipant(censusID, member.ID.Hex())
+			createdParticipant, err := testDB.CensusParticipant(census.ID.Hex(), member.ID.Hex())
 			c.Assert(err, qt.IsNil)
-			c.Assert(createdParticipant.CensusID, qt.Equals, censusID)
+			c.Assert(createdParticipant.CensusID, qt.Equals, census.ID.Hex())
 			c.Assert(createdParticipant.CreatedAt.IsZero(), qt.IsFalse)
 			c.Assert(createdParticipant.UpdatedAt.IsZero(), qt.IsFalse)
 
@@ -124,9 +131,9 @@ func TestCensusParticipant(t *testing.T) {
 			c.Assert(err, qt.IsNil)
 
 			// Verify the participant was updated correctly
-			updatedParticipant, err := testDB.CensusParticipant(censusID, member.ID.Hex())
+			updatedParticipant, err := testDB.CensusParticipant(census.ID.Hex(), member.ID.Hex())
 			c.Assert(err, qt.IsNil)
-			c.Assert(updatedParticipant.CensusID, qt.Equals, censusID)
+			c.Assert(updatedParticipant.CensusID, qt.Equals, census.ID.Hex())
 			c.Assert(updatedParticipant.CreatedAt, qt.Equals, createdParticipant.CreatedAt)
 			c.Assert(updatedParticipant.UpdatedAt.After(createdParticipant.UpdatedAt), qt.IsTrue)
 		})
@@ -135,7 +142,7 @@ func TestCensusParticipant(t *testing.T) {
 	t.Run("GetCensusParticipant", func(_ *testing.T) {
 		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites
-		member, _, censusID := setupTestCensusParticipantPrerequisites(t, "_get")
+		member, census := setupTestCensusParticipantPrerequisites(t, "_get")
 		participantID := testParticipantID + "_get"
 
 		t.Run("InvalidData", func(_ *testing.T) {
@@ -143,13 +150,13 @@ func TestCensusParticipant(t *testing.T) {
 			_, err := testDB.CensusParticipant("", member.ID.Hex())
 			c.Assert(err, qt.Equals, ErrInvalidData)
 
-			_, err = testDB.CensusParticipant(censusID, "")
+			_, err = testDB.CensusParticipant(census.ID.Hex(), "")
 			c.Assert(err, qt.Equals, ErrInvalidData)
 		})
 
 		t.Run("NonExistentParticipant", func(_ *testing.T) {
 			// Test getting non-existent participant
-			_, err := testDB.CensusParticipant(censusID, participantID)
+			_, err := testDB.CensusParticipant(census.ID.Hex(), participantID)
 			c.Assert(err, qt.Equals, ErrNotFound)
 		})
 
@@ -157,15 +164,15 @@ func TestCensusParticipant(t *testing.T) {
 			// Create a participant to retrieve
 			participant := &CensusParticipant{
 				ParticipantID: member.ID.Hex(),
-				CensusID:      censusID,
+				CensusID:      census.ID.Hex(),
 			}
 			err := testDB.SetCensusParticipant(participant)
 			c.Assert(err, qt.IsNil)
 
 			// Test getting existing participant
-			retrievedParticipant, err := testDB.CensusParticipant(censusID, member.ID.Hex())
+			retrievedParticipant, err := testDB.CensusParticipant(census.ID.Hex(), member.ID.Hex())
 			c.Assert(err, qt.IsNil)
-			c.Assert(retrievedParticipant.CensusID, qt.Equals, censusID)
+			c.Assert(retrievedParticipant.CensusID, qt.Equals, census.ID.Hex())
 			c.Assert(retrievedParticipant.CreatedAt.IsZero(), qt.IsFalse)
 			c.Assert(retrievedParticipant.UpdatedAt.IsZero(), qt.IsFalse)
 		})
@@ -174,14 +181,14 @@ func TestCensusParticipant(t *testing.T) {
 	t.Run("DeleteCensusParticipant", func(_ *testing.T) {
 		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites
-		member, _, censusID := setupTestCensusParticipantPrerequisites(t, "_delete")
+		member, census := setupTestCensusParticipantPrerequisites(t, "_delete")
 
 		t.Run("InvalidData", func(_ *testing.T) {
 			// Test deleting with invalid data
 			err := testDB.DelCensusParticipant("", member.ID.Hex())
 			c.Assert(err, qt.Equals, ErrInvalidData)
 
-			err = testDB.DelCensusParticipant(censusID, "")
+			err = testDB.DelCensusParticipant(census.ID.Hex(), "")
 			c.Assert(err, qt.Equals, ErrInvalidData)
 		})
 
@@ -189,23 +196,23 @@ func TestCensusParticipant(t *testing.T) {
 			// Create a participant to delete
 			participant := &CensusParticipant{
 				ParticipantID: member.ID.Hex(),
-				CensusID:      censusID,
+				CensusID:      census.ID.Hex(),
 			}
 			err := testDB.SetCensusParticipant(participant)
 			c.Assert(err, qt.IsNil)
 
 			// Test deleting existing participant
-			err = testDB.DelCensusParticipant(censusID, member.ID.Hex())
+			err = testDB.DelCensusParticipant(census.ID.Hex(), member.ID.Hex())
 			c.Assert(err, qt.IsNil)
 
 			// Verify the participant was deleted
-			_, err = testDB.CensusParticipant(censusID, member.ID.Hex())
+			_, err = testDB.CensusParticipant(census.ID.Hex(), member.ID.Hex())
 			c.Assert(err, qt.Equals, ErrNotFound)
 		})
 
 		t.Run("NonExistentParticipant", func(_ *testing.T) {
 			// Test deleting non-existent participant (should not error)
-			err := testDB.DelCensusParticipant(censusID, member.ID.Hex())
+			err := testDB.DelCensusParticipant(census.ID.Hex(), member.ID.Hex())
 			c.Assert(err, qt.IsNil)
 		})
 	})
@@ -213,11 +220,11 @@ func TestCensusParticipant(t *testing.T) {
 	t.Run("BulkCensusParticipant", func(_ *testing.T) {
 		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites
-		_, _, censusID := setupTestCensusParticipantPrerequisites(t, "_bulk")
+		_, census := setupTestCensusParticipantPrerequisites(t, "_bulk")
 
 		t.Run("EmptyMembers", func(_ *testing.T) {
 			// Test with empty members
-			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", censusID, nil)
+			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", census.ID.Hex(), nil)
 			c.Assert(err, qt.IsNil)
 
 			// Channel should be closed immediately for empty members
@@ -278,7 +285,7 @@ func TestCensusParticipant(t *testing.T) {
 				},
 			}
 
-			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", censusID, members)
+			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", census.ID.Hex(), members)
 			c.Assert(err, qt.IsNil)
 			c.Assert(progressChan, qt.Not(qt.IsNil))
 
@@ -301,9 +308,9 @@ func TestCensusParticipant(t *testing.T) {
 				c.Assert(member.CreatedAt.IsZero(), qt.IsFalse)
 
 				// Verify participants were created
-				participant, err := testDB.CensusParticipant(censusID, member.ID.Hex())
+				participant, err := testDB.CensusParticipant(census.ID.Hex(), member.ID.Hex())
 				c.Assert(err, qt.IsNil)
-				c.Assert(participant.CensusID, qt.Equals, censusID)
+				c.Assert(participant.CensusID, qt.Equals, census.ID.Hex())
 				c.Assert(participant.CreatedAt.IsZero(), qt.IsFalse)
 			}
 		})
@@ -326,7 +333,7 @@ func TestCensusParticipant(t *testing.T) {
 			}
 
 			// Create initial members
-			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", censusID, members)
+			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", census.ID.Hex(), members)
 			c.Assert(err, qt.IsNil)
 			c.Assert(progressChan, qt.Not(qt.IsNil))
 
@@ -348,7 +355,7 @@ func TestCensusParticipant(t *testing.T) {
 			members[1].ID = member1.ID
 			members[1].PlaintextPhone = "+34698111111"
 
-			progressChan, err = testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", censusID, members)
+			progressChan, err = testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", census.ID.Hex(), members)
 			c.Assert(err, qt.IsNil)
 			c.Assert(progressChan, qt.Not(qt.IsNil))
 
@@ -373,11 +380,7 @@ func TestCensusParticipant(t *testing.T) {
 	t.Run("CensusParticipantByLoginHash", func(_ *testing.T) {
 		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites
-		member, _, censusID := setupTestCensusParticipantPrerequisites(t, "_loginHash")
-
-		// Set auth fields and two-factor auth fields
-		authFields := OrgMemberAuthFields{OrgMemberAuthFieldsMemberNumber, OrgMemberAuthFieldsName}
-		twoFaFields := OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail}
+		member, census := setupTestCensusParticipantPrerequisites(t, "_loginHash")
 
 		// Update the member with additional information for testing login hash
 		member.Name = "Test User"
@@ -385,13 +388,13 @@ func TestCensusParticipant(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Generate login hash
-		loginHash := HashAuthTwoFaFields(*member, authFields, twoFaFields)
+		loginHash := HashAuthTwoFaFields(*member, census.AuthFields, census.TwoFaFields)
 		c.Assert(loginHash, qt.Not(qt.IsNil))
 
 		// Create participant with login hash
 		participant := &CensusParticipant{
 			ParticipantID: member.ID.Hex(),
-			CensusID:      censusID,
+			CensusID:      census.ID.Hex(),
 			LoginHash:     loginHash,
 		}
 		err = testDB.SetCensusParticipant(participant)
@@ -399,26 +402,34 @@ func TestCensusParticipant(t *testing.T) {
 
 		t.Run("InvalidData", func(_ *testing.T) {
 			// Test with empty login hash
-			_, err := testDB.censusParticipantByLoginHash(censusID, []byte{})
+			censusWithNilID := *census
+			censusWithNilID.ID = primitive.NilObjectID
+			_, err := testDB.CensusParticipantByLoginHash(censusWithNilID, *member)
 			c.Assert(err, qt.Equals, ErrInvalidData)
+		})
 
-			// Test with empty census ID
-			_, err = testDB.censusParticipantByLoginHash("", loginHash)
-			c.Assert(err, qt.Equals, ErrInvalidData)
+		t.Run("CensusWithNoAuthNorTwoFa", func(_ *testing.T) {
+			// Test with empty login hash
+			censusWithNoFields := *census
+			censusWithNoFields.AuthFields = nil
+			censusWithNoFields.TwoFaFields = nil
+			_, err := testDB.CensusParticipantByLoginHash(censusWithNoFields, *member)
+			c.Assert(err, qt.ErrorMatches, ErrInvalidData.Error()+".*")
 		})
 
 		t.Run("NonExistentParticipant", func(_ *testing.T) {
 			// Test with non-existent login hash
-			nonExistentHash := []byte("nonexistenthash")
-			_, err := testDB.censusParticipantByLoginHash(censusID, nonExistentHash)
+			nonExistentParticipant := *member
+			nonExistentParticipant.Name = "nonExistent"
+			_, err := testDB.CensusParticipantByLoginHash(*census, nonExistentParticipant)
 			c.Assert(err, qt.Equals, ErrNotFound)
 		})
 
 		t.Run("ExistingParticipant", func(_ *testing.T) {
 			// Test successful retrieval
-			retrievedParticipant, err := testDB.censusParticipantByLoginHash(censusID, loginHash)
+			retrievedParticipant, err := testDB.CensusParticipantByLoginHash(*census, *member)
 			c.Assert(err, qt.IsNil)
-			c.Assert(retrievedParticipant.CensusID, qt.Equals, censusID)
+			c.Assert(retrievedParticipant.CensusID, qt.Equals, census.ID.Hex())
 			c.Assert(retrievedParticipant.ParticipantID, qt.Equals, member.ID.Hex())
 		})
 	})
@@ -504,11 +515,11 @@ func TestCensusParticipant(t *testing.T) {
 		c.Assert(participants, qt.HasLen, 3)
 
 		// Verify login hash exists for each participant
-		for _, participant := range participants {
+		for i, participant := range participants {
 			c.Assert(participant.LoginHash, qt.Not(qt.IsNil))
 
 			// Verify we can retrieve participant by login hash
-			found, err := testDB.censusParticipantByLoginHash(censusID, participant.LoginHash)
+			found, err := testDB.CensusParticipantByLoginHash(*census, *members[i])
 			c.Assert(err, qt.IsNil)
 			c.Assert(found.ParticipantID, qt.Equals, participant.ParticipantID)
 		}
