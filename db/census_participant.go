@@ -162,101 +162,53 @@ func (ms *MongoStorage) CensusParticipantByMemberNumber(
 	return participant, nil
 }
 
-// censusParticipantByLoginHash retrieves a census participant from the database based on
-// the login data hash and censusID. Returns ErrNotFound if the participant doesn't exist.
-// TODO add the index
-func (ms *MongoStorage) censusParticipantByLoginHash(
-	censusID string,
-	loginHash []byte,
-) (*CensusParticipant, error) {
+// CensusParticipantByLoginHash retrieves a census participant from the database.
+// Uses the loginHash generated with the details of the passed member,
+// based on the AuthFields and TwoFaFields of the passed census.
+// Returns ErrNotFound if the participant doesn't exist.
+func (ms *MongoStorage) CensusParticipantByLoginHash(census Census, member OrgMember) (*CensusParticipant, error) {
+	// validate input
+	if census.ID.IsZero() {
+		return nil, ErrInvalidData
+	}
+	if len(census.AuthFields)+len(census.TwoFaFields) == 0 {
+		return nil, fmt.Errorf("%w: census has no auth fields nor twoFa fields", ErrInvalidData)
+	}
+
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	// validate input
-	if len(loginHash) == 0 || len(censusID) == 0 {
-		return nil, ErrInvalidData
+	// Calculate hashes based on census configuration
+	hashes := bson.M{}
+	hashes["loginHash"] = HashAuthTwoFaFields(member, census.AuthFields, census.TwoFaFields)
+
+	// Calculate specific 2FA hashes if needed
+	if len(census.TwoFaFields) == 2 && len(member.Email) > 0 {
+		hashes["loginHashEmail"] = HashAuthTwoFaFields(member, census.AuthFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail})
+	}
+	if len(census.TwoFaFields) == 2 && !member.Phone.IsEmpty() {
+		hashes["loginHashPhone"] = HashAuthTwoFaFields(member, census.AuthFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldPhone})
 	}
 
-	// prepare filter for find
-	filter := bson.M{
-		"loginHash": loginHash,
-		"censusId":  censusID,
+	findHashes := make([]bson.M, 0, len(hashes))
+	for k, v := range hashes {
+		findHashes = append(findHashes, bson.M{k: v})
 	}
 
-	// find the participant
-	participant := &CensusParticipant{}
-	err := ms.censusParticipants.FindOne(ctx, filter).Decode(participant)
-	if errors.Is(err, mongo.ErrNoDocuments) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	return participant, nil
-}
-
-// CensusParticipantByLoginHash retrieves a census participant from the database based on
-// the member email or phone. Returns ErrNotFound if the participant doesn't exist.
-func (ms *MongoStorage) censusParticipantByEmailOrPhone(
-	censusID string,
-	authFields OrgMemberAuthFields,
-	member OrgMember,
-) (*CensusParticipant, error) {
-	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-
-	// prepare filter for find
-	var filter bson.M
-	switch {
-	case member.Email != "" && member.Phone.IsEmpty():
-		filter = bson.M{
-			"loginHashEmail": HashAuthTwoFaFields(member, authFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail}),
-			"censusId":       censusID,
-		}
-	case member.Email == "" && !member.Phone.IsEmpty():
-		filter = bson.M{
-			"loginHashPhone": HashAuthTwoFaFields(member, authFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldPhone}),
-			"censusId":       censusID,
-		}
-	default:
-		return nil, fmt.Errorf("member has neither phone nor email")
+	findFilter := bson.M{
+		"censusId": census.ID.Hex(),
+		"$or":      findHashes,
 	}
 
 	// find the participant
 	participant := &CensusParticipant{}
-	err := ms.censusParticipants.FindOne(ctx, filter).Decode(participant)
+	err := ms.censusParticipants.FindOne(ctx, findFilter).Decode(participant)
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
-		return nil, err
-	}
-
-	return participant, nil
-}
-
-// CensusParticipantByLoginHashOrEmailorPhone is an extension of CensusParticipantByLoginHash for
-// the case when the census has 2FA enabled with both email and phone but only one of them is available.
-// It calculates the login hash for the available field and tries to find the participant.
-func (ms *MongoStorage) CensusParticipantByLoginHashOrEmailorPhone(
-	censusID string,
-	authFields OrgMemberAuthFields,
-	twoFaFields OrgMemberTwoFaFields,
-	member OrgMember,
-) (*CensusParticipant, error) {
-	// validate input
-	if len(censusID) == 0 {
-		return nil, ErrInvalidData
-	}
-
-	participant, err := ms.censusParticipantByLoginHash(censusID, HashAuthTwoFaFields(member, authFields, twoFaFields))
-	if errors.Is(err, ErrNotFound) && len(twoFaFields) > 0 {
-		participant, err = ms.censusParticipantByEmailOrPhone(censusID, authFields, member)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to get census participant by login hash, email or phone: %w", err)
+		return nil, fmt.Errorf("mongo: %w", err)
 	}
 
 	return participant, nil
