@@ -11,6 +11,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.vocdoni.io/dvote/log"
 )
@@ -114,8 +115,7 @@ func (ms *MongoStorage) PopulateGroupCensus(
 	}
 
 	// set the participants for the census
-	insertedCount, err := ms.setBulkCensusParticipant(ctx, census.ID.Hex(),
-		groupID, census.OrgAddress, census.AuthFields, census.TwoFaFields)
+	insertedCount, err := ms.setBulkCensusParticipant(ctx, census, groupID)
 	if err != nil {
 		return 0, fmt.Errorf("error setting census participants: %w", err)
 	}
@@ -167,6 +167,10 @@ func (ms *MongoStorage) Census(censusID string) (*Census, error) {
 	census := &Census{}
 	err = ms.censuses.FindOne(ctx, bson.M{"_id": objID}).Decode(census)
 	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, ErrNotFound
+		}
+
 		return nil, fmt.Errorf("failed to get census: %w", err)
 	}
 
