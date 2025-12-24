@@ -30,8 +30,6 @@ var addParticipantsToCensusWorkers sync.Map
 //
 //	@Summary		Create a new census
 //	@Description	Create a new census for an organization. Requires Manager/Admin role.
-//	@Description	Creates either a regular census or a group-based census if GroupID is provided.
-//	@Description	Validates that either AuthFields or TwoFaFields are provided and checks for duplicates or empty fields.
 //	@Tags			census
 //	@Accept			json
 //	@Produce		json
@@ -132,12 +130,14 @@ func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Reques
 		errors.ErrMalformedURLParam.Withf("wrong census ID").Write(w)
 		return
 	}
+
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
+
 	// get the async flag
 	async := r.URL.Query().Get("async") == "true" //nolint:goconst
 
@@ -151,18 +151,21 @@ func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Reques
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
+
 	// check the user has the necessary permissions
 	if !user.HasRoleFor(census.OrgAddress, db.ManagerRole) && !user.HasRoleFor(census.OrgAddress, db.AdminRole) {
-		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+		errors.ErrUnauthorized.Withf("user does not have the necessary permissions in the organization").Write(w)
 		return
 	}
+
 	// decode the participants from the request body
 	members := &apicommon.AddMembersRequest{}
 	if err := json.NewDecoder(r.Body).Decode(members); err != nil {
 		log.Error(err)
-		errors.ErrMalformedBody.Withf("missing participants").Write(w)
+		errors.ErrMalformedBody.Withf("couldn't decode members").Write(w)
 		return
 	}
+
 	// check if there are participants to add
 	if len(members.Members) == 0 {
 		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{Added: 0})
@@ -376,7 +379,7 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
 //	@Failure		404		{object}	errors.Error	"Census not found"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/census/{id}/publish/group/{groupid} [post]
+//	@Router			/census/{id}/group/{groupid}/publish [post]
 func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) {
 	censusID := internal.HexBytes{}
 	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
