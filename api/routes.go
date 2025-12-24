@@ -150,6 +150,8 @@ const (
 	processBundleInfoEndpoint = "/process/bundle/{bundleId}"
 	// POST /process/bundle/{bundleId}/auth/{step} to check if the voter is authorized
 	processBundleAuthEndpoint = "/process/bundle/{bundleId}/auth/{step}"
+	// GET /process/bundle/{bundleId}/weight to get the voter weight for the bundle
+	processBundleWeightEndpoint = "/process/bundle/{bundleId}/weight"
 	// POST /process/bundle/{bundleId}/sign to sign with two-factor authentication
 	processBundleSignEndpoint = "/process/bundle/{bundleId}/sign"
 	// GET /process/bundle/{bundleId}/{participantId} to get the process information

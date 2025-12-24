@@ -22,6 +22,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/dvote/vochain/state"
 )
@@ -268,6 +269,29 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	oid, err := primitive.ObjectIDFromHex(auth.UserID.String())
+	if err != nil {
+		errors.ErrUnauthorized.WithErr(fmt.Errorf("invalid user ID in token: %w", err)).Write(w)
+		return
+	}
+	member, err := c.mainDB.OrgMember(bundle.OrgAddress, oid.Hex())
+	if err != nil {
+		errors.ErrUserNotFound.WithErr(err).Write(w)
+		return
+	}
+
+	census, err := c.mainDB.Census(bundle.Census.ID.Hex())
+	if err != nil {
+		errors.ErrCensusNotFound.WithErr(err).Write(w)
+		return
+	}
+
+	// default weight to 1 if not set
+	weight := uint64(1)
+	if census.Weighted {
+		weight = member.Weight
+	}
+
 	// // Check if the participant is in the census
 	// if !c.checkCensusParticipant(w, bundle.Census.ID.Hex(), string(auth.UserID)) {
 	// 	return
@@ -279,7 +303,81 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// Sign the request and send the response
-	c.signAndRespond(w, req.AuthToken, *address, processID, big.NewInt(int64(auth.Weight)).Bytes())
+	c.signAndRespond(w, req.AuthToken, *address, processID, big.NewInt(int64(weight)).Bytes())
+}
+
+// UserWeightHandler godoc
+//
+//	@Summary		Get user weight for a bundle
+//	@Description	Get the weight of a user for a given bundle. Requires a verified token.
+//	@Tags			process
+//	@Accept			json
+//	@Produce		json
+//	@Param			bundleId	path		string						true	"Bundle ID"
+//	@Param			request		body		handlers.UserWeightRequest	true	"Request with auth token"
+//	@Success		200			{object}	handlers.UserWeightResponse
+//	@Failure		400			{object}	errors.Error	"Invalid input data"
+//	@Failure		401			{object}	errors.Error	"Unauthorized or invalid token"
+//	@Failure		404			{object}	errors.Error	"Bundle not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/process/bundle/{bundleId}/weight [get]
+func (c *CSPHandlers) UserWeightHandler(w http.ResponseWriter, r *http.Request) {
+	// get the bundle ID from the URL parameters
+	bundleID, ok := parseBundleID(w, r)
+	if !ok {
+		return
+	}
+	// parse the request from the body
+	var req UserWeightRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	// get the user data from the token
+	auth, ok := c.getAuthInfo(w, req.AuthToken)
+	if !ok {
+		return
+	}
+	if !bytes.Equal(*bundleID, auth.BundleID) {
+		errors.ErrUnauthorized.Withf("token does not belong to the bundle").Write(w)
+		return
+	}
+	// check if the token is verified
+	if !auth.Verified {
+		errors.ErrUnauthorized.WithErr(csp.ErrAuthTokenNotVerified).Write(w)
+		return
+	}
+
+	bundle, ok := c.getBundle(w, *bundleID)
+	if !ok {
+		return
+	}
+	oid, err := primitive.ObjectIDFromHex(auth.UserID.String())
+	if err != nil {
+		errors.ErrUnauthorized.WithErr(fmt.Errorf("invalid user ID in token: %w", err)).Write(w)
+		return
+	}
+	member, err := c.mainDB.OrgMember(bundle.OrgAddress, oid.Hex())
+	if err != nil {
+		errors.ErrUserNotFound.WithErr(err).Write(w)
+		return
+	}
+	census, err := c.mainDB.Census(bundle.Census.ID.Hex())
+	if err != nil {
+		errors.ErrCensusNotFound.WithErr(err).Write(w)
+		return
+	}
+
+	// default weight to 1 if not set
+	weight := uint64(1)
+	if census.Weighted {
+		weight = member.Weight
+	}
+
+	// return the user weight for the bundle
+	apicommon.HTTPWriteJSON(w, &UserWeightResponse{
+		Weight: internal.HexBytes(big.NewInt(int64(weight)).Bytes()),
+	})
 }
 
 // ConsumedAddressHandler godoc
@@ -540,14 +638,9 @@ func (c *CSPHandlers) authFirstStep(
 	if err != nil {
 		return nil, err
 	}
-	// default weight to 1 if not set
-	weight := uint64(1)
-	if census.Weighted {
-		weight = orgMember.Weight
-	}
 
 	// Generate the token
-	return c.csp.BundleAuthToken(bundleID, internal.HexBytes(orgMember.ID.Hex()), toDestinations, challengeType, lang, weight)
+	return c.csp.BundleAuthToken(bundleID, internal.HexBytesFromString(orgMember.ID.Hex()), toDestinations, challengeType, lang)
 }
 
 // authSecondStep is the second step of the authentication process. It

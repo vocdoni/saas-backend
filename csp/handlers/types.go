@@ -50,6 +50,20 @@ type SignRequest struct {
 	ProcessID internal.HexBytes `json:"electionId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 }
 
+// UserWeightRequest defines the payload for the request to get the
+// weight of a user for a given bundle. It includes the authToken to query
+// the information.
+type UserWeightRequest struct {
+	AuthToken internal.HexBytes `json:"authToken" swaggertype:"string" format:"hex" example:"deadbeef"`
+}
+
+// USerWeightResponse defines the payload for the response to the
+// request to get the weight of a user for a given bundle. It includes
+// the weight of the user.
+type UserWeightResponse struct {
+	Weight internal.HexBytes `json:"weight,omitempty" swaggertype:"string" format:"hex" example:"2a"`
+}
+
 // ConsumedAddressRequest defines the payload for the request to get the
 // if a token was used and which address was used. It includes the
 // authToken to query the information.

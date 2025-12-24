@@ -1275,6 +1275,20 @@ definitions:
         format: hex
         type: string
     type: object
+  handlers.UserWeightRequest:
+    properties:
+      authToken:
+        example: deadbeef
+        format: hex
+        type: string
+    type: object
+  handlers.UserWeightResponse:
+    properties:
+      weight:
+        example: 2a
+        format: hex
+        type: string
+    type: object
 host: localhost:8080
 info:
   contact:
@@ -3662,6 +3676,50 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Sign a process in a bundle
+      tags:
+      - process
+  /process/bundle/{bundleId}/weight:
+    get:
+      consumes:
+      - application/json
+      description: Get the weight of a user for a given bundle. Requires a verified
+        token.
+      parameters:
+      - description: Bundle ID
+        in: path
+        name: bundleId
+        required: true
+        type: string
+      - description: Request with auth token
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.UserWeightRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.UserWeightResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized or invalid token
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Bundle not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Get user weight for a bundle
       tags:
       - process
   /storage:

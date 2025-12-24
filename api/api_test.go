@@ -712,6 +712,17 @@ func postProcessBundle(t *testing.T, token, censusID string, processIDs ...[]byt
 	return bundleIDStr, bundleResp.Root.String()
 }
 
+// getCSPUserWeight retrieves the CSP user weight for the given process ID and voter address.
+func getCSPUserWeight(t *testing.T, bundleID string, authToken internal.HexBytes) internal.HexBytes {
+	weightReq := &handlers.UserWeightRequest{
+		AuthToken: authToken,
+	}
+
+	weightResp := requestAndParse[handlers.UserWeightResponse](t, http.MethodGet, "", weightReq,
+		"process", "bundle", bundleID, "weight")
+	return weightResp.Weight
+}
+
 // testCSPSign signs a payload with the CSP using the given auth token and process ID.
 // It returns the signature.
 func testCSPSign(t *testing.T, bundleID string, authToken, processID, payload internal.HexBytes) internal.HexBytes {
@@ -949,7 +960,7 @@ func getOrgMember(t *testing.T, adminToken string, orgAddress common.Address, me
 			return m
 		}
 	}
-	t.Fatalf("member %q not found", memberID)
+	qt.Assert(t, membersList.Members, qt.IsNil, qt.Commentf("member %q not found", memberID))
 	return apicommon.OrgMember{}
 }
 

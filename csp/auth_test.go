@@ -40,7 +40,6 @@ func TestBundleAuthToken(t *testing.T) {
 			testUserEmail,
 			notifications.EmailChallenge,
 			apicommon.DefaultLang,
-			testUserWeight,
 		)
 		c.Assert(err, qt.ErrorIs, ErrNoBundleID)
 	})
@@ -52,7 +51,6 @@ func TestBundleAuthToken(t *testing.T) {
 			testUserEmail,
 			notifications.EmailChallenge,
 			apicommon.DefaultLang,
-			testUserWeight,
 		)
 		c.Assert(err, qt.ErrorIs, ErrNoUserID)
 	})
@@ -60,10 +58,10 @@ func TestBundleAuthToken(t *testing.T) {
 	c.Run("notification cooldown reached", func(c *qt.C) {
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		// generate a valid token
-		_, err := csp.BundleAuthToken(testBundleID, testUserID, "", notifications.EmailChallenge, apicommon.DefaultLang, testUserWeight)
+		_, err := csp.BundleAuthToken(testBundleID, testUserID, "", notifications.EmailChallenge, apicommon.DefaultLang)
 		c.Assert(err, qt.ErrorIs, ErrNotificationFailure)
 		// try to generate a new token before the cooldown time
-		_, err = csp.BundleAuthToken(testBundleID, testUserID, "", notifications.EmailChallenge, apicommon.DefaultLang, testUserWeight)
+		_, err = csp.BundleAuthToken(testBundleID, testUserID, "", notifications.EmailChallenge, apicommon.DefaultLang)
 		c.Assert(err, qt.ErrorIs, ErrAttemptCoolDownTime)
 	})
 
@@ -76,7 +74,6 @@ func TestBundleAuthToken(t *testing.T) {
 			testUserEmail,
 			notifications.EmailChallenge,
 			apicommon.DefaultLang,
-			testUserWeight,
 		)
 		c.Assert(err, qt.IsNil)
 		c.Assert(token, qt.Not(qt.IsNil))
@@ -87,7 +84,6 @@ func TestBundleAuthToken(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(authTokenResult.BundleID.Bytes(), qt.DeepEquals, bundleID.Bytes())
 		c.Assert(authTokenResult.UserID.Bytes(), qt.DeepEquals, testUserID.Bytes())
-		c.Assert(authTokenResult.Weight, qt.Equals, testUserWeight)
 		// wait to dequeue the notification
 		time.Sleep(time.Second * 3)
 		// get the verification code from the email
@@ -102,6 +98,7 @@ func TestBundleAuthToken(t *testing.T) {
 		mailCode := rgxNotification.FindStringSubmatch(mailBody)
 		c.Assert(mailCode, qt.HasLen, 2)
 		c.Assert(mailCode[1], qt.Equals, expectedCode)
+		// get the user weight
 	})
 }
 
@@ -139,7 +136,7 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 	c.Run("solution not match", func(c *qt.C) {
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		// create the token
-		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID, testUserWeight), qt.IsNil)
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID), qt.IsNil)
 		// try to verify an invalid solution
 		err := csp.VerifyBundleAuthToken(testToken, "invalid")
 		c.Assert(err, qt.ErrorIs, ErrChallengeCodeFailure)
@@ -148,7 +145,7 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 	c.Run("success", func(c *qt.C) {
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		// create the token
-		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID, testUserWeight), qt.IsNil)
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID), qt.IsNil)
 		// generate the code
 		_, code, err := csp.generateToken(testUserID, testBundleID)
 		c.Assert(err, qt.IsNil)

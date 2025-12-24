@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
+	"math/big"
 	"net/http"
 	"testing"
 	"time"
@@ -288,24 +290,22 @@ func TestCSPVoting(t *testing.T) {
 				}
 
 				// Add members to the organization first
-				postOrgMembers(t, token, orgAddress, members...)
+				postedOrgMembers := postOrgMembers(t, token, orgAddress, members...)
 
-				// Get the organization members to obtain their IDs
-				orgMembersResp := requestAndParse[apicommon.OrganizationMembersResponse](
-					t, http.MethodGet, token, nil,
-					"organizations", orgAddress.String(), "members")
-
-				// Create member IDs list for the group
-				memberIDs := make([]string, len(orgMembersResp.Members))
-				for i, member := range orgMembersResp.Members {
-					memberIDs[i] = member.ID
+				// Fill in the IDs in the original members slice
+				idMap := make(map[string]string, len(postedOrgMembers))
+				for _, m := range postedOrgMembers {
+					idMap[m.NationalID] = m.ID
+				}
+				for i := range members {
+					members[i].ID = idMap[members[i].NationalID]
 				}
 
 				// Create a group with all the members
 				createGroupReq := &apicommon.CreateOrganizationMemberGroupRequest{
 					Title:       "CSP Voting Test Group",
 					Description: "Group for testing CSP voting authentication",
-					MemberIDs:   memberIDs,
+					MemberIDs:   memberIDs(members),
 				}
 
 				groupResp := requestAndParse[apicommon.OrganizationMemberGroupInfo](
@@ -322,6 +322,7 @@ func TestCSPVoting(t *testing.T) {
 				publishGroupRequest := &apicommon.PublishCensusGroupRequest{
 					AuthFields:  authFields,
 					TwoFaFields: twoFaFields,
+					Weighted:    true,
 				}
 
 				publishedGroupCensus := requestAndParse[apicommon.PublishedCensusResponse](
@@ -349,11 +350,21 @@ func TestCSPVoting(t *testing.T) {
 						Email:        "john.doe@example.com",
 					})
 
-					// Sign the voter's address with the CSP
-					signature := testCSPSign(t, bundleID, authToken, processID, user1Addr)
+					cspWeight := getCSPUserWeight(t, bundleID, authToken)
 
 					weight, ok := math.ParseUint64(members[0].Weight)
 					c.Assert(ok, qt.IsTrue, qt.Commentf("Failed to convert member weight %s to int", members[0].Weight))
+					c.Assert(
+						bytes.Equal(cspWeight, big.NewInt(int64(weight)).Bytes()),
+						qt.IsTrue,
+						qt.Commentf(
+							"CSP reported weight %d does not match expected weight %d",
+							cspWeight, weight,
+						),
+					)
+
+					// Sign the voter's address with the CSP
+					signature := testCSPSign(t, bundleID, authToken, processID, user1Addr)
 
 					// Generate a vote proof with the signature
 					proof := testGenerateVoteProof(processID, user1Addr, signature, weight)
@@ -367,6 +378,53 @@ func TestCSPVoting(t *testing.T) {
 					votes, err := vocdoniClient.ElectionVoteCount(processID)
 					c.Assert(err, qt.IsNil)
 					c.Assert(votes, qt.Equals, uint32(1), qt.Commentf("expected 1 vote, got %d", votes))
+				})
+
+				// Create a voting key for the member
+				t.Run("Update user weight", func(_ *testing.T) {
+					// Create the voting address for the first user
+					user1 := ethereum.SignKeys{}
+					err = user1.Generate()
+					c.Assert(err, qt.IsNil)
+
+					member := members[7]
+
+					// Authenticate the member with the CSP using the new multi-field system
+					authToken := testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
+						Name:         member.Name,
+						Surname:      member.Surname,
+						MemberNumber: member.MemberNumber,
+						Email:        member.Email,
+					})
+
+					cspWeight := getCSPUserWeight(t, bundleID, authToken)
+
+					weight, ok := math.ParseUint64(member.Weight)
+					c.Assert(ok, qt.IsTrue, qt.Commentf("Failed to convert member weight %s to int", member.Weight))
+					c.Assert(
+						bytes.Equal(cspWeight, big.NewInt(int64(weight)).Bytes()),
+						qt.IsTrue,
+						qt.Commentf(
+							"CSP reported weight %d does not match expected weight %d",
+							cspWeight, weight,
+						),
+					)
+
+					toUpdate := member
+					toUpdate.Phone = "" // getOrgMember returns a useless trimmed hash of the phone
+					toUpdate.Weight = "10"
+					putOrgMember(t, token, orgAddress, toUpdate)
+					member = getOrgMember(t, token, orgAddress, member.ID)
+					c.Assert(member.Weight, qt.Equals, "10")
+					cspWeight = getCSPUserWeight(t, bundleID, authToken)
+					c.Assert(
+						bytes.Equal(cspWeight, big.NewInt(int64(10)).Bytes()),
+						qt.IsTrue,
+						qt.Commentf(
+							"CSP reported weight %x does not match expected weight %d",
+							cspWeight, 10,
+						),
+					)
 				})
 
 				// Test cases to try to break the authentication and voting mechanisms
