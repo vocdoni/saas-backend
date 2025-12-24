@@ -400,7 +400,11 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 	// retrieve census
 	census, err := a.db.Census(censusID.String())
 	if err != nil {
-		errors.ErrCensusNotFound.Write(w)
+		if errors.Is(err, db.ErrNotFound) {
+			errors.ErrCensusNotFound.Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 
