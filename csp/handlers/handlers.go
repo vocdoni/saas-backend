@@ -26,6 +26,8 @@ import (
 	"go.vocdoni.io/dvote/vochain/state"
 )
 
+const DefaultOrgName = "Vocdoni"
+
 // CSPHandlers is a struct that contains an instance of the CSP and the main
 // database (where the bundle and census data is stored). It is used to handle
 // the CSP API requests such as the authentication and signing of the bundle
@@ -546,8 +548,28 @@ func (c *CSPHandlers) authFirstStep(
 		weight = orgMember.Weight
 	}
 
+	name := DefaultOrgName
+	logo := ""
+
+	if n, ok := org.Meta["name"].(string); ok {
+		name = n
+		// if name is found then retrieve the logo as well
+		if l, ok := org.Meta["logo"].(string); ok {
+			logo = l
+		}
+	}
+
 	// Generate the token
-	return c.csp.BundleAuthToken(bundleID, internal.HexBytes(orgMember.ID.Hex()), toDestinations, challengeType, lang, weight)
+	return c.csp.BundleAuthToken(
+		bundleID,
+		internal.HexBytes(orgMember.ID.Hex()),
+		toDestinations,
+		challengeType,
+		lang,
+		weight,
+		name,
+		logo,
+	)
 }
 
 // authSecondStep is the second step of the authentication process. It

@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -49,6 +50,16 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrMalformedURLParam.Withf("census not found").Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
+	org, err := a.db.Organization(census.OrgAddress)
+	if err != nil {
+		if err == db.ErrNotFound {
+			errors.ErrMalformedURLParam.Withf("organization not found").Write(w)
 			return
 		}
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -131,6 +142,18 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		Processes:  processes,
 		OrgAddress: census.OrgAddress,
 		Census:     *census,
+	}
+
+	// get organization metadata from the vochain
+	if org.Meta["name"] == "" || org.Meta["logo"] == "" {
+		if meta, err := a.client.AccountMetadata(fmt.Sprintf("%s", census.OrgAddress)); err == nil {
+			org.Meta["name"] = meta.Name
+			org.Meta["logo"] = meta.Media.Logo
+		}
+		if err := a.db.SetOrganization(org); err != nil {
+			errors.ErrGenericInternalServerError.Withf("tried to update update organization name and logo but failed: %v", err).Write(w)
+			return
+		}
 	}
 
 	_, err = a.db.SetProcessBundle(bundle)
