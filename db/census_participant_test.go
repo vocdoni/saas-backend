@@ -504,14 +504,7 @@ func TestCensusParticipant(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		upsertCount, err := testDB.setBulkCensusParticipant(
-			ctx,
-			censusID,
-			groupID,
-			testOrgAddress,
-			census.AuthFields,
-			census.TwoFaFields,
-		)
+		upsertCount, err := testDB.setBulkCensusParticipant(ctx, census, groupID)
 		c.Assert(err, qt.IsNil)
 		c.Assert(upsertCount, qt.Equals, int64(3))
 

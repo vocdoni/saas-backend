@@ -397,33 +397,6 @@ func startProgressReporter(
 	}
 }
 
-// validateBulkCensusParticipant validates the input parameters for bulk census participant
-// and returns the census if valid
-func (ms *MongoStorage) validateBulkCensusParticipant(
-	censusID string,
-	orgMembersSize int,
-) (*Census, error) {
-	// Early returns for invalid input
-	if orgMembersSize == 0 {
-		return nil, nil // Not an error, just no work to do
-	}
-	if len(censusID) == 0 {
-		return nil, ErrInvalidData
-	}
-
-	// Validate census and organization
-	census, err := ms.Census(censusID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get published census: %w", err)
-	}
-
-	if _, err := ms.Organization(census.OrgAddress); err != nil {
-		return nil, err
-	}
-
-	return census, nil
-}
-
 // processBatches processes members in batches and sends progress updates
 func (ms *MongoStorage) processBatches(
 	orgMembers []*OrgMember,
@@ -499,15 +472,26 @@ func (ms *MongoStorage) SetBulkCensusOrgMemberParticipant(
 ) (chan *BulkCensusParticipantStatus, error) {
 	progressChan := make(chan *BulkCensusParticipantStatus, 10)
 
-	// Validate input parameters
-	census, err := ms.validateBulkCensusParticipant(censusID, len(orgMembers))
+	// Early returns for invalid input
+	if len(censusID) == 0 {
+		close(progressChan)
+		return progressChan, ErrInvalidData
+	}
+
+	// Validate census and organization
+	census, err := ms.Census(censusID)
 	if err != nil {
 		close(progressChan)
-		return progressChan, err
+		return progressChan, fmt.Errorf("failed to get published census: %w", err)
+	}
+
+	if _, err := ms.Organization(org.Address); err != nil {
+		close(progressChan)
+		return progressChan, fmt.Errorf("failed to get organization: %w", err)
 	}
 
 	// If no members, return empty channel
-	if census == nil {
+	if len(orgMembers) == 0 {
 		close(progressChan)
 		return progressChan, nil
 	}
@@ -518,11 +502,8 @@ func (ms *MongoStorage) SetBulkCensusOrgMemberParticipant(
 	return progressChan, nil
 }
 
-func (ms *MongoStorage) setBulkCensusParticipant(
-	ctx context.Context, censusID, groupID string, orgAddress common.Address,
-	authFields OrgMemberAuthFields, twoFaFields OrgMemberTwoFaFields,
-) (int64, error) {
-	_, members, err := ms.ListOrganizationMemberGroup(groupID, orgAddress, 0, 0)
+func (ms *MongoStorage) setBulkCensusParticipant(ctx context.Context, census *Census, groupID string) (int64, error) {
+	_, members, err := ms.ListOrganizationMemberGroup(groupID, census.OrgAddress, 0, 0)
 	if err != nil {
 		return 0, fmt.Errorf("error retrieving group members: %w", err)
 	}
@@ -539,20 +520,20 @@ func (ms *MongoStorage) setBulkCensusParticipant(
 		id := member.ID.Hex()
 		censusParticipantsFilter := bson.M{
 			"participantID": id,
-			"censusId":      censusID,
+			"censusId":      census.ID.Hex(),
 		}
 		participantDoc := &CensusParticipant{
 			ParticipantID: id,
-			LoginHash:     HashAuthTwoFaFields(*member, authFields, twoFaFields),
-			CensusID:      censusID,
+			LoginHash:     HashAuthTwoFaFields(*member, census.AuthFields, census.TwoFaFields),
+			CensusID:      census.ID.Hex(),
 			UpdatedAt:     currentTime,
 		}
 
-		if len(twoFaFields) == 2 && member.Email != "" {
-			participantDoc.LoginHashEmail = HashAuthTwoFaFields(*member, authFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail})
+		if len(census.TwoFaFields) == 2 && member.Email != "" {
+			participantDoc.LoginHashEmail = HashAuthTwoFaFields(*member, census.AuthFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail})
 		}
-		if len(twoFaFields) == 2 && !member.Phone.IsEmpty() {
-			participantDoc.LoginHashPhone = HashAuthTwoFaFields(*member, authFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldPhone})
+		if len(census.TwoFaFields) == 2 && !member.Phone.IsEmpty() {
+			participantDoc.LoginHashPhone = HashAuthTwoFaFields(*member, census.AuthFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldPhone})
 		}
 		// Create participant update document
 		updateParticipantDoc, err := dynamicUpdateDocument(participantDoc, nil)
