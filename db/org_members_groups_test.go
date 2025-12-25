@@ -12,6 +12,7 @@ import (
 const testGroupMemberNumber = "member123"
 
 func setupTestOrgMembersGroupPrerequisites(t *testing.T, memberSuffix string) (*Organization, []string) {
+	t.Helper()
 	// Create test organization
 	org := &Organization{
 		Address:   testOrgAddress,

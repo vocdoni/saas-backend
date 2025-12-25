@@ -442,6 +442,7 @@ func TestMain(m *testing.M) {
 // The body is expected to be a JSON object or null.
 // If jwt is not empty, it will be sent as a Bearer token.
 func testRequest(t *testing.T, method, jwt string, jsonBody any, urlPath ...string) ([]byte, int) {
+	t.Helper()
 	body, err := json.Marshal(jsonBody)
 	qt.Assert(t, err, qt.IsNil)
 	testURL := fmt.Sprintf("http://%s:%d", testHost, testPort)
@@ -482,6 +483,7 @@ func testRequest(t *testing.T, method, jwt string, jsonBody any, urlPath ...stri
 
 // testCreateUser creates a new user with the given password and returns the JWT token.
 func testCreateUser(t *testing.T, password string) string {
+	t.Helper()
 	n := internal.RandomInt(100000000000)
 	mail := fmt.Sprintf("%d%s", n, testEmail)
 
@@ -525,6 +527,7 @@ func testCreateUser(t *testing.T, password string) string {
 
 // testCreateOrganization creates a new organization and returns the address.
 func testCreateOrganization(t *testing.T, jwt string) common.Address {
+	t.Helper()
 	orgName := fmt.Sprintf("org-%d", internal.RandomInt(10000))
 	orgInfo := &apicommon.OrganizationInfo{
 		Type:    string(db.CompanyType),
@@ -542,6 +545,7 @@ func testCreateOrganization(t *testing.T, jwt string) common.Address {
 }
 
 func testNewVocdoniClient(t *testing.T) *apiclient.HTTPclient {
+	t.Helper()
 	client, err := apiclient.New(testAPIEndpoint)
 	qt.Assert(t, err, qt.IsNil)
 	return client
@@ -553,6 +557,7 @@ func testNewVocdoniClient(t *testing.T) *apiclient.HTTPclient {
 func signRemoteSignerAndSendVocdoniTx(t *testing.T, tx *models.Tx, token string, vocdoniClient *apiclient.HTTPclient,
 	orgAddress common.Address,
 ) (responseData []byte) {
+	t.Helper()
 	c := qt.New(t)
 	txBytes, err := proto.Marshal(tx)
 	c.Assert(err, qt.IsNil)
@@ -578,6 +583,7 @@ func signRemoteSignerAndSendVocdoniTx(t *testing.T, tx *models.Tx, token string,
 // It uses the provided signer to sign the transaction.
 // Returns the response data if any.
 func signAndSendVocdoniTx(t *testing.T, tx *models.Tx, signer *ethereum.SignKeys, vocdoniClient *apiclient.HTTPclient) []byte {
+	t.Helper()
 	c := qt.New(t)
 	txBytes, err := proto.Marshal(tx)
 	c.Assert(err, qt.IsNil)
@@ -646,12 +652,14 @@ func waitForEmail(t *testing.T, emailTo string) string {
 }
 
 func fetchVocdoniAccountNonce(t *testing.T, client *apiclient.HTTPclient, address common.Address) uint32 {
+	t.Helper()
 	acc, err := client.Account(address.String())
 	qt.Assert(t, err, qt.IsNil)
 	return acc.Nonce
 }
 
 func fetchVocdoniChainID(t *testing.T, client *apiclient.HTTPclient) string {
+	t.Helper()
 	cid := client.ChainID()
 	qt.Assert(t, cid, qt.Not(qt.Equals), "")
 	return cid
@@ -662,6 +670,7 @@ func fetchVocdoniChainID(t *testing.T, client *apiclient.HTTPclient) string {
 func postCensus(t *testing.T, token string, orgAddress common.Address,
 	authFields db.OrgMemberAuthFields, twoFaFields db.OrgMemberTwoFaFields,
 ) string {
+	t.Helper()
 	createdCensus := requestAndParse[apicommon.CreateCensusResponse](t, http.MethodPost, token,
 		&apicommon.CreateCensusRequest{
 			OrgAddress:  orgAddress,
@@ -677,6 +686,7 @@ func postCensus(t *testing.T, token string, orgAddress common.Address,
 // postProcessBundle creates a new process bundle with the given census ID and process IDs.
 // It returns the bundle ID and root.
 func postProcessBundle(t *testing.T, token, censusID string, processIDs ...[]byte) (bundleID string, root string) {
+	t.Helper()
 	c := qt.New(t)
 
 	// Convert process IDs to hex strings
@@ -705,6 +715,7 @@ func postProcessBundle(t *testing.T, token, censusID string, processIDs ...[]byt
 // testCSPSign signs a payload with the CSP using the given auth token and process ID.
 // It returns the signature.
 func testCSPSign(t *testing.T, bundleID string, authToken, processID, payload internal.HexBytes) internal.HexBytes {
+	t.Helper()
 	c := qt.New(t)
 
 	// Sign with the verified token
@@ -724,6 +735,7 @@ func testCSPSign(t *testing.T, bundleID string, authToken, processID, payload in
 // Asserts that AuthToken is not empty.
 func postProcessBundleAuth0(t *testing.T, bundleID string, request *handlers.AuthRequest, queryParams ...string,
 ) internal.HexBytes {
+	t.Helper()
 	resp := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", request,
 		processBundleAuthURL(bundleID, "0")+joinQueryParams(queryParams...))
 
@@ -735,6 +747,7 @@ func postProcessBundleAuth0(t *testing.T, bundleID string, request *handlers.Aut
 // postProcessBundleAuth0 authenticates with the CSP, expecting an error and returns it.
 func postProcessBundleAuth0AndExpectError(t *testing.T, bundleID string, request *handlers.AuthRequest, queryParams ...string,
 ) errors.Error {
+	t.Helper()
 	return requestAndExpectError(t, http.MethodPost, "", request,
 		processBundleAuthURL(bundleID, "0")+joinQueryParams(queryParams...))
 }
@@ -743,6 +756,7 @@ func postProcessBundleAuth0AndExpectError(t *testing.T, bundleID string, request
 // Asserts that AuthToken is not empty.
 func postProcessBundleAuth1(t *testing.T, bundleID string, request *handlers.AuthChallengeRequest, queryParams ...string,
 ) internal.HexBytes {
+	t.Helper()
 	resp := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", request,
 		processBundleAuthURL(bundleID, "1")+joinQueryParams(queryParams...))
 
@@ -774,6 +788,7 @@ func testGenerateVoteProof(processID, voterAddr, signature internal.HexBytes, we
 func testCastVote(t *testing.T, vocdoniClient *apiclient.HTTPclient, signer *ethereum.SignKeys,
 	processID internal.HexBytes, proof *models.Proof, votePackage []byte,
 ) []byte {
+	t.Helper()
 	// Create the vote transaction
 	tx := models.Tx{
 		Payload: &models.Tx_Vote{
@@ -806,12 +821,14 @@ func extractOTPFromEmail(mailBody string) string {
 // It takes the same parameters as testRequest plus a type parameter for the response.
 // Asserts the HTTP Status Code is 200 OK, and returns the parsed response of the specified type.
 func requestAndParse[T any](t *testing.T, method, jwt string, jsonBody any, urlPath ...string) T {
+	t.Helper()
 	return requestAndParseWithAssertCode[T](http.StatusOK, t, method, jwt, jsonBody, urlPath...)
 }
 
 // requestAndParseWithAssertCode makes a request, asserts the expected status code, and parses the JSON response.
 // It takes the expected status code as the first parameter, followed by the same parameters as testRequest.
 func requestAndParseWithAssertCode[T any](expectedCode int, t *testing.T, method, jwt string, jsonBody any, urlPath ...string) T {
+	t.Helper()
 	var result T
 	resp, code := testRequest(t, method, jwt, jsonBody, urlPath...)
 	qt.Assert(t, code, qt.Equals, expectedCode, qt.Commentf("response: %s", resp))
@@ -824,6 +841,7 @@ func requestAndParseWithAssertCode[T any](expectedCode int, t *testing.T, method
 // requestAndAssertCode makes a request and asserts the expected status code.
 // It takes the expected status code as the first parameter, followed by the same parameters as testRequest.
 func requestAndAssertCode(expectedCode int, t *testing.T, method, jwt string, jsonBody any, urlPath ...string) {
+	t.Helper()
 	resp, code := testRequest(t, method, jwt, jsonBody, urlPath...)
 	qt.Assert(t, code, qt.Equals, expectedCode, qt.Commentf("response: %s", resp))
 }
@@ -831,6 +849,7 @@ func requestAndAssertCode(expectedCode int, t *testing.T, method, jwt string, js
 // requestAndAssertError makes a request and asserts the expected response matches error.
 // It takes the expected status code as the first parameter, followed by the same parameters as testRequest.
 func requestAndAssertError(expectedError errors.Error, t *testing.T, method, jwt string, jsonBody any, urlPath ...string) {
+	t.Helper()
 	errResp := requestAndParseWithAssertCode[errors.Error](expectedError.HTTPstatus,
 		t, method, jwt, jsonBody, urlPath...)
 	qt.Assert(t, errResp.Code, qt.Equals, expectedError.Code)
@@ -838,6 +857,7 @@ func requestAndAssertError(expectedError errors.Error, t *testing.T, method, jwt
 
 // requestAndExpectError makes a request, expecting to receive an error and returns it.
 func requestAndExpectError(t *testing.T, method, jwt string, jsonBody any, urlPath ...string) errors.Error {
+	t.Helper()
 	resp, code := testRequest(t, method, jwt, jsonBody, urlPath...)
 	qt.Assert(t, code, qt.Not(qt.Equals), http.StatusOK, qt.Commentf("response: %s", resp))
 
@@ -903,6 +923,7 @@ func decodeNestedFieldAs[T any](c *qt.C, parsedJSON map[string]any, field string
 
 func postOrgMembers(t *testing.T, loginToken string, orgAddress common.Address, members ...apicommon.OrgMember,
 ) []apicommon.OrgMember {
+	t.Helper()
 	// Add members to the organization first
 	postResp := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, loginToken,
 		&apicommon.AddMembersRequest{Members: members},
@@ -915,11 +936,13 @@ func postOrgMembers(t *testing.T, loginToken string, orgAddress common.Address, 
 }
 
 func getOrgMembers(t *testing.T, adminToken string, orgAddress common.Address) apicommon.OrganizationMembersResponse {
+	t.Helper()
 	return requestAndParse[apicommon.OrganizationMembersResponse](t, http.MethodGet, adminToken, nil,
 		organizationMembersURL(orgAddress.String()))
 }
 
 func getOrgMember(t *testing.T, adminToken string, orgAddress common.Address, memberID string) apicommon.OrgMember {
+	t.Helper()
 	membersList := getOrgMembers(t, adminToken, orgAddress)
 	for _, m := range membersList.Members {
 		if m.ID == memberID {
@@ -931,6 +954,7 @@ func getOrgMember(t *testing.T, adminToken string, orgAddress common.Address, me
 }
 
 func putOrgMember(t *testing.T, adminToken string, orgAddress common.Address, member apicommon.OrgMember) string {
+	t.Helper()
 	resp := requestAndParse[apicommon.OrgMember](t, http.MethodPut, adminToken, member,
 		organizationMembersURL(orgAddress.String()))
 	return resp.ID
@@ -938,23 +962,28 @@ func putOrgMember(t *testing.T, adminToken string, orgAddress common.Address, me
 
 func putOrgMemberAndExpectError(t *testing.T, adminToken string, orgAddress common.Address, member apicommon.OrgMember,
 ) errors.Error {
+	t.Helper()
 	return requestAndExpectError(t, http.MethodPut, adminToken, member, organizationMembersURL(orgAddress.String()))
 }
 
 func postCensusAndExpectError(t *testing.T, adminToken string, censusInfo *apicommon.CreateCensusRequest) errors.Error {
+	t.Helper()
 	return requestAndExpectError(t, http.MethodPost, adminToken, censusInfo, censusEndpoint)
 }
 
 func getCensus(t *testing.T, adminToken string, censusID string) apicommon.OrganizationCensus {
+	t.Helper()
 	return requestAndParse[apicommon.OrganizationCensus](t, http.MethodGet, adminToken, nil, censusEndpoint, censusID)
 }
 
 func getCensusAndExpectError(t *testing.T, adminToken string, censusID string) errors.Error {
+	t.Helper()
 	return requestAndExpectError(t, http.MethodGet, adminToken, nil, censusEndpoint, censusID)
 }
 
 func postCensusParticipants(t *testing.T, adminToken string, censusID string, members ...apicommon.OrgMember,
 ) apicommon.AddMembersResponse {
+	t.Helper()
 	resp := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, adminToken,
 		&apicommon.AddMembersRequest{Members: members},
 		censusEndpoint, censusID)
@@ -964,6 +993,7 @@ func postCensusParticipants(t *testing.T, adminToken string, censusID string, me
 
 func postCensusParticipantsAndExpectError(t *testing.T, adminToken string, censusID string, members ...apicommon.OrgMember,
 ) errors.Error {
+	t.Helper()
 	return requestAndExpectError(t, http.MethodPost, adminToken, &apicommon.AddMembersRequest{Members: members},
 		censusEndpoint, censusID)
 }
@@ -993,6 +1023,7 @@ func createGroupBasedCensus(
 }
 
 func postGroup(t *testing.T, token string, orgAddress common.Address, memberIDs ...string) apicommon.OrganizationMemberGroupInfo {
+	t.Helper()
 	request := &apicommon.CreateOrganizationMemberGroupRequest{
 		Title:       "Test Census Group",
 		Description: "Group for testing census publishing",
@@ -1009,6 +1040,7 @@ func postGroup(t *testing.T, token string, orgAddress common.Address, memberIDs 
 // It returns the census details.
 func postGroupCensus(t *testing.T, loginToken string, censusID, groupID string, request *apicommon.PublishCensusGroupRequest,
 ) apicommon.PublishedCensusResponse {
+	t.Helper()
 	c := qt.New(t)
 
 	resp := requestAndParse[apicommon.PublishedCensusResponse](t, http.MethodPost, loginToken, request,
@@ -1023,6 +1055,7 @@ func postGroupCensus(t *testing.T, loginToken string, censusID, groupID string, 
 func postGroupCensusAndExpectError(t *testing.T, loginToken string, censusID, groupID string,
 	request *apicommon.PublishCensusGroupRequest,
 ) errors.Error {
+	t.Helper()
 	return requestAndExpectError(t, http.MethodPost, loginToken, request, censusGroupPublishURL(censusID, groupID))
 }
 

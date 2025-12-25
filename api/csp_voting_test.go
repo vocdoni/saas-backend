@@ -21,6 +21,7 @@ import (
 // testCSPAuthenticateWithFields performs the CSP authentication flow for a member using the new multi-field system.
 // It returns the verified auth token.
 func testCSPAuthenticateWithFields(t *testing.T, bundleID string, authReq *handlers.AuthRequest) internal.HexBytes {
+	t.Helper()
 	c := qt.New(t)
 
 	// Step 1: Initiate authentication (auth/0)
@@ -48,6 +49,7 @@ func testCSPAuthenticateWithFields(t *testing.T, bundleID string, authReq *handl
 // signAndMarshalTx signs a transaction with the given signer and marshals it to bytes.
 // This is a helper function for the test cases.
 func signAndMarshalTx(t *testing.T, tx *models.Tx, signer *ethereum.SignKeys) []byte {
+	t.Helper()
 	c := qt.New(t)
 	txBytes, err := proto.Marshal(tx)
 	c.Assert(err, qt.IsNil)

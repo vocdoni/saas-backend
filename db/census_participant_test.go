@@ -14,6 +14,7 @@ import (
 const testParticipantID = "member123"
 
 func setupTestCensusParticipantPrerequisites(t *testing.T, memberSuffix string) (*OrgMember, *Census) {
+	t.Helper()
 	// Create test organization
 	org := &Organization{
 		Address:   testOrgAddress,

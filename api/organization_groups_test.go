@@ -514,6 +514,7 @@ func TestOrganizationGroups(t *testing.T) {
 }
 
 func createGroupWithAllCurrentMembers(t *testing.T, adminToken, orgAddress string) string {
+	t.Helper()
 	// Get all members to create a group with them
 	allMembersResponse := requestAndParse[apicommon.OrganizationMembersResponse](
 		t, http.MethodGet, adminToken, nil,

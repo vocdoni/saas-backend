@@ -19,6 +19,7 @@ var mockCustomer = &stripeapi.Customer{
 }
 
 func newStripeService(t *testing.T) *stripe.Service {
+	t.Helper()
 	c := qt.New(t)
 
 	_ = os.Setenv("VOCDONI_STRIPEAPISECRET", "mockAPISecret")

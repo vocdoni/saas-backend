@@ -92,6 +92,7 @@ func TestLanguageParameterInUserRegistration(t *testing.T) {
 }
 
 func assertContentMatches(t *testing.T, content, lang string, regexps map[string]*regexp.Regexp) {
+	t.Helper()
 	c := qt.New(t)
 	for regexLang, re := range regexps {
 		if regexLang == lang ||
