@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -58,10 +57,7 @@ func TestOrganizationUsers(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Get the invitation code from the email
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	mailBody, err := testMailService.FindEmail(ctx, userInfo.Email)
-	c.Assert(err, qt.IsNil)
+	mailBody := waitForEmail(t, userInfo.Email)
 
 	// Extract the verification code using regex
 	mailCode := apiTestVerificationCodeRgx.FindStringSubmatch(mailBody)
@@ -367,10 +363,7 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 		// Get the invitation code from the email
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		mailBody, err := testMailService.FindEmail(ctx, userToRemoveInfo.Email)
-		c.Assert(err, qt.IsNil)
+		mailBody := waitForEmail(t, userToRemoveInfo.Email)
 
 		// Extract the verification code using regex
 		mailCode := apiTestVerificationCodeRgx.FindStringSubmatch(mailBody)

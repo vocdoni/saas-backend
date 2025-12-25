@@ -495,10 +495,7 @@ func testCreateUser(t *testing.T, password string) string {
 	requestAndAssertCode(http.StatusOK, t, http.MethodPost, "", userInfo, usersEndpoint)
 
 	// Get the verification code from the email
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	mailBody, err := testMailService.FindEmail(ctx, mail)
-	qt.Assert(t, err, qt.IsNil)
+	mailBody := waitForEmail(t, mail)
 
 	// Extract the verification code using regex
 	mailCode := apiTestVerificationCodeRgx.FindStringSubmatch(mailBody)
@@ -624,6 +621,28 @@ func waitUntilTxIsMined(ctx context.Context, txHash []byte, c *apiclient.HTTPcli
 				hex.EncodeToString(txHash), time.Since(startTime).String(), ctx.Err())
 		}
 	}
+}
+
+// waitForEmail waits for an email to arrive in testMailService and returns the mailBody
+func waitForEmail(t *testing.T, emailTo string) string {
+	t.Helper()
+	c := qt.New(t)
+
+	var mailBody string
+	var err error
+	maxRetries := 10
+	for i := range maxRetries {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		mailBody, err = testMailService.FindEmail(ctx, emailTo)
+		cancel()
+		if err == nil {
+			break
+		}
+		t.Logf("Waiting for email, attempt %d/%d...", i+1, maxRetries)
+		time.Sleep(1000 * time.Millisecond)
+	}
+	c.Assert(err, qt.IsNil, qt.Commentf("failed to receive email after %d attempts", maxRetries))
+	return mailBody
 }
 
 func fetchVocdoniAccountNonce(t *testing.T, client *apiclient.HTTPclient, address common.Address) uint32 {

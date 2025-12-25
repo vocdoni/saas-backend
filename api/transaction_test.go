@@ -2,7 +2,6 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -46,11 +45,10 @@ func TestSignTxHandler(t *testing.T) {
 	c.Assert(signuoResp.Body.Close(), qt.IsNil)
 	c.Assert(signuoResp.Body.Close(), qt.IsNil)
 	// get the verification code from the email
-	signupMailBody, err := testMailService.FindEmail(context.Background(), testEmail)
-	c.Assert(err, qt.IsNil)
+	mailBody := waitForEmail(t, testEmail)
 	// create a regex to find the verification code in the email
 	mailCodeRgx := regexp.MustCompile(fmt.Sprintf(`%s(.{%d})`, VerificationCodeTextBody, VerificationCodeLength*2))
-	mailCode := mailCodeRgx.FindStringSubmatch(signupMailBody)
+	mailCode := mailCodeRgx.FindStringSubmatch(mailBody)
 	c.Assert(mailCode, qt.HasLen, 2)
 	// verify the user
 	verifyJSON := mustMarshal(&apicommon.UserVerification{

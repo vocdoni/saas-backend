@@ -1,13 +1,11 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
 	"testing"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
@@ -289,10 +287,7 @@ func TestOrganizationCreateTicketHandler(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Check that cc'ed email arrives correctly to the mailbox
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	mailBody, err := testMailService.FindEmail(ctx, apicommon.SupportEmail)
-	c.Assert(err, qt.IsNil)
+	mailBody := waitForEmail(t, apicommon.SupportEmail)
 	c.Assert(mailBody, qt.Matches, regexp.MustCompile(`(?i)\s(You have a new support request)\s`))
 
 	// Test without authentication

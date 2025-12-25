@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -152,10 +151,7 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Get the verification code from the email
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	mailBody, err := testMailService.FindEmail(ctx, testEmail)
-	c.Assert(err, qt.IsNil)
+	mailBody := waitForEmail(t, testEmail)
 	verifyMailCode := verificationCodeRgx.FindStringSubmatch(mailBody)
 	c.Assert(len(verifyMailCode) > 1, qt.IsTrue)
 	verifyMailLink := verificationLinkRgx.FindStringSubmatch(mailBody)
@@ -179,8 +175,7 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Get the recovery code from the email
-	mailBody, err = testMailService.FindEmail(ctx, testEmail)
-	c.Assert(err, qt.IsNil)
+	mailBody = waitForEmail(t, testEmail)
 	passResetMailCode := passwordResetRgx.FindStringSubmatch(mailBody)
 	c.Assert(len(passResetMailCode) > 1, qt.IsTrue)
 
@@ -256,10 +251,7 @@ func TestResendVerificationCodeHandler(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Get the verification code from the email and verify the user
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	mailBody, err := testMailService.FindEmail(ctx, "verified@test.com")
-	c.Assert(err, qt.IsNil)
+	mailBody := waitForEmail(t, "verified@test.com")
 	verifyMailCode := verificationCodeRgx.FindStringSubmatch(mailBody)
 	c.Assert(len(verifyMailCode) > 1, qt.IsTrue)
 	verifyMailLink := verificationLinkRgx.FindStringSubmatch(mailBody)
@@ -292,10 +284,7 @@ func TestResendVerificationCodeHandler(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Clear the email from the first registration
-	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_, err = testMailService.FindEmail(ctx, "unverified@test.com")
-	c.Assert(err, qt.IsNil)
+	waitForEmail(t, "unverified@test.com")
 
 	// Test resending verification code with active code (attempts remaining)
 	verification.Email = "unverified@test.com"
@@ -304,15 +293,11 @@ func TestResendVerificationCodeHandler(t *testing.T) {
 
 	// Parse the response to check expiration is returned
 	var resendResp apicommon.UserVerification
-	err = json.Unmarshal(resp, &resendResp)
-	c.Assert(err, qt.IsNil)
+	c.Assert(json.Unmarshal(resp, &resendResp), qt.IsNil)
 	c.Assert(resendResp.Expiration.After(time.Now()), qt.IsTrue)
 
 	// Verify email was sent
-	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	mailBody, err = testMailService.FindEmail(ctx, "unverified@test.com")
-	c.Assert(err, qt.IsNil)
+	mailBody = waitForEmail(t, "unverified@test.com")
 	c.Assert(mailBody, qt.Not(qt.Equals), "")
 	verifyMailCode = verificationCodeRgx.FindStringSubmatch(mailBody)
 	c.Assert(len(verifyMailCode) > 1, qt.IsTrue)
@@ -339,8 +324,7 @@ func TestResendVerificationCodeHandler(t *testing.T) {
 		Error string                     `json:"error"`
 		Data  apicommon.UserVerification `json:"data"`
 	}
-	err = json.Unmarshal(resp, &errorResp)
-	c.Assert(err, qt.IsNil)
+	c.Assert(json.Unmarshal(resp, &errorResp), qt.IsNil)
 	c.Assert(errorResp.Data.Expiration.After(time.Now()), qt.IsTrue)
 
 	// Test expired verification code scenario
@@ -367,10 +351,7 @@ func TestResendVerificationCodeHandler(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Verify email was sent with new code
-	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	mailBody, err = testMailService.FindEmail(ctx, "expired@test.com")
-	c.Assert(err, qt.IsNil)
+	mailBody = waitForEmail(t, "expired@test.com")
 	c.Assert(mailBody, qt.Not(qt.Equals), "")
 
 	// Extract the new verification code to ensure it works

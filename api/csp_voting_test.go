@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -29,21 +28,7 @@ func testCSPAuthenticateWithFields(t *testing.T, bundleID string, authReq *handl
 
 	// Step 2: Get the OTP code from the email with retries (if email is provided)
 	if authReq.Email != "" {
-		var mailBody string
-		var err error
-		maxRetries := 10
-		for i := 0; i < maxRetries; i++ {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			mailBody, err = testMailService.FindEmail(ctx, authReq.Email)
-			cancel()
-			if err == nil {
-				break
-			}
-			t.Logf("Waiting for email, attempt %d/%d...", i+1, maxRetries)
-			time.Sleep(1000 * time.Millisecond)
-		}
-		c.Assert(err, qt.IsNil, qt.Commentf("failed to receive email after %d attempts", maxRetries))
-
+		mailBody := waitForEmail(t, authReq.Email)
 		// Extract the OTP code from the email
 		otpCode := extractOTPFromEmail(mailBody)
 		c.Assert(otpCode, qt.Not(qt.Equals), "", qt.Commentf("failed to extract OTP code from email"))

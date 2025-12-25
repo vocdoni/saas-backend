@@ -1,11 +1,9 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"regexp"
 	"testing"
-	"time"
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -91,27 +89,6 @@ func TestLanguageParameterInUserRegistration(t *testing.T) {
 	t.Run("Spanish Registration Email", func(*testing.T) { test("es") })
 	t.Run("English Registration Email", func(*testing.T) { test("en") })
 	t.Run("Catalan Registration Email", func(*testing.T) { test("ca") })
-}
-
-func waitForEmail(t *testing.T, emailTo string) string {
-	c := qt.New(t)
-
-	// Wait for and retrieve the email
-	var mailBody string
-	var err error
-	maxRetries := 10
-	for i := range maxRetries {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		mailBody, err = testMailService.FindEmail(ctx, emailTo)
-		cancel()
-		if err == nil {
-			break
-		}
-		t.Logf("Waiting for email, attempt %d/%d...", i+1, maxRetries)
-		time.Sleep(1000 * time.Millisecond)
-	}
-	c.Assert(err, qt.IsNil, qt.Commentf("failed to receive email after %d attempts", maxRetries))
-	return mailBody
 }
 
 func assertContentMatches(t *testing.T, content, lang string, regexps map[string]*regexp.Regexp) {

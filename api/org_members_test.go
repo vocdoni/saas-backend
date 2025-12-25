@@ -346,8 +346,7 @@ func TestOrganizationMembers(t *testing.T) {
 	c.Assert(jobStatus.Errors[2], qt.Matches, ".*invalid-birthdate.*")
 
 	// Check that the completion email was sent
-	mailBody, err := testMailService.FindEmail(ctx, user.Email)
-	qt.Assert(t, err, qt.IsNil)
+	mailBody := waitForEmail(t, user.Email)
 	c.Assert(mailBody, qt.Matches, regexp.MustCompile(`(?i)\s(has been completed)\s`),
 		qt.Commentf("mail content does not, got:\n%s", mailBody))
 
