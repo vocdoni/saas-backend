@@ -1387,10 +1387,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: |-
-        Create a new census for an organization. Requires Manager/Admin role.
-        Creates either a regular census or a group-based census if GroupID is provided.
-        Validates that either AuthFields or TwoFaFields are provided and checks for duplicates or empty fields.
+      description: Create a new census for an organization. Requires Manager/Admin
+        role.
       parameters:
       - description: Census information
         in: body
@@ -1504,6 +1502,58 @@ paths:
       summary: Add participants to a census
       tags:
       - census
+  /census/{id}/group/{groupid}/publish:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Publish a census based on a specific organization members group for voting. Requires Manager/Admin role.
+        Returns published census with credentials.
+      parameters:
+      - description: Census ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Group ID
+        in: path
+        name: groupId
+        required: true
+        type: string
+      - description: Census authentication configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.PublishCensusGroupRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.PublishedCensusResponse'
+        "400":
+          description: Invalid census ID or group ID
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Census not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Publish a group-based census for voting
+      tags:
+      - census
   /census/{id}/participants:
     get:
       consumes:
@@ -1582,58 +1632,6 @@ paths:
       security:
       - BearerAuth: []
       summary: Publish a census for voting
-      tags:
-      - census
-  /census/{id}/publish/group/{groupid}:
-    post:
-      consumes:
-      - application/json
-      description: |-
-        Publish a census based on a specific organization members group for voting. Requires Manager/Admin role.
-        Returns published census with credentials.
-      parameters:
-      - description: Census ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Group ID
-        in: path
-        name: groupId
-        required: true
-        type: string
-      - description: Census authentication configuration
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/apicommon.PublishCensusGroupRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.PublishedCensusResponse'
-        "400":
-          description: Invalid census ID or group ID
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Census not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Publish a group-based census for voting
       tags:
       - census
   /census/job/{jobid}:
