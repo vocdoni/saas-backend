@@ -40,6 +40,8 @@ func TestBundleAuthToken(t *testing.T) {
 			testUserEmail,
 			notifications.EmailChallenge,
 			apicommon.DefaultLang,
+			"",
+			"",
 		)
 		c.Assert(err, qt.ErrorIs, ErrNoBundleID)
 	})
@@ -51,6 +53,8 @@ func TestBundleAuthToken(t *testing.T) {
 			testUserEmail,
 			notifications.EmailChallenge,
 			apicommon.DefaultLang,
+			"",
+			"",
 		)
 		c.Assert(err, qt.ErrorIs, ErrNoUserID)
 	})
@@ -58,10 +62,10 @@ func TestBundleAuthToken(t *testing.T) {
 	c.Run("notification cooldown reached", func(c *qt.C) {
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		// generate a valid token
-		_, err := csp.BundleAuthToken(testBundleID, testUserID, "", notifications.EmailChallenge, apicommon.DefaultLang)
+		_, err := csp.BundleAuthToken(testBundleID, testUserID, "", notifications.EmailChallenge, apicommon.DefaultLang, "", "")
 		c.Assert(err, qt.ErrorIs, ErrNotificationFailure)
 		// try to generate a new token before the cooldown time
-		_, err = csp.BundleAuthToken(testBundleID, testUserID, "", notifications.EmailChallenge, apicommon.DefaultLang)
+		_, err = csp.BundleAuthToken(testBundleID, testUserID, "", notifications.EmailChallenge, apicommon.DefaultLang, "", "")
 		c.Assert(err, qt.ErrorIs, ErrAttemptCoolDownTime)
 	})
 
@@ -74,6 +78,8 @@ func TestBundleAuthToken(t *testing.T) {
 			testUserEmail,
 			notifications.EmailChallenge,
 			apicommon.DefaultLang,
+			testOrgName,
+			testOrgLogo,
 		)
 		c.Assert(err, qt.IsNil)
 		c.Assert(token, qt.Not(qt.IsNil))
@@ -91,7 +97,11 @@ func TestBundleAuthToken(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		// parse the email body to get the verification code
 		seedNotification, err := mailtemplates.VerifyOTPCodeNotification.Localized(apicommon.DefaultLang).
-			ExecPlain(struct{ Code string }{`(.{6})`})
+			ExecPlain(struct {
+				Code         string
+				Organization string
+				Logo         string
+			}{`(.{6})`, testOrgName, testOrgLogo})
 		c.Assert(err, qt.IsNil)
 		rgxNotification := regexp.MustCompile(seedNotification.PlainBody)
 		// verify the user

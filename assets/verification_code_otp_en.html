@@ -1,7 +1,7 @@
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" lang="en">
 <head>
-    <title>Verification Code - Vocdoni</title>
+    <title>Verification Code - {{.Organization}}</title>
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
@@ -10,7 +10,7 @@
     <meta name="format-detection" content="telephone=no, date=no, address=no, email=no, url=no" />
     
     <div style="display: none; max-height: 0; overflow: hidden;">
-        Your verification code for Vocdoni
+        Your verification code for {{.Organization}}
     </div>
     
     <style type="text/css">
@@ -195,7 +195,7 @@
                 <div class="email-container">
                     
                     <div class="header">
-                        <img src="https://tomato-giant-grasshopper-196.mypinata.cloud/ipfs/bafkreifqyu5m5as4gvcirlog5j267um24q7y4ri6r3svhsi7fda24676ny" 
+                        <img src="{{if .Logo}}{{.Logo}}{{else}}https://tomato-giant-grasshopper-196.mypinata.cloud/ipfs/bafkreifqyu5m5as4gvcirlog5j267um24q7y4ri6r3svhsi7fda24676ny{{end}}" 
                              alt="Vocdoni Logo" 
                              class="logo" 
                              width="100" 
