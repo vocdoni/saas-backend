@@ -25,6 +25,11 @@ const (
 	testRemainingTime = "5m30s"
 )
 
+var testOrgMeta = OrganizationMeta{
+	Name: "Test Organization",
+	Logo: "https://example.com/logo.png",
+}
+
 func TestMain(m *testing.M) {
 	ctx := context.Background()
 	// start test mail server
@@ -70,8 +75,7 @@ func TestNewChallengeSent(t *testing.T) {
 		[]byte("bundle"),
 		testUserEmail,
 		"123456",
-		testOrgName,
-		testOrgLogo,
+		testOrgMeta,
 		testRemainingTime,
 	)
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
@@ -82,8 +86,7 @@ func TestNewChallengeSent(t *testing.T) {
 		nil,
 		testUserEmail,
 		"123456",
-		testOrgName,
-		testOrgLogo,
+		testOrgMeta,
 		testRemainingTime,
 	)
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
@@ -94,8 +97,7 @@ func TestNewChallengeSent(t *testing.T) {
 		[]byte("bundle"),
 		"",
 		"123456",
-		testOrgName,
-		testOrgLogo,
+		testOrgMeta,
 		testRemainingTime,
 	)
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
@@ -106,8 +108,7 @@ func TestNewChallengeSent(t *testing.T) {
 		[]byte("bundle"),
 		testUserEmail,
 		"",
-		testOrgName,
-		testOrgLogo,
+		testOrgMeta,
 		testRemainingTime,
 	)
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
@@ -119,8 +120,7 @@ func TestNewChallengeSent(t *testing.T) {
 		[]byte("bundle"),
 		testUserEmail,
 		"123456",
-		testOrgName,
-		testOrgLogo,
+		testOrgMeta,
 		testRemainingTime,
 	)
 	c.Assert(err, qt.ErrorIs, ErrCreateNotification)
@@ -134,8 +134,7 @@ func TestNewChallengeSent(t *testing.T) {
 		[]byte("bundle"),
 		testUserEmail,
 		"123456",
-		testOrgName,
-		testOrgLogo,
+		testOrgMeta,
 		testRemainingTime,
 	)
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationType)
@@ -147,8 +146,7 @@ func TestNewChallengeSent(t *testing.T) {
 		[]byte("bundle"),
 		testUserEmail,
 		"123456",
-		testOrgName,
-		testOrgLogo,
+		testOrgMeta,
 		testRemainingTime,
 	)
 	c.Assert(err, qt.IsNil)

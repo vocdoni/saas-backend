@@ -38,6 +38,11 @@ var (
 	ErrInvalidNotificationService = fmt.Errorf("invalid notification service")
 )
 
+type OrganizationMeta struct {
+	Name string
+	Logo string
+}
+
 // NotificationChallenge represents a challenge to be sent to a user for
 // verification, either by SMS or email. It contains creation time (to handle
 // expiration), retries (to avoid abuse), and success status (to track
@@ -91,7 +96,9 @@ func NewNotificationChallenge(
 	cType ChallengeType,
 	lang string,
 	uID, bID internal.HexBytes,
-	to, code, orgName, orgLogo, remainingTime string,
+	to, code string,
+	orgMeta OrganizationMeta,
+	remainingTime string,
 ) (
 	*NotificationChallenge, error,
 ) {
@@ -103,7 +110,7 @@ func NewNotificationChallenge(
 		Organization     string
 		OrganizationLogo string
 		ExpiryTime       string
-	}{code, orgName, orgLogo, remainingTime})
+	}{code, orgMeta.Name, orgMeta.Logo, remainingTime})
 	if err != nil {
 		return nil, errors.Join(ErrCreateNotification, err)
 	}
