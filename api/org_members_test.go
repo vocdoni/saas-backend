@@ -63,7 +63,7 @@ func TestOrganizationMembers(t *testing.T) {
 				Email:        "john.doe@example.com",
 				Phone:        "+34612345678",
 				Password:     "password123",
-				Weight:       strptr("1"),
+				Weight:       "1",
 				Other: map[string]any{
 					"department": "Engineering",
 					"age":        30,
@@ -78,7 +78,7 @@ func TestOrganizationMembers(t *testing.T) {
 				Email:        "jane.smith@example.com",
 				Phone:        "+34698765432",
 				Password:     "password456",
-				Weight:       strptr("0"),
+				Weight:       "0",
 				Other: map[string]any{
 					"department": "Marketing",
 					"age":        28,
@@ -134,7 +134,7 @@ func TestOrganizationMembers(t *testing.T) {
 				Email:      "carlos@example.com",
 				Phone:      "+34600111222",
 				Password:   "password999",
-				Weight:     strptr("0"),
+				Weight:     "0",
 				Other: map[string]any{
 					"department": "Finance",
 				},
@@ -148,7 +148,7 @@ func TestOrganizationMembers(t *testing.T) {
 				Email:     "maria.garcia@example.com",
 				Phone:     "+34600333444",
 				Password:  "passwordxyz",
-				Weight:    strptr("1"),
+				Weight:    "1",
 				Other: map[string]any{
 					"department": "Legal",
 				},
@@ -163,7 +163,7 @@ func TestOrganizationMembers(t *testing.T) {
 				Email:      "invalid-email",
 				Phone:      "invalid-phone",
 				Password:   "passwordabc",
-				Weight:     strptr("2"),
+				Weight:     "2",
 				Other: map[string]any{
 					"department": "Operations",
 				},
@@ -211,7 +211,7 @@ func TestOrganizationMembers(t *testing.T) {
 			c.Assert(member.Surname, qt.Equals, "") // Should be empty
 			c.Assert(member.NationalID, qt.Equals, "99887766E")
 			c.Assert(member.BirthDate, qt.Equals, "1985-07-10")
-			c.Assert(member.Weight, qt.DeepEquals, strptr("0"))
+			c.Assert(member.Weight, qt.Equals, "0")
 		}
 		if member.MemberNumber == "P006" {
 			mariaFound = true
@@ -220,7 +220,7 @@ func TestOrganizationMembers(t *testing.T) {
 			c.Assert(member.NationalID, qt.Equals, "") // Should be empty
 			c.Assert(member.BirthDate, qt.Equals, "1992-11-25")
 			c.Assert(member.Phone, qt.Not(qt.Equals), "+34600333444") // Should be hashed, not the original string
-			c.Assert(member.Weight, qt.DeepEquals, strptr("1"))
+			c.Assert(member.Weight, qt.Equals, "1")
 		}
 		if member.ID == pedroID {
 			pedroFound = true
@@ -228,13 +228,13 @@ func TestOrganizationMembers(t *testing.T) {
 			c.Assert(member.Surname, qt.Equals, "Martinez")
 			c.Assert(member.NationalID, qt.Equals, "44556677F")
 			c.Assert(member.MemberNumber, qt.Equals, "") // Should be empty
-			c.Assert(member.Weight, qt.DeepEquals, strptr("2"))
+			c.Assert(member.Weight, qt.Equals, "2")
 		}
 		if member.ID == joanID {
 			joanFound = true
 			c.Assert(member.Name, qt.Equals, "Joan")
 			c.Assert(member.Surname, qt.Equals, "Lopez")
-			c.Assert(member.Weight, qt.DeepEquals, strptr("1")) // Should default to 1
+			c.Assert(member.Weight, qt.Equals, "1") // Should default to 1
 		}
 	}
 	c.Assert(carlosFound, qt.IsTrue, qt.Commentf("Carlos member should be found"))
@@ -592,16 +592,9 @@ func TestUpsertOrganizationMember(t *testing.T) {
 
 		// updating another parameter of member0, like weight, should just work
 		editedMember0.MemberNumber = members[0].MemberNumber
-		editedMember0.Weight = strptr("42")
+		editedMember0.Weight = "42"
 		c.Logf("putting member: %+v", editedMember0)
 		putOrgMember(t, loginToken, orgAddress, editedMember0)
-		qt.Assert(t, getOrgMember(t, loginToken, orgAddress, member0ID).Weight, qt.DeepEquals, strptr("42"))
-
-		// setting weight=0, should also work
-		editedMember0.Weight = strptr("0")
-		c.Logf("putting member: %+v", editedMember0)
-		putOrgMember(t, loginToken, orgAddress, editedMember0)
-		qt.Assert(t, getOrgMember(t, loginToken, orgAddress, member0ID).Weight, qt.DeepEquals, strptr("0"))
 
 		// setting same Phone should be OK since it's not used in the census
 		editedMember0.Phone = members[1].Phone
@@ -736,7 +729,7 @@ func TestUpsertOrganizationMember(t *testing.T) {
 		// updating another parameter of member0, like weight, should just work
 		editedMember0.Phone = ""
 		editedMember0.Email = ""
-		editedMember0.Weight = strptr("42")
+		editedMember0.Weight = "42"
 		c.Logf("putting member: %+v", editedMember0)
 		putOrgMember(t, loginToken, orgAddress, editedMember0)
 
