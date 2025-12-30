@@ -877,7 +877,7 @@ type OrgMember struct {
 	Password string `json:"password,omitempty"`
 
 	// Member's census weight
-	Weight string `json:"weight,omitempty"`
+	Weight *string `json:"weight,omitempty"`
 
 	// Additional custom fields
 	Other map[string]any `json:"other,omitempty"`
@@ -899,11 +899,10 @@ func (p *OrgMember) ToDB() *db.OrgMember {
 	// if the weight is provided convert it to int, defaults to 1
 	// we are performing the conversion here to avoid having a parsedweight field in the db
 	weight := uint64(1)
-	if p.Weight != "" {
-		// convert only if non-empty string since ParseUint64 returns 0 if empty string
+	if p.Weight != nil {
 		var ok bool
-		if weight, ok = math.ParseUint64(p.Weight); !ok {
-			log.Warnf("Failed to convert member weight %s to int", p.Weight)
+		if weight, ok = math.ParseUint64(*p.Weight); !ok {
+			log.Warnf("Failed to convert member weight %s to int", *p.Weight)
 		}
 	}
 
@@ -933,7 +932,7 @@ func OrgMemberFromDb(p db.OrgMember) OrgMember {
 		Email:        p.Email,
 		Phone:        p.Phone.String(), // This returns either "" or the masked hash
 		Other:        p.Other,
-		Weight:       fmt.Sprintf("%d", p.Weight),
+		Weight:       strptr(fmt.Sprintf("%d", p.Weight)),
 	}
 }
 

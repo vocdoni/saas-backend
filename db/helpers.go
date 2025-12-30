@@ -76,7 +76,9 @@ func dynamicUpdateDocument(item any, alwaysUpdateTags []string) (bson.M, error) 
 		}
 		// check if the field should always be updated or is not the zero value
 		_, alwaysUpdate := alwaysUpdateMap[tag]
-		if alwaysUpdate || !reflect.DeepEqual(field.Interface(), reflect.Zero(field.Type()).Interface()) {
+		if alwaysUpdate ||
+			!reflect.DeepEqual(field.Interface(), reflect.Zero(field.Type()).Interface()) ||
+			!field.IsZero() {
 			update[tag] = field.Interface()
 		}
 	}

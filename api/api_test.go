@@ -226,6 +226,8 @@ func testURL(path string) string {
 	return fmt.Sprintf("http://%s:%d%s", testHost, testPort, path)
 }
 
+func strptr(s string) *string { return &s }
+
 // mustMarshal helper function marshalls the input interface into a byte slice.
 // It panics if the marshalling fails.
 func mustMarshal(i any) []byte {
@@ -911,7 +913,7 @@ func newOrgMembers(n int) []apicommon.OrgMember {
 			Other:        map[string]any{"some": "data"},
 			NationalID:   fmt.Sprintf("DNI%03d", i+1),
 			BirthDate:    time.Date(1980, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, i).Format("2006-01-02"),
-			Weight:       fmt.Sprintf("%d", i+1),
+			Weight:       strptr(fmt.Sprintf("%d", i+1)),
 		}
 	}
 	return members

@@ -39,3 +39,5 @@ func HTTPWriteOK(w http.ResponseWriter) {
 		log.Warnw("failed to write on response", "error", err)
 	}
 }
+
+func strptr(s string) *string { return &s }
