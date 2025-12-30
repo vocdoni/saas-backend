@@ -837,14 +837,14 @@ func TestUpsertOrganizationMember(t *testing.T) {
 				"default": ""
 			},  
 			"media": {
-				"logo": "https://example.com/logo.png"
+				"avatar": "https://example.com/logo.png"
 			},  
 			"meta": {} 
 		}`
 		var validMetadata api.AccountMetadata
 		err := json.Unmarshal([]byte(validMetadataJSON), &validMetadata)
 		c.Assert(err, qt.IsNil)
-		name, logo := ParseVochainOrganizationMeta(&validMetadata)
+		name, logo := db.ParseVochainOrganizationMeta(&validMetadata)
 		c.Assert(name, qt.Equals, "TestCSPORg")
 		c.Assert(logo, qt.Equals, "https://example.com/logo.png")
 
@@ -864,7 +864,7 @@ func TestUpsertOrganizationMember(t *testing.T) {
 		var emptyMetadata api.AccountMetadata
 		err = json.Unmarshal([]byte(emptyMetadataJSON), &emptyMetadata)
 		c.Assert(err, qt.IsNil)
-		name, logo = ParseVochainOrganizationMeta(&emptyMetadata)
+		name, logo = db.ParseVochainOrganizationMeta(&emptyMetadata)
 		c.Assert(name, qt.Equals, "")
 		c.Assert(logo, qt.Equals, "")
 	})

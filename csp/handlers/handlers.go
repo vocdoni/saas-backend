@@ -27,7 +27,11 @@ import (
 	"go.vocdoni.io/dvote/vochain/state"
 )
 
-const DefaultOrgName = "Vocdoni"
+const (
+	DefaultOrgName = "Vocdoni"
+	DefaultOrgLogo = "https://tomato-giant-grasshopper-196.mypinata.cloud/ipfs/" +
+		"bafkreifqyu5m5as4gvcirlog5j267um24q7y4ri6r3svhsi7fda24676ny"
+)
 
 // CSPHandlers is a struct that contains an instance of the CSP and the main
 // database (where the bundle and census data is stored). It is used to handle
@@ -642,7 +646,7 @@ func (c *CSPHandlers) authFirstStep(
 	}
 
 	name := DefaultOrgName
-	logo := ""
+	logo := DefaultOrgLogo
 
 	if n, ok := org.Meta["name"].(string); ok {
 		name = n

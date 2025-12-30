@@ -25,6 +25,10 @@ func (ms *MongoStorage) fetchOrganizationFromDB(ctx context.Context, address com
 		}
 		return nil, err
 	}
+	// initialize Meta map if it's nil to prevent nil map assignment errors
+	if org.Meta == nil {
+		org.Meta = make(map[string]any)
+	}
 	return org, nil
 }
 

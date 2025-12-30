@@ -144,20 +144,14 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	// get organization metadata from the vochain
-	if org.Meta["name"] == "" || org.Meta["logo"] == "" {
-		if meta, err := a.client.AccountMetadata(census.OrgAddress.String()); err == nil {
-			org.Meta["name"], org.Meta["logo"] = ParseVochainOrganizationMeta(meta)
-			// if name, ok := meta.Name["default"]; ok {
-			// 	org.Meta["name"] = name
-			// }
-			// org.Meta["logo"] = meta.Media.Logo
-		}
-		if err := a.db.SetOrganization(org); err != nil {
-			errors.ErrGenericInternalServerError.
-				Withf("tried to update update organization name and logo but failed: %v", err).
-				Write(w)
-			return
-		}
+	if meta, err := a.client.AccountMetadata(census.OrgAddress.String()); err == nil {
+		org.Meta["name"], org.Meta["logo"] = db.ParseVochainOrganizationMeta(meta)
+	}
+	if err := a.db.SetOrganization(org); err != nil {
+		errors.ErrGenericInternalServerError.
+			Withf("tried to update update organization name and logo but failed: %v", err).
+			Write(w)
+		return
 	}
 
 	_, err = a.db.SetProcessBundle(bundle)
