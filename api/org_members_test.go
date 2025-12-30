@@ -211,7 +211,7 @@ func TestOrganizationMembers(t *testing.T) {
 			c.Assert(member.Surname, qt.Equals, "") // Should be empty
 			c.Assert(member.NationalID, qt.Equals, "99887766E")
 			c.Assert(member.BirthDate, qt.Equals, "1985-07-10")
-			c.Assert(member.Weight, qt.Equals, "0")
+			c.Assert(member.Weight, qt.DeepEquals, strptr("0"))
 		}
 		if member.MemberNumber == "P006" {
 			mariaFound = true
@@ -220,7 +220,7 @@ func TestOrganizationMembers(t *testing.T) {
 			c.Assert(member.NationalID, qt.Equals, "") // Should be empty
 			c.Assert(member.BirthDate, qt.Equals, "1992-11-25")
 			c.Assert(member.Phone, qt.Not(qt.Equals), "+34600333444") // Should be hashed, not the original string
-			c.Assert(member.Weight, qt.Equals, "1")
+			c.Assert(member.Weight, qt.DeepEquals, strptr("1"))
 		}
 		if member.ID == pedroID {
 			pedroFound = true
@@ -228,13 +228,13 @@ func TestOrganizationMembers(t *testing.T) {
 			c.Assert(member.Surname, qt.Equals, "Martinez")
 			c.Assert(member.NationalID, qt.Equals, "44556677F")
 			c.Assert(member.MemberNumber, qt.Equals, "") // Should be empty
-			c.Assert(member.Weight, qt.Equals, "2")
+			c.Assert(member.Weight, qt.DeepEquals, strptr("2"))
 		}
 		if member.ID == joanID {
 			joanFound = true
 			c.Assert(member.Name, qt.Equals, "Joan")
 			c.Assert(member.Surname, qt.Equals, "Lopez")
-			c.Assert(member.Weight, qt.Equals, "1") // Should default to 1
+			c.Assert(member.Weight, qt.DeepEquals, strptr("1")) // Should default to 1
 		}
 	}
 	c.Assert(carlosFound, qt.IsTrue, qt.Commentf("Carlos member should be found"))

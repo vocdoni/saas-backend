@@ -415,7 +415,7 @@ func TestCSPVoting(t *testing.T) {
 					toUpdate.Weight = strptr("10")
 					putOrgMember(t, token, orgAddress, toUpdate)
 					member = getOrgMember(t, token, orgAddress, member.ID)
-					c.Assert(member.Weight, qt.Equals, "10")
+					c.Assert(member.Weight, qt.DeepEquals, strptr("10"))
 					cspWeight = getCSPUserWeight(t, bundleID, authToken)
 					c.Assert(
 						bytes.Equal(cspWeight, big.NewInt(int64(10)).Bytes()),
