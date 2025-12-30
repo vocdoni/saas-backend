@@ -257,8 +257,8 @@
             <div class="email-content">
               <div class="header">
                 <img
-                  src="{{.OrganizationLogo}}"
-                  alt="{{.Organization}}"
+                  src="{{if .OrganizationLogo}}{{.OrganizationLogo}}{{else}}https://tomato-giant-grasshopper-196.mypinata.cloud/ipfs/bafkreifqyu5m5as4gvcirlog5j267um24q7y4ri6r3svhsi7fda24676ny{{end}}" 
+                  alt="{{if .Organization}}{{.Organization}}{{else}}Vocdoni{{end}}"
                   class="logo"
                 />
               </div>
