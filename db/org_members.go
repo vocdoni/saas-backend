@@ -380,7 +380,7 @@ func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, 
 		return primitive.NilObjectID, fmt.Errorf("failed to update census participants: %w", err)
 	}
 
-	updateDoc, err := dynamicUpdateDocument(preparedMember, []string{"weight"})
+	updateDoc, err := dynamicUpdateDocument(preparedMember, nil)
 	if err != nil {
 		return primitive.NilObjectID, err
 	}
