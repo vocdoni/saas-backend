@@ -16,12 +16,13 @@ import (
 var testMailService *smtp.Email
 
 const (
-	testUserEmail = "user@test.com"
-	adminEmail    = "admin@test.com"
-	adminUser     = "admin"
-	adminPass     = "admin123"
-	testOrgName   = "Test Organization"
-	testOrgLogo   = "https://example.com/logo.png"
+	testUserEmail     = "user@test.com"
+	adminEmail        = "admin@test.com"
+	adminUser         = "admin"
+	adminPass         = "admin123"
+	testOrgName       = "Test Organization"
+	testOrgLogo       = "https://example.com/logo.png"
+	testRemainingTime = "5m30s"
 )
 
 func TestMain(m *testing.M) {
@@ -71,6 +72,7 @@ func TestNewChallengeSent(t *testing.T) {
 		"123456",
 		testOrgName,
 		testOrgLogo,
+		testRemainingTime,
 	)
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
 	_, err = NewNotificationChallenge(
@@ -82,6 +84,7 @@ func TestNewChallengeSent(t *testing.T) {
 		"123456",
 		testOrgName,
 		testOrgLogo,
+		testRemainingTime,
 	)
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
 	_, err = NewNotificationChallenge(
@@ -93,6 +96,7 @@ func TestNewChallengeSent(t *testing.T) {
 		"123456",
 		testOrgName,
 		testOrgLogo,
+		testRemainingTime,
 	)
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
 	_, err = NewNotificationChallenge(
@@ -104,6 +108,7 @@ func TestNewChallengeSent(t *testing.T) {
 		"",
 		testOrgName,
 		testOrgLogo,
+		testRemainingTime,
 	)
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
 	// invalid notification template
@@ -116,6 +121,7 @@ func TestNewChallengeSent(t *testing.T) {
 		"123456",
 		testOrgName,
 		testOrgLogo,
+		testRemainingTime,
 	)
 	c.Assert(err, qt.ErrorIs, ErrCreateNotification)
 	// load email templates
@@ -130,6 +136,7 @@ func TestNewChallengeSent(t *testing.T) {
 		"123456",
 		testOrgName,
 		testOrgLogo,
+		testRemainingTime,
 	)
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationType)
 	// valid notification
@@ -142,6 +149,7 @@ func TestNewChallengeSent(t *testing.T) {
 		"123456",
 		testOrgName,
 		testOrgLogo,
+		testRemainingTime,
 	)
 	c.Assert(err, qt.IsNil)
 	c.Assert(ch, qt.Not(qt.IsNil))

@@ -69,7 +69,8 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 		"bundleID", bID,
 		"token", token)
 	// compose the notification challenge
-	ch, err := notifications.NewNotificationChallenge(ctype, lang, uID, bID, to, code, orgName, orgLogo)
+	remainingTime := c.notificationCoolDownTime.String()
+	ch, err := notifications.NewNotificationChallenge(ctype, lang, uID, bID, to, code, orgName, orgLogo, remainingTime)
 	if err != nil {
 		log.Warnw("error composing notification challenge",
 			"userID", uID,

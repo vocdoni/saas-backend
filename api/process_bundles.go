@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -59,7 +58,7 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 	org, err := a.db.Organization(census.OrgAddress)
 	if err != nil {
 		if err == db.ErrNotFound {
-			errors.ErrMalformedURLParam.Withf("organization not found").Write(w)
+			errors.ErrInvalidCensusData.Withf("organization not found").Write(w)
 			return
 		}
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -146,12 +145,17 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 
 	// get organization metadata from the vochain
 	if org.Meta["name"] == "" || org.Meta["logo"] == "" {
-		if meta, err := a.client.AccountMetadata(fmt.Sprintf("%s", census.OrgAddress)); err == nil {
-			org.Meta["name"] = meta.Name
-			org.Meta["logo"] = meta.Media.Logo
+		if meta, err := a.client.AccountMetadata(census.OrgAddress.String()); err == nil {
+			org.Meta["name"], org.Meta["logo"] = ParseVochainOrganizationMeta(meta)
+			// if name, ok := meta.Name["default"]; ok {
+			// 	org.Meta["name"] = name
+			// }
+			// org.Meta["logo"] = meta.Media.Logo
 		}
 		if err := a.db.SetOrganization(org); err != nil {
-			errors.ErrGenericInternalServerError.Withf("tried to update update organization name and logo but failed: %v", err).Write(w)
+			errors.ErrGenericInternalServerError.
+				Withf("tried to update update organization name and logo but failed: %v", err).
+				Write(w)
 			return
 		}
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.vocdoni.io/dvote/api"
 )
 
 func TestOrganizationMembers(t *testing.T) {
@@ -822,5 +823,49 @@ func TestUpsertOrganizationMember(t *testing.T) {
 			Email:        members[1].Email,
 			Phone:        members[1].Phone,
 		})
+	})
+	c.Run("TestParsingVochainMetadata", func(c *qt.C) {
+		validMetadataJSON := `{
+			"version": "1.0",  
+			"name": {  
+				"default": "TestCSPORg"
+			},  
+			"description": {  
+				"default": ""
+			},  
+			"newsFeed": {  
+				"default": ""
+			},  
+			"media": {
+				"logo": "https://example.com/logo.png"
+			},  
+			"meta": {} 
+		}`
+		var validMetadata api.AccountMetadata
+		err := json.Unmarshal([]byte(validMetadataJSON), &validMetadata)
+		c.Assert(err, qt.IsNil)
+		name, logo := ParseVochainOrganizationMeta(&validMetadata)
+		c.Assert(name, qt.Equals, "TestCSPORg")
+		c.Assert(logo, qt.Equals, "https://example.com/logo.png")
+
+		emptyMetadataJSON := `{
+			"version": "1.0",  
+			"name": {  
+			},  
+			"description": {  
+				"default": ""  
+			},  
+			"newsFeed": {  
+				"default": ""  
+			},  
+			"media": {},  
+			"meta": {}  
+		} `
+		var emptyMetadata api.AccountMetadata
+		err = json.Unmarshal([]byte(emptyMetadataJSON), &emptyMetadata)
+		c.Assert(err, qt.IsNil)
+		name, logo = ParseVochainOrganizationMeta(&emptyMetadata)
+		c.Assert(name, qt.Equals, "")
+		c.Assert(logo, qt.Equals, "")
 	})
 }

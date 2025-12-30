@@ -91,7 +91,7 @@ func NewNotificationChallenge(
 	cType ChallengeType,
 	lang string,
 	uID, bID internal.HexBytes,
-	to, code, orgName, orgLogo string,
+	to, code, orgName, orgLogo, remainingTime string,
 ) (
 	*NotificationChallenge, error,
 ) {
@@ -99,10 +99,11 @@ func NewNotificationChallenge(
 		return nil, ErrInvalidNotificationInputs
 	}
 	n, err := mailtemplates.VerifyOTPCodeNotification.Localized(lang).ExecTemplate(struct {
-		Code         string
-		Organization string
-		Logo         string
-	}{code, orgName, orgLogo})
+		Code             string
+		Organization     string
+		OrganizationLogo string
+		ExpiryTime       string
+	}{code, orgName, orgLogo, remainingTime})
 	if err != nil {
 		return nil, errors.Join(ErrCreateNotification, err)
 	}

@@ -419,13 +419,15 @@ func TestVerifyOTPCodeNotification(t *testing.T) {
 
 		// Test data
 		data := struct {
-			Code         string
-			Organization string
-			Logo         string
+			Code             string
+			Organization     string
+			OrganizationLogo string
+			ExpiryTime       string
 		}{
-			Code:         "987654",
-			Organization: "TestOrgName",
-			Logo:         "https://example.com/logo.png",
+			Code:             "987654",
+			Organization:     "TestOrgName",
+			OrganizationLogo: "https://example.com/logo.png",
+			ExpiryTime:       "00h:05m:00s",
 		}
 
 		// Execute template
@@ -440,7 +442,7 @@ func TestVerifyOTPCodeNotification(t *testing.T) {
 		c.Assert(notification.PlainBody, qt.Contains, "987654")
 		c.Assert(notification.PlainBody, qt.Not(qt.Contains), "{{.Code}}")
 		c.Assert(notification.Body, qt.Contains, "987654")
-		c.Assert(notification.Body, qt.Not(qt.Contains), "{{.Logo}}")
+		c.Assert(notification.Body, qt.Not(qt.Contains), "{{.OrganizationLogo}}")
 		c.Assert(notification.Body, qt.Contains, "https://example.com/logo.png")
 		c.Assert(notification.Body, qt.Not(qt.Contains), "{{.Organization}}")
 		c.Assert(notification.Body, qt.Contains, "TestOrgName")

@@ -16,6 +16,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
+	"go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/util"
 )
 
@@ -313,4 +314,23 @@ func parseLimit(s string) (int64, error) {
 		limit = apicommon.DefaultItemsPerPage
 	}
 	return limit, nil
+}
+
+// ParseVochainOrganizationMeta parses the metadata provided by the vochain client
+// and returns the organization name and logo if available
+func ParseVochainOrganizationMeta(meta *api.AccountMetadata) (name string, logo string) {
+	if meta == nil {
+		return "", ""
+	}
+	// get the organization name
+	if meta.Name != nil {
+		if n, ok := meta.Name["default"]; ok {
+			name = n
+		}
+	}
+	// get the organization logo
+	if meta.Media != nil {
+		logo = meta.Media.Logo
+	}
+	return name, logo
 }

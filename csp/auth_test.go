@@ -98,9 +98,9 @@ func TestBundleAuthToken(t *testing.T) {
 		// parse the email body to get the verification code
 		seedNotification, err := mailtemplates.VerifyOTPCodeNotification.Localized(apicommon.DefaultLang).
 			ExecPlain(struct {
-				Code         string
-				Organization string
-				Logo         string
+				Code             string
+				Organization     string
+				OrganizationLogo string
 			}{`(.{6})`, testOrgName, testOrgLogo})
 		c.Assert(err, qt.IsNil)
 		rgxNotification := regexp.MustCompile(seedNotification.PlainBody)
