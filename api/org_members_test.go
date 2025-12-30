@@ -595,6 +595,13 @@ func TestUpsertOrganizationMember(t *testing.T) {
 		editedMember0.Weight = "42"
 		c.Logf("putting member: %+v", editedMember0)
 		putOrgMember(t, loginToken, orgAddress, editedMember0)
+		qt.Assert(t, getOrgMember(t, loginToken, orgAddress, member0ID).Weight, qt.Equals, "42")
+
+		// setting weight=0, should also work
+		editedMember0.Weight = "0"
+		c.Logf("putting member: %+v", editedMember0)
+		putOrgMember(t, loginToken, orgAddress, editedMember0)
+		qt.Assert(t, getOrgMember(t, loginToken, orgAddress, member0ID).Weight, qt.Equals, "0")
 
 		// setting same Phone should be OK since it's not used in the census
 		editedMember0.Phone = members[1].Phone
