@@ -63,7 +63,7 @@ func TestOrganizationMembers(t *testing.T) {
 				Email:        "john.doe@example.com",
 				Phone:        "+34612345678",
 				Password:     "password123",
-				Weight:       "1",
+				Weight:       strptr("1"),
 				Other: map[string]any{
 					"department": "Engineering",
 					"age":        30,
@@ -78,7 +78,7 @@ func TestOrganizationMembers(t *testing.T) {
 				Email:        "jane.smith@example.com",
 				Phone:        "+34698765432",
 				Password:     "password456",
-				Weight:       "0",
+				Weight:       strptr("0"),
 				Other: map[string]any{
 					"department": "Marketing",
 					"age":        28,
@@ -134,7 +134,7 @@ func TestOrganizationMembers(t *testing.T) {
 				Email:      "carlos@example.com",
 				Phone:      "+34600111222",
 				Password:   "password999",
-				Weight:     "0",
+				Weight:     strptr("0"),
 				Other: map[string]any{
 					"department": "Finance",
 				},
@@ -148,7 +148,7 @@ func TestOrganizationMembers(t *testing.T) {
 				Email:     "maria.garcia@example.com",
 				Phone:     "+34600333444",
 				Password:  "passwordxyz",
-				Weight:    "1",
+				Weight:    strptr("1"),
 				Other: map[string]any{
 					"department": "Legal",
 				},
@@ -163,7 +163,7 @@ func TestOrganizationMembers(t *testing.T) {
 				Email:      "invalid-email",
 				Phone:      "invalid-phone",
 				Password:   "passwordabc",
-				Weight:     "2",
+				Weight:     strptr("2"),
 				Other: map[string]any{
 					"department": "Operations",
 				},
@@ -592,9 +592,16 @@ func TestUpsertOrganizationMember(t *testing.T) {
 
 		// updating another parameter of member0, like weight, should just work
 		editedMember0.MemberNumber = members[0].MemberNumber
-		editedMember0.Weight = "42"
+		editedMember0.Weight = strptr("42")
 		c.Logf("putting member: %+v", editedMember0)
 		putOrgMember(t, loginToken, orgAddress, editedMember0)
+		qt.Assert(t, getOrgMember(t, loginToken, orgAddress, member0ID).Weight, qt.DeepEquals, strptr("42"))
+
+		// setting weight=0, should also work
+		editedMember0.Weight = strptr("0")
+		c.Logf("putting member: %+v", editedMember0)
+		putOrgMember(t, loginToken, orgAddress, editedMember0)
+		qt.Assert(t, getOrgMember(t, loginToken, orgAddress, member0ID).Weight, qt.DeepEquals, strptr("0"))
 
 		// setting same Phone should be OK since it's not used in the census
 		editedMember0.Phone = members[1].Phone
@@ -729,7 +736,7 @@ func TestUpsertOrganizationMember(t *testing.T) {
 		// updating another parameter of member0, like weight, should just work
 		editedMember0.Phone = ""
 		editedMember0.Email = ""
-		editedMember0.Weight = "42"
+		editedMember0.Weight = strptr("42")
 		c.Logf("putting member: %+v", editedMember0)
 		putOrgMember(t, loginToken, orgAddress, editedMember0)
 

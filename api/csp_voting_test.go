@@ -195,7 +195,7 @@ func TestCSPVoting(t *testing.T) {
 						BirthDate:    "1990-01-01",
 						Email:        "john.doe@example.com",
 						Phone:        "612345601", // phone without country code should be handled gracefully
-						Weight:       "1",
+						Weight:       strptr("1"),
 					},
 					{
 						Name:         "Jane",
@@ -205,7 +205,7 @@ func TestCSPVoting(t *testing.T) {
 						BirthDate:    "1985-05-15",
 						Email:        "jane.smith@example.com",
 						Phone:        "+34612345602",
-						Weight:       "1",
+						Weight:       strptr("1"),
 					},
 					{
 						Name:         "Alice",
@@ -215,7 +215,7 @@ func TestCSPVoting(t *testing.T) {
 						BirthDate:    "1992-10-22",
 						Email:        "alice.johnson@example.com",
 						Phone:        "+34612345603",
-						Weight:       "1",
+						Weight:       strptr("1"),
 					},
 					{
 						Name:         "Bob",
@@ -225,7 +225,7 @@ func TestCSPVoting(t *testing.T) {
 						BirthDate:    "1988-03-10",
 						Email:        "bob.williams@example.com",
 						Phone:        "+34612345604",
-						Weight:       "1",
+						Weight:       strptr("1"),
 					},
 					{
 						Name:         "Charlie",
@@ -235,7 +235,7 @@ func TestCSPVoting(t *testing.T) {
 						BirthDate:    "1995-12-03",
 						Email:        "charlie.brown@example.com",
 						Phone:        "+34612345605",
-						Weight:       "1",
+						Weight:       strptr("1"),
 					},
 					{
 						Name:         "David",
@@ -245,7 +245,7 @@ func TestCSPVoting(t *testing.T) {
 						BirthDate:    "1993-07-25",
 						Email:        "david.garcia@example.com",
 						Phone:        "+34612345606",
-						Weight:       "1",
+						Weight:       strptr("1"),
 					},
 					{
 						Name:         "Eva",
@@ -255,7 +255,7 @@ func TestCSPVoting(t *testing.T) {
 						BirthDate:    "1987-11-30",
 						Email:        "", // Member without an email
 						Phone:        "+34612345607",
-						Weight:       "1",
+						Weight:       strptr("1"),
 					},
 					{
 						Name:         "Frank",
@@ -265,7 +265,7 @@ func TestCSPVoting(t *testing.T) {
 						BirthDate:    "1991-04-18",
 						Email:        "frank.lopez@example.com",
 						Phone:        "", // Member without a phone number
-						Weight:       "1",
+						Weight:       strptr("1"),
 					},
 					{
 						Name:         "Grace",
@@ -285,7 +285,7 @@ func TestCSPVoting(t *testing.T) {
 						BirthDate:    "1994-06-14",
 						Email:        "hannah.wilson@example.com",
 						Phone:        "+34612345610",
-						Weight:       "0", // Member with weight 0
+						Weight:       strptr("0"), // Member with weight 0
 					},
 				}
 
@@ -352,7 +352,7 @@ func TestCSPVoting(t *testing.T) {
 
 					cspWeight := getCSPUserWeight(t, bundleID, authToken)
 
-					weight, ok := math.ParseUint64(members[0].Weight)
+					weight, ok := math.ParseUint64(*members[0].Weight)
 					c.Assert(ok, qt.IsTrue, qt.Commentf("Failed to convert member weight %s to int", members[0].Weight))
 					c.Assert(
 						bytes.Equal(cspWeight, big.NewInt(int64(weight)).Bytes()),
@@ -399,7 +399,7 @@ func TestCSPVoting(t *testing.T) {
 
 					cspWeight := getCSPUserWeight(t, bundleID, authToken)
 
-					weight, ok := math.ParseUint64(member.Weight)
+					weight, ok := math.ParseUint64(*member.Weight)
 					c.Assert(ok, qt.IsTrue, qt.Commentf("Failed to convert member weight %s to int", member.Weight))
 					c.Assert(
 						bytes.Equal(cspWeight, big.NewInt(int64(weight)).Bytes()),
@@ -412,7 +412,7 @@ func TestCSPVoting(t *testing.T) {
 
 					toUpdate := member
 					toUpdate.Phone = "" // getOrgMember returns a useless trimmed hash of the phone
-					toUpdate.Weight = "10"
+					toUpdate.Weight = strptr("10")
 					putOrgMember(t, token, orgAddress, toUpdate)
 					member = getOrgMember(t, token, orgAddress, member.ID)
 					c.Assert(member.Weight, qt.Equals, "10")
@@ -751,7 +751,7 @@ func TestCSPVoting(t *testing.T) {
 						signature := testCSPSign(t, bundleID, authToken, processID, user2Addr)
 
 						// Get weight for user 2
-						weight, ok := math.ParseUint64(members[2].Weight)
+						weight, ok := math.ParseUint64(*members[2].Weight)
 						c.Assert(ok, qt.IsTrue, qt.Commentf("Failed to convert member weight %s to int", members[2].Weight))
 
 						// Generate a vote proof with the signature
@@ -799,7 +799,7 @@ func TestCSPVoting(t *testing.T) {
 						signature := testCSPSign(t, bundleID, authToken, processID, user4Addr)
 
 						// Get weight for user 3
-						weight, ok := math.ParseUint64(members[3].Weight)
+						weight, ok := math.ParseUint64(*members[3].Weight)
 						c.Assert(ok, qt.IsTrue, qt.Commentf("Failed to convert member weight %s to int", members[3].Weight))
 
 						// Generate a vote proof with the signature
@@ -824,7 +824,7 @@ func TestCSPVoting(t *testing.T) {
 						signature5 := testCSPSign(t, bundleID, authToken5, processID, user4Addr)
 
 						// Get weight for user 4
-						weight, ok = math.ParseUint64(members[4].Weight)
+						weight, ok = math.ParseUint64(*members[4].Weight)
 						c.Assert(ok, qt.IsTrue, qt.Commentf("Failed to convert member weight %s to int", members[4].Weight))
 
 						// Try to use user 5's signature with user 4's key (should fail)
