@@ -409,7 +409,7 @@ func TestVerifyOTPCodeNotification(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Test template field values
-		c.Assert(plaintext.Subject, qt.Equals, "Codi de Verificació - Vocdoni")
+		c.Assert(plaintext.Subject, qt.Equals, "Codi de Verificació - {{.Organization}}")
 		c.Assert(plaintext.Body, qt.Contains, "El teu codi de verificació és:")
 		c.Assert(plaintext.Body, qt.Contains, "{{.Code}}")
 	})
@@ -419,9 +419,15 @@ func TestVerifyOTPCodeNotification(t *testing.T) {
 
 		// Test data
 		data := struct {
-			Code string
+			Code             string
+			Organization     string
+			OrganizationLogo string
+			ExpiryTime       string
 		}{
-			Code: "987654",
+			Code:             "987654",
+			Organization:     "TestOrgName",
+			OrganizationLogo: "https://example.com/logo.png",
+			ExpiryTime:       "00h:05m:00s",
 		}
 
 		// Execute template
@@ -430,12 +436,16 @@ func TestVerifyOTPCodeNotification(t *testing.T) {
 		c.Assert(notification, qt.Not(qt.IsNil))
 
 		// Verify Catalan subject
-		c.Assert(notification.Subject, qt.Equals, "Codi de Verificació - Vocdoni")
+		c.Assert(notification.Subject, qt.Equals, "Codi de Verificació - TestOrgName")
 
 		// Verify content
 		c.Assert(notification.PlainBody, qt.Contains, "987654")
 		c.Assert(notification.PlainBody, qt.Not(qt.Contains), "{{.Code}}")
 		c.Assert(notification.Body, qt.Contains, "987654")
+		c.Assert(notification.Body, qt.Not(qt.Contains), "{{.OrganizationLogo}}")
+		c.Assert(notification.Body, qt.Contains, "https://example.com/logo.png")
+		c.Assert(notification.Body, qt.Not(qt.Contains), "{{.Organization}}")
+		c.Assert(notification.Body, qt.Contains, "TestOrgName")
 	})
 }
 

@@ -16,11 +16,19 @@ import (
 var testMailService *smtp.Email
 
 const (
-	testUserEmail = "user@test.com"
-	adminEmail    = "admin@test.com"
-	adminUser     = "admin"
-	adminPass     = "admin123"
+	testUserEmail     = "user@test.com"
+	adminEmail        = "admin@test.com"
+	adminUser         = "admin"
+	adminPass         = "admin123"
+	testOrgName       = "Test Organization"
+	testOrgLogo       = "https://example.com/logo.png"
+	testRemainingTime = "5m30s"
 )
+
+var testOrgMeta = OrganizationMeta{
+	Name: "Test Organization",
+	Logo: "https://example.com/logo.png",
+}
 
 func TestMain(m *testing.M) {
 	ctx := context.Background()
@@ -60,24 +68,87 @@ func TestMain(m *testing.M) {
 func TestNewChallengeSent(t *testing.T) {
 	c := qt.New(t)
 	// invalid inputs
-	_, err := NewNotificationChallenge(EmailChallenge, "en", nil, []byte("bundle"), testUserEmail, "123456")
+	_, err := NewNotificationChallenge(
+		EmailChallenge,
+		"en",
+		nil,
+		[]byte("bundle"),
+		testUserEmail,
+		"123456",
+		testOrgMeta,
+		testRemainingTime,
+	)
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
-	_, err = NewNotificationChallenge(EmailChallenge, "en", []byte("user"), nil, testUserEmail, "123456")
+	_, err = NewNotificationChallenge(
+		EmailChallenge,
+		"en",
+		[]byte("user"),
+		nil,
+		testUserEmail,
+		"123456",
+		testOrgMeta,
+		testRemainingTime,
+	)
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
-	_, err = NewNotificationChallenge(EmailChallenge, "en", []byte("user"), []byte("bundle"), "", "123456")
+	_, err = NewNotificationChallenge(
+		EmailChallenge,
+		"en",
+		[]byte("user"),
+		[]byte("bundle"),
+		"",
+		"123456",
+		testOrgMeta,
+		testRemainingTime,
+	)
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
-	_, err = NewNotificationChallenge(EmailChallenge, "en", []byte("user"), []byte("bundle"), testUserEmail, "")
+	_, err = NewNotificationChallenge(
+		EmailChallenge,
+		"en",
+		[]byte("user"),
+		[]byte("bundle"),
+		testUserEmail,
+		"",
+		testOrgMeta,
+		testRemainingTime,
+	)
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
 	// invalid notification template
-	_, err = NewNotificationChallenge(EmailChallenge, "en", []byte("user"), []byte("bundle"), testUserEmail, "123456")
+	_, err = NewNotificationChallenge(
+		EmailChallenge,
+		"en",
+		[]byte("user"),
+		[]byte("bundle"),
+		testUserEmail,
+		"123456",
+		testOrgMeta,
+		testRemainingTime,
+	)
 	c.Assert(err, qt.ErrorIs, ErrCreateNotification)
 	// load email templates
 	c.Assert(mailtemplates.Load(), qt.IsNil)
 	// invalid notification type
-	_, err = NewNotificationChallenge("invalid", "en", []byte("user"), []byte("bundle"), testUserEmail, "123456")
+	_, err = NewNotificationChallenge(
+		"invalid",
+		"en",
+		[]byte("user"),
+		[]byte("bundle"),
+		testUserEmail,
+		"123456",
+		testOrgMeta,
+		testRemainingTime,
+	)
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationType)
 	// valid notification
-	ch, err := NewNotificationChallenge(EmailChallenge, "en", []byte("user"), []byte("bundle"), testUserEmail, "123456")
+	ch, err := NewNotificationChallenge(
+		EmailChallenge,
+		"en",
+		[]byte("user"),
+		[]byte("bundle"),
+		testUserEmail,
+		"123456",
+		testOrgMeta,
+		testRemainingTime,
+	)
 	c.Assert(err, qt.IsNil)
 	c.Assert(ch, qt.Not(qt.IsNil))
 	c.Assert(ch.Type, qt.Equals, EmailChallenge)
@@ -87,6 +158,7 @@ func TestNewChallengeSent(t *testing.T) {
 	c.Assert(ch.Notification.ToAddress, qt.Equals, testUserEmail)
 	c.Assert(ch.Notification.ToNumber, qt.Equals, "")
 	c.Assert(ch.Notification.PlainBody, qt.Contains, "123456")
+	c.Assert(ch.Notification.Subject, qt.Contains, testOrgName)
 	// send the notification and check the result
 	c.Assert(ch.Send(context.Background(), testMailService), qt.IsNil)
 	c.Assert(ch.Success, qt.IsTrue)
@@ -94,11 +166,23 @@ func TestNewChallengeSent(t *testing.T) {
 	mailBody, err := testMailService.FindEmail(context.Background(), testUserEmail)
 	c.Assert(err, qt.IsNil)
 	// parse the email body to get the verification code
-	seedNotification, err := mailtemplates.VerifyOTPCodeNotification.Localized("en").ExecPlain(struct{ Code string }{`(.{6})`})
+	seedNotification, err := mailtemplates.
+		VerifyOTPCodeNotification.
+		Localized("en").
+		ExecPlain(struct {
+			Code, Organization string
+		}{
+			Code:         `(.{6})`,
+			Organization: testOrgName,
+		})
 	c.Assert(err, qt.IsNil)
 	rgxNotification := regexp.MustCompile(seedNotification.PlainBody)
 	// verify the user
 	mailCode := rgxNotification.FindStringSubmatch(mailBody)
 	c.Assert(mailCode, qt.HasLen, 2)
 	c.Assert(mailCode[1], qt.Equals, "123456")
+	regSubject := regexp.MustCompile(seedNotification.Subject)
+	subjectMatch := regSubject.FindStringSubmatch(mailBody)
+	c.Assert(subjectMatch, qt.HasLen, 1)
+	c.Assert(subjectMatch[0], qt.Contains, testOrgName)
 }

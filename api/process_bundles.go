@@ -55,6 +55,16 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	org, err := a.db.Organization(census.OrgAddress)
+	if err != nil {
+		if err == db.ErrNotFound {
+			errors.ErrInvalidCensusData.Withf("organization not found").Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
 	// Get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
@@ -131,6 +141,17 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		Processes:  processes,
 		OrgAddress: census.OrgAddress,
 		Census:     *census,
+	}
+
+	// get organization metadata from the vochain
+	if meta, err := a.client.AccountMetadata(census.OrgAddress.String()); err == nil {
+		org.Meta["name"], org.Meta["logo"] = db.ParseVochainOrganizationMeta(meta)
+	}
+	if err := a.db.SetOrganization(org); err != nil {
+		errors.ErrGenericInternalServerError.
+			Withf("tried to update update organization name and logo but failed: %v", err).
+			Write(w)
+		return
 	}
 
 	_, err = a.db.SetProcessBundle(bundle)

@@ -1,3 +1,3 @@
-subject: "Verification Code - Vocdoni"
+subject: "Verification Code - {{.Organization}}"
 body: |
   Your verification code is: {{.Code}}

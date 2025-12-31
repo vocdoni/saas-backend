@@ -30,6 +30,8 @@ var (
 	testPID             = internal.HexBytes(util.RandomBytes(32))
 	testToken           = internal.HexBytes("token")
 	testAddress         = internal.HexBytes("address")
+	testOrgName         = "Test Organization"
+	testOrgLogo         = "https://example.com/logo.png"
 )
 
 func TestMain(m *testing.M) {
