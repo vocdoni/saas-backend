@@ -15,7 +15,7 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-const DefaultNotificationThrottleTime = time.Second * 60 * 5
+const DefaultNotificationCoolDownTime = time.Second * 60
 
 // Config struct contains the configuration for the CSP service. It includes
 // the database name, the MongoDB client, the notification cooldown time, the
@@ -81,16 +81,16 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 		}
 	}()
 	go queue.Start()
-	notificationCoolDwontime := config.NotificationCoolDownTime
-	if notificationCoolDwontime <= 0 {
-		notificationCoolDwontime = DefaultNotificationThrottleTime
+	notificationCoolDownTime := config.NotificationCoolDownTime
+	if notificationCoolDownTime <= 0 {
+		notificationCoolDownTime = DefaultNotificationCoolDownTime
 	}
 	return &CSP{
 		Storage:                  config.DB,
 		Signer:                   s,
 		notifyQueue:              queue,
 		notificationThrottleTime: config.NotificationThrottleTime,
-		notificationCoolDownTime: notificationCoolDwontime,
+		notificationCoolDownTime: notificationCoolDownTime,
 	}, nil
 }
 
