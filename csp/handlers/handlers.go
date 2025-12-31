@@ -326,7 +326,7 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 //	@Failure		401			{object}	errors.Error	"Unauthorized or invalid token"
 //	@Failure		404			{object}	errors.Error	"Bundle not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
-//	@Router			/process/bundle/{bundleId}/weight [get]
+//	@Router			/process/bundle/{bundleId}/weight [post]
 func (c *CSPHandlers) UserWeightHandler(w http.ResponseWriter, r *http.Request) {
 	// get the bundle ID from the URL parameters
 	bundleID, ok := parseBundleID(w, r)

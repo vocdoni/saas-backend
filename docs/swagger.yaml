@@ -3679,7 +3679,7 @@ paths:
       tags:
       - process
   /process/bundle/{bundleId}/weight:
-    get:
+    post:
       consumes:
       - application/json
       description: Get the weight of a user for a given bundle. Requires a verified
