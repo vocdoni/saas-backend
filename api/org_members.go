@@ -34,7 +34,7 @@ type MembersImportCompletionData struct {
 }
 
 // sendMembersImportCompletionEmail sends an email notification when members import is completed
-func (a *API) sendMembersImportCompletionEmail(userEmail, userName, orgName string, progress *db.BulkOrgMembersJob) {
+func (a *API) sendMembersImportCompletionEmail(userEmail, userName string, org *db.Organization, progress *db.BulkOrgMembersJob) {
 	if a.mail == nil {
 		return // Email service not configured
 	}
@@ -47,14 +47,13 @@ func (a *API) sendMembersImportCompletionEmail(userEmail, userName, orgName stri
 	// Import the mailtemplates package dynamically to avoid import issues
 	// We'll use the sendMail method which handles the template execution
 	data := MembersImportCompletionData{
-		OrganizationName: orgName,
-		UserName:         userName,
-		TotalMembers:     progress.Total,
-		AddedMembers:     progress.Added,
-		Link:             link,
-		ErrorCount:       len(progress.Errors),
-		Errors:           progress.ErrorsAsStrings(),
-		CompletedAt:      time.Now(),
+		UserName:     userName,
+		TotalMembers: progress.Total,
+		AddedMembers: progress.Added,
+		Link:         link,
+		ErrorCount:   len(progress.Errors),
+		Errors:       progress.ErrorsAsStrings(),
+		CompletedAt:  time.Now(),
 	}
 
 	// Create a background context for email sending
@@ -63,15 +62,16 @@ func (a *API) sendMembersImportCompletionEmail(userEmail, userName, orgName stri
 	// We need to import mailtemplates here to use the template
 	// For now, let's create a simple notification structure
 	if err := a.sendMail(ctx, userEmail, mailtemplates.MembersImportCompletionNotification, data); err != nil {
-		log.Errorf("failed to send members import completion email to %s for org %s: %v", userEmail, orgName, err)
-	} else {
-		log.Infow("members import completion email sent",
-			"user", userEmail,
-			"org", orgName,
-			"added", progress.Added,
-			"total", progress.Total,
-			"errors", len(progress.Errors))
+		log.Errorf("failed to send members import completion email to %s for org %s: %v", userEmail, org.Address, err)
+		return
 	}
+
+	log.Infow("members import completion email sent",
+		"user", userEmail,
+		"org", org.Address,
+		"added", progress.Added,
+		"total", progress.Total,
+		"errors", len(progress.Errors))
 }
 
 // organizationMembersHandler godoc
@@ -234,10 +234,6 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 	// Capture user and org info for the async goroutine
 	userEmail := user.Email
 	userName := user.FirstName + " " + user.LastName
-	orgName := org.Subdomain
-	if orgName == "" {
-		orgName = org.Address.Hex()
-	}
 
 	go func() {
 		var lastProgress *db.BulkOrgMembersJob
@@ -256,7 +252,7 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 
 		// Send completion email notification when async job is done
 		if lastProgress != nil {
-			a.sendMembersImportCompletionEmail(userEmail, userName, orgName, lastProgress)
+			a.sendMembersImportCompletionEmail(userEmail, userName, org, lastProgress)
 		}
 	}()
 
