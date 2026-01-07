@@ -478,3 +478,70 @@ func (ms *MongoStorage) DecrementOrganizationSubOrgsCounter(address common.Addre
 
 	return nil
 }
+
+// IncrementOrganizationSentEmailsCounter atomically increments the emails counter for the organization with the given address.
+func (ms *MongoStorage) IncrementOrganizationSentEmailsCounter(address common.Address) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+
+	org, plan, err := ms.fetchOrganizationAndPlan(address)
+	if err != nil {
+		return err
+	}
+
+	if org.Counters.SentEmails >= plan.Organization.MaxSentEmails {
+		return fmt.Errorf("max sentEmails reached (%d >= %d)", org.Counters.SentEmails, plan.Organization.MaxSentEmails)
+	}
+
+	return ms.incrementOrganizationCounter(address, "sentEmails")
+}
+
+// IncrementOrganizationSentSMSCounter atomically increments the SMS counter for the organization with the given address.
+func (ms *MongoStorage) IncrementOrganizationSentSMSCounter(address common.Address) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+
+	org, plan, err := ms.fetchOrganizationAndPlan(address)
+	if err != nil {
+		return err
+	}
+
+	if org.Counters.SentSMS >= plan.Organization.MaxSentSMS {
+		return fmt.Errorf("max sentSMS reached (%d >= %d)", org.Counters.SentSMS, plan.Organization.MaxSentSMS)
+	}
+
+	return ms.incrementOrganizationCounter(address, "sentSMS")
+}
+
+func (ms *MongoStorage) fetchOrganizationAndPlan(orgAddress common.Address) (*Organization, *Plan, error) {
+	org, err := ms.Organization(orgAddress)
+	if err != nil {
+		return nil, nil, fmt.Errorf("could not get organization: %v", err)
+	}
+	if org.Subscription.PlanID == 0 {
+		return nil, nil, fmt.Errorf("organization has no subscription plan")
+	}
+	plan, err := ms.Plan(org.Subscription.PlanID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("could not get subscription plan: %v", err)
+	}
+	return org, plan, nil
+}
+
+// incrementOrganizationCount uses the $inc operator to atomically increment the counter
+func (ms *MongoStorage) incrementOrganizationCounter(orgAddress common.Address, counter string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	filter := bson.M{"_id": orgAddress}
+	update := bson.M{"$inc": bson.M{strings.Join([]string{"counters", counter}, "."): 1}}
+	result, err := ms.organizations.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to increment %s counter: %w", counter, err)
+	}
+
+	if result.MatchedCount == 0 {
+		return fmt.Errorf("no counter matched %s", orgAddress)
+	}
+	return nil
+}

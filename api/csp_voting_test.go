@@ -343,6 +343,8 @@ func TestCSPVoting(t *testing.T) {
 					c.Assert(err, qt.IsNil)
 					user1Addr := user1.Address().Bytes()
 
+					orgBefore := getOrganization(t, orgAddress)
+
 					// Authenticate the member with the CSP using the new multi-field system
 					authToken := testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
 						Name:         "John",
@@ -379,6 +381,10 @@ func TestCSPVoting(t *testing.T) {
 					votes, err := vocdoniClient.ElectionVoteCount(processID)
 					c.Assert(err, qt.IsNil)
 					c.Assert(votes, qt.Equals, uint32(1), qt.Commentf("expected 1 vote, got %d", votes))
+
+					// check counter is incremented
+					orgAfter := getOrganization(t, orgAddress)
+					qt.Assert(t, orgAfter.Counters.SentEmails, qt.Equals, orgBefore.Counters.SentEmails+1)
 				})
 
 				// Create a voting key for the member
@@ -503,6 +509,8 @@ func TestCSPVoting(t *testing.T) {
 
 					// Test case 7: Try to verify with invalid OTP code
 					t.Run("Invalid OTP Code", func(_ *testing.T) {
+						orgBefore := getOrganization(t, orgAddress)
+
 						// First get a valid auth token
 						authToken := testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
 							Name:         "Jane",
@@ -518,6 +526,10 @@ func TestCSPVoting(t *testing.T) {
 						}
 						resp, code := testRequest(t, http.MethodPost, "", authChallengeReq, "process", "bundle", bundleID, "auth", "1")
 						c.Assert(code, qt.Equals, http.StatusUnauthorized, qt.Commentf("expected unauthorized, got %d: %s", code, resp))
+
+						// check counter is anyway incremented, since OTP was sent
+						orgAfter := getOrganization(t, orgAddress)
+						qt.Assert(t, orgAfter.Counters.SentEmails, qt.Equals, orgBefore.Counters.SentEmails+1)
 					})
 
 					// Test case 8: Member without memberNumber doesn't disrupt authentication when not required

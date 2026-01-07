@@ -800,6 +800,12 @@ definitions:
       maxProcesses:
         description: Maximum number of voting processes allowed
         type: integer
+      maxSentEmails:
+        description: Maximum number of sent emails allowed
+        type: integer
+      maxSentSMS:
+        description: Maximum number of sent SMS allowed
+        type: integer
       subOrgs:
         description: Maximum number of sub-organizations allowed
         type: integer
@@ -1115,6 +1121,10 @@ definitions:
         description: Max process duration in days
         type: integer
       maxProcesses:
+        type: integer
+      maxSentEmails:
+        type: integer
+      maxSentSMS:
         type: integer
       subOrgs:
         type: integer

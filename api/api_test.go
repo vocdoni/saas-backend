@@ -83,14 +83,16 @@ var (
 		YearlyPrice:          0,
 		Default:              true,
 		Organization: db.PlanLimits{
-			Users:        1,
-			SubOrgs:      0,
-			MaxProcesses: 10,
-			MaxCensus:    50,
-			MaxDuration:  7,
-			CustomURL:    false,
-			MaxDrafts:    0,
-			CustomPlan:   false,
+			Users:         1,
+			SubOrgs:       0,
+			MaxProcesses:  10,
+			MaxCensus:     50,
+			MaxDuration:   7,
+			CustomURL:     false,
+			MaxDrafts:     0,
+			CustomPlan:    false,
+			MaxSentEmails: 100,
+			MaxSentSMS:    0,
 		},
 		VotingTypes: db.VotingTypes{
 			Single:     true,
@@ -123,14 +125,16 @@ var (
 		YearlyPrice:          19900,
 		Default:              false,
 		Organization: db.PlanLimits{
-			Users:        5,
-			SubOrgs:      1,
-			MaxProcesses: 20,
-			MaxCensus:    10000,
-			MaxDuration:  90,
-			CustomURL:    false,
-			MaxDrafts:    5,
-			CustomPlan:   false,
+			Users:         5,
+			SubOrgs:       1,
+			MaxProcesses:  20,
+			MaxCensus:     10000,
+			MaxDuration:   90,
+			CustomURL:     false,
+			MaxDrafts:     5,
+			CustomPlan:    false,
+			MaxSentEmails: 10000,
+			MaxSentSMS:    10000,
 		},
 		VotingTypes: db.VotingTypes{
 			Single:     true,
@@ -163,13 +167,15 @@ var (
 		YearlyPrice:          49900,
 		Default:              false,
 		Organization: db.PlanLimits{
-			Users:        10,
-			SubOrgs:      2,
-			MaxProcesses: 40,
-			MaxCensus:    20000,
-			MaxDuration:  180,
-			CustomURL:    false,
-			MaxDrafts:    10,
+			Users:         10,
+			SubOrgs:       2,
+			MaxProcesses:  40,
+			MaxCensus:     20000,
+			MaxDuration:   180,
+			CustomURL:     false,
+			MaxDrafts:     10,
+			MaxSentEmails: 20000,
+			MaxSentSMS:    20000,
 		},
 		VotingTypes: db.VotingTypes{
 			Single:     true,
@@ -982,6 +988,11 @@ func postCensusAndExpectError(t *testing.T, adminToken string, censusInfo *apico
 	return requestAndExpectError(t, http.MethodPost, adminToken, censusInfo, censusEndpoint)
 }
 
+func getOrganization(t *testing.T, orgAddress common.Address) apicommon.OrganizationInfo {
+	t.Helper()
+	return requestAndParse[apicommon.OrganizationInfo](t, http.MethodGet, "", nil, organizationInfoURL(orgAddress.String()))
+}
+
 func getCensus(t *testing.T, adminToken string, censusID string) apicommon.OrganizationCensus {
 	t.Helper()
 	return requestAndParse[apicommon.OrganizationCensus](t, http.MethodGet, adminToken, nil, censusEndpoint, censusID)
@@ -1087,6 +1098,10 @@ func organizationMembersURL(orgAddress string) string {
 
 func organizationGroupsURL(orgAddress string) string {
 	return strings.ReplaceAll(organizationGroupsEndpoint, "{address}", orgAddress)
+}
+
+func organizationInfoURL(orgAddress string) string {
+	return strings.ReplaceAll(organizationEndpoint, "{address}", orgAddress)
 }
 
 func censusGroupPublishURL(censusID, groupID string) string {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
@@ -38,9 +39,10 @@ var (
 	ErrInvalidNotificationService = fmt.Errorf("invalid notification service")
 )
 
-type OrganizationMeta struct {
-	Name string
-	Logo string
+type OrganizationInfo struct {
+	Address common.Address
+	Name    string
+	Logo    string
 }
 
 // NotificationChallenge represents a challenge to be sent to a user for
@@ -51,6 +53,7 @@ type NotificationChallenge struct {
 	Type         ChallengeType
 	UserID       internal.HexBytes
 	BundleID     internal.HexBytes
+	OrgAddress   common.Address
 	Notification *notifications.Notification
 	CreatedAt    time.Time
 	Retries      int
@@ -95,14 +98,14 @@ func (nc *NotificationChallenge) Send(ctx context.Context, service notifications
 func NewNotificationChallenge(
 	cType ChallengeType,
 	lang string,
-	uID, bID internal.HexBytes,
+	userID, bundleID internal.HexBytes,
 	to, code string,
-	orgMeta OrganizationMeta,
+	orgInfo OrganizationInfo,
 	remainingTime string,
 ) (
 	*NotificationChallenge, error,
 ) {
-	if uID == nil || bID == nil || to == "" || code == "" {
+	if userID == nil || bundleID == nil || to == "" || code == "" {
 		return nil, ErrInvalidNotificationInputs
 	}
 	n, err := mailtemplates.VerifyOTPCodeNotification.Localized(lang).ExecTemplate(struct {
@@ -110,7 +113,7 @@ func NewNotificationChallenge(
 		Organization     string
 		OrganizationLogo string
 		ExpiryTime       string
-	}{code, orgMeta.Name, orgMeta.Logo, remainingTime})
+	}{code, orgInfo.Name, orgInfo.Logo, remainingTime})
 	if err != nil {
 		return nil, errors.Join(ErrCreateNotification, err)
 	}
@@ -123,8 +126,9 @@ func NewNotificationChallenge(
 		return nil, ErrInvalidNotificationType
 	}
 	return &NotificationChallenge{
-		UserID:       uID,
-		BundleID:     bID,
+		OrgAddress:   orgInfo.Address,
+		UserID:       userID,
+		BundleID:     bundleID,
 		Notification: n,
 		Type:         cType,
 	}, nil
