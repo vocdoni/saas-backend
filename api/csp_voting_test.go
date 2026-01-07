@@ -350,7 +350,7 @@ func TestCSPVoting(t *testing.T) {
 						Email:        "john.doe@example.com",
 					})
 
-					cspWeight := getCSPUserWeight(t, bundleID, authToken)
+					cspWeight := fetchCSPUserWeight(t, bundleID, authToken)
 
 					weight, ok := math.ParseUint64(members[0].Weight)
 					c.Assert(ok, qt.IsTrue, qt.Commentf("Failed to convert member weight %s to int", members[0].Weight))
@@ -397,7 +397,7 @@ func TestCSPVoting(t *testing.T) {
 						Email:        member.Email,
 					})
 
-					cspWeight := getCSPUserWeight(t, bundleID, authToken)
+					cspWeight := fetchCSPUserWeight(t, bundleID, authToken)
 
 					weight, ok := math.ParseUint64(member.Weight)
 					c.Assert(ok, qt.IsTrue, qt.Commentf("Failed to convert member weight %s to int", member.Weight))
@@ -416,7 +416,7 @@ func TestCSPVoting(t *testing.T) {
 					putOrgMember(t, token, orgAddress, toUpdate)
 					member = getOrgMember(t, token, orgAddress, member.ID)
 					c.Assert(member.Weight, qt.Equals, "10")
-					cspWeight = getCSPUserWeight(t, bundleID, authToken)
+					cspWeight = fetchCSPUserWeight(t, bundleID, authToken)
 					c.Assert(
 						bytes.Equal(cspWeight, big.NewInt(int64(10)).Bytes()),
 						qt.IsTrue,

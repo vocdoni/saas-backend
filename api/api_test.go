@@ -712,13 +712,13 @@ func postProcessBundle(t *testing.T, token, censusID string, processIDs ...[]byt
 	return bundleIDStr, bundleResp.Root.String()
 }
 
-// getCSPUserWeight retrieves the CSP user weight for the given process ID and voter address.
-func getCSPUserWeight(t *testing.T, bundleID string, authToken internal.HexBytes) internal.HexBytes {
+// fetchCSPUserWeight retrieves the CSP user weight for the given process ID and voter address.
+func fetchCSPUserWeight(t *testing.T, bundleID string, authToken internal.HexBytes) internal.HexBytes {
 	weightReq := &handlers.UserWeightRequest{
 		AuthToken: authToken,
 	}
 
-	weightResp := requestAndParse[handlers.UserWeightResponse](t, http.MethodGet, "", weightReq,
+	weightResp := requestAndParse[handlers.UserWeightResponse](t, http.MethodPost, "", weightReq,
 		"process", "bundle", bundleID, "weight")
 	return weightResp.Weight
 }
