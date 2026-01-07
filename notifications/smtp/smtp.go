@@ -39,6 +39,8 @@ type Email struct {
 	auth   smtp.Auth
 }
 
+var _ notifications.NotificationService = &Email{}
+
 // New initializes the SMTP email service with the configuration. It sets the
 // SMTP auth if the username and password are provided. It returns an error if
 // the configuration is invalid or if the from email could not be parsed.

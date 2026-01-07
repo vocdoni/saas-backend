@@ -6,6 +6,7 @@ import (
 	"encoding/base32"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/google/uuid"
 	"github.com/vocdoni/saas-backend/csp/notifications"
 	"github.com/vocdoni/saas-backend/db"
@@ -21,7 +22,7 @@ import (
 // the queue to be sent. It returns the token as HexBytes.
 func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 	ctype notifications.ChallengeType, lang string,
-	orgName, orgLogo string,
+	orgName, orgLogo string, orgAddress common.Address,
 ) (internal.HexBytes, error) {
 	// check the input parameters
 	if len(bID) == 0 {
@@ -71,11 +72,12 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 		"token", token)
 	// compose the notification challenge
 	remainingTime := c.notificationCoolDownTime.String()
-	organizationMeta := notifications.OrganizationMeta{
-		Name: orgName,
-		Logo: orgLogo,
+	orgInfo := notifications.OrganizationInfo{
+		Address: orgAddress,
+		Name:    orgName,
+		Logo:    orgLogo,
 	}
-	ch, err := notifications.NewNotificationChallenge(ctype, lang, uID, bID, to, code, organizationMeta, remainingTime)
+	ch, err := notifications.NewNotificationChallenge(ctype, lang, uID, bID, to, code, orgInfo, remainingTime)
 	if err != nil {
 		log.Warnw("error composing notification challenge",
 			"userID", uID,

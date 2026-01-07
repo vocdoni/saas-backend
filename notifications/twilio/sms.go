@@ -35,6 +35,8 @@ type SMS struct {
 	client *t.RestClient
 }
 
+var _ notifications.NotificationService = &SMS{}
+
 // New initializes the Twilio SMS service with the configuration. It sets the
 // account SID and the auth token as environment variables and initializes the
 // Twilio REST client. It returns an error if the configuration is invalid or if
