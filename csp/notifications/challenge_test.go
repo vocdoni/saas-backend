@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/csp/testutil"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
@@ -30,9 +31,12 @@ const (
 	testRemainingTime = "5m30s"
 )
 
-var testOrgMeta = OrganizationMeta{
-	Name: "Test Organization",
-	Logo: "https://example.com/logo.png",
+var testOrgAddress = common.HexToAddress("0xfafa")
+
+var testOrgInfo = OrganizationInfo{
+	Address: testOrgAddress,
+	Name:    testOrgName,
+	Logo:    testOrgLogo,
 }
 
 func TestMain(m *testing.M) {
@@ -80,7 +84,7 @@ func TestNewEmailChallengeSent(t *testing.T) {
 		[]byte("bundle"),
 		testUserEmail,
 		"123456",
-		testOrgMeta,
+		testOrgInfo,
 		testRemainingTime,
 	)
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
@@ -91,7 +95,7 @@ func TestNewEmailChallengeSent(t *testing.T) {
 		nil,
 		testUserEmail,
 		"123456",
-		testOrgMeta,
+		testOrgInfo,
 		testRemainingTime,
 	)
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
@@ -102,7 +106,7 @@ func TestNewEmailChallengeSent(t *testing.T) {
 		[]byte("bundle"),
 		"",
 		"123456",
-		testOrgMeta,
+		testOrgInfo,
 		testRemainingTime,
 	)
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
@@ -113,7 +117,7 @@ func TestNewEmailChallengeSent(t *testing.T) {
 		[]byte("bundle"),
 		testUserEmail,
 		"",
-		testOrgMeta,
+		testOrgInfo,
 		testRemainingTime,
 	)
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
@@ -125,7 +129,7 @@ func TestNewEmailChallengeSent(t *testing.T) {
 		[]byte("bundle"),
 		testUserEmail,
 		"123456",
-		testOrgMeta,
+		testOrgInfo,
 		testRemainingTime,
 	)
 	c.Assert(err, qt.ErrorIs, ErrCreateNotification)
@@ -139,7 +143,7 @@ func TestNewEmailChallengeSent(t *testing.T) {
 		[]byte("bundle"),
 		testUserEmail,
 		"123456",
-		testOrgMeta,
+		testOrgInfo,
 		testRemainingTime,
 	)
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationType)
@@ -151,7 +155,7 @@ func TestNewEmailChallengeSent(t *testing.T) {
 		[]byte("bundle"),
 		testUserEmail,
 		"123456",
-		testOrgMeta,
+		testOrgInfo,
 		testRemainingTime,
 	)
 	c.Assert(err, qt.IsNil)
@@ -206,7 +210,7 @@ func TestNewSMSChallengeSent(t *testing.T) {
 		[]byte("bundle"),
 		testUserPhone,
 		"123456",
-		testOrgMeta,
+		testOrgInfo,
 		testRemainingTime,
 	)
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
@@ -217,7 +221,7 @@ func TestNewSMSChallengeSent(t *testing.T) {
 		nil,
 		testUserPhone,
 		"123456",
-		testOrgMeta,
+		testOrgInfo,
 		testRemainingTime,
 	)
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
@@ -228,7 +232,7 @@ func TestNewSMSChallengeSent(t *testing.T) {
 		[]byte("bundle"),
 		"",
 		"123456",
-		testOrgMeta,
+		testOrgInfo,
 		testRemainingTime,
 	)
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
@@ -239,7 +243,7 @@ func TestNewSMSChallengeSent(t *testing.T) {
 		[]byte("bundle"),
 		testUserPhone,
 		"",
-		testOrgMeta,
+		testOrgInfo,
 		testRemainingTime,
 	)
 	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
@@ -252,7 +256,7 @@ func TestNewSMSChallengeSent(t *testing.T) {
 		[]byte("bundle"),
 		testUserPhone,
 		"123456",
-		testOrgMeta,
+		testOrgInfo,
 		testRemainingTime,
 	)
 	c.Assert(err, qt.IsNil)

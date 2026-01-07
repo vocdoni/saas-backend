@@ -782,6 +782,12 @@ definitions:
     type: object
   apicommon.SubscriptionPlanLimits:
     properties:
+      2FAemail:
+        description: Maximum number of sent emails allowed
+        type: integer
+      2FAsms:
+        description: Maximum number of sent SMS allowed
+        type: integer
       customPlan:
         description: Whether this is a custom plan
         type: boolean
@@ -1103,6 +1109,10 @@ definitions:
     type: object
   db.PlanLimits:
     properties:
+      2FAemail:
+        type: integer
+      2FAsms:
+        type: integer
       customPlan:
         type: boolean
       customURL:
