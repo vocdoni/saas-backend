@@ -100,7 +100,8 @@ func (se *Email) composeBody(notification *notifications.Notification) ([]byte, 
 	// create email headers
 	var headers bytes.Buffer
 	boundary := "----=_Part_0_123456789.123456789"
-	headers.WriteString(fmt.Sprintf("From: %s\r\n", se.config.FromAddress))
+	fromAddr := mail.Address{Name: se.config.FromName, Address: se.config.FromAddress}
+	headers.WriteString(fmt.Sprintf("From: %s\r\n", fromAddr.String()))
 	headers.WriteString(fmt.Sprintf("To: %s\r\n", to.String()))
 	if notification.ReplyTo != "" {
 		replyToAddress, err := mail.ParseAddress(notification.ReplyTo)
