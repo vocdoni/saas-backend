@@ -6,6 +6,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"go.vocdoni.io/proto/build/go/models"
 )
 
@@ -77,8 +78,7 @@ func TestHasTxPermission(t *testing.T) {
 
 	// Test case 1: Organization without a plan
 	_, err := subs.HasTxPermission(tx, models.TxType_SET_ACCOUNT_INFO_URI, orgWithoutPlan, user)
-	c.Assert(err, qt.Not(qt.IsNil))
-	c.Assert(err.Error(), qt.Equals, "organization has no subscription plan")
+	c.Assert(err, qt.ErrorIs, errors.ErrOrganizationHasNoSubscription)
 
 	// Test case 2: Organization with a plan
 	hasPermission, err := subs.HasTxPermission(tx, models.TxType_SET_ACCOUNT_INFO_URI, orgWithPlan, user)
@@ -87,8 +87,7 @@ func TestHasTxPermission(t *testing.T) {
 
 	// Test case 3: Nil organization
 	_, err = subs.HasTxPermission(tx, models.TxType_SET_ACCOUNT_INFO_URI, nil, user)
-	c.Assert(err, qt.Not(qt.IsNil))
-	c.Assert(err.Error(), qt.Equals, "organization is nil")
+	c.Assert(err, qt.ErrorIs, errors.ErrInvalidData)
 }
 
 func TestHasDBPermission(t *testing.T) {
