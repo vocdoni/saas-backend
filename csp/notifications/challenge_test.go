@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/csp/testutil"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"github.com/vocdoni/saas-backend/notifications/smtp"
 	"github.com/vocdoni/saas-backend/test"
@@ -13,10 +14,14 @@ import (
 
 // testMailService is the test mail service for the tests. Make it global so it
 // can be accessed by the tests directly.
-var testMailService *smtp.Email
+var (
+	testMailService *smtp.Email
+	testSMSService  = new(testutil.MockSMS)
+)
 
 const (
 	testUserEmail     = "user@test.com"
+	testUserPhone     = "+34612345678"
 	adminEmail        = "admin@test.com"
 	adminUser         = "admin"
 	adminPass         = "admin123"
@@ -65,7 +70,7 @@ func TestMain(m *testing.M) {
 	m.Run()
 }
 
-func TestNewChallengeSent(t *testing.T) {
+func TestNewEmailChallengeSent(t *testing.T) {
 	c := qt.New(t)
 	// invalid inputs
 	_, err := NewNotificationChallenge(
@@ -185,4 +190,86 @@ func TestNewChallengeSent(t *testing.T) {
 	subjectMatch := regSubject.FindStringSubmatch(mailBody)
 	c.Assert(subjectMatch, qt.HasLen, 1)
 	c.Assert(subjectMatch[0], qt.Contains, testOrgName)
+}
+
+func TestNewSMSChallengeSent(t *testing.T) {
+	c := qt.New(t)
+
+	// load templates
+	c.Assert(mailtemplates.Load(), qt.IsNil)
+
+	// invalid inputs
+	_, err := NewNotificationChallenge(
+		SMSChallenge,
+		"en",
+		nil,
+		[]byte("bundle"),
+		testUserPhone,
+		"123456",
+		testOrgMeta,
+		testRemainingTime,
+	)
+	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
+	_, err = NewNotificationChallenge(
+		SMSChallenge,
+		"en",
+		[]byte("user"),
+		nil,
+		testUserPhone,
+		"123456",
+		testOrgMeta,
+		testRemainingTime,
+	)
+	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
+	_, err = NewNotificationChallenge(
+		SMSChallenge,
+		"en",
+		[]byte("user"),
+		[]byte("bundle"),
+		"",
+		"123456",
+		testOrgMeta,
+		testRemainingTime,
+	)
+	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
+	_, err = NewNotificationChallenge(
+		SMSChallenge,
+		"en",
+		[]byte("user"),
+		[]byte("bundle"),
+		testUserPhone,
+		"",
+		testOrgMeta,
+		testRemainingTime,
+	)
+	c.Assert(err, qt.ErrorIs, ErrInvalidNotificationInputs)
+
+	// valid notification
+	ch, err := NewNotificationChallenge(
+		SMSChallenge,
+		"en",
+		[]byte("user"),
+		[]byte("bundle"),
+		testUserPhone,
+		"123456",
+		testOrgMeta,
+		testRemainingTime,
+	)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ch, qt.Not(qt.IsNil))
+	c.Assert(ch.Type, qt.Equals, SMSChallenge)
+	c.Assert(string(ch.UserID), qt.Equals, "user")
+	c.Assert(string(ch.BundleID), qt.Equals, "bundle")
+	c.Assert(ch.Notification, qt.Not(qt.IsNil))
+	c.Assert(ch.Notification.ToAddress, qt.Equals, "")
+	c.Assert(ch.Notification.ToNumber, qt.Equals, testUserPhone)
+	c.Assert(ch.Notification.PlainBody, qt.Contains, "123456")
+	c.Assert(ch.Notification.Subject, qt.Contains, testOrgName)
+	// send the notification and check the result
+	c.Assert(ch.Send(context.Background(), testSMSService), qt.IsNil)
+	c.Assert(ch.Success, qt.IsTrue)
+	// get the verification code from the mock SMS
+	smsNotification := testSMSService.FindNotification(testUserPhone)
+	c.Assert(smsNotification, qt.IsNotNil)
+	c.Assert(smsNotification.PlainBody, qt.Contains, "123456")
 }

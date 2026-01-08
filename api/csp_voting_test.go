@@ -30,11 +30,12 @@ func testCSPAuthenticateWithFields(t *testing.T, bundleID string, authReq *handl
 	// Step 1: Initiate authentication (auth/0)
 	authToken := postProcessBundleAuth0(t, bundleID, authReq)
 
-	// Step 2: Get the OTP code from the email with retries (if email is provided)
-	if authReq.Email != "" {
+	// Step 2: Get the OTP code
+	switch {
+	case authReq.Email != "":
 		mailBody := waitForEmail(t, authReq.Email)
 		// Extract the OTP code from the email
-		otpCode := extractOTPFromEmail(mailBody)
+		otpCode := extractOTPFromBody(mailBody)
 		c.Assert(otpCode, qt.Not(qt.Equals), "", qt.Commentf("failed to extract OTP code from email"))
 		t.Logf("Extracted OTP code: %s", otpCode)
 
@@ -43,10 +44,20 @@ func testCSPAuthenticateWithFields(t *testing.T, bundleID string, authReq *handl
 			AuthToken: authToken,
 			AuthData:  []string{otpCode},
 		})
-	}
+	case authReq.Phone != "":
+		smsBody := waitForSMS(t, authReq.Phone)
+		otpCode := extractOTPFromBody(smsBody)
+		c.Assert(otpCode, qt.Not(qt.Equals), "")
 
-	// For auth-only cases, return the initial token
-	return authToken
+		// Step 3: Verify authentication (auth/1)
+		return postProcessBundleAuth1(t, bundleID, &handlers.AuthChallengeRequest{
+			AuthToken: authToken,
+			AuthData:  []string{otpCode},
+		})
+	default:
+		// For auth-only cases, return the initial token
+		return authToken
+	}
 }
 
 // signAndMarshalTx signs a transaction with the given signer and marshals it to bytes.
@@ -181,9 +192,10 @@ func TestCSPVoting(t *testing.T) {
 					db.OrgMemberAuthFieldsSurname,
 					db.OrgMemberAuthFieldsMemberNumber,
 				}
-				// use the email for two-factor authentication
+				// use the email OR sms for two-factor authentication
 				twoFaFields := db.OrgMemberTwoFaFields{
 					db.OrgMemberTwoFaFieldEmail,
+					db.OrgMemberTwoFaFieldPhone,
 				}
 
 				// Generate test members with complete data for new authentication system
@@ -288,6 +300,16 @@ func TestCSPVoting(t *testing.T) {
 						Phone:        "+34612345610",
 						Weight:       "0", // Member with weight 0
 					},
+					{
+						Name:         "MemberForSMS",
+						Surname:      "Surname",
+						MemberNumber: "P011",
+						NationalID:   "12312312N",
+						BirthDate:    "1991-01-11",
+						Email:        "MemberForSMS@example.com",
+						Phone:        "+34612312312",
+						Weight:       "1",
+					},
 				}
 
 				// Add members to the organization first
@@ -336,7 +358,10 @@ func TestCSPVoting(t *testing.T) {
 				bundleID, _ := postProcessBundle(t, token, censusID, processID)
 
 				// Create a voting key for the member
-				t.Run("Authenticate and Vote", func(_ *testing.T) {
+				testAuthenthicateAndVote := func(t *testing.T, authRequest *handlers.AuthRequest) {
+					votesBefore, err := vocdoniClient.ElectionVoteCount(processID)
+					c.Assert(err, qt.IsNil)
+
 					// Create the voting address for the first user
 					user1 := ethereum.SignKeys{}
 					err = user1.Generate()
@@ -344,12 +369,7 @@ func TestCSPVoting(t *testing.T) {
 					user1Addr := user1.Address().Bytes()
 
 					// Authenticate the member with the CSP using the new multi-field system
-					authToken := testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
-						Name:         "John",
-						Surname:      "Doe",
-						MemberNumber: "P001",
-						Email:        "john.doe@example.com",
-					})
+					authToken := testCSPAuthenticateWithFields(t, bundleID, authRequest)
 
 					cspWeight := fetchCSPUserWeight(t, bundleID, authToken)
 
@@ -376,9 +396,41 @@ func TestCSPVoting(t *testing.T) {
 					t.Logf("Vote cast successfully with nullifier: %x", nullifier)
 
 					// Verify the vote was counted
-					votes, err := vocdoniClient.ElectionVoteCount(processID)
+					votesAfter, err := vocdoniClient.ElectionVoteCount(processID)
 					c.Assert(err, qt.IsNil)
-					c.Assert(votes, qt.Equals, uint32(1), qt.Commentf("expected 1 vote, got %d", votes))
+					c.Assert(votesAfter, qt.Equals, votesBefore+1, qt.Commentf("expected 1 more vote, got %d", votesAfter))
+				}
+
+				t.Run("Authenticate with Email and Vote", func(t *testing.T) {
+					orgBefore := getOrganization(t, orgAddress)
+
+					testAuthenthicateAndVote(t, &handlers.AuthRequest{
+						Name:         "John",
+						Surname:      "Doe",
+						MemberNumber: "P001",
+						Email:        "john.doe@example.com",
+					})
+
+					// check only email counter is incremented
+					orgAfter := getOrganization(t, orgAddress)
+					// qt.Assert(t, orgAfter.Counters.SentEmails, qt.Equals, orgBefore.Counters.SentEmails+1) // TODO: implement counter
+					qt.Assert(t, orgAfter.Counters.SentSMS, qt.Equals, orgBefore.Counters.SentSMS)
+				})
+
+				t.Run("Authenticate with SMS and Vote", func(t *testing.T) {
+					orgBefore := getOrganization(t, orgAddress)
+
+					testAuthenthicateAndVote(t, &handlers.AuthRequest{
+						Name:         "MemberForSMS",
+						Surname:      "Surname",
+						MemberNumber: "P011",
+						Phone:        "+34612312312",
+					})
+
+					// check only sms counter is incremented
+					orgAfter := getOrganization(t, orgAddress)
+					qt.Assert(t, orgAfter.Counters.SentEmails, qt.Equals, orgBefore.Counters.SentEmails)
+					// qt.Assert(t, orgAfter.Counters.SentSMS, qt.Equals, orgBefore.Counters.SentSMS+1) // TODO: implement counter
 				})
 
 				// Create a voting key for the member

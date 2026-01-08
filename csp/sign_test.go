@@ -26,6 +26,7 @@ func TestSign(t *testing.T) {
 	csp, err := New(ctx, &Config{
 		DB:                       testDB,
 		MailService:              testMailService,
+		SMSService:               testSMSService,
 		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,
 		RootKey:                  *testRootKey,
@@ -61,6 +62,7 @@ func TestPrepareSaltedKeySigner(t *testing.T) {
 	csp, err := New(ctx, &Config{
 		DB:                       testDB,
 		MailService:              testMailService,
+		SMSService:               testSMSService,
 		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,
 		RootKey:                  *testRootKey,
@@ -166,6 +168,7 @@ func TestFinishSaltedKeySigner(t *testing.T) {
 	csp, err := New(ctx, &Config{
 		DB:                       testDB,
 		MailService:              testMailService,
+		SMSService:               testSMSService,
 		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,
 		RootKey:                  *testRootKey,
