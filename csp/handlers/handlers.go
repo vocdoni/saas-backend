@@ -644,6 +644,10 @@ func (c *CSPHandlers) authFirstStep(
 		return nil, fmt.Errorf("failed to get org member: %w", err)
 	}
 
+	if census.Weighted && orgMember.Weight == 0 {
+		return nil, errors.ErrZeroWeightVoter
+	}
+
 	// Determine contact method based on census type
 	toDestinations, challengeType, err := determineContactMethod(census, org, &req, orgMember)
 	if err != nil {
