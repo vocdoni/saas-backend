@@ -23,6 +23,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/handlers"
+	"github.com/vocdoni/saas-backend/csp/testutil"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
@@ -203,6 +204,10 @@ var testDB *db.MongoStorage
 // testMailService is the test mail service for the tests. Make it global so it
 // can be accessed by the tests directly.
 var testMailService *smtp.Email
+
+// testSMSService is the test SMS service for the tests. Make it global so it
+// can be accessed by the tests directly.
+var testSMSService = new(testutil.MockSMS)
 
 // testAPIEndpoint is the Voconed API endpoint for the tests. Make it global so it can be accessed by the tests directly.
 var testAPIEndpoint string
@@ -401,6 +406,7 @@ func TestMain(m *testing.M) {
 	testCSP, err = csp.New(ctx, &csp.Config{
 		DB:                       testDB,
 		MailService:              testMailService,
+		SMSService:               testSMSService,
 		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: cspNotificationCoolDownTime,
 		RootKey:                  *rootKey,
@@ -423,6 +429,7 @@ func TestMain(m *testing.M) {
 		Client:              testAPIClient,
 		Account:             testAccount,
 		MailService:         testMailService,
+		SMSService:          testSMSService,
 		FullTransparentMode: false,
 		Subscriptions:       subscriptionsService,
 		CSP:                 testCSP,
@@ -651,6 +658,25 @@ func waitForEmail(t *testing.T, emailTo string) string {
 	return mailBody
 }
 
+// waitForSMS waits for an SMS to arrive in testSMSService and returns the PlainBody
+func waitForSMS(t *testing.T, phoneTo string) string {
+	t.Helper()
+	c := qt.New(t)
+
+	maxRetries := 10
+	for i := range maxRetries {
+		mailBody := testSMSService.FindNotification(phoneTo)
+		if mailBody != nil {
+			return mailBody.PlainBody
+		}
+		t.Logf("Waiting for sms, attempt %d/%d...", i+1, maxRetries)
+		time.Sleep(1000 * time.Millisecond)
+	}
+	t.Logf("failed to receive sms after %d attempts", maxRetries)
+	c.Fail()
+	return ""
+}
+
 func fetchVocdoniAccountNonce(t *testing.T, client *apiclient.HTTPclient, address common.Address) uint32 {
 	t.Helper()
 	acc, err := client.Account(address.String())
@@ -816,12 +842,12 @@ func testCastVote(t *testing.T, vocdoniClient *apiclient.HTTPclient, signer *eth
 	return signAndSendVocdoniTx(t, &tx, signer, vocdoniClient)
 }
 
-// extractOTPFromEmail extracts the OTP code from the email body.
+// extractOTPFromBody extracts the OTP code from the email body.
 // It returns the OTP code as a string.
-func extractOTPFromEmail(mailBody string) string {
+func extractOTPFromBody(body string) string {
 	// The OTP code is typically a 6-digit number in the email
 	re := regexp.MustCompile(`\b\d{6}\b`)
-	matches := re.FindStringSubmatch(mailBody)
+	matches := re.FindStringSubmatch(body)
 	if len(matches) > 0 {
 		return matches[0]
 	}
@@ -949,7 +975,7 @@ func postOrgMembers(t *testing.T, loginToken string, orgAddress common.Address, 
 func getOrgMembers(t *testing.T, adminToken string, orgAddress common.Address) apicommon.OrganizationMembersResponse {
 	t.Helper()
 	return requestAndParse[apicommon.OrganizationMembersResponse](t, http.MethodGet, adminToken, nil,
-		organizationMembersURL(orgAddress.String()))
+		organizationMembersURL(orgAddress.String())+"?limit=100")
 }
 
 func getOrgMember(t *testing.T, adminToken string, orgAddress common.Address, memberID string) apicommon.OrgMember {
@@ -980,6 +1006,11 @@ func putOrgMemberAndExpectError(t *testing.T, adminToken string, orgAddress comm
 func postCensusAndExpectError(t *testing.T, adminToken string, censusInfo *apicommon.CreateCensusRequest) errors.Error {
 	t.Helper()
 	return requestAndExpectError(t, http.MethodPost, adminToken, censusInfo, censusEndpoint)
+}
+
+func getOrganization(t *testing.T, orgAddress common.Address) apicommon.OrganizationInfo {
+	t.Helper()
+	return requestAndParse[apicommon.OrganizationInfo](t, http.MethodGet, "", nil, organizationInfoURL(orgAddress.String()))
 }
 
 func getCensus(t *testing.T, adminToken string, censusID string) apicommon.OrganizationCensus {
@@ -1087,6 +1118,10 @@ func organizationMembersURL(orgAddress string) string {
 
 func organizationGroupsURL(orgAddress string) string {
 	return strings.ReplaceAll(organizationGroupsEndpoint, "{address}", orgAddress)
+}
+
+func organizationInfoURL(orgAddress string) string {
+	return strings.ReplaceAll(organizationEndpoint, "{address}", orgAddress)
 }
 
 func censusGroupPublishURL(censusID, groupID string) string {

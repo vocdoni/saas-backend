@@ -26,7 +26,7 @@ func TestNotificationChallengeQueue(t *testing.T) {
 		c.Parallel()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		queue := NewQueue(ctx, time.Minute, time.Second, testMailService, nil)
+		queue := NewQueue(ctx, time.Minute, time.Second, testMailService, testSMSService)
 		go queue.Start()
 		c.Assert(queue.Push(&NotificationChallenge{
 			Type:         EmailChallenge,
@@ -57,7 +57,7 @@ func TestNotificationChallengeQueue(t *testing.T) {
 		c.Parallel()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		queue := NewQueue(ctx, time.Second*10, time.Second*15, testMailService, nil)
+		queue := NewQueue(ctx, time.Second*10, time.Second*15, testMailService, testSMSService)
 		go queue.Start()
 
 		c.Assert(queue.Push(&NotificationChallenge{
@@ -90,7 +90,7 @@ func TestNotificationChallengeQueue(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		queue := NewQueue(ctx, time.Second*10, time.Second, testMailService, nil)
+		queue := NewQueue(ctx, time.Second*10, time.Second, testMailService, testSMSService)
 		go queue.Start()
 
 		c.Assert(mailtemplates.Load(), qt.IsNil)

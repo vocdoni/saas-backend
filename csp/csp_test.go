@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/vocdoni/saas-backend/csp/testutil"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"github.com/vocdoni/saas-backend/notifications/smtp"
@@ -22,6 +23,7 @@ const (
 var (
 	testMongoURI        string
 	testMailService     *smtp.Email
+	testSMSService      = new(testutil.MockSMS)
 	testRootKey         = new(internal.HexBytes).SetString("700e669712473377a92457f3ff2a4d8f6b17e139f127738018a80fe26983f410")
 	testUserID          = internal.HexBytes("userID")
 	testBundleID        = internal.HexBytes("bundleID")
