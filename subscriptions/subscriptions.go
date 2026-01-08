@@ -54,6 +54,7 @@ type DBInterface interface {
 	Organization(address common.Address) (*db.Organization, error)
 	OrganizationWithParent(address common.Address) (*db.Organization, *db.Organization, error)
 	CountProcesses(orgAddress common.Address, draft db.DraftFilter) (int64, error)
+	OrganizationMemberGroup(groupID string, orgAddress common.Address) (*db.OrganizationMemberGroup, error)
 }
 
 // Subscriptions is the service that manages the organization permissions based on
@@ -137,7 +138,7 @@ func (p *Subscriptions) HasTxPermission(
 		}
 		newProcess := tx.GetNewProcess()
 		if newProcess.Process.MaxCensusSize > uint64(plan.Organization.MaxCensus) {
-			return false, errors.ErrProcessCensusSizeExceedsLimit.Withf("plan max census: %d", plan.Organization.MaxCensus)
+			return false, errors.ErrProcessCensusSizeExceedsPlanLimit.Withf("plan max census: %d", plan.Organization.MaxCensus)
 		}
 		if org.Counters.Processes >= plan.Organization.MaxProcesses {
 			// allow processes with less than TestMaxCensusSize for user testing
@@ -207,4 +208,36 @@ func (p *Subscriptions) OrgHasPermission(orgAddress common.Address, permission D
 	default:
 		return fmt.Errorf("permission not found")
 	}
+}
+
+func (p *Subscriptions) OrgCanPublishGroupCensus(census *db.Census, groupID string) error {
+	org, err := p.db.Organization(census.OrgAddress)
+	if err != nil {
+		return errors.ErrOrganizationNotFound.WithErr(err)
+	}
+
+	if org.Subscription.PlanID == 0 {
+		return errors.ErrOrganizationHasNoSubscription
+	}
+
+	plan, err := p.db.Plan(org.Subscription.PlanID)
+	if err != nil {
+		return errors.ErrPlanNotFound.WithErr(err)
+	}
+
+	group, err := p.db.OrganizationMemberGroup(groupID, org.Address)
+	if err != nil {
+		return errors.ErrGroupNotFound.WithErr(err)
+	}
+
+	remainingEmails := plan.Organization.MaxSentEmails - org.Counters.SentEmails
+	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldEmail) && len(group.MemberIDs) > remainingEmails {
+		return errors.ErrProcessCensusSizeExceedsEmailAllowance.Withf("remaining emails: %d", remainingEmails)
+	}
+	remainingSMS := plan.Organization.MaxSentSMS - org.Counters.SentSMS
+	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldPhone) && len(group.MemberIDs) > remainingSMS {
+		return errors.ErrProcessCensusSizeExceedsSMSAllowance.Withf("remaining sms: %d", remainingSMS)
+	}
+
+	return nil
 }

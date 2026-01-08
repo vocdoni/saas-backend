@@ -13,11 +13,13 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/math"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -69,6 +71,12 @@ const (
 	anotherEmail = "something-else@gmail.com"
 
 	cspNotificationCoolDownTime = time.Second * 5
+)
+
+var (
+	twoFaEmail        = db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail}
+	twoFaPhone        = db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldPhone}
+	twoFaEmailOrPhone = slices.Concat(twoFaEmail, twoFaPhone)
 )
 
 var (
@@ -746,6 +754,7 @@ func postProcessBundle(t *testing.T, token, censusID string, processIDs ...[]byt
 
 // fetchCSPUserWeight retrieves the CSP user weight for the given process ID and voter address.
 func fetchCSPUserWeight(t *testing.T, bundleID string, authToken internal.HexBytes) internal.HexBytes {
+	t.Helper()
 	weightReq := &handlers.UserWeightRequest{
 		AuthToken: authToken,
 	}
@@ -772,6 +781,54 @@ func testCSPSign(t *testing.T, bundleID string, authToken, processID, payload in
 
 	t.Logf("Received signature: %s", signResp.Signature.String())
 	return signResp.Signature
+}
+
+func testAuthenthicateAndVote(t *testing.T, vocdoniClient *apiclient.HTTPclient,
+	bundleID string, processID internal.HexBytes, expectedWeight string, authRequest *handlers.AuthRequest,
+) {
+	t.Helper()
+	c := qt.New(t)
+
+	votesBefore, err := vocdoniClient.ElectionVoteCount(processID.Bytes())
+	c.Assert(err, qt.IsNil)
+
+	// Create the voting address for the first user
+	user1 := ethereum.SignKeys{}
+	err = user1.Generate()
+	c.Assert(err, qt.IsNil)
+	user1Addr := user1.Address().Bytes()
+
+	// Authenticate the member with the CSP using the new multi-field system
+	authToken := testCSPAuthenticateWithFields(t, bundleID, authRequest)
+
+	cspWeight := fetchCSPUserWeight(t, bundleID, authToken)
+
+	weight, ok := math.ParseUint64(expectedWeight)
+	c.Assert(ok, qt.IsTrue, qt.Commentf("Failed to convert member weight %s to int", expectedWeight))
+	c.Assert(
+		bytes.Equal(cspWeight, big.NewInt(int64(weight)).Bytes()),
+		qt.IsTrue,
+		qt.Commentf(
+			"CSP reported weight %d does not match expected weight %d",
+			cspWeight, weight,
+		),
+	)
+
+	// Sign the voter's address with the CSP
+	signature := testCSPSign(t, bundleID, authToken, processID, user1Addr)
+
+	// Generate a vote proof with the signature
+	proof := testGenerateVoteProof(processID, user1Addr, signature, weight)
+
+	// Cast a vote
+	votePackage := []byte("[\"1\"]") // Vote for option 1
+	nullifier := testCastVote(t, vocdoniClient, &user1, processID, proof, votePackage)
+	t.Logf("Vote cast successfully with nullifier: %x", nullifier)
+
+	// Verify the vote was counted
+	votesAfter, err := vocdoniClient.ElectionVoteCount(processID.Bytes())
+	c.Assert(err, qt.IsNil)
+	c.Assert(votesAfter, qt.Equals, votesBefore+1, qt.Commentf("expected 1 more vote, got %d", votesAfter))
 }
 
 // postProcessBundleAuth0 authenticates with the CSP (step 0) and returns the AuthToken.
@@ -950,6 +1007,7 @@ func newOrgMembers(n int) []apicommon.OrgMember {
 }
 
 func decodeNestedFieldAs[T any](c *qt.C, parsedJSON map[string]any, field string) T {
+	c.Helper()
 	c.Assert(parsedJSON[field], qt.Not(qt.IsNil), qt.Commentf("no field %q in json %#v\n", parsedJSON))
 
 	// to decode field we need to Marshal and Unmarshal
@@ -1046,28 +1104,32 @@ func postCensusParticipantsAndExpectError(t *testing.T, adminToken string, censu
 		censusEndpoint, censusID)
 }
 
-func createGroupBasedCensus(
-	t *testing.T,
-	token string,
-	orgAddress common.Address,
-	authFields db.OrgMemberAuthFields,
-	twoFaFields db.OrgMemberTwoFaFields,
-	memberIDs ...string,
-) (censusID string, group apicommon.OrganizationMemberGroupInfo,
-	census apicommon.PublishedCensusResponse,
-) {
+func createGroupBasedCensus(t *testing.T, token string, orgAddress common.Address,
+	authFields db.OrgMemberAuthFields, twoFaFields db.OrgMemberTwoFaFields, memberIDs ...string,
+) (censusID string, group apicommon.OrganizationMemberGroupInfo, census apicommon.PublishedCensusResponse) {
+	t.Helper()
 	censusID = postCensus(t, token, orgAddress, authFields, twoFaFields)
-
 	group = postGroup(t, token, orgAddress, memberIDs...)
-
 	census = postGroupCensus(t, token, censusID, group.ID,
 		&apicommon.PublishCensusGroupRequest{
 			AuthFields:  authFields,
 			TwoFaFields: twoFaFields,
 		})
-
 	qt.Assert(t, census.Size, qt.Equals, int64(len(memberIDs)))
 	return censusID, group, census
+}
+
+func createGroupBasedCensusAndExpectError(t *testing.T, token string, orgAddress common.Address,
+	authFields db.OrgMemberAuthFields, twoFaFields db.OrgMemberTwoFaFields, memberIDs ...string,
+) errors.Error {
+	t.Helper()
+	censusID := postCensus(t, token, orgAddress, authFields, twoFaFields)
+	group := postGroup(t, token, orgAddress, memberIDs...)
+	return postGroupCensusAndExpectError(t, token, censusID, group.ID,
+		&apicommon.PublishCensusGroupRequest{
+			AuthFields:  authFields,
+			TwoFaFields: twoFaFields,
+		})
 }
 
 func postGroup(t *testing.T, token string, orgAddress common.Address, memberIDs ...string) apicommon.OrganizationMemberGroupInfo {
@@ -1105,6 +1167,18 @@ func postGroupCensusAndExpectError(t *testing.T, loginToken string, censusID, gr
 ) errors.Error {
 	t.Helper()
 	return requestAndExpectError(t, http.MethodPost, loginToken, request, censusGroupPublishURL(censusID, groupID))
+}
+
+func setOrganizationSubscription(t *testing.T, orgAddress common.Address, planID uint64) {
+	t.Helper()
+	err := testDB.SetOrganizationSubscription(orgAddress, &db.OrganizationSubscription{
+		PlanID:          planID,
+		StartDate:       time.Now(),
+		RenewalDate:     time.Now().Add(time.Hour * 24),
+		LastPaymentDate: time.Now(),
+		Active:          true,
+	})
+	qt.Assert(t, err, qt.IsNil)
 }
 
 // URLs
