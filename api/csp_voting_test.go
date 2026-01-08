@@ -14,6 +14,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/proto/build/go/models"
@@ -904,6 +905,7 @@ func TestCSPVoting(t *testing.T) {
 					publishGroupRequest := &apicommon.PublishCensusGroupRequest{
 						AuthFields:  authFields,
 						TwoFaFields: bothTwoFaFields,
+						Weighted:    true,
 					}
 
 					requestAndParse[apicommon.PublishedCensusResponse](
@@ -980,6 +982,20 @@ func TestCSPVoting(t *testing.T) {
 							http.MethodPost, "", authReq,
 							"process", "bundle", bothMethodsBundleID, "auth", "0")
 						c.Assert(authResp.AuthToken, qt.Not(qt.Equals), "", qt.Commentf("auth token should not be empty"))
+					})
+					// Test 4: User with zero weight should not be able to authenticate
+					t.Run("User with Phone Only", func(_ *testing.T) {
+						// Use Jane Smith who has phone but we'll only provide the phone for 2FA
+						authReq := &handlers.AuthRequest{
+							Name:         "Hannah",
+							MemberNumber: "P010",
+							Phone:        "+34612345610",
+							// No email provided
+						}
+						err := requestAndExpectError(t,
+							http.MethodPost, "", authReq,
+							"process", "bundle", bothMethodsBundleID, "auth", "0")
+						c.Assert(err, qt.ErrorIs, errors.ErrZeroWeightVoter)
 					})
 				})
 			})
