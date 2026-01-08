@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/vocdoni/saas-backend/csp/notifications"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/xlzd/gotp"
 	"go.vocdoni.io/dvote/log"
@@ -49,7 +50,7 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 		log.Warnw("cooldown time not reached",
 			"userID", uID,
 			"bundleID", bID)
-		return nil, ErrAttemptCoolDownTime
+		return nil, errors.ErrAttemptCoolDownTime
 	}
 	// generate a new token, secret and code from the attempt number
 	token, code, err := c.generateToken(uID, bID)
@@ -193,7 +194,7 @@ func (c *CSP) createAuthOnlyToken(bID, uID internal.HexBytes) (internal.HexBytes
 		log.Warnw("cooldown time not reached",
 			"userID", uID,
 			"bundleID", bID)
-		return nil, ErrAttemptCoolDownTime
+		return nil, errors.ErrAttemptCoolDownTime
 	}
 
 	// generate a new token (we don't need the code for auth-only)

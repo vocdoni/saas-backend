@@ -438,7 +438,7 @@ func TestCSPVoting(t *testing.T) {
 							Email:        "john.doe@example.com",
 						}
 						resp, code := testRequest(t, http.MethodPost, "", authReq, "process", "bundle", bundleID, "auth", "0")
-						c.Assert(code, qt.Equals, http.StatusUnauthorized, qt.Commentf("expected unauthorized, got %d: %s", code, resp))
+						c.Assert(code, qt.Equals, http.StatusNotFound, qt.Commentf("expected unauthorized, got %d: %s", code, resp))
 					})
 
 					// Test case 2: Try to authenticate with valid fields but wrong email
@@ -450,7 +450,7 @@ func TestCSPVoting(t *testing.T) {
 							Email:        "wrong.email@example.com",
 						}
 						resp, code := testRequest(t, http.MethodPost, "", authReq, "process", "bundle", bundleID, "auth", "0")
-						c.Assert(code, qt.Equals, http.StatusUnauthorized, qt.Commentf("expected unauthorized, got %d: %s", code, resp))
+						c.Assert(code, qt.Equals, http.StatusNotFound, qt.Commentf("expected unauthorized, got %d: %s", code, resp))
 					})
 
 					// Test case 3: Try to authenticate with wrong name but correct other fields
@@ -462,7 +462,7 @@ func TestCSPVoting(t *testing.T) {
 							Email:        "john.doe@example.com",
 						}
 						resp, code := testRequest(t, http.MethodPost, "", authReq, "process", "bundle", bundleID, "auth", "0")
-						c.Assert(code, qt.Equals, http.StatusUnauthorized, qt.Commentf("expected unauthorized, got %d: %s", code, resp))
+						c.Assert(code, qt.Equals, http.StatusNotFound, qt.Commentf("expected unauthorized, got %d: %s", code, resp))
 					})
 
 					// Test case 4: Try to authenticate with wrong surname but correct other fields
@@ -474,7 +474,7 @@ func TestCSPVoting(t *testing.T) {
 							Email:        "john.doe@example.com",
 						}
 						resp, code := testRequest(t, http.MethodPost, "", authReq, "process", "bundle", bundleID, "auth", "0")
-						c.Assert(code, qt.Equals, http.StatusUnauthorized, qt.Commentf("expected unauthorized, got %d: %s", code, resp))
+						c.Assert(code, qt.Equals, http.StatusNotFound, qt.Commentf("expected unauthorized, got %d: %s", code, resp))
 					})
 
 					// Test case 5: Try to authenticate with missing required auth fields
@@ -484,7 +484,7 @@ func TestCSPVoting(t *testing.T) {
 							Email:        "john.doe@example.com",
 						}
 						resp, code := testRequest(t, http.MethodPost, "", authReq, "process", "bundle", bundleID, "auth", "0")
-						c.Assert(code, qt.Equals, http.StatusUnauthorized, qt.Commentf("expected unauthorized, got %d: %s", code, resp))
+						c.Assert(code, qt.Equals, http.StatusNotFound, qt.Commentf("expected unauthorized, got %d: %s", code, resp))
 					})
 
 					// Test case 6: Try to authenticate with missing contact information
@@ -725,7 +725,7 @@ func TestCSPVoting(t *testing.T) {
 						}
 						resp, code := testRequest(t, http.MethodPost, "", wrongAuthReq,
 							"process", "bundle", complexBundleID, "auth", "0")
-						c.Assert(code, qt.Equals, http.StatusUnauthorized,
+						c.Assert(code, qt.Equals, http.StatusNotFound,
 							qt.Commentf("expected unauthorized for wrong national ID, got %d: %s", code, resp))
 					})
 				})

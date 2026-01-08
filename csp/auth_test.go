@@ -12,6 +12,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp/notifications"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"github.com/vocdoni/saas-backend/test"
@@ -66,7 +67,7 @@ func TestBundleAuthToken(t *testing.T) {
 		c.Assert(err, qt.ErrorIs, ErrNotificationFailure)
 		// try to generate a new token before the cooldown time
 		_, err = csp.BundleAuthToken(testBundleID, testUserID, "", notifications.EmailChallenge, apicommon.DefaultLang, "", "")
-		c.Assert(err, qt.ErrorIs, ErrAttemptCoolDownTime)
+		c.Assert(err, qt.ErrorIs, errors.ErrAttemptCoolDownTime)
 	})
 
 	c.Run("success test", func(c *qt.C) {

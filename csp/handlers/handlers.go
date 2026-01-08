@@ -135,8 +135,9 @@ func (c *CSPHandlers) handleAuthStep(w http.ResponseWriter, r *http.Request,
 //	@Param			request		body		interface{}	true	"Authentication request (varies by step)"
 //	@Success		200			{object}	handlers.AuthResponse
 //	@Failure		400			{object}	errors.Error	"Invalid input data"
-//	@Failure		401			{object}	errors.Error	"Unauthorized"
-//	@Failure		404			{object}	errors.Error	"Bundle not found"
+//	@Failure		401			{object}	errors.Error	"Unauthorized, cooldown time not reached (ErrAttemptCoolDownTime), or invalid challenge"
+//	@Failure		404			{object}	errors.Error	"Bundle not found, census not found, organization not found"
+//	@Failure		404			{object}	errors.Error	"census participant not found (ErrCensusParticipantNotFound)"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/process/bundle/{bundleId}/auth/{step} [post]
 func (c *CSPHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) {
@@ -235,8 +236,8 @@ func (c *CSPHandlers) signAndRespond(w http.ResponseWriter, authToken, address, 
 //	@Param			request		body		handlers.SignRequest	true	"Sign request with process ID, auth token, and payload (address)"
 //	@Success		200			{object}	handlers.AuthResponse
 //	@Failure		400			{object}	errors.Error	"Invalid input data"
-//	@Failure		401			{object}	errors.Error	"Unauthorized or invalid token"
-//	@Failure		404			{object}	errors.Error	"Bundle not found or process not in bundle"
+//	@Failure		401			{object}	errors.Error	"Unauthorized, invalid token, or token not verified (ErrAuthTokenNotVerified)"
+//	@Failure		404			{object}	errors.Error	"Bundle not found, process not in bundle, or user not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/process/bundle/{bundleId}/sign [post]
 func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) {
@@ -264,7 +265,7 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if !auth.Verified {
-		errors.ErrUnauthorized.Withf("token not verified").Write(w)
+		errors.ErrUnauthorized.WithErr(csp.ErrAuthTokenNotVerified).Write(w)
 		return
 	}
 
@@ -323,8 +324,9 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 //	@Param			request		body		handlers.UserWeightRequest	true	"Request with auth token"
 //	@Success		200			{object}	handlers.UserWeightResponse
 //	@Failure		400			{object}	errors.Error	"Invalid input data"
-//	@Failure		401			{object}	errors.Error	"Unauthorized or invalid token"
-//	@Failure		404			{object}	errors.Error	"Bundle not found"
+//	@Failure		401			{object}	errors.Error	"Unauthorized, invalid token, token not verified (ErrAuthTokenNotVerified)"
+//	@Failure		401			{object}	errors.Error	"token not belonging to bundle"
+//	@Failure		404			{object}	errors.Error	"Bundle not found, user not found, or census not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/process/bundle/{bundleId}/weight [post]
 func (c *CSPHandlers) UserWeightHandler(w http.ResponseWriter, r *http.Request) {
@@ -397,8 +399,8 @@ func (c *CSPHandlers) UserWeightHandler(w http.ResponseWriter, r *http.Request) 
 //	@Param			processId	path		string							true	"Process ID"
 //	@Param			request		body		handlers.ConsumedAddressRequest	true	"Request with auth token"
 //	@Success		200			{object}	handlers.ConsumedAddressResponse
-//	@Failure		400			{object}	errors.Error	"Invalid input data"
-//	@Failure		401			{object}	errors.Error	"Unauthorized or invalid token"
+//	@Failure		400			{object}	errors.Error	"Invalid input data or user has not voted (ErrUserNoVoted)"
+//	@Failure		401			{object}	errors.Error	"Unauthorized, invalid token, or token not verified (ErrAuthTokenNotVerified)"
 //	@Failure		404			{object}	errors.Error	"Process not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/process/{processId}/sign-info [post]
@@ -565,10 +567,13 @@ func determineContactMethod(
 //
 // The function first validates the request data against census information,
 // then attempts to find the participant in the census using the login hash
-// generated from the provided fields. If found, it determines the appropriate
-// contact method (email, SMS, or none for auth-only censuses) based on the
-// census type and provided contact information. Finally, it generates and
-// returns an authentication token that will be used in the second step.
+// generated from the provided fields. If the participant is not found in the
+// census, it returns ErrCensusParticipantNotFound. If found, it determines the
+// appropriate contact method (email, SMS, or none for auth-only censuses) based
+// on the census type and provided contact information. Finally, it generates and
+// returns an authentication token that will be used in the second step. If the
+// cooldown period between authentication attempts has not elapsed, the underlying
+// BundleAuthToken call may return ErrAttemptCoolDownTime.
 func (c *CSPHandlers) authFirstStep(
 	r *http.Request,
 	bundleID internal.HexBytes,
@@ -628,7 +633,7 @@ func (c *CSPHandlers) authFirstStep(
 	censusParticipant, err := c.mainDB.CensusParticipantByLoginHash(*census, *inputMember)
 	if err != nil {
 		if errorspkg.Is(err, db.ErrNotFound) {
-			return nil, errors.ErrUnauthorized.Withf("participant not found in the census")
+			return nil, errors.ErrCensusParticipantNotFound
 		}
 		return nil, errors.ErrGenericInternalServerError.WithErr(err)
 	}

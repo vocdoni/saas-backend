@@ -3397,11 +3397,11 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ConsumedAddressResponse'
         "400":
-          description: Invalid input data
+          description: Invalid input data or user has not voted (ErrUserNoVoted)
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
-          description: Unauthorized or invalid token
+          description: Unauthorized, invalid token, or token not verified (ErrAuthTokenNotVerified)
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
@@ -3617,11 +3617,12 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
-          description: Unauthorized
+          description: Unauthorized, cooldown time not reached (ErrAttemptCoolDownTime),
+            or invalid challenge
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
-          description: Bundle not found
+          description: census participant not found (ErrCensusParticipantNotFound)
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -3664,11 +3665,11 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
-          description: Unauthorized or invalid token
+          description: Unauthorized, invalid token, or token not verified (ErrAuthTokenNotVerified)
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
-          description: Bundle not found or process not in bundle
+          description: Bundle not found, process not in bundle, or user not found
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -3708,11 +3709,11 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
-          description: Unauthorized or invalid token
+          description: token not belonging to bundle
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
-          description: Bundle not found
+          description: Bundle not found, user not found, or census not found
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
