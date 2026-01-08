@@ -28,6 +28,7 @@ func TestBundleAuthToken(t *testing.T) {
 	csp, err := New(ctx, &Config{
 		DB:                       testDB,
 		MailService:              testMailService,
+		SMSService:               testSMSService,
 		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,
 		RootKey:                  *testRootKey,
@@ -128,6 +129,7 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 	csp, err := New(ctx, &Config{
 		DB:                       testDB,
 		MailService:              testMailService,
+		SMSService:               testSMSService,
 		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,
 		RootKey:                  *testRootKey,
