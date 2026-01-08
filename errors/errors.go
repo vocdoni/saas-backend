@@ -117,8 +117,6 @@ func (e Error) Write(w http.ResponseWriter) {
 			e.HTTPstatus, e.Error(), e.Code, caller)
 
 		switch logLevel {
-		case "debug":
-			log.Debugw(errMsg)
 		case "info":
 			log.Infow(errMsg)
 		case "warn":
