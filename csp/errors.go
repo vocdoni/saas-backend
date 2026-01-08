@@ -36,9 +36,6 @@ var (
 	// ErrChallengeCodeFailure is returned when the challenge code does not
 	// match.
 	ErrChallengeCodeFailure = fmt.Errorf("challenge code do not match")
-	// ErrAttemptCoolDownTime is returned if the cooldown time for a challenge
-	// attempt is not reached.
-	ErrAttemptCoolDownTime = fmt.Errorf("attempt cooldown time not reached")
 	// ErrStorageFailure is returned when the storage service fails.
 	ErrStorageFailure = fmt.Errorf("storage service failure")
 	// ErrNotificationFailure is returned when the notification service fails.
