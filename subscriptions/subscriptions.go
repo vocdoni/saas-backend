@@ -54,6 +54,7 @@ type DBInterface interface {
 	Organization(address common.Address) (*db.Organization, error)
 	OrganizationWithParent(address common.Address) (*db.Organization, *db.Organization, error)
 	CountProcesses(orgAddress common.Address, draft db.DraftFilter) (int64, error)
+	OrganizationMemberGroup(groupID string, orgAddress common.Address) (*db.OrganizationMemberGroup, error)
 }
 
 // Subscriptions is the service that manages the organization permissions based on
@@ -226,4 +227,36 @@ func (p *Subscriptions) OrgHasPermission(orgAddress common.Address, permission D
 	default:
 		return fmt.Errorf("permission not found")
 	}
+}
+
+func (p *Subscriptions) OrgCanPublishGroupCensus(orgAddress common.Address, groupID string) error {
+	org, err := p.db.Organization(orgAddress)
+	if err != nil {
+		return errors.ErrOrganizationNotFound.WithErr(err)
+	}
+
+	if org.Subscription.PlanID == 0 {
+		return errors.ErrNoOrganizationSubscription
+	}
+
+	plan, err := p.db.Plan(org.Subscription.PlanID)
+	if err != nil {
+		return errors.ErrPlanNotFound.WithErr(err)
+	}
+
+	group, err := p.db.OrganizationMemberGroup(groupID, org.Address)
+	if err != nil {
+		return errors.ErrGroupNotFound.WithErr(err)
+	}
+
+	remainingEmails := plan.Organization.MaxSentEmails - org.Counters.SentEmails
+	if len(group.MemberIDs) > remainingEmails {
+		return errors.ErrProcessCensusSizeExceedsLimit.Withf("remaining emails: %d", remainingEmails)
+	}
+	remainingSMS := plan.Organization.MaxSentSMS - org.Counters.SentSMS
+	if len(group.MemberIDs) > remainingSMS {
+		return errors.ErrProcessCensusSizeExceedsLimit.Withf("remaining sms: %d", remainingSMS)
+	}
+
+	return nil
 }
