@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"slices"
 	"testing"
 	"time"
 
@@ -321,14 +322,27 @@ func TestCensus(t *testing.T) {
 	// Test 9: Publish Group Census
 	t.Run("PublishGroupCensus", func(t *testing.T) {
 		c := qt.New(t)
+
+		authFields := db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber, db.OrgMemberAuthFieldsName}
+		twoFaEmail := db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail}
+		twoFaPhone := db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldPhone}
+		twoFaEmailOrPhone := slices.Concat(twoFaEmail, twoFaPhone)
+
+		// Test 9.0: On free plan, creating a group census with OrgMemberTwoFaFieldPhone should fail
+		c.Assert(createGroupBasedCensusAndExpectError(t, adminToken, orgAddress, authFields, twoFaPhone,
+			memberIDs(orgMembers)...),
+			qt.ErrorIs, errors.ErrProcessCensusSizeExceedsLimit)
+		c.Assert(createGroupBasedCensusAndExpectError(t, adminToken, orgAddress, authFields, twoFaEmailOrPhone,
+			memberIDs(orgMembers)...),
+			qt.ErrorIs, errors.ErrProcessCensusSizeExceedsLimit)
+
+		// After upgrading to a subscription, twoFaPhone or twoFaEmailOrPhone are now allowed
+		setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+		createGroupBasedCensus(t, adminToken, orgAddress, authFields, twoFaPhone,
+			memberIDs(orgMembers)...)
+
 		// Test 9.1: Successful group census publication
-		censusID, group, census := createGroupBasedCensus(t, adminToken, orgAddress,
-			db.OrgMemberAuthFields{
-				db.OrgMemberAuthFieldsMemberNumber,
-				db.OrgMemberAuthFieldsName,
-			}, db.OrgMemberTwoFaFields{
-				db.OrgMemberTwoFaFieldEmail,
-			},
+		censusID, group, census := createGroupBasedCensus(t, adminToken, orgAddress, authFields, twoFaEmailOrPhone,
 			memberIDs(orgMembers)...)
 
 		// Verify that the census participants are correctly set
@@ -341,15 +355,8 @@ func TestCensus(t *testing.T) {
 
 		// Test 9.2: Test with already published census
 		// Publishing again should return the same information
-		publishGroupRequest := &apicommon.PublishCensusGroupRequest{
-			AuthFields: db.OrgMemberAuthFields{
-				db.OrgMemberAuthFieldsMemberNumber,
-				db.OrgMemberAuthFieldsName,
-			},
-			TwoFaFields: db.OrgMemberTwoFaFields{
-				db.OrgMemberTwoFaFieldEmail,
-			},
-		}
+		publishGroupRequest := &apicommon.PublishCensusGroupRequest{AuthFields: authFields, TwoFaFields: twoFaEmailOrPhone}
+
 		censusAgain := postGroupCensus(t, adminToken, censusID, group.ID, publishGroupRequest)
 		c.Assert(censusAgain.URI, qt.Equals, census.URI)
 		c.Assert(censusAgain.Root.String(), qt.Equals, census.Root.String())

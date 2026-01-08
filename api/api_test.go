@@ -746,6 +746,7 @@ func postProcessBundle(t *testing.T, token, censusID string, processIDs ...[]byt
 
 // fetchCSPUserWeight retrieves the CSP user weight for the given process ID and voter address.
 func fetchCSPUserWeight(t *testing.T, bundleID string, authToken internal.HexBytes) internal.HexBytes {
+	t.Helper()
 	weightReq := &handlers.UserWeightRequest{
 		AuthToken: authToken,
 	}
@@ -950,6 +951,7 @@ func newOrgMembers(n int) []apicommon.OrgMember {
 }
 
 func decodeNestedFieldAs[T any](c *qt.C, parsedJSON map[string]any, field string) T {
+	c.Helper()
 	c.Assert(parsedJSON[field], qt.Not(qt.IsNil), qt.Commentf("no field %q in json %#v\n", parsedJSON))
 
 	// to decode field we need to Marshal and Unmarshal
@@ -1046,28 +1048,32 @@ func postCensusParticipantsAndExpectError(t *testing.T, adminToken string, censu
 		censusEndpoint, censusID)
 }
 
-func createGroupBasedCensus(
-	t *testing.T,
-	token string,
-	orgAddress common.Address,
-	authFields db.OrgMemberAuthFields,
-	twoFaFields db.OrgMemberTwoFaFields,
-	memberIDs ...string,
-) (censusID string, group apicommon.OrganizationMemberGroupInfo,
-	census apicommon.PublishedCensusResponse,
-) {
+func createGroupBasedCensus(t *testing.T, token string, orgAddress common.Address,
+	authFields db.OrgMemberAuthFields, twoFaFields db.OrgMemberTwoFaFields, memberIDs ...string,
+) (censusID string, group apicommon.OrganizationMemberGroupInfo, census apicommon.PublishedCensusResponse) {
+	t.Helper()
 	censusID = postCensus(t, token, orgAddress, authFields, twoFaFields)
-
 	group = postGroup(t, token, orgAddress, memberIDs...)
-
 	census = postGroupCensus(t, token, censusID, group.ID,
 		&apicommon.PublishCensusGroupRequest{
 			AuthFields:  authFields,
 			TwoFaFields: twoFaFields,
 		})
-
 	qt.Assert(t, census.Size, qt.Equals, int64(len(memberIDs)))
 	return censusID, group, census
+}
+
+func createGroupBasedCensusAndExpectError(t *testing.T, token string, orgAddress common.Address,
+	authFields db.OrgMemberAuthFields, twoFaFields db.OrgMemberTwoFaFields, memberIDs ...string,
+) errors.Error {
+	t.Helper()
+	censusID := postCensus(t, token, orgAddress, authFields, twoFaFields)
+	group := postGroup(t, token, orgAddress, memberIDs...)
+	return postGroupCensusAndExpectError(t, token, censusID, group.ID,
+		&apicommon.PublishCensusGroupRequest{
+			AuthFields:  authFields,
+			TwoFaFields: twoFaFields,
+		})
 }
 
 func postGroup(t *testing.T, token string, orgAddress common.Address, memberIDs ...string) apicommon.OrganizationMemberGroupInfo {
@@ -1105,6 +1111,18 @@ func postGroupCensusAndExpectError(t *testing.T, loginToken string, censusID, gr
 ) errors.Error {
 	t.Helper()
 	return requestAndExpectError(t, http.MethodPost, loginToken, request, censusGroupPublishURL(censusID, groupID))
+}
+
+func setOrganizationSubscription(t *testing.T, orgAddress common.Address, planID uint64) {
+	t.Helper()
+	err := testDB.SetOrganizationSubscription(orgAddress, &db.OrganizationSubscription{
+		PlanID:          planID,
+		StartDate:       time.Now(),
+		RenewalDate:     time.Now().Add(time.Hour * 24),
+		LastPaymentDate: time.Now(),
+		Active:          true,
+	})
+	qt.Assert(t, err, qt.IsNil)
 }
 
 // URLs
