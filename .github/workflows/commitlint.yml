@@ -18,8 +18,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: wagoid/commitlint-github-action@v6 # lint commit messages
+        if: always()
         id: lint_commits
       - uses: amannn/action-semantic-pull-request@v6
+        if: always()
         id: lint_pr_title
         # env:
         #   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
