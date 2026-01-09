@@ -101,29 +101,29 @@ func (se *Email) composeBody(notification *notifications.Notification) ([]byte, 
 	var headers bytes.Buffer
 	boundary := "----=_Part_0_123456789.123456789"
 	fromAddr := mail.Address{Name: se.config.FromName, Address: se.config.FromAddress}
-	headers.WriteString(fmt.Sprintf("From: %s\r\n", fromAddr.String()))
-	headers.WriteString(fmt.Sprintf("To: %s\r\n", to.String()))
+	fmt.Fprintf(&headers, "From: %s\r\n", fromAddr.String())
+	fmt.Fprintf(&headers, "To: %s\r\n", to.String())
 	if notification.ReplyTo != "" {
 		replyToAddress, err := mail.ParseAddress(notification.ReplyTo)
 		if err != nil {
 			return nil, fmt.Errorf("could not parse reply-to email: %v", err)
 		}
-		headers.WriteString(fmt.Sprintf("Reply-To: %s\r\n", replyToAddress.String()))
+		fmt.Fprintf(&headers, "Reply-To: %s\r\n", replyToAddress.String())
 	}
 	if notification.CCAddress != "" {
 		cc, err := mail.ParseAddress(notification.CCAddress)
 		if err != nil {
 			return nil, fmt.Errorf("could not parse cc email: %v", err)
 		}
-		headers.WriteString(fmt.Sprintf("Cc: %s\r\n", cc.String()))
+		fmt.Fprintf(&headers, "Cc: %s\r\n", cc.String())
 	}
-	headers.WriteString(fmt.Sprintf("Subject: %s\r\n", notification.Subject))
+	fmt.Fprintf(&headers, "Subject: %s\r\n", notification.Subject)
 	if !notification.EnableTracking {
-		headers.WriteString(fmt.Sprintf("X-SMTPAPI: %s\r\n", disableTrackingFilter))
+		fmt.Fprintf(&headers, "X-SMTPAPI: %s\r\n", disableTrackingFilter)
 	}
-	headers.WriteString("MIME-Version: 1.0\r\n")
-	headers.WriteString(fmt.Sprintf("Content-Type: multipart/alternative; boundary=\"%s\"\r\n", boundary))
-	headers.WriteString("\r\n") // blank line between headers and body
+	fmt.Fprint(&headers, "MIME-Version: 1.0\r\n")
+	fmt.Fprintf(&headers, "Content-Type: multipart/alternative; boundary=\"%s\"\r\n", boundary)
+	fmt.Fprint(&headers, "\r\n") // blank line between headers and body
 	// create multipart writer
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)

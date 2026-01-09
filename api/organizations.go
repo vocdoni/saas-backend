@@ -304,7 +304,7 @@ func (a *API) organizationSubscriptionHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if org.Subscription == (db.OrganizationSubscription{}) {
-		errors.ErrNoOrganizationSubscription.Write(w)
+		errors.ErrOrganizationHasNoSubscription.Write(w)
 		return
 	}
 	// get the subscription from the database

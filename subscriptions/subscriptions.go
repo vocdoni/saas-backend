@@ -109,17 +109,17 @@ func (p *Subscriptions) HasTxPermission(
 	user *db.User,
 ) (bool, error) {
 	if org == nil {
-		return false, fmt.Errorf("organization is nil")
+		return false, errors.ErrInvalidData.With("organization is nil")
 	}
 
 	// Check if the organization has a subscription
 	if org.Subscription.PlanID == 0 {
-		return false, fmt.Errorf("organization has no subscription plan")
+		return false, errors.ErrOrganizationHasNoSubscription
 	}
 
 	plan, err := p.db.Plan(org.Subscription.PlanID)
 	if err != nil {
-		return false, fmt.Errorf("could not get organization plan: %v", err)
+		return false, errors.ErrPlanNotFound.WithErr(err)
 	}
 
 	switch txType {
@@ -127,37 +127,31 @@ func (p *Subscriptions) HasTxPermission(
 	case models.TxType_SET_ACCOUNT_INFO_URI:
 		// check if the user has the admin role for the organization
 		if !user.HasRoleFor(org.Address, db.AdminRole) {
-			return false, fmt.Errorf("user does not have admin role")
+			return false, errors.ErrUserHasNoAdminRole
 		}
 	// check CREATE PROCESS
 	case models.TxType_NEW_PROCESS, models.TxType_SET_PROCESS_CENSUS:
 		// check if the user has the admin role for the organization
 		if !user.HasRoleFor(org.Address, db.AdminRole) {
-			return false, fmt.Errorf("user does not have admin role")
+			return false, errors.ErrUserHasNoAdminRole
 		}
 		newProcess := tx.GetNewProcess()
 		if newProcess.Process.MaxCensusSize > uint64(plan.Organization.MaxCensus) {
-			return false, fmt.Errorf("MaxCensusSize is greater than the allowed")
+			return false, errors.ErrProcessCensusSizeExceedsLimit.Withf("plan max census: %d", plan.Organization.MaxCensus)
 		}
 		if org.Counters.Processes >= plan.Organization.MaxProcesses {
 			// allow processes with less than TestMaxCensusSize for user testing
 			if newProcess.Process.MaxCensusSize > uint64(db.TestMaxCensusSize) {
-				return false, fmt.Errorf("max processes reached")
+				return false, errors.ErrMaxProcessesReached
 			}
 		}
 		return hasElectionMetadataPermissions(newProcess, plan)
 
-	// check SET_PROCESS
-	case models.TxType_SET_PROCESS_STATUS:
+	case models.TxType_SET_PROCESS_STATUS,
+		models.TxType_CREATE_ACCOUNT:
 		// check if the user has the admin role for the organization
 		if !user.HasRoleFor(org.Address, db.AdminRole) && !user.HasRoleFor(org.Address, db.ManagerRole) {
-			return false, fmt.Errorf("user does not have admin role")
-		}
-	// check CREATE_ACCOUNT
-	case models.TxType_CREATE_ACCOUNT:
-		// check if the user has the admin role for the organization
-		if !user.HasRoleFor(org.Address, db.AdminRole) && !user.HasRoleFor(org.Address, db.ManagerRole) {
-			return false, fmt.Errorf("user does not have admin role")
+			return false, errors.ErrUserHasNoAdminRole
 		}
 	default:
 		return false, fmt.Errorf("unsupported txtype")
@@ -172,22 +166,9 @@ func (p *Subscriptions) HasDBPermission(userEmail string, orgAddress common.Addr
 		return false, fmt.Errorf("could not get user: %v", err)
 	}
 	switch permission {
-	case InviteUser:
-		// check if the user has permission to invite users
+	case InviteUser, DeleteUser, CreateSubOrg:
 		if !user.HasRoleFor(orgAddress, db.AdminRole) {
-			return false, fmt.Errorf("user does not have admin role")
-		}
-		return true, nil
-	case DeleteUser:
-		// check if the user has permission to delete users
-		if !user.HasRoleFor(orgAddress, db.AdminRole) {
-			return false, fmt.Errorf("user does not have admin role")
-		}
-		return true, nil
-	case CreateSubOrg:
-		// check if the user has permission to create sub organizations
-		if !user.HasRoleFor(orgAddress, db.AdminRole) {
-			return false, fmt.Errorf("user does not have admin role")
+			return false, errors.ErrUserHasNoAdminRole
 		}
 		return true, nil
 	default:
@@ -206,7 +187,7 @@ func (p *Subscriptions) OrgHasPermission(orgAddress common.Address, permission D
 		}
 
 		if org.Subscription.PlanID == 0 {
-			return errors.ErrNoOrganizationSubscription.With("can't create draft process")
+			return errors.ErrOrganizationHasNoSubscription.With("can't create draft process")
 		}
 
 		plan, err := p.db.Plan(org.Subscription.PlanID)
