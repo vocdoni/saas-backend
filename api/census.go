@@ -429,6 +429,15 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if err := a.subscriptions.OrgCanPublishGroupCensus(census.OrgAddress, groupID.String()); err != nil {
+		if apiErr := (errors.Error{}); errors.As(err, &apiErr) {
+			apiErr.Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
 	inserted, err := a.db.PopulateGroupCensus(census, groupID.String())
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)

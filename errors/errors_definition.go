@@ -65,6 +65,7 @@ var (
 	ErrPlanNotFound               = Error{Code: 40023, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("subscription plan not found")}
 	ErrJobNotFound                = Error{Code: 40026, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("job not found")}
 	ErrCensusNotFound             = Error{Code: 40027, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("census not found")}
+	ErrGroupNotFound              = Error{Code: 40057, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("group not found")}
 	ErrCensusTypeNotFound         = Error{Code: 40028, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("census type not found")}
 	ErrCensusParticipantNotFound  = Error{Code: 40029, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("census participant not found")}
 	ErrProcessNotFound            = Error{Code: 40038, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("process not found")}
@@ -77,6 +78,7 @@ var (
 	ErrOrganizationSubscriptionInactive = Error{Code: 40021, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("organization subscription is not active")}
 	ErrNoDefaultPlan                    = Error{Code: 40022, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("no default plan available")}
 	ErrMaxDraftsReached                 = Error{Code: 40031, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("max drafts reached")}
+	ErrProcessCensusSizeExceedsLimit    = Error{Code: 40035, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("process census size exceeds limit")}
 
 	// CSP errors (408)
 	ErrZeroWeightVoter = Error{Code: 40801, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("voter weight cannot be zero")}
