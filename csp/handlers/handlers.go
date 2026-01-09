@@ -6,7 +6,6 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
-	errorspkg "errors" // TODO: rename our `errors` pkg to `apierror`
 	"fmt"
 	"math/big"
 	"net/http"
@@ -632,7 +631,7 @@ func (c *CSPHandlers) authFirstStep(
 	// Check the participant is in the census
 	censusParticipant, err := c.mainDB.CensusParticipantByLoginHash(*census, *inputMember)
 	if err != nil {
-		if errorspkg.Is(err, db.ErrNotFound) {
+		if errors.Is(err, db.ErrNotFound) {
 			return nil, errors.ErrCensusParticipantNotFound
 		}
 		return nil, errors.ErrGenericInternalServerError.WithErr(err)

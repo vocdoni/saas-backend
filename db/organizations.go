@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"go.mongodb.org/mongo-driver/bson"
@@ -94,7 +93,7 @@ func (ms *MongoStorage) SetOrganization(org *Organization) error {
 	// set upsert to true to create the document if it doesn't exist
 	opts := options.Update().SetUpsert(true)
 	if _, err := ms.organizations.UpdateOne(ctx, bson.M{"_id": org.Address}, updateDoc, opts); err != nil {
-		if strings.Contains(err.Error(), "duplicate key error") {
+		if mongo.IsDuplicateKeyError(err) {
 			return ErrAlreadyExists
 		}
 		return err

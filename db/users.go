@@ -2,7 +2,6 @@ package db
 
 import (
 	"context"
-	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"go.mongodb.org/mongo-driver/bson"
@@ -136,7 +135,7 @@ func (ms *MongoStorage) SetUser(user *User) (uint64, error) {
 		// if the user doesn't exist, create it setting the ID first
 		user.ID = nextID
 		if _, err := ms.users.InsertOne(ctx, user); err != nil {
-			if strings.Contains(err.Error(), "duplicate key error") {
+			if mongo.IsDuplicateKeyError(err) {
 				return 0, ErrAlreadyExists
 			}
 			return 0, err
