@@ -1,0 +1,114 @@
+name: 'Conventional Commits'
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - edited
+      - synchronize
+
+jobs:
+  main:
+    name: Lint
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: wagoid/commitlint-github-action@v6 # lint commit messages
+        if: always()
+        id: lint_commits
+      - uses: amannn/action-semantic-pull-request@v6
+        if: always()
+        id: lint_pr_title
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build combined message
+        id: build_comment
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          LINT_PR_TITLE_OUTPUT: ${{ steps.lint_pr_title.outputs.error_message }}
+          LINT_COMMITS_OUTPUT: ${{ steps.lint_commits.outputs.results }}
+        with:
+          script: |
+            const lintPRTitleOutput = process.env.LINT_PR_TITLE_OUTPUT;
+            const lintCommitsOutput = process.env.LINT_COMMITS_OUTPUT;
+
+            let msg = '';
+
+            if (lintPRTitleOutput && 
+                lintPRTitleOutput !== 'null' && 
+                lintPRTitleOutput.trim() !== '') {
+              msg += `## ❌ PR title lint
+
+            Please adapt the pull request title to follow the Conventional Commits format.
+
+            ${lintPRTitleOutput}
+
+            `;
+            }
+
+            // wagoid outputs JSON text; parse it and render nicely
+            function renderCommitLintSection(raw) {
+              if (!raw || raw === 'null' || raw.trim() === '' || raw.trim() === '[]') return '';
+
+              let rows;
+              try {
+                rows = JSON.parse(raw);
+              } catch (e) {
+                // Fallback: keep raw msg if parsing fails
+                return `${raw}`;
+              }
+
+              if (!Array.isArray(rows) || rows.length === 0) return '';
+
+              const invalid = rows.filter(r => r && r.valid === false);
+
+              // If all rows are valid, skip section entirely
+              if (invalid.length === 0) return '';
+
+              const lines = invalid.flatMap(r => {
+                const commitLine = `* ${r.hash} \`${r.message ?? ''}\``.trimEnd();
+
+                const errorLines = (r.errors ?? []).map(err => `  * ❌ ${err}`);
+                const warningLines = (r.warnings ?? []).map(warn => `  * ⚠️ ${warn}`);
+
+                return [commitLine, ...errorLines, ...warningLines];
+              });
+
+              return `${lines.join('\n')}`;
+            }
+
+            const commitLintSection = renderCommitLintSection(lintCommitsOutput);
+
+            if (commitLintSection && commitLintSection.trim() !== '') {
+              msg += `## ❌ Commit message lint
+
+            Please adapt the commits to follow the [Conventional Commits](https://www.conventionalcommits.org/) format.
+
+            For reference, see https://github.com/conventional-changelog/commitlint/#what-is-commitlint
+
+            ${commitLintSection}
+
+            `;
+            }
+
+            if (msg.trim().length > 0) {
+              core.setOutput('message', msg);
+            }
+
+      - uses: marocchino/sticky-pull-request-comment@v2
+        if: always() && steps.build_comment.outputs.message != ''
+        with:
+          header: pr-lint-error
+          message: ${{ steps.build_comment.outputs.message }}
+
+      # Delete a previous comment when the issue has been resolved
+      - uses: marocchino/sticky-pull-request-comment@v2
+        if: always() && steps.build_comment.outputs.message == ''
+        with:
+          header: pr-lint-error
+          delete: true
