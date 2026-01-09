@@ -43,6 +43,7 @@ func TestBundleAuthToken(t *testing.T) {
 			apicommon.DefaultLang,
 			"",
 			"",
+			testAddress.Address(),
 		)
 		c.Assert(err, qt.ErrorIs, ErrNoBundleID)
 	})
@@ -56,6 +57,7 @@ func TestBundleAuthToken(t *testing.T) {
 			apicommon.DefaultLang,
 			"",
 			"",
+			testAddress.Address(),
 		)
 		c.Assert(err, qt.ErrorIs, ErrNoUserID)
 	})
@@ -63,10 +65,12 @@ func TestBundleAuthToken(t *testing.T) {
 	c.Run("notification cooldown reached", func(c *qt.C) {
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		// generate a valid token
-		_, err := csp.BundleAuthToken(testBundleID, testUserID, "", notifications.EmailChallenge, apicommon.DefaultLang, "", "")
+		_, err := csp.BundleAuthToken(testBundleID, testUserID, "",
+			notifications.EmailChallenge, apicommon.DefaultLang, "", "", testAddress.Address())
 		c.Assert(err, qt.ErrorIs, ErrNotificationFailure)
 		// try to generate a new token before the cooldown time
-		_, err = csp.BundleAuthToken(testBundleID, testUserID, "", notifications.EmailChallenge, apicommon.DefaultLang, "", "")
+		_, err = csp.BundleAuthToken(testBundleID, testUserID, "",
+			notifications.EmailChallenge, apicommon.DefaultLang, "", "", testAddress.Address())
 		c.Assert(err, qt.ErrorIs, errors.ErrAttemptCoolDownTime)
 	})
 
@@ -81,6 +85,7 @@ func TestBundleAuthToken(t *testing.T) {
 			apicommon.DefaultLang,
 			testOrgName,
 			testOrgLogo,
+			testAddress.Address(),
 		)
 		c.Assert(err, qt.IsNil)
 		c.Assert(token, qt.Not(qt.IsNil))

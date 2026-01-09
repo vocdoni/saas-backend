@@ -540,6 +540,12 @@ type SubscriptionPlanLimits struct {
 
 	// Whether this is a custom plan
 	CustomPlan bool `json:"customPlan"`
+
+	// Maximum number of sent emails allowed
+	MaxSentEmails int `json:"maxSentEmails" bson:"maxSentEmails"`
+
+	// Maximum number of sent SMS allowed
+	MaxSentSMS int `json:"maxSentSMS" bson:"maxSentSMS"`
 }
 
 // SubscriptionVotingTypes represents the voting types available in a subscription plan.

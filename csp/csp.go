@@ -77,6 +77,18 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 					"type", ch.Type,
 					"userID", ch.UserID,
 					"bundleID", ch.BundleID)
+				switch ch.Type {
+				case notifications.EmailChallenge:
+					if err := config.DB.IncrementOrganizationSentEmailsCounter(ch.OrgAddress); err != nil {
+						log.Errorf("failed to increment org %s email counter: %v", ch.OrgAddress, err)
+					}
+				case notifications.SMSChallenge:
+					if err := config.DB.IncrementOrganizationSentSMSCounter(ch.OrgAddress); err != nil {
+						log.Errorf("failed to increment org %s sms counter: %v", ch.OrgAddress, err)
+					}
+				default:
+					log.Warnf("can't count notification of unknown type %s", ch.Type)
+				}
 			}
 		}
 	}()

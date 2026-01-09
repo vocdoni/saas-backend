@@ -85,10 +85,12 @@ type PlanLimits struct {
 	MaxProcesses int `json:"maxProcesses" bson:"maxProcesses"`
 	MaxCensus    int `json:"maxCensus" bson:"maxCensus"`
 	// Max process duration in days
-	MaxDuration int  `json:"maxDaysDuration" bson:"maxDuration"`
-	CustomURL   bool `json:"customURL" bson:"customURL"`
-	MaxDrafts   int  `json:"drafts" bson:"drafts"`
-	CustomPlan  bool `json:"customPlan" bson:"customPlan"`
+	MaxDuration   int  `json:"maxDaysDuration" bson:"maxDuration"`
+	CustomURL     bool `json:"customURL" bson:"customURL"`
+	MaxDrafts     int  `json:"drafts" bson:"drafts"`
+	CustomPlan    bool `json:"customPlan" bson:"customPlan"`
+	MaxSentEmails int  `json:"maxSentEmails" bson:"maxSentEmails"`
+	MaxSentSMS    int  `json:"maxSentSMS" bson:"maxSentSMS"`
 }
 
 type VotingTypes struct {
