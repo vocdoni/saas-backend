@@ -68,6 +68,19 @@ func (e Error) Unwrap() error {
 	return e.Err
 }
 
+// Is returns true if the Code matches
+func (e Error) Is(target error) bool {
+	t, ok := target.(Error)
+	if !ok {
+		tp, ok := target.(*Error)
+		if !ok {
+			return false
+		}
+		t = *tp
+	}
+	return e.Code == t.Code
+}
+
 // Write serializes a JSON msg using Error.Err and Error.Code
 // and passes that to http.Error(). It also logs the error with appropriate level.
 func (e Error) Write(w http.ResponseWriter) {
@@ -144,7 +157,7 @@ func (e Error) With(s string) Error {
 // The original error is preserved for logging purposes
 func (e Error) WithErr(err error) Error {
 	return Error{
-		Err:        fmt.Errorf("%w: %v", e.Err, err.Error()),
+		Err:        fmt.Errorf("%w: %w", e.Err, err),
 		Code:       e.Code,
 		HTTPstatus: e.HTTPstatus,
 		LogLevel:   e.LogLevel,
