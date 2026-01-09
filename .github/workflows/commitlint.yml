@@ -23,9 +23,8 @@ jobs:
       - uses: amannn/action-semantic-pull-request@v6
         if: always()
         id: lint_pr_title
-        # env:
-        #   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Build combined message
         id: build_comment
         if: always()
@@ -70,18 +69,19 @@ jobs:
             `;
             }
 
-            core.setOutput('has_message', msg.trim().length > 0 ? 'true' : 'false');
-            if (msg.trim().length > 0) core.setOutput('message', msg);
+            if (msg.trim().length > 0) {
+              core.setOutput('message', msg);
+            }
 
       - uses: marocchino/sticky-pull-request-comment@v2
-        if: always() && steps.build_comment.outputs.has_message == 'true'
+        if: always() && steps.build_comment.outputs.message != ''
         with:
           header: pr-lint-error
           message: ${{ steps.build_comment.outputs.message }}
 
       # Delete a previous comment when the issue has been resolved
       - uses: marocchino/sticky-pull-request-comment@v2
-        if: always() && steps.build_comment.outputs.has_message != 'true'
+        if: always() && steps.build_comment.outputs.message == ''
         with:
           header: pr-lint-error
           delete: true
