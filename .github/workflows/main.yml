@@ -43,11 +43,11 @@ jobs:
             exit 1
           fi
       - name: Run Go test
-        run: go test -v -timeout=30m ./...
+        run: go test -v -failfast -timeout=30m ./...
                 -cover -coverpkg=./... -covermode=count -coverprofile=gocoverage.txt
       - name: Run Go test -race # note that -race can easily make the crypto stuff 10x slower
         if: github.ref == 'refs/heads/stage' ||  startsWith(github.ref, 'refs/heads/release')
-        run: go test -vet=off -timeout=30m -race ./...
+        run: go test -vet=off -failfast -timeout=30m -race ./...
                 -cover -coverpkg=./... -covermode=atomic -coverprofile=gocoverage.txt
 
       - uses: benjlevesque/short-sha@v3.0 # sets env.SHA to the first 7 chars of github.sha
