@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -72,13 +73,14 @@ func dynamicUpdateDocument(item any, alwaysUpdateTags []string) (bson.M, error) 
 		}
 		fieldType := typ.Field(i)
 		tag := fieldType.Tag.Get("bson")
-		if tag == "" || tag == "-" || tag == "_id" {
+		tagName := strings.Split(tag, ",")[0]
+		if tagName == "" || tagName == "-" || tagName == "_id" {
 			continue
 		}
 		// check if the field should always be updated or is not the zero value
-		_, alwaysUpdate := alwaysUpdateMap[tag]
+		_, alwaysUpdate := alwaysUpdateMap[tagName]
 		if alwaysUpdate || !reflect.DeepEqual(field.Interface(), reflect.Zero(field.Type()).Interface()) {
-			update[tag] = field.Interface()
+			update[tagName] = field.Interface()
 		}
 	}
 	return bson.M{"$set": update}, nil
