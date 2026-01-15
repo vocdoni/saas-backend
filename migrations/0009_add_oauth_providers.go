@@ -9,7 +9,7 @@ import (
 )
 
 func init() {
-	AddMigration(4, "add_oauth_providers", upAddOAuthProviders, downAddOAuthProviders)
+	AddMigration(9, "add_oauth_providers", upAddOAuthProviders, downAddOAuthProviders)
 }
 
 // upAddOAuthProviders adds the oauth field to the users collection

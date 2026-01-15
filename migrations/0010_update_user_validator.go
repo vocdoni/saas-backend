@@ -10,7 +10,7 @@ import (
 )
 
 func init() {
-	AddMigration(5, "update_user_validator", upUpdateUserValidator, downUpdateUserValidator)
+	AddMigration(10, "update_user_validator", upUpdateUserValidator, downUpdateUserValidator)
 }
 
 // upUpdateUserValidator updates the users collection validator to allow empty passwords for OAuth-only users
