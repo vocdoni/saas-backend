@@ -370,8 +370,8 @@ func (a *API) oauthLinkHandler(w http.ResponseWriter, r *http.Request) {
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			provider	path		string	true	"OAuth provider name (google, github, facebook)"
-//	@Success		200			{string}	string	"OK"
+//	@Param			provider	path		string			true	"OAuth provider name (google, github, facebook)"
+//	@Success		200			{string}	string			"OK"
 //	@Failure		400			{object}	errors.Error	"Invalid provider, provider not linked, or cannot unlink last auth method"
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
