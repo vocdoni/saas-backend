@@ -259,3 +259,74 @@ func cspAuthTokenStatusID(userID, processID internal.HexBytes) internal.HexBytes
 	hash := sha256.Sum256(append(userID, processID...))
 	return internal.HexBytes(hash[:])
 }
+
+// CountCSPAuthByBundle counts the total number of CSP authentication tokens
+// for a given bundle ID. Returns an error if the bundleID is nil.
+func (ms *MongoStorage) CountCSPAuthByBundle(bundleID internal.HexBytes) (int64, error) {
+	if bundleID == nil {
+		return 0, ErrBadInputs
+	}
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	// count documents matching the bundle ID
+	filter := bson.M{"bundleid": bundleID}
+	count, err := ms.cspTokens.CountDocuments(ctx, filter)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// CountCSPAuthVerifiedByBundle counts the number of verified CSP authentication
+// tokens for a given bundle ID. Returns an error if the bundleID is nil.
+func (ms *MongoStorage) CountCSPAuthVerifiedByBundle(bundleID internal.HexBytes) (int64, error) {
+	if bundleID == nil {
+		return 0, ErrBadInputs
+	}
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	// count documents matching the bundle ID and verified status
+	filter := bson.M{"bundleid": bundleID, "verified": true}
+	count, err := ms.cspTokens.CountDocuments(ctx, filter)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// CountCSPProcessConsumedByProcess counts the number of consumed CSP processes
+// for a given process ID. Returns an error if the processID is nil.
+func (ms *MongoStorage) CountCSPProcessConsumedByProcess(processID internal.HexBytes) (int64, error) {
+	if processID == nil {
+		return 0, ErrBadInputs
+	}
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	// count documents matching the process ID and consumed status
+	filter := bson.M{"processid": processID, "consumed": true}
+	count, err := ms.cspTokensStatus.CountDocuments(ctx, filter)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// CSPProcessByUserAndProcess retrieves the CSP process status for a given
+// user and process. Returns an error if the userID or processID are nil.
+func (ms *MongoStorage) CSPProcessByUserAndProcess(userID, processID internal.HexBytes) (*CSPProcess, error) {
+	if userID == nil || processID == nil {
+		return nil, ErrBadInputs
+	}
+	ms.keysLock.RLock()
+	defer ms.keysLock.RUnlock()
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	// calculate the status ID using the same hash function
+	id := cspAuthTokenStatusID(userID, processID)
+	// fetch the process status
+	return ms.fetchCSPProcessFromDB(ctx, id)
+}
