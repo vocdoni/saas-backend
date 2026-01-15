@@ -290,7 +290,7 @@ func TestOAuthLinkUnlinkHandler(t *testing.T) {
 	// Verify the provider was linked
 	user, err = testDB.UserByEmail(email)
 	c.Assert(err, qt.IsNil)
-	c.Assert(len(user.OAuth), qt.Equals, 1)
+	c.Assert(user.OAuth, qt.HasLen, 1)
 	c.Assert(user.OAuth["google"].ExternalID, qt.Equals, userAddress)
 
 	// Test linking the same provider again (should fail)
@@ -323,7 +323,7 @@ func TestOAuthLinkUnlinkHandler(t *testing.T) {
 	// Verify both providers are linked
 	user, err = testDB.UserByEmail(email)
 	c.Assert(err, qt.IsNil)
-	c.Assert(len(user.OAuth), qt.Equals, 2)
+	c.Assert(user.OAuth, qt.HasLen, 2)
 
 	// Test unlinking with invalid provider
 	invalidUnlinkEndpoint := "/auth/oauth/unlink/invalid-provider"
@@ -343,7 +343,7 @@ func TestOAuthLinkUnlinkHandler(t *testing.T) {
 	// Verify Google was unlinked
 	user, err = testDB.UserByEmail(email)
 	c.Assert(err, qt.IsNil)
-	c.Assert(len(user.OAuth), qt.Equals, 1)
+	c.Assert(user.OAuth, qt.HasLen, 1)
 	_, hasGoogle := user.OAuth["google"]
 	c.Assert(hasGoogle, qt.IsFalse)
 
@@ -355,7 +355,7 @@ func TestOAuthLinkUnlinkHandler(t *testing.T) {
 	// Verify GitHub was unlinked
 	user, err = testDB.UserByEmail(email)
 	c.Assert(err, qt.IsNil)
-	c.Assert(len(user.OAuth), qt.Equals, 0)
+	c.Assert(user.OAuth, qt.HasLen, 0)
 
 	// Now test the security constraint: create an OAuth-only user and try to unlink the last provider
 	oauthOnlyEmail := fmt.Sprintf("oauth-only-%d@test.com", internal.RandomInt(10000))
@@ -397,5 +397,5 @@ func TestOAuthLinkUnlinkHandler(t *testing.T) {
 	// Verify the provider is still linked
 	user, err = testDB.UserByEmail(oauthOnlyEmail)
 	c.Assert(err, qt.IsNil)
-	c.Assert(len(user.OAuth), qt.Equals, 1)
+	c.Assert(user.OAuth, qt.HasLen, 1)
 }
