@@ -301,7 +301,7 @@ type UserInfo struct {
 	HasPassword bool `json:"hasPassword,omitempty"`
 
 	// List of OAuth providers linked to this account (e.g., ["google", "github"])
-	Providers []string `json:"providers,omitempty"`
+	Providers []string `json:"providers"`
 
 	// Organizations the user belongs to
 	Organizations []*UserOrganization `json:"organizations"`
