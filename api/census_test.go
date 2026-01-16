@@ -2,13 +2,13 @@ package api
 
 import (
 	"net/http"
-	"slices"
 	"testing"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
@@ -17,15 +17,15 @@ import (
 func TestCensus(t *testing.T) {
 	c := qt.New(t)
 
+	authFieldsNameAndMemberNumber := db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber, db.OrgMemberAuthFieldsName}
+
 	// Set up test environment with user, org, and members
 	adminToken := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, adminToken)
 	orgMembers := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(2)...)
 
 	// Test 1: Create a census
-	censusID := postCensus(t, adminToken, orgAddress,
-		db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber, db.OrgMemberAuthFieldsName},
-		db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail})
+	censusID := postCensus(t, adminToken, orgAddress, authFieldsNameAndMemberNumber, twoFaEmail)
 
 	// Verify the census was created correctly by retrieving it
 	retrievedCensus := getCensus(t, adminToken, censusID)
@@ -36,7 +36,7 @@ func TestCensus(t *testing.T) {
 	// Test 1.3: Test with no authentication
 	censusInfo := &apicommon.CreateCensusRequest{
 		OrgAddress:  orgAddress,
-		AuthFields:  db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber, db.OrgMemberAuthFieldsName},
+		AuthFields:  authFieldsNameAndMemberNumber,
 		TwoFaFields: db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail},
 	}
 	c.Assert(postCensusAndExpectError(t, "", censusInfo),
@@ -45,9 +45,7 @@ func TestCensus(t *testing.T) {
 	// Test 1.4: Test with invalid organization address
 	invalidCensusInfo := &apicommon.CreateCensusRequest{
 		OrgAddress: common.Address{},
-		AuthFields: db.OrgMemberAuthFields{
-			db.OrgMemberAuthFieldsMemberNumber,
-		},
+		AuthFields: authFieldsNameAndMemberNumber,
 	}
 	c.Assert(postCensusAndExpectError(t, adminToken, invalidCensusInfo),
 		qt.ErrorMatches, errors.ErrUnauthorized.Err.Error()+".*")
@@ -300,13 +298,8 @@ func TestCensus(t *testing.T) {
 		"organizations", orgAddress.String(), "members")
 
 	// Test 7.1: Create a census with email twoFa field when some members have empty emails
-	// Note: After simplification, empty field validation has been removed from the handler
-	postCensus(t, adminToken, orgAddress,
-		db.OrgMemberAuthFields{},
-		db.OrgMemberTwoFaFields{
-			db.OrgMemberTwoFaFieldEmail, // Has empty values, but now accepted
-		},
-	)
+	// Note: After simplification, empty field validation has been removed from the handler, so this is now accepted
+	postCensus(t, adminToken, orgAddress, db.OrgMemberAuthFields{}, twoFaEmail)
 
 	// Test 8: Create a user with manager role and test permissions
 	// Create a second user
@@ -323,26 +316,21 @@ func TestCensus(t *testing.T) {
 	t.Run("PublishGroupCensus", func(t *testing.T) {
 		c := qt.New(t)
 
-		authFields := db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber, db.OrgMemberAuthFieldsName}
-		twoFaEmail := db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail}
-		twoFaPhone := db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldPhone}
-		twoFaEmailOrPhone := slices.Concat(twoFaEmail, twoFaPhone)
-
 		// Test 9.0: On free plan, creating a group census with OrgMemberTwoFaFieldPhone should fail
-		c.Assert(createGroupBasedCensusAndExpectError(t, adminToken, orgAddress, authFields, twoFaPhone,
+		c.Assert(createGroupBasedCensusAndExpectError(t, adminToken, orgAddress, authFieldsNameAndMemberNumber, twoFaPhone,
 			memberIDs(orgMembers)...),
 			qt.ErrorIs, errors.ErrProcessCensusSizeExceedsSMSAllowance)
-		c.Assert(createGroupBasedCensusAndExpectError(t, adminToken, orgAddress, authFields, twoFaEmailOrPhone,
+		c.Assert(createGroupBasedCensusAndExpectError(t, adminToken, orgAddress, authFieldsNameAndMemberNumber, twoFaEmailOrPhone,
 			memberIDs(orgMembers)...),
-			qt.ErrorIs, errors.ErrProcessCensusSizeExceedsEmailAllowance)
+			qt.ErrorIs, errors.ErrProcessCensusSizeExceedsSMSAllowance)
 
 		// After upgrading to a subscription, twoFaPhone or twoFaEmailOrPhone are now allowed
 		setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
-		createGroupBasedCensus(t, adminToken, orgAddress, authFields, twoFaPhone,
+		createGroupBasedCensus(t, adminToken, orgAddress, authFieldsNameAndMemberNumber, twoFaPhone,
 			memberIDs(orgMembers)...)
 
 		// Test 9.1: Successful group census publication
-		censusID, group, census := createGroupBasedCensus(t, adminToken, orgAddress, authFields, twoFaEmailOrPhone,
+		censusID, group, census := createGroupBasedCensus(t, adminToken, orgAddress, authFieldsNameAndMemberNumber, twoFaEmailOrPhone,
 			memberIDs(orgMembers)...)
 
 		// Verify that the census participants are correctly set
@@ -355,7 +343,9 @@ func TestCensus(t *testing.T) {
 
 		// Test 9.2: Test with already published census
 		// Publishing again should return the same information
-		publishGroupRequest := &apicommon.PublishCensusGroupRequest{AuthFields: authFields, TwoFaFields: twoFaEmailOrPhone}
+		publishGroupRequest := &apicommon.PublishCensusGroupRequest{
+			AuthFields: authFieldsNameAndMemberNumber, TwoFaFields: twoFaEmailOrPhone,
+		}
 
 		censusAgain := postGroupCensus(t, adminToken, censusID, group.ID, publishGroupRequest)
 		c.Assert(censusAgain.URI, qt.Equals, census.URI)
@@ -385,4 +375,40 @@ func TestCensus(t *testing.T) {
 		c.Assert(postGroupCensusAndExpectError(t, nonAdminToken, censusID, group.ID, publishGroupRequest),
 			qt.ErrorMatches, errors.ErrUnauthorized.Err.Error()+".*")
 	})
+}
+
+func TestCensusLimits(t *testing.T) {
+	c := qt.New(t)
+
+	// Set up test environment with user, org, and members
+	adminToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, adminToken)
+	orgMembers := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(10)...)
+	processID := randomProcessID()
+
+	authFields := db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber, db.OrgMemberAuthFieldsName}
+
+	censusID, _, _ := createGroupBasedCensus(t, adminToken, orgAddress, authFields, twoFaEmailOrPhone,
+		memberIDs(orgMembers)...)
+
+	// Create a bundle with the census and process
+	bundleID, _ := postProcessBundle(t, adminToken, censusID, processID)
+
+	// Authenticate N members to trigger email sendings and hit MaxSentEmails limit
+	for _, member := range orgMembers {
+		testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
+			MemberNumber: member.MemberNumber,
+			Name:         member.Name,
+			Email:        member.Email,
+		})
+	}
+	// Now creating a group census with twoFaEmail should fail
+	c.Assert(createGroupBasedCensusAndExpectError(t, adminToken, orgAddress, authFields, twoFaEmail,
+		memberIDs(orgMembers)...),
+		qt.ErrorIs, errors.ErrProcessCensusSizeExceedsEmailAllowance)
+
+	// After upgrading to a subscription, twoFaPhone or twoFaEmailOrPhone are now allowed
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	createGroupBasedCensus(t, adminToken, orgAddress, authFields, twoFaPhone,
+		memberIDs(orgMembers)...)
 }

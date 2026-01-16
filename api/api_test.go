@@ -13,11 +13,13 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/math"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -69,6 +71,12 @@ const (
 	anotherEmail = "something-else@gmail.com"
 
 	cspNotificationCoolDownTime = time.Second * 5
+)
+
+var (
+	twoFaEmail        = db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail}
+	twoFaPhone        = db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldPhone}
+	twoFaEmailOrPhone = slices.Concat(twoFaEmail, twoFaPhone)
 )
 
 var (
@@ -773,6 +781,54 @@ func testCSPSign(t *testing.T, bundleID string, authToken, processID, payload in
 
 	t.Logf("Received signature: %s", signResp.Signature.String())
 	return signResp.Signature
+}
+
+func testAuthenthicateAndVote(t *testing.T, vocdoniClient *apiclient.HTTPclient,
+	bundleID string, processID internal.HexBytes, expectedWeight string, authRequest *handlers.AuthRequest,
+) {
+	t.Helper()
+	c := qt.New(t)
+
+	votesBefore, err := vocdoniClient.ElectionVoteCount(processID.Bytes())
+	c.Assert(err, qt.IsNil)
+
+	// Create the voting address for the first user
+	user1 := ethereum.SignKeys{}
+	err = user1.Generate()
+	c.Assert(err, qt.IsNil)
+	user1Addr := user1.Address().Bytes()
+
+	// Authenticate the member with the CSP using the new multi-field system
+	authToken := testCSPAuthenticateWithFields(t, bundleID, authRequest)
+
+	cspWeight := fetchCSPUserWeight(t, bundleID, authToken)
+
+	weight, ok := math.ParseUint64(expectedWeight)
+	c.Assert(ok, qt.IsTrue, qt.Commentf("Failed to convert member weight %s to int", expectedWeight))
+	c.Assert(
+		bytes.Equal(cspWeight, big.NewInt(int64(weight)).Bytes()),
+		qt.IsTrue,
+		qt.Commentf(
+			"CSP reported weight %d does not match expected weight %d",
+			cspWeight, weight,
+		),
+	)
+
+	// Sign the voter's address with the CSP
+	signature := testCSPSign(t, bundleID, authToken, processID, user1Addr)
+
+	// Generate a vote proof with the signature
+	proof := testGenerateVoteProof(processID, user1Addr, signature, weight)
+
+	// Cast a vote
+	votePackage := []byte("[\"1\"]") // Vote for option 1
+	nullifier := testCastVote(t, vocdoniClient, &user1, processID, proof, votePackage)
+	t.Logf("Vote cast successfully with nullifier: %x", nullifier)
+
+	// Verify the vote was counted
+	votesAfter, err := vocdoniClient.ElectionVoteCount(processID.Bytes())
+	c.Assert(err, qt.IsNil)
+	c.Assert(votesAfter, qt.Equals, votesBefore+1, qt.Commentf("expected 1 more vote, got %d", votesAfter))
 }
 
 // postProcessBundleAuth0 authenticates with the CSP (step 0) and returns the AuthToken.
