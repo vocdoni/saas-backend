@@ -298,7 +298,7 @@ type UserInfo struct {
 	Verified bool `json:"verified,omitempty"`
 
 	// Whether the user has a password set (true if not OAuth-only)
-	HasPassword bool `json:"hasPassword,omitempty"`
+	HasPassword bool `json:"hasPassword"`
 
 	// List of OAuth providers linked to this account (e.g., ["google", "github"])
 	Providers []string `json:"providers"`
