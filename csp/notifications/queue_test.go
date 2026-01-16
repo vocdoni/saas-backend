@@ -95,7 +95,7 @@ func TestNotificationChallengeQueue(t *testing.T) {
 
 		c.Assert(mailtemplates.Load(), qt.IsNil)
 		nc, err := NewNotificationChallenge(EmailChallenge, apicommon.DefaultLang,
-			[]byte("user"), []byte("bundle"), testUserEmail, "123456", testOrgMeta, testRemainingTime)
+			[]byte("user"), []byte("bundle"), testUserEmail, "123456", testOrgInfo, testRemainingTime)
 		c.Assert(err, qt.IsNil)
 		c.Assert(queue.Push(nc), qt.IsNil)
 	outer:

@@ -673,6 +673,7 @@ func (c *CSPHandlers) authFirstStep(
 		lang,
 		name,
 		logo,
+		org.Address,
 	)
 }
 
