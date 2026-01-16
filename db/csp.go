@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -273,11 +275,11 @@ func (ms *MongoStorage) CountCSPAuthByBundle(bundleID internal.HexBytes) (int64,
 	defer cancel()
 	// count documents matching the bundle ID
 	filter := bson.M{"bundleid": bundleID}
-	count, err := ms.cspTokens.CountDocuments(ctx, filter)
+	distinctValues, err := ms.cspTokens.Distinct(ctx, "userid", filter)
 	if err != nil {
 		return 0, err
 	}
-	return count, nil
+	return int64(len(distinctValues)), nil
 }
 
 // CountCSPAuthVerifiedByBundle counts the number of verified CSP authentication
@@ -291,11 +293,11 @@ func (ms *MongoStorage) CountCSPAuthVerifiedByBundle(bundleID internal.HexBytes)
 	defer cancel()
 	// count documents matching the bundle ID and verified status
 	filter := bson.M{"bundleid": bundleID, "verified": true}
-	count, err := ms.cspTokens.CountDocuments(ctx, filter)
+	distinctValues, err := ms.cspTokens.Distinct(ctx, "userid", filter)
 	if err != nil {
 		return 0, err
 	}
-	return count, nil
+	return int64(len(distinctValues)), nil
 }
 
 // CountCSPProcessConsumedByProcess counts the number of consumed CSP processes
@@ -309,11 +311,11 @@ func (ms *MongoStorage) CountCSPProcessConsumedByProcess(processID internal.HexB
 	defer cancel()
 	// count documents matching the process ID and consumed status
 	filter := bson.M{"processid": processID, "consumed": true}
-	count, err := ms.cspTokensStatus.CountDocuments(ctx, filter)
+	distinctValues, err := ms.cspTokensStatus.Distinct(ctx, "userid", filter)
 	if err != nil {
 		return 0, err
 	}
-	return count, nil
+	return int64(len(distinctValues)), nil
 }
 
 // CSPProcessByUserAndProcess retrieves the CSP process status for a given
@@ -329,4 +331,40 @@ func (ms *MongoStorage) CSPProcessByUserAndProcess(userID, processID internal.He
 	defer cancel()
 	// fetch the process status
 	return ms.fetchCSPProcessFromDB(ctx, userID, processID)
+}
+
+func (ms *MongoStorage) distinctCSPProcessVotersByProcess(processID internal.HexBytes) ([]string, error) {
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// prepare the filter
+	filter := bson.M{"processid": processID, "consumed": true}
+	// execute the distinct operation
+	var results []string
+	distinctValues, err := ms.cspTokensStatus.Distinct(ctx, "userid", filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute distinct query: %w", err)
+	}
+	// convert results to []internal.HexBytes
+	for _, v := range distinctValues {
+		b, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("unexpected type in distinct results")
+		}
+		results = append(results, b)
+	}
+	return results, nil
+}
+
+func (ms *MongoStorage) GetOrgMembersByProcess(orgAddress common.Address, processID internal.HexBytes) ([]*OrgMember, error) {
+	userids, err := ms.distinctCSPProcessVotersByProcess(processID)
+	if err != nil {
+		return nil, err
+	}
+	_, orgMembers, err := ms.orgMembersByIDs(orgAddress, userids, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+	return orgMembers, nil
 }
