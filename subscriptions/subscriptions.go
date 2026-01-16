@@ -138,7 +138,7 @@ func (p *Subscriptions) HasTxPermission(
 		}
 		newProcess := tx.GetNewProcess()
 		if newProcess.Process.MaxCensusSize > uint64(plan.Organization.MaxCensus) {
-			return false, errors.ErrProcessCensusSizeExceedsLimit.Withf("plan max census: %d", plan.Organization.MaxCensus)
+			return false, errors.ErrProcessCensusSizeExceedsPlanLimit.Withf("plan max census: %d", plan.Organization.MaxCensus)
 		}
 		if org.Counters.Processes >= plan.Organization.MaxProcesses {
 			// allow processes with less than TestMaxCensusSize for user testing
@@ -232,11 +232,11 @@ func (p *Subscriptions) OrgCanPublishGroupCensus(census *db.Census, groupID stri
 
 	remainingEmails := plan.Organization.MaxSentEmails - org.Counters.SentEmails
 	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldEmail) && len(group.MemberIDs) > remainingEmails {
-		return errors.ErrProcessCensusSizeExceedsLimit.Withf("remaining emails: %d", remainingEmails)
+		return errors.ErrProcessCensusSizeExceedsEmailAllowance.Withf("remaining emails: %d", remainingEmails)
 	}
 	remainingSMS := plan.Organization.MaxSentSMS - org.Counters.SentSMS
 	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldPhone) && len(group.MemberIDs) > remainingSMS {
-		return errors.ErrProcessCensusSizeExceedsLimit.Withf("remaining sms: %d", remainingSMS)
+		return errors.ErrProcessCensusSizeExceedsSMSAllowance.Withf("remaining sms: %d", remainingSMS)
 	}
 
 	return nil

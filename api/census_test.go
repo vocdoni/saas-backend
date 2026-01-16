@@ -331,10 +331,10 @@ func TestCensus(t *testing.T) {
 		// Test 9.0: On free plan, creating a group census with OrgMemberTwoFaFieldPhone should fail
 		c.Assert(createGroupBasedCensusAndExpectError(t, adminToken, orgAddress, authFields, twoFaPhone,
 			memberIDs(orgMembers)...),
-			qt.ErrorIs, errors.ErrProcessCensusSizeExceedsLimit)
+			qt.ErrorIs, errors.ErrProcessCensusSizeExceedsSMSAllowance)
 		c.Assert(createGroupBasedCensusAndExpectError(t, adminToken, orgAddress, authFields, twoFaEmailOrPhone,
 			memberIDs(orgMembers)...),
-			qt.ErrorIs, errors.ErrProcessCensusSizeExceedsLimit)
+			qt.ErrorIs, errors.ErrProcessCensusSizeExceedsEmailAllowance)
 
 		// After upgrading to a subscription, twoFaPhone or twoFaEmailOrPhone are now allowed
 		setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
