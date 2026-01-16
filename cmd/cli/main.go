@@ -171,14 +171,6 @@ func queryProcessOnly(database *db.MongoStorage, client *vocapi.HTTPclient, proc
 		fmt.Printf("Census Root:    %s\n", bundle.Census.Published.Root.String())
 	}
 
-	// Count census participants
-	participants, err := database.CensusParticipants(bundle.Census.ID.Hex())
-	if err != nil {
-		return fmt.Errorf("failed to count census participants: %w", err)
-	}
-	fmt.Printf("\nTotal Census Participants: %d\n", len(participants))
-
-	// Print CSP statistics
 	printSectionHeader("CSP STATISTICS")
 
 	bundleIDBytes := internal.HexBytes{}
@@ -206,6 +198,15 @@ func queryProcessOnly(database *db.MongoStorage, client *vocapi.HTTPclient, proc
 		return fmt.Errorf("failed to count voting proofs: %w", err)
 	}
 	fmt.Printf("Voting Proofs Obtained (proofs consumed): %d\n", votingProofs)
+
+	orgMembers, err := database.GetOrgMembersByProcess(bundle.OrgAddress, processID)
+	if err != nil {
+		return fmt.Errorf("failed to get distinct voter IDs: %w", err)
+	}
+	fmt.Printf("Distinct Voter IDs in Org for Process:\n")
+	for _, orgMember := range orgMembers {
+		fmt.Printf("%s\n", orgMember.ID.Hex())
+	}
 
 	return nil
 }
