@@ -671,7 +671,7 @@ func waitForSMS(t *testing.T, phoneTo string) string {
 
 	maxRetries := 10
 	for i := range maxRetries {
-		mailBody := testSMSService.FindNotification(phoneTo)
+		mailBody := testSMSService.ConsumeSMS(phoneTo)
 		if mailBody != nil {
 			return mailBody.PlainBody
 		}

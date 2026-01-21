@@ -24,9 +24,9 @@ func (mock *MockSMS) SendNotification(_ context.Context, n *notifications.Notifi
 	return nil
 }
 
-// FindNotification fetches a stored SMS notification for the recipient.
-func (mock *MockSMS) FindNotification(toNumber string) *notifications.Notification {
-	if v, ok := mock.storage.Load(toNumber); ok {
+// ConsumeSMS fetches a stored SMS notification for the recipient, and deletes it from storage.
+func (mock *MockSMS) ConsumeSMS(toNumber string) *notifications.Notification {
+	if v, ok := mock.storage.LoadAndDelete(toNumber); ok {
 		if n, ok := v.(*notifications.Notification); ok {
 			return n
 		}
