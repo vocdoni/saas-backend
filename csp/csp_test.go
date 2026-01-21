@@ -22,7 +22,7 @@ const (
 
 var (
 	testMongoURI        string
-	testMailService     *smtp.Email
+	testMailService     = new(testutil.SMTP)
 	testSMSService      = new(testutil.MockSMS)
 	testRootKey         = new(internal.HexBytes).SetString("700e669712473377a92457f3ff2a4d8f6b17e139f127738018a80fe26983f410")
 	testUserID          = internal.HexBytes("userID")
@@ -69,14 +69,15 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	// create test mail service
-	testMailService = new(smtp.Email)
-	if err := testMailService.New(&smtp.Config{
-		FromAddress:  adminEmail,
-		SMTPUsername: adminUser,
-		SMTPPassword: adminPass,
-		SMTPServer:   mailHost,
-		SMTPPort:     smtpPort.Int(),
-		TestAPIPort:  apiPort.Int(),
+	if err := testMailService.New(&testutil.SMTPConfig{
+		Config: smtp.Config{
+			FromAddress:  adminEmail,
+			SMTPUsername: adminUser,
+			SMTPPassword: adminPass,
+			SMTPServer:   mailHost,
+			SMTPPort:     smtpPort.Int(),
+		},
+		TestAPIPort: apiPort.Int(),
 	}); err != nil {
 		panic(err)
 	}

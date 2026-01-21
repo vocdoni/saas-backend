@@ -63,7 +63,8 @@ func NewQueue(ctx context.Context, ttl, throttle time.Duration,
 func (sq *Queue) Push(challenge *NotificationChallenge) error {
 	log.Debugw("notification challenge enqueued",
 		"bundleID", challenge.BundleID.String(),
-		"userID", challenge.UserID.String())
+		"userID", challenge.UserID.String(),
+		"type", challenge.Type)
 	return sq.items.Enqueue(challenge)
 }
 
@@ -87,8 +88,9 @@ func (sq *Queue) dequeueChallenge() (*NotificationChallenge, error) {
 
 	if !challenge.Valid() {
 		log.Warnw("invalid notification challenge",
-			"bundle", challenge.BundleID.String(),
-			"user", challenge.UserID.String())
+			"bundleID", challenge.BundleID.String(),
+			"userID", challenge.UserID.String(),
+			"type", challenge.Type)
 		return nil, fmt.Errorf("invalid challenge")
 	}
 
@@ -107,14 +109,16 @@ func (sq *Queue) getNotificationService(challenge *NotificationChallenge) notifi
 // Returns true if the challenge was successfully re-enqueued
 func (sq *Queue) handleFailedNotification(challenge *NotificationChallenge, err error) bool {
 	log.Warnw("failed to send notification",
-		"bundle", challenge.BundleID.String(),
-		"user", challenge.UserID.String(),
+		"bundleID", challenge.BundleID.String(),
+		"userID", challenge.UserID.String(),
+		"type", challenge.Type,
 		"error", err)
 
 	if err := sq.reenqueue(challenge); err != nil {
 		log.Warnw("notification challenge not re-enqueued",
-			"bundle", challenge.BundleID.String(),
-			"user", challenge.UserID.String(),
+			"bundleID", challenge.BundleID.String(),
+			"userID", challenge.UserID.String(),
+			"type", challenge.Type,
 			"error", err)
 		// Notify that we're removing this element
 		sq.NotificationsSent <- challenge
@@ -127,8 +131,8 @@ func (sq *Queue) handleFailedNotification(challenge *NotificationChallenge, err 
 // handleSuccessfulNotification handles a successful notification
 func (sq *Queue) handleSuccessfulNotification(challenge *NotificationChallenge) {
 	log.Debugw("notification with challenge successfully sent",
-		"bundle", challenge.BundleID.String(),
-		"user", challenge.UserID.String(),
+		"bundleID", challenge.BundleID.String(),
+		"userID", challenge.UserID.String(),
 		"type", challenge.Type)
 	sq.NotificationsSent <- challenge
 }
@@ -187,8 +191,9 @@ func (sq *Queue) reenqueue(challenge *NotificationChallenge) error {
 		return fmt.Errorf("cannot enqueue the challenge: %w", err)
 	}
 	log.Debugw("notification challenge re-enqueued",
-		"bundle", challenge.BundleID.String(),
-		"user", challenge.UserID.String(),
+		"bundleID", challenge.BundleID.String(),
+		"userID", challenge.UserID.String(),
+		"type", challenge.Type,
 		"retry", challenge.Retries)
 	return nil
 }
