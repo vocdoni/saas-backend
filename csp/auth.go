@@ -50,7 +50,8 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 	if lastToken != nil && time.Since(lastToken.CreatedAt) < c.notificationCoolDownTime {
 		log.Warnw("cooldown time not reached",
 			"userID", uID,
-			"bundleID", bID)
+			"bundleID", bID,
+			"lastToken", lastToken.Token)
 		return nil, errors.ErrAttemptCoolDownTime
 	}
 	// generate a new token, secret and code from the attempt number
@@ -63,6 +64,7 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 		log.Warnw("error setting new token",
 			"userID", uID,
 			"bundleID", bID,
+			"token", token,
 			"error", err)
 		return nil, ErrStorageFailure
 	}
@@ -82,6 +84,7 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 		log.Warnw("error composing notification challenge",
 			"userID", uID,
 			"bundleID", bID,
+			"token", token,
 			"error", err)
 		return nil, ErrNotificationFailure
 	}
@@ -90,6 +93,7 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 		log.Warnw("error pushing notification challenge",
 			"userID", uID,
 			"bundleID", bID,
+			"token", token,
 			"error", err)
 		return nil, ErrNotificationFailure
 	}
