@@ -1,6 +1,7 @@
 package subscriptions
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -206,4 +207,8 @@ func (m *mockMongoStorage) OrganizationWithParent(address common.Address) (
 
 func (*mockMongoStorage) CountProcesses(_ common.Address, _ db.DraftFilter) (int64, error) {
 	return 0, nil
+}
+
+func (*mockMongoStorage) OrganizationMemberGroup(string, common.Address) (*db.OrganizationMemberGroup, error) {
+	return nil, fmt.Errorf("not implemented in mock")
 }

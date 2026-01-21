@@ -273,7 +273,7 @@ func TestNewSMSChallengeSent(t *testing.T) {
 	c.Assert(ch.Send(context.Background(), testSMSService), qt.IsNil)
 	c.Assert(ch.Success, qt.IsTrue)
 	// get the verification code from the mock SMS
-	smsNotification := testSMSService.FindNotification(testUserPhone)
+	smsNotification := testSMSService.ConsumeSMS(testUserPhone)
 	c.Assert(smsNotification, qt.IsNotNil)
 	c.Assert(smsNotification.PlainBody, qt.Contains, "123456")
 }
