@@ -28,7 +28,6 @@ type Config struct {
 	SMTPPassword string
 	SMTPServer   string
 	SMTPPort     int
-	TestAPIPort  int
 }
 
 // Email is the implementation of the NotificationService interface for the
