@@ -99,6 +99,24 @@ func (ms *MongoStorage) UserByEmail(email string) (*User, error) {
 	return user, nil
 }
 
+// UserByOAuthProviderExternalID returns the user that has the given OAuth provider and external ID.
+// If no user is found, it returns ErrNotFound.
+func (ms *MongoStorage) UserByOAuthProviderExternalID(provider, externalID string) (*User, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	fieldName := "oauth." + provider + ".externalID"
+	result := ms.users.FindOne(ctx, bson.M{fieldName: externalID})
+	user := &User{}
+	if err := result.Decode(user); err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return user, nil
+}
+
 // SetUser method creates or updates the user in the database. If the user
 // already exists, it updates the fields that have changed. If the user doesn't
 // exist, it creates it. If an error occurs, it returns the error.
