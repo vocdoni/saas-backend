@@ -75,6 +75,35 @@ func TestBundleAuthToken(t *testing.T) {
 		c.Assert(err, qt.ErrorIs, errors.ErrAttemptCoolDownTime)
 	})
 
+	c.Run("auth-only ignores cooldown", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		token, err := csp.BundleAuthToken(
+			testBundleID,
+			testUserID,
+			"",
+			"",
+			apicommon.DefaultLang,
+			"",
+			"",
+			testAddress.Address(),
+		)
+		c.Assert(err, qt.IsNil)
+		c.Assert(token, qt.Not(qt.IsNil))
+
+		token, err = csp.BundleAuthToken(
+			testBundleID,
+			testUserID,
+			"",
+			"",
+			apicommon.DefaultLang,
+			"",
+			"",
+			testAddress.Address(),
+		)
+		c.Assert(err, qt.IsNil)
+		c.Assert(token, qt.Not(qt.IsNil))
+	})
+
 	c.Run("success test", func(c *qt.C) {
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		bundleID := internal.HexBytes(testBundleID)

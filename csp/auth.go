@@ -182,23 +182,6 @@ func (*CSP) verifySolution(uID, bID internal.HexBytes, solution string) bool {
 // that don't require challenge verification. It generates a token and immediately
 // marks it as verified.
 func (c *CSP) createAuthOnlyToken(bID, uID internal.HexBytes) (internal.HexBytes, error) {
-	// get last token for the user and bundle
-	lastToken, err := c.Storage.LastCSPAuth(uID, bID)
-	if err != nil && err != db.ErrTokenNotFound {
-		log.Warnw("error getting last token",
-			"userID", uID,
-			"bundleID", bID,
-			"error", err)
-		return nil, ErrStorageFailure
-	}
-	// check if the last token was created less than the cooldown time
-	if lastToken != nil && time.Since(lastToken.CreatedAt) < c.notificationCoolDownTime {
-		log.Warnw("cooldown time not reached",
-			"userID", uID,
-			"bundleID", bID)
-		return nil, errors.ErrAttemptCoolDownTime
-	}
-
 	// generate a new token (we don't need the code for auth-only)
 	bToken, err := uuid.New().MarshalBinary()
 	if err != nil {
