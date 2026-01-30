@@ -445,6 +445,9 @@ type OrganizationSubscriptionInfo struct {
 	// Current usage metrics
 	Usage SubscriptionUsage `json:"usage"`
 
+	// Current period usage metrics
+	PeriodUsage *SubscriptionUsage `json:"periodUsage,omitempty"`
+
 	// Subscription plan details
 	Plan SubscriptionPlan `json:"plan"`
 }

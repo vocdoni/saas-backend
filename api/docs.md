@@ -953,7 +953,15 @@ Remove a user from the organization. Only admins of an organization can remove a
     "sentSMS":0,
     "sentEmails":0,
     "subOrgs":0,
-    "users":0
+    "users":0,
+    "processes":0
+  },
+  "periodUsage":{
+    "sentSMS":0,
+    "sentEmails":0,
+    "subOrgs":0,
+    "users":0,
+    "processes":0
   },
   "plan":{
     "id":3,

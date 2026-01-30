@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
@@ -207,6 +208,27 @@ func TestOrganizationSubscriptionHandler(t *testing.T) {
 	token := testCreateUser(t, testPass)
 	orgAddress := testCreateOrganization(t, token)
 
+	org, err := testDB.Organization(orgAddress)
+	c.Assert(err, qt.IsNil)
+	org.Counters.Processes = 5
+	org.Counters.SentEmails = 3
+	org.Counters.SentSMS = 2
+	org.Subscription.BillingPeriod = db.BillingPeriodAnnual
+	org.Subscription.StartDate = time.Now().UTC().Add(-time.Hour)
+	org.Subscription.RenewalDate = time.Now().UTC().Add(time.Hour)
+	c.Assert(testDB.SetOrganization(org), qt.IsNil)
+	c.Assert(testDB.UpsertUsageSnapshot(&db.UsageSnapshot{
+		OrgAddress:    orgAddress,
+		PeriodStart:   org.Subscription.StartDate,
+		PeriodEnd:     org.Subscription.RenewalDate,
+		BillingPeriod: org.Subscription.BillingPeriod,
+		Baseline: db.UsageSnapshotBaseline{
+			Processes:  4,
+			SentEmails: 2,
+			SentSMS:    1,
+		},
+	}), qt.IsNil)
+
 	// Test getting subscription info
 	resp, code := testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String(), "subscription")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
@@ -216,6 +238,7 @@ func TestOrganizationSubscriptionHandler(t *testing.T) {
 	c.Assert(subInfo.Plan, qt.Not(qt.IsNil))
 	c.Assert(subInfo.SubscriptionDetails, qt.Not(qt.IsNil))
 	c.Assert(subInfo.Usage, qt.Not(qt.IsNil))
+	c.Assert(subInfo.PeriodUsage, qt.Not(qt.IsNil))
 
 	// Test without authentication
 	_, code = testRequest(t, http.MethodGet, "", nil, "organizations", orgAddress.String(), "subscription")

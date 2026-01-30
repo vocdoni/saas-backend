@@ -318,6 +318,13 @@ func (a *API) organizationSubscriptionHandler(w http.ResponseWriter, r *http.Req
 		Usage:               apicommon.SubscriptionUsageFromDB(&org.Counters),
 		Plan:                apicommon.SubscriptionPlanFromDB(plan),
 	}
+	if periodUsage, ok, err := a.subscriptions.PeriodUsage(org); err != nil {
+		errors.ErrGenericInternalServerError.Withf("could not get period usage: %v", err).Write(w)
+		return
+	} else if ok {
+		usage := apicommon.SubscriptionUsageFromDB(&periodUsage)
+		info.PeriodUsage = &usage
+	}
 	apicommon.HTTPWriteJSON(w, info)
 }
 

@@ -49,6 +49,7 @@ type MongoStorage struct {
 	processBundles      *mongo.Collection
 	cspTokens           *mongo.Collection
 	cspTokensStatus     *mongo.Collection
+	usageSnapshots      *mongo.Collection
 	jobs                *mongo.Collection
 	migrations          *mongo.Collection
 }
