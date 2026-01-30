@@ -3,6 +3,7 @@ package subscriptions
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
@@ -164,11 +165,110 @@ func TestHasDBPermission(t *testing.T) {
 	c.Assert(hasPermission, qt.IsTrue)
 }
 
+func TestAnnualUsageEnforcement(t *testing.T) {
+	c := qt.New(t)
+
+	now := time.Now().UTC()
+	start := now.Add(-time.Hour)
+	end := now.Add(time.Hour)
+
+	org := &db.Organization{
+		Address: testOrgAddress,
+		Subscription: db.OrganizationSubscription{
+			PlanID:        1,
+			BillingPeriod: db.BillingPeriodAnnual,
+			StartDate:     start,
+			RenewalDate:   end,
+		},
+		Counters: db.OrganizationCounters{
+			Processes:  5,
+			SentEmails: 10,
+		},
+	}
+
+	groupID := "group-1"
+	mockDB := &mockMongoStorage{
+		plans: map[uint64]*db.Plan{
+			1: {
+				ID:   1,
+				Name: "Test Plan",
+				Organization: db.PlanLimits{
+					MaxProcesses:  2,
+					MaxCensus:     100,
+					MaxDuration:   365,
+					MaxSentEmails: 12,
+					MaxSentSMS:    0,
+				},
+			},
+		},
+		orgs: map[string]*db.Organization{
+			testOrgAddress.String(): org,
+		},
+		groups: map[string]*db.OrganizationMemberGroup{
+			groupID: {
+				MemberIDs: make([]string, 11),
+			},
+		},
+		snapshots: map[string]*db.UsageSnapshot{
+			usageSnapshotKey(testOrgAddress, start): {
+				OrgAddress:  testOrgAddress,
+				PeriodStart: start,
+				PeriodEnd:   end,
+				Baseline: db.UsageSnapshotBaseline{
+					Processes:  4,
+					SentEmails: 9,
+					SentSMS:    0,
+				},
+			},
+		},
+	}
+
+	subs := &Subscriptions{db: mockDB}
+
+	user := &db.User{
+		Email: "admin@example.com",
+		Organizations: []db.OrganizationUser{
+			{Address: testOrgAddress, Role: db.AdminRole},
+		},
+	}
+
+	tx := &models.Tx{
+		Payload: &models.Tx_NewProcess{
+			NewProcess: &models.NewProcessTx{
+				Txtype: models.TxType_NEW_PROCESS,
+				Process: &models.Process{
+					MaxCensusSize: uint64(20),
+					Duration:      1,
+					EnvelopeType: &models.EnvelopeType{
+						Anonymous:      false,
+						CostFromWeight: false,
+					},
+					VoteOptions: &models.ProcessVoteOptions{
+						MaxVoteOverwrites: 0,
+					},
+				},
+			},
+		},
+	}
+
+	hasPermission, err := subs.HasTxPermission(tx, models.TxType_NEW_PROCESS, org, user)
+	c.Assert(err, qt.IsNil)
+	c.Assert(hasPermission, qt.IsTrue)
+
+	census := &db.Census{
+		OrgAddress:  testOrgAddress,
+		TwoFaFields: db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail},
+	}
+	c.Assert(subs.OrgCanPublishGroupCensus(census, groupID), qt.IsNil)
+}
+
 // Mock implementation of the necessary db.MongoStorage methods for testing
 type mockMongoStorage struct {
-	plans map[uint64]*db.Plan
-	users map[string]*db.User
-	orgs  map[string]*db.Organization
+	plans     map[uint64]*db.Plan
+	users     map[string]*db.User
+	orgs      map[string]*db.Organization
+	groups    map[string]*db.OrganizationMemberGroup
+	snapshots map[string]*db.UsageSnapshot
 }
 
 func (m *mockMongoStorage) Plan(id uint64) (*db.Plan, error) {
@@ -209,6 +309,34 @@ func (*mockMongoStorage) CountProcesses(_ common.Address, _ db.DraftFilter) (int
 	return 0, nil
 }
 
-func (*mockMongoStorage) OrganizationMemberGroup(string, common.Address) (*db.OrganizationMemberGroup, error) {
-	return nil, fmt.Errorf("not implemented in mock")
+func (m *mockMongoStorage) OrganizationMemberGroup(groupID string, _ common.Address) (*db.OrganizationMemberGroup, error) {
+	group, ok := m.groups[groupID]
+	if !ok {
+		return nil, db.ErrNotFound
+	}
+	return group, nil
+}
+
+func (m *mockMongoStorage) GetUsageSnapshot(orgAddress common.Address, periodStart time.Time) (*db.UsageSnapshot, error) {
+	key := usageSnapshotKey(orgAddress, periodStart)
+	snapshot, ok := m.snapshots[key]
+	if !ok {
+		return nil, db.ErrNotFound
+	}
+	return snapshot, nil
+}
+
+func (m *mockMongoStorage) UpsertUsageSnapshot(snapshot *db.UsageSnapshot) error {
+	if snapshot == nil {
+		return db.ErrInvalidData
+	}
+	key := usageSnapshotKey(snapshot.OrgAddress, snapshot.PeriodStart)
+	if _, ok := m.snapshots[key]; !ok {
+		m.snapshots[key] = snapshot
+	}
+	return nil
+}
+
+func usageSnapshotKey(orgAddress common.Address, periodStart time.Time) string {
+	return fmt.Sprintf("%s:%s", orgAddress.String(), periodStart.UTC().Format(time.RFC3339Nano))
 }

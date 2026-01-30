@@ -566,6 +566,10 @@ definitions:
     type: object
   apicommon.OrganizationSubscriptionInfo:
     properties:
+      periodUsage:
+        allOf:
+        - $ref: '#/definitions/apicommon.SubscriptionUsage'
+        description: Current period usage metrics
       plan:
         allOf:
         - $ref: '#/definitions/apicommon.SubscriptionPlan'

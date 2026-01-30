@@ -4,6 +4,7 @@ package subscriptions
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/db"
@@ -55,6 +56,8 @@ type DBInterface interface {
 	OrganizationWithParent(address common.Address) (*db.Organization, *db.Organization, error)
 	CountProcesses(orgAddress common.Address, draft db.DraftFilter) (int64, error)
 	OrganizationMemberGroup(groupID string, orgAddress common.Address) (*db.OrganizationMemberGroup, error)
+	GetUsageSnapshot(orgAddress common.Address, periodStart time.Time) (*db.UsageSnapshot, error)
+	UpsertUsageSnapshot(snapshot *db.UsageSnapshot) error
 }
 
 // Subscriptions is the service that manages the organization permissions based on
@@ -140,7 +143,17 @@ func (p *Subscriptions) HasTxPermission(
 		if newProcess.Process.MaxCensusSize > uint64(plan.Organization.MaxCensus) {
 			return false, errors.ErrProcessCensusSizeExceedsPlanLimit.Withf("plan max census: %d", plan.Organization.MaxCensus)
 		}
-		if org.Counters.Processes >= plan.Organization.MaxProcesses {
+		usage, ok, err := p.PeriodUsage(org)
+		if err != nil {
+			return false, errors.ErrGenericInternalServerError.WithErr(err)
+		}
+
+		usedProcesses := org.Counters.Processes
+		if ok {
+			usedProcesses = usage.Processes
+		}
+
+		if usedProcesses >= plan.Organization.MaxProcesses {
 			// allow processes with less than TestMaxCensusSize for user testing
 			if newProcess.Process.MaxCensusSize > uint64(db.TestMaxCensusSize) {
 				return false, errors.ErrMaxProcessesReached
@@ -230,14 +243,75 @@ func (p *Subscriptions) OrgCanPublishGroupCensus(census *db.Census, groupID stri
 		return errors.ErrGroupNotFound.WithErr(err)
 	}
 
-	remainingEmails := plan.Organization.MaxSentEmails - org.Counters.SentEmails
+	usage, ok, err := p.PeriodUsage(org)
+	if err != nil {
+		return errors.ErrGenericInternalServerError.WithErr(err)
+	}
+	sentEmails := org.Counters.SentEmails
+	sentSMS := org.Counters.SentSMS
+	if ok {
+		sentEmails = usage.SentEmails
+		sentSMS = usage.SentSMS
+	}
+
+	remainingEmails := plan.Organization.MaxSentEmails - sentEmails
 	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldEmail) && len(group.MemberIDs) > remainingEmails {
 		return errors.ErrProcessCensusSizeExceedsEmailAllowance.Withf("remaining emails: %d", remainingEmails)
 	}
-	remainingSMS := plan.Organization.MaxSentSMS - org.Counters.SentSMS
+	remainingSMS := plan.Organization.MaxSentSMS - sentSMS
 	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldPhone) && len(group.MemberIDs) > remainingSMS {
 		return errors.ErrProcessCensusSizeExceedsSMSAllowance.Withf("remaining sms: %d", remainingSMS)
 	}
 
 	return nil
+}
+
+func (p *Subscriptions) PeriodUsage(org *db.Organization) (db.OrganizationCounters, bool, error) {
+	if org == nil {
+		return db.OrganizationCounters{}, false, errors.ErrInvalidData
+	}
+
+	periodStart, periodEnd, ok := db.ComputeAnnualPeriod(
+		org.Subscription,
+		org.Subscription.BillingPeriod,
+		time.Now(),
+	)
+	if !ok {
+		return db.OrganizationCounters{}, false, nil
+	}
+
+	snapshot, err := p.db.GetUsageSnapshot(org.Address, periodStart)
+	if err != nil {
+		if err == db.ErrNotFound {
+			snapshot = &db.UsageSnapshot{
+				OrgAddress:    org.Address,
+				PeriodStart:   periodStart,
+				PeriodEnd:     periodEnd,
+				BillingPeriod: org.Subscription.BillingPeriod,
+				Baseline: db.UsageSnapshotBaseline{
+					Processes:  org.Counters.Processes,
+					SentSMS:    org.Counters.SentSMS,
+					SentEmails: org.Counters.SentEmails,
+				},
+			}
+			if err := p.db.UpsertUsageSnapshot(snapshot); err != nil {
+				return db.OrganizationCounters{}, false, err
+			}
+			return db.OrganizationCounters{}, true, nil
+		}
+		return db.OrganizationCounters{}, false, err
+	}
+
+	return db.OrganizationCounters{
+		Processes:  clampCounter(org.Counters.Processes - snapshot.Baseline.Processes),
+		SentSMS:    clampCounter(org.Counters.SentSMS - snapshot.Baseline.SentSMS),
+		SentEmails: clampCounter(org.Counters.SentEmails - snapshot.Baseline.SentEmails),
+	}, true, nil
+}
+
+func clampCounter(value int) int {
+	if value < 0 {
+		return 0
+	}
+	return value
 }

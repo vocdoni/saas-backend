@@ -158,6 +158,22 @@ type OrganizationCounters struct {
 	Processes  int `json:"processes" bson:"processes"`
 }
 
+type UsageSnapshotBaseline struct {
+	Processes  int `json:"processes" bson:"processes"`
+	SentSMS    int `json:"sentSMS" bson:"sentSMS"`
+	SentEmails int `json:"sentEmails" bson:"sentEmails"`
+}
+
+type UsageSnapshot struct {
+	OrgAddress    common.Address        `json:"orgAddress" bson:"orgAddress"`
+	PeriodStart   time.Time             `json:"periodStart" bson:"periodStart"`
+	PeriodEnd     time.Time             `json:"periodEnd" bson:"periodEnd"`
+	BillingPeriod BillingPeriod         `json:"billingPeriod" bson:"billingPeriod"`
+	Baseline      UsageSnapshotBaseline `json:"baseline" bson:"baseline"`
+	CreatedAt     time.Time             `json:"createdAt" bson:"createdAt"`
+	UpdatedAt     time.Time             `json:"updatedAt" bson:"updatedAt"`
+}
+
 type OrganizationInvite struct {
 	ID                  primitive.ObjectID `json:"id" bson:"_id"`
 	InvitationCode      string             `json:"invitationCode" bson:"invitationCode"`

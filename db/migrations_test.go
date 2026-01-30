@@ -188,3 +188,49 @@ func (ms *MongoStorage) newFetchOrganizationFromDB(ctx context.Context, address 
 	}
 	return org, nil
 }
+
+func TestUsageSnapshotsIndex(t *testing.T) {
+	c := qt.New(t)
+
+	testDBName := test.RandomDatabaseName()
+	dbh, err := New(mongoURI, testDBName)
+	c.Assert(err, qt.IsNil)
+	defer dbh.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	collection := dbh.DBClient.Database(testDBName).Collection("orgUsageSnapshots")
+	cursor, err := collection.Indexes().List(ctx)
+	c.Assert(err, qt.IsNil)
+
+	var indexes []bson.M
+	c.Assert(cursor.All(ctx, &indexes), qt.IsNil)
+
+	found := false
+	for _, idx := range indexes {
+		key := idx["key"]
+		unique, ok := idx["unique"].(bool)
+
+		if !ok || !unique {
+			continue
+		}
+
+		switch k := key.(type) {
+		case bson.M:
+			if k["orgAddress"] == int32(1) && k["periodStart"] == int32(1) {
+				found = true
+			}
+		case bson.D:
+			keyMap := bson.M{}
+			for _, item := range k {
+				keyMap[item.Key] = item.Value
+			}
+			if keyMap["orgAddress"] == int32(1) && keyMap["periodStart"] == int32(1) {
+				found = true
+			}
+		}
+	}
+
+	c.Assert(found, qt.IsTrue, qt.Commentf("usage snapshot index not found"))
+}

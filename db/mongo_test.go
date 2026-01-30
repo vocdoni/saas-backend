@@ -73,3 +73,10 @@ func TestMain(m *testing.M) {
 		panic(fmt.Sprintf("failed to stop MongoDB container: %v", err))
 	}
 }
+
+func TestCollectionsMapIncludesUsageSnapshots(t *testing.T) {
+	ms := &MongoStorage{}
+	if _, ok := ms.collectionsMap()["orgUsageSnapshots"]; !ok {
+		t.Fatalf("orgUsageSnapshots collection not registered")
+	}
+}
