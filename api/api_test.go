@@ -209,7 +209,7 @@ var testDB *db.MongoStorage
 
 // testMailService is the test mail service for the tests. Make it global so it
 // can be accessed by the tests directly.
-var testMailService *smtp.Email
+var testMailService = new(testutil.SMTP)
 
 // testSMSService is the test SMS service for the tests. Make it global so it
 // can be accessed by the tests directly.
@@ -396,14 +396,15 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	// create test mail service
-	testMailService = new(smtp.Email)
-	if err := testMailService.New(&smtp.Config{
-		FromAddress:  adminEmail,
-		SMTPUsername: adminUser,
-		SMTPPassword: adminPass,
-		SMTPServer:   mailHost,
-		SMTPPort:     smtpPort.Int(),
-		TestAPIPort:  apiPort.Int(),
+	if err := testMailService.New(&testutil.SMTPConfig{
+		Config: smtp.Config{
+			FromAddress:  adminEmail,
+			SMTPUsername: adminUser,
+			SMTPPassword: adminPass,
+			SMTPServer:   mailHost,
+			SMTPPort:     smtpPort.Int(),
+		},
+		TestAPIPort: apiPort.Int(),
 	}); err != nil {
 		panic(err)
 	}
