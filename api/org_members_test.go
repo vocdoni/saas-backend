@@ -633,6 +633,10 @@ func TestUpsertOrganizationMember(t *testing.T) {
 		orgMembers := postOrgMembers(t, loginToken, orgAddress, members...)
 		c.Logf("resulting org members: %+v", orgMembers)
 
+		// can't use TwoFaFieldPhone on free plan due to sms limits,
+		// so we need to upgrade the subscription first
+		setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+
 		censusID, _, _ := createGroupBasedCensus(t, loginToken, orgAddress,
 			db.OrgMemberAuthFields{
 				db.OrgMemberAuthFieldsMemberNumber,
@@ -682,6 +686,10 @@ func TestUpsertOrganizationMember(t *testing.T) {
 		c.Logf("will add org members: %+v", members)
 		orgMembers := postOrgMembers(t, loginToken, orgAddress, members...)
 		c.Logf("resulting org members: %+v", orgMembers)
+
+		// can't use TwoFaFieldPhone on free plan due to sms limits,
+		// so we need to upgrade the subscription first
+		setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
 		censusID, _, _ := createGroupBasedCensus(t, loginToken, orgAddress,
 			db.OrgMemberAuthFields{

@@ -357,59 +357,16 @@ func TestCSPVoting(t *testing.T) {
 				// Create a bundle with the census and process
 				bundleID, _ := postProcessBundle(t, token, censusID, processID)
 
-				// Create a voting key for the member
-				testAuthenthicateAndVote := func(t *testing.T, authRequest *handlers.AuthRequest) {
-					votesBefore, err := vocdoniClient.ElectionVoteCount(processID)
-					c.Assert(err, qt.IsNil)
-
-					// Create the voting address for the first user
-					user1 := ethereum.SignKeys{}
-					err = user1.Generate()
-					c.Assert(err, qt.IsNil)
-					user1Addr := user1.Address().Bytes()
-
-					// Authenticate the member with the CSP using the new multi-field system
-					authToken := testCSPAuthenticateWithFields(t, bundleID, authRequest)
-
-					cspWeight := fetchCSPUserWeight(t, bundleID, authToken)
-
-					weight, ok := math.ParseUint64(members[0].Weight)
-					c.Assert(ok, qt.IsTrue, qt.Commentf("Failed to convert member weight %s to int", members[0].Weight))
-					c.Assert(
-						bytes.Equal(cspWeight, big.NewInt(int64(weight)).Bytes()),
-						qt.IsTrue,
-						qt.Commentf(
-							"CSP reported weight %d does not match expected weight %d",
-							cspWeight, weight,
-						),
-					)
-
-					// Sign the voter's address with the CSP
-					signature := testCSPSign(t, bundleID, authToken, processID, user1Addr)
-
-					// Generate a vote proof with the signature
-					proof := testGenerateVoteProof(processID, user1Addr, signature, weight)
-
-					// Cast a vote
-					votePackage := []byte("[\"1\"]") // Vote for option 1
-					nullifier := testCastVote(t, vocdoniClient, &user1, processID, proof, votePackage)
-					t.Logf("Vote cast successfully with nullifier: %x", nullifier)
-
-					// Verify the vote was counted
-					votesAfter, err := vocdoniClient.ElectionVoteCount(processID)
-					c.Assert(err, qt.IsNil)
-					c.Assert(votesAfter, qt.Equals, votesBefore+1, qt.Commentf("expected 1 more vote, got %d", votesAfter))
-				}
-
 				t.Run("Authenticate with Email and Vote", func(t *testing.T) {
 					orgBefore := getOrganization(t, orgAddress)
 
-					testAuthenthicateAndVote(t, &handlers.AuthRequest{
-						Name:         "John",
-						Surname:      "Doe",
-						MemberNumber: "P001",
-						Email:        "john.doe@example.com",
-					})
+					testAuthenthicateAndVote(t, vocdoniClient, bundleID, processID, members[0].Weight,
+						&handlers.AuthRequest{
+							Name:         "John",
+							Surname:      "Doe",
+							MemberNumber: "P001",
+							Email:        "john.doe@example.com",
+						})
 
 					// check only email counter is incremented
 					orgAfter := getOrganization(t, orgAddress)
@@ -420,12 +377,13 @@ func TestCSPVoting(t *testing.T) {
 				t.Run("Authenticate with SMS and Vote", func(t *testing.T) {
 					orgBefore := getOrganization(t, orgAddress)
 
-					testAuthenthicateAndVote(t, &handlers.AuthRequest{
-						Name:         "MemberForSMS",
-						Surname:      "Surname",
-						MemberNumber: "P011",
-						Phone:        "+34612312312",
-					})
+					testAuthenthicateAndVote(t, vocdoniClient, bundleID, processID, members[0].Weight,
+						&handlers.AuthRequest{
+							Name:         "MemberForSMS",
+							Surname:      "Surname",
+							MemberNumber: "P011",
+							Phone:        "+34612312312",
+						})
 
 					// check only sms counter is incremented
 					orgAfter := getOrganization(t, orgAddress)
