@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"go.vocdoni.io/dvote/log"
@@ -209,7 +210,8 @@ func (c *CRMClient) FindContactByEmail(email string) (string, error) {
 		return "", fmt.Errorf("email is required")
 	}
 
-	url := fmt.Sprintf("%s/invoicing/v1/contacts?email=%s", c.baseURL, email)
+	escapedEmail := url.QueryEscape(email)
+	url := fmt.Sprintf("%s/invoicing/v1/contacts?email=%s", c.baseURL, escapedEmail)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {

@@ -95,7 +95,7 @@ type SMTPConfig struct {
 
 func main() {
 	// Define flags similar to cmd/service/main.go
-	flag.StringP("vocdoniApi", "v", "https://api-dev.vocdoni.net/v2", "vocdoni node remote API URL")
+	flag.StringP("vocdoniAPI", "v", "https://api-dev.vocdoni.net/v2", "vocdoni node remote API URL")
 	flag.StringP("mongoURL", "m", "", "The URL of the MongoDB server")
 	flag.StringP("mongoDB", "d", "", "The name of the MongoDB database")
 	flag.StringP("output", "o", "bi.json", "Output file path for the BI report")
@@ -122,7 +122,7 @@ func main() {
 	viper.AutomaticEnv()
 
 	// Read configuration
-	apiEndpoint := viper.GetString("vocdoniApi")
+	vocdoniAPI := viper.GetString("vocdoniAPI")
 	mongoURL := viper.GetString("mongoURL")
 	mongoDB := viper.GetString("mongoDB")
 	outputFile := viper.GetString("output")
@@ -154,7 +154,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	log.Infow("Starting BI extraction", "mongoURL", mongoURL, "mongoDB", mongoDB, "vocdoniApi", apiEndpoint)
+	log.Infow("Starting BI extraction", "mongoURL", mongoURL, "mongoDB", mongoDB, "vocdoniAPI", vocdoniAPI)
 
 	// Initialize MongoDB database
 	storage, err := db.New(mongoURL, mongoDB)
@@ -165,37 +165,46 @@ func main() {
 	database := storage.DBClient.Database(mongoDB)
 
 	// Create Vocdoni API client
-	apiClient, err := apiclient.New(apiEndpoint)
+	apiClient, err := apiclient.New(vocdoniAPI)
 	if err != nil {
 		log.Fatalf("Could not create Vocdoni API client: %v", err)
 	}
-	log.Infow("Connected to Vocdoni API", "endpoint", apiEndpoint, "chainID", apiClient.ChainID())
+	log.Infow("Connected to Vocdoni API", "endpoint", vocdoniAPI, "chainID", apiClient.ChainID())
 
 	// Initialize SMTP email sender
-	if smtpServer == "" || smtpFromAddress == "" || smtpUsername == "" || smtpPassword == "" {
+	smtpEnabled := smtpServer != "" && smtpFromAddress != "" && smtpUsername != "" && smtpPassword != ""
+	if !smtpEnabled {
 		log.Warn("SMTP server or from address not provided, skipping email sender initialization")
 	}
-	smtpAuth := smtp.PlainAuth("", smtpUsername, smtpPassword, smtpServer)
-	smtpConfig := &SMTPConfig{
-		Server:      smtpServer,
-		Port:        smtpPort,
-		Auth:        smtpAuth,
-		FromAddress: smtpFromAddress,
-		FromName:    "Vocdoni BI Report",
-		ToAddress:   smtpToAddress,
+	var smtpConfig *SMTPConfig
+	if smtpEnabled {
+		smtpAuth := smtp.PlainAuth("", smtpUsername, smtpPassword, smtpServer)
+		smtpConfig = &SMTPConfig{
+			Server:      smtpServer,
+			Port:        smtpPort,
+			Auth:        smtpAuth,
+			FromAddress: smtpFromAddress,
+			FromName:    "Vocdoni BI Report",
+			ToAddress:   smtpToAddress,
+		}
 	}
 
 	// Initialize Holded CRM client if API key is provided
+	var crmClient *CRMClient
+	var funnelID string
+	var stageID string
 	if crmAPIKey == "" || crmURL == "" {
 		log.Warn("No CRM API key or URL provided, skipping CRM client initialization")
+	} else {
+		crmClient = NewCRMClient(crmAPIKey, crmURL)
+		log.Infow("Initialized CRM client", "baseURL", crmClient.baseURL)
+		funnelID, stageID, err = crmClient.GetLeadsFunnelStageID() // Just to verify connectivity
+		if err != nil {
+			log.Warnw("Failed to retrieve Holded CRM Leads funnel ID", "error", err)
+		} else {
+			log.Infow("Retrieved Holded CRM Leads funnel ID", "funnelID", funnelID, "stageID", stageID)
+		}
 	}
-	crmClient := NewCRMClient(crmAPIKey, crmURL)
-	log.Infow("Initialized CRM client", "baseURL", crmClient.baseURL)
-	funnelID, stageID, err := crmClient.GetLeadsFunnelStageID() // Just to verify connectivity
-	if err != nil {
-		log.Warnw("Failed to retrieve Holded CRM Leads funnel ID", "error", err)
-	}
-	log.Infow("Retrieved Holded CRM Leads funnel ID", "funnelID", funnelID, "stageID", stageID)
 
 	// Generate BI report
 	report, err := generateBIReport(database, apiClient, daysBefore)
@@ -210,8 +219,14 @@ func main() {
 		"db_only", report.Summary.DatabaseOnly,
 		"errors", report.Summary.Errors)
 
-	leads, errors := updateCRMWithBIData(crmClient, funnelID, stageID, report)
-	log.Infow("Created leads in Holded CRM", "total", len(leads), "errors", len(errors))
+	var leads []LeadReport
+	var errors []error
+	if crmClient != nil && funnelID != "" && stageID != "" {
+		leads, errors = updateCRMWithBIData(crmClient, funnelID, stageID, report)
+		log.Infow("Created leads in Holded CRM", "total", len(leads), "errors", len(errors))
+	} else {
+		log.Warn("Skipping CRM lead creation; CRM client or funnel/stage not configured")
+	}
 
 	// Output JSON report to file
 	jsonData, err := json.MarshalIndent(report, "", "  ")
@@ -226,11 +241,15 @@ func main() {
 	}
 
 	// send email
-	err = sendInformativeEmail(smtpConfig, leads, errors, daysBefore)
-	if err != nil {
-		log.Fatalf("Could not send informative email: %v", err)
+	if smtpEnabled {
+		err = sendInformativeEmail(smtpConfig, leads, errors, daysBefore)
+		if err != nil {
+			log.Fatalf("Could not send informative email: %v", err)
+		}
+		log.Infow("Informative email sent successfully", "to", smtpConfig.ToAddress)
+	} else {
+		log.Warn("Skipping informative email; SMTP not configured")
 	}
-	log.Infow("Informative email sent successfully", "to", smtpConfig.ToAddress)
 
 	// TODO implement periodic execution (daily/weekly) using cron or similar if not available by hosting
 }
@@ -269,7 +288,11 @@ func updateCRMWithBIData(crmClient *CRMClient, funnelID, stageID string, report 
 			"active":                 fmt.Sprintf("%v", v.DatabaseInfo.Active),
 			"origin":                 "bi_report",
 		}
-		leadID, err := crmClient.HandleLead(contactID, funnelID, stageID, v.VochainInfo.Name, customFields)
+		orgName := ""
+		if v.VochainInfo != nil {
+			orgName = v.VochainInfo.Name
+		}
+		leadID, err := crmClient.HandleLead(contactID, funnelID, stageID, orgName, customFields)
 		if err != nil {
 			errors = append(errors, err)
 			log.Errorw(err, v.DatabaseInfo.Creator)
@@ -279,12 +302,12 @@ func updateCRMWithBIData(crmClient *CRMClient, funnelID, stageID string, report 
 			LeadID:      leadID,
 			ContactID:   contactID,
 			Email:       v.DatabaseInfo.Creator,
-			OrgName:     v.VochainInfo.Name,
+			OrgName:     orgName,
 			ContactName: v.DatabaseInfo.FirstName + " " + v.DatabaseInfo.LastName,
 			Country:     v.DatabaseInfo.Country,
 			Type:        v.DatabaseInfo.Type,
 		})
-		log.Infow("Created lead", leadID, "and contact", contactID, "for", v.DatabaseInfo.Creator)
+		log.Infof("Created lead %s and contact %s for %s", leadID, contactID, v.DatabaseInfo.Creator)
 	}
 	return leads, errors
 }
@@ -319,6 +342,11 @@ func generateBIReport(database *mongo.Database, apiClient *apiclient.HTTPclient,
 			continue
 		}
 
+		firstname, lastname, err := getCreatorNameAndLastName(ctx, database, dbOrg.Creator)
+		if err != nil {
+			log.Debugw("Failed to get creator user info", "email", dbOrg.Creator, "error", err)
+		}
+
 		orgBI := OrganizationBI{
 			Address: dbOrg.Address.Hex(),
 			DatabaseInfo: &databaseInfo{
@@ -330,19 +358,12 @@ func generateBIReport(database *mongo.Database, apiClient *apiclient.HTTPclient,
 				Active:         dbOrg.Active,
 				Size:           dbOrg.Size,
 				Communications: dbOrg.Communications,
+				FirstName:      firstname,
+				LastName:       lastname,
 			},
 		}
 
 		summary.TotalOrganizations++
-
-		// Add user information
-		firstname, lastname, err := getCreatorNameAndLastName(ctx, database, dbOrg.Creator)
-		if err != nil {
-			log.Debugw("Failed to get creator user info", "email", dbOrg.Creator, "error", err)
-		}
-
-		orgBI.DatabaseInfo.FirstName = firstname
-		orgBI.DatabaseInfo.LastName = lastname
 
 		// Try to get vochain account information
 		log.Debugw("Querying vochain for organization", "address", dbOrg.Address.Hex())
@@ -429,19 +450,20 @@ func sendInformativeEmail(config *SMTPConfig, leads []LeadReport, errors []error
 	date := time.Now().Format("2006-01-02 15:04:05")
 	// compose email body
 	subject := date + " Test BI Report Generated"
-	body := fmt.Sprintf("The BI report has been generated successfully for the last %d days.\n\n", dayBefore)
-	body += fmt.Sprintf("Total leads created: %d\n", len(leads))
-	body += "Leads:\n"
+	var body strings.Builder
+	fmt.Fprintf(&body, "The BI report has been generated successfully for the last %d days.\n\n", dayBefore)
+	fmt.Fprintf(&body, "Total leads created: %d\n", len(leads))
+	fmt.Fprint(&body, "Leads:\n")
 	for _, lead := range leads {
-		body += fmt.Sprintf("- LeadID: %s, ContactID: %s, Email: %s, OrgName: %s, ContactName: %s, Country: %s, Type: %s\n",
+		fmt.Fprintf(&body, "- LeadID: %s, ContactID: %s, Email: %s, OrgName: %s, ContactName: %s, Country: %s, Type: %s\n",
 			lead.LeadID, lead.ContactID, lead.Email, lead.OrgName, lead.ContactName, lead.Country, lead.Type)
 	}
-	body += "\n"
-	body += fmt.Sprintf("Total errors: %d\n\n", len(errors))
+	fmt.Fprint(&body, "\n")
+	fmt.Fprintf(&body, "Total errors: %d\n\n", len(errors))
 	if len(errors) > 0 {
-		body += "Errors:\n"
+		fmt.Fprint(&body, "Errors:\n")
 		for _, err := range errors {
-			body += fmt.Sprintf("- %v\n", err)
+			fmt.Fprintf(&body, "- %v\n", err)
 		}
 	}
 
@@ -450,7 +472,7 @@ func sendInformativeEmail(config *SMTPConfig, leads []LeadReport, errors []error
 	msg := []byte("To: " + to.String() + "\r\n" +
 		"Subject: " + subject + "\r\n" +
 		"\r\n" +
-		body + "\r\n")
+		body.String() + "\r\n")
 	err = smtp.SendMail(server, config.Auth, config.FromAddress, []string{to.Address}, msg)
 	if err != nil {
 		return fmt.Errorf("could not send email: %v", err)
