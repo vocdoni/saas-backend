@@ -59,6 +59,7 @@ type DBInterface interface {
 	UserByEmail(email string) (*db.User, error)
 	Organization(address common.Address) (*db.Organization, error)
 	OrganizationWithParent(address common.Address) (*db.Organization, *db.Organization, error)
+	CountOrgMembers(orgAddress common.Address) (int64, error)
 	CountProcesses(orgAddress common.Address, draft db.DraftFilter) (int64, error)
 	OrganizationMemberGroup(groupID string, orgAddress common.Address) (*db.OrganizationMemberGroup, error)
 }
@@ -224,6 +225,33 @@ func (p *Subscriptions) OrgHasPermission(orgAddress common.Address, permission D
 	default:
 		return fmt.Errorf("permission not found")
 	}
+}
+
+func (p *Subscriptions) OrgCanAddNMembers(orgAddress common.Address, memberNumber int) error {
+	// Check if the organization has a subscription
+	org, err := p.db.Organization(orgAddress)
+	if err != nil {
+		return errors.ErrOrganizationNotFound.WithErr(err)
+	}
+
+	if org.Subscription.PlanID == 0 {
+		return errors.ErrOrganizationHasNoSubscription.With("can't create draft process")
+	}
+
+	plan, err := p.db.Plan(org.Subscription.PlanID)
+	if err != nil {
+		return errors.ErrGenericInternalServerError.WithErr(err)
+	}
+
+	count, err := p.db.CountOrgMembers(orgAddress)
+	if err != nil {
+		return errors.ErrGenericInternalServerError.WithErr(err)
+	}
+
+	if int(count)+memberNumber > plan.Organization.MaxCensus {
+		return errors.ErrExceedsOrganizationMembersLimit.Withf("(%d)", plan.Organization.MaxCensus)
+	}
+	return nil
 }
 
 func (p *Subscriptions) OrgCanPublishGroupCensus(census *db.Census, groupID string) error {

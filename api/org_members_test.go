@@ -541,6 +541,34 @@ func TestOrganizationMembers(t *testing.T) {
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "members")
 	c.Assert(membersResponse.Members, qt.HasLen, 7, qt.Commentf("expected 7 members remaining (9 total - 2 deleted)"))
+
+	// Test 8: Verify that the members/census limit is enforced
+	// reduce limit of freePlan to allow exactly orgMembers
+	reducedFreePlan := *mockFreePlan
+	reducedFreePlan.Organization.MaxCensus = len(membersResponse.Members)
+	id, err := testDB.SetPlan(&reducedFreePlan)
+	qt.Assert(t, err, qt.IsNil)
+	qt.Assert(t, id, qt.Equals, reducedFreePlan.ID)
+	// Now try adding another member, should fail due to limit
+	overLimitMembers := &apicommon.AddMembersRequest{
+		Members: []apicommon.OrgMember{
+			{
+				MemberNumber: "P999",
+				Name:         "Over",
+				Surname:      "Limit",
+				NationalID:   "00000000X",
+				BirthDate:    "1990-01-01",
+			},
+		},
+	}
+	requestAndAssertCode(http.StatusUnauthorized,
+		t, http.MethodPost, adminToken, overLimitMembers,
+		"organizations", orgAddress.String(), "members")
+
+	// revert plan changes
+	id, err = testDB.SetPlan(mockFreePlan)
+	qt.Assert(t, err, qt.IsNil)
+	qt.Assert(t, id, qt.Equals, mockFreePlan.ID)
 }
 
 func TestUpsertOrganizationMember(t *testing.T) {

@@ -259,6 +259,11 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(member2.Phone.Bytes(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, members[1].PlaintextPhone))
 		c.Assert(member2.HashedPass, qt.DeepEquals, internal.HashPassword(testSalt, members[1].Password))
 
+		// Verify that the org members count is correct
+		count, err := testDB.CountOrgMembers(testOrgAddress)
+		c.Assert(err, qt.IsNil)
+		c.Assert(count, qt.Equals, int64(2))
+
 		// Test with empty organization address
 		testOrgWithEmptyAddress := &Organization{
 			Address: common.Address{},
