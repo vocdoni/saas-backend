@@ -391,7 +391,7 @@ func TestCensusSizeExceedsEmailAllowance(t *testing.T) {
 
 	// reduce limit of freePlan to allow exactly orgMembers
 	reducedFreePlan := *mockFreePlan
-	reducedFreePlan.Organization.MaxSentEmails = len(orgMembers)
+	reducedFreePlan.Features.TwoFaEmail = len(orgMembers)
 	id, err := testDB.SetPlan(&reducedFreePlan)
 	qt.Assert(t, err, qt.IsNil)
 	qt.Assert(t, id, qt.Equals, reducedFreePlan.ID)
@@ -438,7 +438,7 @@ func TestCensusSizeExceedsSMSAllowance(t *testing.T) {
 
 	// reduce limit of freePlan to allow exactly orgMembers
 	reducedFreePlan := *mockFreePlan
-	reducedFreePlan.Organization.MaxSentSMS = len(orgMembers)
+	reducedFreePlan.Features.TwoFaSms = len(orgMembers)
 	id, err := testDB.SetPlan(&reducedFreePlan)
 	qt.Assert(t, err, qt.IsNil)
 	qt.Assert(t, id, qt.Equals, reducedFreePlan.ID)

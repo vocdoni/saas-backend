@@ -230,11 +230,11 @@ func (p *Subscriptions) OrgCanPublishGroupCensus(census *db.Census, groupID stri
 		return errors.ErrGroupNotFound.WithErr(err)
 	}
 
-	remainingEmails := plan.Organization.MaxSentEmails - org.Counters.SentEmails
+	remainingEmails := plan.Features.TwoFaEmail - org.Counters.SentEmails
 	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldEmail) && len(group.MemberIDs) > remainingEmails {
 		return errors.ErrProcessCensusSizeExceedsEmailAllowance.Withf("remaining emails: %d", remainingEmails)
 	}
-	remainingSMS := plan.Organization.MaxSentSMS - org.Counters.SentSMS
+	remainingSMS := plan.Features.TwoFaSms - org.Counters.SentSMS
 	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldPhone) && len(group.MemberIDs) > remainingSMS {
 		return errors.ErrProcessCensusSizeExceedsSMSAllowance.Withf("remaining sms: %d", remainingSMS)
 	}
