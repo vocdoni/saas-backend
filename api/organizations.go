@@ -64,6 +64,12 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		errors.ErrNoDefaultPlan.WithErr((err)).Write(w)
 		return
 	}
+	// check if the user has permission to create new organizations
+	hasPermission, err := a.subscriptions.HasDBPermission(user.Email, common.Address{}, subscriptions.CreateOrg)
+	if !hasPermission || err != nil {
+		errors.ErrUnauthorized.WithErr(err).Write(w)
+		return
+	}
 	parentOrg := common.Address{}
 	var dbParentOrg *db.Organization
 	if orgInfo.Parent != nil {
