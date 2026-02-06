@@ -87,8 +87,9 @@ var (
 	ErrMaxProcessesReached                    = Error{Code: 40033, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("max processes reached")}
 	ErrUserHasNoAdminRole                     = Error{Code: 40032, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("user does not have admin role")}
 	ErrProcessCensusSizeExceedsPlanLimit      = Error{Code: 40035, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("process census size exceeds plan limit")}
-	ErrProcessCensusSizeExceedsEmailAllowance = Error{Code: 40046, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("process census size exceeds sms allowance")}
-	ErrProcessCensusSizeExceedsSMSAllowance   = Error{Code: 40047, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("process census size exceeds email allowance")}
+	ErrProcessCensusSizeExceedsEmailAllowance = Error{Code: 40046, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("process census size exceeds email allowance")}
+	ErrProcessCensusSizeExceedsSMSAllowance   = Error{Code: 40047, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("process census size exceeds sms allowance")}
+	ErrMaxOrganizationsReached                = Error{Code: 40048, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("user has reached maximum number of organizations")}
 	// CSP errors (408)
 	ErrZeroWeightVoter = Error{Code: 40801, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("voter weight cannot be zero")}
 

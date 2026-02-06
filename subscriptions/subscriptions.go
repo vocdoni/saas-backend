@@ -29,7 +29,11 @@ const (
 	CreateSubOrg
 	// CreateDraft represents the permission to create draft processes.
 	CreateDraft
+	// CreateOrg represents the permission to create new organizations.
+	CreateOrg
 )
+
+const MaxOrgsPerUser = 15
 
 // String returns the string representation of the DBPermission.
 func (p DBPermission) String() string {
@@ -42,6 +46,8 @@ func (p DBPermission) String() string {
 		return "CreateSubOrg"
 	case CreateDraft:
 		return "CreateDraft"
+	case CreateOrg:
+		return "CreateOrg"
 	default:
 		return "Unknown"
 	}
@@ -170,6 +176,16 @@ func (p *Subscriptions) HasDBPermission(userEmail string, orgAddress common.Addr
 	case InviteUser, DeleteUser, CreateSubOrg:
 		if !user.HasRoleFor(orgAddress, db.AdminRole) {
 			return false, errors.ErrUserHasNoAdminRole
+		}
+		return true, nil
+	case CreateOrg:
+		// Check if the user can create more organizations based on the MaxOrgsPerUser limit
+		if len(user.Organizations) >= MaxOrgsPerUser {
+			return false, errors.ErrMaxOrganizationsReached.Withf(
+				"user is part of %d organizations, max allowed is %d",
+				len(user.Organizations),
+				MaxOrgsPerUser,
+			)
 		}
 		return true, nil
 	default:
