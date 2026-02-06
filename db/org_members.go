@@ -663,6 +663,25 @@ func (ms *MongoStorage) GetAllOrgMemberIDs(orgAddress common.Address) ([]string,
 	return memberIDs, nil
 }
 
+// CountOrgMembers  counts the number of the organization members
+func (ms *MongoStorage) CountOrgMembers(orgAddress common.Address) (int64, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return 0, ErrInvalidData
+	}
+
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	// Create filter - draft processes have nil address, published processes have non-nil address
+	filter := bson.M{
+		"orgAddress": orgAddress,
+	}
+
+	// Count total documents
+	return ms.orgMembers.CountDocuments(ctx, filter)
+}
+
 // validateOrgMembers checks if the provided member IDs are valid
 func (ms *MongoStorage) validateOrgMembers(ctx context.Context, orgAddress common.Address, members []string) error {
 	if len(members) == 0 {

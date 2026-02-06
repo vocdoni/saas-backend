@@ -193,6 +193,16 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{Added: 0})
 		return
 	}
+	// check if the new members pass the organization members limit
+	if err := a.subscriptions.OrgCanAddNMembers(org.Address, len(members.Members)); err != nil {
+		if apiErr := (errors.Error{}); errors.As(err, &apiErr) {
+			apiErr.Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
 	// add the org members to the database
 	progressChan, err := a.db.AddBulkOrgMembers(org, members.ToDB(), passwordSalt)
 	if err != nil {

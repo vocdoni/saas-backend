@@ -183,7 +183,7 @@ func TestCreateGroupWithLargeNumberOfMembers(t *testing.T) {
 
 	// Add a larger number of test members to the organization
 	var testMembers []apicommon.OrgMember
-	for i := 1; i <= 50; i++ {
+	for i := 1; i <= mockFreePlan.Organization.MaxCensus+1; i++ {
 		testMembers = append(testMembers, apicommon.OrgMember{
 			MemberNumber: string(rune('0'+(i%10))) + string(rune('0'+((i/10)%10))) + string(rune('0'+((i/100)%10))),
 			Name:         "Member",
@@ -196,12 +196,23 @@ func TestCreateGroupWithLargeNumberOfMembers(t *testing.T) {
 		Members: testMembers,
 	}
 
+	// adding members should initially fail based on the free plan (5o members)
+	requestAndAssertCode(http.StatusUnauthorized,
+		t, http.MethodPost, adminToken, members,
+		"organizations", orgAddress.String(), "members")
+	// Adjust the free plan
+	increasedFreePlan := *mockFreePlan
+	increasedFreePlan.Organization.MaxCensus = len(testMembers)
+	id, err := testDB.SetPlan(&increasedFreePlan)
+	qt.Assert(t, err, qt.IsNil)
+	qt.Assert(t, id, qt.Equals, increasedFreePlan.ID)
+
 	// Add members to the organization
 	addedResponse := requestAndParse[apicommon.AddMembersResponse](
 		t, http.MethodPost, adminToken, members,
 		"organizations", orgAddress.String(), "members",
 	)
-	c.Assert(addedResponse.Added, qt.Equals, uint32(50))
+	c.Assert(addedResponse.Added, qt.Equals, uint32(len(testMembers)))
 
 	// Create a group with all members
 	createGroupReq := &apicommon.CreateOrganizationMemberGroupRequest{
@@ -219,5 +230,10 @@ func TestCreateGroupWithLargeNumberOfMembers(t *testing.T) {
 	groupDetails := requestAndParse[apicommon.OrganizationMemberGroupInfo](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "groups", groupResponse.ID)
-	c.Assert(groupDetails.MemberIDs, qt.HasLen, 50)
+	c.Assert(groupDetails.MemberIDs, qt.HasLen, len(testMembers))
+
+	// revert plan changes
+	id, err = testDB.SetPlan(mockFreePlan)
+	qt.Assert(t, err, qt.IsNil)
+	qt.Assert(t, id, qt.Equals, mockFreePlan.ID)
 }
