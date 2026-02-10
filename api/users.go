@@ -614,8 +614,10 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 //	@Success		200		{string}	string						"OK"
 //	@Failure		400		{object}	errors.Error				"Invalid input data"
 //	@Failure		401		{object}	errors.Error				"Unauthorized or invalid verification code"
+//	@Failure		404		{object}	errors.Error				"User not found"
+//	@Failure		410		{object}	errors.Error				"Verification code expired"
 //	@Failure		500		{object}	errors.Error				"Internal server error"
-//	@Router			/users/reset [post]
+//	@Router			/users/password/reset [post]
 func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	userPasswords := &apicommon.UserPasswordReset{}
 	if err := json.NewDecoder(r.Body).Decode(userPasswords); err != nil {
@@ -636,12 +638,6 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		errors.ErrGenericInternalServerError.Write(w)
-		return
-	}
-
-	// check if user is OAuth-only (no password set)
-	if user.Password == "" {
-		errors.ErrOAuthUserCannotUsePasswordRecovery.Write(w)
 		return
 	}
 

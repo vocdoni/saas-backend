@@ -4273,6 +4273,48 @@ paths:
       summary: Update user password
       tags:
       - users
+  /users/password/reset:
+    post:
+      consumes:
+      - application/json
+      description: Reset a user's password using a verification code
+      parameters:
+      - description: Password reset information
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.UserPasswordReset'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized or invalid verification code
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "410":
+          description: Verification code expired
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Reset user password
+      tags:
+      - users
   /users/recovery:
     post:
       consumes:
@@ -4301,40 +4343,6 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Recover user password
-      tags:
-      - users
-  /users/reset:
-    post:
-      consumes:
-      - application/json
-      description: Reset a user's password using a verification code
-      parameters:
-      - description: Password reset information
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/apicommon.UserPasswordReset'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "400":
-          description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized or invalid verification code
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      summary: Reset user password
       tags:
       - users
   /users/verify:
