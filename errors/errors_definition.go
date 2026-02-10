@@ -43,21 +43,20 @@ var (
 	ErrProviderAlreadyLinkedToAnotherAccount = Error{Code: 40044, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("OAuth provider already linked to another account"), LogLevel: "info"}
 
 	// Validation errors (400)
-	ErrEmailMalformed                  = Error{Code: 40002, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid email format")}
-	ErrPasswordTooShort                = Error{Code: 40003, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("password must be at least 8 characters")}
-	ErrMalformedBody                   = Error{Code: 40004, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid JSON request body")}
-	ErrInvalidUserData                 = Error{Code: 40005, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid user information provided")}
-	ErrMalformedURLParam               = Error{Code: 40010, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid URL parameter")}
-	ErrNoOrganizationProvided          = Error{Code: 40011, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("organization address is required")}
-	ErrInvalidOrganizationData         = Error{Code: 40013, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid organization information provided")}
-	ErrUserAlreadyVerified             = Error{Code: 40015, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("user account is already verified")}
-	ErrVerificationMaxAttempts         = Error{Code: 40017, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("verification resend max attempts reached")}
-	ErrStorageInvalidObject            = Error{Code: 40024, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid storage object or parameters")}
-	ErrNotSupported                    = Error{Code: 40025, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("feature not supported")}
-	ErrUserNoVoted                     = Error{Code: 40036, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("user has not voted yet"), LogLevel: "info"}
-	ErrInvalidData                     = Error{Code: 40037, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid data provided")}
-	ErrInvalidCensusData               = Error{Code: 40030, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid census data provided")}
-	ErrExceedsOrganizationMembersLimit = Error{Code: 40045, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("operation would exceed organization members limit")}
+	ErrEmailMalformed          = Error{Code: 40002, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid email format")}
+	ErrPasswordTooShort        = Error{Code: 40003, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("password must be at least 8 characters")}
+	ErrMalformedBody           = Error{Code: 40004, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid JSON request body")}
+	ErrInvalidUserData         = Error{Code: 40005, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid user information provided")}
+	ErrMalformedURLParam       = Error{Code: 40010, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid URL parameter")}
+	ErrNoOrganizationProvided  = Error{Code: 40011, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("organization address is required")}
+	ErrInvalidOrganizationData = Error{Code: 40013, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid organization information provided")}
+	ErrUserAlreadyVerified     = Error{Code: 40015, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("user account is already verified")}
+	ErrVerificationMaxAttempts = Error{Code: 40017, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("verification resend max attempts reached")}
+	ErrStorageInvalidObject    = Error{Code: 40024, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid storage object or parameters")}
+	ErrNotSupported            = Error{Code: 40025, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("feature not supported")}
+	ErrUserNoVoted             = Error{Code: 40036, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("user has not voted yet"), LogLevel: "info"}
+	ErrInvalidData             = Error{Code: 40037, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid data provided")}
+	ErrInvalidCensusData       = Error{Code: 40030, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid census data provided")}
 
 	// Transaction errors (400)
 	ErrCouldNotSignTransaction = Error{Code: 40006, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("transaction signing failed")}
@@ -80,6 +79,7 @@ var (
 	ErrDuplicateConflict           = Error{Code: 40901, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("resource already exists")}
 	ErrUpdateWouldCreateDuplicates = Error{Code: 40902, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("update would create duplicates")}
 
+	// TODO: most of theses errors should be unauthorized
 	// Subscription errors (400)
 	ErrOrganizationHasNoSubscription          = Error{Code: 40020, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("organization has no subscription")}
 	ErrOrganizationSubscriptionInactive       = Error{Code: 40021, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("organization subscription is not active")}
@@ -91,6 +91,8 @@ var (
 	ErrProcessCensusSizeExceedsEmailAllowance = Error{Code: 40046, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("process census size exceeds email allowance")}
 	ErrProcessCensusSizeExceedsSMSAllowance   = Error{Code: 40047, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("process census size exceeds sms allowance")}
 	ErrMaxOrganizationsReached                = Error{Code: 40048, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("user has reached maximum number of organizations")}
+	ErrExceedsOrganizationMembersLimit        = Error{Code: 40145, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("operation would exceed organization members limit")}
+
 	// CSP errors (408)
 	ErrZeroWeightVoter = Error{Code: 40801, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("voter weight cannot be zero")}
 
