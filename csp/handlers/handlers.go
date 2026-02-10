@@ -640,7 +640,7 @@ func (c *CSPHandlers) authFirstStep(
 	// Fetch the corresponding org member using the participant ID (which is the ObjectID hex string)
 	orgMember, err := c.mainDB.OrgMember(census.OrgAddress, censusParticipant.ParticipantID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get org member: %w", err)
+		return nil, errors.ErrCensusParticipantNotFound.With("failed to get org member")
 	}
 
 	if census.Weighted && orgMember.Weight == 0 {
