@@ -500,6 +500,11 @@ func (ms *MongoStorage) OrgMembers(orgAddress common.Address, page, limit int64,
 		SetSort(bson.D{
 			{Key: "name", Value: 1},
 			{Key: "surname", Value: 1},
+			{Key: "email", Value: 1},
+			{Key: "memberNumber", Value: 1},
+			{Key: "nationalId", Value: 1},
+			{Key: "weight", Value: 1},
+			{Key: "createdAt", Value: 1},
 		})
 
 	return paginatedDocuments[*OrgMember](ms.orgMembers, page, limit, filter, findOptions)
