@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -375,6 +376,83 @@ func TestCensusParticipant(t *testing.T) {
 				c.Assert(member.Email, qt.Equals, p.Email)
 				c.Assert(member.Phone.Bytes(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, p.PlaintextPhone))
 			}
+		})
+	})
+
+	t.Run("AddCensusParticipantsByMemberIDs", func(_ *testing.T) {
+		t.Run("InvalidCensusID", func(_ *testing.T) {
+			added, memberErrors, err := testDB.AddCensusParticipantsByMemberIDs("", []string{"invalid-member-id"})
+			c.Assert(err, qt.Equals, ErrInvalidData)
+			c.Assert(added, qt.Equals, 0)
+			c.Assert(memberErrors, qt.IsNil)
+		})
+
+		t.Run("AddsSkipsAndCollectsMemberErrors", func(_ *testing.T) {
+			c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+			member, census := setupTestCensusParticipantPrerequisites(t, "_memberIDs")
+
+			member2 := &OrgMember{
+				ID:           primitive.NewObjectID(),
+				OrgAddress:   testOrgAddress,
+				MemberNumber: "member2_memberIDs",
+				Email:        "member2_memberIDs@example.com",
+				CreatedAt:    time.Now(),
+				UpdatedAt:    time.Now(),
+			}
+			_, err := testDB.SetOrgMember("test_salt", member2)
+			c.Assert(err, qt.IsNil)
+
+			unknownID := primitive.NewObjectID().Hex()
+			added, memberErrors, err := testDB.AddCensusParticipantsByMemberIDs(census.ID.Hex(),
+				[]string{member.ID.Hex(), member.ID.Hex(), unknownID, "", member2.ID.Hex()})
+			c.Assert(err, qt.IsNil)
+			c.Assert(added, qt.Equals, 2)
+			c.Assert(memberErrors, qt.HasLen, 2)
+			c.Assert(strings.Join(memberErrors, " "), qt.Matches, ".*invalid data provided.*")
+			c.Assert(strings.Join(memberErrors, " "), qt.Matches, ".*"+unknownID+".*")
+
+			participant1, err := testDB.CensusParticipant(census.ID.Hex(), member.ID.Hex())
+			c.Assert(err, qt.IsNil)
+			c.Assert(participant1.LoginHash, qt.Not(qt.IsNil))
+
+			participant2, err := testDB.CensusParticipant(census.ID.Hex(), member2.ID.Hex())
+			c.Assert(err, qt.IsNil)
+			c.Assert(participant2.LoginHash, qt.Not(qt.IsNil))
+
+			participants, err := testDB.CensusParticipants(census.ID.Hex())
+			c.Assert(err, qt.IsNil)
+			c.Assert(participants, qt.HasLen, 2)
+		})
+
+		t.Run("CollectsDuplicateHashErrors", func(_ *testing.T) {
+			c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+			member, census := setupTestCensusParticipantPrerequisites(t, "_memberIDs_conflict")
+
+			conflictingMember := &OrgMember{
+				ID:           primitive.NewObjectID(),
+				OrgAddress:   testOrgAddress,
+				MemberNumber: member.MemberNumber,
+				Name:         member.Name,
+				Email:        member.Email,
+				CreatedAt:    time.Now(),
+				UpdatedAt:    time.Now(),
+			}
+			_, err := testDB.SetOrgMember("test_salt", conflictingMember)
+			c.Assert(err, qt.IsNil)
+
+			added, memberErrors, err := testDB.AddCensusParticipantsByMemberIDs(census.ID.Hex(),
+				[]string{member.ID.Hex(), conflictingMember.ID.Hex()})
+			c.Assert(err, qt.IsNil)
+			c.Assert(added, qt.Equals, 1)
+			c.Assert(memberErrors, qt.HasLen, 1)
+			c.Assert(memberErrors[0], qt.Matches, ".*"+ErrUpdateWouldCreateDuplicates.Error()+".*")
+			c.Assert(memberErrors[0], qt.Matches, ".*"+conflictingMember.ID.Hex()+".*")
+
+			_, err = testDB.CensusParticipant(census.ID.Hex(), member.ID.Hex())
+			c.Assert(err, qt.IsNil)
+
+			_, err = testDB.CensusParticipant(census.ID.Hex(), conflictingMember.ID.Hex())
+			c.Assert(err, qt.Equals, ErrNotFound)
 		})
 	})
 

@@ -124,10 +124,8 @@ const (
 	// POST /census to create a new census
 	censusEndpoint = "/census"
 	// GET /census/{id} to get census information
-	// POST /census/{id} to add members to census
+	// POST /census/{id} to add organization members to census by member ID
 	censusIDEndpoint = "/census/{id}"
-	// GET /census/check/{jobid} to check the status of the add members job
-	censusAddParticipantsJobStatusEndpoint = "/census/job/{jobid}"
 	// POST /census/{id}/publish to publish a census
 	censusPublishEndpoint = "/census/{id}/publish"
 	// POST /census/{id}/group/{groupid}/publish to publish a group census

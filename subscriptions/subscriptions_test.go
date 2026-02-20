@@ -209,6 +209,10 @@ func (*mockMongoStorage) CountOrgMembers(_ common.Address) (int64, error) {
 	return 0, nil
 }
 
+func (*mockMongoStorage) CountCensusParticipants(string) (int64, error) {
+	return 0, nil
+}
+
 func (*mockMongoStorage) CountProcesses(_ common.Address, _ db.DraftFilter) (int64, error) {
 	return 0, nil
 }
