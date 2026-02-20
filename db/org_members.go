@@ -127,15 +127,6 @@ func (j *BulkOrgMembersJob) ErrorsAsStrings() []string {
 	return errorsAsStrings(j.Errors)
 }
 
-// errorsAsStrings converts a slice of errors to a slice of strings
-func errorsAsStrings(errs []error) []string {
-	s := []string{}
-	for _, err := range errs {
-		s = append(s, err.Error())
-	}
-	return s
-}
-
 // prepareOrgMember processes a member for storage by:
 //   - Setting the organization address
 //   - Setting the creation timestamp

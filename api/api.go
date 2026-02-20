@@ -256,7 +256,6 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, objectStorageUploadTypedEndpoint, a.objectStorage.UploadImageWithFormHandler)
 		handle(r, http.MethodPost, censusEndpoint, a.createCensusHandler)
 		handle(r, http.MethodPost, censusIDEndpoint, a.addCensusParticipantsHandler)
-		handle(r, http.MethodGet, censusAddParticipantsJobStatusEndpoint, a.censusAddParticipantsJobStatusHandler)
 		handle(r, http.MethodPost, censusPublishEndpoint, a.publishCensusHandler)
 		handle(r, http.MethodPost, censusGroupPublishEndpoint, a.publishCensusGroupHandler)
 		handle(r, http.MethodGet, censusParticipantsEndpoint, a.censusParticipantsHandler)

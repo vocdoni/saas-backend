@@ -18,6 +18,14 @@ definitions:
         - $ref: '#/definitions/apicommon.UserInfo'
         description: User information for registration or identification
     type: object
+  apicommon.AddCensusParticipantsRequest:
+    properties:
+      memberIds:
+        description: List of existing organization member IDs to add to the census
+        items:
+          type: string
+        type: array
+    type: object
   apicommon.AddMembersJobResponse:
     properties:
       added:
@@ -1017,15 +1025,6 @@ definitions:
           $ref: '#/definitions/db.OrgMemberTwoFaField'
         type: array
     type: object
-  db.BulkCensusParticipantStatus:
-    properties:
-      added:
-        type: integer
-      progress:
-        type: integer
-      total:
-        type: integer
-    type: object
   db.Census:
     properties:
       authFields:
@@ -1578,28 +1577,28 @@ paths:
     post:
       consumes:
       - application/json
-      description: Add multiple participants to a census. Requires Manager/Admin role.
+      description: |-
+        Add existing organization members to a census by member ID (synchronous).
+        Members already in the census are skipped.
+        Returns number of participants added plus per-member errors in the response `errors` field.
+        Requires Manager/Admin role.
       parameters:
       - description: Census ID
         in: path
         name: id
         required: true
         type: string
-      - description: Process asynchronously and return job ID
-        in: query
-        name: async
-        type: boolean
-      - description: Participants to add
+      - description: Participant member IDs to add
         in: body
         name: request
         required: true
         schema:
-          $ref: '#/definitions/apicommon.AddMembersRequest'
+          $ref: '#/definitions/apicommon.AddCensusParticipantsRequest'
       produces:
       - application/json
       responses:
         "200":
-          description: OK
+          description: Added count and optional per-member errors
           schema:
             $ref: '#/definitions/apicommon.AddMembersResponse'
         "400":
@@ -1620,7 +1619,7 @@ paths:
             $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
-      summary: Add participants to a census
+      summary: Add organization members to a census
       tags:
       - census
   /census/{id}/group/{groupid}/publish:
@@ -1753,37 +1752,6 @@ paths:
       security:
       - BearerAuth: []
       summary: Publish a census for voting
-      tags:
-      - census
-  /census/job/{jobid}:
-    get:
-      consumes:
-      - application/json
-      description: |-
-        Check the progress of a job to add participants to a census. Returns the progress of the job.
-        If the job is completed, the job is deleted after 60 seconds.
-      parameters:
-      - description: Job ID
-        in: path
-        name: jobid
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/db.BulkCensusParticipantStatus'
-        "400":
-          description: Invalid job ID
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Job not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-      summary: Check the progress of adding participants
       tags:
       - census
   /oauth/login:

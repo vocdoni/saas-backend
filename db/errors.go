@@ -21,3 +21,12 @@ var (
 	// ErrUpdateWouldCreateDuplicates is returned when trying to update an OrgMember
 	ErrUpdateWouldCreateDuplicates = fmt.Errorf("update would create duplicates")
 )
+
+// errorsAsStrings converts a slice of errors to a slice of strings
+func errorsAsStrings(errs []error) []string {
+	s := []string{}
+	for _, err := range errs {
+		s = append(s, err.Error())
+	}
+	return s
+}
