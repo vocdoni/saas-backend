@@ -127,15 +127,6 @@ func (j *BulkOrgMembersJob) ErrorsAsStrings() []string {
 	return errorsAsStrings(j.Errors)
 }
 
-// errorsAsStrings converts a slice of errors to a slice of strings
-func errorsAsStrings(errs []error) []string {
-	s := []string{}
-	for _, err := range errs {
-		s = append(s, err.Error())
-	}
-	return s
-}
-
 // prepareOrgMember processes a member for storage by:
 //   - Setting the organization address
 //   - Setting the creation timestamp
@@ -422,16 +413,7 @@ func (ms *MongoStorage) updateCensusParticipantsForMember(ctx context.Context, m
 		}
 
 		// Calculate new hashes based on census configuration
-		hashes := bson.M{}
-		hashes["loginHash"] = HashAuthTwoFaFields(*member, census.AuthFields, census.TwoFaFields)
-
-		// Calculate specific 2FA hashes if needed
-		if len(census.TwoFaFields) == 2 && len(member.Email) > 0 {
-			hashes["loginHashEmail"] = HashAuthTwoFaFields(*member, census.AuthFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail})
-		}
-		if len(census.TwoFaFields) == 2 && !member.Phone.IsEmpty() {
-			hashes["loginHashPhone"] = HashAuthTwoFaFields(*member, census.AuthFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldPhone})
-		}
+		hashes := calculateParticipantHashesBson(*census, *member)
 
 		findHashes := make([]bson.M, 0, len(hashes))
 		for k, v := range hashes {

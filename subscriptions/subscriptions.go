@@ -59,6 +59,7 @@ type DBInterface interface {
 	UserByEmail(email string) (*db.User, error)
 	Organization(address common.Address) (*db.Organization, error)
 	OrganizationWithParent(address common.Address) (*db.Organization, *db.Organization, error)
+	CountCensusParticipants(censusID string) (int64, error)
 	CountOrgMembers(orgAddress common.Address) (int64, error)
 	CountProcesses(orgAddress common.Address, draft db.DraftFilter) (int64, error)
 	OrganizationMemberGroup(groupID string, orgAddress common.Address) (*db.OrganizationMemberGroup, error)
@@ -283,5 +284,32 @@ func (p *Subscriptions) OrgCanPublishGroupCensus(census *db.Census, groupID stri
 		return errors.ErrProcessCensusSizeExceedsSMSAllowance.Withf("remaining sms: %d", remainingSMS)
 	}
 
+	return nil
+}
+
+func (p *Subscriptions) OrgCanAddCensusParticipants(orgAddress common.Address, censusID string, participantsCount int) error {
+	// Check if the organization has a subscription
+	org, err := p.db.Organization(orgAddress)
+	if err != nil {
+		return errors.ErrOrganizationNotFound.WithErr(err)
+	}
+
+	if org.Subscription.PlanID == 0 {
+		return errors.ErrOrganizationHasNoSubscription.With("can't create draft process")
+	}
+
+	plan, err := p.db.Plan(org.Subscription.PlanID)
+	if err != nil {
+		return errors.ErrPlanNotFound.WithErr(err)
+	}
+
+	count, err := p.db.CountCensusParticipants(censusID)
+	if err != nil {
+		return errors.ErrGenericInternalServerError.WithErr(err)
+	}
+
+	if int(count)+participantsCount > plan.Organization.MaxCensus {
+		return errors.ErrProcessCensusSizeExceedsPlanLimit.Withf("(%d)", plan.Organization.MaxCensus)
+	}
 	return nil
 }

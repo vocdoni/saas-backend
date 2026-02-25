@@ -180,17 +180,7 @@ func (ms *MongoStorage) CensusParticipantByLoginHash(census Census, member OrgMe
 	defer cancel()
 
 	// Calculate hashes based on census configuration
-	hashes := bson.M{}
-	hashes["loginHash"] = HashAuthTwoFaFields(member, census.AuthFields, census.TwoFaFields)
-
-	// Calculate specific 2FA hashes if needed
-	if len(census.TwoFaFields) == 2 && len(member.Email) > 0 {
-		hashes["loginHashEmail"] = HashAuthTwoFaFields(member, census.AuthFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail})
-	}
-	if len(census.TwoFaFields) == 2 && !member.Phone.IsEmpty() {
-		hashes["loginHashPhone"] = HashAuthTwoFaFields(member, census.AuthFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldPhone})
-	}
-
+	hashes := calculateParticipantHashesBson(census, member)
 	findHashes := make([]bson.M, 0, len(hashes))
 	for k, v := range hashes {
 		findHashes = append(findHashes, bson.M{k: v})
@@ -502,6 +492,109 @@ func (ms *MongoStorage) SetBulkCensusOrgMemberParticipant(
 	return progressChan, nil
 }
 
+// AddCensusParticipantsByMemberIDs adds existing organization members to a census.
+// It skips members already added to the census, and inserts new participants one by one.
+func (ms *MongoStorage) AddCensusParticipantsByMemberIDs(censusID string, memberIDs []string) (int, []string, error) {
+	if len(censusID) == 0 {
+		return 0, nil, ErrInvalidData
+	}
+	if len(memberIDs) == 0 {
+		return 0, nil, nil
+	}
+
+	census, err := ms.Census(censusID)
+	if err != nil {
+		return 0, nil, fmt.Errorf("failed to get census: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	added := 0
+	var memberErrors []error
+	for _, memberID := range memberIDs {
+		if len(memberID) == 0 {
+			memberErrors = append(memberErrors, fmt.Errorf("%s: %w", memberID, ErrInvalidData))
+			continue
+		}
+
+		member, err := ms.OrgMember(census.OrgAddress, memberID)
+		switch {
+		case errors.Is(err, ErrInvalidData), errors.Is(err, mongo.ErrNoDocuments):
+			memberErrors = append(memberErrors, fmt.Errorf("%s: %w", memberID, ErrInvalidData))
+			continue
+		case err != nil:
+			memberErrors = append(memberErrors, fmt.Errorf("%s: failed to get member %w", memberID, err))
+			continue
+		default:
+		}
+
+		participantFilter := bson.M{
+			"participantID": member.ID.Hex(),
+			"censusId":      census.ID.Hex(),
+		}
+		existingCount, err := ms.censusParticipants.CountDocuments(ctx, participantFilter)
+		if err != nil {
+			memberErrors = append(memberErrors, fmt.Errorf(" %s: failed to check existing participant %w", memberID, err))
+			continue
+		}
+		if existingCount > 0 {
+			continue
+		}
+
+		// Calculate hashes based on census configuration, matching updateCensusParticipantsForMember.
+		hashes := calculateParticipantHashesBson(*census, *member)
+		findHashes := make([]bson.M, 0, len(hashes))
+		for k, v := range hashes {
+			findHashes = append(findHashes, bson.M{k: v})
+		}
+		conflictFilter := bson.M{
+			"participantID": bson.M{"$ne": member.ID.Hex()},
+			"censusId":      census.ID.Hex(),
+			"$or":           findHashes,
+		}
+		conflictCount, err := ms.censusParticipants.CountDocuments(ctx, conflictFilter)
+		if err != nil {
+			memberErrors = append(memberErrors, fmt.Errorf("%s: failed to validate duplicate hashes for member  %w", memberID, err))
+			continue
+		}
+		if conflictCount > 0 {
+			memberErrors = append(memberErrors, fmt.Errorf("%s: %w", memberID, ErrUpdateWouldCreateDuplicates))
+			continue
+		}
+
+		now := time.Now()
+		newParticipant := bson.M{
+			"participantID": member.ID.Hex(),
+			"censusId":      census.ID.Hex(),
+			"loginHash":     hashes["loginHash"],
+			"createdAt":     now,
+			"updatedAt":     now,
+		}
+		if hash, ok := hashes["loginHashEmail"]; ok {
+			newParticipant["loginHashEmail"] = hash
+		}
+		if hash, ok := hashes["loginHashPhone"]; ok {
+			newParticipant["loginHashPhone"] = hash
+		}
+
+		ms.keysLock.Lock()
+		_, err = ms.censusParticipants.InsertOne(ctx, newParticipant)
+		ms.keysLock.Unlock()
+		if err != nil {
+			if mongo.IsDuplicateKeyError(err) {
+				memberErrors = append(memberErrors, fmt.Errorf("%s: %w", memberID, ErrUpdateWouldCreateDuplicates))
+				continue
+			}
+			memberErrors = append(memberErrors, fmt.Errorf("%s: failed to add participant to census %w", memberID, err))
+			continue
+		}
+		added++
+	}
+
+	return added, errorsAsStrings(memberErrors), nil
+}
+
 func (ms *MongoStorage) setBulkCensusParticipant(ctx context.Context, census *Census, groupID string) (int64, error) {
 	_, members, err := ms.ListOrganizationMemberGroup(groupID, census.OrgAddress, 0, 0)
 	if err != nil {
@@ -573,6 +666,25 @@ func (ms *MongoStorage) setBulkCensusParticipant(ctx context.Context, census *Ce
 	return results.UpsertedCount, err
 }
 
+// CountCensusMembers  counts the number of the members in a census
+func (ms *MongoStorage) CountCensusParticipants(censusID string) (int64, error) {
+	// validate input
+	if len(censusID) == 0 {
+		return 0, ErrInvalidData
+	}
+
+	// prepare filter
+	filter := bson.M{
+		"censusId": censusID,
+	}
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	// Count total documents
+	return ms.censusParticipants.CountDocuments(ctx, filter)
+}
+
 // CensusParticipants retrieves all the census participants for a given census.
 func (ms *MongoStorage) CensusParticipants(censusID string) ([]CensusParticipant, error) {
 	// create a context with a timeout
@@ -605,4 +717,17 @@ func (ms *MongoStorage) CensusParticipants(censusID string) ([]CensusParticipant
 	}
 
 	return participants, nil
+}
+
+func calculateParticipantHashesBson(census Census, member OrgMember) bson.M {
+	hashes := bson.M{}
+	hashes["loginHash"] = HashAuthTwoFaFields(member, census.AuthFields, census.TwoFaFields)
+
+	if len(census.TwoFaFields) == 2 && len(member.Email) > 0 {
+		hashes["loginHashEmail"] = HashAuthTwoFaFields(member, census.AuthFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail})
+	}
+	if len(census.TwoFaFields) == 2 && !member.Phone.IsEmpty() {
+		hashes["loginHashPhone"] = HashAuthTwoFaFields(member, census.AuthFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldPhone})
+	}
+	return hashes
 }

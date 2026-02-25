@@ -2,8 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	stderrors "errors"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -12,7 +12,6 @@ import (
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/log"
-	"go.vocdoni.io/dvote/util"
 )
 
 const (
@@ -21,10 +20,6 @@ const (
 	CensusTypeMail      = "mail"
 	CensusTypeSMS       = "sms"
 )
-
-// addParticipantsToCensusWorkers is a map of job identifiers to the progress of adding participants to a census.
-// This is used to check the progress of the job.
-var addParticipantsToCensusWorkers sync.Map
 
 // createCensusHandler godoc
 //
@@ -109,20 +104,22 @@ func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 
 // addCensusParticipantsHandler godoc
 //
-//	@Summary		Add participants to a census
-//	@Description	Add multiple participants to a census. Requires Manager/Admin role.
+//	@Summary		Add organization members to a census
+//	@Description	Add existing organization members to a census by member ID (synchronous).
+//	@Description	Members already in the census are skipped.
+//	@Description	Returns number of participants added plus per-member errors in the response `errors` field.
+//	@Description	Requires Manager/Admin role.
 //	@Tags			census
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id		path		string						true	"Census ID"
-//	@Param			async	query		boolean						false	"Process asynchronously and return job ID"
-//	@Param			request	body		apicommon.AddMembersRequest	true	"Participants to add"
-//	@Success		200		{object}	apicommon.AddMembersResponse
-//	@Failure		400		{object}	errors.Error	"Invalid input data"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		404		{object}	errors.Error	"Census not found"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Param			id		path		string									true	"Census ID"
+//	@Param			request	body		apicommon.AddCensusParticipantsRequest	true	"Participant member IDs to add"
+//	@Success		200		{object}	apicommon.AddMembersResponse			"Added count and optional per-member errors"
+//	@Failure		400		{object}	errors.Error							"Invalid input data"
+//	@Failure		401		{object}	errors.Error							"Unauthorized"
+//	@Failure		404		{object}	errors.Error							"Census not found"
+//	@Failure		500		{object}	errors.Error							"Internal server error"
 //	@Router			/census/{id} [post]
 func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 	censusID := internal.HexBytes{}
@@ -137,9 +134,6 @@ func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Reques
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
-
-	// get the async flag
-	async := r.URL.Query().Get("async") == "true" //nolint:goconst
 
 	// retrieve census
 	census, err := a.db.Census(censusID.String())
@@ -158,132 +152,45 @@ func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// decode the participants from the request body
-	members := &apicommon.AddMembersRequest{}
-	if err := json.NewDecoder(r.Body).Decode(members); err != nil {
+	// decode the participant IDs from the request body
+	participants := &apicommon.AddCensusParticipantsRequest{}
+	if err := json.NewDecoder(r.Body).Decode(participants); err != nil {
 		log.Error(err)
-		errors.ErrMalformedBody.Withf("couldn't decode members").Write(w)
+		errors.ErrMalformedBody.Withf("couldn't decode participant IDs").Write(w)
 		return
 	}
 
 	// check if there are participants to add
-	if len(members.Members) == 0 {
+	if len(participants.MemberIDs) == 0 {
 		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{Added: 0})
 		return
 	}
-	org, err := a.db.Organization(census.OrgAddress)
-	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
 
-	// add the org members as census participants in the database
-	progressChan, err := a.db.SetBulkCensusOrgMemberParticipant(
-		org,
-		passwordSalt,
+	if err := a.subscriptions.OrgCanAddCensusParticipants(
+		census.OrgAddress,
 		censusID.String(),
-		members.ToDB(),
-	)
-	if err != nil {
+		len(participants.MemberIDs),
+	); err != nil {
+		if apiErr := (errors.Error{}); errors.As(err, &apiErr) {
+			apiErr.Write(w)
+			return
+		}
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 
-	if !async {
-		// Wait for the channel to be closed (100% completion)
-		var lastProgress *db.BulkCensusParticipantStatus
-		for p := range progressChan {
-			lastProgress = p
-			// Just drain the channel until it's closed
-			log.Debugw("census add participants",
-				"census", censusID.String(),
-				"org", census.OrgAddress,
-				"progress", p.Progress,
-				"added", p.Added,
-				"total", p.Total)
-		}
-		// Return the number of participants added
-		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{Added: uint32(lastProgress.Added)})
-		return
+	added, membersErrors, err := a.db.AddCensusParticipantsByMemberIDs(censusID.String(), participants.MemberIDs)
+	// TODO return as error the failed memberIDs
+	switch {
+	case err == nil:
+		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{Added: uint32(added), Errors: membersErrors})
+	case stderrors.Is(err, db.ErrInvalidData), stderrors.Is(err, db.ErrUpdateWouldCreateDuplicates):
+		errors.ErrInvalidData.WithErr(err).Write(w)
+	case stderrors.Is(err, db.ErrNotFound):
+		errors.ErrCensusNotFound.Write(w)
+	default:
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 	}
-
-	// if async create a new job identifier
-	jobID := internal.HexBytes(util.RandomBytes(16))
-
-	// Create persistent job record
-	if err := a.db.CreateJob(jobID.String(), db.JobTypeCensusParticipants, census.OrgAddress, len(members.Members)); err != nil {
-		log.Warnw("failed to create persistent job record", "error", err, "jobId", jobID.String())
-		// Continue with in-memory only (fallback)
-	}
-
-	go func() {
-		for p := range progressChan {
-			// We need to drain the channel to avoid blocking
-			addParticipantsToCensusWorkers.Store(jobID.String(), p)
-
-			// When job completes, persist final results
-			if p.Progress == 100 {
-				// we pass CompleteJob an empty errors slice, because SetBulkCensusOrgMemberParticipant
-				// doesn't collect errors, it only reports progress over the channel.
-				if err := a.db.CompleteJob(jobID.String(), p.Added, []string{}); err != nil {
-					log.Warnw("failed to persist job completion", "error", err, "jobId", jobID.String())
-				}
-				addParticipantsToCensusWorkers.Delete(jobID.String())
-			}
-		}
-	}()
-
-	apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{JobID: jobID})
-}
-
-// censusAddParticipantsJobStatusHandler godoc
-//
-//	@Summary		Check the progress of adding participants
-//	@Description	Check the progress of a job to add participants to a census. Returns the progress of the job.
-//	@Description	If the job is completed, the job is deleted after 60 seconds.
-//	@Tags			census
-//	@Accept			json
-//	@Produce		json
-//	@Param			jobid	path		string	true	"Job ID"
-//	@Success		200		{object}	db.BulkCensusParticipantStatus
-//	@Failure		400		{object}	errors.Error	"Invalid job ID"
-//	@Failure		404		{object}	errors.Error	"Job not found"
-//	@Router			/census/job/{jobid} [get]
-func (a *API) censusAddParticipantsJobStatusHandler(w http.ResponseWriter, r *http.Request) {
-	jobID := internal.HexBytes{}
-	if err := jobID.ParseString(chi.URLParam(r, "jobid")); err != nil {
-		errors.ErrMalformedURLParam.Withf("invalid job ID").Write(w)
-		return
-	}
-
-	// First check in-memory for active jobs
-	if v, ok := addParticipantsToCensusWorkers.Load(jobID.String()); ok {
-		p, ok := v.(*db.BulkCensusParticipantStatus)
-		if !ok {
-			errors.ErrGenericInternalServerError.Withf("invalid job status type").Write(w)
-			return
-		}
-		apicommon.HTTPWriteJSON(w, p)
-		return
-	}
-
-	// If not in memory, check database for completed jobs
-	job, err := a.db.Job(jobID.String())
-	if err != nil {
-		if err == db.ErrNotFound {
-			errors.ErrJobNotFound.Withf("%s", jobID.String()).Write(w)
-			return
-		}
-		errors.ErrGenericInternalServerError.Withf("failed to get job: %v", err).Write(w)
-		return
-	}
-
-	// Return persistent job data in the same format as BulkCensusParticipantStatus
-	apicommon.HTTPWriteJSON(w, &db.BulkCensusParticipantStatus{
-		Progress: 100, // Completed jobs are always 100%
-		Total:    job.Total,
-		Added:    job.Added,
-	})
 }
 
 // publishCensusHandler godoc
