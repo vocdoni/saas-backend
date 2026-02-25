@@ -3,7 +3,6 @@ package api
 import (
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
@@ -11,7 +10,6 @@ import (
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
-	"github.com/vocdoni/saas-backend/internal"
 )
 
 func TestCensus(t *testing.T) {
@@ -59,165 +57,65 @@ func TestCensus(t *testing.T) {
 
 	// Test 3: Add members to census
 	// Test 3.1: Test with valid data (using the same members we added to the organization)
-	censusMembers := []apicommon.OrgMember{
-		{
-			MemberNumber: "P003",
-			Name:         "Carla Johnson",
-			Email:        "carla.johnson@example.com",
-			Phone:        "+34633333333",
-			Password:     "password333",
-			Other: map[string]any{
-				"department": "Sales",
-				"age":        35,
-			},
-		},
-		{
-			MemberNumber: "P004",
-			Name:         "Diego Brown",
-			Email:        "diego.brown@example.com",
-			Phone:        "+34644444444",
-			Password:     "password444",
-			Other: map[string]any{
-				"department": "HR",
-				"age":        42,
-			},
-		},
-	}
-
-	postCensusParticipants(t, adminToken, censusID, censusMembers...)
+	censusMemberIDs := memberIDs(orgMembers)
+	postCensusParticipants(t, adminToken, censusID, censusMemberIDs...)
 
 	// Test 3.2: Test with no authentication
-	c.Assert(postCensusParticipantsAndExpectError(t, "", censusID, censusMembers...),
+	c.Assert(postCensusParticipantsAndExpectError(t, "", censusID, censusMemberIDs...),
 		qt.ErrorMatches, errors.ErrUnauthorized.Err.Error())
 
 	// Test 3.3: Test with invalid census ID
-	c.Assert(postCensusParticipantsAndExpectError(t, adminToken, "invalid-id", censusMembers...),
+	c.Assert(postCensusParticipantsAndExpectError(t, adminToken, "invalid-id", censusMemberIDs...),
 		qt.ErrorMatches, errors.ErrMalformedURLParam.Err.Error()+".*")
 
 	// Test 3.4: Test with empty members list
-	postCensusParticipants(t, adminToken, censusID, []apicommon.OrgMember{}...)
+	postCensusParticipants(t, adminToken, censusID)
 
-	// Test 3.5: Test with async=true flag
-	asyncMembers := &apicommon.AddMembersRequest{
-		Members: []apicommon.OrgMember{
-			{
-				MemberNumber: "P005",
-				Name:         "Elsa Smith",
-				Email:        "elsa.smith@example.com",
-				Phone:        "+34655555555",
-				Password:     "password555",
-				Other: map[string]any{
-					"department": "Sales",
-					"age":        35,
-				},
-			},
-			{
-				MemberNumber: "P006",
-				Name:         "Fabian Doe",
-				Email:        "fabian.doe@example.com",
-				Phone:        "+34666666666",
-				Password:     "password666",
-				Other: map[string]any{
-					"department": "HR",
-					"age":        42,
-				},
-			},
-		},
-	}
-
-	// Make the request with async=true and verify the response contains a job ID
-	asyncResponse := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, adminToken, asyncMembers,
-		censusEndpoint, censusID+"?async=true")
-	c.Assert(asyncResponse.JobID, qt.HasLen, 16) // JobID should be 16 bytes
-
-	// Convert the job ID to a hex string for the API call
-	var jobIDHex internal.HexBytes
-	jobIDHex.SetBytes(asyncResponse.JobID)
-	t.Logf("Async job ID: %s\n", jobIDHex.String())
-
-	// Check the job progress
-	var (
-		jobStatus   db.BulkCensusParticipantStatus
-		maxAttempts = 30
+	// Test 3.5: Invalid member IDs are returned in response errors, not as HTTP errors
+	invalidMembersResp := requestAndParse[apicommon.AddMembersResponse](
+		t, http.MethodPost, adminToken,
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: []string{"invalid-member-id"}},
+		censusEndpoint, censusID,
 	)
+	c.Assert(invalidMembersResp.Added, qt.Equals, uint32(0))
+	c.Assert(invalidMembersResp.Errors, qt.HasLen, 1)
+	c.Assert(invalidMembersResp.Errors[0], qt.Matches, ".*invalid-member-id.*")
+	c.Assert(invalidMembersResp.Errors[0], qt.Matches, ".*"+errors.ErrInvalidData.Err.Error()+".*")
 
-	// Poll the job status until it's complete or max attempts reached
-	for range maxAttempts {
-		jobStatus = requestAndParse[db.BulkCensusParticipantStatus](t, http.MethodGet, adminToken, nil,
-			"census", "job", jobIDHex.String())
-
-		t.Logf("Job progress: %d%%, Added: %d, Total: %d\n",
-			jobStatus.Progress, jobStatus.Added, jobStatus.Total)
-
-		if jobStatus.Progress == 100 {
+	// Test 3.6: Mixed valid/invalid IDs should partially add and report member-level errors
+	uniqueNewMember := apicommon.OrgMember{
+		MemberNumber: "P999",
+		Name:         "Unique Test Member",
+		Surname:      "Census",
+		Email:        "unique-census-member@example.com",
+		Phone:        "+34699999999",
+		Password:     "password999",
+		NationalID:   "DNI999",
+		BirthDate:    "1980-12-31",
+		Weight:       "1",
+	}
+	extraOrgMembers := postOrgMembers(t, adminToken, orgAddress, uniqueNewMember)
+	existingIDs := make(map[string]bool, len(censusMemberIDs))
+	for _, id := range censusMemberIDs {
+		existingIDs[id] = true
+	}
+	validNewMemberID := ""
+	for _, member := range extraOrgMembers {
+		if !existingIDs[member.ID] {
+			validNewMemberID = member.ID
 			break
 		}
-
-		time.Sleep(100 * time.Millisecond) // Wait a bit before checking again
 	}
+	c.Assert(validNewMemberID, qt.Not(qt.Equals), "")
 
-	// Verify the job completed successfully
-	c.Assert(jobStatus.Progress, qt.Equals, 100, qt.Commentf("Job did not complete within expected time"))
-	c.Assert(jobStatus.Added, qt.Equals, 2) // We added 2 members
-	c.Assert(jobStatus.Total, qt.Equals, 2)
-
-	// Test 3.6: Test jobs endpoint - basic functionality
-	jobsResponse := requestAndParse[apicommon.JobsResponse](
-		t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "jobs")
-	c.Assert(jobsResponse.Jobs, qt.HasLen, 1, qt.Commentf("expected 1 job (the census participants job)"))
-	c.Assert(jobsResponse.Pagination.TotalItems, qt.Equals, int64(1))
-	c.Assert(jobsResponse.Pagination.CurrentPage, qt.Equals, int64(1))
-
-	// Verify the job details
-	job := jobsResponse.Jobs[0]
-	c.Assert(job.Type, qt.Equals, db.JobTypeCensusParticipants)
-	c.Assert(job.Total, qt.Equals, 2)
-	c.Assert(job.Added, qt.Equals, 2)
-	c.Assert(job.Completed, qt.IsTrue)
-	c.Assert(job.CreatedAt.IsZero(), qt.IsFalse)
-	c.Assert(job.CompletedAt.IsZero(), qt.IsFalse)
-	c.Assert(job.JobID, qt.Equals, jobIDHex.String())
-	t.Logf("Found job: ID=%s, Type=%s, Total=%d, Added=%d, Completed=%t",
-		job.JobID, job.Type, job.Total, job.Added, job.Completed)
-
-	// Test 3.7: Test jobs endpoint - pagination and filtering
-	// Test with pagination
-	jobsResponsePaged := requestAndParse[apicommon.JobsResponse](
-		t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "jobs?page=1&limit=1")
-	c.Assert(jobsResponsePaged.Jobs, qt.HasLen, 1)
-	c.Assert(jobsResponsePaged.Pagination.TotalItems, qt.Equals, int64(1))
-	c.Assert(jobsResponsePaged.Pagination.CurrentPage, qt.Equals, int64(1))
-
-	// Test with job type filter
-	jobsResponseFiltered := requestAndParse[apicommon.JobsResponse](
-		t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "jobs?type=census_participants")
-	c.Assert(jobsResponseFiltered.Jobs, qt.HasLen, 1)
-	c.Assert(jobsResponseFiltered.Jobs[0].Type, qt.Equals, db.JobTypeCensusParticipants)
-
-	// Test with different job type filter (should return empty)
-	jobsResponseEmpty := requestAndParse[apicommon.JobsResponse](
-		t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "jobs?type=org_members")
-	c.Assert(jobsResponseEmpty.Jobs, qt.HasLen, 0, qt.Commentf("should be empty for org_members filter"))
-
-	// Test 3.8: Test jobs endpoint - authorization and error cases
-	// Test with no authentication
-	requestAndAssertCode(http.StatusUnauthorized,
-		t, http.MethodGet, "", nil,
-		"organizations", orgAddress.String(), "jobs")
-
-	// Test with invalid organization address
-	requestAndAssertCode(http.StatusBadRequest,
-		t, http.MethodGet, adminToken, nil,
-		"organizations", "invalid-address", "jobs")
-
-	// Test with invalid job type filter
-	requestAndAssertCode(http.StatusBadRequest,
-		t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "jobs?type=invalid_type")
+	mixedMembersResp := requestAndParse[apicommon.AddMembersResponse](
+		t, http.MethodPost, adminToken,
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: []string{validNewMemberID, "invalid-member-id"}},
+		censusEndpoint, censusID,
+	)
+	c.Assert(mixedMembersResp.Added, qt.Equals, uint32(1))
+	c.Assert(mixedMembersResp.Errors, qt.HasLen, 1)
+	c.Assert(mixedMembersResp.Errors[0], qt.Matches, ".*invalid-member-id.*")
 
 	// Test 4: Publish census
 	// Test 4.1: Test with valid data

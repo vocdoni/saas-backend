@@ -1083,20 +1083,20 @@ func getCensusAndExpectError(t *testing.T, adminToken string, censusID string) e
 	return requestAndExpectError(t, http.MethodGet, adminToken, nil, censusEndpoint, censusID)
 }
 
-func postCensusParticipants(t *testing.T, adminToken string, censusID string, members ...apicommon.OrgMember,
+func postCensusParticipants(t *testing.T, adminToken string, censusID string, memberIDs ...string,
 ) apicommon.AddMembersResponse {
 	t.Helper()
 	resp := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, adminToken,
-		&apicommon.AddMembersRequest{Members: members},
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: memberIDs},
 		censusEndpoint, censusID)
-	qt.Assert(t, resp.Added, qt.Equals, uint32(len(members)))
+	qt.Assert(t, resp.Added, qt.Equals, uint32(len(memberIDs)))
 	return resp
 }
 
-func postCensusParticipantsAndExpectError(t *testing.T, adminToken string, censusID string, members ...apicommon.OrgMember,
+func postCensusParticipantsAndExpectError(t *testing.T, adminToken string, censusID string, memberIDs ...string,
 ) errors.Error {
 	t.Helper()
-	return requestAndExpectError(t, http.MethodPost, adminToken, &apicommon.AddMembersRequest{Members: members},
+	return requestAndExpectError(t, http.MethodPost, adminToken, &apicommon.AddCensusParticipantsRequest{MemberIDs: memberIDs},
 		censusEndpoint, censusID)
 }
 

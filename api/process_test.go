@@ -38,39 +38,12 @@ func testCreateOrgAndCensus(
 	censusID := postCensus(t, adminToken, orgAddress, authFields, twoFaFields)
 	t.Logf("Created census with ID: %s\n", censusID)
 
-	// Add members to the census
-	members := &apicommon.AddMembersRequest{
-		Members: []apicommon.OrgMember{
-			{
-				MemberNumber: "P001",
-				Name:         "John Doe",
-				Email:        "john.doe@example.com",
-				Phone:        "+34612345678",
-				Password:     "password123",
-				Other: map[string]any{
-					"department": "Engineering",
-					"age":        30,
-				},
-			},
-			{
-				MemberNumber: "P002",
-				Name:         "Jane Smith",
-				Email:        "jane.smith@example.com",
-				Phone:        "+34698765432",
-				Password:     "password456",
-				Other: map[string]any{
-					"department": "Marketing",
-					"age":        28,
-				},
-			},
-		},
-	}
-
-	resp, code := testRequest(t, http.MethodPost, adminToken, members, censusEndpoint, censusID)
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+	// Add existing organization members to the census
+	orgMembers := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(2)...)
+	postCensusParticipants(t, adminToken, censusID, memberIDs(orgMembers)...)
 
 	// Publish the census
-	resp, code = testRequest(t, http.MethodPost, adminToken, nil, censusEndpoint, censusID, "publish")
+	resp, code := testRequest(t, http.MethodPost, adminToken, nil, censusEndpoint, censusID, "publish")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	var publishedCensus apicommon.PublishedCensusResponse

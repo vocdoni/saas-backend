@@ -823,7 +823,7 @@ type OrganizationCensuses struct {
 	Censuses []OrganizationCensus `json:"censuses"`
 }
 
-// AddMembersRequest defines the payload for adding members to a census.
+// AddMembersRequest defines the payload for adding members to an organization.
 // swagger:model AddMembersRequest
 type AddMembersRequest struct {
 	// List of members to add
@@ -837,6 +837,14 @@ func (r *AddMembersRequest) ToDB() []*db.OrgMember {
 		members = append(members, p.ToDB())
 	}
 	return members
+}
+
+// AddCensusParticipantsRequest defines the payload for adding existing
+// organization members to an existing census.
+// swagger:model AddCensusParticipantsRequest
+type AddCensusParticipantsRequest struct {
+	// List of existing organization member IDs to add to the census
+	MemberIDs []string `json:"memberIds"`
 }
 
 type DeleteMembersRequest struct {

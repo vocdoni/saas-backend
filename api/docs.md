@@ -66,7 +66,6 @@
   - [📝 Create Census](#-create-census)
   - [ℹ️ Get Census Info](#ℹ%EF%B8%8F-get-census-info)
   - [👥 Add Members](#-add-members)
-  - [🔍 Check Add Members Job Status](#-check-add-members-job-status)
   - [📢 Publish Census](#-publish-census)
   - [📋 Get Published Census Info](#-get-published-census-info)
   - [📢 Publish Group Census](#-publish-group-census)
@@ -2005,36 +2004,22 @@ Returns the census ID
 * **Method** `POST`
 * **Headers**
   * `Authentication: Bearer <user_token>`
-* **Query params**
-  * `async` - Process asynchronously and return job ID (default: false)
 * **Request body**
 ```json
 {
-  "members": [
-    {
-      "email": "member@example.com",
-      "phone": "+1234567890"
-    }
-  ]
+  "memberIds": ["66f2d6f0c7a6d022b96c5d30", "66f2d6f0c7a6d022b96c5d31"]
 }
 ```
 
-* **Response (Synchronous)**
-Returns the number of members successfully added
-```json
-42
-```
-
-* **Response (Asynchronous)**
-Returns a job ID that can be used to check the status of the operation
+* **Response**
 ```json
 {
-  "jobID": "deadbeef"
+  "added": 2
 }
 ```
 
 * **Description**
-Adds multiple members to a census in bulk. Requires Manager or Admin role for the organization that owns the census. If the request contains no members or if the members array is empty, returns 0. Can be processed synchronously or asynchronously by setting the `async` query parameter to `true`.
+Adds existing organization members to an existing census by their member IDs. Requires Manager or Admin role for the organization that owns the census. If `memberIds` is empty, the endpoint returns `{"added": 0}`.
 
 * **Errors**
 
@@ -2045,31 +2030,7 @@ Adds multiple members to a census in bulk. Requires Manager or Admin role for th
 | `400` | `40004` | `malformed JSON body` |
 | `400` | `40010` | `malformed URL parameter` |
 | `400` | `40010` | `census not found` |
-| `500` | `50002` | `internal server error` |
-| `500` | `50004` | `not all members were added` |
-
-### 🔍 Check Add Members Job Status
-
-* **Path** `/census/job/{jobid}`
-* **Method** `GET`
-* **Response**
-```json
-{
-  "progress": 75,
-  "added": 150,
-  "total": 200
-}
-```
-
-* **Description**
-Checks the progress of a job to add members to a census. Returns the progress percentage, number of members added so far, and total number of members to add. If the job is completed (progress = 100), the job information is automatically deleted after 60 seconds.
-
-* **Errors**
-
-| HTTP Status | Error code | Message |
-|:---:|:---:|:---|
-| `400` | `40010` | `malformed URL parameter` |
-| `404` | `40404` | `job not found` |
+| `400` | `40037` | `invalid data provided` |
 | `500` | `50002` | `internal server error` |
 
 ### 📢 Publish Census
