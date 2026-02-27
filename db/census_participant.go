@@ -181,6 +181,17 @@ func (ms *MongoStorage) CensusParticipantByLoginHash(census Census, member OrgMe
 
 	// Calculate hashes based on census configuration
 	hashes := calculateParticipantHashesBson(census, member)
+	// hashes := bson.M{}
+	// hashes["loginHash"] = HashAuthTwoFaFields(member, census.AuthFields, census.TwoFaFields)
+
+	// // Calculate specific 2FA hashes if needed
+	// if len(census.TwoFaFields) == 2 && len(member.Email) > 0 {
+	// 	hashes["loginHashEmail"] = HashAuthTwoFaFields(member, census.AuthFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail})
+	// }
+	// if len(census.TwoFaFields) == 2 && !member.Phone.IsEmpty() {
+	// 	hashes["loginHashPhone"] = HashAuthTwoFaFields(member, census.AuthFields, OrgMemberTwoFaFields{OrgMemberTwoFaFieldPhone})
+	// }
+
 	findHashes := make([]bson.M, 0, len(hashes))
 	for k, v := range hashes {
 		findHashes = append(findHashes, bson.M{k: v})
