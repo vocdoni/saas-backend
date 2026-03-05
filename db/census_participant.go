@@ -181,6 +181,7 @@ func (ms *MongoStorage) CensusParticipantByLoginHash(census Census, member OrgMe
 
 	// Calculate hashes based on census configuration
 	hashes := calculateParticipantHashesBson(census, member)
+
 	findHashes := make([]bson.M, 0, len(hashes))
 	for k, v := range hashes {
 		findHashes = append(findHashes, bson.M{k: v})
