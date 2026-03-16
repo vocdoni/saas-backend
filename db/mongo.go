@@ -21,7 +21,7 @@ const (
 	// connectTimeout is used for connection timeout
 	connectTimeout = 10 * time.Second
 	// defaultTimeout is used for simple operations (FindOne, UpdateOne, DeleteOne)
-	defaultTimeout = 10 * time.Second
+	defaultTimeout = 100 * time.Second
 	// batchTimeout is used for batch operations (BulkWrite)
 	batchTimeout = 20 * time.Second
 	// exportTimeout is used for export/import operations (String, Import)
