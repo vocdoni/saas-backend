@@ -16,15 +16,21 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-// BundleAuthToken method generates a new authentication token for a user in
-// a process of a bundle. It generates a new token, secret and code from the
-// attempt number. It composes the notification challenge and pushes it to
-// the queue to be sent. It returns the token as HexBytes.
+type authNotificationMetadata struct {
+	to         string
+	ctype      notifications.ChallengeType
+	lang       string
+	orgName    string
+	orgLogo    string
+	orgAddress common.Address
+}
+
+// BundleAuthToken generates or reuses an active authentication token for a user
+// in a bundle and sends the corresponding notification challenge.
 func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 	ctype notifications.ChallengeType, lang string,
 	orgName, orgLogo string, orgAddress common.Address,
 ) (internal.HexBytes, error) {
-	// check the input parameters
 	if len(bID) == 0 {
 		return nil, ErrNoBundleID
 	}
@@ -32,82 +38,47 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 		return nil, ErrNoUserID
 	}
 
-	// For auth-only cases (no challenge type and no destination), create a pre-verified token
 	if to == "" && ctype == "" {
 		return c.createAuthOnlyToken(bID, uID)
 	}
 
-	// get last token for the user and bundle
-	lastToken, err := c.Storage.LastCSPAuth(uID, bID)
-	if err != nil && err != db.ErrTokenNotFound {
-		log.Warnw("error getting last token",
-			"userID", uID,
-			"bundleID", bID,
-			"error", err)
-		return nil, ErrStorageFailure
-	}
-	// check if the last token was created less than the cooldown time
-	if lastToken != nil && time.Since(lastToken.CreatedAt) < c.notificationCoolDownTime {
-		log.Warnw("cooldown time not reached",
-			"userID", uID,
-			"bundleID", bID,
-			"lastToken", lastToken.Token)
-		return nil, errors.ErrAttemptCoolDownTime
-	}
-	// generate a new token, secret and code from the attempt number
-	token, code, err := c.generateToken(uID, bID)
-	if err != nil {
-		return nil, err
-	}
-	// create the new token
-	if err := c.Storage.SetCSPAuth(token, uID, bID); err != nil {
-		log.Warnw("error setting new token",
-			"userID", uID,
-			"bundleID", bID,
-			"token", token,
-			"error", err)
-		return nil, ErrStorageFailure
-	}
-	log.Debugw("new auth token stored",
-		"userID", uID,
-		"bundleID", bID,
-		"token", token)
-	// compose the notification challenge
-	remainingTime := c.notificationCoolDownTime.String()
-	orgInfo := notifications.OrganizationInfo{
-		Address: orgAddress,
-		Name:    orgName,
-		Logo:    orgLogo,
-	}
-	ch, err := notifications.NewNotificationChallenge(ctype, lang, uID, bID, to, code, orgInfo, remainingTime)
-	if err != nil {
-		log.Warnw("error composing notification challenge",
-			"userID", uID,
-			"bundleID", bID,
-			"token", token,
-			"error", err)
-		return nil, ErrNotificationFailure
-	}
-	// push the challenge to the queue to be sent
-	if err := c.notifyQueue.Push(ch); err != nil {
-		log.Warnw("error pushing notification challenge",
-			"userID", uID,
-			"bundleID", bID,
-			"token", token,
-			"error", err)
-		return nil, ErrNotificationFailure
-	}
-	return token, nil
+	return c.bundleAuthTokenForRequest(bID, uID, authNotificationMetadata{
+		to:         to,
+		ctype:      ctype,
+		lang:       lang,
+		orgName:    orgName,
+		orgLogo:    orgLogo,
+		orgAddress: orgAddress,
+	})
 }
 
-// VerifyBundleAuthToken method verifies the authentication token for a user
-// in a process of a bundle. It gets the user data from the token and checks
-// if the process is already consumed. It checks if the process is related to
-// the user and if the token matches. It verifies the solution and updates the
-// user data in the storage. It returns an error if the process is already
-// consumed, if the process is not related to the user, if the token does not
-// match, if the solution is not correct or if there is an error updating the
-// user data.
+// ResendBundleAuthToken resends the active challenge or rotates it if the
+// auth throttle window has elapsed.
+func (c *CSP) ResendBundleAuthToken(token internal.HexBytes, to string,
+	ctype notifications.ChallengeType, lang, orgName, orgLogo string, orgAddress common.Address,
+) (internal.HexBytes, error) {
+	if len(token) == 0 {
+		return nil, ErrInvalidAuthToken
+	}
+	auth, err := c.Storage.CSPAuth(token)
+	if err != nil {
+		return nil, ErrInvalidAuthToken
+	}
+	if auth.Verified || !auth.InvalidatedAt.IsZero() || len(auth.SupersededBy) > 0 || len(auth.ChallengeNonce) == 0 {
+		return nil, ErrInvalidAuthToken
+	}
+	return c.bundleAuthTokenForExisting(auth, authNotificationMetadata{
+		to:         to,
+		ctype:      ctype,
+		lang:       lang,
+		orgName:    orgName,
+		orgLogo:    orgLogo,
+		orgAddress: orgAddress,
+	})
+}
+
+// VerifyBundleAuthToken verifies the authentication token challenge solution
+// and marks the token as verified.
 func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) error {
 	if len(token) == 0 {
 		return ErrInvalidAuthToken
@@ -115,16 +86,15 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 	if len(solution) == 0 {
 		return ErrInvalidSolution
 	}
-	// get the user data from the token
 	authTokenData, err := c.Storage.CSPAuth(token)
 	if err != nil {
-		log.Warnw("error getting user data by token",
-			"token", token,
-			"error", err)
+		log.Warnw("error getting user data by token", "token", token, "error", err)
 		return ErrInvalidAuthToken
 	}
-	// verify the solution, and if the solution is not correct, return an error
-	if !c.verifySolution(authTokenData.UserID, authTokenData.BundleID, solution) {
+	if !authTokenData.InvalidatedAt.IsZero() || len(authTokenData.SupersededBy) > 0 {
+		return ErrInvalidAuthToken
+	}
+	if !c.verifySolution(authTokenData.UserID, authTokenData.BundleID, authTokenData.ChallengeNonce, solution) {
 		log.Warnw("challenge code do not match",
 			"userID", authTokenData.UserID,
 			"bundleID", authTokenData.BundleID,
@@ -132,7 +102,6 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 			"solution", solution)
 		return ErrChallengeCodeFailure
 	}
-	// set the token as verified
 	if err := c.Storage.VerifyCSPAuth(token); err != nil {
 		log.Warnw("error verifying token",
 			"userID", authTokenData.UserID,
@@ -144,90 +113,164 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 	return nil
 }
 
-// generateToken method generates a new authentication token for a user in a
-// process. It checks if the process is already consumed for this user. It
-// generates a new challenge secret, challenge token and OTP code for the
-// secret and the attempt number. It returns the token, the secret and the
-// code respectively.
-func (*CSP) generateToken(uID, bID internal.HexBytes) (
-	internal.HexBytes, string, error,
-) {
-	// generate a new challenge secret and challenge token
-	secret := otpSecret(uID, bID)
-	// generate the OTP code for the secret and the attempt number
-	otp := gotp.NewDefaultHOTP(secret)
-	code := otp.At(0)
-	// generate a new token and convert it to HexBytes
-	bToken, err := uuid.New().MarshalBinary()
-	if err != nil {
-		log.Warnw("error marshalling token",
-			"error", err,
-			"userID", uID,
-			"bundleID", bID)
-		return nil, "", ErrInvalidAuthToken
+func (c *CSP) bundleAuthTokenForRequest(bID, uID internal.HexBytes, metadata authNotificationMetadata) (internal.HexBytes, error) {
+	auth, err := c.Storage.LastActiveCSPAuth(uID, bID)
+	if err != nil && err != db.ErrTokenNotFound {
+		log.Warnw("error getting active token", "userID", uID, "bundleID", bID, "error", err)
+		return nil, ErrStorageFailure
 	}
-	return bToken, code, nil
+	if err == db.ErrTokenNotFound {
+		return c.createAndSendAuthToken(bID, uID, metadata)
+	}
+	return c.bundleAuthTokenForExisting(auth, metadata)
 }
 
-// verifySolution method verifies the solution for a user process. It generates
-// the OTP code for the process secret and the attempt number and compares it
-// with the solution. It returns true if the solution is correct, false
-// otherwise.
-func (*CSP) verifySolution(uID, bID internal.HexBytes, solution string) bool {
-	secret := otpSecret(uID, bID)
-	// generate the OTP code for the secret and the attempt number
-	otp := gotp.NewDefaultHOTP(secret)
-	code := otp.At(0)
-	// compare the generated code with the solution
-	return code == solution
+func (c *CSP) bundleAuthTokenForExisting(auth *db.CSPAuth, metadata authNotificationMetadata) (internal.HexBytes, error) {
+	if time.Since(auth.LastSentAt) < c.notificationCoolDownTime {
+		return nil, errors.ErrAttemptCoolDownTime
+	}
+	if time.Since(auth.CreatedAt) >= c.authThrottleTime {
+		return c.rotateAndSendAuthToken(auth, metadata)
+	}
+	if err := c.sendNotificationChallenge(auth, metadata); err != nil {
+		return nil, err
+	}
+	return auth.Token, nil
 }
 
-// createAuthOnlyToken creates a pre-verified token for auth-only censuses
-// that don't require challenge verification. It generates a token and immediately
-// marks it as verified.
-func (c *CSP) createAuthOnlyToken(bID, uID internal.HexBytes) (internal.HexBytes, error) {
-	// generate a new token (we don't need the code for auth-only)
+func (c *CSP) createAndSendAuthToken(bID, uID internal.HexBytes, metadata authNotificationMetadata) (internal.HexBytes, error) {
+	token, challengeNonce, err := c.generateToken(uID, bID)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.Storage.SetCSPAuthChallenge(token, uID, bID, challengeNonce); err != nil {
+		log.Warnw("error setting new token", "userID", uID, "bundleID", bID, "token", token, "error", err)
+		return nil, ErrStorageFailure
+	}
+	auth, err := c.Storage.CSPAuth(token)
+	if err != nil {
+		return nil, ErrStorageFailure
+	}
+	if err := c.sendNotificationChallenge(auth, metadata); err != nil {
+		return nil, err
+	}
+	return token, nil
+}
+
+func (c *CSP) rotateAndSendAuthToken(auth *db.CSPAuth, metadata authNotificationMetadata) (internal.HexBytes, error) {
+	newToken, challengeNonce, err := c.generateToken(auth.UserID, auth.BundleID)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.Storage.SetCSPAuthChallenge(newToken, auth.UserID, auth.BundleID, challengeNonce); err != nil {
+		return nil, ErrStorageFailure
+	}
+	if err := c.Storage.InvalidateCSPAuth(auth.Token, newToken); err != nil {
+		return nil, ErrStorageFailure
+	}
+	newAuth, err := c.Storage.CSPAuth(newToken)
+	if err != nil {
+		return nil, ErrStorageFailure
+	}
+	if err := c.sendNotificationChallenge(newAuth, metadata); err != nil {
+		return nil, err
+	}
+	return newToken, nil
+}
+
+func (c *CSP) sendNotificationChallenge(auth *db.CSPAuth, metadata authNotificationMetadata) error {
+	code := c.authCode(auth)
+	orgInfo := notifications.OrganizationInfo{
+		Address: metadata.orgAddress,
+		Name:    metadata.orgName,
+		Logo:    metadata.orgLogo,
+	}
+	ch, err := notifications.NewNotificationChallenge(
+		metadata.ctype,
+		metadata.lang,
+		auth.UserID,
+		auth.BundleID,
+		metadata.to,
+		code,
+		orgInfo,
+		c.notificationCoolDownTime.String(),
+	)
+	if err != nil {
+		log.Warnw("error composing notification challenge",
+			"userID", auth.UserID,
+			"bundleID", auth.BundleID,
+			"token", auth.Token,
+			"error", err)
+		return ErrNotificationFailure
+	}
+	if err := c.notifyQueue.Push(ch); err != nil {
+		log.Warnw("error pushing notification challenge",
+			"userID", auth.UserID,
+			"bundleID", auth.BundleID,
+			"token", auth.Token,
+			"error", err)
+		return ErrNotificationFailure
+	}
+	if err := c.Storage.TouchCSPAuthNotification(auth.Token); err != nil {
+		log.Warnw("error touching auth notification timestamp", "token", auth.Token, "error", err)
+		return ErrStorageFailure
+	}
+	return nil
+}
+
+// generateToken generates a new authentication token plus token-specific
+// challenge nonce so each token has its own OTP.
+func (*CSP) generateToken(uID, bID internal.HexBytes) (internal.HexBytes, internal.HexBytes, error) {
 	bToken, err := uuid.New().MarshalBinary()
 	if err != nil {
-		log.Warnw("error marshalling token",
-			"error", err,
-			"userID", uID,
-			"bundleID", bID)
+		log.Warnw("error marshalling token", "error", err, "userID", uID, "bundleID", bID)
+		return nil, nil, ErrInvalidAuthToken
+	}
+	challengeNonce, err := uuid.New().MarshalBinary()
+	if err != nil {
+		log.Warnw("error marshalling challenge nonce", "error", err, "userID", uID, "bundleID", bID)
+		return nil, nil, ErrInvalidAuthToken
+	}
+	return bToken, challengeNonce, nil
+}
+
+func (c *CSP) authCode(auth *db.CSPAuth) string {
+	return authCode(auth.UserID, auth.BundleID, auth.ChallengeNonce)
+}
+
+func authCode(uID, bID, challengeNonce internal.HexBytes) string {
+	secret := otpSecret(uID, bID, challengeNonce)
+	otp := gotp.NewDefaultHOTP(secret)
+	return otp.At(0)
+}
+
+// verifySolution verifies the challenge response against the token-specific
+// secret.
+func (*CSP) verifySolution(uID, bID, challengeNonce internal.HexBytes, solution string) bool {
+	return authCode(uID, bID, challengeNonce) == solution
+}
+
+// createAuthOnlyToken creates a pre-verified token for auth-only censuses.
+func (c *CSP) createAuthOnlyToken(bID, uID internal.HexBytes) (internal.HexBytes, error) {
+	bToken, err := uuid.New().MarshalBinary()
+	if err != nil {
+		log.Warnw("error marshalling token", "error", err, "userID", uID, "bundleID", bID)
 		return nil, ErrInvalidAuthToken
 	}
-
-	// create the new token
 	if err := c.Storage.SetCSPAuth(bToken, uID, bID); err != nil {
-		log.Warnw("error setting new token",
-			"userID", uID,
-			"bundleID", bID,
-			"error", err)
+		log.Warnw("error setting new token", "userID", uID, "bundleID", bID, "error", err)
 		return nil, ErrStorageFailure
 	}
-
-	// immediately verify the token since no challenge is needed
 	if err := c.Storage.VerifyCSPAuth(bToken); err != nil {
-		log.Warnw("error verifying auth-only token",
-			"userID", uID,
-			"bundleID", bID,
-			"token", bToken,
-			"error", err)
+		log.Warnw("error verifying auth-only token", "userID", uID, "bundleID", bID, "token", bToken, "error", err)
 		return nil, ErrStorageFailure
 	}
-
-	log.Debugw("new auth-only token created and verified",
-		"userID", uID,
-		"bundleID", bID,
-		"token", bToken)
-
+	log.Debugw("new auth-only token created and verified", "userID", uID, "bundleID", bID, "token", bToken)
 	return bToken, nil
 }
 
-// otpSecret method generates a new OTP secret for a user and a bundle. The
-// secret is generated by hashing the user ID and the bundle ID with SHA-256.
-// It returns the secret as HexBytes.
-func otpSecret(uID, bID internal.HexBytes) string {
-	hash := sha256.Sum256(append(uID, bID...))
-	// encode the secret in base32 and return it
+// otpSecret generates the token-specific OTP secret for a user and bundle.
+func otpSecret(uID, bID, challengeNonce internal.HexBytes) string {
+	hash := sha256.Sum256(append(append(uID, bID...), challengeNonce...))
 	return base32.StdEncoding.EncodeToString(hash[:])
 }

@@ -16,12 +16,16 @@ import (
 
 // CSPAuth represents a user authentication information for a bundle of processes
 type CSPAuth struct {
-	Token      internal.HexBytes `json:"token" bson:"_id"`
-	UserID     internal.HexBytes `json:"userID" bson:"userid"`
-	BundleID   internal.HexBytes `json:"bundleID" bson:"bundleid"`
-	CreatedAt  time.Time         `json:"createdAt" bson:"createdat"`
-	Verified   bool              `json:"verified" bson:"verified"`
-	VerifiedAt time.Time         `json:"verifiedAt" bson:"verifiedat"`
+	Token          internal.HexBytes `json:"token" bson:"_id"`
+	UserID         internal.HexBytes `json:"userID" bson:"userid"`
+	BundleID       internal.HexBytes `json:"bundleID" bson:"bundleid"`
+	ChallengeNonce internal.HexBytes `json:"challengeNonce,omitempty" bson:"challengeNonce,omitempty"`
+	SupersededBy   internal.HexBytes `json:"supersededBy,omitempty" bson:"supersededBy,omitempty"`
+	CreatedAt      time.Time         `json:"createdAt" bson:"createdat"`
+	LastSentAt     time.Time         `json:"lastSentAt" bson:"lastSentAt"`
+	InvalidatedAt  time.Time         `json:"invalidatedAt,omitempty" bson:"invalidatedAt,omitempty"`
+	Verified       bool              `json:"verified" bson:"verified"`
+	VerifiedAt     time.Time         `json:"verifiedAt" bson:"verifiedat"`
 }
 
 // CSPProcess is the status of a process in a bundle of processes for a user
@@ -40,6 +44,12 @@ type CSPProcess struct {
 // bundle of processes. It returns an error if the token, user ID or bundle
 // ID are nil.
 func (ms *MongoStorage) SetCSPAuth(token, userID, bundleID internal.HexBytes) error {
+	return ms.SetCSPAuthChallenge(token, userID, bundleID, nil)
+}
+
+// SetCSPAuthChallenge stores a new CSP authentication token with token-specific
+// challenge state so different tokens can yield different OTPs.
+func (ms *MongoStorage) SetCSPAuthChallenge(token, userID, bundleID, challengeNonce internal.HexBytes) error {
 	if token == nil || userID == nil || bundleID == nil {
 		return ErrBadInputs
 	}
@@ -48,13 +58,16 @@ func (ms *MongoStorage) SetCSPAuth(token, userID, bundleID internal.HexBytes) er
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
+	now := time.Now()
 	// insert the token
 	if _, err := ms.cspTokens.InsertOne(ctx, CSPAuth{
-		Token:     token,
-		UserID:    userID,
-		BundleID:  bundleID,
-		CreatedAt: time.Now(),
-		Verified:  false,
+		Token:          token,
+		UserID:         userID,
+		BundleID:       bundleID,
+		ChallengeNonce: challengeNonce,
+		CreatedAt:      now,
+		LastSentAt:     now,
+		Verified:       false,
 	}); err != nil {
 		return errors.Join(ErrStoreToken, err)
 	}
@@ -98,6 +111,32 @@ func (ms *MongoStorage) LastCSPAuth(userID, bundleID internal.HexBytes) (*CSPAut
 	return tokenData, nil
 }
 
+// LastActiveCSPAuth returns the last unverified and non-invalidated token for
+// the given user and bundle.
+func (ms *MongoStorage) LastActiveCSPAuth(userID, bundleID internal.HexBytes) (*CSPAuth, error) {
+	if userID == nil || bundleID == nil {
+		return nil, ErrBadInputs
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	filter := bson.M{
+		"userid":        userID,
+		"bundleid":      bundleID,
+		"verified":      false,
+		"invalidatedAt": bson.M{"$in": bson.A{time.Time{}, nil}},
+	}
+	opts := options.FindOne().SetSort(bson.M{"createdat": -1})
+	tokenData := new(CSPAuth)
+	if err := ms.cspTokens.FindOne(ctx, filter, opts).Decode(tokenData); err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, ErrTokenNotFound
+		}
+		return nil, err
+	}
+	return tokenData, nil
+}
+
 // VerifyCSPAuth method verifies a CSP authentication token. It returns an
 // error if the token is nil or the token does not exist.
 func (ms *MongoStorage) VerifyCSPAuth(token internal.HexBytes) error {
@@ -117,6 +156,47 @@ func (ms *MongoStorage) VerifyCSPAuth(token internal.HexBytes) error {
 	filter := bson.M{"_id": token}
 	updateDoc := bson.M{"$set": bson.M{"verified": true, "verifiedat": time.Now()}}
 	if _, err := ms.cspTokens.UpdateOne(ctx, filter, updateDoc, nil); err != nil {
+		return errors.Join(ErrStoreToken, err)
+	}
+	return nil
+}
+
+// TouchCSPAuthNotification updates the last send timestamp for a token.
+func (ms *MongoStorage) TouchCSPAuthNotification(token internal.HexBytes) error {
+	if token == nil {
+		return ErrBadInputs
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	if _, err := ms.fetchCSPAuthFromDB(ctx, token); err != nil {
+		return err
+	}
+	updateDoc := bson.M{"$set": bson.M{"lastSentAt": time.Now()}}
+	if _, err := ms.cspTokens.UpdateOne(ctx, bson.M{"_id": token}, updateDoc); err != nil {
+		return errors.Join(ErrStoreToken, err)
+	}
+	return nil
+}
+
+// InvalidateCSPAuth marks a token as superseded by a newer one.
+func (ms *MongoStorage) InvalidateCSPAuth(token, supersededBy internal.HexBytes) error {
+	if token == nil || supersededBy == nil {
+		return ErrBadInputs
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	if _, err := ms.fetchCSPAuthFromDB(ctx, token); err != nil {
+		return err
+	}
+	updateDoc := bson.M{"$set": bson.M{
+		"invalidatedAt": time.Now(),
+		"supersededBy":  supersededBy,
+	}}
+	if _, err := ms.cspTokens.UpdateOne(ctx, bson.M{"_id": token}, updateDoc); err != nil {
 		return errors.Join(ErrStoreToken, err)
 	}
 	return nil

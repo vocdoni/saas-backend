@@ -71,6 +71,7 @@ const (
 	anotherEmail = "something-else@gmail.com"
 
 	cspNotificationCoolDownTime = time.Second * 5
+	cspAuthThrottleTime         = time.Second * 10
 )
 
 var (
@@ -419,6 +420,7 @@ func TestMain(m *testing.M) {
 		SMSService:               testSMSService,
 		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: cspNotificationCoolDownTime,
+		AuthThrottleTime:         cspAuthThrottleTime,
 		RootKey:                  *rootKey,
 	})
 	if err != nil {
@@ -861,6 +863,24 @@ func postProcessBundleAuth1(t *testing.T, bundleID string, request *handlers.Aut
 	return resp.AuthToken
 }
 
+func postProcessBundleAuth0Resend(t *testing.T, bundleID string, request *handlers.AuthResendRequest, queryParams ...string,
+) internal.HexBytes {
+	t.Helper()
+	resp := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", request,
+		processBundleAuthResendURL(bundleID)+joinQueryParams(queryParams...))
+
+	qt.Assert(t, resp.AuthToken, qt.Not(qt.HasLen), 0, qt.Commentf("auth token is empty"))
+	t.Logf("Received resent auth token: %s", resp.AuthToken.String())
+	return resp.AuthToken
+}
+
+func postProcessBundleAuth0ResendAndExpectError(t *testing.T, bundleID string, request *handlers.AuthResendRequest, queryParams ...string,
+) errors.Error {
+	t.Helper()
+	return requestAndExpectError(t, http.MethodPost, "", request,
+		processBundleAuthResendURL(bundleID)+joinQueryParams(queryParams...))
+}
+
 // testGenerateVoteProof generates a vote proof with the given signature, process ID, and voter address.
 // It returns the proof.
 func testGenerateVoteProof(processID, voterAddr, signature internal.HexBytes, weight uint64) *models.Proof {
@@ -1211,5 +1231,11 @@ func processBundleAuthURL(bundleID, step string) string {
 	s := processBundleAuthEndpoint
 	s = strings.ReplaceAll(s, "{bundleId}", bundleID)
 	s = strings.ReplaceAll(s, "{step}", step)
+	return s
+}
+
+func processBundleAuthResendURL(bundleID string) string {
+	s := processBundleAuthResendEndpoint
+	s = strings.ReplaceAll(s, "{bundleId}", bundleID)
 	return s
 }

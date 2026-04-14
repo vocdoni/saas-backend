@@ -31,6 +31,7 @@ func TestBundleAuthToken(t *testing.T) {
 		SMSService:               testSMSService,
 		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,
+		AuthThrottleTime:         time.Second * 10,
 		RootKey:                  *testRootKey,
 	})
 	c.Assert(err, qt.IsNil)
@@ -120,12 +121,11 @@ func TestBundleAuthToken(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(token, qt.Not(qt.IsNil))
 		// calculate expected code and token
-		_, expectedCode, err := csp.generateToken(testUserID, bundleID)
-		c.Assert(err, qt.IsNil)
 		authTokenResult, err := csp.Storage.CSPAuth(token)
 		c.Assert(err, qt.IsNil)
 		c.Assert(authTokenResult.BundleID.Bytes(), qt.DeepEquals, bundleID.Bytes())
 		c.Assert(authTokenResult.UserID.Bytes(), qt.DeepEquals, testUserID.Bytes())
+		expectedCode := csp.authCode(authTokenResult)
 		// wait to dequeue the notification
 		time.Sleep(time.Second * 3)
 		// get the verification code from the email
@@ -161,6 +161,7 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 		SMSService:               testSMSService,
 		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,
+		AuthThrottleTime:         time.Second * 10,
 		RootKey:                  *testRootKey,
 	})
 	c.Assert(err, qt.IsNil)
@@ -191,16 +192,16 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 
 	c.Run("success", func(c *qt.C) {
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
-		// create the token
-		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID), qt.IsNil)
-		// generate the code
-		_, code, err := csp.generateToken(testUserID, testBundleID)
+		challengeNonce := internal.RandomBytes(16)
+		c.Assert(csp.Storage.SetCSPAuthChallenge(testToken, testUserID, testBundleID, challengeNonce), qt.IsNil)
+		authTokenResult, err := csp.Storage.CSPAuth(testToken)
 		c.Assert(err, qt.IsNil)
+		code := csp.authCode(authTokenResult)
 		// try to verify an valid solution
 		err = csp.VerifyBundleAuthToken(testToken, code)
 		c.Assert(err, qt.IsNil)
 		// check that the token is verified
-		authTokenResult, err := csp.Storage.CSPAuth(testToken)
+		authTokenResult, err = csp.Storage.CSPAuth(testToken)
 		c.Assert(err, qt.IsNil)
 		c.Assert(authTokenResult.Verified, qt.IsTrue)
 	})
@@ -208,33 +209,165 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 
 func TestGenerateToken(t *testing.T) {
 	c := qt.New(t)
-	secret := otpSecret(testUserID, testBundleID)
-	otp := gotp.NewDefaultHOTP(secret)
-	token, code, err := new(CSP).generateToken(testUserID, testBundleID)
+	token, nonce, err := new(CSP).generateToken(testUserID, testBundleID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(token, qt.Not(qt.IsNil))
+	c.Assert(nonce, qt.HasLen, 16)
+	code := authCode(testUserID, testBundleID, nonce)
+	secret := otpSecret(testUserID, testBundleID, nonce)
+	otp := gotp.NewDefaultHOTP(secret)
 	c.Assert(code, qt.Equals, otp.At(0))
 }
 
 func TestVerifySolution(t *testing.T) {
 	c := qt.New(t)
 
-	secret := otpSecret(testUserID, testBundleID)
+	challengeNonce := internal.HexBytes("challenge")
+	secret := otpSecret(testUserID, testBundleID, challengeNonce)
 	otp := gotp.NewDefaultHOTP(secret)
 	code := otp.At(0)
 
-	ok := new(CSP).verifySolution(testUserID, testBundleID, code)
+	ok := new(CSP).verifySolution(testUserID, testBundleID, challengeNonce, code)
 	c.Assert(ok, qt.IsTrue)
 
-	ok = new(CSP).verifySolution(testUserID, testBundleID, "invalid")
+	ok = new(CSP).verifySolution(testUserID, testBundleID, challengeNonce, "invalid")
 	c.Assert(ok, qt.IsFalse)
 }
 
 func TestOTPSecret(t *testing.T) {
 	c := qt.New(t)
 
-	expectedSecret := sha256.Sum256(append(testUserID, testBundleID...))
+	challengeNonce := internal.HexBytes("challenge")
+	expectedSecret := sha256.Sum256(append(append(testUserID, testBundleID...), challengeNonce...))
 	encodedSecret := base32.StdEncoding.EncodeToString(expectedSecret[:])
-	secret := otpSecret(testUserID, testBundleID)
+	secret := otpSecret(testUserID, testBundleID, challengeNonce)
 	c.Assert(secret, qt.Equals, encodedSecret)
+}
+
+func TestResendBundleAuthToken(t *testing.T) {
+	c := qt.New(t)
+	testDB, err := db.New(testMongoURI, test.RandomDatabaseName())
+	c.Assert(err, qt.IsNil)
+
+	ctx := context.Background()
+	csp, err := New(ctx, &Config{
+		DB:                       testDB,
+		MailService:              testMailService,
+		SMSService:               testSMSService,
+		NotificationThrottleTime: time.Second,
+		NotificationCoolDownTime: time.Second,
+		AuthThrottleTime:         3 * time.Second,
+		RootKey:                  *testRootKey,
+	})
+	c.Assert(err, qt.IsNil)
+
+	c.Run("cooldown blocks resend", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		token, err := csp.BundleAuthToken(
+			testBundleID,
+			testUserID,
+			testUserEmail,
+			notifications.EmailChallenge,
+			apicommon.DefaultLang,
+			testOrgName,
+			testOrgLogo,
+			testAddress.Address(),
+		)
+		c.Assert(err, qt.IsNil)
+
+		_, err = csp.ResendBundleAuthToken(
+			token,
+			testUserEmail,
+			notifications.EmailChallenge,
+			apicommon.DefaultLang,
+			testOrgName,
+			testOrgLogo,
+			testAddress.Address(),
+		)
+		c.Assert(err, qt.ErrorIs, errors.ErrAttemptCoolDownTime)
+	})
+
+	c.Run("reuse token and otp before throttle", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		token, err := csp.BundleAuthToken(
+			testBundleID,
+			testUserID,
+			testUserEmail,
+			notifications.EmailChallenge,
+			apicommon.DefaultLang,
+			testOrgName,
+			testOrgLogo,
+			testAddress.Address(),
+		)
+		c.Assert(err, qt.IsNil)
+		auth, err := csp.Storage.CSPAuth(token)
+		c.Assert(err, qt.IsNil)
+		firstCode := csp.authCode(auth)
+
+		time.Sleep(time.Second)
+
+		resentToken, err := csp.ResendBundleAuthToken(
+			token,
+			testUserEmail,
+			notifications.EmailChallenge,
+			apicommon.DefaultLang,
+			testOrgName,
+			testOrgLogo,
+			testAddress.Address(),
+		)
+		c.Assert(err, qt.IsNil)
+		c.Assert(resentToken, qt.DeepEquals, token)
+
+		auth, err = csp.Storage.CSPAuth(token)
+		c.Assert(err, qt.IsNil)
+		c.Assert(csp.authCode(auth), qt.Equals, firstCode)
+	})
+
+	c.Run("rotate token and otp after throttle", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		token, err := csp.BundleAuthToken(
+			testBundleID,
+			testUserID,
+			testUserEmail,
+			notifications.EmailChallenge,
+			apicommon.DefaultLang,
+			testOrgName,
+			testOrgLogo,
+			testAddress.Address(),
+		)
+		c.Assert(err, qt.IsNil)
+		auth, err := csp.Storage.CSPAuth(token)
+		c.Assert(err, qt.IsNil)
+		firstCode := csp.authCode(auth)
+
+		time.Sleep(3 * time.Second)
+
+		rotatedToken, err := csp.ResendBundleAuthToken(
+			token,
+			testUserEmail,
+			notifications.EmailChallenge,
+			apicommon.DefaultLang,
+			testOrgName,
+			testOrgLogo,
+			testAddress.Address(),
+		)
+		c.Assert(err, qt.IsNil)
+		c.Assert(rotatedToken, qt.Not(qt.DeepEquals), token)
+
+		auth, err = csp.Storage.CSPAuth(rotatedToken)
+		c.Assert(err, qt.IsNil)
+		secondCode := csp.authCode(auth)
+		c.Assert(secondCode, qt.Not(qt.Equals), firstCode)
+
+		oldAuth, err := csp.Storage.CSPAuth(token)
+		c.Assert(err, qt.IsNil)
+		c.Assert(oldAuth.InvalidatedAt.IsZero(), qt.IsFalse)
+		c.Assert(oldAuth.SupersededBy, qt.DeepEquals, rotatedToken)
+
+		err = csp.VerifyBundleAuthToken(token, firstCode)
+		c.Assert(err, qt.ErrorIs, ErrInvalidAuthToken)
+
+		err = csp.VerifyBundleAuthToken(rotatedToken, secondCode)
+		c.Assert(err, qt.IsNil)
+	})
 }

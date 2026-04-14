@@ -152,6 +152,8 @@ const (
 	processBundleInfoEndpoint = "/process/bundle/{bundleId}"
 	// POST /process/bundle/{bundleId}/auth/{step} to check if the voter is authorized
 	processBundleAuthEndpoint = "/process/bundle/{bundleId}/auth/{step}"
+	// POST /process/bundle/{bundleId}/auth/0/resend to resend the step-0 auth challenge
+	processBundleAuthResendEndpoint = "/process/bundle/{bundleId}/auth/0/resend"
 	// POST /process/bundle/{bundleId}/weight to get the voter weight for the bundle
 	processBundleWeightEndpoint = "/process/bundle/{bundleId}/weight"
 	// POST /process/bundle/{bundleId}/sign to sign with two-factor authentication

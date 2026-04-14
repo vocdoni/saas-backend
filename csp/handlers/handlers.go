@@ -161,6 +161,38 @@ func (c *CSPHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) 
 	c.handleAuthStep(w, r, step, *bundleID, bundle.Census.ID.Hex())
 }
 
+// BundleAuthResendHandler godoc
+//
+//	@Summary		Resend the step-0 authentication challenge
+//	@Description	Resends the auth/0 challenge for an existing token using only the auth token and a valid email or phone.
+//	@Tags			process
+//	@Accept			json
+//	@Produce		json
+//	@Param			bundleId	path		string						true	"Bundle ID"
+//	@Param			request		body		handlers.AuthResendRequest	true	"Auth resend request"
+//	@Success		200			{object}	handlers.AuthResponse
+//	@Failure		400			{object}	errors.Error	"Invalid input data"
+//	@Failure		401			{object}	errors.Error	"Unauthorized or cooldown time not reached"
+//	@Failure		404			{object}	errors.Error	"Bundle, census, organization, or user not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/process/bundle/{bundleId}/auth/0/resend [post]
+func (c *CSPHandlers) BundleAuthResendHandler(w http.ResponseWriter, r *http.Request) {
+	bundleID, ok := parseBundleID(w, r)
+	if !ok {
+		return
+	}
+	authToken, err := c.authResendStep(r, *bundleID)
+	if err != nil {
+		if apiErr, ok := err.(errors.Error); ok {
+			apiErr.Write(w)
+			return
+		}
+		errors.ErrUnauthorized.WithErr(err).Write(w)
+		return
+	}
+	apicommon.HTTPWriteJSON(w, &AuthResponse{AuthToken: authToken})
+}
+
 // parseSignRequest parses the sign request from the request body
 func parseSignRequest(w http.ResponseWriter, r *http.Request) (*SignRequest, bool) {
 	var req SignRequest
@@ -555,6 +587,18 @@ func determineContactMethod(
 	}
 }
 
+func orgBranding(org *db.Organization) (string, string) {
+	name := DefaultOrgName
+	logo := DefaultOrgLogo
+	if n, ok := org.Meta["name"].(string); ok {
+		name = n
+		if l, ok := org.Meta["logo"].(string); ok {
+			logo = l
+		}
+	}
+	return name, logo
+}
+
 // authFirstStep is the first step of the authentication process. It receives
 // the request, the bundle ID and the census ID as parameters. It checks the
 // request data (participant ID, email and phone) against the census data.
@@ -653,16 +697,7 @@ func (c *CSPHandlers) authFirstStep(
 		return nil, err
 	}
 
-	name := DefaultOrgName
-	logo := DefaultOrgLogo
-
-	if n, ok := org.Meta["name"].(string); ok {
-		name = n
-		// if name is found then retrieve the logo as well
-		if l, ok := org.Meta["logo"].(string); ok {
-			logo = l
-		}
-	}
+	name, logo := orgBranding(org)
 
 	// Generate the token
 	return c.csp.BundleAuthToken(
@@ -675,6 +710,102 @@ func (c *CSPHandlers) authFirstStep(
 		logo,
 		org.Address,
 	)
+}
+
+func (c *CSPHandlers) authResendStep(r *http.Request, bundleID internal.HexBytes) (internal.HexBytes, error) {
+	var req AuthResendRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return nil, errors.ErrMalformedBody.Withf("invalid JSON request")
+	}
+	if req.AuthToken == nil {
+		return nil, errors.ErrUnauthorized.Withf("missing auth token")
+	}
+	if (req.Email == "" && req.Phone == "") || (req.Email != "" && req.Phone != "") {
+		return nil, errors.ErrInvalidUserData.Withf("provide exactly one identifier")
+	}
+
+	auth, err := c.csp.Storage.CSPAuth(req.AuthToken)
+	if err != nil {
+		return nil, errors.ErrUnauthorized.WithErr(err)
+	}
+	if !bytes.Equal(auth.BundleID, bundleID) {
+		return nil, errors.ErrUnauthorized.Withf("token does not belong to the bundle")
+	}
+	if auth.Verified || !auth.InvalidatedAt.IsZero() || len(auth.SupersededBy) > 0 || len(auth.ChallengeNonce) == 0 {
+		return nil, errors.ErrUnauthorized.WithErr(csp.ErrInvalidAuthToken)
+	}
+
+	bundle, err := c.mainDB.ProcessBundle(bundleID)
+	if err != nil {
+		if err == db.ErrNotFound {
+			return nil, errors.ErrMalformedURLParam.Withf("bundle not found")
+		}
+		return nil, errors.ErrGenericInternalServerError.WithErr(err)
+	}
+	census, err := c.mainDB.Census(bundle.Census.ID.Hex())
+	if err != nil {
+		if err == db.ErrNotFound {
+			return nil, errors.ErrCensusNotFound
+		}
+		return nil, errors.ErrGenericInternalServerError.WithErr(err)
+	}
+	org, err := c.mainDB.Organization(census.OrgAddress)
+	if err != nil {
+		if err == db.ErrNotFound {
+			return nil, errors.ErrOrganizationNotFound
+		}
+		return nil, errors.ErrGenericInternalServerError.WithErr(err)
+	}
+
+	oid, err := primitive.ObjectIDFromHex(auth.UserID.String())
+	if err != nil {
+		return nil, errors.ErrUnauthorized.WithErr(fmt.Errorf("invalid user ID in token: %w", err))
+	}
+	member, err := c.mainDB.OrgMember(census.OrgAddress, oid.Hex())
+	if err != nil {
+		if err == db.ErrNotFound {
+			return nil, errors.ErrUserNotFound
+		}
+		return nil, errors.ErrGenericInternalServerError.WithErr(err)
+	}
+
+	resendReq := &AuthRequest{Email: req.Email, Phone: req.Phone}
+	toDestination, challengeType, err := determineContactMethod(census, org, resendReq, member)
+	if err != nil {
+		return nil, err
+	}
+	name, logo := orgBranding(org)
+	lang := apicommon.DefaultLang
+	if l, ok := r.Context().Value(apicommon.LangMetadataKey).(string); ok && l != "" {
+		lang = l
+	}
+
+	authToken, resendErr := c.csp.ResendBundleAuthToken(
+		req.AuthToken,
+		toDestination,
+		challengeType,
+		lang,
+		name,
+		logo,
+		org.Address,
+	)
+	switch resendErr {
+	case nil:
+		return authToken, nil
+	case csp.ErrInvalidAuthToken:
+		return nil, errors.ErrUnauthorized.WithErr(resendErr)
+	case errors.ErrAttemptCoolDownTime:
+		return nil, resendErr.(errors.Error)
+	case csp.ErrStorageFailure:
+		return nil, errors.ErrInternalStorageError.WithErr(resendErr)
+	case csp.ErrNotificationFailure:
+		return nil, errors.ErrGenericInternalServerError.WithErr(resendErr)
+	default:
+		if apiErr, ok := resendErr.(errors.Error); ok {
+			return nil, apiErr
+		}
+		return nil, errors.ErrGenericInternalServerError.WithErr(resendErr)
+	}
 }
 
 // authSecondStep is the second step of the authentication process. It

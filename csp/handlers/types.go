@@ -40,6 +40,14 @@ type AuthChallengeRequest struct {
 	AuthData  []string          `json:"authData,omitempty"` // reserved for the auth handler
 }
 
+// AuthResendRequest defines the payload for resending the first-step
+// authentication challenge.
+type AuthResendRequest struct {
+	AuthToken internal.HexBytes `json:"authToken" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Email     string            `json:"email,omitempty"`
+	Phone     string            `json:"phone,omitempty"`
+}
+
 // SignRequest defines the payload for the signature request. It includes the
 // tokenR, the authToken, the payload to sign, and the processID (election ID)
 // if applicable. Not all fields are required for all types of signatures.

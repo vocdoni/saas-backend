@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"slices"
 	"testing"
 	"time"
 
@@ -58,6 +59,107 @@ func testCSPAuthenticateWithFields(t *testing.T, bundleID string, authReq *handl
 		// For auth-only cases, return the initial token
 		return authToken
 	}
+}
+
+func TestCSPAuthResend(t *testing.T) {
+	c := qt.New(t)
+
+	setupBundle := func(t *testing.T, twoFaFields db.OrgMemberTwoFaFields) (string, apicommon.OrgMember) {
+		t.Helper()
+		loginToken := testCreateUser(t, "adminpassword123")
+		orgAddress := testCreateOrganization(t, loginToken)
+		if slices.Contains(twoFaFields, db.OrgMemberTwoFaFieldPhone) {
+			setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+		}
+		members := newOrgMembers(1)
+		orgMembers := postOrgMembers(t, loginToken, orgAddress, members...)
+		censusID, _, _ := createGroupBasedCensus(t, loginToken, orgAddress,
+			db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber}, twoFaFields, memberIDs(orgMembers)...)
+		bundleID, _ := postProcessBundle(t, loginToken, censusID, randomProcessID())
+		return bundleID, members[0]
+	}
+
+	t.Run("email", func(t *testing.T) {
+		bundleID, member := setupBundle(t, db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail})
+		authToken := postProcessBundleAuth0(t, bundleID, &handlers.AuthRequest{
+			MemberNumber: member.MemberNumber,
+			Email:        member.Email,
+		})
+		firstCode := extractOTPFromBody(waitForEmail(t, member.Email))
+
+		errResp := postProcessBundleAuth0ResendAndExpectError(t, bundleID, &handlers.AuthResendRequest{
+			AuthToken: authToken,
+			Email:     member.Email,
+		})
+		c.Assert(errResp.Code, qt.Equals, errors.ErrAttemptCoolDownTime.Code)
+
+		time.Sleep(cspNotificationCoolDownTime)
+
+		resentToken := postProcessBundleAuth0Resend(t, bundleID, &handlers.AuthResendRequest{
+			AuthToken: authToken,
+			Email:     member.Email,
+		})
+		c.Assert(resentToken, qt.DeepEquals, authToken)
+		secondCode := extractOTPFromBody(waitForEmail(t, member.Email))
+		c.Assert(secondCode, qt.Equals, firstCode)
+
+		time.Sleep(cspAuthThrottleTime - cspNotificationCoolDownTime)
+
+		rotatedToken := postProcessBundleAuth0Resend(t, bundleID, &handlers.AuthResendRequest{
+			AuthToken: authToken,
+			Email:     member.Email,
+		})
+		c.Assert(rotatedToken, qt.Not(qt.DeepEquals), authToken)
+		thirdCode := extractOTPFromBody(waitForEmail(t, member.Email))
+		c.Assert(thirdCode, qt.Not(qt.Equals), firstCode)
+
+		errResp = requestAndExpectError(t, http.MethodPost, "", &handlers.AuthChallengeRequest{
+			AuthToken: authToken,
+			AuthData:  []string{firstCode},
+		}, processBundleAuthURL(bundleID, "1"))
+		c.Assert(errResp.Code, qt.Equals, errors.ErrUnauthorized.Code)
+
+		postProcessBundleAuth1(t, bundleID, &handlers.AuthChallengeRequest{
+			AuthToken: rotatedToken,
+			AuthData:  []string{thirdCode},
+		})
+
+		errResp = postProcessBundleAuth0ResendAndExpectError(t, bundleID, &handlers.AuthResendRequest{
+			AuthToken: rotatedToken,
+			Email:     member.Email,
+		})
+		c.Assert(errResp.Code, qt.Equals, errors.ErrUnauthorized.Code)
+
+		errResp = postProcessBundleAuth0ResendAndExpectError(t, bundleID, &handlers.AuthResendRequest{
+			AuthToken: authToken,
+			Email:     anotherEmail,
+		})
+		c.Assert(errResp.Code, qt.Equals, errors.ErrUnauthorized.Code)
+	})
+
+	t.Run("phone and wrong bundle", func(t *testing.T) {
+		bundleID, member := setupBundle(t, db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldPhone})
+		otherBundleID, _ := setupBundle(t, db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldPhone})
+
+		authToken := postProcessBundleAuth0(t, bundleID, &handlers.AuthRequest{
+			MemberNumber: member.MemberNumber,
+			Phone:        member.Phone,
+		})
+
+		time.Sleep(cspNotificationCoolDownTime)
+
+		resentToken := postProcessBundleAuth0Resend(t, bundleID, &handlers.AuthResendRequest{
+			AuthToken: authToken,
+			Phone:     member.Phone,
+		})
+		c.Assert(resentToken, qt.DeepEquals, authToken)
+
+		errResp := postProcessBundleAuth0ResendAndExpectError(t, otherBundleID, &handlers.AuthResendRequest{
+			AuthToken: authToken,
+			Phone:     member.Phone,
+		})
+		c.Assert(errResp.Code, qt.Equals, errors.ErrUnauthorized.Code)
+	})
 }
 
 // signAndMarshalTx signs a transaction with the given signer and marshals it to bytes.
