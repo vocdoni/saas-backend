@@ -158,11 +158,12 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		_, memberIDs := setupTestOrgMembersGroupPrerequisites(t, "_list")
 
 		t.Run("EmptyList", func(_ *testing.T) {
-			// Test getting groups for organization with no groups
+			// Test getting groups for organization — members were added above so the
+			// auto group is already present.
 			totalItems, groups, err := testDB.OrganizationMemberGroups(testOrgAddress, 1, 10)
 			c.Assert(err, qt.IsNil)
-			c.Assert(groups, qt.HasLen, 0)
-			c.Assert(totalItems, qt.Equals, int64(0))
+			c.Assert(groups, qt.HasLen, 1) // only the auto group
+			c.Assert(totalItems, qt.Equals, int64(1))
 		})
 
 		t.Run("MultipleGroups", func(_ *testing.T) {
@@ -179,10 +180,11 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			}
 
 			// Test getting all groups for the organization
+			// 3 regular groups + 1 auto group = 4 total
 			totalItems, groups, err := testDB.OrganizationMemberGroups(testOrgAddress, 1, 10)
 			c.Assert(err, qt.IsNil)
-			c.Assert(groups, qt.HasLen, 3)
-			c.Assert(totalItems, qt.Equals, int64(3))
+			c.Assert(groups, qt.HasLen, 4)
+			c.Assert(totalItems, qt.Equals, int64(4))
 
 			// Verify each group has the correct organization address
 			for _, group := range groups {
@@ -247,17 +249,19 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			}
 
 			// Test getting groups for original organization
+			// 2 regular groups + 1 auto group = 3 total
 			_, groups1, err := testDB.OrganizationMemberGroups(testOrgAddress, 1, 10)
 			c.Assert(err, qt.IsNil)
-			c.Assert(groups1, qt.HasLen, 2)
+			c.Assert(groups1, qt.HasLen, 3)
 			for _, group := range groups1 {
 				c.Assert(group.OrgAddress, qt.DeepEquals, testOrgAddress)
 			}
 
 			// Test getting groups for different organization
+			// 3 regular groups + 1 auto group = 4 total
 			_, groups2, err := testDB.OrganizationMemberGroups(testAnotherOrgAddress, 1, 10)
 			c.Assert(err, qt.IsNil)
-			c.Assert(groups2, qt.HasLen, 3)
+			c.Assert(groups2, qt.HasLen, 4)
 			for _, group := range groups2 {
 				c.Assert(group.OrgAddress, qt.DeepEquals, testAnotherOrgAddress)
 			}

@@ -133,7 +133,10 @@ func TestOrganizationGroups(t *testing.T) {
 		groupsResponse := requestAndParse[apicommon.OrganizationMemberGroupsResponse](
 			t, http.MethodGet, adminToken, nil,
 			"organizations", orgAddress.String(), "groups")
-		c.Assert(groupsResponse.Groups, qt.HasLen, 2) // We created two groups in the previous test (Test 1 and Test 6)
+		// Now 3 groups: the auto "All members" group + two regular groups created above
+		c.Assert(groupsResponse.Groups, qt.HasLen, 3)
+		// First group must always be the auto group
+		c.Assert(groupsResponse.Groups[0].IsAutoGroup, qt.IsTrue)
 
 		// Test 2: Try to get groups without authentication
 		requestAndAssertCode(http.StatusUnauthorized,
@@ -151,8 +154,8 @@ func TestOrganizationGroups(t *testing.T) {
 			t, http.MethodGet, adminToken, nil,
 			"organizations", "invalid-address", "groups")
 
-		// Save the first group ID for later tests
-		firstGroupID := groupsResponse.Groups[0].ID
+		// Save the first non-auto group ID for later tests
+		firstGroupID := groupsResponse.Groups[1].ID
 		c.Assert(firstGroupID, qt.Not(qt.Equals), "")
 
 		// Test 5: Get a specific group by ID
@@ -177,7 +180,15 @@ func TestOrganizationGroups(t *testing.T) {
 			"organizations", orgAddress.String(), "groups")
 		c.Assert(len(groupsResponse.Groups) > 0, qt.IsTrue)
 
-		groupID := groupsResponse.Groups[0].ID
+		// Pick the first non-auto group for update/member-manipulation tests.
+		var groupID string
+		for _, g := range groupsResponse.Groups {
+			if !g.IsAutoGroup {
+				groupID = g.ID
+				break
+			}
+		}
+		c.Assert(groupID, qt.Not(qt.Equals), "")
 
 		// Test 1: Update the group's title and description
 		updateRequest := &apicommon.UpdateOrganizationMemberGroupsRequest{

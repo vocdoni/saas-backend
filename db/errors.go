@@ -20,6 +20,10 @@ var (
 	ErrTokenNotVerified = fmt.Errorf("token not verified")
 	// ErrUpdateWouldCreateDuplicates is returned when trying to update an OrgMember
 	ErrUpdateWouldCreateDuplicates = fmt.Errorf("update would create duplicates")
+	// ErrAutoGroupCannotBeDeleted is returned when trying to delete the auto-generated "All members" group
+	ErrAutoGroupCannotBeDeleted = fmt.Errorf("auto-generated group cannot be deleted")
+	// ErrAutoGroupMembersCannotBeModified is returned when trying to manually add/remove members from the auto group
+	ErrAutoGroupMembersCannotBeModified = fmt.Errorf("auto-generated group membership cannot be manually modified")
 )
 
 // errorsAsStrings converts a slice of errors to a slice of strings
