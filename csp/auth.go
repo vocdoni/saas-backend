@@ -47,12 +47,15 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 		return nil, ErrStorageFailure
 	}
 	// check if the last token was created less than the cooldown time
-	if lastToken != nil && time.Since(lastToken.CreatedAt) < c.notificationCoolDownTime {
-		log.Warnw("cooldown time not reached",
-			"userID", uID,
-			"bundleID", bID,
-			"lastToken", lastToken.Token)
-		return nil, errors.ErrAttemptCoolDownTime
+	if lastToken != nil {
+		remainingTime := c.notificationCoolDownTime - time.Since(lastToken.CreatedAt)
+		if remainingTime > 0 {
+			log.Warnw("cooldown time not reached",
+				"userID", uID,
+				"bundleID", bID,
+				"lastToken", lastToken.Token)
+			return nil, errors.ErrAttemptCoolDownTime.WithData(map[string]any{"coolDownTime": remainingTime.Milliseconds()})
+		}
 	}
 	// generate a new token, secret and code from the attempt number
 	token, code, err := c.generateToken(uID, bID)
@@ -73,13 +76,13 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 		"bundleID", bID,
 		"token", token)
 	// compose the notification challenge
-	remainingTime := c.notificationCoolDownTime.String()
+	remainingTimeN := c.notificationCoolDownTime.String()
 	orgInfo := notifications.OrganizationInfo{
 		Address: orgAddress,
 		Name:    orgName,
 		Logo:    orgLogo,
 	}
-	ch, err := notifications.NewNotificationChallenge(ctype, lang, uID, bID, to, code, orgInfo, remainingTime)
+	ch, err := notifications.NewNotificationChallenge(ctype, lang, uID, bID, to, code, orgInfo, remainingTimeN)
 	if err != nil {
 		log.Warnw("error composing notification challenge",
 			"userID", uID,
@@ -98,6 +101,83 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 		return nil, ErrNotificationFailure
 	}
 	return token, nil
+}
+
+func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
+	ctype notifications.ChallengeType, lang string,
+	orgName, orgLogo string, orgAddress common.Address,
+) error {
+	// check the input parameters
+	if len(token) == 0 {
+		return ErrInvalidAuthToken
+	}
+	if to == "" || ctype == "" {
+		return errors.ErrInvalidData.Withf("missing challenge destination or type")
+	}
+
+	// get the user data from the token
+	authTokenData, err := c.Storage.CSPAuth(token)
+	if err != nil {
+		log.Warnw("error getting user data by token",
+			"token", token,
+			"error", err)
+		return ErrInvalidAuthToken
+	}
+
+	remainingTime := c.notificationCoolDownTime - time.Since(authTokenData.CreatedAt)
+	if remainingTime.Seconds() < 0 {
+		log.Warnw("resend requested but cooldown time reached",
+			"userID", authTokenData.UserID,
+			"bundleID", authTokenData.BundleID,
+			"lastToken", authTokenData.Token)
+		return ErrTokenExpired
+	} else if authTokenData.Verified {
+		return errors.ErrUserAlreadyVerified.WithData(map[string]any{"coolDownTime": remainingTime.Seconds()})
+	}
+	// compose the notification challenge
+	remainingTimeN := c.notificationCoolDownTime.String()
+	orgInfo := notifications.OrganizationInfo{
+		Address: orgAddress,
+		Name:    orgName,
+		Logo:    orgLogo,
+	}
+	code, err := c.regenerateTokenCode(authTokenData.UserID, authTokenData.BundleID)
+	if err != nil {
+		log.Warnw("error regenerating token code",
+			"userID", authTokenData.UserID,
+			"bundleID", authTokenData.BundleID,
+			"token", token,
+			"error", err)
+		return ErrChallengeCodeFailure
+	}
+	ch, err := notifications.NewNotificationChallenge(
+		ctype,
+		lang,
+		authTokenData.UserID,
+		authTokenData.BundleID,
+		to,
+		code,
+		orgInfo,
+		remainingTimeN,
+	)
+	if err != nil {
+		log.Warnw("error composing notification challenge",
+			"userID", authTokenData.UserID,
+			"bundleID", authTokenData.BundleID,
+			"token", token,
+			"error", err)
+		return ErrNotificationFailure
+	}
+	// push the challenge to the queue to be sent
+	if err := c.notifyQueue.Push(ch); err != nil {
+		log.Warnw("error pushing notification challenge",
+			"userID", authTokenData.UserID,
+			"bundleID", authTokenData.BundleID,
+			"token", token,
+			"error", err)
+		return ErrNotificationFailure
+	}
+	return nil
 }
 
 // VerifyBundleAuthToken method verifies the authentication token for a user
@@ -167,6 +247,15 @@ func (*CSP) generateToken(uID, bID internal.HexBytes) (
 		return nil, "", ErrInvalidAuthToken
 	}
 	return bToken, code, nil
+}
+
+func (*CSP) regenerateTokenCode(uID, bID internal.HexBytes) (
+	string, error,
+) {
+	secret := otpSecret(uID, bID)
+	otp := gotp.NewDefaultHOTP(secret)
+	code := otp.At(0)
+	return code, nil
 }
 
 // verifySolution method verifies the solution for a user process. It generates

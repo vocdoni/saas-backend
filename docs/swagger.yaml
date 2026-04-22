@@ -1270,6 +1270,17 @@ definitions:
       subscription_status:
         type: string
     type: object
+  handlers.AuthResendRequest:
+    properties:
+      authToken:
+        example: deadbeef
+        format: hex
+        type: string
+      email:
+        type: string
+      phone:
+        type: string
+    type: object
   handlers.AuthResponse:
     properties:
       authToken:
@@ -3718,6 +3729,56 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Authenticate for a process bundle
+      tags:
+      - process
+  /process/bundle/{bundleId}/auth/resend:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Resend the challenge for an existing (non-verified) authentication token.
+        The request must include the auth token and a valid contact method for the bundle census type
+        (email, phone, or either depending on census configuration).
+        The same token is returned if the challenge is queued successfully.
+      parameters:
+      - description: Bundle ID
+        in: path
+        name: bundleId
+        required: true
+        type: string
+      - description: Resend request with auth token and contact data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.AuthResendRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.AuthResponse'
+        "400":
+          description: Malformed URL/body, missing auth token, invalid contact data,
+            or token already verified
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized, invalid/expired token, token not belonging to
+            bundle, or contact mismatch
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error (storage/challenge generation/notification
+            failures)
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Resend authentication challenge for a process bundle
       tags:
       - process
   /process/bundle/{bundleId}/sign:
