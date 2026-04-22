@@ -161,6 +161,131 @@ func (c *CSPHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) 
 	c.handleAuthStep(w, r, step, *bundleID, bundle.Census.ID.Hex())
 }
 
+// BundleAuthResendHandler godoc
+//
+//	@Summary		Resend authentication challenge for a process bundle
+//	@Description	Resend the challenge for an existing (non-verified) authentication token.
+//	@Description	The request must include the auth token and a valid contact method for the bundle census type
+//	@Description	(email, phone, or either depending on census configuration).
+//	@Description	The same token is returned if the challenge is queued successfully.
+//	@Tags			process
+//	@Accept			json
+//	@Produce		json
+//	@Param			bundleId	path		string						true	"Bundle ID"
+//	@Param			request		body		handlers.AuthResendRequest	true	"Resend request with auth token and contact data"
+//	@Success		200			{object}	handlers.AuthResponse
+//	@Failure		400			{object}	errors.Error	"Malformed URL/body, missing auth token, invalid contact data, or token already verified"
+//	@Failure		401			{object}	errors.Error	"Unauthorized, invalid/expired token, token not belonging to bundle, or contact mismatch"
+//	@Failure		404			{object}	errors.Error	"Organization not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error (storage/challenge generation/notification failures)"
+//	@Router			/process/bundle/{bundleId}/auth/resend [post]
+func (c *CSPHandlers) BundleAuthResendHandler(w http.ResponseWriter, r *http.Request) {
+	// Parse the bundle ID
+	bundleID, ok := parseBundleID(w, r)
+	if !ok {
+		return
+	}
+
+	// Get the bundle
+	bundle, ok := c.getBundle(w, *bundleID)
+	if !ok {
+		return
+	}
+
+	// Parse the request body for the auth token and contact information
+	var req AuthResendRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	if len(req.AuthToken) == 0 {
+		errors.ErrInvalidData.Withf("missing auth token").Write(w)
+		return
+	}
+
+	// Load token data and enforce that the token belongs to the bundle in the path.
+	auth, ok := c.getAuthInfo(w, req.AuthToken)
+	if !ok {
+		return
+	}
+	if !bytes.Equal(*bundleID, auth.BundleID) {
+		errors.ErrUnauthorized.Withf("token does not belong to the bundle").Write(w)
+		return
+	}
+
+	lang := apicommon.DefaultLang
+	if l, ok := r.Context().Value(apicommon.LangMetadataKey).(string); ok && l != "" {
+		lang = l
+	}
+
+	org, err := c.mainDB.Organization(bundle.OrgAddress)
+	if err != nil {
+		if err == db.ErrNotFound {
+			errors.ErrOrganizationNotFound.Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
+	oid, err := primitive.ObjectIDFromHex(auth.UserID.String())
+	if err != nil {
+		errors.ErrUnauthorized.WithErr(fmt.Errorf("invalid user ID in token: %w", err)).Write(w)
+		return
+	}
+	member, err := c.mainDB.OrgMember(bundle.OrgAddress, oid.Hex())
+	if err != nil {
+		errors.ErrUserNotFound.WithErr(err).Write(w)
+		return
+	}
+
+	// Determine the contact method and resend the challenge based on the census type
+	// and provided contact information
+	toDestination, challengeType, err := determineContactMethod(
+		&bundle.Census, org,
+		&AuthRequest{Email: req.Email, Phone: req.Phone},
+		member,
+	)
+	if err != nil {
+		if apiErr, ok := err.(errors.Error); ok {
+			apiErr.Write(w)
+		} else {
+			errors.ErrUnauthorized.WithErr(err).Write(w)
+		}
+		return
+	}
+
+	name := DefaultOrgName
+	logo := DefaultOrgLogo
+
+	if n, ok := org.Meta["name"].(string); ok {
+		name = n
+		// if name is found then retrieve the logo as well
+		if l, ok := org.Meta["logo"].(string); ok {
+			logo = l
+		}
+	}
+
+	// Resend the challenge with the same token and new contact information
+	if err := c.csp.ResendChallenge(req.AuthToken, toDestination, challengeType, lang, name, logo, org.Address); err != nil {
+		if apiErr, ok := err.(errors.Error); ok {
+			apiErr.Write(w)
+			return
+		}
+
+		switch err {
+		case csp.ErrInvalidAuthToken, csp.ErrTokenExpired:
+			errors.ErrUnauthorized.WithErr(err).Write(w)
+		case csp.ErrStorageFailure:
+			errors.ErrInternalStorageError.WithErr(err).Write(w)
+		default:
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		}
+		return
+	}
+	apicommon.HTTPWriteJSON(w, &AuthResponse{AuthToken: req.AuthToken})
+}
+
 // parseSignRequest parses the sign request from the request body
 func parseSignRequest(w http.ResponseWriter, r *http.Request) (*SignRequest, bool) {
 	var req SignRequest

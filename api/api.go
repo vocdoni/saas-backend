@@ -296,6 +296,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, processBundleInfoEndpoint, a.processBundleInfoHandler)
 		handle(r, http.MethodPost, processBundleWeightEndpoint, cspHandlers.UserWeightHandler)
 		handle(r, http.MethodPost, processBundleAuthEndpoint, cspHandlers.BundleAuthHandler)
+		handle(r, http.MethodPost, processBundleAuthResendEndpoint, cspHandlers.BundleAuthResendHandler)
 		handle(r, http.MethodPost, processBundleSignEndpoint, cspHandlers.BundleSignHandler)
 		handle(r, http.MethodGet, processBundleMemberEndpoint, a.processBundleParticipantInfoHandler)
 	})

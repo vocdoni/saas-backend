@@ -16,6 +16,8 @@ var (
 	// ErrTooManyAttempts is returned when no more SMS attempts available for a
 	// user.
 	ErrTooManyAttempts = fmt.Errorf("too many SMS attempts")
+	// ErrTokenExpired is returned when the authentication token has expired.
+	ErrTokenExpired = fmt.Errorf("authentication token has expired")
 	// ErrUserUnknown is returned if the userID is not found in the database.
 	ErrUserUnknown = fmt.Errorf("user is unknown")
 	// ErrUserAlreadyVerified is returned if the user is already verified when

@@ -23,6 +23,13 @@ type AuthRequest struct {
 	Phone        string `json:"phone"`
 }
 
+// AuthResendRequest defines the payload for the 2FA resend request.
+type AuthResendRequest struct {
+	AuthToken internal.HexBytes `json:"authToken" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Email     string            `json:"email"`
+	Phone     string            `json:"phone"`
+}
+
 // AuthResponse defines the payload for the authentication response, including
 // the authToken and the signature. It is used during the authentication
 // process for both steps: the challenge request and the challenge validation.
