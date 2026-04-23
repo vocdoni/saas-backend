@@ -376,7 +376,7 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 
 		// if the key is already seen, add to duplicates
 		// and continue to the next member
-		if len(authFields) > 0 {
+		if len(authFields) > 0 || len(twoFaFields) > 0 {
 			key := buildCompositeKey(bm, authFields, twoFaFields)
 			if val, seen := seenKeys[key]; seen {
 				duplicates[m.ID] = struct{}{}
