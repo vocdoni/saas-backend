@@ -205,7 +205,7 @@ func queryProcessOnly(database *db.MongoStorage, client *vocapi.HTTPclient, proc
 	}
 	fmt.Printf("Distinct Voter IDs in Org for Process:\n")
 	for _, orgMember := range orgMembers {
-		fmt.Printf("%s\n", orgMember.ID.Hex())
+		fmt.Printf("%s\n", orgMember.MemberNumber)
 	}
 
 	return nil
