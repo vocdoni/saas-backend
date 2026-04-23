@@ -104,7 +104,7 @@ func (ms *MongoStorage) PopulateGroupCensus(
 		}
 		return 0, fmt.Errorf("error retrieving organization group: %w", err)
 	}
-	if len(group.MemberIDs) == 0 {
+	if !group.IsAutoGroup && len(group.MemberIDs) == 0 {
 		return 0, fmt.Errorf("group has no members")
 	}
 
