@@ -21,16 +21,39 @@ func init() {
 // the first member is added via the application layer, so this migration only
 // needs to back-fill existing data.
 func upCreateAllMembersAutoGroup(ctx context.Context, database *mongo.Database) error {
+	organizations := database.Collection("organizations")
 	orgMembers := database.Collection("orgMembers")
 	orgMemberGroups := database.Collection("orgMemberGroups")
 
-	// Find all distinct orgAddress values that have at least one member.
-	addresses, err := orgMembers.Distinct(ctx, "orgAddress", bson.D{})
+	// Fetch all org addresses from the organizations collection.
+	// This is more efficient than Distinct on orgMembers for large member bases,
+	// since the organizations collection is far smaller.
+	cursor, err := organizations.Find(ctx, bson.D{}, options.Find().SetProjection(bson.M{"_id": 1}))
 	if err != nil {
-		return fmt.Errorf("failed to list distinct org addresses: %w", err)
+		return fmt.Errorf("failed to list organizations: %w", err)
 	}
+	defer cursor.Close(ctx)
 
-	for _, addr := range addresses {
+	for cursor.Next(ctx) {
+		var org struct {
+			ID interface{} `bson:"_id"`
+		}
+		if err := cursor.Decode(&org); err != nil {
+			return fmt.Errorf("failed to decode organization: %w", err)
+		}
+		addr := org.ID
+
+		// Skip orgs that have no members yet.
+		memberCount, err := orgMembers.CountDocuments(ctx,
+			bson.M{"orgAddress": addr},
+			options.Count().SetLimit(1),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to count members for %v: %w", addr, err)
+		}
+		if memberCount == 0 {
+			continue
+		}
 		// Check whether an auto group already exists for this org (idempotent).
 		count, err := orgMemberGroups.CountDocuments(ctx,
 			bson.M{"orgAddress": addr, "isAutoGroup": true},
@@ -61,13 +84,16 @@ func upCreateAllMembersAutoGroup(ctx context.Context, database *mongo.Database) 
 		}
 	}
 
-	return nil
+	return cursor.Err()
 }
 
-// downCreateAllMembersAutoGroup removes all auto groups created by this migration.
+// downCreateAllMembersAutoGroup deletes all auto groups created by this migration.
 // It is safe to run multiple times.
-func downCreateAllMembersAutoGroup(_ context.Context, _ *mongo.Database) error {
-	// We intentionally do not delete auto groups on rollback to avoid data loss:
-	// the groups are harmless and may already be referenced by census records.
+func downCreateAllMembersAutoGroup(ctx context.Context, database *mongo.Database) error {
+	orgMemberGroups := database.Collection("orgMemberGroups")
+	_, err := orgMemberGroups.DeleteMany(ctx, bson.M{"isAutoGroup": true})
+	if err != nil {
+		return fmt.Errorf("failed to delete auto groups: %w", err)
+	}
 	return nil
 }
