@@ -41,20 +41,11 @@ func (ms *MongoStorage) OrganizationMemberGroup(
 		}
 		return nil, err
 	}
-	// For the auto group, populate MemberIDs dynamically from the full orgMembers collection.
-	if group.IsAutoGroup {
-		ids, err := ms.GetAllOrgMemberIDs(orgAddress)
-		if err != nil {
-			return nil, fmt.Errorf("could not populate auto group members: %w", err)
-		}
-		group.MemberIDs = ids
-	}
 	return group, nil
 }
 
 // OrganizationMemberGroups returns the list of an organization's members groups.
-// The auto-generated "All members" group, if it exists, is always prepended as
-// the first element of the first page.
+// The auto-generated "All members" group, if it exists, always sorts first.
 func (ms *MongoStorage) OrganizationMemberGroups(
 	orgAddress common.Address,
 	page, limit int64,
@@ -63,44 +54,32 @@ func (ms *MongoStorage) OrganizationMemberGroups(
 		return 0, nil, ErrInvalidData
 	}
 
-	// Fetch the auto group separately (may not exist yet).
-	autoGroup, err := ms.orgAutoMemberGroup(orgAddress)
-	if err != nil {
-		return 0, nil, fmt.Errorf("could not fetch auto group: %w", err)
-	}
-
-	// Query only non-auto groups for regular pagination.
-	filter := bson.M{"orgAddress": orgAddress, "isAutoGroup": bson.M{"$ne": true}}
-	totalRegular, groups, err := paginatedDocuments[*OrganizationMemberGroup](
-		ms.orgMemberGroups, page, limit, filter, options.Find())
+	filter := bson.M{"orgAddress": orgAddress}
+	// Sort: auto group first (isAutoGroup DESC), then stable by _id ASC.
+	findOpts := options.Find().SetSort(bson.D{
+		{Key: "isAutoGroup", Value: -1},
+		{Key: "_id", Value: 1},
+	})
+	total, groups, err := paginatedDocuments[*OrganizationMemberGroup](
+		ms.orgMemberGroups, page, limit, filter, findOpts)
 	if err != nil {
 		return 0, nil, err
 	}
 
-	if autoGroup == nil {
-		// No auto group exists yet (org has no members).
-		return totalRegular, groups, nil
-	}
-
-	// Populate auto group member count dynamically.
-	memberCount, err := ms.CountOrgMembers(orgAddress)
-	if err != nil {
-		return 0, nil, fmt.Errorf("could not count auto group members: %w", err)
-	}
-	// MemberIDs slice stores the count implicitly; use a slice of the right length so
-	// callers that rely on len(MemberIDs) for display get the correct number without
-	// fetching all IDs.
-	autoGroup.MemberIDs = make([]string, memberCount)
-
-	// Prepend the auto group on the first page only.
-	total := totalRegular + 1
-	if page == 1 {
-		groups = append([]*OrganizationMemberGroup{autoGroup}, groups...)
-		// Trim to limit so callers never receive more items than requested.
-		if int64(len(groups)) > limit {
-			groups = groups[:limit]
+	// For any auto group in the results, populate member count dynamically.
+	for _, g := range groups {
+		if !g.IsAutoGroup {
+			continue
 		}
+		memberCount, err := ms.CountOrgMembers(orgAddress)
+		if err != nil {
+			return 0, nil, fmt.Errorf("could not count auto group members: %w", err)
+		}
+		// Use a slice of the right length so callers that rely on len(MemberIDs)
+		// for display get the correct count without fetching all IDs.
+		g.MemberIDs = make([]string, memberCount)
 	}
+
 	return total, groups, nil
 }
 
@@ -543,34 +522,22 @@ func buildCompositeKey(bm bson.M, authFields OrgMemberAuthFields, twoFaFields Or
 	return strings.Join(keyParts, "|")
 }
 
-// orgAutoMemberGroup fetches the auto-generated "All members" group for an organization,
-// or returns nil if it does not yet exist. It does NOT populate MemberIDs.
-func (ms *MongoStorage) orgAutoMemberGroup(orgAddress common.Address) (*OrganizationMemberGroup, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-
-	filter := bson.M{"orgAddress": orgAddress, "isAutoGroup": true}
-	var group OrganizationMemberGroup
-	if err := ms.orgMemberGroups.FindOne(ctx, filter).Decode(&group); err != nil {
-		if err == mongo.ErrNoDocuments {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return &group, nil
-}
-
 // EnsureAutoMemberGroup creates the auto-generated "All members" group for an organization
 // if it does not already exist. It is idempotent and safe to call after every member addition.
 func (ms *MongoStorage) EnsureAutoMemberGroup(orgAddress common.Address) error {
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return ErrInvalidData
 	}
-	existing, err := ms.orgAutoMemberGroup(orgAddress)
-	if err != nil {
+
+	checkCtx, checkCancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer checkCancel()
+
+	var existing OrganizationMemberGroup
+	err := ms.orgMemberGroups.FindOne(checkCtx, bson.M{"orgAddress": orgAddress, "isAutoGroup": true}).Decode(&existing)
+	if err != nil && err != mongo.ErrNoDocuments {
 		return fmt.Errorf("could not check for existing auto group: %w", err)
 	}
-	if existing != nil {
+	if err == nil {
 		return nil // already exists
 	}
 
