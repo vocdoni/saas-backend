@@ -589,9 +589,6 @@ func (ms *MongoStorage) EnsureAutoMemberGroup(orgAddress common.Address) error {
 		UpdatedAt:   time.Now(),
 	}
 
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
-
 	if _, err := ms.orgMemberGroups.InsertOne(ctx, group); err != nil {
 		return fmt.Errorf("could not create auto group: %w", err)
 	}
@@ -619,9 +616,6 @@ func (ms *MongoStorage) DeleteAutoMemberGroupIfEmpty(orgAddress common.Address) 
 func (ms *MongoStorage) deleteAutoMemberGroup(orgAddress common.Address) error {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-
-	ms.keysLock.Lock()
-	defer ms.keysLock.Unlock()
 
 	filter := bson.M{"orgAddress": orgAddress, "isAutoGroup": true}
 	_, err := ms.orgMemberGroups.DeleteOne(ctx, filter)

@@ -43,10 +43,10 @@ func (ms *MongoStorage) SetOrgMember(salt string, orgMember *OrgMember) (string,
 		return "", err
 	}
 	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
 	filter := bson.M{"_id": member.ID}
 	opts := options.Update().SetUpsert(true)
 	_, err = ms.orgMembers.UpdateOne(ctx, filter, updateDoc, opts)
-	ms.keysLock.Unlock()
 	if err != nil {
 		return "", err
 	}
@@ -78,6 +78,7 @@ func (ms *MongoStorage) DelOrgMember(id string) error {
 	}
 
 	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
@@ -85,7 +86,6 @@ func (ms *MongoStorage) DelOrgMember(id string) error {
 	// delete the orgMember from the database using the ID
 	filter := bson.M{"_id": objID}
 	_, err = ms.orgMembers.DeleteOne(ctx, filter)
-	ms.keysLock.Unlock()
 	if err != nil {
 		return err
 	}
@@ -340,9 +340,11 @@ func (ms *MongoStorage) addOrgMemberBatches(
 
 	// Ensure the auto group exists now that members have been added.
 	if job.Added > 0 {
+		ms.keysLock.Lock()
 		if err := ms.EnsureAutoMemberGroup(org.Address); err != nil {
 			log.Warnw("could not ensure auto member group after bulk add", "error", err)
 		}
+		ms.keysLock.Unlock()
 	}
 }
 
@@ -379,7 +381,7 @@ func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, 
 	defer cancel()
 
 	ms.keysLock.Lock()
-	// Lock is released explicitly below, before calling EnsureAutoMemberGroup.
+	defer ms.keysLock.Unlock()
 
 	// if this member exists already, check the orgAddress is not being changed
 	orgMemberInDB := &OrgMember{}
@@ -388,33 +390,28 @@ func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, 
 			member.Phone = orgMemberInDB.Phone
 		}
 		if orgMemberInDB.OrgAddress != org.Address {
-			ms.keysLock.Unlock()
 			return primitive.NilObjectID, fmt.Errorf("modifying orgAddress is not allowed")
 		}
 	}
 
 	preparedMember, validationErrors := prepareOrgMember(org, member, salt, time.Now())
 	if len(validationErrors) > 0 {
-		ms.keysLock.Unlock()
 		return primitive.NilObjectID, fmt.Errorf("errors: %s", errorsAsStrings(validationErrors))
 	}
 
 	// Update the census participants first, to bail out early in case this would create any duplicates conflict
 	if err := ms.updateCensusParticipantsForMember(ctx, preparedMember); err != nil {
-		ms.keysLock.Unlock()
 		return primitive.NilObjectID, fmt.Errorf("failed to update census participants: %w", err)
 	}
 
 	updateDoc, err := dynamicUpdateDocument(preparedMember, []string{"weight"})
 	if err != nil {
-		ms.keysLock.Unlock()
 		return primitive.NilObjectID, err
 	}
 
 	filter := bson.M{"_id": preparedMember.ID}
 	opts := options.Update().SetUpsert(true)
 	_, err = ms.orgMembers.UpdateOne(ctx, filter, updateDoc, opts)
-	ms.keysLock.Unlock()
 	if err != nil {
 		return primitive.NilObjectID, fmt.Errorf("failed to upsert org member: %w", err)
 	}
@@ -562,6 +559,9 @@ func (ms *MongoStorage) DeleteOrgMembers(orgAddress common.Address, ids []string
 		},
 	}
 
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+
 	result, err := ms.orgMembers.DeleteMany(ctx, filter)
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete orgMembers: %w", err)
@@ -622,10 +622,10 @@ func (ms *MongoStorage) DeleteAllOrgMembers(orgAddress common.Address) (int, err
 	}
 
 	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
 
 	result, err := ms.orgMembers.DeleteMany(ctx, filter)
 	if err != nil {
-		ms.keysLock.Unlock()
 		return 0, fmt.Errorf("failed to delete all orgMembers: %w", err)
 	}
 
@@ -641,7 +641,6 @@ func (ms *MongoStorage) DeleteAllOrgMembers(orgAddress common.Address) (int, err
 	}
 
 	_, err = ms.orgMemberGroups.UpdateMany(ctx, groupFilter, groupUpdate)
-	ms.keysLock.Unlock()
 	if err != nil {
 		return 0, fmt.Errorf("failed to update groups after deleting all orgMembers: %w", err)
 	}
