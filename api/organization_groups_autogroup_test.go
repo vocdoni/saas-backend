@@ -81,11 +81,11 @@ func TestAutoGroupAlwaysMirrorsFullMemberbase(t *testing.T) {
 	autoGroupID := groupsResp.Groups[0].ID
 	c.Assert(groupsResp.Groups[0].MembersCount, qt.Equals, 5)
 
-	// Fetch the single group details — MemberIDs must contain all 5.
+	// Fetch the single group details — MembersCount must reflect all 5.
 	groupDetail := requestAndParse[apicommon.OrganizationMemberGroupInfo](
 		t, http.MethodGet, adminToken, nil,
 		"organizations", orgAddress.String(), "groups", autoGroupID)
-	c.Assert(groupDetail.MemberIDs, qt.HasLen, 5)
+	c.Assert(groupDetail.MembersCount, qt.Equals, 5)
 
 	// Add 2 more members.
 	postOrgMembers(t, adminToken, orgAddress, newOrgMembers(2)...)

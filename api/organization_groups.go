@@ -135,16 +135,29 @@ func (a *API) organizationMemberGroupHandler(w http.ResponseWriter, r *http.Requ
 		errors.ErrGenericInternalServerError.Withf("could not get organization member group: %v", err).Write(w)
 		return
 	}
-	apicommon.HTTPWriteJSON(w, &apicommon.OrganizationMemberGroupInfo{
+
+	info := &apicommon.OrganizationMemberGroupInfo{
 		ID:          group.ID.Hex(),
 		Title:       group.Title,
 		Description: group.Description,
-		MemberIDs:   group.MemberIDs,
 		CensusIDs:   group.CensusIDs,
 		CreatedAt:   group.CreatedAt,
 		UpdatedAt:   group.UpdatedAt,
 		IsAutoGroup: group.IsAutoGroup,
-	})
+	}
+	// Auto groups store no member IDs in the document; expose the live count
+	// instead, consistent with the groups-listing response.
+	if group.IsAutoGroup {
+		count, err := a.db.CountOrgMembers(org.Address)
+		if err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+		info.MembersCount = int(count)
+	} else {
+		info.MemberIDs = group.MemberIDs
+	}
+	apicommon.HTTPWriteJSON(w, info)
 }
 
 // createOrganizationMemberGroupHandler godoc
