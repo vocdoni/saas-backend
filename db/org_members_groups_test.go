@@ -1053,6 +1053,93 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		c.Assert(results, qt.Not(qt.IsNil))
 		c.Assert(results.Duplicates, qt.HasLen, 0, qt.Commentf("Should NOT detect duplicates when 2FA fields make members unique"))
 		c.Assert(results.Members, qt.HasLen, 2, qt.Commentf("Should include both members as valid"))
+
+		// Test 13: Regression — duplicate detection must fire when ONLY twoFa
+		// fields are configured (authFields is empty).
+		//
+		// Before the fix the guard was `if len(authFields) > 0`, so the entire
+		// duplicate-detection block was skipped whenever authFields was empty,
+		// even if twoFaFields contained the only meaningful identity fields.
+		// This caused the census participant bulk-write to fail later with
+		// E11000 duplicate-key errors instead of surfacing a clean validation
+		// error here.
+		//
+		// Phone uniqueness is not enforced by the orgMembers unique index
+		// (the index uses the field name "hashedPhone" while data is stored
+		// under "phone"), so two members with the same phone but different
+		// emails can coexist — making phone the ideal field for this test.
+		regPhone1 := &OrgMember{
+			OrgAddress:     testOrgAddress,
+			Email:          "regression_dup1@test.com",
+			PlaintextPhone: "+34611222001", // same phone as regression_dup2
+			MemberNumber:   "reg_dup_001",
+			Name:           "Regression",
+			Surname:        "DupOne",
+			Password:       testPassword,
+		}
+		regPhone1ID, err := testDB.SetOrgMember(testSalt, regPhone1)
+		c.Assert(err, qt.IsNil)
+
+		regPhone2 := &OrgMember{
+			OrgAddress:     testOrgAddress,
+			Email:          "regression_dup2@test.com",
+			PlaintextPhone: "+34611222001", // same phone as regression_dup1
+			MemberNumber:   "reg_dup_002",
+			Name:           "Regression",
+			Surname:        "DupTwo",
+			Password:       testPassword,
+		}
+		regPhone2ID, err := testDB.SetOrgMember(testSalt, regPhone2)
+		c.Assert(err, qt.IsNil)
+
+		regPhoneUnique := &OrgMember{
+			OrgAddress:     testOrgAddress,
+			Email:          "regression_unique@test.com",
+			PlaintextPhone: "+34611222002", // unique phone
+			MemberNumber:   "reg_unique_003",
+			Name:           "Regression",
+			Surname:        "Unique",
+			Password:       testPassword,
+		}
+		regUniqueID, err := testDB.SetOrgMember(testSalt, regPhoneUnique)
+		c.Assert(err, qt.IsNil)
+
+		regGroup := &OrganizationMemberGroup{
+			OrgAddress:  testOrgAddress,
+			Title:       "Regression TwoFa-Only Dup Group",
+			Description: "Group for twoFa-only duplicate detection regression",
+			MemberIDs:   []string{regPhone1ID, regPhone2ID, regUniqueID},
+		}
+		regGroupID, err := testDB.CreateOrganizationMemberGroup(regGroup)
+		c.Assert(err, qt.IsNil)
+
+		// authFields intentionally empty — only twoFa fields provided.
+		results, err = testDB.CheckGroupMembersFields(
+			testOrgAddress,
+			regGroupID,
+			OrgMemberAuthFields{},
+			OrgMemberTwoFaFields{OrgMemberTwoFaFieldPhone},
+		)
+		c.Assert(err, qt.IsNil)
+		c.Assert(results, qt.Not(qt.IsNil))
+		// Both members sharing the same phone must be flagged as duplicates.
+		c.Assert(results.Duplicates, qt.HasLen, 2)
+		dupHex := make([]string, len(results.Duplicates))
+		for i, id := range results.Duplicates {
+			dupHex[i] = id.Hex()
+		}
+		c.Assert(contains(dupHex, regPhone1ID), qt.IsTrue)
+		c.Assert(contains(dupHex, regPhone2ID), qt.IsTrue)
+		// The member with the unique phone must not be flagged as a duplicate.
+		c.Assert(contains(dupHex, regUniqueID), qt.IsFalse)
+		// The second-seen duplicate must not appear in Members at all.
+		memberHex := make([]string, len(results.Members))
+		for i, id := range results.Members {
+			memberHex[i] = id.Hex()
+		}
+		c.Assert(contains(memberHex, regUniqueID), qt.IsTrue)
+		c.Assert(contains(memberHex, regPhone2ID), qt.IsFalse)
+		c.Assert(results.MissingData, qt.HasLen, 0)
 	})
 
 	// Test DeleteOrgMembers with automatic group cleanup
