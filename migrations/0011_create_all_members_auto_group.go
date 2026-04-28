@@ -32,11 +32,13 @@ func upCreateAllMembersAutoGroup(ctx context.Context, database *mongo.Database) 
 	if err != nil {
 		return fmt.Errorf("failed to list organizations: %w", err)
 	}
-	defer cursor.Close(ctx)
+	defer func() {
+		_ = cursor.Close(ctx)
+	}()
 
 	for cursor.Next(ctx) {
 		var org struct {
-			ID interface{} `bson:"_id"`
+			ID any `bson:"_id"`
 		}
 		if err := cursor.Decode(&org); err != nil {
 			return fmt.Errorf("failed to decode organization: %w", err)
