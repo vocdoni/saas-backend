@@ -158,11 +158,12 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		_, memberIDs := setupTestOrgMembersGroupPrerequisites(t, "_list")
 
 		t.Run("EmptyList", func(_ *testing.T) {
-			// Test getting groups for organization with no groups
+			// Test getting groups for organization — members were added above so the
+			// auto group is already present.
 			totalItems, groups, err := testDB.OrganizationMemberGroups(testOrgAddress, 1, 10)
 			c.Assert(err, qt.IsNil)
-			c.Assert(groups, qt.HasLen, 0)
-			c.Assert(totalItems, qt.Equals, int64(0))
+			c.Assert(groups, qt.HasLen, 1) // only the auto group
+			c.Assert(totalItems, qt.Equals, int64(1))
 		})
 
 		t.Run("MultipleGroups", func(_ *testing.T) {
@@ -179,10 +180,11 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			}
 
 			// Test getting all groups for the organization
+			// 3 regular groups + 1 auto group = 4 total
 			totalItems, groups, err := testDB.OrganizationMemberGroups(testOrgAddress, 1, 10)
 			c.Assert(err, qt.IsNil)
-			c.Assert(groups, qt.HasLen, 3)
-			c.Assert(totalItems, qt.Equals, int64(3))
+			c.Assert(groups, qt.HasLen, 4)
+			c.Assert(totalItems, qt.Equals, int64(4))
 
 			// Verify each group has the correct organization address
 			for _, group := range groups {
@@ -247,17 +249,19 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			}
 
 			// Test getting groups for original organization
+			// 2 regular groups + 1 auto group = 3 total
 			_, groups1, err := testDB.OrganizationMemberGroups(testOrgAddress, 1, 10)
 			c.Assert(err, qt.IsNil)
-			c.Assert(groups1, qt.HasLen, 2)
+			c.Assert(groups1, qt.HasLen, 3)
 			for _, group := range groups1 {
 				c.Assert(group.OrgAddress, qt.DeepEquals, testOrgAddress)
 			}
 
 			// Test getting groups for different organization
+			// 3 regular groups + 1 auto group = 4 total
 			_, groups2, err := testDB.OrganizationMemberGroups(testAnotherOrgAddress, 1, 10)
 			c.Assert(err, qt.IsNil)
-			c.Assert(groups2, qt.HasLen, 3)
+			c.Assert(groups2, qt.HasLen, 4)
 			for _, group := range groups2 {
 				c.Assert(group.OrgAddress, qt.DeepEquals, testAnotherOrgAddress)
 			}
@@ -1049,6 +1053,93 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		c.Assert(results, qt.Not(qt.IsNil))
 		c.Assert(results.Duplicates, qt.HasLen, 0, qt.Commentf("Should NOT detect duplicates when 2FA fields make members unique"))
 		c.Assert(results.Members, qt.HasLen, 2, qt.Commentf("Should include both members as valid"))
+
+		// Test 13: Regression — duplicate detection must fire when ONLY twoFa
+		// fields are configured (authFields is empty).
+		//
+		// Before the fix the guard was `if len(authFields) > 0`, so the entire
+		// duplicate-detection block was skipped whenever authFields was empty,
+		// even if twoFaFields contained the only meaningful identity fields.
+		// This caused the census participant bulk-write to fail later with
+		// E11000 duplicate-key errors instead of surfacing a clean validation
+		// error here.
+		//
+		// Phone uniqueness is not enforced by the orgMembers unique index
+		// (the index uses the field name "hashedPhone" while data is stored
+		// under "phone"), so two members with the same phone but different
+		// emails can coexist — making phone the ideal field for this test.
+		regPhone1 := &OrgMember{
+			OrgAddress:     testOrgAddress,
+			Email:          "regression_dup1@test.com",
+			PlaintextPhone: "+34611222001", // same phone as regression_dup2
+			MemberNumber:   "reg_dup_001",
+			Name:           "Regression",
+			Surname:        "DupOne",
+			Password:       testPassword,
+		}
+		regPhone1ID, err := testDB.SetOrgMember(testSalt, regPhone1)
+		c.Assert(err, qt.IsNil)
+
+		regPhone2 := &OrgMember{
+			OrgAddress:     testOrgAddress,
+			Email:          "regression_dup2@test.com",
+			PlaintextPhone: "+34611222001", // same phone as regression_dup1
+			MemberNumber:   "reg_dup_002",
+			Name:           "Regression",
+			Surname:        "DupTwo",
+			Password:       testPassword,
+		}
+		regPhone2ID, err := testDB.SetOrgMember(testSalt, regPhone2)
+		c.Assert(err, qt.IsNil)
+
+		regPhoneUnique := &OrgMember{
+			OrgAddress:     testOrgAddress,
+			Email:          "regression_unique@test.com",
+			PlaintextPhone: "+34611222002", // unique phone
+			MemberNumber:   "reg_unique_003",
+			Name:           "Regression",
+			Surname:        "Unique",
+			Password:       testPassword,
+		}
+		regUniqueID, err := testDB.SetOrgMember(testSalt, regPhoneUnique)
+		c.Assert(err, qt.IsNil)
+
+		regGroup := &OrganizationMemberGroup{
+			OrgAddress:  testOrgAddress,
+			Title:       "Regression TwoFa-Only Dup Group",
+			Description: "Group for twoFa-only duplicate detection regression",
+			MemberIDs:   []string{regPhone1ID, regPhone2ID, regUniqueID},
+		}
+		regGroupID, err := testDB.CreateOrganizationMemberGroup(regGroup)
+		c.Assert(err, qt.IsNil)
+
+		// authFields intentionally empty — only twoFa fields provided.
+		results, err = testDB.CheckGroupMembersFields(
+			testOrgAddress,
+			regGroupID,
+			OrgMemberAuthFields{},
+			OrgMemberTwoFaFields{OrgMemberTwoFaFieldPhone},
+		)
+		c.Assert(err, qt.IsNil)
+		c.Assert(results, qt.Not(qt.IsNil))
+		// Both members sharing the same phone must be flagged as duplicates.
+		c.Assert(results.Duplicates, qt.HasLen, 2)
+		dupHex := make([]string, len(results.Duplicates))
+		for i, id := range results.Duplicates {
+			dupHex[i] = id.Hex()
+		}
+		c.Assert(contains(dupHex, regPhone1ID), qt.IsTrue)
+		c.Assert(contains(dupHex, regPhone2ID), qt.IsTrue)
+		// The member with the unique phone must not be flagged as a duplicate.
+		c.Assert(contains(dupHex, regUniqueID), qt.IsFalse)
+		// The second-seen duplicate must not appear in Members at all.
+		memberHex := make([]string, len(results.Members))
+		for i, id := range results.Members {
+			memberHex[i] = id.Hex()
+		}
+		c.Assert(contains(memberHex, regUniqueID), qt.IsTrue)
+		c.Assert(contains(memberHex, regPhone2ID), qt.IsFalse)
+		c.Assert(results.MissingData, qt.HasLen, 0)
 	})
 
 	// Test DeleteOrgMembers with automatic group cleanup

@@ -78,6 +78,7 @@ func (a *API) organizationMemberGroupsHandler(w http.ResponseWriter, r *http.Req
 			UpdatedAt:    group.UpdatedAt,
 			CensusIDs:    group.CensusIDs,
 			MembersCount: len(group.MemberIDs),
+			IsAutoGroup:  group.IsAutoGroup,
 		})
 	}
 	apicommon.HTTPWriteJSON(w, memberGroups)
@@ -134,15 +135,29 @@ func (a *API) organizationMemberGroupHandler(w http.ResponseWriter, r *http.Requ
 		errors.ErrGenericInternalServerError.Withf("could not get organization member group: %v", err).Write(w)
 		return
 	}
-	apicommon.HTTPWriteJSON(w, &apicommon.OrganizationMemberGroupInfo{
+
+	info := &apicommon.OrganizationMemberGroupInfo{
 		ID:          group.ID.Hex(),
 		Title:       group.Title,
 		Description: group.Description,
-		MemberIDs:   group.MemberIDs,
 		CensusIDs:   group.CensusIDs,
 		CreatedAt:   group.CreatedAt,
 		UpdatedAt:   group.UpdatedAt,
-	})
+		IsAutoGroup: group.IsAutoGroup,
+	}
+	// Auto groups store no member IDs in the document; expose the live count
+	// instead, consistent with the groups-listing response.
+	if group.IsAutoGroup {
+		count, err := a.db.CountOrgMembers(org.Address)
+		if err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+		info.MembersCount = int(count)
+	} else {
+		info.MemberIDs = group.MemberIDs
+	}
+	apicommon.HTTPWriteJSON(w, info)
 }
 
 // createOrganizationMemberGroupHandler godoc
@@ -287,11 +302,14 @@ func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 		toUpdate.RemoveMembers,
 	)
 	if err != nil {
-		if err == db.ErrNotFound {
+		switch err {
+		case db.ErrNotFound, db.ErrInvalidData:
 			errors.ErrInvalidData.Withf("group not found").Write(w)
-			return
+		case db.ErrAutoGroupMembersCannotBeModified:
+			errors.ErrAutoGroupMembersCannotBeModified.Write(w)
+		default:
+			errors.ErrGenericInternalServerError.Withf("could not update organization member group: %v", err).Write(w)
 		}
-		errors.ErrGenericInternalServerError.Withf("could not update organization member group: %v", err).Write(w)
 		return
 	}
 	apicommon.HTTPWriteOK(w)
@@ -338,11 +356,14 @@ func (a *API) deleteOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 		return
 	}
 	if err := a.db.DeleteOrganizationMemberGroup(groupID, org.Address); err != nil {
-		if err == db.ErrNotFound {
+		switch err {
+		case db.ErrNotFound:
 			errors.ErrInvalidData.Withf("group not found").Write(w)
-			return
+		case db.ErrAutoGroupCannotBeDeleted:
+			errors.ErrAutoGroupCannotBeDeleted.Write(w)
+		default:
+			errors.ErrGenericInternalServerError.Withf("could not delete organization member group: %v", err).Write(w)
 		}
-		errors.ErrGenericInternalServerError.Withf("could not delete organization member group: %v", err).Write(w)
 		return
 	}
 	apicommon.HTTPWriteOK(w)

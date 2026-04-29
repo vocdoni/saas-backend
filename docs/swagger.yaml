@@ -542,6 +542,11 @@ definitions:
       id:
         description: Unique identifier for the group
         type: string
+      isAutoGroup:
+        description: |-
+          IsAutoGroup indicates this is the auto-generated "All members" group.
+          It cannot be deleted and its membership cannot be manually modified.
+        type: boolean
       memberIds:
         description: List of member IDs in the group
         items:

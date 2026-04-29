@@ -369,6 +369,13 @@ type OrgMemberAggregationResults struct {
 	MissingData []primitive.ObjectID `json:"missingData" bson:"missingData"`
 }
 
+const (
+	// AutoGroupTitle is the title of the auto-generated group that always contains every member.
+	AutoGroupTitle = "All members"
+	// AutoGroupDescription is the description shown to users for the auto-generated group.
+	AutoGroupDescription = "This group is automatically generated and always contains every member of your member base."
+)
+
 // An Organization members' group is a precursor of a census, and is simply a
 // collection of members that are grouped together for a specific purpose
 type OrganizationMemberGroup struct {
@@ -376,10 +383,15 @@ type OrganizationMemberGroup struct {
 	OrgAddress  common.Address     `json:"orgAddress" bson:"orgAddress"`
 	Title       string             `json:"title" bson:"title"`
 	Description string             `json:"description" bson:"description"`
-	MemberIDs   []string           `json:"memberIds" bson:"memberIds"`
-	CreatedAt   time.Time          `json:"createdAt" bson:"createdAt"`
-	UpdatedAt   time.Time          `json:"updatedAt" bson:"updatedAt"`
-	CensusIDs   []string           `json:"censusIds" bson:"censusIds"`
+	// MemberIDs is intentionally empty for auto groups (IsAutoGroup == true).
+	// Their membership is derived dynamically from the full orgMembers collection.
+	MemberIDs []string  `json:"memberIds" bson:"memberIds"`
+	CreatedAt time.Time `json:"createdAt" bson:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt" bson:"updatedAt"`
+	CensusIDs []string  `json:"censusIds" bson:"censusIds"`
+	// IsAutoGroup marks this group as the auto-generated "All members" group.
+	// Auto groups cannot be deleted and their membership cannot be manually modified.
+	IsAutoGroup bool `json:"isAutoGroup" bson:"isAutoGroup"`
 }
 
 // Relates an OrgMember to a Census

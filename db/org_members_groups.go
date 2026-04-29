@@ -44,7 +44,8 @@ func (ms *MongoStorage) OrganizationMemberGroup(
 	return group, nil
 }
 
-// OrganizationMemberGroups returns the list of an organization's members groups
+// OrganizationMemberGroups returns the list of an organization's members groups.
+// The auto-generated "All members" group, if it exists, always sorts first.
 func (ms *MongoStorage) OrganizationMemberGroups(
 	orgAddress common.Address,
 	page, limit int64,
@@ -54,8 +55,32 @@ func (ms *MongoStorage) OrganizationMemberGroups(
 	}
 
 	filter := bson.M{"orgAddress": orgAddress}
+	// Sort: auto group first (isAutoGroup DESC), then stable by _id ASC.
+	findOpts := options.Find().SetSort(bson.D{
+		{Key: "isAutoGroup", Value: -1},
+		{Key: "_id", Value: 1},
+	})
+	total, groups, err := paginatedDocuments[*OrganizationMemberGroup](
+		ms.orgMemberGroups, page, limit, filter, findOpts)
+	if err != nil {
+		return 0, nil, err
+	}
 
-	return paginatedDocuments[*OrganizationMemberGroup](ms.orgMemberGroups, page, limit, filter, options.Find())
+	// For any auto group in the results, populate member count dynamically.
+	for _, g := range groups {
+		if !g.IsAutoGroup {
+			continue
+		}
+		memberCount, err := ms.CountOrgMembers(orgAddress)
+		if err != nil {
+			return 0, nil, fmt.Errorf("could not count auto group members: %w", err)
+		}
+		// Use a slice of the right length so callers that rely on len(MemberIDs)
+		// for display get the correct count without fetching all IDs.
+		g.MemberIDs = make([]string, memberCount)
+	}
+
+	return total, groups, nil
 }
 
 // CreateOrganizationMemberGroup Creates an organization member group
@@ -98,8 +123,9 @@ func (ms *MongoStorage) CreateOrganizationMemberGroup(group *OrganizationMemberG
 }
 
 // UpdateOrganizationMemberGroup updates an organization members group by adding
-// and/or removing members. If a member exists in both lists, it will be removed
-// TODO allow to update the rest of the fields as well. Maybe a different function?
+// and/or removing members. If a member exists in both lists, it will be removed.
+// For the auto-generated group, only title and description can be updated;
+// manual membership changes are not allowed and return ErrAutoGroupMembersCannotBeModified.
 func (ms *MongoStorage) UpdateOrganizationMemberGroup(
 	groupID string, orgAddress common.Address,
 	title, description string, addedMembers, removedMembers []string,
@@ -113,6 +139,10 @@ func (ms *MongoStorage) UpdateOrganizationMemberGroup(
 			return ErrInvalidData
 		}
 		return fmt.Errorf("could not retrieve organization members group: %w", err)
+	}
+	// Auto groups do not allow manual member manipulation.
+	if group.IsAutoGroup && (len(addedMembers) > 0 || len(removedMembers) > 0) {
+		return ErrAutoGroupMembersCannotBeModified
 	}
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -214,10 +244,23 @@ func (ms *MongoStorage) addOrganizationMemberGroupCensus(
 	return err
 }
 
-// DeleteOrganizationMemberGroup deletes an organization member group by its ID
+// DeleteOrganizationMemberGroup deletes an organization member group by its ID.
+// Returns ErrAutoGroupCannotBeDeleted if the group is the auto-generated "All members" group.
 func (ms *MongoStorage) DeleteOrganizationMemberGroup(groupID string, orgAddress common.Address) error {
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return ErrInvalidData
+	}
+	// Prevent deletion of the auto group.
+	group, err := ms.OrganizationMemberGroup(groupID, orgAddress)
+	if err != nil {
+		if err == ErrNotFound {
+			// Preserve original behaviour: silently succeed when group doesn't exist.
+			return nil
+		}
+		return fmt.Errorf("could not retrieve group: %w", err)
+	}
+	if group.IsAutoGroup {
+		return ErrAutoGroupCannotBeDeleted
 	}
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -253,7 +296,10 @@ func (ms *MongoStorage) ListOrganizationMemberGroup(
 	if err != nil {
 		return 0, nil, fmt.Errorf("could not retrieve organization members group: %w", err)
 	}
-
+	// For auto groups, all org members are included; query directly without an ID filter.
+	if group.IsAutoGroup {
+		return ms.OrgMembers(orgAddress, page, limit, "")
+	}
 	return ms.orgMembersByIDs(
 		orgAddress,
 		group.MemberIDs,
@@ -330,7 +376,7 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 
 		// if the key is already seen, add to duplicates
 		// and continue to the next member
-		if len(authFields) > 0 {
+		if len(authFields) > 0 || len(twoFaFields) > 0 {
 			key := buildCompositeKey(bm, authFields, twoFaFields)
 			if val, seen := seenKeys[key]; seen {
 				duplicates[m.ID] = struct{}{}
@@ -375,20 +421,24 @@ func (ms *MongoStorage) getGroupMembersFields(
 			}
 			return nil, fmt.Errorf("failed to fetch group %s for organization %s: %w", groupID, orgAddress, err)
 		}
-		// Check if the group has members
-		if len(group.MemberIDs) == 0 {
-			return nil, fmt.Errorf("no members in group %s for organization %s", groupID, orgAddress)
-		}
-		objectIDs := make([]primitive.ObjectID, len(group.MemberIDs))
-		for i, id := range group.MemberIDs {
-			objID, err := primitive.ObjectIDFromHex(id)
-			if err != nil {
-				return nil, fmt.Errorf("invalid member ID %s: %w", id, ErrInvalidData)
+		// Auto groups always contain every member; no extra ID filter is needed.
+		// For regular groups, restrict to the stored member IDs.
+		if !group.IsAutoGroup {
+			// Check if the group has members
+			if len(group.MemberIDs) == 0 {
+				return nil, fmt.Errorf("no members in group %s for organization %s", groupID, orgAddress)
 			}
-			objectIDs[i] = objID
-		}
-		if len(objectIDs) > 0 {
-			filter = append(filter, bson.E{Key: "_id", Value: bson.M{"$in": objectIDs}})
+			objectIDs := make([]primitive.ObjectID, len(group.MemberIDs))
+			for i, id := range group.MemberIDs {
+				objID, err := primitive.ObjectIDFromHex(id)
+				if err != nil {
+					return nil, fmt.Errorf("invalid member ID %s: %w", id, ErrInvalidData)
+				}
+				objectIDs[i] = objID
+			}
+			if len(objectIDs) > 0 {
+				filter = append(filter, bson.E{Key: "_id", Value: bson.M{"$in": objectIDs}})
+			}
 		}
 	}
 
@@ -470,4 +520,71 @@ func buildCompositeKey(bm bson.M, authFields OrgMemberAuthFields, twoFaFields Or
 	}
 
 	return strings.Join(keyParts, "|")
+}
+
+// EnsureAutoMemberGroup creates the auto-generated "All members" group for an organization
+// if it does not already exist. It is idempotent and safe to call after every member addition.
+func (ms *MongoStorage) EnsureAutoMemberGroup(orgAddress common.Address) error {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return ErrInvalidData
+	}
+
+	checkCtx, checkCancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer checkCancel()
+
+	var existing OrganizationMemberGroup
+	err := ms.orgMemberGroups.FindOne(checkCtx, bson.M{"orgAddress": orgAddress, "isAutoGroup": true}).Decode(&existing)
+	if err != nil && err != mongo.ErrNoDocuments {
+		return fmt.Errorf("could not check for existing auto group: %w", err)
+	}
+	if err == nil {
+		return nil // already exists
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	group := OrganizationMemberGroup{
+		ID:          primitive.NewObjectID(),
+		OrgAddress:  orgAddress,
+		Title:       AutoGroupTitle,
+		Description: AutoGroupDescription,
+		MemberIDs:   []string{},
+		CensusIDs:   []string{},
+		IsAutoGroup: true,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+
+	if _, err := ms.orgMemberGroups.InsertOne(ctx, group); err != nil {
+		return fmt.Errorf("could not create auto group: %w", err)
+	}
+	return nil
+}
+
+// DeleteAutoMemberGroupIfEmpty deletes the auto-generated "All members" group when the
+// organization has no more members. Should be called after any member deletion.
+func (ms *MongoStorage) DeleteAutoMemberGroupIfEmpty(orgAddress common.Address) error {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return ErrInvalidData
+	}
+	count, err := ms.CountOrgMembers(orgAddress)
+	if err != nil {
+		return fmt.Errorf("could not count org members: %w", err)
+	}
+	if count > 0 {
+		return nil // still has members, keep the auto group
+	}
+	return ms.deleteAutoMemberGroup(orgAddress)
+}
+
+// deleteAutoMemberGroup unconditionally removes the auto-generated "All members" group.
+// Used when all members have been deleted at once.
+func (ms *MongoStorage) deleteAutoMemberGroup(orgAddress common.Address) error {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	filter := bson.M{"orgAddress": orgAddress, "isAutoGroup": true}
+	_, err := ms.orgMemberGroups.DeleteOne(ctx, filter)
+	return err
 }

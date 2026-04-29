@@ -223,6 +223,9 @@ type OrganizationMemberGroupInfo struct {
 	CensusIDs []string `json:"censusIds,omitempty" bson:"censusIds"`
 	// Count of members in the group
 	MembersCount int `json:"membersCount,omitempty" bson:"membersCount"`
+	// IsAutoGroup indicates this is the auto-generated "All members" group.
+	// It cannot be deleted and its membership cannot be manually modified.
+	IsAutoGroup bool `json:"isAutoGroup,omitempty" bson:"isAutoGroup"`
 }
 
 // OrganizationMemberGroupsResponse represents the response for listing organization member groups.

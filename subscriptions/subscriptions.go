@@ -275,12 +275,21 @@ func (p *Subscriptions) OrgCanPublishGroupCensus(census *db.Census, groupID stri
 		return errors.ErrGroupNotFound.WithErr(err)
 	}
 
+	memberCount := len(group.MemberIDs)
+	if group.IsAutoGroup {
+		count, err := p.db.CountOrgMembers(org.Address)
+		if err != nil {
+			return errors.ErrGenericInternalServerError.WithErr(err)
+		}
+		memberCount = int(count)
+	}
+
 	remainingEmails := plan.Features.TwoFaEmail - org.Counters.SentEmails
-	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldEmail) && len(group.MemberIDs) > remainingEmails {
+	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldEmail) && memberCount > remainingEmails {
 		return errors.ErrProcessCensusSizeExceedsEmailAllowance.Withf("remaining emails: %d", remainingEmails)
 	}
 	remainingSMS := plan.Features.TwoFaSms - org.Counters.SentSMS
-	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldPhone) && len(group.MemberIDs) > remainingSMS {
+	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldPhone) && memberCount > remainingSMS {
 		return errors.ErrProcessCensusSizeExceedsSMSAllowance.Withf("remaining sms: %d", remainingSMS)
 	}
 

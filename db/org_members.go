@@ -51,6 +51,11 @@ func (ms *MongoStorage) SetOrgMember(salt string, orgMember *OrgMember) (string,
 		return "", err
 	}
 
+	// Ensure the auto group exists now that at least one member is present.
+	if err := ms.EnsureAutoMemberGroup(orgMember.OrgAddress); err != nil {
+		log.Warnw("could not ensure auto member group after SetOrgMember", "error", err)
+	}
+
 	return member.ID.Hex(), nil
 }
 
@@ -59,6 +64,17 @@ func (ms *MongoStorage) DelOrgMember(id string) error {
 	objID, err := primitive.ObjectIDFromHex(id)
 	if err != nil {
 		return ErrInvalidData
+	}
+
+	// Fetch the member first so we know which org it belongs to (needed for auto group cleanup).
+	ctxFetch, cancelFetch := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancelFetch()
+	var existing OrgMember
+	if err := ms.orgMembers.FindOne(ctxFetch, bson.M{"_id": objID}).Decode(&existing); err != nil {
+		if err == mongo.ErrNoDocuments {
+			return ErrNotFound
+		}
+		return fmt.Errorf("could not fetch member before deletion: %w", err)
 	}
 
 	ms.keysLock.Lock()
@@ -70,7 +86,15 @@ func (ms *MongoStorage) DelOrgMember(id string) error {
 	// delete the orgMember from the database using the ID
 	filter := bson.M{"_id": objID}
 	_, err = ms.orgMembers.DeleteOne(ctx, filter)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Clean up the auto group if the org now has no members.
+	if err := ms.DeleteAutoMemberGroupIfEmpty(existing.OrgAddress); err != nil {
+		log.Warnw("could not clean up auto member group after DelOrgMember", "error", err)
+	}
+	return nil
 }
 
 // OrgMember retrieves a orgMember from the DB based on it ID
@@ -313,6 +337,15 @@ func (ms *MongoStorage) addOrgMemberBatches(
 			Errors:   append(job.Errors, errs...),
 		}
 	}
+
+	// Ensure the auto group exists now that members have been added.
+	if job.Added > 0 {
+		ms.keysLock.Lock()
+		defer ms.keysLock.Unlock()
+		if err := ms.EnsureAutoMemberGroup(org.Address); err != nil {
+			log.Warnw("could not ensure auto member group after bulk add", "error", err)
+		}
+	}
 }
 
 // AddBulkOrgMembers adds multiple organization members to the database in batches of 200 entries.
@@ -381,6 +414,11 @@ func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, 
 	_, err = ms.orgMembers.UpdateOne(ctx, filter, updateDoc, opts)
 	if err != nil {
 		return primitive.NilObjectID, fmt.Errorf("failed to upsert org member: %w", err)
+	}
+
+	// Ensure the auto group exists now that at least one member is present.
+	if err := ms.EnsureAutoMemberGroup(org.Address); err != nil {
+		log.Warnw("could not ensure auto member group after upsert", "error", err)
 	}
 
 	return preparedMember.ID, nil
@@ -521,6 +559,9 @@ func (ms *MongoStorage) DeleteOrgMembers(orgAddress common.Address, ids []string
 		},
 	}
 
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+
 	result, err := ms.orgMembers.DeleteMany(ctx, filter)
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete orgMembers: %w", err)
@@ -555,6 +596,11 @@ func (ms *MongoStorage) DeleteOrgMembers(orgAddress common.Address, ids []string
 	_, err = ms.orgMemberGroups.UpdateMany(ctx, groupFilter, groupUpdate)
 	if err != nil {
 		return 0, fmt.Errorf("failed to update groups after deleting orgMembers: %w", err)
+	}
+
+	// Clean up the auto group if the org now has no members.
+	if err := ms.DeleteAutoMemberGroupIfEmpty(orgAddress); err != nil {
+		log.Warnw("could not clean up auto member group after DeleteOrgMembers", "error", err)
 	}
 
 	return int(result.DeletedCount), nil
@@ -597,6 +643,11 @@ func (ms *MongoStorage) DeleteAllOrgMembers(orgAddress common.Address) (int, err
 	_, err = ms.orgMemberGroups.UpdateMany(ctx, groupFilter, groupUpdate)
 	if err != nil {
 		return 0, fmt.Errorf("failed to update groups after deleting all orgMembers: %w", err)
+	}
+
+	// All members are gone — remove the auto group too.
+	if err := ms.deleteAutoMemberGroup(orgAddress); err != nil {
+		log.Warnw("could not delete auto member group after DeleteAllOrgMembers", "error", err)
 	}
 
 	return int(result.DeletedCount), nil

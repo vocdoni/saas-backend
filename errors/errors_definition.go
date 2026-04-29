@@ -92,6 +92,8 @@ var (
 	ErrProcessCensusSizeExceedsSMSAllowance   = Error{Code: 40047, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("process census size exceeds sms allowance")}
 	ErrMaxOrganizationsReached                = Error{Code: 40048, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("user has reached maximum number of organizations")}
 	ErrExceedsOrganizationMembersLimit        = Error{Code: 40145, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("operation would exceed organization members limit")}
+	ErrAutoGroupCannotBeDeleted               = Error{Code: 40150, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("the \"All members\" group is auto-generated and cannot be deleted")}
+	ErrAutoGroupMembersCannotBeModified       = Error{Code: 40151, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("membership of the auto-generated \"All members\" group cannot be manually modified")}
 
 	// CSP errors (408)
 	ErrZeroWeightVoter = Error{Code: 40801, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("voter weight cannot be zero")}
