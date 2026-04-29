@@ -341,10 +341,10 @@ func (ms *MongoStorage) addOrgMemberBatches(
 	// Ensure the auto group exists now that members have been added.
 	if job.Added > 0 {
 		ms.keysLock.Lock()
+		defer ms.keysLock.Unlock()
 		if err := ms.EnsureAutoMemberGroup(org.Address); err != nil {
 			log.Warnw("could not ensure auto member group after bulk add", "error", err)
 		}
-		ms.keysLock.Unlock()
 	}
 }
 
