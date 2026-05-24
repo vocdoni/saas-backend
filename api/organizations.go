@@ -148,6 +148,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
+	log.Infow("organization created", "org_id", dbOrg.Address.Hex())
 	// send the organization back to the user
 	apicommon.HTTPWriteJSON(w, apicommon.OrganizationFromDB(dbOrg, dbParentOrg))
 }
