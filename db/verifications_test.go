@@ -95,4 +95,42 @@ func TestVerifications(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(code.Attempts, qt.Equals, 2)
 	})
+
+	t.Run("TestSetVerificationCodeExpirationBoundary", func(_ *testing.T) {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+		userID, err := testDB.SetUser(&User{
+			Email:     testUserEmail + "4",
+			Password:  testUserPass,
+			FirstName: testUserFirstName,
+			LastName:  testUserLastName,
+		})
+		c.Assert(err, qt.IsNil)
+
+		sealedCode1, err := internal.SealToken("oldCode", testUserEmail, "mock-app-secret")
+		c.Assert(err, qt.IsNil)
+		// Set a code that expires almost immediately, simulating the expiration boundary.
+		oldExp := time.Now().Add(time.Millisecond)
+		c.Assert(testDB.SetVerificationCode(&User{ID: userID}, sealedCode1, CodeTypeVerifyAccount, oldExp), qt.IsNil)
+
+		// Wait past the old code's expiration boundary.
+		time.Sleep(2 * time.Millisecond)
+
+		// Set a new code at (or just after) the old code's expiration boundary.
+		sealedCode2, err := internal.SealToken("newCode", testUserEmail, "mock-app-secret")
+		c.Assert(err, qt.IsNil)
+		newExp := time.Now().Add(time.Hour)
+		c.Assert(testDB.SetVerificationCode(&User{ID: userID}, sealedCode2, CodeTypeVerifyAccount, newExp), qt.IsNil)
+
+		// The new code must win: UserVerificationCode must return the new sealed code and a future expiration.
+		//
+		// Why no race occurs on current main: UserVerificationCode does not filter by expiration —
+		// the verifications collection has no MongoDB TTL index and the application does not enforce
+		// expiry at query time. SetVerificationCode uses ReplaceOne (upsert), which atomically
+		// overwrites the whole document. Once that call returns, any subsequent read is guaranteed
+		// to see the new code; the old (expired) document can never reappear.
+		code, err := testDB.UserVerificationCode(&User{ID: userID}, CodeTypeVerifyAccount)
+		c.Assert(err, qt.IsNil)
+		c.Assert(code.SealedCode, qt.DeepEquals, sealedCode2)
+		c.Assert(code.Expiration.After(time.Now()), qt.IsTrue)
+	})
 }
