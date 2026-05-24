@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	flag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -43,6 +44,7 @@ func main() {
 	flag.String("smtpPassword", "", "SMTP password")
 	flag.String("emailFromAddress", "", "Email service from address")
 	flag.String("emailFromName", "Vocdoni", "Email service from name")
+	flag.Int("smtpTimeoutSeconds", 10, "SMTP dial and send timeout in seconds")
 	flag.String("twilioAccountSid", "", "Twilio account SID")
 	flag.String("twilioAuthToken", "", "Twilio auth token")
 	flag.String("twilioFromNumber", "", "Twilio from number")
@@ -77,6 +79,7 @@ func main() {
 	smtpPassword := viper.GetString("smtpPassword")
 	emailFromAddress := viper.GetString("emailFromAddress")
 	emailFromName := viper.GetString("emailFromName")
+	smtpTimeout := time.Duration(viper.GetInt("smtpTimeoutSeconds")) * time.Second
 	// sms vars
 	twilioAccountSid := viper.GetString("twilioAccountSid")
 	twilioAuthToken := viper.GetString("twilioAuthToken")
@@ -153,6 +156,7 @@ func main() {
 			SMTPPort:     smtpPort,
 			SMTPUsername: smtpUsername,
 			SMTPPassword: smtpPassword,
+			SMTPTimeout:  smtpTimeout,
 		}); err != nil {
 			log.Fatalf("could not create the email service: %v", err)
 		}

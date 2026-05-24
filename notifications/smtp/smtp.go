@@ -5,11 +5,14 @@ package smtp
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"mime/multipart"
+	"net"
 	"net/mail"
 	"net/smtp"
 	"net/textproto"
+	"time"
 
 	"github.com/vocdoni/saas-backend/notifications"
 )
@@ -17,10 +20,8 @@ import (
 var disableTrackingFilter = []byte(`{"filters":{"clicktrack":{"settings":{"enable":0,"enable_text":false}}}}`)
 
 // Config represents the configuration for the SMTP email service. It
-// contains the sender's name, address, SMTP username, password, server and
-// port. The TestAPIPort is used to define the port of the API service used
-// for testing the email service locally to check messages (for example using
-// MailHog).
+// contains the sender's name, address, SMTP username, password, server, port,
+// and dial+send timeout.
 type Config struct {
 	FromName     string
 	FromAddress  string
@@ -28,6 +29,7 @@ type Config struct {
 	SMTPPassword string
 	SMTPServer   string
 	SMTPPort     int
+	SMTPTimeout  time.Duration
 }
 
 // Email is the implementation of the NotificationService interface for the
@@ -70,23 +72,68 @@ func (se *Email) SendNotification(ctx context.Context, notification *notificatio
 	if err != nil {
 		return fmt.Errorf("could not compose email body: %v", err)
 	}
-	// send the email
 	server := fmt.Sprintf("%s:%d", se.config.SMTPServer, se.config.SMTPPort)
-	// create a channel to handle errors
 	errCh := make(chan error, 1)
 	go func() {
-		// send the message
-		err := smtp.SendMail(server, se.auth, se.config.FromAddress, []string{notification.ToAddress}, body)
-		errCh <- err
+		errCh <- se.dialAndSend(server, body, notification.ToAddress)
 		close(errCh)
 	}()
-	// wait for the message to be sent or the context to be done
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case err := <-errCh:
 		return err
 	}
+}
+
+// dialAndSend establishes a TCP connection to the SMTP server using the
+// configured timeout, then sends the pre-composed message body.
+func (se *Email) dialAndSend(server string, body []byte, to string) error {
+	dialer := &net.Dialer{Timeout: se.config.SMTPTimeout}
+	conn, err := dialer.Dial("tcp", server)
+	if err != nil {
+		return fmt.Errorf("could not dial SMTP server: %w", err)
+	}
+	// apply the same timeout as a deadline for the send phase
+	if se.config.SMTPTimeout > 0 {
+		if err := conn.SetDeadline(time.Now().Add(se.config.SMTPTimeout)); err != nil {
+			_ = conn.Close()
+			return fmt.Errorf("could not set send deadline: %w", err)
+		}
+	}
+	c, err := smtp.NewClient(conn, se.config.SMTPServer)
+	if err != nil {
+		_ = conn.Close()
+		return fmt.Errorf("could not create SMTP client: %w", err)
+	}
+	defer c.Close() //nolint:errcheck
+	if ok, _ := c.Extension("STARTTLS"); ok {
+		if err := c.StartTLS(&tls.Config{ServerName: se.config.SMTPServer}); err != nil {
+			return fmt.Errorf("could not start TLS: %w", err)
+		}
+	}
+	if se.auth != nil {
+		if err := c.Auth(se.auth); err != nil {
+			return fmt.Errorf("could not authenticate: %w", err)
+		}
+	}
+	if err := c.Mail(se.config.FromAddress); err != nil {
+		return fmt.Errorf("could not set mail from: %w", err)
+	}
+	if err := c.Rcpt(to); err != nil {
+		return fmt.Errorf("could not set rcpt to: %w", err)
+	}
+	w, err := c.Data()
+	if err != nil {
+		return fmt.Errorf("could not open data writer: %w", err)
+	}
+	if _, err := w.Write(body); err != nil {
+		return fmt.Errorf("could not write mail body: %w", err)
+	}
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("could not close data writer: %w", err)
+	}
+	return c.Quit()
 }
 
 // composeBody creates the email body with the notification data. It creates a
