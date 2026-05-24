@@ -312,3 +312,12 @@ func TestDecryptTokenFromHexErrors(t *testing.T) {
 		c.Assert(err.Error(), quicktest.Contains, "failed to decrypt token")
 	})
 }
+
+func BenchmarkHashPassword(b *testing.B) {
+	salt := "1234567890abcdef"                     // 16 bytes
+	password := "abcdefghijklmnopqrstuvwxyz123456" // 32 chars
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		HashPassword(salt, password)
+	}
+}
