@@ -6,10 +6,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/jwtauth/v5"
+	"github.com/google/uuid"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"go.vocdoni.io/dvote/log"
 )
 
 // authenticator is a middleware that authenticates the user and returns a JWT
@@ -75,6 +77,18 @@ func (*API) setLang(next http.Handler) http.Handler {
 			ctx = context.WithValue(r.Context(), apicommon.LangMetadataKey, lang)
 		}
 		// add lang to the context
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// requestID is a middleware that generates a UUID for each request, sets it on
+// the X-Request-ID response header, and binds a zerolog context-logger carrying
+// the request_id field so handlers can retrieve it via zerolog.Ctx(r.Context()).
+func requestID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := uuid.New().String()
+		w.Header().Set("X-Request-ID", id)
+		ctx := log.Logger().With().Str("request_id", id).Logger().WithContext(r.Context())
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

@@ -169,6 +169,7 @@ func (a *API) initRouter() http.Handler {
 		AllowCredentials: true,
 		MaxAge:           300, // Maximum value not ignored by any of major browsers
 	}).Handler)
+	r.Use(requestID)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Throttle(100))
