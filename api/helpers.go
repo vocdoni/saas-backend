@@ -210,8 +210,10 @@ func (a *API) generateVerificationLink(user *db.User, code string) (string, erro
 
 // calculatePagination calculates PreviousPage, NextPage and LastPage.
 //
-// If page is negative or higher than LastPage, returns ErrPageNotFound
-func calculatePagination(page, limit, totalItems int64) (*apicommon.Pagination, error) {
+// If page is negative or higher than LastPage, returns ErrPageNotFound.
+// The optional baseURL parameter, when non-empty, causes Next and Previous to be
+// populated with fully-formed, percent-encoded URLs (e.g. "https://host/path?limit=10&page=3").
+func calculatePagination(page, limit, totalItems int64, baseURL ...string) (*apicommon.Pagination, error) {
 	lastp := int64(math.Ceil(float64(totalItems) / float64(limit)))
 	if totalItems == 0 {
 		lastp = 1
@@ -231,13 +233,38 @@ func calculatePagination(page, limit, totalItems int64) (*apicommon.Pagination, 
 		nextp = &nextPage
 	}
 
-	return &apicommon.Pagination{
+	p := &apicommon.Pagination{
 		TotalItems:   totalItems,
 		PreviousPage: prevp,
 		CurrentPage:  page,
 		NextPage:     nextp,
 		LastPage:     lastp,
-	}, nil
+	}
+
+	if len(baseURL) > 0 && baseURL[0] != "" {
+		base := baseURL[0]
+		if nextp != nil {
+			p.Next = buildPageURL(base, *nextp, limit)
+		}
+		if prevp != nil {
+			p.Previous = buildPageURL(base, *prevp, limit)
+		}
+	}
+
+	return p, nil
+}
+
+// buildPageURL constructs a percent-encoded pagination URL from a base URL, page, and limit.
+func buildPageURL(baseURL string, page, limit int64) string {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return ""
+	}
+	q := u.Query()
+	q.Set(ParamPage, strconv.FormatInt(page, 10))
+	q.Set(ParamLimit, strconv.FormatInt(limit, 10))
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // parsePaginationParams returns a PaginationParams filled with the passed params

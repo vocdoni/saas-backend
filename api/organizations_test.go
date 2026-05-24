@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 )
 
 func TestCreateOrganizationHandler(t *testing.T) {
@@ -477,4 +479,62 @@ func TestCreateOrganizationWithDifferentTypes(t *testing.T) {
 		c.Assert(json.Unmarshal(resp, &createdOrg), qt.IsNil)
 		c.Assert(createdOrg.Type, qt.Equals, string(orgType))
 	}
+}
+
+func TestOrganizationJobsPaginationNextLink(t *testing.T) {
+	c := qt.New(t)
+
+	token := testCreateUser(t, testPass)
+	orgAddress := testCreateOrganization(t, token)
+
+	// Insert 15 jobs directly so we have two pages at limit=10.
+	const totalJobs = 15
+	for i := range totalJobs {
+		jobID := fmt.Sprintf("job-%d-%s", i, internal.RandomHex(4))
+		c.Assert(testDB.CreateJob(jobID, db.JobTypeOrgMembers, orgAddress, 1), qt.IsNil)
+	}
+
+	// --- page 1 ---
+	resp, code := testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String(), "jobs?limit=10")
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+	var page1 apicommon.JobsResponse
+	c.Assert(json.Unmarshal(resp, &page1), qt.IsNil)
+	c.Assert(page1.Jobs, qt.HasLen, 10)
+	c.Assert(page1.Pagination, qt.Not(qt.IsNil))
+
+	// Next must be present; Previous must be absent on the first page.
+	c.Assert(page1.Pagination.Next, qt.Not(qt.Equals), "")
+	c.Assert(page1.Pagination.Previous, qt.Equals, "")
+
+	// The Next URL must not contain a raw '+' — url.Values.Encode() must have
+	// percent-encoded any reserved characters (e.g. '+' → '%2B').
+	c.Assert(strings.Contains(page1.Pagination.Next, "+"), qt.IsFalse)
+
+	// The Next URL must point to page 2 with the same limit.
+	c.Assert(strings.Contains(page1.Pagination.Next, "page=2"), qt.IsTrue)
+	c.Assert(strings.Contains(page1.Pagination.Next, "limit=10"), qt.IsTrue)
+
+	// --- page 2 (follow the Next link) ---
+	// Strip the leading "/" so testRequest joins it correctly.
+	nextPath := strings.TrimPrefix(page1.Pagination.Next, "/")
+	resp, code = testRequest(t, http.MethodGet, token, nil, nextPath)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+	var page2 apicommon.JobsResponse
+	c.Assert(json.Unmarshal(resp, &page2), qt.IsNil)
+	c.Assert(page2.Jobs, qt.HasLen, totalJobs-10)
+	c.Assert(page2.Pagination, qt.Not(qt.IsNil))
+
+	// On the last page: Next is absent, Previous is present.
+	c.Assert(page2.Pagination.Next, qt.Equals, "")
+	c.Assert(page2.Pagination.Previous, qt.Not(qt.Equals), "")
+
+	// The Previous URL must also be free of raw '+' — both links share the
+	// same buildPageURL helper so encoding is consistent.
+	c.Assert(strings.Contains(page2.Pagination.Previous, "+"), qt.IsFalse)
+
+	// The Previous URL must point back to page 1 with the same limit.
+	c.Assert(strings.Contains(page2.Pagination.Previous, "page=1"), qt.IsTrue)
+	c.Assert(strings.Contains(page2.Pagination.Previous, "limit=10"), qt.IsTrue)
 }
