@@ -4,6 +4,8 @@ const (
 	// ping route
 	// GET /ping to check the server status
 	pingEndpoint = "/ping"
+	// GET /api/info to get the runtime information of the server
+	infoEndpoint = "/api/info"
 
 	// auth routes
 

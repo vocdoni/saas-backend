@@ -49,6 +49,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"runtime"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -56,6 +57,7 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/go-chi/jwtauth/v5"
 	"github.com/vocdoni/saas-backend/account"
+	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
@@ -70,6 +72,9 @@ const (
 	jwtExpiration = 360 * time.Hour // 15 days
 	passwordSalt  = "vocdoni365"    // salt for password hashing
 )
+
+// startTime records when the API package was loaded, used to compute uptime.
+var startTime = time.Now()
 
 type Config struct {
 	Host        string
@@ -209,6 +214,7 @@ func (a *API) initRouter() http.Handler {
 		// handle valid JWT tokens
 		r.Use(a.authenticator)
 
+		handle(r, http.MethodGet, infoEndpoint, a.infoHandler)
 		handle(r, http.MethodPost, authRefresTokenEndpoint, a.refreshTokenHandler)
 		handle(r, http.MethodGet, authAddressesEndpoint, a.organizationAddressesHandler)
 		handle(r, http.MethodPost, oauthLinkEndpoint, a.oauthLinkHandler)
@@ -302,4 +308,20 @@ func (a *API) initRouter() http.Handler {
 	})
 	a.router = r
 	return r
+}
+
+// infoHandler godoc
+//
+//	@Summary		Get server runtime information
+//	@Description	Returns the Go version and server uptime in seconds
+//	@Tags			info
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Success		200	{object}	apicommon.InfoResponse
+//	@Router			/api/info [get]
+func (*API) infoHandler(w http.ResponseWriter, _ *http.Request) {
+	apicommon.HTTPWriteJSON(w, apicommon.InfoResponse{
+		GoVersion:     runtime.Version(),
+		UptimeSeconds: int64(time.Since(startTime).Seconds()),
+	})
 }

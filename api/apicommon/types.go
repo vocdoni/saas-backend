@@ -1207,6 +1207,16 @@ type JobsResponse struct {
 	Jobs []JobInfo `json:"jobs"`
 }
 
+// InfoResponse represents the runtime information of the server.
+// swagger:model InfoResponse
+type InfoResponse struct {
+	// Go version of the running server
+	GoVersion string `json:"go_version"`
+
+	// Number of seconds the server has been running
+	UptimeSeconds int64 `json:"uptime_seconds"`
+}
+
 // JobFromDB converts a db.Job to a JobInfo.
 func JobFromDB(job *db.Job) JobInfo {
 	if job == nil {

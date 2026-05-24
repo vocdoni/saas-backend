@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -966,6 +967,19 @@ func requestAndExpectError(t *testing.T, method, jwt string, jsonBody any, urlPa
 
 func randomProcessID() []byte {
 	return internal.RandomBytes(32)
+}
+
+func TestInfoHandler(t *testing.T) {
+	c := qt.New(t)
+
+	// Unauthenticated request must be rejected
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodGet, "", nil, infoEndpoint)
+
+	// Authenticated request must return runtime info
+	token := testCreateUser(t, testPass)
+	info := requestAndParse[apicommon.InfoResponse](t, http.MethodGet, token, nil, infoEndpoint)
+	c.Assert(info.GoVersion, qt.Equals, runtime.Version())
+	c.Assert(info.UptimeSeconds >= 0, qt.IsTrue)
 }
 
 // memberIDs returns a slice of all orgMembers[n].ID
