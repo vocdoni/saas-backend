@@ -56,7 +56,7 @@ type apiTestCase struct {
 const (
 	testSecret    = "super-secret"
 	testEmail     = "user@test.com"
-	testPass      = "password123"
+	testPass      = "password12345"
 	testFirstName = "test"
 	testLastName  = "user"
 	testHost      = "0.0.0.0"

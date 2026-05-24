@@ -73,7 +73,7 @@ func TestRegisterHandler(t *testing.T) {
 	// Test valid registration
 	userInfo := &apicommon.UserInfo{
 		Email:     "valid@test.com",
-		Password:  "password",
+		Password:  "validpassword1",
 		FirstName: "first",
 		LastName:  "last",
 	}
@@ -114,14 +114,20 @@ func TestRegisterHandler(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusBadRequest)
 	c.Assert(string(resp), qt.Contains, "invalid email format")
 
-	// Test short password
+	// Test password below minimum length (11 chars, one less than the required 12)
 	userInfo.Email = "valid2@test.com"
-	userInfo.Password = "short"
+	userInfo.Password = "password12a"
 	resp, code = testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
 	c.Assert(code, qt.Equals, http.StatusBadRequest)
-	c.Assert(string(resp), qt.Contains, "password must be at least 8 characters")
+	c.Assert(string(resp), qt.Contains, "password must be at least 12 characters")
+
+	// Test password at exactly the minimum length (12 chars) is accepted
+	userInfo.Password = "password12ab"
+	resp, code = testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
 	// Test empty password
+	userInfo.Email = "valid3@test.com"
 	userInfo.Password = ""
 	_, code = testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
 	c.Assert(code, qt.Equals, http.StatusBadRequest)
@@ -180,7 +186,7 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	c.Assert(len(passResetMailCode) > 1, qt.IsTrue)
 
 	// Reset the password
-	newPassword := "password2"
+	newPassword := "newpassword123"
 	resetPass := &apicommon.UserPasswordReset{
 		Email:       testEmail,
 		Code:        passResetMailCode[1],
@@ -201,6 +207,22 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	loginInfo.Password = newPassword
 	resp, code = testRequest(t, http.MethodPost, "", loginInfo, authLoginEndpoint)
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+}
+
+func TestUpdateUserPasswordHandler(t *testing.T) {
+	c := qt.New(t)
+
+	// Set up a verified, logged-in user
+	jwt := testCreateUser(t, testPass)
+
+	// Test that a new password below the minimum length is rejected
+	updateReq := &apicommon.UserPasswordUpdate{
+		OldPassword: testPass,
+		NewPassword: "short12",
+	}
+	resp, code := testRequest(t, http.MethodPut, jwt, updateReq, usersPasswordEndpoint)
+	c.Assert(code, qt.Equals, http.StatusBadRequest)
+	c.Assert(string(resp), qt.Contains, "password must be at least 12 characters")
 }
 
 func TestUserWithOrganization(t *testing.T) {

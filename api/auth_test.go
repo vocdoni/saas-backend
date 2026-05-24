@@ -245,7 +245,7 @@ func TestOAuthLinkUnlinkHandler(t *testing.T) {
 	email := fmt.Sprintf("link-test-%d@test.com", internal.RandomInt(10000))
 	userInfo := &apicommon.UserInfo{
 		Email:     email,
-		Password:  "password123",
+		Password:  testPass,
 		FirstName: "Link",
 		LastName:  "Test",
 	}
@@ -297,7 +297,7 @@ func TestOAuthLinkUnlinkHandler(t *testing.T) {
 	email2 := fmt.Sprintf("link-test-2-%d@test.com", internal.RandomInt(10000))
 	userInfo2 := &apicommon.UserInfo{
 		Email:     email2,
-		Password:  "password123",
+		Password:  testPass,
 		FirstName: "Link",
 		LastName:  "Test",
 	}

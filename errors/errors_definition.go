@@ -44,7 +44,7 @@ var (
 
 	// Validation errors (400)
 	ErrEmailMalformed          = Error{Code: 40002, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid email format")}
-	ErrPasswordTooShort        = Error{Code: 40003, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("password must be at least 8 characters")}
+	ErrPasswordTooShort        = Error{Code: 40003, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("password must be at least 12 characters")}
 	ErrMalformedBody           = Error{Code: 40004, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid JSON request body")}
 	ErrInvalidUserData         = Error{Code: 40005, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid user information provided")}
 	ErrMalformedURLParam       = Error{Code: 40010, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid URL parameter")}

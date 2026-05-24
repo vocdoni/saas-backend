@@ -44,7 +44,7 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// check the password is correct format
-	if len(userInfo.Password) < 8 {
+	if len(userInfo.Password) < 12 {
 		errors.ErrPasswordTooShort.Write(w)
 		return
 	}
@@ -527,7 +527,7 @@ func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// check the password is correct format
-	if len(userPasswords.NewPassword) < 8 {
+	if len(userPasswords.NewPassword) < 12 {
 		errors.ErrPasswordTooShort.Write(w)
 		return
 	}
@@ -625,7 +625,7 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// check the password is correct format
-	if len(userPasswords.NewPassword) < 8 {
+	if len(userPasswords.NewPassword) < 12 {
 		errors.ErrPasswordTooShort.Write(w)
 		return
 	}

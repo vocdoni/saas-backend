@@ -71,7 +71,7 @@ func TestLanguageParameterInUserRegistration(t *testing.T) {
 	test := func(lang string) {
 		userInfo := db.User{
 			Email:     fmt.Sprintf("testLang%s@example.com", lang),
-			Password:  "password123",
+			Password:  testPass,
 			FirstName: "María",
 			LastName:  "García",
 		}
