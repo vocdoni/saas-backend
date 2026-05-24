@@ -236,13 +236,13 @@ func (a *API) InitializeStripeService() error {
 	// Load plans from Stripe and populate the database
 	plans, err := service.GetPlansFromStripe()
 	if err != nil {
-		return fmt.Errorf("failed to load plans from Stripe: %w", err)
+		return wrapErr("failed to load plans from Stripe", err)
 	}
 
 	// Store plans in database
 	for _, plan := range plans {
 		if _, err := a.db.SetPlan(plan); err != nil {
-			return fmt.Errorf("failed to store plan %s: %w", plan.Name, err)
+			return wrapErr(fmt.Sprintf("failed to store plan %s", plan.Name), err)
 		}
 	}
 

@@ -314,3 +314,8 @@ func parseLimit(s string) (int64, error) {
 	}
 	return limit, nil
 }
+
+// wrapErr wraps err with a context message using fmt.Errorf("%s: %w", msg, err).
+func wrapErr(msg string, err error) error {
+	return fmt.Errorf("%s: %w", msg, err)
+}
