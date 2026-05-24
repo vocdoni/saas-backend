@@ -1,4 +1,4 @@
-.PHONY: swagger test lint
+.PHONY: swagger test lint lint-strict
 
 # Generate Swagger documentation
 swagger:
@@ -13,6 +13,11 @@ test:
 # Run linter
 lint:
 	@echo "Running linter..."
+	@golangci-lint run
+
+# Run linter against the whole repo (no --new-from-rev scoping)
+lint-strict:
+	@echo "Running linter (strict, whole repo)..."
 	@golangci-lint run
 
 # Default target
