@@ -1,3 +1,5 @@
+// Package internal provides shared utility functions for email and phone number validation,
+// cryptographically secure random data generation, password hashing, and AES-GCM token encryption.
 package internal
 
 import (
