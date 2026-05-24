@@ -233,6 +233,25 @@ func TestEncryptDecryptToken(t *testing.T) {
 	})
 }
 
+func TestRandomHexLength(t *testing.T) {
+	c := quicktest.New(t)
+
+	tests := []struct {
+		n int
+	}{
+		{n: 0},
+		{n: 1},
+		{n: 16},
+		{n: 32},
+	}
+
+	for _, tt := range tests {
+		c.Run(fmt.Sprintf("n=%d", tt.n), func(c *quicktest.C) {
+			c.Assert(RandomHex(tt.n), quicktest.HasLen, 2*tt.n)
+		})
+	}
+}
+
 func TestDecryptTokenFromHexErrors(t *testing.T) {
 	c := quicktest.New(t)
 
