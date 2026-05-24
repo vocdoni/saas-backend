@@ -49,3 +49,12 @@ This service also allows to the SDK to user it as remote signer, which makes tha
 
 Check out the service [API documentation](./api/docs.md) here.
 
+## Quickstart
+
+**Prerequisites:** Docker 20.10+ (for the `docker compose` plugin)
+
+- `git clone https://github.com/vocdoni/saas-backend.git && cd saas-backend`
+- `cp example.env .env`
+- `docker compose up -d`
+- `curl http://localhost:8080/ping`
+
