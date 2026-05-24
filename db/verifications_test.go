@@ -97,6 +97,15 @@ func TestVerifications(t *testing.T) {
 	})
 
 	t.Run("TestSetVerificationCodeExpirationBoundary", func(_ *testing.T) {
+		// Documenting current behavior: no prior commit has been identified where this
+		// assertion would fail. SetVerificationCode has always used ReplaceOne (upsert),
+		// which atomically overwrites the document, and there is no MongoDB TTL index nor
+		// application-level expiration check at query time. This test guards against
+		// future regressions if either of those invariants changes.
+		t.Log("documenting current behavior (not a regression for a fixed bug): " +
+			"SetVerificationCode atomically replaces the document via ReplaceOne; " +
+			"no TTL index exists and expiration is not enforced at query time, " +
+			"so the new code always wins with no observable race on current main")
 		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		userID, err := testDB.SetUser(&User{
 			Email:     testUserEmail + "4",
@@ -122,12 +131,6 @@ func TestVerifications(t *testing.T) {
 		c.Assert(testDB.SetVerificationCode(&User{ID: userID}, sealedCode2, CodeTypeVerifyAccount, newExp), qt.IsNil)
 
 		// The new code must win: UserVerificationCode must return the new sealed code and a future expiration.
-		//
-		// Why no race occurs on current main: UserVerificationCode does not filter by expiration —
-		// the verifications collection has no MongoDB TTL index and the application does not enforce
-		// expiry at query time. SetVerificationCode uses ReplaceOne (upsert), which atomically
-		// overwrites the whole document. Once that call returns, any subsequent read is guaranteed
-		// to see the new code; the old (expired) document can never reappear.
 		code, err := testDB.UserVerificationCode(&User{ID: userID}, CodeTypeVerifyAccount)
 		c.Assert(err, qt.IsNil)
 		c.Assert(code.SealedCode, qt.DeepEquals, sealedCode2)
