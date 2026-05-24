@@ -2,8 +2,10 @@ package internal
 
 import (
 	"fmt"
+	"regexp"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/frankban/quicktest"
 	"github.com/nyaruka/phonenumbers"
 )
@@ -13,6 +15,239 @@ const (
 	secret = "secret"
 	token  = "123456"
 )
+
+func TestValidEmail(t *testing.T) {
+	c := quicktest.New(t)
+
+	tests := []struct {
+		name  string
+		email string
+		want  bool
+	}{
+		{name: "simple valid", email: email, want: true},
+		{name: "plus addressing", email: "user+tag@example.com", want: true},
+		{name: "subdomain", email: "user@mail.example.com", want: true},
+		{name: "dot in local part", email: "first.last@example.org", want: true},
+		{name: "hyphen in domain", email: "user@my-domain.com", want: true},
+		{name: "two-char TLD", email: "user@example.io", want: true},
+		{name: "long TLD", email: "user@example.museum", want: true},
+		{name: "mixed case", email: "User@Example.COM", want: true},
+		{name: "country subdomain", email: "user+test@example.co.uk", want: true},
+		{name: "no at sign", email: "notanemail", want: false},
+		{name: "missing local part", email: "@example.com", want: false},
+		{name: "missing domain", email: "user@", want: false},
+		{name: "no TLD dot", email: "user@example", want: false},
+		{name: "trailing dot in domain", email: "user@example.", want: false},
+		{name: "single char TLD", email: "user@example.c", want: false},
+		{name: "empty string", email: "", want: false},
+		{name: "spaces in email", email: "user @example.com", want: false},
+		{name: "double at sign", email: "user@@example.com", want: false},
+	}
+
+	for _, tt := range tests {
+		c.Run(tt.name, func(c *quicktest.C) {
+			got := ValidEmail(tt.email)
+			c.Assert(got, quicktest.Equals, tt.want)
+		})
+	}
+}
+
+func TestRandomInt(t *testing.T) {
+	c := quicktest.New(t)
+
+	tests := []struct {
+		name   string
+		maxInt int
+	}{
+		{name: "small range", maxInt: 10},
+		{name: "large range", maxInt: 1000000},
+		{name: "range of one", maxInt: 1},
+		{name: "range of two", maxInt: 2},
+	}
+
+	for _, tt := range tests {
+		c.Run(tt.name, func(c *quicktest.C) {
+			for range 50 {
+				got := RandomInt(tt.maxInt)
+				c.Assert(got >= 0, quicktest.IsTrue)
+				c.Assert(got < tt.maxInt, quicktest.IsTrue)
+			}
+		})
+	}
+}
+
+func TestRandomBytes(t *testing.T) {
+	c := quicktest.New(t)
+
+	tests := []struct {
+		name string
+		n    int
+	}{
+		{name: "zero bytes", n: 0},
+		{name: "one byte", n: 1},
+		{name: "small slice", n: 16},
+		{name: "large slice", n: 256},
+	}
+
+	for _, tt := range tests {
+		c.Run(tt.name, func(c *quicktest.C) {
+			got := RandomBytes(tt.n)
+			c.Assert(got, quicktest.HasLen, tt.n)
+		})
+	}
+
+	c.Run("non-deterministic output", func(c *quicktest.C) {
+		a := RandomBytes(32)
+		b := RandomBytes(32)
+		c.Assert(string(a) != string(b), quicktest.IsTrue)
+	})
+}
+
+func TestRandomHex(t *testing.T) {
+	c := quicktest.New(t)
+
+	hexChars := regexp.MustCompile(`^[0-9a-f]*$`)
+
+	tests := []struct {
+		name string
+		n    int
+	}{
+		{name: "zero bytes", n: 0},
+		{name: "one byte", n: 1},
+		{name: "eight bytes", n: 8},
+		{name: "32 bytes", n: 32},
+	}
+
+	for _, tt := range tests {
+		c.Run(tt.name, func(c *quicktest.C) {
+			got := RandomHex(tt.n)
+			c.Assert(got, quicktest.HasLen, tt.n*2)
+			c.Assert(hexChars.MatchString(got), quicktest.IsTrue)
+		})
+	}
+}
+
+func TestHashPassword(t *testing.T) {
+	c := quicktest.New(t)
+
+	c.Run("deterministic output", func(c *quicktest.C) {
+		h1 := HashPassword("salt", "password")
+		h2 := HashPassword("salt", "password")
+		c.Assert(h1, quicktest.DeepEquals, h2)
+	})
+
+	c.Run("output length is 32 bytes", func(c *quicktest.C) {
+		h := HashPassword("salt", "password")
+		c.Assert(h, quicktest.HasLen, 32)
+	})
+
+	c.Run("different salts produce different hashes", func(c *quicktest.C) {
+		h1 := HashPassword("salt1", "password")
+		h2 := HashPassword("salt2", "password")
+		c.Assert(string(h1) != string(h2), quicktest.IsTrue)
+	})
+
+	c.Run("different passwords produce different hashes", func(c *quicktest.C) {
+		h1 := HashPassword("salt", "password1")
+		h2 := HashPassword("salt", "password2")
+		c.Assert(string(h1) != string(h2), quicktest.IsTrue)
+	})
+}
+
+func TestHexHashPassword(t *testing.T) {
+	c := quicktest.New(t)
+
+	hexChars := regexp.MustCompile(`^[0-9a-f]+$`)
+
+	c.Run("output length is 64 chars", func(c *quicktest.C) {
+		h := HexHashPassword("salt", "password")
+		c.Assert(h, quicktest.HasLen, 64)
+	})
+
+	c.Run("valid hex encoding", func(c *quicktest.C) {
+		h := HexHashPassword("salt", "password")
+		c.Assert(hexChars.MatchString(h), quicktest.IsTrue)
+	})
+
+	c.Run("deterministic output", func(c *quicktest.C) {
+		h1 := HexHashPassword("salt", "password")
+		h2 := HexHashPassword("salt", "password")
+		c.Assert(h1, quicktest.Equals, h2)
+	})
+
+	c.Run("consistent with HashPassword", func(c *quicktest.C) {
+		raw := HashPassword("salt", "password")
+		hex := HexHashPassword("salt", "password")
+		c.Assert(hex, quicktest.HasLen, len(raw)*2)
+	})
+}
+
+func TestHashVerificationCode(t *testing.T) {
+	c := quicktest.New(t)
+
+	hexChars := regexp.MustCompile(`^[0-9a-f]+$`)
+
+	c.Run("deterministic output", func(c *quicktest.C) {
+		h1 := HashVerificationCode(email, "123456")
+		h2 := HashVerificationCode(email, "123456")
+		c.Assert(h1, quicktest.Equals, h2)
+	})
+
+	c.Run("output is valid hex", func(c *quicktest.C) {
+		h := HashVerificationCode(email, "123456")
+		c.Assert(hexChars.MatchString(h), quicktest.IsTrue)
+	})
+
+	c.Run("output length encodes input plus 32-byte hash suffix", func(c *quicktest.C) {
+		userEmail, code := email, "123456"
+		h := HashVerificationCode(userEmail, code)
+		// sha256.New().Sum(b) appends the sha256-of-empty (32 bytes) to b
+		wantLen := (len(userEmail) + len(code) + 32) * 2
+		c.Assert(h, quicktest.HasLen, wantLen)
+	})
+
+	c.Run("different emails produce different output", func(c *quicktest.C) {
+		h1 := HashVerificationCode("alice@example.com", "123456")
+		h2 := HashVerificationCode("bob@example.com", "123456")
+		c.Assert(h1 != h2, quicktest.IsTrue)
+	})
+
+	c.Run("different codes produce different output", func(c *quicktest.C) {
+		h1 := HashVerificationCode(email, "111111")
+		h2 := HashVerificationCode(email, "222222")
+		c.Assert(h1 != h2, quicktest.IsTrue)
+	})
+}
+
+func TestHashOrgData(t *testing.T) {
+	c := quicktest.New(t)
+
+	addr1 := common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678")
+	addr2 := common.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+
+	c.Run("output length is 32 bytes", func(c *quicktest.C) {
+		h := HashOrgData(addr1, "some data")
+		c.Assert(h, quicktest.HasLen, 32)
+	})
+
+	c.Run("deterministic output", func(c *quicktest.C) {
+		h1 := HashOrgData(addr1, "some data")
+		h2 := HashOrgData(addr1, "some data")
+		c.Assert(h1, quicktest.DeepEquals, h2)
+	})
+
+	c.Run("different addresses produce different hashes", func(c *quicktest.C) {
+		h1 := HashOrgData(addr1, "some data")
+		h2 := HashOrgData(addr2, "some data")
+		c.Assert(string(h1) != string(h2), quicktest.IsTrue)
+	})
+
+	c.Run("different data produces different hashes", func(c *quicktest.C) {
+		h1 := HashOrgData(addr1, "data-a")
+		h2 := HashOrgData(addr1, "data-b")
+		c.Assert(string(h1) != string(h2), quicktest.IsTrue)
+	})
+}
 
 func TestSanitizePhone(t *testing.T) {
 	c := quicktest.New(t)
