@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
 	"go.mongodb.org/mongo-driver/bson"
@@ -129,7 +130,7 @@ func (ms *MongoStorage) SetUser(user *User) (uint64, error) {
 	// get the next available user ID
 	nextID, err := ms.nextUserID(ctx)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("set user: %w", err)
 	}
 	// if the user provided doesn't have organizations, create an empty slice
 	if user.Organizations == nil {
@@ -143,11 +144,11 @@ func (ms *MongoStorage) SetUser(user *User) (uint64, error) {
 		// if the user exists, update it with the new data
 		updateDoc, err := dynamicUpdateDocument(user, nil)
 		if err != nil {
-			return 0, err
+			return 0, fmt.Errorf("set user: %w", err)
 		}
 		_, err = ms.users.UpdateOne(ctx, bson.M{"_id": user.ID}, updateDoc)
 		if err != nil {
-			return 0, err
+			return 0, fmt.Errorf("set user: %w", err)
 		}
 	} else {
 		// if the user doesn't exist, create it setting the ID first
@@ -156,7 +157,7 @@ func (ms *MongoStorage) SetUser(user *User) (uint64, error) {
 			if mongo.IsDuplicateKeyError(err) {
 				return 0, ErrAlreadyExists
 			}
-			return 0, err
+			return 0, fmt.Errorf("set user: %w", err)
 		}
 	}
 	return user.ID, nil
