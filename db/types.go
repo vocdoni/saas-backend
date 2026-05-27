@@ -57,6 +57,17 @@ func (u *User) HasRoleFor(address common.Address, role UserRole) bool {
 	return false
 }
 
+// HasAnyRoleFor returns true if the user has any role in the organization at
+// the given address.
+func (u *User) HasAnyRoleFor(address common.Address) bool {
+	for _, org := range u.Organizations {
+		if org.Address == address {
+			return true
+		}
+	}
+	return false
+}
+
 type UserRole string
 
 type OrganizationType string

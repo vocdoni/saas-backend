@@ -212,4 +212,26 @@ func TestUsers(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(user.Verified, qt.IsTrue)
 	})
+
+	t.Run("HasAnyRoleFor", func(_ *testing.T) {
+		// test with user that has multiple orgs
+		user := &User{
+			Organizations: []OrganizationUser{
+				{Address: testOrgAddress, Role: AdminRole},
+				{Address: testAnotherOrgAddress, Role: ManagerRole},
+				{Address: testThirdOrgAddress, Role: ViewerRole},
+			},
+		}
+		// user has a role for each org in the list
+		c.Assert(user.HasAnyRoleFor(testOrgAddress), qt.IsTrue)
+		c.Assert(user.HasAnyRoleFor(testAnotherOrgAddress), qt.IsTrue)
+		c.Assert(user.HasAnyRoleFor(testThirdOrgAddress), qt.IsTrue)
+		// user has no role for a non-existent org
+		c.Assert(user.HasAnyRoleFor(testFourthOrgAddress), qt.IsFalse)
+		c.Assert(user.HasAnyRoleFor(testNonExistentOrg), qt.IsFalse)
+
+		// test with nil Organizations
+		emptyUser := &User{}
+		c.Assert(emptyUser.HasAnyRoleFor(testOrgAddress), qt.IsFalse)
+	})
 }

@@ -220,6 +220,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, signMessageEndpoint, a.signMessageHandler)
 		handle(r, http.MethodPost, organizationsEndpoint, a.createOrganizationHandler)
 		handle(r, http.MethodPut, organizationEndpoint, a.updateOrganizationHandler)
+		handle(r, http.MethodDelete, organizationEndpoint, a.removeOrganizationFromUserHandler)
 		handle(r, http.MethodGet, organizationUsersEndpoint, a.organizationUsersHandler)
 		handle(r, http.MethodGet, organizationSubscriptionEndpoint, a.organizationSubscriptionHandler)
 		handle(r, http.MethodPost, organizationAddUserEndpoint, a.inviteOrganizationUserHandler)

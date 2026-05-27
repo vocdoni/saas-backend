@@ -478,3 +478,42 @@ func TestCreateOrganizationWithDifferentTypes(t *testing.T) {
 		c.Assert(createdOrg.Type, qt.Equals, string(orgType))
 	}
 }
+
+func TestRemoveOrganizationFromUserHandler(t *testing.T) {
+	c := qt.New(t)
+
+	// Create a user and organization
+	token := testCreateUser(t, testPass)
+	orgAddress := testCreateOrganization(t, token)
+
+	// Verify the user has the organization in their list
+	user := requestAndParse[apicommon.UserInfo](t, http.MethodGet, token, nil, usersMeEndpoint)
+	c.Assert(user.Organizations, qt.HasLen, 1)
+	c.Assert(user.Organizations[0].Organization.Address, qt.Equals, orgAddress)
+
+	// Test removing the organization link
+	_, code := testRequest(t, http.MethodDelete, token, nil, "organizations", orgAddress.String())
+	c.Assert(code, qt.Equals, http.StatusOK)
+
+	// Verify the organization was removed from the user's list
+	user = requestAndParse[apicommon.UserInfo](t, http.MethodGet, token, nil, usersMeEndpoint)
+	c.Assert(user.Organizations, qt.HasLen, 0)
+
+	// Test removing again should return 404 (no longer has link)
+	_, code = testRequest(t, http.MethodDelete, token, nil, "organizations", orgAddress.String())
+	c.Assert(code, qt.Equals, http.StatusNotFound)
+
+	// Test with non-existent organization
+	nonExistentAddr := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	_, code = testRequest(t, http.MethodDelete, token, nil, "organizations", nonExistentAddr.String())
+	c.Assert(code, qt.Equals, http.StatusNotFound)
+
+	// Test without authentication
+	_, code = testRequest(t, http.MethodDelete, "", nil, "organizations", orgAddress.String())
+	c.Assert(code, qt.Equals, http.StatusUnauthorized)
+
+	// Test that another user (without link) gets 404
+	anotherToken := testCreateUser(t, "anotherpassword")
+	_, code = testRequest(t, http.MethodDelete, anotherToken, nil, "organizations", orgAddress.String())
+	c.Assert(code, qt.Equals, http.StatusNotFound)
+}

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
@@ -61,7 +62,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	// find default plan
 	defaultPlan, err := a.db.DefaultPlan()
 	if err != nil || defaultPlan == nil {
-		errors.ErrNoDefaultPlan.WithErr((err)).Write(w)
+		errors.ErrNoDefaultPlan.WithErr(err).Write(w)
 		return
 	}
 	// check if the user has permission to create new organizations
@@ -541,4 +542,52 @@ func (a *API) organizationJobsHandler(w http.ResponseWriter, r *http.Request) {
 		Pagination: pagination,
 		Jobs:       jobsResponse,
 	})
+}
+
+// removeOrganizationFromUserHandler godoc
+//
+//	@Summary		Remove the authenticated user's organization link
+//	@Description	Remove the authenticated user's link to the organization. Any user with any role in the
+//	@Description	organization can invoke this endpoint. The organization document itself is not deleted.
+//	@Tags			organizations
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			address	path		string	true	"Organization address"
+//	@Success		200		{string}	string	"OK"
+//	@Failure		401		{object}	errors.Error	"Unauthorized"
+//	@Failure		404		{object}	errors.Error	"Organization not found or user has no link to it"
+//	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{address} [delete]
+func (a *API) removeOrganizationFromUserHandler(w http.ResponseWriter, r *http.Request) {
+	// get the user from the request context
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	// parse the organization address directly from the URL parameter
+	// (no need to load the full org document from DB for this operation)
+	orgAddress := common.HexToAddress(chi.URLParam(r, "address"))
+	// check if the user has any role in the organization
+	if !user.HasAnyRoleFor(orgAddress) {
+		errors.ErrOrganizationNotFound.Write(w)
+		return
+	}
+	// atomically remove the organization from the user's organizations list
+	if err := a.db.RemoveOrganizationUser(orgAddress, user.ID); err != nil {
+		errors.ErrGenericInternalServerError.Withf("could not update user: %v", err).Write(w)
+		return
+	}
+	// decrement the organization's user counter
+	if err := a.db.DecrementOrganizationUsersCounter(orgAddress); err != nil {
+		log.Errorf("decrement users: %v", err)
+		// compensate: re-add the organization link to the user
+		if _, compensateErr := a.db.SetUser(user); compensateErr != nil {
+			log.Errorf("compensate: could not re-add org link: %v", compensateErr)
+		}
+		errors.ErrGenericInternalServerError.Withf("could not update organization users counter: %v", err).Write(w)
+		return
+	}
+	apicommon.HTTPWriteOK(w)
 }
