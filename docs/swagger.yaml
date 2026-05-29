@@ -78,6 +78,39 @@ definitions:
           type: string
         type: array
     type: object
+  apicommon.CheckBundleParticipantsRequest:
+    properties:
+      fieldName:
+        type: string
+      processID:
+        example: deadbeef
+        format: hex
+        type: string
+      value:
+        type: string
+    type: object
+  apicommon.CheckBundleParticipantsResponse:
+    properties:
+      participants:
+        items:
+          $ref: '#/definitions/apicommon.CheckBundleParticipantsResponseEntry'
+        type: array
+    type: object
+  apicommon.CheckBundleParticipantsResponseEntry:
+    properties:
+      email:
+        type: string
+      hasVoted:
+        type: boolean
+      memberId:
+        type: string
+      memberNumber:
+        type: string
+      name:
+        type: string
+      surname:
+        type: string
+    type: object
   apicommon.CreateCensusRequest:
     properties:
       authFields:
@@ -3784,6 +3817,60 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Resend authentication challenge for a process bundle
+      tags:
+      - process
+  /process/bundle/{bundleId}/participants/check:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Look up org members by one of the allowed identification fields
+        (email, phone, memberNumber, nationalId, name, surname) and return
+        The request must also include the processID
+        hasVoted is true when the member has used (consumed) that process to
+        cast a ballot. Requires Manager/Admin role on the bundle's organization.
+      parameters:
+      - description: Bundle ID
+        in: path
+        name: bundleId
+        required: true
+        type: string
+      - description: Lookup request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.CheckBundleParticipantsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.CheckBundleParticipantsResponse'
+        "400":
+          description: Invalid input
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Bundle not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Check whether an org member belongs to a bundle's census and have voted
       tags:
       - process
   /process/bundle/{bundleId}/sign:

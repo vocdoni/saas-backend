@@ -3,12 +3,14 @@ package db
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -98,6 +100,9 @@ func (ms *MongoStorage) ProcessBundle(hbBundleID internal.HexBytes) (*ProcessesB
 
 	bundle := &ProcessesBundle{}
 	if err := ms.processBundles.FindOne(ctx, bson.M{"_id": bundleID}).Decode(bundle); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("failed to get process bundle: %w", err)
 	}
 

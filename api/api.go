@@ -264,6 +264,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodDelete, processEndpoint, a.deleteProcessHandler)
 		handle(r, http.MethodPost, processBundleEndpoint, a.createProcessBundleHandler)
 		handle(r, http.MethodPut, processBundleUpdateEndpoint, a.updateProcessBundleHandler)
+		handle(r, http.MethodPost, processBundleParticipantsCheckEndpoint, a.checkProcessBundleVotedParticipantsHandler)
 	})
 
 	// Public routes

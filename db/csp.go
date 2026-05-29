@@ -368,3 +368,37 @@ func (ms *MongoStorage) GetOrgMembersByProcess(orgAddress common.Address, proces
 	}
 	return orgMembers, nil
 }
+
+// MembersWithUsedCSPProcess returns the subset of the given memberIDs (each the
+// hex of an OrgMember ObjectID) that have already cast a ballot in the given
+// process. The returned map is keyed by the memberID hex string and only
+// contains entries set to true; members without a CSP process for the given
+// process, or with one that has not been used, are simply absent from the map.
+//
+// A member is considered to have voted when a CSPProcess exists for
+// (memberID, processID) and its Used field is true — i.e. the member consumed
+// the process to cast a ballot.
+func (ms *MongoStorage) MembersWithUsedCSPProcess(
+	processID internal.HexBytes,
+	memberIDs []string,
+) (map[string]bool, error) {
+	if processID == nil {
+		return nil, ErrBadInputs
+	}
+
+	result := make(map[string]bool, len(memberIDs))
+	for _, id := range memberIDs {
+		userID := internal.HexBytesFromString(id)
+		proc, err := ms.CSPProcessByUserAndProcess(userID, processID)
+		if err != nil {
+			if errors.Is(err, ErrTokenNotFound) {
+				continue
+			}
+			return nil, fmt.Errorf("failed to query CSP process status: %w", err)
+		}
+		if proc.Used {
+			result[id] = true
+		}
+	}
+	return result, nil
+}
