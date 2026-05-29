@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/hex"
 	"encoding/json"
+	stderrors "errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -361,4 +362,159 @@ func (a *API) processBundleParticipantInfoHandler(w http.ResponseWriter, r *http
 	*/
 
 	apicommon.HTTPWriteJSON(w, nil)
+}
+
+// checkProcessBundleVotedParticipantsHandler godoc
+//
+//	@Summary		Check whether an org member belongs to a bundle's census and have voted
+//	@Description	Look up org members by one of the allowed identification fields
+//	@Description	(email, phone, memberNumber, nationalId, name, surname) and return
+//	@Description	The request must also include the processID
+//	@Description	hasVoted is true when the member has used (consumed) that process to
+//	@Description	cast a ballot. Requires Manager/Admin role on the bundle's organization.
+//	@Tags			process
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			bundleId	path		string										true	"Bundle ID"
+//	@Param			request		body		apicommon.CheckBundleParticipantsRequest	true	"Lookup request"
+//	@Success		200			{object}	apicommon.CheckBundleParticipantsResponse
+//	@Failure		400			{object}	errors.Error	"Invalid input"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		403			{object}	errors.Error	"Forbidden"
+//	@Failure		404			{object}	errors.Error	"Bundle not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/process/bundle/{bundleId}/participants/check [post]
+func (a *API) checkProcessBundleVotedParticipantsHandler(w http.ResponseWriter, r *http.Request) {
+	bundleIDStr := chi.URLParam(r, "bundleId")
+	if bundleIDStr == "" {
+		errors.ErrMalformedURLParam.Withf("missing bundle ID").Write(w)
+		return
+	}
+	var bundleID internal.HexBytes
+	if err := bundleID.ParseString(bundleIDStr); err != nil {
+		errors.ErrMalformedURLParam.Withf("invalid bundle ID").Write(w)
+		return
+	}
+
+	var req apicommon.CheckBundleParticipantsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	field := db.OrgMemberLookupField(req.FieldName)
+	if !field.IsValid() {
+		errors.ErrMalformedBody.Withf(
+			"invalid fieldName: must be one of email, phone, memberNumber, nationalId",
+		).Write(w)
+		return
+	}
+	if req.Value == "" {
+		errors.ErrMalformedBody.Withf("missing value").Write(w)
+		return
+	}
+	if len(req.ProcessID) == 0 {
+		errors.ErrMalformedBody.Withf("missing processID").Write(w)
+		return
+	}
+
+	bundle, err := a.db.ProcessBundle(bundleID)
+	if err != nil {
+		if stderrors.Is(err, db.ErrNotFound) {
+			errors.ErrBundleNotFound.Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	if !user.HasRoleFor(bundle.OrgAddress, db.ManagerRole) &&
+		!user.HasRoleFor(bundle.OrgAddress, db.AdminRole) {
+		errors.ErrForbidden.Withf("user is not admin or manager of organization").Write(w)
+		return
+	}
+
+	// Build the lookup value. Phone is hashed server-side because OrgMember.Phone
+	// is stored as a HashedPhone.
+	var lookupValue any = req.Value
+	if field == db.OrgMemberLookupFieldPhone {
+		org, err := a.db.Organization(bundle.OrgAddress)
+		if err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+		hashed, err := db.NewHashedPhone(req.Value, org)
+		if err != nil {
+			errors.ErrMalformedBody.Withf("invalid phone: %v", err).Write(w)
+			return
+		}
+		if hashed.IsEmpty() {
+			errors.ErrMalformedBody.Withf("invalid phone").Write(w)
+			return
+		}
+		lookupValue = hashed
+	}
+
+	members, err := a.db.OrgMembersByField(bundle.OrgAddress, field, lookupValue)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if len(members) == 0 {
+		apicommon.HTTPWriteJSON(w, apicommon.CheckBundleParticipantsResponse{
+			Participants: []apicommon.CheckBundleParticipantsResponseEntry{},
+		})
+		return
+	}
+
+	memberIDs := make([]string, 0, len(members))
+	membersByID := make(map[string]*db.OrgMember, len(members))
+	for _, m := range members {
+		id := m.ID.Hex()
+		memberIDs = append(memberIDs, id)
+		membersByID[id] = m
+	}
+
+	censusID := bundle.Census.ID.Hex()
+	participants, err := a.db.CensusParticipantsByMemberIDs(censusID, memberIDs)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
+	// Look up vote status for the requested process. A used CSP process for a
+	// member indicates they have consumed the process to cast a ballot.
+	// participantIDs are the member IDs that are included in the census.
+	participantIDs := make([]string, 0, len(participants))
+	for _, p := range participants {
+		participantIDs = append(participantIDs, p.ParticipantID)
+	}
+	votedSet, err := a.db.MembersWithUsedCSPProcess(req.ProcessID, participantIDs)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
+	entries := make([]apicommon.CheckBundleParticipantsResponseEntry, 0, len(participants))
+	for _, p := range participants {
+		m, ok := membersByID[p.ParticipantID]
+		if !ok {
+			continue
+		}
+		entries = append(entries, apicommon.CheckBundleParticipantsResponseEntry{
+			MemberID:     m.ID.Hex(),
+			Name:         m.Name,
+			Surname:      m.Surname,
+			Email:        m.Email,
+			MemberNumber: m.MemberNumber,
+			HasVoted:     votedSet[m.ID.Hex()],
+		})
+	}
+
+	apicommon.HTTPWriteJSON(w, apicommon.CheckBundleParticipantsResponse{Participants: entries})
 }

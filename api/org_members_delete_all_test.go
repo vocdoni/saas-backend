@@ -8,6 +8,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 )
 
+// TestDeleteAllOrganizationMembers tests the endpoint for deleting all members from an organization.
 func TestDeleteAllOrganizationMembers(t *testing.T) {
 	c := qt.New(t)
 

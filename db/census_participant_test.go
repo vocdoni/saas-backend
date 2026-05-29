@@ -657,6 +657,143 @@ func TestCensusParticipant(t *testing.T) {
 	})
 }
 
+type censusParticipantsByMemberIDsFixture struct {
+	alice   *OrgMember
+	bob     *OrgMember
+	carol   *OrgMember
+	censusA *Census
+	censusB *Census
+}
+
+func setupCensusParticipantsByMemberIDsFixtureForTrackedTests(t *testing.T) *censusParticipantsByMemberIDsFixture {
+	t.Helper()
+	c := qt.New(t)
+
+	org := &Organization{
+		Address:   testOrgAddress,
+		Active:    true,
+		CreatedAt: time.Now(),
+	}
+	c.Assert(testDB.SetOrganization(org), qt.IsNil)
+
+	mkMember := func(memberNumber, email string) *OrgMember {
+		member := &OrgMember{
+			ID:           primitive.NewObjectID(),
+			OrgAddress:   testOrgAddress,
+			MemberNumber: memberNumber,
+			Email:        email,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		}
+		_, err := testDB.SetOrgMember(testSalt, member)
+		c.Assert(err, qt.IsNil)
+		return member
+	}
+
+	alice := mkMember("tracked-alice", "tracked-alice@example.com")
+	bob := mkMember("tracked-bob", "tracked-bob@example.com")
+	carol := mkMember("tracked-carol", "tracked-carol@example.com")
+
+	censusA := &Census{
+		OrgAddress: testOrgAddress,
+		CreatedAt:  time.Now(),
+	}
+	censusAID, err := testDB.SetCensus(censusA)
+	c.Assert(err, qt.IsNil)
+	censusAObjID, err := primitive.ObjectIDFromHex(censusAID)
+	c.Assert(err, qt.IsNil)
+	censusA.ID = censusAObjID
+
+	censusB := &Census{
+		OrgAddress: testOrgAddress,
+		CreatedAt:  time.Now(),
+	}
+	censusBID, err := testDB.SetCensus(censusB)
+	c.Assert(err, qt.IsNil)
+	censusBObjID, err := primitive.ObjectIDFromHex(censusBID)
+	c.Assert(err, qt.IsNil)
+	censusB.ID = censusBObjID
+
+	c.Assert(testDB.SetCensusParticipant(&CensusParticipant{
+		ParticipantID: alice.ID.Hex(),
+		CensusID:      censusA.ID.Hex(),
+		CreatedAt:     time.Now(),
+	}), qt.IsNil)
+	c.Assert(testDB.SetCensusParticipant(&CensusParticipant{
+		ParticipantID: bob.ID.Hex(),
+		CensusID:      censusA.ID.Hex(),
+		CreatedAt:     time.Now(),
+	}), qt.IsNil)
+	c.Assert(testDB.SetCensusParticipant(&CensusParticipant{
+		ParticipantID: alice.ID.Hex(),
+		CensusID:      censusB.ID.Hex(),
+		CreatedAt:     time.Now(),
+	}), qt.IsNil)
+
+	return &censusParticipantsByMemberIDsFixture{
+		alice:   alice,
+		bob:     bob,
+		carol:   carol,
+		censusA: censusA,
+		censusB: censusB,
+	}
+}
+
+func TestCensusParticipantsByMemberIDsTrackedSuite(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	t.Run("empty census ID is rejected", func(_ *testing.T) {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+		fixture := setupCensusParticipantsByMemberIDsFixtureForTrackedTests(t)
+
+		_, err := testDB.CensusParticipantsByMemberIDs("", []string{fixture.alice.ID.Hex()})
+		c.Assert(err, qt.Equals, ErrInvalidData)
+	})
+
+	t.Run("empty member IDs returns an empty slice without error", func(_ *testing.T) {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+		fixture := setupCensusParticipantsByMemberIDsFixtureForTrackedTests(t)
+
+		got, err := testDB.CensusParticipantsByMemberIDs(fixture.censusA.ID.Hex(), nil)
+		c.Assert(err, qt.IsNil)
+		c.Assert(got, qt.HasLen, 0)
+	})
+
+	t.Run("returns only participants that belong to the requested census", func(_ *testing.T) {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+		fixture := setupCensusParticipantsByMemberIDsFixtureForTrackedTests(t)
+
+		got, err := testDB.CensusParticipantsByMemberIDs(
+			fixture.censusA.ID.Hex(),
+			[]string{fixture.alice.ID.Hex(), fixture.bob.ID.Hex(), fixture.carol.ID.Hex()},
+		)
+		c.Assert(err, qt.IsNil)
+		c.Assert(got, qt.HasLen, 2)
+
+		gotIDs := map[string]bool{}
+		for _, participant := range got {
+			gotIDs[participant.ParticipantID] = true
+		}
+		c.Assert(gotIDs[fixture.alice.ID.Hex()], qt.IsTrue)
+		c.Assert(gotIDs[fixture.bob.ID.Hex()], qt.IsTrue)
+		c.Assert(gotIDs[fixture.carol.ID.Hex()], qt.IsFalse)
+	})
+
+	t.Run("results stay scoped to the requested census ID", func(_ *testing.T) {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+		fixture := setupCensusParticipantsByMemberIDsFixtureForTrackedTests(t)
+
+		got, err := testDB.CensusParticipantsByMemberIDs(
+			fixture.censusB.ID.Hex(),
+			[]string{fixture.alice.ID.Hex(), fixture.bob.ID.Hex()},
+		)
+		c.Assert(err, qt.IsNil)
+		c.Assert(got, qt.HasLen, 1)
+		c.Assert(got[0].ParticipantID, qt.Equals, fixture.alice.ID.Hex())
+	})
+}
+
 // TestCreateCensusParticipantBulkOperationsFiltering specifically tests the filtering functionality
 // in the createCensusParticipantBulkOperations function, focusing on ensuring
 // that "participantID": orgMember.ID.Hex() works correctly for upserts

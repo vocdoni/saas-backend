@@ -299,3 +299,127 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(err, qt.Equals, ErrInvalidData)
 	})
 }
+
+type orgMembersByFieldFixture struct {
+	org   *Organization
+	alice *OrgMember
+	bob   *OrgMember
+	carol *OrgMember
+	other *OrgMember
+}
+
+func setupOrgMembersByFieldFixtureForTrackedTests(t *testing.T) *orgMembersByFieldFixture {
+	t.Helper()
+	c := qt.New(t)
+
+	org := &Organization{
+		Address: testOrgAddress,
+		Country: "ES",
+	}
+	otherOrg := &Organization{
+		Address: testAnotherOrgAddress,
+		Country: "ES",
+	}
+	c.Assert(testDB.SetOrganization(org), qt.IsNil)
+	c.Assert(testDB.SetOrganization(otherOrg), qt.IsNil)
+
+	mkMember := func(orgAddress common.Address, memberNumber, email, phone, nationalID string) *OrgMember {
+		member := &OrgMember{
+			OrgAddress:     orgAddress,
+			MemberNumber:   memberNumber,
+			Email:          email,
+			PlaintextPhone: phone,
+			NationalID:     nationalID,
+			Name:           memberNumber,
+		}
+		memberID, err := testDB.SetOrgMember(testSalt, member)
+		c.Assert(err, qt.IsNil)
+
+		stored, err := testDB.OrgMember(orgAddress, memberID)
+		c.Assert(err, qt.IsNil)
+		return stored
+	}
+
+	alice := mkMember(testOrgAddress, "P001", "shared@x.com", "+34611111111", "DNI001")
+	bob := mkMember(testOrgAddress, "P002", "bob@x.com", "+34622222222", "DNI002")
+	carol := mkMember(testOrgAddress, "P003", "shared@x.com", "+34633333333", "DNI003")
+	other := mkMember(testAnotherOrgAddress, "P004", "shared@x.com", "+34611111111", "DNI004")
+
+	return &orgMembersByFieldFixture{
+		org:   org,
+		alice: alice,
+		bob:   bob,
+		carol: carol,
+		other: other,
+	}
+}
+
+func TestOrgMembersByFieldTrackedSuite(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	t.Run("validation rejects invalid field and empty values", func(_ *testing.T) {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+		_ = setupOrgMembersByFieldFixtureForTrackedTests(t)
+
+		_, err := testDB.OrgMembersByField(testOrgAddress, OrgMemberLookupField("invalid-field"), "Alice")
+		c.Assert(err, qt.Equals, ErrInvalidData)
+
+		_, err = testDB.OrgMembersByField(testOrgAddress, OrgMemberLookupFieldEmail, "")
+		c.Assert(err, qt.Equals, ErrInvalidData)
+	})
+
+	t.Run("lookup by email returns all matches within the organization", func(_ *testing.T) {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+		fixture := setupOrgMembersByFieldFixtureForTrackedTests(t)
+
+		got, err := testDB.OrgMembersByField(testOrgAddress, OrgMemberLookupFieldEmail, "shared@x.com")
+		c.Assert(err, qt.IsNil)
+		c.Assert(got, qt.HasLen, 2)
+
+		gotIDs := map[string]bool{}
+		for _, member := range got {
+			gotIDs[member.ID.Hex()] = true
+		}
+		c.Assert(gotIDs[fixture.alice.ID.Hex()], qt.IsTrue)
+		c.Assert(gotIDs[fixture.carol.ID.Hex()], qt.IsTrue)
+	})
+
+	t.Run("lookup by member number and national ID returns the unique match", func(_ *testing.T) {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+		fixture := setupOrgMembersByFieldFixtureForTrackedTests(t)
+
+		gotByNumber, err := testDB.OrgMembersByField(testOrgAddress, OrgMemberLookupFieldMemberNumber, "P002")
+		c.Assert(err, qt.IsNil)
+		c.Assert(gotByNumber, qt.HasLen, 1)
+		c.Assert(gotByNumber[0].ID.Hex(), qt.Equals, fixture.bob.ID.Hex())
+
+		gotByNationalID, err := testDB.OrgMembersByField(testOrgAddress, OrgMemberLookupFieldNationalID, "DNI001")
+		c.Assert(err, qt.IsNil)
+		c.Assert(gotByNationalID, qt.HasLen, 1)
+		c.Assert(gotByNationalID[0].ID.Hex(), qt.Equals, fixture.alice.ID.Hex())
+	})
+
+	t.Run("lookup by phone uses the hashed value and remains org-scoped", func(_ *testing.T) {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+		fixture := setupOrgMembersByFieldFixtureForTrackedTests(t)
+
+		hashedPhone, err := NewHashedPhone("+34611111111", fixture.org)
+		c.Assert(err, qt.IsNil)
+
+		got, err := testDB.OrgMembersByField(testOrgAddress, OrgMemberLookupFieldPhone, hashedPhone)
+		c.Assert(err, qt.IsNil)
+		c.Assert(got, qt.HasLen, 1)
+		c.Assert(got[0].ID.Hex(), qt.Equals, fixture.alice.ID.Hex())
+		c.Assert(got[0].ID.Hex(), qt.Not(qt.Equals), fixture.other.ID.Hex())
+	})
+
+	t.Run("no matches return an empty slice without error", func(_ *testing.T) {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+		_ = setupOrgMembersByFieldFixtureForTrackedTests(t)
+
+		got, err := testDB.OrgMembersByField(testOrgAddress, OrgMemberLookupFieldEmail, "missing@x.com")
+		c.Assert(err, qt.IsNil)
+		c.Assert(got, qt.HasLen, 0)
+	})
+}

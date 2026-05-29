@@ -796,3 +796,105 @@ func (ms *MongoStorage) orgMembersByIDs(
 
 	return paginatedDocuments[*OrgMember](ms.orgMembers, page, limit, filter, options.Find())
 }
+
+// OrgMemberLookupField identifies an OrgMember column that can be used as a
+// unique-ish lookup key. Only the values declared as constants below are valid;
+// any other value should be rejected by callers before reaching the DB layer.
+type OrgMemberLookupField string
+
+const (
+	OrgMemberLookupFieldEmail        OrgMemberLookupField = "email"
+	OrgMemberLookupFieldPhone        OrgMemberLookupField = "phone"
+	OrgMemberLookupFieldMemberNumber OrgMemberLookupField = "memberNumber"
+	OrgMemberLookupFieldNationalID   OrgMemberLookupField = "nationalId"
+	OrgMemberLookupFieldName         OrgMemberLookupField = "name"
+	OrgMemberLookupFieldSurname      OrgMemberLookupField = "surname"
+)
+
+// IsValid reports whether the field is one of the supported lookup fields.
+func (f OrgMemberLookupField) IsValid() bool {
+	switch f {
+	case OrgMemberLookupFieldEmail,
+		OrgMemberLookupFieldPhone,
+		OrgMemberLookupFieldMemberNumber,
+		OrgMemberLookupFieldNationalID,
+		OrgMemberLookupFieldName,
+		OrgMemberLookupFieldSurname:
+		return true
+	}
+	return false
+}
+
+// bsonField returns the BSON field name corresponding to the lookup field.
+func (f OrgMemberLookupField) bsonField() string {
+	switch f {
+	case OrgMemberLookupFieldEmail:
+		return "email"
+	case OrgMemberLookupFieldPhone:
+		return "phone"
+	case OrgMemberLookupFieldMemberNumber:
+		return "memberNumber"
+	case OrgMemberLookupFieldNationalID:
+		return "nationalId"
+	case OrgMemberLookupFieldName:
+		return "name"
+	case OrgMemberLookupFieldSurname:
+		return "surname"
+	}
+	return ""
+}
+
+// OrgMembersByField retrieves all organization members for the given org whose
+// `field` column equals `value`. The field must be one of the OrgMemberLookupField
+// constants — invalid fields return ErrInvalidData.
+//
+// For OrgMemberLookupFieldPhone, the caller must pass an already-hashed value
+// (HashedPhone bytes); for the other fields the value is matched verbatim as a
+// string. Returns an empty slice (not an error) when there is no match.
+func (ms *MongoStorage) OrgMembersByField(
+	orgAddress common.Address,
+	field OrgMemberLookupField,
+	value any,
+) ([]*OrgMember, error) {
+	if !field.IsValid() {
+		return nil, ErrInvalidData
+	}
+	switch v := value.(type) {
+	case string:
+		if v == "" {
+			return nil, ErrInvalidData
+		}
+	case HashedPhone:
+		if v.IsEmpty() {
+			return nil, ErrInvalidData
+		}
+	case []byte:
+		if len(v) == 0 {
+			return nil, ErrInvalidData
+		}
+	case nil:
+		return nil, ErrInvalidData
+	default:
+		return nil, ErrInvalidData
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	filter := bson.M{
+		"orgAddress":      orgAddress,
+		field.bsonField(): value,
+	}
+
+	cur, err := ms.orgMembers.Find(ctx, filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query org members by %s: %w", field, err)
+	}
+	defer func() { _ = cur.Close(ctx) }()
+
+	var members []*OrgMember
+	if err := cur.All(ctx, &members); err != nil {
+		return nil, fmt.Errorf("failed to decode org members by %s: %w", field, err)
+	}
+	return members, nil
+}

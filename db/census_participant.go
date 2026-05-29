@@ -720,6 +720,45 @@ func (ms *MongoStorage) CensusParticipants(censusID string) ([]CensusParticipant
 	return participants, nil
 }
 
+// CensusParticipantsByMemberIDs retrieves all census participants of the given
+// census whose participantID matches one of the provided memberIDs. Returns an
+// empty slice (not an error) when there is no match.
+func (ms *MongoStorage) CensusParticipantsByMemberIDs(
+	censusID string,
+	memberIDs []string,
+) ([]CensusParticipant, error) {
+	if len(censusID) == 0 {
+		return nil, ErrInvalidData
+	}
+	if len(memberIDs) == 0 {
+		return nil, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	filter := bson.M{
+		"censusId":      censusID,
+		"participantID": bson.M{"$in": memberIDs},
+	}
+
+	cursor, err := ms.censusParticipants.Find(ctx, filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query census participants by member IDs: %w", err)
+	}
+	defer func() {
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("error closing cursor", "error", err)
+		}
+	}()
+
+	var participants []CensusParticipant
+	if err := cursor.All(ctx, &participants); err != nil {
+		return nil, fmt.Errorf("failed to decode census participants: %w", err)
+	}
+	return participants, nil
+}
+
 func calculateParticipantHashesBson(census Census, member OrgMember) bson.M {
 	hashes := bson.M{}
 	hashes["loginHash"] = HashAuthTwoFaFields(member, census.AuthFields, census.TwoFaFields)

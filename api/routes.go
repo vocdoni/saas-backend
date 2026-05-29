@@ -160,6 +160,9 @@ const (
 	processBundleSignEndpoint = "/process/bundle/{bundleId}/sign"
 	// GET /process/bundle/{bundleId}/{participantId} to get the process information
 	processBundleMemberEndpoint = "/process/bundle/{bundleId}/{participantId}"
+	// POST /process/bundle/{bundleId}/participants/check to check whether an org member is a
+	// participant of the bundle's census. Manager/Admin only.
+	processBundleParticipantsCheckEndpoint = "/process/bundle/{bundleId}/participants/check"
 
 	// // census auth routes (currently not implemented)
 	// // POST /process/{processId}/auth/0 to initiate auth

@@ -74,6 +74,7 @@ var (
 	ErrCensusParticipantNotFound = Error{Code: 40029, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("census participant not found")}
 	ErrProcessNotFound           = Error{Code: 40038, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("process not found")}
 	ErrGroupNotFound             = Error{Code: 40057, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("group not found")}
+	ErrBundleNotFound            = Error{Code: 40058, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("bundle not found")}
 
 	// Conflict errors (409)
 	ErrDuplicateConflict           = Error{Code: 40901, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("resource already exists")}
@@ -94,6 +95,7 @@ var (
 	ErrExceedsOrganizationMembersLimit        = Error{Code: 40145, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("operation would exceed organization members limit")}
 	ErrAutoGroupCannotBeDeleted               = Error{Code: 40150, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("the \"All members\" group is auto-generated and cannot be deleted")}
 	ErrAutoGroupMembersCannotBeModified       = Error{Code: 40151, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("membership of the auto-generated \"All members\" group cannot be manually modified")}
+	ErrForbidden                              = Error{Code: 40152, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("forbidden"), LogLevel: "info"}
 
 	// CSP errors (408)
 	ErrZeroWeightVoter = Error{Code: 40801, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("voter weight cannot be zero")}

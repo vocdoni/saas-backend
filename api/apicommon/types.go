@@ -1110,6 +1110,43 @@ type CreateProcessBundleResponse struct {
 	Root internal.HexBytes `json:"root" swaggertype:"string" format:"hex" example:"deadbeef"`
 }
 
+// CheckBundleParticipantsRequest is the payload for the bundle participant
+// membership check endpoint. fieldName must be one of: "email", "phone",
+// "memberNumber", "nationalId". value is the raw value to look up — for
+// "phone" the caller passes the plaintext number and the backend hashes it
+// server-side before the lookup. processID is the hex ID of the process whose
+// voting status is reported in the response (hasVoted is true when the member
+// has consumed that process).
+// swagger:model CheckBundleParticipantsRequest
+type CheckBundleParticipantsRequest struct {
+	FieldName string            `json:"fieldName"`
+	Value     string            `json:"value"`
+	ProcessID internal.HexBytes `json:"processID" swaggertype:"string" format:"hex" example:"deadbeef"`
+}
+
+// CheckBundleParticipantsResponseEntry describes a single org member that
+// matched the lookup and is a participant of the bundle's census. HasVoted is
+// true when the member has a used CSP process for the request's processID
+// (i.e. has consumed the process to cast a ballot).
+// swagger:model CheckBundleParticipantsResponseEntry
+type CheckBundleParticipantsResponseEntry struct {
+	MemberID     string `json:"memberId"`
+	Name         string `json:"name,omitempty"`
+	Surname      string `json:"surname,omitempty"`
+	Email        string `json:"email,omitempty"`
+	MemberNumber string `json:"memberNumber,omitempty"`
+	HasVoted     bool   `json:"hasVoted"`
+}
+
+// CheckBundleParticipantsResponse is the response for the bundle participant
+// membership check endpoint. The participants slice contains only members that
+// match the lookup AND are participants of the bundle's census. An empty
+// slice means no match.
+// swagger:model CheckBundleParticipantsResponse
+type CheckBundleParticipantsResponse struct {
+	Participants []CheckBundleParticipantsResponseEntry `json:"participants"`
+}
+
 // OAuthLoginRequest defines the payload for register/login through the OAuth service.
 // swagger:model OAuthLoginRequest
 type OAuthLoginRequest struct {
