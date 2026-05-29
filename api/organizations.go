@@ -560,32 +560,22 @@ func (a *API) organizationJobsHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/organizations/{address} [delete]
 func (a *API) removeOrganizationFromUserHandler(w http.ResponseWriter, r *http.Request) {
-	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
-	// parse the organization address directly from the URL parameter
-	// (no need to load the full org document from DB for this operation)
 	orgAddress := common.HexToAddress(chi.URLParam(r, "address"))
-	// check if the user has any role in the organization
 	if !user.HasAnyRoleFor(orgAddress) {
 		errors.ErrOrganizationNotFound.Write(w)
 		return
 	}
-	// atomically remove the organization from the user's organizations list
 	if err := a.db.RemoveOrganizationUser(orgAddress, user.ID); err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not update user: %v", err).Write(w)
 		return
 	}
-	// decrement the organization's user counter
 	if err := a.db.DecrementOrganizationUsersCounter(orgAddress); err != nil {
 		log.Errorf("decrement users: %v", err)
-		// compensate: re-add the organization link to the user
-		if _, compensateErr := a.db.SetUser(user); compensateErr != nil {
-			log.Errorf("compensate: could not re-add org link: %v", compensateErr)
-		}
 		errors.ErrGenericInternalServerError.Withf("could not update organization users counter: %v", err).Write(w)
 		return
 	}
