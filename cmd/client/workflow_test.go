@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -13,6 +14,73 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 )
+
+func TestMemberMatchesIdentifier(t *testing.T) {
+	c := qt.New(t)
+
+	member := apicommon.OrgMember{
+		Email:        "person@example.com",
+		NationalID:   "1234",
+		MemberNumber: "M-99",
+	}
+
+	cases := []struct {
+		name       string
+		member     apicommon.OrgMember
+		idField    string
+		identifier string
+		want       bool
+	}{
+		{"email match", member, identifierFieldEmail, "person@example.com", true},
+		{
+			"email trims surrounding space",
+			apicommon.OrgMember{Email: "  person@example.com  "},
+			identifierFieldEmail, "person@example.com", true,
+		},
+		{"email case-sensitive mismatch", member, identifierFieldEmail, "Person@example.com", false},
+		{"email no match", member, identifierFieldEmail, "other@example.com", false},
+		{"nationalId match", member, identifierFieldNationalID, "1234", true},
+		{"nationalId mismatch", member, identifierFieldNationalID, "5678", false},
+		{"memberNumber match", member, identifierFieldMemberNumber, "M-99", true},
+		{"unknown field never matches", member, "unknown", "person@example.com", false},
+	}
+
+	for _, tc := range cases {
+		c.Run(tc.name, func(c *qt.C) {
+			c.Assert(memberMatchesIdentifier(tc.member, tc.idField, tc.identifier), qt.Equals, tc.want)
+		})
+	}
+}
+
+func TestFindMemberByIdentifierEscapesSearchTerm(t *testing.T) {
+	c := qt.New(t)
+
+	orgAddress := common.HexToAddress("0x3333333333333333333333333333333333333333")
+	identifier := "a.b+x@example.com"
+
+	var gotSearch string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.Assert(r.Method, qt.Equals, http.MethodGet)
+		c.Assert(r.URL.Path, qt.Equals, "/organizations/"+orgAddress.Hex()+"/members")
+		gotSearch = r.URL.Query().Get("search")
+
+		w.Header().Set("Content-Type", "application/json")
+		c.Assert(json.NewEncoder(w).Encode(apicommon.OrganizationMembersResponse{
+			Members: []apicommon.OrgMember{{ID: "member-id-1", Email: identifier}},
+		}), qt.IsNil)
+	}))
+	defer server.Close()
+
+	client := newClient(server.URL)
+	found, err := findMemberByIdentifier(client, orgAddress, identifierFieldEmail, identifier)
+
+	c.Assert(err, qt.IsNil)
+	c.Assert(found, qt.IsNotNil)
+	c.Assert(found.ID, qt.Equals, "member-id-1")
+	// The server-side `search` param is a regex; metacharacters must be escaped
+	// so the email is matched literally instead of as a pattern.
+	c.Assert(gotSearch, qt.Equals, regexp.QuoteMeta(identifier))
+}
 
 func TestUpdateExistingMemberFromRowSkipReturnsPersistedMember(t *testing.T) {
 	c := qt.New(t)

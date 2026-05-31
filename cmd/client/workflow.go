@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -293,8 +294,14 @@ func findMemberByIdentifier(client *Client, orgAddress common.Address, idField, 
 	limit := 100
 	var found *apicommon.OrgMember
 
+	// The server treats `search` as a regex, so escape the identifier to match it
+	// literally. This matters for emails (which contain `.` and may contain `+`)
+	// and hardens nationalId/memberNumber lookups against stray metacharacters.
+	// The authoritative exact comparison still happens in memberMatchesIdentifier.
+	searchTerm := regexp.QuoteMeta(strings.TrimSpace(identifier))
+
 	for {
-		resp, err := client.organizationMembers(orgAddress, identifier, page, limit)
+		resp, err := client.organizationMembers(orgAddress, searchTerm, page, limit)
 		if err != nil {
 			return nil, fmt.Errorf("search members page %d: %w", page, err)
 		}
@@ -328,6 +335,10 @@ func memberMatchesIdentifier(member apicommon.OrgMember, idField, identifier str
 		return strings.TrimSpace(member.NationalID) == identifier
 	case identifierFieldMemberNumber:
 		return strings.TrimSpace(member.MemberNumber) == identifier
+	case identifierFieldEmail:
+		// Email is stored in plaintext, so it can be compared directly. Matching
+		// is trim-only and case-sensitive, mirroring how it is stored.
+		return strings.TrimSpace(member.Email) == strings.TrimSpace(identifier)
 	default:
 		return false
 	}
