@@ -178,6 +178,8 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
+	sentAt := userVerification.Expiration.Add(-apicommon.VerificationCodeExpiration)
+	log.Infow("email verification completed", "elapsed_seconds", time.Since(sentAt).Seconds())
 	// generate a new token with the user name as the subject
 	res, err := a.buildLoginResponse(user.Email)
 	if err != nil {
