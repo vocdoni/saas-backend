@@ -3,6 +3,8 @@ package notifications
 import (
 	"sync"
 	"time"
+
+	"go.vocdoni.io/dvote/log"
 )
 
 // breaker is a minimal circuit breaker guarding a single notification provider
@@ -16,6 +18,7 @@ import (
 // errors). Permanent failures (e.g. an invalid recipient) are a property of the
 // individual message, not the provider, so callers must not record them here.
 type breaker struct {
+	name        string
 	mu          sync.Mutex
 	failures    int
 	openUntil   time.Time
@@ -26,10 +29,10 @@ type breaker struct {
 	now func() time.Time
 }
 
-// newBreaker creates a breaker that opens after maxFailures consecutive
-// failures and stays open for cooldown. Non-positive arguments fall back to the
-// package defaults.
-func newBreaker(maxFailures int, cooldown time.Duration) *breaker {
+// newBreaker creates a breaker, identified by name (used in logs), that opens
+// after maxFailures consecutive failures and stays open for cooldown.
+// Non-positive numeric arguments fall back to the package defaults.
+func newBreaker(name string, maxFailures int, cooldown time.Duration) *breaker {
 	if maxFailures <= 0 {
 		maxFailures = DefaultBreakerMaxFailures
 	}
@@ -37,6 +40,7 @@ func newBreaker(maxFailures int, cooldown time.Duration) *breaker {
 		cooldown = DefaultBreakerCooldown
 	}
 	return &breaker{
+		name:        name,
 		maxFailures: maxFailures,
 		cooldown:    cooldown,
 		now:         time.Now,
@@ -65,18 +69,34 @@ func (b *breaker) retryAfter() time.Duration {
 // RecordSuccess resets the failure count and closes the breaker.
 func (b *breaker) RecordSuccess() {
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	wasTripped := b.failures >= b.maxFailures
 	b.failures = 0
 	b.openUntil = time.Time{}
+	b.mu.Unlock()
+	// Log the recovery outside the lock; name is immutable after construction.
+	if wasTripped {
+		log.Infow("notification provider recovered, circuit breaker closed", "provider", b.name)
+	}
 }
 
 // RecordFailure increments the consecutive failure count and opens the breaker
-// for the cooldown period once the configured threshold is reached.
+// for the cooldown period once the configured threshold is reached. It is only
+// called for attempts the breaker allowed, so an "opened" transition is logged
+// at most once per cooldown cycle.
 func (b *breaker) RecordFailure() {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	b.failures++
+	opened := false
 	if b.failures >= b.maxFailures {
 		b.openUntil = b.now().Add(b.cooldown)
+		opened = true
+	}
+	failures := b.failures
+	b.mu.Unlock()
+	if opened {
+		log.Warnw("notification provider failing, circuit breaker opened",
+			"provider", b.name,
+			"consecutiveFailures", failures,
+			"cooldown", b.cooldown.String())
 	}
 }

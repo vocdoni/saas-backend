@@ -16,6 +16,7 @@ import (
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
+	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"github.com/vocdoni/saas-backend/notifications/smtp"
 	"github.com/vocdoni/saas-backend/notifications/twilio"
@@ -43,6 +44,12 @@ func main() {
 	flag.String("smtpPassword", "", "SMTP password")
 	flag.String("emailFromAddress", "", "Email service from address")
 	flag.String("emailFromName", "Vocdoni", "Email service from name")
+	// Optional backup SMTP relay used for email failover. It shares the same
+	// sender identity (emailFromAddress/emailFromName); only the relay differs.
+	flag.String("backupSmtpServer", "", "Backup SMTP server (optional; enables email failover)")
+	flag.Int("backupSmtpPort", 587, "Backup SMTP port")
+	flag.String("backupSmtpUsername", "", "Backup SMTP username")
+	flag.String("backupSmtpPassword", "", "Backup SMTP password")
 	flag.String("twilioAccountSid", "", "Twilio account SID")
 	flag.String("twilioAuthToken", "", "Twilio auth token")
 	flag.String("twilioFromNumber", "", "Twilio from number")
@@ -82,6 +89,11 @@ func main() {
 	smtpPassword := viper.GetString("smtpPassword")
 	emailFromAddress := viper.GetString("emailFromAddress")
 	emailFromName := viper.GetString("emailFromName")
+	// optional backup SMTP relay (same sender, different relay)
+	backupSMTPServer := viper.GetString("backupSmtpServer")
+	backupSMTPPort := viper.GetInt("backupSmtpPort")
+	backupSMTPUsername := viper.GetString("backupSmtpUsername")
+	backupSMTPPassword := viper.GetString("backupSmtpPassword")
 	// sms vars
 	twilioAccountSid := viper.GetString("twilioAccountSid")
 	twilioAuthToken := viper.GetString("twilioAuthToken")
@@ -154,8 +166,8 @@ func main() {
 		if emailFromAddress == "" || emailFromName == "" {
 			log.Fatal("emailFromAddress and emailFromName are required")
 		}
-		apiConf.MailService = new(smtp.Email)
-		if err := apiConf.MailService.New(&smtp.Config{
+		primaryMail := new(smtp.Email)
+		if err := primaryMail.New(&smtp.Config{
 			FromName:     emailFromName,
 			FromAddress:  emailFromAddress,
 			SMTPServer:   smtpServer,
@@ -165,6 +177,25 @@ func main() {
 		}); err != nil {
 			log.Fatalf("could not create the email service: %v", err)
 		}
+		apiConf.MailService = primaryMail
+		// if a backup SMTP relay is configured, wrap the primary and backup in a
+		// failover service. The backup shares the same sender identity (from
+		// address/name); only the relay configuration differs.
+		if backupSMTPServer != "" && backupSMTPUsername != "" && backupSMTPPassword != "" {
+			backupMail := new(smtp.Email)
+			if err := backupMail.New(&smtp.Config{
+				FromName:     emailFromName,
+				FromAddress:  emailFromAddress,
+				SMTPServer:   backupSMTPServer,
+				SMTPPort:     backupSMTPPort,
+				SMTPUsername: backupSMTPUsername,
+				SMTPPassword: backupSMTPPassword,
+			}); err != nil {
+				log.Fatalf("could not create the backup email service: %v", err)
+			}
+			apiConf.MailService = notifications.NewFailoverService(primaryMail, backupMail)
+			log.Infow("backup email service configured", "server", backupSMTPServer, "port", backupSMTPPort)
+		}
 		cspConf.MailService = apiConf.MailService
 		// load email templates
 		if err := mailtemplates.Load(); err != nil {
@@ -172,6 +203,10 @@ func main() {
 		}
 		log.Infow("email templates loaded",
 			"templates", len(mailtemplates.Available()))
+	} else if backupSMTPServer != "" {
+		// guard against a confusing misconfiguration: a backup relay is useless
+		// without a primary, and the primary block above was skipped.
+		log.Warnw("backup SMTP relay configured but primary SMTP relay is not; backup will be ignored")
 	}
 	// create SMS notifications service if the required parameters are set and
 	// include it in the API configuration
