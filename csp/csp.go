@@ -19,8 +19,7 @@ const DefaultNotificationCoolDownTime = time.Second * 60
 
 // Config struct contains the configuration for the CSP service. It includes
 // the database name, the MongoDB client, the notification cooldown time, the
-// notification throttle time, the maximum notification attempts, the SMS
-// service and the mail service.
+// notification queue settings, the SMS service and the mail service.
 type Config struct {
 	// db stuff
 	DB *db.MongoStorage
@@ -29,14 +28,28 @@ type Config struct {
 	RootKey      internal.HexBytes
 	// notification stuff
 	NotificationCoolDownTime time.Duration
+	// NotificationThrottleTime is deprecated and ignored. The notification queue
+	// is now drained by a concurrent worker pool guarded by per-provider circuit
+	// breakers instead of a single throttled loop. Kept for backwards
+	// compatibility with existing configurations.
 	NotificationThrottleTime time.Duration
-	SMSService               saasNotifications.NotificationService
-	MailService              saasNotifications.NotificationService
+	// NotificationQueueWorkers is the number of concurrent notification senders.
+	// It bounds the maximum number of in-flight provider sends. Zero uses the
+	// default (notifications.DefaultQueueWorkers).
+	NotificationQueueWorkers int
+	// NotificationQueueTTL is the maximum age of a queued challenge before it is
+	// dropped. Zero uses the default (notifications.DefaultQueueTTL).
+	NotificationQueueTTL time.Duration
+	// NotificationBreakerMaxFailures and NotificationBreakerCooldown configure
+	// the per-provider circuit breakers. Zero uses the defaults.
+	NotificationBreakerMaxFailures int
+	NotificationBreakerCooldown    time.Duration
+	SMSService                     saasNotifications.NotificationService
+	MailService                    saasNotifications.NotificationService
 }
 
 // CSP struct contains the CSP service. It includes the storage, the
-// notification queue, the maximum notification attempts, the notification
-// throttle time and the notification cooldown time.
+// notification queue and the per-user notification cooldown time.
 type CSP struct {
 	PasswordSalt string
 	Signer       *saltedkey.SaltedKey
@@ -44,7 +57,6 @@ type CSP struct {
 	signerLock   sync.Map
 	notifyQueue  *notifications.Queue
 
-	notificationThrottleTime time.Duration
 	notificationCoolDownTime time.Duration
 }
 
@@ -52,20 +64,21 @@ type CSP struct {
 // the configuration for the service. It returns the CSP service or an error
 // if the storage fails to initialize. It initializes the storage with the
 // MongoDB client and the database name provided in the configuration, and
-// creates a new notification queue with the notification cooldown time, the
-// notification throttle time, the SMS service and the mail service.
+// creates a new notification queue (a concurrent worker pool guarded by
+// per-provider circuit breakers) with the SMS and mail services.
 func New(ctx context.Context, config *Config) (*CSP, error) {
 	s, err := saltedkey.NewSaltedKey(config.RootKey.String())
 	if err != nil {
 		return nil, err
 	}
-	queue := notifications.NewQueue(
-		ctx,
-		config.NotificationCoolDownTime,
-		config.NotificationThrottleTime,
-		config.MailService,
-		config.SMSService,
-	)
+	queue := notifications.NewQueue(ctx, notifications.QueueConfig{
+		TTL:                config.NotificationQueueTTL,
+		Workers:            config.NotificationQueueWorkers,
+		MailService:        config.MailService,
+		SMSService:         config.SMSService,
+		BreakerMaxFailures: config.NotificationBreakerMaxFailures,
+		BreakerCooldown:    config.NotificationBreakerCooldown,
+	})
 	go func() {
 		for {
 			select {
@@ -101,7 +114,6 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 		Storage:                  config.DB,
 		Signer:                   s,
 		notifyQueue:              queue,
-		notificationThrottleTime: config.NotificationThrottleTime,
 		notificationCoolDownTime: notificationCoolDownTime,
 	}, nil
 }
