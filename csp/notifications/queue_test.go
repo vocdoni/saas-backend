@@ -2,6 +2,7 @@ package notifications
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/textproto"
 	"regexp"
@@ -68,6 +69,35 @@ func (m *configurableMail) maxConcurrent() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.maxInFlight
+}
+
+func TestIsPermanentSendError(t *testing.T) {
+	c := qt.New(t)
+
+	perm := &textproto.Error{Code: 550, Msg: "no such user"}
+	transientProto := &textproto.Error{Code: 451, Msg: "try later"}
+	netErr := fmt.Errorf("dial tcp: connection refused")
+
+	c.Assert(isPermanentSendError(nil), qt.IsFalse)
+	c.Assert(isPermanentSendError(perm), qt.IsTrue)
+	c.Assert(isPermanentSendError(transientProto), qt.IsFalse)
+	c.Assert(isPermanentSendError(netErr), qt.IsFalse)
+	// wrapped permanent (as a failover branch wraps it with %w) stays permanent
+	c.Assert(isPermanentSendError(fmt.Errorf("provider 0: %w", perm)), qt.IsTrue)
+
+	// failover-style joined errors: permanent only when every branch is permanent
+	c.Assert(isPermanentSendError(errors.Join(
+		fmt.Errorf("provider 0: %w", perm),
+		fmt.Errorf("provider 1: %w", perm),
+	)), qt.IsTrue)
+	c.Assert(isPermanentSendError(errors.Join(
+		fmt.Errorf("provider 0: %w", perm),
+		fmt.Errorf("provider 1: %w", netErr),
+	)), qt.IsFalse)
+	c.Assert(isPermanentSendError(errors.Join(
+		fmt.Errorf("provider 0: %w", perm),
+		fmt.Errorf("provider 1: %w", transientProto),
+	)), qt.IsFalse)
 }
 
 func TestNotificationChallengeQueue(t *testing.T) {

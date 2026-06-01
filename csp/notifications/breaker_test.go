@@ -11,7 +11,7 @@ func TestBreaker(t *testing.T) {
 	c := qt.New(t)
 
 	now := time.Unix(1000, 0)
-	b := newBreaker(3, time.Minute)
+	b := newBreaker("test", 3, time.Minute)
 	b.now = func() time.Time { return now }
 
 	// starts closed
@@ -52,7 +52,7 @@ func TestBreaker(t *testing.T) {
 
 func TestBreakerDefaults(t *testing.T) {
 	c := qt.New(t)
-	b := newBreaker(0, 0)
+	b := newBreaker("test", 0, 0)
 	c.Assert(b.maxFailures, qt.Equals, DefaultBreakerMaxFailures)
 	c.Assert(b.cooldown, qt.Equals, DefaultBreakerCooldown)
 }

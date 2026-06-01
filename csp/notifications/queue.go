@@ -97,8 +97,8 @@ func NewQueue(ctx context.Context, conf QueueConfig) *Queue {
 		workers:           workers,
 		smsService:        conf.SMSService,
 		mailService:       conf.MailService,
-		mailBreaker:       newBreaker(conf.BreakerMaxFailures, conf.BreakerCooldown),
-		smsBreaker:        newBreaker(conf.BreakerMaxFailures, conf.BreakerCooldown),
+		mailBreaker:       newBreaker("email", conf.BreakerMaxFailures, conf.BreakerCooldown),
+		smsBreaker:        newBreaker("sms", conf.BreakerMaxFailures, conf.BreakerCooldown),
 	}
 }
 
@@ -134,6 +134,7 @@ func (sq *Queue) breakerFor(challenge *NotificationChallenge) *breaker {
 // Start launches the worker pool. Each worker blocks waiting for the next
 // challenge and delivers it. The workers return when the context is canceled.
 func (sq *Queue) Start() {
+	log.Infow("starting notification queue workers", "workers", sq.workers, "ttl", sq.ttl.String())
 	for i := 0; i < sq.workers; i++ {
 		go sq.worker()
 	}
@@ -331,9 +332,28 @@ func (sq *Queue) softReenqueue(challenge *NotificationChallenge) bool {
 // (deferral, timeout, network error) which is worth retrying. SMTP servers
 // signal permanent failures with 5xx reply codes, surfaced by net/smtp as a
 // *textproto.Error.
+//
+// When delivery is attempted through a failover service the result is an
+// errors.Join of every provider's error. Such an error is only permanent if
+// *all* providers failed permanently: if any provider returned a transient
+// error, retrying may still succeed, so we must not drop the message.
 func isPermanentSendError(err error) bool {
 	if err == nil {
 		return false
+	}
+	// Joined errors (e.g. from a failover service): permanent only if every
+	// branch is permanent.
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		branches := joined.Unwrap()
+		if len(branches) == 0 {
+			return false
+		}
+		for _, branch := range branches {
+			if !isPermanentSendError(branch) {
+				return false
+			}
+		}
+		return true
 	}
 	var protoErr *textproto.Error
 	if errors.As(err, &protoErr) {
