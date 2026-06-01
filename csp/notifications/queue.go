@@ -289,14 +289,21 @@ func (sq *Queue) reenqueue(challenge *NotificationChallenge) error {
 		return fmt.Errorf("TTL or max retries reached")
 	}
 	challenge.Retries++
+	// Capture the fields needed for logging before enqueuing: once the pointer
+	// is back in the queue another worker may dequeue and mutate it (e.g. bump
+	// Retries again), so reading it after Enqueue would be a data race.
+	bundleID := challenge.BundleID.String()
+	userID := challenge.UserID.String()
+	cType := challenge.Type
+	retries := challenge.Retries
 	if err := sq.items.Enqueue(challenge); err != nil {
 		return fmt.Errorf("cannot enqueue the challenge: %w", err)
 	}
 	log.Debugw("notification challenge re-enqueued",
-		"bundleID", challenge.BundleID.String(),
-		"userID", challenge.UserID.String(),
-		"type", challenge.Type,
-		"retry", challenge.Retries)
+		"bundleID", bundleID,
+		"userID", userID,
+		"type", cType,
+		"retry", retries)
 	return nil
 }
 

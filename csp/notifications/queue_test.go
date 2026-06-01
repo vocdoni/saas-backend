@@ -309,4 +309,47 @@ func TestNotificationChallengeQueue(t *testing.T) {
 			c.Fatal("timed out waiting for permanent failure")
 		}
 	})
+
+	// concurrent retries drives the re-enqueue path with multiple workers so
+	// the race detector exercises it (the re-enqueued pointer must not be read
+	// after it is published back to the queue). Several challenges fail
+	// transiently a few times before succeeding.
+	c.Run("concurrent retries", func(c *qt.C) {
+		c.Parallel()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		const total = 4
+		mail := &configurableMail{
+			sendErr: fmt.Errorf("451 4.3.0 temporary failure"), // transient
+			failFor: 6,                                         // first 6 sends (across challenges) fail, then succeed
+		}
+		queue := NewQueue(ctx, QueueConfig{
+			TTL:                time.Minute,
+			Workers:            4,
+			MailService:        mail,
+			SMSService:         testSMSService,
+			BreakerMaxFailures: 1 << 30, // disable the breaker; exercise pure retries
+		})
+		queue.Start()
+
+		for i := 0; i < total; i++ {
+			nc, err := NewNotificationChallenge(EmailChallenge, apicommon.DefaultLang,
+				[]byte(fmt.Sprintf("user-%d", i)), []byte("bundle"),
+				testUserEmail, "123456", testOrgInfo, testRemainingTime)
+			c.Assert(err, qt.IsNil)
+			c.Assert(queue.Push(nc), qt.IsNil)
+		}
+
+		delivered := 0
+		for delivered < total {
+			select {
+			case res := <-queue.NotificationsSent:
+				c.Assert(res.Success, qt.IsTrue)
+				delivered++
+			case <-time.After(10 * time.Second):
+				c.Fatalf("timed out: only %d/%d delivered", delivered, total)
+			}
+		}
+	})
 }
