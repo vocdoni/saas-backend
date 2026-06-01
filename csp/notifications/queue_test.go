@@ -84,6 +84,10 @@ func TestIsPermanentSendError(t *testing.T) {
 	c.Assert(isPermanentSendError(netErr), qt.IsFalse)
 	// wrapped permanent (as a failover branch wraps it with %w) stays permanent
 	c.Assert(isPermanentSendError(fmt.Errorf("provider 0: %w", perm)), qt.IsTrue)
+	// validation/configuration errors are permanent: retrying cannot fix them
+	c.Assert(isPermanentSendError(ErrInvalidNotificationService), qt.IsTrue)
+	c.Assert(isPermanentSendError(ErrInvalidNotificationInputs), qt.IsTrue)
+	c.Assert(isPermanentSendError(fmt.Errorf("wrapped: %w", ErrInvalidNotificationService)), qt.IsTrue)
 
 	// failover-style joined errors: permanent only when every branch is permanent
 	c.Assert(isPermanentSendError(errors.Join(

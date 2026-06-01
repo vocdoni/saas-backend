@@ -60,10 +60,12 @@ type QueueConfig struct {
 // Queue is a FIFO queue that delivers notification challenges (SMS or email)
 // concurrently. A pool of workers drains the queue; each send is guarded by a
 // per-provider circuit breaker so that a failing provider is given time to
-// recover instead of being hammered. Transient failures are retried (bounded by
-// the max retries and the challenge TTL); permanent failures are not retried.
-// The result of every challenge (delivered or given up) is reported on the
-// NotificationsSent channel.
+// recover instead of being hammered. Permanent failures are not retried; see
+// isPermanentSendError for what counts as permanent (currently SMTP 5xx replies
+// and the package's validation/configuration errors). Every other error,
+// including SMS-provider errors, is treated as transient and retried, bounded
+// by the max retries and the challenge TTL. The result of every challenge
+// (delivered or given up) is reported on the NotificationsSent channel.
 type Queue struct {
 	NotificationsSent chan *NotificationChallenge
 
@@ -327,11 +329,16 @@ func (sq *Queue) softReenqueue(challenge *NotificationChallenge) bool {
 	return true
 }
 
-// isPermanentSendError reports whether a send error is permanent (the message
-// will never be deliverable, e.g. an invalid recipient) as opposed to transient
-// (deferral, timeout, network error) which is worth retrying. SMTP servers
-// signal permanent failures with 5xx reply codes, surfaced by net/smtp as a
-// *textproto.Error.
+// isPermanentSendError reports whether a send error is permanent (retrying will
+// never succeed) as opposed to transient (deferral, timeout, network error)
+// which is worth retrying. Permanent errors are:
+//   - SMTP 5xx replies (e.g. invalid recipient), surfaced by net/smtp as a
+//     *textproto.Error;
+//   - the package's validation/configuration errors (invalid challenge inputs
+//     or a missing notification service), which cannot be fixed by retrying and
+//     would otherwise waste retries and trip the circuit breaker.
+//
+// Everything else, including SMS-provider errors, is treated as transient.
 //
 // When delivery is attempted through a failover service the result is an
 // errors.Join of every provider's error. Such an error is only permanent if
@@ -353,6 +360,10 @@ func isPermanentSendError(err error) bool {
 				return false
 			}
 		}
+		return true
+	}
+	// Validation/configuration errors will never succeed on retry.
+	if errors.Is(err, ErrInvalidNotificationInputs) || errors.Is(err, ErrInvalidNotificationService) {
 		return true
 	}
 	var protoErr *textproto.Error
