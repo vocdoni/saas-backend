@@ -49,6 +49,11 @@ func main() {
 	flag.String("stripeApiSecret", "", "Stripe API secret")
 	flag.String("stripeWebhookSecret", "", "Stripe Webhook secret")
 	flag.String("oauthServiceURL", "http://oauth.vocdoni.net", "OAuth service URL")
+	// CSP notification queue tuning (0 = use built-in defaults)
+	flag.Int("notificationWorkers", 0, "number of concurrent CSP notification senders (0 = default)")
+	flag.Duration("notificationQueueTTL", 0, "max age of a queued CSP notification before it is dropped (0 = default)")
+	flag.Int("notificationBreakerMaxFailures", 0, "provider failures that trip the CSP notification breaker (0 = default)")
+	flag.Duration("notificationBreakerCooldown", 0, "how long the CSP notification breaker stays open once tripped (0 = default)")
 	// parse flags
 	flag.Parse()
 	// initialize Viper
@@ -136,8 +141,12 @@ func main() {
 	}
 
 	cspConf := &csp.Config{
-		RootKey: bPrivKey,
-		DB:      database,
+		RootKey:                        bPrivKey,
+		DB:                             database,
+		NotificationQueueWorkers:       viper.GetInt("notificationWorkers"),
+		NotificationQueueTTL:           viper.GetDuration("notificationQueueTTL"),
+		NotificationBreakerMaxFailures: viper.GetInt("notificationBreakerMaxFailures"),
+		NotificationBreakerCooldown:    viper.GetDuration("notificationBreakerCooldown"),
 	}
 	// overwrite the email notifications service with the SMTP service if the
 	// required parameters are set and include it in the API configuration
