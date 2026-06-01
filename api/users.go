@@ -313,8 +313,8 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 			errors.ErrGenericInternalServerError.Write(w)
 			return
 		}
-		// resend the existing verification code
-		if err := a.sendMail(r.Context(), user.Email, mailtemplates.VerifyAccountNotification,
+		// resend the existing verification code via resend provider if configured
+		if err := a.sendResendMail(r.Context(), user.Email, mailtemplates.VerifyAccountNotification,
 			struct {
 				Code string
 				Link string
@@ -343,9 +343,8 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
-	// send the verification mail to the user email with the verification code
-	// and the verification link
-	if err := a.sendMail(r.Context(), user.Email, mailtemplates.VerifyAccountNotification,
+	// send the verification mail via resend provider if configured
+	if err := a.sendResendMail(r.Context(), user.Email, mailtemplates.VerifyAccountNotification,
 		struct {
 			Code string
 			Link string

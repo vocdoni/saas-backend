@@ -79,8 +79,9 @@ type Config struct {
 	DB          *db.MongoStorage
 	Client      *apiclient.HTTPclient
 	Account     *account.Account
-	MailService notifications.NotificationService
-	SMSService  notifications.NotificationService
+	MailService       notifications.NotificationService
+	ResendMailService notifications.NotificationService
+	SMSService        notifications.NotificationService
 	WebAppURL   string
 	ServerURL   string
 	// FullTransparentMode if true allows signing all transactions and does not
@@ -105,6 +106,7 @@ type API struct {
 	client          *apiclient.HTTPclient
 	account         *account.Account
 	mail            notifications.NotificationService
+	resendMail      notifications.NotificationService
 	sms             notifications.NotificationService
 	secret          string
 	webAppURL       string
@@ -135,6 +137,7 @@ func New(conf *Config) *API {
 		client:          conf.Client,
 		account:         conf.Account,
 		mail:            conf.MailService,
+		resendMail:      conf.ResendMailService,
 		sms:             conf.SMSService,
 		secret:          conf.Secret,
 		webAppURL:       conf.WebAppURL,

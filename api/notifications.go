@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/vocdoni/saas-backend/internal"
+	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 )
 
@@ -16,26 +17,36 @@ import (
 // not be sent or the email address is invalid. If the mail service is not available,
 // it does nothing.
 func (a *API) sendMail(ctx context.Context, to string, mail mailtemplates.MailTemplate, data any) error {
-	if a.mail != nil {
-		ctx, cancel := context.WithTimeout(ctx, time.Second*10)
-		defer cancel()
-		// check if the email address is valid
-		if !internal.ValidEmail(to) {
-			return fmt.Errorf("invalid email address")
-		}
-		// get the language from context
-		lang := a.getLanguageFromContext(ctx)
-		// execute the localized mail template to get the notification
-		notification, err := mail.Localized(lang).ExecTemplate(data)
-		if err != nil {
-			return err
-		}
-		// set the recipient email address
-		notification.ToAddress = to
-		// send the mail notification
-		if err := a.mail.SendNotification(ctx, notification); err != nil {
-			return err
-		}
+	return a.sendMailVia(ctx, a.mail, to, mail, data)
+}
+
+// sendResendMail sends a localized notification via the resend mail service when
+// configured, falling back to the primary service if no resend service is set.
+func (a *API) sendResendMail(ctx context.Context, to string, mail mailtemplates.MailTemplate, data any) error {
+	svc := a.resendMail
+	if svc == nil {
+		svc = a.mail
 	}
-	return nil
+	return a.sendMailVia(ctx, svc, to, mail, data)
+}
+
+// sendMailVia sends a localized notification using the given service.
+func (a *API) sendMailVia(ctx context.Context, svc notifications.NotificationService, to string,
+	tmpl mailtemplates.MailTemplate, data any,
+) error {
+	if svc == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
+	defer cancel()
+	if !internal.ValidEmail(to) {
+		return fmt.Errorf("invalid email address")
+	}
+	lang := a.getLanguageFromContext(ctx)
+	notification, err := tmpl.Localized(lang).ExecTemplate(data)
+	if err != nil {
+		return err
+	}
+	notification.ToAddress = to
+	return svc.SendNotification(ctx, notification)
 }

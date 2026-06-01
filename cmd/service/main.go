@@ -43,6 +43,12 @@ func main() {
 	flag.String("smtpPassword", "", "SMTP password")
 	flag.String("emailFromAddress", "", "Email service from address")
 	flag.String("emailFromName", "Vocdoni", "Email service from name")
+	flag.String("smtpResendServer", "", "Resend SMTP server (used for resend requests)")
+	flag.Int("smtpResendPort", 587, "Resend SMTP port")
+	flag.String("smtpResendUsername", "", "Resend SMTP username")
+	flag.String("smtpResendPassword", "", "Resend SMTP password")
+	flag.String("emailResendFromAddress", "", "Resend email service from address")
+	flag.String("emailResendFromName", "Vocdoni", "Resend email service from name")
 	flag.String("twilioAccountSid", "", "Twilio account SID")
 	flag.String("twilioAuthToken", "", "Twilio auth token")
 	flag.String("twilioFromNumber", "", "Twilio from number")
@@ -77,6 +83,13 @@ func main() {
 	smtpPassword := viper.GetString("smtpPassword")
 	emailFromAddress := viper.GetString("emailFromAddress")
 	emailFromName := viper.GetString("emailFromName")
+	// resend email vars
+	smtpResendServer := viper.GetString("smtpResendServer")
+	smtpResendPort := viper.GetInt("smtpResendPort")
+	smtpResendUsername := viper.GetString("smtpResendUsername")
+	smtpResendPassword := viper.GetString("smtpResendPassword")
+	emailResendFromAddress := viper.GetString("emailResendFromAddress")
+	emailResendFromName := viper.GetString("emailResendFromName")
 	// sms vars
 	twilioAccountSid := viper.GetString("twilioAccountSid")
 	twilioAuthToken := viper.GetString("twilioAuthToken")
@@ -163,6 +176,24 @@ func main() {
 		}
 		log.Infow("email templates loaded",
 			"templates", len(mailtemplates.Available()))
+	}
+	// initialize resend email service if configured
+	if smtpResendServer != "" && smtpResendUsername != "" && smtpResendPassword != "" {
+		if emailResendFromAddress == "" || emailResendFromName == "" {
+			log.Fatal("emailResendFromAddress and emailResendFromName are required when resend SMTP is configured")
+		}
+		apiConf.ResendMailService = new(smtp.Email)
+		if err := apiConf.ResendMailService.New(&smtp.Config{
+			FromName:     emailResendFromName,
+			FromAddress:  emailResendFromAddress,
+			SMTPServer:   smtpResendServer,
+			SMTPPort:     smtpResendPort,
+			SMTPUsername: smtpResendUsername,
+			SMTPPassword: smtpResendPassword,
+		}); err != nil {
+			log.Fatalf("could not create the resend email service: %v", err)
+		}
+		log.Infow("resend email service created", "server", smtpResendServer)
 	}
 	// create SMS notifications service if the required parameters are set and
 	// include it in the API configuration
