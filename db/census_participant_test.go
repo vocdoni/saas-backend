@@ -454,6 +454,64 @@ func TestCensusParticipant(t *testing.T) {
 			_, err = testDB.CensusParticipant(census.ID.Hex(), conflictingMember.ID.Hex())
 			c.Assert(err, qt.Equals, ErrNotFound)
 		})
+
+		t.Run("UpdatesCensusSizeAndProcessBundles", func(_ *testing.T) {
+			c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+			member, census := setupTestCensusParticipantPrerequisites(t, "_memberIDs_size")
+
+			census.Size = 99
+			_, err := testDB.SetCensus(census)
+			c.Assert(err, qt.IsNil)
+
+			member2 := &OrgMember{
+				ID:           primitive.NewObjectID(),
+				OrgAddress:   testOrgAddress,
+				MemberNumber: "member2_memberIDs_size",
+				Email:        "member2_memberIDs_size@example.com",
+				CreatedAt:    time.Now(),
+				UpdatedAt:    time.Now(),
+			}
+			_, err = testDB.SetOrgMember("test_salt", member2)
+			c.Assert(err, qt.IsNil)
+
+			bundle := &ProcessesBundle{
+				OrgAddress: testOrgAddress,
+				Census:     *census,
+				Processes:  []internal.HexBytes{internal.HexBytes("process_memberIDs_size")},
+			}
+			bundleID, err := testDB.SetProcessBundle(bundle)
+			c.Assert(err, qt.IsNil)
+
+			err = testDB.SetCensusParticipant(&CensusParticipant{
+				ParticipantID: member.ID.Hex(),
+				CensusID:      census.ID.Hex(),
+			})
+			c.Assert(err, qt.IsNil)
+
+			added, memberErrors, err := testDB.AddCensusParticipantsByMemberIDs(census.ID.Hex(),
+				[]string{member.ID.Hex(), member2.ID.Hex()})
+			c.Assert(err, qt.IsNil)
+			c.Assert(added, qt.Equals, 1)
+			c.Assert(memberErrors, qt.HasLen, 0)
+
+			updatedCensus, err := testDB.Census(census.ID.Hex())
+			c.Assert(err, qt.IsNil)
+			c.Assert(updatedCensus.Size, qt.Equals, int64(2))
+
+			updatedBundle, err := testDB.ProcessBundle(bundleID)
+			c.Assert(err, qt.IsNil)
+			c.Assert(updatedBundle.Census.Size, qt.Equals, int64(2))
+
+			added, memberErrors, err = testDB.AddCensusParticipantsByMemberIDs(census.ID.Hex(),
+				[]string{member.ID.Hex(), member2.ID.Hex()})
+			c.Assert(err, qt.IsNil)
+			c.Assert(added, qt.Equals, 0)
+			c.Assert(memberErrors, qt.HasLen, 0)
+
+			updatedCensus, err = testDB.Census(census.ID.Hex())
+			c.Assert(err, qt.IsNil)
+			c.Assert(updatedCensus.Size, qt.Equals, int64(2))
+		})
 	})
 
 	t.Run("CensusParticipantByLoginHash", func(_ *testing.T) {
