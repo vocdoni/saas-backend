@@ -357,6 +357,104 @@ func TestCSPVoting(t *testing.T) {
 				// Create a bundle with the census and process
 				bundleID, _ := postProcessBundle(t, token, censusID, processID)
 
+				// Check census membership via the CSP token alone (the only voter
+				// data the client stores), mirroring client.isInCensus() for CSP.
+				t.Run("Check census membership", func(t *testing.T) {
+					c := qt.New(t)
+
+					// Grace (P009) is a verified participant of this bundle's census.
+					grace := members[8]
+					authToken := testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
+						Name:         grace.Name,
+						Surname:      grace.Surname,
+						MemberNumber: grace.MemberNumber,
+						Email:        grace.Email,
+					})
+
+					checkReq := &handlers.CheckMembershipRequest{
+						AuthToken: authToken,
+						ProcessID: processID,
+					}
+
+					// A verified token for this bundle whose user is in the census is eligible.
+					resp := requestAndParse[handlers.CheckMembershipResponse](t, http.MethodPost, "", checkReq,
+						"process", "bundle", bundleID, "check")
+					c.Assert(resp.Belongs, qt.IsTrue)
+					c.Assert(resp.HasVoted, qt.IsFalse)
+					c.Assert(bytes.Equal(resp.Weight, big.NewInt(1).Bytes()), qt.IsTrue,
+						qt.Commentf("unexpected weight %x", resp.Weight))
+
+					// Once the member consumes the process, hasVoted flips to true.
+					voter := ethereum.SignKeys{}
+					c.Assert(voter.Generate(), qt.IsNil)
+					c.Assert(testDB.ConsumeCSPProcess(authToken, processID,
+						internal.HexBytes(voter.Address().Bytes())), qt.IsNil)
+
+					resp = requestAndParse[handlers.CheckMembershipResponse](t, http.MethodPost, "", checkReq,
+						"process", "bundle", bundleID, "check")
+					c.Assert(resp.Belongs, qt.IsTrue)
+					c.Assert(resp.HasVoted, qt.IsTrue)
+
+					// An unknown token is reported as not eligible with HTTP 200, not an error.
+					unknown := requestAndParse[handlers.CheckMembershipResponse](t, http.MethodPost, "",
+						&handlers.CheckMembershipRequest{AuthToken: internal.HexBytes{0xde, 0xad, 0xbe, 0xef}},
+						"process", "bundle", bundleID, "check")
+					c.Assert(unknown.Belongs, qt.IsFalse)
+
+					// A token issued for a different bundle is rejected even though the user
+					// is in the (shared) census: this closes the cross-bundle leak.
+					otherBundleID, _ := postProcessBundle(t, token, censusID, processID)
+					otherResp := requestAndParse[handlers.CheckMembershipResponse](t, http.MethodPost, "", checkReq,
+						"process", "bundle", otherBundleID, "check")
+					c.Assert(otherResp.Belongs, qt.IsFalse)
+
+					// The normal auth flow cannot mint a verified token for a non-participant
+					// or a zero-weight voter (auth rejects both), so seed tokens directly to
+					// exercise the handler's remaining negative gates.
+					bundleHex := internal.HexBytesFromString(bundleID)
+					seedVerifiedToken := func(memberID string) internal.HexBytes {
+						tok := internal.HexBytes(internal.RandomBytes(16))
+						c.Assert(testDB.SetCSPAuth(tok, internal.HexBytesFromString(memberID), bundleHex), qt.IsNil)
+						c.Assert(testDB.VerifyCSPAuth(tok), qt.IsNil)
+						return tok
+					}
+					checkBelongs := func(tok internal.HexBytes) bool {
+						r := requestAndParse[handlers.CheckMembershipResponse](t, http.MethodPost, "",
+							&handlers.CheckMembershipRequest{AuthToken: tok, ProcessID: processID},
+							"process", "bundle", bundleID, "check")
+						return r.Belongs
+					}
+
+					// A verified token for this bundle whose user is NOT in the census
+					// (an org member outside the published group) is not eligible.
+					allMembers := postOrgMembers(t, token, orgAddress, apicommon.OrgMember{
+						Name: "Out", Surname: "Sider", MemberNumber: "P999", NationalID: "OUTSIDER99",
+						Email: "outsider@example.com", Phone: "+34612399999", Weight: "1",
+					})
+					var outsiderID string
+					for _, m := range allMembers {
+						if m.NationalID == "OUTSIDER99" {
+							outsiderID = m.ID
+						}
+					}
+					c.Assert(outsiderID, qt.Not(qt.Equals), "")
+					c.Assert(checkBelongs(seedVerifiedToken(outsiderID)), qt.IsFalse)
+
+					// A verified token for a zero-weight member of a weighted census is not eligible.
+					c.Assert(members[9].Weight, qt.Equals, "0") // Hannah
+					c.Assert(checkBelongs(seedVerifiedToken(members[9].ID)), qt.IsFalse)
+
+					// An unverified token (issued but never verified) is not eligible,
+					// even for a genuine census participant.
+					unverifiedTok := internal.HexBytes(internal.RandomBytes(16))
+					c.Assert(testDB.SetCSPAuth(unverifiedTok, internal.HexBytesFromString(grace.ID), bundleHex), qt.IsNil)
+					c.Assert(checkBelongs(unverifiedTok), qt.IsFalse)
+
+					// A missing auth token is a client error, not a membership answer.
+					requestAndAssertError(errors.ErrInvalidData, t, http.MethodPost, "",
+						&handlers.CheckMembershipRequest{}, "process", "bundle", bundleID, "check")
+				})
+
 				t.Run("Authenticate with Email and Vote", func(t *testing.T) {
 					orgBefore := getOrganization(t, orgAddress)
 
