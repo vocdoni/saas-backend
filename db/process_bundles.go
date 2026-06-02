@@ -199,6 +199,37 @@ func (ms *MongoStorage) ProcessBundlesByOrg(orgAddress common.Address) ([]*Proce
 	return bundles, nil
 }
 
+// ProcessBundlesByCensus retrieves process bundles that belong to a specific census.
+// This allows finding all bundles created for a particular census.
+func (ms *MongoStorage) ProcessBundlesByCensus(census *Census) ([]*ProcessesBundle, error) {
+	if census == nil || census.ID == primitive.NilObjectID {
+		return nil, ErrInvalidData
+	}
+
+	// Create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	// Find bundles where the census._id matches the given ID
+	filter := bson.M{"census._id": census.ID}
+	cursor, err := ms.processBundles.Find(ctx, filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find process bundles by census: %w", err)
+	}
+	defer func() {
+		if err := cursor.Close(ctx); err != nil {
+			fmt.Printf("failed to close cursor: %v", err)
+		}
+	}()
+
+	var bundles []*ProcessesBundle
+	if err := cursor.All(ctx, &bundles); err != nil {
+		return nil, fmt.Errorf("failed to decode process bundles: %w", err)
+	}
+
+	return bundles, nil
+}
+
 // AddProcessesToBundle adds processes to an existing bundle if they don't already exist.
 // It checks each process to avoid duplicates and only updates the database if new processes were added.
 func (ms *MongoStorage) AddProcessesToBundle(hbBundleID internal.HexBytes, processes []internal.HexBytes) error {
