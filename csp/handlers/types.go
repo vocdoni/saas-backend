@@ -71,6 +71,26 @@ type UserWeightResponse struct {
 	Weight internal.HexBytes `json:"weight,omitempty" swaggertype:"string" format:"hex" example:"2a"`
 }
 
+// CheckMembershipRequest defines the payload for the request to check whether
+// the user behind a CSP auth token belongs to a bundle's census. The user is
+// identified solely by the authToken; the optional electionId (process ID)
+// scopes the hasVoted result to that process.
+type CheckMembershipRequest struct {
+	AuthToken internal.HexBytes `json:"authToken" swaggertype:"string" format:"hex" example:"deadbeef"`
+	ProcessID internal.HexBytes `json:"electionId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+}
+
+// CheckMembershipResponse defines the payload for the response to the census
+// membership check. Belongs reports whether the token's user is an eligible
+// participant of the bundle's census, Weight is the voter weight (1 unless the
+// census is weighted) and HasVoted reports whether the user already cast a
+// ballot in the requested process (only meaningful when electionId is provided).
+type CheckMembershipResponse struct {
+	Belongs  bool              `json:"belongs"`
+	Weight   internal.HexBytes `json:"weight,omitempty" swaggertype:"string" format:"hex" example:"2a"`
+	HasVoted bool              `json:"hasVoted"`
+}
+
 // ConsumedAddressRequest defines the payload for the request to get the
 // if a token was used and which address was used. It includes the
 // authToken to query the information.

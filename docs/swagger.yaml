@@ -1334,6 +1334,28 @@ definitions:
         format: hex
         type: string
     type: object
+  handlers.CheckMembershipRequest:
+    properties:
+      authToken:
+        example: deadbeef
+        format: hex
+        type: string
+      electionId:
+        example: deadbeef
+        format: hex
+        type: string
+    type: object
+  handlers.CheckMembershipResponse:
+    properties:
+      belongs:
+        type: boolean
+      hasVoted:
+        type: boolean
+      weight:
+        example: 2a
+        format: hex
+        type: string
+    type: object
   handlers.ConsumedAddressRequest:
     properties:
       authToken:
@@ -3817,6 +3839,51 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Resend authentication challenge for a process bundle
+      tags:
+      - process
+  /process/bundle/{bundleId}/check:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Check whether the user behind a CSP auth token is an eligible participant of the bundle's census.
+        The user is identified solely by the auth token (the only voter data the client stores). The token
+        must be verified and issued for this same bundle, and the user must be a participant of the bundle's
+        census. When electionId is provided, the response also reports whether the user already voted in that
+        process. Ineligibility (unknown/unverified token, token from another bundle, not in census, zero weight
+        on a weighted census) is reported as belongs=false with HTTP 200, not as an error.
+      parameters:
+      - description: Bundle ID
+        in: path
+        name: bundleId
+        required: true
+        type: string
+      - description: Request with auth token and optional election ID
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.CheckMembershipRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.CheckMembershipResponse'
+        "400":
+          description: Malformed URL/body or missing auth token
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Bundle not found or census not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Check census membership for a bundle
       tags:
       - process
   /process/bundle/{bundleId}/participants/check:

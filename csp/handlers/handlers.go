@@ -512,6 +512,122 @@ func (c *CSPHandlers) UserWeightHandler(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// BundleCheckHandler godoc
+//
+//	@Summary		Check census membership for a bundle
+//	@Description	Check whether the user behind a CSP auth token is an eligible participant of the bundle's census.
+//	@Description	The user is identified solely by the auth token (the only voter data the client stores). The token
+//	@Description	must be verified and issued for this same bundle, and the user must be a participant of the bundle's
+//	@Description	census. When electionId is provided, the response also reports whether the user already voted in that
+//	@Description	process. Ineligibility (unknown/unverified token, token from another bundle, not in census, zero weight
+//	@Description	on a weighted census) is reported as belongs=false with HTTP 200, not as an error.
+//	@Tags			process
+//	@Accept			json
+//	@Produce		json
+//	@Param			bundleId	path		string							true	"Bundle ID"
+//	@Param			request		body		handlers.CheckMembershipRequest	true	"Request with auth token and optional election ID"
+//	@Success		200			{object}	handlers.CheckMembershipResponse
+//	@Failure		400			{object}	errors.Error	"Malformed URL/body or missing auth token"
+//	@Failure		404			{object}	errors.Error	"Bundle not found or census not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/process/bundle/{bundleId}/check [post]
+func (c *CSPHandlers) BundleCheckHandler(w http.ResponseWriter, r *http.Request) {
+	// Parse the bundle ID and load the bundle
+	bundleID, ok := parseBundleID(w, r)
+	if !ok {
+		return
+	}
+	bundle, ok := c.getBundle(w, *bundleID)
+	if !ok {
+		return
+	}
+
+	// Parse the request body
+	var req CheckMembershipRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	if len(req.AuthToken) == 0 {
+		errors.ErrInvalidData.Withf("missing auth token").Write(w)
+		return
+	}
+
+	// notEligible writes a successful negative response: the token's user is
+	// simply not allowed to vote in this bundle, which is not an error.
+	notEligible := func() {
+		apicommon.HTTPWriteJSON(w, &CheckMembershipResponse{Belongs: false})
+	}
+
+	// Load the token. An unknown or expired token means "not eligible".
+	auth, err := c.csp.Storage.CSPAuth(req.AuthToken)
+	if err != nil {
+		notEligible()
+		return
+	}
+	// The token must be verified and issued for this very bundle. A token from a
+	// different bundle (or an unverified one) does not grant access here.
+	if !auth.Verified || !bytes.Equal(*bundleID, auth.BundleID) {
+		notEligible()
+		return
+	}
+
+	// Resolve the org member referenced by the token.
+	oid, err := primitive.ObjectIDFromHex(auth.UserID.String())
+	if err != nil {
+		notEligible()
+		return
+	}
+	member, err := c.mainDB.OrgMember(bundle.OrgAddress, oid.Hex())
+	if err != nil {
+		notEligible()
+		return
+	}
+
+	census, err := c.mainDB.Census(bundle.Census.ID.Hex())
+	if err != nil {
+		errors.ErrCensusNotFound.WithErr(err).Write(w)
+		return
+	}
+
+	// The token's user must be a participant of the bundle's census.
+	if _, err := c.mainDB.CensusParticipant(bundle.Census.ID.Hex(), auth.UserID.String()); err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			notEligible()
+			return
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
+	// Compute the voter weight (1 unless the census is weighted). A zero weight
+	// on a weighted census means the user cannot vote.
+	weight := uint64(1)
+	if census.Weighted {
+		weight = member.Weight
+		if weight == 0 {
+			notEligible()
+			return
+		}
+	}
+
+	// Optionally report whether the user already voted in the requested process.
+	hasVoted := false
+	if len(req.ProcessID) > 0 {
+		if processID, found := findProcessInBundle(bundle, req.ProcessID); found {
+			if proc, err := c.mainDB.CSPProcessByUserAndProcess(auth.UserID, processID); err == nil {
+				hasVoted = proc.Used
+			}
+		}
+	}
+
+	apicommon.HTTPWriteJSON(w, &CheckMembershipResponse{
+		Belongs:  true,
+		Weight:   internal.HexBytes(big.NewInt(int64(weight)).Bytes()),
+		HasVoted: hasVoted,
+	})
+}
+
 // ConsumedAddressHandler godoc
 //
 //	@Summary		Get the address used to sign a process
