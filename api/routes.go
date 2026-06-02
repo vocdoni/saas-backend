@@ -158,6 +158,8 @@ const (
 	processBundleWeightEndpoint = "/process/bundle/{bundleId}/weight"
 	// POST /process/bundle/{bundleId}/sign to sign with two-factor authentication
 	processBundleSignEndpoint = "/process/bundle/{bundleId}/sign"
+	// POST /process/bundle/{bundleId}/check to check census membership for a CSP auth token
+	processBundleCheckEndpoint = "/process/bundle/{bundleId}/check"
 	// GET /process/bundle/{bundleId}/{participantId} to get the process information
 	processBundleMemberEndpoint = "/process/bundle/{bundleId}/{participantId}"
 	// POST /process/bundle/{bundleId}/participants/check to check whether an org member is a
