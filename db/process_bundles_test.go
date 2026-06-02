@@ -200,6 +200,86 @@ func TestProcessBundles(t *testing.T) {
 		c.Assert(bundles[0].ID.Hex(), qt.Equals, bundle2ID.String())
 	})
 
+	t.Run("TestProcessBundlesByCensus", func(_ *testing.T) {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+		// Setup prerequisites
+		census1 := setupTestPrerequisites1(c, testDB)
+
+		var rootHex internal.HexBytes
+		c.Assert(rootHex.ParseString(testProcessRoot), qt.IsNil)
+		census2 := &Census{
+			OrgAddress: testOrgAddress,
+			Published: PublishedCensus{
+				Root: rootHex,
+				URI:  testProcessURI,
+			},
+		}
+		census2ID, err := testDB.SetCensus(census2)
+		c.Assert(err, qt.IsNil)
+		census2.ID, err = primitive.ObjectIDFromHex(census2ID)
+		c.Assert(err, qt.IsNil)
+
+		// Create test processes
+		process1 := createTestProcess(c, testDB, testProcessID, census1)
+		process2 := createTestProcess(c, testDB, testProcessID2, census1)
+		process3 := createTestProcess(c, testDB, testProcessID3, census2)
+
+		// Create process bundles for different censuses
+		bundle1 := &ProcessesBundle{
+			OrgAddress: testOrgAddress,
+			Census:     *census1,
+			Processes:  []internal.HexBytes{process1.Address, process2.Address},
+		}
+		bundle1ID, err := testDB.SetProcessBundle(bundle1)
+		c.Assert(err, qt.IsNil)
+
+		bundle2 := &ProcessesBundle{
+			OrgAddress: testOrgAddress,
+			Census:     *census1,
+			Processes:  []internal.HexBytes{process2.Address},
+		}
+		bundle2ID, err := testDB.SetProcessBundle(bundle2)
+		c.Assert(err, qt.IsNil)
+
+		bundle3 := &ProcessesBundle{
+			OrgAddress: testOrgAddress,
+			Census:     *census2,
+			Processes:  []internal.HexBytes{process3.Address},
+		}
+		bundle3ID, err := testDB.SetProcessBundle(bundle3)
+		c.Assert(err, qt.IsNil)
+
+		// Test with invalid census
+		_, err = testDB.ProcessBundlesByCensus(nil)
+		c.Assert(err, qt.Equals, ErrInvalidData)
+
+		// Test retrieving bundles by census
+		bundles, err := testDB.ProcessBundlesByCensus(census1)
+		c.Assert(err, qt.IsNil)
+		c.Assert(bundles, qt.HasLen, 2)
+		bundleIDs := []string{bundles[0].ID.Hex(), bundles[1].ID.Hex()}
+		c.Assert(bundleIDs, qt.Contains, bundle1ID.String())
+		c.Assert(bundleIDs, qt.Contains, bundle2ID.String())
+
+		bundles, err = testDB.ProcessBundlesByCensus(census2)
+		c.Assert(err, qt.IsNil)
+		c.Assert(bundles, qt.HasLen, 1)
+		c.Assert(bundles[0].ID.Hex(), qt.Equals, bundle3ID.String())
+
+		// Test with a census that has no bundles
+		censusWithoutBundles := &Census{
+			OrgAddress: testOrgAddress,
+		}
+		censusWithoutBundlesID, err := testDB.SetCensus(censusWithoutBundles)
+		c.Assert(err, qt.IsNil)
+		censusWithoutBundles.ID, err = primitive.ObjectIDFromHex(censusWithoutBundlesID)
+		c.Assert(err, qt.IsNil)
+
+		bundles, err = testDB.ProcessBundlesByCensus(censusWithoutBundles)
+		c.Assert(err, qt.IsNil)
+		c.Assert(bundles, qt.HasLen, 0)
+	})
+
 	t.Run("TestAddProcessesToBundle", func(_ *testing.T) {
 		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		// Setup prerequisites

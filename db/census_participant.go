@@ -593,7 +593,49 @@ func (ms *MongoStorage) AddCensusParticipantsByMemberIDs(censusID string, member
 		added++
 	}
 
+	// Update the census size based on the number of added participants
+	if added > 0 {
+		return added, errorsAsStrings(memberErrors), ms.updateCensusSize(censusID)
+	}
 	return added, errorsAsStrings(memberErrors), nil
+}
+
+// updateCensusSize updates the size of a census in the database:
+//   - it updates the size in the census document
+//   - it updates the size in the process bundle documents
+func (ms *MongoStorage) updateCensusSize(censusID string) error {
+	// Get the census from the database
+	census, err := ms.Census(censusID)
+	if err != nil {
+		return err
+	}
+	// Get the current census participants
+	newSize, err := ms.CountCensusParticipants(censusID)
+	if err != nil {
+		return err
+	}
+	// Update the size and store it
+	census.Size = newSize
+	if _, err = ms.SetCensus(census); err != nil {
+		return fmt.Errorf("failed to update census size: %w", err)
+	}
+	// Get the bundles with that census
+	bundles, err := ms.ProcessBundlesByCensus(census)
+	if err != nil {
+		return err
+	}
+	// Update the bundles
+	bundlesErrors := make([]error, 0, len(bundles))
+	for _, bundle := range bundles {
+		bundle.Census.Size = newSize
+		if _, err = ms.SetProcessBundle(bundle); err != nil {
+			bundlesErrors = append(bundlesErrors, fmt.Errorf("failed to update bundle size: %w", err))
+		}
+	}
+	if len(bundlesErrors) > 0 {
+		return errors.Join(bundlesErrors...)
+	}
+	return nil
 }
 
 func (ms *MongoStorage) setBulkCensusParticipant(ctx context.Context, census *Census, groupID string) (int64, error) {
