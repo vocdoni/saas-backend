@@ -22,6 +22,8 @@ RUN --mount=type=cache,target=/go-cache go mod download
 # When using `docker compose watch`, your code will be synced over this path.
 COPY . .
 
+RUN go run scripts/circuits/main.go
+
 # Ensure the dynamic linker can find Wasmer's shared library used by wasmer-go
 ENV WASMER_PATH=/go/pkg/mod/github.com/wasmerio/wasmer-go@v1.0.4/wasmer/packaged/lib/linux-amd64
 ENV LD_LIBRARY_PATH=${WASMER_PATH}
