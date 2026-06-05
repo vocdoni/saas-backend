@@ -64,4 +64,9 @@ var (
 	ErrUserIsNotAlreadySigning = fmt.Errorf("the user is not signing")
 	// ErrInvalidSalt is returned when the salt is invalid.
 	ErrInvalidSalt = fmt.Errorf("invalid salt, length must be %d bytes", saltedkey.SaltSize)
+	// ErrBlindRNotFound is returned when no pending blind signing session exists
+	// for the given auth token and process ID.
+	ErrBlindRNotFound = fmt.Errorf("blind signing session not found or expired")
+	// ErrWeightAttestation is returned when the weight attestation signing fails.
+	ErrWeightAttestation = fmt.Errorf("failed to sign weight attestation")
 )

@@ -1376,6 +1376,32 @@ definitions:
         format: hex
         type: string
     type: object
+  handlers.SignRRequest:
+    properties:
+      authToken:
+        example: deadbeef
+        format: hex
+        type: string
+      electionId:
+        example: deadbeef
+        format: hex
+        type: string
+    type: object
+  handlers.SignRResponse:
+    properties:
+      tokenR:
+        example: deadbeef
+        format: hex
+        type: string
+      weight:
+        example: 2a
+        format: hex
+        type: string
+      weightCert:
+        example: deadbeef
+        format: hex
+        type: string
+    type: object
   handlers.SignRequest:
     properties:
       authToken:
@@ -3985,6 +4011,54 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Sign a process in a bundle
+      tags:
+      - process
+  /process/bundle/{bundleId}/sign-r:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Begin a blind signing session. Returns the R point the voter needs to blind their
+        ballot address, together with the voter's weight and a non-blind weight attestation
+        (ECDSA signature over {processID, weight}) for weighted censuses.
+        The R point is valid for one sign call; it is discarded after use or on the next
+        call to this endpoint for the same (token, process) pair.
+      parameters:
+      - description: Bundle ID
+        in: path
+        name: bundleId
+        required: true
+        type: string
+      - description: Auth token and process ID
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.SignRRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SignRResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized or token not verified
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Bundle not found or process not in bundle
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Get blind signing R point for a bundle process
       tags:
       - process
   /process/bundle/{bundleId}/weight:
