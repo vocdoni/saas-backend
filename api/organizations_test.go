@@ -450,6 +450,91 @@ func TestOrganizationPartialUpdate(t *testing.T) {
 	c.Assert(updatedOrg.Address, qt.Equals, initialOrg.Address)
 }
 
+func TestOrganizationsListPagination(t *testing.T) {
+	c := qt.New(t)
+
+	// Create a user and 5 organizations belonging to that user.
+	token := testCreateUser(t, testPass)
+	const total = 5
+	for i := range total {
+		orgInfo := &apicommon.OrganizationInfo{
+			Type:    string(db.CompanyType),
+			Website: fmt.Sprintf("https://paginationtest%d.com", i),
+		}
+		resp, code := testRequest(t, http.MethodPost, token, orgInfo, organizationsEndpoint)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("creating org %d: %s", i, resp))
+	}
+
+	// Unauthenticated request must be rejected.
+	_, code := testRequest(t, http.MethodGet, "", nil, organizationsEndpoint)
+	c.Assert(code, qt.Equals, http.StatusUnauthorized)
+
+	// Default request (no pagination params) must return all 5 orgs on page 1.
+	resp1 := requestAndParse[apicommon.OrganizationsResponse](
+		t, http.MethodGet, token, nil, organizationsEndpoint)
+	c.Assert(resp1.Pagination, qt.Not(qt.IsNil))
+	c.Assert(resp1.Pagination.TotalItems, qt.Equals, int64(total))
+	c.Assert(resp1.Pagination.CurrentPage, qt.Equals, int64(1))
+	c.Assert(resp1.Pagination.PreviousPage, qt.IsNil)
+	c.Assert(resp1.Pagination.NextPage, qt.IsNil)
+	c.Assert(resp1.Pagination.LastPage, qt.Equals, int64(1))
+	c.Assert(resp1.Organizations, qt.HasLen, total)
+
+	// Page 1 with limit=2 must return 2 items and a NextPage pointer.
+	p1 := requestAndParse[apicommon.OrganizationsResponse](
+		t, http.MethodGet, token, nil, "organizations?page=1&limit=2")
+	c.Assert(p1.Pagination.TotalItems, qt.Equals, int64(total))
+	c.Assert(p1.Pagination.CurrentPage, qt.Equals, int64(1))
+	c.Assert(p1.Pagination.PreviousPage, qt.IsNil)
+	c.Assert(p1.Pagination.NextPage, qt.Not(qt.IsNil))
+	c.Assert(*p1.Pagination.NextPage, qt.Equals, int64(2))
+	c.Assert(p1.Pagination.LastPage, qt.Equals, int64(3))
+	c.Assert(p1.Organizations, qt.HasLen, 2)
+
+	// Page 2 with limit=2 must return 2 items with both previous and next pointers.
+	p2 := requestAndParse[apicommon.OrganizationsResponse](
+		t, http.MethodGet, token, nil, "organizations?page=2&limit=2")
+	c.Assert(p2.Pagination.TotalItems, qt.Equals, int64(total))
+	c.Assert(p2.Pagination.CurrentPage, qt.Equals, int64(2))
+	c.Assert(p2.Pagination.PreviousPage, qt.Not(qt.IsNil))
+	c.Assert(*p2.Pagination.PreviousPage, qt.Equals, int64(1))
+	c.Assert(p2.Pagination.NextPage, qt.Not(qt.IsNil))
+	c.Assert(*p2.Pagination.NextPage, qt.Equals, int64(3))
+	c.Assert(p2.Pagination.LastPage, qt.Equals, int64(3))
+	c.Assert(p2.Organizations, qt.HasLen, 2)
+
+	// Pages 1 and 2 must not share any addresses (no duplication).
+	p1Addrs := make(map[string]bool, len(p1.Organizations))
+	for _, o := range p1.Organizations {
+		p1Addrs[o.Address.Hex()] = true
+	}
+	for _, o := range p2.Organizations {
+		c.Assert(p1Addrs[o.Address.Hex()], qt.IsFalse,
+			qt.Commentf("address %s appears on both page 1 and page 2", o.Address.Hex()))
+	}
+
+	// Last page (page 3) with limit=2 must return 1 item and no NextPage.
+	p3 := requestAndParse[apicommon.OrganizationsResponse](
+		t, http.MethodGet, token, nil, "organizations?page=3&limit=2")
+	c.Assert(p3.Pagination.TotalItems, qt.Equals, int64(total))
+	c.Assert(p3.Pagination.CurrentPage, qt.Equals, int64(3))
+	c.Assert(p3.Pagination.PreviousPage, qt.Not(qt.IsNil))
+	c.Assert(*p3.Pagination.PreviousPage, qt.Equals, int64(2))
+	c.Assert(p3.Pagination.NextPage, qt.IsNil)
+	c.Assert(p3.Pagination.LastPage, qt.Equals, int64(3))
+	c.Assert(p3.Organizations, qt.HasLen, 1)
+
+	// Requesting a page beyond the last must return a bad-request error.
+	_, code = testRequest(t, http.MethodGet, token, nil, "organizations?page=99&limit=2")
+	c.Assert(code, qt.Equals, http.StatusBadRequest)
+
+	// Invalid pagination params must return bad-request.
+	_, code = testRequest(t, http.MethodGet, token, nil, "organizations?page=invalid")
+	c.Assert(code, qt.Equals, http.StatusBadRequest)
+	_, code = testRequest(t, http.MethodGet, token, nil, "organizations?limit=invalid")
+	c.Assert(code, qt.Equals, http.StatusBadRequest)
+}
+
 func TestCreateOrganizationWithDifferentTypes(t *testing.T) {
 	c := qt.New(t)
 

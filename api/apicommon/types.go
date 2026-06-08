@@ -162,6 +162,15 @@ type OrganizationTypeList struct {
 	Types []*OrganizationType `json:"types"`
 }
 
+// OrganizationsResponse represents a paginated list of organizations.
+// swagger:model OrganizationsResponse
+type OrganizationsResponse struct {
+	// Pagination fields
+	Pagination *Pagination `json:"pagination"`
+	// List of organizations
+	Organizations []*OrganizationInfo `json:"organizations"`
+}
+
 // OrganizationAddMetaRequest represents a request to add or update meta information for an organization.
 // swagger:model OrganizationAddMetaRequest
 type OrganizationAddMetaRequest struct {

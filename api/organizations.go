@@ -16,6 +16,69 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
+// listOrganizationsHandler godoc
+//
+//	@Summary		List user organizations
+//	@Description	Get a paginated list of organizations the authenticated user belongs to
+//	@Tags			organizations
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			page	query		integer	false	"Page number (default: 1)"
+//	@Param			limit	query		integer	false	"Number of items per page (default: 10)"
+//	@Success		200		{object}	apicommon.OrganizationsResponse
+//	@Failure		400		{object}	errors.Error	"Invalid input"
+//	@Failure		401		{object}	errors.Error	"Unauthorized"
+//	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Router			/organizations [get]
+func (a *API) listOrganizationsHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	params, err := parsePaginationParams(r.URL.Query().Get(ParamPage), r.URL.Query().Get(ParamLimit))
+	if err != nil {
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
+		return
+	}
+	// re-fetch the user to guarantee we have the latest organizations list
+	freshUser, err := a.db.UserByEmail(user.Email)
+	if err != nil {
+		errors.ErrGenericInternalServerError.Withf("could not get user: %v", err).Write(w)
+		return
+	}
+	totalItems := int64(len(freshUser.Organizations))
+	pagination, err := calculatePagination(params.Page, params.Limit, totalItems)
+	if err != nil {
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
+		return
+	}
+	// compute the slice of organizations for the requested page
+	start := (params.Page - 1) * params.Limit
+	end := start + params.Limit
+	if end > totalItems {
+		end = totalItems
+	}
+	pageOrgs := freshUser.Organizations[start:end]
+	orgs := make([]*apicommon.OrganizationInfo, 0, len(pageOrgs))
+	for _, orgUser := range pageOrgs {
+		org, parent, err := a.db.OrganizationWithParent(orgUser.Address)
+		if err != nil {
+			if err == db.ErrNotFound {
+				continue
+			}
+			errors.ErrGenericInternalServerError.Withf("could not get organization: %v", err).Write(w)
+			return
+		}
+		orgs = append(orgs, apicommon.OrganizationFromDB(org, parent))
+	}
+	apicommon.HTTPWriteJSON(w, &apicommon.OrganizationsResponse{
+		Pagination:    pagination,
+		Organizations: orgs,
+	})
+}
+
 // createOrganizationHandler godoc
 //
 //	@Summary		Create a new organization
