@@ -5,6 +5,7 @@ ENV CGO_ENABLED=1
 RUN go env -w GOCACHE=/go-cache
 COPY . .
 RUN --mount=type=cache,target=/go-cache go mod download
+RUN --mount=type=cache,target=/go-cache go run scripts/circuits/main.go
 RUN --mount=type=cache,target=/go-cache go build -o=backend -ldflags="-s -w" cmd/service/main.go
 
 FROM debian:bookworm-slim AS base
@@ -25,5 +26,6 @@ RUN apt-get update && \
 
 WORKDIR /app
 COPY --from=builder /src/backend ./
+COPY --from=builder /root/.cache/vocdoni/zkCircuits /root/.cache/vocdoni/zkCircuits
 
 ENTRYPOINT ["/app/backend"]
