@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"math/big"
 	"regexp"
+	"slices"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/nyaruka/phonenumbers"
@@ -27,6 +29,29 @@ var emailRegex = regexp.MustCompile(EmailRegexTemplate)
 // ValidEmail helper function allows to validate an email address.
 func ValidEmail(email string) bool {
 	return emailRegex.MatchString(email)
+}
+
+// NormalizeEmail returns the canonical form of an email address used for
+// storage and login matching: trimmed of surrounding whitespace and
+// lowercased. Storing and comparing emails in this canonical form makes the
+// CSP 2FA login case-insensitive.
+func NormalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
+// HashSortedFields sorts the given field values and returns the login-hash
+// digest used to look up census participants during CSP authentication.
+//
+// IMPORTANT: the construction below is intentional and MUST NOT be "fixed".
+// sha256.New().Sum(b) appends the digest of what has been written to the
+// hasher (nothing, here) to b, so the returned bytes are the Go-formatted
+// representation of the sorted slice followed by the SHA-256 of the empty
+// input. Every loginHash/loginHashEmail already stored in the database depends
+// on this exact, byte-for-byte behaviour; changing it would invalidate every
+// stored hash and lock out every voter.
+func HashSortedFields(data []string) []byte {
+	slices.Sort(data)
+	return sha256.New().Sum(fmt.Append(nil, data))
 }
 
 // SanitizeAndVerifyPhoneNumber helper function allows to sanitize and verify a phone number
