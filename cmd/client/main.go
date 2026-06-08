@@ -2,13 +2,15 @@
 // The actions provided are those of:
 // * importing members from a CSV file
 // * adding them to a census derived from a bundleId.
-// It is assumed the existing memberbase has as unique identidier field either the nationalId or the memberNumber.
+// It is assumed the existing memberbase has as unique identidier field the nationalId, the memberNumber or the email.
+// The email identifier is intended for memberbases where emails are guaranteed unique; note that when email is used as
+// the identifier it is treated as immutable (a changed email is matched as a new member rather than an update).
 //
 // Execution example:
 //
 //	go run ./cmd/client --orgAddress <hex-address> --email <email> --password <password> \
 //	  --action import-and-add-to-census|import-members --bundleId <bundle-id> --csv <path> \
-//	  --idField nationalId|memberNumber
+//	  --idField nationalId|memberNumber|email
 package main
 
 import (
@@ -29,10 +31,11 @@ const (
 	actionImportAndAddToCensus  = "import-and-add-to-census"
 	identifierFieldNationalID   = "nationalId"
 	identifierFieldMemberNumber = "memberNumber"
+	identifierFieldEmail        = "email"
 	clientUsage                 = `Usage:
   go run ./cmd/client --orgAddress <hex-address> --email <email> --password <password> \
 	  --action import-and-add-to-census|import-members --bundleId <bundle-id> --csv <path> \
-	  --idField nationalId|memberNumber`
+	  --idField nationalId|memberNumber|email`
 )
 
 // Config contains CLI inputs.
@@ -170,7 +173,7 @@ func parseConfig(args []string) (Config, error) {
 		&cfg.IDField,
 		"idField",
 		"",
-		"unique member identifier field: nationalId | memberNumber",
+		"unique member identifier field: nationalId | memberNumber | email",
 	)
 	flagSet.StringVar(
 		&cfg.BundleID,
@@ -207,8 +210,15 @@ func parseConfig(args []string) (Config, error) {
 	if cfg.CSVPath == "" {
 		return Config{}, fmt.Errorf("--csv is required")
 	}
-	if cfg.IDField != identifierFieldNationalID && cfg.IDField != identifierFieldMemberNumber {
-		return Config{}, fmt.Errorf("--idField must be %q or %q", identifierFieldNationalID, identifierFieldMemberNumber)
+	if cfg.IDField != identifierFieldNationalID &&
+		cfg.IDField != identifierFieldMemberNumber &&
+		cfg.IDField != identifierFieldEmail {
+		return Config{}, fmt.Errorf(
+			"--idField must be %q, %q or %q",
+			identifierFieldNationalID,
+			identifierFieldMemberNumber,
+			identifierFieldEmail,
+		)
 	}
 	if cfg.Action == actionImportAndAddToCensus && cfg.BundleID == "" {
 		return Config{}, fmt.Errorf("--bundleId is required for action %q", actionImportAndAddToCensus)
