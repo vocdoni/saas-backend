@@ -525,7 +525,7 @@ func (a *API) organizationJobsHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrGenericInternalServerError.Withf("could not get jobs: %v", err).Write(w)
 		return
 	}
-	pagination, err := calculatePagination(params.Page, params.Limit, totalItems)
+	pagination, err := calculatePagination(params.Page, params.Limit, totalItems, a.serverURL+r.URL.RequestURI())
 	if err != nil {
 		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return

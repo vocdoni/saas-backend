@@ -31,6 +31,10 @@ type Pagination struct {
 	CurrentPage  int64  `json:"currentPage"`
 	NextPage     *int64 `json:"nextPage"`
 	LastPage     int64  `json:"lastPage"`
+	// Next is the full URL (with percent-encoded cursor) to fetch the next page, empty when on the last page.
+	Next string `json:"next,omitempty"`
+	// Previous is the full URL (with percent-encoded cursor) to fetch the previous page, empty when on the first page.
+	Previous string `json:"previous,omitempty"`
 }
 
 // PaginationParams allows the client to request a specific page, and how many items per page
