@@ -298,6 +298,24 @@ func TestOrgMembers(t *testing.T) {
 		_, err = testDB.DeleteOrgMembers(common.Address{}, []string{"some-id"})
 		c.Assert(err, qt.Equals, ErrInvalidData)
 	})
+
+	t.Run("EmailNormalization", func(_ *testing.T) {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+		c.Assert(testDB.SetOrganization(&Organization{Address: testOrgAddress}), qt.IsNil)
+
+		member := &OrgMember{
+			OrgAddress:   testOrgAddress,
+			Email:        "  Mixed.Case@Example.COM ",
+			MemberNumber: testMemberNumber,
+			Name:         testName,
+		}
+		memberOID, err := testDB.SetOrgMember(testSalt, member)
+		c.Assert(err, qt.IsNil)
+
+		stored, err := testDB.OrgMember(testOrgAddress, memberOID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(stored.Email, qt.Equals, "mixed.case@example.com")
+	})
 }
 
 type orgMembersByFieldFixture struct {
