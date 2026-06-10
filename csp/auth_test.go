@@ -180,6 +180,7 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 		SMSService:               testSMSService,
 		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,
+		OTPExpiry:                time.Second * 5,
 		RootKey:                  *testRootKey,
 	})
 	c.Assert(err, qt.IsNil)
@@ -197,6 +198,16 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 	c.Run("token not found", func(c *qt.C) {
 		err := csp.VerifyBundleAuthToken([]byte("invalid"), "invalid")
 		c.Assert(err, qt.ErrorIs, ErrInvalidAuthToken)
+	})
+
+	c.Run("expired OTP", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		secret := gotp.RandomSecret(16)
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID, secret), qt.IsNil)
+		code := gotp.NewDefaultHOTP(secret).At(0)
+		time.Sleep(time.Second * 6)
+		err := csp.VerifyBundleAuthToken(testToken, code)
+		c.Assert(err, qt.ErrorIs, ErrTokenExpired)
 	})
 
 	c.Run("solution not match", func(c *qt.C) {
@@ -235,6 +246,7 @@ func TestResendChallenge(t *testing.T) {
 		SMSService:               testSMSService,
 		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,
+		OTPExpiry:                time.Second * 30,
 		RootKey:                  *testRootKey,
 	})
 	c.Assert(err, qt.IsNil)
@@ -358,6 +370,7 @@ func TestBundleAuthTokenResendAndVerifyFlow(t *testing.T) {
 		SMSService:               testSMSService,
 		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,
+		OTPExpiry:                time.Second * 30,
 		RootKey:                  *testRootKey,
 	})
 	c.Assert(err, qt.IsNil)

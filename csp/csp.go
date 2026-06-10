@@ -15,7 +15,10 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-const DefaultNotificationCoolDownTime = time.Second * 60
+const (
+	DefaultNotificationCoolDownTime = time.Second * 60
+	DefaultOTPExpiry                = time.Minute * 15
+)
 
 // Config struct contains the configuration for the CSP service. It includes
 // the database name, the MongoDB client, the notification cooldown time, the
@@ -33,6 +36,9 @@ type Config struct {
 	// breakers instead of a single throttled loop. Kept for backwards
 	// compatibility with existing configurations.
 	NotificationThrottleTime time.Duration
+	// OTPExpiry is how long a challenge OTP remains valid for verification.
+	// Resends within this window repeat the same code. Zero uses DefaultOTPExpiry (15 min).
+	OTPExpiry time.Duration
 	// NotificationQueueWorkers is the number of concurrent notification senders.
 	// It bounds the maximum number of in-flight provider sends. Zero uses the
 	// default (notifications.DefaultQueueWorkers).
@@ -58,6 +64,7 @@ type CSP struct {
 	notifyQueue  *notifications.Queue
 
 	notificationCoolDownTime time.Duration
+	otpExpiry                time.Duration
 }
 
 // New method creates a new CSP service. It requires a CSPConfig struct with
@@ -110,11 +117,16 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 	if notificationCoolDownTime <= 0 {
 		notificationCoolDownTime = DefaultNotificationCoolDownTime
 	}
+	otpExpiry := config.OTPExpiry
+	if otpExpiry <= 0 {
+		otpExpiry = DefaultOTPExpiry
+	}
 	return &CSP{
 		Storage:                  config.DB,
 		Signer:                   s,
 		notifyQueue:              queue,
 		notificationCoolDownTime: notificationCoolDownTime,
+		otpExpiry:                otpExpiry,
 	}, nil
 }
 

@@ -119,18 +119,18 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 		return ErrInvalidAuthToken
 	}
 
-	remainingTime := c.notificationCoolDownTime - time.Since(authTokenData.CreatedAt)
-	if remainingTime.Seconds() < 0 {
-		log.Warnw("resend requested but cooldown time reached",
+	remainingTime := c.otpExpiry - time.Since(authTokenData.CreatedAt)
+	if remainingTime <= 0 {
+		log.Warnw("resend requested but OTP has expired",
 			"userID", authTokenData.UserID,
 			"bundleID", authTokenData.BundleID,
-			"lastToken", authTokenData.Token)
+			"token", authTokenData.Token)
 		return ErrTokenExpired
 	} else if authTokenData.Verified {
 		return errors.ErrUserAlreadyVerified.WithData(map[string]any{"coolDownTime": remainingTime.Seconds()})
 	}
 	// compose the notification challenge
-	remainingTimeN := c.notificationCoolDownTime.String()
+	remainingTimeN := remainingTime.String()
 	orgInfo := notifications.OrganizationInfo{
 		Address: orgAddress,
 		Name:    orgName,
@@ -197,6 +197,14 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 			"token", token,
 			"error", err)
 		return ErrInvalidAuthToken
+	}
+	// reject if the OTP window has passed
+	if time.Since(authTokenData.CreatedAt) > c.otpExpiry {
+		log.Warnw("OTP expired",
+			"userID", authTokenData.UserID,
+			"bundleID", authTokenData.BundleID,
+			"token", token)
+		return ErrTokenExpired
 	}
 	// verify the solution, and if the solution is not correct, return an error
 	if !c.verifySolution(authTokenData.Secret, solution) {
