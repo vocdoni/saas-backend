@@ -42,8 +42,6 @@ var (
 	ErrStorageFailure = fmt.Errorf("storage service failure")
 	// ErrNotificationFailure is returned when the notification service fails.
 	ErrNotificationFailure = fmt.Errorf("notification service failure")
-	// ErrInvalidSignerType is returned when the signer type is invalid.
-	ErrInvalidSignerType = fmt.Errorf("invalid signer type")
 	// ErrAuthTokenNotVerified is returned when the token is not verified.
 	ErrAuthTokenNotVerified = fmt.Errorf("the token is not verified")
 	// ErrProcessAlreadyConsumed is returned when the user is already
@@ -52,16 +50,13 @@ var (
 	// ErrProcessAlreadyVoted is returned when the user has already voted in
 	// the process.
 	ErrProcessAlreadyVoted = fmt.Errorf("the user has already voted in the process")
-	// ErrPrepareSignature is returned when the signature preparation fails.
-	ErrPrepareSignature = fmt.Errorf("error preparing the signature")
 	// ErrSign is returned when the signature fails.
 	ErrSign = fmt.Errorf("error signing the message")
-	// ErrUserAlreadySigning is returned when the user is already signing and
-	// is not expected to be.
-	ErrUserAlreadySigning = fmt.Errorf("the user is already signing")
-	// ErrUserIsNotAlreadySigning is returned when the user is not signing and
-	// is expected to be.
-	ErrUserIsNotAlreadySigning = fmt.Errorf("the user is not signing")
 	// ErrInvalidSalt is returned when the salt is invalid.
 	ErrInvalidSalt = fmt.Errorf("invalid salt, length must be %d bytes", saltedkey.SaltSize)
+	// ErrBlindRNotFound is returned when no pending blind signing session exists
+	// for the given auth token and process ID.
+	ErrBlindRNotFound = fmt.Errorf("blind signing session not found or expired")
+	// ErrWeightAttestation is returned when the weight attestation signing fails.
+	ErrWeightAttestation = fmt.Errorf("failed to sign weight attestation")
 )

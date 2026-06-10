@@ -156,7 +156,9 @@ const (
 	processBundleAuthResendEndpoint = "/process/bundle/{bundleId}/auth/resend"
 	// POST /process/bundle/{bundleId}/weight to get the voter weight for the bundle
 	processBundleWeightEndpoint = "/process/bundle/{bundleId}/weight"
-	// POST /process/bundle/{bundleId}/sign to sign with two-factor authentication
+	// POST /process/bundle/{bundleId}/sign-r to begin a blind signing session (get R point)
+	processBundleSignREndpoint = "/process/bundle/{bundleId}/sign-r"
+	// POST /process/bundle/{bundleId}/sign to complete a blind signing session
 	processBundleSignEndpoint = "/process/bundle/{bundleId}/sign"
 	// POST /process/bundle/{bundleId}/check to check census membership for a CSP auth token
 	processBundleCheckEndpoint = "/process/bundle/{bundleId}/check"

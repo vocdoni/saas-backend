@@ -17,7 +17,6 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/notifications"
-	"github.com/vocdoni/saas-backend/csp/signers"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
@@ -323,67 +322,69 @@ func findProcessInBundle(bundle *db.ProcessesBundle, processID internal.HexBytes
 	return nil, false
 }
 
-// parseAddress parses the address from the payload
-func parseAddress(w http.ResponseWriter, payload string) (*internal.HexBytes, bool) {
-	address := new(internal.HexBytes)
-	if err := address.ParseString(payload); err != nil {
-		errors.ErrMalformedBody.WithErr(err).Write(w)
-		return nil, false
-	}
-	return address, true
-}
+// signBlindAndRespond performs the blind signing step and sends the response.
+// blindedMsg is the blinded ballot produced client-side using the R point from
+// BundleSignRHandler. The returned signature must be unblinded client-side.
+func (c *CSPHandlers) signBlindAndRespond(w http.ResponseWriter, authToken, blindedMsg, processID internal.HexBytes) {
+	log.Debugw("new CSP blind sign request", "procId", processID)
 
-// signAndRespond signs the request and sends the response
-func (c *CSPHandlers) signAndRespond(w http.ResponseWriter, authToken, address, processID, weight internal.HexBytes) {
-	log.Debugw("new CSP sign request", "address", address, "procId", processID, "weight", weight)
-
-	signature, err := c.csp.Sign(authToken, address, processID, weight, signers.SignerTypeECDSASalted)
+	signature, err := c.csp.SignBlindMsg(authToken, processID, blindedMsg)
 	if err != nil {
-		errors.ErrUnauthorized.WithErr(err).Write(w)
+		switch err {
+		case csp.ErrAuthTokenNotVerified, csp.ErrBlindRNotFound, csp.ErrProcessAlreadyConsumed:
+			errors.ErrUnauthorized.WithErr(err).Write(w)
+		default:
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		}
 		return
 	}
 
-	apicommon.HTTPWriteJSON(w, &AuthResponse{Signature: signature, Weight: weight})
+	apicommon.HTTPWriteJSON(w, &AuthResponse{Signature: signature})
 }
 
-// BundleSignHandler godoc
+// BundleSignRHandler godoc
 //
-//	@Summary		Sign a process in a bundle
-//	@Description	Sign a process in a bundle. Requires a verified token. The server signs the address with the user data
-//	@Description	and returns the signature. Once signed, the process is marked as consumed and cannot be signed again.
-//	@Description	The signing process includes verifying that the participant is in the census, that the process is part of
-//	@Description	the bundle, and that the authentication token is valid and verified.
+//	@Summary		Get blind signing R point for a bundle process
+//	@Description	Begin a blind signing session. Returns the R point the voter needs to blind their
+//	@Description	ballot address, together with the voter's weight and a non-blind weight attestation
+//	@Description	(ECDSA signature over {processID, weight}) for weighted censuses.
+//	@Description	The R point is valid for one sign call; it is discarded after use or on the next
+//	@Description	call to this endpoint for the same (token, process) pair.
 //	@Tags			process
 //	@Accept			json
 //	@Produce		json
 //	@Param			bundleId	path		string					true	"Bundle ID"
-//	@Param			request		body		handlers.SignRequest	true	"Sign request with process ID, auth token, and payload (address)"
-//	@Success		200			{object}	handlers.AuthResponse
+//	@Param			request		body		handlers.SignRRequest	true	"Auth token and process ID"
+//	@Success		200			{object}	handlers.SignRResponse
 //	@Failure		400			{object}	errors.Error	"Invalid input data"
-//	@Failure		401			{object}	errors.Error	"Unauthorized, invalid token, or token not verified (ErrAuthTokenNotVerified)"
-//	@Failure		404			{object}	errors.Error	"Bundle not found, process not in bundle, or user not found"
+//	@Failure		401			{object}	errors.Error	"Unauthorized or token not verified"
+//	@Failure		404			{object}	errors.Error	"Bundle not found or process not in bundle"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
-//	@Router			/process/bundle/{bundleId}/sign [post]
-func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) {
-	// Parse the bundle ID
+//	@Router			/process/bundle/{bundleId}/sign-r [post]
+func (c *CSPHandlers) BundleSignRHandler(w http.ResponseWriter, r *http.Request) {
 	bundleID, ok := parseBundleID(w, r)
 	if !ok {
 		return
 	}
-
-	// Get the bundle
 	bundle, ok := c.getBundle(w, *bundleID)
 	if !ok {
 		return
 	}
 
-	// Parse the sign request
-	req, ok := parseSignRequest(w, r)
-	if !ok {
+	var req SignRRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	if len(req.AuthToken) == 0 {
+		errors.ErrUnauthorized.Withf("missing auth token").Write(w)
+		return
+	}
+	if len(req.ProcessID) == 0 {
+		errors.ErrInvalidData.Withf("missing process ID").Write(w)
 		return
 	}
 
-	// Get the authentication information
 	auth, ok := c.getAuthInfo(w, req.AuthToken)
 	if !ok {
 		return
@@ -393,7 +394,6 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Find the process in the bundle
 	processID, found := findProcessInBundle(bundle, req.ProcessID)
 	if !found {
 		errors.ErrUnauthorized.Withf("process not found in bundle").Write(w)
@@ -410,31 +410,86 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 		errors.ErrUserNotFound.WithErr(err).Write(w)
 		return
 	}
-
 	census, err := c.mainDB.Census(bundle.Census.ID.Hex())
 	if err != nil {
 		errors.ErrCensusNotFound.WithErr(err).Write(w)
 		return
 	}
 
-	// default weight to 1 if not set
 	weight := uint64(1)
 	if census.Weighted {
 		weight = member.Weight
 	}
 
-	// // Check if the participant is in the census
-	// if !c.checkCensusParticipant(w, bundle.Census.ID.Hex(), string(auth.UserID)) {
-	// 	return
-	// }
+	tokenR, weightCert, err := c.csp.GetBlindR(req.AuthToken, processID, weight)
+	if err != nil {
+		switch err {
+		case csp.ErrAuthTokenNotVerified,
+			csp.ErrProcessAlreadyConsumed:
+			errors.ErrUnauthorized.WithErr(err).Write(w)
+		default:
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		}
+		return
+	}
 
-	// Parse the address from the payload
-	address, ok := parseAddress(w, req.Payload)
+	apicommon.HTTPWriteJSON(w, &SignRResponse{
+		TokenR:     tokenR,
+		Weight:     big.NewInt(int64(weight)).Bytes(),
+		WeightCert: weightCert,
+	})
+}
+
+// BundleSignHandler godoc
+//
+//	@Summary		Blind-sign a process in a bundle
+//	@Description	Complete a blind signing session. Requires a verified token and a blinded ballot
+//	@Description	address (produced client-side using the R point from sign-r). Returns the raw blind
+//	@Description	signature the voter must unblind locally. Once signed, the process is marked as
+//	@Description	consumed and cannot be signed again.
+//	@Tags			process
+//	@Accept			json
+//	@Produce		json
+//	@Param			bundleId	path		string					true	"Bundle ID"
+//	@Param			request		body		handlers.SignRequest	true	"Auth token, process ID, and blinded payload"
+//	@Success		200			{object}	handlers.AuthResponse
+//	@Failure		400			{object}	errors.Error	"Invalid input data"
+//	@Failure		401			{object}	errors.Error	"Unauthorized, invalid token, token not verified, or no pending blind session"
+//	@Failure		404			{object}	errors.Error	"Bundle not found or process not in bundle"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/process/bundle/{bundleId}/sign [post]
+func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) {
+	bundleID, ok := parseBundleID(w, r)
 	if !ok {
 		return
 	}
-	// Sign the request and send the response
-	c.signAndRespond(w, req.AuthToken, *address, processID, big.NewInt(int64(weight)).Bytes())
+	bundle, ok := c.getBundle(w, *bundleID)
+	if !ok {
+		return
+	}
+	req, ok := parseSignRequest(w, r)
+	if !ok {
+		return
+	}
+	auth, ok := c.getAuthInfo(w, req.AuthToken)
+	if !ok {
+		return
+	}
+	if !auth.Verified {
+		errors.ErrUnauthorized.WithErr(csp.ErrAuthTokenNotVerified).Write(w)
+		return
+	}
+	processID, found := findProcessInBundle(bundle, req.ProcessID)
+	if !found {
+		errors.ErrUnauthorized.Withf("process not found in bundle").Write(w)
+		return
+	}
+	blindedMsg := new(internal.HexBytes)
+	if err := blindedMsg.ParseString(req.Payload); err != nil {
+		errors.ErrMalformedBody.WithErr(err).Write(w)
+		return
+	}
+	c.signBlindAndRespond(w, req.AuthToken, *blindedMsg, processID)
 }
 
 // UserWeightHandler godoc
@@ -684,12 +739,14 @@ func (c *CSPHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Requ
 		errors.ErrUserNoVoted.Write(w)
 		return
 	}
-	// return the address used to sign the process and the nullifier
-	apicommon.HTTPWriteJSON(w, &ConsumedAddressResponse{
-		Address:   cspProcess.UsedAddress,
-		Nullifier: state.GenerateNullifier(common.BytesToAddress(cspProcess.UsedAddress), *processID),
-		At:        cspProcess.UsedAt,
-	})
+	resp := ConsumedAddressResponse{At: cspProcess.UsedAt}
+	// for blind-signed processes the CSP never learns the voter's address,
+	// so Address and Nullifier remain nil.
+	if len(cspProcess.UsedAddress) > 0 {
+		resp.Address = cspProcess.UsedAddress
+		resp.Nullifier = state.GenerateNullifier(common.BytesToAddress(cspProcess.UsedAddress), *processID)
+	}
+	apicommon.HTTPWriteJSON(w, &resp)
 }
 
 // validateContactInfo checks if at least one contact method is provided

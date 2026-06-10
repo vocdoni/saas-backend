@@ -234,6 +234,53 @@ func (ms *MongoStorage) ConsumeCSPProcess(token, processID, address internal.Hex
 	return nil
 }
 
+// ConsumeCSPProcessBlind marks a CSP process as consumed without recording an
+// address. It is used for blind-signature flows where the CSP never learns the
+// voter's Ethereum address.
+func (ms *MongoStorage) ConsumeCSPProcessBlind(token, processID internal.HexBytes) error {
+	if token == nil || processID == nil {
+		return ErrBadInputs
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	tokenData, err := ms.fetchCSPAuthFromDB(ctx, token)
+	if err != nil {
+		return err
+	}
+	tokenStatus, err := ms.fetchCSPProcessFromDB(ctx, tokenData.UserID, processID)
+	if err != nil && !errors.Is(err, ErrTokenNotFound) {
+		return err
+	}
+	if tokenStatus != nil && tokenStatus.TimesVoted > MaxVoteOverwritesPerProcess {
+		return ErrProcessAlreadyConsumed
+	}
+	timesVoted := 1
+	if tokenStatus != nil {
+		timesVoted = tokenStatus.TimesVoted + 1
+	}
+	id := cspAuthTokenStatusID(tokenData.UserID, processID)
+	updateDoc, err := dynamicUpdateDocument(CSPProcess{
+		ID:         id,
+		UserID:     tokenData.UserID,
+		ProcessID:  processID,
+		Used:       true,
+		UsedAt:     time.Now(),
+		UsedToken:  token,
+		TimesVoted: timesVoted,
+	}, nil)
+	if err != nil {
+		return errors.Join(ErrPrepareDocument, err)
+	}
+	filter := bson.M{"_id": id}
+	opts := options.Update().SetUpsert(true)
+	if _, err = ms.cspTokensStatus.UpdateOne(ctx, filter, updateDoc, opts); err != nil {
+		return errors.Join(ErrStoreToken, err)
+	}
+	return nil
+}
+
 func (ms *MongoStorage) fetchCSPAuthFromDB(ctx context.Context, token internal.HexBytes) (*CSPAuth, error) {
 	tokenData := new(CSPAuth)
 	if err := ms.cspTokens.FindOne(ctx, bson.M{"_id": token}).Decode(tokenData); err != nil {

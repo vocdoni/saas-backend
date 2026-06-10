@@ -54,7 +54,7 @@ type CSP struct {
 	PasswordSalt string
 	Signer       *saltedkey.SaltedKey
 	Storage      *db.MongoStorage
-	signerLock   sync.Map
+	blindKStore  sync.Map // ephemeral secretK values for in-flight blind signing sessions
 	notifyQueue  *notifications.Queue
 
 	notificationCoolDownTime time.Duration
@@ -118,11 +118,16 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 	}, nil
 }
 
-// PubKey method returns the root public key of the CSP.
+// PubKey method returns the root ECDSA public key of the CSP.
 func (c *CSP) PubKey() (internal.HexBytes, error) {
 	pub, err := c.Signer.ECDSAPubKey()
 	if err != nil {
 		return nil, err
 	}
 	return ethcrypto.CompressPubkey(pub), nil
+}
+
+// BlindPubKey returns the root blind (secp256k1) public key of the CSP.
+func (c *CSP) BlindPubKey() internal.HexBytes {
+	return c.Signer.BlindPubKey().Bytes()
 }
