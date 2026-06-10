@@ -20,6 +20,7 @@ type CSPAuth struct {
 	UserID     internal.HexBytes `json:"userID" bson:"userid"`
 	BundleID   internal.HexBytes `json:"bundleID" bson:"bundleid"`
 	CreatedAt  time.Time         `json:"createdAt" bson:"createdat"`
+	Secret     string            `json:"secret,omitempty" bson:"secret,omitempty"`
 	Verified   bool              `json:"verified" bson:"verified"`
 	VerifiedAt time.Time         `json:"verifiedAt" bson:"verifiedat"`
 }
@@ -39,7 +40,7 @@ type CSPProcess struct {
 // SetCSPAuth method stores a new CSP authentication token for a user and a
 // bundle of processes. It returns an error if the token, user ID or bundle
 // ID are nil.
-func (ms *MongoStorage) SetCSPAuth(token, userID, bundleID internal.HexBytes) error {
+func (ms *MongoStorage) SetCSPAuth(token, userID, bundleID internal.HexBytes, secret string) error {
 	if token == nil || userID == nil || bundleID == nil {
 		return ErrBadInputs
 	}
@@ -54,6 +55,7 @@ func (ms *MongoStorage) SetCSPAuth(token, userID, bundleID internal.HexBytes) er
 		UserID:    userID,
 		BundleID:  bundleID,
 		CreatedAt: time.Now(),
+		Secret:    secret,
 		Verified:  false,
 	}); err != nil {
 		return errors.Join(ErrStoreToken, err)
@@ -113,9 +115,9 @@ func (ms *MongoStorage) VerifyCSPAuth(token internal.HexBytes) error {
 	if _, err := ms.fetchCSPAuthFromDB(ctx, token); err != nil {
 		return err
 	}
-	// update the token
+	// update the token: mark verified and clear the secret so the code cannot be reused
 	filter := bson.M{"_id": token}
-	updateDoc := bson.M{"$set": bson.M{"verified": true, "verifiedat": time.Now()}}
+	updateDoc := bson.M{"$set": bson.M{"verified": true, "verifiedat": time.Now()}, "$unset": bson.M{"secret": ""}}
 	if _, err := ms.cspTokens.UpdateOne(ctx, filter, updateDoc, nil); err != nil {
 		return errors.Join(ErrStoreToken, err)
 	}

@@ -242,7 +242,7 @@ func TestCheckProcessBundleParticipants(t *testing.T) {
 		token := internal.HexBytes(util.RandomBytes(32))
 		address := internal.HexBytes(util.RandomBytes(20))
 
-		c.Assert(testDB.SetCSPAuth(token, userID, bundleIDBytes), qt.IsNil)
+		c.Assert(testDB.SetCSPAuth(token, userID, bundleIDBytes, ""), qt.IsNil)
 		c.Assert(testDB.VerifyCSPAuth(token), qt.IsNil)
 		c.Assert(testDB.ConsumeCSPProcess(token, processID, address), qt.IsNil)
 
