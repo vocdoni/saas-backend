@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	blind "github.com/arnaucube/go-blindsecp256k1"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
 	qt "github.com/frankban/quicktest"
@@ -760,23 +761,56 @@ func fetchCSPUserWeight(t *testing.T, bundleID string, authToken internal.HexByt
 	return weightResp.Weight
 }
 
-// testCSPSign signs a payload with the CSP using the given auth token and process ID.
-// It returns the signature.
-func testCSPSign(t *testing.T, bundleID string, authToken, processID, payload internal.HexBytes) internal.HexBytes {
+// testCSPSign implements the two-step blind signing protocol with the CSP.
+// Step 1 calls /sign-r to get the ephemeral R point and weight, then blinds the
+// CAbundle hash. Step 2 sends the blinded message to /sign and unblinds the
+// response. Returns the 96-byte uncompressed blind signature and the signed weight.
+func testCSPSign(t *testing.T, bundleID string, authToken, processID internal.HexBytes, voterAddr []byte) (
+	internal.HexBytes, uint64,
+) {
 	t.Helper()
 	c := qt.New(t)
 
-	// Sign with the verified token
-	signReq := &handlers.SignRequest{
+	// Step 1: get R point and weight from sign-r
+	signRResp := requestAndParse[handlers.SignRResponse](t, http.MethodPost, "", &handlers.SignRRequest{
 		AuthToken: authToken,
 		ProcessID: processID,
-		Payload:   hex.EncodeToString(payload),
-	}
-	signResp := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", signReq, "process", "bundle", bundleID, "sign")
-	c.Assert(signResp.Signature, qt.Not(qt.Equals), "", qt.Commentf("signature is empty"))
+	}, "process", "bundle", bundleID, "sign-r")
+	c.Assert(signRResp.TokenR, qt.Not(qt.HasLen), 0, qt.Commentf("tokenR is empty"))
 
-	t.Logf("Received signature: %s", signResp.Signature.String())
-	return signResp.Signature
+	r, err := blind.NewPointFromBytes(signRResp.TokenR)
+	c.Assert(err, qt.IsNil)
+
+	weightBytes := signRResp.Weight
+	weight := new(big.Int).SetBytes(weightBytes).Uint64()
+
+	// Build the CAbundle exactly as the chain will verify it
+	bundle := &models.CAbundle{
+		ProcessId:  processID,
+		Address:    voterAddr,
+		VoteWeight: weightBytes,
+	}
+	cspBundle, err := proto.Marshal(bundle)
+	c.Assert(err, qt.IsNil)
+
+	// Blind the keccak256 hash of the bundle
+	msgHash := ethereum.HashRaw(cspBundle)
+	msgBlinded, userSecretData, err := blind.Blind(new(big.Int).SetBytes(msgHash), r)
+	c.Assert(err, qt.IsNil)
+
+	// Step 2: send blinded message to sign
+	signResp := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", &handlers.SignRequest{
+		AuthToken: authToken,
+		ProcessID: processID,
+		Payload:   hex.EncodeToString(msgBlinded.Bytes()),
+	}, "process", "bundle", bundleID, "sign")
+	c.Assert(signResp.Signature, qt.Not(qt.HasLen), 0, qt.Commentf("signature is empty"))
+
+	// Unblind the S scalar returned by the CSP to get the full *Signature{S, F}
+	sig := blind.Unblind(new(big.Int).SetBytes(signResp.Signature), userSecretData)
+
+	t.Logf("Blind signature obtained (%d bytes uncompressed)", len(sig.BytesUncompressed()))
+	return sig.BytesUncompressed(), weight
 }
 
 func testAuthenthicateAndVote(t *testing.T, vocdoniClient *apiclient.HTTPclient,
@@ -810,11 +844,11 @@ func testAuthenthicateAndVote(t *testing.T, vocdoniClient *apiclient.HTTPclient,
 		),
 	)
 
-	// Sign the voter's address with the CSP
-	signature := testCSPSign(t, bundleID, authToken, processID, user1Addr)
+	// Sign the voter's address with the CSP (two-step blind protocol; weight comes from sign-r)
+	signature, signedWeight := testCSPSign(t, bundleID, authToken, processID, user1Addr)
 
 	// Generate a vote proof with the signature
-	proof := testGenerateVoteProof(processID, user1Addr, signature, weight)
+	proof := testGenerateVoteProof(processID, user1Addr, signature, signedWeight)
 
 	// Cast a vote
 	votePackage := []byte("[\"1\"]") // Vote for option 1
@@ -867,7 +901,7 @@ func testGenerateVoteProof(processID, voterAddr, signature internal.HexBytes, we
 	return &models.Proof{
 		Payload: &models.Proof_Ca{
 			Ca: &models.ProofCA{
-				Type:      models.ProofCA_ECDSA_PIDSALTED,
+				Type:      models.ProofCA_ECDSA_BLIND_PIDSALTED,
 				Signature: signature,
 				Bundle: &models.CAbundle{
 					ProcessId:  processID,

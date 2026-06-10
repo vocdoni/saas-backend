@@ -143,9 +143,8 @@ func TestCSPVoting(t *testing.T) {
 
 		// Create a process for the organization
 		t.Run("Create Process", func(_ *testing.T) {
-			// Get the CSP public key
-			cspPubKey, err := testCSP.PubKey()
-			c.Assert(err, qt.IsNil)
+			// Get the CSP blind public key (census root for blind-signature processes)
+			cspPubKey := testCSP.BlindPubKey()
 
 			// Get the account nonce
 			nonce := fetchVocdoniAccountNonce(t, vocdoniClient, orgAddress)
@@ -862,12 +861,8 @@ func TestCSPVoting(t *testing.T) {
 							Email:        "alice.johnson@example.com",
 						})
 
-						// Sign the voter's address with the CSP
-						signature := testCSPSign(t, bundleID, authToken, processID, user2Addr)
-
-						// Get weight for user 2
-						weight, ok := math.ParseUint64(members[2].Weight)
-						c.Assert(ok, qt.IsTrue, qt.Commentf("Failed to convert member weight %s to int", members[2].Weight))
+						// Sign the voter's address with the CSP (two-step blind protocol)
+						signature, weight := testCSPSign(t, bundleID, authToken, processID, user2Addr)
 
 						// Generate a vote proof with the signature
 						proof := testGenerateVoteProof(processID, user2Addr, signature, weight)
@@ -910,12 +905,8 @@ func TestCSPVoting(t *testing.T) {
 						c.Assert(err, qt.IsNil)
 						user4Addr := user4.Address().Bytes()
 
-						// Sign the voter's address with the CSP
-						signature := testCSPSign(t, bundleID, authToken, processID, user4Addr)
-
-						// Get weight for user 3
-						weight, ok := math.ParseUint64(members[3].Weight)
-						c.Assert(ok, qt.IsTrue, qt.Commentf("Failed to convert member weight %s to int", members[3].Weight))
+						// Sign the voter's address with the CSP (two-step blind protocol)
+						signature, weight := testCSPSign(t, bundleID, authToken, processID, user4Addr)
 
 						// Generate a vote proof with the signature
 						proof := testGenerateVoteProof(processID, user4Addr, signature, weight)
@@ -933,17 +924,11 @@ func TestCSPVoting(t *testing.T) {
 							Email:        "charlie.brown@example.com",
 						})
 
-						// Try to sign with user 5's token but for user 4's address
-						// Note: The signature will be the same because the CSP signs the same data (processID + address)
-						// regardless of which user is signing
-						signature5 := testCSPSign(t, bundleID, authToken5, processID, user4Addr)
+						// Try to sign with user 5's token but for user 4's address (blind CSP signs any bundle)
+						signature5, weight5 := testCSPSign(t, bundleID, authToken5, processID, user4Addr)
 
-						// Get weight for user 4
-						weight, ok = math.ParseUint64(members[4].Weight)
-						c.Assert(ok, qt.IsTrue, qt.Commentf("Failed to convert member weight %s to int", members[4].Weight))
-
-						// Try to use user 5's signature with user 4's key (should fail)
-						invalidProof := testGenerateVoteProof(processID, user4Addr, signature5, weight)
+						// Try to use user 5's signature with user 4's key (should fail — user4 already voted)
+						invalidProof := testGenerateVoteProof(processID, user4Addr, signature5, weight5)
 
 						// This should fail at the blockchain level because the signature doesn't match the address
 						user4Copy := ethereum.SignKeys{}
@@ -977,7 +962,7 @@ func TestCSPVoting(t *testing.T) {
 						user6Addr := user6.Address().Bytes()
 
 						// Create a forged signature (just random bytes)
-						forgedSignature := internal.RandomBytes(65) // ECDSA signatures are 65 bytes
+						forgedSignature := internal.RandomBytes(96) // blind signatures are 96 bytes uncompressed
 
 						// Generate a vote proof with the forged signature
 						invalidProof := testGenerateVoteProof(processID, user6Addr, forgedSignature, 1)
