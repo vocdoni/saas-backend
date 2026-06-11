@@ -100,6 +100,8 @@ const (
 	organizationGroupValidateEndpoint = "/organizations/{address}/groups/{groupID}/validate"
 	// GET /organizations/{address}/jobs to list the organization import jobs
 	organizationJobsEndpoint = "/organizations/{address}/jobs"
+	// GET /organizations/{address}/processes to get the organization bundle processes
+	organizationBundlesEndpoint = "/organizations/{address}/processes"
 
 	// subscription routes
 	// GET /subscriptions to get the subscriptions of an organization
