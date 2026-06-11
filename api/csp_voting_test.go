@@ -539,6 +539,53 @@ func TestCSPVoting(t *testing.T) {
 						})
 				})
 
+				// Verify ConsumedAddressHandler omits address/nullifier for blind processes
+				// but includes them for ECDSA processes.
+				t.Run("Sign-info endpoint", func(t *testing.T) {
+					c := qt.New(t)
+
+					t.Run("returns only timestamp for blind-signed process", func(t *testing.T) {
+						// John Doe (P001) has not yet voted on blindBundleID; consume it now
+						// via the blind path so we can check sign-info without casting a vote.
+						authToken := testCSPAuthenticateWithFields(t, blindBundleID, &handlers.AuthRequest{
+							Name:         "John",
+							Surname:      "Doe",
+							MemberNumber: "P001",
+							Email:        "john.doe@example.com",
+						})
+						voter := ethereum.SignKeys{}
+						c.Assert(voter.Generate(), qt.IsNil)
+						testCSPSignBlind(t, blindBundleID, authToken, internal.HexBytes(blindProcessID), voter.Address().Bytes())
+
+						resp := requestAndParse[handlers.ConsumedAddressResponse](t, http.MethodPost, "",
+							&handlers.ConsumedAddressRequest{AuthToken: authToken},
+							"process", hex.EncodeToString(blindProcessID), "sign-info")
+						c.Assert(resp.At.IsZero(), qt.IsFalse, qt.Commentf("expected At to be set"))
+						c.Assert(resp.Address, qt.HasLen, 0, qt.Commentf("expected no address for blind process"))
+						c.Assert(resp.Nullifier, qt.HasLen, 0, qt.Commentf("expected no nullifier for blind process"))
+					})
+
+					t.Run("returns address and nullifier for ECDSA-signed process", func(t *testing.T) {
+						// Frank Lopez (P008) has not yet signed on bundleID; consume it now.
+						authToken := testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
+							Name:         "Frank",
+							Surname:      "Lopez",
+							MemberNumber: "P008",
+							Email:        "frank.lopez@example.com",
+						})
+						voter := ethereum.SignKeys{}
+						c.Assert(voter.Generate(), qt.IsNil)
+						testCSPSign(t, bundleID, authToken, processID, voter.Address().Bytes())
+
+						resp := requestAndParse[handlers.ConsumedAddressResponse](t, http.MethodPost, "",
+							&handlers.ConsumedAddressRequest{AuthToken: authToken},
+							"process", hex.EncodeToString(processID), "sign-info")
+						c.Assert(resp.At.IsZero(), qt.IsFalse, qt.Commentf("expected At to be set"))
+						c.Assert(resp.Address, qt.Not(qt.HasLen), 0, qt.Commentf("expected address for ECDSA process"))
+						c.Assert(resp.Nullifier, qt.Not(qt.HasLen), 0, qt.Commentf("expected nullifier for ECDSA process"))
+					})
+				})
+
 				// Create a voting key for the member
 				t.Run("Update user weight", func(_ *testing.T) {
 					// Create the voting address for the first user
