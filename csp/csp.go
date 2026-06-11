@@ -15,8 +15,6 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-const DefaultNotificationCoolDownTime = time.Second * 60
-
 // Config struct contains the configuration for the CSP service. It includes
 // the database name, the MongoDB client, the notification cooldown time, the
 // notification queue settings, the SMS service and the mail service.
@@ -28,11 +26,12 @@ type Config struct {
 	RootKey      internal.HexBytes
 	// notification stuff
 	NotificationCoolDownTime time.Duration
-	// NotificationThrottleTime is deprecated and ignored. The notification queue
-	// is now drained by a concurrent worker pool guarded by per-provider circuit
-	// breakers instead of a single throttled loop. Kept for backwards
-	// compatibility with existing configurations.
-	NotificationThrottleTime time.Duration
+	// NotificationTTL is how long a CSP OTP challenge remains valid. After
+	// this window ResendChallenge returns ErrTokenExpired and queued but
+	// undelivered notifications are dropped. Distinct from
+	// NotificationCoolDownTime (the anti-spam rate limit on new token
+	// requests). Zero uses notifications.DefaultOTPExpiry.
+	NotificationTTL time.Duration
 	// NotificationQueueWorkers is the number of concurrent notification senders.
 	// It bounds the maximum number of in-flight provider sends. Zero uses the
 	// default (notifications.DefaultQueueWorkers).
@@ -58,6 +57,7 @@ type CSP struct {
 	notifyQueue  *notifications.Queue
 
 	notificationCoolDownTime time.Duration
+	notificationTTL          time.Duration
 }
 
 // New method creates a new CSP service. It requires a CSPConfig struct with
@@ -108,13 +108,18 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 	go queue.Start()
 	notificationCoolDownTime := config.NotificationCoolDownTime
 	if notificationCoolDownTime <= 0 {
-		notificationCoolDownTime = DefaultNotificationCoolDownTime
+		notificationCoolDownTime = saasNotifications.DefaultOTPCooldown
+	}
+	notificationTTL := config.NotificationTTL
+	if notificationTTL <= 0 {
+		notificationTTL = saasNotifications.DefaultOTPExpiry
 	}
 	return &CSP{
 		Storage:                  config.DB,
 		Signer:                   s,
 		notifyQueue:              queue,
 		notificationCoolDownTime: notificationCoolDownTime,
+		notificationTTL:          notificationTTL,
 	}, nil
 }
 

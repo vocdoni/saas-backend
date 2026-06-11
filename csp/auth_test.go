@@ -30,7 +30,6 @@ func TestBundleAuthToken(t *testing.T) {
 		DB:                       testDB,
 		MailService:              testMailService,
 		SMSService:               testSMSService,
-		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,
 		RootKey:                  *testRootKey,
 	})
@@ -180,7 +179,6 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 		DB:                       testDB,
 		MailService:              testMailService,
 		SMSService:               testSMSService,
-		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,
 		RootKey:                  *testRootKey,
 	})
@@ -238,7 +236,6 @@ func TestResendChallenge(t *testing.T) {
 		DB:                       testDB,
 		MailService:              testMailService,
 		SMSService:               testSMSService,
-		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,
 		RootKey:                  *testRootKey,
 	})
@@ -361,7 +358,6 @@ func TestBundleAuthTokenResendAndVerifyFlow(t *testing.T) {
 		DB:                       testDB,
 		MailService:              testMailService,
 		SMSService:               testSMSService,
-		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,
 		RootKey:                  *testRootKey,
 	})

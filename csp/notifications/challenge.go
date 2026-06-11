@@ -15,13 +15,13 @@ import (
 )
 
 // ChallengeType represents the type of notification challenge to be sent (SMS or email).
-type ChallengeType string
+type ChallengeType = notifications.NotificationType
 
 const (
 	// SMSChallenge is a challenge to be sent by SMS.
-	SMSChallenge ChallengeType = "sms"
+	SMSChallenge = notifications.SMS
 	// EmailChallenge is a challenge to be sent by email.
-	EmailChallenge ChallengeType = "email"
+	EmailChallenge = notifications.Email
 )
 
 var (
@@ -50,14 +50,17 @@ type OrganizationInfo struct {
 // expiration), retries (to avoid abuse), and success status (to track
 // delivery).
 type NotificationChallenge struct {
-	Type         ChallengeType
+	Type         notifications.NotificationType
 	UserID       internal.HexBytes
 	BundleID     internal.HexBytes
 	OrgAddress   common.Address
 	Notification *notifications.Notification
 	CreatedAt    time.Time
-	Retries      int
-	Success      bool
+	// ExpiresAt is the deadline after which the OTP code is considered stale.
+	// The queue drops the challenge without sending if this time has passed.
+	ExpiresAt time.Time
+	Retries   int
+	Success   bool
 }
 
 // Valid methid checks if the notification challenge is valid. A valid
@@ -96,7 +99,7 @@ func (nc *NotificationChallenge) Send(ctx context.Context, service notifications
 // provided parameters. It returns an error if the notification could not be
 // created.
 func NewNotificationChallenge(
-	cType ChallengeType,
+	cType notifications.NotificationType,
 	lang string,
 	userID, bundleID internal.HexBytes,
 	to, code string,

@@ -180,6 +180,7 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 			Code         string
 			Link         string
 		}{org.Address, code, link},
+		time.Now().Add(apicommon.InvitationExpiration),
 	); err != nil {
 		// in this case we don't DecrementOrganizationUsersCounter because the invite was actually created,
 		// just the notification failed.
@@ -389,6 +390,7 @@ func (a *API) updatePendingUserInvitationHandler(w http.ResponseWriter, r *http.
 			Code         string
 			Link         string
 		}{org.Address, code, link},
+		time.Now().Add(apicommon.InvitationExpiration),
 	); err != nil {
 		log.Warnw("could not send verification code email", "error", err)
 		errors.ErrGenericInternalServerError.Write(w)
