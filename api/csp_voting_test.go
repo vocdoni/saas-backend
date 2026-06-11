@@ -357,6 +357,41 @@ func TestCSPVoting(t *testing.T) {
 				// Create a bundle with the census and process
 				bundleID, _ := postProcessBundle(t, token, censusID, processID)
 
+				// Create a second process registered with the blind public key and
+				// a separate bundle so the blind signing path can be tested end-to-end.
+				blindNonce := fetchVocdoniAccountNonce(t, vocdoniClient, orgAddress)
+				blindProcessTx := models.Tx{
+					Payload: &models.Tx_NewProcess{
+						NewProcess: &models.NewProcessTx{
+							Txtype: models.TxType_NEW_PROCESS,
+							Nonce:  blindNonce,
+							Process: &models.Process{
+								EntityId:      orgAddress.Bytes(),
+								Duration:      120,
+								Status:        models.ProcessStatus_READY,
+								CensusOrigin:  models.CensusOrigin_OFF_CHAIN_CA,
+								CensusRoot:    testCSP.BlindPubKey(),
+								MaxCensusSize: 10,
+								EnvelopeType: &models.EnvelopeType{
+									Anonymous:      false,
+									CostFromWeight: false,
+								},
+								VoteOptions: &models.ProcessVoteOptions{
+									MaxCount: 1,
+									MaxValue: 5,
+								},
+								Mode: &models.ProcessMode{
+									AutoStart:     true,
+									Interruptible: true,
+								},
+							},
+						},
+					},
+				}
+				blindProcessID := signRemoteSignerAndSendVocdoniTx(t, &blindProcessTx, token, vocdoniClient, orgAddress)
+				t.Logf("Created blind process with ID: %x", blindProcessID)
+				blindBundleID, _ := postProcessBundle(t, token, censusID, blindProcessID)
+
 				// Check census membership via the CSP token alone (the only voter
 				// data the client stores), mirroring client.isInCensus() for CSP.
 				t.Run("Check census membership", func(t *testing.T) {
@@ -487,6 +522,21 @@ func TestCSPVoting(t *testing.T) {
 					orgAfter := getOrganization(t, orgAddress)
 					qt.Assert(t, orgAfter.Counters.SentEmails, qt.Equals, orgBefore.Counters.SentEmails)
 					qt.Assert(t, orgAfter.Counters.SentSMS, qt.Equals, orgBefore.Counters.SentSMS+1)
+				})
+
+				t.Run("Authenticate with Email and Vote (Blind)", func(t *testing.T) {
+					// Uses the blind process (ECDSA_BLIND_PIDSALTED) and blindBundleID.
+					// This exercises the two-step /sign-r → /sign blind protocol and
+					// verifies that BlindPubKey() is in the standard secp256k1 compressed
+					// format that vochain can decompress.
+					testAuthenthicateAndVoteBlind(t, vocdoniClient, blindBundleID,
+						internal.HexBytes(blindProcessID), members[1].Weight,
+						&handlers.AuthRequest{
+							Name:         "Jane",
+							Surname:      "Smith",
+							MemberNumber: "P002",
+							Email:        "jane.smith@example.com",
+						})
 				})
 
 				// Create a voting key for the member
