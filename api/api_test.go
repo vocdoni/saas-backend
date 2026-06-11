@@ -223,7 +223,10 @@ var testSMSService = new(testutil.MockSMS)
 var testAPIEndpoint string
 
 // testCSP is the CSP service for the tests. Make it global so it can be accessed by the tests directly.
-var testCSP *csp.CSP
+var (
+	testCSP *csp.CSP
+	testAPI *API
+)
 
 // This regex is used in testCreateUser to extract verification codes from emails.
 var apiTestVerificationCodeRgx = regexp.MustCompile(`code=([a-zA-Z0-9]+)`)
@@ -419,7 +422,6 @@ func TestMain(m *testing.M) {
 		DB:                       testDB,
 		MailService:              testMailService,
 		SMSService:               testSMSService,
-		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: cspNotificationCoolDownTime,
 		RootKey:                  *rootKey,
 	})
@@ -441,7 +443,7 @@ func TestMain(m *testing.M) {
 	}
 
 	// start the API
-	New(&Config{
+	testAPI = New(ctx, &Config{
 		Host:                testHost,
 		Port:                testPort,
 		Secret:              testSecret,
@@ -456,7 +458,8 @@ func TestMain(m *testing.M) {
 		CSP:                 testCSP,
 		OAuthServiceURL:     testOAuthServiceURL,
 		WebAppURL:           testWebAppURL,
-	}).Start()
+	})
+	testAPI.Start()
 	// wait for the API to start
 	if err := pingAPI(testURL(pingEndpoint), 5); err != nil {
 		panic(err)

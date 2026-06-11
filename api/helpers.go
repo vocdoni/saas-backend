@@ -131,7 +131,7 @@ func (a *API) generateVerificationCodeAndLink(target any, codeType db.CodeType) 
 		if err != nil {
 			return "", "", err
 		}
-		exp := time.Now().Add(apicommon.VerificationCodeExpiration)
+		exp := time.Now().Add(a.otpExpiry)
 		// store the verification code in the database
 		if err := a.db.SetVerificationCode(&db.User{ID: user.ID}, sealedCode, codeType, exp); err != nil {
 			return "", "", err

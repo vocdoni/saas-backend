@@ -28,7 +28,6 @@ func TestBundleAuthToken(t *testing.T) {
 		DB:                       testDB,
 		MailService:              testMailService,
 		SMSService:               testSMSService,
-		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,
 		RootKey:                  *testRootKey,
 	})
@@ -176,9 +175,8 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 		DB:                       testDB,
 		MailService:              testMailService,
 		SMSService:               testSMSService,
-		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,
-		OTPExpiry:                time.Second * 5,
+		NotificationTTL:          time.Second * 5,
 		RootKey:                  *testRootKey,
 	})
 	c.Assert(err, qt.IsNil)
@@ -202,9 +200,9 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		// shrink the OTP window for this subtest so we can trigger expiry with a
 		// millisecond-scale sleep instead of waiting out the full window
-		origExpiry := csp.otpExpiry
-		csp.otpExpiry = 10 * time.Millisecond
-		c.Cleanup(func() { csp.otpExpiry = origExpiry })
+		origExpiry := csp.notificationTTL
+		csp.notificationTTL = 10 * time.Millisecond
+		c.Cleanup(func() { csp.notificationTTL = origExpiry })
 		secret := gotp.RandomSecret(16)
 		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID, secret), qt.IsNil)
 		code := gotp.NewDefaultHOTP(secret).At(0)
@@ -277,9 +275,8 @@ func TestResendChallenge(t *testing.T) {
 		DB:                       testDB,
 		MailService:              testMailService,
 		SMSService:               testSMSService,
-		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,
-		OTPExpiry:                time.Second * 30,
+		NotificationTTL:          time.Second * 30,
 		RootKey:                  *testRootKey,
 	})
 	c.Assert(err, qt.IsNil)
@@ -418,9 +415,8 @@ func TestBundleAuthTokenResendAndVerifyFlow(t *testing.T) {
 		DB:                       testDB,
 		MailService:              testMailService,
 		SMSService:               testSMSService,
-		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: time.Second * 5,
-		OTPExpiry:                time.Second * 30,
+		NotificationTTL:          time.Second * 30,
 		RootKey:                  *testRootKey,
 	})
 	c.Assert(err, qt.IsNil)
