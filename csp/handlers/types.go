@@ -101,9 +101,28 @@ type ConsumedAddressRequest struct {
 // ConsumedAddressResponse defines the payload for the response to the
 // request to get the if a token was used and which address was used.
 // It includes the address, the nullifier, and the timestamp of the
-// usage.
+// usage. For blind-signed processes Address and Nullifier are nil.
 type ConsumedAddressResponse struct {
-	Address   internal.HexBytes `json:"authToken" swaggertype:"string" format:"hex" example:"deadbeef"`
-	Nullifier internal.HexBytes `json:"nullifier" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Address   internal.HexBytes `json:"authToken,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Nullifier internal.HexBytes `json:"nullifier,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	At        time.Time         `json:"at"`
+}
+
+// SignRRequest defines the payload for requesting the blind signing R point.
+// The client submits its verified auth token and the process ID it intends to
+// vote in. The server returns the R point and a weight attestation.
+type SignRRequest struct {
+	AuthToken internal.HexBytes `json:"authToken" swaggertype:"string" format:"hex" example:"deadbeef"`
+	ProcessID internal.HexBytes `json:"electionId" swaggertype:"string" format:"hex" example:"deadbeef"`
+}
+
+// SignRResponse defines the payload returned by the sign-r endpoint.
+// TokenR is the R point (33 bytes, compressed secp256k1) the client uses to
+// blind its ballot address. Weight is the voter's weight for this process.
+// WeightCert is a non-blind ECDSA signature over {processID, weight} that the
+// chain can verify independently from the anonymous blind credential.
+type SignRResponse struct {
+	TokenR     internal.HexBytes `json:"tokenR" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Weight     internal.HexBytes `json:"weight,omitempty" swaggertype:"string" format:"hex" example:"2a"`
+	WeightCert internal.HexBytes `json:"weightCert,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 }

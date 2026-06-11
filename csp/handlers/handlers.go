@@ -286,6 +286,104 @@ func (c *CSPHandlers) BundleAuthResendHandler(w http.ResponseWriter, r *http.Req
 	apicommon.HTTPWriteJSON(w, &AuthResponse{AuthToken: req.AuthToken})
 }
 
+// BundleSignRHandler godoc
+//
+//	@Summary		Get blind signing R point for a bundle process
+//	@Description	Begin a blind signing session. Returns the R point the voter needs to blind their
+//	@Description	ballot address, together with the voter's weight and a non-blind weight attestation
+//	@Description	(ECDSA signature over {processID, weight}) for weighted censuses.
+//	@Description	The R point is valid for one sign call; it is discarded after use or on the next
+//	@Description	call to this endpoint for the same (token, process) pair.
+//	@Tags			process
+//	@Accept			json
+//	@Produce		json
+//	@Param			bundleId	path		string					true	"Bundle ID"
+//	@Param			request		body		handlers.SignRRequest	true	"Auth token and process ID"
+//	@Success		200			{object}	handlers.SignRResponse
+//	@Failure		400			{object}	errors.Error	"Invalid input data"
+//	@Failure		401			{object}	errors.Error	"Unauthorized or token not verified"
+//	@Failure		404			{object}	errors.Error	"Bundle not found or process not in bundle"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/process/bundle/{bundleId}/sign-r [post]
+func (c *CSPHandlers) BundleSignRHandler(w http.ResponseWriter, r *http.Request) {
+	bundleID, ok := parseBundleID(w, r)
+	if !ok {
+		return
+	}
+	bundle, ok := c.getBundle(w, *bundleID)
+	if !ok {
+		return
+	}
+
+	var req SignRRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	if len(req.AuthToken) == 0 {
+		errors.ErrUnauthorized.Withf("missing auth token").Write(w)
+		return
+	}
+	if len(req.ProcessID) == 0 {
+		errors.ErrInvalidData.Withf("missing process ID").Write(w)
+		return
+	}
+
+	auth, ok := c.getAuthInfo(w, req.AuthToken)
+	if !ok {
+		return
+	}
+	if !auth.Verified {
+		errors.ErrUnauthorized.WithErr(csp.ErrAuthTokenNotVerified).Write(w)
+		return
+	}
+
+	processID, found := findProcessInBundle(bundle, req.ProcessID)
+	if !found {
+		errors.ErrUnauthorized.Withf("process not found in bundle").Write(w)
+		return
+	}
+
+	oid, err := primitive.ObjectIDFromHex(auth.UserID.String())
+	if err != nil {
+		errors.ErrUnauthorized.WithErr(fmt.Errorf("invalid user ID in token: %w", err)).Write(w)
+		return
+	}
+	member, err := c.mainDB.OrgMember(bundle.OrgAddress, oid.Hex())
+	if err != nil {
+		errors.ErrUserNotFound.WithErr(err).Write(w)
+		return
+	}
+	census, err := c.mainDB.Census(bundle.Census.ID.Hex())
+	if err != nil {
+		errors.ErrCensusNotFound.WithErr(err).Write(w)
+		return
+	}
+
+	weight := uint64(1)
+	if census.Weighted {
+		weight = member.Weight
+	}
+
+	tokenR, weightCert, err := c.csp.GetBlindR(req.AuthToken, processID, weight)
+	if err != nil {
+		switch err {
+		case csp.ErrAuthTokenNotVerified,
+			csp.ErrProcessAlreadyConsumed:
+			errors.ErrUnauthorized.WithErr(err).Write(w)
+		default:
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		}
+		return
+	}
+
+	apicommon.HTTPWriteJSON(w, &SignRResponse{
+		TokenR:     tokenR,
+		Weight:     big.NewInt(int64(weight)).Bytes(),
+		WeightCert: weightCert,
+	})
+}
+
 // parseSignRequest parses the sign request from the request body
 func parseSignRequest(w http.ResponseWriter, r *http.Request) (*SignRequest, bool) {
 	var req SignRequest
@@ -333,7 +431,7 @@ func parseAddress(w http.ResponseWriter, payload string) (*internal.HexBytes, bo
 	return address, true
 }
 
-// signAndRespond signs the request and sends the response
+// signAndRespond signs with ECDSA (plain) and sends the response.
 func (c *CSPHandlers) signAndRespond(w http.ResponseWriter, authToken, address, processID, weight internal.HexBytes) {
 	log.Debugw("new CSP sign request", "address", address, "procId", processID, "weight", weight)
 
@@ -344,6 +442,26 @@ func (c *CSPHandlers) signAndRespond(w http.ResponseWriter, authToken, address, 
 	}
 
 	apicommon.HTTPWriteJSON(w, &AuthResponse{Signature: signature, Weight: weight})
+}
+
+// signBlindAndRespond performs the blind signing step and sends the response.
+// blindedMsg is the blinded ballot produced client-side using the R point from
+// BundleSignRHandler. The returned signature must be unblinded client-side.
+func (c *CSPHandlers) signBlindAndRespond(w http.ResponseWriter, authToken, blindedMsg, processID internal.HexBytes) {
+	log.Debugw("new CSP blind sign request", "procId", processID)
+
+	signature, err := c.csp.SignBlindMsg(authToken, processID, blindedMsg)
+	if err != nil {
+		switch err {
+		case csp.ErrAuthTokenNotVerified, csp.ErrBlindRNotFound, csp.ErrProcessAlreadyConsumed:
+			errors.ErrUnauthorized.WithErr(err).Write(w)
+		default:
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		}
+		return
+	}
+
+	apicommon.HTTPWriteJSON(w, &AuthResponse{Signature: signature})
 }
 
 // BundleSignHandler godoc
@@ -428,12 +546,22 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 	// 	return
 	// }
 
-	// Parse the address from the payload
+	// Blind signing mode: TokenR is set, Payload is the blinded message.
+	if len(req.TokenR) > 0 {
+		blindedMsg := new(internal.HexBytes)
+		if err := blindedMsg.ParseString(req.Payload); err != nil {
+			errors.ErrMalformedBody.WithErr(err).Write(w)
+			return
+		}
+		c.signBlindAndRespond(w, req.AuthToken, *blindedMsg, processID)
+		return
+	}
+
+	// Plain ECDSA mode: Payload is the voter's Ethereum address.
 	address, ok := parseAddress(w, req.Payload)
 	if !ok {
 		return
 	}
-	// Sign the request and send the response
 	c.signAndRespond(w, req.AuthToken, *address, processID, big.NewInt(int64(weight)).Bytes())
 }
 
@@ -684,12 +812,14 @@ func (c *CSPHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Requ
 		errors.ErrUserNoVoted.Write(w)
 		return
 	}
-	// return the address used to sign the process and the nullifier
-	apicommon.HTTPWriteJSON(w, &ConsumedAddressResponse{
-		Address:   cspProcess.UsedAddress,
-		Nullifier: state.GenerateNullifier(common.BytesToAddress(cspProcess.UsedAddress), *processID),
-		At:        cspProcess.UsedAt,
-	})
+	resp := ConsumedAddressResponse{At: cspProcess.UsedAt}
+	// for blind-signed processes the CSP never learns the address, so both
+	// Address and Nullifier remain nil.
+	if len(cspProcess.UsedAddress) > 0 {
+		resp.Address = cspProcess.UsedAddress
+		resp.Nullifier = state.GenerateNullifier(common.BytesToAddress(cspProcess.UsedAddress), *processID)
+	}
+	apicommon.HTTPWriteJSON(w, &resp)
 }
 
 // validateContactInfo checks if at least one contact method is provided

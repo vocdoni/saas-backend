@@ -357,6 +357,41 @@ func TestCSPVoting(t *testing.T) {
 				// Create a bundle with the census and process
 				bundleID, _ := postProcessBundle(t, token, censusID, processID)
 
+				// Create a second process registered with the blind public key and
+				// a separate bundle so the blind signing path can be tested end-to-end.
+				blindNonce := fetchVocdoniAccountNonce(t, vocdoniClient, orgAddress)
+				blindProcessTx := models.Tx{
+					Payload: &models.Tx_NewProcess{
+						NewProcess: &models.NewProcessTx{
+							Txtype: models.TxType_NEW_PROCESS,
+							Nonce:  blindNonce,
+							Process: &models.Process{
+								EntityId:      orgAddress.Bytes(),
+								Duration:      120,
+								Status:        models.ProcessStatus_READY,
+								CensusOrigin:  models.CensusOrigin_OFF_CHAIN_CA,
+								CensusRoot:    testCSP.BlindPubKey(),
+								MaxCensusSize: 10,
+								EnvelopeType: &models.EnvelopeType{
+									Anonymous:      false,
+									CostFromWeight: false,
+								},
+								VoteOptions: &models.ProcessVoteOptions{
+									MaxCount: 1,
+									MaxValue: 5,
+								},
+								Mode: &models.ProcessMode{
+									AutoStart:     true,
+									Interruptible: true,
+								},
+							},
+						},
+					},
+				}
+				blindProcessID := signRemoteSignerAndSendVocdoniTx(t, &blindProcessTx, token, vocdoniClient, orgAddress)
+				t.Logf("Created blind process with ID: %x", blindProcessID)
+				blindBundleID, _ := postProcessBundle(t, token, censusID, blindProcessID)
+
 				// Check census membership via the CSP token alone (the only voter
 				// data the client stores), mirroring client.isInCensus() for CSP.
 				t.Run("Check census membership", func(t *testing.T) {
@@ -487,6 +522,68 @@ func TestCSPVoting(t *testing.T) {
 					orgAfter := getOrganization(t, orgAddress)
 					qt.Assert(t, orgAfter.Counters.SentEmails, qt.Equals, orgBefore.Counters.SentEmails)
 					qt.Assert(t, orgAfter.Counters.SentSMS, qt.Equals, orgBefore.Counters.SentSMS+1)
+				})
+
+				t.Run("Authenticate with Email and Vote (Blind)", func(t *testing.T) {
+					// Uses the blind process (ECDSA_BLIND_PIDSALTED) and blindBundleID.
+					// This exercises the two-step /sign-r → /sign blind protocol and
+					// verifies that BlindPubKey() is in the standard secp256k1 compressed
+					// format that vochain can decompress.
+					testAuthenthicateAndVoteBlind(t, vocdoniClient, blindBundleID,
+						internal.HexBytes(blindProcessID), members[1].Weight,
+						&handlers.AuthRequest{
+							Name:         "Jane",
+							Surname:      "Smith",
+							MemberNumber: "P002",
+							Email:        "jane.smith@example.com",
+						})
+				})
+
+				// Verify ConsumedAddressHandler omits address/nullifier for blind processes
+				// but includes them for ECDSA processes.
+				t.Run("Sign-info endpoint", func(t *testing.T) {
+					c := qt.New(t)
+
+					t.Run("returns only timestamp for blind-signed process", func(t *testing.T) {
+						// John Doe (P001) has not yet voted on blindBundleID; consume it now
+						// via the blind path so we can check sign-info without casting a vote.
+						authToken := testCSPAuthenticateWithFields(t, blindBundleID, &handlers.AuthRequest{
+							Name:         "John",
+							Surname:      "Doe",
+							MemberNumber: "P001",
+							Email:        "john.doe@example.com",
+						})
+						voter := ethereum.SignKeys{}
+						c.Assert(voter.Generate(), qt.IsNil)
+						testCSPSignBlind(t, blindBundleID, authToken, internal.HexBytes(blindProcessID), voter.Address().Bytes())
+
+						resp := requestAndParse[handlers.ConsumedAddressResponse](t, http.MethodPost, "",
+							&handlers.ConsumedAddressRequest{AuthToken: authToken},
+							"process", hex.EncodeToString(blindProcessID), "sign-info")
+						c.Assert(resp.At.IsZero(), qt.IsFalse, qt.Commentf("expected At to be set"))
+						c.Assert(resp.Address, qt.HasLen, 0, qt.Commentf("expected no address for blind process"))
+						c.Assert(resp.Nullifier, qt.HasLen, 0, qt.Commentf("expected no nullifier for blind process"))
+					})
+
+					t.Run("returns address and nullifier for ECDSA-signed process", func(t *testing.T) {
+						// Frank Lopez (P008) has not yet signed on bundleID; consume it now.
+						authToken := testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
+							Name:         "Frank",
+							Surname:      "Lopez",
+							MemberNumber: "P008",
+							Email:        "frank.lopez@example.com",
+						})
+						voter := ethereum.SignKeys{}
+						c.Assert(voter.Generate(), qt.IsNil)
+						testCSPSign(t, bundleID, authToken, processID, voter.Address().Bytes())
+
+						resp := requestAndParse[handlers.ConsumedAddressResponse](t, http.MethodPost, "",
+							&handlers.ConsumedAddressRequest{AuthToken: authToken},
+							"process", hex.EncodeToString(processID), "sign-info")
+						c.Assert(resp.At.IsZero(), qt.IsFalse, qt.Commentf("expected At to be set"))
+						c.Assert(resp.Address, qt.Not(qt.HasLen), 0, qt.Commentf("expected address for ECDSA process"))
+						c.Assert(resp.Nullifier, qt.Not(qt.HasLen), 0, qt.Commentf("expected nullifier for ECDSA process"))
+					})
 				})
 
 				// Create a voting key for the member

@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	blind "github.com/arnaucube/go-blindsecp256k1"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
 	qt "github.com/frankban/quicktest"
@@ -877,6 +878,113 @@ func testGenerateVoteProof(processID, voterAddr, signature internal.HexBytes, we
 			},
 		},
 	}
+}
+
+// testCSPSignBlind implements the two-step blind signing protocol with the CSP.
+// Step 1 calls /sign-r to get the ephemeral R point and weight, then blinds the
+// CAbundle hash. Step 2 sends the blinded message to /sign and unblinds the response.
+// Returns the 96-byte uncompressed blind signature and the voter weight from the CSP.
+func testCSPSignBlind(t *testing.T, bundleID string, authToken, processID internal.HexBytes, voterAddr []byte) (
+	internal.HexBytes, uint64,
+) {
+	t.Helper()
+	c := qt.New(t)
+
+	// Step 1: get R point and weight from sign-r
+	signRResp := requestAndParse[handlers.SignRResponse](t, http.MethodPost, "", &handlers.SignRRequest{
+		AuthToken: authToken,
+		ProcessID: processID,
+	}, "process", "bundle", bundleID, "sign-r")
+	c.Assert(signRResp.TokenR, qt.Not(qt.HasLen), 0, qt.Commentf("tokenR is empty"))
+
+	r, err := blind.NewPointFromBytes(signRResp.TokenR)
+	c.Assert(err, qt.IsNil)
+
+	weightBytes := signRResp.Weight
+	weight := new(big.Int).SetBytes(weightBytes).Uint64()
+
+	// Build the CAbundle exactly as vochain will verify it
+	bundle := &models.CAbundle{
+		ProcessId:  processID,
+		Address:    voterAddr,
+		VoteWeight: weightBytes,
+	}
+	cspBundle, err := proto.Marshal(bundle)
+	c.Assert(err, qt.IsNil)
+
+	// Blind the keccak256 hash of the bundle
+	msgHash := ethereum.HashRaw(cspBundle)
+	msgBlinded, userSecretData, err := blind.Blind(new(big.Int).SetBytes(msgHash), r)
+	c.Assert(err, qt.IsNil)
+
+	// Step 2: send blinded message to sign. TokenR must be non-empty so the
+	// handler dispatches to the blind path instead of the plain ECDSA path.
+	signResp := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", &handlers.SignRequest{
+		TokenR:    signRResp.TokenR,
+		AuthToken: authToken,
+		ProcessID: processID,
+		Payload:   hex.EncodeToString(msgBlinded.Bytes()),
+	}, "process", "bundle", bundleID, "sign")
+	c.Assert(signResp.Signature, qt.Not(qt.HasLen), 0, qt.Commentf("signature is empty"))
+
+	// Unblind the S scalar to get the full *Signature{S, F}
+	sig := blind.Unblind(new(big.Int).SetBytes(signResp.Signature), userSecretData)
+	t.Logf("Blind signature obtained (%d bytes uncompressed)", len(sig.BytesUncompressed()))
+	return sig.BytesUncompressed(), weight
+}
+
+// testGenerateBlindVoteProof generates a vote proof using the blind signature proof type.
+func testGenerateBlindVoteProof(processID, voterAddr, signature internal.HexBytes, weight uint64) *models.Proof {
+	return &models.Proof{
+		Payload: &models.Proof_Ca{
+			Ca: &models.ProofCA{
+				Type:      models.ProofCA_ECDSA_BLIND_PIDSALTED,
+				Signature: signature,
+				Bundle: &models.CAbundle{
+					ProcessId:  processID,
+					Address:    voterAddr,
+					VoteWeight: big.NewInt(int64(weight)).Bytes(),
+				},
+			},
+		},
+	}
+}
+
+// testAuthenthicateAndVoteBlind is identical to testAuthenthicateAndVote but
+// uses the two-step blind signing protocol and ECDSA_BLIND_PIDSALTED proof type.
+func testAuthenthicateAndVoteBlind(t *testing.T, vocdoniClient *apiclient.HTTPclient,
+	bundleID string, processID internal.HexBytes, expectedWeight string, authRequest *handlers.AuthRequest,
+) {
+	t.Helper()
+	c := qt.New(t)
+
+	votesBefore, err := vocdoniClient.ElectionVoteCount(processID.Bytes())
+	c.Assert(err, qt.IsNil)
+
+	user1 := ethereum.SignKeys{}
+	err = user1.Generate()
+	c.Assert(err, qt.IsNil)
+	user1Addr := user1.Address().Bytes()
+
+	authToken := testCSPAuthenticateWithFields(t, bundleID, authRequest)
+
+	expectedWeightInt, ok := math.ParseUint64(expectedWeight)
+	c.Assert(ok, qt.IsTrue)
+
+	// Weight comes from the sign-r step; verify it matches
+	signature, signedWeight := testCSPSignBlind(t, bundleID, authToken, processID, user1Addr)
+	c.Assert(signedWeight, qt.Equals, expectedWeightInt,
+		qt.Commentf("CSP weight %d != expected %d", signedWeight, expectedWeightInt))
+
+	proof := testGenerateBlindVoteProof(processID, user1Addr, signature, signedWeight)
+
+	votePackage := []byte("[\"1\"]")
+	nullifier := testCastVote(t, vocdoniClient, &user1, processID, proof, votePackage)
+	t.Logf("Blind vote cast successfully with nullifier: %x", nullifier)
+
+	votesAfter, err := vocdoniClient.ElectionVoteCount(processID.Bytes())
+	c.Assert(err, qt.IsNil)
+	c.Assert(votesAfter, qt.Equals, votesBefore+1, qt.Commentf("expected 1 more vote, got %d", votesAfter))
 }
 
 // testCastVote casts a vote with the given proof and process ID.

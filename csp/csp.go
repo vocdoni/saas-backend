@@ -2,6 +2,7 @@ package csp
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"sync"
 	"time"
 
@@ -55,6 +56,7 @@ type CSP struct {
 	Signer       *saltedkey.SaltedKey
 	Storage      *db.MongoStorage
 	signerLock   sync.Map
+	blindKStore  sync.Map // ephemeral secretK values for in-flight blind signing sessions
 	notifyQueue  *notifications.Queue
 
 	notificationCoolDownTime time.Duration
@@ -118,11 +120,27 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 	}, nil
 }
 
-// PubKey method returns the root public key of the CSP.
+// PubKey method returns the root ECDSA public key of the CSP.
 func (c *CSP) PubKey() (internal.HexBytes, error) {
 	pub, err := c.Signer.ECDSAPubKey()
 	if err != nil {
 		return nil, err
 	}
 	return ethcrypto.CompressPubkey(pub), nil
+}
+
+// BlindPubKey returns the root blind public key in standard secp256k1 compressed
+// format (0x02/0x03 prefix + 32-byte X), compatible with vochain's
+// ethereum.DecompressPubKey / btcec.ParsePubKey.
+//
+// go-blindsecp256k1's own Bytes() uses a non-standard layout (32-byte X
+// little-endian + parity byte at the end) which btcec cannot parse.
+func (c *CSP) BlindPubKey() internal.HexBytes {
+	pk := c.Signer.BlindPubKey()
+	ecPub := &ecdsa.PublicKey{
+		Curve: ethcrypto.S256(),
+		X:     pk.X,
+		Y:     pk.Y,
+	}
+	return ethcrypto.CompressPubkey(ecPub)
 }
