@@ -578,27 +578,46 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrGenericInternalServerError.Write(w)
 		return
 	}
-	// check the user is verified
-	if user.Verified {
-		// generate a new verification code
-		code, link, err := a.generateVerificationCodeAndLink(user, db.CodeTypePasswordReset)
+	if !user.Verified {
+		// user exists but hasn't verified their email yet; send the account
+		// verification email so they can complete registration and then log in
+		code, link, err := a.generateVerificationCodeAndLink(user, db.CodeTypeVerifyAccount)
 		if err != nil {
 			log.Warnw("could not generate verification code", "error", err)
 			errors.ErrGenericInternalServerError.Write(w)
 			return
 		}
-		// send the password reset mail to the user email with the verification
-		// code and the verification link
-		if err := a.sendMail(r.Context(), user.Email, mailtemplates.PasswordResetNotification,
+		if err := a.sendMail(r.Context(), user.Email, mailtemplates.VerifyAccountNotification,
 			struct {
 				Code string
 				Link string
 			}{code, link},
 		); err != nil {
-			log.Warnw("could not send reset passworod code", "error", err)
+			log.Warnw("could not send verification code", "error", err)
 			errors.ErrGenericInternalServerError.Write(w)
 			return
 		}
+		apicommon.HTTPWriteOK(w)
+		return
+	}
+	// generate a new verification code
+	code, link, err := a.generateVerificationCodeAndLink(user, db.CodeTypePasswordReset)
+	if err != nil {
+		log.Warnw("could not generate verification code", "error", err)
+		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
+	// send the password reset mail to the user email with the verification
+	// code and the verification link
+	if err := a.sendMail(r.Context(), user.Email, mailtemplates.PasswordResetNotification,
+		struct {
+			Code string
+			Link string
+		}{code, link},
+	); err != nil {
+		log.Warnw("could not send reset password code", "error", err)
+		errors.ErrGenericInternalServerError.Write(w)
+		return
 	}
 	apicommon.HTTPWriteOK(w)
 }
