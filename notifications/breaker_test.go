@@ -11,12 +11,12 @@ func TestBreaker(t *testing.T) {
 	c := qt.New(t)
 
 	now := time.Unix(1000, 0)
-	b := newBreaker("test", 3, time.Minute)
+	b := NewBreaker("test", 3, time.Minute)
 	b.now = func() time.Time { return now }
 
 	// starts closed
 	c.Assert(b.Allow(), qt.IsTrue)
-	c.Assert(b.retryAfter(), qt.Equals, time.Duration(0))
+	c.Assert(b.RetryAfter(), qt.Equals, time.Duration(0))
 
 	// failures below threshold keep it closed
 	b.RecordFailure()
@@ -26,7 +26,7 @@ func TestBreaker(t *testing.T) {
 	// reaching the threshold opens it for the cooldown
 	b.RecordFailure()
 	c.Assert(b.Allow(), qt.IsFalse)
-	c.Assert(b.retryAfter() > 0, qt.IsTrue)
+	c.Assert(b.RetryAfter() > 0, qt.IsTrue)
 
 	// still open just before the cooldown elapses
 	now = now.Add(time.Minute - time.Second)
@@ -35,7 +35,7 @@ func TestBreaker(t *testing.T) {
 	// half-open once the cooldown has elapsed
 	now = now.Add(2 * time.Second)
 	c.Assert(b.Allow(), qt.IsTrue)
-	c.Assert(b.retryAfter(), qt.Equals, time.Duration(0))
+	c.Assert(b.RetryAfter(), qt.Equals, time.Duration(0))
 
 	// a failed probe reopens it
 	b.RecordFailure()
@@ -52,7 +52,7 @@ func TestBreaker(t *testing.T) {
 
 func TestBreakerDefaults(t *testing.T) {
 	c := qt.New(t)
-	b := newBreaker("test", 0, 0)
+	b := NewBreaker("test", 0, 0)
 	c.Assert(b.maxFailures, qt.Equals, DefaultBreakerMaxFailures)
 	c.Assert(b.cooldown, qt.Equals, DefaultBreakerCooldown)
 }

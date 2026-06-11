@@ -53,6 +53,7 @@ func (ms *MongoStorage) SetVerificationCode(user *User, sealedCode []byte, t Cod
 		ID:         user.ID,
 		SealedCode: sealedCode,
 		Type:       t,
+		CreatedAt:  time.Now(),
 		Expiration: exp,
 		Attempts:   1,
 	}

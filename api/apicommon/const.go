@@ -1,7 +1,9 @@
 // Package apicommon provides common types, constants, and helper functions for the API.
 package apicommon
 
-import "time"
+import (
+	"time"
+)
 
 // MetadataKey is a type to define the key for the metadata stored in the
 // context.
@@ -15,10 +17,6 @@ const LangMetadataKey MetadataKey = "lang"
 
 // DefaultLang is the default language
 const DefaultLang = "en"
-
-// VerificationCodeExpiration is the duration of the verification code
-// before it is invalidated
-var VerificationCodeExpiration = 10 * time.Minute
 
 // VerificationCodeMaxAttempts is the maximum number of attempts to verify a code
 const VerificationCodeMaxAttempts = 3

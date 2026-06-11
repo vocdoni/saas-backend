@@ -12,6 +12,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
+	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.vocdoni.io/dvote/log"
@@ -483,12 +484,19 @@ func (a *API) organizationCreateTicket(w http.ResponseWriter, r *http.Request) {
 	notification.ReplyTo = user.Email
 	notification.CCAddress = user.Email
 
-	// send an email to the support destination
-	if err := a.mail.SendNotification(r.Context(), notification); err != nil {
-		log.Warnw("could not send ticket notification email", "error", err)
-		errors.ErrGenericInternalServerError.Write(w)
+	if a.notifyQueue == nil {
+		errors.ErrGenericInternalServerError.With("no notification queue configured").Write(w)
 		return
 	}
+	if err := a.notifyQueue.Push(&notifications.QueueItem{
+		Notification: notification,
+		Type:         notifications.Email,
+		Label:        user.Email,
+	}); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
 	apicommon.HTTPWriteOK(w)
 }
 

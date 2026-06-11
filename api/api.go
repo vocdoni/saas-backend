@@ -47,6 +47,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -93,6 +94,12 @@ type Config struct {
 	CSP           *csp.CSP
 	// OAuth service URL
 	OAuthServiceURL string
+	// OTPExpiry overrides the validity window for all one-time codes (account
+	// verification, password reset). Zero uses notifications.DefaultOTPExpiry.
+	OTPExpiry time.Duration
+	// OTPCooldown overrides the anti-spam rate limit between notification
+	// requests for the same account. Zero uses notifications.DefaultOTPCooldown.
+	OTPCooldown time.Duration
 }
 
 // API type represents the API HTTP server with JWT authentication capabilities.
@@ -106,6 +113,8 @@ type API struct {
 	account         *account.Account
 	mail            notifications.NotificationService
 	sms             notifications.NotificationService
+	ctx             context.Context
+	notifyQueue     *notifications.Queue
 	secret          string
 	webAppURL       string
 	serverURL       string
@@ -117,10 +126,12 @@ type API struct {
 	stripeHandlers  *StripeHandlers
 	txQueue         chan txTask
 	orgTxLocks      *orgTxMutex
+	otpExpiry       time.Duration
+	otpCooldown     time.Duration
 }
 
 // New creates a new API HTTP server. It does not start the server. Use Start() for that.
-func New(conf *Config) *API {
+func New(ctx context.Context, conf *Config) *API {
 	if conf == nil {
 		return nil
 	}
@@ -129,7 +140,25 @@ func New(conf *Config) *API {
 		conf.ObjectStorage.ServerURL = conf.ServerURL
 	}
 
+	otpExpiry := conf.OTPExpiry
+	if otpExpiry <= 0 {
+		otpExpiry = notifications.DefaultOTPExpiry
+	}
+	otpCooldown := conf.OTPCooldown
+	if otpCooldown <= 0 {
+		otpCooldown = notifications.DefaultOTPCooldown
+	}
+
+	var notifyQueue *notifications.Queue
+	if conf.MailService != nil || conf.SMSService != nil {
+		notifyQueue = notifications.NewQueue(ctx, notifications.QueueConfig{
+			MailService: conf.MailService,
+			SMSService:  conf.SMSService,
+		})
+	}
+
 	a := &API{
+		ctx:             ctx,
 		db:              conf.DB,
 		auth:            jwtauth.New("HS256", []byte(conf.Secret), nil),
 		host:            conf.Host,
@@ -138,6 +167,7 @@ func New(conf *Config) *API {
 		account:         conf.Account,
 		mail:            conf.MailService,
 		sms:             conf.SMSService,
+		notifyQueue:     notifyQueue,
 		secret:          conf.Secret,
 		webAppURL:       conf.WebAppURL,
 		serverURL:       conf.ServerURL,
@@ -147,13 +177,36 @@ func New(conf *Config) *API {
 		csp:             conf.CSP,
 		oauthServiceURL: conf.OAuthServiceURL,
 		orgTxLocks:      newOrgTxMutex(),
+		otpExpiry:       otpExpiry,
+		otpCooldown:     otpCooldown,
 	}
 	a.startTxQueue()
 	return a
 }
 
-// Start starts the API HTTP server (non blocking).
+// Start starts the API HTTP server and the notification queue (non blocking).
 func (a *API) Start() {
+	if a.notifyQueue != nil {
+		a.notifyQueue.Start()
+		// Drain the Done channel so workers never block on a full channel.
+		// The API does not need per-item outcome tracking; CSP has its own
+		// forwardResults() goroutine that drains the inner queue it owns.
+		go func() {
+			for {
+				select {
+				case <-a.ctx.Done():
+					return
+				case item, ok := <-a.notifyQueue.Done:
+					if !ok {
+						return
+					}
+					if item != nil && !item.Success {
+						log.Warnw("notification delivery failed", "label", item.Label, "retries", item.Retries)
+					}
+				}
+			}
+		}()
+	}
 	go func() {
 		if err := http.ListenAndServe(fmt.Sprintf("%s:%d", a.host, a.port), a.initRouter()); err != nil {
 			log.Fatalf("failed to start the API server: %v", err) //revive:disable:deep-exit

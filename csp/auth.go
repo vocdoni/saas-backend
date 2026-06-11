@@ -72,14 +72,13 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 		"bundleID", bID,
 		"token", token)
 	// compose the notification challenge, advertising the OTP validity window
-	// (not the notification cooldown) as the code's expiry time
-	remainingTimeN := c.otpExpiry.String()
+	// (the challenge TTL, not the notification cooldown) as the code's expiry
 	orgInfo := notifications.OrganizationInfo{
 		Address: orgAddress,
 		Name:    orgName,
 		Logo:    orgLogo,
 	}
-	ch, err := notifications.NewNotificationChallenge(ctype, lang, uID, bID, to, code, orgInfo, remainingTimeN)
+	ch, err := notifications.NewNotificationChallenge(ctype, lang, uID, bID, to, code, orgInfo, c.notificationTTL.String())
 	if err != nil {
 		log.Warnw("error composing notification challenge",
 			"userID", uID,
@@ -88,6 +87,7 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 			"error", err)
 		return nil, ErrNotificationFailure
 	}
+	ch.ExpiresAt = time.Now().Add(c.notificationTTL)
 	// push the challenge to the queue to be sent
 	if err := c.notifyQueue.Push(ch); err != nil {
 		log.Warnw("error pushing notification challenge",
@@ -121,7 +121,7 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 		return ErrInvalidAuthToken
 	}
 
-	remainingTime := c.otpExpiry - time.Since(authTokenData.CreatedAt)
+	remainingTime := c.notificationTTL - time.Since(authTokenData.CreatedAt)
 	// an already-verified token is always reported as such, regardless of age,
 	// so it never masquerades as merely expired
 	if authTokenData.Verified {
@@ -150,7 +150,6 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 		return ErrTokenExpired
 	}
 	// compose the notification challenge
-	remainingTimeN := remainingTime.String()
 	orgInfo := notifications.OrganizationInfo{
 		Address: orgAddress,
 		Name:    orgName,
@@ -173,7 +172,7 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 		to,
 		code,
 		orgInfo,
-		remainingTimeN,
+		remainingTime.String(),
 	)
 	if err != nil {
 		log.Warnw("error composing notification challenge",
@@ -183,6 +182,7 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 			"error", err)
 		return ErrNotificationFailure
 	}
+	ch.ExpiresAt = time.Now().Add(c.notificationTTL)
 	// push the challenge to the queue to be sent
 	if err := c.notifyQueue.Push(ch); err != nil {
 		log.Warnw("error pushing notification challenge",
@@ -232,7 +232,7 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 		return ErrTokenExpired
 	}
 	// reject if the OTP window has passed
-	if time.Since(authTokenData.CreatedAt) > c.otpExpiry {
+	if time.Since(authTokenData.CreatedAt) > c.notificationTTL {
 		log.Warnw("OTP expired",
 			"userID", authTokenData.UserID,
 			"bundleID", authTokenData.BundleID,
