@@ -97,6 +97,7 @@ func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 			Code string
 			Link string
 		}{code, link},
+		time.Now().Add(a.otpExpiry),
 	); err != nil {
 		log.Warnw("could not send verification code", "error", err)
 		errors.ErrGenericInternalServerError.Write(w)
@@ -319,6 +320,7 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 				Code string
 				Link string
 			}{code, link},
+			userVerification.Expiration,
 		); err != nil {
 			log.Warnw("could not resend verification code", "error", err)
 			errors.ErrGenericInternalServerError.Write(w)
@@ -350,6 +352,7 @@ func (a *API) resendUserVerificationCodeHandler(w http.ResponseWriter, r *http.R
 			Code string
 			Link string
 		}{newCode, link},
+		time.Now().Add(a.otpExpiry),
 	); err != nil {
 		log.Warnw("could not send verification code", "error", err)
 		errors.ErrGenericInternalServerError.Write(w)
@@ -592,6 +595,7 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 				Code string
 				Link string
 			}{code, link},
+			time.Now().Add(a.otpExpiry),
 		); err != nil {
 			log.Warnw("could not send verification code", "error", err)
 			errors.ErrGenericInternalServerError.Write(w)
@@ -600,6 +604,22 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 		apicommon.HTTPWriteOK(w)
 		return
 	}
+
+	// enforce cooldown: if a code was already issued recently, silently skip
+	// sending a new one to prevent email flooding without leaking timing info.
+	if existing, err := a.db.UserVerificationCode(user, db.CodeTypePasswordReset); err == nil {
+		if !existing.CreatedAt.IsZero() && time.Since(existing.CreatedAt) < a.otpCooldown {
+			apicommon.HTTPWriteOK(w)
+			return
+		}
+	} else if !errors.Is(err, db.ErrNotFound) {
+		// Unexpected DB error: treat conservatively as cooldown-active so a
+		// transient storage failure cannot be exploited to bypass rate limiting.
+		log.Warnw("could not check password recovery cooldown", "error", err)
+		apicommon.HTTPWriteOK(w)
+		return
+	}
+
 	// generate a new verification code
 	code, link, err := a.generateVerificationCodeAndLink(user, db.CodeTypePasswordReset)
 	if err != nil {
@@ -614,6 +634,7 @@ func (a *API) recoverUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 			Code string
 			Link string
 		}{code, link},
+		time.Now().Add(a.otpExpiry),
 	); err != nil {
 		log.Warnw("could not send reset password code", "error", err)
 		errors.ErrGenericInternalServerError.Write(w)

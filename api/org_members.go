@@ -61,7 +61,7 @@ func (a *API) sendMembersImportCompletionEmail(userEmail, userName string, org *
 
 	// We need to import mailtemplates here to use the template
 	// For now, let's create a simple notification structure
-	if err := a.sendMail(ctx, userEmail, mailtemplates.MembersImportCompletionNotification, data); err != nil {
+	if err := a.sendMail(ctx, userEmail, mailtemplates.MembersImportCompletionNotification, data, time.Time{}); err != nil {
 		log.Errorf("failed to send members import completion email to %s for org %s: %v", userEmail, org.Address, err)
 		return
 	}

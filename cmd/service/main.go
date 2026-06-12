@@ -56,6 +56,9 @@ func main() {
 	flag.String("stripeApiSecret", "", "Stripe API secret")
 	flag.String("stripeWebhookSecret", "", "Stripe Webhook secret")
 	flag.String("oauthServiceURL", "http://oauth.vocdoni.net", "OAuth service URL")
+	// OTP / verification code tuning (0 = use built-in defaults, applies to both API and CSP)
+	flag.Duration("otpExpiry", 0, "validity window for one-time codes (0 = default 15m)")
+	flag.Duration("otpCooldown", 0, "min wait between notification requests for the same account (0 = default 60s)")
 	// CSP notification queue tuning (0 = use built-in defaults)
 	flag.Int("notificationWorkers", 0, "number of concurrent CSP notification senders (0 = default)")
 	flag.Duration("notificationQueueTTL", 0, "max age of a queued CSP notification before it is dropped (0 = default)")
@@ -150,11 +153,15 @@ func main() {
 		ServerURL:           server,
 		FullTransparentMode: fullTransparentMode,
 		OAuthServiceURL:     oauthServiceURL,
+		OTPExpiry:           viper.GetDuration("otpExpiry"),
+		OTPCooldown:         viper.GetDuration("otpCooldown"),
 	}
 
 	cspConf := &csp.Config{
 		RootKey:                        bPrivKey,
 		DB:                             database,
+		NotificationTTL:                viper.GetDuration("otpExpiry"),
+		NotificationCoolDownTime:       viper.GetDuration("otpCooldown"),
 		NotificationQueueWorkers:       viper.GetInt("notificationWorkers"),
 		NotificationQueueTTL:           viper.GetDuration("notificationQueueTTL"),
 		NotificationBreakerMaxFailures: viper.GetInt("notificationBreakerMaxFailures"),
@@ -241,7 +248,7 @@ func main() {
 		log.Fatal(err)
 	}
 	// create the local API server
-	api.New(apiConf).Start()
+	api.New(ctx, apiConf).Start()
 	log.Infow("server started", "host", host, "port", port)
 	// wait forever, as the server is running in a goroutine
 	c := make(chan os.Signal, 1)

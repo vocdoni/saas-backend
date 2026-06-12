@@ -129,7 +129,8 @@ func TestRegisterHandler(t *testing.T) {
 
 func TestVerifyAccountHandler(t *testing.T) {
 	// Register a user with short expiration time
-	apicommon.VerificationCodeExpiration = 5 * time.Second
+	testAPI.otpExpiry = 5 * time.Second
+	defer func() { testAPI.otpExpiry = notifications.DefaultOTPExpiry }()
 	token := testCreateUser(t, testPass)
 
 	// get the user to verify the token works
@@ -329,8 +330,8 @@ func TestResendVerificationCodeHandler(t *testing.T) {
 
 	// Test expired verification code scenario
 	// Temporarily set a very short expiration time
-	originalExpiration := apicommon.VerificationCodeExpiration
-	apicommon.VerificationCodeExpiration = 100 * time.Millisecond
+	originalExpiration := testAPI.otpExpiry
+	testAPI.otpExpiry = 100 * time.Millisecond
 
 	// Create another user with short expiration time
 	expiredUserInfo := &apicommon.UserInfo{
@@ -342,8 +343,16 @@ func TestResendVerificationCodeHandler(t *testing.T) {
 	resp, code = testRequest(t, http.MethodPost, "", expiredUserInfo, usersEndpoint)
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
+	// Drain the registration email so waitForEmail after the resend only sees the new one.
+	// With async email delivery the registration email arrives after the handler returns, so
+	// we must wait for it here rather than assuming it never lands in the inbox.
+	waitForEmail(t, "expired@test.com")
+
 	// Wait for the verification code to expire
 	time.Sleep(200 * time.Millisecond)
+
+	// Restore before resend so the newly generated code gets a full lifetime
+	testAPI.otpExpiry = originalExpiration
 
 	// Test resending with expired code (should generate new code)
 	verification.Email = "expired@test.com"
@@ -365,7 +374,4 @@ func TestResendVerificationCodeHandler(t *testing.T) {
 	}
 	resp, code = testRequest(t, http.MethodPost, "", newVerification, verifyUserEndpoint)
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	// Restore original expiration time
-	apicommon.VerificationCodeExpiration = originalExpiration
 }

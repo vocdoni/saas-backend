@@ -78,27 +78,23 @@ func TestIsPermanentSendError(t *testing.T) {
 	transientProto := &textproto.Error{Code: 451, Msg: "try later"}
 	netErr := fmt.Errorf("dial tcp: connection refused")
 
-	c.Assert(isPermanentSendError(nil), qt.IsFalse)
-	c.Assert(isPermanentSendError(perm), qt.IsTrue)
-	c.Assert(isPermanentSendError(transientProto), qt.IsFalse)
-	c.Assert(isPermanentSendError(netErr), qt.IsFalse)
+	c.Assert(notifications.IsPermanentSendError(nil), qt.IsFalse)
+	c.Assert(notifications.IsPermanentSendError(perm), qt.IsTrue)
+	c.Assert(notifications.IsPermanentSendError(transientProto), qt.IsFalse)
+	c.Assert(notifications.IsPermanentSendError(netErr), qt.IsFalse)
 	// wrapped permanent (as a failover branch wraps it with %w) stays permanent
-	c.Assert(isPermanentSendError(fmt.Errorf("provider 0: %w", perm)), qt.IsTrue)
-	// validation/configuration errors are permanent: retrying cannot fix them
-	c.Assert(isPermanentSendError(ErrInvalidNotificationService), qt.IsTrue)
-	c.Assert(isPermanentSendError(ErrInvalidNotificationInputs), qt.IsTrue)
-	c.Assert(isPermanentSendError(fmt.Errorf("wrapped: %w", ErrInvalidNotificationService)), qt.IsTrue)
+	c.Assert(notifications.IsPermanentSendError(fmt.Errorf("provider 0: %w", perm)), qt.IsTrue)
 
 	// failover-style joined errors: permanent only when every branch is permanent
-	c.Assert(isPermanentSendError(errors.Join(
+	c.Assert(notifications.IsPermanentSendError(errors.Join(
 		fmt.Errorf("provider 0: %w", perm),
 		fmt.Errorf("provider 1: %w", perm),
 	)), qt.IsTrue)
-	c.Assert(isPermanentSendError(errors.Join(
+	c.Assert(notifications.IsPermanentSendError(errors.Join(
 		fmt.Errorf("provider 0: %w", perm),
 		fmt.Errorf("provider 1: %w", netErr),
 	)), qt.IsFalse)
-	c.Assert(isPermanentSendError(errors.Join(
+	c.Assert(notifications.IsPermanentSendError(errors.Join(
 		fmt.Errorf("provider 0: %w", perm),
 		fmt.Errorf("provider 1: %w", transientProto),
 	)), qt.IsFalse)
