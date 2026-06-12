@@ -42,7 +42,7 @@ func TestSign(t *testing.T) {
 		pid := internal.HexBytes(util.RandomBytes(32))
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		// index the token
-		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID), qt.IsNil)
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID, ""), qt.IsNil)
 		// verify the token
 		c.Assert(csp.Storage.VerifyCSPAuth(testToken), qt.IsNil)
 		sign, err := csp.Sign(testToken, testAddress, pid, testUserWeightBytes, signers.SignerTypeECDSASalted)
@@ -84,7 +84,7 @@ func TestPrepareSaltedKeySigner(t *testing.T) {
 			csp.unlock(testUserID, testPID)
 		})
 		// store the token and verify it
-		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID), qt.IsNil)
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID, ""), qt.IsNil)
 		c.Assert(csp.Storage.VerifyCSPAuth(testToken), qt.IsNil)
 		// lock the user
 		csp.lock(testUserID, testPID)
@@ -98,7 +98,7 @@ func TestPrepareSaltedKeySigner(t *testing.T) {
 			csp.unlock(testUserID, testPID)
 		})
 		// store the token
-		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID), qt.IsNil)
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID, ""), qt.IsNil)
 		// store the token status
 		c.Assert(csp.Storage.ConsumeCSPProcess(testToken, testPID, testAddress), qt.IsNil)
 		_, _, _, err := csp.prepareSaltedKeySigner(testToken, testAddress, testPID, testUserWeightBytes)
@@ -111,7 +111,7 @@ func TestPrepareSaltedKeySigner(t *testing.T) {
 			csp.unlock(testUserID, testPID)
 		})
 		// store the token
-		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID), qt.IsNil)
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID, ""), qt.IsNil)
 		// verify the token
 		c.Assert(csp.Storage.VerifyCSPAuth(testToken), qt.IsNil)
 		// consume the process
@@ -128,7 +128,7 @@ func TestPrepareSaltedKeySigner(t *testing.T) {
 			csp.unlock(testUserID, testPID)
 		})
 		// index the token
-		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID), qt.IsNil)
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID, ""), qt.IsNil)
 		// verify the token
 		c.Assert(csp.Storage.VerifyCSPAuth(testToken), qt.IsNil)
 		_, _, _, err := csp.prepareSaltedKeySigner(testToken, testAddress, util.RandomBytes(saltedkey.SaltSize-1), testUserWeightBytes)
@@ -141,7 +141,7 @@ func TestPrepareSaltedKeySigner(t *testing.T) {
 			csp.unlock(testUserID, testPID)
 		})
 		// index the token
-		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID), qt.IsNil)
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID, ""), qt.IsNil)
 		// verify the token
 		c.Assert(csp.Storage.VerifyCSPAuth(testToken), qt.IsNil)
 		userID, salt, message, err := csp.prepareSaltedKeySigner(testToken, testAddress, testPID, testUserWeightBytes)
@@ -183,7 +183,7 @@ func TestFinishSaltedKeySigner(t *testing.T) {
 	c.Run("token not verified", func(c *qt.C) {
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		// store the token
-		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID), qt.IsNil)
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID, ""), qt.IsNil)
 		err := csp.finishSaltedKeySigner(testToken, testAddress, testPID)
 		c.Assert(err, qt.ErrorIs, ErrAuthTokenNotVerified)
 	})
@@ -194,7 +194,7 @@ func TestFinishSaltedKeySigner(t *testing.T) {
 			defer csp.unlock(testUserID, testPID)
 		})
 		// store the token
-		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID), qt.IsNil)
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID, ""), qt.IsNil)
 		// verify the token
 		c.Assert(csp.Storage.VerifyCSPAuth(testToken), qt.IsNil)
 		err := csp.finishSaltedKeySigner(testToken, testAddress, testPID)
@@ -207,7 +207,7 @@ func TestFinishSaltedKeySigner(t *testing.T) {
 			defer csp.unlock(testUserID, testPID)
 		})
 		// store the token
-		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID), qt.IsNil)
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID, ""), qt.IsNil)
 		// verify the token
 		c.Assert(csp.Storage.VerifyCSPAuth(testToken), qt.IsNil)
 		_, _, _, err := csp.prepareSaltedKeySigner(testToken, testAddress, testPID, testUserWeightBytes)
