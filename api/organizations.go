@@ -547,8 +547,9 @@ func (a *API) organizationJobsHandler(w http.ResponseWriter, r *http.Request) {
 //
 //	@Summary		List organization bundles and their main process
 //	@Description	Returns a paginated list of process bundles for an organization.
-//	@Description	Each entry contains the bundle ID and the primary vochain process ID (Processes[0]).
-//	@Description	Requires Manager or Admin role.
+//	@Description	Each entry contains the bundle ID, the primary vochain process ID
+//	@Description	(first element of Processes when present), and all process IDs in the bundle.
+//	@Description	Requires the user to be part of the organization (any role).
 //	@Tags			process
 //	@Accept			json
 //	@Produce		json
@@ -556,7 +557,7 @@ func (a *API) organizationJobsHandler(w http.ResponseWriter, r *http.Request) {
 //	@Param			address	path		string	true	"Organization address"
 //	@Param			page	query		int		false	"Page number (default 1)"
 //	@Param			limit	query		int		false	"Items per page (default 10, max 100)"
-//	@Success		200		{object}	apicommon.ListOrganizationBundleProcesses
+//	@Success		200		{object}	apicommon.ListOrganizationBundles
 //	@Failure		400		{object}	errors.Error	"Invalid request or organization not found"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
@@ -601,11 +602,16 @@ func (a *API) organizationBundlesHandler(w http.ResponseWriter, r *http.Request)
 	// array) and the list of processes IDs
 	finalBundles := []apicommon.OrganizationBundle{}
 	for _, bundle := range bundles {
+		// skip bundles with no processes
+		if len(bundle.Processes) == 0 {
+			continue
+		}
+		// get processes IDs
 		processes := make([]string, 0, len(bundle.Processes))
 		for _, process := range bundle.Processes {
 			processes = append(processes, process.String())
 		}
-
+		// add bundle with the primary process and all processes IDs
 		finalBundles = append(finalBundles, apicommon.OrganizationBundle{
 			BundleID:         bundle.ID.Hex(),
 			PrimaryProcessID: bundle.Processes[0].String(),

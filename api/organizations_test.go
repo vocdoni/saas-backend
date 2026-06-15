@@ -392,8 +392,10 @@ func TestOrganizationBundlesHandler(t *testing.T) {
 
 	token := testCreateUser(t, testPass)
 	orgAddress := testCreateOrganization(t, token)
-	bundle1ID, primaryProcess1 := testCreateOrganizationBundle(t, orgAddress, internal.HexBytes("api_process_1"))
-	bundle2ID, primaryProcess2 := testCreateOrganizationBundle(t, orgAddress, internal.HexBytes("api_process_2"))
+	primaryProcess1 := internal.HexBytes("primary_process_1")
+	primaryProcess2 := internal.HexBytes("primary_process_2")
+	bundle1ID := testCreateOrganizationBundle(t, orgAddress, primaryProcess1)
+	bundle2ID := testCreateOrganizationBundle(t, orgAddress, primaryProcess2)
 
 	resp, code := testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String(), "processes")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
@@ -439,10 +441,7 @@ func TestOrganizationBundlesHandler(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusBadRequest)
 }
 
-func testCreateOrganizationBundle(t *testing.T, orgAddress common.Address, processID internal.HexBytes) (
-	internal.HexBytes,
-	internal.HexBytes,
-) {
+func testCreateOrganizationBundle(t *testing.T, orgAddress common.Address, processID internal.HexBytes) internal.HexBytes {
 	t.Helper()
 	c := qt.New(t)
 
@@ -476,7 +475,7 @@ func testCreateOrganizationBundle(t *testing.T, orgAddress common.Address, proce
 	})
 	c.Assert(err, qt.IsNil)
 
-	return bundleID, processID
+	return bundleID
 }
 
 func TestOrganizationWithOptionalFields(t *testing.T) {

@@ -205,7 +205,13 @@ func (ms *MongoStorage) ListOrganizationBundles(orgAddress common.Address, page,
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return 0, nil, ErrInvalidData
 	}
-	return paginatedDocuments[ProcessesBundle](ms.processBundles, page, limit, bson.M{"orgAddress": orgAddress}, options.Find())
+	filter := bson.M{
+		"orgAddress":  orgAddress,
+		"processes.0": bson.M{"$exists": true}, // has at least one process
+	}
+
+	sortedOptions := options.Find().SetSort(bson.D{{Key: "_id", Value: 1}})
+	return paginatedDocuments[ProcessesBundle](ms.processBundles, page, limit, filter, sortedOptions)
 }
 
 // ProcessBundlesByCensus retrieves process bundles that belong to a specific census.

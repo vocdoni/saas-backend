@@ -308,6 +308,16 @@ func TestProcessBundles(t *testing.T) {
 		_, err = testDB.SetProcess(otherProcess)
 		c.Assert(err, qt.IsNil)
 
+		// Bundle with an empty processes array — should NOT appear in
+		// ListOrganizationBundles results regardless of belonging to the org.
+		emptyBundle := &ProcessesBundle{
+			OrgAddress: testOrgAddress,
+			Census:     *census,
+			Processes:  []internal.HexBytes{},
+		}
+		_, err = testDB.SetProcessBundle(emptyBundle)
+		c.Assert(err, qt.IsNil)
+
 		bundle1ID, err := testDB.SetProcessBundle(&ProcessesBundle{
 			OrgAddress: testOrgAddress,
 			Census:     *census,
@@ -329,11 +339,18 @@ func TestProcessBundles(t *testing.T) {
 
 		total, bundles, err := testDB.ListOrganizationBundles(testOrgAddress, 1, 10)
 		c.Assert(err, qt.IsNil)
+		// total must be 2 — the empty-process bundle is excluded
 		c.Assert(total, qt.Equals, int64(2))
 		c.Assert(bundles, qt.HasLen, 2)
 		bundleIDs := []string{bundles[0].ID.Hex(), bundles[1].ID.Hex()}
 		c.Assert(bundleIDs, qt.Contains, bundle1ID.String())
 		c.Assert(bundleIDs, qt.Contains, bundle2ID.String())
+
+		// Verify deterministic ascending sort order (by MongoDB _id)
+		// ObjectID hex values are lexicographically sortable and advance
+		// monotonically, so creation order == natural sort order.
+		c.Assert(bundleIDs[0] < bundleIDs[1], qt.IsTrue,
+			qt.Commentf("bundles must be sorted in ascending order by ID (ObjectID hex)"))
 
 		total, bundles, err = testDB.ListOrganizationBundles(testOrgAddress, 2, 1)
 		c.Assert(err, qt.IsNil)
