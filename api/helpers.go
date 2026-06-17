@@ -6,7 +6,9 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -313,4 +315,17 @@ func parseLimit(s string) (int64, error) {
 		limit = apicommon.DefaultItemsPerPage
 	}
 	return limit, nil
+}
+
+// getURLParam receives an URL string that contains the param specified in the
+// template, compares the template with the url provided and returns the value
+// of the param. This function si similar to chi.URLParam, but it needs a
+// template to extract the param.
+func getURLParam(url, template, param string) (string, bool) {
+	rgx := regexp.MustCompile(strings.Replace(template, fmt.Sprintf("{%s}", param), "(.*)", 1))
+	matches := rgx.FindStringSubmatch(url)
+	if len(matches) < 2 {
+		return "", false
+	}
+	return matches[1], true
 }

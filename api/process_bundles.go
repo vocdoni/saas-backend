@@ -110,6 +110,8 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 			URI:  a.serverURL + "/process/bundle/" + bundleID.Hex(),
 			Root: rootHex,
 		})
+		// If no processes are provided, empty bundle is created so we should
+		// not increment the bundle counter of the organization
 		return
 	}
 
@@ -144,23 +146,29 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		Census:     *census,
 	}
 
-	// get organization metadata from the vochain
+	// Get organization metadata from the vochain
 	if meta, err := a.client.AccountMetadata(census.OrgAddress.String()); err == nil {
 		org.Meta["name"], org.Meta["logo"] = db.ParseVochainOrganizationMeta(meta)
 	}
+	// Since the bundle is not empty, increment the bundle counter only if the
+	// bundle size is less than the maximum for a test
+	if census.Size > db.TestMaxCensusSize {
+		org.Counters.Bundles++
+	}
+	// Update the organization
 	if err := a.db.SetOrganization(org); err != nil {
 		errors.ErrGenericInternalServerError.
 			Withf("tried to update update organization name and logo but failed: %v", err).
 			Write(w)
 		return
 	}
-
+	// Update the process bundle
 	_, err = a.db.SetProcessBundle(bundle)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-
+	// Parse the bundle census root (CSP public key) to be returned
 	var rootHex internal.HexBytes
 	if err := rootHex.ParseString(cspPubKey.String()); err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -231,6 +239,7 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 			URI:  "/process/bundle/" + bundleIDStr,
 			Root: bundle.Census.Published.Root,
 		})
+		// If not processes are added, just return the existing bundle
 		return
 	}
 
@@ -262,7 +271,23 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-
+	// If the bundle was empty and now has processes, increment the
+	// organization bundle counter
+	if wasEmpty := len(bundle.Processes) == 0; wasEmpty {
+		org, err := a.db.Organization(bundle.OrgAddress)
+		if err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+		// Increment the bundle counter and update the organization
+		if bundle.Census.Size > db.TestMaxCensusSize {
+			org.Counters.Bundles++
+		}
+		if err := a.db.SetOrganization(org); err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+	}
 	apicommon.HTTPWriteJSON(w, apicommon.CreateProcessBundleResponse{
 		URI:  "/process/bundle/" + bundleIDStr,
 		Root: bundle.Census.Published.Root,

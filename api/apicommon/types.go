@@ -689,6 +689,9 @@ type SubscriptionUsage struct {
 
 	// Number of voting processes created
 	Processes int `json:"processes"`
+
+	// Number of bundles
+	Bundles int `json:"bundles"`
 }
 
 // SubscriptionUsageFromDB converts a db.OrganizationCounters to a SubscriptionUsage.
@@ -702,6 +705,7 @@ func SubscriptionUsageFromDB(usage *db.OrganizationCounters) SubscriptionUsage {
 		SubOrgs:    usage.SubOrgs,
 		Users:      usage.Users,
 		Processes:  usage.Processes,
+		Bundles:    usage.Bundles,
 	}
 }
 

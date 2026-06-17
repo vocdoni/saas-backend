@@ -2,12 +2,14 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/proto/build/go/models"
 	"google.golang.org/protobuf/proto"
 )
@@ -35,8 +37,15 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// read the request body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		errors.ErrMalformedBody.Withf("could not read request body: %v", err).Write(w)
+		return
+	}
+	defer r.Body.Close()
+	// unmarshal the request body
 	signReq := &apicommon.TransactionData{}
-	if err := json.NewDecoder(r.Body).Decode(signReq); err != nil {
+	if err := json.Unmarshal(body, signReq); err != nil {
 		errors.ErrMalformedBody.Withf("could not decode request body: %v", err).Write(w)
 		return
 	}
@@ -105,7 +114,49 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 		newProcess := tx.GetNewProcess()
 		// do not count processes with less than TestMaxCensusSize for user testing
 		if newProcess.Process.MaxCensusSize > uint64(db.TestMaxCensusSize) {
+			// Right now, this API assumes that the processes created with it
+			// include the bundleID in the censusURI parameter of the process
+			// during the creation.
+			censusURI := newProcess.GetProcess().GetCensusURI()
+			if censusURI == "" {
+				errors.ErrMalformedBody.Withf("missing bundle data").Write(w)
+				return
+			}
+			// The bundleID is part of the URL that is passed in the censusURI
+			// following the processBundleInfoEndpoint template.
+			// Get the bundleID using the getURLParam function over the
+			// censusURI, using the processBundleInfoEndpoint as the template
+			// and "bundleId" as the param.
+			strBundleID, ok := getURLParam(censusURI, processBundleInfoEndpoint, "bundleId")
+			if !ok {
+				errors.ErrMalformedBody.With("invalid bundle id").Write(w)
+				return
+			}
+			// Parse the bundleID
+			var bundleID internal.HexBytes
+			if err := bundleID.ParseString(strBundleID); err != nil {
+				errors.ErrMalformedBody.Withf("invalid bundle id: %v", err).Write(w)
+				return
+			}
+			// Get the bundle from the database
+			bundle, err := a.db.ProcessBundle(bundleID)
+			if err != nil {
+				errors.ErrGenericInternalServerError.Withf("could not get bundle: %v", err).Write(w)
+				return
+			}
+			// Update the bundle with the new process
+			if err := a.db.AddProcessesToBundle(bundleID, []internal.HexBytes{newProcess.Process.ProcessId}); err != nil {
+				errors.ErrGenericInternalServerError.Withf("could not update bundle: %v", err).Write(w)
+				return
+			}
+			// If the bundle was empty and now has processes, increment the
+			// organization bundle counter
+			if wasEmpty := len(bundle.Processes) == 0; wasEmpty {
+				org.Counters.Bundles++
+			}
+			// Increment the process counter
 			org.Counters.Processes++
+			// Update the organization to save the counters
 			if err := a.db.SetOrganization(org); err != nil {
 				errors.ErrGenericInternalServerError.Withf("could not update organization process counter: %v", err).Write(w)
 				return
