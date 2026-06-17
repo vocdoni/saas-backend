@@ -168,6 +168,7 @@ type OrganizationCounters struct {
 	SubOrgs    int `json:"subOrgs" bson:"subOrgs"`
 	Users      int `json:"users" bson:"users"`
 	Processes  int `json:"processes" bson:"processes"`
+	Bundles    int `json:"bundles" bson:"bundles"`
 }
 
 type OrganizationInvite struct {
