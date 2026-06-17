@@ -160,12 +160,10 @@ func main() {
 		NotificationBreakerMaxFailures: viper.GetInt("notificationBreakerMaxFailures"),
 		NotificationBreakerCooldown:    viper.GetDuration("notificationBreakerCooldown"),
 	}
+
 	// overwrite the email notifications service with the SMTP service if the
 	// required parameters are set and include it in the API configuration
-	if smtpServer != "" && smtpUsername != "" && smtpPassword != "" {
-		if emailFromAddress == "" || emailFromName == "" {
-			log.Fatal("emailFromAddress and emailFromName are required")
-		}
+	if smtpServer != "" {
 		primaryMail := new(smtp.Email)
 		if err := primaryMail.New(&smtp.Config{
 			FromName:     emailFromName,
@@ -178,10 +176,13 @@ func main() {
 			log.Fatalf("could not create the email service: %v", err)
 		}
 		apiConf.MailService = primaryMail
+		log.Infow("email service configured",
+			"server", smtpServer,
+			"port", smtpPort)
 		// if a backup SMTP relay is configured, wrap the primary and backup in a
 		// failover service. The backup shares the same sender identity (from
 		// address/name); only the relay configuration differs.
-		if backupSMTPServer != "" && backupSMTPUsername != "" && backupSMTPPassword != "" {
+		if backupSMTPServer != "" {
 			backupMail := new(smtp.Email)
 			if err := backupMail.New(&smtp.Config{
 				FromName:     emailFromName,
@@ -194,7 +195,9 @@ func main() {
 				log.Fatalf("could not create the backup email service: %v", err)
 			}
 			apiConf.MailService = notifications.NewFailoverService(primaryMail, backupMail)
-			log.Infow("backup email service configured", "server", backupSMTPServer, "port", backupSMTPPort)
+			log.Infow("backup email service configured",
+				"backup server", backupSMTPServer,
+				"backup port", backupSMTPPort)
 		}
 		cspConf.MailService = apiConf.MailService
 		// load email templates
