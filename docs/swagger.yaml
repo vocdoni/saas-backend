@@ -548,6 +548,11 @@ definitions:
         allOf:
         - $ref: '#/definitions/apicommon.OrganizationInfo'
         description: Parent organization if this is a sub-organization
+      provisionAccount:
+        description: |-
+          Whether to provision the organization's on-chain account at creation
+          time (opt-in, eager). Default false preserves the legacy two-step flow.
+        type: boolean
       size:
         description: The size category of the organization
         type: string

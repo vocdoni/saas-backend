@@ -86,6 +86,10 @@ type OrganizationInfo struct {
 
 	// Arbitrary key value fields with metadata regarding the organization
 	Meta map[string]any `json:"meta"`
+
+	// Whether to provision the organization's on-chain account at creation
+	// time (opt-in, eager). Default false preserves the legacy two-step flow.
+	ProvisionAccount bool `json:"provisionAccount,omitempty"`
 }
 
 // OrganizationUsers represents a list of users of an organization.
