@@ -1028,6 +1028,9 @@ type CreateProcessRequest struct {
 	// Additional metadata for the process
 	// Can be any key-value pairs
 	Metadata map[string]any `json:"metadata"`
+
+	// Optional high-level election parameters (used later at publish time)
+	ElectionParams *db.ElectionParams `json:"electionParams,omitempty"`
 }
 
 // UpdateProcessRequest defines the payload for updating an existing voting process.
@@ -1042,6 +1045,9 @@ type UpdateProcessRequest struct {
 	// Additional metadata for the process
 	// Can be any key-value pairs
 	Metadata map[string]any `json:"metadata"`
+
+	// Optional high-level election parameters (used later at publish time)
+	ElectionParams *db.ElectionParams `json:"electionParams,omitempty"`
 }
 
 // InitiateAuthRequest defines the payload for participant authentication.

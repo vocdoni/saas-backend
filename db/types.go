@@ -421,17 +421,77 @@ type PublishedCensus struct {
 	CreatedAt time.Time         `json:"createdAt" bson:"createdAt"`
 }
 
+// MultiLangString holds language-keyed strings, e.g. {"default":"Hello","es":"Hola"}.
+type MultiLangString map[string]string
+
+// Choice is a single selectable option within a Question.
+type Choice struct {
+	Title MultiLangString `json:"title" bson:"title"`
+	Value uint32          `json:"value" bson:"value"`
+}
+
+// Question is a single question of an election.
+type Question struct {
+	Title       MultiLangString `json:"title" bson:"title"`
+	Description MultiLangString `json:"description,omitempty" bson:"description,omitempty"`
+	Choices     []Choice        `json:"choices" bson:"choices"`
+}
+
+// VoteType describes how votes are counted and validated.
+type VoteType struct {
+	MaxCount          uint32 `json:"maxCount" bson:"maxCount"`
+	MaxValue          uint32 `json:"maxValue" bson:"maxValue"`
+	MaxVoteOverwrites uint32 `json:"maxVoteOverwrites" bson:"maxVoteOverwrites"`
+	CostFromWeight    bool   `json:"costFromWeight" bson:"costFromWeight"`
+	CostExponent      uint32 `json:"costExponent" bson:"costExponent"`
+	UniqueChoices     bool   `json:"uniqueChoices" bson:"uniqueChoices"`
+}
+
+// ElectionType describes the election envelope and mode flags.
+type ElectionType struct {
+	Autostart         bool `json:"autostart" bson:"autostart"`
+	Interruptible     bool `json:"interruptible" bson:"interruptible"`
+	DynamicCensus     bool `json:"dynamicCensus" bson:"dynamicCensus"`
+	SecretUntilTheEnd bool `json:"secretUntilTheEnd" bson:"secretUntilTheEnd"`
+	Anonymous         bool `json:"anonymous" bson:"anonymous"`
+}
+
+// ElectionTypeMetadata is the metadata "type" block describing how results are displayed.
+type ElectionTypeMetadata struct {
+	Name       string `json:"name" bson:"name"`
+	Properties any    `json:"properties,omitempty" bson:"properties,omitempty"`
+}
+
+// ElectionParams holds the high-level inputs for an election. At publish time these are
+// mapped into the on-chain models.Process and an ElectionMetadata JSON document.
+type ElectionParams struct {
+	Title         MultiLangString       `json:"title" bson:"title"`
+	Description   MultiLangString       `json:"description,omitempty" bson:"description,omitempty"`
+	Header        string                `json:"header,omitempty" bson:"header,omitempty"`
+	StreamURI     string                `json:"streamUri,omitempty" bson:"streamUri,omitempty"`
+	StartDate     time.Time             `json:"startDate,omitempty" bson:"startDate,omitempty"`
+	EndDate       time.Time             `json:"endDate,omitempty" bson:"endDate,omitempty"`
+	Questions     []Question            `json:"questions" bson:"questions"`
+	VoteType      VoteType              `json:"voteType" bson:"voteType"`
+	ElectionType  ElectionType          `json:"electionType" bson:"electionType"`
+	TypeMetadata  *ElectionTypeMetadata `json:"type,omitempty" bson:"type,omitempty"`
+	MaxCensusSize uint64                `json:"maxCensusSize,omitempty" bson:"maxCensusSize,omitempty"`
+}
+
 // Process represents a voting process in the vochain
 // A process is tied to an organization by the orgAddress
 // and to a publishedCensus
 //
 //nolint:lll
 type Process struct {
-	ID         primitive.ObjectID `json:"id" bson:"_id"`
-	Address    internal.HexBytes  `json:"address" bson:"address"  swaggertype:"string" format:"hex" example:"deadbeef"`
-	OrgAddress common.Address     `json:"orgAdress" bson:"orgAddress"`
-	Census     Census             `json:"census" bson:"census"`
-	Metadata   map[string]any     `json:"metadata"  bson:"metadata"`
+	ID             primitive.ObjectID `json:"id" bson:"_id"`
+	Address        internal.HexBytes  `json:"address" bson:"address"  swaggertype:"string" format:"hex" example:"deadbeef"`
+	OrgAddress     common.Address     `json:"orgAdress" bson:"orgAddress"`
+	Census         Census             `json:"census" bson:"census"`
+	Metadata       map[string]any     `json:"metadata"  bson:"metadata"`
+	ElectionParams *ElectionParams    `json:"electionParams,omitempty" bson:"electionParams,omitempty"`
+	Status         string             `json:"status,omitempty" bson:"status,omitempty"`
+	PublishedAt    time.Time          `json:"publishedAt,omitempty" bson:"publishedAt,omitempty"`
 }
 
 // ProcessesBundle represents a group of voting processes that share a common census.

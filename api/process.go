@@ -52,7 +52,8 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Create or update the process
 	process := &db.Process{
-		Metadata: processInfo.Metadata,
+		Metadata:       processInfo.Metadata,
+		ElectionParams: processInfo.ElectionParams,
 	}
 
 	var orgAddress common.Address
@@ -189,6 +190,10 @@ func (a *API) updateProcessHandler(w http.ResponseWriter, r *http.Request) {
 
 	if len(processInfo.Metadata) > 0 {
 		existingProcess.Metadata = processInfo.Metadata
+	}
+
+	if processInfo.ElectionParams != nil {
+		existingProcess.ElectionParams = processInfo.ElectionParams
 	}
 
 	if !processInfo.Address.Equals(nil) {
