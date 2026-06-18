@@ -30,6 +30,30 @@ type Config struct {
 	SMTPPort     int
 }
 
+// Valid checks if the SMTP configuration is valid. It checks that the required
+// auth parameters are provided based on the SMTP server type. It also checks
+// that the required identity parameters are provided, from address and name.
+func (c Config) Valid() bool {
+	// check if the required SMTP connection parameters are provided
+	if c.SMTPServer == "" || c.SMTPPort == 0 {
+		return false
+	}
+	// check if the required auth parameters are provided:
+	//  - for a local server, no auth required (username and password can be empty)
+	//  - for a remote server, auth required (username and password are mandatory)
+	localSMTPServer := c.SMTPServer == "localhost" || c.SMTPServer == "127.0.0.1"
+	validCredentials := c.SMTPUsername != "" && c.SMTPPassword != ""
+	if !localSMTPServer && !validCredentials {
+		return false
+	}
+	// check if the required identity parameters are provided, from address and
+	// name
+	if c.FromAddress == "" || c.FromName == "" {
+		return false
+	}
+	return true
+}
+
 // Email is the implementation of the NotificationService interface for the
 // SMTP email service. It contains the configuration and the SMTP auth. It uses
 // the net/smtp package to send emails.
@@ -47,6 +71,9 @@ func (se *Email) New(rawConfig any) error {
 	// parse configuration
 	config, ok := rawConfig.(*Config)
 	if !ok {
+		return fmt.Errorf("invalid SMTP configuration")
+	}
+	if !config.Valid() {
 		return fmt.Errorf("invalid SMTP configuration")
 	}
 	// parse from email

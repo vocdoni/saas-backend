@@ -72,6 +72,7 @@ func TestMain(m *testing.M) {
 	if err := testMailService.New(&testutil.SMTPConfig{
 		Config: smtp.Config{
 			FromAddress:  adminEmail,
+			FromName:     adminUser,
 			SMTPUsername: adminUser,
 			SMTPPassword: adminPass,
 			SMTPServer:   mailHost,
