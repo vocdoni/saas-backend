@@ -272,3 +272,89 @@ func TestDraftProcess(t *testing.T) {
 		c.Assert(processDraftsResp.Processes, qt.HasLen, maxDrafts)
 	}
 }
+
+// TestDraftProcessElectionParams tests that high-level election params are persisted on draft
+// processes and round-trip through the API, while drafts without params keep working unchanged.
+func TestDraftProcessElectionParams(t *testing.T) {
+	c := qt.New(t)
+
+	// Create a user with admin permissions
+	adminToken := testCreateUser(t, "adminpassword123")
+
+	// Create org and census
+	orgAddress, censusID, _ := testCreateOrgAndCensus(t, adminToken)
+
+	censusIDBytes := internal.HexBytes{}
+	err := censusIDBytes.ParseString(censusID)
+	c.Assert(err, qt.IsNil)
+
+	// Subscribe the organization to the Essential plan so drafts are allowed (free plan allows 0).
+	err = testDB.SetOrganizationSubscription(orgAddress, &db.OrganizationSubscription{
+		PlanID:          mockEssentialPlan.ID,
+		StartDate:       time.Now(),
+		RenewalDate:     time.Now().Add(time.Hour * 24),
+		LastPaymentDate: time.Now(),
+		Active:          true,
+	})
+	c.Assert(err, qt.IsNil)
+
+	// Step 1: Create a draft process with populated election params and round-trip them back.
+	params := &db.ElectionParams{
+		Title:       db.MultiLangString{"default": "My Election"},
+		Description: db.MultiLangString{"default": "An election description"},
+		// Use a UTC, sub-millisecond-free instant so the BSON/JSON round-trip is lossless.
+		EndDate: time.Date(2026, 12, 31, 23, 59, 0, 0, time.UTC),
+		Questions: []db.Question{
+			{
+				Title: db.MultiLangString{"default": "Who should lead?"},
+				Choices: []db.Choice{
+					{Title: db.MultiLangString{"default": "Alice"}, Value: 0},
+					{Title: db.MultiLangString{"default": "Bob"}, Value: 1},
+				},
+			},
+		},
+		VoteType: db.VoteType{
+			MaxCount:          1,
+			MaxValue:          1,
+			MaxVoteOverwrites: 1,
+			UniqueChoices:     true,
+		},
+		ElectionType: db.ElectionType{
+			Autostart:     true,
+			Interruptible: true,
+		},
+	}
+
+	createReq := &apicommon.CreateProcessRequest{
+		OrgAddress:     orgAddress,
+		CensusID:       censusIDBytes,
+		ElectionParams: params,
+	}
+	pid := requestAndParseWithAssertCode[string](http.StatusOK,
+		t, http.MethodPost, adminToken, createReq, "process")
+	t.Log("Successfully created draft process with election params")
+
+	// Fetch it back and assert the round-tripped election params match.
+	got := requestAndParse[db.Process](t, http.MethodGet, adminToken, nil, "process", pid)
+	c.Assert(got.Address, qt.IsNil, qt.Commentf("Process should be a draft"))
+	c.Assert(got.ElectionParams, qt.Not(qt.IsNil))
+	c.Assert(got.ElectionParams.Title, qt.DeepEquals, params.Title)
+	c.Assert(got.ElectionParams.Description, qt.DeepEquals, params.Description)
+	c.Assert(got.ElectionParams.Questions, qt.DeepEquals, params.Questions)
+	c.Assert(got.ElectionParams.VoteType, qt.DeepEquals, params.VoteType)
+	c.Assert(got.ElectionParams.ElectionType, qt.DeepEquals, params.ElectionType)
+	c.Assert(got.ElectionParams.EndDate.Equal(params.EndDate), qt.IsTrue,
+		qt.Commentf("endDate: got %s want %s", got.ElectionParams.EndDate, params.EndDate))
+
+	// Step 2: A draft created WITHOUT election params still succeeds and returns nil params.
+	plainReq := &apicommon.CreateProcessRequest{
+		OrgAddress: orgAddress,
+		CensusID:   censusIDBytes,
+		Metadata:   map[string]any{"title": "Plain draft"},
+	}
+	plainPID := requestAndParseWithAssertCode[string](http.StatusOK,
+		t, http.MethodPost, adminToken, plainReq, "process")
+	plainGot := requestAndParse[db.Process](t, http.MethodGet, adminToken, nil, "process", plainPID)
+	c.Assert(plainGot.Address, qt.IsNil, qt.Commentf("Process should be a draft"))
+	c.Assert(plainGot.ElectionParams, qt.IsNil, qt.Commentf("Plain draft should have no election params"))
+}

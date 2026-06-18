@@ -200,6 +200,11 @@ definitions:
         example: deadbeef
         format: hex
         type: string
+      electionParams:
+        allOf:
+        - $ref: '#/definitions/db.ElectionParams'
+        description: Optional high-level election parameters (used later at publish
+          time)
       metadata:
         additionalProperties: {}
         description: |-
@@ -1134,6 +1139,59 @@ definitions:
     - CensusTypeMail
     - CensusTypeSMS
     - CensusTypeSMSorMail
+  db.Choice:
+    properties:
+      title:
+        $ref: '#/definitions/db.MultiLangString'
+      value:
+        type: integer
+    type: object
+  db.ElectionParams:
+    properties:
+      description:
+        $ref: '#/definitions/db.MultiLangString'
+      electionType:
+        $ref: '#/definitions/db.ElectionType'
+      endDate:
+        type: string
+      header:
+        type: string
+      maxCensusSize:
+        type: integer
+      questions:
+        items:
+          $ref: '#/definitions/db.Question'
+        type: array
+      startDate:
+        type: string
+      streamUri:
+        type: string
+      title:
+        $ref: '#/definitions/db.MultiLangString'
+      type:
+        $ref: '#/definitions/db.ElectionTypeMetadata'
+      voteType:
+        $ref: '#/definitions/db.VoteType'
+    type: object
+  db.ElectionType:
+    properties:
+      anonymous:
+        type: boolean
+      autostart:
+        type: boolean
+      dynamicCensus:
+        type: boolean
+      interruptible:
+        type: boolean
+      secretUntilTheEnd:
+        type: boolean
+    type: object
+  db.ElectionTypeMetadata:
+    properties:
+      name:
+        type: string
+      properties: {}
+    type: object
   db.Features:
     properties:
       2FAemail:
@@ -1165,6 +1223,10 @@ definitions:
     x-enum-varnames:
     - JobTypeOrgMembers
     - JobTypeCensusParticipants
+  db.MultiLangString:
+    additionalProperties:
+      type: string
+    type: object
   db.OrgMemberAuthField:
     enum:
     - name
@@ -1242,6 +1304,8 @@ definitions:
         type: string
       census:
         $ref: '#/definitions/db.Census'
+      electionParams:
+        $ref: '#/definitions/db.ElectionParams'
       id:
         type: string
       metadata:
@@ -1251,6 +1315,10 @@ definitions:
         items:
           type: integer
         type: array
+      publishedAt:
+        type: string
+      status:
+        type: string
     type: object
   db.ProcessesBundle:
     properties:
@@ -1286,6 +1354,17 @@ definitions:
       uri:
         type: string
     type: object
+  db.Question:
+    properties:
+      choices:
+        items:
+          $ref: '#/definitions/db.Choice'
+        type: array
+      description:
+        $ref: '#/definitions/db.MultiLangString'
+      title:
+        $ref: '#/definitions/db.MultiLangString'
+    type: object
   db.UserRole:
     enum:
     - admin
@@ -1296,6 +1375,21 @@ definitions:
     - AdminRole
     - ManagerRole
     - ViewerRole
+  db.VoteType:
+    properties:
+      costExponent:
+        type: integer
+      costFromWeight:
+        type: boolean
+      maxCount:
+        type: integer
+      maxValue:
+        type: integer
+      maxVoteOverwrites:
+        type: integer
+      uniqueChoices:
+        type: boolean
+    type: object
   db.VotingTypes:
     properties:
       approval:
