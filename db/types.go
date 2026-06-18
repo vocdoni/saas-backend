@@ -47,14 +47,19 @@ type UserVerification struct {
 // TODO this is the default role function while it should be
 // used only when it is not necessary to consult the DB
 func (u *User) HasRoleFor(address common.Address, role UserRole) bool {
+	currentRole, ok := u.RoleFor(address)
+	return ok && currentRole == role
+}
+
+// RoleFor returns the role of the user in the organization with the given
+// address
+func (u *User) RoleFor(address common.Address) (UserRole, bool) {
 	for _, org := range u.Organizations {
-		if org.Address == address &&
-			// Check if the role matches the organization role
-			string(org.Role) == string(role) {
-			return true
+		if org.Address == address {
+			return org.Role, true
 		}
 	}
-	return false
+	return "", false
 }
 
 type UserRole string

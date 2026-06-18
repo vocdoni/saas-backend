@@ -3,6 +3,7 @@ package db
 import (
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -278,6 +279,91 @@ func TestProcessBundles(t *testing.T) {
 		bundles, err = testDB.ProcessBundlesByCensus(censusWithoutBundles)
 		c.Assert(err, qt.IsNil)
 		c.Assert(bundles, qt.HasLen, 0)
+	})
+
+	t.Run("TestListOrganizationBundles", func(_ *testing.T) {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+		census := setupTestPrerequisites1(c, testDB)
+
+		otherOrg := &Organization{Address: testAnotherOrgAddress}
+		c.Assert(testDB.SetOrganization(otherOrg), qt.IsNil)
+		otherCensus := &Census{
+			OrgAddress: testAnotherOrgAddress,
+			Type:       CensusTypeMail,
+			Published:  census.Published,
+		}
+		otherCensusID, err := testDB.SetCensus(otherCensus)
+		c.Assert(err, qt.IsNil)
+		otherCensus.ID, err = primitive.ObjectIDFromHex(otherCensusID)
+		c.Assert(err, qt.IsNil)
+
+		process1 := createTestProcess(c, testDB, testProcessID, census)
+		process2 := createTestProcess(c, testDB, testProcessID2, census)
+		otherProcess := &Process{
+			Address:    testProcessID3,
+			OrgAddress: testAnotherOrgAddress,
+			Census:     *otherCensus,
+			Metadata:   testProcessMetadata,
+		}
+		_, err = testDB.SetProcess(otherProcess)
+		c.Assert(err, qt.IsNil)
+
+		// Bundle with an empty processes array — should NOT appear in
+		// ListOrganizationBundles results regardless of belonging to the org.
+		emptyBundle := &ProcessesBundle{
+			OrgAddress: testOrgAddress,
+			Census:     *census,
+			Processes:  []internal.HexBytes{},
+		}
+		_, err = testDB.SetProcessBundle(emptyBundle)
+		c.Assert(err, qt.IsNil)
+
+		bundle1ID, err := testDB.SetProcessBundle(&ProcessesBundle{
+			OrgAddress: testOrgAddress,
+			Census:     *census,
+			Processes:  []internal.HexBytes{process1.Address},
+		})
+		c.Assert(err, qt.IsNil)
+		bundle2ID, err := testDB.SetProcessBundle(&ProcessesBundle{
+			OrgAddress: testOrgAddress,
+			Census:     *census,
+			Processes:  []internal.HexBytes{process2.Address},
+		})
+		c.Assert(err, qt.IsNil)
+		_, err = testDB.SetProcessBundle(&ProcessesBundle{
+			OrgAddress: testAnotherOrgAddress,
+			Census:     *otherCensus,
+			Processes:  []internal.HexBytes{otherProcess.Address},
+		})
+		c.Assert(err, qt.IsNil)
+
+		total, bundles, err := testDB.ListOrganizationBundles(testOrgAddress, 1, 10)
+		c.Assert(err, qt.IsNil)
+		// total must be 2 — the empty-process bundle is excluded
+		c.Assert(total, qt.Equals, int64(2))
+		c.Assert(bundles, qt.HasLen, 2)
+		bundleIDs := []string{bundles[0].ID.Hex(), bundles[1].ID.Hex()}
+		c.Assert(bundleIDs, qt.Contains, bundle1ID.String())
+		c.Assert(bundleIDs, qt.Contains, bundle2ID.String())
+
+		// Verify deterministic ascending sort order (by MongoDB _id)
+		// ObjectID hex values are lexicographically sortable and advance
+		// monotonically, so creation order == natural sort order.
+		c.Assert(bundleIDs[0] < bundleIDs[1], qt.IsTrue,
+			qt.Commentf("bundles must be sorted in ascending order by ID (ObjectID hex)"))
+
+		total, bundles, err = testDB.ListOrganizationBundles(testOrgAddress, 2, 1)
+		c.Assert(err, qt.IsNil)
+		c.Assert(total, qt.Equals, int64(2))
+		c.Assert(bundles, qt.HasLen, 1)
+
+		total, bundles, err = testDB.ListOrganizationBundles(testThirdOrgAddress, 1, 10)
+		c.Assert(err, qt.IsNil)
+		c.Assert(total, qt.Equals, int64(0))
+		c.Assert(bundles, qt.HasLen, 0)
+
+		_, _, err = testDB.ListOrganizationBundles(common.Address{}, 1, 10)
+		c.Assert(err, qt.Equals, ErrInvalidData)
 	})
 
 	t.Run("TestAddProcessesToBundle", func(_ *testing.T) {

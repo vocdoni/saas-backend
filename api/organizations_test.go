@@ -11,6 +11,8 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 func TestCreateOrganizationHandler(t *testing.T) {
@@ -383,6 +385,97 @@ func TestOrganizationJobsHandler(t *testing.T) {
 
 	_, code = testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String(), "jobs?limit=invalid")
 	c.Assert(code, qt.Equals, http.StatusBadRequest)
+}
+
+func TestOrganizationBundlesHandler(t *testing.T) {
+	c := qt.New(t)
+
+	token := testCreateUser(t, testPass)
+	orgAddress := testCreateOrganization(t, token)
+	primaryProcess1 := internal.HexBytes("primary_process_1")
+	primaryProcess2 := internal.HexBytes("primary_process_2")
+	bundle1ID := testCreateOrganizationBundle(t, orgAddress, primaryProcess1)
+	bundle2ID := testCreateOrganizationBundle(t, orgAddress, primaryProcess2)
+
+	resp, code := testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String(), "processes")
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+	var bundles apicommon.ListOrganizationBundles
+	c.Assert(json.Unmarshal(resp, &bundles), qt.IsNil)
+	c.Assert(bundles.Pagination, qt.Not(qt.IsNil))
+	c.Assert(bundles.Pagination.TotalItems, qt.Equals, int64(2))
+	c.Assert(bundles.Bundles, qt.HasLen, 2)
+
+	bundlesByID := map[string]string{}
+	processesByID := map[string][]string{}
+	for _, bundle := range bundles.Bundles {
+		bundlesByID[bundle.BundleID] = bundle.PrimaryProcessID
+		processesByID[bundle.BundleID] = bundle.Processes
+	}
+	c.Assert(bundlesByID[bundle1ID.String()], qt.Equals, primaryProcess1.String())
+	c.Assert(processesByID[bundle1ID.String()], qt.HasLen, 1)
+	c.Assert(processesByID[bundle1ID.String()][0], qt.Equals, primaryProcess1.String())
+	c.Assert(bundlesByID[bundle2ID.String()], qt.Equals, primaryProcess2.String())
+	c.Assert(processesByID[bundle2ID.String()], qt.HasLen, 1)
+	c.Assert(processesByID[bundle2ID.String()][0], qt.Equals, primaryProcess2.String())
+
+	resp, code = testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String(), "processes?page=1&limit=1")
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+	c.Assert(json.Unmarshal(resp, &bundles), qt.IsNil)
+	c.Assert(bundles.Pagination.TotalItems, qt.Equals, int64(2))
+	c.Assert(bundles.Pagination.LastPage, qt.Equals, int64(2))
+	c.Assert(bundles.Bundles, qt.HasLen, 1)
+
+	_, code = testRequest(t, http.MethodGet, "", nil, "organizations", orgAddress.String(), "processes")
+	c.Assert(code, qt.Equals, http.StatusUnauthorized)
+
+	anotherUserToken := testCreateUser(t, "anotherpassword")
+	_, code = testRequest(t, http.MethodGet, anotherUserToken, nil, "organizations", orgAddress.String(), "processes")
+	c.Assert(code, qt.Equals, http.StatusUnauthorized)
+
+	_, code = testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String(), "processes?page=invalid")
+	c.Assert(code, qt.Equals, http.StatusBadRequest)
+
+	nonExistentAddr := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	_, code = testRequest(t, http.MethodGet, token, nil, "organizations", nonExistentAddr.String(), "processes")
+	c.Assert(code, qt.Equals, http.StatusBadRequest)
+}
+
+func testCreateOrganizationBundle(t *testing.T, orgAddress common.Address, processID internal.HexBytes) internal.HexBytes {
+	t.Helper()
+	c := qt.New(t)
+
+	var root internal.HexBytes
+	c.Assert(root.ParseString("0xabcde"), qt.IsNil)
+	census := &db.Census{
+		OrgAddress: orgAddress,
+		Type:       db.CensusTypeMail,
+		Published: db.PublishedCensus{
+			Root: root,
+			URI:  "ipfs://test-census",
+		},
+	}
+	censusID, err := testDB.SetCensus(census)
+	c.Assert(err, qt.IsNil)
+	census.ID, err = primitive.ObjectIDFromHex(censusID)
+	c.Assert(err, qt.IsNil)
+
+	process := &db.Process{
+		Address:    processID,
+		OrgAddress: orgAddress,
+		Census:     *census,
+	}
+	_, err = testDB.SetProcess(process)
+	c.Assert(err, qt.IsNil)
+
+	bundleID, err := testDB.SetProcessBundle(&db.ProcessesBundle{
+		OrgAddress: orgAddress,
+		Census:     *census,
+		Processes:  []internal.HexBytes{processID},
+	})
+	c.Assert(err, qt.IsNil)
+
+	return bundleID
 }
 
 func TestOrganizationWithOptionalFields(t *testing.T) {

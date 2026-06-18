@@ -248,6 +248,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodDelete, organizationGroupEndpoint, a.deleteOrganizationMemberGroupHandler)
 		handle(r, http.MethodPost, organizationGroupValidateEndpoint, a.organizationMemberGroupValidateHandler)
 		handle(r, http.MethodGet, organizationJobsEndpoint, a.organizationJobsHandler)
+		handle(r, http.MethodGet, organizationBundlesEndpoint, a.organizationBundlesHandler)
 		handle(r, http.MethodPost, subscriptionsCheckout, a.stripeHandlers.CreateSubscriptionCheckout)
 		handle(r, http.MethodGet, subscriptionsCheckoutSession, a.stripeHandlers.GetCheckoutSession)
 		handle(r, http.MethodGet, subscriptionsPortal, func(w http.ResponseWriter, r *http.Request) {

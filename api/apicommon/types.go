@@ -269,6 +269,27 @@ type ListOrganizationProcesses struct {
 	Processes []db.Process `json:"processes"`
 }
 
+// OrganizationBundle represents an organization bundle. It contains the bundle ID and the main process ID.
+// swagger:model OrganizationBundle
+type OrganizationBundle struct {
+	// The ID of the bundle
+	BundleID string `json:"bundleId"`
+	// The ID of the primary process which identifies the set of processes in
+	// the bundle, no matter how many (one or more)
+	PrimaryProcessID string `json:"primaryProcessId"`
+	// The list of processes IDs in the bundle
+	Processes []string `json:"processes"`
+}
+
+// ListOrganizationBundles represents the response for listing the bundles of an organization.
+// swagger:model ListOrganizationBundles
+type ListOrganizationBundles struct {
+	// Pagination fields
+	Pagination *Pagination `json:"pagination"`
+	// List of organization bundles
+	Bundles []OrganizationBundle `json:"bundles"`
+}
+
 // ValidateMemberGroupRequest validates the request for creating or updating an organization member group.
 // Validates that either AuthFields or TwoFaFields are provided and checks for duplicates or empty fields.
 // swagger:model ValidateMemberGroupRequest
