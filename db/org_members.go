@@ -171,11 +171,9 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 	}
 	member.OrgAddress = org.Address
 
-	// normalize and validate the email. Normalizing to lowercase here is the
-	// single write chokepoint that keeps every member email (and the login
-	// hashes derived from it) case-insensitive across all write paths.
+	// normalize and validate the email
+	member.Email = internal.NormalizeEmail(member.Email)
 	if member.Email != "" {
-		member.Email = internal.NormalizeEmail(member.Email)
 		if _, err := mail.ParseAddress(member.Email); err != nil {
 			errors = append(errors, fmt.Errorf("could not parse email: %s %v", member.Email, err))
 			// If email is invalid, set it to empty and store the error
