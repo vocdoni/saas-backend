@@ -272,6 +272,18 @@ definitions:
         - $ref: '#/definitions/apicommon.Pagination'
         description: Pagination fields
     type: object
+  apicommon.ListOrganizationBundles:
+    properties:
+      bundles:
+        description: List of organization bundles
+        items:
+          $ref: '#/definitions/apicommon.OrganizationBundle'
+        type: array
+      pagination:
+        allOf:
+        - $ref: '#/definitions/apicommon.Pagination'
+        description: Pagination fields
+    type: object
   apicommon.ListOrganizationMemberGroupResponse:
     properties:
       members:
@@ -427,6 +439,22 @@ definitions:
           items:
             type: integer
           type: array
+        type: array
+    type: object
+  apicommon.OrganizationBundle:
+    properties:
+      bundleId:
+        description: The ID of the bundle
+        type: string
+      primaryProcessId:
+        description: |-
+          The ID of the primary process which identifies the set of processes in
+          the bundle, no matter how many (one or more)
+        type: string
+      processes:
+        description: The list of processes IDs in the bundle
+        items:
+          type: string
         type: array
     type: object
   apicommon.OrganizationCensus:
@@ -2633,6 +2661,53 @@ paths:
       summary: Check the progress of adding members
       tags:
       - organizations
+  /organizations/{address}/processes:
+    get:
+      consumes:
+      - application/json
+      description: |-
+        Returns a paginated list of process bundles for an organization.
+        Each entry contains the bundle ID, the primary vochain process ID
+        (first element of Processes when present), and all process IDs in the bundle.
+        Requires the user to be part of the organization (any role).
+      parameters:
+      - description: Organization address
+        in: path
+        name: address
+        required: true
+        type: string
+      - description: Page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: Items per page (default 10, max 100)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ListOrganizationBundles'
+        "400":
+          description: Invalid request or organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: List organization bundles and their main process
+      tags:
+      - process
   /organizations/{address}/processes/drafts:
     get:
       consumes:
