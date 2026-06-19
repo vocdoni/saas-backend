@@ -23,9 +23,10 @@ Integrators additionally create and manage client organizations under a quota.
 | `POST` | `/organizations` (+ optional `provisionAccount`) | Bearer | existing org fields, optional `provisionAccount` | Create an org. With `provisionAccount: true` the SaaS **also forges the org's on-chain `CreateAccount`** (idempotent). Omitted/false → today's behavior (DB only). |
 | `POST` | `/process` (+ `electionParams`) | Bearer | `orgAddress`, `censusId`, `metadata`, optional `electionParams` | Create a draft. **Additive:** gains an optional `electionParams` field carrying all on-chain election inputs. |
 | `PUT`  | `/process/{draftId}` (+ `electionParams`) | Bearer | `censusId`, `metadata`, optional `electionParams` | Update a draft. Same optional `electionParams` field. |
-| `POST` | `/process/{draftId}/publish` | Bearer (Manager/Admin) | optional `{ startDate }` (overrides the draft's start) | Publish a draft to the chain: forge → fund → sign → submit → confirm `NewProcess`. Returns the `processId`. |
-| `PUT`  | `/process/{processId}/status` | Bearer (Manager/Admin) | `{ status }` (`ready`/`paused`/`ended`/`canceled`) | Change lifecycle status. |
-| `POST` | `/process/{processId}/vote` | Public | `{ txPayload }` (base64 of the signed `Vote` envelope) | Relay an already-signed vote envelope to the chain. Returns a `voteId` receipt. |
+| `POST` | `/process/{draftId}/publish` | Bearer (Manager/Admin) | optional `{ startDate }` (overrides the draft's start) | Publish a draft to the chain: forge → fund → sign → submit → confirm `NewProcess`. **Async:** validates synchronously, returns `202` + `jobId`; poll `GET /jobs/{jobId}` for the `processId`. |
+| `PUT`  | `/process/{processId}/status` | Bearer (Manager/Admin) | `{ status }` (`ready`/`paused`/`ended`/`canceled`) | Change lifecycle status. **Async:** returns `202` + `jobId`. |
+| `POST` | `/process/{processId}/vote` | Public | `{ txPayload }` (hex of the signed `Vote` envelope) | Relay an already-signed vote envelope to the chain. **Async:** returns `202` + `jobId`; poll for the `voteID` receipt. |
+| `GET`  | `/jobs/{jobId}` | Public (capability) | — (none) | Poll an async tx job (publish/status/vote). Always `200`; `status` is `pending`/`completed`/`failed`, with the on-chain `result` when completed. |
 | `GET`  | `/process/{processId}/results` | Public | — (none) | Read live status, vote count and tally. |
 | `GET`  | `/process/{processId}/metadata` | Public | — (none) | Read the public election metadata (title, questions, choices). |
 | `POST` | `/organizations/{address}/managed` | Bearer (Admin of integrator) | client org info + optional `ownerEmail` | **Integrator only.** Create a first-class client org managed by `{address}` (forges its account). Quota-enforced. |
@@ -181,17 +182,21 @@ POST /process/{draftId}/publish
   { "startDate": "2026-07-01T09:00:00Z" }
   ```
   Overrides the draft's start date if provided.
-- **200 OK:**
+- **202 Accepted:** the draft is validated, built, funded and signed **synchronously** (so bad,
+  unauthorized or over-quota requests still fail immediately); the on-chain submit/confirm is queued
+  on a bounded worker pool. The response carries the job id and sets `Location: /jobs/{jobId}`:
   ```json
-  { "processId": "<64-hex on-chain election id>" }
+  { "jobId": "<hex job id>" }
   ```
-  `processId` is also persisted to `db.Process.Address`. No transaction hash is exposed — the
-  SaaS confirms the tx on chain before returning.
-- **Idempotent:** if the draft is already published, returns the existing `processId` with 200
-  (no new tx).
-- **Errors:** `400` draft incomplete (no `electionParams` or no census), `401` not a
-  manager/admin, `403` plan/quota exceeded, `404` draft not found, `500`
-  `ErrVochainRequestFailed` (submit/mine failed).
+  Poll `GET /jobs/{jobId}` (see *Poll an async transaction job*) until `status` is `completed`; the
+  result is `{ "address": "<64-hex on-chain election id>", "status": "READY" }`. `address` (the
+  `processId`) is persisted to `db.Process.Address`. No transaction hash is exposed.
+- **Idempotent:** if the draft is already published, returns **200** synchronously with
+  `{ "address": "<processId>", "status": "..." }` (no new tx, no job).
+- **Errors (synchronous):** `400` draft incomplete (no `electionParams`), `401` not a
+  manager/admin, `403` plan/quota exceeded, `404` draft not found, `409` a publish is already in
+  progress for this draft, `503` tx queue full. A submit/mine failure surfaces on the job as
+  `status: failed` with an `error` message (the draft is reset and any quota reservation released).
 
 ---
 
@@ -209,9 +214,14 @@ PUT /process/{processId}/status
   ```json
   { "status": "ready" | "paused" | "ended" | "canceled" }
   ```
-- **200 OK:** `{ "status": "paused" }` (the new status, echoed back after the SaaS confirms the
-  tx on chain).
-- **Errors:** `400` invalid/illegal transition, `401`, `404` process unknown to SaaS, `500`.
+- **202 Accepted:** built, funded and signed synchronously; submit/confirm is queued.
+  ```json
+  { "jobId": "<hex job id>" }
+  ```
+  (+ `Location: /jobs/{jobId}`.) Poll the job until `completed`; the result is
+  `{ "status": "PAUSED" }` (the new status, set after the SaaS confirms the tx on chain).
+- **Errors:** `400` invalid/illegal transition, `401`, `404` process unknown to SaaS, `503` tx
+  queue full. On-chain failure surfaces on the job as `status: failed`.
 
 ---
 
@@ -230,16 +240,52 @@ POST /process/{processId}/vote
 - **Path:** `processId` — on-chain election ID (hex).
 - **Body:**
   ```json
-  { "txPayload": "<base64 of protobuf SignedTx wrapping a Vote>" }
+  { "txPayload": "<hex of protobuf SignedTx wrapping a Vote>" }
   ```
   (`txPayload` matches the field name used by `apicommon.TransactionData`.)
-- **200 OK:**
+- **202 Accepted:** the envelope is decoded and validated synchronously; the submit is queued.
   ```json
-  { "voteId": "<hex nullifier / vote id>" }
+  { "jobId": "<hex job id>" }
   ```
-  `voteId` is the vote receipt the voter can use to later verify their vote was counted.
+  (+ `Location: /jobs/{jobId}`.) Poll the job until `completed`; the result is
+  `{ "voteID": "<hex nullifier>" }` — the receipt the voter can use to later verify their vote
+  was counted.
 - **Errors:** `400` payload is not a Vote tx or targets a different process, `404` process
-  not found, `409` already voted / nullifier used (as reported by chain), `500`.
+  not found, `503` tx queue full. A chain rejection (e.g. already voted / nullifier used) surfaces
+  on the job as `status: failed`.
+
+---
+
+## Poll an async transaction job
+
+The three endpoints above (publish, status, vote) submit on a bounded background worker pool to keep
+on-chain confirmation (up to ~40s under congestion) off the request path, where it would share the
+router's throttle/timeout budget with the public voter endpoints. Each returns a `jobId`; this single
+endpoint reports the outcome.
+
+```
+GET /jobs/{jobId}
+```
+
+- **Auth:** Public. The 32-byte `jobId` **is** the capability — it is unguessable and the result
+  contains only public on-chain data (process id, vote nullifier, status), so no token is needed
+  (the relay-vote flow is itself public).
+- **Path:** `jobId` — the hex id returned by a `202`.
+- **200 OK** (always, while the job exists):
+  ```json
+  {
+    "jobId":  "<hex>",
+    "type":   "publish_process" | "set_process_status" | "relay_vote",
+    "status": "pending" | "completed" | "failed",
+    "result": { "address": "<hex>", "voteID": "<hex>", "status": "READY" },
+    "error":  "<reason, when failed>"
+  }
+  ```
+  `result` is present only when `status` is `completed`, and carries just the fields relevant to the
+  job type (`address`+`status` for publish, `status` for a status change, `voteID` for a vote).
+  `error` is present only when `status` is `failed`.
+- **Polling:** clients poll until `status` leaves `pending`. There is no push/webhook.
+- **Errors:** `400` malformed id, `404` unknown job.
 
 ---
 
@@ -392,17 +438,19 @@ GET /organizations/{address}/integrator
 2. `POST /process/bundle/{bundleId}/sign` — CSP blind signature (existing).
 3. The client builds + signs the `Vote` envelope locally using the CSP signature (the only
    client-side crypto).
-4. `POST /process/{processId}/vote` — **new** relay endpoint submits it to the chain.
-5. `GET /process/{processId}/results` — **new** read endpoint for live tally.
+4. `POST /process/{processId}/vote` — **new** relay endpoint queues it; returns `202` + `jobId`.
+5. `GET /jobs/{jobId}` — poll until `completed`; the result's `voteID` is the vote receipt.
+6. `GET /process/{processId}/results` — **new** read endpoint for live tally.
 
 ## New apicommon types (summary)
 
 | Type | Used by |
 |------|---------|
 | `ElectionParams` (+ `Question`, `Choice`, `VoteType`, `ElectionType`) | create/update draft |
-| `PublishProcessRequest` / `PublishProcessResponse` | `POST /process/{id}/publish` |
-| `SetProcessStatusRequest` | `PUT /process/{id}/status` |
-| `RelayVoteRequest` / `RelayVoteResponse` | `POST /process/{id}/vote` |
+| `PublishProcessRequest` / `PublishProcessResponse` (idempotent 200 only) / `EnqueuedResponse` (202) | `POST /process/{id}/publish` |
+| `SetProcessStatusRequest` / `EnqueuedResponse` (202) | `PUT /process/{id}/status` |
+| `RelayVoteRequest` / `EnqueuedResponse` (202) | `POST /process/{id}/vote` |
+| `EnqueuedResponse` (`jobId`) / `JobStatusResponse` (`jobId`, `type`, `status`, `result`, `error`) | `GET /jobs/{jobId}` |
 | `ProcessResultsResponse` | `GET /process/{id}/results` |
 | `CreateManagedOrganizationRequest` | `POST /organizations/{address}/managed` |
 | `IntegratorInfoResponse` (`enabled`, `limits`, `usage`) | `GET /organizations/{address}/integrator` |
