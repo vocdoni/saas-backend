@@ -238,7 +238,7 @@ func (a *API) integratorInfoHandler(w http.ResponseWriter, r *http.Request) {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
-		resp.Limits = limits
+		resp.Limits = &limits
 	}
 	apicommon.HTTPWriteJSON(w, resp)
 }

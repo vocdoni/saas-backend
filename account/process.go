@@ -70,6 +70,30 @@ type NewProcessParams struct {
 	MetadataURL string // public https URL of the stored ElectionMetadata JSON
 }
 
+// electionStartDuration maps the high-level start/end dates to the on-chain
+// StartTime and Duration (seconds). A zero startTime means "start immediately".
+// When startDate is already in the past the election starts now and must still
+// end at endDate, so the duration is measured from now rather than from
+// startDate (which would otherwise overrun endDate).
+func electionStartDuration(startDate, endDate time.Time) (startTime, duration uint32, err error) {
+	if endDate.IsZero() {
+		return 0, 0, fmt.Errorf("endDate is required")
+	}
+	if !startDate.IsZero() {
+		if !endDate.After(startDate) {
+			return 0, 0, fmt.Errorf("endDate must be after startDate")
+		}
+		if startDate.After(time.Now()) {
+			return uint32(startDate.Unix()), uint32(endDate.Sub(startDate).Seconds()), nil
+		}
+	}
+	d := time.Until(endDate)
+	if d <= 0 {
+		return 0, 0, fmt.Errorf("endDate must be in the future")
+	}
+	return 0, uint32(d.Seconds()), nil
+}
+
 // BuildNewProcessTx constructs an unsigned Tx_NewProcess from high-level election
 // params. It reads the organization account's current on-chain nonce, maps
 // ElectionParams into the on-chain models.Process using a CSP census, and always
@@ -87,24 +111,9 @@ func (a *Account) BuildNewProcessTx(p *NewProcessParams) (*models.Tx, error) {
 		return nil, fmt.Errorf("could not fetch organization account: %w", err)
 	}
 
-	var duration, startTime uint32
-	switch {
-	case !ep.StartDate.IsZero() && !ep.EndDate.IsZero():
-		if !ep.EndDate.After(ep.StartDate) {
-			return nil, fmt.Errorf("endDate must be after startDate")
-		}
-		duration = uint32(ep.EndDate.Sub(ep.StartDate).Seconds())
-		if ep.StartDate.After(time.Now()) {
-			startTime = uint32(ep.StartDate.Unix())
-		}
-	case !ep.EndDate.IsZero():
-		d := time.Until(ep.EndDate)
-		if d <= 0 {
-			return nil, fmt.Errorf("endDate must be in the future")
-		}
-		duration = uint32(d.Seconds())
-	default:
-		return nil, fmt.Errorf("endDate is required")
+	startTime, duration, err := electionStartDuration(ep.StartDate, ep.EndDate)
+	if err != nil {
+		return nil, err
 	}
 
 	metadataURL := p.MetadataURL

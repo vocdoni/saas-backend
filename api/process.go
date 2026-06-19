@@ -373,7 +373,7 @@ func (a *API) deleteProcessHandler(w http.ResponseWriter, r *http.Request) {
 //	@Description	Publishes an existing draft process (created via POST /process) as an on-chain
 //	@Description	election. The backend builds the election metadata and NewProcess transaction,
 //	@Description	funds, signs (with the organization signer), submits and confirms it. Requires
-//	@Description	Manager/Admin role. Idempotent: if the draft is already published its on-chain id
+//	@Description	Admin role. Idempotent: if the draft is already published its on-chain id
 //	@Description	is returned without sending a new transaction.
 //	@Tags			process
 //	@Accept			json
@@ -414,9 +414,11 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// permission: Manager or Admin of the owning organization
-	if !user.HasRoleFor(draft.OrgAddress, db.ManagerRole) && !user.HasRoleFor(draft.OrgAddress, db.AdminRole) {
-		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization that owns this process").Write(w)
+	// permission: Admin of the owning organization. Publishing maps to a NEW_PROCESS
+	// tx, which subscriptions.HasTxPermission requires Admin for, so we enforce the
+	// same role here rather than letting a Manager pass and be rejected downstream.
+	if !user.HasRoleFor(draft.OrgAddress, db.AdminRole) {
+		errors.ErrUnauthorized.Withf("user is not admin of the organization that owns this process").Write(w)
 		return
 	}
 

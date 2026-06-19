@@ -337,6 +337,9 @@ func (p *Subscriptions) EffectiveIntegratorLimits(org *db.Organization) (db.Inte
 	if org.IntegratorLimits != nil {
 		return *org.IntegratorLimits, nil
 	}
+	if org.Subscription.PlanID == 0 {
+		return db.IntegratorLimits{}, errors.ErrPlanNotFound.With("organization has no subscription plan")
+	}
 	plan, err := p.db.Plan(org.Subscription.PlanID)
 	if err != nil {
 		return db.IntegratorLimits{}, fmt.Errorf("could not get subscription plan: %w", err)

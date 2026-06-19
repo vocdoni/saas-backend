@@ -203,6 +203,12 @@ func TestEffectiveIntegratorLimits(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(limits, qt.DeepEquals, mockDB.plans[1].IntegratorLimits)
 
+	// no override and no plan (PlanID==0) returns a typed ErrPlanNotFound, not a 500
+	_, err = subs.EffectiveIntegratorLimits(&db.Organization{
+		Subscription: db.OrganizationSubscription{PlanID: 0},
+	})
+	c.Assert(err, qt.ErrorIs, errors.ErrPlanNotFound)
+
 	// a plan lookup failure is wrapped
 	_, err = subs.EffectiveIntegratorLimits(&db.Organization{
 		Subscription: db.OrganizationSubscription{PlanID: 99},

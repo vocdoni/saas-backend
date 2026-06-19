@@ -492,10 +492,11 @@ type IntegratorUsage struct {
 }
 
 // IntegratorInfoResponse is returned by GET /organizations/{address}/integrator.
+// Limits is only present when Enabled is true.
 type IntegratorInfoResponse struct {
-	Enabled bool                `json:"enabled"`
-	Limits  db.IntegratorLimits `json:"limits"`
-	Usage   IntegratorUsage     `json:"usage"`
+	Enabled bool                 `json:"enabled"`
+	Limits  *db.IntegratorLimits `json:"limits,omitempty"`
+	Usage   IntegratorUsage      `json:"usage"`
 }
 
 // OrganizationSubscriptionInfo provides detailed information about an organization's subscription.

@@ -4043,7 +4043,7 @@ paths:
         Publishes an existing draft process (created via POST /process) as an on-chain
         election. The backend builds the election metadata and NewProcess transaction,
         funds, signs (with the organization signer), submits and confirms it. Requires
-        Manager/Admin role. Idempotent: if the draft is already published its on-chain id
+        Admin role. Idempotent: if the draft is already published its on-chain id
         is returned without sending a new transaction.
       parameters:
       - description: Draft process ID
@@ -4752,8 +4752,9 @@ paths:
       - storage
   /storage/{objectName}:
     get:
-      description: Download an image inline. Retrieves the object from storage and
-        displays it in the browser.
+      description: |-
+        Download a stored object (image or JSON) inline. Retrieves the object from storage and
+        serves it with its stored content type.
       parameters:
       - description: Object name
         in: path
@@ -4763,9 +4764,10 @@ paths:
       produces:
       - image/jpeg
       - image/png
+      - application/json
       responses:
         "200":
-          description: Image file
+          description: Object contents
           schema:
             type: file
         "400":
@@ -4780,7 +4782,7 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
-      summary: Download an image
+      summary: Download a stored object
       tags:
       - storage
   /subscriptions/{address}/portal:
