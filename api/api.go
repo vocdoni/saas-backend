@@ -115,6 +115,7 @@ type API struct {
 	csp             *csp.CSP
 	oauthServiceURL string
 	stripeHandlers  *StripeHandlers
+	txQueue         chan txTask
 }
 
 // New creates a new API HTTP server. It does not start the server. Use Start() for that.
@@ -127,7 +128,7 @@ func New(conf *Config) *API {
 		conf.ObjectStorage.ServerURL = conf.ServerURL
 	}
 
-	return &API{
+	a := &API{
 		db:              conf.DB,
 		auth:            jwtauth.New("HS256", []byte(conf.Secret), nil),
 		host:            conf.Host,
@@ -145,6 +146,8 @@ func New(conf *Config) *API {
 		csp:             conf.CSP,
 		oauthServiceURL: conf.OAuthServiceURL,
 	}
+	a.startTxQueue()
+	return a
 }
 
 // Start starts the API HTTP server (non blocking).
@@ -298,6 +301,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, subscriptionsWebhook, a.stripeHandlers.HandleWebhook)
 		handle(r, http.MethodGet, objectStorageDownloadTypedEndpoint, a.objectStorage.DownloadImageInlineHandler)
 		handle(r, http.MethodGet, censusIDEndpoint, a.censusInfoHandler)
+		handle(r, http.MethodGet, jobStatusEndpoint, a.jobStatusHandler)
 		handle(r, http.MethodGet, processEndpoint, a.processInfoHandler)
 		handle(r, http.MethodPost, processVoteEndpoint, a.relayVoteHandler)
 		handle(r, http.MethodGet, processResultsEndpoint, a.processResultsHandler)

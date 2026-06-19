@@ -578,9 +578,36 @@ const (
 	JobTypeOrgMembers JobType = "org_members"
 	// JobTypeCensusParticipants represents census participant import jobs
 	JobTypeCensusParticipants JobType = "census_participants"
+	// JobTypePublishProcess represents a draft-process publish (NEW_PROCESS) tx job
+	JobTypePublishProcess JobType = "publish_process"
+	// JobTypeSetProcessStatus represents a SET_PROCESS_STATUS tx job
+	JobTypeSetProcessStatus JobType = "set_process_status"
+	// JobTypeRelayVote represents a vote-relay tx job
+	JobTypeRelayVote JobType = "relay_vote"
 )
 
-// Job represents a persistent import job with its results and errors.
+// JobStatus is the lifecycle state of a transaction job (see CreateTxJob/SetJobStatus).
+type JobStatus string
+
+const (
+	// JobStatusPending means the tx has been enqueued but not yet confirmed on chain
+	JobStatusPending JobStatus = "pending"
+	// JobStatusCompleted means the tx was submitted and confirmed on chain
+	JobStatusCompleted JobStatus = "completed"
+	// JobStatusFailed means the tx submission/confirmation failed
+	JobStatusFailed JobStatus = "failed"
+)
+
+// JobResult carries the public on-chain outcome of a transaction job. Fields are
+// populated depending on the job type (publish → Address+Status; status → Status;
+// vote → VoteID) and are omitted when empty.
+type JobResult struct {
+	Address internal.HexBytes `json:"address,omitempty" bson:"address,omitempty" swaggertype:"string" example:"deadbeef"`
+	VoteID  internal.HexBytes `json:"voteID,omitempty" bson:"voteID,omitempty" swaggertype:"string" example:"deadbeef"`
+	Status  string            `json:"status,omitempty" bson:"status,omitempty"`
+}
+
+// Job represents a persistent import or transaction job with its results and errors.
 // This allows clients to query job status and errors even after server restarts.
 type Job struct {
 	ID          primitive.ObjectID `json:"id" bson:"_id"`
@@ -592,4 +619,8 @@ type Job struct {
 	Errors      []string           `json:"errors" bson:"errors"`         // All errors encountered
 	CreatedAt   time.Time          `json:"createdAt" bson:"createdAt"`
 	CompletedAt time.Time          `json:"completedAt" bson:"completedAt"`
+	// Transaction-job fields (JobTypePublishProcess/SetProcessStatus/RelayVote)
+	Status JobStatus  `json:"status,omitempty" bson:"status,omitempty"` // pending|completed|failed
+	Result *JobResult `json:"result,omitempty" bson:"result,omitempty"` // on-chain outcome when completed
+	Error  string     `json:"error,omitempty" bson:"error,omitempty"`   // failure reason when failed
 }

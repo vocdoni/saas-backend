@@ -92,12 +92,12 @@ func TestProcessStatusLifecycle(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(draftID.IsZero(), qt.IsFalse)
 
-	// publish to obtain the on-chain process address
-	published := requestAndParse[apicommon.PublishProcessResponse](
-		t, http.MethodPost, token, nil, "process", draftID.Hex(), "publish")
-	c.Assert(len(published.Address) > 0, qt.IsTrue)
-	c.Assert(published.Status, qt.Equals, "READY")
-	addr := published.Address
+	// publish (async) to obtain the on-chain process address
+	pubJob := enqueueAndPollJob(t, http.MethodPost, token, nil, "process", draftID.Hex(), "publish")
+	c.Assert(pubJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", pubJob.Error))
+	c.Assert(len(pubJob.Result.Address) > 0, qt.IsTrue)
+	c.Assert(pubJob.Result.Status, qt.Equals, "READY")
+	addr := pubJob.Result.Address
 
 	// drive the status transitions and assert the chain reflects each change. An
 	// ended election is auto-advanced to "RESULTS" by the chain once tallied, so
@@ -112,9 +112,10 @@ func TestProcessStatusLifecycle(t *testing.T) {
 		{"ended", "ENDED", []string{"ENDED", "RESULTS"}},
 	}
 	for _, tr := range transitions {
-		resp := requestAndParse[apicommon.SetProcessStatusResponse](t, http.MethodPut, token,
+		job := enqueueAndPollJob(t, http.MethodPut, token,
 			&apicommon.SetProcessStatusRequest{Status: tr.request}, "process", addr.String(), "status")
-		c.Assert(resp.Status, qt.Equals, tr.respStatus)
+		c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", job.Error))
+		c.Assert(job.Result.Status, qt.Equals, tr.respStatus)
 		waitForElectionStatus(t, addr, tr.chainStatus...)
 	}
 }
@@ -136,10 +137,11 @@ func testRelayVoteRequest(t *testing.T, signer *ethereum.SignKeys, processID int
 	c.Assert(err, qt.IsNil)
 	stx, err := proto.Marshal(&models.SignedTx{Tx: txBytes, Signature: signature})
 	c.Assert(err, qt.IsNil)
-	resp := requestAndParse[apicommon.RelayVoteResponse](t, http.MethodPost, "",
+	job := enqueueAndPollJob(t, http.MethodPost, "",
 		&apicommon.RelayVoteRequest{TxPayload: stx}, "process", processID.String(), "vote")
-	c.Assert(resp.VoteID, qt.Not(qt.HasLen), 0)
-	return resp.VoteID
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", job.Error))
+	c.Assert(job.Result.VoteID, qt.Not(qt.HasLen), 0)
+	return job.Result.VoteID
 }
 
 // TestRelayVote builds the full CSP voting setup (org, census, bundle, on-chain

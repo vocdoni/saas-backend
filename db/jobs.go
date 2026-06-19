@@ -75,6 +75,47 @@ func (ms *MongoStorage) CreateJob(jobID string, jobType JobType, orgAddress comm
 	return ms.SetJob(job)
 }
 
+// CreateTxJob inserts a new transaction job in the pending state. Unlike CreateJob
+// (import jobs), it carries no Total/Added counters; the outcome is recorded later
+// via SetJobStatus.
+func (ms *MongoStorage) CreateTxJob(jobID string, jobType JobType, orgAddress common.Address) error {
+	return ms.SetJob(&Job{
+		JobID:      jobID,
+		Type:       jobType,
+		OrgAddress: orgAddress,
+		Errors:     []string{},
+		Status:     JobStatusPending,
+		CreatedAt:  time.Now(),
+	})
+}
+
+// SetJobStatus records the terminal outcome of a transaction job. On success pass
+// the result and an empty errMsg; on failure pass a nil result and the error message.
+func (ms *MongoStorage) SetJobStatus(jobID string, status JobStatus, result *JobResult, errMsg string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+
+	set := bson.M{
+		"status":      status,
+		"completedAt": time.Now(),
+	}
+	if result != nil {
+		set["result"] = result
+	}
+	if errMsg != "" {
+		set["error"] = errMsg
+	}
+
+	_, err := ms.jobs.UpdateOne(ctx, bson.M{"jobId": jobID}, bson.M{"$set": set})
+	if err != nil {
+		return fmt.Errorf("failed to set job status: %w", err)
+	}
+	return nil
+}
+
 // CompleteJob updates a job with final results when it completes.
 func (ms *MongoStorage) CompleteJob(jobID string, added int, errors []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)

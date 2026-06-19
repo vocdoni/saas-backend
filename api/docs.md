@@ -77,6 +77,8 @@
   - [🔐 Process Authentication](#-process-authentication)
   - [🔒 Two-Factor Authentication](#-two-factor-authentication)
   - [✍️ Two-Factor Signing](#-two-factor-signing)
+  - [⛓️ Async on-chain transactions](#-async-on-chain-transactions-publish--status--vote)
+  - [🔍 Poll job status](#-poll-job-status)
 - [📦 Process Bundles](#-process-bundles)
   - [🆕 Create Process Bundle](#-create-process-bundle)
   - [➕ Add Processes to Bundle](#-add-processes-to-bundle)
@@ -2376,6 +2378,60 @@ Signs a payload using two-factor authentication. Requires a valid tokenR obtaine
 | `400` | `40004` | `malformed JSON body` |
 | `400` | `40010` | `malformed URL parameter` |
 | `401` | `40001` | `user not authorized` |
+| `500` | `50002` | `internal server error` |
+
+### ⛓️ Async on-chain transactions (publish / status / vote)
+
+The endpoints that send an on-chain transaction — publish a draft process, change a
+process status, and relay a vote — are **asynchronous**. The request is validated,
+funded and signed synchronously (so malformed, unauthorized or over-quota requests
+still get an immediate `4xx`), then the on-chain submit + confirmation runs on a
+bounded background worker pool. The handler responds `202 Accepted` with a job id and
+a `Location` header; the client polls `GET /jobs/{jobId}` until the job completes.
+
+If the worker queue is saturated the handler returns `503` and the client should retry.
+
+* **Publish a draft process** — `POST /process/{processId}/publish` (Admin role).
+  Returns `202` + `{ "jobId": "<hex>" }`. On success the job result carries the on-chain
+  process id and `status: "READY"`. A second publish while one is in flight returns `409`.
+  If the draft is already published the endpoint returns `200` with the on-chain id
+  (idempotent, no transaction sent).
+* **Change process status** — `PUT /process/{processId}/status` (Manager/Admin).
+  Body `{ "status": "ready|paused|ended|canceled" }`. Returns `202` + `{ "jobId" }`.
+* **Relay a signed vote** — `POST /process/{processId}/vote` (public).
+  Body `{ "txPayload": "<hex>" }`. Returns `202` + `{ "jobId" }`; the job result carries
+  the vote nullifier (`voteID`).
+
+#### 🔍 Poll job status
+
+* **Path** `/jobs/{jobId}`
+* **Method** `GET`
+* **Description**
+  Returns the current state of an async transaction job. Public: the 32-byte job id is
+  the capability and the result contains only public on-chain data. Always responds
+  `200`; the `status` field carries the lifecycle state.
+
+* **Response** (`status` is one of `pending`, `completed`, `failed`)
+```json
+{
+  "jobId": "a1b2c3...",
+  "type": "publish_process",
+  "status": "completed",
+  "result": {
+    "address": "deadbeef",   // on-chain process id (publish)
+    "voteID": "deadbeef",    // vote nullifier (relay vote)
+    "status": "READY"        // process status (publish / status change)
+  },
+  "error": ""                // failure reason when status is "failed"
+}
+```
+
+* **Errors**
+
+| HTTP Status | Error code | Message |
+|:---:|:---:|:---|
+| `400` | `40010` | `malformed URL parameter` |
+| `404` | `40026` | `job not found` |
 | `500` | `50002` | `internal server error` |
 
 ## 📦 Process Bundles

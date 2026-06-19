@@ -372,19 +372,24 @@ func (a *API) deleteProcessHandler(w http.ResponseWriter, r *http.Request) {
 //	@Summary		Publish a draft process as an on-chain election
 //	@Description	Publishes an existing draft process (created via POST /process) as an on-chain
 //	@Description	election. The backend builds the election metadata and NewProcess transaction,
-//	@Description	funds, signs (with the organization signer), submits and confirms it. Requires
-//	@Description	Admin role. Idempotent: if the draft is already published its on-chain id
-//	@Description	is returned without sending a new transaction.
+//	@Description	funds and signs it (with the organization signer) synchronously, then submits and
+//	@Description	confirms it on a background worker; the call returns 202 with a job id. Poll GET
+//	@Description	/jobs/{jobId} for the resulting on-chain id. Requires Admin role. Idempotent: if
+//	@Description	the draft is already published its on-chain id is returned with 200 without sending
+//	@Description	a new transaction.
 //	@Tags			process
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			processId	path		string								true	"Draft process ID"
-//	@Success		200			{object}	apicommon.PublishProcessResponse	"On-chain process id and status"
+//	@Success		202			{object}	apicommon.EnqueuedResponse			"Publish accepted; poll GET /jobs/{jobId}"
+//	@Success		200			{object}	apicommon.PublishProcessResponse	"Already published (idempotent): on-chain id and status"
 //	@Failure		400			{object}	errors.Error						"Invalid input data"
 //	@Failure		401			{object}	errors.Error						"Unauthorized"
 //	@Failure		404			{object}	errors.Error						"Process not found"
+//	@Failure		409			{object}	errors.Error						"A publish is already in progress for this draft"
 //	@Failure		500			{object}	errors.Error						"Internal server error"
+//	@Failure		503			{object}	errors.Error						"Transaction queue is full"
 //	@Router			/process/{processId}/publish [post]
 func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 	processID := chi.URLParam(r, "processId")
@@ -428,6 +433,13 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// in-flight guard: a publish has already been enqueued for this draft and is being
+	// submitted by a worker. Reject the duplicate rather than send a second NEW_PROCESS tx.
+	if draft.Status == "PUBLISHING" {
+		errors.ErrPublishInProgress.Write(w)
+		return
+	}
+
 	// a draft must carry the high-level election definition to be publishable.
 	// the on-chain census root is always the CSP public key, so the draft census
 	// (member list used later by the CSP bundle flow) is not required here.
@@ -452,6 +464,7 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 	// rolled back (deferred) unless the publish commits. Test-sized elections are exempt
 	// from the integrator quota, mirroring the per-org Processes counter exemption below.
 	managedReserved := false
+	var integratorAddr common.Address
 	nonTestSized := draft.ElectionParams.MaxCensusSize > uint64(db.TestMaxCensusSize)
 	if org.ManagedBy != (common.Address{}) && nonTestSized {
 		integrator, err := a.db.Organization(org.ManagedBy)
@@ -478,15 +491,18 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		managedReserved = true
+		integratorAddr = integrator.Address
+		// roll back the reservation if the publish is not handed to a worker (any
+		// synchronous failure below, or a full queue). Once enqueued the worker owns
+		// the reservation outcome and clears managedReserved.
 		defer func() {
-			// roll back the reservation if the publish did not commit
 			if !managedReserved {
 				return
 			}
-			if e := a.db.AddOrganizationManagedProcesses(integrator.Address, -1); e != nil {
+			if e := a.db.AddOrganizationManagedProcesses(integratorAddr, -1); e != nil {
 				log.Warnw("could not roll back managed processes counter", "error", e)
 			}
-			if e := a.db.AddOrganizationManagedCensusSize(integrator.Address,
+			if e := a.db.AddOrganizationManagedCensusSize(integratorAddr,
 				-int64(draft.ElectionParams.MaxCensusSize)); e != nil {
 				log.Warnw("could not roll back managed census counter", "error", e)
 			}
@@ -561,37 +577,73 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// submit + wait; data is the on-chain process id
-	data, err := a.account.SubmitSignedTx(stx)
-	if err != nil {
-		errors.ErrVochainRequestFailed.WithErr(err).Write(w)
-		return
-	}
-
-	// persist the published state on the draft (same _id) right after the on-chain
-	// process exists. the idempotency guard at the top keys off draft.Address, so a
-	// later failure cannot lead a retry to create a duplicate election.
-	draft.Address = internal.HexBytes(data)
-	draft.Status = "READY"
-	draft.PublishedAt = time.Now()
+	// mark the draft in-flight so a concurrent publish is rejected with 409 and the state
+	// is durable. ponytail: a worker crash leaves the draft stuck in PUBLISHING (needs a
+	// manual reset) — documented v1 ceiling, no crash recovery.
+	prevStatus := draft.Status
+	draft.Status = "PUBLISHING"
 	if _, err := a.db.SetProcess(draft); err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	// the on-chain election now exists and the draft is published: commit the integrator
-	// reservation so the deferred rollback above does not undo it.
-	managedReserved = false
 
-	// the org's own Processes counter is best-effort: the election already exists on-chain
-	// and the draft is marked published, so a counter failure must not fail the request (the
-	// idempotency guard would otherwise turn away any retry without re-counting). The atomic
-	// $inc mirrors api/transaction.go and avoids losing an update against a concurrent writer;
-	// counter nuance: only count non-test-sized elections.
-	if nonTestSized {
-		if err := a.db.IncrementOrganizationProcessesCounter(org.Address); err != nil {
-			log.Warnw("could not update organization process counter", "error", err)
-		}
+	jobID, err := apicommon.NewJobID()
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if err := a.db.CreateTxJob(jobID, db.JobTypePublishProcess, org.Address); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
 	}
 
-	apicommon.HTTPWriteJSON(w, &apicommon.PublishProcessResponse{Address: draft.Address, Status: draft.Status})
+	// submit + confirm on the worker pool. On success the draft becomes READY with its
+	// on-chain id; on failure the draft status is reset and any managed reservation is
+	// released. The idempotency guard keys off draft.Address, so a retry after failure
+	// cannot create a duplicate election.
+	reserved := managedReserved
+	censusSize := int64(draft.ElectionParams.MaxCensusSize)
+	if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
+		data, err := a.account.SubmitSignedTx(stx)
+		if err != nil {
+			draft.Status = prevStatus
+			if _, e := a.db.SetProcess(draft); e != nil {
+				log.Warnw("could not reset draft status after failed publish", "error", e)
+			}
+			if reserved {
+				if e := a.db.AddOrganizationManagedProcesses(integratorAddr, -1); e != nil {
+					log.Warnw("could not roll back managed processes counter", "error", e)
+				}
+				if e := a.db.AddOrganizationManagedCensusSize(integratorAddr, -censusSize); e != nil {
+					log.Warnw("could not roll back managed census counter", "error", e)
+				}
+			}
+			return nil, err
+		}
+		draft.Address = internal.HexBytes(data)
+		draft.Status = "READY"
+		draft.PublishedAt = time.Now()
+		if _, err := a.db.SetProcess(draft); err != nil {
+			return nil, err
+		}
+		// best-effort per-org Processes counter; only count non-test-sized elections.
+		if nonTestSized {
+			if err := a.db.IncrementOrganizationProcessesCounter(org.Address); err != nil {
+				log.Warnw("could not update organization process counter", "error", err)
+			}
+		}
+		return &db.JobResult{Address: draft.Address, Status: "READY"}, nil
+	}}) {
+		// full queue: undo the in-flight guard; the deferred rollback releases the reservation
+		draft.Status = prevStatus
+		if _, e := a.db.SetProcess(draft); e != nil {
+			log.Warnw("could not reset draft status after full queue", "error", e)
+		}
+		errors.ErrTxQueueFull.Write(w)
+		return
+	}
+	// handed to a worker: it now owns the reservation commit/rollback
+	managedReserved = false
+
+	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, &apicommon.EnqueuedResponse{JobID: jobID})
 }
