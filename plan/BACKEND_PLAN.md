@@ -76,7 +76,7 @@ api/process.go (handlers)
       ▼
 account.Account  (new methods, alongside tx_funder.go / account.go)
    ├─ CreateOrgAccount(org)                       // idempotent CreateAccount + fund + sign + submit + wait
-   ├─ BuildNewProcessTx(org, draft, metaURL)      // construct models.Tx_NewProcess
+   ├─ BuildNewProcessTx(org, draft, metaURL)      // construct models.Tx_NewProcess (NewProcessParams carries CensusOrigin)
    ├─ BuildSetProcessStatusTx(processId, status)  // construct models.Tx_SetProcess
    ├─ SubmitSignedTx(stx) (data, error)           // apiclient submit + WaitUntilTxIsMined
    ├─ RelayVote(processId, signedTxBytes)         // verify Vote+process, submit, return voteID
@@ -161,6 +161,9 @@ can create/manage organizations for its clients through the API.
 - Add `ElectionParams` (+ `Question`, `Choice`, `VoteType`, `ElectionType`, `ElectionTypeMetadata`,
   and a `MultiLangString` helper): the high-level election inputs the publish handler maps into the
   on-chain `models.Process`.
+- Add the non-CSP census types to `db.CensusType` — `CensusTypeWeighted="weighted"` and
+  `CensusTypeZKWeighted="zkweighted"` — alongside the existing CSP types. For these, census
+  participants carry `{key: address/pubkey, weight}` instead of email/phone (see Phase 6).
 - Extend `Organization` (all optional/zero-valued):
   ```go
   ManagedBy        common.Address    `json:"managedBy,omitempty" bson:"managedBy,omitempty"`               // integrator that owns this client org
@@ -227,14 +230,18 @@ processStatusEndpoint        = "/process/{processId}/status"    // PUT
 processVoteEndpoint          = "/process/{processId}/vote"      // POST  (public)
 processResultsEndpoint       = "/process/{processId}/results"   // GET   (public)
 processMetadataEndpoint      = "/process/{processId}/metadata"  // GET   (public)
+processCensusProofEndpoint   = "/process/{processId}/census/proof"  // GET   (public; Phase 6)
+processCensusEndpoint        = "/process/{processId}/census"        // PUT   (dynamic add; Phase 6)
 managedOrganizationsEndpoint = "/organizations/{address}/managed"     // POST create, GET list (integrator)
 integratorEndpoint           = "/organizations/{address}/integrator"  // GET quota + usage
 ```
-`api/api.go` — register publish/status, managed-org create/list, and integrator usage in the
-**protected** group (`jwtauth.Verifier` + `a.authenticator`); register vote + results + metadata in
-the **public** group (next to the CSP voter routes). Election handlers in `api/process.go` (relay in
-a small `api/process_vote.go`); integrator/managed-org handlers in `api/organizations.go`. There is
-**no** org-account endpoint — account creation is internal to org creation.
+`api/api.go` — register publish/status, managed-org create/list, integrator usage, and the dynamic
+census add (`PUT .../census`, Phase 6) in the **protected** group (`jwtauth.Verifier` +
+`a.authenticator`); register vote + results + metadata + the census-proof proxy
+(`GET .../census/proof`, Phase 6) in the **public** group (next to the CSP voter routes). Election
+handlers in `api/process.go` (relay in a small `api/process_vote.go`); integrator/managed-org
+handlers in `api/organizations.go`. There is **no** org-account endpoint — account creation is
+internal to org creation.
 
 **Path-param naming (do not be misled by the docs):** the chi param is literally `processId` in
 *every* `/process/{…}` route (matching the existing `processEndpoint`). Read it with
@@ -269,7 +276,10 @@ existing `GET /process/{processId}`, **on-chain election id** for `status`/`vote
    + census present.
 2. Build `ElectionMetadata` from `electionParams`; store content-addressed in `objectstorage/`;
    that `https://` URL becomes `Process.Metadata` (also served by `GET .../metadata`).
-3. Resolve census: origin = CSP, `CensusRoot` = CSP pubkey, `CensusURI` = SaaS CSP endpoint.
+3. Resolve census: this is the **CSP case** of a now-general census-origin switch (generalized in
+   Phase 6) — origin = `OFF_CHAIN_CA`, `CensusRoot` = CSP pubkey, `CensusURI` = SaaS CSP endpoint.
+   For the non-CSP (`weighted`/`zkweighted`) types the root/URI instead come from the published
+   on-chain census.
 4. `BuildNewProcessTx` → `FundTransaction` → `SignTransaction(orgSigner)` → `SubmitSignedTx` →
    `WaitUntilTxIsMined` → on-chain `processId` (the `data` returned by the submit).
 5. Quota: reuse `HasTxPermission(NEW_PROCESS)` + counter bump. **Replicate the existing nuance**
@@ -317,6 +327,66 @@ existing `GET /process/{processId}`, **on-chain election id** for `status`/`vote
 - **Tests:** non-integrator is rejected from managed endpoints; integrator creates managed orgs up
   to `MaxManagedOrgs` then is blocked; publishing under a managed org enforces per-org + aggregate
   caps and bumps integrator counters; quota override beats plan limits.
+
+### Phase 6 — non-CSP (merkle / weighted / dynamic) elections
+
+So far every census in this plan is **CSP** (origin `OFF_CHAIN_CA`, root = CSP pubkey). The
+vocdoni.app UI, however, still creates **non-CSP** elections — `weighted` and `zkweighted`
+(anonymous) censuses with an explicit participant list — by talking to the Vochain via
+`@vocdoni/sdk` directly, **bypassing the backend**. For the UI to use **only** the backend, the
+managed path must also create these elections.
+
+**No new crypto, nothing to vendor — reference only.** Everything Phase 6 needs is already exposed
+by the `apiclient.HTTPclient` the backend already wraps (`account.Account.client`, from the existing
+`go.vocdoni.io/dvote` dependency): census build/publish/proof and the election census setters. Proof
+**verification** happens on-chain (node side); the backend only **generates** census proofs and
+**relays** votes — it never holds a voter key and never decodes a ballot. So Phase 6 is **pure
+wiring**: no import beyond the dependency already in `go.mod`, no vendored package, no new crypto.
+
+Census taxonomy (the real on-chain types — there is no plain "tree" type; all censuses are weighted
+now):
+
+| `db.CensusType` | Anonymous | On-chain `CensusOrigin`     | Root / participants |
+|-----------------|-----------|----------------------------|---------------------|
+| `weighted`      | no        | `OFF_CHAIN_TREE_WEIGHTED`  | merkle root of `{key, weight}` participants |
+| `zkweighted`    | yes (Poseidon hash; `EnvelopeType.Anonymous=true`) | `OFF_CHAIN_TREE_WEIGHTED` | merkle root of `{key, weight}` participants |
+| `csp`           | no        | `OFF_CHAIN_CA`             | CSP pubkey (existing path, unchanged) |
+
+apiclient methods reused (all already available on the wrapped client, signatures stable):
+`NewCensus(censusType)` → root id; `CensusAddParticipants(censusID, *api.CensusParticipants)`
+(participants are `{Key, Weight}`); `CensusPublish(censusID)` → `(root HexBytes, uri string)`;
+`CensusGenProof(censusID, voterKey)` → `*CensusProof{Root, Proof, LeafValue, Siblings, LeafWeight}`;
+`SetElectionCensus(electionID, api.ElectionCensus)` / `SetElectionCensusSize(electionID, newSize)`.
+
+**Voter model (decided):** the voter signs the ballot **client-side**; the backend issues the census
+proof and relays. The backend never holds the voter key and never decodes the ballot — identical
+trust boundary to the CSP path, only the authorization artifact differs (merkle proof vs CSP blind
+signature).
+
+Six changes:
+
+1. **`db.CensusType`:** add `CensusTypeWeighted="weighted"` and `CensusTypeZKWeighted="zkweighted"`
+   (also done in the data-model section above). For these, census participants carry
+   `{key: address/pubkey, weight}` instead of email/phone.
+2. **`publishCensusHandler`:** for the new types, build the on-chain census
+   (`NewCensus` → `CensusAddParticipants` → `CensusPublish`) and store the returned **root + URI**,
+   instead of stuffing the CSP pubkey. The CSP path is unchanged.
+3. **`BuildNewProcessTx` / `NewProcessParams`:** gain a `CensusOrigin` field; the root/URI come from
+   the published census (CSP path unchanged). Anonymous (`zkweighted`) additionally sets
+   `EnvelopeType.Anonymous`.
+4. **`GET /process/{processId}/census/proof?key=<addr>`** (new, public): proxies `CensusGenProof`.
+   The voter fetches the proof, builds + signs the envelope client-side, then posts it.
+5. **`POST /process/{processId}/vote`** (existing relay, Phase 3): generalize so it accepts a
+   CSP-authorized envelope **OR** a merkle-proof-carrying envelope, and relays either. It still
+   verifies the tx is a `Vote` for `processId` and **never decodes the ballot**.
+6. **`PUT /process/{processId}/census`** (new): dynamic add — `CensusAddParticipants` +
+   `SetElectionCensusSize`. Gated behind the election's `DynamicCensus` mode flag.
+
+- **Tests:** publish a `weighted` election against Voconed; fetch a proof via the new GET; build +
+  sign a vote envelope (merkle proof instead of CSP) and relay it; assert the nullifier on chain. A
+  `zkweighted` election sets `EnvelopeType.Anonymous`. Dynamic add grows the census and bumps
+  `SetElectionCensusSize` (rejected when `DynamicCensus` is off). The CSP path (Phase 2/3 tests)
+  stays green.
 
 ## Error handling & idempotency
 

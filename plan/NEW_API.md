@@ -25,8 +25,10 @@ Integrators additionally create and manage client organizations under a quota.
 | `PUT`  | `/process/{draftId}` (+ `electionParams`) | Bearer | `censusId`, `metadata`, optional `electionParams` | Update a draft. Same optional `electionParams` field. |
 | `POST` | `/process/{draftId}/publish` | Bearer (Manager/Admin) | optional `{ startDate }` (overrides the draft's start) | Publish a draft to the chain: forge → fund → sign → submit → confirm `NewProcess`. **Async:** validates synchronously, returns `202` + `jobId`; poll `GET /jobs/{jobId}` for the `processId`. |
 | `PUT`  | `/process/{processId}/status` | Bearer (Manager/Admin) | `{ status }` (`ready`/`paused`/`ended`/`canceled`) | Change lifecycle status. **Async:** returns `202` + `jobId`. |
-| `POST` | `/process/{processId}/vote` | Public | `{ txPayload }` (hex of the signed `Vote` envelope) | Relay an already-signed vote envelope to the chain. **Async:** returns `202` + `jobId`; poll for the `voteID` receipt. |
-| `GET`  | `/jobs/{jobId}` | Public (capability) | — (none) | Poll an async tx job (publish/status/vote). Always `200`; `status` is `pending`/`completed`/`failed`, with the on-chain `result` when completed. |
+| `PUT`  | `/process/{processId}/census` | Bearer (Manager/Admin) | `{ participants }` (`{key, weight}[]`) | **Non-CSP only.** Dynamic-census add: append participants and grow the election census size. Gated behind the `DynamicCensus` mode flag. **Async:** returns `202` + `jobId`; poll for the new census size. |
+| `POST` | `/process/{processId}/vote` | Public | `{ txPayload }` (hex of the signed `Vote` envelope) | Relay an already-signed vote envelope to the chain — a **CSP- or proof-authorized** envelope. **Async:** returns `202` + `jobId`; poll for the `voteID` receipt. |
+| `GET`  | `/process/{processId}/census/proof` | Public | `?key=<addr>` | **Non-CSP only.** Proxy a Merkle census proof for the voter key, so the voter can build + sign the envelope. |
+| `GET`  | `/jobs/{jobId}` | Public (capability) | — (none) | Poll an async tx job (publish/status/census/vote). Always `200`; `status` is `pending`/`completed`/`failed`, with the on-chain `result` when completed. |
 | `GET`  | `/process/{processId}/results` | Public | — (none) | Read live status, vote count and tally. |
 | `GET`  | `/process/{processId}/metadata` | Public | — (none) | Read the public election metadata (title, questions, choices). |
 | `POST` | `/organizations/{address}/managed` | Bearer (Admin of integrator) | client org info + optional `ownerEmail` | **Integrator only.** Create a first-class client org managed by `{address}` (forges its account). Quota-enforced. |
@@ -155,10 +157,26 @@ Mapping to the on-chain `models.Process` (built server-side):
 | `voteType.*`                         | `Process.VoteOptions` (maxCount/maxValue/costExponent/maxVoteOverwrites) |
 | `electionType.anonymous/encrypted`  | `Process.EnvelopeType` (Anonymous/EncryptedVotes)    |
 | `electionType.interruptible`        | `Process.Mode.Interruptible`                         |
-| census (from `censusId`)            | `Process.CensusOrigin = OFF_CHAIN_CA` (CSP), `CensusRoot = CSP pubkey`, `CensusURI = SaaS CSP endpoint` |
+| census (from `censusId`)            | `Process.CensusOrigin`, `CensusRoot`, `CensusURI` — depend on the census type (see table below) |
 
-Census origin is always **CSP** for SaaS censuses (`auth`/`mail`/`sms`/`sms_or_mail`), so
-there is no Merkle tree to publish — the CSP public key is the census root.
+### Census types → on-chain origin
+
+The census `type` selects the on-chain `CensusOrigin`, the root, and what a participant record
+carries. The SaaS supports three (there is no plain "tree" type — all censuses are weighted now):
+
+| Census type   | Anonymous | `CensusOrigin`            | Root / participants |
+|---------------|-----------|--------------------------|---------------------|
+| `csp`         | no        | `OFF_CHAIN_CA`           | CSP public key is the root — no Merkle tree to publish; participant = email/phone identity |
+| `weighted`    | no        | `OFF_CHAIN_TREE_WEIGHTED`| Merkle root of `{key: address/pubkey, weight}` participants, published by the SaaS |
+| `zkweighted`  | yes (sets `electionType.anonymous`) | `OFF_CHAIN_TREE_WEIGHTED` | same as `weighted`, but anonymous (Poseidon) |
+
+- **CSP** (`auth`/`mail`/`sms`/`sms_or_mail`) is the existing path: the CSP public key is the
+  census root, so there is no tree to publish, and the voter is authorized by a CSP blind signature.
+- **`weighted` / `zkweighted`** are the **non-CSP (Merkle)** path added in Phase 6: at publish the
+  SaaS builds the on-chain census from the participant list and uses its **published root + URI**;
+  the voter is authorized by a **Merkle census proof** (fetched via §4a) instead of a CSP signature.
+  `zkweighted` additionally sets `EnvelopeType.Anonymous`. The vote relay (§4) accepts either
+  authorization and still never decodes the ballot.
 
 ---
 
@@ -225,6 +243,35 @@ PUT /process/{processId}/status
 
 ---
 
+## 3a. Dynamic census add (non-CSP)
+
+Append participants to a published **non-CSP** (`weighted`/`zkweighted`) census and grow the
+election's census size on chain. The SaaS calls `CensusAddParticipants` then
+`SetElectionCensusSize`. Only valid for elections whose `DynamicCensus` mode flag is set; CSP
+elections (where the root is the CSP pubkey, not a tree) do not support this.
+
+```
+PUT /process/{processId}/census
+```
+
+- **Auth:** Bearer. Manager or Admin of the owning org.
+- **Path:** `processId` — on-chain election ID (hex).
+- **Body:**
+  ```json
+  { "participants": [ { "key": "0x<addr/pubkey>", "weight": "1" } ] }
+  ```
+- **202 Accepted:** participants are validated synchronously; the `CensusAddParticipants` +
+  `SetElectionCensusSize` submit is queued.
+  ```json
+  { "jobId": "<hex job id>" }
+  ```
+  (+ `Location: /jobs/{jobId}`.) Poll the job until `completed`; the result is
+  `{ "censusSize": 5050 }` (the new on-chain census size, set after the SaaS confirms the tx).
+- **Errors:** `400` election is not dynamic / CSP election / empty participants, `401`, `404`
+  process unknown, `503` tx queue full. On-chain failure surfaces on the job as `status: failed`.
+
+---
+
 ## 4. Relay a vote
 
 Submit an already-signed vote envelope to the Vochain. The SaaS **verifies it is a Vote tx
@@ -235,8 +282,10 @@ preserved at the operator).
 POST /process/{processId}/vote
 ```
 
-- **Auth:** Public. The voter is authorized by the CSP proof embedded inside the envelope
-  (obtained via the existing `/process/bundle/{id}/auth|sign` flow).
+- **Auth:** Public. The voter is authorized by the proof embedded inside the envelope — either a
+  **CSP blind signature** (CSP censuses, obtained via the existing `/process/bundle/{id}/auth|sign`
+  flow) **or** a **Merkle census proof** (non-CSP `weighted`/`zkweighted` censuses, obtained via
+  §4a). The relay accepts both and forwards either unchanged; it still never decodes the ballot.
 - **Path:** `processId` — on-chain election ID (hex).
 - **Body:**
   ```json
@@ -258,10 +307,10 @@ POST /process/{processId}/vote
 
 ## Poll an async transaction job
 
-The three endpoints above (publish, status, vote) submit on a bounded background worker pool to keep
-on-chain confirmation (up to ~40s under congestion) off the request path, where it would share the
-router's throttle/timeout budget with the public voter endpoints. Each returns a `jobId`; this single
-endpoint reports the outcome.
+The four endpoints above (publish, status, census add, vote) submit on a bounded background worker
+pool to keep on-chain confirmation (up to ~40s under congestion) off the request path, where it would
+share the router's throttle/timeout budget with the public voter endpoints. Each returns a `jobId`;
+this single endpoint reports the outcome.
 
 ```
 GET /jobs/{jobId}
@@ -275,17 +324,48 @@ GET /jobs/{jobId}
   ```json
   {
     "jobId":  "<hex>",
-    "type":   "publish_process" | "set_process_status" | "relay_vote",
+    "type":   "publish_process" | "set_process_status" | "add_census_participants" | "relay_vote",
     "status": "pending" | "completed" | "failed",
-    "result": { "address": "<hex>", "voteID": "<hex>", "status": "READY" },
+    "result": { "address": "<hex>", "voteID": "<hex>", "status": "READY", "censusSize": 5050 },
     "error":  "<reason, when failed>"
   }
   ```
   `result` is present only when `status` is `completed`, and carries just the fields relevant to the
-  job type (`address`+`status` for publish, `status` for a status change, `voteID` for a vote).
-  `error` is present only when `status` is `failed`.
+  job type (`address`+`status` for publish, `status` for a status change, `censusSize` for a census
+  add, `voteID` for a vote). `error` is present only when `status` is `failed`.
 - **Polling:** clients poll until `status` leaves `pending`. There is no push/webhook.
 - **Errors:** `400` malformed id, `404` unknown job.
+
+---
+
+## 4a. Census proof for a voter (non-CSP)
+
+For **non-CSP** (`weighted`/`zkweighted`) elections the voter is authorized by a **Merkle census
+proof** rather than a CSP blind signature. This endpoint proxies the chain's `CensusGenProof` for
+the given voter key so the voter can assemble + sign the vote envelope client-side; the backend
+never holds the voter key. CSP elections don't use it (their authorization is the CSP signature).
+
+```
+GET /process/{processId}/census/proof?key=<addr>
+```
+
+- **Auth:** Public.
+- **Path:** `processId` — on-chain election ID (hex).
+- **Query:** `key` — the voter's address/public key (hex), as registered in the census.
+- **200 OK:** the census proof for the key, e.g.:
+  ```json
+  {
+    "root":      "<hex census root>",
+    "proof":     "<hex merkle proof>",
+    "leafValue": "<hex>",
+    "siblings":  "<hex>",
+    "weight":    "1"
+  }
+  ```
+  The voter feeds this into the envelope (in place of the CSP `ProofCA`), signs it locally, then
+  posts it to §4.
+- **Errors:** `400` CSP election (no Merkle proof) / missing `key`, `404` key not in census /
+  process unknown, `500` `ErrVochainRequestFailed`.
 
 ---
 
@@ -434,6 +514,7 @@ GET /organizations/{address}/integrator
 
 ## Voter flow end-to-end (with the new SDK)
 
+**CSP census:**
 1. `POST /process/bundle/{bundleId}/auth/0` … `/auth/{step}` — CSP challenge (existing).
 2. `POST /process/bundle/{bundleId}/sign` — CSP blind signature (existing).
 3. The client builds + signs the `Vote` envelope locally using the CSP signature (the only
@@ -442,6 +523,16 @@ GET /organizations/{address}/integrator
 5. `GET /jobs/{jobId}` — poll until `completed`; the result's `voteID` is the vote receipt.
 6. `GET /process/{processId}/results` — **new** read endpoint for live tally.
 
+**Non-CSP (`weighted`/`zkweighted`) census:**
+1. `GET /process/{processId}/census/proof?key=<addr>` — **new** fetch the Merkle census proof for
+   the voter key (§4a).
+2. The client builds + signs the `Vote` envelope locally, embedding the Merkle proof in place of
+   the CSP `ProofCA` (the only client-side crypto).
+3. `POST /process/{processId}/vote` — same relay endpoint; it accepts the proof-authorized envelope,
+   queues it and returns `202` + `jobId`.
+4. `GET /jobs/{jobId}` — poll until `completed`; the result's `voteID` is the vote receipt.
+5. `GET /process/{processId}/results` — live tally.
+
 ## New apicommon types (summary)
 
 | Type | Used by |
@@ -449,7 +540,9 @@ GET /organizations/{address}/integrator
 | `ElectionParams` (+ `Question`, `Choice`, `VoteType`, `ElectionType`) | create/update draft |
 | `PublishProcessRequest` / `PublishProcessResponse` (idempotent 200 only) / `EnqueuedResponse` (202) | `POST /process/{id}/publish` |
 | `SetProcessStatusRequest` / `EnqueuedResponse` (202) | `PUT /process/{id}/status` |
-| `RelayVoteRequest` / `EnqueuedResponse` (202) | `POST /process/{id}/vote` |
+| `AddCensusParticipantsRequest` / `EnqueuedResponse` (202) | `PUT /process/{id}/census` (non-CSP dynamic add) |
+| `RelayVoteRequest` / `EnqueuedResponse` (202) | `POST /process/{id}/vote` (CSP- or proof-authorized) |
+| `CensusProofResponse` | `GET /process/{id}/census/proof` (non-CSP) |
 | `EnqueuedResponse` (`jobId`) / `JobStatusResponse` (`jobId`, `type`, `status`, `result`, `error`) | `GET /jobs/{jobId}` |
 | `ProcessResultsResponse` | `GET /process/{id}/results` |
 | `CreateManagedOrganizationRequest` | `POST /organizations/{address}/managed` |
