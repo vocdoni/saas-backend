@@ -15,6 +15,18 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
+// integratorAddressFromRequest validates the {address} path param and returns it as an
+// address. It writes ErrMalformedURLParam and returns ok=false when the param is not a
+// valid hex address, so callers fail with a 400 rather than treating it as the zero address.
+func integratorAddressFromRequest(w http.ResponseWriter, r *http.Request) (common.Address, bool) {
+	addr := chi.URLParam(r, "address")
+	if !common.IsHexAddress(addr) {
+		errors.ErrMalformedURLParam.With("invalid organization address").Write(w)
+		return common.Address{}, false
+	}
+	return common.HexToAddress(addr), true
+}
+
 // createManagedOrganizationHandler godoc
 //
 //	@Summary		Create a managed organization under an integrator
@@ -41,7 +53,10 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
-	integratorAddr := common.HexToAddress(chi.URLParam(r, "address"))
+	integratorAddr, ok := integratorAddressFromRequest(w, r)
+	if !ok {
+		return
+	}
 	if !user.HasRoleFor(integratorAddr, db.AdminRole) {
 		errors.ErrUnauthorized.Withf("user is not admin of the integrator organization").Write(w)
 		return
@@ -75,6 +90,16 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 	}
 	creatorEmail := user.Email
 	if req.OwnerEmail != "" {
+		// validate the owner exists up front, before provisioning an on-chain account, so a
+		// bad ownerEmail fails fast with a 400 instead of orphaning a funded on-chain account.
+		if _, err := a.db.UserByEmail(req.OwnerEmail); err != nil {
+			if err == db.ErrNotFound {
+				errors.ErrMalformedBody.Withf("owner email does not correspond to an existing user").Write(w)
+				return
+			}
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
 		creatorEmail = req.OwnerEmail
 	}
 	signer, nonce, err := account.NewSigner(a.secret, creatorEmail)
@@ -158,7 +183,10 @@ func (a *API) managedOrganizationsHandler(w http.ResponseWriter, r *http.Request
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
-	integratorAddr := common.HexToAddress(chi.URLParam(r, "address"))
+	integratorAddr, ok := integratorAddressFromRequest(w, r)
+	if !ok {
+		return
+	}
 	if !user.HasRoleFor(integratorAddr, db.AdminRole) && !user.HasRoleFor(integratorAddr, db.ManagerRole) {
 		errors.ErrUnauthorized.Withf("user is not admin or manager of the integrator organization").Write(w)
 		return
@@ -210,7 +238,10 @@ func (a *API) integratorInfoHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
-	integratorAddr := common.HexToAddress(chi.URLParam(r, "address"))
+	integratorAddr, ok := integratorAddressFromRequest(w, r)
+	if !ok {
+		return
+	}
 	if !user.HasRoleFor(integratorAddr, db.AdminRole) && !user.HasRoleFor(integratorAddr, db.ManagerRole) {
 		errors.ErrUnauthorized.Withf("user is not admin or manager of the integrator organization").Write(w)
 		return
