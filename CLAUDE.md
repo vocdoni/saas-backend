@@ -24,6 +24,9 @@ go test -v ./db/
 # Local dev stack (API + MongoDB + mongo-express on :8081)
 cp example.env .env   # then edit secrets
 docker compose up
+# Optional add-ons via compose profiles (docker-compose.yml):
+#   --profile with-ui      UI + defaultplan seed     --profile with-vocone  local Voconed chain + fundaccount
+#   --profile local-smtp   fake SMTP capture server
 ```
 
 - **Tests require Docker.** `TestMain` starts ephemeral MongoDB (`mongo:7`) and Voconed
