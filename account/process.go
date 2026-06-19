@@ -151,6 +151,32 @@ func (a *Account) BuildNewProcessTx(p *NewProcessParams) (*models.Tx, error) {
 	}, nil
 }
 
+// BuildSetProcessStatusTx builds an unsigned SET_PROCESS_STATUS transaction that
+// moves the on-chain election identified by processID to the given status. It reads
+// the organization account's current nonce so the funder/signer can complete it.
+func (a *Account) BuildSetProcessStatusTx(
+	orgAddress common.Address, processID []byte, status models.ProcessStatus,
+) (*models.Tx, error) {
+	if len(processID) == 0 {
+		return nil, fmt.Errorf("empty process id")
+	}
+	acc, err := a.client.Account(orgAddress.String())
+	if err != nil {
+		return nil, fmt.Errorf("could not fetch organization account: %w", err)
+	}
+	st := status
+	return &models.Tx{
+		Payload: &models.Tx_SetProcess{
+			SetProcess: &models.SetProcessTx{
+				Txtype:    models.TxType_SET_PROCESS_STATUS,
+				Nonce:     acc.Nonce,
+				ProcessId: processID,
+				Status:    &st,
+			},
+		},
+	}, nil
+}
+
 // SubmitSignedTx submits an already-signed transaction to the chain and waits
 // (up to 40s) until it is mined. It returns the transaction response data — for a
 // NewProcess transaction this is the on-chain process id.
