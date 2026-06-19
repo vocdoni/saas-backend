@@ -12,6 +12,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"go.vocdoni.io/dvote/log"
 )
 
 // createManagedOrganizationHandler godoc
@@ -107,6 +108,14 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 			Active:    true,
 		},
 	}
+	// forge the managed org's on-chain account (always eager) BEFORE persisting the DB
+	// row. CreateOrgAccount is idempotent and the address derives from the signer, so a
+	// failure here leaves nothing to clean up and the request can be retried safely.
+	infoURI := fmt.Sprintf("%s/organizations/%s", a.serverURL, dbOrg.Address.String())
+	if err := a.account.CreateOrgAccount(signer, dbOrg.Address.String(), infoURI); err != nil {
+		errors.ErrGenericInternalServerError.Withf("could not provision managed organization account: %v", err).Write(w)
+		return
+	}
 	if err := a.db.SetOrganization(dbOrg); err != nil {
 		if err == db.ErrAlreadyExists {
 			errors.ErrInvalidOrganizationData.WithErr(err).Write(w)
@@ -119,16 +128,10 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	// forge the managed org's on-chain account (always eager)
-	infoURI := fmt.Sprintf("%s/organizations/%s", a.serverURL, dbOrg.Address.String())
-	if err := a.account.CreateOrgAccount(signer, dbOrg.Address.String(), infoURI); err != nil {
-		errors.ErrGenericInternalServerError.Withf("could not provision managed organization account: %v", err).Write(w)
-		return
-	}
-	// bump the integrator's managed organizations counter
+	// bump the integrator's managed organizations counter (best-effort: the org already
+	// exists on-chain and in the DB, so a counter failure must not fail the request).
 	if err := a.db.IncrementOrganizationManagedOrgsCounter(integratorAddr); err != nil {
-		errors.ErrGenericInternalServerError.Withf("could not update managed orgs counter: %v", err).Write(w)
-		return
+		log.Warnw("could not update managed orgs counter", "integrator", integratorAddr.Hex(), "error", err)
 	}
 	apicommon.HTTPWriteJSON(w, apicommon.OrganizationFromDB(dbOrg, nil))
 }

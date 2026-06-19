@@ -121,6 +121,9 @@ func setIntegrator(database *db.MongoStorage, orgAddress string, maxOrgs, maxPro
 	if orgAddress == "" {
 		return fmt.Errorf("orgAddress is required")
 	}
+	if !common.IsHexAddress(orgAddress) {
+		return fmt.Errorf("invalid orgAddress: %q is not a hex address", orgAddress)
+	}
 	addr := common.HexToAddress(orgAddress)
 	org, err := database.Organization(addr)
 	if err != nil {

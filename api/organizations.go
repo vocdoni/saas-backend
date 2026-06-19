@@ -136,6 +136,24 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 			Active:    true,
 		},
 	}
+	// optionally provision the organization's on-chain account (opt-in, eager) BEFORE
+	// persisting the DB row. CreateOrgAccount is idempotent, so doing it first means a
+	// provisioning failure leaves no orphaned organization (and no creator/parent
+	// links) behind. When provisionAccount is false this block is skipped and behavior
+	// is identical to the legacy flow (DB row only; account created later by the SDK).
+	if orgInfo.ProvisionAccount {
+		infoURI := fmt.Sprintf("%s/organizations/%s", a.serverURL, dbOrg.Address.String())
+		if err := a.account.CreateOrgAccount(signer, dbOrg.Address.String(), infoURI); err != nil {
+			if orgInfo.Parent != nil {
+				if err := a.db.DecrementOrganizationSubOrgsCounter(parentOrg); err != nil {
+					log.Errorf("decrement suborgs: %v", err)
+				}
+			}
+			errors.ErrGenericInternalServerError.
+				Withf("could not provision organization account: %v", err).Write(w)
+			return
+		}
+	}
 	if err := a.db.SetOrganization(dbOrg); err != nil {
 		if orgInfo.Parent != nil {
 			if err := a.db.DecrementOrganizationSubOrgsCounter(parentOrg); err != nil {
@@ -148,17 +166,6 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		errors.ErrGenericInternalServerError.Write(w)
 		return
-	}
-	// optionally provision the organization's on-chain account (opt-in, eager).
-	// when provisionAccount is false this block is skipped and behavior is
-	// identical to the legacy flow (DB row only; account created later by the SDK).
-	if orgInfo.ProvisionAccount {
-		infoURI := fmt.Sprintf("%s/organizations/%s", a.serverURL, dbOrg.Address.String())
-		if err := a.account.CreateOrgAccount(signer, dbOrg.Address.String(), infoURI); err != nil {
-			errors.ErrGenericInternalServerError.
-				Withf("could not provision organization account: %v", err).Write(w)
-			return
-		}
 	}
 	// send the organization back to the user
 	apicommon.HTTPWriteJSON(w, apicommon.OrganizationFromDB(dbOrg, dbParentOrg))

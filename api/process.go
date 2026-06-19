@@ -15,6 +15,7 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/proto/build/go/models"
 )
 
@@ -536,34 +537,36 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// counter nuance: mirror api/transaction.go — only count non-test-sized elections
-	if draft.ElectionParams.MaxCensusSize > uint64(db.TestMaxCensusSize) {
-		org.Counters.Processes++
-		if err := a.db.SetOrganization(org); err != nil {
-			errors.ErrGenericInternalServerError.Withf("could not update organization process counter: %v", err).Write(w)
-			return
-		}
-	}
-
-	// bump the integrator's aggregate counters for managed-org publishes
-	if integrator != nil {
-		if err := a.db.AddOrganizationManagedProcesses(integrator.Address, 1); err != nil {
-			errors.ErrGenericInternalServerError.Withf("could not update managed processes counter: %v", err).Write(w)
-			return
-		}
-		if err := a.db.AddOrganizationManagedCensusSize(integrator.Address, int64(draft.ElectionParams.MaxCensusSize)); err != nil {
-			errors.ErrGenericInternalServerError.Withf("could not update managed census counter: %v", err).Write(w)
-			return
-		}
-	}
-
-	// persist the published state on the draft (same _id)
+	// persist the published state on the draft (same _id) right after the on-chain
+	// process exists. the idempotency guard at the top keys off draft.Address, so a
+	// later failure cannot lead a retry to create a duplicate election.
 	draft.Address = internal.HexBytes(data)
 	draft.Status = "READY"
 	draft.PublishedAt = time.Now()
 	if _, err := a.db.SetProcess(draft); err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
+	}
+
+	// usage counters are best-effort: the election already exists on-chain and the
+	// draft is marked published, so a counter failure must not fail the request (the
+	// idempotency guard would otherwise turn away any retry without re-counting).
+	// counter nuance: mirror api/transaction.go — only count non-test-sized elections.
+	if draft.ElectionParams.MaxCensusSize > uint64(db.TestMaxCensusSize) {
+		org.Counters.Processes++
+		if err := a.db.SetOrganization(org); err != nil {
+			log.Warnw("could not update organization process counter", "error", err)
+		}
+	}
+
+	// bump the integrator's aggregate counters for managed-org publishes
+	if integrator != nil {
+		if err := a.db.AddOrganizationManagedProcesses(integrator.Address, 1); err != nil {
+			log.Warnw("could not update managed processes counter", "error", err)
+		}
+		if err := a.db.AddOrganizationManagedCensusSize(integrator.Address, int64(draft.ElectionParams.MaxCensusSize)); err != nil {
+			log.Warnw("could not update managed census counter", "error", err)
+		}
 	}
 
 	apicommon.HTTPWriteJSON(w, &apicommon.PublishProcessResponse{Address: draft.Address, Status: draft.Status})
