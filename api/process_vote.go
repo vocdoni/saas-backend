@@ -202,6 +202,12 @@ func (a *API) setProcessStatusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// quota / permission (same engine as the /transactions and publish paths)
+	if hasPermission, err := a.subscriptions.HasTxPermission(fundedTx, *txType, org, user); !hasPermission || err != nil {
+		errors.ErrUnauthorized.Withf("user does not have permission to change process status: %v", err).Write(w)
+		return
+	}
+
 	// sign with the organization signer
 	stx, err := a.account.SignTransaction(fundedTx, orgSigner)
 	if err != nil {

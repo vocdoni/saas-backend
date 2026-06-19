@@ -331,6 +331,9 @@ func (*Subscriptions) IsIntegrator(org *db.Organization) bool {
 // EffectiveIntegratorLimits returns the integrator limits in force for the org: the
 // per-organization override if set, otherwise the limits granted by its plan.
 func (p *Subscriptions) EffectiveIntegratorLimits(org *db.Organization) (db.IntegratorLimits, error) {
+	if org == nil {
+		return db.IntegratorLimits{}, errors.ErrNotAnIntegrator
+	}
 	if org.IntegratorLimits != nil {
 		return *org.IntegratorLimits, nil
 	}
