@@ -2,15 +2,20 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
+	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.vocdoni.io/proto/build/go/models"
 )
 
 // createProcessHandler godoc
@@ -359,4 +364,177 @@ func (a *API) deleteProcessHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	apicommon.HTTPWriteOK(w)
+}
+
+// publishProcessHandler godoc
+//
+//	@Summary		Publish a draft process as an on-chain election
+//	@Description	Publishes an existing draft process (created via POST /process) as an on-chain
+//	@Description	election. The backend builds the election metadata and NewProcess transaction,
+//	@Description	funds, signs (with the organization signer), submits and confirms it. Requires
+//	@Description	Manager/Admin role. Idempotent: if the draft is already published its on-chain id
+//	@Description	is returned without sending a new transaction.
+//	@Tags			process
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			processId	path		string								true	"Draft process ID"
+//	@Success		200			{object}	apicommon.PublishProcessResponse	"On-chain process id and status"
+//	@Failure		400			{object}	errors.Error						"Invalid input data"
+//	@Failure		401			{object}	errors.Error						"Unauthorized"
+//	@Failure		404			{object}	errors.Error						"Process not found"
+//	@Failure		500			{object}	errors.Error						"Internal server error"
+//	@Router			/process/{processId}/publish [post]
+func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
+	processID := chi.URLParam(r, "processId")
+	if processID == "" {
+		errors.ErrMalformedURLParam.Withf("missing process ID").Write(w)
+		return
+	}
+	parsedID, err := primitive.ObjectIDFromHex(processID)
+	if err != nil {
+		errors.ErrMalformedURLParam.Withf("invalid process ID").Write(w)
+		return
+	}
+
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+
+	draft, err := a.db.Process(parsedID)
+	if err != nil {
+		if err == db.ErrNotFound {
+			errors.ErrProcessNotFound.Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
+	// permission: Manager or Admin of the owning organization
+	if !user.HasRoleFor(draft.OrgAddress, db.ManagerRole) && !user.HasRoleFor(draft.OrgAddress, db.AdminRole) {
+		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization that owns this process").Write(w)
+		return
+	}
+
+	// idempotent: already published
+	if !draft.Address.Equals(nil) {
+		apicommon.HTTPWriteJSON(w, &apicommon.PublishProcessResponse{Address: draft.Address, Status: draft.Status})
+		return
+	}
+
+	// a draft must carry the high-level election definition to be publishable.
+	// the on-chain census root is always the CSP public key, so the draft census
+	// (member list used later by the CSP bundle flow) is not required here.
+	if draft.ElectionParams == nil {
+		errors.ErrMalformedBody.Withf("draft has no election params").Write(w)
+		return
+	}
+
+	org, err := a.db.Organization(draft.OrgAddress)
+	if err != nil {
+		if err == db.ErrNotFound {
+			errors.ErrOrganizationNotFound.Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
+	orgSigner, err := account.OrganizationSigner(a.secret, org.Creator, org.Nonce)
+	if err != nil {
+		errors.ErrGenericInternalServerError.Withf("could not restore organization signer: %v", err).Write(w)
+		return
+	}
+
+	cspPubKey, err := a.csp.PubKey()
+	if err != nil {
+		errors.ErrGenericInternalServerError.Withf("could not get csp public key: %v", err).Write(w)
+		return
+	}
+
+	// build + store the election metadata content-addressed; its public URL is the
+	// on-chain metadata pointer (must be known before the tx, so it cannot contain
+	// the not-yet-known process id).
+	metaBytes, err := account.BuildElectionMetadata(draft.ElectionParams)
+	if err != nil {
+		errors.ErrMalformedBody.Withf("invalid election params: %v", err).Write(w)
+		return
+	}
+	objectName, err := a.objectStorage.PutJSON(metaBytes, user.Email)
+	if err != nil {
+		errors.ErrInternalStorageError.WithErr(err).Write(w)
+		return
+	}
+	metadataURL := fmt.Sprintf("%s/storage/%s", a.serverURL, objectName)
+
+	// build the NewProcess tx (CSP census)
+	tx, err := a.account.BuildNewProcessTx(&account.NewProcessParams{
+		OrgAddress:  draft.OrgAddress,
+		Params:      draft.ElectionParams,
+		CensusRoot:  cspPubKey,
+		CensusURI:   a.serverURL,
+		MetadataURL: metadataURL,
+	})
+	if err != nil {
+		errors.ErrMalformedBody.Withf("could not build election: %v", err).Write(w)
+		return
+	}
+
+	// fund
+	fundedTx, txType, err := a.account.FundTransaction(tx, orgSigner.Address())
+	if err != nil {
+		if apiErr, ok := err.(errors.Error); ok {
+			apiErr.Write(w)
+			return
+		}
+		errors.ErrVochainRequestFailed.WithErr(err).Write(w)
+		return
+	}
+	if txType == nil || *txType != models.TxType_NEW_PROCESS {
+		errors.ErrInvalidTxFormat.With("unexpected tx type for publish").Write(w)
+		return
+	}
+
+	// quota / permission (same engine as the /transactions path)
+	if hasPermission, err := a.subscriptions.HasTxPermission(fundedTx, *txType, org, user); !hasPermission || err != nil {
+		errors.ErrUnauthorized.Withf("user does not have permission to publish: %v", err).Write(w)
+		return
+	}
+
+	// sign with the organization signer
+	stx, err := a.account.SignTransaction(fundedTx, orgSigner)
+	if err != nil {
+		errors.ErrGenericInternalServerError.Withf("could not sign election tx: %v", err).Write(w)
+		return
+	}
+
+	// submit + wait; data is the on-chain process id
+	data, err := a.account.SubmitSignedTx(stx)
+	if err != nil {
+		errors.ErrVochainRequestFailed.WithErr(err).Write(w)
+		return
+	}
+
+	// counter nuance: mirror api/transaction.go — only count non-test-sized elections
+	if draft.ElectionParams.MaxCensusSize > uint64(db.TestMaxCensusSize) {
+		org.Counters.Processes++
+		if err := a.db.SetOrganization(org); err != nil {
+			errors.ErrGenericInternalServerError.Withf("could not update organization process counter: %v", err).Write(w)
+			return
+		}
+	}
+
+	// persist the published state on the draft (same _id)
+	draft.Address = internal.HexBytes(data)
+	draft.Status = "READY"
+	draft.PublishedAt = time.Now()
+	if _, err := a.db.SetProcess(draft); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
+	apicommon.HTTPWriteJSON(w, &apicommon.PublishProcessResponse{Address: draft.Address, Status: draft.Status})
 }

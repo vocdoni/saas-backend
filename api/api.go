@@ -263,6 +263,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, processCreateEndpoint, a.createProcessHandler)
 		handle(r, http.MethodPut, processEndpoint, a.updateProcessHandler)
 		handle(r, http.MethodDelete, processEndpoint, a.deleteProcessHandler)
+		handle(r, http.MethodPost, processPublishEndpoint, a.publishProcessHandler)
 		handle(r, http.MethodPost, processBundleEndpoint, a.createProcessBundleHandler)
 		handle(r, http.MethodPut, processBundleUpdateEndpoint, a.updateProcessBundleHandler)
 		handle(r, http.MethodPost, processBundleParticipantsCheckEndpoint, a.checkProcessBundleVotedParticipantsHandler)

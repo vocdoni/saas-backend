@@ -31,6 +31,7 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/migrations"
 	"github.com/vocdoni/saas-backend/notifications/smtp"
+	"github.com/vocdoni/saas-backend/objectstorage"
 	"github.com/vocdoni/saas-backend/subscriptions"
 	"github.com/vocdoni/saas-backend/test"
 	"go.mongodb.org/mongo-driver/bson"
@@ -431,6 +432,14 @@ func TestMain(m *testing.M) {
 		DB: testDB,
 	})
 
+	// Initialize the object storage service (backs election metadata uploads)
+	testObjectStorage, err := objectstorage.New(&objectstorage.Config{
+		DB: testDB,
+	})
+	if err != nil {
+		panic(err)
+	}
+
 	// start the API
 	New(&Config{
 		Host:                testHost,
@@ -443,6 +452,7 @@ func TestMain(m *testing.M) {
 		SMSService:          testSMSService,
 		FullTransparentMode: false,
 		Subscriptions:       subscriptionsService,
+		ObjectStorage:       testObjectStorage,
 		CSP:                 testCSP,
 		OAuthServiceURL:     testOAuthServiceURL,
 		WebAppURL:           testWebAppURL,

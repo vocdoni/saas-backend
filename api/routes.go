@@ -145,6 +145,9 @@ const (
 	// POST /process/{processId}/sign-info to get the sign info for the process
 	processSignInfoEndpoint = "/process/{processId}/sign-info"
 
+	// POST /process/{processId}/publish to publish a draft process as an on-chain election
+	processPublishEndpoint = "/process/{processId}/publish"
+
 	// two-factor process bundle routes
 	// POST /process/bundle to create a new bundle
 	processBundleEndpoint = "/process/bundle"
