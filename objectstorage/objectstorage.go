@@ -141,6 +141,21 @@ func (osc *Client) Put(data io.Reader, size int64, userID string) (string, error
 	return fmt.Sprintf("%s.%s", objectID, fileExtension), nil
 }
 
+// PutJSON stores the given JSON document content-addressed (object id = hash of
+// the data) with an explicit "application/json" content type and returns the
+// object name "{objectID}.json". Unlike Put it does not sniff or restrict the
+// content type, so it must only be used for server-generated JSON.
+func (osc *Client) PutJSON(data []byte, userID string) (string, error) {
+	objectID, err := calculateObjectID(data)
+	if err != nil {
+		return "", fmt.Errorf("error calculating objectID: %w", err)
+	}
+	if err := osc.db.SetObject(objectID, userID, "application/json", data); err != nil {
+		return "", fmt.Errorf("cannot set object: %w", err)
+	}
+	return fmt.Sprintf("%s.json", objectID), nil
+}
+
 // calculateObjectID calculates the objectID from the given data. The objectID
 // is the first 12 bytes of the md5 hash of the data. If an error occurs, it
 // returns an empty string and the error.

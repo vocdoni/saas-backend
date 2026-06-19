@@ -1054,6 +1054,17 @@ type UpdateProcessRequest struct {
 	ElectionParams *db.ElectionParams `json:"electionParams,omitempty"`
 }
 
+// PublishProcessResponse is returned by POST /process/{processId}/publish with the
+// on-chain process id and status after a draft has been published as an election.
+// swagger:model PublishProcessResponse
+type PublishProcessResponse struct {
+	// On-chain process id (Vochain election id)
+	Address internal.HexBytes `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
+
+	// Process status (e.g. "READY")
+	Status string `json:"status"`
+}
+
 // InitiateAuthRequest defines the payload for participant authentication.
 // swagger:model InitiateAuthRequest
 type InitiateAuthRequest struct {

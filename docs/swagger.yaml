@@ -767,6 +767,17 @@ definitions:
         description: Indicates if the census is weighted
         type: boolean
     type: object
+  apicommon.PublishProcessResponse:
+    properties:
+      address:
+        description: On-chain process id (Vochain election id)
+        example: deadbeef
+        format: hex
+        type: string
+      status:
+        description: Process status (e.g. "READY")
+        type: string
+    type: object
   apicommon.PublishedCensusResponse:
     properties:
       root:
@@ -3701,6 +3712,50 @@ paths:
       security:
       - BearerAuth: []
       summary: Update an existing voting process
+      tags:
+      - process
+  /process/{processId}/publish:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Publishes an existing draft process (created via POST /process) as an on-chain
+        election. The backend builds the election metadata and NewProcess transaction,
+        funds, signs (with the organization signer), submits and confirms it. Requires
+        Manager/Admin role. Idempotent: if the draft is already published its on-chain id
+        is returned without sending a new transaction.
+      parameters:
+      - description: Draft process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: On-chain process id and status
+          schema:
+            $ref: '#/definitions/apicommon.PublishProcessResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Publish a draft process as an on-chain election
       tags:
       - process
   /process/{processId}/sign-info:

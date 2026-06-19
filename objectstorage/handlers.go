@@ -16,7 +16,7 @@ import (
 )
 
 // isObjectNameRgx is a regular expression to match object names.
-var isObjectNameRgx = regexp.MustCompile(`^([a-zA-Z0-9]+)\.(jpg|jpeg|png)`)
+var isObjectNameRgx = regexp.MustCompile(`^([a-zA-Z0-9]+)\.(jpg|jpeg|png|json)`)
 
 // validateUser checks if the user is authenticated
 func validateUser(w http.ResponseWriter, r *http.Request) (*db.User, bool) {
