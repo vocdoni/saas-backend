@@ -66,7 +66,7 @@ func TestHasTxPermission(t *testing.T) {
 				ID:   1,
 				Name: "Test Plan",
 				Organization: db.PlanLimits{
-					MaxProcesses: 10,
+					MaxBundles: 10,
 				},
 			},
 		},

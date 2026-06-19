@@ -553,8 +553,8 @@ type SubscriptionPlanLimits struct {
 	// Maximum number of sub-organizations allowed
 	SubOrgs int `json:"subOrgs"`
 
-	// Maximum number of voting processes allowed
-	MaxProcesses int `json:"maxProcesses"`
+	// Maximum number of voting bundles allowed
+	MaxBundles int `json:"maxBundles"`
 
 	// Maximum number of census allowed
 	MaxCensus int `json:"maxCensus"`

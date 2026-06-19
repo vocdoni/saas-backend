@@ -86,7 +86,7 @@ var (
 	ErrOrganizationSubscriptionInactive       = Error{Code: 40021, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("organization subscription is not active")}
 	ErrNoDefaultPlan                          = Error{Code: 40022, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("no default plan available")}
 	ErrMaxDraftsReached                       = Error{Code: 40031, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("max drafts reached")}
-	ErrMaxProcessesReached                    = Error{Code: 40033, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("max processes reached")}
+	ErrMaxBundlesReached                      = Error{Code: 40033, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("max processes reached")}
 	ErrUserHasNoAdminRole                     = Error{Code: 40032, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("user does not have admin role")}
 	ErrProcessCensusSizeExceedsPlanLimit      = Error{Code: 40035, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("process census size exceeds plan limit")}
 	ErrProcessCensusSizeExceedsEmailAllowance = Error{Code: 40046, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("process census size exceeds email allowance")}

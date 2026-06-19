@@ -148,10 +148,10 @@ func (p *Subscriptions) HasTxPermission(
 		if newProcess.Process.MaxCensusSize > uint64(plan.Organization.MaxCensus) {
 			return false, errors.ErrProcessCensusSizeExceedsPlanLimit.Withf("plan max census: %d", plan.Organization.MaxCensus)
 		}
-		if org.Counters.Processes >= plan.Organization.MaxProcesses {
+		if org.Counters.Processes >= plan.Organization.MaxBundles {
 			// allow processes with less than TestMaxCensusSize for user testing
 			if newProcess.Process.MaxCensusSize > uint64(db.TestMaxCensusSize) {
-				return false, errors.ErrMaxProcessesReached
+				return false, errors.ErrMaxBundlesReached
 			}
 		}
 		return hasElectionMetadataPermissions(newProcess, plan)
