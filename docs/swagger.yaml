@@ -1422,8 +1422,6 @@ definitions:
         type: integer
       id:
         type: integer
-      integrator:
-        type: boolean
       integratorLimits:
         $ref: '#/definitions/db.IntegratorLimits'
       monthlyPrice:
