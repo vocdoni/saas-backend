@@ -79,6 +79,7 @@ var (
 	// Conflict errors (409)
 	ErrDuplicateConflict           = Error{Code: 40901, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("resource already exists")}
 	ErrUpdateWouldCreateDuplicates = Error{Code: 40902, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("update would create duplicates")}
+	ErrPublishInProgress           = Error{Code: 40903, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("process publish already in progress")}
 
 	// TODO: most of theses errors should be unauthorized
 	// Subscription errors (400)
@@ -112,4 +113,7 @@ var (
 	ErrInternalStorageError        = Error{Code: 50006, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("server error: storage operation failed"), LogLevel: "error"}
 	ErrOAuthServerConnectionFailed = Error{Code: 50007, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("server error: OAuth server connection failed"), LogLevel: "error"}
 	ErrStripeWebhookError          = Error{Code: 50008, HTTPstatus: http.StatusInternalServerError, Err: fmt.Errorf("server error: stripe webhook failed"), LogLevel: "error"}
+
+	// Service unavailable errors (503)
+	ErrTxQueueFull = Error{Code: 50301, HTTPstatus: http.StatusServiceUnavailable, Err: fmt.Errorf("transaction queue is full, retry later"), LogLevel: "warn"}
 )

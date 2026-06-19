@@ -111,10 +111,9 @@ func TestIntegratorManagedOrgs(t *testing.T) {
 		},
 	})
 	c.Assert(err, qt.IsNil)
-	published := requestAndParse[apicommon.PublishProcessResponse](
-		t, http.MethodPost, token, nil, "process", draftID.Hex(), "publish",
-	)
-	c.Assert(len(published.Address) > 0, qt.IsTrue)
+	pubJob := enqueueAndPollJob(t, http.MethodPost, token, nil, "process", draftID.Hex(), "publish")
+	c.Assert(pubJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", pubJob.Error))
+	c.Assert(len(pubJob.Result.Address) > 0, qt.IsTrue)
 
 	// the integrator's aggregate counters were bumped
 	integratorOrg, err = testDB.Organization(integratorAddr)

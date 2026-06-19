@@ -298,6 +298,13 @@ definitions:
         description: Number of members deleted
         type: integer
     type: object
+  apicommon.EnqueuedResponse:
+    properties:
+      jobId:
+        description: Opaque job id; poll GET /jobs/{jobId} for the outcome
+        example: a1b2c3
+        type: string
+    type: object
   apicommon.IntegratorInfoResponse:
     properties:
       enabled:
@@ -345,6 +352,19 @@ definitions:
         allOf:
         - $ref: '#/definitions/db.JobType'
         description: Type of job
+    type: object
+  apicommon.JobStatusResponse:
+    properties:
+      error:
+        type: string
+      jobId:
+        type: string
+      result:
+        $ref: '#/definitions/db.JobResult'
+      status:
+        $ref: '#/definitions/db.JobStatus'
+      type:
+        $ref: '#/definitions/db.JobType'
     type: object
   apicommon.JobsResponse:
     properties:
@@ -909,25 +929,11 @@ definitions:
         format: hex
         type: string
     type: object
-  apicommon.RelayVoteResponse:
-    properties:
-      voteID:
-        description: On-chain vote nullifier
-        example: deadbeef
-        format: hex
-        type: string
-    type: object
   apicommon.SetProcessStatusRequest:
     properties:
       status:
         description: 'One of: ready, paused, ended, canceled'
         example: paused
-        type: string
-    type: object
-  apicommon.SetProcessStatusResponse:
-    properties:
-      status:
-        description: Process status (e.g. "PAUSED")
         type: string
     type: object
   apicommon.SubscriptionCheckout:
@@ -1378,14 +1384,41 @@ definitions:
       maxManagedProcesses:
         type: integer
     type: object
+  db.JobResult:
+    properties:
+      address:
+        example: deadbeef
+        type: string
+      status:
+        type: string
+      voteID:
+        example: deadbeef
+        type: string
+    type: object
+  db.JobStatus:
+    enum:
+    - pending
+    - completed
+    - failed
+    type: string
+    x-enum-varnames:
+    - JobStatusPending
+    - JobStatusCompleted
+    - JobStatusFailed
   db.JobType:
     enum:
     - org_members
     - census_participants
+    - publish_process
+    - set_process_status
+    - relay_vote
     type: string
     x-enum-varnames:
     - JobTypeOrgMembers
     - JobTypeCensusParticipants
+    - JobTypePublishProcess
+    - JobTypeSetProcessStatus
+    - JobTypeRelayVote
   db.MultiLangString:
     additionalProperties:
       type: string
@@ -2112,6 +2145,43 @@ paths:
       summary: Publish a census for voting
       tags:
       - census
+  /jobs/{jobId}:
+    get:
+      description: |-
+        Returns the current state of a transaction job created by an async endpoint
+        (publish, status change or vote relay). Always responds 200; the `status` field
+        carries the lifecycle state (`pending`, `completed` or `failed`). On `completed`
+        the `result` field holds the public on-chain outcome; on `failed` the `error`
+        field holds the reason. Public endpoint: the 32-byte job id is the capability and
+        results contain only public on-chain data.
+      parameters:
+      - description: Job id returned by the async endpoint (hex)
+        in: path
+        name: jobId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Job status and (when completed) result
+          schema:
+            $ref: '#/definitions/apicommon.JobStatusResponse'
+        "400":
+          description: Invalid job id
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Job not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Poll the status of an async transaction job
+      tags:
+      - process
   /oauth/login:
     post:
       consumes:
@@ -4040,9 +4110,11 @@ paths:
       description: |-
         Publishes an existing draft process (created via POST /process) as an on-chain
         election. The backend builds the election metadata and NewProcess transaction,
-        funds, signs (with the organization signer), submits and confirms it. Requires
-        Admin role. Idempotent: if the draft is already published its on-chain id
-        is returned without sending a new transaction.
+        funds and signs it (with the organization signer) synchronously, then submits and
+        confirms it on a background worker; the call returns 202 with a job id. Poll GET
+        /jobs/{jobId} for the resulting on-chain id. Requires Admin role. Idempotent: if
+        the draft is already published its on-chain id is returned with 200 without sending
+        a new transaction.
       parameters:
       - description: Draft process ID
         in: path
@@ -4053,9 +4125,13 @@ paths:
       - application/json
       responses:
         "200":
-          description: On-chain process id and status
+          description: 'Already published (idempotent): on-chain id and status'
           schema:
             $ref: '#/definitions/apicommon.PublishProcessResponse'
+        "202":
+          description: Publish accepted; poll GET /jobs/{jobId}
+          schema:
+            $ref: '#/definitions/apicommon.EnqueuedResponse'
         "400":
           description: Invalid input data
           schema:
@@ -4068,8 +4144,16 @@ paths:
           description: Process not found
           schema:
             $ref: '#/definitions/errors.Error'
+        "409":
+          description: A publish is already in progress for this draft
+          schema:
+            $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Transaction queue is full
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -4163,9 +4247,10 @@ paths:
       - application/json
       description: |-
         Changes the status of an on-chain election (ready|paused|ended|canceled). The
-        backend builds a SET_PROCESS_STATUS transaction, funds, signs it with the
-        organization signer, submits and confirms it. Requires Manager/Admin role of the
-        organization that owns the process.
+        backend builds a SET_PROCESS_STATUS transaction, funds and signs it with the
+        organization signer synchronously, then submits and confirms it on a background
+        worker; the call returns 202 with a job id. Poll GET /jobs/{jobId} for the result.
+        Requires Manager/Admin role of the organization that owns the process.
       parameters:
       - description: On-chain process id (hex)
         in: path
@@ -4181,10 +4266,10 @@ paths:
       produces:
       - application/json
       responses:
-        "200":
-          description: Updated process status
+        "202":
+          description: Job accepted; poll GET /jobs/{jobId}
           schema:
-            $ref: '#/definitions/apicommon.SetProcessStatusResponse'
+            $ref: '#/definitions/apicommon.EnqueuedResponse'
         "400":
           description: Invalid input data
           schema:
@@ -4201,6 +4286,10 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
+        "503":
+          description: Transaction queue is full
+          schema:
+            $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
       summary: Change an on-chain election status
@@ -4212,10 +4301,10 @@ paths:
       - application/json
       description: |-
         Relays a voter transaction that has already been signed by the voter to the
-        Vochain and returns the resulting vote nullifier (voteID). The body carries a
-        marshaled models.SignedTx whose inner Tx is a Vote envelope. Public endpoint: no
-        authentication is required. The handler never decodes the vote package nor exposes
-        the transaction hash; only the nullifier is returned.
+        Vochain. The body carries a marshaled models.SignedTx whose inner Tx is a Vote
+        envelope. Public endpoint: no authentication is required. The vote is validated
+        synchronously and then submitted on a background worker; the call returns 202 with
+        a job id. Poll GET /jobs/{jobId} for the resulting vote nullifier (voteID).
       parameters:
       - description: On-chain process id (hex)
         in: path
@@ -4231,10 +4320,10 @@ paths:
       produces:
       - application/json
       responses:
-        "200":
-          description: Vote nullifier
+        "202":
+          description: Job accepted; poll GET /jobs/{jobId}
           schema:
-            $ref: '#/definitions/apicommon.RelayVoteResponse'
+            $ref: '#/definitions/apicommon.EnqueuedResponse'
         "400":
           description: Invalid input data
           schema:
@@ -4245,6 +4334,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Transaction queue is full
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Relay an already-signed vote to the Vochain

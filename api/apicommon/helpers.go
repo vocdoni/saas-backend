@@ -2,6 +2,8 @@ package apicommon
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 
@@ -38,4 +40,34 @@ func HTTPWriteOK(w http.ResponseWriter) {
 	if _, err := w.Write([]byte("\n")); err != nil {
 		log.Warnw("failed to write on response", "error", err)
 	}
+}
+
+// HTTPWriteJSONStatus writes a JSON response with an explicit status code. For 202
+// Accepted carrying an EnqueuedResponse it also sets the Location header to the job
+// status URL so the response is REST-friendly.
+func HTTPWriteJSONStatus(w http.ResponseWriter, status int, data any) {
+	if status == http.StatusAccepted {
+		if enq, ok := data.(*EnqueuedResponse); ok {
+			w.Header().Set("Location", "/jobs/"+enq.JobID)
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	if _, err := w.Write([]byte("\n")); err != nil {
+		log.Warnw("failed to write on response", "error", err)
+	}
+}
+
+// NewJobID returns a random 32-byte hex job id. The id is the capability used to
+// poll a job's status, so it must be unguessable.
+func NewJobID() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }

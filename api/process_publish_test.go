@@ -10,6 +10,7 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/types"
 )
@@ -64,20 +65,27 @@ func TestPublishProcess(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(draftID.IsZero(), qt.IsFalse)
 
-	// publish
-	resp := requestAndParse[apicommon.PublishProcessResponse](
-		t, http.MethodPost, token, nil, "process", draftID.Hex(), "publish")
-	c.Assert(len(resp.Address) > 0, qt.IsTrue)
-	c.Assert(resp.Status, qt.Equals, "READY")
+	// publish: async — returns 202 + jobId, then poll until completed
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "process", draftID.Hex(), "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", job.Error))
+	c.Assert(job.Type, qt.Equals, db.JobTypePublishProcess)
+	c.Assert(job.Result, qt.Not(qt.IsNil))
+	c.Assert(len(job.Result.Address) > 0, qt.IsTrue)
+	c.Assert(job.Result.Status, qt.Equals, "READY")
 
 	// verify on chain
 	client := testNewVocdoniClient(t)
-	election, err := client.Election(types.HexBytes(resp.Address))
+	election, err := client.Election(types.HexBytes(job.Result.Address))
 	c.Assert(err, qt.IsNil)
 	c.Assert(election, qt.Not(qt.IsNil))
 
-	// idempotency: second publish returns the same address with no new tx
+	// idempotency: once published the endpoint returns 200 with the same address (no tx)
 	resp2 := requestAndParse[apicommon.PublishProcessResponse](
 		t, http.MethodPost, token, nil, "process", draftID.Hex(), "publish")
-	c.Assert(resp2.Address.String(), qt.Equals, resp.Address.String())
+	c.Assert(resp2.Address.String(), qt.Equals, job.Result.Address.String())
+}
+
+// TestJobStatusNotFound asserts an unknown job id returns 404.
+func TestJobStatusNotFound(t *testing.T) {
+	requestAndAssertError(errors.ErrJobNotFound, t, http.MethodGet, "", nil, "jobs", "deadbeefdeadbeef")
 }

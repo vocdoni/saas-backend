@@ -45,6 +45,11 @@ const (
 	// POST /transactions/message to sign a message
 	signMessageEndpoint = "/transactions/message"
 
+	// async job routes
+	// GET /jobs/{jobId} to poll the status/result of an async transaction job (public; the
+	// 32-byte job id is the capability — results carry only public on-chain data)
+	jobStatusEndpoint = "/jobs/{jobId}"
+
 	// organization routes
 	// POST /organizations to create a new organization
 	organizationsEndpoint = "/organizations"

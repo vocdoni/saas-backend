@@ -20,19 +20,20 @@ import (
 //
 //	@Summary		Relay an already-signed vote to the Vochain
 //	@Description	Relays a voter transaction that has already been signed by the voter to the
-//	@Description	Vochain and returns the resulting vote nullifier (voteID). The body carries a
-//	@Description	marshaled models.SignedTx whose inner Tx is a Vote envelope. Public endpoint: no
-//	@Description	authentication is required. The handler never decodes the vote package nor exposes
-//	@Description	the transaction hash; only the nullifier is returned.
+//	@Description	Vochain. The body carries a marshaled models.SignedTx whose inner Tx is a Vote
+//	@Description	envelope. Public endpoint: no authentication is required. The vote is validated
+//	@Description	synchronously and then submitted on a background worker; the call returns 202 with
+//	@Description	a job id. Poll GET /jobs/{jobId} for the resulting vote nullifier (voteID).
 //	@Tags			process
 //	@Accept			json
 //	@Produce		json
 //	@Param			processId	path		string						true	"On-chain process id (hex)"
 //	@Param			request		body		apicommon.RelayVoteRequest	true	"Signed vote transaction payload"
-//	@Success		200			{object}	apicommon.RelayVoteResponse	"Vote nullifier"
+//	@Success		202			{object}	apicommon.EnqueuedResponse	"Job accepted; poll GET /jobs/{jobId}"
 //	@Failure		400			{object}	errors.Error				"Invalid input data"
 //	@Failure		404			{object}	errors.Error				"Process not found"
 //	@Failure		500			{object}	errors.Error				"Internal server error"
+//	@Failure		503			{object}	errors.Error				"Transaction queue is full"
 //	@Router			/process/{processId}/vote [post]
 func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 	var pid internal.HexBytes
@@ -73,7 +74,8 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ensure we manage this process
-	if _, err := a.db.ProcessByAddress(pid); err != nil {
+	process, err := a.db.ProcessByAddress(pid)
+	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrProcessNotFound.Write(w)
 			return
@@ -82,38 +84,52 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// submit + confirm; data is the vote nullifier (voteID)
-	voteID, err := a.account.SubmitSignedTx(req.TxPayload)
+	// submit + confirm on the worker pool; the vote nullifier (voteID) is recorded on
+	// the job. Validation above already ran synchronously, so a bad vote got a 400.
+	jobID, err := apicommon.NewJobID()
 	if err != nil {
-		if apiErr, ok := err.(errors.Error); ok {
-			apiErr.Write(w)
-			return
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if err := a.db.CreateTxJob(jobID, db.JobTypeRelayVote, process.OrgAddress); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	payload := req.TxPayload
+	if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
+		voteID, err := a.account.SubmitSignedTx(payload)
+		if err != nil {
+			return nil, err
 		}
-		errors.ErrVochainRequestFailed.WithErr(err).Write(w)
+		return &db.JobResult{VoteID: internal.HexBytes(voteID)}, nil
+	}}) {
+		errors.ErrTxQueueFull.Write(w)
 		return
 	}
 
-	apicommon.HTTPWriteJSON(w, &apicommon.RelayVoteResponse{VoteID: internal.HexBytes(voteID)})
+	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, &apicommon.EnqueuedResponse{JobID: jobID})
 }
 
 // setProcessStatusHandler godoc
 //
 //	@Summary		Change an on-chain election status
 //	@Description	Changes the status of an on-chain election (ready|paused|ended|canceled). The
-//	@Description	backend builds a SET_PROCESS_STATUS transaction, funds, signs it with the
-//	@Description	organization signer, submits and confirms it. Requires Manager/Admin role of the
-//	@Description	organization that owns the process.
+//	@Description	backend builds a SET_PROCESS_STATUS transaction, funds and signs it with the
+//	@Description	organization signer synchronously, then submits and confirms it on a background
+//	@Description	worker; the call returns 202 with a job id. Poll GET /jobs/{jobId} for the result.
+//	@Description	Requires Manager/Admin role of the organization that owns the process.
 //	@Tags			process
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			processId	path		string								true	"On-chain process id (hex)"
 //	@Param			request		body		apicommon.SetProcessStatusRequest	true	"New process status"
-//	@Success		200			{object}	apicommon.SetProcessStatusResponse	"Updated process status"
+//	@Success		202			{object}	apicommon.EnqueuedResponse			"Job accepted; poll GET /jobs/{jobId}"
 //	@Failure		400			{object}	errors.Error						"Invalid input data"
 //	@Failure		401			{object}	errors.Error						"Unauthorized"
 //	@Failure		404			{object}	errors.Error						"Process not found"
 //	@Failure		500			{object}	errors.Error						"Internal server error"
+//	@Failure		503			{object}	errors.Error						"Transaction queue is full"
 //	@Router			/process/{processId}/status [put]
 func (a *API) setProcessStatusHandler(w http.ResponseWriter, r *http.Request) {
 	var pid internal.HexBytes
@@ -215,18 +231,31 @@ func (a *API) setProcessStatusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// submit + wait
-	if _, err := a.account.SubmitSignedTx(stx); err != nil {
-		errors.ErrVochainRequestFailed.WithErr(err).Write(w)
-		return
-	}
-
-	// update the cached status and persist (canonical uppercase enum name e.g. "PAUSED")
-	process.Status = strings.ToUpper(req.Status)
-	if _, err := a.db.SetProcess(process); err != nil {
+	// submit + wait on the worker pool; on success persist the new cached status
+	// (canonical uppercase enum name e.g. "PAUSED").
+	newStatus := strings.ToUpper(req.Status)
+	jobID, err := apicommon.NewJobID()
+	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
+	if err := a.db.CreateTxJob(jobID, db.JobTypeSetProcessStatus, process.OrgAddress); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
+		if _, err := a.account.SubmitSignedTx(stx); err != nil {
+			return nil, err
+		}
+		process.Status = newStatus
+		if _, err := a.db.SetProcess(process); err != nil {
+			return nil, err
+		}
+		return &db.JobResult{Status: newStatus}, nil
+	}}) {
+		errors.ErrTxQueueFull.Write(w)
+		return
+	}
 
-	apicommon.HTTPWriteJSON(w, &apicommon.SetProcessStatusResponse{Status: process.Status})
+	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, &apicommon.EnqueuedResponse{JobID: jobID})
 }

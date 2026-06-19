@@ -979,6 +979,33 @@ func randomProcessID() []byte {
 	return internal.RandomBytes(32)
 }
 
+// enqueueAndPollJob posts to an async tx endpoint, asserts 202 + a job id, then polls
+// GET /jobs/{jobId} until the job leaves the pending state (or times out) and returns
+// the final job status. jsonBody/urlPath are forwarded to the action endpoint.
+func enqueueAndPollJob(t *testing.T, method, jwt string, jsonBody any, urlPath ...string) apicommon.JobStatusResponse {
+	t.Helper()
+	enq := requestAndParseWithAssertCode[apicommon.EnqueuedResponse](
+		http.StatusAccepted, t, method, jwt, jsonBody, urlPath...)
+	qt.Assert(t, enq.JobID, qt.Not(qt.Equals), "")
+	return pollJob(t, enq.JobID)
+}
+
+// pollJob polls GET /jobs/{jobId} until the job is no longer pending or it times out.
+func pollJob(t *testing.T, jobID string) apicommon.JobStatusResponse {
+	t.Helper()
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		js := requestAndParse[apicommon.JobStatusResponse](t, http.MethodGet, "", nil, "jobs", jobID)
+		if js.Status != db.JobStatusPending {
+			return js
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("job %s still pending after timeout", jobID)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
 // memberIDs returns a slice of all orgMembers[n].ID
 func memberIDs(orgMembers []apicommon.OrgMember) []string {
 	s := make([]string, 0, len(orgMembers))
