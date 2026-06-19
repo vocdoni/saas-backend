@@ -90,14 +90,16 @@ transaction, tx hash, token, gas, faucet, signer, or private key:
   `AuthService`; callers never pass or read a token.
 - **Organizer ops** (create org / census / draft / publish / setStatus) are plain awaited REST
   calls returning resource ids (org address, `processId`). The SaaS forges and confirms every tx.
-  The three on-chain actions — `publish`, `setStatus`, `vote` — are **async on the wire** (the SaaS
-  returns `202` + a `jobId` and confirms on a background worker), but the SDK hides this: each method
-  enqueues, then polls `GET /jobs/{jobId}` until the job completes and resolves with the on-chain
-  result (or rejects on a failed job). Consumers just `await` and never see the job id.
-- **Voting** takes `vote(processId, choices)`. The ephemeral voter key needed to sign the CSP
+  The on-chain actions — `publish`, `setStatus`, dynamic census add, `vote` — are **async on the
+  wire** (the SaaS returns `202` + a `jobId` and confirms on a background worker), but the SDK hides
+  this: each method enqueues, then polls `GET /jobs/{jobId}` until the job completes and resolves with
+  the on-chain result (or rejects on a failed job). Consumers just `await` and never see the job id.
+- **Voting** takes `vote(processId, choices)`. The ephemeral voter key needed to sign the vote
   envelope is **generated and held internally by `VoteService`** (kept for the session so a
   re-vote/overwrite reuses the same nullifier). The integrator passes choices, gets back a
-  `voteId` receipt — no key handling, no envelope, no tx, no polling.
+  `voteId` receipt — no key handling, no envelope, no tx, no polling. `vote()` transparently handles
+  both the CSP path (blind signature) and the non-CSP Merkle path (proof fetched from the SaaS); the
+  consumer never sees the difference.
 
 The only crypto the SDK owns (the vote envelope, §5) runs entirely under the hood; it is an
 implementation detail of `vote()`, not part of the consumer surface.
@@ -143,6 +145,11 @@ the relay are all internal to `vote()`. `CspService` holds the completed auth to
 so `vote()` can use it.
 
 ### `vote(processId, choices)` internally
+`vote()` branches on the election's census origin, but the consumer surface is identical for both —
+they pass `choices`, get back a `{voteId}`. Blockchain concepts (proofs, envelopes, keys) stay
+hidden.
+
+**CSP census:**
 1. `electionService.results(processId)` (or a get) → process params needed for the envelope
    (censusOrigin=CSP, voteOptions, encryption pubkeys if `secretUntilTheEnd`).
 2. Use the **internally generated** ephemeral voter key (held by `VoteService` for the session)
@@ -152,13 +159,25 @@ so `vote()` can use it.
 4. `voteService.relay(processId, txPayload)` → `POST /process/{processId}/vote` → `202 {jobId}`,
    then `awaitJob(jobId)` → `{voteID}` (the receipt). The poll is internal to `vote()`.
 
+**Non-CSP (`weighted`/`zkweighted`) census:**
+1. `electionService.results(processId)` (or a get) → process params (censusOrigin = weighted,
+   voteOptions, `anonymous`).
+2. `voteService.censusProof(processId, voterAddress)` → `GET /process/{processId}/census/proof?key=`
+   — the SaaS proxies the Merkle proof; no client-side proof generation.
+3. `core/vote.ts` builds `VoteEnvelope` with the **Merkle proof** (`ProofArbo`) in place of
+   `ProofCA`, packages votes, signs with the internal voter key → hex `SignedTx`. (For
+   `zkweighted`/anonymous, the ZK proof path is out of scope for this round — see §5.)
+4. `voteService.relay(processId, txPayload)` → the **same** `POST /process/{processId}/vote` →
+   `202 {jobId}`, then `awaitJob(jobId)` → `{voteID}`. The relay accepts CSP- or proof-authorized
+   envelopes; the poll is internal to `vote()`.
+
 ## 5. Ported minimal vote-envelope module (the only crypto we own)
 
-Port from `other-repos/vocdoni-sdk/` (copy + trim to the CSP path only):
+Port from `other-repos/vocdoni-sdk/` (copy + trim to the CSP and Merkle non-anonymous paths):
 
 | Port into | From vocdoni-sdk |
 |-----------|------------------|
-| `core/vote.ts` `generateVoteTransaction` (CSP `ProofCA` branch), `packageVoteContent`, `cspCaBundle`, `encodeCspCaBundle` | `src/core/vote.ts` |
+| `core/vote.ts` `generateVoteTransaction` (CSP `ProofCA` branch **and** the Merkle `ProofArbo` branch), `packageVoteContent`, `cspCaBundle`, `encodeCspCaBundle` | `src/core/vote.ts` |
 | `core/transaction.ts` `encodeTransaction`, `hashTransaction` | `src/core/transaction.ts` |
 | `util/signing.ts` `Signing.signTransaction` | `src/util/signing.ts` |
 | `util/blind-signing.ts` `CensusBlind` (blind/unblind, decodePoint), `getBlindedPayload` | `src/util/blind-signing.ts` |
@@ -167,14 +186,22 @@ Port from `other-repos/vocdoni-sdk/` (copy + trim to the CSP path only):
 | types `Vote`, `CspVote`, `VotePackage`, `CspProofType` | `src/types/vote/*` |
 
 External deps for this module (same versions as vocdoni-sdk):
-- `@vocdoni/proto` — `VoteEnvelope`, `Tx`, `SignedTx`, `ProofCA`, `ProofCA_Type`, `CAbundle`.
+- `@vocdoni/proto` — `VoteEnvelope`, `Tx`, `SignedTx`, `ProofCA`, `ProofCA_Type`, `CAbundle`, plus
+  `ProofArbo`, `ProofArbo_Type`, `ProofArbo_KeyType` for the Merkle branch.
 - `@ethersproject/wallet` + `@ethersproject/keccak256` (ethers v5) — sign + hash.
 - `blindsecp256k1` — CSP blind/unblind.
 - `tweetnacl` — encrypted-vote sealedbox (phase 2 only).
 
+The **Merkle proof itself is not generated client-side** — the SDK fetches it from
+`GET /process/{processId}/census/proof` (the SaaS proxies the chain's `CensusGenProof`) and only
+**embeds** it as a `ProofArbo` in the envelope. So no Merkle/Arbo proof-generation code is ported;
+the added surface is just the envelope branch that wraps an already-fetched proof.
+
 **Explicitly NOT ported** (now done server-side by the SaaS): election creation
-(`core/election.ts`), account crypto (`core/account.ts`), Merkle/offchain census proofs,
-ZK/anonymous (`snarkjs`/`circomlibjs`), Census3. This keeps the SDK lean and dependency-light.
+(`core/election.ts`), account crypto (`core/account.ts`), Merkle/offchain census proof
+**generation** (fetched from the SaaS instead — only proof *embedding* is ported),
+ZK/anonymous (`snarkjs`/`circomlibjs`, so `zkweighted` anonymous voting is out of scope this round),
+Census3. This keeps the SDK lean and dependency-light.
 
 ## 6. Phases
 
@@ -184,8 +211,10 @@ ZK/anonymous (`snarkjs`/`circomlibjs`), Census3. This keeps the SDK lean and dep
 2. **Auth + Org + Census** services (pure REST) + unit tests.
 3. **Election** service: `createDraft/updateDraft/publish/setStatus/get/results` against the
    new SaaS endpoints.
-4. **Vote**: port the minimal crypto module (§5), implement `csp.*` + `vote()`, integration
-   test against a running SaaS + Voconed (publish → CSP auth/sign → vote → results).
+4. **Vote**: port the minimal crypto module (§5), implement `csp.*` + `vote()` for **both** the CSP
+   and the non-CSP Merkle path (`voteService.censusProof` → `ProofArbo` envelope), integration test
+   against a running SaaS + Voconed (publish → {CSP auth/sign | fetch census proof} → vote →
+   results).
 5. **Encrypted votes** (optional): NaCl sealedbox path for `secretUntilTheEnd` elections.
 6. **Docs + examples**, publish to npm, then migrate the vocdoni.app UI (§7).
 

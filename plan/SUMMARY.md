@@ -49,13 +49,22 @@ RemoteSigner path) keeps working throughout, so old and new can coexist during m
 | Election | `POST /process` / `PUT /process/{id}` *(+ optional `electionParams`)* | organizer |
 | Publish | `POST /process/{draftId}/publish` → `{processId}` | manager/admin |
 | Lifecycle | `PUT /process/{processId}/status` (ready/paused/ended/canceled) | manager/admin |
-| Vote relay | `POST /process/{processId}/vote` → `{voteId}` | public (CSP-authorized) |
+| Vote relay | `POST /process/{processId}/vote` → `{voteId}` | public (CSP- or proof-authorized) |
+| Non-CSP census | `GET /process/{processId}/census/proof` · `PUT /process/{processId}/census` (dynamic add) | public proof · manager/admin |
 | Reads | `GET /process/{processId}/results` · `GET /process/{processId}/metadata` | public |
 | Integrator | `POST`/`GET /organizations/{address}/managed` · `GET /organizations/{address}/integrator` | integrator admin |
 
 Integrator quota dimensions: managed orgs, elections per org, total elections, census per election,
 census per org, total census. A `0` limit means unlimited. Publishing under a managed org rolls
 usage up to the integrator and enforces its caps.
+
+**Non-CSP (Merkle) elections:** the backend was CSP-only, but the vocdoni.app UI still creates
+`weighted` / `zkweighted` (anonymous) censuses straight against the Vochain. Phase 6 brings these
+into the managed path — the backend builds + publishes the on-chain census, issues Merkle census
+proofs (`GET /process/{id}/census/proof`), relays proof-authorized votes alongside CSP ones, and
+supports dynamic-census adds (`PUT /process/{id}/census`) — so the UI can drop `@vocdoni/sdk`
+entirely. It is **pure wiring** over the already-wrapped dvote `apiclient`: no new crypto, nothing
+to vendor.
 
 ## How the hard parts are solved
 
@@ -80,7 +89,7 @@ migrates to it incrementally.
 
 ## Plan & status
 
-Backend ships in 6 phases (each: `make lint` + `make swagger` + `make test` green, plus a Voconed
+Backend ships in 7 phases (each: `make lint` + `make swagger` + `make test` green, plus a Voconed
 integration test):
 
 0. Election params on drafts *(scaffolding)*
@@ -89,6 +98,7 @@ integration test):
 3. Vote relay + status lifecycle
 4. Read proxies (results + metadata)
 5. Integrator layer (managed orgs + quota)
+6. Non-CSP (merkle / weighted / dynamic) elections
 
 **Current status:** designs finalized and reconciled across the three plan docs; implementation
 starting at Phase 0. The SDK is planned but **out of scope for this round** — backend first.
