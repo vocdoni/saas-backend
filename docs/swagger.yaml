@@ -750,6 +750,25 @@ definitions:
       totalItems:
         type: integer
     type: object
+  apicommon.ProcessResultsResponse:
+    properties:
+      endDate:
+        type: string
+      finalResults:
+        type: boolean
+      results:
+        items:
+          items:
+            type: string
+          type: array
+        type: array
+      startDate:
+        type: string
+      status:
+        type: string
+      voteCount:
+        type: integer
+    type: object
   apicommon.PublishCensusGroupRequest:
     properties:
       authFields:
@@ -3743,6 +3762,41 @@ paths:
       summary: Update an existing voting process
       tags:
       - process
+  /process/{processId}/metadata:
+    get:
+      description: |-
+        Rebuilds and returns the raw ElectionMetadata JSON document of the process
+        identified by its on-chain process id. The metadata is deterministically derived
+        from the stored ElectionParams, so it is identical to the content-addressed document
+        published on chain. Public endpoint: no authentication is required.
+      parameters:
+      - description: On-chain process id (hex)
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Election metadata JSON
+          schema:
+            type: object
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Get the election metadata JSON
+      tags:
+      - process
   /process/{processId}/publish:
     post:
       consumes:
@@ -3785,6 +3839,41 @@ paths:
       security:
       - BearerAuth: []
       summary: Publish a draft process as an on-chain election
+      tags:
+      - process
+  /process/{processId}/results:
+    get:
+      description: |-
+        Fetches the current on-chain state of the election identified by its process id
+        and returns a trimmed view of it: status, vote count, start/end dates, whether the
+        results are final and the tally (if any). Public endpoint: no authentication is
+        required.
+      parameters:
+      - description: On-chain process id (hex)
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Trimmed on-chain election state
+          schema:
+            $ref: '#/definitions/apicommon.ProcessResultsResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Get the trimmed on-chain election results
       tags:
       - process
   /process/{processId}/sign-info:
