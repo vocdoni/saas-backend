@@ -297,6 +297,8 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, censusIDEndpoint, a.censusInfoHandler)
 		handle(r, http.MethodGet, processEndpoint, a.processInfoHandler)
 		handle(r, http.MethodPost, processVoteEndpoint, a.relayVoteHandler)
+		handle(r, http.MethodGet, processResultsEndpoint, a.processResultsHandler)
+		handle(r, http.MethodGet, processMetadataEndpoint, a.processMetadataHandler)
 		handle(r, http.MethodPost, processSignInfoEndpoint, cspHandlers.ConsumedAddressHandler)
 		handle(r, http.MethodGet, processBundleInfoEndpoint, a.processBundleInfoHandler)
 		handle(r, http.MethodPost, processBundleWeightEndpoint, cspHandlers.UserWeightHandler)

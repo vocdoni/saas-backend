@@ -1065,6 +1065,17 @@ type PublishProcessResponse struct {
 	Status string `json:"status"`
 }
 
+// ProcessResultsResponse is the trimmed on-chain election state returned by
+// GET /process/{processId}/results.
+type ProcessResultsResponse struct {
+	Status       string     `json:"status"`
+	VoteCount    uint64     `json:"voteCount"`
+	StartDate    time.Time  `json:"startDate"`
+	EndDate      time.Time  `json:"endDate"`
+	FinalResults bool       `json:"finalResults"`
+	Results      [][]string `json:"results,omitempty"`
+}
+
 // RelayVoteRequest is the body of POST /process/{processId}/vote: a hex-encoded,
 // already-signed voter transaction (a marshaled models.SignedTx wrapping a Vote tx).
 // swagger:model RelayVoteRequest

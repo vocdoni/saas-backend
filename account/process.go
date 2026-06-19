@@ -192,3 +192,13 @@ func (a *Account) SubmitSignedTx(stx []byte) ([]byte, error) {
 	}
 	return data, nil
 }
+
+// Election fetches the current on-chain state of the election (process) with
+// the given id from the Vochain.
+func (a *Account) Election(processID []byte) (*api.Election, error) {
+	election, err := a.client.Election(processID)
+	if err != nil {
+		return nil, fmt.Errorf("could not fetch election %x: %w", processID, err)
+	}
+	return election, nil
+}

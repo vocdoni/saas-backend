@@ -154,6 +154,12 @@ const (
 	// POST /process/{processId}/vote to relay an already-signed vote (public)
 	processVoteEndpoint = "/process/{processId}/vote"
 
+	// GET /process/{processId}/results to get the trimmed on-chain election results (public)
+	processResultsEndpoint = "/process/{processId}/results"
+
+	// GET /process/{processId}/metadata to get the election metadata JSON (public)
+	processMetadataEndpoint = "/process/{processId}/metadata"
+
 	// two-factor process bundle routes
 	// POST /process/bundle to create a new bundle
 	processBundleEndpoint = "/process/bundle"
