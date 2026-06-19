@@ -151,7 +151,6 @@ type Plan struct {
 	Organization         PlanLimits       `json:"organization" bson:"organization"`
 	VotingTypes          VotingTypes      `json:"votingTypes" bson:"votingTypes"`
 	Features             Features         `json:"features" bson:"features"`
-	Integrator           bool             `json:"integrator" bson:"integrator"`
 	IntegratorLimits     IntegratorLimits `json:"integratorLimits" bson:"integratorLimits"`
 }
 

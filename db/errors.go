@@ -24,6 +24,9 @@ var (
 	ErrAutoGroupCannotBeDeleted = fmt.Errorf("auto-generated group cannot be deleted")
 	// ErrAutoGroupMembersCannotBeModified is returned when trying to manually add/remove members from the auto group
 	ErrAutoGroupMembersCannotBeModified = fmt.Errorf("auto-generated group membership cannot be manually modified")
+	// ErrManagedQuotaReached is returned when an atomic integrator-quota reservation would
+	// exceed the integrator's managed-orgs, managed-processes or managed-census-size limit.
+	ErrManagedQuotaReached = fmt.Errorf("integrator managed quota reached")
 )
 
 // errorsAsStrings converts a slice of errors to a slice of strings

@@ -27,6 +27,15 @@ func integratorAddressFromRequest(w http.ResponseWriter, r *http.Request) (commo
 	return common.HexToAddress(addr), true
 }
 
+// releaseManagedOrgSlot rolls back a managed-org slot reserved by
+// IncrementOrganizationManagedOrgsCounterWithLimit when provisioning or persisting the
+// managed org fails. Best-effort: a failed rollback is only logged, never fatal.
+func (a *API) releaseManagedOrgSlot(integratorAddr common.Address) {
+	if err := a.db.DecrementOrganizationManagedOrgsCounter(integratorAddr); err != nil {
+		log.Warnw("could not roll back managed orgs counter", "integrator", integratorAddr.Hex(), "error", err)
+	}
+}
+
 // createManagedOrganizationHandler godoc
 //
 //	@Summary		Create a managed organization under an integrator
@@ -76,6 +85,11 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 			apiErr.Write(w)
 			return
 		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	limits, err := a.subscriptions.EffectiveIntegratorLimits(integrator)
+	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
@@ -133,15 +147,28 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 			Active:    true,
 		},
 	}
+	// atomically reserve a managed-org slot BEFORE provisioning the (faucet-funded)
+	// on-chain account, so two concurrent creates from the same integrator cannot both
+	// pass the stale CanCreateManagedOrg check above and over-provision past the cap.
+	if err := a.db.IncrementOrganizationManagedOrgsCounterWithLimit(integratorAddr, limits.MaxManagedOrgs); err != nil {
+		if err == db.ErrManagedQuotaReached {
+			errors.ErrMaxManagedOrgsReached.Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
 	// forge the managed org's on-chain account (always eager) BEFORE persisting the DB
 	// row. CreateOrgAccount is idempotent and the address derives from the signer, so a
 	// failure here leaves nothing to clean up and the request can be retried safely.
 	infoURI := fmt.Sprintf("%s/organizations/%s", a.serverURL, dbOrg.Address.String())
 	if err := a.account.CreateOrgAccount(signer, dbOrg.Address.String(), infoURI); err != nil {
+		a.releaseManagedOrgSlot(integratorAddr)
 		errors.ErrGenericInternalServerError.Withf("could not provision managed organization account: %v", err).Write(w)
 		return
 	}
 	if err := a.db.SetOrganization(dbOrg); err != nil {
+		a.releaseManagedOrgSlot(integratorAddr)
 		if err == db.ErrAlreadyExists {
 			errors.ErrInvalidOrganizationData.WithErr(err).Write(w)
 			return
@@ -152,11 +179,6 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		}
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
-	}
-	// bump the integrator's managed organizations counter (best-effort: the org already
-	// exists on-chain and in the DB, so a counter failure must not fail the request).
-	if err := a.db.IncrementOrganizationManagedOrgsCounter(integratorAddr); err != nil {
-		log.Warnw("could not update managed orgs counter", "integrator", integratorAddr.Hex(), "error", err)
 	}
 	apicommon.HTTPWriteJSON(w, apicommon.OrganizationFromDB(dbOrg, nil))
 }

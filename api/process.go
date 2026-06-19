@@ -446,15 +446,21 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// if this org is managed by an integrator, enforce the integrator's aggregate quota
-	var integrator *db.Organization
-	if org.ManagedBy != (common.Address{}) {
-		integrator, err = a.db.Organization(org.ManagedBy)
+	// if this org is managed by an integrator, atomically reserve the integrator's
+	// aggregate process/census quota BEFORE building the on-chain tx, so concurrent
+	// publishes cannot each pass a stale check and exceed the cap. The reservation is
+	// rolled back (deferred) unless the publish commits. Test-sized elections are exempt
+	// from the integrator quota, mirroring the per-org Processes counter exemption below.
+	managedReserved := false
+	nonTestSized := draft.ElectionParams.MaxCensusSize > uint64(db.TestMaxCensusSize)
+	if org.ManagedBy != (common.Address{}) && nonTestSized {
+		integrator, err := a.db.Organization(org.ManagedBy)
 		if err != nil {
 			errors.ErrGenericInternalServerError.Withf("could not get integrator organization: %v", err).Write(w)
 			return
 		}
-		if err := a.subscriptions.CanPublishForManagedOrg(integrator, int(draft.ElectionParams.MaxCensusSize)); err != nil {
+		limits, err := a.subscriptions.EffectiveIntegratorLimits(integrator)
+		if err != nil {
 			if apiErr, ok := err.(errors.Error); ok {
 				apiErr.Write(w)
 				return
@@ -462,6 +468,29 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
+		if err := a.db.ReserveManagedPublish(integrator.Address,
+			limits.MaxManagedProcesses, limits.MaxManagedCensusSize, int(draft.ElectionParams.MaxCensusSize)); err != nil {
+			if err == db.ErrManagedQuotaReached {
+				errors.ErrIntegratorQuotaExceeded.Write(w)
+				return
+			}
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+		managedReserved = true
+		defer func() {
+			// roll back the reservation if the publish did not commit
+			if !managedReserved {
+				return
+			}
+			if e := a.db.AddOrganizationManagedProcesses(integrator.Address, -1); e != nil {
+				log.Warnw("could not roll back managed processes counter", "error", e)
+			}
+			if e := a.db.AddOrganizationManagedCensusSize(integrator.Address,
+				-int64(draft.ElectionParams.MaxCensusSize)); e != nil {
+				log.Warnw("could not roll back managed census counter", "error", e)
+			}
+		}()
 	}
 
 	orgSigner, err := account.OrganizationSigner(a.secret, org.Creator, org.Nonce)
@@ -549,25 +578,18 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
+	// the on-chain election now exists and the draft is published: commit the integrator
+	// reservation so the deferred rollback above does not undo it.
+	managedReserved = false
 
-	// usage counters are best-effort: the election already exists on-chain and the
-	// draft is marked published, so a counter failure must not fail the request (the
+	// the org's own Processes counter is best-effort: the election already exists on-chain
+	// and the draft is marked published, so a counter failure must not fail the request (the
 	// idempotency guard would otherwise turn away any retry without re-counting).
 	// counter nuance: mirror api/transaction.go — only count non-test-sized elections.
-	if draft.ElectionParams.MaxCensusSize > uint64(db.TestMaxCensusSize) {
+	if nonTestSized {
 		org.Counters.Processes++
 		if err := a.db.SetOrganization(org); err != nil {
 			log.Warnw("could not update organization process counter", "error", err)
-		}
-	}
-
-	// bump the integrator's aggregate counters for managed-org publishes
-	if integrator != nil {
-		if err := a.db.AddOrganizationManagedProcesses(integrator.Address, 1); err != nil {
-			log.Warnw("could not update managed processes counter", "error", err)
-		}
-		if err := a.db.AddOrganizationManagedCensusSize(integrator.Address, int64(draft.ElectionParams.MaxCensusSize)); err != nil {
-			log.Warnw("could not update managed census counter", "error", err)
 		}
 	}
 

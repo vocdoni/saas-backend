@@ -385,14 +385,54 @@ func (ms *MongoStorage) IncrementOrganizationSentSMSCounter(address common.Addre
 	return ms.addToOrganizationCounter(address, "sentSMS", 1)
 }
 
-// IncrementOrganizationManagedOrgsCounter atomically increments the managed organizations counter.
-func (ms *MongoStorage) IncrementOrganizationManagedOrgsCounter(address common.Address) error {
+// IncrementOrganizationManagedOrgsCounterWithLimit atomically increments the managed
+// organizations counter only if it stays within limit, re-reading the counter under
+// keysLock so two concurrent creates cannot both pass a stale check and exceed the cap
+// (each managed org provisions a faucet-funded on-chain account, so over-provisioning is
+// a real cost vector). Returns ErrManagedQuotaReached when the limit is already reached.
+func (ms *MongoStorage) IncrementOrganizationManagedOrgsCounterWithLimit(address common.Address, limit int) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+
+	org, err := ms.Organization(address)
+	if err != nil {
+		return fmt.Errorf("could not get organization: %w", err)
+	}
+	if org.Counters.ManagedOrgs >= limit {
+		return ErrManagedQuotaReached
+	}
 	return ms.addToOrganizationCounter(address, "managedOrgs", 1)
 }
 
 // DecrementOrganizationManagedOrgsCounter atomically decrements the managed organizations counter.
 func (ms *MongoStorage) DecrementOrganizationManagedOrgsCounter(address common.Address) error {
 	return ms.addToOrganizationCounter(address, "managedOrgs", -1)
+}
+
+// ReserveManagedPublish atomically reserves one managed process and censusDelta managed
+// census slots for the integrator, re-reading both counters under keysLock so concurrent
+// publishes cannot each pass a stale check and exceed the integrator's aggregate quota.
+// Returns ErrManagedQuotaReached if either limit would be exceeded. Roll back with
+// AddOrganizationManagedProcesses(-1) / AddOrganizationManagedCensusSize(-censusDelta) if
+// the publish later fails.
+func (ms *MongoStorage) ReserveManagedPublish(address common.Address, processLimit, censusLimit, censusDelta int) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+
+	org, err := ms.Organization(address)
+	if err != nil {
+		return fmt.Errorf("could not get organization: %w", err)
+	}
+	if org.Counters.ManagedProcesses >= processLimit {
+		return ErrManagedQuotaReached
+	}
+	if org.Counters.ManagedCensusSize+censusDelta > censusLimit {
+		return ErrManagedQuotaReached
+	}
+	if err := ms.addToOrganizationCounter(address, "managedProcesses", 1); err != nil {
+		return err
+	}
+	return ms.addToOrganizationCounter(address, "managedCensusSize", int64(censusDelta))
 }
 
 // AddOrganizationManagedProcesses atomically adds delta to the managed processes counter.
