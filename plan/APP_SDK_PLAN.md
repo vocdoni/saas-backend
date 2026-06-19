@@ -90,10 +90,14 @@ transaction, tx hash, token, gas, faucet, signer, or private key:
   `AuthService`; callers never pass or read a token.
 - **Organizer ops** (create org / census / draft / publish / setStatus) are plain awaited REST
   calls returning resource ids (org address, `processId`). The SaaS forges and confirms every tx.
+  The three on-chain actions — `publish`, `setStatus`, `vote` — are **async on the wire** (the SaaS
+  returns `202` + a `jobId` and confirms on a background worker), but the SDK hides this: each method
+  enqueues, then polls `GET /jobs/{jobId}` until the job completes and resolves with the on-chain
+  result (or rejects on a failed job). Consumers just `await` and never see the job id.
 - **Voting** takes `vote(processId, choices)`. The ephemeral voter key needed to sign the CSP
   envelope is **generated and held internally by `VoteService`** (kept for the session so a
   re-vote/overwrite reuses the same nullifier). The integrator passes choices, gets back a
-  `voteId` receipt — no key handling, no envelope, no tx.
+  `voteId` receipt — no key handling, no envelope, no tx, no polling.
 
 The only crypto the SDK owns (the vote envelope, §5) runs entirely under the hood; it is an
 implementation detail of `vote()`, not part of the consumer surface.
@@ -109,12 +113,16 @@ Integr.:  createManagedOrganization(integratorAddr, info)           // POST /org
           integratorInfo(integratorAddr): {enabled,limits,usage}    // GET  /organizations/{addr}/integrator
 Census:   createCensus(fromGroupId|members)  getCensus(id)         // /census
 Election: createDraft(params)  updateDraft(id,params)
-          publish(draftId): Promise<{processId}>                   // POST /process/{id}/publish
-          setStatus(processId, 'ready'|'paused'|'ended'|'canceled')// PUT  /process/{id}/status
+          publish(draftId): Promise<{processId}>                   // POST /process/{id}/publish → 202; polls /jobs/{jobId}
+          setStatus(processId, 'ready'|'paused'|'ended'|'canceled')// PUT  /process/{id}/status   → 202; polls /jobs/{jobId}
           get(draftId)  results(processId)                          // GET  /process/{id}[/results]
 Voter:    csp.info(bundleId)  csp.auth(bundleId,step,data)          // OTP challenge: consumer enters the code
-          vote(processId, choices): Promise<{voteId}>               // CSP sign + envelope + relay, all internal
+          vote(processId, choices): Promise<{voteId}>               // CSP sign + envelope + relay (202) + poll, all internal
 ```
+
+The `202` + `jobId` poll loop lives in a small shared helper (`awaitJob(jobId)`) inside the
+HTTP client, reused by `publish`, `setStatus` and `vote`; it polls `GET /jobs/{jobId}` until
+`status` is `completed` (resolve with `result`) or `failed` (reject with `error`).
 
 `election.publish/setStatus/results`, `vote`, and the integrator methods are the new managed
 endpoints; everything else maps to today's API. The integrator never constructs a transaction.
@@ -140,8 +148,9 @@ so `vote()` can use it.
 2. Use the **internally generated** ephemeral voter key (held by `VoteService` for the session)
    and the CSP auth token from the completed `csp.auth` → CSP blind-sign → unblinded signature.
 3. `core/vote.ts` builds `VoteEnvelope` with `ProofCA` (CSP), packages votes, signs with the
-   internal voter key → base64 `SignedTx`.
-4. `voteService.relay(processId, txPayload)` → `POST /process/{processId}/vote` → `{voteId}`.
+   internal voter key → hex `SignedTx`.
+4. `voteService.relay(processId, txPayload)` → `POST /process/{processId}/vote` → `202 {jobId}`,
+   then `awaitJob(jobId)` → `{voteID}` (the receipt). The poll is internal to `vote()`.
 
 ## 5. Ported minimal vote-envelope module (the only crypto we own)
 
