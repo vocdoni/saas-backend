@@ -105,8 +105,7 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 		newProcess := tx.GetNewProcess()
 		// do not count processes with less than TestMaxCensusSize for user testing
 		if newProcess.Process.MaxCensusSize > uint64(db.TestMaxCensusSize) {
-			org.Counters.Processes++
-			if err := a.db.SetOrganization(org); err != nil {
+			if err := a.db.IncrementOrganizationProcessesCounter(org.Address); err != nil {
 				errors.ErrGenericInternalServerError.Withf("could not update organization process counter: %v", err).Write(w)
 				return
 			}

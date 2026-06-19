@@ -584,11 +584,11 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 
 	// the org's own Processes counter is best-effort: the election already exists on-chain
 	// and the draft is marked published, so a counter failure must not fail the request (the
-	// idempotency guard would otherwise turn away any retry without re-counting).
-	// counter nuance: mirror api/transaction.go — only count non-test-sized elections.
+	// idempotency guard would otherwise turn away any retry without re-counting). The atomic
+	// $inc mirrors api/transaction.go and avoids losing an update against a concurrent writer;
+	// counter nuance: only count non-test-sized elections.
 	if nonTestSized {
-		org.Counters.Processes++
-		if err := a.db.SetOrganization(org); err != nil {
+		if err := a.db.IncrementOrganizationProcessesCounter(org.Address); err != nil {
 			log.Warnw("could not update organization process counter", "error", err)
 		}
 	}
