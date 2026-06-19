@@ -26,6 +26,11 @@ func main() {
 	flag.StringP("mongoURL", "m", "", "MongoDB connection URL")
 	flag.StringP("mongoDB", "d", "", "MongoDB database name")
 	flag.StringP("vocdoniAPI", "v", "https://api-dev.vocdoni.net/v2", "Vocdoni node API URL")
+	flag.Bool("setIntegrator", false, "enable the given organization as an integrator and set its limits")
+	flag.String("orgAddress", "", "organization address (hex) for --setIntegrator")
+	flag.Int("maxManagedOrgs", 0, "integrator limit: max managed organizations")
+	flag.Int("maxManagedProcesses", 0, "integrator limit: max managed processes")
+	flag.Int("maxManagedCensusSize", 0, "integrator limit: max managed census size")
 
 	// Parse flags
 	flag.Parse()
@@ -45,6 +50,22 @@ func main() {
 	apiEndpoint := viper.GetString("vocdoniAPI")
 	// Initialize logger
 	log.Init("info", "stdout", nil)
+
+	if viper.GetBool("setIntegrator") {
+		if mongoURL == "" || mongoDB == "" {
+			log.Fatal("mongoURL and mongoDB are required")
+		}
+		database, err := db.New(mongoURL, mongoDB)
+		if err != nil {
+			log.Fatalf("could not connect to MongoDB: %v", err)
+		}
+		defer database.Close()
+		if err := setIntegrator(database, viper.GetString("orgAddress"),
+			viper.GetInt("maxManagedOrgs"), viper.GetInt("maxManagedProcesses"), viper.GetInt("maxManagedCensusSize")); err != nil {
+			log.Fatalf("could not set integrator: %v", err)
+		}
+		return
+	}
 
 	// Validate required parameters
 	if processID == "" {
@@ -92,6 +113,34 @@ func main() {
 			log.Fatalf("error querying process and user: %v", err)
 		}
 	}
+}
+
+// setIntegrator enables the organization at the given address as an integrator and
+// sets its integrator-limits override.
+func setIntegrator(database *db.MongoStorage, orgAddress string, maxOrgs, maxProcesses, maxCensus int) error {
+	if orgAddress == "" {
+		return fmt.Errorf("orgAddress is required")
+	}
+	addr := common.HexToAddress(orgAddress)
+	org, err := database.Organization(addr)
+	if err != nil {
+		return fmt.Errorf("could not get organization: %w", err)
+	}
+	org.IsIntegrator = true
+	org.IntegratorLimits = &db.IntegratorLimits{
+		MaxManagedOrgs:       maxOrgs,
+		MaxManagedProcesses:  maxProcesses,
+		MaxManagedCensusSize: maxCensus,
+	}
+	if err := database.SetOrganization(org); err != nil {
+		return fmt.Errorf("could not update organization: %w", err)
+	}
+	log.Infow("organization is now an integrator",
+		"address", addr.Hex(),
+		"maxManagedOrgs", maxOrgs,
+		"maxManagedProcesses", maxProcesses,
+		"maxManagedCensusSize", maxCensus)
+	return nil
 }
 
 // queryProcessOnly handles the process-only query mode

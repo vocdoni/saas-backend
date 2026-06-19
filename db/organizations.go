@@ -385,6 +385,35 @@ func (ms *MongoStorage) IncrementOrganizationSentSMSCounter(address common.Addre
 	return ms.addToOrganizationCounter(address, "sentSMS", 1)
 }
 
+// IncrementOrganizationManagedOrgsCounter atomically increments the managed organizations counter.
+func (ms *MongoStorage) IncrementOrganizationManagedOrgsCounter(address common.Address) error {
+	return ms.addToOrganizationCounter(address, "managedOrgs", 1)
+}
+
+// DecrementOrganizationManagedOrgsCounter atomically decrements the managed organizations counter.
+func (ms *MongoStorage) DecrementOrganizationManagedOrgsCounter(address common.Address) error {
+	return ms.addToOrganizationCounter(address, "managedOrgs", -1)
+}
+
+// AddOrganizationManagedProcesses atomically adds delta to the managed processes counter.
+func (ms *MongoStorage) AddOrganizationManagedProcesses(address common.Address, delta int64) error {
+	return ms.addToOrganizationCounter(address, "managedProcesses", delta)
+}
+
+// AddOrganizationManagedCensusSize atomically adds delta to the managed census size counter.
+func (ms *MongoStorage) AddOrganizationManagedCensusSize(address common.Address, delta int64) error {
+	return ms.addToOrganizationCounter(address, "managedCensusSize", delta)
+}
+
+// ListManagedOrganizations returns a paginated list of organizations managed by
+// the integrator at the given address.
+func (ms *MongoStorage) ListManagedOrganizations(
+	managerAddress common.Address, page, limit int64,
+) (int64, []Organization, error) {
+	filter := bson.M{"managedBy": managerAddress}
+	return paginatedDocuments[Organization](ms.organizations, page, limit, filter, options.Find())
+}
+
 func (ms *MongoStorage) fetchOrganizationAndPlan(orgAddress common.Address) (*Organization, *Plan, error) {
 	org, err := ms.Organization(orgAddress)
 	if err != nil {

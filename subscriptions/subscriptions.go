@@ -322,3 +322,55 @@ func (p *Subscriptions) OrgCanAddCensusParticipants(orgAddress common.Address, c
 	}
 	return nil
 }
+
+// IsIntegrator reports whether the given organization is enabled as an integrator.
+func (*Subscriptions) IsIntegrator(org *db.Organization) bool {
+	return org != nil && org.IsIntegrator
+}
+
+// EffectiveIntegratorLimits returns the integrator limits in force for the org: the
+// per-organization override if set, otherwise the limits granted by its plan.
+func (p *Subscriptions) EffectiveIntegratorLimits(org *db.Organization) (db.IntegratorLimits, error) {
+	if org.IntegratorLimits != nil {
+		return *org.IntegratorLimits, nil
+	}
+	plan, err := p.db.Plan(org.Subscription.PlanID)
+	if err != nil {
+		return db.IntegratorLimits{}, fmt.Errorf("could not get subscription plan: %w", err)
+	}
+	return plan.IntegratorLimits, nil
+}
+
+// CanCreateManagedOrg checks that the integrator may create another managed organization.
+func (p *Subscriptions) CanCreateManagedOrg(integrator *db.Organization) error {
+	if !p.IsIntegrator(integrator) {
+		return errors.ErrNotAnIntegrator
+	}
+	limits, err := p.EffectiveIntegratorLimits(integrator)
+	if err != nil {
+		return err
+	}
+	if integrator.Counters.ManagedOrgs >= limits.MaxManagedOrgs {
+		return errors.ErrMaxManagedOrgsReached.Withf("limit %d", limits.MaxManagedOrgs)
+	}
+	return nil
+}
+
+// CanPublishForManagedOrg checks the integrator's aggregate process/census quota
+// before publishing an election (with the given census size) under a managed org.
+func (p *Subscriptions) CanPublishForManagedOrg(integrator *db.Organization, censusSize int) error {
+	if !p.IsIntegrator(integrator) {
+		return errors.ErrNotAnIntegrator
+	}
+	limits, err := p.EffectiveIntegratorLimits(integrator)
+	if err != nil {
+		return err
+	}
+	if integrator.Counters.ManagedProcesses >= limits.MaxManagedProcesses {
+		return errors.ErrIntegratorQuotaExceeded.Withf("max managed processes %d", limits.MaxManagedProcesses)
+	}
+	if integrator.Counters.ManagedCensusSize+censusSize > limits.MaxManagedCensusSize {
+		return errors.ErrIntegratorQuotaExceeded.Withf("max managed census size %d", limits.MaxManagedCensusSize)
+	}
+	return nil
+}
