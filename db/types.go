@@ -72,25 +72,36 @@ type OrganizationUser struct {
 }
 
 type Organization struct {
-	Address         common.Address           `json:"address" bson:"_id"` // common.Address is serialized as bytes in the db
-	Website         string                   `json:"website" bson:"website"`
-	Type            OrganizationType         `json:"type" bson:"type"`
-	Creator         string                   `json:"creator" bson:"creator"`
-	CreatedAt       time.Time                `json:"createdAt" bson:"createdAt"`
-	Nonce           string                   `json:"nonce" bson:"nonce"`
-	Size            string                   `json:"size" bson:"size"`
-	Color           string                   `json:"color" bson:"color"`
-	Subdomain       string                   `json:"subdomain" bson:"subdomain"`
-	Country         string                   `json:"country" bson:"country"`
-	Timezone        string                   `json:"timezone" bson:"timezone"`
-	Active          bool                     `json:"active" bson:"active"`
-	Communications  bool                     `json:"communications" bson:"communications"`
-	TokensPurchased uint64                   `json:"tokensPurchased" bson:"tokensPurchased"`
-	TokensRemaining uint64                   `json:"tokensRemaining" bson:"tokensRemaining"`
-	Parent          common.Address           `json:"parent" bson:"parent"`
-	Meta            map[string]any           `json:"meta" bson:"meta"`
-	Subscription    OrganizationSubscription `json:"subscription" bson:"subscription"`
-	Counters        OrganizationCounters     `json:"counters" bson:"counters"`
+	Address          common.Address           `json:"address" bson:"_id"` // common.Address is serialized as bytes in the db
+	Website          string                   `json:"website" bson:"website"`
+	Type             OrganizationType         `json:"type" bson:"type"`
+	Creator          string                   `json:"creator" bson:"creator"`
+	CreatedAt        time.Time                `json:"createdAt" bson:"createdAt"`
+	Nonce            string                   `json:"nonce" bson:"nonce"`
+	Size             string                   `json:"size" bson:"size"`
+	Color            string                   `json:"color" bson:"color"`
+	Subdomain        string                   `json:"subdomain" bson:"subdomain"`
+	Country          string                   `json:"country" bson:"country"`
+	Timezone         string                   `json:"timezone" bson:"timezone"`
+	Active           bool                     `json:"active" bson:"active"`
+	Communications   bool                     `json:"communications" bson:"communications"`
+	TokensPurchased  uint64                   `json:"tokensPurchased" bson:"tokensPurchased"`
+	TokensRemaining  uint64                   `json:"tokensRemaining" bson:"tokensRemaining"`
+	Parent           common.Address           `json:"parent" bson:"parent"`
+	Meta             map[string]any           `json:"meta" bson:"meta"`
+	Subscription     OrganizationSubscription `json:"subscription" bson:"subscription"`
+	Counters         OrganizationCounters     `json:"counters" bson:"counters"`
+	ManagedBy        common.Address           `json:"managedBy,omitempty" bson:"managedBy,omitempty"`
+	IsIntegrator     bool                     `json:"isIntegrator" bson:"isIntegrator"`
+	IntegratorLimits *IntegratorLimits        `json:"integratorLimits,omitempty" bson:"integratorLimits,omitempty"`
+}
+
+// IntegratorLimits caps the resources an integrator organization may consume
+// across the organizations it manages.
+type IntegratorLimits struct {
+	MaxManagedOrgs       int `json:"maxManagedOrgs" bson:"maxManagedOrgs"`
+	MaxManagedProcesses  int `json:"maxManagedProcesses" bson:"maxManagedProcesses"`
+	MaxManagedCensusSize int `json:"maxManagedCensusSize" bson:"maxManagedCensusSize"`
 }
 
 type PlanLimits struct {
@@ -128,18 +139,20 @@ type Features struct {
 }
 
 type Plan struct {
-	ID                   uint64      `json:"id" bson:"_id"`
-	Name                 string      `json:"name" bson:"name"`
-	StripeID             string      `json:"stripeID" bson:"stripeID"`
-	StripeMonthlyPriceID string      `json:"stripeMonthlyPriceID" bson:"stripeMonthlyPriceID"`
-	MonthlyPrice         int64       `json:"monthlyPrice" bson:"monthlyPrice"`
-	StripeYearlyPriceID  string      `json:"stripeYearlyPriceID" bson:"stripeYearlyPriceID"`
-	YearlyPrice          int64       `json:"yearlyPrice" bson:"yearlyPrice"`
-	Default              bool        `json:"default" bson:"default"`
-	FreeTrialDays        int         `json:"freeTrialDays" bson:"freeTrialDays"`
-	Organization         PlanLimits  `json:"organization" bson:"organization"`
-	VotingTypes          VotingTypes `json:"votingTypes" bson:"votingTypes"`
-	Features             Features    `json:"features" bson:"features"`
+	ID                   uint64           `json:"id" bson:"_id"`
+	Name                 string           `json:"name" bson:"name"`
+	StripeID             string           `json:"stripeID" bson:"stripeID"`
+	StripeMonthlyPriceID string           `json:"stripeMonthlyPriceID" bson:"stripeMonthlyPriceID"`
+	MonthlyPrice         int64            `json:"monthlyPrice" bson:"monthlyPrice"`
+	StripeYearlyPriceID  string           `json:"stripeYearlyPriceID" bson:"stripeYearlyPriceID"`
+	YearlyPrice          int64            `json:"yearlyPrice" bson:"yearlyPrice"`
+	Default              bool             `json:"default" bson:"default"`
+	FreeTrialDays        int              `json:"freeTrialDays" bson:"freeTrialDays"`
+	Organization         PlanLimits       `json:"organization" bson:"organization"`
+	VotingTypes          VotingTypes      `json:"votingTypes" bson:"votingTypes"`
+	Features             Features         `json:"features" bson:"features"`
+	Integrator           bool             `json:"integrator" bson:"integrator"`
+	IntegratorLimits     IntegratorLimits `json:"integratorLimits" bson:"integratorLimits"`
 }
 
 type BillingPeriod string
@@ -163,11 +176,14 @@ type OrganizationSubscription struct {
 }
 
 type OrganizationCounters struct {
-	SentSMS    int `json:"sentSMS" bson:"sentSMS"`
-	SentEmails int `json:"sentEmails" bson:"sentEmails"`
-	SubOrgs    int `json:"subOrgs" bson:"subOrgs"`
-	Users      int `json:"users" bson:"users"`
-	Processes  int `json:"processes" bson:"processes"`
+	SentSMS           int `json:"sentSMS" bson:"sentSMS"`
+	SentEmails        int `json:"sentEmails" bson:"sentEmails"`
+	SubOrgs           int `json:"subOrgs" bson:"subOrgs"`
+	Users             int `json:"users" bson:"users"`
+	Processes         int `json:"processes" bson:"processes"`
+	ManagedOrgs       int `json:"managedOrgs" bson:"managedOrgs"`
+	ManagedProcesses  int `json:"managedProcesses" bson:"managedProcesses"`
+	ManagedCensusSize int `json:"managedCensusSize" bson:"managedCensusSize"`
 }
 
 type OrganizationInvite struct {

@@ -102,6 +102,10 @@ const (
 	organizationJobsEndpoint = "/organizations/{address}/jobs"
 	// GET /organizations/{address}/processes to get the organization bundle processes
 	organizationBundlesEndpoint = "/organizations/{address}/processes"
+	// POST /organizations/{address}/managed to create a managed org; GET to list them (integrator)
+	managedOrganizationsEndpoint = "/organizations/{address}/managed"
+	// GET /organizations/{address}/integrator to get integrator quota and usage
+	integratorEndpoint = "/organizations/{address}/integrator"
 
 	// subscription routes
 	// GET /subscriptions to get the subscriptions of an organization

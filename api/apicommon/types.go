@@ -470,6 +470,34 @@ func OrganizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 	}
 }
 
+// CreateManagedOrganizationRequest is the body of POST /organizations/{address}/managed.
+// It carries the new organization's fields plus an optional owner to assign as its admin.
+type CreateManagedOrganizationRequest struct {
+	OrganizationInfo
+	// OwnerEmail optionally assigns an existing user as the managed org's creator/admin.
+	OwnerEmail string `json:"ownerEmail,omitempty"`
+}
+
+// ListManagedOrganizations is the paginated list of organizations managed by an integrator.
+type ListManagedOrganizations struct {
+	Pagination    *Pagination         `json:"pagination"`
+	Organizations []*OrganizationInfo `json:"organizations"`
+}
+
+// IntegratorUsage holds an integrator's current managed-resource usage counters.
+type IntegratorUsage struct {
+	ManagedOrgs       int `json:"managedOrgs"`
+	ManagedProcesses  int `json:"managedProcesses"`
+	ManagedCensusSize int `json:"managedCensusSize"`
+}
+
+// IntegratorInfoResponse is returned by GET /organizations/{address}/integrator.
+type IntegratorInfoResponse struct {
+	Enabled bool                `json:"enabled"`
+	Limits  db.IntegratorLimits `json:"limits"`
+	Usage   IntegratorUsage     `json:"usage"`
+}
+
 // OrganizationSubscriptionInfo provides detailed information about an organization's subscription.
 // swagger:model OrganizationSubscriptionInfo
 type OrganizationSubscriptionInfo struct {

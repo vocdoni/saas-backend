@@ -443,6 +443,24 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// if this org is managed by an integrator, enforce the integrator's aggregate quota
+	var integrator *db.Organization
+	if org.ManagedBy != (common.Address{}) {
+		integrator, err = a.db.Organization(org.ManagedBy)
+		if err != nil {
+			errors.ErrGenericInternalServerError.Withf("could not get integrator organization: %v", err).Write(w)
+			return
+		}
+		if err := a.subscriptions.CanPublishForManagedOrg(integrator, int(draft.ElectionParams.MaxCensusSize)); err != nil {
+			if apiErr, ok := err.(errors.Error); ok {
+				apiErr.Write(w)
+				return
+			}
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+	}
+
 	orgSigner, err := account.OrganizationSigner(a.secret, org.Creator, org.Nonce)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not restore organization signer: %v", err).Write(w)
@@ -523,6 +541,18 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 		org.Counters.Processes++
 		if err := a.db.SetOrganization(org); err != nil {
 			errors.ErrGenericInternalServerError.Withf("could not update organization process counter: %v", err).Write(w)
+			return
+		}
+	}
+
+	// bump the integrator's aggregate counters for managed-org publishes
+	if integrator != nil {
+		if err := a.db.AddOrganizationManagedProcesses(integrator.Address, 1); err != nil {
+			errors.ErrGenericInternalServerError.Withf("could not update managed processes counter: %v", err).Write(w)
+			return
+		}
+		if err := a.db.AddOrganizationManagedCensusSize(integrator.Address, int64(draft.ElectionParams.MaxCensusSize)); err != nil {
+			errors.ErrGenericInternalServerError.Withf("could not update managed census counter: %v", err).Write(w)
 			return
 		}
 	}
