@@ -127,12 +127,13 @@ func (osc *Client) UploadImageWithFormHandler(w http.ResponseWriter, r *http.Req
 
 // DownloadImageInlineHandler godoc
 //
-//	@Summary		Download an image
-//	@Description	Download an image inline. Retrieves the object from storage and displays it in the browser.
+//	@Summary		Download a stored object
+//	@Description	Download a stored object (image or JSON) inline. Retrieves the object from storage and
+//	@Description	serves it with its stored content type.
 //	@Tags			storage
-//	@Produce		image/jpeg,image/png
+//	@Produce		image/jpeg,image/png,application/json
 //	@Param			objectName	path		string			true	"Object name"
-//	@Success		200			{file}		binary			"Image file"
+//	@Success		200			{file}		binary			"Object contents"
 //	@Failure		400			{object}	errors.Error	"Invalid object name"
 //	@Failure		404			{object}	errors.Error	"Object not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
