@@ -1065,6 +1065,37 @@ type PublishProcessResponse struct {
 	Status string `json:"status"`
 }
 
+// RelayVoteRequest is the body of POST /process/{processId}/vote: a hex-encoded,
+// already-signed voter transaction (a marshaled models.SignedTx wrapping a Vote tx).
+// swagger:model RelayVoteRequest
+type RelayVoteRequest struct {
+	// Hex of a marshaled models.SignedTx whose inner Tx is a Vote
+	TxPayload internal.HexBytes `json:"txPayload" swaggertype:"string" format:"hex" example:"deadbeef"`
+}
+
+// RelayVoteResponse is returned by POST /process/{processId}/vote with the vote
+// nullifier (voteID) assigned on chain.
+// swagger:model RelayVoteResponse
+type RelayVoteResponse struct {
+	// On-chain vote nullifier
+	VoteID internal.HexBytes `json:"voteID" swaggertype:"string" format:"hex" example:"deadbeef"`
+}
+
+// SetProcessStatusRequest is the body of PUT /process/{processId}/status.
+// swagger:model SetProcessStatusRequest
+type SetProcessStatusRequest struct {
+	// One of: ready, paused, ended, canceled
+	Status string `json:"status" example:"paused"`
+}
+
+// SetProcessStatusResponse is returned by PUT /process/{processId}/status with the
+// new (cached) status.
+// swagger:model SetProcessStatusResponse
+type SetProcessStatusResponse struct {
+	// Process status (e.g. "PAUSED")
+	Status string `json:"status"`
+}
+
 // InitiateAuthRequest defines the payload for participant authentication.
 // swagger:model InitiateAuthRequest
 type InitiateAuthRequest struct {

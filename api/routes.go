@@ -148,6 +148,12 @@ const (
 	// POST /process/{processId}/publish to publish a draft process as an on-chain election
 	processPublishEndpoint = "/process/{processId}/publish"
 
+	// PUT /process/{processId}/status to change an on-chain election status
+	processStatusEndpoint = "/process/{processId}/status"
+
+	// POST /process/{processId}/vote to relay an already-signed vote (public)
+	processVoteEndpoint = "/process/{processId}/vote"
+
 	// two-factor process bundle routes
 	// POST /process/bundle to create a new bundle
 	processBundleEndpoint = "/process/bundle"

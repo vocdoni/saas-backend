@@ -792,6 +792,35 @@ definitions:
         description: URI of the published census
         type: string
     type: object
+  apicommon.RelayVoteRequest:
+    properties:
+      txPayload:
+        description: Hex of a marshaled models.SignedTx whose inner Tx is a Vote
+        example: deadbeef
+        format: hex
+        type: string
+    type: object
+  apicommon.RelayVoteResponse:
+    properties:
+      voteID:
+        description: On-chain vote nullifier
+        example: deadbeef
+        format: hex
+        type: string
+    type: object
+  apicommon.SetProcessStatusRequest:
+    properties:
+      status:
+        description: 'One of: ready, paused, ended, canceled'
+        example: paused
+        type: string
+    type: object
+  apicommon.SetProcessStatusResponse:
+    properties:
+      status:
+        description: Process status (e.g. "PAUSED")
+        type: string
+    type: object
   apicommon.SubscriptionCheckout:
     properties:
       address:
@@ -3801,6 +3830,99 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Get the address used to sign a process
+      tags:
+      - process
+  /process/{processId}/status:
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Changes the status of an on-chain election (ready|paused|ended|canceled). The
+        backend builds a SET_PROCESS_STATUS transaction, funds, signs it with the
+        organization signer, submits and confirms it. Requires Manager/Admin role of the
+        organization that owns the process.
+      parameters:
+      - description: On-chain process id (hex)
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: New process status
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.SetProcessStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Updated process status
+          schema:
+            $ref: '#/definitions/apicommon.SetProcessStatusResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Change an on-chain election status
+      tags:
+      - process
+  /process/{processId}/vote:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Relays a voter transaction that has already been signed by the voter to the
+        Vochain and returns the resulting vote nullifier (voteID). The body carries a
+        marshaled models.SignedTx whose inner Tx is a Vote envelope. Public endpoint: no
+        authentication is required. The handler never decodes the vote package nor exposes
+        the transaction hash; only the nullifier is returned.
+      parameters:
+      - description: On-chain process id (hex)
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Signed vote transaction payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.RelayVoteRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Vote nullifier
+          schema:
+            $ref: '#/definitions/apicommon.RelayVoteResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Relay an already-signed vote to the Vochain
       tags:
       - process
   /process/bundle:
