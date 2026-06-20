@@ -1,9 +1,42 @@
 package api
 
 import (
+	"sync"
+
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/db"
 	"go.vocdoni.io/dvote/log"
 )
+
+// orgTxMutex hands out a per-organization mutex so the build->sign->submit pipeline for
+// backend-submitted txs (publish and status change) is serialized per org. Two concurrent
+// such requests for the same org would otherwise read the same account nonce and sign
+// conflicting transactions. ponytail: in-process only — a multi-instance deployment would
+// need a distributed lock, matching the single-instance assumption of db.keysLock. The
+// locks map grows unbounded; an org count high enough to matter is not realistic here.
+type orgTxMutex struct {
+	mu    sync.Mutex
+	locks map[common.Address]*sync.Mutex
+}
+
+func newOrgTxMutex() *orgTxMutex {
+	return &orgTxMutex{locks: make(map[common.Address]*sync.Mutex)}
+}
+
+// lock acquires and returns the mutex for addr. Because submit runs on a worker, the
+// caller hands the returned mutex to the worker, which Unlocks it after the on-chain
+// submit completes — the lock is therefore held across the async hand-off.
+func (o *orgTxMutex) lock(addr common.Address) *sync.Mutex {
+	o.mu.Lock()
+	m, ok := o.locks[addr]
+	if !ok {
+		m = &sync.Mutex{}
+		o.locks[addr] = m
+	}
+	o.mu.Unlock()
+	m.Lock()
+	return m
+}
 
 // ponytail: pool sizes are consts; promote to config only if tuning is needed.
 const (

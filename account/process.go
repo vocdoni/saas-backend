@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -84,12 +85,26 @@ func electionStartDuration(startDate, endDate time.Time) (startTime, duration ui
 			return 0, 0, fmt.Errorf("endDate must be after startDate")
 		}
 		if startDate.After(time.Now()) {
-			return uint32(startDate.Unix()), uint32(endDate.Sub(startDate).Seconds()), nil
+			// range-check before truncating to the on-chain uint32 types: a wrapped
+			// start/duration would otherwise set a bogus election window and could slip a
+			// too-long duration under the plan limit (which compares the already-cast value).
+			start := startDate.Unix()
+			dur := endDate.Sub(startDate).Seconds()
+			if start < 0 || start > math.MaxUint32 {
+				return 0, 0, fmt.Errorf("startDate out of range")
+			}
+			if dur < 0 || dur > math.MaxUint32 {
+				return 0, 0, fmt.Errorf("duration out of range")
+			}
+			return uint32(start), uint32(dur), nil
 		}
 	}
 	d := time.Until(endDate)
 	if d <= 0 {
 		return 0, 0, fmt.Errorf("endDate must be in the future")
+	}
+	if secs := d.Seconds(); secs > math.MaxUint32 {
+		return 0, 0, fmt.Errorf("duration out of range")
 	}
 	return 0, uint32(d.Seconds()), nil
 }
