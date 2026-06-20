@@ -433,13 +433,6 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// in-flight guard: a publish has already been enqueued for this draft and is being
-	// submitted by a worker. Reject the duplicate rather than send a second NEW_PROCESS tx.
-	if draft.Status == "PUBLISHING" {
-		errors.ErrPublishInProgress.Write(w)
-		return
-	}
-
 	// a draft must carry the high-level election definition to be publishable.
 	// the on-chain census root is always the CSP public key, so the draft census
 	// (member list used later by the CSP bundle flow) is not required here.
@@ -447,6 +440,38 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrMalformedBody.Withf("draft has no election params").Write(w)
 		return
 	}
+
+	// atomically claim the draft for publishing BEFORE any expensive metadata/funding/
+	// signing work. This single conditional update is the authoritative duplicate-publish
+	// guard: two concurrent publishes cannot both win the claim, so only one NEW_PROCESS
+	// tx is ever built for a draft.
+	claimed, err := a.db.ClaimProcessForPublish(parsedID)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if !claimed {
+		// lost the claim: either another request is mid-publish, or it already finished.
+		if cur, e := a.db.Process(parsedID); e == nil && !cur.Address.Equals(nil) {
+			apicommon.HTTPWriteJSON(w, &apicommon.PublishProcessResponse{Address: cur.Address, Status: cur.Status})
+			return
+		}
+		errors.ErrPublishInProgress.Write(w)
+		return
+	}
+
+	// from here the draft is in PUBLISHING. Until a worker owns the job, every failure
+	// path must release the claim, otherwise the draft is stuck (the release must $unset
+	// status, since a zero-value string write is dropped by the dynamic update helper).
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		if e := a.db.ClearProcessPublishing(parsedID); e != nil {
+			log.Warnw("could not clear publishing state after failed publish", "error", e)
+		}
+	}()
 
 	org, err := a.db.Organization(draft.OrgAddress)
 	if err != nil {
@@ -536,6 +561,18 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	metadataURL := fmt.Sprintf("%s/storage/%s", a.serverURL, objectName)
 
+	// serialize build->sign->submit per organization so a concurrent publish or status
+	// change for the same org cannot read the same account nonce and sign a conflicting
+	// tx. The worker releases the lock after submit (held across the async hand-off);
+	// every synchronous failure below releases it via the deferred unlock.
+	orgLock := a.orgTxLocks.lock(org.Address)
+	lockHeld := true
+	defer func() {
+		if lockHeld {
+			orgLock.Unlock()
+		}
+	}()
+
 	// build the NewProcess tx (CSP census)
 	tx, err := a.account.BuildNewProcessTx(&account.NewProcessParams{
 		OrgAddress:  draft.OrgAddress,
@@ -577,16 +614,6 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// mark the draft in-flight so a concurrent publish is rejected with 409 and the state
-	// is durable. ponytail: a worker crash leaves the draft stuck in PUBLISHING (needs a
-	// manual reset) — documented v1 ceiling, no crash recovery.
-	prevStatus := draft.Status
-	draft.Status = "PUBLISHING"
-	if _, err := a.db.SetProcess(draft); err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-
 	jobID, err := apicommon.NewJobID()
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -598,17 +625,17 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// submit + confirm on the worker pool. On success the draft becomes READY with its
-	// on-chain id; on failure the draft status is reset and any managed reservation is
-	// released. The idempotency guard keys off draft.Address, so a retry after failure
-	// cannot create a duplicate election.
+	// on-chain id; on failure the PUBLISHING claim is released and any managed reservation
+	// is rolled back. The idempotency guard keys off draft.Address, so a retry after
+	// failure cannot create a duplicate election.
 	reserved := managedReserved
 	censusSize := int64(draft.ElectionParams.MaxCensusSize)
 	if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
+		defer orgLock.Unlock()
 		data, err := a.account.SubmitSignedTx(stx)
 		if err != nil {
-			draft.Status = prevStatus
-			if _, e := a.db.SetProcess(draft); e != nil {
-				log.Warnw("could not reset draft status after failed publish", "error", e)
+			if e := a.db.ClearProcessPublishing(parsedID); e != nil {
+				log.Warnw("could not clear publishing state after failed publish", "error", e)
 			}
 			if reserved {
 				if e := a.db.AddOrganizationManagedProcesses(integratorAddr, -1); e != nil {
@@ -634,16 +661,18 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		return &db.JobResult{Address: draft.Address, Status: "READY"}, nil
 	}}) {
-		// full queue: undo the in-flight guard; the deferred rollback releases the reservation
-		draft.Status = prevStatus
-		if _, e := a.db.SetProcess(draft); e != nil {
-			log.Warnw("could not reset draft status after full queue", "error", e)
+		// full queue: mark the job failed so it is not orphaned pending; the deferred
+		// unlock, publishing-claim release and reservation rollback all fire on return.
+		if e := a.db.SetJobStatus(jobID, db.JobStatusFailed, nil, "tx queue full"); e != nil {
+			log.Warnw("could not mark job failed after full queue", "error", e)
 		}
 		errors.ErrTxQueueFull.Write(w)
 		return
 	}
-	// handed to a worker: it now owns the reservation commit/rollback
+	// handed to a worker: it now owns the publish claim, reservation and org lock.
+	committed = true
 	managedReserved = false
+	lockHeld = false
 
 	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, &apicommon.EnqueuedResponse{JobID: jobID})
 }

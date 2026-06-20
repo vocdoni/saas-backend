@@ -12,6 +12,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/proto/build/go/models"
 	"google.golang.org/protobuf/proto"
 )
@@ -103,6 +104,10 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		return &db.JobResult{VoteID: internal.HexBytes(voteID)}, nil
 	}}) {
+		// full queue: mark the job failed so it is not orphaned pending.
+		if e := a.db.SetJobStatus(jobID, db.JobStatusFailed, nil, "tx queue full"); e != nil {
+			log.Warnw("could not mark job failed after full queue", "error", e)
+		}
 		errors.ErrTxQueueFull.Write(w)
 		return
 	}
@@ -197,6 +202,18 @@ func (a *API) setProcessStatusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// serialize build->sign->submit per organization so a concurrent status change or
+	// publish for the same org cannot read the same account nonce and sign a conflicting
+	// tx. The worker releases the lock after submit (held across the async hand-off);
+	// every synchronous failure below releases it via the deferred unlock.
+	orgLock := a.orgTxLocks.lock(org.Address)
+	lockHeld := true
+	defer func() {
+		if lockHeld {
+			orgLock.Unlock()
+		}
+	}()
+
 	tx, err := a.account.BuildSetProcessStatusTx(orgSigner.Address(), pid.Bytes(), status)
 	if err != nil {
 		errors.ErrVochainRequestFailed.WithErr(err).Write(w)
@@ -244,6 +261,7 @@ func (a *API) setProcessStatusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
+		defer orgLock.Unlock()
 		if _, err := a.account.SubmitSignedTx(stx); err != nil {
 			return nil, err
 		}
@@ -253,9 +271,15 @@ func (a *API) setProcessStatusHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		return &db.JobResult{Status: newStatus}, nil
 	}}) {
+		// full queue: mark the job failed so it is not orphaned pending; the deferred
+		// unlock fires on return.
+		if e := a.db.SetJobStatus(jobID, db.JobStatusFailed, nil, "tx queue full"); e != nil {
+			log.Warnw("could not mark job failed after full queue", "error", e)
+		}
 		errors.ErrTxQueueFull.Write(w)
 		return
 	}
+	lockHeld = false
 
 	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, &apicommon.EnqueuedResponse{JobID: jobID})
 }

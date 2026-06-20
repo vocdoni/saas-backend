@@ -116,6 +116,7 @@ type API struct {
 	oauthServiceURL string
 	stripeHandlers  *StripeHandlers
 	txQueue         chan txTask
+	orgTxLocks      *orgTxMutex
 }
 
 // New creates a new API HTTP server. It does not start the server. Use Start() for that.
@@ -145,6 +146,7 @@ func New(conf *Config) *API {
 		objectStorage:   conf.ObjectStorage,
 		csp:             conf.CSP,
 		oauthServiceURL: conf.OAuthServiceURL,
+		orgTxLocks:      newOrgTxMutex(),
 	}
 	a.startTxQueue()
 	return a

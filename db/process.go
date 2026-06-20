@@ -69,6 +69,50 @@ func (ms *MongoStorage) SetProcess(process *Process) (primitive.ObjectID, error)
 	return process.ID, nil
 }
 
+// ClaimProcessForPublish atomically transitions a draft to the PUBLISHING state in a
+// single conditional update, but only when it is not already publishing and has not yet
+// been published (no on-chain address). It returns true when this call won the claim and
+// false when the draft was already publishing or published. This is the authoritative
+// duplicate-publish guard: because the check and set are one Mongo operation, two
+// concurrent publish requests cannot both proceed and sign two NEW_PROCESS txs.
+func (ms *MongoStorage) ClaimProcessForPublish(processID primitive.ObjectID) (bool, error) {
+	if processID == primitive.NilObjectID {
+		return false, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	filter := bson.M{
+		"_id":     processID,
+		"status":  bson.M{"$ne": "PUBLISHING"},
+		"address": bson.M{"$eq": nil},
+	}
+	res, err := ms.processes.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"status": "PUBLISHING"}})
+	if err != nil {
+		return false, fmt.Errorf("failed to claim process for publish: %w", err)
+	}
+	return res.ModifiedCount == 1, nil
+}
+
+// ClearProcessPublishing reverts a draft from the PUBLISHING state back to an unpublished
+// draft (no status). It $unsets the status field rather than writing a zero-value string,
+// which dynamicUpdateDocument would silently drop, so a publish that fails after claiming
+// the draft cannot leave it permanently stuck in PUBLISHING. The status filter makes it a
+// no-op if a worker already advanced the draft to READY.
+func (ms *MongoStorage) ClearProcessPublishing(processID primitive.ObjectID) error {
+	if processID == primitive.NilObjectID {
+		return ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	filter := bson.M{"_id": processID, "status": "PUBLISHING"}
+	if _, err := ms.processes.UpdateOne(ctx, filter, bson.M{"$unset": bson.M{"status": ""}}); err != nil {
+		return fmt.Errorf("failed to clear process publishing state: %w", err)
+	}
+	return nil
+}
+
 // DeleteProcess removes a process
 func (ms *MongoStorage) DelProcess(processID primitive.ObjectID) error {
 	if processID == primitive.NilObjectID {
