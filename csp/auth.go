@@ -2,8 +2,7 @@
 package csp
 
 import (
-	"crypto/sha256"
-	"encoding/base32"
+	"crypto/subtle"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -57,13 +56,10 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 			return nil, errors.ErrAttemptCoolDownTime.WithData(map[string]any{"coolDownTime": remainingTime.Milliseconds()})
 		}
 	}
-	// generate a new token, secret and code from the attempt number
-	token, code, err := c.generateToken(uID, bID)
-	if err != nil {
-		return nil, err
-	}
+	// generate a new token, secret and code
+	token, secret, code := c.generateToken()
 	// create the new token
-	if err := c.Storage.SetCSPAuth(token, uID, bID); err != nil {
+	if err := c.Storage.SetCSPAuth(token, uID, bID, secret); err != nil {
 		log.Warnw("error setting new token",
 			"userID", uID,
 			"bundleID", bID,
@@ -75,8 +71,9 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 		"userID", uID,
 		"bundleID", bID,
 		"token", token)
-	// compose the notification challenge
-	remainingTimeN := c.notificationCoolDownTime.String()
+	// compose the notification challenge, advertising the OTP validity window
+	// (not the notification cooldown) as the code's expiry time
+	remainingTimeN := c.otpExpiry.String()
 	orgInfo := notifications.OrganizationInfo{
 		Address: orgAddress,
 		Name:    orgName,
@@ -124,24 +121,42 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 		return ErrInvalidAuthToken
 	}
 
-	remainingTime := c.notificationCoolDownTime - time.Since(authTokenData.CreatedAt)
-	if remainingTime.Seconds() < 0 {
-		log.Warnw("resend requested but cooldown time reached",
+	remainingTime := c.otpExpiry - time.Since(authTokenData.CreatedAt)
+	// an already-verified token is always reported as such, regardless of age,
+	// so it never masquerades as merely expired
+	if authTokenData.Verified {
+		coolDown := remainingTime.Seconds()
+		if coolDown < 0 {
+			coolDown = 0
+		}
+		return errors.ErrUserAlreadyVerified.WithData(map[string]any{"coolDownTime": coolDown})
+	}
+	if remainingTime <= 0 {
+		log.Warnw("resend requested but OTP has expired",
 			"userID", authTokenData.UserID,
 			"bundleID", authTokenData.BundleID,
-			"lastToken", authTokenData.Token)
+			"token", authTokenData.Token)
 		return ErrTokenExpired
-	} else if authTokenData.Verified {
-		return errors.ErrUserAlreadyVerified.WithData(map[string]any{"coolDownTime": remainingTime.Seconds()})
+	}
+	// reject unverified tokens without a stored challenge secret (legacy rows or
+	// auth-only tokens): regenerating a code from an empty secret would yield a
+	// guessable value, so such tokens are discarded. ErrTokenExpired prompts the
+	// client to restart the OTP flow rather than treating it as a hard failure.
+	if authTokenData.Secret == "" {
+		log.Warnw("resend requested for token without challenge secret",
+			"userID", authTokenData.UserID,
+			"bundleID", authTokenData.BundleID,
+			"token", token)
+		return ErrTokenExpired
 	}
 	// compose the notification challenge
-	remainingTimeN := c.notificationCoolDownTime.String()
+	remainingTimeN := remainingTime.String()
 	orgInfo := notifications.OrganizationInfo{
 		Address: orgAddress,
 		Name:    orgName,
 		Logo:    orgLogo,
 	}
-	code, err := c.regenerateTokenCode(authTokenData.UserID, authTokenData.BundleID)
+	code, err := c.regenerateTokenCode(authTokenData.Secret)
 	if err != nil {
 		log.Warnw("error regenerating token code",
 			"userID", authTokenData.UserID,
@@ -203,13 +218,57 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 			"error", err)
 		return ErrInvalidAuthToken
 	}
-	// verify the solution, and if the solution is not correct, return an error
-	if !c.verifySolution(authTokenData.UserID, authTokenData.BundleID, solution) {
-		log.Warnw("challenge code do not match",
+	// reject tokens without a stored challenge secret. This covers legacy rows
+	// created before per-token secrets existed, auth-only tokens, and tokens
+	// already verified (whose secret was wiped): in all cases the OTP would be
+	// derived from an empty secret and thus trivially guessable, so the token is
+	// not OTP-verifiable. ErrTokenExpired prompts the client to restart the OTP
+	// flow rather than treating it as a hard failure.
+	if authTokenData.Secret == "" {
+		log.Warnw("verification attempted for token without challenge secret",
+			"userID", authTokenData.UserID,
+			"bundleID", authTokenData.BundleID,
+			"token", token)
+		return ErrTokenExpired
+	}
+	// reject if the OTP window has passed
+	if time.Since(authTokenData.CreatedAt) > c.otpExpiry {
+		log.Warnw("OTP expired",
+			"userID", authTokenData.UserID,
+			"bundleID", authTokenData.BundleID,
+			"token", token)
+		return ErrTokenExpired
+	}
+	// reject tokens that exhausted the maximum number of attempts
+	if authTokenData.Attempts >= MaxChallengeAttempts {
+		log.Warnw("too many challenge attempts",
 			"userID", authTokenData.UserID,
 			"bundleID", authTokenData.BundleID,
 			"token", token,
-			"solution", solution)
+			"attempts", authTokenData.Attempts)
+		return ErrTooManyAttempts
+	}
+	// verify the solution, and if the solution is not correct, atomically record
+	// the failed attempt while enforcing the cap
+	if !c.verifySolution(authTokenData.Secret, solution) {
+		log.Warnw("challenge code does not match",
+			"userID", authTokenData.UserID,
+			"bundleID", authTokenData.BundleID,
+			"token", token)
+		recorded, err := c.Storage.IncrementCSPAuthAttempts(token, MaxChallengeAttempts)
+		if err != nil {
+			// fail closed: if we cannot persist the attempt, do not allow the
+			// verification to proceed, otherwise attempt limiting could be
+			// bypassed while the database is unhealthy
+			log.Warnw("error incrementing challenge attempts",
+				"token", token,
+				"error", err)
+			return ErrStorageFailure
+		}
+		if !recorded {
+			// a concurrent request already pushed attempts to the cap
+			return ErrTooManyAttempts
+		}
 		return ErrChallengeCodeFailure
 	}
 	// set the token as verified
@@ -224,51 +283,27 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 	return nil
 }
 
-// generateToken method generates a new authentication token for a user in a
-// process. It checks if the process is already consumed for this user. It
-// generates a new challenge secret, challenge token and OTP code for the
-// secret and the attempt number. It returns the token, the secret and the
-// code respectively.
-func (*CSP) generateToken(uID, bID internal.HexBytes) (
-	internal.HexBytes, string, error,
-) {
-	// generate a new challenge secret and challenge token
-	secret := otpSecret(uID, bID)
-	// generate the OTP code for the secret and the attempt number
-	otp := gotp.NewDefaultHOTP(secret)
-	code := otp.At(0)
-	// generate a new token and convert it to HexBytes
-	bToken, err := uuid.New().MarshalBinary()
-	if err != nil {
-		log.Warnw("error marshalling token",
-			"error", err,
-			"userID", uID,
-			"bundleID", bID)
-		return nil, "", ErrInvalidAuthToken
-	}
-	return bToken, code, nil
+// generateToken generates a new authentication token with a random OTP secret.
+// It returns the bearer token, the base32 OTP secret, and the 6-digit code.
+func (*CSP) generateToken() (bToken internal.HexBytes, secret, code string) {
+	secret = gotp.RandomSecret(16)
+	code = gotp.NewDefaultHOTP(secret).At(0)
+	// a uuid.UUID is a [16]byte; slice its bytes directly to avoid the fallible
+	// MarshalBinary call (and the panic path it would require).
+	id := uuid.New()
+	return internal.HexBytes(id[:]), secret, code
 }
 
-func (*CSP) regenerateTokenCode(uID, bID internal.HexBytes) (
-	string, error,
-) {
-	secret := otpSecret(uID, bID)
-	otp := gotp.NewDefaultHOTP(secret)
-	code := otp.At(0)
-	return code, nil
+// regenerateTokenCode recomputes the OTP code for a stored secret (used for resend).
+func (*CSP) regenerateTokenCode(secret string) (string, error) {
+	return gotp.NewDefaultHOTP(secret).At(0), nil
 }
 
-// verifySolution method verifies the solution for a user process. It generates
-// the OTP code for the process secret and the attempt number and compares it
-// with the solution. It returns true if the solution is correct, false
-// otherwise.
-func (*CSP) verifySolution(uID, bID internal.HexBytes, solution string) bool {
-	secret := otpSecret(uID, bID)
-	// generate the OTP code for the secret and the attempt number
-	otp := gotp.NewDefaultHOTP(secret)
-	code := otp.At(0)
-	// compare the generated code with the solution
-	return code == solution
+// verifySolution checks whether solution matches the HOTP code for secret. The
+// comparison is constant-time to avoid leaking the code through timing.
+func (*CSP) verifySolution(secret, solution string) bool {
+	code := gotp.NewDefaultHOTP(secret).At(0)
+	return subtle.ConstantTimeCompare([]byte(code), []byte(solution)) == 1
 }
 
 // createAuthOnlyToken creates a pre-verified token for auth-only censuses
@@ -285,8 +320,8 @@ func (c *CSP) createAuthOnlyToken(bID, uID internal.HexBytes) (internal.HexBytes
 		return nil, ErrInvalidAuthToken
 	}
 
-	// create the new token
-	if err := c.Storage.SetCSPAuth(bToken, uID, bID); err != nil {
+	// create the new token (auth-only tokens need no OTP secret)
+	if err := c.Storage.SetCSPAuth(bToken, uID, bID, ""); err != nil {
 		log.Warnw("error setting new token",
 			"userID", uID,
 			"bundleID", bID,
@@ -310,13 +345,4 @@ func (c *CSP) createAuthOnlyToken(bID, uID internal.HexBytes) (internal.HexBytes
 		"token", bToken)
 
 	return bToken, nil
-}
-
-// otpSecret method generates a new OTP secret for a user and a bundle. The
-// secret is generated by hashing the user ID and the bundle ID with SHA-256.
-// It returns the secret as HexBytes.
-func otpSecret(uID, bID internal.HexBytes) string {
-	hash := sha256.Sum256(append(uID, bID...))
-	// encode the secret in base32 and return it
-	return base32.StdEncoding.EncodeToString(hash[:])
 }

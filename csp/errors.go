@@ -13,9 +13,9 @@ var (
 	ErrNoBundleID = fmt.Errorf("no bundle ID provided")
 	// ErrNoProcessID is returned when no process ID is provided.
 	ErrNoProcessID = fmt.Errorf("no process ID provided")
-	// ErrTooManyAttempts is returned when no more SMS attempts available for a
-	// user.
-	ErrTooManyAttempts = fmt.Errorf("too many SMS attempts")
+	// ErrTooManyAttempts is returned when no more verification attempts are
+	// available for an authentication token (e.g. challenge code retries).
+	ErrTooManyAttempts = fmt.Errorf("too many verification attempts")
 	// ErrTokenExpired is returned when the authentication token has expired.
 	ErrTokenExpired = fmt.Errorf("authentication token has expired")
 	// ErrUserUnknown is returned if the userID is not found in the database.

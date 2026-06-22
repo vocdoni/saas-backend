@@ -16,12 +16,16 @@ import (
 
 // CSPAuth represents a user authentication information for a bundle of processes
 type CSPAuth struct {
-	Token      internal.HexBytes `json:"token" bson:"_id"`
-	UserID     internal.HexBytes `json:"userID" bson:"userid"`
-	BundleID   internal.HexBytes `json:"bundleID" bson:"bundleid"`
-	CreatedAt  time.Time         `json:"createdAt" bson:"createdat"`
-	Verified   bool              `json:"verified" bson:"verified"`
-	VerifiedAt time.Time         `json:"verifiedAt" bson:"verifiedat"`
+	Token     internal.HexBytes `json:"token" bson:"_id"`
+	UserID    internal.HexBytes `json:"userID" bson:"userid"`
+	BundleID  internal.HexBytes `json:"bundleID" bson:"bundleid"`
+	CreatedAt time.Time         `json:"createdAt" bson:"createdat"`
+	// Secret is the per-token OTP challenge secret. It must never leave the
+	// server, so it is excluded from JSON serialization.
+	Secret     string    `json:"-" bson:"secret,omitempty"`
+	Attempts   int       `json:"attempts" bson:"attempts"`
+	Verified   bool      `json:"verified" bson:"verified"`
+	VerifiedAt time.Time `json:"verifiedAt" bson:"verifiedat"`
 }
 
 // CSPProcess is the status of a process in a bundle of processes for a user
@@ -39,7 +43,7 @@ type CSPProcess struct {
 // SetCSPAuth method stores a new CSP authentication token for a user and a
 // bundle of processes. It returns an error if the token, user ID or bundle
 // ID are nil.
-func (ms *MongoStorage) SetCSPAuth(token, userID, bundleID internal.HexBytes) error {
+func (ms *MongoStorage) SetCSPAuth(token, userID, bundleID internal.HexBytes, secret string) error {
 	if token == nil || userID == nil || bundleID == nil {
 		return ErrBadInputs
 	}
@@ -54,6 +58,7 @@ func (ms *MongoStorage) SetCSPAuth(token, userID, bundleID internal.HexBytes) er
 		UserID:    userID,
 		BundleID:  bundleID,
 		CreatedAt: time.Now(),
+		Secret:    secret,
 		Verified:  false,
 	}); err != nil {
 		return errors.Join(ErrStoreToken, err)
@@ -113,13 +118,46 @@ func (ms *MongoStorage) VerifyCSPAuth(token internal.HexBytes) error {
 	if _, err := ms.fetchCSPAuthFromDB(ctx, token); err != nil {
 		return err
 	}
-	// update the token
+	// update the token: mark verified and clear the secret so the code cannot be reused
 	filter := bson.M{"_id": token}
-	updateDoc := bson.M{"$set": bson.M{"verified": true, "verifiedat": time.Now()}}
+	updateDoc := bson.M{"$set": bson.M{"verified": true, "verifiedat": time.Now()}, "$unset": bson.M{"secret": ""}}
 	if _, err := ms.cspTokens.UpdateOne(ctx, filter, updateDoc, nil); err != nil {
 		return errors.Join(ErrStoreToken, err)
 	}
 	return nil
+}
+
+// IncrementCSPAuthAttempts atomically records a failed verification attempt for
+// the given token, but only while the stored attempt count is still below
+// maxAttempts. It returns recorded=true when the attempt was counted, and
+// recorded=false when the cap had already been reached (no increment performed)
+// — this is done in a single conditional update so concurrent verifications
+// cannot push the counter past maxAttempts. It returns ErrTokenNotFound if the
+// token does not exist and ErrBadInputs if the token is nil.
+func (ms *MongoStorage) IncrementCSPAuthAttempts(token internal.HexBytes, maxAttempts int) (recorded bool, err error) {
+	if token == nil {
+		return false, ErrBadInputs
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	// conditional increment: only bump attempts while still below the cap
+	res, err := ms.cspTokens.UpdateOne(ctx,
+		bson.M{"_id": token, "attempts": bson.M{"$lt": maxAttempts}},
+		bson.M{"$inc": bson.M{"attempts": 1}})
+	if err != nil {
+		return false, errors.Join(ErrStoreToken, err)
+	}
+	if res.MatchedCount == 1 {
+		return true, nil
+	}
+	// no document matched: either the token does not exist or the cap is already
+	// reached. Distinguish the two so callers can react correctly.
+	if _, err := ms.fetchCSPAuthFromDB(ctx, token); err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 // CSPProcess returns the CSPProcess for the given token and processID.

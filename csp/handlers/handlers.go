@@ -954,7 +954,8 @@ func (c *CSPHandlers) authSecondStep(r *http.Request) (internal.HexBytes, error)
 	switch err := c.csp.VerifyBundleAuthToken(req.AuthToken, req.AuthData[0]); err {
 	case nil:
 		return req.AuthToken, nil
-	case csp.ErrInvalidAuthToken, csp.ErrInvalidSolution, csp.ErrChallengeCodeFailure:
+	case csp.ErrInvalidAuthToken, csp.ErrInvalidSolution, csp.ErrChallengeCodeFailure,
+		csp.ErrTokenExpired, csp.ErrTooManyAttempts:
 		return nil, errors.ErrUnauthorized.WithErr(err)
 	case csp.ErrUserUnknown, csp.ErrUserNotBelongsToBundle:
 		return nil, errors.ErrUserNotFound.WithErr(err)

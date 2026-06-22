@@ -414,7 +414,7 @@ func TestCSPVoting(t *testing.T) {
 					bundleHex := internal.HexBytesFromString(bundleID)
 					seedVerifiedToken := func(memberID string) internal.HexBytes {
 						tok := internal.HexBytes(internal.RandomBytes(16))
-						c.Assert(testDB.SetCSPAuth(tok, internal.HexBytesFromString(memberID), bundleHex), qt.IsNil)
+						c.Assert(testDB.SetCSPAuth(tok, internal.HexBytesFromString(memberID), bundleHex, ""), qt.IsNil)
 						c.Assert(testDB.VerifyCSPAuth(tok), qt.IsNil)
 						return tok
 					}
@@ -447,7 +447,7 @@ func TestCSPVoting(t *testing.T) {
 					// An unverified token (issued but never verified) is not eligible,
 					// even for a genuine census participant.
 					unverifiedTok := internal.HexBytes(internal.RandomBytes(16))
-					c.Assert(testDB.SetCSPAuth(unverifiedTok, internal.HexBytesFromString(grace.ID), bundleHex), qt.IsNil)
+					c.Assert(testDB.SetCSPAuth(unverifiedTok, internal.HexBytesFromString(grace.ID), bundleHex, ""), qt.IsNil)
 					c.Assert(checkBelongs(unverifiedTok), qt.IsFalse)
 
 					// A missing auth token is a client error, not a membership answer.
