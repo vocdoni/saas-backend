@@ -26,8 +26,8 @@ var _ notifications.NotificationService = &SMTP{}
 
 const (
 	//revive:disable:unsecure-url-scheme
-	searchInboxEndpoint = "http://%s:%d/api/v2/search?kind=to&query=%s"
-	clearInboxEndpoint  = "http://%s:%d/api/v1/messages"
+	searchInboxEndpoint   = "http://%s:%d/api/v2/search?kind=to&query=%s"
+	deleteMessageEndpoint = "http://%s:%d/api/v1/messages/%s"
 )
 
 // New initializes the SMTP email service with the configuration. It sets the
@@ -45,10 +45,19 @@ func (sm *SMTP) New(rawConfig any) error {
 
 // FindEmail searches for an email in the test API service. It sends a GET
 // request to the search endpoint with the recipient's email address as a query
-// parameter. If the email is found, it returns the email body and clears the
-// inbox. If the email is not found, it returns an EOF error. If the request
-// fails, it returns an error with the status code. This method is used for
-// testing the email service.
+// parameter. If a message is found, it returns the body of the first match and
+// deletes ONLY that message from the inbox. If no message is found, it returns
+// an EOF error. If the request fails, it returns an error with the status code.
+// This method is used for testing the email service.
+//
+// Only the matched message is deleted (by its ID), never the whole inbox. The
+// tests share a single MailHog inbox across many concurrent senders (notably the
+// CSP notification queue's worker pool, which delivers OTP emails in the
+// background). Wiping the entire inbox here would race against those concurrent
+// deliveries: clearing all messages on behalf of one recipient could delete
+// another recipient's in-flight email before the test waiting on it ever
+// retrieves it, making that wait time out with EOF. Deleting only the matched
+// message keeps each recipient's lookups independent.
 func (sm *SMTP) FindEmail(ctx context.Context, to string) (string, error) {
 	searchEndpoint := fmt.Sprintf(searchInboxEndpoint, sm.config.SMTPServer, sm.config.TestAPIPort, to)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchEndpoint, nil)
@@ -69,6 +78,7 @@ func (sm *SMTP) FindEmail(ctx context.Context, to string) (string, error) {
 	//revive:disable:nested-structs
 	type mailResponse struct {
 		Items []struct {
+			ID      string `json:"ID"`
 			Content struct {
 				Body string `json:"Body"`
 			} `json:"Content"`
@@ -81,12 +91,19 @@ func (sm *SMTP) FindEmail(ctx context.Context, to string) (string, error) {
 	if len(mailResults.Items) == 0 {
 		return "", io.EOF
 	}
-	return mailResults.Items[0].Content.Body, sm.clearInbox()
+	match := mailResults.Items[0]
+	return match.Content.Body, sm.deleteMessage(ctx, match.ID)
 }
 
-func (sm *SMTP) clearInbox() error {
-	clearEndpoint := fmt.Sprintf(clearInboxEndpoint, sm.config.SMTPServer, sm.config.TestAPIPort)
-	req, err := http.NewRequest(http.MethodDelete, clearEndpoint, nil)
+// deleteMessage removes a single message from the test inbox by its ID. A blank
+// id is a no-op so a successful match with an unexpected (empty) ID does not
+// fail the caller.
+func (sm *SMTP) deleteMessage(ctx context.Context, id string) error {
+	if id == "" {
+		return nil
+	}
+	deleteEndpoint := fmt.Sprintf(deleteMessageEndpoint, sm.config.SMTPServer, sm.config.TestAPIPort, id)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, deleteEndpoint, nil)
 	if err != nil {
 		return fmt.Errorf("could not create request: %v", err)
 	}
