@@ -8,6 +8,13 @@ definitions:
           type: string
         type: array
     type: object
+  api.VersionInfo:
+    properties:
+      goVersion:
+        type: string
+      version:
+        type: string
+    type: object
   apicommon.AcceptOrganizationInvitation:
     properties:
       code:
@@ -5452,6 +5459,19 @@ paths:
       summary: Resend verification code
       tags:
       - users
+  /version:
+    get:
+      description: Returns the service version and build information
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.VersionInfo'
+      summary: Get service version
+      tags:
+      - health
 schemes:
 - http
 - https
