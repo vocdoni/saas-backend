@@ -252,7 +252,7 @@ func seedUsedCSPProcess(t *testing.T, memberID string, bundleID, processID inter
 	token := internal.HexBytes(append([]byte{0xC5, 0x90}, processID...))
 	userID := internal.HexBytesFromString(memberID)
 	address := internal.HexBytes{0x11, 0x22, 0x33}
-	c.Assert(testDB.SetCSPAuth(token, userID, bundleID), qt.IsNil)
+	c.Assert(testDB.SetCSPAuth(token, userID, bundleID, ""), qt.IsNil)
 	c.Assert(testDB.VerifyCSPAuth(token), qt.IsNil)
 	c.Assert(testDB.ConsumeCSPProcess(token, processID, address), qt.IsNil)
 }
@@ -295,7 +295,7 @@ func TestMembersWithUsedCSPProcess(t *testing.T) {
 		// Verified auth exists, but the process was never consumed → no CSPProcess.
 		token := internal.HexBytes{0x01, 0x02, 0x03}
 		userID := internal.HexBytesFromString(fixture.alice.ID.Hex())
-		c.Assert(testDB.SetCSPAuth(token, userID, fixture.bundleID), qt.IsNil)
+		c.Assert(testDB.SetCSPAuth(token, userID, fixture.bundleID, ""), qt.IsNil)
 		c.Assert(testDB.VerifyCSPAuth(token), qt.IsNil)
 
 		got, err := testDB.MembersWithUsedCSPProcess(processID, []string{fixture.alice.ID.Hex()})
