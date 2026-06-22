@@ -710,6 +710,7 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if code != userPasswords.Code {
 		errors.ErrUnauthorized.With("code mismatch").Write(w)
+		return
 	}
 
 	// hash and update the new password
@@ -718,6 +719,10 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		log.Warnw("could not update user password", "error", err)
 		errors.ErrGenericInternalServerError.Write(w)
 		return
+	}
+	// invalidate the reset code so it cannot be reused
+	if err := a.db.DeleteUserVerificationCode(user, db.CodeTypePasswordReset); err != nil {
+		log.Warnw("could not delete password reset code", "error", err)
 	}
 	apicommon.HTTPWriteOK(w)
 }

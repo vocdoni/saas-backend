@@ -17,6 +17,17 @@ func (ms *MongoStorage) delVerificationCode(ctx context.Context, id uint64, t Co
 	return err
 }
 
+// DeleteUserVerificationCode deletes the verification code of the given type for
+// the user provided. It is safe to call when no code exists. If an error occurs,
+// it returns the error.
+func (ms *MongoStorage) DeleteUserVerificationCode(user *User, t CodeType) error {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	return ms.delVerificationCode(ctx, user.ID, t)
+}
+
 // UserVerificationCode returns the verification code for the user provided. If
 // the user has not a verification code, it returns an specific error, if other
 // error occurs, it returns the error.

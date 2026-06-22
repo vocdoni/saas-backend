@@ -12,6 +12,7 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 )
@@ -202,6 +203,86 @@ func TestRecoverAndResetPassword(t *testing.T) {
 	// Try to login with the new password (should succeed)
 	loginInfo.Password = newPassword
 	resp, code = testRequest(t, http.MethodPost, "", loginInfo, authLoginEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+}
+
+// TestResetPasswordWrongCodeRejected ensures that a password reset is rejected
+// when the supplied code is wrong, that the password is left untouched, and that
+// a valid code cannot be reused after a successful reset.
+func TestResetPasswordWrongCodeRejected(t *testing.T) {
+	c := qt.New(t)
+
+	// Register a user with a unique email so the test is independent
+	mail := fmt.Sprintf("%d-reset@test.com", internal.RandomInt(100000000000))
+	userInfo := &apicommon.UserInfo{
+		Email:     mail,
+		Password:  testPass,
+		FirstName: testFirstName,
+		LastName:  testLastName,
+	}
+	resp, code := testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+	// Verify the user
+	mailBody := waitForEmail(t, mail)
+	verifyMailCode := verificationCodeRgx.FindStringSubmatch(mailBody)
+	c.Assert(len(verifyMailCode) > 1, qt.IsTrue)
+	verification := &apicommon.UserVerification{Email: mail, Code: verifyMailCode[1]}
+	resp, code = testRequest(t, http.MethodPost, "", verification, verifyUserEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+	// Request password recovery
+	resp, code = testRequest(t, http.MethodPost, "", &apicommon.UserInfo{Email: mail}, usersRecoveryPasswordEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+	mailBody = waitForEmail(t, mail)
+	passResetMailCode := passwordResetRgx.FindStringSubmatch(mailBody)
+	c.Assert(len(passResetMailCode) > 1, qt.IsTrue)
+	validCode := passResetMailCode[1]
+
+	// Attempt reset with a WRONG code: must be rejected
+	attackerPassword := "attackerpassword"
+	resp, code = testRequest(t, http.MethodPost, "", &apicommon.UserPasswordReset{
+		Email:       mail,
+		Code:        validCode + "wrong",
+		NewPassword: attackerPassword,
+	}, usersResetPasswordEndpoint)
+	c.Assert(code, qt.Equals, http.StatusUnauthorized, qt.Commentf("response: %s", resp))
+
+	// The attacker password must NOT have been stored
+	_, code = testRequest(t, http.MethodPost, "", &apicommon.UserInfo{
+		Email:    mail,
+		Password: attackerPassword,
+	}, authLoginEndpoint)
+	c.Assert(code, qt.Equals, http.StatusUnauthorized)
+	// The original password must still work
+	resp, code = testRequest(t, http.MethodPost, "", &apicommon.UserInfo{
+		Email:    mail,
+		Password: testPass,
+	}, authLoginEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+	// Reset with the CORRECT code: must succeed
+	newPassword := "newpassword2"
+	resp, code = testRequest(t, http.MethodPost, "", &apicommon.UserPasswordReset{
+		Email:       mail,
+		Code:        validCode,
+		NewPassword: newPassword,
+	}, usersResetPasswordEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+	// Reusing the same (now consumed) code must be rejected
+	resp, code = testRequest(t, http.MethodPost, "", &apicommon.UserPasswordReset{
+		Email:       mail,
+		Code:        validCode,
+		NewPassword: "yetanotherpass",
+	}, usersResetPasswordEndpoint)
+	c.Assert(code, qt.Equals, http.StatusUnauthorized, qt.Commentf("response: %s", resp))
+
+	// The new password set with the valid code must still work
+	resp, code = testRequest(t, http.MethodPost, "", &apicommon.UserInfo{
+		Email:    mail,
+		Password: newPassword,
+	}, authLoginEndpoint)
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 }
 
