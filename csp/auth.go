@@ -2,8 +2,10 @@
 package csp
 
 import (
-	"crypto/sha256"
+	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base32"
+	"fmt"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -57,13 +59,16 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 			return nil, errors.ErrAttemptCoolDownTime.WithData(map[string]any{"coolDownTime": remainingTime.Milliseconds()})
 		}
 	}
-	// generate a new token, secret and code from the attempt number
-	token, code, err := c.generateToken(uID, bID)
+	// generate a new token, a cryptographically random per-token challenge
+	// secret and the OTP code derived from it
+	challenge, err := c.generateToken(uID, bID)
 	if err != nil {
 		return nil, err
 	}
-	// create the new token
-	if err := c.Storage.SetCSPAuth(token, uID, bID); err != nil {
+	token, code := challenge.token, challenge.code
+	// create the new token storing its challenge secret and expiration
+	expiresAt := time.Now().Add(db.CSPAuthTokenValidity)
+	if err := c.Storage.SetCSPAuthChallenge(token, uID, bID, challenge.secret, expiresAt); err != nil {
 		log.Warnw("error setting new token",
 			"userID", uID,
 			"bundleID", bID,
@@ -141,15 +146,9 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 		Name:    orgName,
 		Logo:    orgLogo,
 	}
-	code, err := c.regenerateTokenCode(authTokenData.UserID, authTokenData.BundleID)
-	if err != nil {
-		log.Warnw("error regenerating token code",
-			"userID", authTokenData.UserID,
-			"bundleID", authTokenData.BundleID,
-			"token", token,
-			"error", err)
-		return ErrChallengeCodeFailure
-	}
+	// recompute the same code from the token's stored challenge secret so the
+	// resent challenge matches the original one
+	code := challengeCode(authTokenData.ChallengeSecret)
 	ch, err := notifications.NewNotificationChallenge(
 		ctype,
 		lang,
@@ -203,13 +202,35 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 			"error", err)
 		return ErrInvalidAuthToken
 	}
-	// verify the solution, and if the solution is not correct, return an error
-	if !c.verifySolution(authTokenData.UserID, authTokenData.BundleID, solution) {
-		log.Warnw("challenge code do not match",
+	// reject expired challenge codes
+	if !authTokenData.ExpiresAt.IsZero() && time.Now().After(authTokenData.ExpiresAt) {
+		log.Warnw("challenge code expired",
+			"userID", authTokenData.UserID,
+			"bundleID", authTokenData.BundleID,
+			"token", token)
+		return ErrTokenExpired
+	}
+	// reject tokens that exhausted the maximum number of attempts
+	if authTokenData.Attempts >= MaxChallengeAttempts {
+		log.Warnw("too many challenge attempts",
 			"userID", authTokenData.UserID,
 			"bundleID", authTokenData.BundleID,
 			"token", token,
-			"solution", solution)
+			"attempts", authTokenData.Attempts)
+		return ErrTooManyAttempts
+	}
+	// verify the solution, and if the solution is not correct, count the failed
+	// attempt and return an error
+	if !verifySolution(authTokenData.ChallengeSecret, solution) {
+		log.Warnw("challenge code do not match",
+			"userID", authTokenData.UserID,
+			"bundleID", authTokenData.BundleID,
+			"token", token)
+		if err := c.Storage.IncrementCSPAuthAttempts(token); err != nil {
+			log.Warnw("error incrementing challenge attempts",
+				"token", token,
+				"error", err)
+		}
 		return ErrChallengeCodeFailure
 	}
 	// set the token as verified
@@ -224,19 +245,37 @@ func (c *CSP) VerifyBundleAuthToken(token internal.HexBytes, solution string) er
 	return nil
 }
 
+// MaxChallengeAttempts is the maximum number of failed challenge-code
+// verification attempts allowed for a single authentication token before it is
+// rejected.
+const MaxChallengeAttempts = 5
+
+// challengeSecretSize is the number of random bytes used to build a per-token
+// challenge secret.
+const challengeSecretSize = 20
+
+// authChallenge holds a freshly generated authentication token together with
+// its per-token challenge secret and the OTP code derived from it.
+type authChallenge struct {
+	token  internal.HexBytes
+	secret string
+	code   string
+}
+
 // generateToken method generates a new authentication token for a user in a
-// process. It checks if the process is already consumed for this user. It
-// generates a new challenge secret, challenge token and OTP code for the
-// secret and the attempt number. It returns the token, the secret and the
-// code respectively.
-func (*CSP) generateToken(uID, bID internal.HexBytes) (
-	internal.HexBytes, string, error,
-) {
-	// generate a new challenge secret and challenge token
-	secret := otpSecret(uID, bID)
-	// generate the OTP code for the secret and the attempt number
-	otp := gotp.NewDefaultHOTP(secret)
-	code := otp.At(0)
+// process. It generates a cryptographically random per-token challenge secret
+// and the OTP code derived from it, plus a random token. The uID and bID
+// parameters are only used for logging context.
+func (*CSP) generateToken(uID, bID internal.HexBytes) (authChallenge, error) {
+	// generate a cryptographically random per-token challenge secret
+	secret, err := generateChallengeSecret()
+	if err != nil {
+		log.Warnw("error generating challenge secret",
+			"error", err,
+			"userID", uID,
+			"bundleID", bID)
+		return authChallenge{}, ErrChallengeCodeFailure
+	}
 	// generate a new token and convert it to HexBytes
 	bToken, err := uuid.New().MarshalBinary()
 	if err != nil {
@@ -244,31 +283,33 @@ func (*CSP) generateToken(uID, bID internal.HexBytes) (
 			"error", err,
 			"userID", uID,
 			"bundleID", bID)
-		return nil, "", ErrInvalidAuthToken
+		return authChallenge{}, ErrInvalidAuthToken
 	}
-	return bToken, code, nil
+	// derive the OTP code from the secret
+	return authChallenge{token: bToken, secret: secret, code: challengeCode(secret)}, nil
 }
 
-func (*CSP) regenerateTokenCode(uID, bID internal.HexBytes) (
-	string, error,
-) {
-	secret := otpSecret(uID, bID)
-	otp := gotp.NewDefaultHOTP(secret)
-	code := otp.At(0)
-	return code, nil
+// verifySolution verifies the provided solution against the OTP code derived
+// from the token's stored challenge secret using a constant-time comparison. It
+// returns true if the solution is correct, false otherwise.
+func verifySolution(secret, solution string) bool {
+	code := challengeCode(secret)
+	return subtle.ConstantTimeCompare([]byte(code), []byte(solution)) == 1
 }
 
-// verifySolution method verifies the solution for a user process. It generates
-// the OTP code for the process secret and the attempt number and compares it
-// with the solution. It returns true if the solution is correct, false
-// otherwise.
-func (*CSP) verifySolution(uID, bID internal.HexBytes, solution string) bool {
-	secret := otpSecret(uID, bID)
-	// generate the OTP code for the secret and the attempt number
-	otp := gotp.NewDefaultHOTP(secret)
-	code := otp.At(0)
-	// compare the generated code with the solution
-	return code == solution
+// challengeCode derives the OTP code for the given challenge secret.
+func challengeCode(secret string) string {
+	return gotp.NewDefaultHOTP(secret).At(0)
+}
+
+// generateChallengeSecret returns a cryptographically random base32-encoded
+// secret suitable for use as an HOTP secret.
+func generateChallengeSecret() (string, error) {
+	b := make([]byte, challengeSecretSize)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("could not generate random challenge secret: %w", err)
+	}
+	return base32.StdEncoding.EncodeToString(b), nil
 }
 
 // createAuthOnlyToken creates a pre-verified token for auth-only censuses
@@ -310,13 +351,4 @@ func (c *CSP) createAuthOnlyToken(bID, uID internal.HexBytes) (internal.HexBytes
 		"token", bToken)
 
 	return bToken, nil
-}
-
-// otpSecret method generates a new OTP secret for a user and a bundle. The
-// secret is generated by hashing the user ID and the bundle ID with SHA-256.
-// It returns the secret as HexBytes.
-func otpSecret(uID, bID internal.HexBytes) string {
-	hash := sha256.Sum256(append(uID, bID...))
-	// encode the secret in base32 and return it
-	return base32.StdEncoding.EncodeToString(hash[:])
 }

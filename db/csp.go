@@ -2,7 +2,9 @@ package db
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base32"
 	"errors"
 	"fmt"
 	"time"
@@ -16,13 +18,24 @@ import (
 
 // CSPAuth represents a user authentication information for a bundle of processes
 type CSPAuth struct {
-	Token      internal.HexBytes `json:"token" bson:"_id"`
-	UserID     internal.HexBytes `json:"userID" bson:"userid"`
-	BundleID   internal.HexBytes `json:"bundleID" bson:"bundleid"`
-	CreatedAt  time.Time         `json:"createdAt" bson:"createdat"`
-	Verified   bool              `json:"verified" bson:"verified"`
-	VerifiedAt time.Time         `json:"verifiedAt" bson:"verifiedat"`
+	Token    internal.HexBytes `json:"token" bson:"_id"`
+	UserID   internal.HexBytes `json:"userID" bson:"userid"`
+	BundleID internal.HexBytes `json:"bundleID" bson:"bundleid"`
+	// ChallengeSecret is a cryptographically random per-token secret used to
+	// derive the challenge (OTP) code. It is never exposed through the JSON API.
+	ChallengeSecret string    `json:"-" bson:"challengesecret"`
+	CreatedAt       time.Time `json:"createdAt" bson:"createdat"`
+	// ExpiresAt is the moment after which the challenge code is no longer valid.
+	ExpiresAt time.Time `json:"expiresAt" bson:"expiresat"`
+	// Attempts counts the number of failed verification attempts for the token.
+	Attempts   int       `json:"attempts" bson:"attempts"`
+	Verified   bool      `json:"verified" bson:"verified"`
+	VerifiedAt time.Time `json:"verifiedAt" bson:"verifiedat"`
 }
+
+// CSPAuthTokenValidity is the default lifetime of a CSP challenge code created
+// through SetCSPAuth. After this period the code can no longer be verified.
+const CSPAuthTokenValidity = 5 * time.Minute
 
 // CSPProcess is the status of a process in a bundle of processes for a user
 type CSPProcess struct {
@@ -37,10 +50,27 @@ type CSPProcess struct {
 }
 
 // SetCSPAuth method stores a new CSP authentication token for a user and a
-// bundle of processes. It returns an error if the token, user ID or bundle
-// ID are nil.
+// bundle of processes. It generates a cryptographically random per-token
+// challenge secret and a default expiration (CSPAuthTokenValidity). It returns
+// an error if the token, user ID or bundle ID are nil.
 func (ms *MongoStorage) SetCSPAuth(token, userID, bundleID internal.HexBytes) error {
+	secret, err := randomChallengeSecret()
+	if err != nil {
+		return errors.Join(ErrStoreToken, err)
+	}
+	return ms.SetCSPAuthChallenge(token, userID, bundleID, secret, time.Now().Add(CSPAuthTokenValidity))
+}
+
+// SetCSPAuthChallenge method stores a new CSP authentication token together with
+// its per-token challenge secret and expiration. It returns an error if the
+// token, user ID or bundle ID are nil, or if the secret is empty.
+func (ms *MongoStorage) SetCSPAuthChallenge(
+	token, userID, bundleID internal.HexBytes, secret string, expiresAt time.Time,
+) error {
 	if token == nil || userID == nil || bundleID == nil {
+		return ErrBadInputs
+	}
+	if secret == "" {
 		return ErrBadInputs
 	}
 	ms.keysLock.Lock()
@@ -50,15 +80,48 @@ func (ms *MongoStorage) SetCSPAuth(token, userID, bundleID internal.HexBytes) er
 	defer cancel()
 	// insert the token
 	if _, err := ms.cspTokens.InsertOne(ctx, CSPAuth{
-		Token:     token,
-		UserID:    userID,
-		BundleID:  bundleID,
-		CreatedAt: time.Now(),
-		Verified:  false,
+		Token:           token,
+		UserID:          userID,
+		BundleID:        bundleID,
+		ChallengeSecret: secret,
+		CreatedAt:       time.Now(),
+		ExpiresAt:       expiresAt,
+		Verified:        false,
 	}); err != nil {
 		return errors.Join(ErrStoreToken, err)
 	}
 	return nil
+}
+
+// IncrementCSPAuthAttempts increments the failed-attempt counter for the given
+// CSP authentication token. It returns an error if the token is nil or does not
+// exist.
+func (ms *MongoStorage) IncrementCSPAuthAttempts(token internal.HexBytes) error {
+	if token == nil {
+		return ErrBadInputs
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.cspTokens.UpdateOne(ctx, bson.M{"_id": token}, bson.M{"$inc": bson.M{"attempts": 1}})
+	if err != nil {
+		return errors.Join(ErrStoreToken, err)
+	}
+	if res.MatchedCount == 0 {
+		return ErrTokenNotFound
+	}
+	return nil
+}
+
+// randomChallengeSecret returns a cryptographically random base32-encoded secret
+// suitable for use as an HOTP/TOTP secret.
+func randomChallengeSecret() (string, error) {
+	b := make([]byte, 20)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("could not generate random challenge secret: %w", err)
+	}
+	return base32.StdEncoding.EncodeToString(b), nil
 }
 
 // CSPAuth method returns the CSP authentication data for a given token. It

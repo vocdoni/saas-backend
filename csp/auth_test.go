@@ -2,7 +2,6 @@ package csp
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/base32"
 	"io"
 	"regexp"
@@ -17,7 +16,6 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 	"github.com/vocdoni/saas-backend/test"
-	"github.com/xlzd/gotp"
 )
 
 func TestBundleAuthToken(t *testing.T) {
@@ -140,13 +138,13 @@ func TestBundleAuthToken(t *testing.T) {
 		)
 		c.Assert(err, qt.IsNil)
 		c.Assert(token, qt.Not(qt.IsNil))
-		// calculate expected code and token
-		_, expectedCode, err := csp.generateToken(testUserID, bundleID)
-		c.Assert(err, qt.IsNil)
+		// the expected code is derived from the token's stored random secret
 		authTokenResult, err := csp.Storage.CSPAuth(token)
 		c.Assert(err, qt.IsNil)
 		c.Assert(authTokenResult.BundleID.Bytes(), qt.DeepEquals, bundleID.Bytes())
 		c.Assert(authTokenResult.UserID.Bytes(), qt.DeepEquals, testUserID.Bytes())
+		c.Assert(authTokenResult.ChallengeSecret, qt.Not(qt.Equals), "")
+		expectedCode := challengeCode(authTokenResult.ChallengeSecret)
 		// wait to dequeue the notification
 		time.Sleep(time.Second * 3)
 		// get the verification code from the email
@@ -214,16 +212,46 @@ func TestVerifyBundleAuthToken(t *testing.T) {
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		// create the token
 		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID), qt.IsNil)
-		// generate the code
-		_, code, err := csp.generateToken(testUserID, testBundleID)
+		// derive the code from the token's stored challenge secret
+		auth, err := csp.Storage.CSPAuth(testToken)
 		c.Assert(err, qt.IsNil)
-		// try to verify an valid solution
+		code := challengeCode(auth.ChallengeSecret)
+		// try to verify a valid solution
 		err = csp.VerifyBundleAuthToken(testToken, code)
 		c.Assert(err, qt.IsNil)
 		// check that the token is verified
 		authTokenResult, err := csp.Storage.CSPAuth(testToken)
 		c.Assert(err, qt.IsNil)
 		c.Assert(authTokenResult.Verified, qt.IsTrue)
+	})
+
+	c.Run("expired token", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		// create a token that already expired
+		secret, err := generateChallengeSecret()
+		c.Assert(err, qt.IsNil)
+		c.Assert(csp.Storage.SetCSPAuthChallenge(
+			testToken, testUserID, testBundleID, secret, time.Now().Add(-time.Minute),
+		), qt.IsNil)
+		code := challengeCode(secret)
+		err = csp.VerifyBundleAuthToken(testToken, code)
+		c.Assert(err, qt.ErrorIs, ErrTokenExpired)
+	})
+
+	c.Run("too many attempts", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID), qt.IsNil)
+		auth, err := csp.Storage.CSPAuth(testToken)
+		c.Assert(err, qt.IsNil)
+		validCode := challengeCode(auth.ChallengeSecret)
+		// exhaust the allowed attempts with wrong codes
+		for range MaxChallengeAttempts {
+			err = csp.VerifyBundleAuthToken(testToken, "000000")
+			c.Assert(err, qt.ErrorIs, ErrChallengeCodeFailure)
+		}
+		// even the valid code is now rejected because attempts are exhausted
+		err = csp.VerifyBundleAuthToken(testToken, validCode)
+		c.Assert(err, qt.ErrorIs, ErrTooManyAttempts)
 	})
 }
 
@@ -330,8 +358,9 @@ func TestResendChallenge(t *testing.T) {
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID), qt.IsNil)
 
-		expectedCode, err := csp.regenerateTokenCode(testUserID, testBundleID)
+		auth, err := csp.Storage.CSPAuth(testToken)
 		c.Assert(err, qt.IsNil)
+		expectedCode := challengeCode(auth.ChallengeSecret)
 
 		err = csp.ResendChallenge(
 			testToken,
@@ -381,8 +410,9 @@ func TestBundleAuthTokenResendAndVerifyFlow(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(token, qt.Not(qt.IsNil))
 
-	expectedFirstCode, err := csp.regenerateTokenCode(testUserID, testBundleID)
+	firstAuth, err := csp.Storage.CSPAuth(token)
 	c.Assert(err, qt.IsNil)
+	expectedFirstCode := challengeCode(firstAuth.ChallengeSecret)
 	firstCode := fetchOTPCodeFromEmail(c, testUserEmail)
 	c.Assert(firstCode, qt.Equals, expectedFirstCode)
 
@@ -413,8 +443,9 @@ func TestBundleAuthTokenResendAndVerifyFlow(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(secondToken, qt.Not(qt.IsNil))
 
-	expectedSecondCode, err := csp.regenerateTokenCode(testUserID, secondBundleID)
+	secondAuth, err := csp.Storage.CSPAuth(secondToken)
 	c.Assert(err, qt.IsNil)
+	expectedSecondCode := challengeCode(secondAuth.ChallengeSecret)
 	secondCode := fetchOTPCodeFromEmail(c, testUserEmail)
 	c.Assert(secondCode, qt.Equals, expectedSecondCode)
 	c.Assert(secondCode, qt.Not(qt.Equals), resendCode)
@@ -434,35 +465,52 @@ func TestBundleAuthTokenResendAndVerifyFlow(t *testing.T) {
 
 func TestGenerateToken(t *testing.T) {
 	c := qt.New(t)
-	secret := otpSecret(testUserID, testBundleID)
-	otp := gotp.NewDefaultHOTP(secret)
-	token, code, err := new(CSP).generateToken(testUserID, testBundleID)
+	challenge, err := new(CSP).generateToken(testUserID, testBundleID)
 	c.Assert(err, qt.IsNil)
-	c.Assert(token, qt.Not(qt.IsNil))
-	c.Assert(code, qt.Equals, otp.At(0))
+	c.Assert(challenge.token, qt.Not(qt.IsNil))
+	c.Assert(challenge.secret, qt.Not(qt.Equals), "")
+	// the code is deterministically derived from the secret
+	c.Assert(challenge.code, qt.Equals, challengeCode(challenge.secret))
+
+	// two tokens for the SAME user and bundle must yield different secrets and
+	// codes, proving codes are no longer deterministic from (userID, bundleID)
+	challenge2, err := new(CSP).generateToken(testUserID, testBundleID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(challenge2.token.Bytes(), qt.Not(qt.DeepEquals), challenge.token.Bytes())
+	c.Assert(challenge2.secret, qt.Not(qt.Equals), challenge.secret)
+	c.Assert(challenge2.code, qt.Not(qt.Equals), challenge.code)
 }
 
 func TestVerifySolution(t *testing.T) {
 	c := qt.New(t)
 
-	secret := otpSecret(testUserID, testBundleID)
-	otp := gotp.NewDefaultHOTP(secret)
-	code := otp.At(0)
+	challenge, err := new(CSP).generateToken(testUserID, testBundleID)
+	c.Assert(err, qt.IsNil)
 
-	ok := new(CSP).verifySolution(testUserID, testBundleID, code)
-	c.Assert(ok, qt.IsTrue)
-
-	ok = new(CSP).verifySolution(testUserID, testBundleID, "invalid")
-	c.Assert(ok, qt.IsFalse)
+	c.Assert(verifySolution(challenge.secret, challenge.code), qt.IsTrue)
+	c.Assert(verifySolution(challenge.secret, "invalid"), qt.IsFalse)
+	c.Assert(verifySolution(challenge.secret, ""), qt.IsFalse)
+	// a different secret must not validate the same code (overwhelmingly likely)
+	other, err := new(CSP).generateToken(testUserID, testBundleID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(verifySolution(other.secret, challenge.code), qt.IsFalse)
 }
 
-func TestOTPSecret(t *testing.T) {
+func TestGenerateChallengeSecret(t *testing.T) {
 	c := qt.New(t)
 
-	expectedSecret := sha256.Sum256(append(testUserID, testBundleID...))
-	encodedSecret := base32.StdEncoding.EncodeToString(expectedSecret[:])
-	secret := otpSecret(testUserID, testBundleID)
-	c.Assert(secret, qt.Equals, encodedSecret)
+	seen := make(map[string]bool)
+	for range 100 {
+		s, err := generateChallengeSecret()
+		c.Assert(err, qt.IsNil)
+		c.Assert(s, qt.Not(qt.Equals), "")
+		// secrets must be unique
+		c.Assert(seen[s], qt.IsFalse)
+		seen[s] = true
+		// secrets must be valid base32 so they can be used as HOTP secrets
+		_, err = base32.StdEncoding.DecodeString(s)
+		c.Assert(err, qt.IsNil)
+	}
 }
 
 func fetchOTPCodeFromEmail(c *qt.C, email string) string {
