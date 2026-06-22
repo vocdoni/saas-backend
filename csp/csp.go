@@ -50,6 +50,11 @@ type Config struct {
 	NotificationBreakerCooldown    time.Duration
 	SMSService                     saasNotifications.NotificationService
 	MailService                    saasNotifications.NotificationService
+	// SyncDelivery makes BundleAuthToken and ResendChallenge block until the
+	// challenge notification has actually been delivered, instead of returning as
+	// soon as it is enqueued. It exists to make tests deterministic; leave false
+	// in production (fire-and-forget).
+	SyncDelivery bool
 }
 
 // CSP struct contains the CSP service. It includes the storage, the
@@ -60,9 +65,11 @@ type CSP struct {
 	Storage      *db.MongoStorage
 	signerLock   sync.Map
 	notifyQueue  *notifications.Queue
+	ctx          context.Context
 
 	notificationCoolDownTime time.Duration
 	notificationTTL          time.Duration
+	notifySync               bool
 }
 
 // New method creates a new CSP service. It requires a CSPConfig struct with
@@ -123,9 +130,35 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 		Storage:                  config.DB,
 		Signer:                   s,
 		notifyQueue:              queue,
+		ctx:                      ctx,
 		notificationCoolDownTime: notificationCoolDownTime,
 		notificationTTL:          notificationTTL,
+		notifySync:               config.SyncDelivery,
 	}, nil
+}
+
+// pushChallenge enqueues a notification challenge. In synchronous-delivery mode
+// (notifySync, used by tests) it blocks until the challenge has been delivered
+// or given up, so callers observe a deterministic happens-before instead of
+// racing the queue worker; otherwise it is fire-and-forget. The wait is bounded
+// by the service context and a hard timeout so a stuck provider cannot hang a
+// request indefinitely.
+func (c *CSP) pushChallenge(ch *notifications.NotificationChallenge) error {
+	if !c.notifySync {
+		return c.notifyQueue.Push(ch)
+	}
+	done, err := c.notifyQueue.PushWait(ch)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
+	defer cancel()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // PubKey method returns the root public key of the CSP.

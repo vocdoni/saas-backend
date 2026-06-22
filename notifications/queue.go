@@ -49,6 +49,11 @@ type QueueItem struct {
 	ExpiresAt time.Time
 	// Meta is opaque caller context. The queue does not inspect it.
 	Meta any
+	// done, if non-nil, receives this item exactly once after its final delivery
+	// attempt (success or give-up), in addition to the shared Queue.Done channel.
+	// It is set by PushWait and lets a single caller await one specific item's
+	// outcome. It is buffered (cap 1) so the queue never blocks signaling it.
+	done chan *QueueItem
 }
 
 // QueueConfig holds the configuration for a Queue.
@@ -132,6 +137,27 @@ func (q *Queue) Push(item *QueueItem) error {
 	}
 	log.Debugw("notification enqueued", "label", item.Label, "type", item.Type)
 	return q.items.Enqueue(item)
+}
+
+// PushWait enqueues the item and returns a channel that receives the item once
+// its final delivery attempt completes (delivered or given up). The channel is
+// buffered (cap 1) so the queue never blocks signaling it; the caller should
+// also select on its own context to avoid waiting forever if the queue is shut
+// down before the item is processed.
+//
+// Production callers that fire-and-forget should use Push. PushWait is for
+// callers that must observe delivery before proceeding — e.g. synchronous
+// request handling in tests, where a subsequent assertion depends on the mail
+// having actually been delivered.
+func (q *Queue) PushWait(item *QueueItem) (<-chan *QueueItem, error) {
+	if item == nil {
+		return nil, fmt.Errorf("nil queue item")
+	}
+	item.done = make(chan *QueueItem, 1)
+	if err := q.Push(item); err != nil {
+		return nil, err
+	}
+	return item.done, nil
 }
 
 // Start launches the worker pool. Workers return when the context is canceled.
@@ -259,6 +285,11 @@ func (q *Queue) giveUp(item *QueueItem) {
 }
 
 func (q *Queue) emit(item *QueueItem) {
+	// signal a per-item waiter, if any. The channel is buffered (cap 1) and an
+	// item reaches emit exactly once, so this never blocks.
+	if item.done != nil {
+		item.done <- item
+	}
 	select {
 	case <-q.ctx.Done():
 	case q.Done <- item:

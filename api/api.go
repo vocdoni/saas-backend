@@ -100,6 +100,13 @@ type Config struct {
 	// OTPCooldown overrides the anti-spam rate limit between notification
 	// requests for the same account. Zero uses notifications.DefaultOTPCooldown.
 	OTPCooldown time.Duration
+	// NotificationsSyncDelivery makes sendMail block until the notification has
+	// actually been delivered (or given up) instead of returning as soon as it
+	// is enqueued. It exists to make tests deterministic — a handler that sends
+	// mail then returns guarantees the mail is in the (fake) inbox by the time
+	// the HTTP response is observed, restoring the happens-before that the async
+	// queue otherwise breaks. Leave false in production.
+	NotificationsSyncDelivery bool
 }
 
 // API type represents the API HTTP server with JWT authentication capabilities.
@@ -128,6 +135,7 @@ type API struct {
 	orgTxLocks      *orgTxMutex
 	otpExpiry       time.Duration
 	otpCooldown     time.Duration
+	notifySync      bool
 }
 
 // New creates a new API HTTP server. It does not start the server. Use Start() for that.
@@ -179,6 +187,7 @@ func New(ctx context.Context, conf *Config) *API {
 		orgTxLocks:      newOrgTxMutex(),
 		otpExpiry:       otpExpiry,
 		otpCooldown:     otpCooldown,
+		notifySync:      conf.NotificationsSyncDelivery,
 	}
 	a.startTxQueue()
 	return a

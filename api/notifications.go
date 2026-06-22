@@ -31,13 +31,42 @@ func (a *API) sendMail(ctx context.Context, to string, mail mailtemplates.MailTe
 		return err
 	}
 	notification.ToAddress = to
-	if err := a.notifyQueue.Push(&notifications.QueueItem{
+	item := &notifications.QueueItem{
 		Notification: notification,
 		Type:         notifications.Email,
 		Label:        to,
 		ExpiresAt:    expiresAt,
-	}); err != nil {
+	}
+	// In synchronous-delivery mode (used by tests) block until the notification
+	// is actually delivered, so callers that subsequently inspect the inbox
+	// observe a deterministic happens-before instead of racing the queue worker.
+	if a.notifySync {
+		return a.sendMailSync(ctx, item)
+	}
+	if err := a.notifyQueue.Push(item); err != nil {
 		log.Warnw("could not enqueue mail notification", "to", to, "error", err)
 	}
 	return nil
+}
+
+// sendMailSync enqueues the item and waits for its delivery outcome, bounded by
+// the caller's context and a hard timeout so a stuck provider can never hang the
+// request indefinitely. It is only used when NotificationsSyncDelivery is set.
+func (a *API) sendMailSync(ctx context.Context, item *notifications.QueueItem) error {
+	done, err := a.notifyQueue.PushWait(item)
+	if err != nil {
+		log.Warnw("could not enqueue mail notification", "to", item.Label, "error", err)
+		return nil
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	select {
+	case res := <-done:
+		if res != nil && !res.Success {
+			return fmt.Errorf("notification delivery failed for %s", item.Label)
+		}
+		return nil
+	case <-waitCtx.Done():
+		return fmt.Errorf("timed out waiting for notification delivery to %s: %w", item.Label, waitCtx.Err())
+	}
 }
