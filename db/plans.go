@@ -115,6 +115,30 @@ func (ms *MongoStorage) DefaultPlan() (*Plan, error) {
 	return plan, nil
 }
 
+// FreeIntegratorPlan returns the free integrator plan: a zero-priced plan that grants
+// managed-organization capacity. It is the plan assigned to organizations created through
+// the integrator portal so they become integrators on the free tier without a checkout.
+func (ms *MongoStorage) FreeIntegratorPlan() (*Plan, error) {
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	// a free plan (no recurring price) that grants at least one managed org
+	filter := bson.M{
+		"integratorLimits.maxManagedOrgs": bson.M{"$gt": 0},
+		"monthlyPrice":                    int64(0),
+		"yearlyPrice":                     int64(0),
+	}
+	plan := &Plan{}
+	err := ms.plans.FindOne(ctx, filter).Decode(plan)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, ErrNotFound
+		}
+		return nil, errors.New("failed to get free integrator plan")
+	}
+	return plan, nil
+}
+
 // Plans method returns all plans from the database.
 func (ms *MongoStorage) Plans() ([]*Plan, error) {
 	// create a context with a timeout

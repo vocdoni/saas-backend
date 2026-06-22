@@ -90,6 +90,12 @@ type OrganizationInfo struct {
 	// Whether to provision the organization's on-chain account at creation
 	// time (opt-in, eager). Default false preserves the legacy two-step flow.
 	ProvisionAccount bool `json:"provisionAccount,omitempty"`
+
+	// Whether to subscribe the new organization to the free integrator plan at
+	// creation time (opt-in). Used by the integrator portal so a newly created org
+	// becomes an integrator on the free tier with no checkout. Default false uses
+	// the regular default plan.
+	Integrator bool `json:"integrator,omitempty"`
 }
 
 // OrganizationUsers represents a list of users of an organization.
