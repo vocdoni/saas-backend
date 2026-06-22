@@ -560,6 +560,9 @@ type SubscriptionPlan struct {
 
 	// Features available in this plan
 	Features SubscriptionFeatures `json:"features"`
+
+	// Integrator limits for this plan (zero when the plan is not an integrator plan)
+	IntegratorLimits SubscriptionIntegratorLimits `json:"integratorLimits"`
 }
 
 // SubscriptionPlanFromDB converts a db.Plan to a SubscriptionPlan.
@@ -579,6 +582,7 @@ func SubscriptionPlanFromDB(plan *db.Plan) SubscriptionPlan {
 		Organization:         SubscriptionPlanLimits(plan.Organization),
 		VotingTypes:          SubscriptionVotingTypes(plan.VotingTypes),
 		Features:             SubscriptionFeatures(plan.Features),
+		IntegratorLimits:     SubscriptionIntegratorLimits(plan.IntegratorLimits),
 	}
 }
 
@@ -609,6 +613,21 @@ type SubscriptionPlanLimits struct {
 
 	// Whether this is a custom plan
 	CustomPlan bool `json:"customPlan"`
+}
+
+// SubscriptionIntegratorLimits represents the integrator limits of a subscription plan.
+// It is the mirror struct of db.IntegratorLimits. All-zero means the plan is not an
+// integrator plan.
+// swagger:model SubscriptionIntegratorLimits
+type SubscriptionIntegratorLimits struct {
+	// Maximum number of organizations the integrator may manage
+	MaxManagedOrgs int `json:"maxManagedOrgs"`
+
+	// Maximum number of voting processes across managed organizations
+	MaxManagedProcesses int `json:"maxManagedProcesses"`
+
+	// Maximum total census size across managed organizations
+	MaxManagedCensusSize int `json:"maxManagedCensusSize"`
 }
 
 // SubscriptionVotingTypes represents the voting types available in a subscription plan.
