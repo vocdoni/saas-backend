@@ -61,4 +61,37 @@ func TestPlans(t *testing.T) {
 		_, err = testDB.Plan(id)
 		c.Assert(err, qt.Equals, ErrNotFound)
 	})
+
+	t.Run("FreeIntegratorPlan", func(_ *testing.T) {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+
+		// nothing seeded yet
+		_, err := testDB.FreeIntegratorPlan()
+		c.Assert(err, qt.Equals, ErrNotFound)
+
+		// a paid integrator plan must not be selected
+		_, err = testDB.SetPlan(&Plan{
+			Name:             "Paid Integrator",
+			MonthlyPrice:     1000,
+			YearlyPrice:      10000,
+			IntegratorLimits: IntegratorLimits{MaxManagedOrgs: 10},
+		})
+		c.Assert(err, qt.IsNil)
+
+		// a free non-integrator plan must not be selected
+		_, err = testDB.SetPlan(&Plan{Name: "Free Basic"})
+		c.Assert(err, qt.IsNil)
+
+		// the free integrator plan: zero-priced and grants managed-org capacity
+		freeID, err := testDB.SetPlan(&Plan{
+			Name:             "Free Integrator",
+			IntegratorLimits: IntegratorLimits{MaxManagedOrgs: 1, MaxManagedProcesses: 5, MaxManagedCensusSize: 100},
+		})
+		c.Assert(err, qt.IsNil)
+
+		plan, err := testDB.FreeIntegratorPlan()
+		c.Assert(err, qt.IsNil)
+		c.Assert(plan.ID, qt.Equals, freeID)
+		c.Assert(plan.IntegratorLimits.MaxManagedOrgs, qt.Equals, 1)
+	})
 }
