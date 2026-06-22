@@ -58,6 +58,13 @@ type NotificationChallenge struct {
 	CreatedAt    time.Time
 	Retries      int
 	Success      bool
+
+	// done, if non-nil, receives this challenge exactly once after its final
+	// delivery attempt (success or give-up). It is set by Queue.PushWait and lets
+	// a single caller await one specific challenge's outcome instead of racing the
+	// shared NotificationsSent consumer. The channel is buffered (cap 1) and a
+	// challenge reaches emit exactly once, so the send never blocks a worker.
+	done chan *NotificationChallenge
 }
 
 // Valid methid checks if the notification challenge is valid. A valid

@@ -57,6 +57,12 @@ type Config struct {
 	NotificationBreakerCooldown    time.Duration
 	SMSService                     saasNotifications.NotificationService
 	MailService                    saasNotifications.NotificationService
+	// SyncDelivery makes the challenge-enqueuing path (BundleAuthToken and
+	// ResendChallenge) block until the challenge has been delivered or given up,
+	// so callers observe a deterministic happens-before instead of racing the
+	// concurrent queue workers. It exists to make tests deterministic; leave it
+	// false in production, where notifications are delivered asynchronously.
+	SyncDelivery bool
 }
 
 // CSP struct contains the CSP service. It includes the storage, the
@@ -67,9 +73,13 @@ type CSP struct {
 	Storage      *db.MongoStorage
 	signerLock   sync.Map
 	notifyQueue  *notifications.Queue
+	ctx          context.Context
 
 	notificationCoolDownTime time.Duration
 	otpExpiry                time.Duration
+	// notifySync, when true, makes pushChallenge block until the challenge has
+	// been delivered or given up. Used by tests for deterministic delivery.
+	notifySync bool
 }
 
 // New method creates a new CSP service. It requires a CSPConfig struct with
@@ -130,9 +140,35 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 		Storage:                  config.DB,
 		Signer:                   s,
 		notifyQueue:              queue,
+		ctx:                      ctx,
 		notificationCoolDownTime: notificationCoolDownTime,
 		otpExpiry:                otpExpiry,
+		notifySync:               config.SyncDelivery,
 	}, nil
+}
+
+// pushChallenge enqueues a notification challenge. In synchronous-delivery mode
+// (notifySync, used by tests) it blocks until the challenge has been delivered
+// or given up, so callers observe a deterministic happens-before instead of
+// racing the concurrent queue workers; otherwise it is fire-and-forget. The
+// wait is bounded by a hard timeout so a stuck or breaker-open provider cannot
+// hang a request indefinitely.
+func (c *CSP) pushChallenge(ch *notifications.NotificationChallenge) error {
+	if !c.notifySync {
+		return c.notifyQueue.Push(ch)
+	}
+	done, err := c.notifyQueue.PushWait(ch)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
+	defer cancel()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // PubKey method returns the root public key of the CSP.

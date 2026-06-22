@@ -422,6 +422,12 @@ func TestMain(m *testing.M) {
 		NotificationThrottleTime: time.Second,
 		NotificationCoolDownTime: cspNotificationCoolDownTime,
 		RootKey:                  *rootKey,
+		// Deliver challenge notifications synchronously so the OTP email is in the
+		// fake inbox before the auth response returns. Without this, tests race the
+		// concurrent queue workers (and a shared per-provider circuit breaker) and
+		// waitForEmail can time out under load even though the email is delivered
+		// later. See fix/relayvote-email-flake.
+		SyncDelivery: true,
 	})
 	if err != nil {
 		panic(err)

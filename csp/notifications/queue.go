@@ -117,6 +117,24 @@ func (sq *Queue) Push(challenge *NotificationChallenge) error {
 	return sq.items.Enqueue(challenge)
 }
 
+// PushWait enqueues a challenge and returns a channel that receives the same
+// challenge once its final delivery attempt completes (delivered or given up).
+// The channel is buffered (cap 1) and is signalled exactly once, in addition to
+// the shared NotificationsSent channel, so it never blocks a worker even if the
+// caller stops reading.
+//
+// Production callers that fire-and-forget should use Push. PushWait exists so a
+// caller can establish a happens-before between enqueuing a specific challenge
+// and observing its delivery (used to make tests deterministic instead of
+// blind-polling the destination inbox).
+func (sq *Queue) PushWait(challenge *NotificationChallenge) (<-chan *NotificationChallenge, error) {
+	challenge.done = make(chan *NotificationChallenge, 1)
+	if err := sq.Push(challenge); err != nil {
+		return nil, err
+	}
+	return challenge.done, nil
+}
+
 // serviceFor returns the notification service for the given challenge type.
 func (sq *Queue) serviceFor(challenge *NotificationChallenge) notifications.NotificationService {
 	if challenge.Type == SMSChallenge {
@@ -278,6 +296,11 @@ func (sq *Queue) giveUp(challenge *NotificationChallenge) {
 // emit reports the final state of a challenge on the NotificationsSent channel,
 // without blocking the worker if the context is canceled.
 func (sq *Queue) emit(challenge *NotificationChallenge) {
+	// Signal a per-item waiter, if any. The channel is buffered (cap 1) and a
+	// challenge reaches emit exactly once, so this never blocks the worker.
+	if challenge.done != nil {
+		challenge.done <- challenge
+	}
 	select {
 	case <-sq.ctx.Done():
 	case sq.NotificationsSent <- challenge:
