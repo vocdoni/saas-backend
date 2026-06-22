@@ -63,27 +63,25 @@ func TestPlans(t *testing.T) {
 	})
 
 	t.Run("FreeIntegratorPlan", func(_ *testing.T) {
+		// Note: DeleteAllDocuments intentionally preserves the `plans` collection, and migration
+		// 0012 seeds a free integrator plan, so we don't assume an empty slate here. We seed an
+		// explicit one too and assert the selector returns a zero-priced, managed-org-granting plan
+		// (robust to which matching plan FindOne returns).
 		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
-		// nothing seeded yet
-		_, err := testDB.FreeIntegratorPlan()
-		c.Assert(err, qt.Equals, ErrNotFound)
-
-		// a paid integrator plan must not be selected
-		_, err = testDB.SetPlan(&Plan{
+		// non-matching plans must never be selected
+		_, err := testDB.SetPlan(&Plan{
 			Name:             "Paid Integrator",
 			MonthlyPrice:     1000,
 			YearlyPrice:      10000,
 			IntegratorLimits: IntegratorLimits{MaxManagedOrgs: 10},
 		})
 		c.Assert(err, qt.IsNil)
-
-		// a free non-integrator plan must not be selected
 		_, err = testDB.SetPlan(&Plan{Name: "Free Basic"})
 		c.Assert(err, qt.IsNil)
 
-		// the free integrator plan: zero-priced and grants managed-org capacity
-		freeID, err := testDB.SetPlan(&Plan{
+		// a free integrator plan: zero-priced and grants managed-org capacity
+		_, err = testDB.SetPlan(&Plan{
 			Name:             "Free Integrator",
 			IntegratorLimits: IntegratorLimits{MaxManagedOrgs: 1, MaxManagedProcesses: 5, MaxManagedCensusSize: 100},
 		})
@@ -91,7 +89,8 @@ func TestPlans(t *testing.T) {
 
 		plan, err := testDB.FreeIntegratorPlan()
 		c.Assert(err, qt.IsNil)
-		c.Assert(plan.ID, qt.Equals, freeID)
-		c.Assert(plan.IntegratorLimits.MaxManagedOrgs, qt.Equals, 1)
+		c.Assert(plan.MonthlyPrice, qt.Equals, int64(0))
+		c.Assert(plan.YearlyPrice, qt.Equals, int64(0))
+		c.Assert(plan.IntegratorLimits.MaxManagedOrgs > 0, qt.IsTrue)
 	})
 }
