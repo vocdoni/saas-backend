@@ -257,6 +257,52 @@ func TestQueuePermanentFailure(t *testing.T) {
 	}
 }
 
+func TestQueuePushWait(t *testing.T) {
+	c := qt.New(t)
+	c.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	q := NewQueue(ctx, QueueConfig{
+		Workers:     1,
+		MailService: &configurableSvc{},
+		// a permanent error makes the failing item give up immediately
+		SMSService: &configurableSvc{sendErr: &textproto.Error{Code: 550, Msg: "mailbox unavailable"}},
+	})
+	q.Start()
+
+	c.Run("awaits successful delivery", func(c *qt.C) {
+		done, err := q.PushWait(&QueueItem{Notification: testNotification(), Type: Email, Label: "ok"})
+		c.Assert(err, qt.IsNil)
+		select {
+		case res := <-done:
+			c.Assert(res.Success, qt.IsTrue)
+		case <-time.After(5 * time.Second):
+			c.Fatal("timed out waiting for PushWait delivery")
+		}
+	})
+
+	c.Run("awaits give-up outcome", func(c *qt.C) {
+		done, err := q.PushWait(&QueueItem{
+			Notification: &Notification{ToNumber: "+1234567890", Body: "x"},
+			Type:         SMS,
+			Label:        "fail",
+		})
+		c.Assert(err, qt.IsNil)
+		select {
+		case res := <-done:
+			c.Assert(res.Success, qt.IsFalse)
+		case <-time.After(5 * time.Second):
+			c.Fatal("timed out waiting for PushWait give-up")
+		}
+	})
+
+	c.Run("nil item errors", func(c *qt.C) {
+		_, err := q.PushWait(nil)
+		c.Assert(err, qt.Not(qt.IsNil))
+	})
+}
+
 func TestQueueRetriesExhausted(t *testing.T) {
 	c := qt.New(t)
 	c.Parallel()

@@ -89,7 +89,7 @@ func (c *CSP) BundleAuthToken(bID, uID internal.HexBytes, to string,
 	}
 	ch.ExpiresAt = time.Now().Add(c.notificationTTL)
 	// push the challenge to the queue to be sent
-	if err := c.notifyQueue.Push(ch); err != nil {
+	if err := c.pushChallenge(ch); err != nil {
 		log.Warnw("error pushing notification challenge",
 			"userID", uID,
 			"bundleID", bID,
@@ -184,7 +184,7 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 	}
 	ch.ExpiresAt = time.Now().Add(c.notificationTTL)
 	// push the challenge to the queue to be sent
-	if err := c.notifyQueue.Push(ch); err != nil {
+	if err := c.pushChallenge(ch); err != nil {
 		log.Warnw("error pushing notification challenge",
 			"userID", authTokenData.UserID,
 			"bundleID", authTokenData.BundleID,

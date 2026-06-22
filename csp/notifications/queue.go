@@ -84,8 +84,9 @@ func NewQueue(ctx context.Context, conf QueueConfig) *Queue {
 	}
 }
 
-// Push adds a notification challenge to the queue for processing.
-func (sq *Queue) Push(challenge *NotificationChallenge) error {
+// toItem maps a NotificationChallenge to a generic inner queue item, stamping
+// CreatedAt and carrying the challenge as Meta so results can be mapped back.
+func (*Queue) toItem(challenge *NotificationChallenge) *notifications.QueueItem {
 	if challenge.CreatedAt.IsZero() {
 		challenge.CreatedAt = time.Now()
 	}
@@ -93,8 +94,7 @@ func (sq *Queue) Push(challenge *NotificationChallenge) error {
 		"bundleID", challenge.BundleID.String(),
 		"userID", challenge.UserID.String(),
 		"type", challenge.Type)
-
-	item := &notifications.QueueItem{
+	return &notifications.QueueItem{
 		Notification: challenge.Notification,
 		Type:         challenge.Type,
 		Label:        challenge.BundleID.String(),
@@ -102,7 +102,19 @@ func (sq *Queue) Push(challenge *NotificationChallenge) error {
 		ExpiresAt:    challenge.ExpiresAt,
 		Meta:         challenge,
 	}
-	return sq.inner.Push(item)
+}
+
+// Push adds a notification challenge to the queue for processing.
+func (sq *Queue) Push(challenge *NotificationChallenge) error {
+	return sq.inner.Push(sq.toItem(challenge))
+}
+
+// PushWait enqueues the challenge and returns a channel signalled once its
+// delivery completes (delivered or given up). See notifications.Queue.PushWait;
+// it exists for callers (notably tests) that must observe delivery before
+// proceeding. Results are still forwarded to NotificationsSent as usual.
+func (sq *Queue) PushWait(challenge *NotificationChallenge) (<-chan *notifications.QueueItem, error) {
+	return sq.inner.PushWait(sq.toItem(challenge))
 }
 
 // Start launches the worker pool and the result-forwarding goroutine.

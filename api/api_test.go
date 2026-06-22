@@ -424,6 +424,9 @@ func TestMain(m *testing.M) {
 		SMSService:               testSMSService,
 		NotificationCoolDownTime: cspNotificationCoolDownTime,
 		RootKey:                  *rootKey,
+		// deliver challenge notifications synchronously so the OTP email is in
+		// the fake inbox before the auth response returns (deterministic tests)
+		SyncDelivery: true,
 	})
 	if err != nil {
 		panic(err)
@@ -458,6 +461,9 @@ func TestMain(m *testing.M) {
 		CSP:                 testCSP,
 		OAuthServiceURL:     testOAuthServiceURL,
 		WebAppURL:           testWebAppURL,
+		// deliver notifications synchronously so waitForEmail observes a
+		// deterministic happens-before instead of racing the queue worker
+		NotificationsSyncDelivery: true,
 	})
 	testAPI.Start()
 	// wait for the API to start
@@ -988,7 +994,8 @@ func randomProcessID() []byte {
 func enqueueAndPollJob(t *testing.T, method, jwt string, jsonBody any, urlPath ...string) apicommon.JobStatusResponse {
 	t.Helper()
 	enq := requestAndParseWithAssertCode[apicommon.EnqueuedResponse](
-		http.StatusAccepted, t, method, jwt, jsonBody, urlPath...)
+		http.StatusAccepted, t, method, jwt, jsonBody, urlPath...,
+	)
 	qt.Assert(t, enq.JobID, qt.Not(qt.Equals), "")
 	return pollJob(t, enq.JobID)
 }
