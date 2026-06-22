@@ -46,14 +46,12 @@ func TestIntegratorPlanSubscription(t *testing.T) {
 		}
 	}()
 
-	// Subscribe the org to the integrator plan and flag it as an integrator, WITHOUT
-	// setting an IntegratorLimits override, so the limits must resolve from the plan.
+	// Subscribe the org to the integrator plan WITHOUT setting an IntegratorLimits
+	// override, so both enablement and limits must resolve from the (active) plan.
 	setOrganizationSubscription(t, integratorAddr, integratorPlanID)
 	integratorOrg, err := testDB.Organization(integratorAddr)
 	c.Assert(err, qt.IsNil)
-	integratorOrg.IsIntegrator = true
 	c.Assert(integratorOrg.IntegratorLimits, qt.IsNil) // override path must be out of play
-	c.Assert(testDB.SetOrganization(integratorOrg), qt.IsNil)
 
 	// Integrator info: enabled, and the limits are exactly the plan's.
 	info := requestAndParse[apicommon.IntegratorInfoResponse](

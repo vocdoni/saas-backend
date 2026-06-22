@@ -166,10 +166,43 @@ func TestHasDBPermission(t *testing.T) {
 
 func TestIsIntegrator(t *testing.T) {
 	c := qt.New(t)
-	subs := &Subscriptions{}
+	mockDB := &mockMongoStorage{
+		plans: map[uint64]*db.Plan{
+			1: {ID: 1, IntegratorLimits: db.IntegratorLimits{MaxManagedOrgs: 5}}, // integrator plan
+			2: {ID: 2, IntegratorLimits: db.IntegratorLimits{MaxManagedOrgs: 0}}, // regular plan
+		},
+	}
+	subs := &Subscriptions{db: mockDB}
+
 	c.Assert(subs.IsIntegrator(nil), qt.IsFalse)
-	c.Assert(subs.IsIntegrator(&db.Organization{IsIntegrator: false}), qt.IsFalse)
-	c.Assert(subs.IsIntegrator(&db.Organization{IsIntegrator: true}), qt.IsTrue)
+
+	// no override and no plan
+	c.Assert(subs.IsIntegrator(&db.Organization{}), qt.IsFalse)
+
+	// a per-org override (manual/admin path) enables regardless of subscription state
+	c.Assert(subs.IsIntegrator(&db.Organization{
+		IntegratorLimits: &db.IntegratorLimits{MaxManagedOrgs: 2},
+	}), qt.IsTrue)
+
+	// an override of zero managed orgs is not an integrator
+	c.Assert(subs.IsIntegrator(&db.Organization{
+		IntegratorLimits: &db.IntegratorLimits{MaxManagedOrgs: 0},
+	}), qt.IsFalse)
+
+	// self-serve via an active subscription to an integrator plan
+	c.Assert(subs.IsIntegrator(&db.Organization{
+		Subscription: db.OrganizationSubscription{PlanID: 1, Active: true},
+	}), qt.IsTrue)
+
+	// the same plan with a lapsed (inactive) subscription is not an integrator
+	c.Assert(subs.IsIntegrator(&db.Organization{
+		Subscription: db.OrganizationSubscription{PlanID: 1, Active: false},
+	}), qt.IsFalse)
+
+	// an active subscription to a non-integrator plan is not an integrator
+	c.Assert(subs.IsIntegrator(&db.Organization{
+		Subscription: db.OrganizationSubscription{PlanID: 2, Active: true},
+	}), qt.IsFalse)
 }
 
 func TestEffectiveIntegratorLimits(t *testing.T) {
@@ -221,13 +254,12 @@ func TestCanCreateManagedOrg(t *testing.T) {
 	subs := &Subscriptions{}
 	limits := &db.IntegratorLimits{MaxManagedOrgs: 3}
 
-	// a non-integrator org is refused
-	err := subs.CanCreateManagedOrg(&db.Organization{IsIntegrator: false, IntegratorLimits: limits})
+	// a non-integrator org (no override, no plan) is refused
+	err := subs.CanCreateManagedOrg(&db.Organization{})
 	c.Assert(err, qt.ErrorIs, errors.ErrNotAnIntegrator)
 
 	// one under the limit is allowed
 	err = subs.CanCreateManagedOrg(&db.Organization{
-		IsIntegrator:     true,
 		IntegratorLimits: limits,
 		Counters:         db.OrganizationCounters{ManagedOrgs: 2},
 	})
@@ -235,7 +267,6 @@ func TestCanCreateManagedOrg(t *testing.T) {
 
 	// at the limit is rejected
 	err = subs.CanCreateManagedOrg(&db.Organization{
-		IsIntegrator:     true,
 		IntegratorLimits: limits,
 		Counters:         db.OrganizationCounters{ManagedOrgs: 3},
 	})
@@ -245,17 +276,16 @@ func TestCanCreateManagedOrg(t *testing.T) {
 func TestCanPublishForManagedOrg(t *testing.T) {
 	c := qt.New(t)
 	subs := &Subscriptions{}
-	limits := &db.IntegratorLimits{MaxManagedProcesses: 5, MaxManagedCensusSize: 100}
+	limits := &db.IntegratorLimits{MaxManagedOrgs: 5, MaxManagedProcesses: 5, MaxManagedCensusSize: 100}
 	integrator := func(processes, censusSize int) *db.Organization {
 		return &db.Organization{
-			IsIntegrator:     true,
 			IntegratorLimits: limits,
 			Counters:         db.OrganizationCounters{ManagedProcesses: processes, ManagedCensusSize: censusSize},
 		}
 	}
 
-	// a non-integrator org is refused
-	err := subs.CanPublishForManagedOrg(&db.Organization{IsIntegrator: false, IntegratorLimits: limits}, 10)
+	// a non-integrator org (no override, no plan) is refused
+	err := subs.CanPublishForManagedOrg(&db.Organization{}, 10)
 	c.Assert(err, qt.ErrorIs, errors.ErrNotAnIntegrator)
 
 	// within quota (census exactly at the limit) is allowed

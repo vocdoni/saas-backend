@@ -72,28 +72,30 @@ type OrganizationUser struct {
 }
 
 type Organization struct {
-	Address          common.Address           `json:"address" bson:"_id"` // common.Address is serialized as bytes in the db
-	Website          string                   `json:"website" bson:"website"`
-	Type             OrganizationType         `json:"type" bson:"type"`
-	Creator          string                   `json:"creator" bson:"creator"`
-	CreatedAt        time.Time                `json:"createdAt" bson:"createdAt"`
-	Nonce            string                   `json:"nonce" bson:"nonce"`
-	Size             string                   `json:"size" bson:"size"`
-	Color            string                   `json:"color" bson:"color"`
-	Subdomain        string                   `json:"subdomain" bson:"subdomain"`
-	Country          string                   `json:"country" bson:"country"`
-	Timezone         string                   `json:"timezone" bson:"timezone"`
-	Active           bool                     `json:"active" bson:"active"`
-	Communications   bool                     `json:"communications" bson:"communications"`
-	TokensPurchased  uint64                   `json:"tokensPurchased" bson:"tokensPurchased"`
-	TokensRemaining  uint64                   `json:"tokensRemaining" bson:"tokensRemaining"`
-	Parent           common.Address           `json:"parent" bson:"parent"`
-	Meta             map[string]any           `json:"meta" bson:"meta"`
-	Subscription     OrganizationSubscription `json:"subscription" bson:"subscription"`
-	Counters         OrganizationCounters     `json:"counters" bson:"counters"`
-	ManagedBy        common.Address           `json:"managedBy,omitempty" bson:"managedBy,omitempty"`
-	IsIntegrator     bool                     `json:"isIntegrator" bson:"isIntegrator"`
-	IntegratorLimits *IntegratorLimits        `json:"integratorLimits,omitempty" bson:"integratorLimits,omitempty"`
+	Address         common.Address           `json:"address" bson:"_id"` // common.Address is serialized as bytes in the db
+	Website         string                   `json:"website" bson:"website"`
+	Type            OrganizationType         `json:"type" bson:"type"`
+	Creator         string                   `json:"creator" bson:"creator"`
+	CreatedAt       time.Time                `json:"createdAt" bson:"createdAt"`
+	Nonce           string                   `json:"nonce" bson:"nonce"`
+	Size            string                   `json:"size" bson:"size"`
+	Color           string                   `json:"color" bson:"color"`
+	Subdomain       string                   `json:"subdomain" bson:"subdomain"`
+	Country         string                   `json:"country" bson:"country"`
+	Timezone        string                   `json:"timezone" bson:"timezone"`
+	Active          bool                     `json:"active" bson:"active"`
+	Communications  bool                     `json:"communications" bson:"communications"`
+	TokensPurchased uint64                   `json:"tokensPurchased" bson:"tokensPurchased"`
+	TokensRemaining uint64                   `json:"tokensRemaining" bson:"tokensRemaining"`
+	Parent          common.Address           `json:"parent" bson:"parent"`
+	Meta            map[string]any           `json:"meta" bson:"meta"`
+	Subscription    OrganizationSubscription `json:"subscription" bson:"subscription"`
+	Counters        OrganizationCounters     `json:"counters" bson:"counters"`
+	ManagedBy       common.Address           `json:"managedBy,omitempty" bson:"managedBy,omitempty"`
+	// IntegratorLimits, when set, is a per-organization override that both enables
+	// integrator status (manual/admin path) and caps its managed resources. When unset,
+	// integrator status and limits derive from the active subscription plan instead.
+	IntegratorLimits *IntegratorLimits `json:"integratorLimits,omitempty" bson:"integratorLimits,omitempty"`
 }
 
 // IntegratorLimits caps the resources an integrator organization may consume

@@ -33,7 +33,6 @@ func TestIntegratorManagedOrgs(t *testing.T) {
 	// MaxManagedOrgs 2, MaxManagedProcesses 1, MaxManagedCensusSize 1000
 	integratorOrg, err := testDB.Organization(integratorAddr)
 	c.Assert(err, qt.IsNil)
-	integratorOrg.IsIntegrator = true
 	integratorOrg.IntegratorLimits = &db.IntegratorLimits{
 		MaxManagedOrgs:       2,
 		MaxManagedProcesses:  1,
