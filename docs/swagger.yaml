@@ -162,6 +162,13 @@ definitions:
       createdAt:
         description: Creation timestamp in RFC3339 format
         type: string
+      integrator:
+        description: |-
+          Whether to subscribe the new organization to the free integrator plan at
+          creation time (opt-in). Used by the integrator portal so a newly created org
+          becomes an integrator on the free tier with no checkout. Default false uses
+          the regular default plan.
+        type: boolean
       meta:
         additionalProperties: {}
         description: Arbitrary key value fields with metadata regarding the organization
@@ -650,6 +657,13 @@ definitions:
       createdAt:
         description: Creation timestamp in RFC3339 format
         type: string
+      integrator:
+        description: |-
+          Whether to subscribe the new organization to the free integrator plan at
+          creation time (opt-in). Used by the integrator portal so a newly created org
+          becomes an integrator on the free tier with no checkout. Default false uses
+          the regular default plan.
+        type: boolean
       meta:
         additionalProperties: {}
         description: Arbitrary key value fields with metadata regarding the organization
@@ -1013,6 +1027,18 @@ definitions:
         description: Whether white labeling is available
         type: boolean
     type: object
+  apicommon.SubscriptionIntegratorLimits:
+    properties:
+      maxManagedCensusSize:
+        description: Maximum total census size across managed organizations
+        type: integer
+      maxManagedOrgs:
+        description: Maximum number of organizations the integrator may manage
+        type: integer
+      maxManagedProcesses:
+        description: Maximum number of voting processes across managed organizations
+        type: integer
+    type: object
   apicommon.SubscriptionPlan:
     properties:
       default:
@@ -1025,6 +1051,11 @@ definitions:
       id:
         description: Unique identifier for the plan
         type: integer
+      integratorLimits:
+        allOf:
+        - $ref: '#/definitions/apicommon.SubscriptionIntegratorLimits'
+        description: Integrator limits for this plan (zero when the plan is not an
+          integrator plan)
       monthlyPrice:
         description: Monthly price
         type: integer
