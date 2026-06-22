@@ -3,8 +3,8 @@ package account
 import (
 	"encoding/hex"
 	"fmt"
-	"strings"
 
+	"github.com/ethereum/go-ethereum/common"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/util"
 	"go.vocdoni.io/proto/build/go/models"
@@ -57,18 +57,25 @@ func SignMessage(message []byte, signer *ethereum.SignKeys) ([]byte, error) {
 	return signature, nil
 }
 
+// VerifySignature recovers the signer address from the given message and
+// signature and checks that it matches the expected address. It returns an
+// error when the signature cannot be decoded, the address cannot be recovered,
+// or the recovered address does not match the expected one.
 func VerifySignature(message, signature, address string) error {
 	messageBytes := []byte(message)
 	signatureBytes, err := hex.DecodeString(util.TrimHex(signature))
 	if err != nil {
 		return fmt.Errorf("could not decode signature: %w", err)
 	}
-	calcAddress, err := ethereum.AddrFromSignature(messageBytes, signatureBytes)
+	recoveredAddr, err := ethereum.AddrFromSignature(messageBytes, signatureBytes)
 	if err != nil {
 		return fmt.Errorf("could not calculate address from signature: %w", err)
 	}
-	if strings.EqualFold(calcAddress.String(), util.TrimHex(address)) {
-		return fmt.Errorf("signature verification failed")
+	// common.HexToAddress normalizes the expected address regardless of the 0x
+	// prefix or letter case, so the comparison against the recovered address is
+	// reliable. The verification fails when they do not match.
+	if recoveredAddr != common.HexToAddress(address) {
+		return fmt.Errorf("signature verification failed: recovered address does not match expected address")
 	}
 	return nil
 }
