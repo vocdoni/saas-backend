@@ -324,8 +324,29 @@ func (p *Subscriptions) OrgCanAddCensusParticipants(orgAddress common.Address, c
 }
 
 // IsIntegrator reports whether the given organization is enabled as an integrator.
-func (*Subscriptions) IsIntegrator(org *db.Organization) bool {
-	return org != nil && org.IsIntegrator
+//
+// Enablement is derived entirely from integrator limits — there is no separate flag:
+//   - a per-organization IntegratorLimits override (the manual/admin path) grants
+//     integrator status regardless of subscription state; and
+//   - otherwise the organization's subscription plan grants it, but only while the
+//     subscription is active.
+//
+// In both cases "integrator" means the effective limits allow at least one managed org.
+func (p *Subscriptions) IsIntegrator(org *db.Organization) bool {
+	if org == nil {
+		return false
+	}
+	if org.IntegratorLimits != nil {
+		return org.IntegratorLimits.MaxManagedOrgs > 0
+	}
+	if !org.Subscription.Active || org.Subscription.PlanID == 0 {
+		return false
+	}
+	plan, err := p.db.Plan(org.Subscription.PlanID)
+	if err != nil || plan == nil {
+		return false
+	}
+	return plan.IntegratorLimits.MaxManagedOrgs > 0
 }
 
 // EffectiveIntegratorLimits returns the integrator limits in force for the org: the
