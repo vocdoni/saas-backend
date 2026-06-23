@@ -38,9 +38,11 @@ func TestFullElectionLifecycle(t *testing.T) {
 
 	// --- organizer: user, org with on-chain account, plan subscription ---
 	token := testCreateUser(t, "superpassword123")
-	orgInfo := &apicommon.OrganizationInfo{
-		Type:             string(db.CompanyType),
-		Website:          fmt.Sprintf("https://e2e-%d.com", internal.RandomInt(100000)),
+	orgInfo := &apicommon.CreateOrganizationRequest{
+		OrganizationInfo: apicommon.OrganizationInfo{
+			Type:    string(db.CompanyType),
+			Website: fmt.Sprintf("https://e2e-%d.com", internal.RandomInt(100000)),
+		},
 		ProvisionAccount: true,
 	}
 	org := requestAndParse[apicommon.OrganizationInfo](t, http.MethodPost, token, orgInfo, organizationsEndpoint)

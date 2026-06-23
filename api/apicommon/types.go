@@ -101,10 +101,6 @@ type OrganizationInfo struct {
 	// Arbitrary key value fields with metadata regarding the organization
 	Meta map[string]any `json:"meta"`
 
-	// Whether to provision the organization's on-chain account at creation
-	// time (opt-in, eager). Default false preserves the legacy two-step flow.
-	ProvisionAccount bool `json:"provisionAccount,omitempty"`
-
 	// Whether to subscribe the new organization to the free integrator plan at
 	// creation time (opt-in). Used by the integrator portal so a newly created org
 	// becomes an integrator on the free tier with no checkout. Default false uses
@@ -477,6 +473,13 @@ func OrganizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 	}
 	details := SubscriptionDetailsFromDB(&dbOrg.Subscription)
 	usage := SubscriptionUsageFromDB(&dbOrg.Counters)
+	// normalize a nil Meta to an empty map so responses are consistent: the DB
+	// read path already does this, but dbOrg may be built in-memory (e.g. at
+	// creation) where Meta is nil, which would otherwise emit "meta": null.
+	meta := dbOrg.Meta
+	if meta == nil {
+		meta = make(map[string]any)
+	}
 	return &OrganizationInfo{
 		Address:        dbOrg.Address,
 		Website:        dbOrg.Website,
@@ -489,10 +492,23 @@ func OrganizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 		Timezone:       dbOrg.Timezone,
 		Active:         dbOrg.Active,
 		Communications: dbOrg.Communications,
+		Meta:           meta,
 		Parent:         parentOrg,
 		Subscription:   &details,
 		Counters:       &usage,
 	}
+}
+
+// CreateOrganizationRequest is the body of POST /organizations. It embeds the new
+// organization's fields and adds creation-only directives that are not part of the
+// organization's persistent representation (so they must not appear in responses).
+// swagger:model CreateOrganizationRequest
+type CreateOrganizationRequest struct {
+	OrganizationInfo
+	// Whether to provision the organization's on-chain account at creation
+	// time (opt-in, eager). Default false preserves the legacy two-step flow
+	// where the account is created later by the SDK.
+	ProvisionAccount bool `json:"provisionAccount,omitempty"`
 }
 
 // CreateManagedOrganizationRequest is the body of POST /organizations/{address}/managed.
@@ -561,12 +577,6 @@ type SubscriptionPlan struct {
 
 	// Yearly price
 	YearlyPrice int64 `json:"yearlyPrice"`
-
-	// Stripe price ID
-	StripePriceID string `json:"stripePriceId"`
-
-	// Starting price in cents
-	StartingPrice int64 `json:"startingPrice"`
 
 	// Whether this is the default plan
 	Default bool `json:"default"`
@@ -725,9 +735,6 @@ type SubscriptionDetails struct {
 
 	// Whether the subscription is active
 	Active bool `json:"active"`
-
-	// Maximum census size allowed
-	MaxCensusSize int `json:"maxCensusSize"`
 
 	// Email associated with the subscription
 	Email string `json:"email"`
@@ -911,6 +918,7 @@ func OrganizationCensusFromDB(census *db.Census) OrganizationCensus {
 		Type:        census.Type,
 		OrgAddress:  census.OrgAddress,
 		Size:        census.Size,
+		Weighted:    census.Weighted,
 		GroupID:     census.GroupID.Hex(),
 		AuthFields:  census.AuthFields,
 		TwoFaFields: census.TwoFaFields,

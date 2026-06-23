@@ -34,7 +34,7 @@ import (
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			request	body		apicommon.OrganizationInfo	true	"Organization info (+ optional provisionAccount / integrator)"
+//	@Param			request	body		apicommon.CreateOrganizationRequest	true	"Organization info (+ optional provisionAccount / integrator)"
 //	@Success		200		{object}	apicommon.OrganizationInfo
 //	@Failure		400		{object}	errors.Error	"Invalid input data"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
@@ -49,7 +49,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// get the organization info from the request body
-	orgInfo := &apicommon.OrganizationInfo{}
+	orgInfo := &apicommon.CreateOrganizationRequest{}
 	if err := json.NewDecoder(r.Body).Decode(orgInfo); err != nil {
 		errors.ErrMalformedBody.Write(w)
 		return

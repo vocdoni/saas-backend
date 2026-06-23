@@ -255,11 +255,6 @@ definitions:
         allOf:
         - $ref: '#/definitions/apicommon.OrganizationInfo'
         description: Parent organization if this is a sub-organization
-      provisionAccount:
-        description: |-
-          Whether to provision the organization's on-chain account at creation
-          time (opt-in, eager). Default false preserves the legacy two-step flow.
-        type: boolean
       size:
         description: The size category of the organization
         type: string
@@ -296,6 +291,73 @@ definitions:
         type: array
       title:
         description: Title of the group
+        type: string
+    type: object
+  apicommon.CreateOrganizationRequest:
+    properties:
+      active:
+        description: Whether the organization is active
+        type: boolean
+      address:
+        description: The organization's blockchain address
+        items:
+          type: integer
+        type: array
+      color:
+        description: The organization's brand color in hex format
+        type: string
+      communications:
+        description: Whether the organization has enabled communications
+        type: boolean
+      counters:
+        allOf:
+        - $ref: '#/definitions/apicommon.SubscriptionUsage'
+        description: Usage counters for the organization
+      country:
+        description: The country where the organization is based
+        type: string
+      createdAt:
+        description: Creation timestamp in RFC3339 format
+        type: string
+      integrator:
+        description: |-
+          Whether to subscribe the new organization to the free integrator plan at
+          creation time (opt-in). Used by the integrator portal so a newly created org
+          becomes an integrator on the free tier with no checkout. Default false uses
+          the regular default plan.
+        type: boolean
+      meta:
+        additionalProperties: {}
+        description: Arbitrary key value fields with metadata regarding the organization
+        type: object
+      parent:
+        allOf:
+        - $ref: '#/definitions/apicommon.OrganizationInfo'
+        description: Parent organization if this is a sub-organization
+      provisionAccount:
+        description: |-
+          Whether to provision the organization's on-chain account at creation
+          time (opt-in, eager). Default false preserves the legacy two-step flow
+          where the account is created later by the SDK.
+        type: boolean
+      size:
+        description: The size category of the organization
+        type: string
+      subdomain:
+        description: The organization's subdomain
+        type: string
+      subscription:
+        allOf:
+        - $ref: '#/definitions/apicommon.SubscriptionDetails'
+        description: Subscription details for the organization
+      timezone:
+        description: The organization's timezone
+        type: string
+      type:
+        description: The type of organization
+        type: string
+      website:
+        description: The organization's website URL
         type: string
     type: object
   apicommon.CreateOrganizationTicketRequest:
@@ -753,11 +815,6 @@ definitions:
         allOf:
         - $ref: '#/definitions/apicommon.OrganizationInfo'
         description: Parent organization if this is a sub-organization
-      provisionAccount:
-        description: |-
-          Whether to provision the organization's on-chain account at creation
-          time (opt-in, eager). Default false preserves the legacy two-step flow.
-        type: boolean
       size:
         description: The size category of the organization
         type: string
@@ -1113,9 +1170,6 @@ definitions:
       lastPaymentDate:
         description: Date of the last payment
         type: string
-      maxCensusSize:
-        description: Maximum census size allowed
-        type: integer
       planId:
         description: ID of the subscription plan
         type: integer
@@ -1198,17 +1252,11 @@ definitions:
         allOf:
         - $ref: '#/definitions/apicommon.SubscriptionPlanLimits'
         description: Organization limits for this plan
-      startingPrice:
-        description: Starting price in cents
-        type: integer
       stripeId:
         description: Stripe product ID
         type: string
       stripeMonthlyPriceId:
         description: Stripe monthly price ID
-        type: string
-      stripePriceId:
-        description: Stripe price ID
         type: string
       stripeYearlyPriceId:
         description: Stripe yearly price ID
@@ -2421,7 +2469,7 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/apicommon.OrganizationInfo'
+          $ref: '#/definitions/apicommon.CreateOrganizationRequest'
       produces:
       - application/json
       responses:
