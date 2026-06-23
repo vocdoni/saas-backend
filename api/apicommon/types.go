@@ -468,6 +468,13 @@ func OrganizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 	}
 	details := SubscriptionDetailsFromDB(&dbOrg.Subscription)
 	usage := SubscriptionUsageFromDB(&dbOrg.Counters)
+	// normalize a nil Meta to an empty map so responses are consistent: the DB
+	// read path already does this, but dbOrg may be built in-memory (e.g. at
+	// creation) where Meta is nil, which would otherwise emit "meta": null.
+	meta := dbOrg.Meta
+	if meta == nil {
+		meta = make(map[string]any)
+	}
 	return &OrganizationInfo{
 		Address:        dbOrg.Address,
 		Website:        dbOrg.Website,
@@ -480,7 +487,7 @@ func OrganizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 		Timezone:       dbOrg.Timezone,
 		Active:         dbOrg.Active,
 		Communications: dbOrg.Communications,
-		Meta:           dbOrg.Meta,
+		Meta:           meta,
 		Parent:         parentOrg,
 		Subscription:   &details,
 		Counters:       &usage,
