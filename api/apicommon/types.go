@@ -353,6 +353,11 @@ type UserInfo struct {
 
 	// Organizations the user belongs to
 	Organizations []*UserOrganization `json:"organizations"`
+
+	// Whether the user belongs to an integrator organization (integrators have a
+	// single org). Lets clients learn integrator status straight from the login
+	// flow without an extra request. Populated by GET /users/me.
+	IsIntegrator bool `json:"isIntegrator"`
 }
 
 // OrganizationInvite represents an invitation to join an organization.

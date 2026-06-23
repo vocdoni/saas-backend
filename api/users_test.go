@@ -11,6 +11,7 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 )
@@ -217,6 +218,33 @@ func TestUserWithOrganization(t *testing.T) {
 
 	// Create an organization
 	testCreateOrganization(t, token)
+}
+
+// TestUserInfoIsIntegrator checks that GET /users/me exposes whether the user is
+// an integrator, before and after the user's org is enabled as an integrator.
+func TestUserInfoIsIntegrator(t *testing.T) {
+	c := qt.New(t)
+
+	token := testCreateUser(t, "superpassword123")
+	orgAddr := testCreateOrganization(t, token)
+
+	// A freshly created org is on the default (non-integrator) plan.
+	before := requestAndParse[apicommon.UserInfo](t, http.MethodGet, token, nil, usersMeEndpoint)
+	c.Assert(before.IsIntegrator, qt.IsFalse)
+
+	// Enable integrator status via a per-org IntegratorLimits override.
+	org, err := testDB.Organization(orgAddr)
+	c.Assert(err, qt.IsNil)
+	org.IntegratorLimits = &db.IntegratorLimits{
+		MaxManagedOrgs:       1,
+		MaxManagedProcesses:  1,
+		MaxManagedCensusSize: 100,
+	}
+	c.Assert(testDB.SetOrganization(org), qt.IsNil)
+
+	// The user is now an integrator.
+	after := requestAndParse[apicommon.UserInfo](t, http.MethodGet, token, nil, usersMeEndpoint)
+	c.Assert(after.IsIntegrator, qt.IsTrue)
 }
 
 func TestResendVerificationCodeHandler(t *testing.T) {
