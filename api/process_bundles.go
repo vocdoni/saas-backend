@@ -25,18 +25,19 @@ type AddProcessesToBundleRequest struct {
 // createProcessBundleHandler godoc
 //
 //	@Summary		Create a new process bundle
-//	@Description	Create a new process bundle with the specified census and optional list of processes. Requires
-//	@Description	Manager/Admin role for the organization that owns the census. The census root will be the same as the
-//	@Description	account's public key.
+//	@Description	Create a new process bundle linking a census to an optional list of on-chain processes,
+//	@Description	used by the CSP voter flow. Requires Manager/Admin role for the organization that owns
+//	@Description	the census. The census root is the CSP (account) public key.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			process
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			request	body		apicommon.CreateProcessBundleRequest	true	"Process bundle creation information"
 //	@Success		200		{object}	apicommon.CreateProcessBundleResponse
-//	@Failure		400		{object}	errors.Error	"Invalid input data"
+//	@Failure		400		{object}	errors.Error	"Invalid input data, or census/organization not found"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		404		{object}	errors.Error	"Census not found"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/process/bundle [post]
 func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request) {
@@ -175,8 +176,11 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 // updateProcessBundleHandler godoc
 //
 //	@Summary		Add processes to an existing bundle
-//	@Description	Add additional processes to an existing bundle. Requires Manager/Admin role for the organization
-//	@Description	that owns the bundle.
+//	@Description	Add additional on-chain processes to an existing bundle. Requires Manager/Admin role for
+//	@Description	the organization that owns the bundle. An empty process list is a no-op that returns the
+//	@Description	bundle's current root.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			process
 //	@Accept			json
 //	@Produce		json
@@ -184,9 +188,8 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 //	@Param			bundleId	path		string						true	"Bundle ID"
 //	@Param			request		body		AddProcessesToBundleRequest	true	"Processes to add"
 //	@Success		200			{object}	apicommon.CreateProcessBundleResponse
-//	@Failure		400			{object}	errors.Error	"Invalid input data"
+//	@Failure		400			{object}	errors.Error	"Invalid input data, or bundle not found"
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
-//	@Failure		404			{object}	errors.Error	"Bundle or census not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/process/bundle/{bundleId} [put]
 func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request) {
