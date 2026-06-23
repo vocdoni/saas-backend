@@ -713,16 +713,21 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// invalidate the reset code before updating the password so it cannot be
+	// reused. fail closed: if the code cannot be deleted we must not report
+	// success, otherwise the still-valid code could be replayed.
+	if err := a.db.DeleteUserVerificationCode(user, db.CodeTypePasswordReset); err != nil {
+		log.Warnw("could not delete password reset code", "error", err)
+		errors.ErrGenericInternalServerError.Write(w)
+		return
+	}
+
 	// hash and update the new password
 	user.Password = internal.HexHashPassword(passwordSalt, userPasswords.NewPassword)
 	if _, err := a.db.SetUser(user); err != nil {
 		log.Warnw("could not update user password", "error", err)
 		errors.ErrGenericInternalServerError.Write(w)
 		return
-	}
-	// invalidate the reset code so it cannot be reused
-	if err := a.db.DeleteUserVerificationCode(user, db.CodeTypePasswordReset); err != nil {
-		log.Warnw("could not delete password reset code", "error", err)
 	}
 	apicommon.HTTPWriteOK(w)
 }

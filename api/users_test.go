@@ -213,7 +213,7 @@ func TestResetPasswordWrongCodeRejected(t *testing.T) {
 	c := qt.New(t)
 
 	// Register a user with a unique email so the test is independent
-	mail := fmt.Sprintf("%d-reset@test.com", internal.RandomInt(100000000000))
+	mail := fmt.Sprintf("%d-reset@test.com", internal.RandomInt(100000))
 	userInfo := &apicommon.UserInfo{
 		Email:     mail,
 		Password:  testPass,
