@@ -17,18 +17,22 @@ import (
 //
 //	@Summary		Create an API key for an organization
 //	@Description	Create a new API key owned by the organization at the given address. The caller
-//	@Description	must be an admin of the organization. The plaintext secret is returned ONCE and
-//	@Description	cannot be retrieved again.
+//	@Description	must be an admin of the organization. The plaintext secret (prefixed "vsk_") is
+//	@Description	returned ONCE in the response and cannot be retrieved again.
+//	@Description
+//	@Description	`label` and at least one `scope` are required. Valid scopes are deny-by-default and
+//	@Description	must be a subset of: `quota:read`, `managed:read`, `managed:write`, `voting:write`,
+//	@Description	`members:write`. The optional `expiresAt`, when set, must be in the future.
 //	@Tags			apikeys
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			address	path		string							true	"Organization address"
 //	@Param			request	body		apicommon.CreateAPIKeyRequest	true	"API key information"
-//	@Success		200		{object}	apicommon.CreateAPIKeyResponse
-//	@Failure		400		{object}	errors.Error	"Invalid input data"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Success		200		{object}	apicommon.CreateAPIKeyResponse	"Created key including the one-time plaintext secret"
+//	@Failure		400		{object}	errors.Error					"Invalid input (missing label/scopes, unknown scope, or past expiresAt)"
+//	@Failure		401		{object}	errors.Error					"Unauthorized"
+//	@Failure		500		{object}	errors.Error					"Internal server error"
 //	@Router			/organizations/{address}/apikeys [post]
 func (a *API) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -138,6 +142,7 @@ func (a *API) apiKeysHandler(w http.ResponseWriter, r *http.Request) {
 //	@Param			address	path		string			true	"Organization address"
 //	@Param			keyID	path		string			true	"API key ID"
 //	@Success		200		{string}	string			"OK"
+//	@Failure		400		{object}	errors.Error	"Invalid input data (missing key ID)"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
 //	@Failure		404		{object}	errors.Error	"API key not found"
 //	@Failure		500		{object}	errors.Error	"Internal server error"

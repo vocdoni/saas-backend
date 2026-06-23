@@ -42,7 +42,11 @@ func (a *API) releaseManagedOrgSlot(integratorAddr common.Address) {
 //	@Description	Create a new organization managed by the integrator at the given address. The
 //	@Description	caller must be an admin of the integrator organization, which must be enabled as
 //	@Description	an integrator and within its managed-organizations quota. The managed org's on-chain
-//	@Description	account is always provisioned eagerly.
+//	@Description	account is always provisioned eagerly. The optional `ownerEmail` designates the managed
+//	@Description	org's owner/admin (defaults to the calling user); the per-user MaxOrgsPerUser cap is
+//	@Description	bypassed for managed orgs.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `managed:write`).
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
@@ -188,6 +192,8 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 //	@Summary		List organizations managed by an integrator
 //	@Description	Returns a paginated list of organizations managed by the integrator at the given
 //	@Description	address. The caller must be an admin or manager of the integrator organization.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `managed:read`).
 //	@Tags			organizations
 //	@Produce		json
 //	@Security		BearerAuth
@@ -243,7 +249,11 @@ func (a *API) managedOrganizationsHandler(w http.ResponseWriter, r *http.Request
 //	@Summary		Get integrator quota and usage
 //	@Description	Returns whether the organization at the given address is enabled as an integrator,
 //	@Description	along with its effective managed-resource limits and current usage. The caller must
-//	@Description	be an admin or manager of the organization.
+//	@Description	be an admin or manager of the organization. When the organization is not an integrator,
+//	@Description	`enabled` is false and `limits` is omitted (usage counters are still returned).
+//	@Description	A 0 in any limit field means unlimited for that dimension.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `quota:read`).
 //	@Tags			organizations
 //	@Produce		json
 //	@Security		BearerAuth

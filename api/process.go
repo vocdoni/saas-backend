@@ -22,15 +22,24 @@ import (
 // createProcessHandler godoc
 //
 //	@Summary		Create a new voting process
-//	@Description	Create a new voting process. Requires Manager/Admin role.
+//	@Description	Create a new voting process (draft). Requires Manager/Admin role of the owning organization. The
+//	@Description	request must reference the organization via either a `censusId` or an explicit `orgAddress`.
+//	@Description	Creating a draft consumes the plan's draft permission.
+//	@Description
+//	@Description	The optional `electionParams` field carries the on-chain election definition (questions, dates,
+//	@Description	vote/election types) used later to publish the draft on chain via POST /process/{processId}/publish.
+//	@Description	It is additive: omitting it keeps the legacy draft behavior.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			process
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			request	body		apicommon.CreateProcessRequest	true	"Process creation information"
-//	@Success		200		{object}	primitive.ObjectID				"Process ID"
+//	@Param			request	body		apicommon.CreateProcessRequest	true	"Process creation information (optionally with electionParams)"
+//	@Success		200		{object}	primitive.ObjectID				"Draft process ID (Mongo ObjectID)"
 //	@Failure		400		{object}	errors.Error					"Invalid input data"
 //	@Failure		401		{object}	errors.Error					"Unauthorized"
+//	@Failure		403		{object}	errors.Error					"Plan does not allow creating more drafts"
 //	@Failure		404		{object}	errors.Error					"Published census not found"
 //	@Failure		409		{object}	errors.Error					"Process already exists"
 //	@Failure		500		{object}	errors.Error					"Internal server error"
@@ -118,17 +127,21 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 // updateProcessHandler godoc
 //
 //	@Summary		Update an existing voting process
-//	@Description	Update an existing voting process. Requires Manager/Admin role.
+//	@Description	Update an existing draft voting process. Requires Manager/Admin role of the owning organization.
+//	@Description	Only drafts that have not yet been published on chain can be updated; updating a published process
+//	@Description	returns a 409. The optional `electionParams` field can be set or replaced here (additive), same as on
+//	@Description	create.
 //	@Tags			process
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			processId	path		string							true	"Process ID"
-//	@Param			request		body		apicommon.CreateProcessRequest	true	"Process update information"
+//	@Param			processId	path		string							true	"Draft process ID (Mongo ObjectID)"
+//	@Param			request		body		apicommon.UpdateProcessRequest	true	"Process update information (optionally with electionParams)"
 //	@Success		200			{string}	string							"OK"
 //	@Failure		400			{object}	errors.Error					"Invalid input data"
 //	@Failure		401			{object}	errors.Error					"Unauthorized"
 //	@Failure		404			{object}	errors.Error					"Process not found"
+//	@Failure		409			{object}	errors.Error					"Process already published and not in draft mode"
 //	@Failure		500			{object}	errors.Error					"Internal server error"
 //	@Router			/process/{processId} [put]
 func (a *API) updateProcessHandler(w http.ResponseWriter, r *http.Request) {
@@ -376,7 +389,10 @@ func (a *API) deleteProcessHandler(w http.ResponseWriter, r *http.Request) {
 //	@Description	confirms it on a background worker; the call returns 202 with a job id. Poll GET
 //	@Description	/jobs/{jobId} for the resulting on-chain id. Requires Admin role. Idempotent: if
 //	@Description	the draft is already published its on-chain id is returned with 200 without sending
-//	@Description	a new transaction.
+//	@Description	a new transaction. Publishing under a managed organization additionally enforces the
+//	@Description	integrator's per-org and aggregate election/census quotas.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			process
 //	@Accept			json
 //	@Produce		json

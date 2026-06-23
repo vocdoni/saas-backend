@@ -24,15 +24,21 @@ import (
 //	@Description	Create a new organization. If the organization is a suborganization, the parent organization must be
 //	@Description	specified in the request body, and the user must be an admin of the parent. If the parent organization
 //	@Description	is already a suborganization, an error is returned.
+//	@Description
+//	@Description	Two optional opt-in fields support the chain-abstracted flow (both default false, preserving the legacy
+//	@Description	behavior): `provisionAccount` forges the organization's on-chain account eagerly at creation time
+//	@Description	(idempotent) instead of leaving it to the legacy SDK createAccount path; `integrator` subscribes the
+//	@Description	new organization to the free integrator plan so it becomes an integrator on the free tier with no
+//	@Description	checkout.
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			request	body		apicommon.OrganizationInfo	true	"Organization information"
+//	@Param			request	body		apicommon.OrganizationInfo	true	"Organization info (+ optional provisionAccount / integrator)"
 //	@Success		200		{object}	apicommon.OrganizationInfo
 //	@Failure		400		{object}	errors.Error	"Invalid input data"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		404		{object}	errors.Error	"Parent organization not found"
+//	@Failure		404		{object}	errors.Error	"Parent org not found, or free integrator plan unavailable (integrator=true)"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/organizations [post]
 func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) {

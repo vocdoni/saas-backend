@@ -123,6 +123,8 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 //	@Description	organization signer synchronously, then submits and confirms it on a background
 //	@Description	worker; the call returns 202 with a job id. Poll GET /jobs/{jobId} for the result.
 //	@Description	Requires Manager/Admin role of the organization that owns the process.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			process
 //	@Accept			json
 //	@Produce		json
