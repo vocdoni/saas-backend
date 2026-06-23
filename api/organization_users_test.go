@@ -333,6 +333,44 @@ func TestOrganizationUsers(t *testing.T) {
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 	})
 
+	t.Run("LastAdminCannotBeDemoted", func(t *testing.T) {
+		// Fresh org whose creator is the sole admin.
+		soleAdminToken := testCreateUser(t, "soleadminpassword123")
+		soleOrgAddress := testCreateOrganization(t, soleAdminToken)
+
+		resp, code := testRequest(t, http.MethodGet, soleAdminToken, nil, usersMeEndpoint)
+		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+		var soleAdminInfo apicommon.UserInfo
+		c.Assert(json.Unmarshal(resp, &soleAdminInfo), qt.IsNil)
+
+		// Demoting the only admin must be rejected, otherwise the org is orphaned.
+		demote := &apicommon.UpdateOrganizationUserRoleRequest{Role: string(db.ViewerRole)}
+		errResp := requestAndParseWithAssertCode[errors.Error](http.StatusBadRequest,
+			t,
+			http.MethodPut,
+			soleAdminToken,
+			demote,
+			"organizations",
+			soleOrgAddress.String(),
+			"users",
+			fmt.Sprintf("%d", soleAdminInfo.ID),
+		)
+		c.Assert(errResp.Code, qt.Equals, errors.ErrInvalidUserData.Code)
+
+		// The admin role must be unchanged.
+		role, ok := db.UserRole(""), false
+		users, err := testDB.OrganizationUsers(soleOrgAddress)
+		c.Assert(err, qt.IsNil)
+		for _, u := range users {
+			if u.ID == soleAdminInfo.ID {
+				role, ok = u.RoleFor(soleOrgAddress)
+				break
+			}
+		}
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(role, qt.Equals, db.AdminRole)
+	})
+
 	t.Run("RemoveOrganizationUser", func(t *testing.T) {
 		// Create a new organization and user for this test
 		newOrgAddress := testCreateOrganization(t, adminToken)
