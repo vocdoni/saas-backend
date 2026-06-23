@@ -50,9 +50,11 @@ func TestProcessStatusLifecycle(t *testing.T) {
 	token := testCreateUser(t, "password123")
 
 	// create an org with eager on-chain account provisioning
-	orgInfo := &apicommon.OrganizationInfo{
-		Type:             string(db.CompanyType),
-		Website:          fmt.Sprintf("https://status-%d.com", internal.RandomInt(100000)),
+	orgInfo := &apicommon.CreateOrganizationRequest{
+		OrganizationInfo: apicommon.OrganizationInfo{
+			Type:    string(db.CompanyType),
+			Website: fmt.Sprintf("https://status-%d.com", internal.RandomInt(100000)),
+		},
 		ProvisionAccount: true,
 	}
 	org := requestAndParse[apicommon.OrganizationInfo](t, http.MethodPost, token, orgInfo, organizationsEndpoint)

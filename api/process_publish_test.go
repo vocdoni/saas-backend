@@ -23,9 +23,11 @@ func TestPublishProcess(t *testing.T) {
 	token := testCreateUser(t, "password123")
 
 	// create an org with eager on-chain account provisioning (Phase 1)
-	orgInfo := &apicommon.OrganizationInfo{
-		Type:             string(db.CompanyType),
-		Website:          fmt.Sprintf("https://pub-%d.com", internal.RandomInt(100000)),
+	orgInfo := &apicommon.CreateOrganizationRequest{
+		OrganizationInfo: apicommon.OrganizationInfo{
+			Type:    string(db.CompanyType),
+			Website: fmt.Sprintf("https://pub-%d.com", internal.RandomInt(100000)),
+		},
 		ProvisionAccount: true,
 	}
 	org := requestAndParse[apicommon.OrganizationInfo](t, http.MethodPost, token, orgInfo, organizationsEndpoint)

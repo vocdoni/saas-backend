@@ -39,9 +39,11 @@ func TestProvisionAccountOnOrgCreation(t *testing.T) {
 	t.Run("flag on = provisioned + idempotent", func(t *testing.T) {
 		c := qt.New(t)
 		token := testCreateUser(t, "password123")
-		orgInfo := &apicommon.OrganizationInfo{
-			Type:             string(db.CompanyType),
-			Website:          fmt.Sprintf("https://on-%d.com", internal.RandomInt(100000)),
+		orgInfo := &apicommon.CreateOrganizationRequest{
+			OrganizationInfo: apicommon.OrganizationInfo{
+				Type:    string(db.CompanyType),
+				Website: fmt.Sprintf("https://on-%d.com", internal.RandomInt(100000)),
+			},
 			ProvisionAccount: true,
 		}
 		resp := requestAndParse[apicommon.OrganizationInfo](t, http.MethodPost, token, orgInfo, organizationsEndpoint)
