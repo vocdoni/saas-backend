@@ -50,6 +50,7 @@ type MongoStorage struct {
 	cspTokens           *mongo.Collection
 	cspTokensStatus     *mongo.Collection
 	jobs                *mongo.Collection
+	apiKeys             *mongo.Collection
 	migrations          *mongo.Collection
 }
 

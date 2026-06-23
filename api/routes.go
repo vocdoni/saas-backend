@@ -111,6 +111,10 @@ const (
 	managedOrganizationsEndpoint = "/organizations/{address}/managed"
 	// GET /organizations/{address}/integrator to get integrator quota and usage
 	integratorEndpoint = "/organizations/{address}/integrator"
+	// POST /organizations/{address}/apikeys to create an API key; GET to list them
+	organizationAPIKeysEndpoint = "/organizations/{address}/apikeys"
+	// DELETE /organizations/{address}/apikeys/{keyID} to revoke an API key
+	organizationAPIKeyEndpoint = "/organizations/{address}/apikeys/{keyID}"
 
 	// subscription routes
 	// GET /subscriptions to get the subscriptions of an organization

@@ -12,6 +12,10 @@ type MetadataKey string
 // UserMetadataKey is the key used to store the user in the context.
 const UserMetadataKey MetadataKey = "user"
 
+// APIKeyMetadataKey is the key used to store the authenticating API key (when a request is
+// authenticated via an API key rather than a JWT) in the context.
+const APIKeyMetadataKey MetadataKey = "apikey"
+
 // LangMetadataKey is the key used to store the language in the context.
 const LangMetadataKey MetadataKey = "lang"
 
