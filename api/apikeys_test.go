@@ -65,6 +65,22 @@ func TestRequiredScopeForRoute(t *testing.T) {
 	_, ok = requiredScopeForRoute("GET", usersMeEndpoint)
 	c.Assert(ok, qt.IsFalse)
 
+	// regression: the allowlisted (method, pattern) must match the route actually
+	// registered in initRouter, or key auth can never reach the handler. These two
+	// drifted once (POST /census/{id}/participants vs POST /census/{id}; POST vs PUT
+	// status), which silently blocked census population and status changes via API key.
+	scope, ok = requiredScopeForRoute("POST", censusIDEndpoint) // add census participants
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(scope, qt.Equals, ScopeVotingWrite)
+	scope, ok = requiredScopeForRoute("PUT", processStatusEndpoint) // change election status
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(scope, qt.Equals, ScopeVotingWrite)
+	// the previously-wrong keys must not linger (they matched no real route)
+	_, ok = requiredScopeForRoute("POST", censusParticipantsEndpoint)
+	c.Assert(ok, qt.IsFalse)
+	_, ok = requiredScopeForRoute("POST", processStatusEndpoint)
+	c.Assert(ok, qt.IsFalse)
+
 	// every allowlisted scope is a valid, assignable scope
 	for route, sc := range apiKeyAllowlist {
 		c.Assert(IsValidAPIKeyScope(sc), qt.IsTrue, qt.Commentf("route %q maps to unknown scope %q", route, sc))
