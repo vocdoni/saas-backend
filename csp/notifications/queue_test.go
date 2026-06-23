@@ -16,6 +16,10 @@ import (
 	"github.com/vocdoni/saas-backend/notifications/mailtemplates"
 )
 
+// errNoSuchUser is the message of a permanent (5xx) SMTP error reused across
+// tests that exercise the give-up / no-retry path.
+const errNoSuchUser = "no such user"
+
 // configurableMail is a NotificationService mock whose behaviour can be tuned
 // per test: it can fail the first failFor calls (failFor == 0 means every call)
 // with sendErr, and optionally delay each send to exercise concurrency.
@@ -74,7 +78,7 @@ func (m *configurableMail) maxConcurrent() int {
 func TestIsPermanentSendError(t *testing.T) {
 	c := qt.New(t)
 
-	perm := &textproto.Error{Code: 550, Msg: "no such user"}
+	perm := &textproto.Error{Code: 550, Msg: errNoSuchUser}
 	transientProto := &textproto.Error{Code: 451, Msg: "try later"}
 	netErr := fmt.Errorf("dial tcp: connection refused")
 
@@ -319,7 +323,7 @@ func TestNotificationChallengeQueue(t *testing.T) {
 		defer cancel()
 
 		mail := &configurableMail{
-			sendErr: &textproto.Error{Code: 550, Msg: "no such user"}, // permanent
+			sendErr: &textproto.Error{Code: 550, Msg: errNoSuchUser}, // permanent
 		}
 		queue := NewQueue(ctx, QueueConfig{
 			TTL:         time.Minute,
@@ -383,6 +387,122 @@ func TestNotificationChallengeQueue(t *testing.T) {
 				delivered++
 			case <-time.After(10 * time.Second):
 				c.Fatalf("timed out: only %d/%d delivered", delivered, total)
+			}
+		}
+	})
+}
+
+// TestPushWait covers the per-item delivery-await contract exposed by PushWait:
+// the returned channel is signalled exactly once with the final state on both
+// success and give-up, and a caller that never reads the channel cannot block a
+// worker (delivery still completes and the shared NotificationsSent channel is
+// still fed).
+func TestPushWait(t *testing.T) {
+	c := qt.New(t)
+	c.Assert(mailtemplates.Load(), qt.IsNil)
+
+	c.Run("signalled once on success", func(c *qt.C) {
+		c.Parallel()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		queue := NewQueue(ctx, QueueConfig{
+			TTL:         time.Second * 10,
+			Workers:     1,
+			MailService: &configurableMail{},
+			SMSService:  testSMSService,
+		})
+		queue.Start()
+
+		nc, err := NewNotificationChallenge(EmailChallenge, apicommon.DefaultLang,
+			[]byte("user"), []byte("bundle"), testUserEmail, "123456", testOrgInfo, testRemainingTime)
+		c.Assert(err, qt.IsNil)
+		done, err := queue.PushWait(nc)
+		c.Assert(err, qt.IsNil)
+
+		select {
+		case res := <-done:
+			c.Assert(res.Success, qt.IsTrue)
+			c.Assert(res, qt.Equals, nc)
+		case <-time.After(5 * time.Second):
+			c.Fatal("timed out waiting for delivery signal")
+		}
+		// The channel is buffered (cap 1) and signalled exactly once: no second
+		// value must ever arrive.
+		select {
+		case extra := <-done:
+			c.Fatalf("done signalled more than once: %v", extra)
+		case <-time.After(200 * time.Millisecond):
+		}
+	})
+
+	c.Run("signalled once on give up", func(c *qt.C) {
+		c.Parallel()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		queue := NewQueue(ctx, QueueConfig{
+			TTL:         time.Minute,
+			Workers:     1,
+			MailService: &configurableMail{sendErr: &textproto.Error{Code: 550, Msg: errNoSuchUser}}, // permanent
+			SMSService:  testSMSService,
+		})
+		queue.Start()
+
+		nc, err := NewNotificationChallenge(EmailChallenge, apicommon.DefaultLang,
+			[]byte("user"), []byte("bundle"), testUserEmail, "123456", testOrgInfo, testRemainingTime)
+		c.Assert(err, qt.IsNil)
+		done, err := queue.PushWait(nc)
+		c.Assert(err, qt.IsNil)
+
+		select {
+		case res := <-done:
+			c.Assert(res.Success, qt.IsFalse)
+		case <-time.After(5 * time.Second):
+			c.Fatal("timed out waiting for give-up signal")
+		}
+		select {
+		case extra := <-done:
+			c.Fatalf("done signalled more than once: %v", extra)
+		case <-time.After(200 * time.Millisecond):
+		}
+	})
+
+	c.Run("non-reading caller does not block a worker", func(c *qt.C) {
+		c.Parallel()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		queue := NewQueue(ctx, QueueConfig{
+			TTL:         time.Second * 10,
+			Workers:     1,
+			MailService: &configurableMail{},
+			SMSService:  testSMSService,
+		})
+		queue.Start()
+
+		// Enqueue with PushWait but deliberately never read the returned channel,
+		// then enqueue a second challenge on the same single worker. If the
+		// unread per-item signal blocked the worker, the second delivery would
+		// never be reported.
+		first, err := NewNotificationChallenge(EmailChallenge, apicommon.DefaultLang,
+			[]byte("user-1"), []byte("bundle"), testUserEmail, "123456", testOrgInfo, testRemainingTime)
+		c.Assert(err, qt.IsNil)
+		_, err = queue.PushWait(first)
+		c.Assert(err, qt.IsNil)
+
+		second, err := NewNotificationChallenge(EmailChallenge, apicommon.DefaultLang,
+			[]byte("user-2"), []byte("bundle"), testUserEmail, "123456", testOrgInfo, testRemainingTime)
+		c.Assert(err, qt.IsNil)
+		c.Assert(queue.Push(second), qt.IsNil)
+
+		// Both challenges must reach the shared channel: the unread done channel
+		// (buffered cap 1) absorbs the first signal without stalling the worker.
+		delivered := 0
+		for delivered < 2 {
+			select {
+			case res := <-queue.NotificationsSent:
+				c.Assert(res.Success, qt.IsTrue)
+				delivered++
+			case <-time.After(5 * time.Second):
+				c.Fatalf("timed out: only %d/2 delivered (worker blocked on unread done?)", delivered)
 			}
 		}
 	})

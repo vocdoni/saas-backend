@@ -20,6 +20,16 @@ const (
 	DefaultOTPExpiry                = time.Minute * 15
 )
 
+// syncDeliveryTimeout bounds how long pushChallenge waits in SyncDelivery mode
+// before returning, so a genuinely stuck provider cannot hang a request. It is
+// set well above the notification breaker cooldown
+// (notifications.DefaultBreakerCooldown) so that a provider which trips the
+// breaker and recovers after the cooldown still delivers within the window,
+// leaving slack for the worker reschedule and the subsequent send attempt. A
+// timeout equal to the cooldown would race delivery and defeat the purpose of
+// SyncDelivery.
+const syncDeliveryTimeout = 3 * notifications.DefaultBreakerCooldown
+
 // MaxChallengeAttempts is the maximum number of failed challenge-code
 // verification attempts allowed for a single authentication token before it is
 // rejected.
@@ -60,8 +70,12 @@ type Config struct {
 	// SyncDelivery makes the challenge-enqueuing path (BundleAuthToken and
 	// ResendChallenge) block until the challenge has been delivered or given up,
 	// so callers observe a deterministic happens-before instead of racing the
-	// concurrent queue workers. It exists to make tests deterministic; leave it
-	// false in production, where notifications are delivered asynchronously.
+	// concurrent queue workers. The wait is bounded by a hard timeout (see
+	// pushChallenge), so under a stuck or breaker-open provider the call returns
+	// context.DeadlineExceeded while the challenge may still be queued/retrying;
+	// it does not always wait for the final delivery state. It exists to make
+	// tests deterministic; leave it false in production, where notifications are
+	// delivered asynchronously.
 	SyncDelivery bool
 }
 
@@ -161,7 +175,7 @@ func (c *CSP) pushChallenge(ch *notifications.NotificationChallenge) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(c.ctx, syncDeliveryTimeout)
 	defer cancel()
 	select {
 	case <-done:
