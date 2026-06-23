@@ -100,6 +100,11 @@ var (
 	ErrNotAnIntegrator                        = Error{Code: 40153, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("organization is not an integrator")}
 	ErrMaxManagedOrgsReached                  = Error{Code: 40154, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("max managed organizations reached")}
 	ErrIntegratorQuotaExceeded                = Error{Code: 40155, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("integrator quota exceeded")}
+	ErrInvalidAPIKey                          = Error{Code: 40156, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("invalid, revoked or expired API key"), LogLevel: "info"}
+	ErrAPIKeyNotAllowed                       = Error{Code: 40157, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("API keys are not permitted for this endpoint"), LogLevel: "info"}
+	ErrInsufficientAPIKeyScope                = Error{Code: 40158, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("API key lacks the required scope"), LogLevel: "info"}
+	ErrInvalidAPIKeyScope                     = Error{Code: 40159, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid API key scope")}
+	ErrAPIKeyNotFound                         = Error{Code: 40160, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("API key not found")}
 
 	// CSP errors (408)
 	ErrZeroWeightVoter = Error{Code: 40801, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("voter weight cannot be zero")}

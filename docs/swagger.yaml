@@ -15,6 +15,29 @@ definitions:
       version:
         type: string
     type: object
+  apicommon.APIKeyInfo:
+    properties:
+      createdAt:
+        type: string
+      createdBy:
+        type: string
+      expiresAt:
+        type: string
+      id:
+        type: string
+      label:
+        type: string
+      lastUsedAt:
+        type: string
+      prefix:
+        type: string
+      revoked:
+        type: boolean
+      scopes:
+        items:
+          type: string
+        type: array
+    type: object
   apicommon.AcceptOrganizationInvitation:
     properties:
       code:
@@ -116,6 +139,48 @@ definitions:
       name:
         type: string
       surname:
+        type: string
+    type: object
+  apicommon.CreateAPIKeyRequest:
+    properties:
+      expiresAt:
+        description: Optional expiration; when set, the key stops working after this
+          time.
+        type: string
+      label:
+        description: Human-readable label to identify the key.
+        type: string
+      scopes:
+        description: Scopes the key is allowed to use (must be a subset of the assignable
+          scopes).
+        items:
+          type: string
+        type: array
+    type: object
+  apicommon.CreateAPIKeyResponse:
+    properties:
+      createdAt:
+        type: string
+      createdBy:
+        type: string
+      expiresAt:
+        type: string
+      id:
+        type: string
+      label:
+        type: string
+      lastUsedAt:
+        type: string
+      prefix:
+        type: string
+      revoked:
+        type: boolean
+      scopes:
+        items:
+          type: string
+        type: array
+      secret:
+        description: Secret is the full API key, shown only at creation time.
         type: string
     type: object
   apicommon.CreateCensusRequest:
@@ -391,6 +456,13 @@ definitions:
         allOf:
         - $ref: '#/definitions/apicommon.Pagination'
         description: Pagination fields
+    type: object
+  apicommon.ListAPIKeysResponse:
+    properties:
+      apiKeys:
+        items:
+          $ref: '#/definitions/apicommon.APIKeyInfo'
+        type: array
     type: object
   apicommon.ListManagedOrganizations:
     properties:
@@ -2378,6 +2450,120 @@ paths:
       summary: Update organization information
       tags:
       - organizations
+  /organizations/{address}/apikeys:
+    get:
+      description: |-
+        Returns the metadata of all API keys owned by the organization (never the secret).
+        The caller must be an admin of the organization.
+      parameters:
+      - description: Organization address
+        in: path
+        name: address
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ListAPIKeysResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: List an organization's API keys
+      tags:
+      - apikeys
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Create a new API key owned by the organization at the given address. The caller
+        must be an admin of the organization. The plaintext secret is returned ONCE and
+        cannot be retrieved again.
+      parameters:
+      - description: Organization address
+        in: path
+        name: address
+        required: true
+        type: string
+      - description: API key information
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.CreateAPIKeyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.CreateAPIKeyResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Create an API key for an organization
+      tags:
+      - apikeys
+  /organizations/{address}/apikeys/{keyID}:
+    delete:
+      description: |-
+        Revokes (permanently disables) the API key with the given ID. The caller must be
+        an admin of the organization.
+      parameters:
+      - description: Organization address
+        in: path
+        name: address
+        required: true
+        type: string
+      - description: API key ID
+        in: path
+        name: keyID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: API key not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Revoke an organization's API key
+      tags:
+      - apikeys
   /organizations/{address}/censuses:
     get:
       consumes:

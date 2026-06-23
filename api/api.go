@@ -319,6 +319,9 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, managedOrganizationsEndpoint, a.createManagedOrganizationHandler)
 		handle(r, http.MethodGet, managedOrganizationsEndpoint, a.managedOrganizationsHandler)
 		handle(r, http.MethodGet, integratorEndpoint, a.integratorInfoHandler)
+		handle(r, http.MethodPost, organizationAPIKeysEndpoint, a.createAPIKeyHandler)
+		handle(r, http.MethodGet, organizationAPIKeysEndpoint, a.apiKeysHandler)
+		handle(r, http.MethodDelete, organizationAPIKeyEndpoint, a.revokeAPIKeyHandler)
 		handle(r, http.MethodPost, subscriptionsCheckout, a.stripeHandlers.CreateSubscriptionCheckout)
 		handle(r, http.MethodGet, subscriptionsCheckoutSession, a.stripeHandlers.GetCheckoutSession)
 		handle(r, http.MethodGet, subscriptionsPortal, func(w http.ResponseWriter, r *http.Request) {

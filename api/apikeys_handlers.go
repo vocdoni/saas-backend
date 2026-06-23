@@ -1,0 +1,170 @@
+package api
+
+import (
+	"encoding/json"
+	"net/http"
+	"time"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
+)
+
+// createAPIKeyHandler godoc
+//
+//	@Summary		Create an API key for an organization
+//	@Description	Create a new API key owned by the organization at the given address. The caller
+//	@Description	must be an admin of the organization. The plaintext secret is returned ONCE and
+//	@Description	cannot be retrieved again.
+//	@Tags			apikeys
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			address	path		string							true	"Organization address"
+//	@Param			request	body		apicommon.CreateAPIKeyRequest	true	"API key information"
+//	@Success		200		{object}	apicommon.CreateAPIKeyResponse
+//	@Failure		400		{object}	errors.Error	"Invalid input data"
+//	@Failure		401		{object}	errors.Error	"Unauthorized"
+//	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{address}/apikeys [post]
+func (a *API) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	orgAddr := common.HexToAddress(chi.URLParam(r, "address"))
+	if !user.HasRoleFor(orgAddr, db.AdminRole) {
+		errors.ErrUnauthorized.Withf("user is not admin of the organization").Write(w)
+		return
+	}
+	req := &apicommon.CreateAPIKeyRequest{}
+	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	if req.Label == "" {
+		errors.ErrMalformedBody.Withf("label is required").Write(w)
+		return
+	}
+	if len(req.Scopes) == 0 {
+		errors.ErrMalformedBody.Withf("at least one scope is required").Write(w)
+		return
+	}
+	for _, s := range req.Scopes {
+		if !IsValidAPIKeyScope(s) {
+			errors.ErrInvalidAPIKeyScope.Withf("unknown scope %q", s).Write(w)
+			return
+		}
+	}
+	if req.ExpiresAt != nil && !req.ExpiresAt.After(time.Now()) {
+		errors.ErrMalformedBody.Withf("expiresAt must be in the future").Write(w)
+		return
+	}
+	gen, err := generateAPIKey()
+	if err != nil {
+		errors.ErrGenericInternalServerError.Withf("could not generate API key: %v", err).Write(w)
+		return
+	}
+	key := &db.APIKey{
+		ID:         uuid.NewString(),
+		OrgAddress: orgAddr,
+		Label:      req.Label,
+		Prefix:     gen.prefix,
+		Hash:       gen.hash,
+		Scopes:     req.Scopes,
+		CreatedBy:  user.Email,
+		CreatedAt:  time.Now(),
+		ExpiresAt:  req.ExpiresAt,
+		Revoked:    false,
+	}
+	if err := a.db.SetAPIKey(key); err != nil {
+		errors.ErrGenericInternalServerError.Withf("could not store API key: %v", err).Write(w)
+		return
+	}
+	apicommon.HTTPWriteJSON(w, &apicommon.CreateAPIKeyResponse{
+		APIKeyInfo: apicommon.APIKeyInfoFromDB(key),
+		Secret:     gen.secret,
+	})
+}
+
+// apiKeysHandler godoc
+//
+//	@Summary		List an organization's API keys
+//	@Description	Returns the metadata of all API keys owned by the organization (never the secret).
+//	@Description	The caller must be an admin of the organization.
+//	@Tags			apikeys
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			address	path		string	true	"Organization address"
+//	@Success		200		{object}	apicommon.ListAPIKeysResponse
+//	@Failure		401		{object}	errors.Error	"Unauthorized"
+//	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{address}/apikeys [get]
+func (a *API) apiKeysHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	orgAddr := common.HexToAddress(chi.URLParam(r, "address"))
+	if !user.HasRoleFor(orgAddr, db.AdminRole) {
+		errors.ErrUnauthorized.Withf("user is not admin of the organization").Write(w)
+		return
+	}
+	keys, err := a.db.APIKeysByOrg(orgAddr)
+	if err != nil {
+		errors.ErrGenericInternalServerError.Withf("could not list API keys: %v", err).Write(w)
+		return
+	}
+	list := make([]apicommon.APIKeyInfo, 0, len(keys))
+	for _, k := range keys {
+		list = append(list, apicommon.APIKeyInfoFromDB(k))
+	}
+	apicommon.HTTPWriteJSON(w, &apicommon.ListAPIKeysResponse{APIKeys: list})
+}
+
+// revokeAPIKeyHandler godoc
+//
+//	@Summary		Revoke an organization's API key
+//	@Description	Revokes (permanently disables) the API key with the given ID. The caller must be
+//	@Description	an admin of the organization.
+//	@Tags			apikeys
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			address	path		string			true	"Organization address"
+//	@Param			keyID	path		string			true	"API key ID"
+//	@Success		200		{string}	string			"OK"
+//	@Failure		401		{object}	errors.Error	"Unauthorized"
+//	@Failure		404		{object}	errors.Error	"API key not found"
+//	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{address}/apikeys/{keyID} [delete]
+func (a *API) revokeAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	orgAddr := common.HexToAddress(chi.URLParam(r, "address"))
+	if !user.HasRoleFor(orgAddr, db.AdminRole) {
+		errors.ErrUnauthorized.Withf("user is not admin of the organization").Write(w)
+		return
+	}
+	keyID := chi.URLParam(r, "keyID")
+	if keyID == "" {
+		errors.ErrMalformedURLParam.Withf("keyID is required").Write(w)
+		return
+	}
+	if err := a.db.RevokeAPIKey(orgAddr, keyID); err != nil {
+		if err == db.ErrNotFound {
+			errors.ErrAPIKeyNotFound.Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.Withf("could not revoke API key: %v", err).Write(w)
+		return
+	}
+	apicommon.HTTPWriteOK(w)
+}

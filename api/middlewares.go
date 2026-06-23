@@ -3,6 +3,9 @@ package api
 import (
 	"context"
 	"net/http"
+	"slices"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/jwtauth/v5"
@@ -10,14 +13,34 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"go.vocdoni.io/dvote/log"
 )
+
+// bearerToken extracts the bearer credential from the Authorization header, or "" if absent.
+func bearerToken(r *http.Request) string {
+	const prefix = "Bearer "
+	h := r.Header.Get("Authorization")
+	if len(h) > len(prefix) && strings.EqualFold(h[:len(prefix)], prefix) {
+		return h[len(prefix):]
+	}
+	return ""
+}
 
 // authenticator is a middleware that authenticates the user and returns a JWT
 // token. If successful, the decodes the user identifier (its email) from the
 // JWT token and gets the user information from the database, then adds the user
 // data to the request context and passes it to the next handler.
+//
+// It also accepts API keys: a Bearer credential with the API-key prefix is resolved against the
+// apiKeys collection (instead of being parsed as a JWT), enforcing the per-route allowlist and
+// the key's scopes. On success the owning user is placed in the context exactly as for a JWT, so
+// downstream role checks are unchanged.
 func (a *API) authenticator(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if raw := bearerToken(r); looksLikeAPIKey(raw) {
+			a.authenticateAPIKey(w, r, next, raw)
+			return
+		}
 		token, claims, err := jwtauth.FromContext(r.Context())
 		if err != nil {
 			errors.ErrUnauthorized.Write(w)
@@ -59,6 +82,45 @@ func (a *API) authenticator(next http.Handler) http.Handler {
 		// user information
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// authenticateAPIKey resolves a request authenticated with an API key. It validates the key,
+// enforces the per-route allowlist and the key's scopes, then loads the key's owning user into
+// the context (so existing role checks work) before delegating to the next handler.
+func (a *API) authenticateAPIKey(w http.ResponseWriter, r *http.Request, next http.Handler, raw string) {
+	key, err := a.db.APIKeyByHash(hashAPIKey(raw))
+	if err != nil {
+		errors.ErrInvalidAPIKey.Write(w)
+		return
+	}
+	// deny-by-default: the endpoint must opt into API-key access, and the key must hold its scope
+	pattern := chi.RouteContext(r.Context()).RoutePattern()
+	scope, allowed := requiredScopeForRoute(r.Method, pattern)
+	if !allowed {
+		errors.ErrAPIKeyNotAllowed.Write(w)
+		return
+	}
+	if !slices.Contains(key.Scopes, scope) {
+		errors.ErrInsufficientAPIKeyScope.Withf("endpoint requires the %q scope", scope).Write(w)
+		return
+	}
+	// the key acts as its creating user, reusing the existing per-organization role checks
+	user, err := a.db.UserByEmail(key.CreatedBy)
+	if err != nil {
+		errors.ErrInvalidAPIKey.Withf("key owner no longer exists").Write(w)
+		return
+	}
+	if !user.Verified {
+		errors.ErrUserNoVerified.With("user account not verified").Write(w)
+		return
+	}
+	// best-effort last-used tracking; never block the request on it
+	if err := a.db.TouchAPIKey(key.ID, time.Now()); err != nil {
+		log.Warnw("could not update API key last-used time", "keyID", key.ID, "error", err)
+	}
+	ctx := context.WithValue(r.Context(), apicommon.UserMetadataKey, *user)
+	ctx = context.WithValue(ctx, apicommon.APIKeyMetadataKey, *key)
+	next.ServeHTTP(w, r.WithContext(ctx))
 }
 
 // setLang is a middleware that sets the lang parameter in the request context
