@@ -603,6 +603,24 @@ func (a *API) updateOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		errors.ErrInvalidUserData.Withf("invalid role").Write(w)
 		return
 	}
+	// prevent demoting the last admin, which would orphan the organization
+	if db.UserRole(update.Role) != db.AdminRole && uint64(userIDInt) == user.ID {
+		users, err := a.db.OrganizationUsers(org.Address)
+		if err != nil {
+			errors.ErrGenericInternalServerError.Withf("could not get organization users: %v", err).Write(w)
+			return
+		}
+		otherAdmins := 0
+		for _, u := range users {
+			if u.ID != user.ID && u.HasRoleFor(org.Address, db.AdminRole) {
+				otherAdmins++
+			}
+		}
+		if otherAdmins == 0 {
+			errors.ErrInvalidUserData.With("cannot demote the last admin of the organization").Write(w)
+			return
+		}
+	}
 	if err := a.db.UpdateOrganizationUserRole(org.Address, uint64(userIDInt), db.UserRole(update.Role)); err != nil {
 		errors.ErrInvalidUserData.Withf("user not found: %v", err).Write(w)
 		return
