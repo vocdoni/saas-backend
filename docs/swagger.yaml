@@ -8,8 +8,10 @@ definitions:
           type: string
         type: array
     type: object
-  api.VersionInfo:
+  api.InfoResponse:
     properties:
+      chainId:
+        type: string
       goVersion:
         type: string
       version:
@@ -953,6 +955,57 @@ definitions:
       totalItems:
         type: integer
     type: object
+  apicommon.ProcessBundleInfo:
+    properties:
+      census:
+        allOf:
+        - $ref: '#/definitions/db.Census'
+        description: The census associated with this bundle
+      chainId:
+        type: string
+      id:
+        description: Unique identifier for the bundle
+        type: string
+      orgAddress:
+        description: The organization that owns this bundle
+        items:
+          type: integer
+        type: array
+      processes:
+        description: Array of process addresses included in this bundle
+        example:
+        - deadbeef
+        items:
+          format: hex
+          type: string
+        type: array
+    type: object
+  apicommon.ProcessInfo:
+    properties:
+      address:
+        example: deadbeef
+        format: hex
+        type: string
+      census:
+        $ref: '#/definitions/db.Census'
+      chainId:
+        type: string
+      electionParams:
+        $ref: '#/definitions/db.ElectionParams'
+      id:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      orgAdress:
+        items:
+          type: integer
+        type: array
+      publishedAt:
+        type: string
+      status:
+        type: string
+    type: object
   apicommon.ProcessResultsResponse:
     properties:
       endDate:
@@ -1628,29 +1681,6 @@ definitions:
       status:
         type: string
     type: object
-  db.ProcessesBundle:
-    properties:
-      census:
-        allOf:
-        - $ref: '#/definitions/db.Census'
-        description: The census associated with this bundle
-      id:
-        description: Unique identifier for the bundle
-        type: string
-      orgAddress:
-        description: The organization that owns this bundle
-        items:
-          type: integer
-        type: array
-      processes:
-        description: Array of process addresses included in this bundle
-        example:
-        - deadbeef
-        items:
-          format: hex
-          type: string
-        type: array
-    type: object
   db.PublishedCensus:
     properties:
       createdAt:
@@ -2255,6 +2285,20 @@ paths:
       summary: Publish a census for voting
       tags:
       - census
+  /info:
+    get:
+      description: Returns the service version, build information and the Vocdoni
+        chain ID.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.InfoResponse'
+      summary: Get service information
+      tags:
+      - health
   /jobs/{jobId}:
     get:
       description: |-
@@ -4232,7 +4276,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/db.Process'
+            $ref: '#/definitions/apicommon.ProcessInfo'
         "400":
           description: Invalid process ID
           schema:
@@ -4629,7 +4673,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/db.ProcessesBundle'
+            $ref: '#/definitions/apicommon.ProcessBundleInfo'
         "400":
           description: Invalid bundle ID
           schema:
@@ -5645,19 +5689,6 @@ paths:
       summary: Resend verification code
       tags:
       - users
-  /version:
-    get:
-      description: Returns the service version and build information
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/api.VersionInfo'
-      summary: Get service version
-      tags:
-      - health
 schemes:
 - http
 - https

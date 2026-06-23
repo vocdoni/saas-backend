@@ -39,6 +39,20 @@ type PaginationParams struct {
 	Limit int64 `json:"limit,omitempty"`
 }
 
+// ProcessInfo is the voter-facing response for a single voting process. It embeds the
+// stored process and adds the Vocdoni chain ID the process lives on.
+type ProcessInfo struct {
+	*db.Process
+	ChainID string `json:"chainId"`
+}
+
+// ProcessBundleInfo is the voter-facing response for a process bundle. It embeds the
+// stored bundle and adds the Vocdoni chain ID the bundle's processes live on.
+type ProcessBundleInfo struct {
+	*db.ProcessesBundle
+	ChainID string `json:"chainId"`
+}
+
 // OrganizationInfo represents an organization in the API.
 // swagger:model OrganizationInfo
 type OrganizationInfo struct {

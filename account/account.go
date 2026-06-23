@@ -76,6 +76,11 @@ func New(privateKey string, apiEndpoint string) (*Account, error) {
 	}, nil
 }
 
+// ChainID returns the identifier of the Vocdoni chain the account is connected to.
+func (a *Account) ChainID() string {
+	return a.client.ChainID()
+}
+
 // FaucetPackage generates a faucet package for the given address and amount.
 func (a *Account) FaucetPackage(toAddr common.Address, amount uint64) (*models.FaucetPackage, error) {
 	log.Infow("generating faucet package",

@@ -223,7 +223,7 @@ func (a *API) updateProcessHandler(w http.ResponseWriter, r *http.Request) {
 //	@Accept			json
 //	@Produce		json
 //	@Param			processId	path		string	true	"Process ID"
-//	@Success		200			{object}	db.Process
+//	@Success		200			{object}	apicommon.ProcessInfo
 //	@Failure		400			{object}	errors.Error	"Invalid process ID"
 //	@Failure		404			{object}	errors.Error	"Process not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
@@ -250,7 +250,10 @@ func (a *API) processInfoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	apicommon.HTTPWriteJSON(w, process)
+	apicommon.HTTPWriteJSON(w, &apicommon.ProcessInfo{
+		Process: process,
+		ChainID: a.account.ChainID(),
+	})
 }
 
 // organizationListProcessDraftsHandler godoc

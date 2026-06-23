@@ -4,6 +4,8 @@ const (
 	// ping route
 	// GET /ping to check the server status
 	pingEndpoint = "/ping"
+	// GET /info to get service version, build and chain information
+	infoEndpoint = "/info"
 
 	// auth routes
 
