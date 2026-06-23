@@ -7,34 +7,35 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 )
 
-// VersionInfo contains build and version information for the service.
-type VersionInfo struct {
+// InfoResponse contains build, version and chain information for the service.
+type InfoResponse struct {
 	Version   string `json:"version"`
 	GoVersion string `json:"goVersion"`
+	ChainID   string `json:"chainId"`
 }
 
-// defaultVersionInfo is returned when build info is unavailable.
-var defaultVersionInfo = VersionInfo{
+// defaultInfoResponse holds the values returned when build info is unavailable.
+var defaultInfoResponse = InfoResponse{
 	Version:   "unknown",
 	GoVersion: "unknown",
 }
 
-// VersionHandler godoc
+// InfoHandler godoc
 //
-//	@Summary		Get service version
-//	@Description	Returns the service version and build information
+//	@Summary		Get service information
+//	@Description	Returns the service version, build information and the Vocdoni chain ID.
 //	@Tags			health
 //	@Produce		json
-//	@Success		200	{object}	VersionInfo
-//	@Router			/version [get]
-func (*API) VersionHandler(w http.ResponseWriter, _ *http.Request) {
-	v, _ := debug.ReadBuildInfo()
-	if v == nil {
-		apicommon.HTTPWriteJSON(w, defaultVersionInfo)
-		return
+//	@Success		200	{object}	InfoResponse
+//	@Router			/info [get]
+func (a *API) InfoHandler(w http.ResponseWriter, _ *http.Request) {
+	info := defaultInfoResponse
+	if v, _ := debug.ReadBuildInfo(); v != nil {
+		info.Version = v.Main.Version
+		info.GoVersion = v.GoVersion
 	}
-	apicommon.HTTPWriteJSON(w, VersionInfo{
-		Version:   v.Main.Version,
-		GoVersion: v.GoVersion,
-	})
+	if a.account != nil {
+		info.ChainID = a.account.ChainID()
+	}
+	apicommon.HTTPWriteJSON(w, info)
 }

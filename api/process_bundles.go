@@ -278,7 +278,7 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 //	@Accept			json
 //	@Produce		json
 //	@Param			bundleId	path		string	true	"Bundle ID"
-//	@Success		200			{object}	db.ProcessesBundle
+//	@Success		200			{object}	apicommon.ProcessBundleInfo
 //	@Failure		400			{object}	errors.Error	"Invalid bundle ID"
 //	@Failure		404			{object}	errors.Error	"Bundle not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
@@ -306,7 +306,10 @@ func (a *API) processBundleInfoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	apicommon.HTTPWriteJSON(w, bundle)
+	apicommon.HTTPWriteJSON(w, &apicommon.ProcessBundleInfo{
+		ProcessesBundle: bundle,
+		ChainID:         a.account.ChainID(),
+	})
 }
 
 // processBundleParticipantInfoHandler godoc

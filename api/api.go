@@ -350,6 +350,7 @@ func (a *API) initRouter() http.Handler {
 				log.Warnw("failed to write ping response", "error", err)
 			}
 		})
+		handle(r, http.MethodGet, infoEndpoint, a.InfoHandler)
 
 		handle(r, http.MethodPost, authLoginEndpoint, a.authLoginHandler)
 		handle(r, http.MethodPost, oauthLoginEndpoint, a.oauthLoginHandler)
