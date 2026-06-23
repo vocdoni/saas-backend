@@ -16,7 +16,9 @@ import (
 //	@Summary		Get organization member groups
 //	@Description	Get the list of groups and their info of the organization
 //	@Description	Does not return the members of the groups, only the groups themselves.
-//	@Description	Needs admin or manager role
+//	@Description	Needs admin or manager role.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `members:write`).
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
@@ -25,9 +27,8 @@ import (
 //	@Param			page	query		integer	false	"Page number (default: 1)"
 //	@Param			limit	query		integer	false	"Number of items per page (default: 10)"
 //	@Success		200		{object}	apicommon.OrganizationMemberGroupsResponse
-//	@Failure		400		{object}	errors.Error	"Invalid input data"
+//	@Failure		400		{object}	errors.Error	"Invalid input data, or organization not found"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		404		{object}	errors.Error	"Organization not found"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/organizations/{address}/groups [get]
 func (a *API) organizationMemberGroupsHandler(w http.ResponseWriter, r *http.Request) {
@@ -88,7 +89,9 @@ func (a *API) organizationMemberGroupsHandler(w http.ResponseWriter, r *http.Req
 //
 //	@Summary		Get the information of an organization member group
 //	@Description	Get the information of an organization member group by its ID
-//	@Description	Needs admin or manager role
+//	@Description	Needs admin or manager role.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `members:write`).
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
@@ -96,9 +99,8 @@ func (a *API) organizationMemberGroupsHandler(w http.ResponseWriter, r *http.Req
 //	@Param			address	path		string	true	"Organization address"
 //	@Param			groupID	path		string	true	"Group ID"
 //	@Success		200		{object}	apicommon.OrganizationMemberGroupInfo
-//	@Failure		400		{object}	errors.Error	"Invalid input data"
+//	@Failure		400		{object}	errors.Error	"Invalid input data, or organization/group not found"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		404		{object}	errors.Error	"Organization or group not found"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/organizations/{address}/groups/{groupID} [get]
 func (a *API) organizationMemberGroupHandler(w http.ResponseWriter, r *http.Request) {
@@ -163,8 +165,10 @@ func (a *API) organizationMemberGroupHandler(w http.ResponseWriter, r *http.Requ
 // createOrganizationMemberGroupHandler godoc
 //
 //	@Summary		Create an organization member group
-//	@Description	Create an organization member group with the given members or all members
-//	@Description	Needs admin or manager role
+//	@Description	Create an organization member group with the given members, or with all members when
+//	@Description	`includeAllMembers` is set. Needs admin or manager role.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `members:write`).
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
@@ -172,9 +176,8 @@ func (a *API) organizationMemberGroupHandler(w http.ResponseWriter, r *http.Requ
 //	@Param			address	path		string											true	"Organization address"
 //	@Param			group	body		apicommon.CreateOrganizationMemberGroupRequest	true	"Group info to create"
 //	@Success		200		{object}	apicommon.OrganizationMemberGroupInfo
-//	@Failure		400		{object}	errors.Error	"Invalid input data"
+//	@Failure		400		{object}	errors.Error	"Invalid input data, or organization not found"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		404		{object}	errors.Error	"Organization not found"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/organizations/{address}/groups [post]
 func (a *API) createOrganizationMemberGroupHandler(w http.ResponseWriter, r *http.Request) {
@@ -247,8 +250,11 @@ func (a *API) createOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 // updateOrganizationMemberGroupHandler godoc
 //
 //	@Summary		Update an organization member group
-//	@Description	Update an organization member group changing the info, and adding or removing members
-//	@Description	Needs admin or manager role
+//	@Description	Update an organization member group changing the info, and adding or removing members.
+//	@Description	Needs admin or manager role. The auto-generated "All members" group cannot have its
+//	@Description	membership modified.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `members:write`).
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
@@ -257,9 +263,9 @@ func (a *API) createOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 //	@Param			groupID	path		string											true	"Group ID"
 //	@Param			group	body		apicommon.UpdateOrganizationMemberGroupsRequest	true	"Group info to update"
 //	@Success		200		{string}	string											"OK"
-//	@Failure		400		{object}	errors.Error									"Invalid input data"
+//	@Failure		400		{object}	errors.Error									"Invalid input data, or organization/group not found"
 //	@Failure		401		{object}	errors.Error									"Unauthorized"
-//	@Failure		404		{object}	errors.Error									"Organization or group not found"
+//	@Failure		403		{object}	errors.Error									"Auto-generated group membership cannot be modified"
 //	@Failure		500		{object}	errors.Error									"Internal server error"
 //	@Router			/organizations/{address}/groups/{groupID} [put]
 func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *http.Request) {
@@ -318,7 +324,10 @@ func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 // deleteOrganizationMemberGroupHandler godoc
 //
 //	@Summary		Delete an organization member group
-//	@Description	Delete an organization member group by its ID
+//	@Description	Delete an organization member group by its ID. Needs admin or manager role. The
+//	@Description	auto-generated "All members" group cannot be deleted.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `members:write`).
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
@@ -326,9 +335,9 @@ func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 //	@Param			address	path		string			true	"Organization address"
 //	@Param			groupID	path		string			true	"Group ID"
 //	@Success		200		{string}	string			"OK"
-//	@Failure		400		{object}	errors.Error	"Invalid input data"
+//	@Failure		400		{object}	errors.Error	"Invalid input data, or organization/group not found"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		404		{object}	errors.Error	"Organization or group not found"
+//	@Failure		403		{object}	errors.Error	"Auto-generated group cannot be deleted"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/organizations/{address}/groups/{groupID} [delete]
 func (a *API) deleteOrganizationMemberGroupHandler(w http.ResponseWriter, r *http.Request) {
@@ -372,8 +381,10 @@ func (a *API) deleteOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 // listOrganizationMemberGroupsHandler godoc
 //
 //	@Summary		Get the list of members with details of an organization member group
-//	@Description	Get the list of members with details of an organization member group
-//	@Description	Needs admin or manager role
+//	@Description	Get the paginated list of members with details of an organization member group.
+//	@Description	Needs admin or manager role.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `members:write`).
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
@@ -383,9 +394,8 @@ func (a *API) deleteOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 //	@Param			page	query		int		false	"Page number for pagination"
 //	@Param			limit	query		int		false	"Number of items per page"
 //	@Success		200		{object}	apicommon.ListOrganizationMemberGroupResponse
-//	@Failure		400		{object}	errors.Error	"Invalid input data"
+//	@Failure		400		{object}	errors.Error	"Invalid input data, or organization/group not found"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		404		{object}	errors.Error	"Organization or group not found"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/organizations/{address}/groups/{groupID}/members [get]
 func (a *API) listOrganizationMemberGroupsHandler(w http.ResponseWriter, r *http.Request) {
@@ -450,6 +460,10 @@ func (a *API) listOrganizationMemberGroupsHandler(w http.ResponseWriter, r *http
 //
 //	@Summary		Validate organization group members data
 //	@Description	Checks the AuthFields for duplicates or empty fields and the TwoFaFields for empty ones.
+//	@Description	On failure the offending member IDs are returned in the error `data`. Needs admin or
+//	@Description	manager role.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `members:write`).
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
@@ -458,9 +472,8 @@ func (a *API) listOrganizationMemberGroupsHandler(w http.ResponseWriter, r *http
 //	@Param			groupID	path		string									true	"Group ID"
 //	@Param			members	body		apicommon.ValidateMemberGroupRequest	true	"Members validation request"
 //	@Success		200		{string}	string									"OK"
-//	@Failure		400		{object}	errors.Error							"Invalid input data"
+//	@Failure		400		{object}	errors.Error							"Invalid input data, duplicate/missing fields, or organization/group not found"
 //	@Failure		401		{object}	errors.Error							"Unauthorized"
-//	@Failure		404		{object}	errors.Error							"Organization or group not found"
 //	@Failure		500		{object}	errors.Error							"Internal server error"
 //
 //	@Router			/organizations/{address}/groups/{groupID}/validate [post]

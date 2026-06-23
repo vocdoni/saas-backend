@@ -24,7 +24,10 @@ const (
 // createCensusHandler godoc
 //
 //	@Summary		Create a new census
-//	@Description	Create a new census for an organization. Requires Manager/Admin role.
+//	@Description	Create a new census for an organization. Requires Manager/Admin role. Members are
+//	@Description	added later (see POST /census/{id}); this only creates the empty census.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			census
 //	@Accept			json
 //	@Produce		json
@@ -105,10 +108,13 @@ func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 // addCensusParticipantsHandler godoc
 //
 //	@Summary		Add organization members to a census
-//	@Description	Add existing organization members to a census by member ID (synchronous).
-//	@Description	Members already in the census are skipped.
-//	@Description	Returns number of participants added plus per-member errors in the response `errors` field.
-//	@Description	Requires Manager/Admin role.
+//	@Description	Add existing organization members to a census by member ID (synchronous). Members
+//	@Description	already in the census are skipped. Returns the number of participants added plus
+//	@Description	per-member errors in the response `errors` field. An empty member ID list is a no-op
+//	@Description	that returns added=0. Requires Manager/Admin role and is subject to the plan's census
+//	@Description	quota.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			census
 //	@Accept			json
 //	@Produce		json
@@ -116,8 +122,9 @@ func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 //	@Param			id		path		string									true	"Census ID"
 //	@Param			request	body		apicommon.AddCensusParticipantsRequest	true	"Participant member IDs to add"
 //	@Success		200		{object}	apicommon.AddMembersResponse			"Added count and optional per-member errors"
-//	@Failure		400		{object}	errors.Error							"Invalid input data"
+//	@Failure		400		{object}	errors.Error							"Invalid input data or census not found"
 //	@Failure		401		{object}	errors.Error							"Unauthorized"
+//	@Failure		403		{object}	errors.Error							"Plan census quota exceeded"
 //	@Failure		404		{object}	errors.Error							"Census not found"
 //	@Failure		500		{object}	errors.Error							"Internal server error"
 //	@Router			/census/{id} [post]
@@ -196,7 +203,11 @@ func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Reques
 // publishCensusHandler godoc
 //
 //	@Summary		Publish a census for voting
-//	@Description	Publish a census for voting. Requires Manager/Admin role. Returns published census with credentials.
+//	@Description	Publish a census for voting (the CSP public key becomes the census root). Requires
+//	@Description	Manager/Admin role. Returns the published census URI and root. Idempotent: a census
+//	@Description	that is already published is returned as-is without re-publishing.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			census
 //	@Accept			json
 //	@Produce		json
@@ -205,7 +216,7 @@ func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Reques
 //	@Success		200	{object}	apicommon.PublishedCensusResponse
 //	@Failure		400	{object}	errors.Error	"Invalid census ID"
 //	@Failure		401	{object}	errors.Error	"Unauthorized"
-//	@Failure		404	{object}	errors.Error	"Census not found"
+//	@Failure		404	{object}	errors.Error	"Census not found or unsupported census type"
 //	@Failure		500	{object}	errors.Error	"Internal server error"
 //	@Router			/census/{id}/publish [post]
 func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
@@ -276,7 +287,8 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 //	@Description	The request body selects the CSP authentication: at least one of authFields or twoFaFields
 //	@Description	must be provided. Supplying only authFields yields an auth-only census (members authenticate
 //	@Description	with their data, no OTP); twoFaFields adds an email/SMS OTP challenge. A body with both empty
-//	@Description	is rejected with 404 (ErrCensusTypeNotFound). Returns the published census root and URI.
+//	@Description	is rejected with 404 (ErrCensusTypeNotFound). Subject to the plan's census quota. Idempotent:
+//	@Description	an already-published census is returned as-is. Returns the published census root and URI.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			census
@@ -284,11 +296,12 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			id		path		string								true	"Census ID"
-//	@Param			groupId	path		string								true	"Group ID"
+//	@Param			groupid	path		string								true	"Group ID"
 //	@Param			request	body		apicommon.PublishCensusGroupRequest	true	"Census authentication configuration"
 //	@Success		200		{object}	apicommon.PublishedCensusResponse
 //	@Failure		400		{object}	errors.Error	"Invalid census ID or group ID"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
+//	@Failure		403		{object}	errors.Error	"Plan census quota exceeded"
 //	@Failure		404		{object}	errors.Error	"Census not found, or neither authFields nor twoFaFields provided (ErrCensusTypeNotFound)"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/census/{id}/group/{groupid}/publish [post]
