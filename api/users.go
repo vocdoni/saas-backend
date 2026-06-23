@@ -381,7 +381,6 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// get the user organizations information from the database if any
 	userOrgs := make([]*apicommon.UserOrganization, 0)
-	isIntegrator := false
 	for _, orgInfo := range user.Organizations {
 		org, parent, err := a.db.OrganizationWithParent(orgInfo.Address)
 		if err != nil {
@@ -390,11 +389,6 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			errors.ErrGenericInternalServerError.Write(w)
 			return
-		}
-		// the user is an integrator if any of its organizations is one
-		// (integrators have a single org)
-		if !isIntegrator && a.subscriptions.IsIntegrator(org) {
-			isIntegrator = true
 		}
 		userOrgs = append(userOrgs, &apicommon.UserOrganization{
 			Role:         string(orgInfo.Role),
@@ -416,7 +410,6 @@ func (a *API) userInfoHandler(w http.ResponseWriter, r *http.Request) {
 		HasPassword:   user.Password != "",
 		Providers:     providers,
 		Organizations: userOrgs,
-		IsIntegrator:  isIntegrator,
 	})
 }
 
@@ -710,6 +703,16 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if code != userPasswords.Code {
 		errors.ErrUnauthorized.With("code mismatch").Write(w)
+		return
+	}
+
+	// invalidate the reset code before updating the password so it cannot be
+	// reused. fail closed: if the code cannot be deleted we must not report
+	// success, otherwise the still-valid code could be replayed.
+	if err := a.db.DeleteUserVerificationCode(user, db.CodeTypePasswordReset); err != nil {
+		log.Warnw("could not delete password reset code", "error", err)
+		errors.ErrGenericInternalServerError.Write(w)
+		return
 	}
 
 	// hash and update the new password
