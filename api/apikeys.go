@@ -71,14 +71,14 @@ var apiKeyAllowlist = map[string]string{
 	// voting: processes, censuses, bundles (for managed organizations)
 	"POST " + processCreateEndpoint:                ScopeVotingWrite,
 	"POST " + processPublishEndpoint:               ScopeVotingWrite,
-	"POST " + processStatusEndpoint:                ScopeVotingWrite,
+	"PUT " + processStatusEndpoint:                 ScopeVotingWrite,
 	"GET " + organizationListProcessDraftsEndpoint: ScopeVotingWrite,
 	"GET " + organizationCensusesEndpoint:          ScopeVotingWrite,
 	"GET " + organizationBundlesEndpoint:           ScopeVotingWrite,
 	"POST " + censusEndpoint:                       ScopeVotingWrite,
 	"POST " + censusPublishEndpoint:                ScopeVotingWrite,
 	"POST " + censusGroupPublishEndpoint:           ScopeVotingWrite,
-	"POST " + censusParticipantsEndpoint:           ScopeVotingWrite,
+	"POST " + censusIDEndpoint:                     ScopeVotingWrite,
 	"POST " + processBundleEndpoint:                ScopeVotingWrite,
 	"PUT " + processBundleUpdateEndpoint:           ScopeVotingWrite,
 }
