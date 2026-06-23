@@ -19,7 +19,9 @@
 //	@securityDefinitions.apikey	BearerAuth
 //	@in							header
 //	@name						Authorization
-//	@description				Type "Bearer" followed by a space and the JWT token.
+//	@description				Type "Bearer" followed by a space and either a JWT (user session) or a
+//	@description				scoped API key (prefixed "vsk_"). API keys are accepted only on endpoints
+//	@description				that opt into key auth, and only when the key carries the required scope.
 //
 //	@tag.name					auth
 //	@tag.description			Authentication operations

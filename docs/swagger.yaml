@@ -1325,6 +1325,30 @@ definitions:
         description: The new role to assign to the user
         type: string
     type: object
+  apicommon.UpdateProcessRequest:
+    properties:
+      address:
+        description: Vochain ID/Address of the process
+        example: deadbeef
+        format: hex
+        type: string
+      censusId:
+        description: Census ID
+        example: deadbeef
+        format: hex
+        type: string
+      electionParams:
+        allOf:
+        - $ref: '#/definitions/db.ElectionParams'
+        description: Optional high-level election parameters (used later at publish
+          time)
+      metadata:
+        additionalProperties: {}
+        description: |-
+          Additional metadata for the process
+          Can be any key-value pairs
+        type: object
+    type: object
   apicommon.UserInfo:
     properties:
       email:
@@ -2379,8 +2403,14 @@ paths:
         Create a new organization. If the organization is a suborganization, the parent organization must be
         specified in the request body, and the user must be an admin of the parent. If the parent organization
         is already a suborganization, an error is returned.
+
+        Two optional opt-in fields support the chain-abstracted flow (both default false, preserving the legacy
+        behavior): `provisionAccount` forges the organization's on-chain account eagerly at creation time
+        (idempotent) instead of leaving it to the legacy SDK createAccount path; `integrator` subscribes the
+        new organization to the free integrator plan so it becomes an integrator on the free tier with no
+        checkout.
       parameters:
-      - description: Organization information
+      - description: Organization info (+ optional provisionAccount / integrator)
         in: body
         name: request
         required: true
@@ -2402,7 +2432,7 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
-          description: Parent organization not found
+          description: Parent org not found, or free integrator plan unavailable (integrator=true)
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -2530,8 +2560,12 @@ paths:
       - application/json
       description: |-
         Create a new API key owned by the organization at the given address. The caller
-        must be an admin of the organization. The plaintext secret is returned ONCE and
-        cannot be retrieved again.
+        must be an admin of the organization. The plaintext secret (prefixed "vsk_") is
+        returned ONCE in the response and cannot be retrieved again.
+
+        `label` and at least one `scope` are required. Valid scopes are deny-by-default and
+        must be a subset of: `quota:read`, `managed:read`, `managed:write`, `voting:write`,
+        `members:write`. The optional `expiresAt`, when set, must be in the future.
       parameters:
       - description: Organization address
         in: path
@@ -2548,11 +2582,12 @@ paths:
       - application/json
       responses:
         "200":
-          description: OK
+          description: Created key including the one-time plaintext secret
           schema:
             $ref: '#/definitions/apicommon.CreateAPIKeyResponse'
         "400":
-          description: Invalid input data
+          description: Invalid input (missing label/scopes, unknown scope, or past
+            expiresAt)
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -2591,6 +2626,10 @@ paths:
           description: OK
           schema:
             type: string
+        "400":
+          description: Invalid input data (missing key ID)
+          schema:
+            $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
           schema:
@@ -2993,7 +3032,11 @@ paths:
       description: |-
         Returns whether the organization at the given address is enabled as an integrator,
         along with its effective managed-resource limits and current usage. The caller must
-        be an admin or manager of the organization.
+        be an admin or manager of the organization. When the organization is not an integrator,
+        `enabled` is false and `limits` is omitted (usage counters are still returned).
+        A 0 in any limit field means unlimited for that dimension.
+
+        Also callable with a scoped API key (scope: `quota:read`).
       parameters:
       - description: Integrator organization address
         in: path
@@ -3085,6 +3128,8 @@ paths:
       description: |-
         Returns a paginated list of organizations managed by the integrator at the given
         address. The caller must be an admin or manager of the integrator organization.
+
+        Also callable with a scoped API key (scope: `managed:read`).
       parameters:
       - description: Integrator organization address
         in: path
@@ -3130,7 +3175,11 @@ paths:
         Create a new organization managed by the integrator at the given address. The
         caller must be an admin of the integrator organization, which must be enabled as
         an integrator and within its managed-organizations quota. The managed org's on-chain
-        account is always provisioned eagerly.
+        account is always provisioned eagerly. The optional `ownerEmail` designates the managed
+        org's owner/admin (defaults to the calling user); the per-user MaxOrgsPerUser cap is
+        bypassed for managed orgs.
+
+        Also callable with a scoped API key (scope: `managed:write`).
       parameters:
       - description: Integrator organization address
         in: path
@@ -4180,9 +4229,18 @@ paths:
     post:
       consumes:
       - application/json
-      description: Create a new voting process. Requires Manager/Admin role.
+      description: |-
+        Create a new voting process (draft). Requires Manager/Admin role of the owning organization. The
+        request must reference the organization via either a `censusId` or an explicit `orgAddress`.
+        Creating a draft consumes the plan's draft permission.
+
+        The optional `electionParams` field carries the on-chain election definition (questions, dates,
+        vote/election types) used later to publish the draft on chain via POST /process/{processId}/publish.
+        It is additive: omitting it keeps the legacy draft behavior.
+
+        Also callable with a scoped API key (scope: `voting:write`).
       parameters:
-      - description: Process creation information
+      - description: Process creation information (optionally with electionParams)
         in: body
         name: request
         required: true
@@ -4192,7 +4250,7 @@ paths:
       - application/json
       responses:
         "200":
-          description: Process ID
+          description: Draft process ID (Mongo ObjectID)
           schema:
             type: string
         "400":
@@ -4201,6 +4259,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Plan does not allow creating more drafts
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
@@ -4295,19 +4357,23 @@ paths:
     put:
       consumes:
       - application/json
-      description: Update an existing voting process. Requires Manager/Admin role.
+      description: |-
+        Update an existing draft voting process. Requires Manager/Admin role of the owning organization.
+        Only drafts that have not yet been published on chain can be updated; updating a published process
+        returns a 409. The optional `electionParams` field can be set or replaced here (additive), same as on
+        create.
       parameters:
-      - description: Process ID
+      - description: Draft process ID (Mongo ObjectID)
         in: path
         name: processId
         required: true
         type: string
-      - description: Process update information
+      - description: Process update information (optionally with electionParams)
         in: body
         name: request
         required: true
         schema:
-          $ref: '#/definitions/apicommon.CreateProcessRequest'
+          $ref: '#/definitions/apicommon.UpdateProcessRequest'
       produces:
       - application/json
       responses:
@@ -4325,6 +4391,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "404":
           description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Process already published and not in draft mode
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -4382,7 +4452,10 @@ paths:
         confirms it on a background worker; the call returns 202 with a job id. Poll GET
         /jobs/{jobId} for the resulting on-chain id. Requires Admin role. Idempotent: if
         the draft is already published its on-chain id is returned with 200 without sending
-        a new transaction.
+        a new transaction. Publishing under a managed organization additionally enforces the
+        integrator's per-org and aggregate election/census quotas.
+
+        Also callable with a scoped API key (scope: `voting:write`).
       parameters:
       - description: Draft process ID
         in: path
@@ -4519,6 +4592,8 @@ paths:
         organization signer synchronously, then submits and confirms it on a background
         worker; the call returns 202 with a job id. Poll GET /jobs/{jobId} for the result.
         Requires Manager/Admin role of the organization that owns the process.
+
+        Also callable with a scoped API key (scope: `voting:write`).
       parameters:
       - description: On-chain process id (hex)
         in: path
@@ -5694,7 +5769,10 @@ schemes:
 - https
 securityDefinitions:
   BearerAuth:
-    description: Type "Bearer" followed by a space and the JWT token.
+    description: |-
+      Type "Bearer" followed by a space and either a JWT (user session) or a
+      scoped API key (prefixed "vsk_"). API keys are accepted only on endpoints
+      that opt into key auth, and only when the key carries the required scope.
     in: header
     name: Authorization
     type: apiKey
