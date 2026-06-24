@@ -2117,8 +2117,11 @@ paths:
     post:
       consumes:
       - application/json
-      description: Create a new census for an organization. Requires Manager/Admin
-        role.
+      description: |-
+        Create a new census for an organization. Requires Manager/Admin role. Members are
+        added later (see POST /census/{id}); this only creates the empty census.
+
+        Also callable with a scoped API key (scope: `voting:write`).
       parameters:
       - description: Census information
         in: body
@@ -2188,10 +2191,13 @@ paths:
       consumes:
       - application/json
       description: |-
-        Add existing organization members to a census by member ID (synchronous).
-        Members already in the census are skipped.
-        Returns number of participants added plus per-member errors in the response `errors` field.
-        Requires Manager/Admin role.
+        Add existing organization members to a census by member ID (synchronous). Members
+        already in the census are skipped. Returns the number of participants added plus
+        per-member errors in the response `errors` field. An empty member ID list is a no-op
+        that returns added=0. Requires Manager/Admin role and is subject to the plan's census
+        quota.
+
+        Also callable with a scoped API key (scope: `voting:write`).
       parameters:
       - description: Census ID
         in: path
@@ -2212,11 +2218,15 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.AddMembersResponse'
         "400":
-          description: Invalid input data
+          description: Invalid input data or census not found
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Plan census quota exceeded
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
@@ -2237,8 +2247,13 @@ paths:
       consumes:
       - application/json
       description: |-
-        Publish a census based on a specific organization members group for voting. Requires Manager/Admin role.
-        Returns published census with credentials.
+        Publish a census populated from a specific organization members group, applying the
+        auth/2FA/weighted settings in the body. The CSP public key becomes the census root.
+        Requires Manager/Admin role and is subject to the plan's census quota. Idempotent: an
+        already-published census is returned as-is. Returns the published census URI, root and
+        the number of members inserted.
+
+        Also callable with a scoped API key (scope: `voting:write`).
       parameters:
       - description: Census ID
         in: path
@@ -2247,7 +2262,7 @@ paths:
         type: string
       - description: Group ID
         in: path
-        name: groupId
+        name: groupid
         required: true
         type: string
       - description: Census authentication configuration
@@ -2271,8 +2286,12 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
+        "403":
+          description: Plan census quota exceeded
+          schema:
+            $ref: '#/definitions/errors.Error'
         "404":
-          description: Census not found
+          description: Census not found or unsupported (non-CSP) census type
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -2328,8 +2347,12 @@ paths:
     post:
       consumes:
       - application/json
-      description: Publish a census for voting. Requires Manager/Admin role. Returns
-        published census with credentials.
+      description: |-
+        Publish a census for voting (the CSP public key becomes the census root). Requires
+        Manager/Admin role. Returns the published census URI and root. Idempotent: a census
+        that is already published is returned as-is without re-publishing.
+
+        Also callable with a scoped API key (scope: `voting:write`).
       parameters:
       - description: Census ID
         in: path
@@ -2352,7 +2375,7 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
-          description: Census not found
+          description: Census not found or unsupported census type
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -2748,7 +2771,9 @@ paths:
       description: |-
         Get the list of groups and their info of the organization
         Does not return the members of the groups, only the groups themselves.
-        Needs admin or manager role
+        Needs admin or manager role.
+
+        Also callable with a scoped API key (scope: `members:write`).
       parameters:
       - description: Organization address
         in: path
@@ -2771,15 +2796,11 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.OrganizationMemberGroupsResponse'
         "400":
-          description: Invalid input data
+          description: Invalid input data, or organization not found
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization not found
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -2795,8 +2816,10 @@ paths:
       consumes:
       - application/json
       description: |-
-        Create an organization member group with the given members or all members
-        Needs admin or manager role
+        Create an organization member group with the given members, or with all members when
+        `includeAllMembers` is set. Needs admin or manager role.
+
+        Also callable with a scoped API key (scope: `members:write`).
       parameters:
       - description: Organization address
         in: path
@@ -2817,15 +2840,11 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.OrganizationMemberGroupInfo'
         "400":
-          description: Invalid input data
+          description: Invalid input data, or organization not found
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization not found
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -2841,7 +2860,11 @@ paths:
     delete:
       consumes:
       - application/json
-      description: Delete an organization member group by its ID
+      description: |-
+        Delete an organization member group by its ID. Needs admin or manager role. The
+        auto-generated "All members" group cannot be deleted.
+
+        Also callable with a scoped API key (scope: `members:write`).
       parameters:
       - description: Organization address
         in: path
@@ -2861,15 +2884,15 @@ paths:
           schema:
             type: string
         "400":
-          description: Invalid input data
+          description: Invalid input data, or organization/group not found
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization or group not found
+        "403":
+          description: Auto-generated group cannot be deleted
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -2886,7 +2909,9 @@ paths:
       - application/json
       description: |-
         Get the information of an organization member group by its ID
-        Needs admin or manager role
+        Needs admin or manager role.
+
+        Also callable with a scoped API key (scope: `members:write`).
       parameters:
       - description: Organization address
         in: path
@@ -2906,15 +2931,11 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.OrganizationMemberGroupInfo'
         "400":
-          description: Invalid input data
+          description: Invalid input data, or organization/group not found
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization or group not found
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -2930,8 +2951,11 @@ paths:
       consumes:
       - application/json
       description: |-
-        Update an organization member group changing the info, and adding or removing members
-        Needs admin or manager role
+        Update an organization member group changing the info, and adding or removing members.
+        Needs admin or manager role. The auto-generated "All members" group cannot have its
+        membership modified.
+
+        Also callable with a scoped API key (scope: `members:write`).
       parameters:
       - description: Organization address
         in: path
@@ -2957,15 +2981,15 @@ paths:
           schema:
             type: string
         "400":
-          description: Invalid input data
+          description: Invalid input data, or organization/group not found
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization or group not found
+        "403":
+          description: Auto-generated group membership cannot be modified
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -2982,8 +3006,10 @@ paths:
       consumes:
       - application/json
       description: |-
-        Get the list of members with details of an organization member group
-        Needs admin or manager role
+        Get the paginated list of members with details of an organization member group.
+        Needs admin or manager role.
+
+        Also callable with a scoped API key (scope: `members:write`).
       parameters:
       - description: Organization address
         in: path
@@ -3011,15 +3037,11 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.ListOrganizationMemberGroupResponse'
         "400":
-          description: Invalid input data
+          description: Invalid input data, or organization/group not found
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization or group not found
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -3035,8 +3057,12 @@ paths:
     post:
       consumes:
       - application/json
-      description: Checks the AuthFields for duplicates or empty fields and the TwoFaFields
-        for empty ones.
+      description: |-
+        Checks the AuthFields for duplicates or empty fields and the TwoFaFields for empty ones.
+        On failure the offending member IDs are returned in the error `data`. Needs admin or
+        manager role.
+
+        Also callable with a scoped API key (scope: `members:write`).
       parameters:
       - description: Organization address
         in: path
@@ -3062,15 +3088,12 @@ paths:
           schema:
             type: string
         "400":
-          description: Invalid input data
+          description: Invalid input data, duplicate/missing fields, or organization/group
+            not found
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization or group not found
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -3279,12 +3302,15 @@ paths:
       summary: Create a managed organization under an integrator
       tags:
       - organizations
-  /organizations/{address}/member:
+  /organizations/{address}/members:
     delete:
       consumes:
       - application/json
-      description: Delete multiple members from an organization or all members. Requires
-        Manager/Admin role.
+      description: |-
+        Delete specific members (by ID) or all members of an organization. Requires Manager/Admin
+        role. An empty ID list (without the `all` flag) is a no-op that returns count=0.
+
+        Also callable with a scoped API key (scope: `members:write`).
       parameters:
       - description: Organization address
         in: path
@@ -3321,11 +3347,13 @@ paths:
       summary: Delete organization members
       tags:
       - organizations
-  /organizations/{address}/members:
     get:
       consumes:
       - application/json
-      description: Retrieve all members of an organization with pagination support
+      description: |-
+        Retrieve all members of an organization with pagination support. Requires Manager/Admin role.
+
+        Also callable with a scoped API key (scope: `members:write`).
       parameters:
       - description: Organization address
         in: path
@@ -3371,8 +3399,13 @@ paths:
     post:
       consumes:
       - application/json
-      description: Add multiple members to an organization. Requires Manager/Admin
-        role.
+      description: |-
+        Add multiple members to an organization. Requires Manager/Admin role and is subject to the
+        plan's member quota. With `async=true` the import runs in the background and the response
+        carries a `jobId` to poll via GET /organizations/{address}/members/job/{jobid}; otherwise it
+        completes synchronously. An empty members list is a no-op that returns added=0.
+
+        Also callable with a scoped API key (scope: `members:write`).
       parameters:
       - description: Organization address
         in: path
@@ -3393,7 +3426,7 @@ paths:
       - application/json
       responses:
         "200":
-          description: OK
+          description: Added count (sync) or jobId (async)
           schema:
             $ref: '#/definitions/apicommon.AddMembersResponse'
         "400":
@@ -3402,6 +3435,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Plan member quota exceeded
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -3419,6 +3456,8 @@ paths:
       description: |-
         Create or update an organization member. Requires Manager/Admin role.
         Automatically updates census participant hashes when member data changes.
+
+        Also callable with a scoped API key (scope: `members:write`).
       parameters:
       - description: Organization address
         in: path
@@ -3462,6 +3501,8 @@ paths:
       description: |-
         Check the progress of a job to add members to an organization. Returns the progress of the job.
         If the job is completed, the job is deleted after 60 seconds.
+
+        Also callable with a scoped API key (scope: `members:write`).
       parameters:
       - description: Organization address
         in: path
@@ -3490,6 +3531,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "404":
           description: Job not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -4713,9 +4758,11 @@ paths:
       consumes:
       - application/json
       description: |-
-        Create a new process bundle with the specified census and optional list of processes. Requires
-        Manager/Admin role for the organization that owns the census. The census root will be the same as the
-        account's public key.
+        Create a new process bundle linking a census to an optional list of on-chain processes,
+        used by the CSP voter flow. Requires Manager/Admin role for the organization that owns
+        the census. The census root is the CSP (account) public key.
+
+        Also callable with a scoped API key (scope: `voting:write`).
       parameters:
       - description: Process bundle creation information
         in: body
@@ -4731,15 +4778,11 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.CreateProcessBundleResponse'
         "400":
-          description: Invalid input data
+          description: Invalid input data, or census/organization not found
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Census not found
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -4790,8 +4833,11 @@ paths:
       consumes:
       - application/json
       description: |-
-        Add additional processes to an existing bundle. Requires Manager/Admin role for the organization
-        that owns the bundle.
+        Add additional on-chain processes to an existing bundle. Requires Manager/Admin role for
+        the organization that owns the bundle. An empty process list is a no-op that returns the
+        bundle's current root.
+
+        Also callable with a scoped API key (scope: `voting:write`).
       parameters:
       - description: Bundle ID
         in: path
@@ -4812,15 +4858,11 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.CreateProcessBundleResponse'
         "400":
-          description: Invalid input data
+          description: Invalid input data, or bundle not found
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Bundle or census not found
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
