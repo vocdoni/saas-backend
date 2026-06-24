@@ -310,7 +310,16 @@ func pingAPI(endpoint string, retries int) error {
 // starts the API server and waits for it to start before running the tests.
 func TestMain(m *testing.M) {
 	log.Init("debug", "stdout", nil)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	// This context is the lifetime of the whole package test run: it is handed to
+	// the API server (api.New) and therefore becomes the notify queue's context,
+	// on which the delivery workers live. It must outlast m.Run() — a fixed
+	// deadline here would cancel the queue mid-suite once the package runtime
+	// crosses it, after which every synchronous mail delivery (registration,
+	// password reset, CSP OTP) silently times out and the handler returns 500.
+	// The suite already grew past the previous 5-minute bound on CI. Use a plain
+	// cancelable context (torn down by the defer below) and let the CI-level
+	// `go test -timeout` be the backstop against a genuinely hung run.
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	// start a MongoDB container for testing
 	dbContainer, err := test.StartMongoContainer(ctx)
