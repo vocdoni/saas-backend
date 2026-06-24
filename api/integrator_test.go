@@ -20,13 +20,13 @@ func TestIntegratorManagedOrgs(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "integratorpass123")
 	integratorAddr := testCreateOrganization(t, token)
-	plainAddr := testCreateOrganization(t, token) // a normal org owned by the same user
 
-	// rejection: a non-integrator org cannot create managed orgs
+	// rejection: a user with no integrator org cannot create managed orgs. The integrator org is
+	// resolved from the session (path-less), and integratorAddr is not an integrator yet here.
 	body := &apicommon.CreateManagedOrganizationRequest{
 		OrganizationInfo: apicommon.OrganizationInfo{Type: string(db.CompanyType), Website: "https://managed.example"},
 	}
-	_, code := testRequest(t, http.MethodPost, token, body, "organizations", plainAddr.String(), "managed")
+	_, code := testRequest(t, http.MethodPost, token, body, "integrator", "organizations")
 	c.Assert(code, qt.Equals, http.StatusForbidden) // ErrNotAnIntegrator
 
 	// enable integrator with an override (override beats plan):
@@ -50,7 +50,7 @@ func TestIntegratorManagedOrgs(t *testing.T) {
 			},
 		}
 		created := requestAndParse[apicommon.OrganizationInfo](
-			t, http.MethodPost, token, reqBody, "organizations", integratorAddr.String(), "managed",
+			t, http.MethodPost, token, reqBody, "integrator", "organizations",
 		)
 		c.Assert(created.Address, qt.Not(qt.Equals), common.Address{})
 		if i == 0 {
@@ -62,12 +62,12 @@ func TestIntegratorManagedOrgs(t *testing.T) {
 		&apicommon.CreateManagedOrganizationRequest{
 			OrganizationInfo: apicommon.OrganizationInfo{Type: string(db.CompanyType), Website: "https://managed-3.example"},
 		},
-		"organizations", integratorAddr.String(), "managed")
+		"integrator", "organizations")
 	c.Assert(code, qt.Equals, http.StatusBadRequest) // ErrMaxManagedOrgsReached
 
 	// integrator info reflects usage + limits
 	info := requestAndParse[apicommon.IntegratorInfoResponse](
-		t, http.MethodGet, token, nil, "organizations", integratorAddr.String(), "integrator",
+		t, http.MethodGet, token, nil, "integrator",
 	)
 	c.Assert(info.Enabled, qt.IsTrue)
 	c.Assert(info.Limits.MaxManagedOrgs, qt.Equals, 2)
@@ -75,7 +75,7 @@ func TestIntegratorManagedOrgs(t *testing.T) {
 
 	// managed list returns the two orgs
 	list := requestAndParse[apicommon.ListManagedOrganizations](
-		t, http.MethodGet, token, nil, "organizations", integratorAddr.String(), "managed",
+		t, http.MethodGet, token, nil, "integrator", "organizations",
 	)
 	c.Assert(list.Organizations, qt.HasLen, 2)
 

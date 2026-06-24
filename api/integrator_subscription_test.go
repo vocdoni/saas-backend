@@ -57,7 +57,8 @@ func TestIntegratorPlanSubscription(t *testing.T) {
 
 	// Integrator info: enabled, and the limits are exactly the plan's.
 	info := requestAndParse[apicommon.IntegratorInfoResponse](
-		t, http.MethodGet, token, nil, "organizations", integratorAddr.String(), "integrator")
+		t, http.MethodGet, token, nil, "integrator",
+	)
 	c.Assert(info.Enabled, qt.IsTrue)
 	c.Assert(info.Limits, qt.Not(qt.IsNil))
 	c.Assert(info.Limits.MaxManagedOrgs, qt.Equals, maxManagedOrgs)
@@ -74,7 +75,8 @@ func TestIntegratorPlanSubscription(t *testing.T) {
 					Website: fmt.Sprintf("https://managed-plan-%d.example", i),
 				},
 			},
-			"organizations", integratorAddr.String(), "managed")
+			"integrator", "organizations",
+		)
 		c.Assert(created.Address, qt.Not(qt.Equals), common.Address{})
 		managed = append(managed, created.Address)
 	}
@@ -87,15 +89,17 @@ func TestIntegratorPlanSubscription(t *testing.T) {
 				Website: "https://managed-plan-over.example",
 			},
 		},
-		"organizations", integratorAddr.String(), "managed")
+		"integrator", "organizations")
 	c.Assert(code, qt.Equals, http.StatusBadRequest) // ErrMaxManagedOrgsReached
 
 	// Usage and the managed list both reflect the created orgs.
 	info = requestAndParse[apicommon.IntegratorInfoResponse](
-		t, http.MethodGet, token, nil, "organizations", integratorAddr.String(), "integrator")
+		t, http.MethodGet, token, nil, "integrator",
+	)
 	c.Assert(info.Usage.ManagedOrgs, qt.Equals, maxManagedOrgs)
 	list := requestAndParse[apicommon.ListManagedOrganizations](
-		t, http.MethodGet, token, nil, "organizations", integratorAddr.String(), "managed")
+		t, http.MethodGet, token, nil, "integrator", "organizations",
+	)
 	c.Assert(list.Organizations, qt.HasLen, maxManagedOrgs)
 
 	// Each managed org is linked to the integrator and auto-subscribed to the
