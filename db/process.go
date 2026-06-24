@@ -221,6 +221,37 @@ func (ms *MongoStorage) CountProcesses(orgAddress common.Address, draft DraftFil
 	return ms.processes.CountDocuments(ctx, filter)
 }
 
+// AllProcessesByOrg returns every process owned by the given organization without pagination,
+// filtered by the draft filter. It is used where the caller must inspect the full set (e.g. the
+// managed-org teardown guard, which must check every published election for an active status
+// rather than only the first page).
+func (ms *MongoStorage) AllProcessesByOrg(orgAddress common.Address, draft DraftFilter) ([]Process, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return nil, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	filter := bson.M{"orgAddress": orgAddress}
+	switch draft {
+	case DraftOnly:
+		filter["address"] = bson.M{"$eq": nil}
+	case PublishedOnly:
+		filter["address"] = bson.M{"$ne": nil}
+	default:
+		// no filter
+	}
+	cursor, err := ms.processes.Find(ctx, filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch processes by org: %w", err)
+	}
+	defer func() { _ = cursor.Close(ctx) }()
+	var out []Process
+	if err := cursor.All(ctx, &out); err != nil {
+		return nil, fmt.Errorf("failed to decode processes: %w", err)
+	}
+	return out, nil
+}
+
 // DeleteProcessesByOrg removes every process (drafts and published DB rows) owned by the
 // given organization. On-chain elections are immutable on the Vochain and are not affected.
 // Returns the number of deleted process documents.
