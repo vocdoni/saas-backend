@@ -48,7 +48,7 @@ func TestDeleteManagedOrg(t *testing.T) {
 	c.Assert(managed.Address, qt.Not(qt.Equals), common.Address{})
 
 	// seed some memberbase + a census on the managed org so the cascade has something to remove
-	addMembersToManagedOrg(t, token, managed.Address)
+	addMembersToManagedOrg(t, managed.Address)
 	censusID := createManagedOrgCensus(t, token, managed.Address)
 
 	// (A) non-admin is rejected: a second user with no role on the integrator tries to delete.
@@ -175,19 +175,21 @@ func seedDraftForManagedOrg(t *testing.T, orgAddress common.Address) primitive.O
 	return draftID
 }
 
-// addMembersToManagedOrg uploads a couple of members to the managed org so the cascade removes them.
-func addMembersToManagedOrg(t *testing.T, token string, orgAddress common.Address) {
+// addMembersToManagedOrg seeds members directly into the managed org's memberbase via the DB
+// layer (bypassing the API path, which would send import-completion emails and slow the test
+// down under CI load). The teardown must still remove them.
+func addMembersToManagedOrg(t *testing.T, orgAddress common.Address) {
 	t.Helper()
-	body := &apicommon.AddMembersRequest{
-		Members: []apicommon.OrgMember{
-			{Email: "m1@delete.example", Name: "M1"},
-			{Email: "m2@delete.example", Name: "M2"},
-		},
+	c := qt.New(t)
+	for _, suffix := range []string{"m1", "m2"} {
+		_, err := testDB.SetOrgMember("test_salt", &db.OrgMember{
+			OrgAddress:   orgAddress,
+			MemberNumber: suffix,
+			Email:        suffix + "@delete.example",
+			Name:         suffix,
+		})
+		c.Assert(err, qt.IsNil)
 	}
-	resp := requestAndParse[apicommon.AddMembersResponse](
-		t, http.MethodPost, token, body, "organizations", orgAddress.String(), "members",
-	)
-	qt.Assert(t, resp.Added > 0, qt.IsTrue)
 }
 
 // createManagedOrgCensus creates an empty census owned by the managed org and returns its hex id.
