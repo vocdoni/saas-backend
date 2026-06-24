@@ -56,8 +56,10 @@ func (a *API) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// API keys are an integrator capability: only integrator organizations may mint them.
-	// A managed or plain org admin is rejected even though they are an admin, because the
-	// API-key scope set (quota/managed/voting/members) is integrator-oriented.
+	// An admin of any org that is not integrator-enabled is rejected here, even though they
+	// are an admin, because the API-key scope set (quota/managed/voting/members) is
+	// integrator-oriented. Integrator status is determined by subscriptions.IsIntegrator,
+	// which accounts for per-org IntegratorLimits overrides and the active plan's limits.
 	org, err := a.db.Organization(orgAddr)
 	if err != nil {
 		if err == db.ErrNotFound {
