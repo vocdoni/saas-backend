@@ -525,6 +525,12 @@ type ListManagedOrganizations struct {
 	Organizations []*OrganizationInfo `json:"organizations"`
 }
 
+// DeleteManagedOrganizationResponse is returned by DELETE
+// /organizations/{address}/managed/{orgAddress} confirming the deleted address.
+type DeleteManagedOrganizationResponse struct {
+	Address string `json:"address"`
+}
+
 // IntegratorUsage holds an integrator's current managed-resource usage counters.
 type IntegratorUsage struct {
 	ManagedOrgs       int `json:"managedOrgs"`

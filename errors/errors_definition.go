@@ -105,6 +105,7 @@ var (
 	ErrInsufficientAPIKeyScope                = Error{Code: 40158, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("API key lacks the required scope"), LogLevel: "info"}
 	ErrInvalidAPIKeyScope                     = Error{Code: 40159, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("invalid API key scope")}
 	ErrAPIKeyNotFound                         = Error{Code: 40160, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("API key not found")}
+	ErrManagedOrgHasActiveElections           = Error{Code: 40161, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("managed organization has active elections and cannot be deleted")}
 
 	// CSP errors (408)
 	ErrZeroWeightVoter = Error{Code: 40801, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("voter weight cannot be zero")}

@@ -220,3 +220,21 @@ func (ms *MongoStorage) CountProcesses(orgAddress common.Address, draft DraftFil
 	// Count total documents
 	return ms.processes.CountDocuments(ctx, filter)
 }
+
+// DeleteProcessesByOrg removes every process (drafts and published DB rows) owned by the
+// given organization. On-chain elections are immutable on the Vochain and are not affected.
+// Returns the number of deleted process documents.
+func (ms *MongoStorage) DeleteProcessesByOrg(orgAddress common.Address) (int64, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return 0, ErrInvalidData
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.processes.DeleteMany(ctx, bson.M{"orgAddress": orgAddress})
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete processes by org: %w", err)
+	}
+	return res.DeletedCount, nil
+}

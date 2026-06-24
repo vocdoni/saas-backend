@@ -7,10 +7,12 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -323,4 +325,204 @@ func (a *API) integratorInfoHandler(w http.ResponseWriter, r *http.Request) {
 		resp.Limits = &limits
 	}
 	apicommon.HTTPWriteJSON(w, resp)
+}
+
+// deleteManagedOrganizationHandler godoc
+//
+//	@Summary		Delete a managed organization and all its data
+//	@Description	Delete the managed organization at {orgAddress} together with every piece of data
+//	@Description	tied to it (memberbase, censuses + participants, processes, bundles, CSP tokens,
+//	@Description	jobs, pending invites), and unlink it from its members. The caller must be an admin
+//	@Description	of their integrator organization (resolved from the API key's org or the user session
+//	@Description	— no address in the URL), and the target must be managed by it. The integrator's usage
+//	@Description	counters are rolled back accordingly.
+//	@Description
+//	@Description	Deletion is blocked with 409 when any of the managed org's published elections is
+//	@Description	still active on-chain (READY/PAUSED); end them (or wait for them to end) first.
+//	@Description	The on-chain organization account and any published elections/censuses are immutable
+//	@Description	on the Vochain and are not affected — only DB-side data is removed.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `managed:write`).
+//	@Tags			organizations
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			orgAddress	path		string	true	"Managed organization address to delete"
+//	@Success		200			{object}	apicommon.DeleteManagedOrganizationResponse
+//	@Failure		400			{object}	errors.Error	"Invalid address"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		403			{object}	errors.Error	"Not an integrator / not managed by this integrator"
+//	@Failure		404			{object}	errors.Error	"Managed organization not found"
+//	@Failure		409			{object}	errors.Error	"Managed organization has active elections"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/integrator/organizations/{orgAddress} [delete]
+func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	integratorAddr, ok := a.integratorAddress(w, r)
+	if !ok {
+		return
+	}
+	if !user.HasRoleFor(integratorAddr, db.AdminRole) {
+		errors.ErrUnauthorized.Withf("user is not admin of the integrator organization").Write(w)
+		return
+	}
+	// parse + validate the managed org address from the path
+	managedAddrRaw := chi.URLParam(r, "orgAddress")
+	if !common.IsHexAddress(managedAddrRaw) {
+		errors.ErrMalformedURLParam.With("invalid managed organization address").Write(w)
+		return
+	}
+	managedAddr := common.HexToAddress(managedAddrRaw)
+
+	managed, err := a.db.Organization(managedAddr)
+	if err != nil {
+		if err == db.ErrNotFound {
+			errors.ErrOrganizationNotFound.Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	// the org must actually be managed by the integrator at {address}. Use a 404 (not 403) so a
+	// caller cannot probe which addresses are managed by other integrators.
+	if managed.ManagedBy.Cmp(integratorAddr) != 0 {
+		errors.ErrOrganizationNotFound.Write(w)
+		return
+	}
+
+	// Active-election guard + usage capture: fetch the managed org's published processes once.
+	// The guard blocks deletion while any published election is READY or PAUSED on-chain (a lookup
+	// error fails closed so we never orphan a live election). The same list feeds the integrator
+	// ManagedProcesses rollback below.
+	_, published, err := a.db.ListProcesses(managedAddr, 1, 10000, db.PublishedOnly)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	for _, p := range published {
+		if p.Address.Equals(nil) {
+			continue
+		}
+		election, err := a.account.Election(p.Address.Bytes())
+		if err != nil {
+			errors.ErrVochainRequestFailed.WithErr(err).Write(w)
+			return
+		}
+		if election.Status == "READY" || election.Status == "PAUSED" {
+			errors.ErrManagedOrgHasActiveElections.Write(w)
+			return
+		}
+	}
+
+	// capture usage to roll back the integrator counters after deletion. The integrator's
+	// ManagedProcesses counter is bumped on publish only for non-test-sized elections
+	// (ElectionParams.MaxCensusSize > db.TestMaxCensusSize), so the rollback delta must mirror
+	// that rule to avoid going negative. ManagedCensusSize rolls back by the summed census Size.
+	censuses, err := a.db.CensusesByOrg(managedAddr)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	var censusSum int64
+	for _, c := range censuses {
+		censusSum += c.Size
+	}
+	var nonTestPublishedCount int64
+	for _, p := range published {
+		if p.ElectionParams != nil && p.ElectionParams.MaxCensusSize > uint64(db.TestMaxCensusSize) {
+			nonTestPublishedCount++
+		}
+	}
+
+	// cascade: each step is best-effort. Failures are logged but do not abort the teardown, so a
+	// single stuck collection can't leave the org half-deleted. The org doc itself is deleted last.
+	bundles, err := a.db.ProcessBundlesByOrg(managedAddr)
+	if err != nil {
+		log.Warnw("could not list bundles for managed org teardown",
+			"org", managedAddr.Hex(), "error", err)
+	}
+	for _, b := range bundles {
+		// match the encoding used by csp/handlers parseBundleID (hex-decoded ObjectID bytes).
+		bundleID := new(internal.HexBytes)
+		if err := bundleID.ParseString(b.ID.Hex()); err != nil {
+			log.Warnw("could not encode bundle id for CSP cleanup",
+				"org", managedAddr.Hex(), "bundle", b.ID.Hex(), "error", err)
+			continue
+		}
+		if _, err := a.db.DeleteCSPAuthByBundle(*bundleID); err != nil {
+			log.Warnw("could not delete CSP auth tokens for bundle",
+				"org", managedAddr.Hex(), "bundle", b.ID.Hex(), "error", err)
+		}
+	}
+	for _, p := range published {
+		if p.Address.Equals(nil) {
+			continue
+		}
+		if _, err := a.db.DeleteCSPProcessByProcess(p.Address); err != nil {
+			log.Warnw("could not delete CSP process status",
+				"org", managedAddr.Hex(), "process", p.Address.String(), "error", err)
+		}
+	}
+	if _, err := a.db.DeleteProcessBundlesByOrg(managedAddr); err != nil {
+		log.Warnw("could not delete process bundles", "org", managedAddr.Hex(), "error", err)
+	}
+	for _, c := range censuses {
+		if _, err := a.db.DeleteCensusParticipantsByCensus(c.ID.Hex()); err != nil {
+			log.Warnw("could not delete census participants",
+				"org", managedAddr.Hex(), "census", c.ID.Hex(), "error", err)
+		}
+		if err := a.db.DelCensus(c.ID.Hex()); err != nil {
+			log.Warnw("could not delete census", "org", managedAddr.Hex(), "census", c.ID.Hex(), "error", err)
+		}
+	}
+	if _, err := a.db.DeleteProcessesByOrg(managedAddr); err != nil {
+		log.Warnw("could not delete processes", "org", managedAddr.Hex(), "error", err)
+	}
+	if _, err := a.db.DeleteAllOrgMemberGroups(managedAddr); err != nil {
+		log.Warnw("could not delete org member groups", "org", managedAddr.Hex(), "error", err)
+	}
+	if _, err := a.db.DeleteAllOrgMembers(managedAddr); err != nil {
+		log.Warnw("could not delete org members", "org", managedAddr.Hex(), "error", err)
+	}
+	if _, err := a.db.DeleteJobsByOrg(managedAddr); err != nil {
+		log.Warnw("could not delete jobs", "org", managedAddr.Hex(), "error", err)
+	}
+	if _, err := a.db.DeleteInvitationsByOrg(managedAddr); err != nil {
+		log.Warnw("could not delete invitations", "org", managedAddr.Hex(), "error", err)
+	}
+	if err := a.db.RemoveOrganizationFromAllUsers(managedAddr); err != nil {
+		log.Warnw("could not unlink organization from users", "org", managedAddr.Hex(), "error", err)
+	}
+	if err := a.db.DelOrganization(managed); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
+	// roll back the integrator's aggregate usage counters (best-effort). ManagedOrgs always -1;
+	// processes only by the number of published, non-test-sized elections the managed org owned
+	// (mirroring the publish-time bump rule); census only if the managed org consumed any.
+	if err := a.db.DecrementOrganizationManagedOrgsCounter(integratorAddr); err != nil {
+		log.Warnw("could not decrement managed orgs counter",
+			"integrator", integratorAddr.Hex(), "error", err)
+	}
+	if nonTestPublishedCount > 0 {
+		if err := a.db.AddOrganizationManagedProcesses(integratorAddr, -nonTestPublishedCount); err != nil {
+			log.Warnw("could not decrement managed processes counter",
+				"integrator", integratorAddr.Hex(), "delta", -nonTestPublishedCount, "error", err)
+		}
+	}
+	if censusSum > 0 {
+		if err := a.db.AddOrganizationManagedCensusSize(integratorAddr, -censusSum); err != nil {
+			log.Warnw("could not decrement managed census size counter",
+				"integrator", integratorAddr.Hex(), "delta", -censusSum, "error", err)
+		}
+	}
+
+	log.Infow("deleted managed organization",
+		"integrator", integratorAddr.Hex(), "org", managedAddr.Hex(),
+		"processes", nonTestPublishedCount, "censusSize", censusSum)
+	apicommon.HTTPWriteJSON(w, &apicommon.DeleteManagedOrganizationResponse{Address: managedAddr.Hex()})
 }

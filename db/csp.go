@@ -440,3 +440,39 @@ func (ms *MongoStorage) MembersWithUsedCSPProcess(
 	}
 	return result, nil
 }
+
+// DeleteCSPAuthByBundle removes every CSP authentication token tied to the given bundle.
+// It is a best-effort cleanup used when tearing down an organization (the bundle's
+// processes share a common census/auth flow). Returns the number of deleted tokens.
+func (ms *MongoStorage) DeleteCSPAuthByBundle(bundleID internal.HexBytes) (int64, error) {
+	if bundleID == nil {
+		return 0, ErrBadInputs
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.cspTokens.DeleteMany(ctx, bson.M{"bundleid": bundleID})
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete CSP auth tokens by bundle: %w", err)
+	}
+	return res.DeletedCount, nil
+}
+
+// DeleteCSPProcessByProcess removes every CSP process-status record tied to the given
+// on-chain process id. Best-effort cleanup used when tearing down an organization's
+// published processes. Returns the number of deleted status rows.
+func (ms *MongoStorage) DeleteCSPProcessByProcess(processID internal.HexBytes) (int64, error) {
+	if processID == nil {
+		return 0, ErrBadInputs
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.cspTokensStatus.DeleteMany(ctx, bson.M{"processid": processID})
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete CSP process status by process: %w", err)
+	}
+	return res.DeletedCount, nil
+}

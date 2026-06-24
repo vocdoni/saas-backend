@@ -185,3 +185,22 @@ func (ms *MongoStorage) DeleteInvitationByCode(invitationCode string) error {
 func (ms *MongoStorage) DeleteInvitationByEmail(email string) error {
 	return ms.deleteInvitationHelper(bson.M{"newUserEmail": email})
 }
+
+// DeleteInvitationsByOrg removes every pending invitation addressed to the given organization.
+// Unlike the single-invitation helpers above (which use DeleteOne), this deletes all matching
+// invitations. Best-effort cleanup used when tearing down an organization. Returns the number
+// of deleted invitations.
+func (ms *MongoStorage) DeleteInvitationsByOrg(orgAddress common.Address) (int64, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return 0, ErrInvalidData
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.organizationInvites.DeleteMany(ctx, bson.M{"organizationAddress": orgAddress})
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete invitations by org: %w", err)
+	}
+	return res.DeletedCount, nil
+}

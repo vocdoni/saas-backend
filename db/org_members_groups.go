@@ -588,3 +588,22 @@ func (ms *MongoStorage) deleteAutoMemberGroup(orgAddress common.Address) error {
 	_, err := ms.orgMemberGroups.DeleteOne(ctx, filter)
 	return err
 }
+
+// DeleteAllOrgMemberGroups removes every member group (manual + the auto "All members"
+// group) owned by the given organization. Best-effort cleanup used when tearing down an
+// organization; DeleteAllOrgMembers also drops the auto group, so the two may be called
+// in either order. Returns the number of deleted group documents.
+func (ms *MongoStorage) DeleteAllOrgMemberGroups(orgAddress common.Address) (int64, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return 0, ErrInvalidData
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.orgMemberGroups.DeleteMany(ctx, bson.M{"orgAddress": orgAddress})
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete org member groups: %w", err)
+	}
+	return res.DeletedCount, nil
+}
