@@ -49,7 +49,7 @@ func IsValidAPIKeyScope(s string) bool {
 // tickets, checkout, etc.) JWT-only. The patterns must match the constants used at registration
 // so they equal chi's RoutePattern().
 var apiKeyAllowlist = map[string]string{
-	// integrator
+	// integrator (path-less; the integrator org is resolved from the key)
 	"GET " + integratorEndpoint:            ScopeQuotaRead,
 	"GET " + managedOrganizationsEndpoint:  ScopeManagedRead,
 	"POST " + managedOrganizationsEndpoint: ScopeManagedWrite,

@@ -21,6 +21,17 @@ func UserFromContext(ctx context.Context) (*db.User, bool) {
 	return nil, false
 }
 
+// APIKeyFromContext retrieves the authenticating API key from the context, present only when the
+// request was authenticated with an API key (set by the authenticator middleware). The second
+// return value reports whether a key was present.
+func APIKeyFromContext(ctx context.Context) (*db.APIKey, bool) {
+	rawKey, ok := ctx.Value(APIKeyMetadataKey).(db.APIKey)
+	if ok {
+		return &rawKey, ok
+	}
+	return nil, false
+}
+
 // HTTPWriteJSON helper function allows to write a JSON response.
 func HTTPWriteJSON(w http.ResponseWriter, data any) {
 	w.Header().Set("Content-Type", "application/json")

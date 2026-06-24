@@ -2378,6 +2378,137 @@ paths:
       summary: Get service information
       tags:
       - health
+  /integrator:
+    get:
+      description: |-
+        Returns whether the caller's organization (resolved from the API key's org or the user
+        session — no address in the URL) is enabled as an integrator, along with its effective
+        managed-resource limits and current usage. The caller must be an admin or manager of the
+        organization. When the organization is not an integrator, `enabled` is false and `limits`
+        is omitted (usage counters are still returned). A 0 in any limit field means unlimited.
+
+        Also callable with a scoped API key (scope: `quota:read`).
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.IntegratorInfoResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get integrator quota and usage
+      tags:
+      - organizations
+  /integrator/organizations:
+    get:
+      description: |-
+        Returns a paginated list of organizations managed by the caller's integrator
+        organization (resolved from the API key's org or the user session — no address in the
+        URL). The caller must be an admin or manager of the integrator organization.
+
+        Also callable with a scoped API key (scope: `managed:read`).
+      parameters:
+      - description: 'Page number (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - description: 'Number of items per page (default: 10)'
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ListManagedOrganizations'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: List organizations managed by an integrator
+      tags:
+      - organizations
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Create a new organization managed by the caller's integrator organization. The
+        integrator is resolved from the authenticated principal (the API key's org, or the
+        user's organization for a session) — no address is passed in the URL. The caller must
+        be an admin of that integrator organization, which must be enabled as an integrator and
+        within its managed-organizations quota. The managed org's on-chain account is always
+        provisioned eagerly. The optional `ownerEmail` designates the managed org's owner/admin
+        (defaults to the calling user); the per-user MaxOrgsPerUser cap is bypassed for managed orgs.
+
+        Also callable with a scoped API key (scope: `managed:write`).
+      parameters:
+      - description: Managed organization information
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.CreateManagedOrganizationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.OrganizationInfo'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Not an integrator or quota reached
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Integrator organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Create a managed organization under an integrator
+      tags:
+      - organizations
   /jobs/{jobId}:
     get:
       description: |-
@@ -3091,50 +3222,6 @@ paths:
       summary: Validate organization group members data
       tags:
       - organizations
-  /organizations/{address}/integrator:
-    get:
-      description: |-
-        Returns whether the organization at the given address is enabled as an integrator,
-        along with its effective managed-resource limits and current usage. The caller must
-        be an admin or manager of the organization. When the organization is not an integrator,
-        `enabled` is false and `limits` is omitted (usage counters are still returned).
-        A 0 in any limit field means unlimited for that dimension.
-
-        Also callable with a scoped API key (scope: `quota:read`).
-      parameters:
-      - description: Integrator organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.IntegratorInfoResponse'
-        "400":
-          description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Get integrator quota and usage
-      tags:
-      - organizations
   /organizations/{address}/jobs:
     get:
       consumes:
@@ -3185,107 +3272,6 @@ paths:
       security:
       - BearerAuth: []
       summary: Get organization jobs
-      tags:
-      - organizations
-  /organizations/{address}/managed:
-    get:
-      description: |-
-        Returns a paginated list of organizations managed by the integrator at the given
-        address. The caller must be an admin or manager of the integrator organization.
-
-        Also callable with a scoped API key (scope: `managed:read`).
-      parameters:
-      - description: Integrator organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: 'Page number (default: 1)'
-        in: query
-        name: page
-        type: integer
-      - description: 'Number of items per page (default: 10)'
-        in: query
-        name: limit
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.ListManagedOrganizations'
-        "400":
-          description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: List organizations managed by an integrator
-      tags:
-      - organizations
-    post:
-      consumes:
-      - application/json
-      description: |-
-        Create a new organization managed by the integrator at the given address. The
-        caller must be an admin of the integrator organization, which must be enabled as
-        an integrator and within its managed-organizations quota. The managed org's on-chain
-        account is always provisioned eagerly. The optional `ownerEmail` designates the managed
-        org's owner/admin (defaults to the calling user); the per-user MaxOrgsPerUser cap is
-        bypassed for managed orgs.
-
-        Also callable with a scoped API key (scope: `managed:write`).
-      parameters:
-      - description: Integrator organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: Managed organization information
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/apicommon.CreateManagedOrganizationRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.OrganizationInfo'
-        "400":
-          description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "403":
-          description: Not an integrator or quota reached
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Integrator organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Create a managed organization under an integrator
       tags:
       - organizations
   /organizations/{address}/member:

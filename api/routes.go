@@ -109,10 +109,13 @@ const (
 	organizationJobsEndpoint = "/organizations/{address}/jobs"
 	// GET /organizations/{address}/processes to get the organization bundle processes
 	organizationBundlesEndpoint = "/organizations/{address}/processes"
-	// POST /organizations/{address}/managed to create a managed org; GET to list them (integrator)
-	managedOrganizationsEndpoint = "/organizations/{address}/managed"
-	// GET /organizations/{address}/integrator to get integrator quota and usage
-	integratorEndpoint = "/organizations/{address}/integrator"
+	// GET /integrator to get integrator quota and usage for the caller's own integrator org.
+	// Path-less: the integrator org is resolved from the API key (its org) or the user session.
+	integratorEndpoint = "/integrator"
+	// POST /integrator/organizations to create a managed org; GET to list them, for the caller's
+	// own integrator org. Path-less: the integrator is resolved from the API key or the user
+	// session, so no organization address is passed in the URL.
+	managedOrganizationsEndpoint = "/integrator/organizations"
 	// POST /organizations/{address}/apikeys to create an API key; GET to list them
 	organizationAPIKeysEndpoint = "/organizations/{address}/apikeys"
 	// DELETE /organizations/{address}/apikeys/{keyID} to revoke an API key

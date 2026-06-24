@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
@@ -41,17 +42,18 @@ func TestAPIKeysAPI(t *testing.T) {
 		"organizations", orgAddr.String(), "apikeys")
 	c.Assert(code, qt.Equals, http.StatusBadRequest)
 
-	// the key works on allowlisted endpoints within its scopes
-	_, code = testRequest(t, http.MethodGet, apiKey, nil, "organizations", orgAddr.String(), "integrator")
+	// the key works on allowlisted endpoints within its scopes (path-less: the integrator org is
+	// resolved from the key itself, no address in the URL)
+	_, code = testRequest(t, http.MethodGet, apiKey, nil, "integrator")
 	c.Assert(code, qt.Equals, http.StatusOK) // quota:read
-	_, code = testRequest(t, http.MethodGet, apiKey, nil, "organizations", orgAddr.String(), "managed")
+	_, code = testRequest(t, http.MethodGet, apiKey, nil, "integrator", "organizations")
 	c.Assert(code, qt.Equals, http.StatusOK) // managed:read
 
 	// missing scope → 403 (key lacks managed:write)
 	mbody := &apicommon.CreateManagedOrganizationRequest{
 		OrganizationInfo: apicommon.OrganizationInfo{Type: string(db.CompanyType)},
 	}
-	_, code = testRequest(t, http.MethodPost, apiKey, mbody, "organizations", orgAddr.String(), "managed")
+	_, code = testRequest(t, http.MethodPost, apiKey, mbody, "integrator", "organizations")
 	c.Assert(code, qt.Equals, http.StatusForbidden)
 
 	// non-allowlisted endpoint → 403 (API keys can't manage API keys)
@@ -72,8 +74,52 @@ func TestAPIKeysAPI(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK)
 
 	// the revoked key no longer authenticates
-	_, code = testRequest(t, http.MethodGet, apiKey, nil, "organizations", orgAddr.String(), "integrator")
+	_, code = testRequest(t, http.MethodGet, apiKey, nil, "integrator")
 	c.Assert(code, qt.Equals, http.StatusUnauthorized)
+}
+
+// TestIntegratorAPIKeyPathless verifies the path-less integrator endpoints resolve the integrator
+// organization from the API key: a key with the integrator scopes creates and lists managed orgs and
+// reads quota with no organization address in the URL, and the managed org is owned by the key's org.
+func TestIntegratorAPIKeyPathless(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "pathlesskeypass123")
+	orgAddr := testCreateOrganization(t, token)
+
+	org, err := testDB.Organization(orgAddr)
+	c.Assert(err, qt.IsNil)
+	org.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 2, MaxManagedProcesses: 5, MaxManagedCensusSize: 100}
+	c.Assert(testDB.SetOrganization(org), qt.IsNil)
+
+	// mint a key with the integrator scopes
+	createBody := &apicommon.CreateAPIKeyRequest{
+		Label:  "pathless",
+		Scopes: []string{ScopeQuotaRead, ScopeManagedRead, ScopeManagedWrite},
+	}
+	data, code := testRequest(t, http.MethodPost, token, createBody, "organizations", orgAddr.String(), "apikeys")
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("resp: %s", data))
+	var created apicommon.CreateAPIKeyResponse
+	c.Assert(json.Unmarshal(data, &created), qt.IsNil)
+	apiKey := created.Secret
+
+	// create a managed org with the key — no address in the URL, resolved from the key's own org
+	mbody := &apicommon.CreateManagedOrganizationRequest{
+		OrganizationInfo: apicommon.OrganizationInfo{Type: string(db.CompanyType), Website: "https://m1.example"},
+	}
+	createdOrg := requestAndParse[apicommon.OrganizationInfo](t, http.MethodPost, apiKey, mbody, "integrator", "organizations")
+	c.Assert(createdOrg.Address, qt.Not(qt.Equals), common.Address{})
+
+	// the managed org is owned by the key's integrator org
+	mo, err := testDB.Organization(createdOrg.Address)
+	c.Assert(err, qt.IsNil)
+	c.Assert(mo.ManagedBy, qt.Equals, orgAddr)
+
+	// list + quota reflect it, all path-less
+	list := requestAndParse[apicommon.ListManagedOrganizations](t, http.MethodGet, apiKey, nil, "integrator", "organizations")
+	c.Assert(list.Organizations, qt.HasLen, 1)
+	info := requestAndParse[apicommon.IntegratorInfoResponse](t, http.MethodGet, apiKey, nil, "integrator")
+	c.Assert(info.Enabled, qt.IsTrue)
+	c.Assert(info.Usage.ManagedOrgs, qt.Equals, 1)
 }
 
 // TestAPIKeysRequireIntegrator verifies that API keys can only be created by integrator
