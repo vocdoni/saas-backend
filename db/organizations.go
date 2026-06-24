@@ -226,6 +226,32 @@ func (ms *MongoStorage) RemoveOrganizationUser(address common.Address, userID ui
 	return nil
 }
 
+// RemoveOrganizationFromAllUsers unlinks the given organization from every user that is a
+// member of it, by pulling the organization entry out of each user's organizations list.
+// It generalizes RemoveOrganizationUser (which targets a single user) and is used when
+// tearing down an organization so no user keeps a dangling role reference to it.
+func (ms *MongoStorage) RemoveOrganizationFromAllUsers(address common.Address) error {
+	if address.Cmp(common.Address{}) == 0 {
+		return ErrInvalidData
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	filter := bson.M{"organizations._id": address}
+	update := bson.M{
+		"$pull": bson.M{
+			"organizations": bson.M{
+				"_id": address,
+			},
+		},
+	}
+	if _, err := ms.users.UpdateMany(ctx, filter, update); err != nil {
+		return fmt.Errorf("failed to unlink organization from users: %w", err)
+	}
+	return nil
+}
+
 // SetOrganizationSubscription method adds the provided subscription to
 // the organization with the given address
 func (ms *MongoStorage) SetOrganizationSubscription(address common.Address, orgSubscription *OrganizationSubscription) error {

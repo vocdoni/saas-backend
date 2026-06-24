@@ -165,3 +165,21 @@ func (ms *MongoStorage) Jobs(orgAddress common.Address, page, limit int64, jobTy
 
 	return paginatedDocuments[Job](ms.jobs, page, limit, filter, findOptions)
 }
+
+// DeleteJobsByOrg removes every job (import and transaction) owned by the given
+// organization. Best-effort cleanup used when tearing down an organization.
+// Returns the number of deleted job documents.
+func (ms *MongoStorage) DeleteJobsByOrg(orgAddress common.Address) (int64, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return 0, ErrInvalidData
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.jobs.DeleteMany(ctx, bson.M{"orgAddress": orgAddress})
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete jobs by org: %w", err)
+	}
+	return res.DeletedCount, nil
+}

@@ -234,6 +234,24 @@ func (ms *MongoStorage) DelCensusParticipant(censusID, participantID string) err
 	return nil
 }
 
+// DeleteCensusParticipantsByCensus removes every census participant of the given census.
+// Best-effort cleanup used when deleting a census (e.g. during organization teardown).
+// Returns the number of deleted participant documents.
+func (ms *MongoStorage) DeleteCensusParticipantsByCensus(censusID string) (int64, error) {
+	if censusID == "" {
+		return 0, ErrInvalidData
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.censusParticipants.DeleteMany(ctx, bson.M{"censusId": censusID})
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete census participants by census: %w", err)
+	}
+	return res.DeletedCount, nil
+}
+
 // BulkCensusParticipantStatus is returned by SetBylkCensusParticipant to provide the output.
 type BulkCensusParticipantStatus struct {
 	Progress int `json:"progress"`

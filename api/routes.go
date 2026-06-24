@@ -116,6 +116,8 @@ const (
 	// own integrator org. Path-less: the integrator is resolved from the API key or the user
 	// session, so no organization address is passed in the URL.
 	managedOrganizationsEndpoint = "/integrator/organizations"
+	// DELETE /integrator/organizations/{orgAddress} to delete a managed org and all its data.
+	managedOrganizationEndpoint = "/integrator/organizations/{orgAddress}"
 	// POST /organizations/{address}/apikeys to create an API key; GET to list them
 	organizationAPIKeysEndpoint = "/organizations/{address}/apikeys"
 	// DELETE /organizations/{address}/apikeys/{keyID} to revoke an API key

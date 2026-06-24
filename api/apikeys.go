@@ -50,9 +50,10 @@ func IsValidAPIKeyScope(s string) bool {
 // so they equal chi's RoutePattern().
 var apiKeyAllowlist = map[string]string{
 	// integrator (path-less; the integrator org is resolved from the key)
-	"GET " + integratorEndpoint:            ScopeQuotaRead,
-	"GET " + managedOrganizationsEndpoint:  ScopeManagedRead,
-	"POST " + managedOrganizationsEndpoint: ScopeManagedWrite,
+	"GET " + integratorEndpoint:             ScopeQuotaRead,
+	"GET " + managedOrganizationsEndpoint:   ScopeManagedRead,
+	"POST " + managedOrganizationsEndpoint:  ScopeManagedWrite,
+	"DELETE " + managedOrganizationEndpoint: ScopeManagedWrite,
 
 	// members & groups (of managed organizations)
 	"GET " + organizationMembersEndpoint:             ScopeMembersWrite,

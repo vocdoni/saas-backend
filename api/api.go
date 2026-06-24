@@ -320,6 +320,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, organizationBundlesEndpoint, a.organizationBundlesHandler)
 		handle(r, http.MethodPost, managedOrganizationsEndpoint, a.createManagedOrganizationHandler)
 		handle(r, http.MethodGet, managedOrganizationsEndpoint, a.managedOrganizationsHandler)
+		handle(r, http.MethodDelete, managedOrganizationEndpoint, a.deleteManagedOrganizationHandler)
 		handle(r, http.MethodGet, integratorEndpoint, a.integratorInfoHandler)
 		handle(r, http.MethodPost, organizationAPIKeysEndpoint, a.createAPIKeyHandler)
 		handle(r, http.MethodGet, organizationAPIKeysEndpoint, a.apiKeysHandler)
