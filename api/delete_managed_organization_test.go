@@ -12,8 +12,8 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// TestDeleteManagedOrg exercises DELETE /organizations/{address}/managed/{orgAddress}:
-//   - a non-admin of the integrator is rejected (401/403)
+// TestDeleteManagedOrg exercises DELETE /integrator/organizations/{orgAddress}:
+//   - a user with no integrator organization is rejected (403)
 //   - an unknown managed org address is 404
 //   - an org not managed by the integrator is 404 (no existence leak)
 //   - a managed org with an active on-chain election (READY) is blocked with 409, and nothing is deleted
@@ -43,7 +43,7 @@ func TestDeleteManagedOrg(t *testing.T) {
 		},
 	}
 	managed := requestAndParse[apicommon.OrganizationInfo](
-		t, http.MethodPost, token, createBody, "organizations", integratorAddr.String(), "managed",
+		t, http.MethodPost, token, createBody, "integrator", "organizations",
 	)
 	c.Assert(managed.Address, qt.Not(qt.Equals), common.Address{})
 
@@ -51,20 +51,21 @@ func TestDeleteManagedOrg(t *testing.T) {
 	addMembersToManagedOrg(t, managed.Address)
 	censusID := createManagedOrgCensus(t, token, managed.Address)
 
-	// (A) non-admin is rejected: a second user with no role on the integrator tries to delete.
+	// (A) a user with no integrator org is rejected: the integrator is resolved from the caller, and
+	// this second user administers no integrator organization.
 	otherToken := testCreateUser(t, "otheruserpass123")
 	_, code := testRequest(t, http.MethodDelete, otherToken, nil,
-		"organizations", integratorAddr.String(), "managed", managed.Address.String())
-	c.Assert(code, qt.Equals, http.StatusUnauthorized)
+		"integrator", "organizations", managed.Address.String())
+	c.Assert(code, qt.Equals, http.StatusForbidden) // ErrNotAnIntegrator
 
 	// (B) unknown managed org address is 404.
 	_, code = testRequest(t, http.MethodDelete, token, nil,
-		"organizations", integratorAddr.String(), "managed", "0xdeadbeef00000000000000000000000000000001")
+		"integrator", "organizations", "0xdeadbeef00000000000000000000000000000001")
 	c.Assert(code, qt.Equals, http.StatusNotFound)
 
 	// (C) an org not managed by this integrator is 404 (the integrator's own address is not managed).
 	_, code = testRequest(t, http.MethodDelete, token, nil,
-		"organizations", integratorAddr.String(), "managed", integratorAddr.String())
+		"integrator", "organizations", integratorAddr.String())
 	c.Assert(code, qt.Equals, http.StatusNotFound)
 
 	// (D) active-election guard: publish a draft under the managed org and keep it READY, then the
@@ -77,7 +78,7 @@ func TestDeleteManagedOrg(t *testing.T) {
 
 	// the published election autostarts (ElectionType.Autostart), so it is READY on-chain → 409.
 	_, code = testRequest(t, http.MethodDelete, token, nil,
-		"organizations", integratorAddr.String(), "managed", managed.Address.String())
+		"integrator", "organizations", managed.Address.String())
 	c.Assert(code, qt.Equals, http.StatusConflict)
 
 	// nothing was deleted: the org, its census and its memberbase are still there.
@@ -102,7 +103,7 @@ func TestDeleteManagedOrg(t *testing.T) {
 
 	resp := requestAndParse[apicommon.DeleteManagedOrganizationResponse](
 		t, http.MethodDelete, token, nil,
-		"organizations", integratorAddr.String(), "managed", managed.Address.String(),
+		"integrator", "organizations", managed.Address.String(),
 	)
 	c.Assert(resp.Address, qt.Equals, managed.Address.String())
 

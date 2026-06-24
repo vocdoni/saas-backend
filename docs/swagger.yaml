@@ -423,6 +423,11 @@ definitions:
           type: integer
         type: array
     type: object
+  apicommon.DeleteManagedOrganizationResponse:
+    properties:
+      address:
+        type: string
+    type: object
   apicommon.DeleteMembersRequest:
     properties:
       all:
@@ -2507,6 +2512,64 @@ paths:
       security:
       - BearerAuth: []
       summary: Create a managed organization under an integrator
+      tags:
+      - organizations
+  /integrator/organizations/{orgAddress}:
+    delete:
+      description: |-
+        Delete the managed organization at {orgAddress} together with every piece of data
+        tied to it (memberbase, censuses + participants, processes, bundles, CSP tokens,
+        jobs, pending invites), and unlink it from its members. The caller must be an admin
+        of their integrator organization (resolved from the API key's org or the user session
+        — no address in the URL), and the target must be managed by it. The integrator's usage
+        counters are rolled back accordingly.
+
+        Deletion is blocked with 409 when any of the managed org's published elections is
+        still active on-chain (READY/PAUSED); end them (or wait for them to end) first.
+        The on-chain organization account and any published elections/censuses are immutable
+        on the Vochain and are not affected — only DB-side data is removed.
+
+        Also callable with a scoped API key (scope: `managed:write`).
+      parameters:
+      - description: Managed organization address to delete
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.DeleteManagedOrganizationResponse'
+        "400":
+          description: Invalid address
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Managed organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Managed organization has active elections
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Delete a managed organization and all its data
       tags:
       - organizations
   /jobs/{jobId}:
