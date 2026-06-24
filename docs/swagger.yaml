@@ -2641,8 +2641,8 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.CreateAPIKeyResponse'
         "400":
-          description: Invalid input (missing label/scopes, unknown scope, or past
-            expiresAt)
+          description: Invalid input (bad address, missing label/scopes, unknown scope,
+            past expiresAt)
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -2651,6 +2651,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "403":
           description: Organization is not an integrator
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found
           schema:
             $ref: '#/definitions/errors.Error'
         "500":

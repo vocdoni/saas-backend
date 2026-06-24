@@ -89,6 +89,10 @@ func TestAPIKeysRequireIntegrator(t *testing.T) {
 	_, code := testRequest(t, http.MethodPost, token, createBody, "organizations", orgAddr.String(), "apikeys")
 	c.Assert(code, qt.Equals, http.StatusForbidden) // ErrNotAnIntegrator
 
+	// a malformed {address} path param is rejected with 400, not silently treated as the zero address
+	_, code = testRequest(t, http.MethodPost, token, createBody, "organizations", "not-an-address", "apikeys")
+	c.Assert(code, qt.Equals, http.StatusBadRequest)
+
 	// enable the org as an integrator (override) and creation now succeeds
 	org, err := testDB.Organization(orgAddr)
 	c.Assert(err, qt.IsNil)
