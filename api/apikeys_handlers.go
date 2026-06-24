@@ -17,7 +17,8 @@ import (
 //
 //	@Summary		Create an API key for an organization
 //	@Description	Create a new API key owned by the organization at the given address. The caller
-//	@Description	must be an admin of the organization. The plaintext secret (prefixed "vsk_") is
+//	@Description	must be an admin of the organization, which must be enabled as an integrator —
+//	@Description	API keys are integrator-only. The plaintext secret (prefixed "vsk_") is
 //	@Description	returned ONCE in the response and cannot be retrieved again.
 //	@Description
 //	@Description	`label` and at least one `scope` are required. Valid scopes are deny-by-default and
@@ -32,6 +33,7 @@ import (
 //	@Success		200		{object}	apicommon.CreateAPIKeyResponse	"Created key including the one-time plaintext secret"
 //	@Failure		400		{object}	errors.Error					"Invalid input (missing label/scopes, unknown scope, or past expiresAt)"
 //	@Failure		401		{object}	errors.Error					"Unauthorized"
+//	@Failure		403		{object}	errors.Error					"Organization is not an integrator"
 //	@Failure		500		{object}	errors.Error					"Internal server error"
 //	@Router			/organizations/{address}/apikeys [post]
 func (a *API) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
@@ -43,6 +45,22 @@ func (a *API) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	orgAddr := common.HexToAddress(chi.URLParam(r, "address"))
 	if !user.HasRoleFor(orgAddr, db.AdminRole) {
 		errors.ErrUnauthorized.Withf("user is not admin of the organization").Write(w)
+		return
+	}
+	// API keys are an integrator capability: only integrator organizations may mint them.
+	// A managed or plain org admin is rejected even though they are an admin, because the
+	// API-key scope set (quota/managed/voting/members) is integrator-oriented.
+	org, err := a.db.Organization(orgAddr)
+	if err != nil {
+		if err == db.ErrNotFound {
+			errors.ErrOrganizationNotFound.Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if !a.subscriptions.IsIntegrator(org) {
+		errors.ErrNotAnIntegrator.Write(w)
 		return
 	}
 	req := &apicommon.CreateAPIKeyRequest{}

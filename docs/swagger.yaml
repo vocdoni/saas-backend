@@ -2614,7 +2614,8 @@ paths:
       - application/json
       description: |-
         Create a new API key owned by the organization at the given address. The caller
-        must be an admin of the organization. The plaintext secret (prefixed "vsk_") is
+        must be an admin of the organization, which must be enabled as an integrator —
+        API keys are integrator-only. The plaintext secret (prefixed "vsk_") is
         returned ONCE in the response and cannot be retrieved again.
 
         `label` and at least one `scope` are required. Valid scopes are deny-by-default and
@@ -2646,6 +2647,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Organization is not an integrator
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
