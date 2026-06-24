@@ -24,19 +24,21 @@ func TestIntegratorPlanSubscription(t *testing.T) {
 	integratorAddr := testCreateOrganization(t, token)
 
 	// Seed an integrator-enabled plan; its IntegratorLimits are what the integrator
-	// should inherit. ID 0 => auto-assigned. The plans collection survives
-	// DeleteAllDocuments, so delete this plan on cleanup to keep the seeded set at 3.
+	// should inherit. The ID is the plan's Stripe product ID (SetPlan rejects empty IDs).
+	// The plans collection survives DeleteAllDocuments, so delete this plan on cleanup to
+	// keep the seeded set at 3.
 	const maxManagedOrgs = 2
-	integratorPlanID, err := testDB.SetPlan(&db.Plan{
-		Name:     "Integrator Plan",
-		StripeID: "prod_test_integrator",
+	integratorPlan := &db.Plan{
+		ID:   "prod_test_integrator",
+		Name: "Integrator Plan",
 		IntegratorLimits: db.IntegratorLimits{
 			MaxManagedOrgs:       maxManagedOrgs,
 			MaxManagedProcesses:  5,
 			MaxManagedCensusSize: 5000,
 		},
-	})
-	c.Assert(err, qt.IsNil)
+	}
+	c.Assert(testDB.SetPlan(integratorPlan), qt.IsNil)
+	integratorPlanID := integratorPlan.ID
 	defer func() {
 		if err := testDB.DelPlan(&db.Plan{ID: integratorPlanID}); err != nil {
 			c.Logf("cleanup plan: %v", err)

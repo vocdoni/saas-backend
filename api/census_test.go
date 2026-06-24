@@ -290,9 +290,7 @@ func TestCensusSizeExceedsEmailAllowance(t *testing.T) {
 	// reduce limit of freePlan to allow exactly orgMembers
 	reducedFreePlan := *mockFreePlan
 	reducedFreePlan.Features.TwoFaEmail = len(orgMembers)
-	id, err := testDB.SetPlan(&reducedFreePlan)
-	qt.Assert(t, err, qt.IsNil)
-	qt.Assert(t, id, qt.Equals, reducedFreePlan.ID)
+	qt.Assert(t, testDB.SetPlan(&reducedFreePlan), qt.IsNil)
 
 	censusID, _, _ := createGroupBasedCensus(t, adminToken, orgAddress, authFields, twoFaEmail,
 		memberIDs(orgMembers)...)
@@ -337,9 +335,7 @@ func TestCensusSizeExceedsSMSAllowance(t *testing.T) {
 	// reduce limit of freePlan to allow exactly orgMembers
 	reducedFreePlan := *mockFreePlan
 	reducedFreePlan.Features.TwoFaSms = len(orgMembers)
-	id, err := testDB.SetPlan(&reducedFreePlan)
-	qt.Assert(t, err, qt.IsNil)
-	qt.Assert(t, id, qt.Equals, reducedFreePlan.ID)
+	qt.Assert(t, testDB.SetPlan(&reducedFreePlan), qt.IsNil)
 
 	censusID, _, _ := createGroupBasedCensus(t, adminToken, orgAddress, authFields, twoFaPhone,
 		memberIDs(orgMembers)...)

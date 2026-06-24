@@ -47,8 +47,12 @@ func main() {
 	}
 
 	plan := &db.Plan{
+		// Plans are keyed by their Stripe product ID; this local-dev plan has no Stripe
+		// product, so it uses a stable sentinel ID. It is listed publicly as the default plan.
+		ID:           "local-dev",
 		Name:         "Local Dev",
 		Default:      true,
+		Public:       true,
 		MonthlyPrice: 0,
 		YearlyPrice:  0,
 		Organization: db.PlanLimits{
@@ -83,9 +87,8 @@ func main() {
 		},
 	}
 
-	id, err := storage.SetPlan(plan)
-	if err != nil {
+	if err := storage.SetPlan(plan); err != nil {
 		log.Fatalf("failed to create default plan: %v", err)
 	}
-	log.Infow("default plan created", "id", id)
+	log.Infow("default plan created", "id", plan.ID)
 }

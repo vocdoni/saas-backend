@@ -10,81 +10,35 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-// nextPlanID internal method returns the next available subsbscription ID. If an error
-// occurs, it returns the error. This method must be called with the keysLock
-// held.
-func (ms *MongoStorage) nextPlanID(ctx context.Context) (uint64, error) {
-	var plan Plan
-	opts := options.FindOne().SetSort(bson.D{{Key: "_id", Value: -1}})
-	if err := ms.plans.FindOne(ctx, bson.M{}, opts).Decode(&plan); err != nil {
-		if err == mongo.ErrNoDocuments {
-			return 1, nil
-		}
-		return 0, err
+// SetPlan creates or replaces the plan, keyed by its Stripe product ID (plan.ID). Plans are
+// synced from Stripe rather than authored locally: the caller always holds the complete plan,
+// so the whole document is replaced (a full ReplaceOne upsert, not a partial update). This
+// matters because zero-valued fields are meaningful here — e.g. a free plan's monthlyPrice/
+// yearlyPrice of 0 must be persisted so selectors like FreeIntegratorPlan can match on them.
+// An empty ID is rejected.
+func (ms *MongoStorage) SetPlan(plan *Plan) error {
+	if plan.ID == "" {
+		return ErrInvalidData
 	}
-	return plan.ID + 1, nil
-}
-
-// SetPlan method creates or updates the plan in the database.
-// If the plan already exists, it updates the fields that have changed.
-func (ms *MongoStorage) SetPlan(plan *Plan) (uint64, error) {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	nextID, err := ms.nextPlanID(ctx)
-	if err != nil {
-		return 0, err
+	if _, err := ms.plans.ReplaceOne(ctx, bson.M{"_id": plan.ID}, plan, options.Replace().SetUpsert(true)); err != nil {
+		return err
 	}
-	if plan.ID >= nextID {
-		return 0, ErrInvalidData
-	}
-	if plan.ID == 0 {
-		plan.ID = nextID
-		if _, err := ms.plans.InsertOne(ctx, plan); err != nil {
-			return 0, err
-		}
-		return plan.ID, nil
-	}
-	updateDoc, err := dynamicUpdateDocument(plan, []string{"freeTrialDays"})
-	if err != nil {
-		return 0, err
-	}
-	// set upsert to true to create the document if it doesn't exist
-	if _, err := ms.plans.UpdateOne(ctx, bson.M{"_id": plan.ID}, updateDoc); err != nil {
-		return 0, err
-	}
-	return plan.ID, nil
+	return nil
 }
 
-// Plan method returns the plan with the given ID. If the
+// Plan method returns the plan with the given ID (its Stripe product ID). If the
 // plan doesn't exist, it returns the specific error.
-func (ms *MongoStorage) Plan(planID uint64) (*Plan, error) {
+func (ms *MongoStorage) Plan(planID string) (*Plan, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// find the plan in the database
 	filter := bson.M{"_id": planID}
-	plan := &Plan{}
-	err := ms.plans.FindOne(ctx, filter).Decode(plan)
-	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			return nil, ErrNotFound // Plan not found
-		}
-		return nil, errors.New("failed to get plan")
-	}
-	return plan, nil
-}
-
-// PlanByStripeID method returns the plan with the given stripe ID. If the
-// plan doesn't exist, it returns the specific error.
-func (ms *MongoStorage) PlanByStripeID(stripeID string) (*Plan, error) {
-	// create a context with a timeout
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-	// find the plan in the database
-	filter := bson.M{"stripeID": stripeID}
 	plan := &Plan{}
 	err := ms.plans.FindOne(ctx, filter).Decode(plan)
 	if err != nil {

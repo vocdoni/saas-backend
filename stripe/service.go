@@ -12,6 +12,7 @@ import (
 	stripeapi "github.com/stripe/stripe-go/v82"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"go.vocdoni.io/dvote/log"
 )
 
 // Service provides the main business logic for Stripe operations
@@ -42,12 +43,12 @@ func NewService(config *Config, database *db.MongoStorage) (*Service, error) {
 
 // CreateCheckoutSessionWithLookupKey creates a new checkout session by resolving the lookup key to get the plan
 func (s *Service) CreateCheckoutSessionWithLookupKey(
-	lookupKey uint64, billingPeriod, returnURL string, orgAddress common.Address, locale string,
+	lookupKey string, billingPeriod, returnURL string, orgAddress common.Address, locale string,
 ) (*stripeapi.CheckoutSession, error) {
-	// Resolve the lookup key to get the plan
+	// Resolve the lookup key (the plan's Stripe product ID) to get the plan
 	plan, err := s.db.Plan(lookupKey)
 	if err != nil {
-		return nil, errors.ErrStripeError.Withf("plan with lookup key %d not found: %v", lookupKey, err)
+		return nil, errors.ErrStripeError.Withf("plan with lookup key %s not found: %v", lookupKey, err)
 	}
 
 	org, err := s.db.Organization(orgAddress)
@@ -77,7 +78,7 @@ func (s *Service) CreateCheckoutSessionWithLookupKey(
 	} else if billingPeriod == string(db.BillingPeriodAnnual) && plan.StripeYearlyPriceID != "" {
 		params.PriceID = plan.StripeYearlyPriceID
 	} else {
-		return nil, errors.ErrStripeError.Withf("invalid billing period %s for plan %d", billingPeriod, plan.ID)
+		return nil, errors.ErrStripeError.Withf("invalid billing period %s for plan %s", billingPeriod, plan.ID)
 	}
 
 	return s.client.CreateCheckoutSession(params)
@@ -98,38 +99,64 @@ func (s *Service) CreatePortalSession(customerEmail string) (*stripeapi.BillingP
 	return s.client.CreatePortalSession(customerEmail)
 }
 
-// GetPlansFromStripe retrieves plans from Stripe and converts them to database format
-func (s *Service) GetPlansFromStripe() ([]*db.Plan, error) {
-	var plans []*db.Plan
+// planProductMarkerKeys are the metadata keys every vocdoni plan product carries. A Stripe
+// product is treated as one of our plans only if it defines all of them. This is the marker
+// that lets the service discover plans dynamically, without a hardcoded product allowlist.
+var planProductMarkerKeys = []string{"organization", "votingTypes", "features"}
 
-	for i, p := range s.config.Plans {
-		if p.ProductID == "" {
+// isPlanProduct reports whether a Stripe product is one of our plan products, by checking it
+// carries the full plan-metadata marker.
+func isPlanProduct(product *stripeapi.Product) bool {
+	for _, k := range planProductMarkerKeys {
+		if _, ok := product.Metadata[k]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// GetPlansFromStripe discovers plans from Stripe and converts them to database format.
+//
+// Stripe is the single source of truth: every active product carrying our plan-metadata
+// marker becomes a plan, so adding a plan (including a per-customer "custom" plan) is just a
+// matter of creating the product in Stripe — no code or config change. A product that fails
+// to parse is skipped and logged rather than aborting the whole sync, so one malformed
+// product can never take down the entire catalog.
+func (s *Service) GetPlansFromStripe() ([]*db.Plan, error) {
+	products, err := s.client.ListProducts()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list products: %w", err)
+	}
+
+	var plans []*db.Plan
+	for i := range products {
+		product := &products[i]
+		if !isPlanProduct(product) {
 			continue
 		}
-
-		product, err := s.client.GetProduct(p.ProductID)
+		prices, err := s.client.GetProductPrices(product.ID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get product %s: %w", p.ProductID, err)
+			log.Warnw("skipping plan product: failed to get prices",
+				"product", product.ID, "name", product.Name, "error", err.Error())
+			continue
 		}
-
-		prices, err := s.client.GetProductPrices(p.ProductID)
-		if err != nil || len(prices) < 2 {
-			return nil, fmt.Errorf("failed to get prices for product %s: %w", p.ProductID, err)
-		}
-
-		plan, err := processProductToPlan(uint64(i), product, prices)
+		plan, err := processProductToPlan(product, prices)
 		if err != nil {
-			return nil, fmt.Errorf("failed to process product %s: %w", p.ProductID, err)
+			log.Warnw("skipping plan product: failed to process",
+				"product", product.ID, "name", product.Name, "error", err.Error())
+			continue
 		}
-
 		plans = append(plans, plan)
 	}
 
 	return plans, nil
 }
 
-// processProductToPlan converts a Stripe product to a database plan
-func processProductToPlan(planID uint64, product *stripeapi.Product, prices []stripeapi.Price) (*db.Plan, error) {
+// processProductToPlan converts a Stripe product to a database plan. The plan is keyed by the
+// Stripe product ID. Missing recurring prices are tolerated (a free, non-purchasable plan such
+// as the free integrator tier has none); the checkout path validates price availability per
+// billing period at purchase time.
+func processProductToPlan(product *stripeapi.Product, prices []stripeapi.Price) (*db.Plan, error) {
 	organizationData, err := extractPlanMetadata[db.PlanLimits](product.Metadata["organization"])
 	if err != nil {
 		return nil, err
@@ -156,10 +183,10 @@ func processProductToPlan(planID uint64, product *stripeapi.Product, prices []st
 	}
 
 	plan := &db.Plan{
-		ID:               planID,
+		ID:               product.ID,
 		Name:             product.Name,
-		StripeID:         product.ID,
 		Default:          isDefaultPlan(product),
+		Public:           isPublicPlan(product),
 		Organization:     organizationData,
 		VotingTypes:      votingTypesData,
 		Features:         featuresData,
@@ -168,6 +195,10 @@ func processProductToPlan(planID uint64, product *stripeapi.Product, prices []st
 	}
 
 	for _, price := range prices {
+		if price.Recurring == nil {
+			// Ignore one-time prices
+			continue
+		}
 		switch price.Recurring.Interval {
 		case stripeapi.PriceRecurringIntervalYear:
 			plan.StripeYearlyPriceID = price.ID
@@ -181,11 +212,8 @@ func processProductToPlan(planID uint64, product *stripeapi.Product, prices []st
 			plan.StripeMonthlyPriceID = price.ID
 			plan.MonthlyPrice = price.UnitAmount
 		default:
-			// Ignore non-recurring prices
+			// Ignore other recurring intervals
 		}
-	}
-	if plan.StripeMonthlyPriceID == "" || plan.StripeYearlyPriceID == "" {
-		return nil, fmt.Errorf("both monthly and yearly prices are required for plan %s", product.ID)
 	}
 
 	return plan, nil
@@ -202,5 +230,12 @@ func extractPlanMetadata[T any](metadataValue string) (T, error) {
 }
 
 func isDefaultPlan(product *stripeapi.Product) bool {
-	return product.DefaultPrice.Metadata["Default"] == "true"
+	return product.DefaultPrice != nil && product.DefaultPrice.Metadata["Default"] == "true"
+}
+
+// isPublicPlan reports whether a plan product is listed on the public /plans catalog. Plans
+// are public by default; a product opts out of the listing with metadata visibility="private"
+// (used for per-customer custom plans and the internal free integrator tier).
+func isPublicPlan(product *stripeapi.Product) bool {
+	return product.Metadata["visibility"] != "private"
 }

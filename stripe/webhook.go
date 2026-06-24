@@ -2,6 +2,7 @@ package stripe
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -64,8 +65,11 @@ func (s *Service) HandleEvent(event *stripeapi.Event) error {
 		return s.handleSubscription(event)
 	case stripeapi.EventTypeInvoicePaymentSucceeded:
 		return s.handleInvoicePayment(event)
-	case stripeapi.EventTypeProductUpdated:
-		return s.handleProductUpdate(event)
+	case stripeapi.EventTypeProductCreated,
+		stripeapi.EventTypeProductUpdated:
+		return s.handleProductUpsert(event)
+	case stripeapi.EventTypeProductDeleted:
+		return s.handleProductDelete(event)
 	default:
 		log.Debugf("stripe webhook: received unhandled event type %s (id %s)", event.Type, event.ID)
 		return nil
@@ -105,8 +109,8 @@ func (s *Service) handleSubscription(event *stripeapi.Event) error {
 
 // handleSubscriptionCreateOrUpdate handles creating (or updating) a subscription.
 func (s *Service) handleSubscriptionCreateOrUpdate(subscriptionInfo *SubscriptionInfo, org *db.Organization) error {
-	// Get plan by Stripe product ID
-	plan, err := s.db.PlanByStripeID(subscriptionInfo.ProductID)
+	// Get plan by its ID (the Stripe product ID)
+	plan, err := s.db.Plan(subscriptionInfo.ProductID)
 	if err != nil || plan == nil {
 		return fmt.Errorf("plan with Stripe ID %s not found for subscription %s: %v",
 			subscriptionInfo.ProductID, subscriptionInfo.ID, err)
@@ -122,7 +126,7 @@ func (s *Service) handleSubscriptionCreateOrUpdate(subscriptionInfo *Subscriptio
 
 	// Save subscription
 	if err := s.db.SetOrganization(org); err != nil {
-		return fmt.Errorf("failed to save subscription %s (planID=%d, status=%s) for organization %s: %v",
+		return fmt.Errorf("failed to save subscription %s (planID=%s, status=%s) for organization %s: %v",
 			subscriptionInfo.ID, plan.ID, subscriptionInfo.Status, subscriptionInfo.OrgAddress, err)
 	}
 
@@ -137,7 +141,7 @@ func (s *Service) handleSubscriptionCreateOrUpdate(subscriptionInfo *Subscriptio
 		log.Warnf("stripe webhook: failed to update customer %s metadata: %v",
 			subscriptionInfo.Customer.ID, err)
 	}
-	log.Infof("stripe webhook: subscription %s (planID=%d, status=%s) saved for organization %s",
+	log.Infof("stripe webhook: subscription %s (planID=%s, status=%s) saved for organization %s",
 		subscriptionInfo.ID, plan.ID, subscriptionInfo.Status, subscriptionInfo.OrgAddress)
 	return nil
 }
@@ -199,39 +203,79 @@ func (s *Service) handleInvoicePayment(event *stripeapi.Event) error {
 	return nil
 }
 
-// handleProductUpdate processes a product update event
-func (s *Service) handleProductUpdate(event *stripeapi.Event) error {
+// handleProductUpsert processes a product created/updated event, keeping the local plan cache
+// in sync with Stripe (the source of truth). Any product carrying our plan-metadata marker is
+// upserted; a product that lacks (or has lost) the marker is removed from the cache if present.
+func (s *Service) handleProductUpsert(event *stripeapi.Event) error {
 	product, err := parseProductFromEvent(event)
 	if err != nil {
 		return fmt.Errorf("failed to parse product from event: %w", err)
 	}
 
-	// Get the existing plan by Stripe product ID
-	existingPlan, err := s.db.PlanByStripeID(product.ID)
-	if err != nil || existingPlan == nil {
-		// If plan doesn't exist in our database, we can skip this update
-		// This might happen if the product is not one of our configured plans
-		log.Debugf("stripe webhook: product %s not found in database, skipping update", product.ID)
+	// Ignore products that are not vocdoni plans, and inactive products. If we previously had this product cached as a
+	// plan (e.g. it was deactivated or its marker was removed), drop it so the cache doesn't go stale.
+	if !product.Active || !isPlanProduct(product) {
+		existing, err := s.db.Plan(product.ID)
+		switch {
+		case errors.Is(err, db.ErrNotFound):
+			// Not cached; nothing to drop.
+		case err != nil:
+			return fmt.Errorf("failed to look up plan for product %s: %w", product.ID, err)
+		default:
+			if err := s.db.DelPlan(existing); err != nil {
+				return fmt.Errorf("failed to remove de-marked plan for product %s: %w", product.ID, err)
+			}
+			log.Infof("stripe webhook: product %s no longer a plan, removed from cache", product.ID)
+		}
 		return nil
 	}
 
+	// Webhook event payloads don't expand default_price, but isDefaultPlan reads
+	// product.DefaultPrice.Metadata. Re-fetch the product with default_price expanded
+	// (as the full sync does) so a product.updated event can't clear the Default flag.
+	product, err = s.client.GetProduct(product.ID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch product %s with expanded default price: %w", product.ID, err)
+	}
+
 	prices, err := s.client.GetProductPrices(product.ID)
-	if err != nil || len(prices) < 2 {
+	if err != nil {
 		return fmt.Errorf("failed to get prices for product %s: %w", product.ID, err)
 	}
 
-	// Update the plan with new product information
-	updatedPlan, err := processProductToPlan(existingPlan.ID, product, prices)
+	plan, err := processProductToPlan(product, prices)
 	if err != nil {
-		return fmt.Errorf("failed to process updated product %s: %w", product.ID, err)
+		return fmt.Errorf("failed to process product %s: %w", product.ID, err)
 	}
 
-	// Update the plan in the database
-	if _, err := s.db.SetPlan(updatedPlan); err != nil {
-		return fmt.Errorf("failed to update plan for product %s: %v", product.ID, err)
+	if err := s.db.SetPlan(plan); err != nil {
+		return fmt.Errorf("failed to upsert plan for product %s: %w", product.ID, err)
 	}
 
-	log.Infof("stripe webhook: product %s updated, plan %d refreshed", product.ID, updatedPlan.ID)
+	log.Infof("stripe webhook: product %s upserted, plan %s refreshed", product.ID, plan.ID)
+	return nil
+}
+
+// handleProductDelete removes a plan from the local cache when its Stripe product is deleted.
+func (s *Service) handleProductDelete(event *stripeapi.Event) error {
+	product, err := parseProductFromEvent(event)
+	if err != nil {
+		return fmt.Errorf("failed to parse product from event: %w", err)
+	}
+
+	existing, err := s.db.Plan(product.ID)
+	if errors.Is(err, db.ErrNotFound) {
+		// Not a plan we track; nothing to do.
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to look up plan for product %s: %w", product.ID, err)
+	}
+	if err := s.db.DelPlan(existing); err != nil {
+		return fmt.Errorf("failed to delete plan for product %s: %w", product.ID, err)
+	}
+
+	log.Infof("stripe webhook: product %s deleted, plan removed from cache", product.ID)
 	return nil
 }
 

@@ -1153,8 +1153,8 @@ definitions:
         description: Locale for the checkout page
         type: string
       lookupKey:
-        description: Plan lookup key
-        type: integer
+        description: Plan lookup key (the plan's Stripe product ID)
+        type: string
       returnURL:
         description: URL to return to after checkout
         type: string
@@ -1171,8 +1171,8 @@ definitions:
         description: Date of the last payment
         type: string
       planId:
-        description: ID of the subscription plan
-        type: integer
+        description: ID of the subscription plan (its Stripe product ID)
+        type: string
       renewalDate:
         description: Date when the subscription will renew
         type: string
@@ -1235,8 +1235,8 @@ definitions:
         - $ref: '#/definitions/apicommon.SubscriptionFeatures'
         description: Features available in this plan
       id:
-        description: Unique identifier for the plan
-        type: integer
+        description: Unique identifier for the plan (its Stripe product ID)
+        type: string
       integratorLimits:
         allOf:
         - $ref: '#/definitions/apicommon.SubscriptionIntegratorLimits'
@@ -1252,9 +1252,6 @@ definitions:
         allOf:
         - $ref: '#/definitions/apicommon.SubscriptionPlanLimits'
         description: Organization limits for this plan
-      stripeId:
-        description: Stripe product ID
-        type: string
       stripeMonthlyPriceId:
         description: Stripe monthly price ID
         type: string
@@ -1695,7 +1692,7 @@ definitions:
       freeTrialDays:
         type: integer
       id:
-        type: integer
+        type: string
       integratorLimits:
         $ref: '#/definitions/db.IntegratorLimits'
       monthlyPrice:
@@ -1704,8 +1701,12 @@ definitions:
         type: string
       organization:
         $ref: '#/definitions/db.PlanLimits'
-      stripeID:
-        type: string
+      public:
+        description: |-
+          Public reports whether the plan is listed on the public /plans catalog. Private plans
+          (custom per-customer contracts and the internal free integrator tier) are hidden from
+          the listing but remain visible to their own subscriber via the subscription payload.
+        type: boolean
       stripeMonthlyPriceID:
         type: string
       stripeYearlyPriceID:
@@ -4229,7 +4230,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: Get the list of available subscription plans
+      description: Get the list of publicly available subscription plans
       produces:
       - application/json
       responses:
@@ -4244,39 +4245,6 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Get all subscription plans
-      tags:
-      - plans
-  /plans/{planID}:
-    get:
-      consumes:
-      - application/json
-      description: Get detailed information about a specific subscription plan
-      parameters:
-      - description: Plan ID
-        in: path
-        name: planID
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/db.Plan'
-        "400":
-          description: Invalid plan ID
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Plan not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      summary: Get plan information
       tags:
       - plans
   /process:

@@ -141,7 +141,7 @@ func TestStripeWebhook(t *testing.T) {
 
 		// Mock a new subscription
 		{
-			s := mockStripeSubscription(orgAddress, mockEssentialPlan.StripeID)
+			s := mockStripeSubscription(orgAddress, mockEssentialPlan.ID)
 			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeCustomerSubscriptionCreated, s))
 			c.Assert(err, qt.IsNil)
 		}
@@ -156,7 +156,7 @@ func TestStripeWebhook(t *testing.T) {
 
 		// Mock a subscription upgrade
 		{
-			s := mockStripeSubscription(orgAddress, mockPremiumPlan.StripeID)
+			s := mockStripeSubscription(orgAddress, mockPremiumPlan.ID)
 			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeCustomerSubscriptionUpdated, s))
 			c.Assert(err, qt.IsNil)
 		}
@@ -171,7 +171,7 @@ func TestStripeWebhook(t *testing.T) {
 
 		// Cancel subscription
 		{
-			s := mockStripeSubscription(orgAddress, mockPremiumPlan.StripeID)
+			s := mockStripeSubscription(orgAddress, mockPremiumPlan.ID)
 			s.Status = stripeapi.SubscriptionStatusCanceled
 			s.CanceledAt = time.Now().Unix()
 			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeCustomerSubscriptionDeleted, s))
@@ -189,14 +189,14 @@ func TestStripeWebhook(t *testing.T) {
 
 	t.Run("SubscriptionErrors", func(*testing.T) {
 		{
-			s := mockStripeSubscription(orgAddress, mockEssentialPlan.StripeID)
+			s := mockStripeSubscription(orgAddress, mockEssentialPlan.ID)
 			s.Metadata = nil
 			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeCustomerSubscriptionCreated, s))
 			c.Assert(err, qt.ErrorMatches, ".* subscription missing address metadata")
 		}
 
 		{
-			s := mockStripeSubscription(orgAddress, mockEssentialPlan.StripeID)
+			s := mockStripeSubscription(orgAddress, mockEssentialPlan.ID)
 			s.Items.Data = nil
 			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeCustomerSubscriptionCreated, s))
 			c.Assert(err, qt.ErrorMatches, ".* subscription has no items")
@@ -267,7 +267,7 @@ func TestStripeWebhook(t *testing.T) {
 	// TODO: needs refactoring, can't fetch stripeapi prices with mock API key
 	// t.Run("ProductUpdated", func(*testing.T) {
 	// 	{
-	// 		plan, err := testDB.PlanByStripeID(mockEssentialPlan.StripeID)
+	// 		plan, err := testDB.Plan(mockEssentialPlan.ID)
 	// 		c.Assert(err, qt.IsNil)
 	// 		c.Assert(plan.Name, qt.Equals, mockEssentialPlan.Name)
 	// 		c.Assert(plan.MonthlyPrice, qt.Equals, mockEssentialPlan.MonthlyPrice)
@@ -276,7 +276,7 @@ func TestStripeWebhook(t *testing.T) {
 	// 	}
 
 	// 	{
-	// 		s := mockStripeProduct(mockEssentialPlan.StripeID)
+	// 		s := mockStripeProduct(mockEssentialPlan.ID)
 	// 		s.Name = "New Name"
 	// 		s.DefaultPrice.UnitAmount = mockEssentialPlan.MonthlyPrice + 1000 // TODO: FIX
 	// 		s.Metadata["features"] = `{"personalization": false, "emailReminder": true, "smsNotification": false}`
@@ -285,7 +285,7 @@ func TestStripeWebhook(t *testing.T) {
 	// 	}
 
 	// 	{
-	// 		plan, err := testDB.PlanByStripeID(mockEssentialPlan.StripeID)
+	// 		plan, err := testDB.Plan(mockEssentialPlan.ID)
 	// 		c.Assert(err, qt.IsNil)
 	// 		c.Assert(plan.Name, qt.Equals, "New Name")
 	// 		c.Assert(plan.MonthlyPrice, qt.Equals, mockEssentialPlan.MonthlyPrice+1000) // TODO: FIX
@@ -296,7 +296,7 @@ func TestStripeWebhook(t *testing.T) {
 
 	// t.Run("ProductErrors", func(*testing.T) {
 	// 	{
-	// 		s := mockStripeProduct(mockEssentialPlan.StripeID)
+	// 		s := mockStripeProduct(mockEssentialPlan.ID)
 	// 		s.Metadata["features"] = `invalid-json`
 	// 		err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeProductUpdated, s))
 	// 		c.Assert(err, qt.ErrorMatches, ".* error parsing plan metadata JSON.*")

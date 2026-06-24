@@ -84,14 +84,14 @@ var (
 	mockPlans = []*db.Plan{mockFreePlan, mockEssentialPlan, mockPremiumPlan}
 
 	mockFreePlan = &db.Plan{
-		ID:                   1,
+		ID:                   "prod_test_free",
 		Name:                 "Free Plan",
-		StripeID:             "prod_test_free",
 		StripeMonthlyPriceID: "price_month_test_free",
 		MonthlyPrice:         0,
 		StripeYearlyPriceID:  "price_year_test_free",
 		YearlyPrice:          0,
 		Default:              true,
+		Public:               true,
 		Organization: db.PlanLimits{
 			Users:        1,
 			SubOrgs:      0,
@@ -124,14 +124,14 @@ var (
 		},
 	}
 	mockEssentialPlan = &db.Plan{
-		ID:                   2,
+		ID:                   "prod_test_essential",
 		Name:                 "Essential Annual Subscription Plan",
-		StripeID:             "prod_test_essential",
 		StripeMonthlyPriceID: "price_month_test_essential",
 		MonthlyPrice:         1990,
 		StripeYearlyPriceID:  "price_year_test_essential",
 		YearlyPrice:          19900,
 		Default:              false,
+		Public:               true,
 		Organization: db.PlanLimits{
 			Users:        5,
 			SubOrgs:      1,
@@ -164,14 +164,14 @@ var (
 		},
 	}
 	mockPremiumPlan = &db.Plan{
-		ID:                   3,
+		ID:                   "prod_test_premium",
 		Name:                 "Premium Annual Subscription Plan",
-		StripeID:             "prod_test_premium",
 		StripeMonthlyPriceID: "price_month_test_premium",
 		MonthlyPrice:         4990,
 		StripeYearlyPriceID:  "price_year_test_premium",
 		YearlyPrice:          49900,
 		Default:              false,
+		Public:               true,
 		Organization: db.PlanLimits{
 			Users:        10,
 			SubOrgs:      2,
@@ -333,7 +333,7 @@ func TestMain(m *testing.M) {
 				update := bson.M{"$set": p}
 				opts := options.Update().SetUpsert(true)
 				if _, err := database.Collection("plans").UpdateOne(ctx, filter, update, opts); err != nil {
-					return fmt.Errorf("failed to upsert plan with ID %d: %w", p.ID, err)
+					return fmt.Errorf("failed to upsert plan with ID %s: %w", p.ID, err)
 				}
 			}
 			return nil
@@ -1213,7 +1213,7 @@ func postGroupCensusAndExpectError(t *testing.T, loginToken string, censusID, gr
 	return requestAndExpectError(t, http.MethodPost, loginToken, request, censusGroupPublishURL(censusID, groupID))
 }
 
-func setOrganizationSubscription(t *testing.T, orgAddress common.Address, planID uint64) {
+func setOrganizationSubscription(t *testing.T, orgAddress common.Address, planID string) {
 	t.Helper()
 	err := testDB.SetOrganizationSubscription(orgAddress, &db.OrganizationSubscription{
 		PlanID:          planID,

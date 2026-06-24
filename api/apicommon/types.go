@@ -557,14 +557,11 @@ type OrganizationSubscriptionInfo struct {
 // It is the mirror struct of db.Plan.
 // swagger:model SubscriptionPlan
 type SubscriptionPlan struct {
-	// Unique identifier for the plan
-	ID uint64 `json:"id"`
+	// Unique identifier for the plan (its Stripe product ID)
+	ID string `json:"id"`
 
 	// Human-readable name of the plan
 	Name string `json:"name"`
-
-	// Stripe product ID
-	StripeID string `json:"stripeId"`
 
 	// Stripe monthly price ID
 	StripeMonthlyPriceID string `json:"stripeMonthlyPriceId"`
@@ -602,7 +599,6 @@ func SubscriptionPlanFromDB(plan *db.Plan) SubscriptionPlan {
 	return SubscriptionPlan{
 		ID:                   plan.ID,
 		Name:                 plan.Name,
-		StripeID:             plan.StripeID,
 		StripeMonthlyPriceID: plan.StripeMonthlyPriceID,
 		MonthlyPrice:         plan.MonthlyPrice,
 		StripeYearlyPriceID:  plan.StripeYearlyPriceID,
@@ -721,8 +717,8 @@ type SubscriptionFeatures struct {
 // It is the mirror struct of db.OrganizationSubscription.
 // swagger:model SubscriptionDetails
 type SubscriptionDetails struct {
-	// ID of the subscription plan
-	PlanID uint64 `json:"planId"`
+	// ID of the subscription plan (its Stripe product ID)
+	PlanID string `json:"planId"`
 
 	// Date when the subscription started
 	StartDate time.Time `json:"startDate"`
@@ -792,8 +788,8 @@ func SubscriptionUsageFromDB(usage *db.OrganizationCounters) SubscriptionUsage {
 // SubscriptionCheckout represents the details required for a subscription checkout process.
 // swagger:model SubscriptionCheckout
 type SubscriptionCheckout struct {
-	// Plan lookup key
-	LookupKey uint64 `json:"lookupKey"`
+	// Plan lookup key (the plan's Stripe product ID)
+	LookupKey string `json:"lookupKey"`
 
 	// Billing period (e.g., "month" or "year")
 	BillingPeriod string `json:"billingPeriod"`

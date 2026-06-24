@@ -119,10 +119,8 @@ const (
 	organizationAPIKeyEndpoint = "/organizations/{address}/apikeys/{keyID}"
 
 	// subscription routes
-	// GET /subscriptions to get the subscriptions of an organization
+	// GET /plans to get the public catalog of subscription plans
 	plansEndpoint = "/plans"
-	// GET /subscriptions/{planID} to get the plan information
-	planInfoEndpoint = "/plans/{planID}"
 	// POST /subscriptions/webhook to receive the subscription webhook from stripe
 	subscriptionsWebhook = "/subscriptions/webhook"
 	// POST /subscriptions/checkout to create a new subscription
