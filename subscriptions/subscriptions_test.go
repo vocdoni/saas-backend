@@ -23,7 +23,7 @@ func TestHasTxPermission(t *testing.T) {
 	orgWithoutPlan := &db.Organization{
 		Address: testOrgAddress,
 		Subscription: db.OrganizationSubscription{
-			PlanID: 0, // No plan
+			PlanID: "", // No plan
 		},
 	}
 
@@ -31,7 +31,7 @@ func TestHasTxPermission(t *testing.T) {
 	orgWithPlan := &db.Organization{
 		Address: testAnotherOrgAddress,
 		Subscription: db.OrganizationSubscription{
-			PlanID: 1, // Has a plan
+			PlanID: "plan-1", // Has a plan
 		},
 	}
 
@@ -61,9 +61,9 @@ func TestHasTxPermission(t *testing.T) {
 
 	// Create a mock DB that returns a plan for ID 1
 	mockDB := &mockMongoStorage{
-		plans: map[uint64]*db.Plan{
-			1: {
-				ID:   1,
+		plans: map[string]*db.Plan{
+			"plan-1": {
+				ID:   "plan-1",
 				Name: "Test Plan",
 				Organization: db.PlanLimits{
 					MaxProcesses: 10,
@@ -117,7 +117,7 @@ func TestHasDBPermission(t *testing.T) {
 			testAnotherOrgAddress.String(): {
 				Address: testAnotherOrgAddress,
 				Subscription: db.OrganizationSubscription{
-					PlanID: 1,
+					PlanID: "plan-1",
 				},
 				Counters: db.OrganizationCounters{
 					Users:   5,
@@ -125,9 +125,9 @@ func TestHasDBPermission(t *testing.T) {
 				},
 			},
 		},
-		plans: map[uint64]*db.Plan{
-			1: {
-				ID:   1,
+		plans: map[string]*db.Plan{
+			"plan-1": {
+				ID:   "plan-1",
 				Name: "Test Plan",
 				Organization: db.PlanLimits{
 					Users:   10,
@@ -167,9 +167,9 @@ func TestHasDBPermission(t *testing.T) {
 func TestIsIntegrator(t *testing.T) {
 	c := qt.New(t)
 	mockDB := &mockMongoStorage{
-		plans: map[uint64]*db.Plan{
-			1: {ID: 1, IntegratorLimits: db.IntegratorLimits{MaxManagedOrgs: 5}}, // integrator plan
-			2: {ID: 2, IntegratorLimits: db.IntegratorLimits{MaxManagedOrgs: 0}}, // regular plan
+		plans: map[string]*db.Plan{
+			"plan-1": {ID: "plan-1", IntegratorLimits: db.IntegratorLimits{MaxManagedOrgs: 5}}, // integrator plan
+			"plan-2": {ID: "plan-2", IntegratorLimits: db.IntegratorLimits{MaxManagedOrgs: 0}}, // regular plan
 		},
 	}
 	subs := &Subscriptions{db: mockDB}
@@ -191,25 +191,25 @@ func TestIsIntegrator(t *testing.T) {
 
 	// self-serve via an active subscription to an integrator plan
 	c.Assert(subs.IsIntegrator(&db.Organization{
-		Subscription: db.OrganizationSubscription{PlanID: 1, Active: true},
+		Subscription: db.OrganizationSubscription{PlanID: "plan-1", Active: true},
 	}), qt.IsTrue)
 
 	// the same plan with a lapsed (inactive) subscription is not an integrator
 	c.Assert(subs.IsIntegrator(&db.Organization{
-		Subscription: db.OrganizationSubscription{PlanID: 1, Active: false},
+		Subscription: db.OrganizationSubscription{PlanID: "plan-1", Active: false},
 	}), qt.IsFalse)
 
 	// an active subscription to a non-integrator plan is not an integrator
 	c.Assert(subs.IsIntegrator(&db.Organization{
-		Subscription: db.OrganizationSubscription{PlanID: 2, Active: true},
+		Subscription: db.OrganizationSubscription{PlanID: "plan-2", Active: true},
 	}), qt.IsFalse)
 }
 
 func TestEffectiveIntegratorLimits(t *testing.T) {
 	c := qt.New(t)
 	mockDB := &mockMongoStorage{
-		plans: map[uint64]*db.Plan{
-			1: {ID: 1, IntegratorLimits: db.IntegratorLimits{
+		plans: map[string]*db.Plan{
+			"plan-1": {ID: "plan-1", IntegratorLimits: db.IntegratorLimits{
 				MaxManagedOrgs: 5, MaxManagedProcesses: 50, MaxManagedCensusSize: 500,
 			}},
 		},
@@ -224,27 +224,27 @@ func TestEffectiveIntegratorLimits(t *testing.T) {
 	override := &db.IntegratorLimits{MaxManagedOrgs: 2, MaxManagedProcesses: 20, MaxManagedCensusSize: 200}
 	limits, err := subs.EffectiveIntegratorLimits(&db.Organization{
 		IntegratorLimits: override,
-		Subscription:     db.OrganizationSubscription{PlanID: 1},
+		Subscription:     db.OrganizationSubscription{PlanID: "plan-1"},
 	})
 	c.Assert(err, qt.IsNil)
 	c.Assert(limits, qt.DeepEquals, *override)
 
 	// with no override the plan limits are used
 	limits, err = subs.EffectiveIntegratorLimits(&db.Organization{
-		Subscription: db.OrganizationSubscription{PlanID: 1},
+		Subscription: db.OrganizationSubscription{PlanID: "plan-1"},
 	})
 	c.Assert(err, qt.IsNil)
-	c.Assert(limits, qt.DeepEquals, mockDB.plans[1].IntegratorLimits)
+	c.Assert(limits, qt.DeepEquals, mockDB.plans["plan-1"].IntegratorLimits)
 
-	// no override and no plan (PlanID==0) returns a typed ErrPlanNotFound, not a 500
+	// no override and no plan (PlanID=="") returns a typed ErrPlanNotFound, not a 500
 	_, err = subs.EffectiveIntegratorLimits(&db.Organization{
-		Subscription: db.OrganizationSubscription{PlanID: 0},
+		Subscription: db.OrganizationSubscription{PlanID: ""},
 	})
 	c.Assert(err, qt.ErrorIs, errors.ErrPlanNotFound)
 
 	// a plan lookup failure is wrapped
 	_, err = subs.EffectiveIntegratorLimits(&db.Organization{
-		Subscription: db.OrganizationSubscription{PlanID: 99},
+		Subscription: db.OrganizationSubscription{PlanID: "plan-unknown"},
 	})
 	c.Assert(err, qt.ErrorMatches, "could not get subscription plan.*")
 }
@@ -300,12 +300,12 @@ func TestCanPublishForManagedOrg(t *testing.T) {
 
 // Mock implementation of the necessary db.MongoStorage methods for testing
 type mockMongoStorage struct {
-	plans map[uint64]*db.Plan
+	plans map[string]*db.Plan
 	users map[string]*db.User
 	orgs  map[string]*db.Organization
 }
 
-func (m *mockMongoStorage) Plan(id uint64) (*db.Plan, error) {
+func (m *mockMongoStorage) Plan(id string) (*db.Plan, error) {
 	plan, ok := m.plans[id]
 	if !ok {
 		return nil, db.ErrNotFound

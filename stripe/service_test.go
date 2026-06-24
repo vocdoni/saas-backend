@@ -35,7 +35,7 @@ func TestProcessProductToPlanIntegratorLimits(t *testing.T) {
 			DefaultPrice: &stripeapi.Price{Metadata: map[string]string{"Default": "false"}},
 		}
 
-		plan, err := processProductToPlan(1, product, testPrices())
+		plan, err := processProductToPlan(product, testPrices())
 		c.Assert(err, qt.IsNil)
 		c.Assert(plan.IntegratorLimits.MaxManagedOrgs, qt.Equals, 3)
 		c.Assert(plan.IntegratorLimits.MaxManagedProcesses, qt.Equals, 30)
@@ -50,7 +50,7 @@ func TestProcessProductToPlanIntegratorLimits(t *testing.T) {
 			DefaultPrice: &stripeapi.Price{Metadata: map[string]string{"Default": "false"}},
 		}
 
-		plan, err := processProductToPlan(2, product, testPrices())
+		plan, err := processProductToPlan(product, testPrices())
 		c.Assert(err, qt.IsNil)
 		c.Assert(plan.IntegratorLimits.MaxManagedOrgs, qt.Equals, 0)
 		c.Assert(plan.IntegratorLimits.MaxManagedProcesses, qt.Equals, 0)
@@ -67,7 +67,7 @@ func TestProcessProductToPlanIntegratorLimits(t *testing.T) {
 			DefaultPrice: &stripeapi.Price{Metadata: map[string]string{"Default": "false"}},
 		}
 
-		_, err := processProductToPlan(3, product, testPrices())
+		_, err := processProductToPlan(product, testPrices())
 		c.Assert(err, qt.IsNotNil)
 	})
 }

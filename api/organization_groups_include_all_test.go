@@ -203,9 +203,7 @@ func TestCreateGroupWithLargeNumberOfMembers(t *testing.T) {
 	// Adjust the free plan
 	increasedFreePlan := *mockFreePlan
 	increasedFreePlan.Organization.MaxCensus = len(testMembers)
-	id, err := testDB.SetPlan(&increasedFreePlan)
-	qt.Assert(t, err, qt.IsNil)
-	qt.Assert(t, id, qt.Equals, increasedFreePlan.ID)
+	qt.Assert(t, testDB.SetPlan(&increasedFreePlan), qt.IsNil)
 
 	// Add members to the organization
 	addedResponse := requestAndParse[apicommon.AddMembersResponse](
@@ -233,7 +231,5 @@ func TestCreateGroupWithLargeNumberOfMembers(t *testing.T) {
 	c.Assert(groupDetails.MemberIDs, qt.HasLen, len(testMembers))
 
 	// revert plan changes
-	id, err = testDB.SetPlan(mockFreePlan)
-	qt.Assert(t, err, qt.IsNil)
-	qt.Assert(t, id, qt.Equals, mockFreePlan.ID)
+	qt.Assert(t, testDB.SetPlan(mockFreePlan), qt.IsNil)
 }

@@ -55,7 +55,7 @@ func (p DBPermission) String() string {
 
 // DBInterface defines the database methods required by the Subscriptions service
 type DBInterface interface {
-	Plan(id uint64) (*db.Plan, error)
+	Plan(id string) (*db.Plan, error)
 	UserByEmail(email string) (*db.User, error)
 	Organization(address common.Address) (*db.Organization, error)
 	OrganizationWithParent(address common.Address) (*db.Organization, *db.Organization, error)
@@ -122,7 +122,7 @@ func (p *Subscriptions) HasTxPermission(
 	}
 
 	// Check if the organization has a subscription
-	if org.Subscription.PlanID == 0 {
+	if org.Subscription.PlanID == "" {
 		return false, errors.ErrOrganizationHasNoSubscription
 	}
 
@@ -205,7 +205,7 @@ func (p *Subscriptions) OrgHasPermission(orgAddress common.Address, permission D
 			return errors.ErrOrganizationNotFound.WithErr(err)
 		}
 
-		if org.Subscription.PlanID == 0 {
+		if org.Subscription.PlanID == "" {
 			return errors.ErrOrganizationHasNoSubscription.With("can't create draft process")
 		}
 
@@ -235,7 +235,7 @@ func (p *Subscriptions) OrgCanAddNMembers(orgAddress common.Address, memberNumbe
 		return errors.ErrOrganizationNotFound.WithErr(err)
 	}
 
-	if org.Subscription.PlanID == 0 {
+	if org.Subscription.PlanID == "" {
 		return errors.ErrOrganizationHasNoSubscription.With("can't create draft process")
 	}
 
@@ -261,7 +261,7 @@ func (p *Subscriptions) OrgCanPublishGroupCensus(census *db.Census, groupID stri
 		return errors.ErrOrganizationNotFound.WithErr(err)
 	}
 
-	if org.Subscription.PlanID == 0 {
+	if org.Subscription.PlanID == "" {
 		return errors.ErrOrganizationHasNoSubscription
 	}
 
@@ -303,7 +303,7 @@ func (p *Subscriptions) OrgCanAddCensusParticipants(orgAddress common.Address, c
 		return errors.ErrOrganizationNotFound.WithErr(err)
 	}
 
-	if org.Subscription.PlanID == 0 {
+	if org.Subscription.PlanID == "" {
 		return errors.ErrOrganizationHasNoSubscription.With("can't create draft process")
 	}
 
@@ -339,7 +339,7 @@ func (p *Subscriptions) IsIntegrator(org *db.Organization) bool {
 	if org.IntegratorLimits != nil {
 		return org.IntegratorLimits.MaxManagedOrgs > 0
 	}
-	if !org.Subscription.Active || org.Subscription.PlanID == 0 {
+	if !org.Subscription.Active || org.Subscription.PlanID == "" {
 		return false
 	}
 	plan, err := p.db.Plan(org.Subscription.PlanID)
@@ -358,7 +358,7 @@ func (p *Subscriptions) EffectiveIntegratorLimits(org *db.Organization) (db.Inte
 	if org.IntegratorLimits != nil {
 		return *org.IntegratorLimits, nil
 	}
-	if org.Subscription.PlanID == 0 {
+	if org.Subscription.PlanID == "" {
 		return db.IntegratorLimits{}, errors.ErrPlanNotFound.With("organization has no subscription plan")
 	}
 	plan, err := p.db.Plan(org.Subscription.PlanID)

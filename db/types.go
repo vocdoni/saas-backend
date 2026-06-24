@@ -141,20 +141,26 @@ type Features struct {
 	PhoneSupport    bool `json:"phoneSupport" bson:"phoneSupport"`
 }
 
+// Plan is keyed by its Stripe product ID. Plans are not authored locally: they are synced
+// from Stripe, which is the single source of truth for plan definitions (see
+// stripe.Service.GetPlansFromStripe).
 type Plan struct {
-	ID                   uint64           `json:"id" bson:"_id"`
-	Name                 string           `json:"name" bson:"name"`
-	StripeID             string           `json:"stripeID" bson:"stripeID"`
-	StripeMonthlyPriceID string           `json:"stripeMonthlyPriceID" bson:"stripeMonthlyPriceID"`
-	MonthlyPrice         int64            `json:"monthlyPrice" bson:"monthlyPrice"`
-	StripeYearlyPriceID  string           `json:"stripeYearlyPriceID" bson:"stripeYearlyPriceID"`
-	YearlyPrice          int64            `json:"yearlyPrice" bson:"yearlyPrice"`
-	Default              bool             `json:"default" bson:"default"`
-	FreeTrialDays        int              `json:"freeTrialDays" bson:"freeTrialDays"`
-	Organization         PlanLimits       `json:"organization" bson:"organization"`
-	VotingTypes          VotingTypes      `json:"votingTypes" bson:"votingTypes"`
-	Features             Features         `json:"features" bson:"features"`
-	IntegratorLimits     IntegratorLimits `json:"integratorLimits" bson:"integratorLimits"`
+	ID                   string `json:"id" bson:"_id"`
+	Name                 string `json:"name" bson:"name"`
+	StripeMonthlyPriceID string `json:"stripeMonthlyPriceID" bson:"stripeMonthlyPriceID"`
+	MonthlyPrice         int64  `json:"monthlyPrice" bson:"monthlyPrice"`
+	StripeYearlyPriceID  string `json:"stripeYearlyPriceID" bson:"stripeYearlyPriceID"`
+	YearlyPrice          int64  `json:"yearlyPrice" bson:"yearlyPrice"`
+	Default              bool   `json:"default" bson:"default"`
+	// Public reports whether the plan is listed on the public /plans catalog. Private plans
+	// (custom per-customer contracts and the internal free integrator tier) are hidden from
+	// the listing but remain visible to their own subscriber via the subscription payload.
+	Public           bool             `json:"public" bson:"public"`
+	FreeTrialDays    int              `json:"freeTrialDays" bson:"freeTrialDays"`
+	Organization     PlanLimits       `json:"organization" bson:"organization"`
+	VotingTypes      VotingTypes      `json:"votingTypes" bson:"votingTypes"`
+	Features         Features         `json:"features" bson:"features"`
+	IntegratorLimits IntegratorLimits `json:"integratorLimits" bson:"integratorLimits"`
 }
 
 type BillingPeriod string
@@ -167,7 +173,7 @@ const (
 )
 
 type OrganizationSubscription struct {
-	PlanID               uint64        `json:"planID" bson:"planID"`
+	PlanID               string        `json:"planID" bson:"planID"`
 	StripeSubscriptionID string        `json:"stripeSubscriptionID" bson:"stripeSubscriptionID"`
 	BillingPeriod        BillingPeriod `json:"billingPeriod" bson:"billingPeriod"`
 	StartDate            time.Time     `json:"startDate" bson:"startDate"`

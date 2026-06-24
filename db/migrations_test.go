@@ -79,17 +79,18 @@ func TestMigrations(t *testing.T) {
 				panic(fmt.Sprintf("failed to create new MongoDB connection: %v", err))
 			}
 
-			// Plans should be populated
+			// Plans are no longer seeded by migrations: they are synced from Stripe at runtime
+			// (the single source of truth). After migrations alone the collection is empty.
 			{
 				plans, err := testDB.Plans()
 				c.Assert(err, qt.IsNil)
-				c.Assert(plans, qt.Not(qt.HasLen), 0)
+				c.Assert(plans, qt.HasLen, 0)
 			}
 
 			err = testDB.RunMigrationsDown(len(migrations.SortedByVersionAsc()))
 			c.Assert(err, qt.IsNil)
 
-			// Plans should now be empty
+			// Plans should still be empty
 			{
 				plans, err := testDB.Plans()
 				c.Assert(err, qt.IsNil)
@@ -105,11 +106,11 @@ func TestMigrations(t *testing.T) {
 				panic(fmt.Sprintf("failed to create new MongoDB connection: %v", err))
 			}
 
-			// Plans should be populated again
+			// Plans remain empty after re-running migrations (sourced from Stripe at runtime).
 			{
 				plans, err := testDB.Plans()
 				c.Assert(err, qt.IsNil)
-				c.Assert(plans, qt.Not(qt.HasLen), 0)
+				c.Assert(plans, qt.HasLen, 0)
 			}
 
 			testDB.Close()

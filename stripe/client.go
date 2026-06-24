@@ -100,6 +100,28 @@ func (*Client) GetProduct(productID string) (*stripeapi.Product, error) {
 	return product, nil
 }
 
+// ListProducts retrieves all active products, with each product's default price expanded so
+// callers can inspect default-price metadata (e.g. the default-plan marker).
+func (*Client) ListProducts() ([]stripeapi.Product, error) {
+	var products []stripeapi.Product
+
+	params := &stripeapi.ProductListParams{
+		Active: stripeapi.Bool(true),
+	}
+	params.AddExpand("data.default_price")
+	params.Filters.AddFilter("limit", "", "100")
+
+	i := stripeproduct.List(params)
+	for i.Next() {
+		products = append(products, *i.Product())
+	}
+	if err := i.Err(); err != nil {
+		return nil, errors.ErrStripeError.Withf("failed to list products: %v", err)
+	}
+
+	return products, nil
+}
+
 // GetPrice retrieves a price by lookup key
 func (*Client) GetPrice(lookupKey string) (*stripeapi.Price, error) {
 	params := &stripeapi.PriceSearchParams{

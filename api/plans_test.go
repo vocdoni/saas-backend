@@ -6,11 +6,12 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/db"
-	"github.com/vocdoni/saas-backend/errors"
 )
 
-// TestPlansAPI covers the public plansHandler (GET /plans) and planInfoHandler
-// (GET /plans/{planID}) endpoints, including their error cases.
+// TestPlansAPI covers the public plansHandler (GET /plans). Plans are synced from Stripe and
+// keyed by their Stripe product ID; only public plans are listed (private custom/free-integrator
+// plans are hidden). The per-plan GET /plans/{planID} endpoint was removed: a subscriber reads
+// its own plan from its subscription payload instead.
 func TestPlansAPI(t *testing.T) {
 	c := qt.New(t)
 	defer func() {
@@ -19,18 +20,11 @@ func TestPlansAPI(t *testing.T) {
 		}
 	}()
 
-	// List all plans: TestMain seeds exactly 3 mock plans (IDs 1, 2, 3).
+	// List all plans: TestMain seeds exactly 3 public mock plans.
 	plans := requestAndParse[[]*db.Plan](t, http.MethodGet, "", nil, plansEndpoint)
 	c.Assert(plans, qt.HasLen, 3)
-
-	// Get a single plan by ID.
-	plan := requestAndParse[db.Plan](t, http.MethodGet, "", nil, "plans", "1")
-	c.Assert(plan.ID, qt.Equals, uint64(1))
-	c.Assert(plan.Name, qt.Equals, "Free Plan")
-
-	// Unknown plan ID returns 404 ErrPlanNotFound.
-	requestAndAssertError(errors.ErrPlanNotFound, t, http.MethodGet, "", nil, "plans", "999999")
-
-	// Non-numeric plan ID returns 400 ErrMalformedURLParam.
-	requestAndAssertError(errors.ErrMalformedURLParam, t, http.MethodGet, "", nil, "plans", "not-a-number")
+	for _, p := range plans {
+		c.Assert(p.Public, qt.IsTrue)
+		c.Assert(p.ID, qt.Not(qt.Equals), "")
+	}
 }

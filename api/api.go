@@ -367,7 +367,6 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, organizationRolesEndpoint, a.organizationRolesHandler)
 		handle(r, http.MethodGet, organizationTypesEndpoint, a.organizationsTypesHandler)
 		handle(r, http.MethodGet, plansEndpoint, a.plansHandler)
-		handle(r, http.MethodGet, planInfoEndpoint, a.planInfoHandler)
 		handle(r, http.MethodPost, subscriptionsWebhook, a.stripeHandlers.HandleWebhook)
 		handle(r, http.MethodGet, objectStorageDownloadTypedEndpoint, a.objectStorage.DownloadImageInlineHandler)
 		handle(r, http.MethodGet, censusIDEndpoint, a.censusInfoHandler)

@@ -466,7 +466,7 @@ func (ms *MongoStorage) fetchOrganizationAndPlan(orgAddress common.Address) (*Or
 	if err != nil {
 		return nil, nil, fmt.Errorf("could not get organization: %v", err)
 	}
-	if org.Subscription.PlanID == 0 {
+	if org.Subscription.PlanID == "" {
 		return nil, nil, fmt.Errorf("organization has no subscription plan")
 	}
 	plan, err := ms.Plan(org.Subscription.PlanID)

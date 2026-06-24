@@ -241,7 +241,7 @@ func (a *API) InitializeStripeService() error {
 
 	// Store plans in database
 	for _, plan := range plans {
-		if _, err := a.db.SetPlan(plan); err != nil {
+		if err := a.db.SetPlan(plan); err != nil {
 			return fmt.Errorf("failed to store plan %s: %w", plan.Name, err)
 		}
 	}

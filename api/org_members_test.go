@@ -546,9 +546,7 @@ func TestOrganizationMembers(t *testing.T) {
 	// reduce limit of freePlan to allow exactly orgMembers
 	reducedFreePlan := *mockFreePlan
 	reducedFreePlan.Organization.MaxCensus = len(membersResponse.Members)
-	id, err := testDB.SetPlan(&reducedFreePlan)
-	qt.Assert(t, err, qt.IsNil)
-	qt.Assert(t, id, qt.Equals, reducedFreePlan.ID)
+	qt.Assert(t, testDB.SetPlan(&reducedFreePlan), qt.IsNil)
 	// Now try adding another member, should fail due to limit
 	overLimitMembers := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
@@ -566,9 +564,7 @@ func TestOrganizationMembers(t *testing.T) {
 		"organizations", orgAddress.String(), "members")
 
 	// revert plan changes
-	id, err = testDB.SetPlan(mockFreePlan)
-	qt.Assert(t, err, qt.IsNil)
-	qt.Assert(t, id, qt.Equals, mockFreePlan.ID)
+	qt.Assert(t, testDB.SetPlan(mockFreePlan), qt.IsNil)
 }
 
 func TestUpsertOrganizationMember(t *testing.T) {
