@@ -75,3 +75,33 @@ func TestAPIKeysAPI(t *testing.T) {
 	_, code = testRequest(t, http.MethodGet, apiKey, nil, "organizations", orgAddr.String(), "integrator")
 	c.Assert(code, qt.Equals, http.StatusUnauthorized)
 }
+
+// TestAPIKeysRequireIntegrator verifies that API keys can only be created by integrator
+// organizations: a plain (non-integrator) org admin is rejected with 403, while the same
+// org once enabled as an integrator (override) is allowed.
+func TestAPIKeysRequireIntegrator(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "apikeyintegratorpass123")
+	orgAddr := testCreateOrganization(t, token) // plain org, not an integrator
+
+	// a plain org admin cannot mint keys (integrator-only)
+	createBody := &apicommon.CreateAPIKeyRequest{Label: "ci", Scopes: []string{ScopeQuotaRead}}
+	_, code := testRequest(t, http.MethodPost, token, createBody, "organizations", orgAddr.String(), "apikeys")
+	c.Assert(code, qt.Equals, http.StatusForbidden) // ErrNotAnIntegrator
+
+	// a malformed {address} path param is rejected with 400, not silently treated as the zero address
+	_, code = testRequest(t, http.MethodPost, token, createBody, "organizations", "not-an-address", "apikeys")
+	c.Assert(code, qt.Equals, http.StatusBadRequest)
+
+	// enable the org as an integrator (override) and creation now succeeds
+	org, err := testDB.Organization(orgAddr)
+	c.Assert(err, qt.IsNil)
+	org.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 1}
+	c.Assert(testDB.SetOrganization(org), qt.IsNil)
+
+	data, code := testRequest(t, http.MethodPost, token, createBody, "organizations", orgAddr.String(), "apikeys")
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("resp: %s", data))
+	var created apicommon.CreateAPIKeyResponse
+	c.Assert(json.Unmarshal(data, &created), qt.IsNil)
+	c.Assert(strings.HasPrefix(created.Secret, APIKeyPrefix), qt.IsTrue)
+}

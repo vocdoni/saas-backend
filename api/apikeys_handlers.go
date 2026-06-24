@@ -17,7 +17,8 @@ import (
 //
 //	@Summary		Create an API key for an organization
 //	@Description	Create a new API key owned by the organization at the given address. The caller
-//	@Description	must be an admin of the organization. The plaintext secret (prefixed "vsk_") is
+//	@Description	must be an admin of the organization, which must be enabled as an integrator —
+//	@Description	API keys are integrator-only. The plaintext secret (prefixed "vsk_") is
 //	@Description	returned ONCE in the response and cannot be retrieved again.
 //	@Description
 //	@Description	`label` and at least one `scope` are required. Valid scopes are deny-by-default and
@@ -30,8 +31,10 @@ import (
 //	@Param			address	path		string							true	"Organization address"
 //	@Param			request	body		apicommon.CreateAPIKeyRequest	true	"API key information"
 //	@Success		200		{object}	apicommon.CreateAPIKeyResponse	"Created key including the one-time plaintext secret"
-//	@Failure		400		{object}	errors.Error					"Invalid input (missing label/scopes, unknown scope, or past expiresAt)"
+//	@Failure		400		{object}	errors.Error					"Invalid input (bad address, missing label/scopes, unknown scope, past expiresAt)"
 //	@Failure		401		{object}	errors.Error					"Unauthorized"
+//	@Failure		403		{object}	errors.Error					"Organization is not an integrator"
+//	@Failure		404		{object}	errors.Error					"Organization not found"
 //	@Failure		500		{object}	errors.Error					"Internal server error"
 //	@Router			/organizations/{address}/apikeys [post]
 func (a *API) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
@@ -40,9 +43,34 @@ func (a *API) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
-	orgAddr := common.HexToAddress(chi.URLParam(r, "address"))
+	// validate the address up front: common.HexToAddress silently maps a malformed {address}
+	// to the zero address, which would otherwise surface as a confusing 401/404 instead of 400.
+	addr := chi.URLParam(r, "address")
+	if !common.IsHexAddress(addr) {
+		errors.ErrMalformedURLParam.With("invalid organization address").Write(w)
+		return
+	}
+	orgAddr := common.HexToAddress(addr)
 	if !user.HasRoleFor(orgAddr, db.AdminRole) {
 		errors.ErrUnauthorized.Withf("user is not admin of the organization").Write(w)
+		return
+	}
+	// API keys are an integrator capability: only integrator organizations may mint them.
+	// An admin of any org that is not integrator-enabled is rejected here, even though they
+	// are an admin, because the API-key scope set (quota/managed/voting/members) is
+	// integrator-oriented. Integrator status is determined by subscriptions.IsIntegrator,
+	// which accounts for per-org IntegratorLimits overrides and the active plan's limits.
+	org, err := a.db.Organization(orgAddr)
+	if err != nil {
+		if err == db.ErrNotFound {
+			errors.ErrOrganizationNotFound.Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if !a.subscriptions.IsIntegrator(org) {
+		errors.ErrNotAnIntegrator.Write(w)
 		return
 	}
 	req := &apicommon.CreateAPIKeyRequest{}
