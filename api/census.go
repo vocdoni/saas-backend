@@ -273,7 +273,10 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 //
 //	@Summary		Publish a group-based census for voting
 //	@Description	Publish a census based on a specific organization members group for voting. Requires Manager/Admin role.
-//	@Description	Returns published census with credentials.
+//	@Description	The request body selects the CSP authentication: at least one of authFields or twoFaFields
+//	@Description	must be provided. Supplying only authFields yields an auth-only census (members authenticate
+//	@Description	with their data, no OTP); twoFaFields adds an email/SMS OTP challenge. A body with both empty
+//	@Description	is rejected with 404 (ErrCensusTypeNotFound). Returns the published census root and URI.
 //	@Tags			census
 //	@Accept			json
 //	@Produce		json
@@ -284,7 +287,7 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 //	@Success		200		{object}	apicommon.PublishedCensusResponse
 //	@Failure		400		{object}	errors.Error	"Invalid census ID or group ID"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		404		{object}	errors.Error	"Census not found"
+//	@Failure		404		{object}	errors.Error	"Census not found, or neither authFields nor twoFaFields provided (ErrCensusTypeNotFound)"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/census/{id}/group/{groupid}/publish [post]
 func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) {

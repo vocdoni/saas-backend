@@ -891,10 +891,13 @@ type PublishedCensusResponse struct {
 // PublishCensusGroupRequest represents a request to publish a census group.
 // swagger:model PublishCensusGroupRequest
 type PublishCensusGroupRequest struct {
-	// Optional for defining which member data should be used for authentication
+	// Member data fields used for authentication (e.g. nationalId, birthDate). At least one
+	// of authFields or twoFaFields must be provided; supplying only authFields publishes an
+	// auth-only (no OTP) CSP census. A request with both empty is rejected (ErrCensusTypeNotFound).
 	AuthFields db.OrgMemberAuthFields `json:"authFields,omitempty"`
 
-	// Optional for defining which member data should be used for two-factor authentication
+	// Member data fields used for two-factor authentication (email and/or phone, sent as an OTP
+	// challenge). At least one of authFields or twoFaFields must be provided.
 	TwoFaFields db.OrgMemberTwoFaFields `json:"twoFaFields,omitempty"`
 
 	// Indicates if the census is weighted
