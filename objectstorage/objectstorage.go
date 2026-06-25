@@ -133,10 +133,10 @@ func (osc *Client) LocalURL(objectName string) string {
 	return osc.storagePrefix() + objectName
 }
 
-// storagePrefix is the "{ServerURL}/storage/" prefix, with any trailing slash on
+// storagePrefix is the "{ServerURL}/storage/" prefix, with any trailing slashes on
 // ServerURL trimmed so a misconfigured value never yields a "//storage/" prefix.
 func (osc *Client) storagePrefix() string {
-	return strings.TrimSuffix(osc.ServerURL, "/") + "/storage/"
+	return strings.TrimRight(osc.ServerURL, "/") + "/storage/"
 }
 
 // uploadObject uploads the object image with the given objectID, associated to

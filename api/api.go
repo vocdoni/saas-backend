@@ -148,7 +148,7 @@ func New(ctx context.Context, conf *Config) *API {
 	}
 	// normalize once so every storage reference built from it — and the local-reference
 	// match on read — is consistent and never yields a "//storage/" prefix.
-	conf.ServerURL = strings.TrimSuffix(conf.ServerURL, "/")
+	conf.ServerURL = strings.TrimRight(conf.ServerURL, "/")
 	// Set the ServerURL for the ObjectStorageClient
 	if conf.ObjectStorage != nil {
 		conf.ObjectStorage.ServerURL = conf.ServerURL

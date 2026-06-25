@@ -517,7 +517,7 @@ type Process struct {
 	// document. https references are fetched (locally when they point at this service's
 	// object storage, otherwise externally); ipfs references are resolved via the Vochain
 	// and then cached locally. Bootstrapped from the on-chain pointer on first read when
-	// empty; empty for unpublished drafts.
+	// unset. Unset for unpublished drafts, and omitted from JSON in that case (omitempty).
 	MetadataURL    string          `json:"metadataURL,omitempty" bson:"metadataURL,omitempty"`
 	ElectionParams *ElectionParams `json:"electionParams,omitempty" bson:"electionParams,omitempty"`
 	Status         string          `json:"status,omitempty" bson:"status,omitempty"`
