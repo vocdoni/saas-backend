@@ -11,6 +11,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/proto/build/go/models"
 	"google.golang.org/protobuf/proto"
@@ -129,7 +130,7 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			processId	path		string								true	"On-chain process id (hex)"
+//	@Param			processId	path		string								true	"24-hex ProcessID"
 //	@Param			request		body		apicommon.SetProcessStatusRequest	true	"New process status"
 //	@Success		202			{object}	apicommon.EnqueuedResponse			"Job accepted; poll GET /jobs/{jobId}"
 //	@Failure		400			{object}	errors.Error						"Invalid input data"
@@ -139,8 +140,8 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		503			{object}	errors.Error						"Transaction queue is full"
 //	@Router			/process/{processId}/status [put]
 func (a *API) setProcessStatusHandler(w http.ResponseWriter, r *http.Request) {
-	var pid internal.HexBytes
-	if err := pid.ParseString(chi.URLParam(r, "processId")); err != nil || len(pid) == 0 {
+	objID, err := primitive.ObjectIDFromHex(chi.URLParam(r, "processId"))
+	if err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid process id").Write(w)
 		return
 	}
@@ -172,13 +173,18 @@ func (a *API) setProcessStatusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	process, err := a.db.ProcessByAddress(pid)
+	process, err := a.db.Process(objID)
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrProcessNotFound.Write(w)
 			return
 		}
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	// only a published process has an on-chain election whose status can be changed.
+	if len(process.Address) == 0 {
+		errors.ErrProcessNotFound.Withf("process not published").Write(w)
 		return
 	}
 
@@ -216,7 +222,7 @@ func (a *API) setProcessStatusHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	tx, err := a.account.BuildSetProcessStatusTx(orgSigner.Address(), pid.Bytes(), status)
+	tx, err := a.account.BuildSetProcessStatusTx(orgSigner.Address(), process.Address.Bytes(), status)
 	if err != nil {
 		errors.ErrVochainRequestFailed.WithErr(err).Write(w)
 		return

@@ -93,7 +93,7 @@ func TestProcessReadProxies(t *testing.T) {
 		VoteType:     db.VoteType{MaxCount: 1, MaxValue: 1},
 		ElectionType: db.ElectionType{Autostart: true, Interruptible: true},
 	}
-	_, err = testDB.SetProcess(&db.Process{OrgAddress: orgAddress, Address: addr, ElectionParams: electionParams})
+	processObjID, err := testDB.SetProcess(&db.Process{OrgAddress: orgAddress, Address: addr, ElectionParams: electionParams})
 	c.Assert(err, qt.IsNil)
 
 	// create a census, add members and publish a group-based census
@@ -158,7 +158,7 @@ func TestProcessReadProxies(t *testing.T) {
 	var res apicommon.ProcessResultsResponse
 	for i := 0; i < 20; i++ {
 		res = requestAndParse[apicommon.ProcessResultsResponse](
-			t, http.MethodGet, "", nil, "process", addr.String(), "results",
+			t, http.MethodGet, "", nil, "process", processObjID.Hex(), "results",
 		)
 		if res.VoteCount == 1 {
 			break
@@ -170,9 +170,30 @@ func TestProcessReadProxies(t *testing.T) {
 	c.Assert(res.EndDate.IsZero(), qt.IsFalse)
 
 	// fetch the public metadata endpoint and assert it matches the rebuilt bytes
-	body, code := testRequest(t, http.MethodGet, "", nil, "process", addr.String(), "metadata")
+	body, code := testRequest(t, http.MethodGet, "", nil, "process", processObjID.Hex(), "metadata")
 	c.Assert(code, qt.Equals, http.StatusOK)
 	expectedBytes, err := account.BuildElectionMetadata(electionParams)
 	c.Assert(err, qt.IsNil)
 	c.Assert(bytes.Equal(body, expectedBytes), qt.IsTrue)
+
+	// sign-info resolves the process by either the 24-hex ProcessID (preferred) or the
+	// 64-hex on-chain election id (backwards compatible), returning the same consumed address
+	// and nullifier for the voter that just cast a vote.
+	signInfoReq := &handlers.ConsumedAddressRequest{AuthToken: authToken}
+	byObjID := requestAndParse[handlers.ConsumedAddressResponse](
+		t, http.MethodPost, "", signInfoReq, "process", processObjID.Hex(), "sign-info",
+	)
+	byOnchain := requestAndParse[handlers.ConsumedAddressResponse](
+		t, http.MethodPost, "", signInfoReq, "process", addr.String(), "sign-info",
+	)
+	c.Assert(byObjID.Address, qt.Not(qt.HasLen), 0)
+	c.Assert(byObjID.Address.String(), qt.Equals, byOnchain.Address.String())
+	c.Assert(byObjID.Nullifier.String(), qt.Equals, byOnchain.Nullifier.String())
+
+	// a malformed id (valid hex but neither a 24-hex ProcessID nor a 32-byte on-chain id) is a
+	// 400, and a well-formed-but-unknown ProcessID is a 404 — these are checked before auth.
+	_, badCode := testRequest(t, http.MethodPost, "", signInfoReq, "process", "abcd", "sign-info")
+	c.Assert(badCode, qt.Equals, http.StatusBadRequest)
+	_, missCode := testRequest(t, http.MethodPost, "", signInfoReq, "process", "0123456789abcdef01234567", "sign-info")
+	c.Assert(missCode, qt.Equals, http.StatusNotFound)
 }

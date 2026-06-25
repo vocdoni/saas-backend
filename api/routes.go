@@ -160,23 +160,28 @@ const (
 	processEndpoint = "/process/{processId}"
 	// POST /process/{processId}/auth to check if the voter is authorized
 	// processAuthEndpoint = "/process/{processId}/auth"
-	// POST /process/{processId}/sign-info to get the sign info for the process
+	// POST /process/{processId}/sign-info to get the sign info for the process.
+	// {processId} accepts the 24-hex ProcessID (preferred) or, for backwards
+	// compatibility, the 64-hex on-chain election id.
 	processSignInfoEndpoint = "/process/{processId}/sign-info"
 
 	// POST /process/{processId}/publish to publish a draft process as an on-chain election
 	processPublishEndpoint = "/process/{processId}/publish"
 
-	// PUT /process/{processId}/status to change an on-chain election status
+	// PUT /process/{processId}/status to change an on-chain election status.
+	// {processId} is the 24-hex ProcessID (not the on-chain election id).
 	processStatusEndpoint = "/process/{processId}/status"
 
 	// POST /vote to relay an already-signed vote (public). The target process is taken
 	// from the signed vote envelope itself, so no process id appears in the path.
 	voteEndpoint = "/vote"
 
-	// GET /process/{processId}/results to get the trimmed on-chain election results (public)
+	// GET /process/{processId}/results to get the trimmed on-chain election results (public).
+	// {processId} is the 24-hex ProcessID (not the on-chain election id).
 	processResultsEndpoint = "/process/{processId}/results"
 
-	// GET /process/{processId}/metadata to get the election metadata JSON (public)
+	// GET /process/{processId}/metadata to get the election metadata JSON (public).
+	// {processId} is the 24-hex ProcessID (not the on-chain election id).
 	processMetadataEndpoint = "/process/{processId}/metadata"
 
 	// two-factor process bundle routes

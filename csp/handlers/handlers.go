@@ -32,6 +32,9 @@ const (
 		"bafkreifqyu5m5as4gvcirlog5j267um24q7y4ri6r3svhsi7fda24676ny"
 )
 
+// electionIDLength is the byte length of a Vochain election (process) id: 32 bytes / 64 hex chars.
+const electionIDLength = 32
+
 // CSPHandlers is a struct that contains an instance of the CSP and the main
 // database (where the bundle and census data is stored). It is used to handle
 // the CSP API requests such as the authentication and signing of the bundle
@@ -632,11 +635,12 @@ func (c *CSPHandlers) BundleCheckHandler(w http.ResponseWriter, r *http.Request)
 //
 //	@Summary		Get the address used to sign a process
 //	@Description	Get the address used to sign a process. Requires a verified token. Returns the address, nullifier,
-//	@Description	and timestamp of the consumption.
+//	@Description	and timestamp of the consumption. {processId} accepts the 24-hex ProcessID (preferred)
+//	@Description	or, for backwards compatibility, the 64-hex on-chain election id.
 //	@Tags			process
 //	@Accept			json
 //	@Produce		json
-//	@Param			processId	path		string							true	"Process ID"
+//	@Param			processId	path		string							true	"24-hex ProcessID (preferred); 64-hex on-chain id also accepted"
 //	@Param			request		body		handlers.ConsumedAddressRequest	true	"Request with auth token"
 //	@Success		200			{object}	handlers.ConsumedAddressResponse
 //	@Failure		400			{object}	errors.Error	"Invalid input data or user has not voted (ErrUserNoVoted)"
@@ -645,10 +649,31 @@ func (c *CSPHandlers) BundleCheckHandler(w http.ResponseWriter, r *http.Request)
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/process/{processId}/sign-info [post]
 func (c *CSPHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Request) {
-	// get the bundle ID from the URL parameters
+	// Resolve the process to its on-chain election id (needed for the CSP lookup and the
+	// nullifier below). Preferred form is the 24-hex ProcessID, consistent with the rest
+	// of the process API; for backwards compatibility we exceptionally also accept the 64-hex
+	// on-chain election id directly. A ProcessID is exactly 24 hex chars, so it never
+	// collides with the 64-hex on-chain id.
+	raw := chi.URLParam(r, "processId")
 	processID := new(internal.HexBytes)
-	if err := processID.ParseString(chi.URLParam(r, "processId")); err != nil {
-		errors.ErrMalformedURLParam.WithErr(csp.ErrNoBundleID).Write(w)
+	if objID, oerr := primitive.ObjectIDFromHex(raw); oerr == nil {
+		process, err := c.mainDB.Process(objID)
+		if err != nil {
+			if err == db.ErrNotFound {
+				errors.ErrProcessNotFound.Write(w)
+				return
+			}
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+		if len(process.Address) == 0 {
+			errors.ErrProcessNotFound.Withf("process not published").Write(w)
+			return
+		}
+		*processID = process.Address
+	} else if err := processID.ParseString(raw); err != nil || len(*processID) != electionIDLength {
+		// backwards-compat: the on-chain election id (32 bytes / 64 hex chars).
+		errors.ErrMalformedURLParam.Withf("invalid process id").Write(w)
 		return
 	}
 	// parse the request from the body
