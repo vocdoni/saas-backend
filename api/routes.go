@@ -160,7 +160,9 @@ const (
 	processEndpoint = "/process/{processId}"
 	// POST /process/{processId}/auth to check if the voter is authorized
 	// processAuthEndpoint = "/process/{processId}/auth"
-	// POST /process/{processId}/sign-info to get the sign info for the process
+	// POST /process/{processId}/sign-info to get the sign info for the process.
+	// {processId} accepts the 24-hex Mongo ObjectID (preferred) or, for backwards
+	// compatibility, the 64-hex on-chain election id.
 	processSignInfoEndpoint = "/process/{processId}/sign-info"
 
 	// POST /process/{processId}/publish to publish a draft process as an on-chain election

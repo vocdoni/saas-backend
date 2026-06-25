@@ -4631,9 +4631,11 @@ paths:
       - application/json
       description: |-
         Get the address used to sign a process. Requires a verified token. Returns the address, nullifier,
-        and timestamp of the consumption.
+        and timestamp of the consumption. {processId} accepts the 24-hex Mongo ObjectID
+        (preferred) or, for backwards compatibility, the 64-hex on-chain election id.
       parameters:
-      - description: Process ID
+      - description: 'Process id: 24-hex Mongo ObjectID (preferred) or 64-hex on-chain
+          election id'
         in: path
         name: processId
         required: true

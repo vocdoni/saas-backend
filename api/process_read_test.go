@@ -175,4 +175,18 @@ func TestProcessReadProxies(t *testing.T) {
 	expectedBytes, err := account.BuildElectionMetadata(electionParams)
 	c.Assert(err, qt.IsNil)
 	c.Assert(bytes.Equal(body, expectedBytes), qt.IsTrue)
+
+	// sign-info resolves the process by either the 24-hex Mongo ObjectID (preferred) or the
+	// 64-hex on-chain election id (backwards compatible), returning the same consumed address
+	// and nullifier for the voter that just cast a vote.
+	signInfoReq := &handlers.ConsumedAddressRequest{AuthToken: authToken}
+	byObjID := requestAndParse[handlers.ConsumedAddressResponse](
+		t, http.MethodPost, "", signInfoReq, "process", processObjID.Hex(), "sign-info",
+	)
+	byOnchain := requestAndParse[handlers.ConsumedAddressResponse](
+		t, http.MethodPost, "", signInfoReq, "process", addr.String(), "sign-info",
+	)
+	c.Assert(byObjID.Address, qt.Not(qt.HasLen), 0)
+	c.Assert(byObjID.Address.String(), qt.Equals, byOnchain.Address.String())
+	c.Assert(byObjID.Nullifier.String(), qt.Equals, byOnchain.Nullifier.String())
 }
