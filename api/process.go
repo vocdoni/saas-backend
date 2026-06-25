@@ -325,12 +325,6 @@ func (a *API) resolveProcessMetadata(p *db.Process) map[string]any {
 			return nil
 		}
 		m = mm
-		// cache locally and promote the reference so the next request resolves locally
-		if b, err := json.Marshal(m); err == nil {
-			if name, err := a.objectStorage.PutJSON(b, metadataObjectUserID); err == nil {
-				p.MetadataURL, changed = storagePrefix+name, true
-			}
-		}
 	case strings.HasPrefix(p.MetadataURL, "http"):
 		m = fetchExternalMetadata(p.MetadataURL)
 	default:
@@ -338,6 +332,16 @@ func (a *API) resolveProcessMetadata(p *db.Process) map[string]any {
 	}
 	if m == nil {
 		return nil
+	}
+	// metadata is immutable (a change is a republish through this API), so cache any
+	// remotely-resolved document locally and promote the reference — later reads then
+	// resolve from our own storage with no Vochain or external round-trip.
+	if !strings.HasPrefix(p.MetadataURL, storagePrefix) {
+		if b, err := json.Marshal(m); err == nil {
+			if name, err := a.objectStorage.PutJSON(b, metadataObjectUserID); err == nil {
+				p.MetadataURL, changed = storagePrefix+name, true
+			}
+		}
 	}
 	// persist a learned/promoted reference inline, so following requests resolve locally
 	if changed {
