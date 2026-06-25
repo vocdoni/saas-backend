@@ -113,6 +113,27 @@ func (ms *MongoStorage) ClearProcessPublishing(processID primitive.ObjectID) err
 	return nil
 }
 
+// SetProcessMetadataURL sets only the metadataURL field of the process identified by
+// processID, leaving every other field untouched so a concurrent update to the same
+// process (status, publishedAt, counters...) is not clobbered by a stale full rewrite.
+func (ms *MongoStorage) SetProcessMetadataURL(processID primitive.ObjectID, metadataURL string) error {
+	if processID == primitive.NilObjectID {
+		return ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	filter := bson.M{"_id": processID}
+	res, err := ms.processes.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"metadataURL": metadataURL}})
+	if err != nil {
+		return fmt.Errorf("failed to set process metadataURL: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // DeleteProcess removes a process
 func (ms *MongoStorage) DelProcess(processID primitive.ObjectID) error {
 	if processID == primitive.NilObjectID {

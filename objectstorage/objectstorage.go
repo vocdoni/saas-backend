@@ -107,6 +107,57 @@ func (osc *Client) Get(objectID string) (*db.Object, error) {
 	return object, nil
 }
 
+// GetByName returns the stored object addressed by its "{id}.{ext}" name (the last
+// path segment of a /storage/{name} URL).
+func (osc *Client) GetByName(objectName string) (*db.Object, error) {
+	objectID, ok := objectIDfromName(objectName)
+	if !ok {
+		return nil, ErrorInvalidObjectID
+	}
+	return osc.Get(objectID)
+}
+
+// LocalName returns the object name when url refers to an object served by this storage
+// client — an absolute "{ServerURL}/storage/{name}" reference or a relative
+// "/storage/{name}" one. Any number of slashes are tolerated at the host/path boundary
+// so a legacy "{ServerURL}//storage/{name}" pointer (written when ServerURL had a
+// trailing slash) still resolves locally; a relative reference keeps resolving even if
+// ServerURL later changes. The boolean reports whether url is a local storage reference.
+func (osc *Client) LocalName(url string) (string, bool) {
+	// extract the object name from a "{slashes}storage/{name}" path tail, requiring a
+	// non-empty name so a bare ".../storage/" never reports as a (useless) local match.
+	extract := func(pathTail string) (string, bool) {
+		name, ok := strings.CutPrefix(strings.TrimLeft(pathTail, "/"), "storage/")
+		if !ok || name == "" {
+			return "", false
+		}
+		return name, true
+	}
+	// absolute reference under our host, tolerating extra slashes at the host/path
+	// boundary (the leading "/" check rejects "hoststorage/..."-style false prefixes).
+	if base := strings.TrimRight(osc.ServerURL, "/"); base != "" {
+		if rest, ok := strings.CutPrefix(url, base); ok && strings.HasPrefix(rest, "/") {
+			return extract(rest)
+		}
+	}
+	// relative reference (also resolvable if ServerURL changes)
+	if strings.HasPrefix(url, "/") {
+		return extract(url)
+	}
+	return "", false
+}
+
+// LocalURL returns the canonical local reference URL for the given object name.
+func (osc *Client) LocalURL(objectName string) string {
+	return osc.storagePrefix() + objectName
+}
+
+// storagePrefix is the "{ServerURL}/storage/" prefix, with any trailing slashes on
+// ServerURL trimmed so a misconfigured value never yields a "//storage/" prefix.
+func (osc *Client) storagePrefix() string {
+	return strings.TrimRight(osc.ServerURL, "/") + "/storage/"
+}
+
 // uploadObject uploads the object image with the given objectID, associated to
 // the user with the given userFID and the community with the given communityID.
 // If the objectID is empty, it calculates the objectID from the data. It returns

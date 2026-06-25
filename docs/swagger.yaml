@@ -1059,6 +1059,15 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
+      metadataURL:
+        description: |-
+          MetadataURL is the generic reference to this process's canonical ElectionMetadata
+          document. http(s) references are fetched — locally when they point at this service's
+          object storage (including a relative "/storage/{name}" reference), otherwise via an
+          external request; ipfs references are resolved via the Vochain and then cached
+          locally. Bootstrapped from the on-chain pointer on first read when unset. Unset for
+          unpublished drafts, and omitted from JSON in that case (omitempty).
+        type: string
       orgAdress:
         items:
           type: integer
@@ -1760,6 +1769,15 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
+      metadataURL:
+        description: |-
+          MetadataURL is the generic reference to this process's canonical ElectionMetadata
+          document. http(s) references are fetched — locally when they point at this service's
+          object storage (including a relative "/storage/{name}" reference), otherwise via an
+          external request; ipfs references are resolved via the Vochain and then cached
+          locally. Bootstrapped from the on-chain pointer on first read when unset. Unset for
+          unpublished drafts, and omitted from JSON in that case (omitempty).
+        type: string
       orgAdress:
         items:
           type: integer
