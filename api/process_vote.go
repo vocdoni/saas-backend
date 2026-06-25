@@ -130,7 +130,7 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			processId	path		string								true	"Process id (24-hex Mongo ObjectID)"
+//	@Param			processId	path		string								true	"24-hex ProcessID"
 //	@Param			request		body		apicommon.SetProcessStatusRequest	true	"New process status"
 //	@Success		202			{object}	apicommon.EnqueuedResponse			"Job accepted; poll GET /jobs/{jobId}"
 //	@Failure		400			{object}	errors.Error						"Invalid input data"

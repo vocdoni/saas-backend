@@ -176,7 +176,7 @@ func TestProcessReadProxies(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(bytes.Equal(body, expectedBytes), qt.IsTrue)
 
-	// sign-info resolves the process by either the 24-hex Mongo ObjectID (preferred) or the
+	// sign-info resolves the process by either the 24-hex ProcessID (preferred) or the
 	// 64-hex on-chain election id (backwards compatible), returning the same consumed address
 	// and nullifier for the voter that just cast a vote.
 	signInfoReq := &handlers.ConsumedAddressRequest{AuthToken: authToken}

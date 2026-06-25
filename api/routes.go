@@ -161,7 +161,7 @@ const (
 	// POST /process/{processId}/auth to check if the voter is authorized
 	// processAuthEndpoint = "/process/{processId}/auth"
 	// POST /process/{processId}/sign-info to get the sign info for the process.
-	// {processId} accepts the 24-hex Mongo ObjectID (preferred) or, for backwards
+	// {processId} accepts the 24-hex ProcessID (preferred) or, for backwards
 	// compatibility, the 64-hex on-chain election id.
 	processSignInfoEndpoint = "/process/{processId}/sign-info"
 
@@ -169,7 +169,7 @@ const (
 	processPublishEndpoint = "/process/{processId}/publish"
 
 	// PUT /process/{processId}/status to change an on-chain election status.
-	// {processId} is the process' 24-hex Mongo ObjectID (not the on-chain election id).
+	// {processId} is the 24-hex ProcessID (not the on-chain election id).
 	processStatusEndpoint = "/process/{processId}/status"
 
 	// POST /vote to relay an already-signed vote (public). The target process is taken
@@ -177,11 +177,11 @@ const (
 	voteEndpoint = "/vote"
 
 	// GET /process/{processId}/results to get the trimmed on-chain election results (public).
-	// {processId} is the process' 24-hex Mongo ObjectID (not the on-chain election id).
+	// {processId} is the 24-hex ProcessID (not the on-chain election id).
 	processResultsEndpoint = "/process/{processId}/results"
 
 	// GET /process/{processId}/metadata to get the election metadata JSON (public).
-	// {processId} is the process' 24-hex Mongo ObjectID (not the on-chain election id).
+	// {processId} is the 24-hex ProcessID (not the on-chain election id).
 	processMetadataEndpoint = "/process/{processId}/metadata"
 
 	// two-factor process bundle routes

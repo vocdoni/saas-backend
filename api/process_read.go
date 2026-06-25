@@ -21,7 +21,7 @@ import (
 //	@Description	required.
 //	@Tags			process
 //	@Produce		json
-//	@Param			processId	path		string								true	"Process id (24-hex Mongo ObjectID)"
+//	@Param			processId	path		string								true	"24-hex ProcessID"
 //	@Success		200			{object}	apicommon.ProcessResultsResponse	"Trimmed on-chain election state"
 //	@Failure		400			{object}	errors.Error						"Invalid input data"
 //	@Failure		404			{object}	errors.Error						"Process not found"
@@ -86,7 +86,7 @@ func (a *API) processResultsHandler(w http.ResponseWriter, r *http.Request) {
 //	@Description	published on chain. Public endpoint: no authentication is required.
 //	@Tags			process
 //	@Produce		json
-//	@Param			processId	path		string			true	"Process id (24-hex Mongo ObjectID)"
+//	@Param			processId	path		string			true	"24-hex ProcessID"
 //	@Success		200			{object}	object			"Election metadata JSON"
 //	@Failure		400			{object}	errors.Error	"Invalid input data"
 //	@Failure		404			{object}	errors.Error	"Process not found"

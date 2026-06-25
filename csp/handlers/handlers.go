@@ -632,12 +632,12 @@ func (c *CSPHandlers) BundleCheckHandler(w http.ResponseWriter, r *http.Request)
 //
 //	@Summary		Get the address used to sign a process
 //	@Description	Get the address used to sign a process. Requires a verified token. Returns the address, nullifier,
-//	@Description	and timestamp of the consumption. {processId} accepts the 24-hex Mongo ObjectID
-//	@Description	(preferred) or, for backwards compatibility, the 64-hex on-chain election id.
+//	@Description	and timestamp of the consumption. {processId} accepts the 24-hex ProcessID (preferred)
+//	@Description	or, for backwards compatibility, the 64-hex on-chain election id.
 //	@Tags			process
 //	@Accept			json
 //	@Produce		json
-//	@Param			processId	path		string							true	"Process id: 24-hex Mongo ObjectID (preferred) or 64-hex on-chain election id"
+//	@Param			processId	path		string							true	"24-hex ProcessID (preferred) or, for backwards compatibility, the 64-hex on-chain election id"
 //	@Param			request		body		handlers.ConsumedAddressRequest	true	"Request with auth token"
 //	@Success		200			{object}	handlers.ConsumedAddressResponse
 //	@Failure		400			{object}	errors.Error	"Invalid input data or user has not voted (ErrUserNoVoted)"
@@ -647,9 +647,9 @@ func (c *CSPHandlers) BundleCheckHandler(w http.ResponseWriter, r *http.Request)
 //	@Router			/process/{processId}/sign-info [post]
 func (c *CSPHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Request) {
 	// Resolve the process to its on-chain election id (needed for the CSP lookup and the
-	// nullifier below). Preferred form is the 24-hex Mongo ObjectID, consistent with the rest
+	// nullifier below). Preferred form is the 24-hex ProcessID, consistent with the rest
 	// of the process API; for backwards compatibility we exceptionally also accept the 64-hex
-	// on-chain election id directly. A valid ObjectID is exactly 24 hex chars, so it never
+	// on-chain election id directly. A ProcessID is exactly 24 hex chars, so it never
 	// collides with the 64-hex on-chain id.
 	raw := chi.URLParam(r, "processId")
 	processID := new(internal.HexBytes)

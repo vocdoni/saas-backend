@@ -4338,7 +4338,7 @@ paths:
       - application/json
       responses:
         "200":
-          description: Draft process ID (Mongo ObjectID)
+          description: 24-hex draft ProcessID
           schema:
             type: string
         "400":
@@ -4451,7 +4451,7 @@ paths:
         returns a 409. The optional `electionParams` field can be set or replaced here (additive), same as on
         create.
       parameters:
-      - description: Draft process ID (Mongo ObjectID)
+      - description: 24-hex draft ProcessID
         in: path
         name: processId
         required: true
@@ -4502,7 +4502,7 @@ paths:
         from the stored ElectionParams, so it is identical to the content-addressed document
         published on chain. Public endpoint: no authentication is required.
       parameters:
-      - description: Process id (24-hex Mongo ObjectID)
+      - description: 24-hex ProcessID
         in: path
         name: processId
         required: true
@@ -4598,7 +4598,7 @@ paths:
         results are final and the tally (if any). Public endpoint: no authentication is
         required.
       parameters:
-      - description: Process id (24-hex Mongo ObjectID)
+      - description: 24-hex ProcessID
         in: path
         name: processId
         required: true
@@ -4631,11 +4631,11 @@ paths:
       - application/json
       description: |-
         Get the address used to sign a process. Requires a verified token. Returns the address, nullifier,
-        and timestamp of the consumption. {processId} accepts the 24-hex Mongo ObjectID
-        (preferred) or, for backwards compatibility, the 64-hex on-chain election id.
+        and timestamp of the consumption. {processId} accepts the 24-hex ProcessID (preferred)
+        or, for backwards compatibility, the 64-hex on-chain election id.
       parameters:
-      - description: 'Process id: 24-hex Mongo ObjectID (preferred) or 64-hex on-chain
-          election id'
+      - description: 24-hex ProcessID (preferred) or, for backwards compatibility,
+          the 64-hex on-chain election id
         in: path
         name: processId
         required: true
@@ -4685,7 +4685,7 @@ paths:
 
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:
-      - description: Process id (24-hex Mongo ObjectID)
+      - description: 24-hex ProcessID
         in: path
         name: processId
         required: true

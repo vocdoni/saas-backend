@@ -36,7 +36,7 @@ import (
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			request	body		apicommon.CreateProcessRequest	true	"Process creation information (optionally with electionParams)"
-//	@Success		200		{object}	primitive.ObjectID				"Draft process ID (Mongo ObjectID)"
+//	@Success		200		{object}	primitive.ObjectID				"24-hex draft ProcessID"
 //	@Failure		400		{object}	errors.Error					"Invalid input data"
 //	@Failure		401		{object}	errors.Error					"Unauthorized"
 //	@Failure		403		{object}	errors.Error					"Plan does not allow creating more drafts"
@@ -135,7 +135,7 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			processId	path		string							true	"Draft process ID (Mongo ObjectID)"
+//	@Param			processId	path		string							true	"24-hex draft ProcessID"
 //	@Param			request		body		apicommon.UpdateProcessRequest	true	"Process update information (optionally with electionParams)"
 //	@Success		200			{string}	string							"OK"
 //	@Failure		400			{object}	errors.Error					"Invalid input data"
