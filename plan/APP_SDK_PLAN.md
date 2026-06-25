@@ -9,7 +9,7 @@ Design decisions already locked:
 - **Standalone**: no `@vocdoni/sdk` dependency. The one piece of Vochain crypto needed —
   building + signing the vote envelope — is a **minimal ported module** (see §5).
 - **Thin vote relay**: the SDK builds + signs the vote locally and POSTs the opaque envelope
-  to the SaaS `/process/{id}/vote`; the SaaS never sees plaintext.
+  to the SaaS `/vote`; the SaaS never sees plaintext.
 - Organizer flows are **plain REST** (the SaaS forges all txs).
 
 ## 1. Tooling & conventions (match vocdoni-sdk exactly)
@@ -37,7 +37,7 @@ src/
     census.ts              //   /census, members, groups
     process.ts             //   /process create/update/publish/status/results
     csp.ts                 //   /process/bundle/{id}/auth|sign|check|weight
-    vote.ts                //   /process/{id}/vote (relay)
+    vote.ts                //   /vote (relay)
     index.ts
   services/                // business logic over api/ (like vocdoni-sdk services)
     auth.ts organization.ts census.ts election.ts vote.ts csp.ts
@@ -156,7 +156,7 @@ hidden.
    and the CSP auth token from the completed `csp.auth` → CSP blind-sign → unblinded signature.
 3. `core/vote.ts` builds `VoteEnvelope` with `ProofCA` (CSP), packages votes, signs with the
    internal voter key → hex `SignedTx`.
-4. `voteService.relay(processId, txPayload)` → `POST /process/{processId}/vote` → `202 {jobId}`,
+4. `voteService.relay(processId, txPayload)` → `POST /vote` → `202 {jobId}`,
    then `awaitJob(jobId)` → `{voteID}` (the receipt). The poll is internal to `vote()`.
 
 **Non-CSP (`weighted`/`zkweighted`) census:**
@@ -167,7 +167,7 @@ hidden.
 3. `core/vote.ts` builds `VoteEnvelope` with the **Merkle proof** (`ProofArbo`) in place of
    `ProofCA`, packages votes, signs with the internal voter key → hex `SignedTx`. (For
    `zkweighted`/anonymous, the ZK proof path is out of scope for this round — see §5.)
-4. `voteService.relay(processId, txPayload)` → the **same** `POST /process/{processId}/vote` →
+4. `voteService.relay(processId, txPayload)` → the **same** `POST /vote` →
    `202 {jobId}`, then `awaitJob(jobId)` → `{voteID}`. The relay accepts CSP- or proof-authorized
    envelopes; the poll is internal to `vote()`.
 

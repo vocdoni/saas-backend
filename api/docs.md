@@ -2398,7 +2398,7 @@ If the worker queue is saturated the handler returns `503` and the client should
   (idempotent, no transaction sent).
 * **Change process status** — `PUT /process/{processId}/status` (Manager/Admin).
   Body `{ "status": "ready|paused|ended|canceled" }`. Returns `202` + `{ "jobId" }`.
-* **Relay a signed vote** — `POST /process/{processId}/vote` (public).
+* **Relay a signed vote** — `POST /vote` (public).
   Body `{ "txPayload": "<hex>" }`. Returns `202` + `{ "jobId" }`; the job result carries
   the vote nullifier (`voteID`).
 

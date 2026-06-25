@@ -169,8 +169,9 @@ const (
 	// PUT /process/{processId}/status to change an on-chain election status
 	processStatusEndpoint = "/process/{processId}/status"
 
-	// POST /process/{processId}/vote to relay an already-signed vote (public)
-	processVoteEndpoint = "/process/{processId}/vote"
+	// POST /vote to relay an already-signed vote (public). The target process is taken
+	// from the signed vote envelope itself, so no process id appears in the path.
+	voteEndpoint = "/vote"
 
 	// GET /process/{processId}/results to get the trimmed on-chain election results (public)
 	processResultsEndpoint = "/process/{processId}/results"

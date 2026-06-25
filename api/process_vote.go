@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -22,27 +21,24 @@ import (
 //	@Summary		Relay an already-signed vote to the Vochain
 //	@Description	Relays a voter transaction that has already been signed by the voter to the
 //	@Description	Vochain. The body carries a marshaled models.SignedTx whose inner Tx is a Vote
-//	@Description	envelope. Public endpoint: no authentication is required. The vote is validated
-//	@Description	synchronously and then submitted on a background worker; the call returns 202 with
-//	@Description	a job id. Poll GET /jobs/{jobId} for the resulting vote nullifier (voteID).
+//	@Description	envelope; the target process is taken from that envelope, so no process id is
+//	@Description	passed in the path. Public endpoint: no authentication is required. The request is
+//	@Description	checked synchronously — the body must decode to a Vote envelope (else 400) for a
+//	@Description	process the backend knows (else 404) — then enqueued for submission on a background
+//	@Description	worker; the call returns 202 with a job id. The chain's acceptance or rejection of
+//	@Description	the vote (proof, nullifier, election state) is decided when the worker submits it and
+//	@Description	reported on the job: poll GET /jobs/{jobId} for the voteID on success, or a failure.
 //	@Tags			process
 //	@Accept			json
 //	@Produce		json
-//	@Param			processId	path		string						true	"On-chain process id (hex)"
-//	@Param			request		body		apicommon.RelayVoteRequest	true	"Signed vote transaction payload"
-//	@Success		202			{object}	apicommon.EnqueuedResponse	"Job accepted; poll GET /jobs/{jobId}"
-//	@Failure		400			{object}	errors.Error				"Invalid input data"
-//	@Failure		404			{object}	errors.Error				"Process not found"
-//	@Failure		500			{object}	errors.Error				"Internal server error"
-//	@Failure		503			{object}	errors.Error				"Transaction queue is full"
-//	@Router			/process/{processId}/vote [post]
+//	@Param			request	body		apicommon.RelayVoteRequest	true	"Signed vote transaction payload"
+//	@Success		202		{object}	apicommon.EnqueuedResponse	"Job accepted; poll GET /jobs/{jobId}"
+//	@Failure		400		{object}	errors.Error				"Invalid input data"
+//	@Failure		404		{object}	errors.Error				"Process not found"
+//	@Failure		500		{object}	errors.Error				"Internal server error"
+//	@Failure		503		{object}	errors.Error				"Transaction queue is full"
+//	@Router			/vote [post]
 func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
-	var pid internal.HexBytes
-	if err := pid.ParseString(chi.URLParam(r, "processId")); err != nil || len(pid) == 0 {
-		errors.ErrMalformedURLParam.Withf("invalid process id").Write(w)
-		return
-	}
-
 	var req apicommon.RelayVoteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		errors.ErrMalformedBody.Write(w)
@@ -69,8 +65,10 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrInvalidTxFormat.With("not a vote tx").Write(w)
 		return
 	}
-	if !bytes.Equal(vote.ProcessId, pid.Bytes()) {
-		errors.ErrInvalidTxFormat.With("vote process id does not match url").Write(w)
+	// the target process is the one named in the signed vote envelope.
+	pid := internal.HexBytes(vote.ProcessId)
+	if len(pid) == 0 {
+		errors.ErrInvalidTxFormat.With("vote has no process id").Write(w)
 		return
 	}
 
@@ -85,8 +83,10 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// submit + confirm on the worker pool; the vote nullifier (voteID) is recorded on
-	// the job. Validation above already ran synchronously, so a bad vote got a 400.
+	// submit + confirm on the worker pool; the vote nullifier (voteID) is recorded on the
+	// job. The structural checks above ran synchronously (a malformed vote got a 400, an
+	// unknown process a 404); the chain's acceptance of the vote is decided here, async, and
+	// surfaced on the job.
 	jobID, err := apicommon.NewJobID()
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)

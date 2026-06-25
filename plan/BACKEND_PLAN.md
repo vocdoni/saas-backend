@@ -15,7 +15,7 @@ This document is the build plan for:
 - an optional `electionParams` field on draft create/update,
 - **chain-abstracted organization creation** (the SaaS forges `CreateAccount` for the org),
 - the managed election endpoints: `POST /process/{draftId}/publish`,
-  `PUT /process/{processId}/status`, `POST /process/{processId}/vote`,
+  `PUT /process/{processId}/status`, `POST /vote`,
   `GET /process/{processId}/results`, `GET /process/{processId}/metadata`,
 - the **integrator** layer: managed-organization creation/listing, plan + manual quota, and
   quota enforcement that rolls election/census usage up to the integrator.
@@ -227,7 +227,7 @@ submitted, but the `processId` is only known **after** submit. So the URL cannot
 ```go
 processPublishEndpoint       = "/process/{processId}/publish"   // POST  (processId = draftId here)
 processStatusEndpoint        = "/process/{processId}/status"    // PUT
-processVoteEndpoint          = "/process/{processId}/vote"      // POST  (public)
+voteEndpoint                 = "/vote"                          // POST  (public; process id is read from the signed envelope)
 processResultsEndpoint       = "/process/{processId}/results"   // GET   (public)
 processMetadataEndpoint      = "/process/{processId}/metadata"  // GET   (public)
 processCensusProofEndpoint   = "/process/{processId}/census/proof"  // GET   (public; Phase 6)
@@ -295,9 +295,10 @@ existing `GET /process/{processId}`, **on-chain election id** for `status`/`vote
   `api/csp_voting_test.go`).
 
 ### Phase 3 — vote relay + status lifecycle
-- `POST /process/{processId}/vote` (public): decode `txPayload` (base64 → `models.SignedTx`),
-  unmarshal inner `Tx`, assert `Tx_Vote` and matching `processId`; submit + confirm; return
-  `{voteId}` (the nullifier). Never decode the VotePackage; never expose the tx hash.
+- `POST /vote` (public): decode `txPayload` (hex → `models.SignedTx`),
+  unmarshal inner `Tx`, assert `Tx_Vote` and read the target `processId` from the envelope
+  (no id in the path); submit + confirm; return `{voteId}` (the nullifier). Never decode the
+  VotePackage; never expose the tx hash.
 - `PUT /process/{processId}/status`: map `ready|paused|ended|canceled` → `models.ProcessStatus`;
   `BuildSetProcessStatusTx` → fund/sign/submit. Manager/Admin.
 - **Tests:** drive CSP `auth`→`sign`, build a vote envelope (as in `api/csp_voting_test.go`),
@@ -376,7 +377,7 @@ Six changes:
    `EnvelopeType.Anonymous`.
 4. **`GET /process/{processId}/census/proof?key=<addr>`** (new, public): proxies `CensusGenProof`.
    The voter fetches the proof, builds + signs the envelope client-side, then posts it.
-5. **`POST /process/{processId}/vote`** (existing relay, Phase 3): generalize so it accepts a
+5. **`POST /vote`** (existing relay, Phase 3): generalize so it accepts a
    CSP-authorized envelope **OR** a merkle-proof-carrying envelope, and relays either. It still
    verifies the tx is a `Vote` for `processId` and **never decodes the ballot**.
 6. **`PUT /process/{processId}/census`** (new): dynamic add — `CensusAddParticipants` +
