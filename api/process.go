@@ -306,9 +306,12 @@ func (a *API) resolveProcessMetadata(p *db.Process) map[string]any {
 	name, isLocal := a.objectStorage.LocalName(p.MetadataURL)
 	switch {
 	case isLocal:
-		// our own object storage — resolve locally
+		// our own object storage — resolve locally; treat a corrupt/non-JSON object as a
+		// resolution failure (m stays nil) so the stored metadata is kept.
 		if obj, err := a.objectStorage.GetByName(name); err == nil {
-			_ = json.Unmarshal(obj.Data, &m)
+			if json.Unmarshal(obj.Data, &m) != nil {
+				m = nil
+			}
 		}
 	case strings.HasPrefix(p.MetadataURL, "ipfs://"):
 		// the Vochain resolves ipfs; reuse the election if already fetched
