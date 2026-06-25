@@ -166,17 +166,20 @@ const (
 	// POST /process/{processId}/publish to publish a draft process as an on-chain election
 	processPublishEndpoint = "/process/{processId}/publish"
 
-	// PUT /process/{processId}/status to change an on-chain election status
+	// PUT /process/{processId}/status to change an on-chain election status.
+	// {processId} is the process' 24-hex Mongo ObjectID (not the on-chain election id).
 	processStatusEndpoint = "/process/{processId}/status"
 
 	// POST /vote to relay an already-signed vote (public). The target process is taken
 	// from the signed vote envelope itself, so no process id appears in the path.
 	voteEndpoint = "/vote"
 
-	// GET /process/{processId}/results to get the trimmed on-chain election results (public)
+	// GET /process/{processId}/results to get the trimmed on-chain election results (public).
+	// {processId} is the process' 24-hex Mongo ObjectID (not the on-chain election id).
 	processResultsEndpoint = "/process/{processId}/results"
 
-	// GET /process/{processId}/metadata to get the election metadata JSON (public)
+	// GET /process/{processId}/metadata to get the election metadata JSON (public).
+	// {processId} is the process' 24-hex Mongo ObjectID (not the on-chain election id).
 	processMetadataEndpoint = "/process/{processId}/metadata"
 
 	// two-factor process bundle routes

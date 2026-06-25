@@ -93,7 +93,7 @@ func TestDeleteManagedOrg(t *testing.T) {
 	// (E) end the active election so the guard passes, then delete. ENDED is terminal, not active.
 	ended := enqueueAndPollJob(t, http.MethodPut, token,
 		&apicommon.SetProcessStatusRequest{Status: "ended"},
-		"process", pubJob.Result.Address.String(), "status")
+		"process", activeDraft.Hex(), "status")
 	c.Assert(ended.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("status error: %s", ended.Error))
 
 	// sanity: the now-ended election still belongs to the managed org before teardown

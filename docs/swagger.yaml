@@ -4498,11 +4498,11 @@ paths:
     get:
       description: |-
         Rebuilds and returns the raw ElectionMetadata JSON document of the process
-        identified by its on-chain process id. The metadata is deterministically derived
+        identified by its process id. The metadata is deterministically derived
         from the stored ElectionParams, so it is identical to the content-addressed document
         published on chain. Public endpoint: no authentication is required.
       parameters:
-      - description: On-chain process id (hex)
+      - description: Process id (24-hex Mongo ObjectID)
         in: path
         name: processId
         required: true
@@ -4598,7 +4598,7 @@ paths:
         results are final and the tally (if any). Public endpoint: no authentication is
         required.
       parameters:
-      - description: On-chain process id (hex)
+      - description: Process id (24-hex Mongo ObjectID)
         in: path
         name: processId
         required: true
@@ -4683,7 +4683,7 @@ paths:
 
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:
-      - description: On-chain process id (hex)
+      - description: Process id (24-hex Mongo ObjectID)
         in: path
         name: processId
         required: true

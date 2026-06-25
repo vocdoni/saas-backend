@@ -115,7 +115,7 @@ func TestProcessStatusLifecycle(t *testing.T) {
 	}
 	for _, tr := range transitions {
 		job := enqueueAndPollJob(t, http.MethodPut, token,
-			&apicommon.SetProcessStatusRequest{Status: tr.request}, "process", addr.String(), "status")
+			&apicommon.SetProcessStatusRequest{Status: tr.request}, "process", draftID.Hex(), "status")
 		c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", job.Error))
 		c.Assert(job.Result.Status, qt.Equals, tr.respStatus)
 		waitForElectionStatus(t, addr, tr.chainStatus...)

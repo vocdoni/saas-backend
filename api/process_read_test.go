@@ -93,7 +93,7 @@ func TestProcessReadProxies(t *testing.T) {
 		VoteType:     db.VoteType{MaxCount: 1, MaxValue: 1},
 		ElectionType: db.ElectionType{Autostart: true, Interruptible: true},
 	}
-	_, err = testDB.SetProcess(&db.Process{OrgAddress: orgAddress, Address: addr, ElectionParams: electionParams})
+	processObjID, err := testDB.SetProcess(&db.Process{OrgAddress: orgAddress, Address: addr, ElectionParams: electionParams})
 	c.Assert(err, qt.IsNil)
 
 	// create a census, add members and publish a group-based census
@@ -158,7 +158,7 @@ func TestProcessReadProxies(t *testing.T) {
 	var res apicommon.ProcessResultsResponse
 	for i := 0; i < 20; i++ {
 		res = requestAndParse[apicommon.ProcessResultsResponse](
-			t, http.MethodGet, "", nil, "process", addr.String(), "results",
+			t, http.MethodGet, "", nil, "process", processObjID.Hex(), "results",
 		)
 		if res.VoteCount == 1 {
 			break
@@ -170,7 +170,7 @@ func TestProcessReadProxies(t *testing.T) {
 	c.Assert(res.EndDate.IsZero(), qt.IsFalse)
 
 	// fetch the public metadata endpoint and assert it matches the rebuilt bytes
-	body, code := testRequest(t, http.MethodGet, "", nil, "process", addr.String(), "metadata")
+	body, code := testRequest(t, http.MethodGet, "", nil, "process", processObjID.Hex(), "metadata")
 	c.Assert(code, qt.Equals, http.StatusOK)
 	expectedBytes, err := account.BuildElectionMetadata(electionParams)
 	c.Assert(err, qt.IsNil)

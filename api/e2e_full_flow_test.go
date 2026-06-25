@@ -135,7 +135,7 @@ func TestFullElectionLifecycle(t *testing.T) {
 
 	// --- end the election; the chain auto-advances ENDED -> RESULTS once tallied ---
 	endJob := enqueueAndPollJob(t, http.MethodPut, token,
-		&apicommon.SetProcessStatusRequest{Status: "ended"}, "process", addr.String(), "status")
+		&apicommon.SetProcessStatusRequest{Status: "ended"}, "process", draftID.Hex(), "status")
 	c.Assert(endJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("end error: %s", endJob.Error))
 	c.Assert(endJob.Result.Status, qt.Equals, "ENDED")
 	waitForElectionStatus(t, addr, "ENDED", "RESULTS")
@@ -144,7 +144,7 @@ func TestFullElectionLifecycle(t *testing.T) {
 	var res apicommon.ProcessResultsResponse
 	for i := 0; i < 20; i++ {
 		res = requestAndParse[apicommon.ProcessResultsResponse](
-			t, http.MethodGet, "", nil, "process", addr.String(), "results")
+			t, http.MethodGet, "", nil, "process", draftID.Hex(), "results")
 		if res.FinalResults && res.VoteCount == uint64(numVoters) {
 			break
 		}

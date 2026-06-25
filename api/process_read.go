@@ -8,7 +8,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
-	"github.com/vocdoni/saas-backend/internal"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -21,21 +21,21 @@ import (
 //	@Description	required.
 //	@Tags			process
 //	@Produce		json
-//	@Param			processId	path		string								true	"On-chain process id (hex)"
+//	@Param			processId	path		string								true	"Process id (24-hex Mongo ObjectID)"
 //	@Success		200			{object}	apicommon.ProcessResultsResponse	"Trimmed on-chain election state"
 //	@Failure		400			{object}	errors.Error						"Invalid input data"
 //	@Failure		404			{object}	errors.Error						"Process not found"
 //	@Failure		500			{object}	errors.Error						"Internal server error"
 //	@Router			/process/{processId}/results [get]
 func (a *API) processResultsHandler(w http.ResponseWriter, r *http.Request) {
-	var pid internal.HexBytes
-	if err := pid.ParseString(chi.URLParam(r, "processId")); err != nil || len(pid) == 0 {
+	objID, err := primitive.ObjectIDFromHex(chi.URLParam(r, "processId"))
+	if err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid process id").Write(w)
 		return
 	}
 
-	// ensure we manage this process
-	if _, err := a.db.ProcessByAddress(pid); err != nil {
+	process, err := a.db.Process(objID)
+	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrProcessNotFound.Write(w)
 			return
@@ -43,8 +43,13 @@ func (a *API) processResultsHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
+	// results only exist once the process has been published on chain.
+	if len(process.Address) == 0 {
+		errors.ErrProcessNotFound.Withf("process not published").Write(w)
+		return
+	}
 
-	election, err := a.account.Election(pid.Bytes())
+	election, err := a.account.Election(process.Address.Bytes())
 	if err != nil {
 		errors.ErrVochainRequestFailed.WithErr(err).Write(w)
 		return
@@ -76,25 +81,25 @@ func (a *API) processResultsHandler(w http.ResponseWriter, r *http.Request) {
 //
 //	@Summary		Get the election metadata JSON
 //	@Description	Rebuilds and returns the raw ElectionMetadata JSON document of the process
-//	@Description	identified by its on-chain process id. The metadata is deterministically derived
+//	@Description	identified by its process id. The metadata is deterministically derived
 //	@Description	from the stored ElectionParams, so it is identical to the content-addressed document
 //	@Description	published on chain. Public endpoint: no authentication is required.
 //	@Tags			process
 //	@Produce		json
-//	@Param			processId	path		string			true	"On-chain process id (hex)"
+//	@Param			processId	path		string			true	"Process id (24-hex Mongo ObjectID)"
 //	@Success		200			{object}	object			"Election metadata JSON"
 //	@Failure		400			{object}	errors.Error	"Invalid input data"
 //	@Failure		404			{object}	errors.Error	"Process not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/process/{processId}/metadata [get]
 func (a *API) processMetadataHandler(w http.ResponseWriter, r *http.Request) {
-	var pid internal.HexBytes
-	if err := pid.ParseString(chi.URLParam(r, "processId")); err != nil || len(pid) == 0 {
+	objID, err := primitive.ObjectIDFromHex(chi.URLParam(r, "processId"))
+	if err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid process id").Write(w)
 		return
 	}
 
-	process, err := a.db.ProcessByAddress(pid)
+	process, err := a.db.Process(objID)
 	if err != nil {
 		if err == db.ErrNotFound {
 			errors.ErrProcessNotFound.Write(w)
