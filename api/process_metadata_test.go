@@ -67,7 +67,7 @@ func TestResolveMetadataPromotesRemote(t *testing.T) {
 
 	// seed a published process whose metadata reference points at the external server
 	// (no on-chain lookup happens because the reference is already set).
-	addr := common.HexToAddress(internal.RandomHex(100000))
+	addr := common.HexToAddress(internal.RandomHex(20))
 	id, err := testDB.SetProcess(&db.Process{
 		OrgAddress:  orgAddress,
 		Address:     internal.HexBytes(addr.Bytes()),

@@ -124,8 +124,12 @@ func (ms *MongoStorage) SetProcessMetadataURL(processID primitive.ObjectID, meta
 	defer cancel()
 
 	filter := bson.M{"_id": processID}
-	if _, err := ms.processes.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"metadataURL": metadataURL}}); err != nil {
+	res, err := ms.processes.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"metadataURL": metadataURL}})
+	if err != nil {
 		return fmt.Errorf("failed to set process metadataURL: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
 	}
 	return nil
 }

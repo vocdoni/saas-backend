@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -18,7 +17,7 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.vocdoni.io/dvote/api"
+	dvoteapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/proto/build/go/models"
 )
@@ -291,7 +290,7 @@ func (a *API) resolveProcessMetadata(p *db.Process) map[string]any {
 	if p.Address.Equals(nil) { // draft, nothing on chain
 		return nil
 	}
-	var election *api.Election
+	var election *dvoteapi.Election
 	changed := false
 	// bootstrap the reference from the on-chain pointer if we don't have one yet
 	if p.MetadataURL == "" {
@@ -687,7 +686,9 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrInternalStorageError.WithErr(err).Write(w)
 		return
 	}
-	metadataURL := fmt.Sprintf("%s/storage/%s", a.serverURL, objectName)
+	// build the reference via the storage client so the URL format (and trailing-slash
+	// handling) matches what the read path's local-reference match expects.
+	metadataURL := a.objectStorage.LocalURL(objectName)
 	// persist the reference so the read path resolves it locally without a chain round-trip.
 	draft.MetadataURL = metadataURL
 
