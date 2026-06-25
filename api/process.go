@@ -324,7 +324,7 @@ func (a *API) resolveProcessMetadata(p *db.Process) map[string]any {
 			return nil
 		}
 		m = mm
-	case strings.HasPrefix(p.MetadataURL, "http"):
+	case strings.HasPrefix(p.MetadataURL, "http://"), strings.HasPrefix(p.MetadataURL, "https://"):
 		m = fetchExternalMetadata(p.MetadataURL)
 	default:
 		return nil
