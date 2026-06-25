@@ -49,7 +49,7 @@ RemoteSigner path) keeps working throughout, so old and new can coexist during m
 | Election | `POST /process` / `PUT /process/{id}` *(+ optional `electionParams`)* | organizer |
 | Publish | `POST /process/{draftId}/publish` → `{processId}` | manager/admin |
 | Lifecycle | `PUT /process/{processId}/status` (ready/paused/ended/canceled) | manager/admin |
-| Vote relay | `POST /process/{processId}/vote` → `{voteId}` | public (CSP- or proof-authorized) |
+| Vote relay | `POST /vote` → `{voteId}` | public (CSP- or proof-authorized) |
 | Non-CSP census | `GET /process/{processId}/census/proof` · `PUT /process/{processId}/census` (dynamic add) | public proof · manager/admin |
 | Reads | `GET /process/{processId}/results` · `GET /process/{processId}/metadata` | public |
 | Integrator | `POST`/`GET /organizations/{address}/managed` · `GET /organizations/{address}/integrator` | integrator admin |

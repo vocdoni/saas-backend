@@ -26,7 +26,7 @@ Integrators additionally create and manage client organizations under a quota.
 | `POST` | `/process/{draftId}/publish` | Bearer (Manager/Admin) | optional `{ startDate }` (overrides the draft's start) | Publish a draft to the chain: forge → fund → sign → submit → confirm `NewProcess`. **Async:** validates synchronously, returns `202` + `jobId`; poll `GET /jobs/{jobId}` for the `processId`. |
 | `PUT`  | `/process/{processId}/status` | Bearer (Manager/Admin) | `{ status }` (`ready`/`paused`/`ended`/`canceled`) | Change lifecycle status. **Async:** returns `202` + `jobId`. |
 | `PUT`  | `/process/{processId}/census` | Bearer (Manager/Admin) | `{ participants }` (`{key, weight}[]`) | **Non-CSP only.** Dynamic-census add: append participants and grow the election census size. Gated behind the `DynamicCensus` mode flag. **Async:** returns `202` + `jobId`; poll for the new census size. |
-| `POST` | `/process/{processId}/vote` | Public | `{ txPayload }` (hex of the signed `Vote` envelope) | Relay an already-signed vote envelope to the chain — a **CSP- or proof-authorized** envelope. **Async:** returns `202` + `jobId`; poll for the `voteID` receipt. |
+| `POST` | `/vote` | Public | `{ txPayload }` (hex of the signed `Vote` envelope) | Relay an already-signed vote envelope to the chain — a **CSP- or proof-authorized** envelope. **Async:** returns `202` + `jobId`; poll for the `voteID` receipt. |
 | `GET`  | `/process/{processId}/census/proof` | Public | `?key=<addr>` | **Non-CSP only.** Proxy a Merkle census proof for the voter key, so the voter can build + sign the envelope. |
 | `GET`  | `/jobs/{jobId}` | Public (capability) | — (none) | Poll an async tx job (publish/status/census/vote). Always `200`; `status` is `pending`/`completed`/`failed`, with the on-chain `result` when completed. |
 | `GET`  | `/process/{processId}/results` | Public | — (none) | Read live status, vote count and tally. |
@@ -279,7 +279,7 @@ for `processId` and forwards it**; it never decrypts or inspects the ballot (bal
 preserved at the operator).
 
 ```
-POST /process/{processId}/vote
+POST /vote
 ```
 
 - **Auth:** Public. The voter is authorized by the proof embedded inside the envelope — either a
@@ -519,7 +519,7 @@ GET /organizations/{address}/integrator
 2. `POST /process/bundle/{bundleId}/sign` — CSP blind signature (existing).
 3. The client builds + signs the `Vote` envelope locally using the CSP signature (the only
    client-side crypto).
-4. `POST /process/{processId}/vote` — **new** relay endpoint queues it; returns `202` + `jobId`.
+4. `POST /vote` — **new** relay endpoint queues it; returns `202` + `jobId`.
 5. `GET /jobs/{jobId}` — poll until `completed`; the result's `voteID` is the vote receipt.
 6. `GET /process/{processId}/results` — **new** read endpoint for live tally.
 
@@ -528,7 +528,7 @@ GET /organizations/{address}/integrator
    the voter key (§4a).
 2. The client builds + signs the `Vote` envelope locally, embedding the Merkle proof in place of
    the CSP `ProofCA` (the only client-side crypto).
-3. `POST /process/{processId}/vote` — same relay endpoint; it accepts the proof-authorized envelope,
+3. `POST /vote` — same relay endpoint; it accepts the proof-authorized envelope,
    queues it and returns `202` + `jobId`.
 4. `GET /jobs/{jobId}` — poll until `completed`; the result's `voteID` is the vote receipt.
 5. `GET /process/{processId}/results` — live tally.
@@ -541,7 +541,7 @@ GET /organizations/{address}/integrator
 | `PublishProcessRequest` / `PublishProcessResponse` (idempotent 200 only) / `EnqueuedResponse` (202) | `POST /process/{id}/publish` |
 | `SetProcessStatusRequest` / `EnqueuedResponse` (202) | `PUT /process/{id}/status` |
 | `AddCensusParticipantsRequest` / `EnqueuedResponse` (202) | `PUT /process/{id}/census` (non-CSP dynamic add) |
-| `RelayVoteRequest` / `EnqueuedResponse` (202) | `POST /process/{id}/vote` (CSP- or proof-authorized) |
+| `RelayVoteRequest` / `EnqueuedResponse` (202) | `POST /vote` (CSP- or proof-authorized) |
 | `CensusProofResponse` | `GET /process/{id}/census/proof` (non-CSP) |
 | `EnqueuedResponse` (`jobId`) / `JobStatusResponse` (`jobId`, `type`, `status`, `result`, `error`) | `GET /jobs/{jobId}` |
 | `ProcessResultsResponse` | `GET /process/{id}/results` |

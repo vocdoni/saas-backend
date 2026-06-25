@@ -1159,16 +1159,17 @@ type ProcessResultsResponse struct {
 	Results      [][]string `json:"results,omitempty"`
 }
 
-// RelayVoteRequest is the body of POST /process/{processId}/vote: a hex-encoded,
-// already-signed voter transaction (a marshaled models.SignedTx wrapping a Vote tx).
+// RelayVoteRequest is the body of POST /vote: a hex-encoded, already-signed voter
+// transaction (a marshaled models.SignedTx wrapping a Vote tx). The target process
+// is taken from the inner Vote envelope.
 // swagger:model RelayVoteRequest
 type RelayVoteRequest struct {
 	// Hex of a marshaled models.SignedTx whose inner Tx is a Vote
 	TxPayload internal.HexBytes `json:"txPayload" swaggertype:"string" format:"hex" example:"deadbeef"`
 }
 
-// RelayVoteResponse is returned by POST /process/{processId}/vote with the vote
-// nullifier (voteID) assigned on chain.
+// RelayVoteResponse is returned by POST /vote with the vote nullifier (voteID)
+// assigned on chain.
 // swagger:model RelayVoteResponse
 type RelayVoteResponse struct {
 	// On-chain vote nullifier

@@ -4718,54 +4718,6 @@ paths:
       summary: Change an on-chain election status
       tags:
       - process
-  /process/{processId}/vote:
-    post:
-      consumes:
-      - application/json
-      description: |-
-        Relays a voter transaction that has already been signed by the voter to the
-        Vochain. The body carries a marshaled models.SignedTx whose inner Tx is a Vote
-        envelope. Public endpoint: no authentication is required. The vote is validated
-        synchronously and then submitted on a background worker; the call returns 202 with
-        a job id. Poll GET /jobs/{jobId} for the resulting vote nullifier (voteID).
-      parameters:
-      - description: On-chain process id (hex)
-        in: path
-        name: processId
-        required: true
-        type: string
-      - description: Signed vote transaction payload
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/apicommon.RelayVoteRequest'
-      produces:
-      - application/json
-      responses:
-        "202":
-          description: Job accepted; poll GET /jobs/{jobId}
-          schema:
-            $ref: '#/definitions/apicommon.EnqueuedResponse'
-        "400":
-          description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Process not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "503":
-          description: Transaction queue is full
-          schema:
-            $ref: '#/definitions/errors.Error'
-      summary: Relay an already-signed vote to the Vochain
-      tags:
-      - process
   /process/bundle:
     post:
       consumes:
@@ -5844,6 +5796,53 @@ paths:
       summary: Resend verification code
       tags:
       - users
+  /vote:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Relays a voter transaction that has already been signed by the voter to the
+        Vochain. The body carries a marshaled models.SignedTx whose inner Tx is a Vote
+        envelope; the target process is taken from that envelope, so no process id is
+        passed in the path. Public endpoint: no authentication is required. The request is
+        checked synchronously — the body must decode to a Vote envelope (else 400) for a
+        process the backend knows (else 404) — then enqueued for submission on a background
+        worker; the call returns 202 with a job id. The chain's acceptance or rejection of
+        the vote (proof, nullifier, election state) is decided when the worker submits it and
+        reported on the job: poll GET /jobs/{jobId} for the voteID on success, or a failure.
+      parameters:
+      - description: Signed vote transaction payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.RelayVoteRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Job accepted; poll GET /jobs/{jobId}
+          schema:
+            $ref: '#/definitions/apicommon.EnqueuedResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Transaction queue is full
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Relay an already-signed vote to the Vochain
+      tags:
+      - process
 schemes:
 - http
 - https

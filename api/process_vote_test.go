@@ -123,7 +123,7 @@ func TestProcessStatusLifecycle(t *testing.T) {
 }
 
 // testRelayVoteRequest signs a vote tx, wraps it as a SignedTx, posts it to
-// POST /process/{processId}/vote, and returns the relayed vote nullifier.
+// POST /vote, and returns the relayed vote nullifier.
 func testRelayVoteRequest(t *testing.T, signer *ethereum.SignKeys, processID internal.HexBytes,
 	proof *models.Proof, votePackage []byte,
 ) internal.HexBytes {
@@ -140,7 +140,7 @@ func testRelayVoteRequest(t *testing.T, signer *ethereum.SignKeys, processID int
 	stx, err := proto.Marshal(&models.SignedTx{Tx: txBytes, Signature: signature})
 	c.Assert(err, qt.IsNil)
 	job := enqueueAndPollJob(t, http.MethodPost, "",
-		&apicommon.RelayVoteRequest{TxPayload: stx}, "process", processID.String(), "vote")
+		&apicommon.RelayVoteRequest{TxPayload: stx}, "vote")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", job.Error))
 	c.Assert(job.Result.VoteID, qt.Not(qt.HasLen), 0)
 	return job.Result.VoteID
