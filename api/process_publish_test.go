@@ -81,6 +81,13 @@ func TestPublishProcess(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(election, qt.Not(qt.IsNil))
 
+	// the info endpoint resolves the canonical metadata from its (https /storage)
+	// reference — the Vochain itself only resolves ipfs pointers.
+	info := requestAndParse[apicommon.ProcessInfo](t, http.MethodGet, token, nil, "process", draftID.Hex())
+	c.Assert(info.MetadataURL, qt.Not(qt.Equals), "")
+	c.Assert(info.Metadata, qt.Not(qt.HasLen), 0)
+	c.Assert(info.Metadata["title"], qt.Not(qt.IsNil))
+
 	// idempotency: once published the endpoint returns 200 with the same address (no tx)
 	resp2 := requestAndParse[apicommon.PublishProcessResponse](
 		t, http.MethodPost, token, nil, "process", draftID.Hex(), "publish")

@@ -1,9 +1,12 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -15,6 +18,7 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/proto/build/go/models"
 )
@@ -263,10 +267,110 @@ func (a *API) processInfoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// resolve the canonical metadata from its reference (best-effort): the Vochain only
+	// resolves ipfs:// pointers, so the https /storage pointer this service publishes is
+	// resolved here instead.
+	if md := a.resolveProcessMetadata(process); md != nil {
+		process.Metadata = md
+	}
+
 	apicommon.HTTPWriteJSON(w, &apicommon.ProcessInfo{
 		Process: process,
 		ChainID: a.account.ChainID(),
 	})
+}
+
+// metadataObjectUserID is the object-storage owner recorded for server-generated
+// metadata documents cached on read.
+const metadataObjectUserID = "system"
+
+// resolveProcessMetadata returns the canonical metadata for a published process,
+// consulting process.MetadataURL. Returns nil (caller keeps the stored value) for
+// drafts or on any error. Persists the reference inline only when it changed.
+func (a *API) resolveProcessMetadata(p *db.Process) map[string]any {
+	if p.Address.Equals(nil) { // draft, nothing on chain
+		return nil
+	}
+	var election *api.Election
+	changed := false
+	// bootstrap the reference from the on-chain pointer if we don't have one yet
+	if p.MetadataURL == "" {
+		el, err := a.account.Election(p.Address.Bytes())
+		if err != nil {
+			log.Warnw("metadata: election fetch failed", "process", p.Address.String(), "error", err)
+			return nil
+		}
+		election, p.MetadataURL, changed = el, el.MetadataURL, true
+	}
+
+	var m map[string]any
+	storagePrefix := a.serverURL + "/storage/"
+	switch {
+	case strings.HasPrefix(p.MetadataURL, storagePrefix):
+		// our own object storage — resolve locally
+		if obj, err := a.objectStorage.GetByName(strings.TrimPrefix(p.MetadataURL, storagePrefix)); err == nil {
+			_ = json.Unmarshal(obj.Data, &m)
+		}
+	case strings.HasPrefix(p.MetadataURL, "ipfs://"):
+		// the Vochain resolves ipfs; reuse the election if already fetched
+		if election == nil {
+			el, err := a.account.Election(p.Address.Bytes())
+			if err != nil {
+				return nil
+			}
+			election = el
+		}
+		mm, ok := election.Metadata.(map[string]any)
+		if !ok || len(mm) == 0 {
+			return nil
+		}
+		m = mm
+		// cache locally and promote the reference so the next request resolves locally
+		if b, err := json.Marshal(m); err == nil {
+			if name, err := a.objectStorage.PutJSON(b, metadataObjectUserID); err == nil {
+				p.MetadataURL, changed = storagePrefix+name, true
+			}
+		}
+	case strings.HasPrefix(p.MetadataURL, "http"):
+		m = fetchExternalMetadata(p.MetadataURL)
+	default:
+		return nil
+	}
+	if m == nil {
+		return nil
+	}
+	// persist a learned/promoted reference inline, so following requests resolve locally
+	if changed {
+		if _, err := a.db.SetProcess(p); err != nil {
+			log.Warnw("metadata: could not persist metadataURL", "process", p.Address.String(), "error", err)
+		}
+	}
+	return m
+}
+
+// fetchExternalMetadata best-effort downloads and JSON-decodes a metadata document from
+// an external http(s) reference (one that does not point at our own object storage).
+// Returns nil on any failure.
+func fetchExternalMetadata(url string) map[string]any {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	var m map[string]any
+	if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&m) != nil { // 1 MiB cap
+		return nil
+	}
+	return m
 }
 
 // organizationListProcessDraftsHandler godoc
@@ -579,6 +683,8 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	metadataURL := fmt.Sprintf("%s/storage/%s", a.serverURL, objectName)
+	// persist the reference so the read path resolves it locally without a chain round-trip.
+	draft.MetadataURL = metadataURL
 
 	// serialize build->sign->submit per organization so a concurrent publish or status
 	// change for the same org cannot read the same account nonce and sign a conflicting

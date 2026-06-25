@@ -508,14 +508,20 @@ type ElectionParams struct {
 //
 //nolint:lll
 type Process struct {
-	ID             primitive.ObjectID `json:"id" bson:"_id"`
-	Address        internal.HexBytes  `json:"address" bson:"address"  swaggertype:"string" format:"hex" example:"deadbeef"`
-	OrgAddress     common.Address     `json:"orgAdress" bson:"orgAddress"`
-	Census         Census             `json:"census" bson:"census"`
-	Metadata       map[string]any     `json:"metadata"  bson:"metadata"`
-	ElectionParams *ElectionParams    `json:"electionParams,omitempty" bson:"electionParams,omitempty"`
-	Status         string             `json:"status,omitempty" bson:"status,omitempty"`
-	PublishedAt    time.Time          `json:"publishedAt,omitempty" bson:"publishedAt,omitempty"`
+	ID         primitive.ObjectID `json:"id" bson:"_id"`
+	Address    internal.HexBytes  `json:"address" bson:"address"  swaggertype:"string" format:"hex" example:"deadbeef"`
+	OrgAddress common.Address     `json:"orgAdress" bson:"orgAddress"`
+	Census     Census             `json:"census" bson:"census"`
+	Metadata   map[string]any     `json:"metadata"  bson:"metadata"`
+	// MetadataURL is the generic reference to this process's canonical ElectionMetadata
+	// document. https references are fetched (locally when they point at this service's
+	// object storage, otherwise externally); ipfs references are resolved via the Vochain
+	// and then cached locally. Bootstrapped from the on-chain pointer on first read when
+	// empty; empty for unpublished drafts.
+	MetadataURL    string          `json:"metadataURL,omitempty" bson:"metadataURL,omitempty"`
+	ElectionParams *ElectionParams `json:"electionParams,omitempty" bson:"electionParams,omitempty"`
+	Status         string          `json:"status,omitempty" bson:"status,omitempty"`
+	PublishedAt    time.Time       `json:"publishedAt,omitempty" bson:"publishedAt,omitempty"`
 }
 
 // ProcessesBundle represents a group of voting processes that share a common census.

@@ -107,6 +107,16 @@ func (osc *Client) Get(objectID string) (*db.Object, error) {
 	return object, nil
 }
 
+// GetByName returns the stored object addressed by its "{id}.{ext}" name (the last
+// path segment of a /storage/{name} URL).
+func (osc *Client) GetByName(objectName string) (*db.Object, error) {
+	objectID, ok := objectIDfromName(objectName)
+	if !ok {
+		return nil, ErrorInvalidObjectID
+	}
+	return osc.Get(objectID)
+}
+
 // uploadObject uploads the object image with the given objectID, associated to
 // the user with the given userFID and the community with the given communityID.
 // If the objectID is empty, it calculates the objectID from the data. It returns
