@@ -1090,13 +1090,17 @@ definitions:
   apicommon.PublishCensusGroupRequest:
     properties:
       authFields:
-        description: Optional for defining which member data should be used for authentication
+        description: |-
+          Member data fields used for authentication (e.g. nationalId, birthDate). At least one
+          of authFields or twoFaFields must be provided; supplying only authFields publishes an
+          auth-only (no OTP) CSP census. A request with both empty is rejected (ErrCensusTypeNotFound).
         items:
           $ref: '#/definitions/db.OrgMemberAuthField'
         type: array
       twoFaFields:
-        description: Optional for defining which member data should be used for two-factor
-          authentication
+        description: |-
+          Member data fields used for two-factor authentication (email and/or phone, sent as an OTP
+          challenge). At least one of authFields or twoFaFields must be provided.
         items:
           $ref: '#/definitions/db.OrgMemberTwoFaField'
         type: array
@@ -2243,7 +2247,10 @@ paths:
       - application/json
       description: |-
         Publish a census based on a specific organization members group for voting. Requires Manager/Admin role.
-        Returns published census with credentials.
+        The request body selects the CSP authentication: at least one of authFields or twoFaFields
+        must be provided. Supplying only authFields yields an auth-only census (members authenticate
+        with their data, no OTP); twoFaFields adds an email/SMS OTP challenge. A body with both empty
+        is rejected with 404 (ErrCensusTypeNotFound). Returns the published census root and URI.
       parameters:
       - description: Census ID
         in: path
@@ -2277,7 +2284,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
-          description: Census not found
+          description: Census not found, or neither authFields nor twoFaFields provided
+            (ErrCensusTypeNotFound)
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
