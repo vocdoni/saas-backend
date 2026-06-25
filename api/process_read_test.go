@@ -189,4 +189,11 @@ func TestProcessReadProxies(t *testing.T) {
 	c.Assert(byObjID.Address, qt.Not(qt.HasLen), 0)
 	c.Assert(byObjID.Address.String(), qt.Equals, byOnchain.Address.String())
 	c.Assert(byObjID.Nullifier.String(), qt.Equals, byOnchain.Nullifier.String())
+
+	// a malformed id (valid hex but neither a 24-hex ProcessID nor a 32-byte on-chain id) is a
+	// 400, and a well-formed-but-unknown ProcessID is a 404 — these are checked before auth.
+	_, badCode := testRequest(t, http.MethodPost, "", signInfoReq, "process", "abcd", "sign-info")
+	c.Assert(badCode, qt.Equals, http.StatusBadRequest)
+	_, missCode := testRequest(t, http.MethodPost, "", signInfoReq, "process", "0123456789abcdef01234567", "sign-info")
+	c.Assert(missCode, qt.Equals, http.StatusNotFound)
 }

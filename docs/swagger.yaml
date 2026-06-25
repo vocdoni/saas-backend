@@ -4634,8 +4634,7 @@ paths:
         and timestamp of the consumption. {processId} accepts the 24-hex ProcessID (preferred)
         or, for backwards compatibility, the 64-hex on-chain election id.
       parameters:
-      - description: 24-hex ProcessID (preferred) or, for backwards compatibility,
-          the 64-hex on-chain election id
+      - description: 24-hex ProcessID (preferred); 64-hex on-chain id also accepted
         in: path
         name: processId
         required: true

@@ -32,6 +32,9 @@ const (
 		"bafkreifqyu5m5as4gvcirlog5j267um24q7y4ri6r3svhsi7fda24676ny"
 )
 
+// electionIDLength is the byte length of a Vochain election (process) id: 32 bytes / 64 hex chars.
+const electionIDLength = 32
+
 // CSPHandlers is a struct that contains an instance of the CSP and the main
 // database (where the bundle and census data is stored). It is used to handle
 // the CSP API requests such as the authentication and signing of the bundle
@@ -637,7 +640,7 @@ func (c *CSPHandlers) BundleCheckHandler(w http.ResponseWriter, r *http.Request)
 //	@Tags			process
 //	@Accept			json
 //	@Produce		json
-//	@Param			processId	path		string							true	"24-hex ProcessID (preferred) or, for backwards compatibility, the 64-hex on-chain election id"
+//	@Param			processId	path		string							true	"24-hex ProcessID (preferred); 64-hex on-chain id also accepted"
 //	@Param			request		body		handlers.ConsumedAddressRequest	true	"Request with auth token"
 //	@Success		200			{object}	handlers.ConsumedAddressResponse
 //	@Failure		400			{object}	errors.Error	"Invalid input data or user has not voted (ErrUserNoVoted)"
@@ -656,7 +659,11 @@ func (c *CSPHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Requ
 	if objID, oerr := primitive.ObjectIDFromHex(raw); oerr == nil {
 		process, err := c.mainDB.Process(objID)
 		if err != nil {
-			errors.ErrProcessNotFound.Write(w)
+			if err == db.ErrNotFound {
+				errors.ErrProcessNotFound.Write(w)
+				return
+			}
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
 		if len(process.Address) == 0 {
@@ -664,8 +671,9 @@ func (c *CSPHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		*processID = process.Address
-	} else if err := processID.ParseString(raw); err != nil || len(*processID) == 0 {
-		errors.ErrMalformedURLParam.WithErr(csp.ErrNoBundleID).Write(w)
+	} else if err := processID.ParseString(raw); err != nil || len(*processID) != electionIDLength {
+		// backwards-compat: the on-chain election id (32 bytes / 64 hex chars).
+		errors.ErrMalformedURLParam.Withf("invalid process id").Write(w)
 		return
 	}
 	// parse the request from the body
