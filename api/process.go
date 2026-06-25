@@ -302,6 +302,9 @@ func (a *API) resolveProcessMetadata(p *db.Process) map[string]any {
 		election, p.MetadataURL, changed = el, el.MetadataURL, true
 	}
 
+	// resolve the document. Branches set m on success and leave it nil on failure; no
+	// early return, so a bootstrapped reference is still persisted below (avoids
+	// re-deriving it from the chain on every read).
 	var m map[string]any
 	name, isLocal := a.objectStorage.LocalName(p.MetadataURL)
 	switch {
@@ -316,29 +319,25 @@ func (a *API) resolveProcessMetadata(p *db.Process) map[string]any {
 	case strings.HasPrefix(p.MetadataURL, "ipfs://"):
 		// the Vochain resolves ipfs; reuse the election if already fetched
 		if election == nil {
-			el, err := a.account.Election(p.Address.Bytes())
-			if err != nil {
-				return nil
+			if el, err := a.account.Election(p.Address.Bytes()); err == nil {
+				election = el
 			}
-			election = el
 		}
-		mm, ok := election.Metadata.(map[string]any)
-		if !ok || len(mm) == 0 {
-			return nil
+		if election != nil {
+			if mm, ok := election.Metadata.(map[string]any); ok && len(mm) > 0 {
+				m = mm
+			}
 		}
-		m = mm
 	case strings.HasPrefix(p.MetadataURL, "http://"), strings.HasPrefix(p.MetadataURL, "https://"):
 		m = fetchExternalMetadata(p.MetadataURL)
 	default:
-		return nil
+		// unrecognized scheme — leave m nil; a bootstrapped reference is still persisted below
 	}
-	if m == nil {
-		return nil
-	}
+
 	// metadata is immutable (a change is a republish through this API), so cache any
 	// remotely-resolved document locally and promote the reference — later reads then
 	// resolve from our own storage with no Vochain or external round-trip.
-	if !isLocal {
+	if m != nil && !isLocal {
 		if b, err := json.Marshal(m); err == nil {
 			if stored, err := a.objectStorage.PutJSON(b, metadataObjectUserID); err == nil {
 				p.MetadataURL, changed = a.objectStorage.LocalURL(stored), true
@@ -346,7 +345,8 @@ func (a *API) resolveProcessMetadata(p *db.Process) map[string]any {
 		}
 	}
 	// persist a learned/promoted reference with a targeted update (not a full rewrite) so
-	// a concurrent change to other process fields is not clobbered by this read path.
+	// a concurrent change to other process fields is not clobbered by this read path. This
+	// runs even when resolution failed, so a bootstrapped reference is stored once.
 	if changed {
 		if err := a.db.SetProcessMetadataURL(p.ID, p.MetadataURL); err != nil {
 			log.Warnw("metadata: could not persist metadataURL", "process", p.Address.String(), "error", err)
