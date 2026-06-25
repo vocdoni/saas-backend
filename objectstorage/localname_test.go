@@ -25,6 +25,9 @@ func TestLocalName(t *testing.T) {
 		{"host-prefix false positive", "https://host", "https://hoststorage/abc.json", "", false},
 		{"external absolute, empty serverURL", "", "https://other/storage/abc.json", "", false},
 		{"ipfs reference", "https://host", "ipfs://bafy.../meta", "", false},
+		{"storage path with no name (absolute)", "https://host", "https://host/storage/", "", false},
+		{"storage path with no name (relative)", "", "/storage/", "", false},
+		{"relative non-storage path", "https://host", "/foo", "", false},
 	}
 	for _, tc := range cases {
 		c.Run(tc.name, func(c *qt.C) {

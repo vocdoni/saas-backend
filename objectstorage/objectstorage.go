@@ -124,18 +124,25 @@ func (osc *Client) GetByName(objectName string) (*db.Object, error) {
 // trailing slash) still resolves locally; a relative reference keeps resolving even if
 // ServerURL later changes. The boolean reports whether url is a local storage reference.
 func (osc *Client) LocalName(url string) (string, bool) {
+	// extract the object name from a "{slashes}storage/{name}" path tail, requiring a
+	// non-empty name so a bare ".../storage/" never reports as a (useless) local match.
+	extract := func(pathTail string) (string, bool) {
+		name, ok := strings.CutPrefix(strings.TrimLeft(pathTail, "/"), "storage/")
+		if !ok || name == "" {
+			return "", false
+		}
+		return name, true
+	}
 	// absolute reference under our host, tolerating extra slashes at the host/path
 	// boundary (the leading "/" check rejects "hoststorage/..."-style false prefixes).
 	if base := strings.TrimRight(osc.ServerURL, "/"); base != "" {
 		if rest, ok := strings.CutPrefix(url, base); ok && strings.HasPrefix(rest, "/") {
-			if name, ok := strings.CutPrefix(strings.TrimLeft(rest, "/"), "storage/"); ok {
-				return name, true
-			}
+			return extract(rest)
 		}
 	}
 	// relative reference (also resolvable if ServerURL changes)
 	if strings.HasPrefix(url, "/") {
-		return strings.CutPrefix(strings.TrimLeft(url, "/"), "storage/")
+		return extract(url)
 	}
 	return "", false
 }

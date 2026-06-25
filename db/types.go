@@ -514,10 +514,11 @@ type Process struct {
 	Census     Census             `json:"census" bson:"census"`
 	Metadata   map[string]any     `json:"metadata"  bson:"metadata"`
 	// MetadataURL is the generic reference to this process's canonical ElectionMetadata
-	// document. https references are fetched (locally when they point at this service's
-	// object storage, otherwise externally); ipfs references are resolved via the Vochain
-	// and then cached locally. Bootstrapped from the on-chain pointer on first read when
-	// unset. Unset for unpublished drafts, and omitted from JSON in that case (omitempty).
+	// document. http(s) references are fetched — locally when they point at this service's
+	// object storage (including a relative "/storage/{name}" reference), otherwise via an
+	// external request; ipfs references are resolved via the Vochain and then cached
+	// locally. Bootstrapped from the on-chain pointer on first read when unset. Unset for
+	// unpublished drafts, and omitted from JSON in that case (omitempty).
 	MetadataURL    string          `json:"metadataURL,omitempty" bson:"metadataURL,omitempty"`
 	ElectionParams *ElectionParams `json:"electionParams,omitempty" bson:"electionParams,omitempty"`
 	Status         string          `json:"status,omitempty" bson:"status,omitempty"`
