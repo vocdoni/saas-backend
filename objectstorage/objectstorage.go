@@ -117,6 +117,28 @@ func (osc *Client) GetByName(objectName string) (*db.Object, error) {
 	return osc.Get(objectID)
 }
 
+// LocalName returns the object name when url refers to an object served by this storage
+// client — either an absolute "{ServerURL}/storage/{name}" reference or a relative
+// "/storage/{name}" one. The relative form keeps a reference resolvable even if
+// ServerURL later changes. The boolean reports whether url is a local storage reference.
+func (osc *Client) LocalName(url string) (string, bool) {
+	if name, ok := strings.CutPrefix(url, osc.storagePrefix()); ok {
+		return name, true
+	}
+	return strings.CutPrefix(url, "/storage/")
+}
+
+// LocalURL returns the canonical local reference URL for the given object name.
+func (osc *Client) LocalURL(objectName string) string {
+	return osc.storagePrefix() + objectName
+}
+
+// storagePrefix is the "{ServerURL}/storage/" prefix, with any trailing slash on
+// ServerURL trimmed so a misconfigured value never yields a "//storage/" prefix.
+func (osc *Client) storagePrefix() string {
+	return strings.TrimSuffix(osc.ServerURL, "/") + "/storage/"
+}
+
 // uploadObject uploads the object image with the given objectID, associated to
 // the user with the given userFID and the community with the given communityID.
 // If the objectID is empty, it calculates the objectID from the data. It returns

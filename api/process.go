@@ -304,11 +304,11 @@ func (a *API) resolveProcessMetadata(p *db.Process) map[string]any {
 	}
 
 	var m map[string]any
-	storagePrefix := a.serverURL + "/storage/"
+	name, isLocal := a.objectStorage.LocalName(p.MetadataURL)
 	switch {
-	case strings.HasPrefix(p.MetadataURL, storagePrefix):
+	case isLocal:
 		// our own object storage — resolve locally
-		if obj, err := a.objectStorage.GetByName(strings.TrimPrefix(p.MetadataURL, storagePrefix)); err == nil {
+		if obj, err := a.objectStorage.GetByName(name); err == nil {
 			_ = json.Unmarshal(obj.Data, &m)
 		}
 	case strings.HasPrefix(p.MetadataURL, "ipfs://"):
@@ -336,16 +336,17 @@ func (a *API) resolveProcessMetadata(p *db.Process) map[string]any {
 	// metadata is immutable (a change is a republish through this API), so cache any
 	// remotely-resolved document locally and promote the reference — later reads then
 	// resolve from our own storage with no Vochain or external round-trip.
-	if !strings.HasPrefix(p.MetadataURL, storagePrefix) {
+	if !isLocal {
 		if b, err := json.Marshal(m); err == nil {
-			if name, err := a.objectStorage.PutJSON(b, metadataObjectUserID); err == nil {
-				p.MetadataURL, changed = storagePrefix+name, true
+			if stored, err := a.objectStorage.PutJSON(b, metadataObjectUserID); err == nil {
+				p.MetadataURL, changed = a.objectStorage.LocalURL(stored), true
 			}
 		}
 	}
-	// persist a learned/promoted reference inline, so following requests resolve locally
+	// persist a learned/promoted reference with a targeted update (not a full rewrite) so
+	// a concurrent change to other process fields is not clobbered by this read path.
 	if changed {
-		if _, err := a.db.SetProcess(p); err != nil {
+		if err := a.db.SetProcessMetadataURL(p.ID, p.MetadataURL); err != nil {
 			log.Warnw("metadata: could not persist metadataURL", "process", p.Address.String(), "error", err)
 		}
 	}
