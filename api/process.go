@@ -269,7 +269,7 @@ func (a *API) processInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// resolve the canonical metadata from its reference (best-effort): the Vochain only
 	// resolves ipfs:// pointers, so the https /storage pointer this service publishes is
 	// resolved here instead.
-	if md := a.resolveProcessMetadata(process); md != nil {
+	if md := a.resolveProcessMetadata(r.Context(), process); md != nil {
 		process.Metadata = md
 	}
 
@@ -286,7 +286,7 @@ const metadataObjectUserID = "system"
 // resolveProcessMetadata returns the canonical metadata for a published process,
 // consulting process.MetadataURL. Returns nil (caller keeps the stored value) for
 // drafts or on any error. Persists the reference inline only when it changed.
-func (a *API) resolveProcessMetadata(p *db.Process) map[string]any {
+func (a *API) resolveProcessMetadata(ctx context.Context, p *db.Process) map[string]any {
 	if p.Address.Equals(nil) { // draft, nothing on chain
 		return nil
 	}
@@ -329,7 +329,7 @@ func (a *API) resolveProcessMetadata(p *db.Process) map[string]any {
 			}
 		}
 	case strings.HasPrefix(p.MetadataURL, "http://"), strings.HasPrefix(p.MetadataURL, "https://"):
-		m = fetchExternalMetadata(p.MetadataURL)
+		m = fetchExternalMetadata(ctx, p.MetadataURL)
 	default:
 		// unrecognized scheme — leave m nil; a bootstrapped reference is still persisted below
 	}
@@ -358,8 +358,8 @@ func (a *API) resolveProcessMetadata(p *db.Process) map[string]any {
 // fetchExternalMetadata best-effort downloads and JSON-decodes a metadata document from
 // an external http(s) reference (one that does not point at our own object storage).
 // Returns nil on any failure.
-func fetchExternalMetadata(url string) map[string]any {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+func fetchExternalMetadata(ctx context.Context, url string) map[string]any {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

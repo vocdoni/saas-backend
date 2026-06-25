@@ -24,7 +24,7 @@ func TestFetchExternalMetadata(t *testing.T) {
 			_, _ = w.Write([]byte(`{"title":"hello","version":"1.0"}`))
 		}))
 		defer ts.Close()
-		m := fetchExternalMetadata(ts.URL)
+		m := fetchExternalMetadata(t.Context(), ts.URL)
 		c.Assert(m, qt.Not(qt.IsNil))
 		c.Assert(m["title"], qt.Equals, "hello")
 	})
@@ -34,7 +34,7 @@ func TestFetchExternalMetadata(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}))
 		defer ts.Close()
-		c.Assert(fetchExternalMetadata(ts.URL), qt.IsNil)
+		c.Assert(fetchExternalMetadata(t.Context(), ts.URL), qt.IsNil)
 	})
 
 	t.Run("over size cap", func(_ *testing.T) {
@@ -46,7 +46,7 @@ func TestFetchExternalMetadata(t *testing.T) {
 			_, _ = w.Write(big)
 		}))
 		defer ts.Close()
-		c.Assert(fetchExternalMetadata(ts.URL), qt.IsNil)
+		c.Assert(fetchExternalMetadata(t.Context(), ts.URL), qt.IsNil)
 	})
 }
 
@@ -64,6 +64,14 @@ func TestResolveMetadataPromotesRemote(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(body)
 	}))
+	// the test closes ts mid-run to prove local resolution; this cleanup closes it if an
+	// assertion fails first, and the guard avoids a double close.
+	tsClosed := false
+	t.Cleanup(func() {
+		if !tsClosed {
+			ts.Close()
+		}
+	})
 
 	// seed a published process whose metadata reference points at the external server
 	// (no on-chain lookup happens because the reference is already set).
@@ -89,6 +97,7 @@ func TestResolveMetadataPromotesRemote(t *testing.T) {
 
 	// second read resolves from local storage even after the external source disappears
 	ts.Close()
+	tsClosed = true
 	info2 := requestAndParse[apicommon.ProcessInfo](t, http.MethodGet, token, nil, "process", id.Hex())
 	c.Assert(info2.Metadata["title"], qt.Equals, "Remote election")
 }
