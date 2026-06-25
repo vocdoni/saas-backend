@@ -118,14 +118,26 @@ func (osc *Client) GetByName(objectName string) (*db.Object, error) {
 }
 
 // LocalName returns the object name when url refers to an object served by this storage
-// client — either an absolute "{ServerURL}/storage/{name}" reference or a relative
-// "/storage/{name}" one. The relative form keeps a reference resolvable even if
+// client — an absolute "{ServerURL}/storage/{name}" reference or a relative
+// "/storage/{name}" one. Any number of slashes are tolerated at the host/path boundary
+// so a legacy "{ServerURL}//storage/{name}" pointer (written when ServerURL had a
+// trailing slash) still resolves locally; a relative reference keeps resolving even if
 // ServerURL later changes. The boolean reports whether url is a local storage reference.
 func (osc *Client) LocalName(url string) (string, bool) {
-	if name, ok := strings.CutPrefix(url, osc.storagePrefix()); ok {
-		return name, true
+	// absolute reference under our host, tolerating extra slashes at the host/path
+	// boundary (the leading "/" check rejects "hoststorage/..."-style false prefixes).
+	if base := strings.TrimRight(osc.ServerURL, "/"); base != "" {
+		if rest, ok := strings.CutPrefix(url, base); ok && strings.HasPrefix(rest, "/") {
+			if name, ok := strings.CutPrefix(strings.TrimLeft(rest, "/"), "storage/"); ok {
+				return name, true
+			}
+		}
 	}
-	return strings.CutPrefix(url, "/storage/")
+	// relative reference (also resolvable if ServerURL changes)
+	if strings.HasPrefix(url, "/") {
+		return strings.CutPrefix(strings.TrimLeft(url, "/"), "storage/")
+	}
+	return "", false
 }
 
 // LocalURL returns the canonical local reference URL for the given object name.
