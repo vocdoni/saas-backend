@@ -28,6 +28,8 @@ type AddProcessesToBundleRequest struct {
 //	@Description	Create a new process bundle with the specified census and optional list of processes. Requires
 //	@Description	Manager/Admin role for the organization that owns the census. The census root will be the same as the
 //	@Description	account's public key.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			process
 //	@Accept			json
 //	@Produce		json
@@ -177,6 +179,8 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 //	@Summary		Add processes to an existing bundle
 //	@Description	Add additional processes to an existing bundle. Requires Manager/Admin role for the organization
 //	@Description	that owns the bundle.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			process
 //	@Accept			json
 //	@Produce		json

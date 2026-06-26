@@ -103,7 +103,7 @@ type ConsumedAddressRequest struct {
 // It includes the address, the nullifier, and the timestamp of the
 // usage.
 type ConsumedAddressResponse struct {
-	Address   internal.HexBytes `json:"authToken" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Address   internal.HexBytes `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
 	Nullifier internal.HexBytes `json:"nullifier" swaggertype:"string" format:"hex" example:"deadbeef"`
 	At        time.Time         `json:"at"`
 }
