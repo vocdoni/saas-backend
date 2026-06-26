@@ -520,15 +520,15 @@ func (ms *MongoStorage) CountMembersManagedBy(integratorAddr common.Address) (in
 	if err != nil {
 		return 0, err
 	}
-	var total int64
-	for i := range orgs {
-		n, err := ms.CountOrgMembers(orgs[i].Address)
-		if err != nil {
-			return 0, err
-		}
-		total += n
+	if len(orgs) == 0 {
+		return 0, nil
 	}
-	return total, nil
+	addrs := make([]common.Address, len(orgs))
+	for i := range orgs {
+		addrs[i] = orgs[i].Address
+	}
+	// single query over all managed orgs rather than one CountOrgMembers per org
+	return ms.orgMembers.CountDocuments(ctx, bson.M{"orgAddress": bson.M{"$in": addrs}}) //nolint:goconst
 }
 
 // SumSentEmailsManagedBy returns the total 2FA emails sent across all organizations

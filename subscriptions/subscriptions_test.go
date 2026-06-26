@@ -409,9 +409,14 @@ func TestManagedOrgLimitsUseIntegratorPlan(t *testing.T) {
 	// Standalone tiny plan (MaxCensus 1) vs its own members (5) — rejected.
 	c.Assert(subs.OrgCanAddNMembers(standaloneAddr, 3), qt.ErrorIs, errors.ErrExceedsOrganizationMembersLimit)
 
-	// --- Census participants: dropped for managed, enforced for standalone ---
-	c.Assert(subs.OrgCanAddCensusParticipants(managedAddr, "census-x", 10_000), qt.IsNil)
-	c.Assert(subs.OrgCanAddCensusParticipants(standaloneAddr, "census-x", 10_000),
+	// --- Census participants: integrator-governed cap for managed, own plan for standalone ---
+	// Managed org: integrator MaxCensus (1000) — 500 allowed, 2000 rejected (its own tiny
+	// plan would have rejected 500, proving the integrator's plan governs).
+	c.Assert(subs.OrgCanAddCensusParticipants(managedAddr, "census-x", 500), qt.IsNil)
+	c.Assert(subs.OrgCanAddCensusParticipants(managedAddr, "census-x", 2000),
+		qt.ErrorIs, errors.ErrProcessCensusSizeExceedsPlanLimit)
+	// Standalone tiny plan (MaxCensus 1): even small adds are rejected.
+	c.Assert(subs.OrgCanAddCensusParticipants(standaloneAddr, "census-x", 10),
 		qt.ErrorIs, errors.ErrProcessCensusSizeExceedsPlanLimit)
 
 	// --- 2FA shared pool (OrgCanPublishGroupCensus) ---
