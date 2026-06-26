@@ -134,6 +134,28 @@ func (ms *MongoStorage) SetProcessMetadataURL(processID primitive.ObjectID, meta
 	return nil
 }
 
+// SetProcessEncryptionKeys sets only the encryptionKeys field of the process identified
+// by processID, leaving every other field untouched (same targeted-update rationale as
+// SetProcessMetadataURL). The encryption public keys are immutable once published by the
+// keykeepers, so this is written once and only with a non-empty set.
+func (ms *MongoStorage) SetProcessEncryptionKeys(processID primitive.ObjectID, keys []EncryptionKey) error {
+	if processID == primitive.NilObjectID {
+		return ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	filter := bson.M{"_id": processID}
+	res, err := ms.processes.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"encryptionKeys": keys}})
+	if err != nil {
+		return fmt.Errorf("failed to set process encryption keys: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // DeleteProcess removes a process
 func (ms *MongoStorage) DelProcess(processID primitive.ObjectID) error {
 	if processID == primitive.NilObjectID {

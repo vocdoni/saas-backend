@@ -9,6 +9,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/proto/build/go/models"
 )
@@ -225,4 +226,21 @@ func (a *Account) Election(processID []byte) (*api.Election, error) {
 		return nil, fmt.Errorf("could not fetch election %x: %w", processID, err)
 	}
 	return election, nil
+}
+
+// ElectionEncryptionKeys fetches the encryption public keys of the on-chain election with
+// the given id. Only encrypted (secretUntilTheEnd) elections publish keys, and only after
+// the keykeepers have done so, so the returned slice may be empty for a freshly created
+// election. The node also returns private keys once the election ends; those are never
+// needed for voting and are deliberately ignored here.
+func (a *Account) ElectionEncryptionKeys(processID []byte) ([]db.EncryptionKey, error) {
+	ek, err := a.client.ElectionKeys(processID)
+	if err != nil {
+		return nil, fmt.Errorf("could not fetch election keys %x: %w", processID, err)
+	}
+	keys := make([]db.EncryptionKey, 0, len(ek.PublicKeys))
+	for _, k := range ek.PublicKeys {
+		keys = append(keys, db.EncryptionKey{Index: k.Index, Key: internal.HexBytes(k.Key)})
+	}
+	return keys, nil
 }
