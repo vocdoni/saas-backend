@@ -27,7 +27,7 @@ func TestProcessProductToPlanIntegratorLimits(t *testing.T) {
 
 	t.Run("parses integrator limits when present", func(_ *testing.T) {
 		md := baseMetadata()
-		md["integratorLimits"] = `{"maxManagedOrgs":3,"maxManagedProcesses":30,"maxManagedCensusSize":300}`
+		md["integratorLimits"] = `{"maxManagedOrgs":3}`
 		product := &stripeapi.Product{
 			ID:           "prod_integrator",
 			Name:         "Integrator",
@@ -38,8 +38,6 @@ func TestProcessProductToPlanIntegratorLimits(t *testing.T) {
 		plan, err := processProductToPlan(product, testPrices())
 		c.Assert(err, qt.IsNil)
 		c.Assert(plan.IntegratorLimits.MaxManagedOrgs, qt.Equals, 3)
-		c.Assert(plan.IntegratorLimits.MaxManagedProcesses, qt.Equals, 30)
-		c.Assert(plan.IntegratorLimits.MaxManagedCensusSize, qt.Equals, 300)
 	})
 
 	t.Run("leaves zero limits when metadata is absent", func(_ *testing.T) {
@@ -53,8 +51,6 @@ func TestProcessProductToPlanIntegratorLimits(t *testing.T) {
 		plan, err := processProductToPlan(product, testPrices())
 		c.Assert(err, qt.IsNil)
 		c.Assert(plan.IntegratorLimits.MaxManagedOrgs, qt.Equals, 0)
-		c.Assert(plan.IntegratorLimits.MaxManagedProcesses, qt.Equals, 0)
-		c.Assert(plan.IntegratorLimits.MaxManagedCensusSize, qt.Equals, 0)
 	})
 
 	t.Run("errors on malformed integrator limits", func(_ *testing.T) {

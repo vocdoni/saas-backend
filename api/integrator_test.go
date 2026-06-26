@@ -29,16 +29,29 @@ func TestIntegratorManagedOrgs(t *testing.T) {
 	_, code := testRequest(t, http.MethodPost, token, body, "integrator", "organizations")
 	c.Assert(code, qt.Equals, http.StatusForbidden) // ErrNotAnIntegrator
 
-	// enable integrator with an override (override beats plan):
-	// MaxManagedOrgs 2, MaxManagedProcesses 1, MaxManagedCensusSize 1000
+	// enable integrator with an override (MaxManagedOrgs); the aggregate process/census
+	// caps come from the integrator's subscription plan top-level limits below.
 	integratorOrg, err := testDB.Organization(integratorAddr)
 	c.Assert(err, qt.IsNil)
-	integratorOrg.IntegratorLimits = &db.IntegratorLimits{
-		MaxManagedOrgs:       2,
-		MaxManagedProcesses:  1,
-		MaxManagedCensusSize: 1000,
-	}
+	integratorOrg.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 2}
 	c.Assert(testDB.SetOrganization(integratorOrg), qt.IsNil)
+
+	// subscribe the integrator to a plan whose top-level limits bound managed publishing:
+	// MaxProcesses 1, MaxCensus 1000.
+	integratorPlan := &db.Plan{
+		ID:           "prod_test_integrator_caps",
+		Name:         "Integrator Caps",
+		Organization: db.PlanLimits{MaxProcesses: 1, MaxCensus: 1000, MaxDuration: 30},
+	}
+	c.Assert(testDB.SetPlan(integratorPlan), qt.IsNil)
+	defer func() { _ = testDB.DelPlan(&db.Plan{ID: integratorPlan.ID}) }()
+	c.Assert(testDB.SetOrganizationSubscription(integratorAddr, &db.OrganizationSubscription{
+		PlanID:          integratorPlan.ID,
+		StartDate:       time.Now(),
+		RenewalDate:     time.Now().Add(24 * time.Hour),
+		LastPaymentDate: time.Now(),
+		Active:          true,
+	}), qt.IsNil)
 
 	// create managed orgs up to the cap
 	var firstManaged common.Address
@@ -120,7 +133,7 @@ func TestIntegratorManagedOrgs(t *testing.T) {
 	c.Assert(integratorOrg.Counters.ManagedProcesses, qt.Equals, 1)
 	c.Assert(integratorOrg.Counters.ManagedCensusSize, qt.Equals, 100)
 
-	// a second publish is blocked by the aggregate quota (MaxManagedProcesses == 1)
+	// a second publish is blocked by the aggregate quota (plan MaxProcesses == 1)
 	draftID2, err := testDB.SetProcess(&db.Process{
 		OrgAddress: firstManaged,
 		ElectionParams: &db.ElectionParams{

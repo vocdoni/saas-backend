@@ -26,11 +26,9 @@ func main() {
 	flag.StringP("mongoURL", "m", "", "MongoDB connection URL")
 	flag.StringP("mongoDB", "d", "", "MongoDB database name")
 	flag.StringP("vocdoniAPI", "v", "https://api-dev.vocdoni.net/v2", "Vocdoni node API URL")
-	flag.Bool("setIntegrator", false, "enable the given organization as an integrator and set its limits")
+	flag.Bool("setIntegrator", false, "enable the given organization as an integrator and set its managed-org limit")
 	flag.String("orgAddress", "", "organization address (hex) for --setIntegrator")
 	flag.Int("maxManagedOrgs", 0, "integrator limit: max managed organizations")
-	flag.Int("maxManagedProcesses", 0, "integrator limit: max managed processes")
-	flag.Int("maxManagedCensusSize", 0, "integrator limit: max managed census size")
 
 	// Parse flags
 	flag.Parse()
@@ -61,7 +59,7 @@ func main() {
 		}
 		defer database.Close()
 		if err := setIntegrator(database, viper.GetString("orgAddress"),
-			viper.GetInt("maxManagedOrgs"), viper.GetInt("maxManagedProcesses"), viper.GetInt("maxManagedCensusSize")); err != nil {
+			viper.GetInt("maxManagedOrgs")); err != nil {
 			log.Fatalf("could not set integrator: %v", err)
 		}
 		return
@@ -116,8 +114,9 @@ func main() {
 }
 
 // setIntegrator enables the organization at the given address as an integrator and
-// sets its integrator-limits override.
-func setIntegrator(database *db.MongoStorage, orgAddress string, maxOrgs, maxProcesses, maxCensus int) error {
+// sets its managed-org limit override. The aggregate process/census caps come from the
+// integrator's subscription plan (Plan.Organization.MaxProcesses / MaxCensus).
+func setIntegrator(database *db.MongoStorage, orgAddress string, maxOrgs int) error {
 	if orgAddress == "" {
 		return fmt.Errorf("orgAddress is required")
 	}
@@ -130,20 +129,16 @@ func setIntegrator(database *db.MongoStorage, orgAddress string, maxOrgs, maxPro
 		return fmt.Errorf("could not get organization: %w", err)
 	}
 	// Setting a per-organization limits override both enables integrator status and
-	// caps its managed resources (see Subscriptions.IsIntegrator).
+	// caps how many organizations it may manage (see Subscriptions.IsIntegrator).
 	org.IntegratorLimits = &db.IntegratorLimits{
-		MaxManagedOrgs:       maxOrgs,
-		MaxManagedProcesses:  maxProcesses,
-		MaxManagedCensusSize: maxCensus,
+		MaxManagedOrgs: maxOrgs,
 	}
 	if err := database.SetOrganization(org); err != nil {
 		return fmt.Errorf("could not update organization: %w", err)
 	}
 	log.Infow("organization is now an integrator",
 		"address", addr.Hex(),
-		"maxManagedOrgs", maxOrgs,
-		"maxManagedProcesses", maxProcesses,
-		"maxManagedCensusSize", maxCensus)
+		"maxManagedOrgs", maxOrgs)
 	return nil
 }
 
