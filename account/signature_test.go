@@ -27,30 +27,30 @@ func TestVerifySignature(t *testing.T) {
 	addrNoPrefix := strings.TrimPrefix(addr, "0x")
 	addrLower := strings.ToLower(addr)
 
-	t.Run("valid signature and address", func(_ *testing.T) {
+	c.Run("valid signature and address", func(c *qt.C) {
 		c.Assert(VerifySignature(message, signature, addr), qt.IsNil)
 	})
-	t.Run("valid with non-0x address", func(_ *testing.T) {
+	c.Run("valid with non-0x address", func(c *qt.C) {
 		c.Assert(VerifySignature(message, signature, addrNoPrefix), qt.IsNil)
 	})
-	t.Run("valid with lowercase address", func(_ *testing.T) {
+	c.Run("valid with lowercase address", func(c *qt.C) {
 		c.Assert(VerifySignature(message, signature, addrLower), qt.IsNil)
 	})
-	t.Run("valid with 0x-prefixed signature", func(_ *testing.T) {
+	c.Run("valid with 0x-prefixed signature", func(c *qt.C) {
 		c.Assert(VerifySignature(message, "0x"+signature, addr), qt.IsNil)
 	})
-	t.Run("wrong expected address is rejected", func(_ *testing.T) {
+	c.Run("wrong expected address is rejected", func(c *qt.C) {
 		other := ethereum.NewSignKeys()
 		c.Assert(other.Generate(), qt.IsNil)
 		c.Assert(VerifySignature(message, signature, other.Address().Hex()), qt.Not(qt.IsNil))
 	})
-	t.Run("tampered message is rejected", func(_ *testing.T) {
+	c.Run("tampered message is rejected", func(c *qt.C) {
 		c.Assert(VerifySignature("tampered message", signature, addr), qt.Not(qt.IsNil))
 	})
-	t.Run("malformed signature is rejected", func(_ *testing.T) {
+	c.Run("malformed signature is rejected", func(c *qt.C) {
 		c.Assert(VerifySignature(message, "not-hex", addr), qt.Not(qt.IsNil))
 	})
-	t.Run("empty signature is rejected", func(_ *testing.T) {
+	c.Run("empty signature is rejected", func(c *qt.C) {
 		c.Assert(VerifySignature(message, "", addr), qt.Not(qt.IsNil))
 	})
 }
