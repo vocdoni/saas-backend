@@ -3,7 +3,8 @@ definitions:
   api.AddProcessesToBundleRequest:
     properties:
       processes:
-        description: Array of process creation requests to add
+        description: Process IDs to add — each is either the 24-hex ProcessID or the
+          64-hex on-chain election id.
         items:
           type: string
         type: array
@@ -378,7 +379,9 @@ definitions:
         description: Census ID
         type: string
       processes:
-        description: List of process Addresses to include in the bundle
+        description: |-
+          List of processes to include in the bundle. Each entry is either the 24-hex ProcessID or the
+          64-hex on-chain election id.
         items:
           type: string
         type: array
