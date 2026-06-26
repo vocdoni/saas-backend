@@ -323,6 +323,30 @@ func (p *Subscriptions) OrgCanAddCensusParticipants(orgAddress common.Address, c
 	return nil
 }
 
+// OrgCanRelayVote checks whether the organization may relay another vote, enforcing the
+// plan's MaxVotes limit against the organization's SentVotes counter. A MaxVotes of 0 means
+// the plan imposes no vote cap.
+func (p *Subscriptions) OrgCanRelayVote(orgAddress common.Address) error {
+	org, err := p.db.Organization(orgAddress)
+	if err != nil {
+		return errors.ErrOrganizationNotFound.WithErr(err)
+	}
+
+	if org.Subscription.PlanID == "" {
+		return errors.ErrOrganizationHasNoSubscription
+	}
+
+	plan, err := p.db.Plan(org.Subscription.PlanID)
+	if err != nil {
+		return errors.ErrPlanNotFound.WithErr(err)
+	}
+
+	if plan.Organization.MaxVotes > 0 && org.Counters.SentVotes >= plan.Organization.MaxVotes {
+		return errors.ErrVoteLimitReached.Withf("(%d)", plan.Organization.MaxVotes)
+	}
+	return nil
+}
+
 // IsIntegrator reports whether the given organization is enabled as an integrator.
 //
 // Enablement is derived entirely from integrator limits — there is no separate flag:

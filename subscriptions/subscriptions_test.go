@@ -298,6 +298,55 @@ func TestCanPublishForManagedOrg(t *testing.T) {
 	c.Assert(subs.CanPublishForManagedOrg(integrator(0, 90), 11), qt.ErrorIs, errors.ErrIntegratorQuotaExceeded)
 }
 
+func TestOrgCanRelayVote(t *testing.T) {
+	c := qt.New(t)
+	const cappedPlan, unlimitedPlan = "capped", "unlimited"
+	mockDB := &mockMongoStorage{
+		plans: map[string]*db.Plan{
+			cappedPlan:    {ID: cappedPlan, Organization: db.PlanLimits{MaxVotes: 3}},
+			unlimitedPlan: {ID: unlimitedPlan, Organization: db.PlanLimits{MaxVotes: 0}},
+		},
+		orgs: map[string]*db.Organization{
+			// no subscription plan
+			testOrgAddress.String(): {Address: testOrgAddress},
+			// capped plan, under the limit
+			common.Address{0x21}.String(): {
+				Address:      common.Address{0x21},
+				Subscription: db.OrganizationSubscription{PlanID: cappedPlan},
+				Counters:     db.OrganizationCounters{SentVotes: 2},
+			},
+			// capped plan, exactly at the limit
+			common.Address{0x22}.String(): {
+				Address:      common.Address{0x22},
+				Subscription: db.OrganizationSubscription{PlanID: cappedPlan},
+				Counters:     db.OrganizationCounters{SentVotes: 3},
+			},
+			// unlimited plan with many votes already relayed
+			common.Address{0x23}.String(): {
+				Address:      common.Address{0x23},
+				Subscription: db.OrganizationSubscription{PlanID: unlimitedPlan},
+				Counters:     db.OrganizationCounters{SentVotes: 9999},
+			},
+		},
+	}
+	subs := &Subscriptions{db: mockDB}
+
+	// unknown organization
+	c.Assert(subs.OrgCanRelayVote(testAnotherOrgAddress), qt.ErrorIs, errors.ErrOrganizationNotFound)
+
+	// organization without a subscription plan
+	c.Assert(subs.OrgCanRelayVote(testOrgAddress), qt.ErrorIs, errors.ErrOrganizationHasNoSubscription)
+
+	// under the cap is allowed
+	c.Assert(subs.OrgCanRelayVote(common.Address{0x21}), qt.IsNil)
+
+	// at the cap is rejected
+	c.Assert(subs.OrgCanRelayVote(common.Address{0x22}), qt.ErrorIs, errors.ErrVoteLimitReached)
+
+	// MaxVotes == 0 means unlimited, never blocked
+	c.Assert(subs.OrgCanRelayVote(common.Address{0x23}), qt.IsNil)
+}
+
 // Mock implementation of the necessary db.MongoStorage methods for testing
 type mockMongoStorage struct {
 	plans map[string]*db.Plan
