@@ -481,7 +481,10 @@ func (a *API) organizationListProcessDraftsHandler(w http.ResponseWriter, r *htt
 // deleteProcessHandler godoc
 //
 //	@Summary		Delete a voting process
-//	@Description	Delete a voting process. Requires Manager/Admin role.
+//	@Description	Delete a voting process. Requires Manager/Admin role of the organization that
+//	@Description	owns the process.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			process
 //	@Accept			json
 //	@Produce		json

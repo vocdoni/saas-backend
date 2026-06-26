@@ -4419,7 +4419,11 @@ paths:
     delete:
       consumes:
       - application/json
-      description: Delete a voting process. Requires Manager/Admin role.
+      description: |-
+        Delete a voting process. Requires Manager/Admin role of the organization that
+        owns the process.
+
+        Also callable with a scoped API key (scope: `voting:write`).
       parameters:
       - description: Process ID
         in: path
