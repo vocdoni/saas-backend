@@ -71,6 +71,7 @@ var apiKeyAllowlist = map[string]string{
 
 	// voting: processes, censuses, bundles (for managed organizations)
 	"POST " + processCreateEndpoint:                ScopeVotingWrite,
+	"DELETE " + processEndpoint:                    ScopeVotingWrite,
 	"POST " + processPublishEndpoint:               ScopeVotingWrite,
 	"PUT " + processStatusEndpoint:                 ScopeVotingWrite,
 	"GET " + organizationListProcessDraftsEndpoint: ScopeVotingWrite,
