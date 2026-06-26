@@ -325,26 +325,31 @@ func (p *Subscriptions) OrgCanPublishGroupCensus(census *db.Census, groupID stri
 		memberCount = int(count)
 	}
 
-	// For a managed org the 2FA allowance is a shared pool: consumption is summed across
-	// all of the integrator's managed orgs. For a standalone org it is the org's own
-	// sent counters.
-	sentEmails, sentSMS := org.Counters.SentEmails, org.Counters.SentSMS
-	if managed(org) {
-		if sentEmails, err = p.db.SumSentEmailsManagedBy(owner.Address); err != nil {
-			return errors.ErrGenericInternalServerError.WithErr(err)
+	// Only check (and, for managed orgs, aggregate) the 2FA channels the census actually
+	// requests. For a managed org the allowance is a shared pool summed across all of the
+	// integrator's managed orgs; for a standalone org it is the org's own sent counter.
+	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldEmail) {
+		sentEmails := org.Counters.SentEmails
+		if managed(org) {
+			if sentEmails, err = p.db.SumSentEmailsManagedBy(owner.Address); err != nil {
+				return errors.ErrGenericInternalServerError.WithErr(err)
+			}
 		}
-		if sentSMS, err = p.db.SumSentSMSManagedBy(owner.Address); err != nil {
-			return errors.ErrGenericInternalServerError.WithErr(err)
+		if remainingEmails := max(0, plan.Features.TwoFaEmail-sentEmails); memberCount > remainingEmails {
+			return errors.ErrProcessCensusSizeExceedsEmailAllowance.Withf("remaining emails: %d", remainingEmails)
 		}
 	}
 
-	remainingEmails := max(0, plan.Features.TwoFaEmail-sentEmails)
-	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldEmail) && memberCount > remainingEmails {
-		return errors.ErrProcessCensusSizeExceedsEmailAllowance.Withf("remaining emails: %d", remainingEmails)
-	}
-	remainingSMS := max(0, plan.Features.TwoFaSms-sentSMS)
-	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldPhone) && memberCount > remainingSMS {
-		return errors.ErrProcessCensusSizeExceedsSMSAllowance.Withf("remaining sms: %d", remainingSMS)
+	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldPhone) {
+		sentSMS := org.Counters.SentSMS
+		if managed(org) {
+			if sentSMS, err = p.db.SumSentSMSManagedBy(owner.Address); err != nil {
+				return errors.ErrGenericInternalServerError.WithErr(err)
+			}
+		}
+		if remainingSMS := max(0, plan.Features.TwoFaSms-sentSMS); memberCount > remainingSMS {
+			return errors.ErrProcessCensusSizeExceedsSMSAllowance.Withf("remaining sms: %d", remainingSMS)
+		}
 	}
 
 	return nil
