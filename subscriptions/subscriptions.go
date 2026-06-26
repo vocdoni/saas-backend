@@ -287,7 +287,7 @@ func (p *Subscriptions) OrgCanAddNMembers(orgAddress common.Address, memberNumbe
 		return errors.ErrGenericInternalServerError.WithErr(err)
 	}
 
-	if int(count)+memberNumber > plan.Organization.MaxCensus {
+	if count+int64(memberNumber) > int64(plan.Organization.MaxCensus) {
 		return errors.ErrExceedsOrganizationMembersLimit.Withf("(%d)", plan.Organization.MaxCensus)
 	}
 	return nil
@@ -349,13 +349,10 @@ func (p *Subscriptions) OrgCanAddCensusParticipants(orgAddress common.Address, c
 		return errors.ErrOrganizationNotFound.WithErr(err)
 	}
 
-	// For a managed org, census size is governed by the integrator's aggregate
-	// ManagedCensusSize quota (ReserveManagedPublish) at publish time, so the per-org
-	// census-size limit is not enforced here.
-	if managed(org) {
-		return nil
-	}
-
+	// Per-census size is bounded by the governing plan's MaxCensus: the integrator's plan
+	// for a managed org, otherwise the org's own. This keeps the participant-add path
+	// bounded (the integrator-wide ManagedCensusSize total is additionally reserved at
+	// publish) rather than relying on the publish-time check alone.
 	_, plan, err := p.limitsOwner(org)
 	if err != nil {
 		return err
@@ -366,7 +363,7 @@ func (p *Subscriptions) OrgCanAddCensusParticipants(orgAddress common.Address, c
 		return errors.ErrGenericInternalServerError.WithErr(err)
 	}
 
-	if int(count)+participantsCount > plan.Organization.MaxCensus {
+	if count+int64(participantsCount) > int64(plan.Organization.MaxCensus) {
 		return errors.ErrProcessCensusSizeExceedsPlanLimit.Withf("(%d)", plan.Organization.MaxCensus)
 	}
 	return nil
