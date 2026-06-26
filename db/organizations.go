@@ -516,6 +516,9 @@ func (ms *MongoStorage) managedOrgAddresses(ctx context.Context, integratorAddr 
 // across all organizations managed by integratorAddr, computed server-side so only the
 // total crosses the wire.
 func (ms *MongoStorage) sumManagedCounter(integratorAddr common.Address, field string) (int, error) {
+	if integratorAddr.Cmp(common.Address{}) == 0 {
+		return 0, ErrInvalidData
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
