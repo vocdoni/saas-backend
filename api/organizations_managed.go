@@ -166,6 +166,7 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		Timezone:       req.Timezone,
 		Active:         true,
 		Communications: req.Communications,
+		Meta:           req.Meta,
 		ManagedBy:      integratorAddr,
 		Subscription: db.OrganizationSubscription{
 			PlanID:    defaultPlan.ID,
