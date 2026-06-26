@@ -1054,6 +1054,15 @@ definitions:
         type: string
       electionParams:
         $ref: '#/definitions/db.ElectionParams'
+      encryptionKeys:
+        description: |-
+          EncryptionKeys holds the on-chain encryption public keys of an encrypted
+          (secretUntilTheEnd) election. They are resolved lazily on read and cached here once
+          the keykeepers have published them (immutable thereafter). Unset/omitted for
+          non-encrypted elections and for encrypted ones whose keys are not yet published.
+        items:
+          $ref: '#/definitions/db.EncryptionKey'
+        type: array
       id:
         type: string
       metadata:
@@ -1608,6 +1617,15 @@ definitions:
         type: string
       properties: {}
     type: object
+  db.EncryptionKey:
+    properties:
+      index:
+        type: integer
+      key:
+        example: deadbeef
+        format: hex
+        type: string
+    type: object
   db.Features:
     properties:
       2FAemail:
@@ -1764,6 +1782,15 @@ definitions:
         $ref: '#/definitions/db.Census'
       electionParams:
         $ref: '#/definitions/db.ElectionParams'
+      encryptionKeys:
+        description: |-
+          EncryptionKeys holds the on-chain encryption public keys of an encrypted
+          (secretUntilTheEnd) election. They are resolved lazily on read and cached here once
+          the keykeepers have published them (immutable thereafter). Unset/omitted for
+          non-encrypted elections and for encrypted ones whose keys are not yet published.
+        items:
+          $ref: '#/definitions/db.EncryptionKey'
+        type: array
       id:
         type: string
       metadata:
@@ -4430,8 +4457,11 @@ paths:
     get:
       consumes:
       - application/json
-      description: Retrieve voting process information by ID. Returns process details
-        including census and metadata.
+      description: |-
+        Retrieve voting process information by ID. Returns process details including census and metadata.
+        For encrypted (secretUntilTheEnd) elections the response additionally carries the election's
+        encryption public keys in `encryptionKeys` (one per keykeeper) once they are published on chain;
+        the field is absent for non-encrypted elections and before the keys are published.
       parameters:
       - description: Process ID
         in: path

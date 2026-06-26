@@ -480,6 +480,15 @@ type ElectionType struct {
 	Anonymous         bool `json:"anonymous" bson:"anonymous"`
 }
 
+// EncryptionKey is a single election encryption public key for an encrypted
+// (secretUntilTheEnd) election, identified by its keykeeper Index. Key holds the
+// hex-encoded public key voters use to encrypt their ballots. Only public keys are
+// ever represented here; the private keys revealed when the election ends are not.
+type EncryptionKey struct {
+	Index int               `json:"index" bson:"index"`
+	Key   internal.HexBytes `json:"key" bson:"key" swaggertype:"string" format:"hex" example:"deadbeef"`
+}
+
 // ElectionTypeMetadata is the metadata "type" block describing how results are displayed.
 type ElectionTypeMetadata struct {
 	Name       string `json:"name" bson:"name"`
@@ -523,6 +532,11 @@ type Process struct {
 	ElectionParams *ElectionParams `json:"electionParams,omitempty" bson:"electionParams,omitempty"`
 	Status         string          `json:"status,omitempty" bson:"status,omitempty"`
 	PublishedAt    time.Time       `json:"publishedAt,omitempty" bson:"publishedAt,omitempty"`
+	// EncryptionKeys holds the on-chain encryption public keys of an encrypted
+	// (secretUntilTheEnd) election. They are resolved lazily on read and cached here once
+	// the keykeepers have published them (immutable thereafter). Unset/omitted for
+	// non-encrypted elections and for encrypted ones whose keys are not yet published.
+	EncryptionKeys []EncryptionKey `json:"encryptionKeys,omitempty" bson:"encryptionKeys,omitempty"`
 }
 
 // ProcessesBundle represents a group of voting processes that share a common census.

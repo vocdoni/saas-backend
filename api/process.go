@@ -235,6 +235,9 @@ func (a *API) updateProcessHandler(w http.ResponseWriter, r *http.Request) {
 //
 //	@Summary		Get process information
 //	@Description	Retrieve voting process information by ID. Returns process details including census and metadata.
+//	@Description	For encrypted (secretUntilTheEnd) elections the response additionally carries the election's
+//	@Description	encryption public keys in `encryptionKeys` (one per keykeeper) once they are published on chain;
+//	@Description	the field is absent for non-encrypted elections and before the keys are published.
 //	@Tags			process
 //	@Accept			json
 //	@Produce		json
@@ -273,10 +276,51 @@ func (a *API) processInfoHandler(w http.ResponseWriter, r *http.Request) {
 		process.Metadata = md
 	}
 
+	// for encrypted (secretUntilTheEnd) elections, expose the encryption public keys the
+	// voter needs to encrypt their ballot. Gated and cached so the common (non-encrypted)
+	// read path never touches the chain.
+	process.EncryptionKeys = a.resolveProcessEncryptionKeys(process)
+
 	apicommon.HTTPWriteJSON(w, &apicommon.ProcessInfo{
 		Process: process,
 		ChainID: a.account.ChainID(),
 	})
+}
+
+// resolveProcessEncryptionKeys returns the encryption public keys for an encrypted
+// election, fetching them from the Vochain only when needed and caching them on the
+// process once published. It is a no-op (returns nil, no chain call) for non-encrypted
+// elections, unpublished drafts, and processes whose keys are already cached are served
+// from the cache. The result is cached only when non-empty: between an election's creation
+// and the keykeepers publishing its keys the node returns an empty set, and a later read
+// must still pick them up.
+func (a *API) resolveProcessEncryptionKeys(p *db.Process) []db.EncryptionKey {
+	// gate: only encrypted elections have encryption keys. Reading the stored election type
+	// keeps every other process on a chain-free path.
+	if p.ElectionParams == nil || !p.ElectionParams.ElectionType.SecretUntilTheEnd {
+		return nil
+	}
+	// nothing on chain yet (draft) — no keys to fetch
+	if p.Address.Equals(nil) {
+		return nil
+	}
+	// immutable once published: serve the cached keys without a chain round-trip
+	if len(p.EncryptionKeys) > 0 {
+		return p.EncryptionKeys
+	}
+	keys, err := a.account.ElectionEncryptionKeys(p.Address.Bytes())
+	if err != nil {
+		log.Warnw("encryption keys: election keys fetch failed", "process", p.Address.String(), "error", err)
+		return nil
+	}
+	// not published yet — do not cache an empty set so a later read still resolves them
+	if len(keys) == 0 {
+		return nil
+	}
+	if err := a.db.SetProcessEncryptionKeys(p.ID, keys); err != nil {
+		log.Warnw("encryption keys: could not persist keys", "process", p.Address.String(), "error", err)
+	}
+	return keys
 }
 
 // metadataObjectUserID is the object-storage owner recorded for server-generated
