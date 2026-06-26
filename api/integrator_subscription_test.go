@@ -32,9 +32,7 @@ func TestIntegratorPlanSubscription(t *testing.T) {
 		ID:   "prod_test_integrator",
 		Name: "Integrator Plan",
 		IntegratorLimits: db.IntegratorLimits{
-			MaxManagedOrgs:       maxManagedOrgs,
-			MaxManagedProcesses:  5,
-			MaxManagedCensusSize: 5000,
+			MaxManagedOrgs: maxManagedOrgs,
 		},
 	}
 	c.Assert(testDB.SetPlan(integratorPlan), qt.IsNil)

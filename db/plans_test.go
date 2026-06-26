@@ -80,7 +80,7 @@ func TestPlans(t *testing.T) {
 		c.Assert(testDB.SetPlan(&Plan{
 			ID:               "prod_free_integrator",
 			Name:             "Free Integrator",
-			IntegratorLimits: IntegratorLimits{MaxManagedOrgs: 1, MaxManagedProcesses: 5, MaxManagedCensusSize: 100},
+			IntegratorLimits: IntegratorLimits{MaxManagedOrgs: 1},
 		}), qt.IsNil)
 
 		plan, err := testDB.FreeIntegratorPlan()

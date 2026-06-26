@@ -99,12 +99,12 @@ type Organization struct {
 	IntegratorLimits *IntegratorLimits `json:"integratorLimits,omitempty" bson:"integratorLimits,omitempty"`
 }
 
-// IntegratorLimits caps the resources an integrator organization may consume
-// across the organizations it manages.
+// IntegratorLimits caps how many organizations an integrator may manage. The
+// aggregate process and census-size caps across those managed orgs are taken from
+// the integrator's plan top-level limits (Plan.Organization.MaxProcesses /
+// MaxCensus), not duplicated here.
 type IntegratorLimits struct {
-	MaxManagedOrgs       int `json:"maxManagedOrgs" bson:"maxManagedOrgs"`
-	MaxManagedProcesses  int `json:"maxManagedProcesses" bson:"maxManagedProcesses"`
-	MaxManagedCensusSize int `json:"maxManagedCensusSize" bson:"maxManagedCensusSize"`
+	MaxManagedOrgs int `json:"maxManagedOrgs" bson:"maxManagedOrgs"`
 }
 
 type PlanLimits struct {

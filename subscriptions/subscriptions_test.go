@@ -214,9 +214,7 @@ func TestEffectiveIntegratorLimits(t *testing.T) {
 	c := qt.New(t)
 	mockDB := &mockMongoStorage{
 		plans: map[string]*db.Plan{
-			"plan-1": {ID: "plan-1", IntegratorLimits: db.IntegratorLimits{
-				MaxManagedOrgs: 5, MaxManagedProcesses: 50, MaxManagedCensusSize: 500,
-			}},
+			"plan-1": {ID: "plan-1", IntegratorLimits: db.IntegratorLimits{MaxManagedOrgs: 5}},
 		},
 	}
 	subs := &Subscriptions{db: mockDB}
@@ -226,7 +224,7 @@ func TestEffectiveIntegratorLimits(t *testing.T) {
 	c.Assert(err, qt.ErrorIs, errors.ErrNotAnIntegrator)
 
 	// a per-org override takes precedence over the plan limits
-	override := &db.IntegratorLimits{MaxManagedOrgs: 2, MaxManagedProcesses: 20, MaxManagedCensusSize: 200}
+	override := &db.IntegratorLimits{MaxManagedOrgs: 2}
 	limits, err := subs.EffectiveIntegratorLimits(&db.Organization{
 		IntegratorLimits: override,
 		Subscription:     db.OrganizationSubscription{PlanID: "plan-1"},
@@ -280,12 +278,21 @@ func TestCanCreateManagedOrg(t *testing.T) {
 
 func TestCanPublishForManagedOrg(t *testing.T) {
 	c := qt.New(t)
-	subs := &Subscriptions{}
-	limits := &db.IntegratorLimits{MaxManagedOrgs: 5, MaxManagedProcesses: 5, MaxManagedCensusSize: 100}
+	mockDB := &mockMongoStorage{
+		plans: map[string]*db.Plan{
+			// aggregate caps come from the plan's top-level Organization limits
+			integratorPlanID: {
+				ID:               integratorPlanID,
+				Organization:     db.PlanLimits{MaxProcesses: 5, MaxCensus: 100},
+				IntegratorLimits: db.IntegratorLimits{MaxManagedOrgs: 5},
+			},
+		},
+	}
+	subs := &Subscriptions{db: mockDB}
 	integrator := func(processes, censusSize int) *db.Organization {
 		return &db.Organization{
-			IntegratorLimits: limits,
-			Counters:         db.OrganizationCounters{ManagedProcesses: processes, ManagedCensusSize: censusSize},
+			Subscription: db.OrganizationSubscription{PlanID: integratorPlanID, Active: true},
+			Counters:     db.OrganizationCounters{ManagedProcesses: processes, ManagedCensusSize: censusSize},
 		}
 	}
 

@@ -236,9 +236,7 @@ func TestUserInfoIsIntegrator(t *testing.T) {
 	org, err := testDB.Organization(orgAddr)
 	c.Assert(err, qt.IsNil)
 	org.IntegratorLimits = &db.IntegratorLimits{
-		MaxManagedOrgs:       1,
-		MaxManagedProcesses:  1,
-		MaxManagedCensusSize: 100,
+		MaxManagedOrgs: 1,
 	}
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 
