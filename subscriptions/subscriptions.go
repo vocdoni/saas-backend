@@ -61,6 +61,9 @@ type DBInterface interface {
 	OrganizationWithParent(address common.Address) (*db.Organization, *db.Organization, error)
 	CountCensusParticipants(censusID string) (int64, error)
 	CountOrgMembers(orgAddress common.Address) (int64, error)
+	CountMembersManagedBy(integratorAddr common.Address) (int64, error)
+	SumSentEmailsManagedBy(integratorAddr common.Address) (int, error)
+	SumSentSMSManagedBy(integratorAddr common.Address) (int, error)
 	CountProcesses(orgAddress common.Address, draft db.DraftFilter) (int64, error)
 	OrganizationMemberGroup(groupID string, orgAddress common.Address) (*db.OrganizationMemberGroup, error)
 }
@@ -110,6 +113,38 @@ func hasElectionMetadataPermissions(process *models.NewProcessTx, plan *db.Plan)
 	return true, nil
 }
 
+// managed reports whether org is a managed organization (created and owned by an integrator).
+func managed(org *db.Organization) bool {
+	return org != nil && org.ManagedBy != (common.Address{})
+}
+
+// limitsOwner returns the organization whose subscription plan governs usage limits for
+// org, together with that plan. For a managed organization the owner is its integrator
+// (org.ManagedBy); otherwise it is org itself. It fails closed if a managed org's
+// integrator cannot be resolved or has no plan — there is no silent fallback to the
+// managed org's own (throwaway default) plan.
+func (p *Subscriptions) limitsOwner(org *db.Organization) (*db.Organization, *db.Plan, error) {
+	if org == nil {
+		return nil, nil, errors.ErrInvalidData.With("organization is nil")
+	}
+	owner := org
+	if managed(org) {
+		integrator, err := p.db.Organization(org.ManagedBy)
+		if err != nil {
+			return nil, nil, errors.ErrOrganizationNotFound.WithErr(err)
+		}
+		owner = integrator
+	}
+	if owner.Subscription.PlanID == "" {
+		return nil, nil, errors.ErrOrganizationHasNoSubscription
+	}
+	plan, err := p.db.Plan(owner.Subscription.PlanID)
+	if err != nil {
+		return nil, nil, errors.ErrPlanNotFound.WithErr(err)
+	}
+	return owner, plan, nil
+}
+
 // HasTxPermission checks if the organization has permission to perform the given transaction.
 func (p *Subscriptions) HasTxPermission(
 	tx *models.Tx,
@@ -121,14 +156,11 @@ func (p *Subscriptions) HasTxPermission(
 		return false, errors.ErrInvalidData.With("organization is nil")
 	}
 
-	// Check if the organization has a subscription
-	if org.Subscription.PlanID == "" {
-		return false, errors.ErrOrganizationHasNoSubscription
-	}
-
-	plan, err := p.db.Plan(org.Subscription.PlanID)
+	// Resolve the plan that governs this org's limits: the integrator's plan for a
+	// managed org, otherwise the org's own plan.
+	_, plan, err := p.limitsOwner(org)
 	if err != nil {
-		return false, errors.ErrPlanNotFound.WithErr(err)
+		return false, err
 	}
 
 	switch txType {
@@ -145,13 +177,19 @@ func (p *Subscriptions) HasTxPermission(
 			return false, errors.ErrUserHasNoAdminRole
 		}
 		newProcess := tx.GetNewProcess()
-		if newProcess.Process.MaxCensusSize > uint64(plan.Organization.MaxCensus) {
-			return false, errors.ErrProcessCensusSizeExceedsPlanLimit.Withf("plan max census: %d", plan.Organization.MaxCensus)
-		}
-		if org.Counters.Processes >= plan.Organization.MaxProcesses {
-			// allow processes with less than TestMaxCensusSize for user testing
-			if newProcess.Process.MaxCensusSize > uint64(db.TestMaxCensusSize) {
-				return false, errors.ErrMaxProcessesReached
+		// For managed orgs the census-size and process-count limits are enforced against
+		// the integrator's aggregate quota (ReserveManagedPublish) at publish time, so the
+		// per-org plan checks are skipped here. Capability/duration checks below still apply,
+		// using the integrator's plan.
+		if !managed(org) {
+			if newProcess.Process.MaxCensusSize > uint64(plan.Organization.MaxCensus) {
+				return false, errors.ErrProcessCensusSizeExceedsPlanLimit.Withf("plan max census: %d", plan.Organization.MaxCensus)
+			}
+			if org.Counters.Processes >= plan.Organization.MaxProcesses {
+				// allow processes with less than TestMaxCensusSize for user testing
+				if newProcess.Process.MaxCensusSize > uint64(db.TestMaxCensusSize) {
+					return false, errors.ErrMaxProcessesReached
+				}
 			}
 		}
 		return hasElectionMetadataPermissions(newProcess, plan)
@@ -205,13 +243,11 @@ func (p *Subscriptions) OrgHasPermission(orgAddress common.Address, permission D
 			return errors.ErrOrganizationNotFound.WithErr(err)
 		}
 
-		if org.Subscription.PlanID == "" {
-			return errors.ErrOrganizationHasNoSubscription.With("can't create draft process")
-		}
-
-		plan, err := p.db.Plan(org.Subscription.PlanID)
+		// MaxDrafts value comes from the integrator's plan for managed orgs; the draft
+		// count itself stays per-org.
+		_, plan, err := p.limitsOwner(org)
 		if err != nil {
-			return errors.ErrGenericInternalServerError.WithErr(err)
+			return err
 		}
 
 		count, err := p.db.CountProcesses(orgAddress, db.DraftOnly)
@@ -229,22 +265,24 @@ func (p *Subscriptions) OrgHasPermission(orgAddress common.Address, permission D
 }
 
 func (p *Subscriptions) OrgCanAddNMembers(orgAddress common.Address, memberNumber int) error {
-	// Check if the organization has a subscription
 	org, err := p.db.Organization(orgAddress)
 	if err != nil {
 		return errors.ErrOrganizationNotFound.WithErr(err)
 	}
 
-	if org.Subscription.PlanID == "" {
-		return errors.ErrOrganizationHasNoSubscription.With("can't create draft process")
-	}
-
-	plan, err := p.db.Plan(org.Subscription.PlanID)
+	owner, plan, err := p.limitsOwner(org)
 	if err != nil {
-		return errors.ErrGenericInternalServerError.WithErr(err)
+		return err
 	}
 
-	count, err := p.db.CountOrgMembers(orgAddress)
+	// For a managed org the member limit is a shared pool across all of the integrator's
+	// managed orgs; for a standalone org it is just the org's own members.
+	var count int64
+	if managed(org) {
+		count, err = p.db.CountMembersManagedBy(owner.Address)
+	} else {
+		count, err = p.db.CountOrgMembers(orgAddress)
+	}
 	if err != nil {
 		return errors.ErrGenericInternalServerError.WithErr(err)
 	}
@@ -261,13 +299,9 @@ func (p *Subscriptions) OrgCanPublishGroupCensus(census *db.Census, groupID stri
 		return errors.ErrOrganizationNotFound.WithErr(err)
 	}
 
-	if org.Subscription.PlanID == "" {
-		return errors.ErrOrganizationHasNoSubscription
-	}
-
-	plan, err := p.db.Plan(org.Subscription.PlanID)
+	owner, plan, err := p.limitsOwner(org)
 	if err != nil {
-		return errors.ErrPlanNotFound.WithErr(err)
+		return err
 	}
 
 	group, err := p.db.OrganizationMemberGroup(groupID, org.Address)
@@ -284,11 +318,24 @@ func (p *Subscriptions) OrgCanPublishGroupCensus(census *db.Census, groupID stri
 		memberCount = int(count)
 	}
 
-	remainingEmails := plan.Features.TwoFaEmail - org.Counters.SentEmails
+	// For a managed org the 2FA allowance is a shared pool: consumption is summed across
+	// all of the integrator's managed orgs. For a standalone org it is the org's own
+	// sent counters.
+	sentEmails, sentSMS := org.Counters.SentEmails, org.Counters.SentSMS
+	if managed(org) {
+		if sentEmails, err = p.db.SumSentEmailsManagedBy(owner.Address); err != nil {
+			return errors.ErrGenericInternalServerError.WithErr(err)
+		}
+		if sentSMS, err = p.db.SumSentSMSManagedBy(owner.Address); err != nil {
+			return errors.ErrGenericInternalServerError.WithErr(err)
+		}
+	}
+
+	remainingEmails := plan.Features.TwoFaEmail - sentEmails
 	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldEmail) && memberCount > remainingEmails {
 		return errors.ErrProcessCensusSizeExceedsEmailAllowance.Withf("remaining emails: %d", remainingEmails)
 	}
-	remainingSMS := plan.Features.TwoFaSms - org.Counters.SentSMS
+	remainingSMS := plan.Features.TwoFaSms - sentSMS
 	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldPhone) && memberCount > remainingSMS {
 		return errors.ErrProcessCensusSizeExceedsSMSAllowance.Withf("remaining sms: %d", remainingSMS)
 	}
@@ -297,19 +344,21 @@ func (p *Subscriptions) OrgCanPublishGroupCensus(census *db.Census, groupID stri
 }
 
 func (p *Subscriptions) OrgCanAddCensusParticipants(orgAddress common.Address, censusID string, participantsCount int) error {
-	// Check if the organization has a subscription
 	org, err := p.db.Organization(orgAddress)
 	if err != nil {
 		return errors.ErrOrganizationNotFound.WithErr(err)
 	}
 
-	if org.Subscription.PlanID == "" {
-		return errors.ErrOrganizationHasNoSubscription.With("can't create draft process")
+	// For a managed org, census size is governed by the integrator's aggregate
+	// ManagedCensusSize quota (ReserveManagedPublish) at publish time, so the per-org
+	// census-size limit is not enforced here.
+	if managed(org) {
+		return nil
 	}
 
-	plan, err := p.db.Plan(org.Subscription.PlanID)
+	_, plan, err := p.limitsOwner(org)
 	if err != nil {
-		return errors.ErrPlanNotFound.WithErr(err)
+		return err
 	}
 
 	count, err := p.db.CountCensusParticipants(censusID)

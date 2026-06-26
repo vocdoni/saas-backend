@@ -487,6 +487,84 @@ func (ms *MongoStorage) ListManagedOrganizations(
 	return paginatedDocuments[Organization](ms.organizations, page, limit, filter, options.Find())
 }
 
+// managedOrgsProjected returns the organizations managed by integratorAddr, projected
+// to just their address and counters. It backs the integrator shared-pool aggregates
+// (members, 2FA sends) computed live across all of an integrator's managed orgs.
+func (ms *MongoStorage) managedOrgsProjected(ctx context.Context, integratorAddr common.Address) ([]Organization, error) {
+	if integratorAddr.Cmp(common.Address{}) == 0 {
+		return nil, ErrInvalidData
+	}
+	filter := bson.M{"managedBy": integratorAddr}
+	opts := options.Find().SetProjection(bson.M{"_id": 1, "counters": 1})
+	cursor, err := ms.organizations.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, fmt.Errorf("could not list managed organizations: %w", err)
+	}
+	defer func() { _ = cursor.Close(ctx) }()
+
+	var orgs []Organization
+	if err := cursor.All(ctx, &orgs); err != nil {
+		return nil, fmt.Errorf("could not decode managed organizations: %w", err)
+	}
+	return orgs, nil
+}
+
+// CountMembersManagedBy returns the total org-member count across all organizations
+// managed by integratorAddr. It is the shared-pool denominator for the member limit
+// of an integrator's managed orgs.
+func (ms *MongoStorage) CountMembersManagedBy(integratorAddr common.Address) (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	orgs, err := ms.managedOrgsProjected(ctx, integratorAddr)
+	if err != nil {
+		return 0, err
+	}
+	var total int64
+	for i := range orgs {
+		n, err := ms.CountOrgMembers(orgs[i].Address)
+		if err != nil {
+			return 0, err
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// SumSentEmailsManagedBy returns the total 2FA emails sent across all organizations
+// managed by integratorAddr (the integrator's shared 2FA-email pool consumption).
+func (ms *MongoStorage) SumSentEmailsManagedBy(integratorAddr common.Address) (int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	orgs, err := ms.managedOrgsProjected(ctx, integratorAddr)
+	if err != nil {
+		return 0, err
+	}
+	total := 0
+	for i := range orgs {
+		total += orgs[i].Counters.SentEmails
+	}
+	return total, nil
+}
+
+// SumSentSMSManagedBy returns the total 2FA SMS sent across all organizations managed
+// by integratorAddr (the integrator's shared 2FA-SMS pool consumption).
+func (ms *MongoStorage) SumSentSMSManagedBy(integratorAddr common.Address) (int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	orgs, err := ms.managedOrgsProjected(ctx, integratorAddr)
+	if err != nil {
+		return 0, err
+	}
+	total := 0
+	for i := range orgs {
+		total += orgs[i].Counters.SentSMS
+	}
+	return total, nil
+}
+
 func (ms *MongoStorage) fetchOrganizationAndPlan(orgAddress common.Address) (*Organization, *Plan, error) {
 	org, err := ms.Organization(orgAddress)
 	if err != nil {

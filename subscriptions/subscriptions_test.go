@@ -17,6 +17,11 @@ var (
 	testAnotherOrgAddress = common.Address{0x10, 0x11, 0x12, 0x13, 0x14}
 )
 
+const (
+	integratorPlanID = "integrator-plan"
+	tinyPlanID       = "tiny-plan"
+)
+
 func TestHasTxPermission(t *testing.T) {
 	c := qt.New(t)
 	// Create a mock organization without a subscription plan
@@ -298,11 +303,210 @@ func TestCanPublishForManagedOrg(t *testing.T) {
 	c.Assert(subs.CanPublishForManagedOrg(integrator(0, 90), 11), qt.ErrorIs, errors.ErrIntegratorQuotaExceeded)
 }
 
+// TestManagedOrgLimitsUseIntegratorPlan asserts that a managed org's limits are governed
+// by its integrator's plan and aggregate quotas, never by its own (throwaway default) plan.
+// In every case the managed org's own plan is intentionally near-zero while the integrator's
+// plan is generous: if the managed org were bound by its own plan it would be rejected.
+func TestManagedOrgLimitsUseIntegratorPlan(t *testing.T) {
+	c := qt.New(t)
+
+	integratorAddr := common.Address{0xAA}
+	managedAddr := common.Address{0xBB}
+	standaloneAddr := common.Address{0xCC} // not managed, same tiny plan — the control
+
+	mockDB := &mockMongoStorage{
+		plans: map[string]*db.Plan{
+			// generous integrator plan
+			integratorPlanID: {
+				ID: integratorPlanID,
+				Organization: db.PlanLimits{
+					MaxProcesses: 100, MaxCensus: 1000, MaxDuration: 30, MaxDrafts: 10,
+				},
+				Features: db.Features{Anonymous: true, TwoFaEmail: 100, TwoFaSms: 100},
+			},
+			// near-zero throwaway plan the managed/standalone orgs are seeded with
+			tinyPlanID: {
+				ID: tinyPlanID,
+				Organization: db.PlanLimits{
+					MaxProcesses: 0, MaxCensus: 1, MaxDuration: 0, MaxDrafts: 0,
+				},
+				Features: db.Features{Anonymous: false, TwoFaEmail: 0, TwoFaSms: 0},
+			},
+		},
+		orgs: map[string]*db.Organization{
+			integratorAddr.String(): {
+				Address:      integratorAddr,
+				Subscription: db.OrganizationSubscription{PlanID: integratorPlanID, Active: true},
+			},
+			managedAddr.String(): {
+				Address:      managedAddr,
+				ManagedBy:    integratorAddr,
+				Subscription: db.OrganizationSubscription{PlanID: tinyPlanID, Active: true},
+			},
+			standaloneAddr.String(): {
+				Address:      standaloneAddr,
+				Subscription: db.OrganizationSubscription{PlanID: tinyPlanID, Active: true},
+			},
+		},
+		// shared-pool consumption across the integrator's managed orgs
+		membersManagedBy:    map[string]int64{integratorAddr.String(): 5},
+		sentEmailsManagedBy: map[string]int{integratorAddr.String(): 10},
+		sentSMSManagedBy:    map[string]int{integratorAddr.String(): 10},
+		orgMembers:          map[string]int64{standaloneAddr.String(): 5},
+		groups: map[string]*db.OrganizationMemberGroup{
+			"group-1": {MemberIDs: []string{"a", "b", "c"}},
+		},
+	}
+	subs := &Subscriptions{db: mockDB}
+
+	adminUser := &db.User{
+		Email: "admin@example.com",
+		Organizations: []db.OrganizationUser{
+			{Address: managedAddr, Role: db.AdminRole},
+			{Address: standaloneAddr, Role: db.AdminRole},
+		},
+	}
+
+	// a NEW_PROCESS tx requesting an anonymous election bigger than a test-sized one.
+	newProcessTx := func() *models.Tx {
+		return &models.Tx{
+			Payload: &models.Tx_NewProcess{
+				NewProcess: &models.NewProcessTx{
+					Txtype: models.TxType_NEW_PROCESS,
+					Process: &models.Process{
+						MaxCensusSize: uint64(db.TestMaxCensusSize) + 50,
+						Duration:      3600,
+						EnvelopeType:  &models.EnvelopeType{Anonymous: true},
+						VoteOptions:   &models.ProcessVoteOptions{},
+					},
+				},
+			},
+		}
+	}
+
+	managedOrg := mockDB.orgs[managedAddr.String()]
+	standaloneOrg := mockDB.orgs[standaloneAddr.String()]
+
+	// --- Capability flag (Anonymous) + dropped census/process checks (HasTxPermission) ---
+	// Managed org: anonymous allowed because the integrator's plan permits it, and the
+	// per-org census/process caps are skipped (integrator aggregate governs at publish).
+	ok, err := subs.HasTxPermission(newProcessTx(), models.TxType_NEW_PROCESS, managedOrg, adminUser)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+	// Standalone org on the same tiny plan: rejected (its own plan forbids anonymous).
+	_, err = subs.HasTxPermission(newProcessTx(), models.TxType_NEW_PROCESS, standaloneOrg, adminUser)
+	c.Assert(err, qt.Not(qt.IsNil))
+
+	// --- MaxDrafts value cap (OrgHasPermission) ---
+	// Managed org: governed by integrator MaxDrafts (10) — allowed; standalone tiny plan
+	// (MaxDrafts 0) — rejected.
+	c.Assert(subs.OrgHasPermission(managedAddr, CreateDraft), qt.IsNil)
+	c.Assert(subs.OrgHasPermission(standaloneAddr, CreateDraft), qt.ErrorIs, errors.ErrMaxDraftsReached)
+
+	// --- Members shared pool (OrgCanAddNMembers) ---
+	// Managed org: integrator MaxCensus (1000) vs shared-pool count (5) — allowed.
+	c.Assert(subs.OrgCanAddNMembers(managedAddr, 3), qt.IsNil)
+	// Standalone tiny plan (MaxCensus 1) vs its own members (5) — rejected.
+	c.Assert(subs.OrgCanAddNMembers(standaloneAddr, 3), qt.ErrorIs, errors.ErrExceedsOrganizationMembersLimit)
+
+	// --- Census participants: dropped for managed, enforced for standalone ---
+	c.Assert(subs.OrgCanAddCensusParticipants(managedAddr, "census-x", 10_000), qt.IsNil)
+	c.Assert(subs.OrgCanAddCensusParticipants(standaloneAddr, "census-x", 10_000),
+		qt.ErrorIs, errors.ErrProcessCensusSizeExceedsPlanLimit)
+
+	// --- 2FA shared pool (OrgCanPublishGroupCensus) ---
+	emailCensus := func(orgAddr common.Address) *db.Census {
+		return &db.Census{OrgAddress: orgAddr, TwoFaFields: db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail}}
+	}
+	// Managed org: integrator TwoFaEmail (100) - shared sent (10) = 90 remaining >= 3 members — allowed.
+	c.Assert(subs.OrgCanPublishGroupCensus(emailCensus(managedAddr), "group-1"), qt.IsNil)
+	// Standalone tiny plan: TwoFaEmail 0 - 0 = 0 remaining < 3 members — rejected.
+	c.Assert(subs.OrgCanPublishGroupCensus(emailCensus(standaloneAddr), "group-1"),
+		qt.ErrorIs, errors.ErrProcessCensusSizeExceedsEmailAllowance)
+}
+
+// TestManagedOrgSharedPoolExceeded asserts the integrator's shared pool is enforced: when
+// combined consumption across the integrator's managed orgs reaches the integrator limit,
+// a managed org is rejected even though its own (throwaway) plan is irrelevant.
+func TestManagedOrgSharedPoolExceeded(t *testing.T) {
+	c := qt.New(t)
+
+	integratorAddr := common.Address{0xA1}
+	managedAddr := common.Address{0xB1}
+
+	mockDB := &mockMongoStorage{
+		plans: map[string]*db.Plan{
+			integratorPlanID: {
+				ID:           integratorPlanID,
+				Organization: db.PlanLimits{MaxCensus: 100},
+				Features:     db.Features{TwoFaSms: 50},
+			},
+			tinyPlanID: {ID: tinyPlanID, Organization: db.PlanLimits{MaxCensus: 1}},
+		},
+		orgs: map[string]*db.Organization{
+			integratorAddr.String(): {
+				Address:      integratorAddr,
+				Subscription: db.OrganizationSubscription{PlanID: integratorPlanID, Active: true},
+			},
+			managedAddr.String(): {
+				Address:      managedAddr,
+				ManagedBy:    integratorAddr,
+				Subscription: db.OrganizationSubscription{PlanID: tinyPlanID, Active: true},
+			},
+		},
+		// pool already near the integrator's limits
+		membersManagedBy: map[string]int64{integratorAddr.String(): 99},
+		sentSMSManagedBy: map[string]int{integratorAddr.String(): 50},
+		groups: map[string]*db.OrganizationMemberGroup{
+			"group-1": {MemberIDs: []string{"a"}},
+		},
+	}
+	subs := &Subscriptions{db: mockDB}
+
+	// members: pool at 99, integrator MaxCensus 100 → adding 2 exceeds.
+	c.Assert(subs.OrgCanAddNMembers(managedAddr, 2), qt.ErrorIs, errors.ErrExceedsOrganizationMembersLimit)
+	// 2FA SMS: pool at 50, integrator TwoFaSms 50 → 0 remaining, 1 member needed → rejected.
+	smsCensus := &db.Census{OrgAddress: managedAddr, TwoFaFields: db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldPhone}}
+	c.Assert(subs.OrgCanPublishGroupCensus(smsCensus, "group-1"),
+		qt.ErrorIs, errors.ErrProcessCensusSizeExceedsSMSAllowance)
+}
+
+// TestManagedOrgMissingIntegratorFailsClosed asserts a managed org whose integrator cannot
+// be resolved is rejected rather than silently falling back to its own plan.
+func TestManagedOrgMissingIntegratorFailsClosed(t *testing.T) {
+	c := qt.New(t)
+
+	managedAddr := common.Address{0xD1}
+	mockDB := &mockMongoStorage{
+		plans: map[string]*db.Plan{tinyPlanID: {ID: tinyPlanID}},
+		orgs: map[string]*db.Organization{
+			managedAddr.String(): {
+				Address:      managedAddr,
+				ManagedBy:    common.Address{0xDE, 0xAD}, // integrator absent from the mock
+				Subscription: db.OrganizationSubscription{PlanID: tinyPlanID, Active: true},
+			},
+		},
+	}
+	subs := &Subscriptions{db: mockDB}
+
+	c.Assert(subs.OrgCanAddNMembers(managedAddr, 1), qt.ErrorIs, errors.ErrOrganizationNotFound)
+}
+
 // Mock implementation of the necessary db.MongoStorage methods for testing
 type mockMongoStorage struct {
 	plans map[string]*db.Plan
 	users map[string]*db.User
 	orgs  map[string]*db.Organization
+	// keyed by integrator address string; default 0 when absent
+	membersManagedBy    map[string]int64
+	sentEmailsManagedBy map[string]int
+	sentSMSManagedBy    map[string]int
+	// keyed by orgAddress string
+	orgMembers map[string]int64
+	// keyed by groupID
+	groups map[string]*db.OrganizationMemberGroup
+	// keyed by orgAddress string; draft process count
+	draftCounts map[string]int64
 }
 
 func (m *mockMongoStorage) Plan(id string) (*db.Plan, error) {
@@ -339,18 +543,34 @@ func (m *mockMongoStorage) OrganizationWithParent(address common.Address) (
 	return org, nil, nil
 }
 
-func (*mockMongoStorage) CountOrgMembers(_ common.Address) (int64, error) {
-	return 0, nil
+func (m *mockMongoStorage) CountOrgMembers(addr common.Address) (int64, error) {
+	return m.orgMembers[addr.String()], nil
+}
+
+func (m *mockMongoStorage) CountMembersManagedBy(integratorAddr common.Address) (int64, error) {
+	return m.membersManagedBy[integratorAddr.String()], nil
+}
+
+func (m *mockMongoStorage) SumSentEmailsManagedBy(integratorAddr common.Address) (int, error) {
+	return m.sentEmailsManagedBy[integratorAddr.String()], nil
+}
+
+func (m *mockMongoStorage) SumSentSMSManagedBy(integratorAddr common.Address) (int, error) {
+	return m.sentSMSManagedBy[integratorAddr.String()], nil
 }
 
 func (*mockMongoStorage) CountCensusParticipants(string) (int64, error) {
 	return 0, nil
 }
 
-func (*mockMongoStorage) CountProcesses(_ common.Address, _ db.DraftFilter) (int64, error) {
-	return 0, nil
+func (m *mockMongoStorage) CountProcesses(addr common.Address, _ db.DraftFilter) (int64, error) {
+	return m.draftCounts[addr.String()], nil
 }
 
-func (*mockMongoStorage) OrganizationMemberGroup(string, common.Address) (*db.OrganizationMemberGroup, error) {
-	return nil, fmt.Errorf("not implemented in mock")
+func (m *mockMongoStorage) OrganizationMemberGroup(groupID string, _ common.Address) (*db.OrganizationMemberGroup, error) {
+	group, ok := m.groups[groupID]
+	if !ok {
+		return nil, fmt.Errorf("group not found in mock")
+	}
+	return group, nil
 }
