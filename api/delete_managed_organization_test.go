@@ -29,9 +29,7 @@ func TestDeleteManagedOrg(t *testing.T) {
 	integratorOrg, err := testDB.Organization(integratorAddr)
 	c.Assert(err, qt.IsNil)
 	integratorOrg.IntegratorLimits = &db.IntegratorLimits{
-		MaxManagedOrgs:       1,
-		MaxManagedProcesses:  2,
-		MaxManagedCensusSize: 1000,
+		MaxManagedOrgs: 1,
 	}
 	c.Assert(testDB.SetOrganization(integratorOrg), qt.IsNil)
 

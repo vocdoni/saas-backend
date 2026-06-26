@@ -671,7 +671,7 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 			errors.ErrGenericInternalServerError.Withf("could not get integrator organization: %v", err).Write(w)
 			return
 		}
-		limits, err := a.subscriptions.EffectiveIntegratorLimits(integrator)
+		maxProcesses, maxCensus, err := a.subscriptions.ManagedPublishLimits(integrator)
 		if err != nil {
 			if apiErr, ok := err.(errors.Error); ok {
 				apiErr.Write(w)
@@ -681,7 +681,7 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := a.db.ReserveManagedPublish(integrator.Address,
-			limits.MaxManagedProcesses, limits.MaxManagedCensusSize, int(draft.ElectionParams.MaxCensusSize)); err != nil {
+			maxProcesses, maxCensus, int(draft.ElectionParams.MaxCensusSize)); err != nil {
 			if err == db.ErrManagedQuotaReached {
 				errors.ErrIntegratorQuotaExceeded.Write(w)
 				return
