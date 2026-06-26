@@ -36,6 +36,7 @@ import (
 //	@Success		202		{object}	apicommon.EnqueuedResponse	"Job accepted; poll GET /jobs/{jobId}"
 //	@Failure		400		{object}	errors.Error				"Invalid input data"
 //	@Failure		404		{object}	errors.Error				"Process not found"
+//	@Failure		429		{object}	errors.Error				"Vote limit reached for organization"
 //	@Failure		500		{object}	errors.Error				"Internal server error"
 //	@Failure		503		{object}	errors.Error				"Transaction queue is full"
 //	@Router			/vote [post]
@@ -84,6 +85,16 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// enforce the owning organization's vote quota (plan MaxVotes vs SentVotes counter).
+	if err := a.subscriptions.OrgCanRelayVote(process.OrgAddress); err != nil {
+		if apiErr, ok := err.(errors.Error); ok {
+			apiErr.Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
 	// submit + confirm on the worker pool; the vote nullifier (voteID) is recorded on the
 	// job. The structural checks above ran synchronously (a malformed vote got a 400, an
 	// unknown process a 404); the chain's acceptance of the vote is decided here, async, and
@@ -102,6 +113,10 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 		voteID, err := a.account.SubmitSignedTx(payload)
 		if err != nil {
 			return nil, err
+		}
+		// count only chain-accepted votes; best-effort, never fail the relay on a counter error.
+		if err := a.db.IncrementOrganizationSentVotesCounter(process.OrgAddress); err != nil {
+			log.Errorw(err, "failed to increment org sent votes counter")
 		}
 		return &db.JobResult{VoteID: internal.HexBytes(voteID)}, nil
 	}}) {

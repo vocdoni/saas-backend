@@ -418,6 +418,12 @@ func (ms *MongoStorage) IncrementOrganizationSentSMSCounter(address common.Addre
 	return ms.addToOrganizationCounter(address, "sentSMS", 1)
 }
 
+// IncrementOrganizationSentVotesCounter atomically increments the relayed-votes counter
+// for the organization with the given address.
+func (ms *MongoStorage) IncrementOrganizationSentVotesCounter(address common.Address) error {
+	return ms.addToOrganizationCounter(address, "sentVotes", 1)
+}
+
 // IncrementOrganizationManagedOrgsCounterWithLimit atomically increments the managed
 // organizations counter only if it stays within limit, re-reading the counter under
 // keysLock so two concurrent creates cannot both pass a stale check and exceed the cap
