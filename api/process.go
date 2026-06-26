@@ -36,12 +36,11 @@ import (
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			request	body		apicommon.CreateProcessRequest	true	"Process creation information (optionally with electionParams)"
-//	@Success		200		{object}	primitive.ObjectID				"24-hex draft ProcessID"
+//	@Success		200		{object}	primitive.ObjectID				"Bare JSON string: 24-hex draft ProcessID, e.g. 507f1f77bcf86cd799439011"
 //	@Failure		400		{object}	errors.Error					"Invalid input data"
 //	@Failure		401		{object}	errors.Error					"Unauthorized"
 //	@Failure		403		{object}	errors.Error					"Plan does not allow creating more drafts"
 //	@Failure		404		{object}	errors.Error					"Published census not found"
-//	@Failure		409		{object}	errors.Error					"Process already exists"
 //	@Failure		500		{object}	errors.Error					"Internal server error"
 //	@Router			/process [post]
 func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {

@@ -129,12 +129,17 @@ func (c *CSPHandlers) handleAuthStep(w http.ResponseWriter, r *http.Request,
 //	@Description	- Step 1: The user sends the token and challenge solution back to the server.
 //	@Description	If valid, the token is marked as verified and returned.
 //	@Description	For auth-only censuses, verification may not require a challenge solution.
-//	@Tags			process
+//	@Description
+//	@Description	The request body depends on the step:
+//	@Description	- Step 0: handlers.AuthRequest — member identification fields (name, surname, memberNumber,
+//	@Description	nationalId, birthDate, email, phone); which are required depends on the census auth configuration.
+//	@Description	- Step 1: handlers.AuthChallengeRequest — { authToken, authData: [challenge solution] }.
+//	@Tags			csp
 //	@Accept			json
 //	@Produce		json
-//	@Param			bundleId	path		string		true	"Bundle ID"
-//	@Param			step		path		string		true	"Authentication step (0 or 1)"
-//	@Param			request		body		interface{}	true	"Authentication request (varies by step)"
+//	@Param			bundleId	path		string					true	"Bundle ID"
+//	@Param			step		path		string					true	"Authentication step (0 or 1)"
+//	@Param			request		body		handlers.AuthRequest	true	"Step 0 body; step 1 uses AuthChallengeRequest (see description)"
 //	@Success		200			{object}	handlers.AuthResponse
 //	@Failure		400			{object}	errors.Error	"Invalid input data"
 //	@Failure		401			{object}	errors.Error	"Unauthorized, cooldown time not reached (ErrAttemptCoolDownTime), or invalid challenge"
@@ -171,7 +176,7 @@ func (c *CSPHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) 
 //	@Description	The request must include the auth token and a valid contact method for the bundle census type
 //	@Description	(email, phone, or either depending on census configuration).
 //	@Description	The same token is returned if the challenge is queued successfully.
-//	@Tags			process
+//	@Tags			csp
 //	@Accept			json
 //	@Produce		json
 //	@Param			bundleId	path		string						true	"Bundle ID"
@@ -356,15 +361,17 @@ func (c *CSPHandlers) signAndRespond(w http.ResponseWriter, authToken, address, 
 //	@Description	and returns the signature. Once signed, the process is marked as consumed and cannot be signed again.
 //	@Description	The signing process includes verifying that the participant is in the census, that the process is part of
 //	@Description	the bundle, and that the authentication token is valid and verified.
-//	@Tags			process
+//	@Description
+//	@Description	Body: authToken, electionId (the process/election ID) and payload (the voter address). tokenR is unused.
+//	@Tags			csp
 //	@Accept			json
 //	@Produce		json
 //	@Param			bundleId	path		string					true	"Bundle ID"
-//	@Param			request		body		handlers.SignRequest	true	"Sign request with process ID, auth token, and payload (address)"
+//	@Param			request		body		handlers.SignRequest	true	"Sign request (see description for fields)"
 //	@Success		200			{object}	handlers.AuthResponse
 //	@Failure		400			{object}	errors.Error	"Invalid input data"
-//	@Failure		401			{object}	errors.Error	"Unauthorized, invalid token, or token not verified (ErrAuthTokenNotVerified)"
-//	@Failure		404			{object}	errors.Error	"Bundle not found, process not in bundle, or user not found"
+//	@Failure		401			{object}	errors.Error	"Unauthorized, invalid/unverified token, or process not in the bundle"
+//	@Failure		404			{object}	errors.Error	"Bundle not found or user not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/process/bundle/{bundleId}/sign [post]
 func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) {
@@ -444,7 +451,7 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 //
 //	@Summary		Get user weight for a bundle
 //	@Description	Get the weight of a user for a given bundle. Requires a verified token.
-//	@Tags			process
+//	@Tags			csp
 //	@Accept			json
 //	@Produce		json
 //	@Param			bundleId	path		string						true	"Bundle ID"
@@ -524,7 +531,7 @@ func (c *CSPHandlers) UserWeightHandler(w http.ResponseWriter, r *http.Request) 
 //	@Description	census. When electionId is provided, the response also reports whether the user already voted in that
 //	@Description	process. Ineligibility (unknown/unverified token, token from another bundle, not in census, zero weight
 //	@Description	on a weighted census) is reported as belongs=false with HTTP 200, not as an error.
-//	@Tags			process
+//	@Tags			csp
 //	@Accept			json
 //	@Produce		json
 //	@Param			bundleId	path		string							true	"Bundle ID"
@@ -637,7 +644,7 @@ func (c *CSPHandlers) BundleCheckHandler(w http.ResponseWriter, r *http.Request)
 //	@Description	Get the address used to sign a process. Requires a verified token. Returns the address, nullifier,
 //	@Description	and timestamp of the consumption. {processId} accepts the 24-hex ProcessID (preferred)
 //	@Description	or, for backwards compatibility, the 64-hex on-chain election id.
-//	@Tags			process
+//	@Tags			csp
 //	@Accept			json
 //	@Produce		json
 //	@Param			processId	path		string							true	"24-hex ProcessID (preferred); 64-hex on-chain id also accepted"

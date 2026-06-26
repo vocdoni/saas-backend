@@ -277,6 +277,8 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 //	@Description	must be provided. Supplying only authFields yields an auth-only census (members authenticate
 //	@Description	with their data, no OTP); twoFaFields adds an email/SMS OTP challenge. A body with both empty
 //	@Description	is rejected with 404 (ErrCensusTypeNotFound). Returns the published census root and URI.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			census
 //	@Accept			json
 //	@Produce		json
