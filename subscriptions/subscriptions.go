@@ -3,6 +3,7 @@
 package subscriptions
 
 import (
+	stderrors "errors"
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -131,7 +132,10 @@ func (p *Subscriptions) limitsOwner(org *db.Organization) (*db.Organization, *db
 	if managed(org) {
 		integrator, err := p.db.Organization(org.ManagedBy)
 		if err != nil {
-			return nil, nil, errors.ErrOrganizationNotFound.WithErr(err)
+			if stderrors.Is(err, db.ErrNotFound) {
+				return nil, nil, errors.ErrOrganizationNotFound.WithErr(err)
+			}
+			return nil, nil, errors.ErrGenericInternalServerError.WithErr(err)
 		}
 		owner = integrator
 	}
@@ -140,7 +144,10 @@ func (p *Subscriptions) limitsOwner(org *db.Organization) (*db.Organization, *db
 	}
 	plan, err := p.db.Plan(owner.Subscription.PlanID)
 	if err != nil {
-		return nil, nil, errors.ErrPlanNotFound.WithErr(err)
+		if stderrors.Is(err, db.ErrNotFound) {
+			return nil, nil, errors.ErrPlanNotFound.WithErr(err)
+		}
+		return nil, nil, errors.ErrGenericInternalServerError.WithErr(err)
 	}
 	return owner, plan, nil
 }
@@ -331,11 +338,11 @@ func (p *Subscriptions) OrgCanPublishGroupCensus(census *db.Census, groupID stri
 		}
 	}
 
-	remainingEmails := plan.Features.TwoFaEmail - sentEmails
+	remainingEmails := max(0, plan.Features.TwoFaEmail-sentEmails)
 	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldEmail) && memberCount > remainingEmails {
 		return errors.ErrProcessCensusSizeExceedsEmailAllowance.Withf("remaining emails: %d", remainingEmails)
 	}
-	remainingSMS := plan.Features.TwoFaSms - sentSMS
+	remainingSMS := max(0, plan.Features.TwoFaSms-sentSMS)
 	if census.TwoFaFields.Contains(db.OrgMemberTwoFaFieldPhone) && memberCount > remainingSMS {
 		return errors.ErrProcessCensusSizeExceedsSMSAllowance.Withf("remaining sms: %d", remainingSMS)
 	}
