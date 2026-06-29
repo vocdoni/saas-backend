@@ -122,6 +122,30 @@ func TestIntegratorManagedOrgs(t *testing.T) {
 		Active:          true,
 	}), qt.IsNil)
 
+	// a managed org may not publish a process whose declared census size exceeds the
+	// integrator plan's MaxCensus (1000): the per-process bound applies to managed orgs even
+	// though the aggregate process-count quota is what governs how many they may publish.
+	overCapDraft, err := testDB.SetProcess(&db.Process{
+		OrgAddress: firstManaged,
+		ElectionParams: &db.ElectionParams{
+			Title:         db.MultiLangString{"default": "Over-cap managed election"},
+			EndDate:       time.Now().Add(2 * time.Hour),
+			MaxCensusSize: 2000,
+			Questions: []db.Question{{
+				Title: db.MultiLangString{"default": "Q1"},
+				Choices: []db.Choice{
+					{Title: db.MultiLangString{"default": "Yes"}, Value: 0},
+					{Title: db.MultiLangString{"default": "No"}, Value: 1},
+				},
+			}},
+			VoteType:     db.VoteType{MaxCount: 1, MaxValue: 1},
+			ElectionType: db.ElectionType{Autostart: true, Interruptible: true},
+		},
+	})
+	c.Assert(err, qt.IsNil)
+	_, code = testRequest(t, http.MethodPost, token, nil, "process", overCapDraft.Hex(), "publish")
+	c.Assert(code, qt.Equals, http.StatusUnauthorized) // ErrProcessCensusSizeExceedsPlanLimit, wrapped
+
 	// seed + publish a draft (MaxCensusSize 100, within the 1000 integrator cap)
 	draftID, err := testDB.SetProcess(&db.Process{
 		OrgAddress: firstManaged,

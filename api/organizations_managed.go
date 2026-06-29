@@ -324,16 +324,20 @@ func (a *API) integratorInfoHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		apiLimits := apicommon.IntegratorLimits{MaxManagedOrgs: limits.MaxManagedOrgs}
 
-		// The process/votes/SMS/email caps are the integrator plan's pooled limits.
-		// An override-enabled integrator may have no subscription plan; leave those caps at 0
-		// (unlimited/unknown) rather than failing the dashboard.
+		// The process/votes/SMS/email caps are the integrator plan's pooled limits. An
+		// override-enabled integrator may have no subscription plan; leave those caps at 0
+		// (unlimited/unknown) in that case rather than failing the dashboard. A real lookup
+		// failure on a plan that is supposed to exist is surfaced rather than masked as 0.
 		if org.Subscription.PlanID != "" {
-			if plan, err := a.db.Plan(org.Subscription.PlanID); err == nil && plan != nil {
-				apiLimits.MaxManagedProcesses = plan.Organization.MaxProcesses
-				apiLimits.MaxVotes = plan.Organization.MaxVotes
-				apiLimits.MaxSMS = plan.Features.TwoFaSms
-				apiLimits.MaxEmails = plan.Features.TwoFaEmail
+			plan, err := a.db.Plan(org.Subscription.PlanID)
+			if err != nil {
+				errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+				return
 			}
+			apiLimits.MaxManagedProcesses = plan.Organization.MaxProcesses
+			apiLimits.MaxVotes = plan.Organization.MaxVotes
+			apiLimits.MaxSMS = plan.Features.TwoFaSms
+			apiLimits.MaxEmails = plan.Features.TwoFaEmail
 		}
 		resp.Limits = &apiLimits
 

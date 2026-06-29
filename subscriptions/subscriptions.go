@@ -185,14 +185,15 @@ func (p *Subscriptions) HasTxPermission(
 			return false, errors.ErrUserHasNoAdminRole
 		}
 		newProcess := tx.GetNewProcess()
-		// For managed orgs the process-count limit is enforced against the integrator's
-		// aggregate quota (ReserveManagedPublish) at publish time, and census size is
-		// metered through the shared vote pool, so the per-org plan checks are skipped here.
-		// Capability/duration checks below still apply, using the integrator's plan.
+		// A single process's declared census size is bounded by the governing plan's MaxCensus
+		// for every org — the integrator's plan for a managed org, otherwise the org's own.
+		if newProcess.Process.MaxCensusSize > uint64(plan.Organization.MaxCensus) {
+			return false, errors.ErrProcessCensusSizeExceedsPlanLimit.Withf("plan max census: %d", plan.Organization.MaxCensus)
+		}
+		// The process-*count* limit, however, is enforced for managed orgs against the
+		// integrator's aggregate quota (ReserveManagedPublish) at publish time, so the per-org
+		// count check is skipped for them. Capability/duration checks below apply to all.
 		if !managed(org) {
-			if newProcess.Process.MaxCensusSize > uint64(plan.Organization.MaxCensus) {
-				return false, errors.ErrProcessCensusSizeExceedsPlanLimit.Withf("plan max census: %d", plan.Organization.MaxCensus)
-			}
 			if org.Counters.Processes >= plan.Organization.MaxProcesses {
 				// allow processes with less than TestMaxCensusSize for user testing
 				if newProcess.Process.MaxCensusSize > uint64(db.TestMaxCensusSize) {
