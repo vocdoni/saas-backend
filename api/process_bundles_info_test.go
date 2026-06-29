@@ -122,3 +122,52 @@ func TestProcessBundleParticipantInfo(t *testing.T) {
 	requestAndAssertError(errors.ErrMalformedURLParam, t, http.MethodGet, "", nil,
 		"process", "bundle", unknownID, "p1")
 }
+
+// TestCreateProcessBundleAcceptsProcessID exercises POST /process/bundle accepting either the 24-hex
+// ProcessID or the 64-hex on-chain election id for each process (dual-accept, mirroring sign-info).
+// The ProcessID resolves to the process' on-chain id; the on-chain id keeps working (non-breaking).
+func TestCreateProcessBundleAcceptsProcessID(t *testing.T) {
+	c := qt.New(t)
+	defer func() {
+		if err := testDB.DeleteAllDocuments(); err != nil {
+			c.Logf("cleanup: %v", err)
+		}
+	}()
+
+	token := testCreateUser(t, "bundlepidpass123")
+	orgAddress := testCreateOrganization(t, token)
+	censusID := postCensus(t, token, orgAddress,
+		db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber},
+		db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail})
+
+	// A published process has a 32-byte on-chain Address.
+	onChain := internal.HexBytes(util.RandomBytes(32))
+	processObjID, err := testDB.SetProcess(&db.Process{OrgAddress: orgAddress, Address: onChain})
+	c.Assert(err, qt.IsNil)
+
+	assertBundleHasOnChainID := func(bundleID string) {
+		got := requestAndParse[db.ProcessesBundle](t, http.MethodGet, "", nil, "process", "bundle", bundleID)
+		c.Assert(got.Processes, qt.HasLen, 1)
+		c.Assert(got.Processes[0].String(), qt.Equals, onChain.String())
+	}
+
+	// (1) The 24-hex ProcessID is resolved to the process' on-chain id.
+	byProcessID, _ := postProcessBundle(t, token, censusID, processObjID[:])
+	assertBundleHasOnChainID(byProcessID)
+
+	// (2) The 64-hex on-chain id keeps working directly (non-breaking).
+	byOnChain, _ := postProcessBundle(t, token, censusID, onChain)
+	assertBundleHasOnChainID(byOnChain)
+
+	// (3) An existing but unpublished process (no on-chain id) → 400.
+	unpublished, err := testDB.SetProcess(&db.Process{OrgAddress: orgAddress})
+	c.Assert(err, qt.IsNil)
+	requestAndAssertError(errors.ErrMalformedBody, t, http.MethodPost, token,
+		&apicommon.CreateProcessBundleRequest{CensusID: censusID, Processes: []string{unpublished.Hex()}},
+		"process", "bundle")
+
+	// (4) A well-formed but unknown ProcessID → 404.
+	requestAndAssertError(errors.ErrProcessNotFound, t, http.MethodPost, token,
+		&apicommon.CreateProcessBundleRequest{CensusID: censusID, Processes: []string{"0123456789abcdef01234567"}},
+		"process", "bundle")
+}

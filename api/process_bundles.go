@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/hex"
 	"encoding/json"
 	stderrors "errors"
 	"net/http"
@@ -11,7 +10,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.vocdoni.io/dvote/util"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // Using types from apicommon package
@@ -19,7 +18,39 @@ import (
 // AddProcessesToBundleRequest represents the request body for adding processes to an existing bundle.
 // It contains an array of process IDs to add to the bundle.
 type AddProcessesToBundleRequest struct {
-	Processes []string `json:"processes"` // Array of process creation requests to add
+	// Process IDs to add — each is either the 24-hex ProcessID or the 64-hex on-chain election id.
+	Processes []string `json:"processes"`
+}
+
+// resolveBundleProcessID resolves a process identifier from a bundle request to its on-chain election
+// id. Mirroring the sign-info endpoint, it accepts either the 24-hex ProcessID (resolved through the
+// database) or the on-chain election id directly, so clients using either form keep working.
+func (a *API) resolveBundleProcessID(raw string) (internal.HexBytes, *errors.Error) {
+	// A ProcessID is exactly 24 hex chars, so it never collides with an on-chain id. Anything that
+	// isn't a 24-hex ObjectID is treated as the on-chain id directly, exactly as before.
+	if objID, err := primitive.ObjectIDFromHex(raw); err == nil {
+		process, err := a.db.Process(objID)
+		if err != nil {
+			if err == db.ErrNotFound {
+				e := errors.ErrProcessNotFound
+				return nil, &e
+			}
+			e := errors.ErrGenericInternalServerError.WithErr(err)
+			return nil, &e
+		}
+		if len(process.Address) == 0 {
+			e := errors.ErrMalformedBody.Withf("process %s is not published", raw)
+			return nil, &e
+		}
+		return process.Address, nil
+	}
+
+	var onChainID internal.HexBytes
+	if err := onChainID.ParseString(raw); err != nil {
+		e := errors.ErrMalformedBody.Withf("invalid process ID")
+		return nil, &e
+	}
+	return onChainID, nil
 }
 
 // createProcessBundleHandler godoc
@@ -121,12 +152,11 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 			errors.ErrMalformedBody.Withf("missing process ID").Write(w)
 			return
 		}
-		processID, err := hex.DecodeString(util.TrimHex(processReq))
-		if err != nil {
-			errors.ErrMalformedBody.Withf("invalid process ID").Write(w)
+		processID, aerr := a.resolveBundleProcessID(processReq)
+		if aerr != nil {
+			aerr.Write(w)
 			return
 		}
-
 		processes = append(processes, processID)
 	}
 
@@ -248,12 +278,11 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 			errors.ErrMalformedBody.Withf("missing process ID").Write(w)
 			return
 		}
-		processID, err := hex.DecodeString(util.TrimHex(processReq))
-		if err != nil {
-			errors.ErrMalformedBody.Withf("invalid process ID").Write(w)
+		processID, aerr := a.resolveBundleProcessID(processReq)
+		if aerr != nil {
+			aerr.Write(w)
 			return
 		}
-
 		processesToAdd = append(processesToAdd, processID)
 	}
 

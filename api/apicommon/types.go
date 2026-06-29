@@ -1287,7 +1287,8 @@ type CreateProcessBundleRequest struct {
 	// Census ID
 	CensusID string `json:"censusId"`
 
-	// List of process Addresses to include in the bundle
+	// List of processes to include in the bundle. Each entry is either the 24-hex ProcessID or the
+	// 64-hex on-chain election id.
 	Processes []string `json:"processes"`
 }
 
