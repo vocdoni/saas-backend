@@ -25,7 +25,7 @@ func TestAPIKeysAPI(t *testing.T) {
 	// make the org an integrator (override) so the integrator endpoints are usable
 	org, err := testDB.Organization(orgAddr)
 	c.Assert(err, qt.IsNil)
-	org.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 2, MaxManagedProcesses: 5, MaxManagedCensusSize: 100}
+	org.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 2}
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 
 	// create a key scoped to quota:read + managed:read
@@ -90,7 +90,7 @@ func TestIntegratorAPIKeyPathless(t *testing.T) {
 
 	org, err := testDB.Organization(orgAddr)
 	c.Assert(err, qt.IsNil)
-	org.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 2, MaxManagedProcesses: 5, MaxManagedCensusSize: 100}
+	org.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 2}
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 
 	// mint a key with the integrator scopes
@@ -136,7 +136,7 @@ func TestIntegratorAPIKeyDeletesProcessDraft(t *testing.T) {
 	// make the org an integrator (override)
 	org, err := testDB.Organization(orgAddr)
 	c.Assert(err, qt.IsNil)
-	org.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 2, MaxManagedProcesses: 5, MaxManagedCensusSize: 100}
+	org.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 2}
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 
 	// mint a key with the scopes needed to create a managed org and act on its processes

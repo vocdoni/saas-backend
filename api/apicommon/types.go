@@ -651,14 +651,10 @@ type SubscriptionPlanLimits struct {
 // integrator plan.
 // swagger:model SubscriptionIntegratorLimits
 type SubscriptionIntegratorLimits struct {
-	// Maximum number of organizations the integrator may manage
+	// Maximum number of organizations the integrator may manage. The aggregate
+	// process and census-size caps across managed orgs come from the plan's
+	// top-level limits (maxProcesses / maxCensus).
 	MaxManagedOrgs int `json:"maxManagedOrgs"`
-
-	// Maximum number of voting processes across managed organizations
-	MaxManagedProcesses int `json:"maxManagedProcesses"`
-
-	// Maximum total census size across managed organizations
-	MaxManagedCensusSize int `json:"maxManagedCensusSize"`
 }
 
 // SubscriptionVotingTypes represents the voting types available in a subscription plan.

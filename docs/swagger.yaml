@@ -1245,14 +1245,11 @@ definitions:
     type: object
   apicommon.SubscriptionIntegratorLimits:
     properties:
-      maxManagedCensusSize:
-        description: Maximum total census size across managed organizations
-        type: integer
       maxManagedOrgs:
-        description: Maximum number of organizations the integrator may manage
-        type: integer
-      maxManagedProcesses:
-        description: Maximum number of voting processes across managed organizations
+        description: |-
+          Maximum number of organizations the integrator may manage. The aggregate
+          process and census-size caps across managed orgs come from the plan's
+          top-level limits (maxProcesses / maxCensus).
         type: integer
     type: object
   apicommon.SubscriptionPlan:
@@ -1654,11 +1651,7 @@ definitions:
     type: object
   db.IntegratorLimits:
     properties:
-      maxManagedCensusSize:
-        type: integer
       maxManagedOrgs:
-        type: integer
-      maxManagedProcesses:
         type: integer
     type: object
   db.JobResult:
