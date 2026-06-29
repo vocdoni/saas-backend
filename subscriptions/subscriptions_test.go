@@ -327,7 +327,7 @@ func TestManagedOrgLimitsUseIntegratorPlan(t *testing.T) {
 			integratorPlanID: {
 				ID: integratorPlanID,
 				Organization: db.PlanLimits{
-					MaxProcesses: 100, MaxCensus: 1000, MaxDuration: 30, MaxDrafts: 10,
+					MaxProcesses: 100, MaxCensus: 1000, MaxDuration: 30, MaxDrafts: 10, MaxVotes: 100,
 				},
 				Features: db.Features{Anonymous: true, TwoFaEmail: 100, TwoFaSms: 100},
 			},
@@ -335,7 +335,7 @@ func TestManagedOrgLimitsUseIntegratorPlan(t *testing.T) {
 			tinyPlanID: {
 				ID: tinyPlanID,
 				Organization: db.PlanLimits{
-					MaxProcesses: 0, MaxCensus: 1, MaxDuration: 0, MaxDrafts: 0,
+					MaxProcesses: 0, MaxCensus: 1, MaxDuration: 0, MaxDrafts: 0, MaxVotes: 1,
 				},
 				Features: db.Features{Anonymous: false, TwoFaEmail: 0, TwoFaSms: 0},
 			},
@@ -359,6 +359,7 @@ func TestManagedOrgLimitsUseIntegratorPlan(t *testing.T) {
 		membersManagedBy:    map[string]int64{integratorAddr.String(): 5},
 		sentEmailsManagedBy: map[string]int{integratorAddr.String(): 10},
 		sentSMSManagedBy:    map[string]int{integratorAddr.String(): 10},
+		sentVotesManagedBy:  map[string]int{integratorAddr.String(): 10},
 		orgMembers:          map[string]int64{standaloneAddr.String(): 5},
 		groups: map[string]*db.OrganizationMemberGroup{
 			"group-1": {MemberIDs: []string{"a", "b", "c"}},
@@ -435,6 +436,17 @@ func TestManagedOrgLimitsUseIntegratorPlan(t *testing.T) {
 	// Standalone tiny plan: TwoFaEmail 0 - 0 = 0 remaining < 3 members — rejected.
 	c.Assert(subs.OrgCanPublishGroupCensus(emailCensus(standaloneAddr), "group-1"),
 		qt.ErrorIs, errors.ErrProcessCensusSizeExceedsEmailAllowance)
+
+	// --- Vote shared pool (OrgCanPublishGroupCensus) ---
+	// A census with no 2FA fields isolates the vote allowance from the email/sms checks.
+	plainCensus := func(orgAddr common.Address) *db.Census {
+		return &db.Census{OrgAddress: orgAddr}
+	}
+	// Managed org: integrator MaxVotes (100) - shared sent (10) = 90 remaining >= 3 members — allowed.
+	c.Assert(subs.OrgCanPublishGroupCensus(plainCensus(managedAddr), "group-1"), qt.IsNil)
+	// Standalone tiny plan: MaxVotes 1 - own sent (0) = 1 remaining < 3 members — rejected.
+	c.Assert(subs.OrgCanPublishGroupCensus(plainCensus(standaloneAddr), "group-1"),
+		qt.ErrorIs, errors.ErrProcessCensusSizeExceedsVoteAllowance)
 }
 
 // TestManagedOrgSharedPoolExceeded asserts the integrator's shared pool is enforced: when
@@ -450,7 +462,7 @@ func TestManagedOrgSharedPoolExceeded(t *testing.T) {
 		plans: map[string]*db.Plan{
 			integratorPlanID: {
 				ID:           integratorPlanID,
-				Organization: db.PlanLimits{MaxCensus: 100},
+				Organization: db.PlanLimits{MaxCensus: 100, MaxVotes: 50},
 				Features:     db.Features{TwoFaSms: 50},
 			},
 			tinyPlanID: {ID: tinyPlanID, Organization: db.PlanLimits{MaxCensus: 1}},
@@ -467,8 +479,9 @@ func TestManagedOrgSharedPoolExceeded(t *testing.T) {
 			},
 		},
 		// pool already near the integrator's limits
-		membersManagedBy: map[string]int64{integratorAddr.String(): 99},
-		sentSMSManagedBy: map[string]int{integratorAddr.String(): 50},
+		membersManagedBy:   map[string]int64{integratorAddr.String(): 99},
+		sentSMSManagedBy:   map[string]int{integratorAddr.String(): 50},
+		sentVotesManagedBy: map[string]int{integratorAddr.String(): 50},
 		groups: map[string]*db.OrganizationMemberGroup{
 			"group-1": {MemberIDs: []string{"a"}},
 		},
@@ -481,6 +494,10 @@ func TestManagedOrgSharedPoolExceeded(t *testing.T) {
 	smsCensus := &db.Census{OrgAddress: managedAddr, TwoFaFields: db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldPhone}}
 	c.Assert(subs.OrgCanPublishGroupCensus(smsCensus, "group-1"),
 		qt.ErrorIs, errors.ErrProcessCensusSizeExceedsSMSAllowance)
+	// votes: pool at 50, integrator MaxVotes 50 → 0 remaining, 1 member needed → rejected.
+	voteCensus := &db.Census{OrgAddress: managedAddr}
+	c.Assert(subs.OrgCanPublishGroupCensus(voteCensus, "group-1"),
+		qt.ErrorIs, errors.ErrProcessCensusSizeExceedsVoteAllowance)
 }
 
 // TestManagedOrgMissingIntegratorFailsClosed asserts a managed org whose integrator cannot
@@ -513,6 +530,7 @@ type mockMongoStorage struct {
 	membersManagedBy    map[string]int64
 	sentEmailsManagedBy map[string]int
 	sentSMSManagedBy    map[string]int
+	sentVotesManagedBy  map[string]int
 	// keyed by orgAddress string
 	orgMembers map[string]int64
 	// keyed by groupID
@@ -569,6 +587,10 @@ func (m *mockMongoStorage) SumSentEmailsManagedBy(integratorAddr common.Address)
 
 func (m *mockMongoStorage) SumSentSMSManagedBy(integratorAddr common.Address) (int, error) {
 	return m.sentSMSManagedBy[integratorAddr.String()], nil
+}
+
+func (m *mockMongoStorage) SumSentVotesManagedBy(integratorAddr common.Address) (int, error) {
+	return m.sentVotesManagedBy[integratorAddr.String()], nil
 }
 
 func (*mockMongoStorage) CountCensusParticipants(string) (int64, error) {

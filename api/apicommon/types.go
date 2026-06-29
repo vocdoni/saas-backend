@@ -633,6 +633,9 @@ type SubscriptionPlanLimits struct {
 	// Maximum number of census allowed
 	MaxCensus int `json:"maxCensus"`
 
+	// Maximum number of votes that may be relayed; 0 means unlimited
+	MaxVotes int `json:"maxVotes"`
+
 	// Maximum duration of voting processes in days
 	MaxDuration int `json:"maxDaysDuration"`
 
@@ -763,6 +766,9 @@ type SubscriptionUsage struct {
 	// Number of emails sent
 	SentEmails int `json:"sentEmails"`
 
+	// Number of votes relayed
+	SentVotes int `json:"sentVotes"`
+
 	// Number of sub-organizations created
 	SubOrgs int `json:"subOrgs"`
 
@@ -781,6 +787,7 @@ func SubscriptionUsageFromDB(usage *db.OrganizationCounters) SubscriptionUsage {
 	return SubscriptionUsage{
 		SentSMS:    usage.SentSMS,
 		SentEmails: usage.SentEmails,
+		SentVotes:  usage.SentVotes,
 		SubOrgs:    usage.SubOrgs,
 		Users:      usage.Users,
 		Processes:  usage.Processes,

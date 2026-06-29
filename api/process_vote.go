@@ -103,6 +103,11 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, err
 		}
+		// meter the relayed vote for billing/quota; best-effort, never fail the relay on a
+		// counter error. The quota itself is enforced at election publish, not here.
+		if err := a.db.IncrementOrganizationSentVotesCounter(process.OrgAddress); err != nil {
+			log.Errorw(err, "failed to increment org sent votes counter")
+		}
 		return &db.JobResult{VoteID: internal.HexBytes(voteID)}, nil
 	}}) {
 		// full queue: mark the job failed so it is not orphaned pending.

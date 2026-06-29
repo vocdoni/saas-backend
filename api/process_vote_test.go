@@ -272,4 +272,9 @@ func TestRelayVote(t *testing.T) {
 	votesAfter, err := vocdoniClient.ElectionVoteCount(processID.Bytes())
 	c.Assert(err, qt.IsNil)
 	c.Assert(votesAfter, qt.Equals, votesBefore+1, qt.Commentf("expected 1 more vote, got %d", votesAfter))
+
+	// a chain-accepted relay meters the owning organization's SentVotes counter
+	orgAfter, err := testDB.Organization(orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(orgAfter.Counters.SentVotes, qt.Equals, 1)
 }
