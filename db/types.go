@@ -112,6 +112,9 @@ type PlanLimits struct {
 	SubOrgs      int `json:"subOrgs" bson:"subOrgs"`
 	MaxProcesses int `json:"maxProcesses" bson:"maxProcesses"`
 	MaxCensus    int `json:"maxCensus" bson:"maxCensus"`
+	// Max votes that may be relayed; 0 means unlimited. For managed orgs this is the
+	// integrator's shared pool, summed across all its managed orgs.
+	MaxVotes int `json:"maxVotes" bson:"maxVotes"`
 	// Max process duration in days
 	MaxDuration int  `json:"maxDaysDuration" bson:"maxDuration"`
 	CustomURL   bool `json:"customURL" bson:"customURL"`
@@ -186,6 +189,7 @@ type OrganizationSubscription struct {
 type OrganizationCounters struct {
 	SentSMS           int `json:"sentSMS" bson:"sentSMS"`
 	SentEmails        int `json:"sentEmails" bson:"sentEmails"`
+	SentVotes         int `json:"sentVotes" bson:"sentVotes"`
 	SubOrgs           int `json:"subOrgs" bson:"subOrgs"`
 	Users             int `json:"users" bson:"users"`
 	Processes         int `json:"processes" bson:"processes"`

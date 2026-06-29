@@ -1313,6 +1313,9 @@ definitions:
       maxProcesses:
         description: Maximum number of voting processes allowed
         type: integer
+      maxVotes:
+        description: Maximum number of votes that may be relayed; 0 means unlimited
+        type: integer
       subOrgs:
         description: Maximum number of sub-organizations allowed
         type: integer
@@ -1330,6 +1333,9 @@ definitions:
         type: integer
       sentSMS:
         description: Number of SMS messages sent
+        type: integer
+      sentVotes:
+        description: Number of votes relayed
         type: integer
       subOrgs:
         description: Number of sub-organizations created
@@ -1762,6 +1768,11 @@ definitions:
         description: Max process duration in days
         type: integer
       maxProcesses:
+        type: integer
+      maxVotes:
+        description: |-
+          Max votes that may be relayed; 0 means unlimited. For managed orgs this is the
+          integrator's shared pool, summed across all its managed orgs.
         type: integer
       subOrgs:
         type: integer

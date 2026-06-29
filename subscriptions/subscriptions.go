@@ -65,6 +65,7 @@ type DBInterface interface {
 	CountMembersManagedBy(integratorAddr common.Address) (int64, error)
 	SumSentEmailsManagedBy(integratorAddr common.Address) (int, error)
 	SumSentSMSManagedBy(integratorAddr common.Address) (int, error)
+	SumSentVotesManagedBy(integratorAddr common.Address) (int, error)
 	CountProcesses(orgAddress common.Address, draft db.DraftFilter) (int64, error)
 	OrganizationMemberGroup(groupID string, orgAddress common.Address) (*db.OrganizationMemberGroup, error)
 }
@@ -349,6 +350,22 @@ func (p *Subscriptions) OrgCanPublishGroupCensus(census *db.Census, groupID stri
 		}
 		if remainingSMS := max(0, plan.Features.TwoFaSms-sentSMS); memberCount > remainingSMS {
 			return errors.ErrProcessCensusSizeExceedsSMSAllowance.Withf("remaining sms: %d", remainingSMS)
+		}
+	}
+
+	// Votes are metered for billing rather than blocked at cast time: an election may not be
+	// published when its census size could exceed the remaining vote quota. As with 2FA, a
+	// managed org draws on the integrator's shared pool (summed across its managed orgs); a
+	// standalone org uses its own counter. MaxVotes of 0 means unlimited.
+	if plan.Organization.MaxVotes > 0 {
+		sentVotes := org.Counters.SentVotes
+		if managed(org) {
+			if sentVotes, err = p.db.SumSentVotesManagedBy(owner.Address); err != nil {
+				return errors.ErrGenericInternalServerError.WithErr(err)
+			}
+		}
+		if remainingVotes := max(0, plan.Organization.MaxVotes-sentVotes); memberCount > remainingVotes {
+			return errors.ErrProcessCensusSizeExceedsVoteAllowance.Withf("remaining votes: %d", remainingVotes)
 		}
 	}
 
