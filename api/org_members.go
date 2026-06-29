@@ -77,7 +77,9 @@ func (a *API) sendMembersImportCompletionEmail(userEmail, userName string, org *
 // organizationMembersHandler godoc
 //
 //	@Summary		Get organization members
-//	@Description	Retrieve all members of an organization with pagination support
+//	@Description	Retrieve all members of an organization with pagination support. Requires Manager/Admin role.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `members:write`).
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
@@ -146,18 +148,24 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 // addOrganizationMembersHandler godoc
 //
 //	@Summary		Add members to an organization
-//	@Description	Add multiple members to an organization. Requires Manager/Admin role.
+//	@Description	Add multiple members to an organization. Requires Manager/Admin role and is subject to the
+//	@Description	plan's member quota. With `async=true` the import runs in the background and the response
+//	@Description	carries a `jobId` to poll via GET /organizations/{address}/members/job/{jobid}; otherwise it
+//	@Description	completes synchronously. An empty members list is a no-op that returns added=0.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `members:write`).
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string						true	"Organization address"
-//	@Param			async	query		boolean						false	"Process asynchronously and return job ID"
-//	@Param			request	body		apicommon.AddMembersRequest	true	"Members to add"
-//	@Success		200		{object}	apicommon.AddMembersResponse
-//	@Failure		400		{object}	errors.Error	"Invalid input data"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
+//	@Param			address	path		string							true	"Organization address"
+//	@Param			async	query		boolean							false	"Process asynchronously and return job ID"
+//	@Param			request	body		apicommon.AddMembersRequest		true	"Members to add"
+//	@Success		200		{object}	apicommon.AddMembersResponse	"Added count (sync) or jobId (async)"
+//	@Failure		400		{object}	errors.Error					"Invalid input data"
+//	@Failure		401		{object}	errors.Error					"Unauthorized"
+//	@Failure		403		{object}	errors.Error					"Plan member quota exceeded"
+//	@Failure		500		{object}	errors.Error					"Internal server error"
 //	@Router			/organizations/{address}/members [post]
 func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
@@ -273,7 +281,11 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 //
 //	@Summary		Check the progress of adding members
 //	@Description	Check the progress of a job to add members to an organization. Returns the progress of the job.
-//	@Description	If the job is completed, the job is deleted after 60 seconds.
+//	@Description	While a job is running its status is served from memory; once completed, the in-memory status
+//	@Description	is evicted after 60 seconds. Completed jobs remain retrievable afterwards from the persisted
+//	@Description	job record (returned with progress 100).
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `members:write`).
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
@@ -284,6 +296,7 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 //	@Failure		400		{object}	errors.Error	"Invalid job ID"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
 //	@Failure		404		{object}	errors.Error	"Job not found"
+//	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Router			/organizations/{address}/members/job/{jobid} [get]
 func (a *API) addOrganizationMembersJobStatusHandler(w http.ResponseWriter, r *http.Request) {
 	jobID := internal.HexBytes{}
@@ -340,6 +353,8 @@ func (a *API) addOrganizationMembersJobStatusHandler(w http.ResponseWriter, r *h
 //	@Summary		Create or update an organization member
 //	@Description	Create or update an organization member. Requires Manager/Admin role.
 //	@Description	Automatically updates census participant hashes when member data changes.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `members:write`).
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
@@ -396,7 +411,10 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 // deleteOrganizationMembersHandler godoc
 //
 //	@Summary		Delete organization members
-//	@Description	Delete multiple members from an organization or all members. Requires Manager/Admin role.
+//	@Description	Delete specific members (by ID) or all members of an organization. Requires Manager/Admin
+//	@Description	role. An empty ID list (without the `all` flag) is a no-op that returns count=0.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `members:write`).
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
@@ -407,7 +425,7 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 //	@Failure		400		{object}	errors.Error	"Invalid input data"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/member [delete]
+//	@Router			/organizations/{address}/members [delete]
 func (a *API) deleteOrganizationMembersHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)
