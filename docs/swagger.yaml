@@ -4422,7 +4422,12 @@ paths:
     delete:
       consumes:
       - application/json
-      description: Delete a voting process. Requires Manager/Admin role.
+      description: |-
+        Delete a draft voting process. Only unpublished drafts can be deleted; a process
+        already published on-chain cannot be removed. Requires Manager/Admin role of the
+        organization that owns the process.
+
+        Also callable with a scoped API key (scope: `voting:write`).
       parameters:
       - description: Process ID
         in: path
@@ -4448,13 +4453,17 @@ paths:
           description: Process not found
           schema:
             $ref: '#/definitions/errors.Error'
+        "409":
+          description: Process already published and not in draft mode
+          schema:
+            $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
-      summary: Delete a voting process
+      summary: Delete a draft voting process
       tags:
       - process
     get:

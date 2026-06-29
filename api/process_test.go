@@ -117,15 +117,40 @@ func TestProcess(t *testing.T) {
 	c.Assert(retrievedProcess.Metadata["title"], qt.Equals, "Test Process")
 	c.Assert(retrievedProcess.Metadata["description"], qt.Equals, "This is a test process")
 
-	// Test 1.8: Test delete process
-	resp, code = testRequest(t, http.MethodDelete, adminToken, nil, "process", pid)
+	// Test 1.8: Test delete process. Only drafts (nil on-chain address) are deletable, so seed a
+	// draft directly (draft creation has its own quota, orthogonal to delete) rather than the
+	// published process above.
+	draftPID, err := testDB.SetProcess(&db.Process{
+		OrgAddress: orgAddress,
+		Metadata:   map[string]any{"title": "Draft Process", "description": "This is a draft process"},
+	})
+	c.Assert(err, qt.IsNil)
+	c.Assert(draftPID.IsZero(), qt.IsFalse)
+
+	resp, code = testRequest(t, http.MethodDelete, adminToken, nil, "process", draftPID.Hex())
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-	t.Log("Successfully deleted the process")
+	t.Log("Successfully deleted the draft process")
 
 	// Verify the process no longer exists
-	_, code = testRequest(t, http.MethodGet, adminToken, nil, "process", pid)
+	_, code = testRequest(t, http.MethodGet, adminToken, nil, "process", draftPID.Hex())
 	c.Assert(code, qt.Equals, http.StatusNotFound)
 	t.Log("Verified the process no longer exists after deletion")
+
+	// Test 1.9: a published process (non-nil on-chain address) cannot be deleted; only drafts can.
+	publishedID, err := testDB.SetProcess(&db.Process{
+		OrgAddress: orgAddress,
+		Address:    internal.HexBytes(util.RandomBytes(32)),
+	})
+	c.Assert(err, qt.IsNil)
+	c.Assert(publishedID.IsZero(), qt.IsFalse)
+
+	resp, code = testRequest(t, http.MethodDelete, adminToken, nil, "process", publishedID.Hex())
+	c.Assert(code, qt.Equals, http.StatusConflict, qt.Commentf("response: %s", resp))
+
+	// the published process is still there
+	_, err = testDB.Process(publishedID)
+	c.Assert(err, qt.IsNil)
+	t.Log("Verified a published process cannot be deleted")
 }
 
 // TestDraftProcess tests the draft process functionality

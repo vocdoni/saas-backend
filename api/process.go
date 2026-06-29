@@ -480,8 +480,12 @@ func (a *API) organizationListProcessDraftsHandler(w http.ResponseWriter, r *htt
 
 // deleteProcessHandler godoc
 //
-//	@Summary		Delete a voting process
-//	@Description	Delete a voting process. Requires Manager/Admin role.
+//	@Summary		Delete a draft voting process
+//	@Description	Delete a draft voting process. Only unpublished drafts can be deleted; a process
+//	@Description	already published on-chain cannot be removed. Requires Manager/Admin role of the
+//	@Description	organization that owns the process.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			process
 //	@Accept			json
 //	@Produce		json
@@ -491,6 +495,7 @@ func (a *API) organizationListProcessDraftsHandler(w http.ResponseWriter, r *htt
 //	@Failure		400			{object}	errors.Error	"Invalid process ID"
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
 //	@Failure		404			{object}	errors.Error	"Process not found"
+//	@Failure		409			{object}	errors.Error	"Process already published and not in draft mode"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/process/{processId} [delete]
 func (a *API) deleteProcessHandler(w http.ResponseWriter, r *http.Request) {
@@ -519,6 +524,13 @@ func (a *API) deleteProcessHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
+	// only draft processes can be deleted; a published process has a non-nil
+	// on-chain address and lives on the Vochain, where it cannot be removed.
+	if !existingProcess.Address.Equals(nil) {
+		errors.ErrDuplicateConflict.Withf("process already published and not in draft mode").Write(w)
 		return
 	}
 
