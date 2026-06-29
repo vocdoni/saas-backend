@@ -392,15 +392,38 @@ func TestManagedOrgLimitsUseIntegratorPlan(t *testing.T) {
 	managedOrg := mockDB.orgs[managedAddr.String()]
 	standaloneOrg := mockDB.orgs[standaloneAddr.String()]
 
-	// --- Capability flag (Anonymous) + dropped census/process checks (HasTxPermission) ---
-	// Managed org: anonymous allowed because the integrator's plan permits it, and the
-	// per-org census/process caps are skipped (integrator aggregate governs at publish).
+	// --- Per-process census cap + capability flags (HasTxPermission) ---
+	// Managed org: the census fits the integrator's generous plan (MaxCensus 1000), anonymous is
+	// allowed by that plan, and only the per-org *process-count* cap is skipped (the integrator
+	// aggregate governs that at publish).
 	ok, err := subs.HasTxPermission(newProcessTx(), models.TxType_NEW_PROCESS, managedOrg, adminUser)
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
-	// Standalone org on the same tiny plan: rejected (its own plan forbids anonymous).
+	// Standalone org on the tiny plan: rejected — its MaxCensus (1) is exceeded.
 	_, err = subs.HasTxPermission(newProcessTx(), models.TxType_NEW_PROCESS, standaloneOrg, adminUser)
 	c.Assert(err, qt.Not(qt.IsNil))
+
+	// A SET_PROCESS_CENSUS tx carries a SetProcess payload; the census update is bounded by the
+	// governing plan's MaxCensus and must be read with GetSetProcess (reading it as a NewProcess
+	// would nil-panic).
+	setProcessCensusTx := func(censusSize uint64) *models.Tx {
+		return &models.Tx{
+			Payload: &models.Tx_SetProcess{
+				SetProcess: &models.SetProcessTx{
+					Txtype:     models.TxType_SET_PROCESS_CENSUS,
+					ProcessId:  []byte{0x01},
+					CensusSize: &censusSize,
+				},
+			},
+		}
+	}
+	// Managed org: a census update within the integrator plan's MaxCensus (1000) is allowed.
+	ok, err = subs.HasTxPermission(setProcessCensusTx(500), models.TxType_SET_PROCESS_CENSUS, managedOrg, adminUser)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+	// Managed org: a census update beyond the integrator plan's MaxCensus is rejected.
+	_, err = subs.HasTxPermission(setProcessCensusTx(2000), models.TxType_SET_PROCESS_CENSUS, managedOrg, adminUser)
+	c.Assert(err, qt.ErrorIs, errors.ErrProcessCensusSizeExceedsPlanLimit)
 
 	// --- MaxDrafts value cap (OrgHasPermission) ---
 	// Managed org: governed by integrator MaxDrafts (10) — allowed; standalone tiny plan

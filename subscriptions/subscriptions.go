@@ -179,12 +179,15 @@ func (p *Subscriptions) HasTxPermission(
 			return false, errors.ErrUserHasNoAdminRole
 		}
 	// check CREATE PROCESS
-	case models.TxType_NEW_PROCESS, models.TxType_SET_PROCESS_CENSUS:
+	case models.TxType_NEW_PROCESS:
 		// check if the user has the admin role for the organization
 		if !user.HasRoleFor(org.Address, db.AdminRole) {
 			return false, errors.ErrUserHasNoAdminRole
 		}
 		newProcess := tx.GetNewProcess()
+		if newProcess == nil || newProcess.Process == nil {
+			return false, errors.ErrInvalidData.With("missing new-process payload")
+		}
 		// A single process's declared census size is bounded by the governing plan's MaxCensus
 		// for every org — the integrator's plan for a managed org, otherwise the org's own.
 		if newProcess.Process.MaxCensusSize > uint64(plan.Organization.MaxCensus) {
@@ -202,6 +205,23 @@ func (p *Subscriptions) HasTxPermission(
 			}
 		}
 		return hasElectionMetadataPermissions(newProcess, plan)
+
+	// check UPDATE PROCESS CENSUS
+	case models.TxType_SET_PROCESS_CENSUS:
+		// check if the user has the admin role for the organization
+		if !user.HasRoleFor(org.Address, db.AdminRole) {
+			return false, errors.ErrUserHasNoAdminRole
+		}
+		// A census update carries a SetProcess payload (not NewProcess), so it must be read with
+		// GetSetProcess. Its new census size, when set, is bounded by the governing plan's
+		// MaxCensus exactly like a new process — the integrator's plan for a managed org.
+		setProcess := tx.GetSetProcess()
+		if setProcess == nil {
+			return false, errors.ErrInvalidData.With("missing set-process payload")
+		}
+		if setProcess.GetCensusSize() > uint64(plan.Organization.MaxCensus) {
+			return false, errors.ErrProcessCensusSizeExceedsPlanLimit.Withf("plan max census: %d", plan.Organization.MaxCensus)
+		}
 
 	case models.TxType_SET_PROCESS_STATUS,
 		models.TxType_CREATE_ACCOUNT:
