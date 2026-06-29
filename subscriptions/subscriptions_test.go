@@ -280,34 +280,31 @@ func TestCanPublishForManagedOrg(t *testing.T) {
 	c := qt.New(t)
 	mockDB := &mockMongoStorage{
 		plans: map[string]*db.Plan{
-			// aggregate caps come from the plan's top-level Organization limits
+			// the aggregate process cap comes from the plan's top-level Organization limit
 			integratorPlanID: {
 				ID:               integratorPlanID,
-				Organization:     db.PlanLimits{MaxProcesses: 5, MaxCensus: 100},
+				Organization:     db.PlanLimits{MaxProcesses: 5},
 				IntegratorLimits: db.IntegratorLimits{MaxManagedOrgs: 5},
 			},
 		},
 	}
 	subs := &Subscriptions{db: mockDB}
-	integrator := func(processes, censusSize int) *db.Organization {
+	integrator := func(processes int) *db.Organization {
 		return &db.Organization{
 			Subscription: db.OrganizationSubscription{PlanID: integratorPlanID, Active: true},
-			Counters:     db.OrganizationCounters{ManagedProcesses: processes, ManagedCensusSize: censusSize},
+			Counters:     db.OrganizationCounters{ManagedProcesses: processes},
 		}
 	}
 
 	// a non-integrator org (no override, no plan) is refused
-	err := subs.CanPublishForManagedOrg(&db.Organization{}, 10)
+	err := subs.CanPublishForManagedOrg(&db.Organization{})
 	c.Assert(err, qt.ErrorIs, errors.ErrNotAnIntegrator)
 
-	// within quota (census exactly at the limit) is allowed
-	c.Assert(subs.CanPublishForManagedOrg(integrator(4, 50), 50), qt.IsNil)
+	// within the process quota is allowed
+	c.Assert(subs.CanPublishForManagedOrg(integrator(4)), qt.IsNil)
 
 	// process count at the limit is rejected
-	c.Assert(subs.CanPublishForManagedOrg(integrator(5, 0), 1), qt.ErrorIs, errors.ErrIntegratorQuotaExceeded)
-
-	// census size that would exceed the limit is rejected
-	c.Assert(subs.CanPublishForManagedOrg(integrator(0, 90), 11), qt.ErrorIs, errors.ErrIntegratorQuotaExceeded)
+	c.Assert(subs.CanPublishForManagedOrg(integrator(5)), qt.ErrorIs, errors.ErrIntegratorQuotaExceeded)
 }
 
 // TestManagedOrgLimitsUseIntegratorPlan asserts that a managed org's limits are governed

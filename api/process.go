@@ -682,7 +682,7 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 			errors.ErrGenericInternalServerError.Withf("could not get integrator organization: %v", err).Write(w)
 			return
 		}
-		maxProcesses, maxCensus, err := a.subscriptions.ManagedPublishLimits(integrator)
+		maxProcesses, err := a.subscriptions.ManagedPublishLimits(integrator)
 		if err != nil {
 			if apiErr, ok := err.(errors.Error); ok {
 				apiErr.Write(w)
@@ -691,8 +691,7 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
-		if err := a.db.ReserveManagedPublish(integrator.Address,
-			maxProcesses, maxCensus, int(draft.ElectionParams.MaxCensusSize)); err != nil {
+		if err := a.db.ReserveManagedPublish(integrator.Address, maxProcesses); err != nil {
 			if err == db.ErrManagedQuotaReached {
 				errors.ErrIntegratorQuotaExceeded.Write(w)
 				return
@@ -711,10 +710,6 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			if e := a.db.AddOrganizationManagedProcesses(integratorAddr, -1); e != nil {
 				log.Warnw("could not roll back managed processes counter", "error", e)
-			}
-			if e := a.db.AddOrganizationManagedCensusSize(integratorAddr,
-				-int64(draft.ElectionParams.MaxCensusSize)); e != nil {
-				log.Warnw("could not roll back managed census counter", "error", e)
 			}
 		}()
 	}
@@ -818,7 +813,6 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 	// is rolled back. The idempotency guard keys off draft.Address, so a retry after
 	// failure cannot create a duplicate election.
 	reserved := managedReserved
-	censusSize := int64(draft.ElectionParams.MaxCensusSize)
 	if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
 		defer orgLock.Unlock()
 		data, err := a.account.SubmitSignedTx(stx)
@@ -829,9 +823,6 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 			if reserved {
 				if e := a.db.AddOrganizationManagedProcesses(integratorAddr, -1); e != nil {
 					log.Warnw("could not roll back managed processes counter", "error", e)
-				}
-				if e := a.db.AddOrganizationManagedCensusSize(integratorAddr, -censusSize); e != nil {
-					log.Warnw("could not roll back managed census counter", "error", e)
 				}
 			}
 			return nil, err

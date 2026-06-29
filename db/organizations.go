@@ -448,13 +448,12 @@ func (ms *MongoStorage) DecrementOrganizationManagedOrgsCounter(address common.A
 	return ms.addToOrganizationCounter(address, "managedOrgs", -1)
 }
 
-// ReserveManagedPublish atomically reserves one managed process and censusDelta managed
-// census slots for the integrator, re-reading both counters under keysLock so concurrent
-// publishes cannot each pass a stale check and exceed the integrator's aggregate quota.
-// Returns ErrManagedQuotaReached if either limit would be exceeded. Roll back with
-// AddOrganizationManagedProcesses(-1) / AddOrganizationManagedCensusSize(-censusDelta) if
-// the publish later fails.
-func (ms *MongoStorage) ReserveManagedPublish(address common.Address, processLimit, censusLimit, censusDelta int) error {
+// ReserveManagedPublish atomically reserves one managed process slot for the integrator,
+// re-reading the counter under keysLock so concurrent publishes cannot each pass a stale
+// check and exceed the integrator's aggregate process quota. Returns ErrManagedQuotaReached
+// if the limit would be exceeded. Roll back with AddOrganizationManagedProcesses(-1) if the
+// publish later fails.
+func (ms *MongoStorage) ReserveManagedPublish(address common.Address, processLimit int) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
@@ -465,23 +464,12 @@ func (ms *MongoStorage) ReserveManagedPublish(address common.Address, processLim
 	if org.Counters.ManagedProcesses >= processLimit {
 		return ErrManagedQuotaReached
 	}
-	if org.Counters.ManagedCensusSize+censusDelta > censusLimit {
-		return ErrManagedQuotaReached
-	}
-	if err := ms.addToOrganizationCounter(address, "managedProcesses", 1); err != nil {
-		return err
-	}
-	return ms.addToOrganizationCounter(address, "managedCensusSize", int64(censusDelta))
+	return ms.addToOrganizationCounter(address, "managedProcesses", 1)
 }
 
 // AddOrganizationManagedProcesses atomically adds delta to the managed processes counter.
 func (ms *MongoStorage) AddOrganizationManagedProcesses(address common.Address, delta int64) error {
 	return ms.addToOrganizationCounter(address, "managedProcesses", delta)
-}
-
-// AddOrganizationManagedCensusSize atomically adds delta to the managed census size counter.
-func (ms *MongoStorage) AddOrganizationManagedCensusSize(address common.Address, delta int64) error {
-	return ms.addToOrganizationCounter(address, "managedCensusSize", delta)
 }
 
 // ListManagedOrganizations returns a paginated list of organizations managed by

@@ -145,11 +145,10 @@ func TestIntegratorManagedOrgs(t *testing.T) {
 	c.Assert(pubJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", pubJob.Error))
 	c.Assert(len(pubJob.Result.Address) > 0, qt.IsTrue)
 
-	// the integrator's aggregate counters were bumped
+	// the integrator's aggregate process counter was bumped
 	integratorOrg, err = testDB.Organization(integratorAddr)
 	c.Assert(err, qt.IsNil)
 	c.Assert(integratorOrg.Counters.ManagedProcesses, qt.Equals, 1)
-	c.Assert(integratorOrg.Counters.ManagedCensusSize, qt.Equals, 100)
 
 	// a second publish is blocked by the aggregate quota (plan MaxProcesses == 1)
 	draftID2, err := testDB.SetProcess(&db.Process{
