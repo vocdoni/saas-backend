@@ -139,9 +139,10 @@ func upNormalizeMemberEmails(ctx context.Context, database *mongo.Database) erro
 		return &c, nil
 	}
 
-	// Coarse server-side prefilter: only members whose email contains an ASCII
-	// uppercase letter. The exact check happens in Go below.
-	cursor, err := orgMembers.Find(ctx, bson.M{"email": bson.M{"$regex": "[A-Z]"}})
+	// Coarse server-side prefilter: only members whose email would change after
+	// normalization (leading/trailing whitespace and/or an ASCII uppercase letter).
+	// The exact check happens in Go below.
+	cursor, err := orgMembers.Find(ctx, bson.M{"email": bson.M{"$regex": "(^\\s|\\s$|[A-Z])"}})
 	if err != nil {
 		return fmt.Errorf("failed to list members: %w", err)
 	}
