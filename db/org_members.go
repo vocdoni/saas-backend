@@ -171,7 +171,8 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 	}
 	member.OrgAddress = org.Address
 
-	// check if mail is valid
+	// normalize and validate the email
+	member.Email = internal.NormalizeEmail(member.Email)
 	if member.Email != "" {
 		if _, err := mail.ParseAddress(member.Email); err != nil {
 			errors = append(errors, fmt.Errorf("could not parse email: %s %v", member.Email, err))

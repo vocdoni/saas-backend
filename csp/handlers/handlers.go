@@ -889,7 +889,9 @@ func (c *CSPHandlers) authFirstStep(
 		return nil, errors.ErrInvalidData.WithErr(err)
 	}
 
-	// create an empty member and assign the input data where applicable
+	// create an empty member and assign the input data where applicable.
+	// The email is normalized to lowercase so the recomputed login hash matches
+	// the (also normalized) email stored at member-creation time.
 	inputMember := &db.OrgMember{
 		OrgAddress:   census.OrgAddress,
 		Name:         req.Name,
@@ -897,7 +899,7 @@ func (c *CSPHandlers) authFirstStep(
 		MemberNumber: req.MemberNumber,
 		NationalID:   req.NationalID,
 		BirthDate:    req.BirthDate,
-		Email:        req.Email,
+		Email:        internal.NormalizeEmail(req.Email),
 		Phone:        phone,
 	}
 

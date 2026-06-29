@@ -4,10 +4,8 @@ package db
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -389,8 +387,7 @@ func HashAuthTwoFaFields(memberData OrgMember, authFields OrgMemberAuthFields, t
 			continue
 		}
 	}
-	slices.Sort(data)
-	return sha256.New().Sum(fmt.Append(nil, data))
+	return internal.HashSortedFields(data)
 }
 
 type OrgMemberAggregationResults struct {
