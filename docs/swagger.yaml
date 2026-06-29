@@ -4680,7 +4680,7 @@ paths:
         /jobs/{jobId} for the resulting on-chain id. Requires Admin role. Idempotent: if
         the draft is already published its on-chain id is returned with 200 without sending
         a new transaction. Publishing under a managed organization additionally enforces the
-        integrator's per-org and aggregate election/census quotas.
+        integrator's aggregate election (process-count) quota.
 
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:

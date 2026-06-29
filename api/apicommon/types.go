@@ -547,9 +547,10 @@ type IntegratorUsage struct {
 //
 // Zero is not uniformly "unlimited". Only MaxVotes treats 0 as unlimited (vote enforcement is
 // skipped when the plan's MaxVotes is 0). MaxManagedProcesses, MaxSMS and MaxEmails are hard
-// caps where 0 means no allowance. Separately, every field is left at 0 when an override-enabled
-// integrator has no subscription plan to source caps from — an "unknown" the dashboard should
-// treat distinctly from a real 0 cap.
+// caps where 0 means no allowance. Separately, the plan-sourced fields (everything except
+// MaxManagedOrgs, which always comes from the effective integrator limit) are left at 0 when an
+// override-enabled integrator has no subscription plan to source caps from — an "unknown" the
+// dashboard should treat distinctly from a real 0 cap.
 type IntegratorLimits struct {
 	MaxManagedOrgs      int `json:"maxManagedOrgs"`
 	MaxManagedProcesses int `json:"maxManagedProcesses"`
