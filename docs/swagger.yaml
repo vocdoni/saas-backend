@@ -1897,6 +1897,23 @@ definitions:
       subscription_status:
         type: string
     type: object
+  handlers.AuthRequest:
+    properties:
+      birthDate:
+        type: string
+      email:
+        type: string
+      memberNumber:
+        type: string
+      name:
+        type: string
+      nationalId:
+        type: string
+      phone:
+        type: string
+      surname:
+        type: string
+    type: object
   handlers.AuthResendRequest:
     properties:
       authToken:
@@ -1954,11 +1971,11 @@ definitions:
     type: object
   handlers.ConsumedAddressResponse:
     properties:
-      at:
-        type: string
-      authToken:
+      address:
         example: deadbeef
         format: hex
+        type: string
+      at:
         type: string
       nullifier:
         example: deadbeef
@@ -2292,6 +2309,8 @@ paths:
         must be provided. Supplying only authFields yields an auth-only census (members authenticate
         with their data, no OTP); twoFaFields adds an email/SMS OTP challenge. A body with both empty
         is rejected with 404 (ErrCensusTypeNotFound). Returns the published census root and URI.
+
+        Also callable with a scoped API key (scope: `voting:write`).
       parameters:
       - description: Census ID
         in: path
@@ -4379,7 +4398,7 @@ paths:
       - application/json
       responses:
         "200":
-          description: 24-hex draft ProcessID
+          description: 'Bare JSON string: 24-hex draft ProcessID, e.g. 507f1f77bcf86cd799439011'
           schema:
             type: string
         "400":
@@ -4396,10 +4415,6 @@ paths:
             $ref: '#/definitions/errors.Error'
         "404":
           description: Published census not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "409":
-          description: Process already exists
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -4723,7 +4738,7 @@ paths:
             $ref: '#/definitions/errors.Error'
       summary: Get the address used to sign a process
       tags:
-      - process
+      - csp
   /process/{processId}/status:
     put:
       consumes:
@@ -4788,6 +4803,8 @@ paths:
         Create a new process bundle with the specified census and optional list of processes. Requires
         Manager/Admin role for the organization that owns the census. The census root will be the same as the
         account's public key.
+
+        Also callable with a scoped API key (scope: `voting:write`).
       parameters:
       - description: Process bundle creation information
         in: body
@@ -4864,6 +4881,8 @@ paths:
       description: |-
         Add additional processes to an existing bundle. Requires Manager/Admin role for the organization
         that owns the bundle.
+
+        Also callable with a scoped API key (scope: `voting:write`).
       parameters:
       - description: Bundle ID
         in: path
@@ -4954,6 +4973,11 @@ paths:
         - Step 1: The user sends the token and challenge solution back to the server.
         If valid, the token is marked as verified and returned.
         For auth-only censuses, verification may not require a challenge solution.
+
+        The request body depends on the step:
+        - Step 0: handlers.AuthRequest — member identification fields (name, surname, memberNumber,
+        nationalId, birthDate, email, phone); which are required depends on the census auth configuration.
+        - Step 1: handlers.AuthChallengeRequest — { authToken, authData: [challenge solution] }.
       parameters:
       - description: Bundle ID
         in: path
@@ -4965,11 +4989,12 @@ paths:
         name: step
         required: true
         type: string
-      - description: Authentication request (varies by step)
+      - description: Step 0 body; step 1 uses AuthChallengeRequest (see description)
         in: body
         name: request
         required: true
-        schema: {}
+        schema:
+          $ref: '#/definitions/handlers.AuthRequest'
       produces:
       - application/json
       responses:
@@ -4996,7 +5021,7 @@ paths:
             $ref: '#/definitions/errors.Error'
       summary: Authenticate for a process bundle
       tags:
-      - process
+      - csp
   /process/bundle/{bundleId}/auth/resend:
     post:
       consumes:
@@ -5046,7 +5071,7 @@ paths:
             $ref: '#/definitions/errors.Error'
       summary: Resend authentication challenge for a process bundle
       tags:
-      - process
+      - csp
   /process/bundle/{bundleId}/check:
     post:
       consumes:
@@ -5091,7 +5116,7 @@ paths:
             $ref: '#/definitions/errors.Error'
       summary: Check census membership for a bundle
       tags:
-      - process
+      - csp
   /process/bundle/{bundleId}/participants/check:
     post:
       consumes:
@@ -5155,13 +5180,15 @@ paths:
         and returns the signature. Once signed, the process is marked as consumed and cannot be signed again.
         The signing process includes verifying that the participant is in the census, that the process is part of
         the bundle, and that the authentication token is valid and verified.
+
+        Body: authToken, electionId (the process/election ID) and payload (the voter address). tokenR is unused.
       parameters:
       - description: Bundle ID
         in: path
         name: bundleId
         required: true
         type: string
-      - description: Sign request with process ID, auth token, and payload (address)
+      - description: Sign request (see description for fields)
         in: body
         name: request
         required: true
@@ -5179,11 +5206,12 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
-          description: Unauthorized, invalid token, or token not verified (ErrAuthTokenNotVerified)
+          description: Unauthorized, invalid/unverified token, or process not in the
+            bundle
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
-          description: Bundle not found, process not in bundle, or user not found
+          description: Bundle not found or user not found
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -5192,7 +5220,7 @@ paths:
             $ref: '#/definitions/errors.Error'
       summary: Sign a process in a bundle
       tags:
-      - process
+      - csp
   /process/bundle/{bundleId}/weight:
     post:
       consumes:
@@ -5236,7 +5264,7 @@ paths:
             $ref: '#/definitions/errors.Error'
       summary: Get user weight for a bundle
       tags:
-      - process
+      - csp
   /storage:
     post:
       consumes:
