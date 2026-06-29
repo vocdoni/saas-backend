@@ -41,7 +41,8 @@ func TestIntegratorManagedOrgs(t *testing.T) {
 	integratorPlan := &db.Plan{
 		ID:           "prod_test_integrator_caps",
 		Name:         "Integrator Caps",
-		Organization: db.PlanLimits{MaxProcesses: 1, MaxCensus: 1000, MaxDuration: 30},
+		Organization: db.PlanLimits{MaxProcesses: 1, MaxCensus: 1000, MaxVotes: 5000, MaxDuration: 30},
+		Features:     db.Features{TwoFaSms: 50, TwoFaEmail: 100},
 	}
 	c.Assert(testDB.SetPlan(integratorPlan), qt.IsNil)
 	defer func() { _ = testDB.DelPlan(&db.Plan{ID: integratorPlan.ID}) }()
@@ -78,13 +79,31 @@ func TestIntegratorManagedOrgs(t *testing.T) {
 		"integrator", "organizations")
 	c.Assert(code, qt.Equals, http.StatusBadRequest) // ErrMaxManagedOrgsReached
 
-	// integrator info reflects usage + limits
+	// seed shared-pool usage on a managed org: 3 votes, 2 SMS, 1 email
+	for i := 0; i < 3; i++ {
+		c.Assert(testDB.IncrementOrganizationSentVotesCounter(firstManaged), qt.IsNil)
+	}
+	for i := 0; i < 2; i++ {
+		c.Assert(testDB.IncrementOrganizationSentSMSCounter(firstManaged), qt.IsNil)
+	}
+	c.Assert(testDB.IncrementOrganizationSentEmailsCounter(firstManaged), qt.IsNil)
+
+	// integrator info reflects usage + limits, including the plan's pooled caps and the
+	// vote/SMS/email usage aggregated across the integrator's managed orgs
 	info := requestAndParse[apicommon.IntegratorInfoResponse](
 		t, http.MethodGet, token, nil, "integrator",
 	)
 	c.Assert(info.Enabled, qt.IsTrue)
 	c.Assert(info.Limits.MaxManagedOrgs, qt.Equals, 2)
+	c.Assert(info.Limits.MaxManagedProcesses, qt.Equals, 1)
+	c.Assert(info.Limits.MaxManagedCensusSize, qt.Equals, 1000)
+	c.Assert(info.Limits.MaxVotes, qt.Equals, 5000)
+	c.Assert(info.Limits.MaxSMS, qt.Equals, 50)
+	c.Assert(info.Limits.MaxEmails, qt.Equals, 100)
 	c.Assert(info.Usage.ManagedOrgs, qt.Equals, 2)
+	c.Assert(info.Usage.SentVotes, qt.Equals, 3)
+	c.Assert(info.Usage.SentSMS, qt.Equals, 2)
+	c.Assert(info.Usage.SentEmails, qt.Equals, 1)
 
 	// managed list returns the two orgs
 	list := requestAndParse[apicommon.ListManagedOrganizations](

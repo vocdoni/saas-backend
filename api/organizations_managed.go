@@ -323,7 +323,31 @@ func (a *API) integratorInfoHandler(w http.ResponseWriter, r *http.Request) {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
-		resp.Limits = &limits
+		apiLimits := apicommon.IntegratorLimits{MaxManagedOrgs: limits.MaxManagedOrgs}
+
+		// The process/census/votes/SMS/email caps are the integrator plan's pooled limits.
+		// An override-enabled integrator may have no subscription plan; leave those caps at 0
+		// (unlimited/unknown) rather than failing the dashboard.
+		if org.Subscription.PlanID != "" {
+			if plan, err := a.db.Plan(org.Subscription.PlanID); err == nil && plan != nil {
+				apiLimits.MaxManagedProcesses = plan.Organization.MaxProcesses
+				apiLimits.MaxManagedCensusSize = plan.Organization.MaxCensus
+				apiLimits.MaxVotes = plan.Organization.MaxVotes
+				apiLimits.MaxSMS = plan.Features.TwoFaSms
+				apiLimits.MaxEmails = plan.Features.TwoFaEmail
+			}
+		}
+		resp.Limits = &apiLimits
+
+		// Shared-pool usage summed across the integrator's managed orgs, in one aggregation.
+		counters, err := a.db.SumManagedCounters(integratorAddr)
+		if err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+		resp.Usage.SentVotes = counters.SentVotes
+		resp.Usage.SentSMS = counters.SentSMS
+		resp.Usage.SentEmails = counters.SentEmails
 	}
 	apicommon.HTTPWriteJSON(w, resp)
 }

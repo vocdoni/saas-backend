@@ -531,19 +531,36 @@ type DeleteManagedOrganizationResponse struct {
 	Address string `json:"address"`
 }
 
-// IntegratorUsage holds an integrator's current managed-resource usage counters.
+// IntegratorUsage holds an integrator's current managed-resource usage counters. SentVotes/
+// SentSMS/SentEmails are the shared-pool totals summed across the integrator's managed orgs.
 type IntegratorUsage struct {
 	ManagedOrgs       int `json:"managedOrgs"`
 	ManagedProcesses  int `json:"managedProcesses"`
 	ManagedCensusSize int `json:"managedCensusSize"`
+	SentVotes         int `json:"sentVotes"`
+	SentSMS           int `json:"sentSMS"`
+	SentEmails        int `json:"sentEmails"`
+}
+
+// IntegratorLimits holds an integrator's effective caps for the dashboard. MaxManagedOrgs is
+// the effective integrator limit; the rest are the integrator's subscription-plan caps for the
+// pools shared across its managed orgs. 0 means unlimited (or unknown, when an override-enabled
+// integrator has no subscription plan).
+type IntegratorLimits struct {
+	MaxManagedOrgs       int `json:"maxManagedOrgs"`
+	MaxManagedProcesses  int `json:"maxManagedProcesses"`
+	MaxManagedCensusSize int `json:"maxManagedCensusSize"`
+	MaxVotes             int `json:"maxVotes"`
+	MaxSMS               int `json:"maxSMS"`
+	MaxEmails            int `json:"maxEmails"`
 }
 
 // IntegratorInfoResponse is returned by GET /organizations/{address}/integrator.
 // Limits is only present when Enabled is true.
 type IntegratorInfoResponse struct {
-	Enabled bool                 `json:"enabled"`
-	Limits  *db.IntegratorLimits `json:"limits,omitempty"`
-	Usage   IntegratorUsage      `json:"usage"`
+	Enabled bool              `json:"enabled"`
+	Limits  *IntegratorLimits `json:"limits,omitempty"`
+	Usage   IntegratorUsage   `json:"usage"`
 }
 
 // OrganizationSubscriptionInfo provides detailed information about an organization's subscription.
