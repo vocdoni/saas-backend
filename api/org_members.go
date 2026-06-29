@@ -281,7 +281,9 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 //
 //	@Summary		Check the progress of adding members
 //	@Description	Check the progress of a job to add members to an organization. Returns the progress of the job.
-//	@Description	If the job is completed, the job is deleted after 60 seconds.
+//	@Description	While a job is running its status is served from memory; once completed, the in-memory status
+//	@Description	is evicted after 60 seconds. Completed jobs remain retrievable afterwards from the persisted
+//	@Description	job record (returned with progress 100).
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `members:write`).
 //	@Tags			organizations
