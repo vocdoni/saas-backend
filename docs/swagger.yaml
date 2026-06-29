@@ -461,17 +461,34 @@ definitions:
       enabled:
         type: boolean
       limits:
-        $ref: '#/definitions/db.IntegratorLimits'
+        $ref: '#/definitions/apicommon.IntegratorLimits'
       usage:
         $ref: '#/definitions/apicommon.IntegratorUsage'
     type: object
+  apicommon.IntegratorLimits:
+    properties:
+      maxEmails:
+        type: integer
+      maxManagedOrgs:
+        type: integer
+      maxManagedProcesses:
+        type: integer
+      maxSMS:
+        type: integer
+      maxVotes:
+        type: integer
+    type: object
   apicommon.IntegratorUsage:
     properties:
-      managedCensusSize:
-        type: integer
       managedOrgs:
         type: integer
       managedProcesses:
+        type: integer
+      sentEmails:
+        type: integer
+      sentSMS:
+        type: integer
+      sentVotes:
         type: integer
     type: object
   apicommon.JobInfo:

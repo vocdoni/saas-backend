@@ -312,9 +312,8 @@ func (a *API) integratorInfoHandler(w http.ResponseWriter, r *http.Request) {
 	resp := &apicommon.IntegratorInfoResponse{
 		Enabled: a.subscriptions.IsIntegrator(org),
 		Usage: apicommon.IntegratorUsage{
-			ManagedOrgs:       org.Counters.ManagedOrgs,
-			ManagedProcesses:  org.Counters.ManagedProcesses,
-			ManagedCensusSize: org.Counters.ManagedCensusSize,
+			ManagedOrgs:      org.Counters.ManagedOrgs,
+			ManagedProcesses: org.Counters.ManagedProcesses,
 		},
 	}
 	if resp.Enabled {
@@ -325,13 +324,12 @@ func (a *API) integratorInfoHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		apiLimits := apicommon.IntegratorLimits{MaxManagedOrgs: limits.MaxManagedOrgs}
 
-		// The process/census/votes/SMS/email caps are the integrator plan's pooled limits.
+		// The process/votes/SMS/email caps are the integrator plan's pooled limits.
 		// An override-enabled integrator may have no subscription plan; leave those caps at 0
 		// (unlimited/unknown) rather than failing the dashboard.
 		if org.Subscription.PlanID != "" {
 			if plan, err := a.db.Plan(org.Subscription.PlanID); err == nil && plan != nil {
 				apiLimits.MaxManagedProcesses = plan.Organization.MaxProcesses
-				apiLimits.MaxManagedCensusSize = plan.Organization.MaxCensus
 				apiLimits.MaxVotes = plan.Organization.MaxVotes
 				apiLimits.MaxSMS = plan.Features.TwoFaSms
 				apiLimits.MaxEmails = plan.Features.TwoFaEmail

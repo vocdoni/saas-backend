@@ -96,7 +96,6 @@ func TestIntegratorManagedOrgs(t *testing.T) {
 	c.Assert(info.Enabled, qt.IsTrue)
 	c.Assert(info.Limits.MaxManagedOrgs, qt.Equals, 2)
 	c.Assert(info.Limits.MaxManagedProcesses, qt.Equals, 1)
-	c.Assert(info.Limits.MaxManagedCensusSize, qt.Equals, 1000)
 	c.Assert(info.Limits.MaxVotes, qt.Equals, 5000)
 	c.Assert(info.Limits.MaxSMS, qt.Equals, 50)
 	c.Assert(info.Limits.MaxEmails, qt.Equals, 100)

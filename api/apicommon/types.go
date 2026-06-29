@@ -534,12 +534,11 @@ type DeleteManagedOrganizationResponse struct {
 // IntegratorUsage holds an integrator's current managed-resource usage counters. SentVotes/
 // SentSMS/SentEmails are the shared-pool totals summed across the integrator's managed orgs.
 type IntegratorUsage struct {
-	ManagedOrgs       int `json:"managedOrgs"`
-	ManagedProcesses  int `json:"managedProcesses"`
-	ManagedCensusSize int `json:"managedCensusSize"`
-	SentVotes         int `json:"sentVotes"`
-	SentSMS           int `json:"sentSMS"`
-	SentEmails        int `json:"sentEmails"`
+	ManagedOrgs      int `json:"managedOrgs"`
+	ManagedProcesses int `json:"managedProcesses"`
+	SentVotes        int `json:"sentVotes"`
+	SentSMS          int `json:"sentSMS"`
+	SentEmails       int `json:"sentEmails"`
 }
 
 // IntegratorLimits holds an integrator's effective caps for the dashboard. MaxManagedOrgs is
@@ -547,12 +546,11 @@ type IntegratorUsage struct {
 // pools shared across its managed orgs. 0 means unlimited (or unknown, when an override-enabled
 // integrator has no subscription plan).
 type IntegratorLimits struct {
-	MaxManagedOrgs       int `json:"maxManagedOrgs"`
-	MaxManagedProcesses  int `json:"maxManagedProcesses"`
-	MaxManagedCensusSize int `json:"maxManagedCensusSize"`
-	MaxVotes             int `json:"maxVotes"`
-	MaxSMS               int `json:"maxSMS"`
-	MaxEmails            int `json:"maxEmails"`
+	MaxManagedOrgs      int `json:"maxManagedOrgs"`
+	MaxManagedProcesses int `json:"maxManagedProcesses"`
+	MaxVotes            int `json:"maxVotes"`
+	MaxSMS              int `json:"maxSMS"`
+	MaxEmails           int `json:"maxEmails"`
 }
 
 // IntegratorInfoResponse is returned by GET /organizations/{address}/integrator.
