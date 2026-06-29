@@ -11,11 +11,11 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// runNormalizeEmailsMigration invokes migration 0012's Up function directly
+// runNormalizeEmailsMigration invokes migration 0015's Up function directly
 // against the current test database state.
 func runNormalizeEmailsMigration(t *testing.T) {
 	t.Helper()
-	mig, ok := migrations.AsMap()[12]
+	mig, ok := migrations.AsMap()[15]
 	qt.Assert(t, ok, qt.IsTrue)
 	err := mig.Up(context.Background(), testDB.DBClient.Database(testDB.database))
 	qt.Assert(t, err, qt.IsNil)

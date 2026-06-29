@@ -14,7 +14,7 @@ import (
 )
 
 func init() {
-	AddMigration(12, "normalize_member_emails", upNormalizeMemberEmails, downNormalizeMemberEmails)
+	AddMigration(15, "normalize_member_emails", upNormalizeMemberEmails, downNormalizeMemberEmails)
 }
 
 // memberHashDoc holds the subset of an orgMember document needed to recompute
