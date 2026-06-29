@@ -280,34 +280,31 @@ func TestCanPublishForManagedOrg(t *testing.T) {
 	c := qt.New(t)
 	mockDB := &mockMongoStorage{
 		plans: map[string]*db.Plan{
-			// aggregate caps come from the plan's top-level Organization limits
+			// the aggregate process cap comes from the plan's top-level Organization limit
 			integratorPlanID: {
 				ID:               integratorPlanID,
-				Organization:     db.PlanLimits{MaxProcesses: 5, MaxCensus: 100},
+				Organization:     db.PlanLimits{MaxProcesses: 5},
 				IntegratorLimits: db.IntegratorLimits{MaxManagedOrgs: 5},
 			},
 		},
 	}
 	subs := &Subscriptions{db: mockDB}
-	integrator := func(processes, censusSize int) *db.Organization {
+	integrator := func(processes int) *db.Organization {
 		return &db.Organization{
 			Subscription: db.OrganizationSubscription{PlanID: integratorPlanID, Active: true},
-			Counters:     db.OrganizationCounters{ManagedProcesses: processes, ManagedCensusSize: censusSize},
+			Counters:     db.OrganizationCounters{ManagedProcesses: processes},
 		}
 	}
 
 	// a non-integrator org (no override, no plan) is refused
-	err := subs.CanPublishForManagedOrg(&db.Organization{}, 10)
+	err := subs.CanPublishForManagedOrg(&db.Organization{})
 	c.Assert(err, qt.ErrorIs, errors.ErrNotAnIntegrator)
 
-	// within quota (census exactly at the limit) is allowed
-	c.Assert(subs.CanPublishForManagedOrg(integrator(4, 50), 50), qt.IsNil)
+	// within the process quota is allowed
+	c.Assert(subs.CanPublishForManagedOrg(integrator(4)), qt.IsNil)
 
 	// process count at the limit is rejected
-	c.Assert(subs.CanPublishForManagedOrg(integrator(5, 0), 1), qt.ErrorIs, errors.ErrIntegratorQuotaExceeded)
-
-	// census size that would exceed the limit is rejected
-	c.Assert(subs.CanPublishForManagedOrg(integrator(0, 90), 11), qt.ErrorIs, errors.ErrIntegratorQuotaExceeded)
+	c.Assert(subs.CanPublishForManagedOrg(integrator(5)), qt.ErrorIs, errors.ErrIntegratorQuotaExceeded)
 }
 
 // TestManagedOrgLimitsUseIntegratorPlan asserts that a managed org's limits are governed
@@ -395,15 +392,38 @@ func TestManagedOrgLimitsUseIntegratorPlan(t *testing.T) {
 	managedOrg := mockDB.orgs[managedAddr.String()]
 	standaloneOrg := mockDB.orgs[standaloneAddr.String()]
 
-	// --- Capability flag (Anonymous) + dropped census/process checks (HasTxPermission) ---
-	// Managed org: anonymous allowed because the integrator's plan permits it, and the
-	// per-org census/process caps are skipped (integrator aggregate governs at publish).
+	// --- Per-process census cap + capability flags (HasTxPermission) ---
+	// Managed org: the census fits the integrator's generous plan (MaxCensus 1000), anonymous is
+	// allowed by that plan, and only the per-org *process-count* cap is skipped (the integrator
+	// aggregate governs that at publish).
 	ok, err := subs.HasTxPermission(newProcessTx(), models.TxType_NEW_PROCESS, managedOrg, adminUser)
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
-	// Standalone org on the same tiny plan: rejected (its own plan forbids anonymous).
+	// Standalone org on the tiny plan: rejected — its MaxCensus (1) is exceeded.
 	_, err = subs.HasTxPermission(newProcessTx(), models.TxType_NEW_PROCESS, standaloneOrg, adminUser)
 	c.Assert(err, qt.Not(qt.IsNil))
+
+	// A SET_PROCESS_CENSUS tx carries a SetProcess payload; the census update is bounded by the
+	// governing plan's MaxCensus and must be read with GetSetProcess (reading it as a NewProcess
+	// would nil-panic).
+	setProcessCensusTx := func(censusSize uint64) *models.Tx {
+		return &models.Tx{
+			Payload: &models.Tx_SetProcess{
+				SetProcess: &models.SetProcessTx{
+					Txtype:     models.TxType_SET_PROCESS_CENSUS,
+					ProcessId:  []byte{0x01},
+					CensusSize: &censusSize,
+				},
+			},
+		}
+	}
+	// Managed org: a census update within the integrator plan's MaxCensus (1000) is allowed.
+	ok, err = subs.HasTxPermission(setProcessCensusTx(500), models.TxType_SET_PROCESS_CENSUS, managedOrg, adminUser)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+	// Managed org: a census update beyond the integrator plan's MaxCensus is rejected.
+	_, err = subs.HasTxPermission(setProcessCensusTx(2000), models.TxType_SET_PROCESS_CENSUS, managedOrg, adminUser)
+	c.Assert(err, qt.ErrorIs, errors.ErrProcessCensusSizeExceedsPlanLimit)
 
 	// --- MaxDrafts value cap (OrgHasPermission) ---
 	// Managed org: governed by integrator MaxDrafts (10) — allowed; standalone tiny plan

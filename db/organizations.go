@@ -448,13 +448,12 @@ func (ms *MongoStorage) DecrementOrganizationManagedOrgsCounter(address common.A
 	return ms.addToOrganizationCounter(address, "managedOrgs", -1)
 }
 
-// ReserveManagedPublish atomically reserves one managed process and censusDelta managed
-// census slots for the integrator, re-reading both counters under keysLock so concurrent
-// publishes cannot each pass a stale check and exceed the integrator's aggregate quota.
-// Returns ErrManagedQuotaReached if either limit would be exceeded. Roll back with
-// AddOrganizationManagedProcesses(-1) / AddOrganizationManagedCensusSize(-censusDelta) if
-// the publish later fails.
-func (ms *MongoStorage) ReserveManagedPublish(address common.Address, processLimit, censusLimit, censusDelta int) error {
+// ReserveManagedPublish atomically reserves one managed process slot for the integrator,
+// re-reading the counter under keysLock so concurrent publishes cannot each pass a stale
+// check and exceed the integrator's aggregate process quota. Returns ErrManagedQuotaReached
+// if the limit would be exceeded. Roll back with AddOrganizationManagedProcesses(-1) if the
+// publish later fails.
+func (ms *MongoStorage) ReserveManagedPublish(address common.Address, processLimit int) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
@@ -465,23 +464,12 @@ func (ms *MongoStorage) ReserveManagedPublish(address common.Address, processLim
 	if org.Counters.ManagedProcesses >= processLimit {
 		return ErrManagedQuotaReached
 	}
-	if org.Counters.ManagedCensusSize+censusDelta > censusLimit {
-		return ErrManagedQuotaReached
-	}
-	if err := ms.addToOrganizationCounter(address, "managedProcesses", 1); err != nil {
-		return err
-	}
-	return ms.addToOrganizationCounter(address, "managedCensusSize", int64(censusDelta))
+	return ms.addToOrganizationCounter(address, "managedProcesses", 1)
 }
 
 // AddOrganizationManagedProcesses atomically adds delta to the managed processes counter.
 func (ms *MongoStorage) AddOrganizationManagedProcesses(address common.Address, delta int64) error {
 	return ms.addToOrganizationCounter(address, "managedProcesses", delta)
-}
-
-// AddOrganizationManagedCensusSize atomically adds delta to the managed census size counter.
-func (ms *MongoStorage) AddOrganizationManagedCensusSize(address common.Address, delta int64) error {
-	return ms.addToOrganizationCounter(address, "managedCensusSize", delta)
 }
 
 // ListManagedOrganizations returns a paginated list of organizations managed by
@@ -584,6 +572,55 @@ func (ms *MongoStorage) SumSentSMSManagedBy(integratorAddr common.Address) (int,
 // by integratorAddr (the integrator's shared vote pool consumption).
 func (ms *MongoStorage) SumSentVotesManagedBy(integratorAddr common.Address) (int, error) {
 	return ms.sumManagedCounter(integratorAddr, "sentVotes")
+}
+
+// ManagedCounters is an integrator's shared-pool usage summed across all of its managed
+// organizations: votes relayed and 2FA SMS/emails sent. bson tags match the $group output
+// of SumManagedCounters.
+type ManagedCounters struct {
+	SentVotes  int `bson:"sentVotes"`
+	SentSMS    int `bson:"sentSMS"`
+	SentEmails int `bson:"sentEmails"`
+}
+
+// SumManagedCounters returns the vote/SMS/email totals across all organizations managed by
+// integratorAddr in a single aggregation, so the frequently-hit /integrator dashboard reads
+// the whole shared-pool usage in one round trip instead of three separate sumManagedCounter
+// calls.
+//
+// ponytail: one $match+$group over the managedBy set the other integrator paths already scan.
+// If /integrator ever gets hot, denormalise these onto the integrator's own Counters at
+// increment time and drop the aggregation.
+func (ms *MongoStorage) SumManagedCounters(integratorAddr common.Address) (ManagedCounters, error) {
+	if integratorAddr.Cmp(common.Address{}) == 0 {
+		return ManagedCounters{}, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{"managedBy": integratorAddr}}},
+		{{Key: "$group", Value: bson.M{
+			"_id":        nil,
+			"sentVotes":  bson.M{"$sum": "$counters.sentVotes"},
+			"sentSMS":    bson.M{"$sum": "$counters.sentSMS"},
+			"sentEmails": bson.M{"$sum": "$counters.sentEmails"},
+		}}},
+	}
+	cursor, err := ms.organizations.Aggregate(ctx, pipeline)
+	if err != nil {
+		return ManagedCounters{}, fmt.Errorf("could not aggregate managed counters: %w", err)
+	}
+	defer func() { _ = cursor.Close(ctx) }()
+
+	var results []ManagedCounters
+	if err := cursor.All(ctx, &results); err != nil {
+		return ManagedCounters{}, fmt.Errorf("could not decode managed counters: %w", err)
+	}
+	if len(results) == 0 {
+		return ManagedCounters{}, nil
+	}
+	return results[0], nil
 }
 
 func (ms *MongoStorage) fetchOrganizationAndPlan(orgAddress common.Address) (*Organization, *Plan, error) {

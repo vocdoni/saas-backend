@@ -185,15 +185,14 @@ type OrganizationSubscription struct {
 }
 
 type OrganizationCounters struct {
-	SentSMS           int `json:"sentSMS" bson:"sentSMS"`
-	SentEmails        int `json:"sentEmails" bson:"sentEmails"`
-	SentVotes         int `json:"sentVotes" bson:"sentVotes"`
-	SubOrgs           int `json:"subOrgs" bson:"subOrgs"`
-	Users             int `json:"users" bson:"users"`
-	Processes         int `json:"processes" bson:"processes"`
-	ManagedOrgs       int `json:"managedOrgs" bson:"managedOrgs"`
-	ManagedProcesses  int `json:"managedProcesses" bson:"managedProcesses"`
-	ManagedCensusSize int `json:"managedCensusSize" bson:"managedCensusSize"`
+	SentSMS          int `json:"sentSMS" bson:"sentSMS"`
+	SentEmails       int `json:"sentEmails" bson:"sentEmails"`
+	SentVotes        int `json:"sentVotes" bson:"sentVotes"`
+	SubOrgs          int `json:"subOrgs" bson:"subOrgs"`
+	Users            int `json:"users" bson:"users"`
+	Processes        int `json:"processes" bson:"processes"`
+	ManagedOrgs      int `json:"managedOrgs" bson:"managedOrgs"`
+	ManagedProcesses int `json:"managedProcesses" bson:"managedProcesses"`
 }
 
 type OrganizationInvite struct {

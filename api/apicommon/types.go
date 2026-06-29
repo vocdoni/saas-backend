@@ -531,19 +531,40 @@ type DeleteManagedOrganizationResponse struct {
 	Address string `json:"address"`
 }
 
-// IntegratorUsage holds an integrator's current managed-resource usage counters.
+// IntegratorUsage holds an integrator's current managed-resource usage counters. SentVotes/
+// SentSMS/SentEmails are the shared-pool totals summed across the integrator's managed orgs.
 type IntegratorUsage struct {
-	ManagedOrgs       int `json:"managedOrgs"`
-	ManagedProcesses  int `json:"managedProcesses"`
-	ManagedCensusSize int `json:"managedCensusSize"`
+	ManagedOrgs      int `json:"managedOrgs"`
+	ManagedProcesses int `json:"managedProcesses"`
+	SentVotes        int `json:"sentVotes"`
+	SentSMS          int `json:"sentSMS"`
+	SentEmails       int `json:"sentEmails"`
+}
+
+// IntegratorLimits holds an integrator's effective caps for the dashboard. MaxManagedOrgs is
+// the effective integrator limit; the rest are the integrator's subscription-plan caps for the
+// pools shared across its managed orgs.
+//
+// Zero is not uniformly "unlimited". Only MaxVotes treats 0 as unlimited (vote enforcement is
+// skipped when the plan's MaxVotes is 0). MaxManagedProcesses, MaxSMS and MaxEmails are hard
+// caps where 0 means no allowance. Separately, the plan-sourced fields (everything except
+// MaxManagedOrgs, which always comes from the effective integrator limit) are left at 0 when an
+// override-enabled integrator has no subscription plan to source caps from — an "unknown" the
+// dashboard should treat distinctly from a real 0 cap.
+type IntegratorLimits struct {
+	MaxManagedOrgs      int `json:"maxManagedOrgs"`
+	MaxManagedProcesses int `json:"maxManagedProcesses"`
+	MaxVotes            int `json:"maxVotes"`
+	MaxSMS              int `json:"maxSMS"`
+	MaxEmails           int `json:"maxEmails"`
 }
 
 // IntegratorInfoResponse is returned by GET /organizations/{address}/integrator.
 // Limits is only present when Enabled is true.
 type IntegratorInfoResponse struct {
-	Enabled bool                 `json:"enabled"`
-	Limits  *db.IntegratorLimits `json:"limits,omitempty"`
-	Usage   IntegratorUsage      `json:"usage"`
+	Enabled bool              `json:"enabled"`
+	Limits  *IntegratorLimits `json:"limits,omitempty"`
+	Usage   IntegratorUsage   `json:"usage"`
 }
 
 // OrganizationSubscriptionInfo provides detailed information about an organization's subscription.

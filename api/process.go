@@ -559,7 +559,7 @@ func (a *API) deleteProcessHandler(w http.ResponseWriter, r *http.Request) {
 //	@Description	/jobs/{jobId} for the resulting on-chain id. Requires Admin role. Idempotent: if
 //	@Description	the draft is already published its on-chain id is returned with 200 without sending
 //	@Description	a new transaction. Publishing under a managed organization additionally enforces the
-//	@Description	integrator's per-org and aggregate election/census quotas.
+//	@Description	integrator's aggregate election (process-count) quota.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			process
@@ -669,10 +669,10 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// if this org is managed by an integrator, atomically reserve the integrator's
-	// aggregate process/census quota BEFORE building the on-chain tx, so concurrent
-	// publishes cannot each pass a stale check and exceed the cap. The reservation is
-	// rolled back (deferred) unless the publish commits. Test-sized elections are exempt
-	// from the integrator quota, mirroring the per-org Processes counter exemption below.
+	// aggregate process quota BEFORE building the on-chain tx, so concurrent publishes
+	// cannot each pass a stale check and exceed the cap. The reservation is rolled back
+	// (deferred) unless the publish commits. Test-sized elections are exempt from the
+	// integrator quota, mirroring the per-org Processes counter exemption below.
 	managedReserved := false
 	var integratorAddr common.Address
 	nonTestSized := draft.ElectionParams.MaxCensusSize > uint64(db.TestMaxCensusSize)
@@ -682,7 +682,7 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 			errors.ErrGenericInternalServerError.Withf("could not get integrator organization: %v", err).Write(w)
 			return
 		}
-		maxProcesses, maxCensus, err := a.subscriptions.ManagedPublishLimits(integrator)
+		maxProcesses, err := a.subscriptions.ManagedPublishLimits(integrator)
 		if err != nil {
 			if apiErr, ok := err.(errors.Error); ok {
 				apiErr.Write(w)
@@ -691,8 +691,7 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
-		if err := a.db.ReserveManagedPublish(integrator.Address,
-			maxProcesses, maxCensus, int(draft.ElectionParams.MaxCensusSize)); err != nil {
+		if err := a.db.ReserveManagedPublish(integrator.Address, maxProcesses); err != nil {
 			if err == db.ErrManagedQuotaReached {
 				errors.ErrIntegratorQuotaExceeded.Write(w)
 				return
@@ -711,10 +710,6 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			if e := a.db.AddOrganizationManagedProcesses(integratorAddr, -1); e != nil {
 				log.Warnw("could not roll back managed processes counter", "error", e)
-			}
-			if e := a.db.AddOrganizationManagedCensusSize(integratorAddr,
-				-int64(draft.ElectionParams.MaxCensusSize)); e != nil {
-				log.Warnw("could not roll back managed census counter", "error", e)
 			}
 		}()
 	}
@@ -818,7 +813,6 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 	// is rolled back. The idempotency guard keys off draft.Address, so a retry after
 	// failure cannot create a duplicate election.
 	reserved := managedReserved
-	censusSize := int64(draft.ElectionParams.MaxCensusSize)
 	if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
 		defer orgLock.Unlock()
 		data, err := a.account.SubmitSignedTx(stx)
@@ -829,9 +823,6 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 			if reserved {
 				if e := a.db.AddOrganizationManagedProcesses(integratorAddr, -1); e != nil {
 					log.Warnw("could not roll back managed processes counter", "error", e)
-				}
-				if e := a.db.AddOrganizationManagedCensusSize(integratorAddr, -censusSize); e != nil {
-					log.Warnw("could not roll back managed census counter", "error", e)
 				}
 			}
 			return nil, err

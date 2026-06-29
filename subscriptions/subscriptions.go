@@ -179,20 +179,24 @@ func (p *Subscriptions) HasTxPermission(
 			return false, errors.ErrUserHasNoAdminRole
 		}
 	// check CREATE PROCESS
-	case models.TxType_NEW_PROCESS, models.TxType_SET_PROCESS_CENSUS:
+	case models.TxType_NEW_PROCESS:
 		// check if the user has the admin role for the organization
 		if !user.HasRoleFor(org.Address, db.AdminRole) {
 			return false, errors.ErrUserHasNoAdminRole
 		}
 		newProcess := tx.GetNewProcess()
-		// For managed orgs the census-size and process-count limits are enforced against
-		// the integrator's aggregate quota (ReserveManagedPublish) at publish time, so the
-		// per-org plan checks are skipped here. Capability/duration checks below still apply,
-		// using the integrator's plan.
+		if newProcess == nil || newProcess.Process == nil {
+			return false, errors.ErrInvalidData.With("missing new-process payload")
+		}
+		// A single process's declared census size is bounded by the governing plan's MaxCensus
+		// for every org — the integrator's plan for a managed org, otherwise the org's own.
+		if newProcess.Process.MaxCensusSize > uint64(plan.Organization.MaxCensus) {
+			return false, errors.ErrProcessCensusSizeExceedsPlanLimit.Withf("plan max census: %d", plan.Organization.MaxCensus)
+		}
+		// The process-*count* limit, however, is enforced for managed orgs against the
+		// integrator's aggregate quota (ReserveManagedPublish) at publish time, so the per-org
+		// count check is skipped for them. Capability/duration checks below apply to all.
 		if !managed(org) {
-			if newProcess.Process.MaxCensusSize > uint64(plan.Organization.MaxCensus) {
-				return false, errors.ErrProcessCensusSizeExceedsPlanLimit.Withf("plan max census: %d", plan.Organization.MaxCensus)
-			}
 			if org.Counters.Processes >= plan.Organization.MaxProcesses {
 				// allow processes with less than TestMaxCensusSize for user testing
 				if newProcess.Process.MaxCensusSize > uint64(db.TestMaxCensusSize) {
@@ -201,6 +205,23 @@ func (p *Subscriptions) HasTxPermission(
 			}
 		}
 		return hasElectionMetadataPermissions(newProcess, plan)
+
+	// check UPDATE PROCESS CENSUS
+	case models.TxType_SET_PROCESS_CENSUS:
+		// check if the user has the admin role for the organization
+		if !user.HasRoleFor(org.Address, db.AdminRole) {
+			return false, errors.ErrUserHasNoAdminRole
+		}
+		// A census update carries a SetProcess payload (not NewProcess), so it must be read with
+		// GetSetProcess. Its new census size, when set, is bounded by the governing plan's
+		// MaxCensus exactly like a new process — the integrator's plan for a managed org.
+		setProcess := tx.GetSetProcess()
+		if setProcess == nil {
+			return false, errors.ErrInvalidData.With("missing set-process payload")
+		}
+		if setProcess.GetCensusSize() > uint64(plan.Organization.MaxCensus) {
+			return false, errors.ErrProcessCensusSizeExceedsPlanLimit.Withf("plan max census: %d", plan.Organization.MaxCensus)
+		}
 
 	case models.TxType_SET_PROCESS_STATUS,
 		models.TxType_CREATE_ACCOUNT:
@@ -379,9 +400,7 @@ func (p *Subscriptions) OrgCanAddCensusParticipants(orgAddress common.Address, c
 	}
 
 	// Per-census size is bounded by the governing plan's MaxCensus: the integrator's plan
-	// for a managed org, otherwise the org's own. This keeps the participant-add path
-	// bounded (the integrator-wide ManagedCensusSize total is additionally reserved at
-	// publish) rather than relying on the publish-time check alone.
+	// for a managed org, otherwise the org's own.
 	_, plan, err := p.limitsOwner(org)
 	if err != nil {
 		return err
@@ -458,38 +477,35 @@ func (p *Subscriptions) CanCreateManagedOrg(integrator *db.Organization) error {
 	return nil
 }
 
-// ManagedPublishLimits returns the integrator's aggregate caps for publishing under its
-// managed organizations: the integrator plan's top-level process and census-size limits.
-// These bound the ManagedProcesses / ManagedCensusSize counters across all managed orgs.
-func (p *Subscriptions) ManagedPublishLimits(integrator *db.Organization) (maxProcesses, maxCensus int, err error) {
+// ManagedPublishLimits returns the integrator's aggregate cap for publishing under its
+// managed organizations: the integrator plan's top-level process limit, which bounds the
+// ManagedProcesses counter across all managed orgs.
+func (p *Subscriptions) ManagedPublishLimits(integrator *db.Organization) (maxProcesses int, err error) {
 	if !p.IsIntegrator(integrator) {
-		return 0, 0, errors.ErrNotAnIntegrator
+		return 0, errors.ErrNotAnIntegrator
 	}
 	if integrator.Subscription.PlanID == "" {
-		return 0, 0, errors.ErrPlanNotFound.With("integrator has no subscription plan")
+		return 0, errors.ErrPlanNotFound.With("integrator has no subscription plan")
 	}
 	plan, err := p.db.Plan(integrator.Subscription.PlanID)
 	if err != nil {
 		if stderrors.Is(err, db.ErrNotFound) {
-			return 0, 0, errors.ErrPlanNotFound.WithErr(err)
+			return 0, errors.ErrPlanNotFound.WithErr(err)
 		}
-		return 0, 0, errors.ErrGenericInternalServerError.WithErr(err)
+		return 0, errors.ErrGenericInternalServerError.WithErr(err)
 	}
-	return plan.Organization.MaxProcesses, plan.Organization.MaxCensus, nil
+	return plan.Organization.MaxProcesses, nil
 }
 
-// CanPublishForManagedOrg checks the integrator's aggregate process/census quota
-// before publishing an election (with the given census size) under a managed org.
-func (p *Subscriptions) CanPublishForManagedOrg(integrator *db.Organization, censusSize int) error {
-	maxProcesses, maxCensus, err := p.ManagedPublishLimits(integrator)
+// CanPublishForManagedOrg checks the integrator's aggregate process quota before publishing
+// an election under a managed org.
+func (p *Subscriptions) CanPublishForManagedOrg(integrator *db.Organization) error {
+	maxProcesses, err := p.ManagedPublishLimits(integrator)
 	if err != nil {
 		return err
 	}
 	if integrator.Counters.ManagedProcesses >= maxProcesses {
 		return errors.ErrIntegratorQuotaExceeded.Withf("max managed processes %d", maxProcesses)
-	}
-	if integrator.Counters.ManagedCensusSize+censusSize > maxCensus {
-		return errors.ErrIntegratorQuotaExceeded.Withf("max managed census size %d", maxCensus)
 	}
 	return nil
 }

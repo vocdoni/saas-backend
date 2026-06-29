@@ -312,9 +312,8 @@ func (a *API) integratorInfoHandler(w http.ResponseWriter, r *http.Request) {
 	resp := &apicommon.IntegratorInfoResponse{
 		Enabled: a.subscriptions.IsIntegrator(org),
 		Usage: apicommon.IntegratorUsage{
-			ManagedOrgs:       org.Counters.ManagedOrgs,
-			ManagedProcesses:  org.Counters.ManagedProcesses,
-			ManagedCensusSize: org.Counters.ManagedCensusSize,
+			ManagedOrgs:      org.Counters.ManagedOrgs,
+			ManagedProcesses: org.Counters.ManagedProcesses,
 		},
 	}
 	if resp.Enabled {
@@ -323,7 +322,34 @@ func (a *API) integratorInfoHandler(w http.ResponseWriter, r *http.Request) {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
-		resp.Limits = &limits
+		apiLimits := apicommon.IntegratorLimits{MaxManagedOrgs: limits.MaxManagedOrgs}
+
+		// The process/votes/SMS/email caps are the integrator plan's pooled limits. An
+		// override-enabled integrator may have no subscription plan; leave those caps at 0
+		// (unlimited/unknown) in that case rather than failing the dashboard. A real lookup
+		// failure on a plan that is supposed to exist is surfaced rather than masked as 0.
+		if org.Subscription.PlanID != "" {
+			plan, err := a.db.Plan(org.Subscription.PlanID)
+			if err != nil {
+				errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+				return
+			}
+			apiLimits.MaxManagedProcesses = plan.Organization.MaxProcesses
+			apiLimits.MaxVotes = plan.Organization.MaxVotes
+			apiLimits.MaxSMS = plan.Features.TwoFaSms
+			apiLimits.MaxEmails = plan.Features.TwoFaEmail
+		}
+		resp.Limits = &apiLimits
+
+		// Shared-pool usage summed across the integrator's managed orgs, in one aggregation.
+		counters, err := a.db.SumManagedCounters(integratorAddr)
+		if err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+		resp.Usage.SentVotes = counters.SentVotes
+		resp.Usage.SentSMS = counters.SentSMS
+		resp.Usage.SentEmails = counters.SentEmails
 	}
 	apicommon.HTTPWriteJSON(w, resp)
 }
@@ -420,18 +446,16 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	// capture usage to roll back the integrator counters after deletion. The integrator's
-	// ManagedProcesses and ManagedCensusSize counters are bumped on publish only for non-test-sized
-	// elections (ElectionParams.MaxCensusSize > db.TestMaxCensusSize), by 1 and by MaxCensusSize
-	// respectively (see api/process.go). The rollback delta must mirror that rule exactly, so both
-	// are derived from the published non-test-sized processes' ElectionParams rather than from the
-	// census documents (whose Size is the current participant count and can under-decrement).
-	var nonTestPublishedCount, managedCensusSize int64
+	// ManagedProcesses counter is bumped on publish only for non-test-sized elections
+	// (ElectionParams.MaxCensusSize > db.TestMaxCensusSize), by 1 (see api/process.go). The
+	// rollback delta must mirror that rule exactly, so it is derived from the published
+	// non-test-sized processes' ElectionParams rather than from the census documents.
+	var nonTestPublishedCount int64
 	for _, p := range published {
 		if p.ElectionParams == nil || p.ElectionParams.MaxCensusSize <= uint64(db.TestMaxCensusSize) {
 			continue
 		}
 		nonTestPublishedCount++
-		managedCensusSize += int64(p.ElectionParams.MaxCensusSize)
 	}
 
 	// cascade: each step is best-effort. Failures are logged but do not abort the teardown, so a
@@ -504,9 +528,8 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	// roll back the integrator's aggregate usage counters (best-effort). ManagedOrgs always -1;
-	// processes/census only by the deltas captured above (published non-test-sized elections and
-	// their summed MaxCensusSize), mirroring the publish-time bump rule so the counters never go
-	// negative.
+	// processes only by the delta captured above (published non-test-sized elections), mirroring
+	// the publish-time bump rule so the counter never goes negative.
 	if err := a.db.DecrementOrganizationManagedOrgsCounter(integratorAddr); err != nil {
 		log.Warnw("could not decrement managed orgs counter",
 			"integrator", integratorAddr.Hex(), "error", err)
@@ -517,15 +540,9 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 				"integrator", integratorAddr.Hex(), "delta", -nonTestPublishedCount, "error", err)
 		}
 	}
-	if managedCensusSize > 0 {
-		if err := a.db.AddOrganizationManagedCensusSize(integratorAddr, -managedCensusSize); err != nil {
-			log.Warnw("could not decrement managed census size counter",
-				"integrator", integratorAddr.Hex(), "delta", -managedCensusSize, "error", err)
-		}
-	}
 
 	log.Infow("deleted managed organization",
 		"integrator", integratorAddr.Hex(), "org", managedAddr.Hex(),
-		"processes", nonTestPublishedCount, "censusSize", managedCensusSize)
+		"processes", nonTestPublishedCount)
 	apicommon.HTTPWriteJSON(w, &apicommon.DeleteManagedOrganizationResponse{Address: managedAddr.Hex()})
 }
