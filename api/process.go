@@ -549,6 +549,42 @@ func (a *API) deleteProcessHandler(w http.ResponseWriter, r *http.Request) {
 	apicommon.HTTPWriteOK(w)
 }
 
+// reserveManagedProcessSlot reserves one process slot against the integrator's shared
+// ManagedProcesses quota when org is a managed organization publishing a non-test-sized
+// election. It returns the integrator address and reserved=true when a slot was taken — the
+// caller MUST roll it back with AddOrganizationManagedProcesses(integratorAddr, -1) if the
+// publish/sign later fails. For a standalone org or a test-sized election it is a no-op
+// (reserved=false, nil error).
+//
+// HasTxPermission skips the per-org process-count check for managed orgs precisely because
+// this integrator-level reservation enforces it instead; every NEW_PROCESS entry point (draft
+// publish and the remote-signer /transactions path) must call this so the two cannot drift.
+func (a *API) reserveManagedProcessSlot(org *db.Organization, maxCensusSize uint64) (common.Address, bool, error) {
+	if org.ManagedBy == (common.Address{}) || maxCensusSize <= uint64(db.TestMaxCensusSize) {
+		return common.Address{}, false, nil
+	}
+	integrator, err := a.db.Organization(org.ManagedBy)
+	if err != nil {
+		// a managed org whose integrator no longer exists is a not-found condition, not a
+		// server fault — map it like subscriptions.limitsOwner does rather than 500.
+		if err == db.ErrNotFound {
+			return common.Address{}, false, errors.ErrOrganizationNotFound.WithErr(err)
+		}
+		return common.Address{}, false, errors.ErrGenericInternalServerError.Withf("could not get integrator organization: %v", err)
+	}
+	maxProcesses, err := a.subscriptions.ManagedPublishLimits(integrator)
+	if err != nil {
+		return common.Address{}, false, err
+	}
+	if err := a.db.ReserveManagedPublish(integrator.Address, maxProcesses); err != nil {
+		if err == db.ErrManagedQuotaReached {
+			return common.Address{}, false, errors.ErrIntegratorQuotaExceeded
+		}
+		return common.Address{}, false, errors.ErrGenericInternalServerError.WithErr(err)
+	}
+	return integrator.Address, true, nil
+}
+
 // publishProcessHandler godoc
 //
 //	@Summary		Publish a draft process as an on-chain election
@@ -673,34 +709,17 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 	// cannot each pass a stale check and exceed the cap. The reservation is rolled back
 	// (deferred) unless the publish commits. Test-sized elections are exempt from the
 	// integrator quota, mirroring the per-org Processes counter exemption below.
-	managedReserved := false
-	var integratorAddr common.Address
 	nonTestSized := draft.ElectionParams.MaxCensusSize > uint64(db.TestMaxCensusSize)
-	if org.ManagedBy != (common.Address{}) && nonTestSized {
-		integrator, err := a.db.Organization(org.ManagedBy)
-		if err != nil {
-			errors.ErrGenericInternalServerError.Withf("could not get integrator organization: %v", err).Write(w)
+	integratorAddr, managedReserved, err := a.reserveManagedProcessSlot(org, draft.ElectionParams.MaxCensusSize)
+	if err != nil {
+		if apiErr, ok := err.(errors.Error); ok {
+			apiErr.Write(w)
 			return
 		}
-		maxProcesses, err := a.subscriptions.ManagedPublishLimits(integrator)
-		if err != nil {
-			if apiErr, ok := err.(errors.Error); ok {
-				apiErr.Write(w)
-				return
-			}
-			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-			return
-		}
-		if err := a.db.ReserveManagedPublish(integrator.Address, maxProcesses); err != nil {
-			if err == db.ErrManagedQuotaReached {
-				errors.ErrIntegratorQuotaExceeded.Write(w)
-				return
-			}
-			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-			return
-		}
-		managedReserved = true
-		integratorAddr = integrator.Address
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if managedReserved {
 		// roll back the reservation if the publish is not handed to a worker (any
 		// synchronous failure below, or a full queue). Once enqueued the worker owns
 		// the reservation outcome and clears managedReserved.

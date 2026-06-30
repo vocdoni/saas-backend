@@ -10,6 +10,8 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
+	"go.vocdoni.io/proto/build/go/models"
+	"google.golang.org/protobuf/proto"
 )
 
 // TestIntegratorManagedOrgs exercises the integrator layer: a non-integrator org is
@@ -195,4 +197,93 @@ func TestIntegratorManagedOrgs(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	_, code = testRequest(t, http.MethodPost, token, nil, "process", draftID2.Hex(), "publish")
 	c.Assert(code, qt.Equals, http.StatusBadRequest) // ErrIntegratorQuotaExceeded
+}
+
+// TestIntegratorProcessQuotaViaTransactions guards the regression where the remote-signer
+// /transactions path stopped enforcing the integrator's shared process quota for managed orgs.
+// A managed org creating elections through /transactions must consume, and be capped by, the
+// integrator's aggregate ManagedProcesses quota — exactly like /process/{id}/publish does.
+func TestIntegratorProcessQuotaViaTransactions(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	token := testCreateUser(t, "integratorpass123")
+	integratorAddr := testCreateOrganization(t, token)
+
+	// enable integrator (override) and subscribe it to a plan whose top-level MaxProcesses (1)
+	// is the shared process cap across all of its managed orgs.
+	integratorOrg, err := testDB.Organization(integratorAddr)
+	c.Assert(err, qt.IsNil)
+	integratorOrg.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 1}
+	c.Assert(testDB.SetOrganization(integratorOrg), qt.IsNil)
+
+	integratorPlan := &db.Plan{
+		ID:           "prod_test_tx_quota",
+		Name:         "Integrator Tx Quota",
+		Organization: db.PlanLimits{MaxProcesses: 1, MaxCensus: 1000, MaxVotes: 5000, MaxDuration: 30},
+		Features:     db.Features{TwoFaSms: 50, TwoFaEmail: 100},
+	}
+	c.Assert(testDB.SetPlan(integratorPlan), qt.IsNil)
+	defer func() { _ = testDB.DelPlan(&db.Plan{ID: integratorPlan.ID}) }()
+	c.Assert(testDB.SetOrganizationSubscription(integratorAddr, &db.OrganizationSubscription{
+		PlanID:          integratorPlan.ID,
+		StartDate:       time.Now(),
+		RenewalDate:     time.Now().Add(24 * time.Hour),
+		LastPaymentDate: time.Now(),
+		Active:          true,
+	}), qt.IsNil)
+
+	// create a managed org: its on-chain account is provisioned eagerly and the calling user
+	// becomes its admin, so it can fund and sign NEW_PROCESS txs through /transactions.
+	managed := requestAndParse[apicommon.OrganizationInfo](
+		t, http.MethodPost, token,
+		&apicommon.CreateManagedOrganizationRequest{
+			OrganizationInfo: apicommon.OrganizationInfo{Type: string(db.CompanyType), Website: "https://managed.example"},
+		},
+		"integrator", "organizations",
+	)
+	c.Assert(managed.Address, qt.Not(qt.Equals), common.Address{})
+
+	// newProcessTx builds a marshalled NEW_PROCESS tx for the managed org with the given census
+	// size. No overwrite/anonymous/weighted features are requested so the plan's feature gates
+	// in HasTxPermission pass.
+	newProcessTx := func(maxCensusSize uint64) []byte {
+		tx := &models.Tx{Payload: &models.Tx_NewProcess{NewProcess: &models.NewProcessTx{
+			Txtype: models.TxType_NEW_PROCESS,
+			Process: &models.Process{
+				EntityId:      managed.Address.Bytes(),
+				MaxCensusSize: maxCensusSize,
+				Duration:      86400,
+				EnvelopeType:  &models.EnvelopeType{},
+				VoteOptions:   &models.ProcessVoteOptions{MaxCount: 1, MaxValue: 1},
+			},
+		}}}
+		b, err := proto.Marshal(tx)
+		c.Assert(err, qt.IsNil)
+		return b
+	}
+	postTx := func(payload []byte) int {
+		_, code := testRequest(t, http.MethodPost, token,
+			&apicommon.TransactionData{Address: managed.Address, TxPayload: payload}, "transactions")
+		return code
+	}
+	managedProcesses := func() int {
+		org, err := testDB.Organization(integratorAddr)
+		c.Assert(err, qt.IsNil)
+		return org.Counters.ManagedProcesses
+	}
+
+	// first non-test-sized process is signed and consumes one slot of the integrator pool.
+	c.Assert(postTx(newProcessTx(100)), qt.Equals, http.StatusOK)
+	c.Assert(managedProcesses(), qt.Equals, 1)
+
+	// the second is capped by the integrator's aggregate quota (plan MaxProcesses == 1).
+	// Before the fix this path enforced nothing and returned 200, leaving the counter at 0.
+	c.Assert(postTx(newProcessTx(100)), qt.Equals, http.StatusBadRequest) // ErrIntegratorQuotaExceeded
+	c.Assert(managedProcesses(), qt.Equals, 1)                            // reservation never taken / rolled back
+
+	// a test-sized election (<= TestMaxCensusSize) is exempt: allowed even with the pool full,
+	// and it does not consume the integrator quota.
+	c.Assert(postTx(newProcessTx(uint64(db.TestMaxCensusSize))), qt.Equals, http.StatusOK)
+	c.Assert(managedProcesses(), qt.Equals, 1)
 }
