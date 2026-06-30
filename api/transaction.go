@@ -8,6 +8,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/proto/build/go/models"
 	"google.golang.org/protobuf/proto"
 )
@@ -101,8 +102,33 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// if isNewProcess and everything went well so far update the organization process counter
+	managedReserved := false
 	if *txType == models.TxType_NEW_PROCESS {
 		newProcess := tx.GetNewProcess()
+		// For a managed org the process-count limit is enforced against the integrator's
+		// shared ManagedProcesses quota (HasTxPermission skips the per-org check for managed
+		// orgs), exactly like the /process/{id}/publish path. Reserve before signing and roll
+		// the reservation back if signing fails below. Test-sized elections are exempt.
+		integratorAddr, reserved, rerr := a.reserveManagedProcessSlot(org, newProcess.Process.MaxCensusSize)
+		if rerr != nil {
+			if apiErr, ok := rerr.(errors.Error); ok {
+				apiErr.Write(w)
+				return
+			}
+			errors.ErrGenericInternalServerError.WithErr(rerr).Write(w)
+			return
+		}
+		managedReserved = reserved
+		if reserved {
+			defer func() {
+				if !managedReserved {
+					return
+				}
+				if e := a.db.AddOrganizationManagedProcesses(integratorAddr, -1); e != nil {
+					log.Warnw("could not roll back managed processes counter", "error", e)
+				}
+			}()
+		}
 		// do not count processes with less than TestMaxCensusSize for user testing
 		if newProcess.Process.MaxCensusSize > uint64(db.TestMaxCensusSize) {
 			if err := a.db.IncrementOrganizationProcessesCounter(org.Address); err != nil {
@@ -118,6 +144,9 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrGenericInternalServerError.Withf("could not sign transaction: %v", err).Write(w)
 		return
 	}
+	// signed successfully; the client owns submission from here, so keep the reservation
+	// (the per-org Processes counter above is likewise not rolled back on this path).
+	managedReserved = false
 
 	// return the signed tx payload
 	apicommon.HTTPWriteJSON(w, &apicommon.TransactionData{
