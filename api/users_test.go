@@ -301,8 +301,8 @@ func TestUserWithOrganization(t *testing.T) {
 	testCreateOrganization(t, token)
 }
 
-// TestUserInfoIsIntegrator checks that GET /users/me exposes whether the user is
-// an integrator, before and after the user's org is enabled as an integrator.
+// TestUserInfoIsIntegrator checks that GET /users/me exposes per-organization
+// integrator status, before and after the user's org is enabled as an integrator.
 func TestUserInfoIsIntegrator(t *testing.T) {
 	c := qt.New(t)
 
@@ -311,7 +311,8 @@ func TestUserInfoIsIntegrator(t *testing.T) {
 
 	// A freshly created org is on the default (non-integrator) plan.
 	before := requestAndParse[apicommon.UserInfo](t, http.MethodGet, token, nil, usersMeEndpoint)
-	c.Assert(before.IsIntegrator, qt.IsFalse)
+	c.Assert(before.Organizations, qt.HasLen, 1)
+	c.Assert(before.Organizations[0].IsIntegrator, qt.IsFalse)
 
 	// Enable integrator status via a per-org IntegratorLimits override.
 	org, err := testDB.Organization(orgAddr)
@@ -321,9 +322,10 @@ func TestUserInfoIsIntegrator(t *testing.T) {
 	}
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 
-	// The user is now an integrator.
+	// The organization is now flagged as an integrator.
 	after := requestAndParse[apicommon.UserInfo](t, http.MethodGet, token, nil, usersMeEndpoint)
-	c.Assert(after.IsIntegrator, qt.IsTrue)
+	c.Assert(after.Organizations, qt.HasLen, 1)
+	c.Assert(after.Organizations[0].IsIntegrator, qt.IsTrue)
 }
 
 func TestResendVerificationCodeHandler(t *testing.T) {
