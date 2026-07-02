@@ -98,6 +98,16 @@ type OrganizationInfo struct {
 	// Parent organization if this is a sub-organization
 	Parent *OrganizationInfo `json:"parent"`
 
+	// Integrator organization that manages this org, when it was created through
+	// the integrator portal. Nil for regular organizations. Lets clients tell
+	// managed orgs apart from the user's own orgs (e.g. to hide them from the org
+	// switcher), a distinction Parent does not capture (managed orgs set ManagedBy,
+	// not Parent).
+	//
+	// A pointer so it is omitted rather than emitted as the zero address: json's
+	// omitempty does not skip the fixed-size common.Address array.
+	ManagedBy *common.Address `json:"managedBy,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+
 	// Arbitrary key value fields with metadata regarding the organization
 	Meta map[string]any `json:"meta"`
 
@@ -480,6 +490,13 @@ func OrganizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 	if meta == nil {
 		meta = make(map[string]any)
 	}
+	// Expose ManagedBy only when set, as a pointer, so regular orgs omit the field
+	// instead of serializing the zero address.
+	var managedBy *common.Address
+	if dbOrg.ManagedBy != (common.Address{}) {
+		mb := dbOrg.ManagedBy
+		managedBy = &mb
+	}
 	return &OrganizationInfo{
 		Address:        dbOrg.Address,
 		Website:        dbOrg.Website,
@@ -494,6 +511,7 @@ func OrganizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 		Communications: dbOrg.Communications,
 		Meta:           meta,
 		Parent:         parentOrg,
+		ManagedBy:      managedBy,
 		Subscription:   &details,
 		Counters:       &usage,
 	}

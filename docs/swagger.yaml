@@ -244,6 +244,19 @@ definitions:
           becomes an integrator on the free tier with no checkout. Default false uses
           the regular default plan.
         type: boolean
+      managedBy:
+        description: |-
+          Integrator organization that manages this org, when it was created through
+          the integrator portal. Nil for regular organizations. Lets clients tell
+          managed orgs apart from the user's own orgs (e.g. to hide them from the org
+          switcher), a distinction Parent does not capture (managed orgs set ManagedBy,
+          not Parent).
+
+          A pointer so it is omitted rather than emitted as the zero address: json's
+          omitempty does not skip the fixed-size common.Address array.
+        example: deadbeef
+        format: hex
+        type: string
       meta:
         additionalProperties: {}
         description: Arbitrary key value fields with metadata regarding the organization
@@ -327,6 +340,19 @@ definitions:
           becomes an integrator on the free tier with no checkout. Default false uses
           the regular default plan.
         type: boolean
+      managedBy:
+        description: |-
+          Integrator organization that manages this org, when it was created through
+          the integrator portal. Nil for regular organizations. Lets clients tell
+          managed orgs apart from the user's own orgs (e.g. to hide them from the org
+          switcher), a distinction Parent does not capture (managed orgs set ManagedBy,
+          not Parent).
+
+          A pointer so it is omitted rather than emitted as the zero address: json's
+          omitempty does not skip the fixed-size common.Address array.
+        example: deadbeef
+        format: hex
+        type: string
       meta:
         additionalProperties: {}
         description: Arbitrary key value fields with metadata regarding the organization
@@ -832,6 +858,19 @@ definitions:
           becomes an integrator on the free tier with no checkout. Default false uses
           the regular default plan.
         type: boolean
+      managedBy:
+        description: |-
+          Integrator organization that manages this org, when it was created through
+          the integrator portal. Nil for regular organizations. Lets clients tell
+          managed orgs apart from the user's own orgs (e.g. to hide them from the org
+          switcher), a distinction Parent does not capture (managed orgs set ManagedBy,
+          not Parent).
+
+          A pointer so it is omitted rather than emitted as the zero address: json's
+          omitempty does not skip the fixed-size common.Address array.
+        example: deadbeef
+        format: hex
+        type: string
       meta:
         additionalProperties: {}
         description: Arbitrary key value fields with metadata regarding the organization
