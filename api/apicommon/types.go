@@ -3,7 +3,9 @@ package apicommon
 //revive:disable:max-public-structs
 
 import (
+	"encoding/json"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -23,6 +25,71 @@ const (
 	// MaxItemsPerPage defines a ceiling for the `limit` param passed by the client
 	MaxItemsPerPage = 100
 )
+
+// MultilingualText is a locale-keyed string map. Clients may send either a plain string
+// (normalised to {"default": "<string>"}) or an object {"<lang>": "<text>", ...}.
+// When sending an object, a "default" key is required.
+type MultilingualText map[string]string
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (m *MultilingualText) UnmarshalJSON(data []byte) error {
+	var s string
+	if json.Unmarshal(data, &s) == nil {
+		*m = MultilingualText{"default": s}
+		return nil
+	}
+	var obj map[string]string
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return fmt.Errorf("must be a string or an object with string values")
+	}
+	if _, ok := obj["default"]; !ok {
+		return fmt.Errorf("multilingual object must have a \"default\" key")
+	}
+	*m = MultilingualText(obj)
+	return nil
+}
+
+// multilingualFromAny extracts a MultilingualText from a meta map value. It handles both
+// the in-memory form (MultilingualText / map[string]string, set at creation time) and the
+// BSON-decoded form (map[string]interface{}, returned after a MongoDB round-trip).
+func multilingualFromAny(v any) *MultilingualText {
+	switch m := v.(type) {
+	case MultilingualText:
+		return &m
+	case map[string]string:
+		r := MultilingualText(m)
+		return &r
+	case map[string]any:
+		r := make(MultilingualText, len(m))
+		for k, val := range m {
+			s, ok := val.(string)
+			if !ok {
+				return nil
+			}
+			r[k] = s
+		}
+		return &r
+	}
+	return nil
+}
+
+// BuildOrgMeta merges the convenience name/logo/description fields with an explicit meta
+// map. The explicit meta keys take precedence: if both name and meta["name"] are set,
+// meta["name"] wins.
+func BuildOrgMeta(name, logo, description *MultilingualText, explicit map[string]any) map[string]any {
+	meta := make(map[string]any)
+	if name != nil {
+		meta["name"] = *name
+	}
+	if logo != nil {
+		meta["logo"] = *logo
+	}
+	if description != nil {
+		meta["description"] = *description
+	}
+	maps.Copy(meta, explicit)
+	return meta
+}
 
 // Pagination contains all the values needed for the UI to easily organize the returned data
 type Pagination struct {
@@ -110,6 +177,18 @@ type OrganizationInfo struct {
 
 	// Arbitrary key value fields with metadata regarding the organization
 	Meta map[string]any `json:"meta"`
+
+	// Name is a shorthand for meta["name"]. On write accepts a plain string
+	// (stored as {"default": "<string>"}) or a locale map; on read it mirrors
+	// whatever is stored in meta["name"]. If both Name and meta["name"] are
+	// provided on a create request, meta["name"] takes precedence.
+	Name *MultilingualText `json:"name,omitempty"`
+
+	// Logo is a shorthand for meta["logo"]. Same encoding rules as Name.
+	Logo *MultilingualText `json:"logo,omitempty"`
+
+	// Description is a shorthand for meta["description"]. Same encoding rules as Name.
+	Description *MultilingualText `json:"description,omitempty"`
 
 	// Whether to subscribe the new organization to the free integrator plan at
 	// creation time (opt-in). Used by the integrator portal so a newly created org
@@ -510,6 +589,9 @@ func OrganizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 		Active:         dbOrg.Active,
 		Communications: dbOrg.Communications,
 		Meta:           meta,
+		Name:           multilingualFromAny(meta["name"]),
+		Logo:           multilingualFromAny(meta["logo"]),
+		Description:    multilingualFromAny(meta["description"]),
 		Parent:         parentOrg,
 		ManagedBy:      managedBy,
 		Subscription:   &details,

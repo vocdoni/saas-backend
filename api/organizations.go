@@ -145,7 +145,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		Timezone:        orgInfo.Timezone,
 		Active:          true,
 		Communications:  orgInfo.Communications,
-		Meta:            orgInfo.Meta,
+		Meta:            apicommon.BuildOrgMeta(orgInfo.Name, orgInfo.Logo, orgInfo.Description, orgInfo.Meta),
 		TokensPurchased: 0,
 		TokensRemaining: 0,
 		Parent:          parentOrg,
