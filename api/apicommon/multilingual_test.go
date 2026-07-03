@@ -111,6 +111,11 @@ func TestMultilingualFromAny(t *testing.T) {
 	got = multilingualFromAny(bad)
 	c.Assert(got, qt.IsNil)
 
+	// plain string (legacy storage) → normalised to {"default": "..."}
+	got = multilingualFromAny("legacy name")
+	c.Assert(got, qt.IsNotNil)
+	c.Assert(*got, qt.DeepEquals, MultilingualText{"default": "legacy name"})
+
 	// nil → nil
 	got = multilingualFromAny(nil)
 	c.Assert(got, qt.IsNil)

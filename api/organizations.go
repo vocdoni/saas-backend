@@ -162,7 +162,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	// is identical to the legacy flow (DB row only; account created later by the SDK).
 	if orgInfo.ProvisionAccount {
 		infoURI := fmt.Sprintf("%s/organizations/%s", a.serverURL, dbOrg.Address.String())
-		if err := a.account.CreateOrgAccount(signer, dbOrg.Address.String(), infoURI); err != nil {
+		if err := a.account.CreateOrgAccount(signer, apicommon.OrgDisplayName(dbOrg.Meta, dbOrg.Address.String()), infoURI); err != nil {
 			if orgInfo.Parent != nil {
 				if err := a.db.DecrementOrganizationSubOrgsCounter(parentOrg); err != nil {
 					log.Errorf("decrement suborgs: %v", err)

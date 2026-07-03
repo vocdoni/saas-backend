@@ -49,11 +49,15 @@ func (m *MultilingualText) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// multilingualFromAny extracts a MultilingualText from a meta map value. It handles both
-// the in-memory form (MultilingualText / map[string]string, set at creation time) and the
-// BSON-decoded form (map[string]interface{}, returned after a MongoDB round-trip).
+// multilingualFromAny extracts a MultilingualText from a meta map value. It handles:
+//   - plain string (legacy storage): normalised to {"default": "<string>"}
+//   - MultilingualText / map[string]string (in-memory, set at creation time)
+//   - map[string]any (BSON-decoded form after a MongoDB round-trip)
 func multilingualFromAny(v any) *MultilingualText {
 	switch m := v.(type) {
+	case string:
+		r := MultilingualText{"default": m}
+		return &r
 	case MultilingualText:
 		return &m
 	case map[string]string:
@@ -71,6 +75,17 @@ func multilingualFromAny(v any) *MultilingualText {
 		return &r
 	}
 	return nil
+}
+
+// OrgDisplayName returns the "default" value of meta["name"] as a plain string, falling
+// back to fallback (typically the org's hex address) when the field is absent or empty.
+func OrgDisplayName(meta map[string]any, fallback string) string {
+	if mt := multilingualFromAny(meta["name"]); mt != nil {
+		if def := (*mt)["default"]; def != "" {
+			return def
+		}
+	}
+	return fallback
 }
 
 // BuildOrgMeta merges the convenience name/logo/description fields with an explicit meta
@@ -568,6 +583,13 @@ func OrganizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 	meta := dbOrg.Meta
 	if meta == nil {
 		meta = make(map[string]any)
+	}
+	// Upgrade any plain-string values for the well-known keys to the object
+	// form so that meta.name and the top-level name field always agree.
+	for _, key := range []string{"name", "logo", "description"} {
+		if s, ok := meta[key].(string); ok {
+			meta[key] = MultilingualText{"default": s}
+		}
 	}
 	// Expose ManagedBy only when set, as a pointer, so regular orgs omit the field
 	// instead of serializing the zero address.
