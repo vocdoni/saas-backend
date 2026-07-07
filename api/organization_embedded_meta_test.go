@@ -15,9 +15,10 @@ func TestOrganizationEmbeddedMeta(t *testing.T) {
 
 	t.Run("string name is normalised to default locale", func(t *testing.T) {
 		c := qt.New(t)
-		body := &apicommon.OrganizationInfo{
-			Type: string(db.CompanyType),
-			Name: &apicommon.MultilingualText{"default": "Acme Corp"},
+		// send a raw JSON string for name to exercise the plain-string input path
+		body := map[string]any{
+			"type": string(db.CompanyType),
+			"name": "Acme Corp",
 		}
 		resp, code := testRequest(t, http.MethodPost, token, body, organizationsEndpoint)
 		c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
