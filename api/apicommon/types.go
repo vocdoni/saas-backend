@@ -89,10 +89,11 @@ func OrgDisplayName(meta map[string]any, fallback string) string {
 }
 
 // BuildOrgMeta merges the convenience name/logo/description fields with an explicit meta
-// map. The explicit meta keys take precedence: if both name and meta["name"] are set,
-// meta["name"] wins.
-func BuildOrgMeta(name, logo, description *MultilingualText, explicit map[string]any) map[string]any {
-	meta := make(map[string]any)
+// map on top of base (nil starts from an empty map). Precedence, lowest to highest:
+// base keys → shorthand fields → explicit meta keys.
+func BuildOrgMeta(base map[string]any, name, logo, description *MultilingualText, explicit map[string]any) map[string]any {
+	meta := make(map[string]any, len(base))
+	maps.Copy(meta, base)
 	if name != nil {
 		meta["name"] = *name
 	}

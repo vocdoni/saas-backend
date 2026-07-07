@@ -56,33 +56,39 @@ func TestBuildOrgMeta(t *testing.T) {
 	desc := MultilingualText{"default": "We make things"}
 
 	// only name
-	m := BuildOrgMeta(&name, nil, nil, nil)
+	m := BuildOrgMeta(nil, &name, nil, nil, nil)
 	c.Assert(m["name"], qt.DeepEquals, MultilingualText{"default": "Acme"})
 	_, hasLogo := m["logo"]
 	c.Assert(hasLogo, qt.IsFalse)
 
 	// all three fields
-	m = BuildOrgMeta(&name, &logo, &desc, nil)
+	m = BuildOrgMeta(nil, &name, &logo, &desc, nil)
 	c.Assert(m["name"], qt.DeepEquals, MultilingualText{"default": "Acme"})
 	c.Assert(m["logo"], qt.DeepEquals, MultilingualText{"default": "https://acme.com/logo.png"})
 	c.Assert(m["description"], qt.DeepEquals, MultilingualText{"default": "We make things"})
 
 	// explicit meta wins over shorthand
 	explicit := map[string]any{"name": MultilingualText{"default": "Override"}, "extra": "val"}
-	m = BuildOrgMeta(&name, nil, nil, explicit)
+	m = BuildOrgMeta(nil, &name, nil, nil, explicit)
 	c.Assert(m["name"], qt.DeepEquals, MultilingualText{"default": "Override"})
 	c.Assert(m["extra"], qt.Equals, "val")
 
 	// only explicit meta, no shorthand
-	m = BuildOrgMeta(nil, nil, nil, map[string]any{"foo": "bar"})
+	m = BuildOrgMeta(nil, nil, nil, nil, map[string]any{"foo": "bar"})
 	c.Assert(m["foo"], qt.Equals, "bar")
 	_, hasName := m["name"]
 	c.Assert(hasName, qt.IsFalse)
 
 	// all nil → empty map (not nil)
-	m = BuildOrgMeta(nil, nil, nil, nil)
+	m = BuildOrgMeta(nil, nil, nil, nil, nil)
 	c.Assert(m, qt.IsNotNil)
 	c.Assert(m, qt.HasLen, 0)
+
+	// base keys are preserved and shorthands override them; explicit wins last
+	base := map[string]any{"name": MultilingualText{"default": "Old"}, "keep": "me"}
+	m = BuildOrgMeta(base, &name, nil, nil, nil)
+	c.Assert(m["name"], qt.DeepEquals, MultilingualText{"default": "Acme"})
+	c.Assert(m["keep"], qt.Equals, "me")
 }
 
 func TestMultilingualFromAny(t *testing.T) {

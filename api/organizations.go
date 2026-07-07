@@ -145,7 +145,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		Timezone:        orgInfo.Timezone,
 		Active:          true,
 		Communications:  orgInfo.Communications,
-		Meta:            apicommon.BuildOrgMeta(orgInfo.Name, orgInfo.Logo, orgInfo.Description, orgInfo.Meta),
+		Meta:            apicommon.BuildOrgMeta(nil, orgInfo.Name, orgInfo.Logo, orgInfo.Description, orgInfo.Meta),
 		TokensPurchased: 0,
 		TokensRemaining: 0,
 		Parent:          parentOrg,
@@ -284,6 +284,10 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	if newOrgInfo.Active != org.Active {
 		org.Active = newOrgInfo.Active
+		updateOrg = true
+	}
+	if newOrgInfo.Name != nil || newOrgInfo.Logo != nil || newOrgInfo.Description != nil || len(newOrgInfo.Meta) > 0 {
+		org.Meta = apicommon.BuildOrgMeta(org.Meta, newOrgInfo.Name, newOrgInfo.Logo, newOrgInfo.Description, newOrgInfo.Meta)
 		updateOrg = true
 	}
 	// update the organization if any field was changed
