@@ -578,13 +578,14 @@ func OrganizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 	}
 	details := SubscriptionDetailsFromDB(&dbOrg.Subscription)
 	usage := SubscriptionUsageFromDB(&dbOrg.Counters)
-	// normalize a nil Meta to an empty map so responses are consistent: the DB
-	// read path already does this, but dbOrg may be built in-memory (e.g. at
-	// creation) where Meta is nil, which would otherwise emit "meta": null.
-	meta := dbOrg.Meta
-	if meta == nil {
-		meta = make(map[string]any)
-	}
+	// copy dbOrg.Meta into a fresh map: we normalize legacy string values below
+	// and must not mutate the db model in-place, since callers don't expect this
+	// read/convert helper to have side effects. A nil Meta is normalized to an
+	// empty map so responses are consistent: the DB read path already does this,
+	// but dbOrg may be built in-memory (e.g. at creation) where Meta is nil,
+	// which would otherwise emit "meta": null.
+	meta := make(map[string]any, len(dbOrg.Meta))
+	maps.Copy(meta, dbOrg.Meta)
 	// Upgrade any plain-string values for the well-known keys to the object
 	// form so that meta.name and the top-level name field always agree.
 	for _, key := range []string{"name", "logo", "description"} {
