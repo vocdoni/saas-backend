@@ -166,7 +166,7 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		Timezone:       req.Timezone,
 		Active:         true,
 		Communications: req.Communications,
-		Meta:           req.Meta,
+		Meta:           apicommon.BuildOrgMeta(nil, req.Name, req.Logo, req.Description, req.Meta),
 		ManagedBy:      integratorAddr,
 		Subscription: db.OrganizationSubscription{
 			PlanID:    defaultPlan.ID,
@@ -189,7 +189,7 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 	// row. CreateOrgAccount is idempotent and the address derives from the signer, so a
 	// failure here leaves nothing to clean up and the request can be retried safely.
 	infoURI := fmt.Sprintf("%s/organizations/%s", a.serverURL, dbOrg.Address.String())
-	if err := a.account.CreateOrgAccount(signer, dbOrg.Address.String(), infoURI); err != nil {
+	if err := a.account.CreateOrgAccount(signer, apicommon.OrgDisplayName(dbOrg.Meta, dbOrg.Address.String()), infoURI); err != nil {
 		a.releaseManagedOrgSlot(integratorAddr)
 		errors.ErrGenericInternalServerError.Withf("could not provision managed organization account: %v", err).Write(w)
 		return

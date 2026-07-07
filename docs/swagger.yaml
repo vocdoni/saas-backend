@@ -237,6 +237,11 @@ definitions:
       createdAt:
         description: Creation timestamp in RFC3339 format
         type: string
+      description:
+        allOf:
+        - $ref: '#/definitions/apicommon.MultilingualText'
+        description: Description is a shorthand for meta["description"]. Same encoding
+          rules as Name.
       integrator:
         description: |-
           Whether to subscribe the new organization to the free integrator plan at
@@ -244,6 +249,11 @@ definitions:
           becomes an integrator on the free tier with no checkout. Default false uses
           the regular default plan.
         type: boolean
+      logo:
+        allOf:
+        - $ref: '#/definitions/apicommon.MultilingualText'
+        description: Logo is a shorthand for meta["logo"]. Same encoding rules as
+          Name.
       managedBy:
         description: |-
           Integrator organization that manages this org, when it was created through
@@ -261,6 +271,14 @@ definitions:
         additionalProperties: {}
         description: Arbitrary key value fields with metadata regarding the organization
         type: object
+      name:
+        allOf:
+        - $ref: '#/definitions/apicommon.MultilingualText'
+        description: |-
+          Name is a shorthand for meta["name"]. On write accepts a plain string
+          (stored as {"default": "<string>"}) or a locale map; on read it mirrors
+          whatever is stored in meta["name"]. If both Name and meta["name"] are
+          provided on a create request, meta["name"] takes precedence.
       ownerEmail:
         description: OwnerEmail optionally assigns an existing user as the managed
           org's creator/admin.
@@ -333,6 +351,11 @@ definitions:
       createdAt:
         description: Creation timestamp in RFC3339 format
         type: string
+      description:
+        allOf:
+        - $ref: '#/definitions/apicommon.MultilingualText'
+        description: Description is a shorthand for meta["description"]. Same encoding
+          rules as Name.
       integrator:
         description: |-
           Whether to subscribe the new organization to the free integrator plan at
@@ -340,6 +363,11 @@ definitions:
           becomes an integrator on the free tier with no checkout. Default false uses
           the regular default plan.
         type: boolean
+      logo:
+        allOf:
+        - $ref: '#/definitions/apicommon.MultilingualText'
+        description: Logo is a shorthand for meta["logo"]. Same encoding rules as
+          Name.
       managedBy:
         description: |-
           Integrator organization that manages this org, when it was created through
@@ -357,6 +385,14 @@ definitions:
         additionalProperties: {}
         description: Arbitrary key value fields with metadata regarding the organization
         type: object
+      name:
+        allOf:
+        - $ref: '#/definitions/apicommon.MultilingualText'
+        description: |-
+          Name is a shorthand for meta["name"]. On write accepts a plain string
+          (stored as {"default": "<string>"}) or a locale map; on read it mirrors
+          whatever is stored in meta["name"]. If both Name and meta["name"] are
+          provided on a create request, meta["name"] takes precedence.
       parent:
         allOf:
         - $ref: '#/definitions/apicommon.OrganizationInfo'
@@ -651,6 +687,10 @@ definitions:
         format: hex
         type: string
     type: object
+  apicommon.MultilingualText:
+    additionalProperties:
+      type: string
+    type: object
   apicommon.OAuthLinkRequest:
     properties:
       address:
@@ -851,6 +891,11 @@ definitions:
       createdAt:
         description: Creation timestamp in RFC3339 format
         type: string
+      description:
+        allOf:
+        - $ref: '#/definitions/apicommon.MultilingualText'
+        description: Description is a shorthand for meta["description"]. Same encoding
+          rules as Name.
       integrator:
         description: |-
           Whether to subscribe the new organization to the free integrator plan at
@@ -858,6 +903,11 @@ definitions:
           becomes an integrator on the free tier with no checkout. Default false uses
           the regular default plan.
         type: boolean
+      logo:
+        allOf:
+        - $ref: '#/definitions/apicommon.MultilingualText'
+        description: Logo is a shorthand for meta["logo"]. Same encoding rules as
+          Name.
       managedBy:
         description: |-
           Integrator organization that manages this org, when it was created through
@@ -875,6 +925,14 @@ definitions:
         additionalProperties: {}
         description: Arbitrary key value fields with metadata regarding the organization
         type: object
+      name:
+        allOf:
+        - $ref: '#/definitions/apicommon.MultilingualText'
+        description: |-
+          Name is a shorthand for meta["name"]. On write accepts a plain string
+          (stored as {"default": "<string>"}) or a locale map; on read it mirrors
+          whatever is stored in meta["name"]. If both Name and meta["name"] are
+          provided on a create request, meta["name"] takes precedence.
       parent:
         allOf:
         - $ref: '#/definitions/apicommon.OrganizationInfo'
