@@ -359,19 +359,14 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	defer testDB.Close()
-	// start the voconed container
-	apiContainer, err := test.StartVoconedContainer(ctx)
-	if err != nil {
-		panic(err)
-	}
-	defer func() { _ = apiContainer.Terminate(ctx) }()
-	// get the API endpoint
-	apiEndpoint, err := apiContainer.Endpoint(ctx, "http")
+	// start an in-process voconed chain (built from the pinned dvote dep, so it always
+	// includes the batch-transaction endpoint the /processes publish path relies on)
+	voconed, err := test.SharedVoconed()
 	if err != nil {
 		panic(err)
 	}
 	// set the test API endpoint global variable
-	testAPIEndpoint = test.VoconedAPIURL(apiEndpoint)
+	testAPIEndpoint = voconed.Endpoint
 	// start test mail server
 	testMailServer, err := test.StartMailService(ctx)
 	if err != nil {
