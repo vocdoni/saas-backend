@@ -541,6 +541,51 @@ func TestManagedOrgMissingIntegratorFailsClosed(t *testing.T) {
 	c.Assert(subs.OrgCanAddNMembers(managedAddr, 1), qt.ErrorIs, errors.ErrOrganizationNotFound)
 }
 
+func TestOrgCanCreateVotingProcessDraft(t *testing.T) {
+	c := qt.New(t)
+	addr := common.Address{0x01}
+	const planID = "plan-drafts"
+	mockDB := &mockMongoStorage{
+		plans: map[string]*db.Plan{planID: {ID: planID, Organization: db.PlanLimits{MaxDrafts: 2}}},
+		orgs: map[string]*db.Organization{addr.String(): {
+			Address:      addr,
+			Subscription: db.OrganizationSubscription{PlanID: planID, Active: true},
+		}},
+		votingDraftCounts: map[string]int64{},
+	}
+	subs := &Subscriptions{db: mockDB}
+
+	// under the limit is allowed
+	mockDB.votingDraftCounts[addr.String()] = 1
+	c.Assert(subs.OrgCanCreateVotingProcessDraft(addr), qt.IsNil)
+	// at the limit is rejected
+	mockDB.votingDraftCounts[addr.String()] = 2
+	c.Assert(subs.OrgCanCreateVotingProcessDraft(addr), qt.ErrorIs, errors.ErrMaxDraftsReached)
+}
+
+func TestOrgAllowsVotingType(t *testing.T) {
+	c := qt.New(t)
+	addr := common.Address{0x02}
+	const planID = "plan-types"
+	mockDB := &mockMongoStorage{
+		plans: map[string]*db.Plan{planID: {
+			ID:          planID,
+			VotingTypes: db.VotingTypes{Single: true, Multiple: false},
+		}},
+		orgs: map[string]*db.Organization{addr.String(): {
+			Address:      addr,
+			Subscription: db.OrganizationSubscription{PlanID: planID, Active: true},
+		}},
+	}
+	subs := &Subscriptions{db: mockDB}
+
+	c.Assert(subs.OrgAllowsVotingType(addr, db.VotingTypeSingleChoice), qt.IsNil) // allowed
+	c.Assert(subs.OrgAllowsVotingType(addr, ""), qt.IsNil)                        // empty (ballotProtocol) skips
+	c.Assert(subs.OrgAllowsVotingType(addr, db.VotingTypeMultiChoice),            // plan disallows
+		qt.ErrorIs, errors.ErrVotingTypeNotAllowed)
+	c.Assert(subs.OrgAllowsVotingType(addr, "quadratic"), qt.ErrorIs, errors.ErrInvalidData) // unknown
+}
+
 // Mock implementation of the necessary db.MongoStorage methods for testing
 type mockMongoStorage struct {
 	plans map[string]*db.Plan
@@ -557,6 +602,8 @@ type mockMongoStorage struct {
 	groups map[string]*db.OrganizationMemberGroup
 	// keyed by orgAddress string; draft process count
 	draftCounts map[string]int64
+	// keyed by orgAddress string; draft voting-process count
+	votingDraftCounts map[string]int64
 }
 
 func (m *mockMongoStorage) Plan(id string) (*db.Plan, error) {
@@ -619,6 +666,10 @@ func (*mockMongoStorage) CountCensusParticipants(string) (int64, error) {
 
 func (m *mockMongoStorage) CountProcesses(addr common.Address, _ db.DraftFilter) (int64, error) {
 	return m.draftCounts[addr.String()], nil
+}
+
+func (m *mockMongoStorage) CountVotingProcesses(addr common.Address, _ db.DraftFilter) (int64, error) {
+	return m.votingDraftCounts[addr.String()], nil
 }
 
 func (m *mockMongoStorage) OrganizationMemberGroup(groupID string, _ common.Address) (*db.OrganizationMemberGroup, error) {

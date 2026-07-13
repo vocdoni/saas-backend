@@ -67,6 +67,7 @@ type DBInterface interface {
 	SumSentSMSManagedBy(integratorAddr common.Address) (int, error)
 	SumSentVotesManagedBy(integratorAddr common.Address) (int, error)
 	CountProcesses(orgAddress common.Address, draft db.DraftFilter) (int64, error)
+	CountVotingProcesses(orgAddress common.Address, draft db.DraftFilter) (int64, error)
 	OrganizationMemberGroup(groupID string, orgAddress common.Address) (*db.OrganizationMemberGroup, error)
 }
 
@@ -293,6 +294,60 @@ func (p *Subscriptions) OrgHasPermission(orgAddress common.Address, permission D
 	}
 }
 
+// OrgCanCreateVotingProcessDraft checks that the organization is under its MaxDrafts plan
+// limit for the new /processes collection. It mirrors OrgHasPermission(CreateDraft) but
+// counts votingProcesses drafts (the two collections have independent counts). MaxDrafts
+// comes from the integrator's plan for a managed org; the draft count stays per-org.
+func (p *Subscriptions) OrgCanCreateVotingProcessDraft(orgAddress common.Address) error {
+	org, err := p.db.Organization(orgAddress)
+	if err != nil {
+		return errors.ErrOrganizationNotFound.WithErr(err)
+	}
+	_, plan, err := p.limitsOwner(org)
+	if err != nil {
+		return err
+	}
+	count, err := p.db.CountVotingProcesses(orgAddress, db.DraftOnly)
+	if err != nil {
+		return errors.ErrGenericInternalServerError.WithErr(err)
+	}
+	if count >= int64(plan.Organization.MaxDrafts) {
+		return errors.ErrMaxDraftsReached.Withf("(%d)", plan.Organization.MaxDrafts)
+	}
+	return nil
+}
+
+// OrgAllowsVotingType checks that the organization's plan permits the given question ballot
+// type. It maps the friendly type to the plan's VotingTypes feature flags. An empty type is
+// allowed (it is validated elsewhere); a raw ballotProtocol override skips this check by
+// passing an empty voteType. Weighted elections stay gated separately via CostFromWeight in
+// hasElectionMetadataPermissions.
+func (p *Subscriptions) OrgAllowsVotingType(orgAddress common.Address, voteType string) error {
+	if voteType == "" {
+		return nil
+	}
+	org, err := p.db.Organization(orgAddress)
+	if err != nil {
+		return errors.ErrOrganizationNotFound.WithErr(err)
+	}
+	_, plan, err := p.limitsOwner(org)
+	if err != nil {
+		return err
+	}
+	allowed := map[string]bool{
+		db.VotingTypeSingleChoice: plan.VotingTypes.Single,
+		db.VotingTypeMultiChoice:  plan.VotingTypes.Multiple,
+	}
+	ok, known := allowed[voteType]
+	if !known {
+		return errors.ErrInvalidData.Withf("unknown voting type %q", voteType)
+	}
+	if !ok {
+		return errors.ErrVotingTypeNotAllowed.Withf("(%s)", voteType)
+	}
+	return nil
+}
+
 func (p *Subscriptions) OrgCanAddNMembers(orgAddress common.Address, memberNumber int) error {
 	org, err := p.db.Organization(orgAddress)
 	if err != nil {
@@ -327,17 +382,10 @@ func (p *Subscriptions) OrgCanPublishGroupCensus(census *db.Census, groupID stri
 	if err != nil {
 		return errors.ErrOrganizationNotFound.WithErr(err)
 	}
-
-	owner, plan, err := p.limitsOwner(org)
-	if err != nil {
-		return err
-	}
-
 	group, err := p.db.OrganizationMemberGroup(groupID, org.Address)
 	if err != nil {
 		return errors.ErrGroupNotFound.WithErr(err)
 	}
-
 	memberCount := len(group.MemberIDs)
 	if group.IsAutoGroup {
 		count, err := p.db.CountOrgMembers(org.Address)
@@ -345,6 +393,25 @@ func (p *Subscriptions) OrgCanPublishGroupCensus(census *db.Census, groupID stri
 			return errors.ErrGenericInternalServerError.WithErr(err)
 		}
 		memberCount = int(count)
+	}
+	// a legacy group census is a single election: one notification and one vote per member.
+	return p.OrgCanPublishCensus(census, memberCount, memberCount)
+}
+
+// OrgCanPublishCensus enforces the org's remaining email/SMS/vote allowance. notifyCount is how
+// many members would be notified (one 2FA challenge per voter), voteCount is how many votes would
+// be cast (a multi-question /processes publishes N elections, so each voter can cast N ballots →
+// voteCount = members × N while notifyCount stays members). It is the shared core of
+// OrgCanPublishGroupCensus (legacy: notify == vote) and the inline /processes publish. For a
+// managed org the allowance is the integrator's shared pool; for a standalone org its own counter.
+func (p *Subscriptions) OrgCanPublishCensus(census *db.Census, notifyCount, voteCount int) error {
+	org, err := p.db.Organization(census.OrgAddress)
+	if err != nil {
+		return errors.ErrOrganizationNotFound.WithErr(err)
+	}
+	owner, plan, err := p.limitsOwner(org)
+	if err != nil {
+		return err
 	}
 
 	// Only check (and, for managed orgs, aggregate) the 2FA channels the census actually
@@ -357,7 +424,7 @@ func (p *Subscriptions) OrgCanPublishGroupCensus(census *db.Census, groupID stri
 				return errors.ErrGenericInternalServerError.WithErr(err)
 			}
 		}
-		if remainingEmails := max(0, plan.Features.TwoFaEmail-sentEmails); memberCount > remainingEmails {
+		if remainingEmails := max(0, plan.Features.TwoFaEmail-sentEmails); notifyCount > remainingEmails {
 			return errors.ErrProcessCensusSizeExceedsEmailAllowance.Withf("remaining emails: %d", remainingEmails)
 		}
 	}
@@ -369,7 +436,7 @@ func (p *Subscriptions) OrgCanPublishGroupCensus(census *db.Census, groupID stri
 				return errors.ErrGenericInternalServerError.WithErr(err)
 			}
 		}
-		if remainingSMS := max(0, plan.Features.TwoFaSms-sentSMS); memberCount > remainingSMS {
+		if remainingSMS := max(0, plan.Features.TwoFaSms-sentSMS); notifyCount > remainingSMS {
 			return errors.ErrProcessCensusSizeExceedsSMSAllowance.Withf("remaining sms: %d", remainingSMS)
 		}
 	}
@@ -385,11 +452,60 @@ func (p *Subscriptions) OrgCanPublishGroupCensus(census *db.Census, groupID stri
 				return errors.ErrGenericInternalServerError.WithErr(err)
 			}
 		}
-		if remainingVotes := max(0, plan.Organization.MaxVotes-sentVotes); memberCount > remainingVotes {
+		if remainingVotes := max(0, plan.Organization.MaxVotes-sentVotes); voteCount > remainingVotes {
 			return errors.ErrProcessCensusSizeExceedsVoteAllowance.Withf("remaining votes: %d", remainingVotes)
 		}
 	}
 
+	return nil
+}
+
+// OrgCanPublishProcess enforces the synchronous plan denials for publishing one election —
+// census size vs plan MaxCensus, per-org MaxProcesses count (non-managed), weighted allowance
+// and duration — mirroring the NEW_PROCESS checks in HasTxPermission so the /processes publish
+// path can surface them synchronously (as a 400 and in the dry-run) instead of as an opaque
+// async job failure. The authoritative enforcement remains HasTxPermission at build time; this
+// is an early, predictable subset. Anonymous/vote-overwrite are not used by the /processes flow.
+// Admin role is verified by the caller.
+//
+//nolint:revive // weighted is an election attribute being validated, not a control flag
+func (p *Subscriptions) OrgCanPublishProcess(
+	org *db.Organization, maxCensusSize uint64, durationSeconds uint32, weighted bool,
+) error {
+	_, plan, err := p.limitsOwner(org)
+	if err != nil {
+		return err
+	}
+	if maxCensusSize > uint64(plan.Organization.MaxCensus) {
+		return errors.ErrProcessCensusSizeExceedsPlanLimit.Withf("plan max census: %d", plan.Organization.MaxCensus)
+	}
+	// The per-org process-count limit is enforced for standalone orgs; managed orgs draw on the
+	// integrator's aggregate quota (see CanReserveManagedPublish). Test-sized elections are exempt.
+	if !managed(org) && org.Counters.Processes >= plan.Organization.MaxProcesses &&
+		maxCensusSize > uint64(db.TestMaxCensusSize) {
+		return errors.ErrMaxProcessesReached
+	}
+	if weighted && !plan.VotingTypes.Weighted {
+		return errors.ErrInvalidData.With("weighted elections are not allowed by the plan")
+	}
+	maxDuration := uint32(plan.Organization.MaxDuration * 24 * 60 * 60)
+	if durationSeconds > maxDuration {
+		return errors.ErrInvalidData.Withf("process duration exceeds the plan limit of %d days", plan.Organization.MaxDuration)
+	}
+	return nil
+}
+
+// CanReserveManagedPublish reports whether the integrator has remaining managed-process quota,
+// WITHOUT reserving it — the read-only counterpart of db.ReserveManagedPublish, for the publish
+// dry-run.
+func (p *Subscriptions) CanReserveManagedPublish(integrator *db.Organization) error {
+	maxProcesses, err := p.ManagedPublishLimits(integrator)
+	if err != nil {
+		return err
+	}
+	if integrator.Counters.ManagedProcesses >= maxProcesses {
+		return errors.ErrIntegratorQuotaExceeded
+	}
 	return nil
 }
 
