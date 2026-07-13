@@ -1,0 +1,365 @@
+package handlers
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"math/big"
+	"net/http"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/go-chi/chi/v5"
+	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/csp"
+	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/internal"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+)
+
+// parseProcessID parses the {processId} URL param (a voting-process Mongo ObjectID) and
+// returns both the ObjectID and its bytes, which are used as the CSP token anchor.
+func parseProcessID(w http.ResponseWriter, r *http.Request) (primitive.ObjectID, internal.HexBytes, bool) {
+	oid, err := primitive.ObjectIDFromHex(chi.URLParam(r, "processId"))
+	if err != nil {
+		errors.ErrMalformedURLParam.Withf("invalid process ID").Write(w)
+		return primitive.NilObjectID, nil, false
+	}
+	return oid, internal.HexBytes(oid[:]), true
+}
+
+// getVotingProcess loads a voting process by id, writing the proper error on failure.
+func (c *CSPHandlers) getVotingProcess(w http.ResponseWriter, oid primitive.ObjectID) (*db.VotingProcess, bool) {
+	vp, err := c.mainDB.VotingProcess(oid)
+	if err != nil {
+		if err == db.ErrNotFound {
+			errors.ErrMalformedURLParam.Withf("process not found").Write(w)
+			return nil, false
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return nil, false
+	}
+	return vp, true
+}
+
+// memberEligibleForQuestion reports whether a member may sign a question. An empty
+// eligibility subset means every census member is eligible.
+func memberEligibleForQuestion(q *db.VotingProcessQuestion, memberID string) bool {
+	if len(q.EligibleMemberIDs) == 0 {
+		return true
+	}
+	for _, id := range q.EligibleMemberIDs {
+		if id == memberID {
+			return true
+		}
+	}
+	return false
+}
+
+// ProcessAuthHandler handles voter authentication for a voting process. It mirrors the
+// bundle auth flow (identity + optional 2FA against the process census) but anchors the
+// issued token to the process id instead of a bundle id.
+func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request) {
+	oid, anchor, ok := parseProcessID(w, r)
+	if !ok {
+		return
+	}
+	step, ok := parseAuthStep(w, r)
+	if !ok {
+		return
+	}
+	vp, ok := c.getVotingProcess(w, oid)
+	if !ok {
+		return
+	}
+	c.handleAuthStep(w, r, step, anchor, vp.CensusID.Hex())
+}
+
+// ProcessAuthResendHandler resends the OTP challenge for a non-verified process auth token.
+func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Request) {
+	oid, anchor, ok := parseProcessID(w, r)
+	if !ok {
+		return
+	}
+	vp, ok := c.getVotingProcess(w, oid)
+	if !ok {
+		return
+	}
+	var req AuthResendRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	if len(req.AuthToken) == 0 {
+		errors.ErrInvalidData.Withf("missing auth token").Write(w)
+		return
+	}
+	auth, ok := c.getAuthInfo(w, req.AuthToken)
+	if !ok {
+		return
+	}
+	if !bytes.Equal(anchor, auth.BundleID) {
+		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
+		return
+	}
+	census, err := c.mainDB.Census(vp.CensusID.Hex())
+	if err != nil {
+		errors.ErrCensusNotFound.WithErr(err).Write(w)
+		return
+	}
+	org, err := c.mainDB.Organization(vp.OrgAddress)
+	if err != nil {
+		errors.ErrOrganizationNotFound.WithErr(err).Write(w)
+		return
+	}
+	member, ok := c.orgMemberFromAuth(w, vp.OrgAddress, auth)
+	if !ok {
+		return
+	}
+	lang := apicommon.DefaultLang
+	if l, ok := r.Context().Value(apicommon.LangMetadataKey).(string); ok && l != "" {
+		lang = l
+	}
+	toDestination, challengeType, err := determineContactMethod(
+		census, org, &AuthRequest{Email: req.Email, Phone: req.Phone}, member,
+	)
+	if err != nil {
+		if apiErr, ok := err.(errors.Error); ok {
+			apiErr.Write(w)
+		} else {
+			errors.ErrUnauthorized.WithErr(err).Write(w)
+		}
+		return
+	}
+	name, logo := orgNameAndLogo(org)
+	if err := c.csp.ResendChallenge(req.AuthToken, toDestination, challengeType, lang, name, logo, org.Address); err != nil {
+		writeResendError(w, err)
+		return
+	}
+	apicommon.HTTPWriteJSON(w, &AuthResponse{AuthToken: req.AuthToken})
+}
+
+// ProcessSignHandler signs a voter's ballot for one question's election. It requires a
+// verified token bound to the process, authorizes the member against the question's
+// eligibility subset, and consumes the per-election signing slot.
+func (c *CSPHandlers) ProcessSignHandler(w http.ResponseWriter, r *http.Request) {
+	oid, anchor, ok := parseProcessID(w, r)
+	if !ok {
+		return
+	}
+	vp, ok := c.getVotingProcess(w, oid)
+	if !ok {
+		return
+	}
+	req, ok := parseSignRequest(w, r)
+	if !ok {
+		return
+	}
+	auth, ok := c.getAuthInfo(w, req.AuthToken)
+	if !ok {
+		return
+	}
+	if !auth.Verified {
+		errors.ErrUnauthorized.WithErr(csp.ErrAuthTokenNotVerified).Write(w)
+		return
+	}
+	if !bytes.Equal(anchor, auth.BundleID) {
+		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
+		return
+	}
+	// resolve the target question by its on-chain election id and verify it belongs to
+	// this process
+	question, err := c.mainDB.QuestionByUpstreamID(req.ProcessID)
+	if err != nil && err != db.ErrNotFound {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if err != nil || question.ProcessID != oid {
+		errors.ErrUnauthorized.Withf("election not found in process").Write(w)
+		return
+	}
+	// authorize the member against the question's eligibility subset
+	if !memberEligibleForQuestion(question, auth.UserID.String()) {
+		errors.ErrUnauthorized.Withf("member not eligible for this question").Write(w)
+		return
+	}
+	member, ok := c.orgMemberFromAuth(w, vp.OrgAddress, auth)
+	if !ok {
+		return
+	}
+	census, err := c.mainDB.Census(vp.CensusID.Hex())
+	if err != nil {
+		errors.ErrCensusNotFound.WithErr(err).Write(w)
+		return
+	}
+	weight := uint64(1)
+	if census.Weighted {
+		if member.Weight == 0 {
+			errors.ErrZeroWeightVoter.Write(w)
+			return
+		}
+		weight = member.Weight
+	}
+	address, ok := parseAddress(w, req.Payload)
+	if !ok {
+		return
+	}
+	c.signAndRespond(w, req.AuthToken, *address, question.UpstreamID, big.NewInt(int64(weight)).Bytes())
+}
+
+// ProcessWeightHandler returns the voter weight for a process (verified token required).
+func (c *CSPHandlers) ProcessWeightHandler(w http.ResponseWriter, r *http.Request) {
+	oid, anchor, ok := parseProcessID(w, r)
+	if !ok {
+		return
+	}
+	vp, ok := c.getVotingProcess(w, oid)
+	if !ok {
+		return
+	}
+	var req UserWeightRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	auth, ok := c.getAuthInfo(w, req.AuthToken)
+	if !ok {
+		return
+	}
+	if !bytes.Equal(anchor, auth.BundleID) {
+		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
+		return
+	}
+	if !auth.Verified {
+		errors.ErrUnauthorized.WithErr(csp.ErrAuthTokenNotVerified).Write(w)
+		return
+	}
+	member, ok := c.orgMemberFromAuth(w, vp.OrgAddress, auth)
+	if !ok {
+		return
+	}
+	census, err := c.mainDB.Census(vp.CensusID.Hex())
+	if err != nil {
+		errors.ErrCensusNotFound.WithErr(err).Write(w)
+		return
+	}
+	weight := uint64(1)
+	if census.Weighted {
+		weight = member.Weight
+	}
+	apicommon.HTTPWriteJSON(w, &UserWeightResponse{Weight: internal.HexBytes(big.NewInt(int64(weight)).Bytes())})
+}
+
+// ProcessCheckHandler returns the voter's status for a process: census membership, weight,
+// and per-question eligibility and vote status. Identified solely by the auth token.
+func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request) {
+	oid, anchor, ok := parseProcessID(w, r)
+	if !ok {
+		return
+	}
+	vp, ok := c.getVotingProcess(w, oid)
+	if !ok {
+		return
+	}
+	var req CheckMembershipRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	auth, ok := c.getAuthInfo(w, req.AuthToken)
+	if !ok {
+		return
+	}
+	if !bytes.Equal(anchor, auth.BundleID) {
+		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
+		return
+	}
+	memberID := auth.UserID.String()
+	resp := &ProcessCheckResponse{}
+	if _, err := c.mainDB.CensusParticipant(vp.CensusID.Hex(), memberID); err == nil {
+		resp.BelongsToProcess = true
+	} else if err != db.ErrNotFound {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if member, err := c.orgMember(vp.OrgAddress, auth); err == nil {
+		census, cErr := c.mainDB.Census(vp.CensusID.Hex())
+		weight := uint64(1)
+		if cErr == nil && census.Weighted {
+			weight = member.Weight
+		}
+		resp.Weight = internal.HexBytes(big.NewInt(int64(weight)).Bytes())
+	}
+	questions, err := c.mainDB.QuestionsByProcess(oid)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	for i := range questions {
+		q := &questions[i]
+		status := ProcessQuestionStatus{
+			QuestionID: q.ID.Hex(),
+			UpstreamID: q.UpstreamID,
+			// a voter can only vote a question if they are a participant of the process
+			// census AND fall within the question's eligibility subset
+			CanVote: resp.BelongsToProcess && memberEligibleForQuestion(q, memberID),
+		}
+		if len(q.UpstreamID) > 0 {
+			if cspProc, err := c.mainDB.CSPProcessByUserAndProcess(auth.UserID, q.UpstreamID); err == nil {
+				status.HasVoted = cspProc.Used
+			}
+		}
+		resp.Questions = append(resp.Questions, status)
+	}
+	apicommon.HTTPWriteJSON(w, resp)
+}
+
+// orgMemberFromAuth resolves the org member referenced by an auth token, writing the
+// proper error on failure.
+func (c *CSPHandlers) orgMemberFromAuth(
+	w http.ResponseWriter, orgAddress common.Address, auth *db.CSPAuth,
+) (*db.OrgMember, bool) {
+	member, err := c.orgMember(orgAddress, auth)
+	if err != nil {
+		errors.ErrUserNotFound.WithErr(err).Write(w)
+		return nil, false
+	}
+	return member, true
+}
+
+// orgMember resolves the org member referenced by an auth token (member ObjectID hex).
+func (c *CSPHandlers) orgMember(orgAddress common.Address, auth *db.CSPAuth) (*db.OrgMember, error) {
+	oid, err := primitive.ObjectIDFromHex(auth.UserID.String())
+	if err != nil {
+		return nil, fmt.Errorf("invalid user ID in token: %w", err)
+	}
+	return c.mainDB.OrgMember(orgAddress, oid.Hex())
+}
+
+// orgNameAndLogo returns the organization display name and logo, falling back to defaults.
+func orgNameAndLogo(org *db.Organization) (name, logo string) {
+	name, logo = DefaultOrgName, DefaultOrgLogo
+	if n, ok := org.Meta["name"].(string); ok {
+		name = n
+		if l, ok := org.Meta["logo"].(string); ok {
+			logo = l
+		}
+	}
+	return name, logo
+}
+
+// writeResendError maps a ResendChallenge error to the proper HTTP error.
+func writeResendError(w http.ResponseWriter, err error) {
+	if apiErr, ok := err.(errors.Error); ok {
+		apiErr.Write(w)
+		return
+	}
+	switch err {
+	case csp.ErrInvalidAuthToken, csp.ErrTokenExpired:
+		errors.ErrUnauthorized.WithErr(err).Write(w)
+	case csp.ErrStorageFailure:
+		errors.ErrInternalStorageError.WithErr(err).Write(w)
+	default:
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+	}
+}
