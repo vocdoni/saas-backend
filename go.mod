@@ -1,12 +1,10 @@
 module github.com/vocdoni/saas-backend
 
-go 1.24.0
-
-toolchain go1.24.1
+go 1.26.1
 
 require (
 	github.com/docker/docker v28.5.1+incompatible
-	github.com/docker/go-connections v0.6.0
+	github.com/docker/go-connections v0.6.0 // indirect
 	github.com/enriquebris/goconcurrentqueue v0.7.0
 	github.com/ethereum/go-ethereum v1.14.7
 	github.com/frankban/quicktest v1.14.6
@@ -22,7 +20,7 @@ require (
 	github.com/twilio/twilio-go v1.23.0
 	github.com/xlzd/gotp v0.1.0
 	go.mongodb.org/mongo-driver v1.14.0
-	go.vocdoni.io/dvote v1.10.2-0.20250311164310-73bb2cd4fa42
+	go.vocdoni.io/dvote v1.10.2-0.20260709120003-13252f57320c
 	go.vocdoni.io/proto v1.15.12
 	golang.org/x/crypto v0.43.0
 	google.golang.org/protobuf v1.36.4
@@ -35,6 +33,7 @@ require (
 )
 
 require (
+	git.sr.ht/~sircmpwn/go-bare v0.0.0-20210406120253-ab86bc2846d9 // indirect
 	github.com/containerd/continuity v0.4.2 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
