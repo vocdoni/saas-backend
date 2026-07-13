@@ -286,6 +286,61 @@ func TestResetPasswordWrongCodeRejected(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 }
 
+// TestResetPasswordBruteForceLockout verifies the password-reset code is locked after a bounded
+// number of wrong guesses, so the short OTP cannot be brute-forced online: repeated wrong codes
+// are rejected and, once the per-code attempt cap is reached, even the CORRECT code is refused
+// and the account password is left unchanged.
+func TestResetPasswordBruteForceLockout(t *testing.T) {
+	c := qt.New(t)
+
+	mail := fmt.Sprintf("%d-lockout@test.com", internal.RandomInt(100000))
+	userInfo := &apicommon.UserInfo{Email: mail, Password: testPass, FirstName: testFirstName, LastName: testLastName}
+	resp, code := testRequest(t, http.MethodPost, "", userInfo, usersEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+	// verify the user
+	mailBody := waitForEmail(t, mail)
+	verifyMailCode := verificationCodeRgx.FindStringSubmatch(mailBody)
+	c.Assert(len(verifyMailCode) > 1, qt.IsTrue)
+	resp, code = testRequest(t, http.MethodPost, "",
+		&apicommon.UserVerification{Email: mail, Code: verifyMailCode[1]}, verifyUserEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+	// request a password reset code
+	resp, code = testRequest(t, http.MethodPost, "", &apicommon.UserInfo{Email: mail}, usersRecoveryPasswordEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+	mailBody = waitForEmail(t, mail)
+	passResetMailCode := passwordResetRgx.FindStringSubmatch(mailBody)
+	c.Assert(len(passResetMailCode) > 1, qt.IsTrue)
+	validCode := passResetMailCode[1]
+
+	// exhaust the guess budget with wrong codes. The stored counter starts at 1, so
+	// VerificationCodeMaxAttempts-1 wrong guesses are compared-and-rejected (401) before lockout.
+	for i := 0; i < apicommon.VerificationCodeMaxAttempts-1; i++ {
+		resp, code = testRequest(t, http.MethodPost, "", &apicommon.UserPasswordReset{
+			Email: mail, Code: validCode + "x", NewPassword: "attackerpassword",
+		}, usersResetPasswordEndpoint)
+		c.Assert(code, qt.Equals, http.StatusUnauthorized, qt.Commentf("guess %d response: %s", i, resp))
+	}
+
+	// the code is now locked: a further wrong guess is refused with max-attempts (400), not 401
+	resp, code = testRequest(t, http.MethodPost, "", &apicommon.UserPasswordReset{
+		Email: mail, Code: validCode + "x", NewPassword: "attackerpassword",
+	}, usersResetPasswordEndpoint)
+	c.Assert(code, qt.Equals, http.StatusBadRequest, qt.Commentf("response: %s", resp))
+
+	// even the CORRECT code is rejected once locked out
+	resp, code = testRequest(t, http.MethodPost, "", &apicommon.UserPasswordReset{
+		Email: mail, Code: validCode, NewPassword: "attackerpassword",
+	}, usersResetPasswordEndpoint)
+	c.Assert(code, qt.Equals, http.StatusBadRequest, qt.Commentf("response: %s", resp))
+
+	// the original password still works: the attacker never reset it
+	resp, code = testRequest(t, http.MethodPost, "",
+		&apicommon.UserInfo{Email: mail, Password: testPass}, authLoginEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+}
+
 func TestUserWithOrganization(t *testing.T) {
 	c := qt.New(t)
 

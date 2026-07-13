@@ -168,6 +168,9 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 	// regardless of the submitted value (no per-guess unlimited retries).
 	recorded, err := a.db.VerificationCodeCheckAndAddAttempt(user, db.CodeTypeVerifyAccount, apicommon.VerificationCodeMaxAttempts)
 	if err != nil {
+		if err != db.ErrNotFound {
+			log.Warnw("could not record verification attempt", "error", err)
+		}
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
@@ -716,6 +719,9 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	// the submitted value, closing the online guessing vector against the short OTP.
 	recorded, err := a.db.VerificationCodeCheckAndAddAttempt(user, db.CodeTypePasswordReset, apicommon.VerificationCodeMaxAttempts)
 	if err != nil {
+		if err != db.ErrNotFound {
+			log.Warnw("could not record password reset attempt", "error", err)
+		}
 		errors.ErrUnauthorized.Write(w)
 		return
 	}

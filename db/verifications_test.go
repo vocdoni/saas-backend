@@ -95,4 +95,49 @@ func TestVerifications(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(code.Attempts, qt.Equals, 2)
 	})
+
+	t.Run("TestVerificationCodeCheckAndAddAttempt", func(_ *testing.T) {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+		const maxAttempts = 3
+		userID, err := testDB.SetUser(&User{
+			Email:     testUserEmail + "4",
+			Password:  testUserPass,
+			FirstName: testUserFirstName,
+			LastName:  testUserLastName,
+		})
+		c.Assert(err, qt.IsNil)
+		user := &User{ID: userID}
+
+		// no code yet: the guard reports ErrNotFound rather than a spurious lockout
+		recorded, err := testDB.VerificationCodeCheckAndAddAttempt(user, CodeTypePasswordReset, maxAttempts)
+		c.Assert(err, qt.Equals, ErrNotFound)
+		c.Assert(recorded, qt.IsFalse)
+
+		sealedCode, err := internal.SealToken("testCode", testUserEmail, "mock-app-secret")
+		c.Assert(err, qt.IsNil)
+		// SetVerificationCode seeds Attempts at 1, so only maxAttempts-1 attempts are recordable
+		c.Assert(testDB.SetVerificationCode(user, sealedCode, CodeTypePasswordReset, time.Now()), qt.IsNil)
+
+		// record attempts until the cap is hit; each recorded call bumps the stored counter
+		for want := 2; want <= maxAttempts; want++ {
+			recorded, err = testDB.VerificationCodeCheckAndAddAttempt(user, CodeTypePasswordReset, maxAttempts)
+			c.Assert(err, qt.IsNil)
+			c.Assert(recorded, qt.IsTrue)
+			code, err := testDB.UserVerificationCode(user, CodeTypePasswordReset)
+			c.Assert(err, qt.IsNil)
+			c.Assert(code.Attempts, qt.Equals, want)
+		}
+
+		// cap reached: further attempts fail closed and do not increment past the cap
+		recorded, err = testDB.VerificationCodeCheckAndAddAttempt(user, CodeTypePasswordReset, maxAttempts)
+		c.Assert(err, qt.IsNil)
+		c.Assert(recorded, qt.IsFalse)
+		code, err := testDB.UserVerificationCode(user, CodeTypePasswordReset)
+		c.Assert(err, qt.IsNil)
+		c.Assert(code.Attempts, qt.Equals, maxAttempts)
+
+		// a different code type for the same user is tracked independently (not locked)
+		_, err = testDB.VerificationCodeCheckAndAddAttempt(user, CodeTypeVerifyAccount, maxAttempts)
+		c.Assert(err, qt.Equals, ErrNotFound)
+	})
 }
