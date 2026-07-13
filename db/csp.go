@@ -16,8 +16,12 @@ import (
 
 // CSPAuth represents a user authentication information for a bundle of processes
 type CSPAuth struct {
-	Token     internal.HexBytes `json:"token" bson:"_id"`
-	UserID    internal.HexBytes `json:"userID" bson:"userid"`
+	Token internal.HexBytes `json:"token" bson:"_id"`
+	// UserID is the member ObjectID (hex) the token authenticates.
+	UserID internal.HexBytes `json:"userID" bson:"userid"`
+	// BundleID is the token's anchor: a process-bundle id in the legacy bundle flow, or a
+	// voting-process id in the new /processes flow. It only binds the token and gates the
+	// resend cooldown; per-election signing/consumption keys on the election id separately.
 	BundleID  internal.HexBytes `json:"bundleID" bson:"bundleid"`
 	CreatedAt time.Time         `json:"createdAt" bson:"createdat"`
 	// Secret is the per-token OTP challenge secret. It must never leave the

@@ -147,10 +147,16 @@ func (ms *MongoStorage) DelCensus(censusID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
+	// delete the census participants first so removing a census does not orphan them (this
+	// is done inline rather than via DeleteCensusParticipantsByCensus, which takes keysLock).
+	if _, err := ms.censusParticipants.DeleteMany(ctx, bson.M{"censusId": censusID}); err != nil { //nolint:goconst
+		return fmt.Errorf("failed to delete census participants: %w", err)
+	}
 	// delete the census from the database using the ID
-	filter := bson.M{"_id": objID}
-	_, err = ms.censuses.DeleteOne(ctx, filter)
-	return err
+	if _, err := ms.censuses.DeleteOne(ctx, bson.M{"_id": objID}); err != nil {
+		return fmt.Errorf("failed to delete census: %w", err)
+	}
+	return nil
 }
 
 // Census retrieves a census from the DB based on its ID
