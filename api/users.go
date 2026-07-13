@@ -163,6 +163,18 @@ func (a *API) verifyUserAccountHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrVerificationCodeExpired.Write(w)
 		return
 	}
+	// bound brute-force: atomically spend one verification attempt, failing closed once the
+	// per-code cap is reached. Done before comparing the code so an exhausted code is locked
+	// regardless of the submitted value (no per-guess unlimited retries).
+	recorded, err := a.db.VerificationCodeCheckAndAddAttempt(user, db.CodeTypeVerifyAccount, apicommon.VerificationCodeMaxAttempts)
+	if err != nil {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	if !recorded {
+		errors.ErrVerificationMaxAttempts.Write(w)
+		return
+	}
 	// check the verification code is correct
 	code, err := internal.OpenToken(userVerification.SealedCode, verification.Email, a.secret)
 	if err != nil {
@@ -696,6 +708,19 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	// check the verification code is not expired
 	if userVerification.Expiration.Before(time.Now()) {
 		errors.ErrVerificationCodeExpired.Write(w)
+		return
+	}
+
+	// bound brute-force: atomically spend one attempt, failing closed once the per-code cap is
+	// reached. Done before comparing the code so an exhausted reset code is locked regardless of
+	// the submitted value, closing the online guessing vector against the short OTP.
+	recorded, err := a.db.VerificationCodeCheckAndAddAttempt(user, db.CodeTypePasswordReset, apicommon.VerificationCodeMaxAttempts)
+	if err != nil {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	if !recorded {
+		errors.ErrVerificationMaxAttempts.Write(w)
 		return
 	}
 

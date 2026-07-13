@@ -73,6 +73,39 @@ func (ms *MongoStorage) SetVerificationCode(user *User, sealedCode []byte, t Cod
 	return err
 }
 
+// VerificationCodeCheckAndAddAttempt atomically records one verification attempt for the
+// user's code of the given type, but only while the stored attempt count is still below
+// maxAttempts. It returns recorded=true when the attempt was counted and recorded=false when
+// the cap had already been reached (no increment performed) — a single conditional update, so
+// concurrent submissions cannot push the counter past the cap. It is the fail-closed guard on
+// the code-guessing path (mirrors IncrementCSPAuthAttempts). It returns ErrNotFound when no
+// such code exists.
+func (ms *MongoStorage) VerificationCodeCheckAndAddAttempt(user *User, t CodeType, maxAttempts int) (bool, error) {
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	// conditional increment: only bump attempts while still below the cap
+	res, err := ms.verifications.UpdateOne(ctx,
+		bson.M{"_id": user.ID, "type": t, "attempts": bson.M{"$lt": maxAttempts}},
+		bson.M{"$inc": bson.M{"attempts": 1}})
+	if err != nil {
+		return false, err
+	}
+	if res.MatchedCount == 1 {
+		return true, nil
+	}
+	// no document matched: either no code exists or the cap is already reached. Distinguish the
+	// two so the caller can return the right error.
+	if err := ms.verifications.FindOne(ctx, bson.M{"_id": user.ID, "type": t}).Err(); err != nil {
+		if err == mongo.ErrNoDocuments {
+			return false, ErrNotFound
+		}
+		return false, err
+	}
+	return false, nil
+}
+
 // VerificationCodeIncrementAttempts method increments the number of attempts
 // for the verification code of the user provided. If an error occurs, it
 // returns the error.
