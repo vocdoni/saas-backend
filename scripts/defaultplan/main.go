@@ -85,6 +85,9 @@ func main() {
 			LiveStreaming:   true,
 			PhoneSupport:    true,
 		},
+		IntegratorLimits: db.IntegratorLimits{
+			MaxManagedOrgs: 10,
+		},
 	}
 
 	if err := storage.SetPlan(plan); err != nil {

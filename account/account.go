@@ -5,6 +5,7 @@ package account
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -39,7 +40,7 @@ func New(privateKey string, apiEndpoint string) (*Account, error) {
 	if err := apiClient.SetAccount(privateKey); err != nil {
 		return nil, fmt.Errorf("failed to set account: %w", err)
 	}
-	if err := ensureAccountExist(apiClient); err != nil {
+	if err := ensureAccountExist(apiEndpoint, apiClient); err != nil {
 		return nil, fmt.Errorf("failed to ensure account exists: %w", err)
 	}
 	// create the signer
@@ -52,7 +53,8 @@ func New(privateKey string, apiEndpoint string) (*Account, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get account: %v", err)
 	}
-	log.Infow("Vocdoni account initialized",
+	log.Infow(
+		"Vocdoni account initialized",
 		"endpoint", apiEndpoint,
 		"chainID", apiClient.ChainID(),
 		"address", account.Address,
@@ -83,7 +85,8 @@ func (a *Account) ChainID() string {
 
 // FaucetPackage generates a faucet package for the given address and amount.
 func (a *Account) FaucetPackage(toAddr common.Address, amount uint64) (*models.FaucetPackage, error) {
-	log.Infow("generating faucet package",
+	log.Infow(
+		"generating faucet package",
 		"toAddr", toAddr,
 		"amount", amount,
 	)
@@ -91,11 +94,15 @@ func (a *Account) FaucetPackage(toAddr common.Address, amount uint64) (*models.F
 }
 
 // ensureAccountExist checks if the account exists and creates it if it doesn't.
-func ensureAccountExist(cli *apiclient.HTTPclient) error {
+func ensureAccountExist(baseURL string, cli *apiclient.HTTPclient) error {
 	if _, err := cli.Account(""); err == nil {
 		return nil
 	}
-	faucetPkg, err := apiclient.GetFaucetPackageFromDefaultService(cli.MyAddress().Hex(), cli.ChainID())
+	faucetURL, err := url.JoinPath(baseURL, "/open/claim", cli.MyAddress().Hex())
+	if err != nil {
+		return fmt.Errorf("error getting faucet URL: %w", err)
+	}
+	faucetPkg, err := apiclient.GetFaucetPackageFromRemoteService(faucetURL, "")
 	if err != nil {
 		return fmt.Errorf("failed to get faucet package: %w", err)
 	}
