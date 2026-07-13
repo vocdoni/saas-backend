@@ -56,11 +56,15 @@ func (a *API) buildLoginResponse(id string) (*apicommon.LoginResponse, error) {
 	if err := j.Set("userId", id); err != nil {
 		return nil, err
 	}
-	if err := j.Set(jwt.ExpirationKey, time.Now().Add(jwtExpiration).UnixNano()); err != nil {
+	// pass a time.Time so jwx encodes a proper NumericDate (seconds). An int64 here would be
+	// read as Unix *seconds*, so a nanosecond value would push expiry ~55 billion years out
+	// and jwt.Validate would never reject the token on expiry.
+	expiry := time.Now().Add(jwtExpiration)
+	if err := j.Set(jwt.ExpirationKey, expiry); err != nil {
 		return nil, err
 	}
 	lr := apicommon.LoginResponse{}
-	lr.Expirity = time.Now().Add(jwtExpiration)
+	lr.Expirity = expiry
 	jmap, err := j.AsMap(context.Background())
 	if err != nil {
 		return nil, err
