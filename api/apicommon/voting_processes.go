@@ -1,0 +1,192 @@
+package apicommon
+
+//revive:disable:max-public-structs
+
+import (
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+)
+
+// CensusSpec is the inline census definition of a voting process. The census type is
+// inferred from the auth/2FA fields; there is no prebuilt-by-id reference over the API.
+type CensusSpec struct {
+	Weighted    bool                    `json:"weighted"`
+	AuthFields  db.OrgMemberAuthFields  `json:"authFields,omitempty"`
+	TwoFaFields db.OrgMemberTwoFaFields `json:"twoFaFields,omitempty"`
+	GroupID     string                  `json:"groupId,omitempty"`
+	MemberIDs   []string                `json:"memberIds,omitempty"`
+}
+
+// EligibilitySpec is an optional per-question subset of the process census, resolved to a
+// list of member ids. Empty means every census member is eligible.
+type EligibilitySpec struct {
+	GroupID   string   `json:"groupId,omitempty"`
+	MemberIDs []string `json:"memberIds,omitempty"`
+}
+
+// VotingProcessQuestionRequest is one question in a create/update request.
+type VotingProcessQuestionRequest struct {
+	Title             db.MultiLangString   `json:"title"`
+	Description       db.MultiLangString   `json:"description,omitempty"`
+	Choices           []db.Choice          `json:"choices"`
+	Type              string               `json:"type"`
+	TypeSetup         db.QuestionTypeSetup `json:"typeSetup"`
+	BallotProtocol    *db.BallotProtocol   `json:"ballotProtocol,omitempty"`
+	SecretUntilTheEnd bool                 `json:"secretUntilTheEnd"`
+	Eligibility       *EligibilitySpec     `json:"census,omitempty"`
+	Metadata          map[string]any       `json:"metadata,omitempty"`
+}
+
+// CreateVotingProcessRequest is the body of POST /processes (also used by PUT to update a
+// draft). Common params are shared by every question.
+type CreateVotingProcessRequest struct {
+	OrgAddress  common.Address                 `json:"orgAddress"`
+	Census      CensusSpec                     `json:"census"`
+	Title       db.MultiLangString             `json:"title"`
+	Description db.MultiLangString             `json:"description,omitempty"`
+	Header      string                         `json:"header,omitempty"`
+	StreamURI   string                         `json:"streamUri,omitempty"`
+	StartDate   string                         `json:"startDate,omitempty"`
+	EndDate     string                         `json:"endDate,omitempty"`
+	Questions   []VotingProcessQuestionRequest `json:"questions"`
+}
+
+// CreateVotingProcessResponse is returned by POST /processes.
+type CreateVotingProcessResponse struct {
+	ProcessID string `json:"processId"`
+}
+
+// VotingProcessResponse is the full read shape of a voting process, used by the single-read
+// and list endpoints. Questions are fully hydrated (including the synced status).
+type VotingProcessResponse struct {
+	ID          string                     `json:"id"`
+	OrgAddress  common.Address             `json:"orgAddress"`
+	Published   bool                       `json:"published"`
+	Census      CensusSpec                 `json:"census"`
+	Title       db.MultiLangString         `json:"title"`
+	Description db.MultiLangString         `json:"description,omitempty"`
+	Header      string                     `json:"header,omitempty"`
+	StreamURI   string                     `json:"streamUri,omitempty"`
+	StartDate   string                     `json:"startDate,omitempty"`
+	EndDate     string                     `json:"endDate,omitempty"`
+	Questions   []db.VotingProcessQuestion `json:"questions"`
+}
+
+// VotingProcessListResponse is the paginated list of voting processes.
+type VotingProcessListResponse struct {
+	Processes  []VotingProcessResponse `json:"processes"`
+	Pagination *Pagination             `json:"pagination"`
+}
+
+// VotingProcessQuestionResults carries one question's on-chain election results (the same
+// trimmed shape as the legacy ProcessResultsResponse) keyed by the question id.
+type VotingProcessQuestionResults struct {
+	QuestionID string            `json:"questionId"`
+	UpstreamID internal.HexBytes `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	ProcessResultsResponse
+}
+
+// VotingProcessResultsResponse is the multi-question results of a published voting process: one
+// entry per published question, each mirroring the legacy single-process results shape.
+type VotingProcessResultsResponse struct {
+	ID        string                         `json:"id"`
+	Questions []VotingProcessQuestionResults `json:"questions"`
+}
+
+// VotingProcessValidateResponse is the publish-readiness dry-run result.
+type VotingProcessValidateResponse struct {
+	Valid  bool     `json:"valid"`
+	Errors []string `json:"errors"`
+}
+
+// SetQuestionsStatusRequest changes the on-chain status of many questions of a process to a
+// single target status. An empty Questions list targets every published question.
+type SetQuestionsStatusRequest struct {
+	Status    string             `json:"status" example:"ended"`
+	Questions []QuestionStatusID `json:"questions,omitempty"`
+}
+
+// QuestionStatusID identifies a target question by its id.
+type QuestionStatusID struct {
+	ID string `json:"id"`
+}
+
+// PublicQuestionResponse is the voter-facing single-question read: the voter-safe question
+// fields plus the parent process's census config (the auth policy a voter must satisfy). It is
+// an explicit allow-list, NOT the raw db.VotingProcessQuestion — the census member list and the
+// per-question eligibility subset (member ids) are never exposed on this public endpoint.
+type PublicQuestionResponse struct {
+	ID                primitive.ObjectID   `json:"id"`
+	ParentProcessID   primitive.ObjectID   `json:"parentProcessId"`
+	Title             db.MultiLangString   `json:"title"`
+	Description       db.MultiLangString   `json:"description,omitempty"`
+	Choices           []db.Choice          `json:"choices"`
+	Type              string               `json:"type"`
+	TypeSetup         db.QuestionTypeSetup `json:"typeSetup"`
+	BallotProtocol    *db.BallotProtocol   `json:"ballotProtocol,omitempty"`
+	SecretUntilTheEnd bool                 `json:"secretUntilTheEnd"`
+	Metadata          map[string]any       `json:"metadata,omitempty"`
+	UpstreamID        internal.HexBytes    `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Status            string               `json:"status,omitempty"`
+	Census            CensusSpec           `json:"census"`
+}
+
+// PublicQuestionResponseFromDB builds the public question read from a question and its parent
+// process's census (config only). It copies only the voter-safe fields (no eligibility member ids).
+func PublicQuestionResponseFromDB(q *db.VotingProcessQuestion, census *db.Census) *PublicQuestionResponse {
+	resp := &PublicQuestionResponse{
+		ID:                q.ID,
+		ParentProcessID:   q.ProcessID,
+		Title:             q.Title,
+		Description:       q.Description,
+		Choices:           q.Choices,
+		Type:              q.Type,
+		TypeSetup:         q.TypeSetup,
+		BallotProtocol:    q.BallotProtocol,
+		SecretUntilTheEnd: q.SecretUntilTheEnd,
+		Metadata:          q.Metadata,
+		UpstreamID:        q.UpstreamID,
+		Status:            q.Status,
+	}
+	if census != nil {
+		resp.Census = CensusSpec{
+			Weighted:    census.Weighted,
+			AuthFields:  census.AuthFields,
+			TwoFaFields: census.TwoFaFields,
+		}
+	}
+	return resp
+}
+
+// VotingProcessResponseFromDB builds the read response from a process, its (hydrated)
+// questions and its census. The census member list is never exposed — only its config.
+func VotingProcessResponseFromDB(
+	vp *db.VotingProcess, questions []db.VotingProcessQuestion, census *db.Census,
+) *VotingProcessResponse {
+	resp := &VotingProcessResponse{
+		ID:          vp.ID.Hex(),
+		OrgAddress:  vp.OrgAddress,
+		Published:   vp.Published,
+		Title:       vp.Title,
+		Description: vp.Description,
+		Header:      vp.Header,
+		StreamURI:   vp.StreamURI,
+		Questions:   questions,
+	}
+	if !vp.StartDate.IsZero() {
+		resp.StartDate = vp.StartDate.UTC().Format("2006-01-02T15:04:05Z")
+	}
+	if !vp.EndDate.IsZero() {
+		resp.EndDate = vp.EndDate.UTC().Format("2006-01-02T15:04:05Z")
+	}
+	if census != nil {
+		resp.Census = CensusSpec{
+			Weighted:    census.Weighted,
+			AuthFields:  census.AuthFields,
+			TwoFaFields: census.TwoFaFields,
+		}
+	}
+	return resp
+}

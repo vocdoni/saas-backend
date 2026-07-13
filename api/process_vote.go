@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -73,13 +74,28 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ensure we manage this process
+	// ensure we manage this election, resolving its owning organization. Legacy elections
+	// live in the processes collection; new multi-question elections are questions of a
+	// voting process, resolved by their on-chain (upstream) id.
+	// TODO: remove the legacy processes lookup once /processes is the only path.
+	var orgAddress common.Address
 	process, err := a.db.ProcessByAddress(pid)
-	if err != nil {
-		if err == db.ErrNotFound {
+	switch err {
+	case nil:
+		orgAddress = process.OrgAddress
+	case db.ErrNotFound:
+		question, qErr := a.db.QuestionByUpstreamID(pid)
+		switch qErr {
+		case nil:
+			orgAddress = question.OrgAddress
+		case db.ErrNotFound:
 			errors.ErrProcessNotFound.Write(w)
 			return
+		default:
+			errors.ErrGenericInternalServerError.WithErr(qErr).Write(w)
+			return
 		}
+	default:
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
@@ -93,7 +109,7 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	if err := a.db.CreateTxJob(jobID, db.JobTypeRelayVote, process.OrgAddress); err != nil {
+	if err := a.db.CreateTxJob(jobID, db.JobTypeRelayVote, orgAddress); err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
@@ -105,7 +121,7 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		// meter the relayed vote for billing/quota; best-effort, never fail the relay on a
 		// counter error. The quota itself is enforced at election publish, not here.
-		if err := a.db.IncrementOrganizationSentVotesCounter(process.OrgAddress); err != nil {
+		if err := a.db.IncrementOrganizationSentVotesCounter(orgAddress); err != nil {
 			log.Errorw(err, "failed to increment org sent votes counter")
 		}
 		return &db.JobResult{VoteID: internal.HexBytes(voteID)}, nil

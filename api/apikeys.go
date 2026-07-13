@@ -83,6 +83,15 @@ var apiKeyAllowlist = map[string]string{
 	"POST " + censusIDEndpoint:                     ScopeVotingWrite,
 	"POST " + processBundleEndpoint:                ScopeVotingWrite,
 	"PUT " + processBundleUpdateEndpoint:           ScopeVotingWrite,
+	// multi-question voting processes (writes + protected reads)
+	"POST " + processesCreateEndpoint:         ScopeVotingWrite,
+	"GET " + processesCreateEndpoint:          ScopeVotingWrite,
+	"PUT " + processesEndpoint:                ScopeVotingWrite,
+	"GET " + processesEndpoint:                ScopeVotingWrite,
+	"GET " + processesCheckEndpoint:           ScopeVotingWrite,
+	"POST " + processesPublishEndpoint:        ScopeVotingWrite,
+	"PUT " + processesQuestionsStatusEndpoint: ScopeVotingWrite,
+	"PUT " + processesQuestionStatusEndpoint:  ScopeVotingWrite,
 }
 
 // requiredScopeForRoute returns the scope required to call (method, pattern) with an API key and

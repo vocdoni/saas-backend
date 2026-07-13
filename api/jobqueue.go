@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -11,7 +12,7 @@ import (
 // orgTxMutex hands out a per-organization mutex so the build->sign->submit pipeline for
 // backend-submitted txs (publish and status change) is serialized per org. Two concurrent
 // such requests for the same org would otherwise read the same account nonce and sign
-// conflicting transactions. ponytail: in-process only — a multi-instance deployment would
+// conflicting transactions. In-process only — a multi-instance deployment would
 // need a distributed lock, matching the single-instance assumption of db.keysLock. The
 // locks map grows unbounded; an org count high enough to matter is not realistic here.
 type orgTxMutex struct {
@@ -38,7 +39,7 @@ func (o *orgTxMutex) lock(addr common.Address) *sync.Mutex {
 	return m
 }
 
-// ponytail: pool sizes are consts; promote to config only if tuning is needed.
+// pool sizes are consts; promote to config only if tuning is needed.
 const (
 	// txQueueSize bounds the number of queued-but-not-yet-running tx tasks.
 	txQueueSize = 100
@@ -56,7 +57,7 @@ type txTask struct {
 }
 
 // startTxQueue creates the buffered queue and launches the worker pool. Called once
-// from New(). ponytail: no graceful drain — on process exit in-flight tasks die and
+// from New(). No graceful drain — on process exit in-flight tasks die and
 // their jobs stay `pending`; add a Stop()/drain only if that ceiling starts to bite.
 func (a *API) startTxQueue() {
 	a.txQueue = make(chan txTask, txQueueSize)
@@ -68,16 +69,30 @@ func (a *API) startTxQueue() {
 // txWorker runs queued tasks and records each outcome on the job row.
 func (a *API) txWorker() {
 	for task := range a.txQueue {
-		result, err := task.run()
-		if err != nil {
-			if e := a.db.SetJobStatus(task.jobID, db.JobStatusFailed, nil, err.Error()); e != nil {
-				log.Warnw("could not record failed job", "jobId", task.jobID, "error", e)
+		a.runTxTask(task)
+	}
+}
+
+// runTxTask runs one task and records its outcome, recovering from a panic so a single bad task
+// marks its job failed instead of crashing the whole worker pool (and process).
+func (a *API) runTxTask(task txTask) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Errorw(fmt.Errorf("tx task %s panicked: %v", task.jobID, r), "tx task panicked")
+			if e := a.db.SetJobStatus(task.jobID, db.JobStatusFailed, nil, fmt.Sprintf("panic: %v", r)); e != nil {
+				log.Warnw("could not record panicked job", "jobId", task.jobID, "error", e)
 			}
-			continue
 		}
-		if e := a.db.SetJobStatus(task.jobID, db.JobStatusCompleted, result, ""); e != nil {
-			log.Warnw("could not record completed job", "jobId", task.jobID, "error", e)
+	}()
+	result, err := task.run()
+	if err != nil {
+		if e := a.db.SetJobStatus(task.jobID, db.JobStatusFailed, nil, err.Error()); e != nil {
+			log.Warnw("could not record failed job", "jobId", task.jobID, "error", e)
 		}
+		return
+	}
+	if e := a.db.SetJobStatus(task.jobID, db.JobStatusCompleted, result, ""); e != nil {
+		log.Warnw("could not record completed job", "jobId", task.jobID, "error", e)
 	}
 }
 

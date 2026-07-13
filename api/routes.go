@@ -207,6 +207,33 @@ const (
 	// participant of the bundle's census. Manager/Admin only.
 	processBundleParticipantsCheckEndpoint = "/process/bundle/{bundleId}/participants/check"
 
+	// multi-question voting-process routes (new /processes API, plural namespace)
+	// POST /processes to create a draft; GET /processes to list (paginated, filterable)
+	processesCreateEndpoint = "/processes"
+	// PUT /processes/{processId} to update a draft; GET /processes/{processId} to read one (full)
+	processesEndpoint = "/processes/{processId}"
+	// GET /processes/{processId}/check publish-readiness dry-run (protected);
+	// POST /processes/{processId}/check voter eligibility/status (public)
+	processesCheckEndpoint = "/processes/{processId}/check"
+	// POST /processes/{processId}/publish to publish the process (one election per question)
+	processesPublishEndpoint = "/processes/{processId}/publish"
+	// PUT /processes/{processId}/questions/status to change many questions' on-chain status
+	processesQuestionsStatusEndpoint = "/processes/{processId}/questions/status"
+	// PUT /processes/{processId}/questions/{questionId}/status to change one question's status
+	processesQuestionStatusEndpoint = "/processes/{processId}/questions/{questionId}/status"
+	// GET /processes/{processId}/questions/{questionId} to read one question (public voter read)
+	processesQuestionEndpoint = "/processes/{processId}/questions/{questionId}"
+	// GET /processes/{processId}/participant/{participantId} for participant info (public);
+	// nested under the literal "participant" to avoid a chi param-vs-literal clash
+	processesParticipantEndpoint = "/processes/{processId}/participant/{participantId}"
+	// GET /processes/{processId}/results for the per-question on-chain results (public)
+	processesResultsEndpoint = "/processes/{processId}/results"
+	// CSP voter routes for a voting process (public)
+	processesAuthEndpoint       = "/processes/{processId}/auth/{step}"
+	processesAuthResendEndpoint = "/processes/{processId}/auth/resend"
+	processesSignEndpoint       = "/processes/{processId}/sign"
+	processesWeightEndpoint     = "/processes/{processId}/weight"
+
 	// // census auth routes (currently not implemented)
 	// // POST /process/{processId}/auth/0 to initiate auth
 	// processAuthInitEndpoint = "/process/{processId}/auth/0"
