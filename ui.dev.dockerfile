@@ -10,6 +10,5 @@ RUN corepack enable && corepack prepare pnpm@10.16.1 --activate
 COPY --from=clone /repo/package.json /repo/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile --ignore-scripts
 COPY --from=clone /repo/ .
-RUN pnpm prepare && pnpm build:platform && mv dist-platform/index.platform.html dist-platform/index.html
 
-CMD ["pnpm", "run", "dev:platform"]
+CMD ["pnpm", "start"]

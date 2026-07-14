@@ -488,13 +488,15 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 // votingProcessParticipantHandler godoc
 //
 //	@Summary		Get a voting process participant
-//	@Description	Public participant info for a voting process, mirroring the bundle participant
-//	@Description	endpoint. Validates the process and participant id.
+//	@Description	Public participant info for a published voting process, mirroring the bundle
+//	@Description	participant endpoint. PLACEHOLDER: validates the process (published only) and the
+//	@Description	participant id, and currently returns null — participant election info is not yet
+//	@Description	surfaced (the bundle equivalent is likewise a stub pending the CSP indexer lookup).
 //	@Tags			processes
 //	@Produce		json
-//	@Param			processId		path		string	true	"Process ID"
-//	@Param			participantId	path		string	true	"Participant ID"
-//	@Success		200				{object}	interface{}
+//	@Param			processId		path		string		true	"Process ID"
+//	@Param			participantId	path		string		true	"Participant ID"
+//	@Success		200				{object}	interface{}	"Placeholder: null until participant info is surfaced"
 //	@Failure		400				{object}	errors.Error
 //	@Failure		404				{object}	errors.Error
 //	@Router			/processes/{processId}/participant/{participantId} [get]
@@ -508,7 +510,14 @@ func (a *API) votingProcessParticipantHandler(w http.ResponseWriter, r *http.Req
 		errors.ErrMalformedURLParam.Withf("missing participant ID").Write(w)
 		return
 	}
-	if _, ok := a.loadVotingProcess(w, oid); !ok {
+	vp, ok := a.loadVotingProcess(w, oid)
+	if !ok {
+		return
+	}
+	// public (voter-facing) read: only published processes are visible, so a draft is not
+	// revealed to unauthenticated callers.
+	if !vp.Published {
+		errors.ErrProcessNotFound.Withf("process not found").Write(w)
 		return
 	}
 	// mirrors processBundleParticipantInfoHandler: participant election info is not yet surfaced

@@ -5892,8 +5892,10 @@ paths:
   /processes/{processId}/participant/{participantId}:
     get:
       description: |-
-        Public participant info for a voting process, mirroring the bundle participant
-        endpoint. Validates the process and participant id.
+        Public participant info for a published voting process, mirroring the bundle
+        participant endpoint. PLACEHOLDER: validates the process (published only) and the
+        participant id, and currently returns null — participant election info is not yet
+        surfaced (the bundle equivalent is likewise a stub pending the CSP indexer lookup).
       parameters:
       - description: Process ID
         in: path
@@ -5909,7 +5911,7 @@ paths:
       - application/json
       responses:
         "200":
-          description: OK
+          description: 'Placeholder: null until participant info is surfaced'
           schema: {}
         "400":
           description: Bad Request

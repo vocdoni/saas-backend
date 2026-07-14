@@ -618,7 +618,6 @@ type VotingProcessQuestion struct {
 	SecretUntilTheEnd bool               `json:"secretUntilTheEnd" bson:"secretUntilTheEnd"`
 	EligibleMemberIDs []string           `json:"eligibleMemberIds" bson:"eligibleMemberIds"`
 	Metadata          map[string]any     `json:"metadata,omitempty" bson:"metadata,omitempty"`
-	MaxCensusSize     uint64             `json:"-" bson:"maxCensusSize"` // computed at publish
 	UpstreamID        internal.HexBytes  `json:"upstreamId,omitempty" bson:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	MetadataURL       string             `json:"-" bson:"metadataURL,omitempty"`
 	Status            string             `json:"status,omitempty" bson:"status,omitempty"`

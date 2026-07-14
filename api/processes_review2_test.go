@@ -222,15 +222,25 @@ func TestVotingProcessPublicQuestionCensus(t *testing.T) {
 // TestVotingProcessParticipant verifies the participant endpoint validates the process and
 // participant id (mirrors the bundle equivalent).
 func TestVotingProcessParticipant(t *testing.T) {
+	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
-	orgAddress := testCreateOrganization(t, token)
+	orgAddress := testCreateProvisionedOrganization(t, token)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
+	req := newVotingProcessRequest(orgAddress, ids)
+	req.StartDate = ""
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
-		t, http.MethodPost, token, newVotingProcessRequest(orgAddress, ids), processesCreateEndpoint)
+		t, http.MethodPost, token, req, processesCreateEndpoint)
 
-	// a valid process + participant id resolves (public, 200)
+	// a draft (unpublished) process is a public read: not revealed -> 404
+	requestAndAssertCode(http.StatusNotFound, t, http.MethodGet, "", nil,
+		"processes", created.ProcessID, "participant", ids[0])
+
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", created.ProcessID, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Error))
+
+	// once published, a valid process + participant id resolves (public, 200, placeholder body)
 	requestAndAssertCode(http.StatusOK, t, http.MethodGet, "", nil, "processes", created.ProcessID, "participant", ids[0])
 	// a non-existent process is 404
 	requestAndAssertCode(http.StatusNotFound, t, http.MethodGet, "", nil,
