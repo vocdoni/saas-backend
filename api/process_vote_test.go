@@ -125,12 +125,13 @@ func TestProcessStatusLifecycle(t *testing.T) {
 // testRelayVoteRequest signs a vote tx, wraps it as a SignedTx, posts it to
 // POST /vote, and returns the relayed vote nullifier.
 func testRelayVoteRequest(t *testing.T, signer *ethereum.SignKeys, processID internal.HexBytes,
-	proof *models.Proof, votePackage []byte,
+	proof *models.Proof, votePackage, memo []byte,
 ) internal.HexBytes {
 	t.Helper()
 	c := qt.New(t)
 	tx := &models.Tx{Payload: &models.Tx_Vote{Vote: &models.VoteEnvelope{
 		ProcessId: processID.Bytes(), Nonce: internal.RandomBytes(16), Proof: proof, VotePackage: votePackage,
+		Memo: memo,
 	}}}
 	txBytes, err := proto.Marshal(tx)
 	c.Assert(err, qt.IsNil)
@@ -266,7 +267,7 @@ func TestRelayVote(t *testing.T) {
 	votesBefore, err := vocdoniClient.ElectionVoteCount(processID.Bytes())
 	c.Assert(err, qt.IsNil)
 
-	nullifier := testRelayVoteRequest(t, &voter, processID, proof, []byte("[\"1\"]"))
+	nullifier := testRelayVoteRequest(t, &voter, processID, proof, []byte("[\"1\"]"), nil)
 	c.Assert(nullifier, qt.Not(qt.HasLen), 0)
 
 	votesAfter, err := vocdoniClient.ElectionVoteCount(processID.Bytes())

@@ -126,7 +126,7 @@ func TestFullElectionLifecycle(t *testing.T) {
 		// the vote package must decode to state.VotePackage{Votes []int} ({"votes":[N]});
 		// a bare ["N"] array is accepted as an envelope but tallies to zero weight.
 		nullifier := testRelayVoteRequest(t, &voter, addr, proof,
-			[]byte(fmt.Sprintf(`{"votes":[%d]}`, votePlan[i])))
+			[]byte(fmt.Sprintf(`{"votes":[%d]}`, votePlan[i])), nil)
 		c.Assert(nullifier, qt.Not(qt.HasLen), 0)
 		_, dup := seenNullifiers[nullifier.String()]
 		c.Assert(dup, qt.IsFalse, qt.Commentf("voter %d reused nullifier %s", i, nullifier.String()))

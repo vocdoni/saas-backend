@@ -1757,6 +1757,28 @@ definitions:
           $ref: '#/definitions/apicommon.VotingProcessResponse'
         type: array
     type: object
+  apicommon.VotingProcessMemosResponse:
+    properties:
+      id:
+        type: string
+      questions:
+        items:
+          $ref: '#/definitions/apicommon.VotingProcessQuestionMemos'
+        type: array
+    type: object
+  apicommon.VotingProcessQuestionMemos:
+    properties:
+      memos:
+        items:
+          type: string
+        type: array
+      questionId:
+        type: string
+      upstreamId:
+        example: deadbeef
+        format: hex
+        type: string
+    type: object
   apicommon.VotingProcessQuestionRequest:
     properties:
       ballotProtocol:
@@ -6096,6 +6118,48 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Get a voting process results
+      tags:
+      - processes
+  /processes/{processId}/results/memos:
+    get:
+      description: |-
+        Per-question raw voter memos of a published voting process, restricted to
+        questions whose on-chain election has reached RESULTS status: one entry per such
+        question, each listing every free-text memo submitted with a vote, repeated once
+        per vote that carried it (votes without a memo are omitted). Questions not yet in
+        results are excluded. Requires Manager/Admin role of the owning organization.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.VotingProcessMemosResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get a voting process voter memos
       tags:
       - processes
   /storage:

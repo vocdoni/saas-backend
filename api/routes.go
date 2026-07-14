@@ -228,6 +228,9 @@ const (
 	processesParticipantEndpoint = "/processes/{processId}/participant/{participantId}"
 	// GET /processes/{processId}/results for the per-question on-chain results (public)
 	processesResultsEndpoint = "/processes/{processId}/results"
+	// GET /processes/{processId}/results/memos for per-question raw voter memos of questions in
+	// RESULTS status (manager/admin only)
+	processesMemosEndpoint = "/processes/{processId}/results/memos"
 	// CSP voter routes for a voting process (public)
 	processesAuthEndpoint       = "/processes/{processId}/auth/{step}"
 	processesAuthResendEndpoint = "/processes/{processId}/auth/resend"
