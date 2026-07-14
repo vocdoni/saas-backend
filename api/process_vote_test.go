@@ -128,12 +128,13 @@ func TestProcessStatusLifecycle(t *testing.T) {
 // testSignVoteTx builds a vote envelope for processID and signs it as the voter would,
 // returning the marshaled models.SignedTx the relay endpoints take as their payload.
 func testSignVoteTx(t *testing.T, signer *ethereum.SignKeys, processID internal.HexBytes,
-	proof *models.Proof, votePackage []byte,
+	proof *models.Proof, votePackage, memo []byte,
 ) internal.HexBytes {
 	t.Helper()
 	c := qt.New(t)
 	tx := &models.Tx{Payload: &models.Tx_Vote{Vote: &models.VoteEnvelope{
 		ProcessId: processID.Bytes(), Nonce: internal.RandomBytes(16), Proof: proof, VotePackage: votePackage,
+		Memo: memo,
 	}}}
 	txBytes, err := proto.Marshal(tx)
 	c.Assert(err, qt.IsNil)
@@ -148,11 +149,11 @@ func testSignVoteTx(t *testing.T, signer *ethereum.SignKeys, processID internal.
 // testRelayVoteRequest signs a vote tx, wraps it as a SignedTx, posts it to
 // POST /vote, and returns the relayed vote nullifier.
 func testRelayVoteRequest(t *testing.T, signer *ethereum.SignKeys, processID internal.HexBytes,
-	proof *models.Proof, votePackage []byte,
+	proof *models.Proof, votePackage, memo []byte,
 ) internal.HexBytes {
 	t.Helper()
 	c := qt.New(t)
-	stx := testSignVoteTx(t, signer, processID, proof, votePackage)
+	stx := testSignVoteTx(t, signer, processID, proof, votePackage, memo)
 	job := enqueueAndPollJob(t, http.MethodPost, "",
 		&apicommon.RelayVoteRequest{TxPayload: stx}, "vote")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", job.Errors))
@@ -328,7 +329,7 @@ func TestRelayVote(t *testing.T) {
 	votesBefore, err := f.client.ElectionVoteCount(processID.Bytes())
 	c.Assert(err, qt.IsNil)
 
-	nullifier := testRelayVoteRequest(t, f.voter, processID, proof, []byte("[\"1\"]"))
+	nullifier := testRelayVoteRequest(t, f.voter, processID, proof, []byte("[\"1\"]"), nil)
 	c.Assert(nullifier, qt.Not(qt.HasLen), 0)
 
 	votesAfter, err := f.client.ElectionVoteCount(processID.Bytes())
@@ -428,7 +429,7 @@ func TestRelayVotesBatch(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		proof := f.proofFor(t, processID)
 		req.Votes[i] = apicommon.RelayVoteRequest{
-			TxPayload: testSignVoteTx(t, f.voter, processID, proof, []byte("[\"1\"]")),
+			TxPayload: testSignVoteTx(t, f.voter, processID, proof, []byte("[\"1\"]"), nil),
 		}
 	}
 
@@ -502,7 +503,7 @@ func TestRelayVotesRejectsBatch(t *testing.T) {
 	c.Assert(voter.Generate(), qt.IsNil)
 	voteFor := func(processID internal.HexBytes) apicommon.RelayVoteRequest {
 		return apicommon.RelayVoteRequest{
-			TxPayload: testSignVoteTx(t, voter, processID, nil, []byte("[\"1\"]")),
+			TxPayload: testSignVoteTx(t, voter, processID, nil, []byte("[\"1\"]"), nil),
 		}
 	}
 	// a well-formed SignedTx that is not a vote

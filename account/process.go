@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -296,6 +297,40 @@ func (a *Account) VoteByNullifier(nullifier []byte) (*api.Vote, error) {
 		return nil, ErrVoteNotFound
 	default:
 		return nil, fmt.Errorf("could not fetch vote %x: status %d (%s)", nullifier, code, resp)
+	}
+}
+
+// ElectionMemos pages every vote of the on-chain election with the given id and returns each
+// non-empty voter memo, one entry per vote that carried one (so a memo cast N times appears N
+// times). Votes without a memo are skipped. The node's votes-list endpoint returns an empty
+// page past the last one, which terminates the loop.
+//
+// ponytail: pages the whole election; fine for the manager-only read this backs. Add saas-side
+// pagination if a process ever accumulates memos in the millions.
+func (a *Account) ElectionMemos(electionID []byte) ([]string, error) {
+	var memos []string
+	for page := 0; ; page++ {
+		resp, code, err := a.client.Request(http.MethodGet, nil,
+			"elections", internal.HexBytes(electionID).String(), "votes", "page", strconv.Itoa(page))
+		if err != nil {
+			return nil, fmt.Errorf("could not fetch votes of election %x: %w", electionID, err)
+		}
+		if code != http.StatusOK {
+			return nil, fmt.Errorf("could not fetch votes of election %x: unexpected status %d (%s)",
+				electionID, code, resp)
+		}
+		var list api.VotesList
+		if err := json.Unmarshal(resp, &list); err != nil {
+			return nil, fmt.Errorf("could not decode votes of election %x: %w", electionID, err)
+		}
+		if len(list.Votes) == 0 {
+			return memos, nil
+		}
+		for _, v := range list.Votes {
+			if v.Memo != "" {
+				memos = append(memos, v.Memo)
+			}
+		}
 	}
 }
 

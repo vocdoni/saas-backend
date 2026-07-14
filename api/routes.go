@@ -247,6 +247,9 @@ const (
 	processesParticipantsEndpoint = "/processes/{processId}/participants"
 	// POST /processes/{processId}/sign-info — voter's per-question consumed address/nullifier (public)
 	processesSignInfoEndpoint = "/processes/{processId}/sign-info"
+	// GET /processes/{processId}/results/memos for per-question raw voter memos of questions in
+	// RESULTS status (manager/admin only)
+	processesMemosEndpoint = "/processes/{processId}/results/memos"
 	// CSP voter routes for a voting process (public)
 	processesAuthEndpoint       = "/processes/{processId}/auth/{step}"
 	processesAuthResendEndpoint = "/processes/{processId}/auth/resend"
