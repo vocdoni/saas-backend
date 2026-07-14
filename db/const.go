@@ -25,6 +25,17 @@ const (
 	TestMaxCensusSize = 10
 	// max vote overwrites per process
 	MaxVoteOverwritesPerProcess = 10
+
+	// Voting-process question status values (derived at read; empty means draft).
+	QuestionStatusReady    = "ready"
+	QuestionStatusPaused   = "paused"
+	QuestionStatusEnded    = "ended"
+	QuestionStatusCanceled = "canceled"
+	QuestionStatusResults  = "results"
+
+	// Voting-process question ballot types (translated into on-chain vote options).
+	VotingTypeSingleChoice = "singlechoice"
+	VotingTypeMultiChoice  = "multichoice"
 )
 
 // organizationWritePermissions is a map that contains if the role has organization write permission

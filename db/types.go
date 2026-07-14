@@ -469,6 +469,9 @@ type VoteType struct {
 	CostFromWeight    bool   `json:"costFromWeight" bson:"costFromWeight"`
 	CostExponent      uint32 `json:"costExponent" bson:"costExponent"`
 	UniqueChoices     bool   `json:"uniqueChoices" bson:"uniqueChoices"`
+	// MaxTotalCost bounds the sum of value^costExponent across a ballot's fields
+	// (0 = no limit). Used by multichoice/approval to cap the number of selections.
+	MaxTotalCost uint32 `json:"maxTotalCost,omitempty" bson:"maxTotalCost,omitempty"`
 }
 
 // ElectionType describes the election envelope and mode flags.
@@ -550,6 +553,77 @@ type ProcessesBundle struct {
 	Processes  []internal.HexBytes `json:"processes" bson:"processes" swaggertype:"array,string" format:"hex" example:"deadbeef"` // Array of process addresses included in this bundle
 }
 
+// QuestionTypeSetup carries the friendly ballot-type parameters for a
+// VotingProcessQuestion. It is translated into on-chain vote options at publish
+// time (see account.VoteTypeFromQuestion). MinChoices is a validation hint only
+// (the current protocol has no on-chain minimum-count field).
+type QuestionTypeSetup struct {
+	MinChoices    uint32 `json:"minChoices" bson:"minChoices"`
+	MaxChoices    uint32 `json:"maxChoices" bson:"maxChoices"`
+	UniqueChoices bool   `json:"uniqueChoices" bson:"uniqueChoices"`
+}
+
+// BallotProtocol is an optional raw override of the on-chain ballot parameters. When
+// set on a VotingProcessQuestion it takes priority over Type/TypeSetup and is mapped
+// directly onto the election envelope and vote options, enabling ballot shapes
+// (approval, ranked, quadratic) before named types exist for them.
+type BallotProtocol struct {
+	MaxCount          uint32 `json:"maxCount" bson:"maxCount"`
+	MaxValue          uint32 `json:"maxValue" bson:"maxValue"`
+	MaxVoteOverwrites uint32 `json:"maxVoteOverwrites" bson:"maxVoteOverwrites"`
+	CostExponent      uint32 `json:"costExponent" bson:"costExponent"`
+	MaxTotalCost      uint32 `json:"maxTotalCost" bson:"maxTotalCost"`
+	UniqueValues      bool   `json:"uniqueValues" bson:"uniqueValues"`
+	CostFromWeight    bool   `json:"costFromWeight" bson:"costFromWeight"`
+}
+
+// VotingProcess is the container document of the multi-question /processes API. It
+// holds the shared parameters and a census, and references its questions (each an
+// independent on-chain election) by id in the processesQuestions collection. It is a
+// draft while Published is false. It is unrelated to the single-election Process type.
+type VotingProcess struct {
+	ID          primitive.ObjectID   `json:"id" bson:"_id"`
+	OrgAddress  common.Address       `json:"orgAddress" bson:"orgAddress"`
+	Published   bool                 `json:"published" bson:"published"`
+	Title       MultiLangString      `json:"title" bson:"title"`
+	Description MultiLangString      `json:"description,omitempty" bson:"description,omitempty"`
+	Header      string               `json:"header,omitempty" bson:"header,omitempty"`
+	StreamURI   string               `json:"streamUri,omitempty" bson:"streamUri,omitempty"`
+	StartDate   time.Time            `json:"startDate,omitempty" bson:"startDate,omitempty"`
+	EndDate     time.Time            `json:"endDate,omitempty" bson:"endDate,omitempty"`
+	CensusID    primitive.ObjectID   `json:"-" bson:"censusId"`    // internal ref to a db.Census
+	QuestionIDs []primitive.ObjectID `json:"-" bson:"questionIds"` // ordered question references
+	CreatedAt   time.Time            `json:"createdAt" bson:"createdAt"`
+	UpdatedAt   time.Time            `json:"updatedAt" bson:"updatedAt"`
+}
+
+// VotingProcessQuestion is one question of a VotingProcess. Each question maps to
+// exactly one on-chain election, identified after publish by UpstreamID. OrgAddress is
+// denormalized from the parent process so the vote relay and the status syncer can
+// resolve the owner without a join. Status is set to "ready" at publish and reconciled
+// against the chain by the status syncer (follow-up); it is empty for a draft.
+//
+//nolint:lll
+type VotingProcessQuestion struct {
+	ID                primitive.ObjectID `json:"id" bson:"_id"`
+	ProcessID         primitive.ObjectID `json:"parentProcessId" bson:"processId"`
+	OrgAddress        common.Address     `json:"-" bson:"orgAddress"`
+	Order             int                `json:"-" bson:"order"`
+	Title             MultiLangString    `json:"title" bson:"title"`
+	Description       MultiLangString    `json:"description,omitempty" bson:"description,omitempty"`
+	Choices           []Choice           `json:"choices" bson:"choices"`
+	Type              string             `json:"type" bson:"type"`
+	TypeSetup         QuestionTypeSetup  `json:"typeSetup" bson:"typeSetup"`
+	BallotProtocol    *BallotProtocol    `json:"ballotProtocol,omitempty" bson:"ballotProtocol,omitempty"`
+	SecretUntilTheEnd bool               `json:"secretUntilTheEnd" bson:"secretUntilTheEnd"`
+	EligibleMemberIDs []string           `json:"eligibleMemberIds" bson:"eligibleMemberIds"`
+	Metadata          map[string]any     `json:"metadata,omitempty" bson:"metadata,omitempty"`
+	UpstreamID        internal.HexBytes  `json:"upstreamId,omitempty" bson:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	MetadataURL       string             `json:"-" bson:"metadataURL,omitempty"`
+	Status            string             `json:"status,omitempty" bson:"status,omitempty"`
+	SyncedAt          time.Time          `json:"-" bson:"syncedAt,omitempty"`
+}
+
 // HashedPhone represents a hashed phone number for database storage
 type HashedPhone []byte
 
@@ -614,6 +688,9 @@ const (
 	JobTypeSetProcessStatus JobType = "set_process_status"
 	// JobTypeRelayVote represents a vote-relay tx job
 	JobTypeRelayVote JobType = "relay_vote"
+	// JobTypePublishVotingProcess represents a multi-question voting-process publish
+	// (batch of NEW_PROCESS txs) tx job
+	JobTypePublishVotingProcess JobType = "publish_voting_process"
 )
 
 // JobStatus is the lifecycle state of a transaction job (see CreateTxJob/SetJobStatus).

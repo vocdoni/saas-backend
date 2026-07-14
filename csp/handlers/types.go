@@ -91,6 +91,23 @@ type CheckMembershipResponse struct {
 	HasVoted bool              `json:"hasVoted"`
 }
 
+// ProcessCheckResponse is the voter status/eligibility response of the new /processes
+// flow. BelongsToProcess reports whether the token's member is in the process census;
+// Weight is the member weight; Questions carries per-question eligibility and vote status.
+type ProcessCheckResponse struct {
+	BelongsToProcess bool                    `json:"belongsToProcess"`
+	Weight           internal.HexBytes       `json:"weight,omitempty" swaggertype:"string" format:"hex" example:"2a"`
+	Questions        []ProcessQuestionStatus `json:"questions"`
+}
+
+// ProcessQuestionStatus is the per-question voter status within a ProcessCheckResponse.
+type ProcessQuestionStatus struct {
+	QuestionID string            `json:"questionId"`
+	UpstreamID internal.HexBytes `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	CanVote    bool              `json:"canVote"`
+	HasVoted   bool              `json:"hasVoted"`
+}
+
 // ConsumedAddressRequest defines the payload for the request to get the
 // if a token was used and which address was used. It includes the
 // authToken to query the information.

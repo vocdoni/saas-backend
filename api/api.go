@@ -196,6 +196,9 @@ func New(ctx context.Context, conf *Config) *API {
 		notifySync:      conf.NotificationsSyncDelivery,
 	}
 	a.startTxQueue()
+	// clear any publishing markers stranded by a previous crash/restart so those processes are
+	// publishable again (see reconcileStalePublishing).
+	a.reconcileStalePublishing()
 	return a
 }
 
@@ -348,6 +351,15 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, processBundleEndpoint, a.createProcessBundleHandler)
 		handle(r, http.MethodPut, processBundleUpdateEndpoint, a.updateProcessBundleHandler)
 		handle(r, http.MethodPost, processBundleParticipantsCheckEndpoint, a.checkProcessBundleVotedParticipantsHandler)
+		// multi-question voting processes: authoring + protected reads
+		handle(r, http.MethodPost, processesCreateEndpoint, a.createVotingProcessHandler)
+		handle(r, http.MethodGet, processesCreateEndpoint, a.listVotingProcessesHandler)
+		handle(r, http.MethodPut, processesEndpoint, a.updateVotingProcessHandler)
+		handle(r, http.MethodGet, processesEndpoint, a.votingProcessInfoHandler)
+		handle(r, http.MethodGet, processesCheckEndpoint, a.validateVotingProcessHandler)
+		handle(r, http.MethodPost, processesPublishEndpoint, a.publishVotingProcessHandler)
+		handle(r, http.MethodPut, processesQuestionsStatusEndpoint, a.setVotingProcessQuestionsStatusHandler)
+		handle(r, http.MethodPut, processesQuestionStatusEndpoint, a.setVotingProcessQuestionStatusHandler)
 	})
 
 	// Public routes
@@ -388,6 +400,15 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, processBundleSignEndpoint, cspHandlers.BundleSignHandler)
 		handle(r, http.MethodPost, processBundleCheckEndpoint, cspHandlers.BundleCheckHandler)
 		handle(r, http.MethodGet, processBundleMemberEndpoint, a.processBundleParticipantInfoHandler)
+		// multi-question voting processes: public voter reads + CSP
+		handle(r, http.MethodGet, processesQuestionEndpoint, a.votingProcessQuestionHandler)
+		handle(r, http.MethodGet, processesParticipantEndpoint, a.votingProcessParticipantHandler)
+		handle(r, http.MethodGet, processesResultsEndpoint, a.votingProcessResultsHandler)
+		handle(r, http.MethodPost, processesCheckEndpoint, cspHandlers.ProcessCheckHandler)
+		handle(r, http.MethodPost, processesAuthEndpoint, cspHandlers.ProcessAuthHandler)
+		handle(r, http.MethodPost, processesAuthResendEndpoint, cspHandlers.ProcessAuthResendHandler)
+		handle(r, http.MethodPost, processesSignEndpoint, cspHandlers.ProcessSignHandler)
+		handle(r, http.MethodPost, processesWeightEndpoint, cspHandlers.ProcessWeightHandler)
 	})
 	a.router = r
 	return r

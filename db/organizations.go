@@ -588,7 +588,7 @@ type ManagedCounters struct {
 // the whole shared-pool usage in one round trip instead of three separate sumManagedCounter
 // calls.
 //
-// ponytail: one $match+$group over the managedBy set the other integrator paths already scan.
+// one $match+$group over the managedBy set the other integrator paths already scan.
 // If /integrator ever gets hot, denormalise these onto the integrator's own Counters at
 // increment time and drop the aggregation.
 func (ms *MongoStorage) SumManagedCounters(integratorAddr common.Address) (ManagedCounters, error) {

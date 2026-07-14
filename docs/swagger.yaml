@@ -111,6 +111,25 @@ definitions:
           type: string
         type: array
     type: object
+  apicommon.CensusSpec:
+    properties:
+      authFields:
+        items:
+          $ref: '#/definitions/db.OrgMemberAuthField'
+        type: array
+      groupId:
+        type: string
+      memberIds:
+        items:
+          type: string
+        type: array
+      twoFaFields:
+        items:
+          $ref: '#/definitions/db.OrgMemberTwoFaField'
+        type: array
+      weighted:
+        type: boolean
+    type: object
   apicommon.CheckBundleParticipantsRequest:
     properties:
       fieldName:
@@ -488,6 +507,36 @@ definitions:
           type: integer
         type: array
     type: object
+  apicommon.CreateVotingProcessRequest:
+    properties:
+      census:
+        $ref: '#/definitions/apicommon.CensusSpec'
+      description:
+        $ref: '#/definitions/db.MultiLangString'
+      endDate:
+        type: string
+      header:
+        type: string
+      orgAddress:
+        items:
+          type: integer
+        type: array
+      questions:
+        items:
+          $ref: '#/definitions/apicommon.VotingProcessQuestionRequest'
+        type: array
+      startDate:
+        type: string
+      streamUri:
+        type: string
+      title:
+        $ref: '#/definitions/db.MultiLangString'
+    type: object
+  apicommon.CreateVotingProcessResponse:
+    properties:
+      processId:
+        type: string
+    type: object
   apicommon.DeleteManagedOrganizationResponse:
     properties:
       address:
@@ -510,6 +559,15 @@ definitions:
       count:
         description: Number of members deleted
         type: integer
+    type: object
+  apicommon.EligibilitySpec:
+    properties:
+      groupId:
+        type: string
+      memberIds:
+        items:
+          type: string
+        type: array
     type: object
   apicommon.EnqueuedResponse:
     properties:
@@ -1222,6 +1280,40 @@ definitions:
       voteCount:
         type: integer
     type: object
+  apicommon.PublicQuestionResponse:
+    properties:
+      ballotProtocol:
+        $ref: '#/definitions/db.BallotProtocol'
+      census:
+        $ref: '#/definitions/apicommon.CensusSpec'
+      choices:
+        items:
+          $ref: '#/definitions/db.Choice'
+        type: array
+      description:
+        $ref: '#/definitions/db.MultiLangString'
+      id:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      parentProcessId:
+        type: string
+      secretUntilTheEnd:
+        type: boolean
+      status:
+        type: string
+      title:
+        $ref: '#/definitions/db.MultiLangString'
+      type:
+        type: string
+      typeSetup:
+        $ref: '#/definitions/db.QuestionTypeSetup'
+      upstreamId:
+        example: deadbeef
+        format: hex
+        type: string
+    type: object
   apicommon.PublishCensusGroupRequest:
     properties:
       authFields:
@@ -1268,6 +1360,11 @@ definitions:
         description: URI of the published census
         type: string
     type: object
+  apicommon.QuestionStatusID:
+    properties:
+      id:
+        type: string
+    type: object
   apicommon.RelayVoteRequest:
     properties:
       txPayload:
@@ -1281,6 +1378,16 @@ definitions:
       status:
         description: 'One of: ready, paused, ended, canceled'
         example: paused
+        type: string
+    type: object
+  apicommon.SetQuestionsStatusRequest:
+    properties:
+      questions:
+        items:
+          $ref: '#/definitions/apicommon.QuestionStatusID'
+        type: array
+      status:
+        example: ended
         type: string
     type: object
   apicommon.SubscriptionCheckout:
@@ -1641,6 +1748,128 @@ definitions:
           $ref: '#/definitions/db.OrgMemberTwoFaField'
         type: array
     type: object
+  apicommon.VotingProcessListResponse:
+    properties:
+      pagination:
+        $ref: '#/definitions/apicommon.Pagination'
+      processes:
+        items:
+          $ref: '#/definitions/apicommon.VotingProcessResponse'
+        type: array
+    type: object
+  apicommon.VotingProcessQuestionRequest:
+    properties:
+      ballotProtocol:
+        $ref: '#/definitions/db.BallotProtocol'
+      census:
+        $ref: '#/definitions/apicommon.EligibilitySpec'
+      choices:
+        items:
+          $ref: '#/definitions/db.Choice'
+        type: array
+      description:
+        $ref: '#/definitions/db.MultiLangString'
+      metadata:
+        additionalProperties: {}
+        type: object
+      secretUntilTheEnd:
+        type: boolean
+      title:
+        $ref: '#/definitions/db.MultiLangString'
+      type:
+        type: string
+      typeSetup:
+        $ref: '#/definitions/db.QuestionTypeSetup'
+    type: object
+  apicommon.VotingProcessQuestionResults:
+    properties:
+      endDate:
+        type: string
+      finalResults:
+        type: boolean
+      questionId:
+        type: string
+      results:
+        items:
+          items:
+            type: string
+          type: array
+        type: array
+      startDate:
+        type: string
+      status:
+        type: string
+      upstreamId:
+        example: deadbeef
+        format: hex
+        type: string
+      voteCount:
+        type: integer
+    type: object
+  apicommon.VotingProcessResponse:
+    properties:
+      census:
+        $ref: '#/definitions/apicommon.CensusSpec'
+      description:
+        $ref: '#/definitions/db.MultiLangString'
+      endDate:
+        type: string
+      header:
+        type: string
+      id:
+        type: string
+      orgAddress:
+        items:
+          type: integer
+        type: array
+      published:
+        type: boolean
+      questions:
+        items:
+          $ref: '#/definitions/db.VotingProcessQuestion'
+        type: array
+      startDate:
+        type: string
+      streamUri:
+        type: string
+      title:
+        $ref: '#/definitions/db.MultiLangString'
+    type: object
+  apicommon.VotingProcessResultsResponse:
+    properties:
+      id:
+        type: string
+      questions:
+        items:
+          $ref: '#/definitions/apicommon.VotingProcessQuestionResults'
+        type: array
+    type: object
+  apicommon.VotingProcessValidateResponse:
+    properties:
+      errors:
+        items:
+          type: string
+        type: array
+      valid:
+        type: boolean
+    type: object
+  db.BallotProtocol:
+    properties:
+      costExponent:
+        type: integer
+      costFromWeight:
+        type: boolean
+      maxCount:
+        type: integer
+      maxTotalCost:
+        type: integer
+      maxValue:
+        type: integer
+      maxVoteOverwrites:
+        type: integer
+      uniqueValues:
+        type: boolean
+    type: object
   db.Census:
     properties:
       authFields:
@@ -1802,6 +2031,7 @@ definitions:
     - publish_process
     - set_process_status
     - relay_vote
+    - publish_voting_process
     type: string
     x-enum-varnames:
     - JobTypeOrgMembers
@@ -1809,6 +2039,7 @@ definitions:
     - JobTypePublishProcess
     - JobTypeSetProcessStatus
     - JobTypeRelayVote
+    - JobTypePublishVotingProcess
   db.MultiLangString:
     additionalProperties:
       type: string
@@ -1957,6 +2188,15 @@ definitions:
       title:
         $ref: '#/definitions/db.MultiLangString'
     type: object
+  db.QuestionTypeSetup:
+    properties:
+      maxChoices:
+        type: integer
+      minChoices:
+        type: integer
+      uniqueChoices:
+        type: boolean
+    type: object
   db.UserRole:
     enum:
     - admin
@@ -1975,12 +2215,53 @@ definitions:
         type: boolean
       maxCount:
         type: integer
+      maxTotalCost:
+        description: |-
+          MaxTotalCost bounds the sum of value^costExponent across a ballot's fields
+          (0 = no limit). Used by multichoice/approval to cap the number of selections.
+        type: integer
       maxValue:
         type: integer
       maxVoteOverwrites:
         type: integer
       uniqueChoices:
         type: boolean
+    type: object
+  db.VotingProcessQuestion:
+    properties:
+      ballotProtocol:
+        $ref: '#/definitions/db.BallotProtocol'
+      choices:
+        items:
+          $ref: '#/definitions/db.Choice'
+        type: array
+      description:
+        $ref: '#/definitions/db.MultiLangString'
+      eligibleMemberIds:
+        items:
+          type: string
+        type: array
+      id:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      parentProcessId:
+        type: string
+      secretUntilTheEnd:
+        type: boolean
+      status:
+        type: string
+      title:
+        $ref: '#/definitions/db.MultiLangString'
+      type:
+        type: string
+      typeSetup:
+        $ref: '#/definitions/db.QuestionTypeSetup'
+      upstreamId:
+        example: deadbeef
+        format: hex
+        type: string
     type: object
   db.VotingTypes:
     properties:
@@ -5426,6 +5707,397 @@ paths:
       summary: Get user weight for a bundle
       tags:
       - csp
+  /processes:
+    get:
+      description: Paginated list of an organization's voting processes (protected).
+        Filter by question status.
+      parameters:
+      - description: Organization address
+        in: query
+        name: orgAddress
+        required: true
+        type: string
+      - description: Filter by question status
+        in: query
+        name: status
+        type: string
+      - description: Page (1-based)
+        in: query
+        name: page
+        type: integer
+      - description: Page size
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.VotingProcessListResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: List voting processes
+      tags:
+      - processes
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Create a multi-question voting process draft. Requires Manager/Admin role of the org
+        (or a scoped API key with `voting:write`). Creates the inline census unpublished.
+        Each question must define either a named `type` (with `typeSetup` for multichoice)
+        or a raw `ballotProtocol` override; if both are given the `ballotProtocol` wins.
+      parameters:
+      - description: Voting process
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.CreateVotingProcessRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.CreateVotingProcessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Create a voting process draft
+      tags:
+      - processes
+  /processes/{processId}:
+    get:
+      description: Read a voting process with its fully hydrated questions (protected
+        read).
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.VotingProcessResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get a voting process
+      tags:
+      - processes
+    put:
+      consumes:
+      - application/json
+      description: Update a voting process while it is still a draft (not published).
+        409 if already published.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Voting process
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.CreateVotingProcessRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Update a voting process draft
+      tags:
+      - processes
+  /processes/{processId}/check:
+    get:
+      description: Publish-readiness dry-run. Returns { valid, errors } without changing
+        anything.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.VotingProcessValidateResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Validate a voting process for publishing
+      tags:
+      - processes
+  /processes/{processId}/participant/{participantId}:
+    get:
+      description: |-
+        Public participant info for a published voting process, mirroring the bundle
+        participant endpoint. PLACEHOLDER: validates the process (published only) and the
+        participant id, and currently returns null — participant election info is not yet
+        surfaced (the bundle equivalent is likewise a stub pending the CSP indexer lookup).
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Participant ID
+        in: path
+        name: participantId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'Placeholder: null until participant info is surfaced'
+          schema: {}
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Get a voting process participant
+      tags:
+      - processes
+  /processes/{processId}/publish:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Publish a voting process: one on-chain election per question, submitted as a batch.
+        Requires Admin role (or a `voting:write` key). Returns 202 with a job id; poll
+        GET /jobs/{jobId}. Idempotent once published.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Already published
+          schema:
+            $ref: '#/definitions/apicommon.CreateVotingProcessResponse'
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/apicommon.EnqueuedResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Publish a voting process
+      tags:
+      - processes
+  /processes/{processId}/questions/{questionId}:
+    get:
+      description: Public voter read of a single question, including its synced status
+        and eligibility.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Question ID
+        in: path
+        name: questionId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.PublicQuestionResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Get a voting process question
+      tags:
+      - processes
+  /processes/{processId}/questions/{questionId}/status:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Question ID
+        in: path
+        name: questionId
+        required: true
+        type: string
+      - description: Target status
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.SetProcessStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/apicommon.EnqueuedResponse'
+      security:
+      - BearerAuth: []
+      summary: Change status of one question
+      tags:
+      - processes
+  /processes/{processId}/questions/status:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Target status + questions
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.SetQuestionsStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/apicommon.EnqueuedResponse'
+      security:
+      - BearerAuth: []
+      summary: Change status of many questions
+      tags:
+      - processes
+  /processes/{processId}/results:
+    get:
+      description: |-
+        Public per-question on-chain results of a published voting process: one entry per
+        published question, each with the trimmed election state (status, vote count,
+        dates, whether final, and the tally). No authentication is required.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.VotingProcessResultsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Get a voting process results
+      tags:
+      - processes
   /storage:
     post:
       consumes:

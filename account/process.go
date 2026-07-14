@@ -70,6 +70,10 @@ type NewProcessParams struct {
 	CensusRoot  []byte // census root (CSP public key)
 	CensusURI   string // census endpoint (SaaS CSP base URL)
 	MetadataURL string // public https URL of the stored ElectionMetadata JSON
+	// Nonce, when set, is used as the tx account nonce instead of reading the current
+	// on-chain nonce. Batch publishing sets explicit consecutive nonces so N txs can be
+	// signed and submitted together; single publishes leave it nil to read the nonce.
+	Nonce *uint32
 }
 
 // electionStartDuration maps the high-level start/end dates to the on-chain
@@ -122,9 +126,13 @@ func (a *Account) BuildNewProcessTx(p *NewProcessParams) (*models.Tx, error) {
 	if ep.MaxCensusSize == 0 {
 		return nil, fmt.Errorf("maxCensusSize must be greater than zero")
 	}
-	acc, err := a.client.Account(p.OrgAddress.String())
-	if err != nil {
-		return nil, fmt.Errorf("could not fetch organization account: %w", err)
+	nonce := p.Nonce
+	if nonce == nil {
+		acc, err := a.client.Account(p.OrgAddress.String())
+		if err != nil {
+			return nil, fmt.Errorf("could not fetch organization account: %w", err)
+		}
+		nonce = &acc.Nonce
 	}
 
 	startTime, duration, err := electionStartDuration(ep.StartDate, ep.EndDate)
@@ -153,6 +161,7 @@ func (a *Account) BuildNewProcessTx(p *NewProcessParams) (*models.Tx, error) {
 			MaxCount:          ep.VoteType.MaxCount,
 			MaxValue:          ep.VoteType.MaxValue,
 			MaxVoteOverwrites: ep.VoteType.MaxVoteOverwrites,
+			MaxTotalCost:      ep.VoteType.MaxTotalCost,
 			CostExponent:      ep.VoteType.CostExponent,
 		},
 		Mode: &models.ProcessMode{
@@ -169,7 +178,7 @@ func (a *Account) BuildNewProcessTx(p *NewProcessParams) (*models.Tx, error) {
 		Payload: &models.Tx_NewProcess{
 			NewProcess: &models.NewProcessTx{
 				Txtype:  models.TxType_NEW_PROCESS,
-				Nonce:   acc.Nonce,
+				Nonce:   *nonce,
 				Process: process,
 			},
 		},

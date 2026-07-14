@@ -1,5 +1,5 @@
 # Base stage — install deps, modules, circuits (shared by all targets)
-FROM golang:1.24 AS base
+FROM golang:1.26 AS base
 
 WORKDIR /src
 

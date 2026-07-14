@@ -30,6 +30,8 @@ func (ms *MongoStorage) collectionsMap() map[string]**mongo.Collection {
 		"publishedCensuses":   &ms.publishedCensuses,
 		"processes":           &ms.processes,
 		"processBundles":      &ms.processBundles,
+		"votingProcesses":     &ms.votingProcesses,
+		"processesQuestions":  &ms.processesQuestions,
 		"cspTokens":           &ms.cspTokens,
 		"cspTokensStatus":     &ms.cspTokensStatus,
 		"jobs":                &ms.jobs,
@@ -54,7 +56,7 @@ func (ms *MongoStorage) init() error {
 // The _id field is skipped.
 func dynamicUpdateDocument(item any, alwaysUpdateTags []string) (bson.M, error) {
 	val := reflect.ValueOf(item)
-	if val.Kind() == reflect.Ptr {
+	if val.Kind() == reflect.Pointer {
 		val = val.Elem()
 	}
 	if !val.IsValid() || val.Kind() != reflect.Struct {

@@ -47,6 +47,8 @@ type MongoStorage struct {
 	publishedCensuses   *mongo.Collection
 	processes           *mongo.Collection
 	processBundles      *mongo.Collection
+	votingProcesses     *mongo.Collection
+	processesQuestions  *mongo.Collection
 	cspTokens           *mongo.Collection
 	cspTokensStatus     *mongo.Collection
 	jobs                *mongo.Collection

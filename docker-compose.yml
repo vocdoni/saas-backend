@@ -45,6 +45,8 @@ services:
   ui:
     profiles:
       - with-ui
+    env_file:
+      - .env
     build:
       context: .
       dockerfile: ui.dev.dockerfile

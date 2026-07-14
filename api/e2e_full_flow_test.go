@@ -30,7 +30,7 @@ func TestFullElectionLifecycle(t *testing.T) {
 		}
 	}()
 
-	// ponytail: 3 voters, unit weights, one binary question — the smallest setup that
+	// 3 voters, unit weights, one binary question — the smallest setup that
 	// still proves a non-trivial tally (a bucket with 2 and a bucket with 1). The vote
 	// plan and expected buckets are derived from this slice, so extend it to scale up.
 	votePlan := []int{1, 1, 0}

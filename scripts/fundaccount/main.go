@@ -16,13 +16,14 @@ func main() {
 	log.Init(log.LogLevelDebug, "stdout", nil)
 
 	flag.StringP("privateKey", "k", "", "private key for the Vocdoni account")
-	flag.String("voconeURL", "http://localhost:9090", "Vocone API URL")
-	flag.String("faucetPath", "/v2/open/claim", "Faucet endpoint path")
+	flag.String("voconeURL", "http://localhost:9090/v2", "Vocone API URL")
+	flag.String("faucetPath", "/open/claim", "Faucet endpoint path")
 	flag.Parse()
 
 	viper.SetEnvPrefix("VOCDONI")
 	if err := viper.BindPFlags(flag.CommandLine); err != nil {
-		log.Fatalf("could not bind flags: %v", err)
+		log.Errorf("could not bind flags: %v", err)
+		return
 	}
 	viper.AutomaticEnv()
 
@@ -36,7 +37,8 @@ func main() {
 
 	key, err := crypto.HexToECDSA(privKey)
 	if err != nil {
-		log.Fatalf("invalid private key: %v", err)
+		log.Errorf("invalid private key: %v", err)
+		return
 	}
 
 	addr := crypto.PubkeyToAddress(key.PublicKey)
@@ -45,7 +47,8 @@ func main() {
 	faucetURL := voconeURL + faucetPath + "/" + addr.Hex()
 	resp, err := http.Get(faucetURL)
 	if err != nil {
-		log.Fatalf("faucet request failed: %v", err)
+		log.Errorf("faucet request failed: %v", err)
+		return
 	}
 	defer func() {
 		_ = resp.Body.Close()
@@ -53,10 +56,12 @@ func main() {
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatalf("faucet response read failed: %v", err)
+		log.Errorf("faucet response read failed: %v", err)
+		return
 	}
 	if resp.StatusCode != http.StatusOK {
-		log.Fatalf("faucet request failed: %s", string(body))
+		log.Errorf("faucet request failed: %s", string(body))
+		return
 	}
 	log.Infof("faucet response (%d): %s", resp.StatusCode, string(body))
 }
