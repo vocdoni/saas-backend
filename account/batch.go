@@ -39,7 +39,11 @@ type BatchItemResult struct {
 // per-input result in input order; "submitted" means mempool-accepted, not confirmed —
 // callers must confirm each submitted item on-chain (WaitTxMined) and resubmit the rest.
 func (a *Account) SubmitSignedTxBatch(stxs [][]byte) ([]BatchItemResult, error) {
-	res, err := a.client.SendTxBatch(stxs)
+	txs := make([]dvoteapi.TransactionPayload, len(stxs))
+	for i, stx := range stxs {
+		txs[i] = dvoteapi.TransactionPayload{Payload: stx}
+	}
+	res, err := a.client.SendTxBatch(txs)
 	if err != nil {
 		return nil, fmt.Errorf("could not submit signed tx batch: %w", err)
 	}
