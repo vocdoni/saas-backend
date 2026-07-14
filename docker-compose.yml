@@ -14,7 +14,7 @@ services:
     image: saas-backend-api
 
     ports:
-      - ${VOCDONI_PORT}:${VOCDONI_PORT}
+      - ${VOCDONI_PORT:-8080}:${VOCDONI_PORT:-8080}
     sysctls:
       net.core.somaxconn: 8128
     restart: ${RESTART:-unless-stopped}
