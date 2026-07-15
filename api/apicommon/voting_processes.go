@@ -104,7 +104,7 @@ type VotingProcessValidateResponse struct {
 // SetQuestionsStatusRequest changes the on-chain status of many questions of a process to a
 // single target status. An empty Questions list targets every published question.
 type SetQuestionsStatusRequest struct {
-	Status    string             `json:"status" example:"ended"`
+	Status    string             `json:"status" example:"ENDED"`
 	Questions []QuestionStatusID `json:"questions,omitempty"`
 }
 

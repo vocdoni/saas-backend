@@ -696,7 +696,8 @@ func (a *API) enqueueStatusChange(
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	statusStr := strings.ToLower(status.String())
+	// stored uppercase to match the vochain (status.String() is already uppercase).
+	statusStr := status.String()
 	orgLock := a.orgTxLocks.lock(org.Address)
 	if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
 		defer orgLock.Unlock()
@@ -732,9 +733,10 @@ func (a *API) enqueueStatusChange(
 	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, &apicommon.EnqueuedResponse{JobID: jobID})
 }
 
-// parseProcessStatus maps a status string to the on-chain enum.
+// parseProcessStatus maps a status string to the on-chain enum. Input is accepted case-insensitively
+// (upper-cased to match the uppercase QuestionStatus* constants).
 func parseProcessStatus(s string) (models.ProcessStatus, bool) {
-	switch strings.ToLower(s) {
+	switch strings.ToUpper(s) {
 	case db.QuestionStatusReady:
 		return models.ProcessStatus_READY, true
 	case db.QuestionStatusPaused:

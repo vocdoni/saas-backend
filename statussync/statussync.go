@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -135,7 +134,8 @@ func (s *Syncer) RunOnce(ctx context.Context) (int, error) {
 }
 
 // electionStatusesByOrg pages all of an org's on-chain elections and returns a map of
-// hex(electionID) → lowercased chain status (matching the stored lowercase form).
+// hex(electionID) → chain status. Both chain and stored statuses are uppercase, so no
+// normalization is needed.
 func (s *Syncer) electionStatusesByOrg(ctx context.Context, org common.Address) (map[string]string, error) {
 	out := make(map[string]string)
 	for page := 0; ; page++ {
@@ -150,7 +150,7 @@ func (s *Syncer) electionStatusesByOrg(ctx context.Context, org common.Address) 
 			return out, nil
 		}
 		for i := range summaries {
-			out[hex.EncodeToString(summaries[i].ElectionID)] = strings.ToLower(summaries[i].Status)
+			out[hex.EncodeToString(summaries[i].ElectionID)] = summaries[i].Status
 		}
 	}
 }

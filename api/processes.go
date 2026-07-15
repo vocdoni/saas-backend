@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -368,7 +369,9 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
-	total, list, err := a.db.ListVotingProcesses(orgAddress, r.URL.Query().Get("status"), params.Page, params.Limit)
+	// stored question status is uppercase; upper-case the filter so client input stays case-insensitive.
+	statusFilter := strings.ToUpper(r.URL.Query().Get("status"))
+	total, list, err := a.db.ListVotingProcesses(orgAddress, statusFilter, params.Page, params.Limit)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return

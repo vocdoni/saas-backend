@@ -1387,7 +1387,7 @@ definitions:
           $ref: '#/definitions/apicommon.QuestionStatusID'
         type: array
       status:
-        example: ended
+        example: ENDED
         type: string
     type: object
   apicommon.SubscriptionCheckout:
