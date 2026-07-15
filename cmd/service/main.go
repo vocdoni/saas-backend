@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	flag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -21,6 +22,7 @@ import (
 	"github.com/vocdoni/saas-backend/notifications/smtp"
 	"github.com/vocdoni/saas-backend/notifications/twilio"
 	"github.com/vocdoni/saas-backend/objectstorage"
+	"github.com/vocdoni/saas-backend/statussync"
 	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
@@ -64,6 +66,10 @@ func main() {
 	flag.Duration("notificationQueueTTL", 0, "max age of a queued CSP notification before it is dropped (0 = default)")
 	flag.Int("notificationBreakerMaxFailures", 0, "provider failures that trip the CSP notification breaker (0 = default)")
 	flag.Duration("notificationBreakerCooldown", 0, "how long the CSP notification breaker stays open once tripped (0 = default)")
+	// on-chain question status sync worker (keeps stored question statuses in sync with the chain)
+	flag.Bool("statusSyncEnabled", false, "enable the background worker that syncs question statuses with the Vochain")
+	flag.Duration("statusSyncInterval", 60*time.Second, "interval between status sync runs (0 = default 60s)")
+	flag.Duration("statusSyncRunTimeout", 5*time.Minute, "per-run timeout for a status sync pass (0 = default 5m)")
 	// parse flags
 	flag.Parse()
 	// initialize Viper
@@ -239,6 +245,16 @@ func main() {
 	if apiConf.CSP, err = csp.New(ctx, cspConf); err != nil {
 		log.Fatalf("could not create the CSP service: %v", err)
 		return
+	}
+	// optional background worker: reconcile each published question's status with the chain so
+	// reads (list, ?status= filter, managed-org delete guard) serve the stored status.
+	if viper.GetBool("statusSyncEnabled") {
+		statussync.New(ctx, &statussync.Config{
+			DB:         database,
+			Account:    acc,
+			Interval:   viper.GetDuration("statusSyncInterval"),
+			RunTimeout: viper.GetDuration("statusSyncRunTimeout"),
+		}).Start()
 	}
 	apiConf.Subscriptions = subscriptions.New(&subscriptions.Config{
 		DB: database,

@@ -3,7 +3,9 @@ package db
 import (
 	"context"
 	"fmt"
+	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -156,4 +158,65 @@ func (ms *MongoStorage) ResetQuestionsPublish(processID primitive.ObjectID) erro
 		return fmt.Errorf("failed to reset questions publish state: %w", err)
 	}
 	return nil
+}
+
+// QuestionsInSyncableStatus returns the minimal refs of every published question whose stored
+// status can still change on-chain (ready|paused|ended). Terminal statuses (canceled|results) are
+// final, so once a question reaches them (stored == chain) it needs no further sync and is
+// excluded — keeping the candidate set bounded while every question still converges to the chain.
+// It is the status syncer's single candidate query (projected to upstreamId, orgAddress, status).
+func (ms *MongoStorage) QuestionsInSyncableStatus(ctx context.Context) ([]QuestionStatusRef, error) {
+	filter := bson.M{
+		"upstreamId": bson.M{"$exists": true},                                                                 //nolint:goconst
+		"status":     bson.M{"$in": []string{QuestionStatusReady, QuestionStatusPaused, QuestionStatusEnded}}, //nolint:goconst
+	}
+	proj := options.Find().SetProjection(bson.M{"upstreamId": 1, "orgAddress": 1, "status": 1})
+	cur, err := ms.processesQuestions.Find(ctx, filter, proj)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list syncable questions: %w", err)
+	}
+	var refs []QuestionStatusRef
+	if err := cur.All(ctx, &refs); err != nil {
+		return nil, fmt.Errorf("failed to decode syncable questions: %w", err)
+	}
+	return refs, nil
+}
+
+// SyncQuestionStatuses applies the given status reconciliations in one unordered BulkWrite keyed
+// by upstreamId, stamping syncedAt. Unordered so one failed update never blocks the rest; a no-op
+// on an empty change set. NewStatus must already be the lowercase stored form. Syncer-only.
+func (ms *MongoStorage) SyncQuestionStatuses(ctx context.Context, changes []QuestionStatusChange) error {
+	if len(changes) == 0 {
+		return nil
+	}
+	now := time.Now()
+	writes := make([]mongo.WriteModel, 0, len(changes))
+	for _, ch := range changes {
+		writes = append(writes, mongo.NewUpdateOneModel().
+			SetFilter(bson.M{"upstreamId": ch.UpstreamID}). //nolint:goconst
+			SetUpdate(bson.M{"$set": bson.M{"status": ch.NewStatus, "syncedAt": now}}))
+	}
+	ctx, cancel := context.WithTimeout(ctx, batchTimeout)
+	defer cancel()
+	if _, err := ms.processesQuestions.BulkWrite(ctx, writes, options.BulkWrite().SetOrdered(false)); err != nil {
+		return fmt.Errorf("failed to sync question statuses: %w", err)
+	}
+	return nil
+}
+
+// CountActiveQuestions counts an organization's published questions in an active status
+// (ready|paused) using the stored (synced) status. Backs the managed-org delete guard so it can
+// block deletion while any new-processes election is live, with no per-election chain calls.
+func (ms *MongoStorage) CountActiveQuestions(orgAddress common.Address) (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	filter := bson.M{
+		"orgAddress": orgAddress,                                                         //nolint:goconst
+		"status":     bson.M{"$in": []string{QuestionStatusReady, QuestionStatusPaused}}, //nolint:goconst
+	}
+	n, err := ms.processesQuestions.CountDocuments(ctx, filter)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count active questions: %w", err)
+	}
+	return n, nil
 }
