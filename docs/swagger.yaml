@@ -1261,6 +1261,48 @@ definitions:
       status:
         type: string
     type: object
+  apicommon.ProcessParticipantEntry:
+    properties:
+      email:
+        type: string
+      memberId:
+        type: string
+      memberNumber:
+        type: string
+      name:
+        type: string
+      questions:
+        items:
+          $ref: '#/definitions/apicommon.ProcessParticipantQuestionVote'
+        type: array
+      surname:
+        type: string
+    type: object
+  apicommon.ProcessParticipantQuestionVote:
+    properties:
+      hasVoted:
+        type: boolean
+      questionId:
+        type: string
+      upstreamId:
+        example: deadbeef
+        format: hex
+        type: string
+    type: object
+  apicommon.ProcessParticipantsCheckRequest:
+    properties:
+      fieldName:
+        type: string
+      value:
+        type: string
+    type: object
+  apicommon.ProcessParticipantsCheckResponse:
+    properties:
+      participants:
+        items:
+          $ref: '#/definitions/apicommon.ProcessParticipantEntry'
+        type: array
+    type: object
   apicommon.ProcessResultsResponse:
     properties:
       endDate:
@@ -2384,6 +2426,32 @@ definitions:
       at:
         type: string
       nullifier:
+        example: deadbeef
+        format: hex
+        type: string
+    type: object
+  handlers.ProcessSignInfoResponse:
+    properties:
+      consumed:
+        items:
+          $ref: '#/definitions/handlers.QuestionConsumedAddress'
+        type: array
+    type: object
+  handlers.QuestionConsumedAddress:
+    properties:
+      address:
+        example: deadbeef
+        format: hex
+        type: string
+      at:
+        type: string
+      nullifier:
+        example: deadbeef
+        format: hex
+        type: string
+      questionId:
+        type: string
+      upstreamId:
         example: deadbeef
         format: hex
         type: string
@@ -4076,6 +4144,7 @@ paths:
     get:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Returns a paginated list of process bundles for an organization.
         Each entry contains the bundle ID, the primary vochain process ID
@@ -4123,6 +4192,7 @@ paths:
     get:
       consumes:
       - application/json
+      deprecated: true
       description: Returns a list of voting process drafts.
       produces:
       - application/json
@@ -4826,6 +4896,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Create a new voting process (draft). Requires Manager/Admin role of the owning organization. The
         request must reference the organization via either a `censusId` or an explicit `orgAddress`.
@@ -4879,6 +4950,7 @@ paths:
     delete:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Delete a draft voting process. Only unpublished drafts can be deleted; a process
         already published on-chain cannot be removed. Requires Manager/Admin role of the
@@ -4926,6 +4998,7 @@ paths:
     get:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Retrieve voting process information by ID. Returns process details including census and metadata.
         For encrypted (secretUntilTheEnd) elections the response additionally carries the election's
@@ -4962,6 +5035,7 @@ paths:
     put:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Update an existing draft voting process. Requires Manager/Admin role of the owning organization.
         Only drafts that have not yet been published on chain can be updated; updating a published process
@@ -5013,6 +5087,7 @@ paths:
       - process
   /process/{processId}/metadata:
     get:
+      deprecated: true
       description: |-
         Rebuilds and returns the raw ElectionMetadata JSON document of the process
         identified by its process id. The metadata is deterministically derived
@@ -5050,6 +5125,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Publishes an existing draft process (created via POST /process) as an on-chain
         election. The backend builds the election metadata and NewProcess transaction,
@@ -5109,6 +5185,7 @@ paths:
       - process
   /process/{processId}/results:
     get:
+      deprecated: true
       description: |-
         Fetches the current on-chain state of the election identified by its process id
         and returns a trimmed view of it: status, vote count, start/end dates, whether the
@@ -5146,6 +5223,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Get the address used to sign a process. Requires a verified token. Returns the address, nullifier,
         and timestamp of the consumption. {processId} accepts the 24-hex ProcessID (preferred)
@@ -5192,6 +5270,7 @@ paths:
     put:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Changes the status of an on-chain election (ready|paused|ended|canceled). The
         backend builds a SET_PROCESS_STATUS transaction, funds and signs it with the
@@ -5248,6 +5327,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Create a new process bundle linking a census to an optional list of on-chain processes,
         used by the CSP voter flow. Requires Manager/Admin role for the organization that owns
@@ -5289,6 +5369,7 @@ paths:
     get:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Retrieve process bundle information by ID. Returns bundle details including the associated census,
         census root, organization address, and list of processes.
@@ -5323,6 +5404,7 @@ paths:
     put:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Add additional on-chain processes to an existing bundle. Requires Manager/Admin role for
         the organization that owns the bundle. An empty process list is a no-op that returns the
@@ -5369,6 +5451,7 @@ paths:
     get:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Retrieve process information for a participant in a process bundle. Returns process details including
         the census and metadata.
@@ -5408,6 +5491,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Handle authentication for a process bundle. There are two steps in the authentication process:
         - Step 0: The user sends the participant ID and contact information (email or phone).
@@ -5468,6 +5552,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Resend the challenge for an existing (non-verified) authentication token.
         The request must include the auth token and a valid contact method for the bundle census type
@@ -5518,6 +5603,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Check whether the user behind a CSP auth token is an eligible participant of the bundle's census.
         The user is identified solely by the auth token (the only voter data the client stores). The token
@@ -5563,6 +5649,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Look up org members by one of the allowed identification fields
         (email, phone, memberNumber, nationalId, name, surname) and return
@@ -5617,6 +5704,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Sign a process in a bundle. Requires a verified token. The server signs the address with the user data
         and returns the signature. Once signed, the process is marked as consumed and cannot be signed again.
@@ -5667,6 +5755,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: Get the weight of a user for a given bundle. Requires a verified
         token.
       parameters:
@@ -5785,6 +5874,45 @@ paths:
       tags:
       - processes
   /processes/{processId}:
+    delete:
+      description: |-
+        Delete an unpublished voting process draft together with its inline census. A
+        published process has on-chain elections and cannot be deleted. Requires
+        Manager/Admin role of the organization that owns the process.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Process already published
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Delete a voting process draft
+      tags:
+      - processes
     get:
       description: Read a voting process with its fully hydrated questions (protected
         read).
@@ -5922,6 +6050,55 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Get a voting process participant
+      tags:
+      - processes
+  /processes/{processId}/participants/check:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Manager/Admin lookup of organization members by a single field (email, phone,
+        memberNumber, nationalId), intersected with the process census, reporting each
+        matched member's per-question voted status. For `phone` pass the plaintext number;
+        it is hashed server-side. Requires Manager/Admin of the owning organization.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Member lookup
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.ProcessParticipantsCheckRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessParticipantsCheckResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Check voted participants of a voting process
       tags:
       - processes
   /processes/{processId}/publish:
@@ -6096,6 +6273,53 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Get a voting process results
+      tags:
+      - processes
+  /processes/{processId}/sign-info:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Per-question consumed address, nullifier and timestamp for the voter identified
+        by a verified CSP auth token. Only questions the voter has already voted are
+        returned. This is the /processes replacement of the single-election sign-info.
+        Public endpoint (the token authenticates the voter).
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Auth token
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.ConsumedAddressRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ProcessSignInfoResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Get a voter's consumed sign info for a voting process
       tags:
       - processes
   /storage:

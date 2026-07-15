@@ -69,7 +69,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	// find default plan
 	defaultPlan, err := a.db.DefaultPlan()
 	if err != nil || defaultPlan == nil {
-		errors.ErrNoDefaultPlan.WithErr((err)).Write(w)
+		errors.ErrNoDefaultPlan.WithErr(err).Write(w)
 		return
 	}
 	// integrator portal opt-in: subscribe the new org to the free integrator plan so it
@@ -611,7 +611,8 @@ func (a *API) organizationJobsHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		400		{object}	errors.Error	"Invalid request or organization not found"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/processes [get]
+//	@Deprecated
+//	@Router	/organizations/{address}/processes [get]
 func (a *API) organizationBundlesHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())

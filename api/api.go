@@ -360,6 +360,8 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, processesPublishEndpoint, a.publishVotingProcessHandler)
 		handle(r, http.MethodPut, processesQuestionsStatusEndpoint, a.setVotingProcessQuestionsStatusHandler)
 		handle(r, http.MethodPut, processesQuestionStatusEndpoint, a.setVotingProcessQuestionStatusHandler)
+		handle(r, http.MethodDelete, processesEndpoint, a.deleteVotingProcessHandler)
+		handle(r, http.MethodPost, processesParticipantsCheckEndpoint, a.votingProcessParticipantsCheckHandler)
 	})
 
 	// Public routes
@@ -409,6 +411,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, processesAuthResendEndpoint, cspHandlers.ProcessAuthResendHandler)
 		handle(r, http.MethodPost, processesSignEndpoint, cspHandlers.ProcessSignHandler)
 		handle(r, http.MethodPost, processesWeightEndpoint, cspHandlers.ProcessWeightHandler)
+		handle(r, http.MethodPost, processesSignInfoEndpoint, cspHandlers.ProcessSignInfoHandler)
 	})
 	a.router = r
 	return r
