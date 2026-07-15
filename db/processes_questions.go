@@ -170,7 +170,7 @@ func (ms *MongoStorage) QuestionsInSyncableStatus(ctx context.Context) ([]Questi
 		"upstreamId": bson.M{"$exists": true},                                                                 //nolint:goconst
 		"status":     bson.M{"$in": []string{QuestionStatusReady, QuestionStatusPaused, QuestionStatusEnded}}, //nolint:goconst
 	}
-	proj := options.Find().SetProjection(bson.M{"upstreamId": 1, "orgAddress": 1, "status": 1})
+	proj := options.Find().SetProjection(bson.M{"upstreamId": 1, "orgAddress": 1, "status": 1}) //nolint:goconst
 	cur, err := ms.processesQuestions.Find(ctx, filter, proj)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list syncable questions: %w", err)

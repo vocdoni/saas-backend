@@ -107,7 +107,7 @@ func TestStatusSync(t *testing.T) {
 	vpID, err := testDB.SetVotingProcess(&db.VotingProcess{
 		OrgAddress: orgAddress,
 		Published:  true,
-		Title:      db.MultiLangString{"default": "Sync process"},
+		Title:      db.MultiLangString{"default": "Sync process"}, //nolint:goconst
 	})
 	c.Assert(err, qt.IsNil)
 	qEndedID, err := testDB.SetQuestion(&db.VotingProcessQuestion{
