@@ -70,7 +70,8 @@ func (a *API) resolveBundleProcessID(raw string) (internal.HexBytes, *errors.Err
 //	@Failure		400		{object}	errors.Error	"Invalid input data, or census/organization not found"
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/process/bundle [post]
+//	@Deprecated
+//	@Router	/process/bundle [post]
 func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request) {
 	var req apicommon.CreateProcessBundleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -200,7 +201,8 @@ func (a *API) createProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 //	@Failure		400			{object}	errors.Error	"Invalid input data, or bundle not found"
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
-//	@Router			/process/bundle/{bundleId} [put]
+//	@Deprecated
+//	@Router	/process/bundle/{bundleId} [put]
 func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request) {
 	bundleIDStr := chi.URLParam(r, "bundleId")
 	if bundleIDStr == "" {
@@ -293,7 +295,8 @@ func (a *API) updateProcessBundleHandler(w http.ResponseWriter, r *http.Request)
 //	@Failure		400			{object}	errors.Error	"Invalid bundle ID"
 //	@Failure		404			{object}	errors.Error	"Bundle not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
-//	@Router			/process/bundle/{bundleId} [get]
+//	@Deprecated
+//	@Router	/process/bundle/{bundleId} [get]
 func (a *API) processBundleInfoHandler(w http.ResponseWriter, r *http.Request) {
 	bundleIDStr := chi.URLParam(r, "bundleId")
 	if bundleIDStr == "" {
@@ -337,7 +340,8 @@ func (a *API) processBundleInfoHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		400				{object}	errors.Error	"Invalid bundle ID or participant ID"
 //	@Failure		404				{object}	errors.Error	"Bundle not found"
 //	@Failure		500				{object}	errors.Error	"Internal server error"
-//	@Router			/process/bundle/{bundleId}/{participantId} [get]
+//	@Deprecated
+//	@Router	/process/bundle/{bundleId}/{participantId} [get]
 func (a *API) processBundleParticipantInfoHandler(w http.ResponseWriter, r *http.Request) {
 	bundleIDStr := chi.URLParam(r, "bundleId")
 	if bundleIDStr == "" {
@@ -398,7 +402,8 @@ func (a *API) processBundleParticipantInfoHandler(w http.ResponseWriter, r *http
 //	@Failure		403			{object}	errors.Error	"Forbidden"
 //	@Failure		404			{object}	errors.Error	"Bundle not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
-//	@Router			/process/bundle/{bundleId}/participants/check [post]
+//	@Deprecated
+//	@Router	/process/bundle/{bundleId}/participants/check [post]
 func (a *API) checkProcessBundleVotedParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 	bundleIDStr := chi.URLParam(r, "bundleId")
 	if bundleIDStr == "" {

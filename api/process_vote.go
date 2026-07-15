@@ -159,7 +159,8 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		404			{object}	errors.Error						"Process not found"
 //	@Failure		500			{object}	errors.Error						"Internal server error"
 //	@Failure		503			{object}	errors.Error						"Transaction queue is full"
-//	@Router			/process/{processId}/status [put]
+//	@Deprecated
+//	@Router	/process/{processId}/status [put]
 func (a *API) setProcessStatusHandler(w http.ResponseWriter, r *http.Request) {
 	objID, err := primitive.ObjectIDFromHex(chi.URLParam(r, "processId"))
 	if err != nil {

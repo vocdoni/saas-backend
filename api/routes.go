@@ -228,6 +228,11 @@ const (
 	processesParticipantEndpoint = "/processes/{processId}/participant/{participantId}"
 	// GET /processes/{processId}/results for the per-question on-chain results (public)
 	processesResultsEndpoint = "/processes/{processId}/results"
+	// POST /processes/{processId}/participants/check — Manager/Admin lookup of org members by
+	// field intersected with the census, with per-question voted status (protected)
+	processesParticipantsCheckEndpoint = "/processes/{processId}/participants/check"
+	// POST /processes/{processId}/sign-info — voter's per-question consumed address/nullifier (public)
+	processesSignInfoEndpoint = "/processes/{processId}/sign-info"
 	// CSP voter routes for a voting process (public)
 	processesAuthEndpoint       = "/processes/{processId}/auth/{step}"
 	processesAuthResendEndpoint = "/processes/{processId}/auth/resend"

@@ -26,7 +26,8 @@ import (
 //	@Failure		400			{object}	errors.Error						"Invalid input data"
 //	@Failure		404			{object}	errors.Error						"Process not found"
 //	@Failure		500			{object}	errors.Error						"Internal server error"
-//	@Router			/process/{processId}/results [get]
+//	@Deprecated
+//	@Router	/process/{processId}/results [get]
 func (a *API) processResultsHandler(w http.ResponseWriter, r *http.Request) {
 	objID, err := primitive.ObjectIDFromHex(chi.URLParam(r, "processId"))
 	if err != nil {
@@ -91,7 +92,8 @@ func (a *API) processResultsHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		400			{object}	errors.Error	"Invalid input data"
 //	@Failure		404			{object}	errors.Error	"Process not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
-//	@Router			/process/{processId}/metadata [get]
+//	@Deprecated
+//	@Router	/process/{processId}/metadata [get]
 func (a *API) processMetadataHandler(w http.ResponseWriter, r *http.Request) {
 	objID, err := primitive.ObjectIDFromHex(chi.URLParam(r, "processId"))
 	if err != nil {

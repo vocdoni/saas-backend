@@ -15,6 +15,7 @@ import (
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.vocdoni.io/dvote/vochain/state"
 )
 
 // parseProcessID parses the {processId} URL param (a voting-process Mongo ObjectID) and
@@ -362,4 +363,73 @@ func writeResendError(w http.ResponseWriter, err error) {
 	default:
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 	}
+}
+
+// ProcessSignInfoHandler godoc
+//
+//	@Summary		Get a voter's consumed sign info for a voting process
+//	@Description	Per-question consumed address, nullifier and timestamp for the voter identified
+//	@Description	by a verified CSP auth token. Only questions the voter has already voted are
+//	@Description	returned. This is the /processes replacement of the single-election sign-info.
+//	@Description	Public endpoint (the token authenticates the voter).
+//	@Tags			processes
+//	@Accept			json
+//	@Produce		json
+//	@Param			processId	path		string							true	"Process ID"
+//	@Param			request		body		handlers.ConsumedAddressRequest	true	"Auth token"
+//	@Success		200			{object}	handlers.ProcessSignInfoResponse
+//	@Failure		400			{object}	errors.Error	"Invalid input data"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		404			{object}	errors.Error	"Process not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/processes/{processId}/sign-info [post]
+func (c *CSPHandlers) ProcessSignInfoHandler(w http.ResponseWriter, r *http.Request) {
+	oid, anchor, ok := parseProcessID(w, r)
+	if !ok {
+		return
+	}
+	if _, ok := c.getVotingProcess(w, oid); !ok {
+		return
+	}
+	var req ConsumedAddressRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	auth, ok := c.getAuthInfo(w, req.AuthToken)
+	if !ok {
+		return
+	}
+	if !bytes.Equal(anchor, auth.BundleID) {
+		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
+		return
+	}
+	if !auth.Verified {
+		errors.ErrUnauthorized.WithErr(csp.ErrAuthTokenNotVerified).Write(w)
+		return
+	}
+	questions, err := c.mainDB.QuestionsByProcess(oid)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	resp := &ProcessSignInfoResponse{Consumed: []QuestionConsumedAddress{}}
+	for i := range questions {
+		q := &questions[i]
+		if len(q.UpstreamID) == 0 {
+			continue // question not yet on chain
+		}
+		cspProc, err := c.mainDB.CSPProcessByUserAndProcess(auth.UserID, q.UpstreamID)
+		if err != nil || !cspProc.Used {
+			continue // this voter has not consumed this question
+		}
+		resp.Consumed = append(resp.Consumed, QuestionConsumedAddress{
+			QuestionID: q.ID.Hex(),
+			UpstreamID: q.UpstreamID,
+			Address:    cspProc.UsedAddress,
+			Nullifier:  state.GenerateNullifier(common.BytesToAddress(cspProc.UsedAddress), q.UpstreamID),
+			At:         cspProc.UsedAt,
+		})
+	}
+	apicommon.HTTPWriteJSON(w, resp)
 }

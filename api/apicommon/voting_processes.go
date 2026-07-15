@@ -100,6 +100,39 @@ type VotingProcessValidateResponse struct {
 	Errors []string `json:"errors"`
 }
 
+// ProcessParticipantsCheckRequest is the body of POST /processes/{processId}/participants/check:
+// a Manager/Admin lookup of org members by a single field. For "phone" the caller passes the
+// plaintext number and the backend hashes it before the lookup.
+type ProcessParticipantsCheckRequest struct {
+	FieldName string `json:"fieldName"`
+	Value     string `json:"value"`
+}
+
+// ProcessParticipantQuestionVote is one question's voted status for a matched participant
+// (hasVoted is true when the member has consumed that question's on-chain election).
+type ProcessParticipantQuestionVote struct {
+	QuestionID string            `json:"questionId"`
+	UpstreamID internal.HexBytes `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	HasVoted   bool              `json:"hasVoted"`
+}
+
+// ProcessParticipantEntry is a matched org member that is also a participant of the process
+// census, with its per-question voted status.
+type ProcessParticipantEntry struct {
+	MemberID     string                           `json:"memberId"`
+	Name         string                           `json:"name,omitempty"`
+	Surname      string                           `json:"surname,omitempty"`
+	Email        string                           `json:"email,omitempty"`
+	MemberNumber string                           `json:"memberNumber,omitempty"`
+	Questions    []ProcessParticipantQuestionVote `json:"questions"`
+}
+
+// ProcessParticipantsCheckResponse holds the members matching the lookup that are participants of
+// the process census (empty when none match).
+type ProcessParticipantsCheckResponse struct {
+	Participants []ProcessParticipantEntry `json:"participants"`
+}
+
 // SetQuestionsStatusRequest changes the on-chain status of many questions of a process to a
 // single target status. An empty Questions list targets every published question.
 type SetQuestionsStatusRequest struct {
