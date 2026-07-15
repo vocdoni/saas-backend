@@ -61,11 +61,14 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
-	if req.OrgAddress == (common.Address{}) {
-		errors.ErrMalformedBody.Withf("missing org address").Write(w)
+	// orgAddress is internal.HexBytes over the API (bare-hex JSON, like upstreamId); unlike
+	// common.Address it doesn't enforce a 20-byte length on decode, so validate it here.
+	if len(req.OrgAddress) != common.AddressLength {
+		errors.ErrMalformedBody.Withf("missing or invalid org address").Write(w)
 		return
 	}
-	if !user.HasRoleFor(req.OrgAddress, db.ManagerRole) && !user.HasRoleFor(req.OrgAddress, db.AdminRole) {
+	orgAddr := common.BytesToAddress(req.OrgAddress)
+	if !user.HasRoleFor(orgAddr, db.ManagerRole) && !user.HasRoleFor(orgAddr, db.AdminRole) {
 		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization").Write(w)
 		return
 	}
@@ -73,7 +76,7 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrMalformedBody.Withf("questions must be between 1 and %d", maxQuestionsPerProcess).Write(w)
 		return
 	}
-	if err := a.subscriptions.OrgCanCreateVotingProcessDraft(req.OrgAddress); err != nil {
+	if err := a.subscriptions.OrgCanCreateVotingProcessDraft(orgAddr); err != nil {
 		writeSubscriptionError(w, err)
 		return
 	}
@@ -82,14 +85,14 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrMalformedBody.WithErr(err).Write(w)
 		return
 	}
-	census, err := a.resolveOrCreateDefaultCensus(req.Census, req.OrgAddress)
+	census, err := a.resolveOrCreateDefaultCensus(req.Census, orgAddr)
 	if err != nil {
 		writeSubscriptionError(w, err)
 		return
 	}
 	// validate + build the questions (incl. eligibility against the census) before any process
 	// write, so a bad request rolls the census back and never creates a half-written draft.
-	built, err := a.buildQuestions(req.OrgAddress, req.Questions, census)
+	built, err := a.buildQuestions(orgAddr, req.Questions, census)
 	if err != nil {
 		_ = a.db.DelCensus(census.ID.Hex())
 		writeSubscriptionError(w, err)
@@ -97,7 +100,7 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	vp := &db.VotingProcess{
-		OrgAddress:  req.OrgAddress,
+		OrgAddress:  orgAddr,
 		Published:   false,
 		Title:       req.Title,
 		Description: req.Description,

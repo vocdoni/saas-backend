@@ -23,7 +23,7 @@ func newVotingProcessRequest(
 		{Title: db.MultiLangString{"default": "No"}, Value: 1},
 	}
 	return &apicommon.CreateVotingProcessRequest{
-		OrgAddress: orgAddress,
+		OrgAddress: orgAddress.Bytes(),
 		Census: apicommon.CensusSpec{
 			TwoFaFields: db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail},
 			MemberIDs:   memberIDs,
