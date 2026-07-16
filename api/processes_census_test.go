@@ -25,7 +25,7 @@ func TestValidateProcessCensus(t *testing.T) {
 
 	validate := func(jwt string, spec apicommon.CensusSpec) int {
 		_, code := testRequest(t, http.MethodPost, jwt,
-			&apicommon.ValidateProcessCensusRequest{OrgAddress: orgAddress, Census: spec},
+			&apicommon.ValidateProcessCensusRequest{OrgAddress: orgAddress.Bytes(), Census: spec},
 			"processes", "census", "validation")
 		return code
 	}

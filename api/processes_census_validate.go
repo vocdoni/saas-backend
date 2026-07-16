@@ -39,11 +39,14 @@ func (a *API) validateProcessCensusHandler(w http.ResponseWriter, r *http.Reques
 		errors.ErrMalformedBody.Write(w)
 		return
 	}
-	if req.OrgAddress.Cmp(common.Address{}) == 0 {
-		errors.ErrMalformedBody.Withf("missing orgAddress").Write(w)
+	// orgAddress is internal.HexBytes over the API (bare-hex JSON, like create); validate the
+	// 20-byte length and reject the zero address, then convert once for the role/db calls.
+	orgAddr := common.BytesToAddress(req.OrgAddress)
+	if len(req.OrgAddress) != common.AddressLength || orgAddr == (common.Address{}) {
+		errors.ErrMalformedBody.Withf("missing or invalid orgAddress").Write(w)
 		return
 	}
-	if !user.HasRoleFor(req.OrgAddress, db.AdminRole) && !user.HasRoleFor(req.OrgAddress, db.ManagerRole) {
+	if !user.HasRoleFor(orgAddr, db.AdminRole) && !user.HasRoleFor(orgAddr, db.ManagerRole) {
 		errors.ErrUnauthorized.Withf("user is not admin or manager of organization").Write(w)
 		return
 	}
@@ -58,11 +61,11 @@ func (a *API) validateProcessCensusHandler(w http.ResponseWriter, r *http.Reques
 	var err error
 	switch {
 	case census.GroupID != "":
-		results, err = a.db.CheckGroupMembersFields(req.OrgAddress, census.GroupID, census.AuthFields, census.TwoFaFields)
+		results, err = a.db.CheckGroupMembersFields(orgAddr, census.GroupID, census.AuthFields, census.TwoFaFields)
 	case len(census.MemberIDs) > 0:
-		results, err = a.db.CheckMembersFields(req.OrgAddress, census.MemberIDs, census.AuthFields, census.TwoFaFields)
+		results, err = a.db.CheckMembersFields(orgAddr, census.MemberIDs, census.AuthFields, census.TwoFaFields)
 	default:
-		results, err = a.db.CheckGroupMembersFields(req.OrgAddress, "", census.AuthFields, census.TwoFaFields)
+		results, err = a.db.CheckGroupMembersFields(orgAddr, "", census.AuthFields, census.TwoFaFields)
 	}
 	if err != nil {
 		// bad input (malformed member id, unknown group) is a client error, not a 500.

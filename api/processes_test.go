@@ -215,7 +215,7 @@ func TestVotingProcessEmptyCensusRejected(t *testing.T) {
 // not need members.
 func minimalVotingProcessRequest(orgAddress common.Address) *apicommon.CreateVotingProcessRequest {
 	return &apicommon.CreateVotingProcessRequest{
-		OrgAddress: orgAddress,
+		OrgAddress: orgAddress.Bytes(),
 		Census:     apicommon.CensusSpec{TwoFaFields: db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail}},
 		Title:      db.MultiLangString{"default": "key proc"}, //nolint:goconst
 		StartDate:  time.Now().Add(time.Hour).UTC().Format(time.RFC3339),

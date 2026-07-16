@@ -59,8 +59,8 @@ type CreateVotingProcessRequest struct {
 // orgAddress + census block as a create request, checked for member-field duplicates / missing data
 // before the process is created.
 type ValidateProcessCensusRequest struct {
-	OrgAddress common.Address `json:"orgAddress"`
-	Census     CensusSpec     `json:"census"`
+	OrgAddress internal.HexBytes `json:"orgAddress" swaggertype:"string" format:"hex" example:"a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"` //nolint:lll
+	Census     CensusSpec        `json:"census"`
 }
 
 // UpdateProcessCensusResponse is the result of PUT /processes/{processId}/census: the number of

@@ -1786,9 +1786,9 @@ definitions:
       census:
         $ref: '#/definitions/apicommon.CensusSpec'
       orgAddress:
-        items:
-          type: integer
-        type: array
+        example: a1b2c3d4e5f60718293a4b5c6d7e8f9012345678
+        format: hex
+        type: string
     type: object
   apicommon.VotingProcessListResponse:
     properties:
