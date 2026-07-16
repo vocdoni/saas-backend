@@ -518,9 +518,9 @@ definitions:
       header:
         type: string
       orgAddress:
-        items:
-          type: integer
-        type: array
+        example: a1b2c3d4e5f60718293a4b5c6d7e8f9012345678
+        format: hex
+        type: string
       questions:
         items:
           $ref: '#/definitions/apicommon.VotingProcessQuestionRequest'
@@ -1819,9 +1819,9 @@ definitions:
       id:
         type: string
       orgAddress:
-        items:
-          type: integer
-        type: array
+        example: a1b2c3d4e5f60718293a4b5c6d7e8f9012345678
+        format: hex
+        type: string
       published:
         type: boolean
       questions:

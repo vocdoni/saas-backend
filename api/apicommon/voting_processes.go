@@ -3,7 +3,6 @@ package apicommon
 //revive:disable:max-public-structs
 
 import (
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -42,7 +41,7 @@ type VotingProcessQuestionRequest struct {
 // CreateVotingProcessRequest is the body of POST /processes (also used by PUT to update a
 // draft). Common params are shared by every question.
 type CreateVotingProcessRequest struct {
-	OrgAddress  common.Address                 `json:"orgAddress"`
+	OrgAddress  internal.HexBytes              `json:"orgAddress" swaggertype:"string" format:"hex" example:"a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"` //nolint:lll
 	Census      CensusSpec                     `json:"census"`
 	Title       db.MultiLangString             `json:"title"`
 	Description db.MultiLangString             `json:"description,omitempty"`
@@ -62,7 +61,7 @@ type CreateVotingProcessResponse struct {
 // and list endpoints. Questions are fully hydrated (including the synced status).
 type VotingProcessResponse struct {
 	ID          string                     `json:"id"`
-	OrgAddress  common.Address             `json:"orgAddress"`
+	OrgAddress  internal.HexBytes          `json:"orgAddress" swaggertype:"string" format:"hex" example:"a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"` //nolint:lll
 	Published   bool                       `json:"published"`
 	Census      CensusSpec                 `json:"census"`
 	Title       db.MultiLangString         `json:"title"`
@@ -167,7 +166,7 @@ func VotingProcessResponseFromDB(
 ) *VotingProcessResponse {
 	resp := &VotingProcessResponse{
 		ID:          vp.ID.Hex(),
-		OrgAddress:  vp.OrgAddress,
+		OrgAddress:  vp.OrgAddress.Bytes(),
 		Published:   vp.Published,
 		Title:       vp.Title,
 		Description: vp.Description,
