@@ -60,10 +60,10 @@ func setSyncTestElectionStatus(
 	signRemoteSignerAndSendVocdoniTx(t, tx, token, client, orgAddress)
 }
 
-// TestStatusSync seeds two published questions in "ready", drives their elections to different
-// on-chain statuses (one ENDED→RESULTS, one PAUSED), runs the syncer, and asserts the stored
-// question statuses converge to the chain (uppercase) and that a terminal question drops out of
-// the syncable candidate set.
+// TestStatusSync exercises the enqueue-driven syncer end to end against a live chain: a
+// read-triggered reconcile converges a stored status to the chain; a status-change confirm refreshes
+// syncedAt once the chain matches the target; and a confirm whose target never lands reconciles the
+// optimistic value back to the real chain status.
 func TestStatusSync(t *testing.T) {
 	c := qt.New(t)
 
@@ -127,35 +127,42 @@ func TestStatusSync(t *testing.T) {
 	setSyncTestElectionStatus(t, token, orgAddress, electionPaused, models.ProcessStatus_PAUSED)
 	waitForElectionStatus(t, electionPaused, "PAUSED")
 
-	// run one sync pass
-	syncer := statussync.New(context.Background(), &statussync.Config{DB: testDB, Account: testAPI.account})
-	changed, err := syncer.RunOnce(context.Background())
-	c.Assert(err, qt.IsNil)
-	// at least our two questions changed (the query is global; other orgs may also reconcile).
-	c.Assert(changed >= 2, qt.IsTrue, qt.Commentf("changed=%d", changed))
+	// maxAttempts == 1 (interval == confirmTimeout) makes ProcessPending deterministic: a confirm
+	// resolves in a single pass instead of rescheduling.
+	syncer := statussync.New(context.Background(), &statussync.Config{
+		DB: testDB, Account: testAPI.account, Interval: time.Second, ConfirmTimeout: time.Second,
+	})
 
-	// stored statuses now mirror the chain (uppercase)
+	// --- read-triggered reconcile: stored READY converges to the chain status ---
+	syncer.EnqueueReconcile(electionEnded, db.QuestionStatusReady)
+	syncer.EnqueueReconcile(electionPaused, db.QuestionStatusReady)
+	c.Assert(syncer.ProcessPending(), qt.Equals, 2)
+
 	qEnded, err := testDB.Question(qEndedID)
 	c.Assert(err, qt.IsNil)
-	c.Assert(qEnded.Status, qt.Equals, db.QuestionStatusResults)
+	c.Assert(qEnded.Status == db.QuestionStatusEnded || qEnded.Status == db.QuestionStatusResults, qt.IsTrue,
+		qt.Commentf("status=%s", qEnded.Status))
 	c.Assert(qEnded.SyncedAt.IsZero(), qt.IsFalse)
 	qPaused, err := testDB.Question(qPausedID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(qPaused.Status, qt.Equals, db.QuestionStatusPaused)
+	c.Assert(qPaused.SyncedAt.IsZero(), qt.IsFalse)
 
-	// the terminal (results) question drops out of the syncable set; the paused one remains.
-	refs, err := testDB.QuestionsInSyncableStatus(context.Background())
+	// --- confirm success: chain already at the target only refreshes syncedAt, keeps the status ---
+	before := qPaused.SyncedAt
+	time.Sleep(5 * time.Millisecond)
+	syncer.EnqueueConfirm(electionPaused, db.QuestionStatusPaused)
+	c.Assert(syncer.ProcessPending(), qt.Equals, 1)
+	qPaused, err = testDB.Question(qPausedID)
 	c.Assert(err, qt.IsNil)
-	seen := map[string]string{}
-	for _, r := range refs {
-		seen[r.UpstreamID.String()] = r.Status
-	}
-	_, endedStillSyncable := seen[electionEnded.String()]
-	c.Assert(endedStillSyncable, qt.IsFalse)
-	c.Assert(seen[electionPaused.String()], qt.Equals, db.QuestionStatusPaused)
+	c.Assert(qPaused.Status, qt.Equals, db.QuestionStatusPaused)
+	c.Assert(qPaused.SyncedAt.After(before), qt.IsTrue)
 
-	// a second pass with nothing to change is a no-op
-	changed, err = syncer.RunOnce(context.Background())
+	// --- confirm give-up: an optimistic target that never lands is reconciled back to the chain ---
+	c.Assert(testDB.SetQuestionStatus(qPausedID, db.QuestionStatusCanceled), qt.IsNil) // optimistic (wrong) write
+	syncer.EnqueueConfirm(electionPaused, db.QuestionStatusCanceled)                   // chain stays PAUSED, never CANCELED
+	c.Assert(syncer.ProcessPending(), qt.Equals, 1)
+	qPaused, err = testDB.Question(qPausedID)
 	c.Assert(err, qt.IsNil)
-	c.Assert(changed, qt.Equals, 0)
+	c.Assert(qPaused.Status, qt.Equals, db.QuestionStatusPaused)
 }

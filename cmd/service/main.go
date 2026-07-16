@@ -66,10 +66,10 @@ func main() {
 	flag.Duration("notificationQueueTTL", 0, "max age of a queued CSP notification before it is dropped (0 = default)")
 	flag.Int("notificationBreakerMaxFailures", 0, "provider failures that trip the CSP notification breaker (0 = default)")
 	flag.Duration("notificationBreakerCooldown", 0, "how long the CSP notification breaker stays open once tripped (0 = default)")
-	// on-chain question status sync worker (keeps stored question statuses in sync with the chain)
-	flag.Bool("statusSyncEnabled", true, "run the question-status sync worker (Vochain reconciler; set false to disable)")
-	flag.Duration("statusSyncInterval", 60*time.Second, "interval between status sync runs (0 = default 60s)")
-	flag.Duration("statusSyncRunTimeout", 5*time.Minute, "per-run timeout for a status sync pass (0 = default 5m)")
+	// on-demand question status sync worker (reconciles stored question statuses with the chain
+	// when a status changes through the API or a process/question is read)
+	flag.Duration("statusSyncInterval", 60*time.Second, "poll cadence for confirm retries + read freshness window (0=60s)")
+	flag.Duration("statusSyncConfirmTimeout", 5*time.Minute, "max wait for on-chain confirmation before reconciling (0=5m)")
 	// parse flags
 	flag.Parse()
 	// initialize Viper
@@ -246,16 +246,17 @@ func main() {
 		log.Fatalf("could not create the CSP service: %v", err)
 		return
 	}
-	// optional background worker: reconcile each published question's status with the chain so
-	// reads (list, ?status= filter, managed-org delete guard) serve the stored status.
-	if viper.GetBool("statusSyncEnabled") {
-		statussync.New(ctx, &statussync.Config{
-			DB:         database,
-			Account:    acc,
-			Interval:   viper.GetDuration("statusSyncInterval"),
-			RunTimeout: viper.GetDuration("statusSyncRunTimeout"),
-		}).Start()
-	}
+	// background worker: reconcile a published question's status with the chain on demand (a status
+	// change through the API, or a read of the process/question). Enqueues from the API handlers flow
+	// through apiConf.StatusSyncer.
+	syncer := statussync.New(ctx, &statussync.Config{
+		DB:             database,
+		Account:        acc,
+		Interval:       viper.GetDuration("statusSyncInterval"),
+		ConfirmTimeout: viper.GetDuration("statusSyncConfirmTimeout"),
+	})
+	apiConf.StatusSyncer = syncer
+	syncer.Start()
 	apiConf.Subscriptions = subscriptions.New(&subscriptions.Config{
 		DB: database,
 	})

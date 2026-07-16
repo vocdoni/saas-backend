@@ -720,6 +720,9 @@ func (a *API) enqueueStatusChange(
 			if err := a.db.SetQuestionStatus(published[i].ID, statusStr); err != nil {
 				log.Warnw("could not persist question status", "error", err)
 			}
+			// confirm the change landed on-chain in the background, correcting the optimistic
+			// write above if the tx never reaches the requested status.
+			a.enqueueConfirm(published[i].UpstreamID, statusStr)
 		}
 		return &db.JobResult{Status: statusStr}, nil
 	}}) {

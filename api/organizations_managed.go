@@ -445,15 +445,25 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	// new /processes questions: block deletion while any published question is active
-	// (ready|paused), read from the stored status kept current by the statussync worker — O(1),
-	// no per-election chain calls.
-	if active, err := a.db.CountActiveQuestions(managedAddr); err != nil {
+	// new /processes questions: block deletion while any published question is active (READY|PAUSED).
+	// Read the live chain status of each non-terminal question (bounded by the org's active question
+	// count) rather than the stored value, so deletion — the one safety-critical moment — never runs
+	// on a status the on-demand syncer hasn't refreshed yet. A lookup error fails closed.
+	questionRefs, err := a.db.SyncableQuestionsByOrg(managedAddr)
+	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
-	} else if active > 0 {
-		errors.ErrManagedOrgHasActiveElections.Write(w)
-		return
+	}
+	for _, ref := range questionRefs {
+		election, err := a.account.Election(ref.UpstreamID)
+		if err != nil {
+			errors.ErrVochainRequestFailed.WithErr(err).Write(w)
+			return
+		}
+		if election.Status == "READY" || election.Status == "PAUSED" {
+			errors.ErrManagedOrgHasActiveElections.Write(w)
+			return
+		}
 	}
 
 	// capture usage to roll back the integrator counters after deletion. The integrator's

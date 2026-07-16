@@ -5,15 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/api"
-	"go.vocdoni.io/dvote/types"
 	"go.vocdoni.io/proto/build/go/models"
 )
 
@@ -238,33 +235,6 @@ func (a *Account) Election(processID []byte) (*api.Election, error) {
 		return nil, fmt.Errorf("could not fetch election %x: %w", processID, err)
 	}
 	return election, nil
-}
-
-// ElectionsByOrg returns one page of the organization's on-chain elections, without a status
-// filter (an empty status disables the node's status filter, so every election is returned
-// regardless of status). Used by the status syncer to reconcile question statuses with a single
-// bulk read per organization. An empty slice signals the page is past the last one.
-//
-// It posts to /elections/filter/page/{page} directly and decodes the paginated ElectionsList;
-// the apiclient's ElectionFilterPaginated decodes a bare slice, which does not match this node's
-// wrapped response.
-func (a *Account) ElectionsByOrg(orgAddr common.Address, page int) ([]*api.ElectionSummary, error) {
-	body := struct {
-		OrganizationID types.HexBytes `json:"organizationId,omitempty"`
-	}{OrganizationID: orgAddr.Bytes()}
-	resp, code, err := a.client.Request(http.MethodPost, body, "elections", "filter", "page", strconv.Itoa(page))
-	if err != nil {
-		return nil, fmt.Errorf("could not fetch elections of org %s (page %d): %w", orgAddr, page, err)
-	}
-	if code != http.StatusOK {
-		return nil, fmt.Errorf("could not fetch elections of org %s (page %d): status %d (%s)",
-			orgAddr, page, code, resp)
-	}
-	var list api.ElectionsList
-	if err := json.Unmarshal(resp, &list); err != nil {
-		return nil, fmt.Errorf("could not decode elections of org %s (page %d): %w", orgAddr, page, err)
-	}
-	return list.Elections, nil
 }
 
 // ElectionEncryptionKeys fetches the encryption public keys of the on-chain election with

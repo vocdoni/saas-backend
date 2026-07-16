@@ -160,13 +160,15 @@ func (ms *MongoStorage) ResetQuestionsPublish(processID primitive.ObjectID) erro
 	return nil
 }
 
-// QuestionsInSyncableStatus returns the minimal refs of every published question whose stored
-// status can still change on-chain (READY|PAUSED|ENDED). Terminal statuses (CANCELED|RESULTS) are
-// final, so once a question reaches them (stored == chain) it needs no further sync and is
-// excluded — keeping the candidate set bounded while every question still converges to the chain.
-// It is the status syncer's single candidate query (projected to upstreamId, orgAddress, status).
-func (ms *MongoStorage) QuestionsInSyncableStatus(ctx context.Context) ([]QuestionStatusRef, error) {
+// SyncableQuestionsByOrg returns the minimal refs of an organization's published questions whose
+// stored status can still change on-chain (READY|PAUSED|ENDED). Terminal statuses (CANCELED|RESULTS)
+// are final and excluded. It backs the managed-org delete guard, which reads each ref's live chain
+// status synchronously at delete time (projected to upstreamId, orgAddress, status).
+func (ms *MongoStorage) SyncableQuestionsByOrg(orgAddress common.Address) ([]QuestionStatusRef, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
 	filter := bson.M{
+		"orgAddress": orgAddress,                                                                              //nolint:goconst
 		"upstreamId": bson.M{"$exists": true},                                                                 //nolint:goconst
 		"status":     bson.M{"$in": []string{QuestionStatusReady, QuestionStatusPaused, QuestionStatusEnded}}, //nolint:goconst
 	}
@@ -182,41 +184,22 @@ func (ms *MongoStorage) QuestionsInSyncableStatus(ctx context.Context) ([]Questi
 	return refs, nil
 }
 
-// SyncQuestionStatuses applies the given status reconciliations in one unordered BulkWrite keyed
-// by upstreamId, stamping syncedAt. Unordered so one failed update never blocks the rest; a no-op
-// on an empty change set. NewStatus must already be the uppercase stored form. Syncer-only.
-func (ms *MongoStorage) SyncQuestionStatuses(ctx context.Context, changes []QuestionStatusChange) error {
-	if len(changes) == 0 {
-		return nil
+// SetQuestionStatusSynced conditionally reconciles a question (by on-chain id) to next, stamping
+// syncedAt. The update applies only while the stored status still equals prev, so a concurrent
+// direct write (publish/status-change) is never clobbered by a stale syncer value — a mismatch
+// yields matched=false and the caller skips. Passing prev == next just refreshes syncedAt. Used by
+// the status syncer.
+func (ms *MongoStorage) SetQuestionStatusSynced(upstreamID internal.HexBytes, prev, next string) (bool, error) {
+	if len(upstreamID) == 0 {
+		return false, ErrInvalidData
 	}
-	now := time.Now()
-	writes := make([]mongo.WriteModel, 0, len(changes))
-	for _, ch := range changes {
-		writes = append(writes, mongo.NewUpdateOneModel().
-			SetFilter(bson.M{"upstreamId": ch.UpstreamID}). //nolint:goconst
-			SetUpdate(bson.M{"$set": bson.M{"status": ch.NewStatus, "syncedAt": now}}))
-	}
-	ctx, cancel := context.WithTimeout(ctx, batchTimeout)
-	defer cancel()
-	if _, err := ms.processesQuestions.BulkWrite(ctx, writes, options.BulkWrite().SetOrdered(false)); err != nil {
-		return fmt.Errorf("failed to sync question statuses: %w", err)
-	}
-	return nil
-}
-
-// CountActiveQuestions counts an organization's published questions in an active status
-// (ready|paused) using the stored (synced) status. Backs the managed-org delete guard so it can
-// block deletion while any new-processes election is live, with no per-election chain calls.
-func (ms *MongoStorage) CountActiveQuestions(orgAddress common.Address) (int64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	filter := bson.M{
-		"orgAddress": orgAddress,                                                         //nolint:goconst
-		"status":     bson.M{"$in": []string{QuestionStatusReady, QuestionStatusPaused}}, //nolint:goconst
-	}
-	n, err := ms.processesQuestions.CountDocuments(ctx, filter)
+	filter := bson.M{"upstreamId": upstreamID, "status": prev}               //nolint:goconst
+	update := bson.M{"$set": bson.M{"status": next, "syncedAt": time.Now()}} //nolint:goconst
+	res, err := ms.processesQuestions.UpdateOne(ctx, filter, update)
 	if err != nil {
-		return 0, fmt.Errorf("failed to count active questions: %w", err)
+		return false, fmt.Errorf("failed to set synced question status: %w", err)
 	}
-	return n, nil
+	return res.MatchedCount > 0, nil
 }

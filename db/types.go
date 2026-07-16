@@ -624,19 +624,12 @@ type VotingProcessQuestion struct {
 	SyncedAt          time.Time          `json:"-" bson:"syncedAt,omitempty"`
 }
 
-// QuestionStatusRef is the minimal projection of a published question the status syncer needs:
-// its on-chain election id, owning org (for per-org bulk chain reads), and stored status.
+// QuestionStatusRef is the minimal projection of a published question the status syncer and the
+// managed-org delete guard need: its on-chain election id, owning org, and stored status.
 type QuestionStatusRef struct {
 	UpstreamID internal.HexBytes `bson:"upstreamId"`
 	OrgAddress common.Address    `bson:"orgAddress"`
 	Status     string            `bson:"status"`
-}
-
-// QuestionStatusChange is a single reconciliation the status syncer applies: set the question
-// identified by UpstreamID to NewStatus (already normalized to the uppercase stored form).
-type QuestionStatusChange struct {
-	UpstreamID internal.HexBytes
-	NewStatus  string
 }
 
 // HashedPhone represents a hashed phone number for database storage

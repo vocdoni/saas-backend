@@ -327,6 +327,11 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	census, _ := a.db.Census(vp.CensusID.Hex())
+	// serve the stored status now; refresh each published question from the chain in the background
+	// to catch status changes made directly on-chain (outside this API).
+	for i := range questions {
+		a.enqueueReconcileIfStale(&questions[i])
+	}
 	apicommon.HTTPWriteJSON(w, apicommon.VotingProcessResponseFromDB(vp, questions, census))
 }
 
@@ -485,6 +490,9 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	census, _ := a.db.Census(vp.CensusID.Hex())
+	// serve the stored status now; refresh it from the chain in the background so a status change
+	// made directly on-chain (outside this API) is picked up.
+	a.enqueueReconcileIfStale(question)
 	apicommon.HTTPWriteJSON(w, apicommon.PublicQuestionResponseFromDB(question, census))
 }
 
