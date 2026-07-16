@@ -41,7 +41,7 @@ type VotingProcessQuestionRequest struct {
 // CreateVotingProcessRequest is the body of POST /processes (also used by PUT to update a
 // draft). Common params are shared by every question.
 type CreateVotingProcessRequest struct {
-	OrgAddress  internal.HexBytes              `json:"orgAddress" swaggertype:"string" format:"hex" example:"deadbeef"`
+	OrgAddress  internal.HexBytes              `json:"orgAddress" swaggertype:"string" format:"hex" example:"a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"` //nolint:lll
 	Census      CensusSpec                     `json:"census"`
 	Title       db.MultiLangString             `json:"title"`
 	Description db.MultiLangString             `json:"description,omitempty"`
@@ -61,7 +61,7 @@ type CreateVotingProcessResponse struct {
 // and list endpoints. Questions are fully hydrated (including the synced status).
 type VotingProcessResponse struct {
 	ID          string                     `json:"id"`
-	OrgAddress  internal.HexBytes          `json:"orgAddress" swaggertype:"string" format:"hex" example:"deadbeef"`
+	OrgAddress  internal.HexBytes          `json:"orgAddress" swaggertype:"string" format:"hex" example:"a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"` //nolint:lll
 	Published   bool                       `json:"published"`
 	Census      CensusSpec                 `json:"census"`
 	Title       db.MultiLangString         `json:"title"`

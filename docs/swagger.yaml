@@ -518,7 +518,7 @@ definitions:
       header:
         type: string
       orgAddress:
-        example: deadbeef
+        example: a1b2c3d4e5f60718293a4b5c6d7e8f9012345678
         format: hex
         type: string
       questions:
@@ -1819,7 +1819,7 @@ definitions:
       id:
         type: string
       orgAddress:
-        example: deadbeef
+        example: a1b2c3d4e5f60718293a4b5c6d7e8f9012345678
         format: hex
         type: string
       published:

@@ -62,12 +62,13 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	// orgAddress is internal.HexBytes over the API (bare-hex JSON, like upstreamId); unlike
-	// common.Address it doesn't enforce a 20-byte length on decode, so validate it here.
-	if len(req.OrgAddress) != common.AddressLength {
+	// common.Address it doesn't enforce a 20-byte length on decode, so validate it here. The
+	// zero address is treated as missing (it can never own an organization).
+	orgAddr := common.BytesToAddress(req.OrgAddress)
+	if len(req.OrgAddress) != common.AddressLength || orgAddr == (common.Address{}) {
 		errors.ErrMalformedBody.Withf("missing or invalid org address").Write(w)
 		return
 	}
-	orgAddr := common.BytesToAddress(req.OrgAddress)
 	if !user.HasRoleFor(orgAddr, db.ManagerRole) && !user.HasRoleFor(orgAddr, db.AdminRole) {
 		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization").Write(w)
 		return
