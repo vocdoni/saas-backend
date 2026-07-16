@@ -1020,6 +1020,26 @@ func pollJob(t *testing.T, jobID string) apicommon.JobStatusResponse {
 	}
 }
 
+// pollOrgJob polls the unified GET /jobs list for the given organization until the job with jobID is
+// no longer pending (or it times out), returning that job's unified response.
+func pollOrgJob(t *testing.T, jwt, orgAddress, jobID string) apicommon.JobResponse {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		list := requestAndParse[apicommon.JobsListResponse](t, http.MethodGet, jwt, nil,
+			"jobs?orgAddress="+orgAddress)
+		for _, j := range list.Jobs {
+			if j.JobID == jobID && j.Status != db.JobStatusPending {
+				return j
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("job %s still pending after timeout", jobID)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
 // memberIDs returns a slice of all orgMembers[n].ID
 func memberIDs(orgMembers []apicommon.OrgMember) []string {
 	s := make([]string, 0, len(orgMembers))

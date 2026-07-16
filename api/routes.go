@@ -51,6 +51,8 @@ const (
 	// GET /jobs/{jobId} to poll the status/result of an async transaction job (public; the
 	// 32-byte job id is the capability — results carry only public on-chain data)
 	jobStatusEndpoint = "/jobs/{jobId}"
+	// GET /jobs?orgAddress=&page=&limit= to list an organization's jobs (protected, Manager/Admin)
+	jobsEndpoint = "/jobs"
 
 	// organization routes
 	// POST /organizations to create a new organization
@@ -88,8 +90,6 @@ const (
 	organizationAddMembersEndpoint = "/organizations/{address}/members"
 	// PUT /organizations/{address}/members to create or update an organization member
 	organizationUpsertMemberEndpoint = "/organizations/{address}/members"
-	// GET /organizations/{address}/members/check/{jobid} to check the status of the add members job
-	organizationAddMembersJobStatusEndpoint = "/organizations/{address}/members/job/{jobid}"
 	// DELETE /organizations/{address}/members to delete members
 	organizationDeleteMembersEndpoint = "/organizations/{address}/members"
 	// POST/PUT/GET/DELETE /organizations/{address}/meta to add/set/get/delete the organization metadata
@@ -105,8 +105,6 @@ const (
 	organizationGroupMembersEndpoint = "/organizations/{address}/groups/{groupID}/members"
 	// POST /organizations/{address}/groups/{groupID}/validate to validate the member data of an organization member group
 	organizationGroupValidateEndpoint = "/organizations/{address}/groups/{groupID}/validate"
-	// GET /organizations/{address}/jobs to list the organization import jobs
-	organizationJobsEndpoint = "/organizations/{address}/jobs"
 	// GET /organizations/{address}/processes to get the organization bundle processes
 	organizationBundlesEndpoint = "/organizations/{address}/processes"
 	// GET /integrator to get integrator quota and usage for the caller's own integrator org.

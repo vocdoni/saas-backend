@@ -4,10 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"sync"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
@@ -16,10 +14,6 @@ import (
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/dvote/util"
 )
-
-// addMembersToOrgWorkers is a map of job identifiers to the progress of adding members to a census.
-// This is used to check the progress of the job.
-var addMembersToOrgWorkers sync.Map
 
 // MembersImportCompletionData represents the data structure for members import completion email template
 type MembersImportCompletionData struct {
@@ -150,7 +144,7 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 //	@Summary		Add members to an organization
 //	@Description	Add multiple members to an organization. Requires Manager/Admin role and is subject to the
 //	@Description	plan's member quota. With `async=true` the import runs in the background and the response
-//	@Description	carries a `jobId` to poll via GET /organizations/{address}/members/job/{jobid}; otherwise it
+//	@Description	carries a `jobId` to poll via GET /jobs/{jobId}; otherwise it
 //	@Description	completes synchronously. An empty members list is a no-op that returns added=0.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `members:write`).
@@ -257,10 +251,8 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 		var lastProgress *db.BulkOrgMembersJob
 		for p := range progressChan {
 			lastProgress = p
-			// Store progress updates in a map that is read by another endpoint to check a job status
-			addMembersToOrgWorkers.Store(jobID.String(), p)
-
-			// When job completes, persist final results
+			// When job completes, persist final results (job status is served from the persisted
+			// record via GET /jobs).
 			if p.Progress == 100 {
 				if err := a.db.CompleteJob(jobID.String(), p.Added, p.ErrorsAsStrings()); err != nil {
 					log.Warnw("failed to persist job completion", "error", err, "jobId", jobID.String())
@@ -275,77 +267,6 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 	}()
 
 	apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{JobID: jobID})
-}
-
-// addOrganizationMembersJobStatusHandler godoc
-//
-//	@Summary		Check the progress of adding members
-//	@Description	Check the progress of a job to add members to an organization. Returns the progress of the job.
-//	@Description	While a job is running its status is served from memory; once completed, the in-memory status
-//	@Description	is evicted after 60 seconds. Completed jobs remain retrievable afterwards from the persisted
-//	@Description	job record (returned with progress 100).
-//	@Description
-//	@Description	Also callable with a scoped API key (scope: `members:write`).
-//	@Tags			jobs
-//	@Accept			json
-//	@Produce		json
-//	@Security		BearerAuth
-//	@Param			address	path		string	true	"Organization address"
-//	@Param			jobid	path		string	true	"Job ID"
-//	@Success		200		{object}	apicommon.AddMembersJobResponse
-//	@Failure		400		{object}	errors.Error	"Invalid job ID"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		404		{object}	errors.Error	"Job not found"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/members/job/{jobid} [get]
-func (a *API) addOrganizationMembersJobStatusHandler(w http.ResponseWriter, r *http.Request) {
-	jobID := internal.HexBytes{}
-	if err := jobID.ParseString(chi.URLParam(r, "jobid")); err != nil {
-		errors.ErrMalformedURLParam.Withf("invalid job ID").Write(w)
-		return
-	}
-
-	// First check in-memory for active jobs
-	if v, ok := addMembersToOrgWorkers.Load(jobID.String()); ok {
-		p, ok := v.(*db.BulkOrgMembersJob)
-		if !ok {
-			errors.ErrGenericInternalServerError.Withf("invalid job status type").Write(w)
-			return
-		}
-		if p.Progress == 100 {
-			go func() {
-				// Schedule the deletion of the job after 60 seconds
-				time.Sleep(60 * time.Second)
-				addMembersToOrgWorkers.Delete(jobID.String())
-			}()
-		}
-		apicommon.HTTPWriteJSON(w, apicommon.AddMembersJobResponse{
-			Added:    uint32(p.Added),
-			Errors:   p.ErrorsAsStrings(),
-			Progress: uint32(p.Progress),
-			Total:    uint32(p.Total),
-		})
-		return
-	}
-
-	// If not in memory, check database for completed jobs
-	job, err := a.db.Job(jobID.String())
-	if err != nil {
-		if err == db.ErrNotFound {
-			errors.ErrJobNotFound.Withf("%s", jobID.String()).Write(w)
-			return
-		}
-		errors.ErrGenericInternalServerError.Withf("failed to get job: %v", err).Write(w)
-		return
-	}
-
-	// Return persistent job data
-	apicommon.HTTPWriteJSON(w, apicommon.AddMembersJobResponse{
-		Added:    uint32(job.Added),
-		Errors:   job.Errors,
-		Progress: 100, // Completed jobs are always 100%
-		Total:    uint32(job.Total),
-	})
 }
 
 // upsertOrganizationMemberHandler godoc

@@ -59,23 +59,6 @@ definitions:
           type: string
         type: array
     type: object
-  apicommon.AddMembersJobResponse:
-    properties:
-      added:
-        description: Number of members added
-        type: integer
-      errors:
-        description: Errors encountered during job
-        items:
-          type: string
-        type: array
-      progress:
-        description: Progress equals Added / Total * 100
-        type: integer
-      total:
-        description: Total members in this job
-        type: integer
-    type: object
   apicommon.AddMembersRequest:
     properties:
       members:
@@ -611,35 +594,20 @@ definitions:
       sentVotes:
         type: integer
     type: object
-  apicommon.JobInfo:
+  apicommon.JobResponse:
     properties:
-      added:
-        description: Items successfully processed
-        type: integer
-      completed:
-        description: Whether the job is completed
-        type: boolean
-      completedAt:
-        description: Job completion timestamp (zero if not completed)
-        type: string
-      createdAt:
-        description: Job creation timestamp
-        type: string
       errors:
-        description: List of errors encountered
         items:
           type: string
         type: array
       jobId:
-        description: Unique job identifier
         type: string
-      total:
-        description: Total items to process
-        type: integer
+      result:
+        $ref: '#/definitions/apicommon.UnifiedJobResult'
+      status:
+        $ref: '#/definitions/db.JobStatus'
       type:
-        allOf:
-        - $ref: '#/definitions/db.JobType'
-        description: Type of job
+        $ref: '#/definitions/db.JobType'
     type: object
   apicommon.JobStatusResponse:
     properties:
@@ -654,17 +622,14 @@ definitions:
       type:
         $ref: '#/definitions/db.JobType'
     type: object
-  apicommon.JobsResponse:
+  apicommon.JobsListResponse:
     properties:
       jobs:
-        description: List of jobs
         items:
-          $ref: '#/definitions/apicommon.JobInfo'
+          $ref: '#/definitions/apicommon.JobResponse'
         type: array
       pagination:
-        allOf:
-        - $ref: '#/definitions/apicommon.Pagination'
-        description: Pagination fields
+        $ref: '#/definitions/apicommon.Pagination'
     type: object
   apicommon.ListAPIKeysResponse:
     properties:
@@ -1632,6 +1597,23 @@ definitions:
         description: Transaction payload bytes
         example: aGVsbG8gd29ybGQ=
         format: base64
+        type: string
+    type: object
+  apicommon.UnifiedJobResult:
+    properties:
+      added:
+        type: integer
+      address:
+        example: deadbeef
+        type: string
+      progress:
+        type: integer
+      status:
+        type: string
+      total:
+        type: integer
+      voteID:
+        example: deadbeef
         type: string
     type: object
   apicommon.UpdateOrganizationMemberGroupsRequest:
@@ -3312,6 +3294,51 @@ paths:
       summary: Revoke an organization's API key
       tags:
       - integrator
+  /jobs:
+    get:
+      description: |-
+        Paginated list of an organization's async jobs — member/census imports and tx jobs
+        (publish, status change, census update, vote relay) — newest first. Requires
+        Manager/Admin role of the organization given by the `orgAddress` query parameter. Each
+        job carries a unified `result` that only includes the attributes its type produced.
+      parameters:
+      - description: Organization address
+        in: query
+        name: orgAddress
+        required: true
+        type: string
+      - description: 'Page number (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - description: 'Items per page (default: 10)'
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.JobsListResponse'
+        "400":
+          description: Invalid input
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: List an organization's jobs
+      tags:
+      - jobs
   /jobs/{jobId}:
     get:
       description: |-
@@ -3894,58 +3921,6 @@ paths:
       summary: Validate organization group members data
       tags:
       - organizations
-  /organizations/{address}/jobs:
-    get:
-      consumes:
-      - application/json
-      description: Get the list of import jobs for an organization with pagination
-        support
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: 'Page number (default: 1)'
-        in: query
-        name: page
-        type: integer
-      - description: 'Number of items per page (default: 10)'
-        in: query
-        name: limit
-        type: integer
-      - description: Filter by job type (org_members or census_participants)
-        in: query
-        name: type
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.JobsResponse'
-        "400":
-          description: Invalid input
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Get organization jobs
-      tags:
-      - jobs
   /organizations/{address}/members:
     delete:
       consumes:
@@ -4046,7 +4021,7 @@ paths:
       description: |-
         Add multiple members to an organization. Requires Manager/Admin role and is subject to the
         plan's member quota. With `async=true` the import runs in the background and the response
-        carries a `jobId` to poll via GET /organizations/{address}/members/job/{jobid}; otherwise it
+        carries a `jobId` to poll via GET /jobs/{jobId}; otherwise it
         completes synchronously. An empty members list is a no-op that returns added=0.
 
         Also callable with a scoped API key (scope: `members:write`).
@@ -4138,56 +4113,6 @@ paths:
       summary: Create or update an organization member
       tags:
       - organizations
-  /organizations/{address}/members/job/{jobid}:
-    get:
-      consumes:
-      - application/json
-      description: |-
-        Check the progress of a job to add members to an organization. Returns the progress of the job.
-        While a job is running its status is served from memory; once completed, the in-memory status
-        is evicted after 60 seconds. Completed jobs remain retrievable afterwards from the persisted
-        job record (returned with progress 100).
-
-        Also callable with a scoped API key (scope: `members:write`).
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: Job ID
-        in: path
-        name: jobid
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.AddMembersJobResponse'
-        "400":
-          description: Invalid job ID
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Job not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Check the progress of adding members
-      tags:
-      - jobs
   /organizations/{address}/processes:
     get:
       consumes:

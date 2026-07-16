@@ -311,36 +311,14 @@ func TestOrganizationMembers(t *testing.T) {
 	jobIDHex.SetBytes(asyncResponse.JobID)
 	t.Logf("Async job ID: %s\n", jobIDHex.String())
 
-	// Test 5: Check the job progress
-	var (
-		maxAttempts = 30
-		attempts    = 0
-		completed   = false
-	)
-
-	// Poll the job status until it's complete or max attempts reached
-	var jobStatus apicommon.AddMembersJobResponse
-	for attempts < maxAttempts && !completed {
-		jobStatus = requestAndParse[apicommon.AddMembersJobResponse](
-			t, http.MethodGet, adminToken, nil,
-			"organizations", orgAddress.String(), "members", "job", jobIDHex.String())
-
-		t.Logf("Job progress: %d%%, Added: %d, Total: %d, Errors: %d\n",
-			jobStatus.Progress, jobStatus.Added, jobStatus.Total, len(jobStatus.Errors))
-
-		if jobStatus.Progress == 100 {
-			completed = true
-		} else {
-			attempts++
-			time.Sleep(100 * time.Millisecond) // Wait a bit before checking again
-		}
-	}
-
-	// Verify the job completed successfully
-	c.Assert(completed, qt.IsTrue, qt.Commentf("Job did not complete within expected time"))
-	c.Assert(jobStatus.Added, qt.Equals, uint32(2)) // We added 2 members
-	c.Assert(jobStatus.Total, qt.Equals, uint32(2))
-	c.Assert(jobStatus.Progress, qt.Equals, uint32(100))
+	// Test 5: poll the unified GET /jobs list until the async import job completes.
+	jobStatus := pollOrgJob(t, adminToken, orgAddress.String(), jobIDHex.String())
+	c.Assert(jobStatus.Status, qt.Equals, db.JobStatusCompleted)
+	c.Assert(jobStatus.Type, qt.Equals, db.JobTypeOrgMembers)
+	c.Assert(jobStatus.Result, qt.Not(qt.IsNil))
+	c.Assert(jobStatus.Result.Added, qt.Equals, 2) // We added 2 members
+	c.Assert(jobStatus.Result.Total, qt.Equals, 2)
+	c.Assert(jobStatus.Result.Progress, qt.Equals, 100)
 	c.Assert(jobStatus.Errors, qt.HasLen, 3)
 	c.Assert(jobStatus.Errors[0], qt.Matches, ".*invalid-email.*")
 	c.Assert(jobStatus.Errors[1], qt.Matches, ".*invalid-phone.*")
@@ -351,10 +329,9 @@ func TestOrganizationMembers(t *testing.T) {
 	c.Assert(mailBody, qt.Matches, regexp.MustCompile(`(?i)\s(has been completed)\s`),
 		qt.Commentf("mail content does not, got:\n%s", mailBody))
 
-	// Test 5.1: Test jobs endpoint - basic functionality
-	jobsResponse := requestAndParse[apicommon.JobsResponse](
-		t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "jobs")
+	// Test 5.1: GET /jobs — basic
+	jobsResponse := requestAndParse[apicommon.JobsListResponse](
+		t, http.MethodGet, adminToken, nil, "jobs?orgAddress="+orgAddress.String())
 	c.Assert(jobsResponse.Jobs, qt.HasLen, 1, qt.Commentf("expected 1 job (the org_members job)"))
 	c.Assert(jobsResponse.Pagination.TotalItems, qt.Equals, int64(1))
 	c.Assert(jobsResponse.Pagination.CurrentPage, qt.Equals, int64(1))
@@ -362,53 +339,30 @@ func TestOrganizationMembers(t *testing.T) {
 	// Verify the job details
 	job := jobsResponse.Jobs[0]
 	c.Assert(job.Type, qt.Equals, db.JobTypeOrgMembers)
-	c.Assert(job.Total, qt.Equals, 2)
-	c.Assert(job.Added, qt.Equals, 2)
-	c.Assert(job.Completed, qt.IsTrue)
-	c.Assert(job.CreatedAt.IsZero(), qt.IsFalse)
-	c.Assert(job.CompletedAt.IsZero(), qt.IsFalse)
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted)
+	c.Assert(job.Result, qt.Not(qt.IsNil))
+	c.Assert(job.Result.Total, qt.Equals, 2)
+	c.Assert(job.Result.Added, qt.Equals, 2)
 	c.Assert(job.JobID, qt.Equals, jobIDHex.String())
 	c.Assert(job.Errors, qt.HasLen, 3) // Should have the validation errors
-	t.Logf("Found org_members job: ID=%s, Type=%s, Total=%d, Added=%d, Completed=%t, Errors=%d",
-		job.JobID, job.Type, job.Total, job.Added, job.Completed, len(job.Errors))
 
-	// Test 5.2: Test jobs endpoint - pagination and filtering
-	// Test with pagination
-	jobsResponsePaged := requestAndParse[apicommon.JobsResponse](
-		t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "jobs?page=1&limit=1")
+	// Test 5.2: GET /jobs — pagination
+	jobsResponsePaged := requestAndParse[apicommon.JobsListResponse](
+		t, http.MethodGet, adminToken, nil, "jobs?orgAddress="+orgAddress.String()+"&page=1&limit=1")
 	c.Assert(jobsResponsePaged.Jobs, qt.HasLen, 1)
 	c.Assert(jobsResponsePaged.Pagination.TotalItems, qt.Equals, int64(1))
 	c.Assert(jobsResponsePaged.Pagination.CurrentPage, qt.Equals, int64(1))
 
-	// Test with job type filter for org_members
-	jobsResponseFiltered := requestAndParse[apicommon.JobsResponse](
-		t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "jobs?type=org_members")
-	c.Assert(jobsResponseFiltered.Jobs, qt.HasLen, 1)
-	c.Assert(jobsResponseFiltered.Jobs[0].Type, qt.Equals, db.JobTypeOrgMembers)
-
-	// Test with different job type filter (should return empty)
-	jobsResponseEmpty := requestAndParse[apicommon.JobsResponse](
-		t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "jobs?type=census_participants")
-	c.Assert(jobsResponseEmpty.Jobs, qt.HasLen, 0, qt.Commentf("should be empty for census_participants filter"))
-
-	// Test 5.3: Test jobs endpoint - authorization and error cases
-	// Test with no authentication
+	// Test 5.3: GET /jobs — authorization and error cases
+	// no authentication
 	requestAndAssertCode(http.StatusUnauthorized,
-		t, http.MethodGet, "", nil,
-		"organizations", orgAddress.String(), "jobs")
-
-	// Test with invalid organization address
+		t, http.MethodGet, "", nil, "jobs?orgAddress="+orgAddress.String())
+	// invalid organization address
 	requestAndAssertCode(http.StatusBadRequest,
-		t, http.MethodGet, adminToken, nil,
-		"organizations", "invalid-address", "jobs")
-
-	// Test with invalid job type filter
+		t, http.MethodGet, adminToken, nil, "jobs?orgAddress=invalid-address")
+	// missing organization address
 	requestAndAssertCode(http.StatusBadRequest,
-		t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "jobs?type=invalid_type")
+		t, http.MethodGet, adminToken, nil, "jobs")
 
 	// Test 5.4: Create another async job to test multiple jobs scenario
 	anotherAsyncMembers := &apicommon.AddMembersRequest{
@@ -436,24 +390,12 @@ func TestOrganizationMembers(t *testing.T) {
 	t.Logf("Second async job ID: %s\n", jobIDHex2.String())
 
 	// Wait for second job to complete
-	completed2 := false
-	for attempts := 0; attempts < maxAttempts && !completed2; attempts++ {
-		jobStatus2 := requestAndParse[apicommon.AddMembersJobResponse](
-			t, http.MethodGet, adminToken, nil,
-			"organizations", orgAddress.String(), "members", "job", jobIDHex2.String())
-
-		if jobStatus2.Progress == 100 {
-			completed2 = true
-		} else {
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
-	c.Assert(completed2, qt.IsTrue, qt.Commentf("Second job did not complete within expected time"))
+	job2 := pollOrgJob(t, adminToken, orgAddress.String(), jobIDHex2.String())
+	c.Assert(job2.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("second job did not complete"))
 
 	// Test multiple jobs - should now have 2 jobs
-	multipleJobsResponse := requestAndParse[apicommon.JobsResponse](
-		t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "jobs")
+	multipleJobsResponse := requestAndParse[apicommon.JobsListResponse](
+		t, http.MethodGet, adminToken, nil, "jobs?orgAddress="+orgAddress.String())
 	c.Assert(multipleJobsResponse.Jobs, qt.HasLen, 2, qt.Commentf("expected 2 jobs"))
 	c.Assert(multipleJobsResponse.Pagination.TotalItems, qt.Equals, int64(2))
 	c.Assert(multipleJobsResponse.Pagination.PreviousPage, qt.IsNil)
@@ -467,9 +409,8 @@ func TestOrganizationMembers(t *testing.T) {
 	c.Assert(multipleJobsResponse.Jobs[1].JobID, qt.Equals, jobIDHex.String())
 
 	// Test pagination with multiple jobs
-	paginatedJobsResponse := requestAndParse[apicommon.JobsResponse](
-		t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "jobs?page=1&limit=1")
+	paginatedJobsResponse := requestAndParse[apicommon.JobsListResponse](
+		t, http.MethodGet, adminToken, nil, "jobs?orgAddress="+orgAddress.String()+"&page=1&limit=1")
 	c.Assert(paginatedJobsResponse.Jobs, qt.HasLen, 1)
 	c.Assert(paginatedJobsResponse.Pagination.TotalItems, qt.Equals, int64(2))
 	c.Assert(paginatedJobsResponse.Pagination.PreviousPage, qt.IsNil)
@@ -479,9 +420,8 @@ func TestOrganizationMembers(t *testing.T) {
 	c.Assert(paginatedJobsResponse.Jobs[0].JobID, qt.Equals, jobIDHex2.String()) // Should be the newest job
 
 	// Test second page
-	paginatedJobsResponse2 := requestAndParse[apicommon.JobsResponse](
-		t, http.MethodGet, adminToken, nil,
-		"organizations", orgAddress.String(), "jobs?page=2&limit=1")
+	paginatedJobsResponse2 := requestAndParse[apicommon.JobsListResponse](
+		t, http.MethodGet, adminToken, nil, "jobs?orgAddress="+orgAddress.String()+"&page=2&limit=1")
 	c.Assert(paginatedJobsResponse2.Jobs, qt.HasLen, 1)
 	c.Assert(paginatedJobsResponse2.Pagination.TotalItems, qt.Equals, int64(2))
 	c.Assert(*paginatedJobsResponse2.Pagination.PreviousPage, qt.Equals, int64(1))
