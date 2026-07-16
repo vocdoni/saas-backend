@@ -67,7 +67,7 @@ func main() {
 	flag.Int("notificationBreakerMaxFailures", 0, "provider failures that trip the CSP notification breaker (0 = default)")
 	flag.Duration("notificationBreakerCooldown", 0, "how long the CSP notification breaker stays open once tripped (0 = default)")
 	// on-chain question status sync worker (keeps stored question statuses in sync with the chain)
-	flag.Bool("statusSyncEnabled", false, "enable the background worker that syncs question statuses with the Vochain")
+	flag.Bool("statusSyncEnabled", true, "run the question-status sync worker (Vochain reconciler; set false to disable)")
 	flag.Duration("statusSyncInterval", 60*time.Second, "interval between status sync runs (0 = default 60s)")
 	flag.Duration("statusSyncRunTimeout", 5*time.Minute, "per-run timeout for a status sync pass (0 = default 5m)")
 	// parse flags

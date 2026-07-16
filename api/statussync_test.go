@@ -61,8 +61,8 @@ func setSyncTestElectionStatus(
 }
 
 // TestStatusSync seeds two published questions in "ready", drives their elections to different
-// on-chain statuses (one ended→results, one paused), runs the syncer, and asserts the stored
-// question statuses converge to the chain (lowercased) and that a terminal question drops out of
+// on-chain statuses (one ENDED→RESULTS, one PAUSED), runs the syncer, and asserts the stored
+// question statuses converge to the chain (uppercase) and that a terminal question drops out of
 // the syncable candidate set.
 func TestStatusSync(t *testing.T) {
 	c := qt.New(t)
@@ -134,7 +134,7 @@ func TestStatusSync(t *testing.T) {
 	// at least our two questions changed (the query is global; other orgs may also reconcile).
 	c.Assert(changed >= 2, qt.IsTrue, qt.Commentf("changed=%d", changed))
 
-	// stored statuses now mirror the chain (lowercased)
+	// stored statuses now mirror the chain (uppercase)
 	qEnded, err := testDB.Question(qEndedID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(qEnded.Status, qt.Equals, db.QuestionStatusResults)

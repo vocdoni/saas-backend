@@ -110,7 +110,8 @@ func (s *Syncer) RunOnce(ctx context.Context) (int, error) {
 	var changes []db.QuestionStatusChange
 	for org, orgRefs := range byOrg {
 		if err := ctx.Err(); err != nil {
-			return len(changes), err
+			// nothing is applied until SyncQuestionStatuses below, so report zero updates.
+			return 0, err
 		}
 		chainStatus, err := s.electionStatusesByOrg(ctx, org)
 		if err != nil {

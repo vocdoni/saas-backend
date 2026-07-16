@@ -161,7 +161,7 @@ func (ms *MongoStorage) ResetQuestionsPublish(processID primitive.ObjectID) erro
 }
 
 // QuestionsInSyncableStatus returns the minimal refs of every published question whose stored
-// status can still change on-chain (ready|paused|ended). Terminal statuses (canceled|results) are
+// status can still change on-chain (READY|PAUSED|ENDED). Terminal statuses (CANCELED|RESULTS) are
 // final, so once a question reaches them (stored == chain) it needs no further sync and is
 // excluded — keeping the candidate set bounded while every question still converges to the chain.
 // It is the status syncer's single candidate query (projected to upstreamId, orgAddress, status).
@@ -184,7 +184,7 @@ func (ms *MongoStorage) QuestionsInSyncableStatus(ctx context.Context) ([]Questi
 
 // SyncQuestionStatuses applies the given status reconciliations in one unordered BulkWrite keyed
 // by upstreamId, stamping syncedAt. Unordered so one failed update never blocks the rest; a no-op
-// on an empty change set. NewStatus must already be the lowercase stored form. Syncer-only.
+// on an empty change set. NewStatus must already be the uppercase stored form. Syncer-only.
 func (ms *MongoStorage) SyncQuestionStatuses(ctx context.Context, changes []QuestionStatusChange) error {
 	if len(changes) == 0 {
 		return nil

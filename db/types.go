@@ -633,7 +633,7 @@ type QuestionStatusRef struct {
 }
 
 // QuestionStatusChange is a single reconciliation the status syncer applies: set the question
-// identified by UpstreamID to NewStatus (already normalized to the lowercase stored form).
+// identified by UpstreamID to NewStatus (already normalized to the uppercase stored form).
 type QuestionStatusChange struct {
 	UpstreamID internal.HexBytes
 	NewStatus  string

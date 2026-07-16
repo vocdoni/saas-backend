@@ -97,7 +97,7 @@ func TestClaimVotingProcessForPublish(t *testing.T) {
 }
 
 // TestQuestionStatusSyncMethods covers the status-syncer DB methods: the syncable-candidate
-// projection (only {ready,paused,ended} with an upstreamId), the bulk status write (status +
+// projection (only {READY,PAUSED,ENDED} with an upstreamId), the bulk status write (status +
 // syncedAt), and the active-question count that backs the managed-org delete guard.
 func TestQuestionStatusSyncMethods(t *testing.T) {
 	c := qt.New(t)
