@@ -79,8 +79,9 @@ func TestVotingProcessAuthoring(t *testing.T) {
 	// eligibility subset is public and restricted to the first member on Q2
 	c.Assert(got.Questions[1].EligibleMemberIDs, qt.HasLen, 1)
 	c.Assert(got.Questions[0].EligibleMemberIDs, qt.HasLen, 0) // Q1 = all census members
-	// census config is exposed, member list is not
+	// census config is exposed, member list is not; size reflects the 2 seeded members
 	c.Assert(got.Census.TwoFaFields, qt.HasLen, 1)
+	c.Assert(got.Census.Size, qt.Equals, int64(2))
 
 	// list contains the process with its questions
 	list := requestAndParse[apicommon.VotingProcessListResponse](

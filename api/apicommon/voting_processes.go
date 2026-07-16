@@ -16,6 +16,9 @@ type CensusSpec struct {
 	TwoFaFields db.OrgMemberTwoFaFields `json:"twoFaFields,omitempty"`
 	GroupID     string                  `json:"groupId,omitempty"`
 	MemberIDs   []string                `json:"memberIds,omitempty"`
+	// Size is the number of members in the census. Response-only (ignored on create/update): for a
+	// published process it equals the on-chain maxCensusSize of its whole-census questions.
+	Size int64 `json:"size,omitempty"`
 }
 
 // EligibilitySpec is an optional per-question subset of the process census, resolved to a
@@ -227,6 +230,7 @@ func VotingProcessResponseFromDB(
 			Weighted:    census.Weighted,
 			AuthFields:  census.AuthFields,
 			TwoFaFields: census.TwoFaFields,
+			Size:        census.Size,
 		}
 	}
 	return resp

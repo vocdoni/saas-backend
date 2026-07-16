@@ -91,6 +91,8 @@ func TestUpdateProcessCensus(t *testing.T) {
 	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
 	openElection := got.Questions[0].UpstreamID // question 0 has no eligibility subset → whole census
 	c.Assert(len(openElection) > 0, qt.IsTrue)
+	// the published process reports its census size (== on-chain maxCensusSize for whole-census questions)
+	c.Assert(got.Census.Size, qt.Equals, int64(2))
 
 	// maxCensusSize on chain starts at the census size (2).
 	elec, err := testAPI.account.Election(openElection)
@@ -112,6 +114,10 @@ func TestUpdateProcessCensus(t *testing.T) {
 	elec, err = testAPI.account.Election(openElection)
 	c.Assert(err, qt.IsNil)
 	c.Assert(elec.Census.MaxCensusSize, qt.Equals, uint64(3), qt.Commentf("maxCensusSize should have grown to 3"))
+
+	// the process census response now reports the grown size.
+	got = requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	c.Assert(got.Census.Size, qt.Equals, int64(3))
 
 	// the newly added member can now authenticate and sign the open election.
 	voter := ethereum.SignKeys{}
