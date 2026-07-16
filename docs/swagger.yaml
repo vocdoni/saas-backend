@@ -1659,6 +1659,17 @@ definitions:
         description: The new role to assign to the user
         type: string
     type: object
+  apicommon.UpdateProcessCensusResponse:
+    properties:
+      added:
+        type: integer
+      errors:
+        items:
+          type: string
+        type: array
+      jobId:
+        type: string
+    type: object
   apicommon.UpdateProcessRequest:
     properties:
       address:
@@ -2074,6 +2085,7 @@ definitions:
     - census_participants
     - publish_process
     - set_process_status
+    - set_process_census
     - relay_vote
     - publish_voting_process
     type: string
@@ -2082,6 +2094,7 @@ definitions:
     - JobTypeCensusParticipants
     - JobTypePublishProcess
     - JobTypeSetProcessStatus
+    - JobTypeSetProcessCensus
     - JobTypeRelayVote
     - JobTypePublishVotingProcess
   db.MultiLangString:
@@ -6124,6 +6137,61 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Resend a voting process auth challenge
+      tags:
+      - processes
+  /processes/{processId}/census:
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Add existing organization members to the census of an already-published voting process
+        (same behaviour as POST /census/{id}, resolving the census from the process) and raise
+        each affected on-chain election's maxCensusSize so the new members can vote. Members are
+        added synchronously; the maxCensusSize update runs as an async job (poll GET /jobs/{jobId}).
+        Questions with an eligibility subset keep their fixed size and are unaffected. Requires
+        Manager/Admin role and is subject to the plan's census quota.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Member IDs to add
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.AddCensusParticipantsRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Members added; maxCensusSize update enqueued
+          schema:
+            $ref: '#/definitions/apicommon.UpdateProcessCensusResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Process is not published
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Add members to a published process's census
       tags:
       - processes
   /processes/{processId}/check:

@@ -60,6 +60,15 @@ type ValidateProcessCensusRequest struct {
 	Census     CensusSpec     `json:"census"`
 }
 
+// UpdateProcessCensusResponse is the result of PUT /processes/{processId}/census: the number of
+// members added to the census synchronously, plus the async job id that raises each published
+// election's maxCensusSize on-chain (empty when no on-chain update was needed).
+type UpdateProcessCensusResponse struct {
+	JobID  string   `json:"jobId,omitempty"`
+	Added  uint32   `json:"added"`
+	Errors []string `json:"errors,omitempty"`
+}
+
 // CreateVotingProcessResponse is returned by POST /processes.
 type CreateVotingProcessResponse struct {
 	ProcessID string `json:"processId"`

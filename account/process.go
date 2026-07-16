@@ -211,6 +211,36 @@ func (a *Account) BuildSetProcessStatusTx(
 	}, nil
 }
 
+// BuildSetProcessCensusTx builds an unsigned SET_PROCESS_CENSUS transaction that raises a published
+// election's maxCensusSize (keeping its census root/URI). The chain accepts a size increase without
+// DynamicCensus as long as the new size is not smaller than the current one; resend the existing
+// censusRoot/censusURI so they are preserved rather than cleared.
+func (a *Account) BuildSetProcessCensusTx(
+	orgAddress common.Address, processID, censusRoot []byte, censusURI string, maxCensusSize uint64,
+) (*models.Tx, error) {
+	if len(processID) == 0 {
+		return nil, fmt.Errorf("empty process id")
+	}
+	acc, err := a.client.Account(orgAddress.String())
+	if err != nil {
+		return nil, fmt.Errorf("could not fetch organization account: %w", err)
+	}
+	uri := censusURI
+	size := maxCensusSize
+	return &models.Tx{
+		Payload: &models.Tx_SetProcess{
+			SetProcess: &models.SetProcessTx{
+				Txtype:     models.TxType_SET_PROCESS_CENSUS,
+				Nonce:      acc.Nonce,
+				ProcessId:  processID,
+				CensusRoot: censusRoot,
+				CensusURI:  &uri,
+				CensusSize: &size,
+			},
+		},
+	}, nil
+}
+
 // SubmitSignedTx submits an already-signed transaction to the chain and waits
 // (up to 40s) until it is mined. It returns the transaction response data — for a
 // NewProcess transaction this is the on-chain process id.

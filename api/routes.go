@@ -214,6 +214,8 @@ const (
 	processesEndpoint = "/processes/{processId}"
 	// POST /processes/census/validation validates a census spec (duplicates/missing fields) before create
 	processesCensusValidateEndpoint = "/processes/census/validation"
+	// PUT /processes/{processId}/census adds members to a published process's census (+ maxCensusSize bump)
+	processesCensusEndpoint = "/processes/{processId}/census"
 	// GET /processes/{processId}/validation publish-readiness dry-run (protected)
 	processesValidateEndpoint = "/processes/{processId}/validation"
 	// POST /processes/{processId}/check voter eligibility/status (public CSP)

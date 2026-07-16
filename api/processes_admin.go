@@ -1,11 +1,15 @@
 package api
 
 import (
+	"encoding/json"
+	stderrors "errors"
 	"net/http"
 
+	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"go.vocdoni.io/dvote/log"
 )
 
 // deleteVotingProcessHandler godoc
@@ -174,4 +178,167 @@ func (a *API) votingProcessParticipantsHandler(w http.ResponseWriter, r *http.Re
 		resp.Participants = append(resp.Participants, entry)
 	}
 	apicommon.HTTPWriteJSON(w, resp)
+}
+
+// updateVotingProcessCensusHandler godoc
+//
+//	@Summary		Add members to a published process's census
+//	@Description	Add existing organization members to the census of an already-published voting process
+//	@Description	(same behaviour as POST /census/{id}, resolving the census from the process) and raise
+//	@Description	each affected on-chain election's maxCensusSize so the new members can vote. Members are
+//	@Description	added synchronously; the maxCensusSize update runs as an async job (poll GET /jobs/{jobId}).
+//	@Description	Questions with an eligibility subset keep their fixed size and are unaffected. Requires
+//	@Description	Manager/Admin role and is subject to the plan's census quota.
+//	@Tags			processes
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			processId	path		string									true	"Process ID"
+//	@Param			request		body		apicommon.AddCensusParticipantsRequest	true	"Member IDs to add"
+//	@Success		202			{object}	apicommon.UpdateProcessCensusResponse	"Members added; maxCensusSize update enqueued"
+//	@Failure		400			{object}	errors.Error							"Invalid input data"
+//	@Failure		401			{object}	errors.Error							"Unauthorized"
+//	@Failure		404			{object}	errors.Error							"Process not found"
+//	@Failure		409			{object}	errors.Error							"Process is not published"
+//	@Failure		500			{object}	errors.Error							"Internal server error"
+//	@Router			/processes/{processId}/census [put]
+func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Request) {
+	oid, ok := a.votingProcessID(w, r)
+	if !ok {
+		return
+	}
+	// loads the process + questions and gates on Manager/Admin of the owning org.
+	vp, questions, ok := a.authorizeStatusChange(w, r, oid)
+	if !ok {
+		return
+	}
+	// only a published process can have its on-chain census extended; drafts use PUT /processes.
+	if !vp.Published {
+		errors.ErrDuplicateConflict.Withf("process is not published; edit the draft via PUT /processes/{processId}").Write(w)
+		return
+	}
+	census, err := a.db.Census(vp.CensusID.Hex())
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
+	var req apicommon.AddCensusParticipantsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errors.ErrMalformedBody.Withf("couldn't decode participant IDs").Write(w)
+		return
+	}
+	if len(req.MemberIDs) == 0 {
+		apicommon.HTTPWriteJSON(w, &apicommon.UpdateProcessCensusResponse{Added: 0})
+		return
+	}
+
+	if err := a.subscriptions.OrgCanAddCensusParticipants(census.OrgAddress, census.ID.Hex(), len(req.MemberIDs)); err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
+
+	added, memberErrs, err := a.db.AddCensusParticipantsByMemberIDs(census.ID.Hex(), req.MemberIDs)
+	switch {
+	case err == nil:
+	case stderrors.Is(err, db.ErrInvalidData), stderrors.Is(err, db.ErrUpdateWouldCreateDuplicates):
+		errors.ErrInvalidData.WithErr(err).Write(w)
+		return
+	case stderrors.Is(err, db.ErrNotFound):
+		errors.ErrCensusNotFound.Write(w)
+		return
+	default:
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
+	// recount and persist the census size so the on-chain maxCensusSize we set below is correct.
+	size, err := a.db.CountCensusParticipants(census.ID.Hex())
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	census.Size = size
+	if _, err := a.db.SetCensus(census); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
+	jobID, ok := a.enqueueCensusSizeUpdate(w, vp, census, questions)
+	if !ok {
+		return
+	}
+	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, &apicommon.UpdateProcessCensusResponse{
+		JobID: jobID, Added: uint32(added), Errors: memberErrs,
+	})
+}
+
+// enqueueCensusSizeUpdate submits a SET_PROCESS_CENSUS tx per published whole-census question to raise
+// its on-chain maxCensusSize to the census's new size. Questions with an eligibility subset keep their
+// fixed size and are skipped. Returns the job id (empty when nothing on-chain needs updating) and false
+// on failure (after writing the error response).
+func (a *API) enqueueCensusSizeUpdate(
+	w http.ResponseWriter, vp *db.VotingProcess, census *db.Census, questions []db.VotingProcessQuestion,
+) (string, bool) {
+	published := make([]db.VotingProcessQuestion, 0, len(questions))
+	for i := range questions {
+		if len(questions[i].UpstreamID) > 0 && len(questions[i].EligibleMemberIDs) == 0 {
+			published = append(published, questions[i])
+		}
+	}
+	if len(published) == 0 {
+		return "", true // no whole-census election on chain: nothing to resize
+	}
+	org, err := a.db.Organization(vp.OrgAddress)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return "", false
+	}
+	orgSigner, err := account.OrganizationSigner(a.secret, org.Creator, org.Nonce)
+	if err != nil {
+		errors.ErrGenericInternalServerError.Withf("could not restore organization signer: %v", err).Write(w)
+		return "", false
+	}
+	jobID, err := apicommon.NewJobID()
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return "", false
+	}
+	if err := a.db.CreateTxJob(jobID, db.JobTypeSetProcessCensus, org.Address); err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return "", false
+	}
+	root := census.Published.Root
+	uri := census.Published.URI
+	size := uint64(census.Size)
+	orgLock := a.orgTxLocks.lock(org.Address)
+	if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
+		defer orgLock.Unlock()
+		for i := range published {
+			tx, err := a.account.BuildSetProcessCensusTx(orgSigner.Address(), published[i].UpstreamID, root, uri, size)
+			if err != nil {
+				return nil, err
+			}
+			fundedTx, _, err := a.account.FundTransaction(tx, orgSigner.Address())
+			if err != nil {
+				return nil, err
+			}
+			stx, err := a.account.SignTransaction(fundedTx, orgSigner)
+			if err != nil {
+				return nil, err
+			}
+			if _, err := a.account.SubmitSignedTx(stx); err != nil {
+				return nil, err
+			}
+		}
+		return &db.JobResult{Status: string(db.JobStatusCompleted)}, nil
+	}}) {
+		orgLock.Unlock()
+		if e := a.db.SetJobStatus(jobID, db.JobStatusFailed, nil, "tx queue full"); e != nil {
+			log.Warnw("could not mark job failed after full queue", "error", e)
+		}
+		errors.ErrTxQueueFull.Write(w)
+		return "", false
+	}
+	return jobID, true
 }

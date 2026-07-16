@@ -686,6 +686,8 @@ const (
 	JobTypePublishProcess JobType = "publish_process"
 	// JobTypeSetProcessStatus represents a SET_PROCESS_STATUS tx job
 	JobTypeSetProcessStatus JobType = "set_process_status"
+	// JobTypeSetProcessCensus represents a SET_PROCESS_CENSUS tx job (raise maxCensusSize)
+	JobTypeSetProcessCensus JobType = "set_process_census"
 	// JobTypeRelayVote represents a vote-relay tx job
 	JobTypeRelayVote JobType = "relay_vote"
 	// JobTypePublishVotingProcess represents a multi-question voting-process publish
