@@ -78,15 +78,15 @@ func (a *API) sendMembersImportCompletionEmail(userEmail, userName string, org *
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string	true	"Organization address"
-//	@Param			page	query		integer	false	"Page number (default: 1)"
-//	@Param			limit	query		integer	false	"Number of items per page (default: 10)"
-//	@Param			search	query		string	false	"Search term for member properties"
-//	@Success		200		{object}	apicommon.OrganizationMembersResponse
-//	@Failure		400		{object}	errors.Error	"Invalid input"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/members [get]
+//	@Param			orgAddress	path		string	true	"Organization address"
+//	@Param			page		query		integer	false	"Page number (default: 1)"
+//	@Param			limit		query		integer	false	"Number of items per page (default: 10)"
+//	@Param			search		query		string	false	"Search term for member properties"
+//	@Success		200			{object}	apicommon.OrganizationMembersResponse
+//	@Failure		400			{object}	errors.Error	"Invalid input"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{orgAddress}/members [get]
 func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)
@@ -152,15 +152,15 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string							true	"Organization address"
-//	@Param			async	query		boolean							false	"Process asynchronously and return job ID"
-//	@Param			request	body		apicommon.AddMembersRequest		true	"Members to add"
-//	@Success		200		{object}	apicommon.AddMembersResponse	"Added count (sync) or jobId (async)"
-//	@Failure		400		{object}	errors.Error					"Invalid input data"
-//	@Failure		401		{object}	errors.Error					"Unauthorized"
-//	@Failure		403		{object}	errors.Error					"Plan member quota exceeded"
-//	@Failure		500		{object}	errors.Error					"Internal server error"
-//	@Router			/organizations/{address}/members [post]
+//	@Param			orgAddress	path		string							true	"Organization address"
+//	@Param			async		query		boolean							false	"Process asynchronously and return job ID"
+//	@Param			request		body		apicommon.AddMembersRequest		true	"Members to add"
+//	@Success		200			{object}	apicommon.AddMembersResponse	"Added count (sync) or jobId (async)"
+//	@Failure		400			{object}	errors.Error					"Invalid input data"
+//	@Failure		401			{object}	errors.Error					"Unauthorized"
+//	@Failure		403			{object}	errors.Error					"Plan member quota exceeded"
+//	@Failure		500			{object}	errors.Error					"Internal server error"
+//	@Router			/organizations/{orgAddress}/members [post]
 func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)
@@ -280,13 +280,13 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string				true	"Organization address"
-//	@Param			request	body		apicommon.OrgMember	true	"Member data to insert or update"
-//	@Success		200		{object}	apicommon.OrgMember	"ID of member inserted or updated"
-//	@Failure		400		{object}	errors.Error		"Invalid input data"
-//	@Failure		401		{object}	errors.Error		"Unauthorized"
-//	@Failure		500		{object}	errors.Error		"Internal server error"
-//	@Router			/organizations/{address}/members [put]
+//	@Param			orgAddress	path		string				true	"Organization address"
+//	@Param			request		body		apicommon.OrgMember	true	"Member data to insert or update"
+//	@Success		200			{object}	apicommon.OrgMember	"ID of member inserted or updated"
+//	@Failure		400			{object}	errors.Error		"Invalid input data"
+//	@Failure		401			{object}	errors.Error		"Unauthorized"
+//	@Failure		500			{object}	errors.Error		"Internal server error"
+//	@Router			/organizations/{orgAddress}/members [put]
 func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)
@@ -340,13 +340,13 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string							true	"Organization address"
-//	@Param			request	body		apicommon.DeleteMembersRequest	true	"Member IDs to delete or all flag"
-//	@Success		200		{object}	apicommon.DeleteMembersResponse
-//	@Failure		400		{object}	errors.Error	"Invalid input data"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/members [delete]
+//	@Param			orgAddress	path		string							true	"Organization address"
+//	@Param			request		body		apicommon.DeleteMembersRequest	true	"Member IDs to delete or all flag"
+//	@Success		200			{object}	apicommon.DeleteMembersResponse
+//	@Failure		400			{object}	errors.Error	"Invalid input data"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{orgAddress}/members [delete]
 func (a *API) deleteOrganizationMembersHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)

@@ -437,7 +437,7 @@ func fetchExternalMetadata(ctx context.Context, url string) map[string]any {
 //	@Failure		404	{object}	errors.Error	"Process not found"
 //	@Failure		500	{object}	errors.Error	"Internal server error"
 //	@Deprecated
-//	@Router	/organizations/{address}/processes/drafts [get]
+//	@Router	/organizations/{orgAddress}/processes/drafts [get]
 func (a *API) organizationListProcessDraftsHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)

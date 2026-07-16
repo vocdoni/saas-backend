@@ -6,7 +6,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 )
 
-// CreateAPIKeyRequest is the body of POST /organizations/{address}/apikeys.
+// CreateAPIKeyRequest is the body of POST /organizations/{orgAddress}/apikeys.
 type CreateAPIKeyRequest struct {
 	// Human-readable label to identify the key.
 	Label string `json:"label"`

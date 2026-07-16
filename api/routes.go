@@ -57,56 +57,56 @@ const (
 	// organization routes
 	// POST /organizations to create a new organization
 	organizationsEndpoint = "/organizations"
-	// GET /organizations/{address} to get the organization information
-	organizationEndpoint = "/organizations/{address}"
-	// GET /organizations/{address}/users to get the organization users
-	organizationUsersEndpoint = "/organizations/{address}/users"
-	// POST /organizations/{address}/users/invite to add a new user
-	organizationAddUserEndpoint = "/organizations/{address}/users"
-	// POST /organizations/{address}/users/invite/accept to accept the invitation
-	organizationAcceptUserEndpoint = "/organizations/{address}/users/accept"
-	// GET /organizations/{address}/users/pending to get the pending users
-	organizationPendingUsersEndpoint = "/organizations/{address}/users/pending"
-	// DELETE /organizations/{address}/users/pending/{userid} to delete the a pending invitation
-	organizationHandlePendingInvitationEndpoint = "/organizations/{address}/users/pending/{invitationID}"
-	// PUT /organizations/{address}/users/{userid} to update the role of an  organization user
-	organizationUpdateUserEndpoint = "/organizations/{address}/users/{userid}"
-	// DELETE /organizations/{address}/users/{userid} to remove user from  an organization
-	organizationDeleteUserEndpoint = "/organizations/{address}/users/{userid}"
+	// GET /organizations/{orgAddress} to get the organization information
+	organizationEndpoint = "/organizations/{orgAddress}"
+	// GET /organizations/{orgAddress}/users to get the organization users
+	organizationUsersEndpoint = "/organizations/{orgAddress}/users"
+	// POST /organizations/{orgAddress}/users/invite to add a new user
+	organizationAddUserEndpoint = "/organizations/{orgAddress}/users"
+	// POST /organizations/{orgAddress}/users/invite/accept to accept the invitation
+	organizationAcceptUserEndpoint = "/organizations/{orgAddress}/users/accept"
+	// GET /organizations/{orgAddress}/users/pending to get the pending users
+	organizationPendingUsersEndpoint = "/organizations/{orgAddress}/users/pending"
+	// DELETE /organizations/{orgAddress}/users/pending/{userId} to delete the a pending invitation
+	organizationHandlePendingInvitationEndpoint = "/organizations/{orgAddress}/users/pending/{invitationId}"
+	// PUT /organizations/{orgAddress}/users/{userId} to update the role of an  organization user
+	organizationUpdateUserEndpoint = "/organizations/{orgAddress}/users/{userId}"
+	// DELETE /organizations/{orgAddress}/users/{userId} to remove user from  an organization
+	organizationDeleteUserEndpoint = "/organizations/{orgAddress}/users/{userId}"
 	// GET /organizations/roles to get the available organization user roles
 	organizationRolesEndpoint = "/organizations/roles"
 	// GET /organizations/types to get the available organization types
 	organizationTypesEndpoint = "/organizations/types"
-	// GET /organizations/{address}/subscription to get the organization subscription
-	organizationSubscriptionEndpoint = "/organizations/{address}/subscription"
-	// GET /organizations/{address}/censuses to get the organization censuses
-	organizationCensusesEndpoint = "/organizations/{address}/censuses"
-	// GET /organizations/{address}/processes/drafts to get the organization draft processes
-	organizationListProcessDraftsEndpoint = "/organizations/{address}/processes/drafts"
+	// GET /organizations/{orgAddress}/subscription to get the organization subscription
+	organizationSubscriptionEndpoint = "/organizations/{orgAddress}/subscription"
+	// GET /organizations/{orgAddress}/censuses to get the organization censuses
+	organizationCensusesEndpoint = "/organizations/{orgAddress}/censuses"
+	// GET /organizations/{orgAddress}/processes/drafts to get the organization draft processes
+	organizationListProcessDraftsEndpoint = "/organizations/{orgAddress}/processes/drafts"
 
-	// GET /organizations/{address}/members to get the organization members
-	organizationMembersEndpoint = "/organizations/{address}/members"
-	// POST /organizations/{address}/members to add new members
-	organizationAddMembersEndpoint = "/organizations/{address}/members"
-	// PUT /organizations/{address}/members to create or update an organization member
-	organizationUpsertMemberEndpoint = "/organizations/{address}/members"
-	// DELETE /organizations/{address}/members to delete members
-	organizationDeleteMembersEndpoint = "/organizations/{address}/members"
-	// POST/PUT/GET/DELETE /organizations/{address}/meta to add/set/get/delete the organization metadata
-	organizationMetaEndpoint = "/organizations/{address}/meta"
-	// POST /organizations/{address}/ticket to create a new ticket to our support system
-	organizationCreateTicketEndpoint = "/organizations/{address}/ticket"
-	// POST/GET /organizations/{address}/groups to create a new organization member group or get the
+	// GET /organizations/{orgAddress}/members to get the organization members
+	organizationMembersEndpoint = "/organizations/{orgAddress}/members"
+	// POST /organizations/{orgAddress}/members to add new members
+	organizationAddMembersEndpoint = "/organizations/{orgAddress}/members"
+	// PUT /organizations/{orgAddress}/members to create or update an organization member
+	organizationUpsertMemberEndpoint = "/organizations/{orgAddress}/members"
+	// DELETE /organizations/{orgAddress}/members to delete members
+	organizationDeleteMembersEndpoint = "/organizations/{orgAddress}/members"
+	// POST/PUT/GET/DELETE /organizations/{orgAddress}/meta to add/set/get/delete the organization metadata
+	organizationMetaEndpoint = "/organizations/{orgAddress}/meta"
+	// POST /organizations/{orgAddress}/ticket to create a new ticket to our support system
+	organizationCreateTicketEndpoint = "/organizations/{orgAddress}/ticket"
+	// POST/GET /organizations/{orgAddress}/groups to create a new organization member group or get the
 	// list of groups of an organization
-	organizationGroupsEndpoint = "/organizations/{address}/groups"
-	// PUT/DELETE /organizations/{address}/groups/{groupID} to update or delete an organization member group
-	organizationGroupEndpoint = "/organizations/{address}/groups/{groupID}"
-	// GET /organizations/{address}/groups/{groupID}/members to get the members of an organization member group
-	organizationGroupMembersEndpoint = "/organizations/{address}/groups/{groupID}/members"
-	// POST /organizations/{address}/groups/{groupID}/validate to validate the member data of an organization member group
-	organizationGroupValidateEndpoint = "/organizations/{address}/groups/{groupID}/validate"
-	// GET /organizations/{address}/processes to get the organization bundle processes
-	organizationBundlesEndpoint = "/organizations/{address}/processes"
+	organizationGroupsEndpoint = "/organizations/{orgAddress}/groups"
+	// PUT/DELETE /organizations/{orgAddress}/groups/{groupId} to update or delete an organization member group
+	organizationGroupEndpoint = "/organizations/{orgAddress}/groups/{groupId}"
+	// GET /organizations/{orgAddress}/groups/{groupId}/members to get the members of an organization member group
+	organizationGroupMembersEndpoint = "/organizations/{orgAddress}/groups/{groupId}/members"
+	// POST /organizations/{orgAddress}/groups/{groupId}/validate to validate the member data of an organization member group
+	organizationGroupValidateEndpoint = "/organizations/{orgAddress}/groups/{groupId}/validate"
+	// GET /organizations/{orgAddress}/processes to get the organization bundle processes
+	organizationBundlesEndpoint = "/organizations/{orgAddress}/processes"
 	// GET /integrator to get integrator quota and usage for the caller's own integrator org.
 	// Path-less: the integrator org is resolved from the API key (its org) or the user session.
 	integratorEndpoint = "/integrator"
@@ -128,10 +128,10 @@ const (
 	subscriptionsWebhook = "/subscriptions/webhook"
 	// POST /subscriptions/checkout to create a new subscription
 	subscriptionsCheckout = "/subscriptions/checkout"
-	// GET /subscriptions/checkout/{sessionID} to get the checkout session information
-	subscriptionsCheckoutSession = "/subscriptions/checkout/{sessionID}"
+	// GET /subscriptions/checkout/{sessionId} to get the checkout session information
+	subscriptionsCheckoutSession = "/subscriptions/checkout/{sessionId}"
 	// GET /subscriptions/portal to get the stripe subscription portal URL
-	subscriptionsPortal = "/subscriptions/{address}/portal"
+	subscriptionsPortal = "/subscriptions/{orgAddress}/portal"
 	// object storage routes
 	// POST /storage/{origin} to upload an image to the object storage
 	objectStorageUploadTypedEndpoint = "/storage"
@@ -146,8 +146,8 @@ const (
 	censusIDEndpoint = "/census/{id}"
 	// POST /census/{id}/publish to publish a census
 	censusPublishEndpoint = "/census/{id}/publish"
-	// POST /census/{id}/group/{groupid}/publish to publish a group census
-	censusGroupPublishEndpoint = "/census/{id}/group/{groupid}/publish"
+	// POST /census/{id}/group/{groupId}/publish to publish a group census
+	censusGroupPublishEndpoint = "/census/{id}/group/{groupId}/publish"
 	// GET /census/{id}/participants to get the census participants
 	censusParticipantsEndpoint = "/census/{id}/participants"
 

@@ -1261,21 +1261,21 @@ func joinQueryParams(queryParams ...string) string {
 }
 
 func organizationMembersURL(orgAddress string) string {
-	return strings.ReplaceAll(organizationMembersEndpoint, "{address}", orgAddress)
+	return strings.ReplaceAll(organizationMembersEndpoint, "{orgAddress}", orgAddress)
 }
 
 func organizationGroupsURL(orgAddress string) string {
-	return strings.ReplaceAll(organizationGroupsEndpoint, "{address}", orgAddress)
+	return strings.ReplaceAll(organizationGroupsEndpoint, "{orgAddress}", orgAddress)
 }
 
 func organizationInfoURL(orgAddress string) string {
-	return strings.ReplaceAll(organizationEndpoint, "{address}", orgAddress)
+	return strings.ReplaceAll(organizationEndpoint, "{orgAddress}", orgAddress)
 }
 
 func censusGroupPublishURL(censusID, groupID string) string {
 	s := censusGroupPublishEndpoint
 	s = strings.ReplaceAll(s, "{id}", censusID)
-	s = strings.ReplaceAll(s, "{groupid}", groupID)
+	s = strings.ReplaceAll(s, "{groupId}", groupID)
 	return s
 }
 

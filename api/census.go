@@ -300,7 +300,7 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			id		path		string								true	"Census ID"
-//	@Param			groupid	path		string								true	"Group ID"
+//	@Param			groupId	path		string								true	"Group ID"
 //	@Param			request	body		apicommon.PublishCensusGroupRequest	true	"Census authentication configuration"
 //	@Success		200		{object}	apicommon.PublishedCensusResponse
 //	@Failure		400		{object}	errors.Error	"Invalid census ID or group ID"
@@ -309,7 +309,7 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		404		{object}	errors.Error	"Census not found, or neither authFields nor twoFaFields provided (ErrCensusTypeNotFound)"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
 //	@Deprecated
-//	@Router	/census/{id}/group/{groupid}/publish [post]
+//	@Router	/census/{id}/group/{groupId}/publish [post]
 func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) {
 	censusID := internal.HexBytes{}
 	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
@@ -318,7 +318,7 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	groupID := internal.HexBytes{}
-	if err := groupID.ParseString(chi.URLParam(r, "groupid")); err != nil {
+	if err := groupID.ParseString(chi.URLParam(r, "groupId")); err != nil {
 		errors.ErrMalformedURLParam.Withf("wrong group ID").Write(w)
 		return
 	}

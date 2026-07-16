@@ -635,7 +635,7 @@ type CreateOrganizationRequest struct {
 	ProvisionAccount bool `json:"provisionAccount,omitempty"`
 }
 
-// CreateManagedOrganizationRequest is the body of POST /organizations/{address}/managed.
+// CreateManagedOrganizationRequest is the body of POST /organizations/{orgAddress}/managed.
 // It carries the new organization's fields plus an optional owner to assign as its admin.
 type CreateManagedOrganizationRequest struct {
 	OrganizationInfo
@@ -650,7 +650,7 @@ type ListManagedOrganizations struct {
 }
 
 // DeleteManagedOrganizationResponse is returned by DELETE
-// /organizations/{address}/managed/{orgAddress} confirming the deleted address.
+// /organizations/{orgAddress}/managed/{orgAddress} confirming the deleted address.
 type DeleteManagedOrganizationResponse struct {
 	Address string `json:"address"`
 }
@@ -683,7 +683,7 @@ type IntegratorLimits struct {
 	MaxEmails           int `json:"maxEmails"`
 }
 
-// IntegratorInfoResponse is returned by GET /organizations/{address}/integrator.
+// IntegratorInfoResponse is returned by GET /organizations/{orgAddress}/integrator.
 // Limits is only present when Enabled is true.
 type IntegratorInfoResponse struct {
 	Enabled bool              `json:"enabled"`

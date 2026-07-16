@@ -413,7 +413,7 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	// the org must actually be managed by the integrator at {address}. Use a 404 (not 403) so a
+	// the org must actually be managed by the integrator at {orgAddress}. Use a 404 (not 403) so a
 	// caller cannot probe which addresses are managed by other integrators.
 	if managed.ManagedBy.Cmp(integratorAddr) != 0 {
 		errors.ErrOrganizationNotFound.Write(w)

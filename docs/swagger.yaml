@@ -2809,7 +2809,7 @@ paths:
       summary: Add organization members to a census
       tags:
       - census
-  /census/{id}/group/{groupid}/publish:
+  /census/{id}/group/{groupId}/publish:
     post:
       consumes:
       - application/json
@@ -2831,7 +2831,7 @@ paths:
         type: string
       - description: Group ID
         in: path
-        name: groupid
+        name: groupId
         required: true
         type: string
       - description: Census authentication configuration
@@ -3460,7 +3460,7 @@ paths:
       summary: Create a new organization
       tags:
       - organizations
-  /organizations/{address}:
+  /organizations/{orgAddress}:
     get:
       consumes:
       - application/json
@@ -3468,7 +3468,7 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       produces:
@@ -3503,7 +3503,7 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       - description: Organization information to update
@@ -3540,7 +3540,7 @@ paths:
       summary: Update organization information
       tags:
       - organizations
-  /organizations/{address}/censuses:
+  /organizations/{orgAddress}/censuses:
     get:
       consumes:
       - application/json
@@ -3548,7 +3548,7 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       produces:
@@ -3579,7 +3579,7 @@ paths:
       summary: Get organization censuses
       tags:
       - organizations
-  /organizations/{address}/groups:
+  /organizations/{orgAddress}/groups:
     get:
       consumes:
       - application/json
@@ -3592,7 +3592,7 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       - description: 'Page number (default: 1)'
@@ -3638,7 +3638,7 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       - description: Group info to create
@@ -3671,7 +3671,7 @@ paths:
       summary: Create an organization member group
       tags:
       - organizations
-  /organizations/{address}/groups/{groupID}:
+  /organizations/{orgAddress}/groups/{groupId}:
     delete:
       consumes:
       - application/json
@@ -3683,12 +3683,12 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       - description: Group ID
         in: path
-        name: groupID
+        name: groupId
         required: true
         type: string
       produces:
@@ -3730,12 +3730,12 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       - description: Group ID
         in: path
-        name: groupID
+        name: groupId
         required: true
         type: string
       produces:
@@ -3774,12 +3774,12 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       - description: Group ID
         in: path
-        name: groupID
+        name: groupId
         required: true
         type: string
       - description: Group info to update
@@ -3816,7 +3816,7 @@ paths:
       summary: Update an organization member group
       tags:
       - organizations
-  /organizations/{address}/groups/{groupID}/members:
+  /organizations/{orgAddress}/groups/{groupId}/members:
     get:
       consumes:
       - application/json
@@ -3828,12 +3828,12 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       - description: Group ID
         in: path
-        name: groupID
+        name: groupId
         required: true
         type: string
       - description: Page number for pagination
@@ -3868,7 +3868,7 @@ paths:
       summary: Get the list of members with details of an organization member group
       tags:
       - organizations
-  /organizations/{address}/groups/{groupID}/validate:
+  /organizations/{orgAddress}/groups/{groupId}/validate:
     post:
       consumes:
       - application/json
@@ -3882,12 +3882,12 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       - description: Group ID
         in: path
-        name: groupID
+        name: groupId
         required: true
         type: string
       - description: Members validation request
@@ -3921,7 +3921,7 @@ paths:
       summary: Validate organization group members data
       tags:
       - organizations
-  /organizations/{address}/members:
+  /organizations/{orgAddress}/members:
     delete:
       consumes:
       - application/json
@@ -3933,7 +3933,7 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       - description: Member IDs to delete or all flag
@@ -3976,7 +3976,7 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       - description: 'Page number (default: 1)'
@@ -4028,7 +4028,7 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       - description: Process asynchronously and return job ID
@@ -4080,7 +4080,7 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       - description: Member data to insert or update
@@ -4111,516 +4111,6 @@ paths:
       security:
       - BearerAuth: []
       summary: Create or update an organization member
-      tags:
-      - organizations
-  /organizations/{address}/processes:
-    get:
-      consumes:
-      - application/json
-      deprecated: true
-      description: |-
-        Returns a paginated list of process bundles for an organization.
-        Each entry contains the bundle ID, the primary vochain process ID
-        (first element of Processes when present), and all process IDs in the bundle.
-        Requires the user to be part of the organization (any role).
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: Page number (default 1)
-        in: query
-        name: page
-        type: integer
-      - description: Items per page (default 10, max 100)
-        in: query
-        name: limit
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.ListOrganizationBundles'
-        "400":
-          description: Invalid request or organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: List organization bundles and their main process
-      tags:
-      - process
-  /organizations/{address}/processes/drafts:
-    get:
-      consumes:
-      - application/json
-      deprecated: true
-      description: Returns a list of voting process drafts.
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.ListOrganizationProcesses'
-        "404":
-          description: Process not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      summary: Get paginated list of process drafts
-      tags:
-      - process
-  /organizations/{address}/subscription:
-    get:
-      consumes:
-      - application/json
-      description: Get the subscription information for an organization
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.OrganizationSubscriptionInfo'
-        "400":
-          description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization not found or no subscription
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Get organization subscription
-      tags:
-      - organizations
-  /organizations/{address}/ticket:
-    post:
-      consumes:
-      - application/json
-      description: Create a new ticket for an organization. The user must have some
-        role in the organization (any role).
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: Ticket request information
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/apicommon.CreateOrganizationTicketRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "400":
-          description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Create a new ticket for an organization
-      tags:
-      - organizations
-  /organizations/{address}/users:
-    get:
-      consumes:
-      - application/json
-      description: Get the list of users with their roles in the organization
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.OrganizationUsers'
-        "400":
-          description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Get organization users
-      tags:
-      - organizations
-    post:
-      consumes:
-      - application/json
-      description: |-
-        Invite a new user to an organization. Only the admin of the organization can invite a new user.
-        It stores the invitation in the database and sends an email to the new user with the invitation code.
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: Invitation information
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/apicommon.OrganizationInvite'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "400":
-          description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "409":
-          description: User already has a role in the organization
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Invite a new user to an organization
-      tags:
-      - organizations
-  /organizations/{address}/users/{userid}:
-    delete:
-      consumes:
-      - application/json
-      description: Remove a user from the organization. Only the admin of the organization
-        can remove a user.
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: User ID
-        in: path
-        name: userid
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "400":
-          description: Invalid input data - User cannot remove itself
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Remove a user from the organization
-      tags:
-      - organizations
-    put:
-      consumes:
-      - application/json
-      description: Update the role of a user in an organization. Only the admin of
-        the organization can update the role.
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: User ID
-        in: path
-        name: userid
-        required: true
-        type: string
-      - description: Update user role information
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/apicommon.UpdateOrganizationUserRoleRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "400":
-          description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Update organization user role
-      tags:
-      - organizations
-  /organizations/{address}/users/accept:
-    post:
-      consumes:
-      - application/json
-      description: |-
-        Accept an invitation to an organization. It checks if the invitation is valid and not expired, and that the
-        user has no role in the organization yet. If the user does not exist, it creates a new user with the provided
-        information. If the user already exists and is verified, it assigns a role to the user in the organization.
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: Invitation acceptance information
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/apicommon.AcceptOrganizationInvitation'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "400":
-          description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized or invalid invitation
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "409":
-          description: User already has a role in the organization
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "410":
-          description: Invitation expired
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      summary: Accept an invitation to an organization
-      tags:
-      - organizations
-  /organizations/{address}/users/pending:
-    get:
-      consumes:
-      - application/json
-      description: Get the list of pending invitations for an organization
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.OrganizationInviteList'
-        "400":
-          description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Get pending organization users
-      tags:
-      - organizations
-  /organizations/{address}/users/pending/{invitationID}:
-    delete:
-      consumes:
-      - application/json
-      description: |-
-        Delete a pending invitation to an organization by email.
-        Only the admin of the organization can delete an invitation.
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: Invitation ID
-        in: path
-        name: invitationID
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "400":
-          description: Invalid data - invitation not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Delete a pending invitation to an organization
-      tags:
-      - organizations
-    put:
-      consumes:
-      - application/json
-      description: |-
-        Update the code, link and expiration time of a pending invitation to an organization by email.
-        Resend the invitation email.
-        Only the admin of the organization can update an invitation.
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: Invitation ID
-        in: path
-        name: invitationID
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "400":
-          description: Invalid data - invitation not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Update a pending invitation to an organization
       tags:
       - organizations
   /organizations/{orgAddress}/meta:
@@ -4810,6 +4300,516 @@ paths:
       security:
       - BearerAuth: []
       summary: Update organization meta information
+      tags:
+      - organizations
+  /organizations/{orgAddress}/processes:
+    get:
+      consumes:
+      - application/json
+      deprecated: true
+      description: |-
+        Returns a paginated list of process bundles for an organization.
+        Each entry contains the bundle ID, the primary vochain process ID
+        (first element of Processes when present), and all process IDs in the bundle.
+        Requires the user to be part of the organization (any role).
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: Page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: Items per page (default 10, max 100)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ListOrganizationBundles'
+        "400":
+          description: Invalid request or organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: List organization bundles and their main process
+      tags:
+      - process
+  /organizations/{orgAddress}/processes/drafts:
+    get:
+      consumes:
+      - application/json
+      deprecated: true
+      description: Returns a list of voting process drafts.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ListOrganizationProcesses'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Get paginated list of process drafts
+      tags:
+      - process
+  /organizations/{orgAddress}/subscription:
+    get:
+      consumes:
+      - application/json
+      description: Get the subscription information for an organization
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.OrganizationSubscriptionInfo'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found or no subscription
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get organization subscription
+      tags:
+      - organizations
+  /organizations/{orgAddress}/ticket:
+    post:
+      consumes:
+      - application/json
+      description: Create a new ticket for an organization. The user must have some
+        role in the organization (any role).
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: Ticket request information
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.CreateOrganizationTicketRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Create a new ticket for an organization
+      tags:
+      - organizations
+  /organizations/{orgAddress}/users:
+    get:
+      consumes:
+      - application/json
+      description: Get the list of users with their roles in the organization
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.OrganizationUsers'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get organization users
+      tags:
+      - organizations
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Invite a new user to an organization. Only the admin of the organization can invite a new user.
+        It stores the invitation in the database and sends an email to the new user with the invitation code.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: Invitation information
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.OrganizationInvite'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: User already has a role in the organization
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Invite a new user to an organization
+      tags:
+      - organizations
+  /organizations/{orgAddress}/users/{userId}:
+    delete:
+      consumes:
+      - application/json
+      description: Remove a user from the organization. Only the admin of the organization
+        can remove a user.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: User ID
+        in: path
+        name: userId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid input data - User cannot remove itself
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Remove a user from the organization
+      tags:
+      - organizations
+    put:
+      consumes:
+      - application/json
+      description: Update the role of a user in an organization. Only the admin of
+        the organization can update the role.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: User ID
+        in: path
+        name: userId
+        required: true
+        type: string
+      - description: Update user role information
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.UpdateOrganizationUserRoleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Update organization user role
+      tags:
+      - organizations
+  /organizations/{orgAddress}/users/accept:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Accept an invitation to an organization. It checks if the invitation is valid and not expired, and that the
+        user has no role in the organization yet. If the user does not exist, it creates a new user with the provided
+        information. If the user already exists and is verified, it assigns a role to the user in the organization.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: Invitation acceptance information
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.AcceptOrganizationInvitation'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized or invalid invitation
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: User already has a role in the organization
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "410":
+          description: Invitation expired
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Accept an invitation to an organization
+      tags:
+      - organizations
+  /organizations/{orgAddress}/users/pending:
+    get:
+      consumes:
+      - application/json
+      description: Get the list of pending invitations for an organization
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.OrganizationInviteList'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get pending organization users
+      tags:
+      - organizations
+  /organizations/{orgAddress}/users/pending/{invitationId}:
+    delete:
+      consumes:
+      - application/json
+      description: |-
+        Delete a pending invitation to an organization by email.
+        Only the admin of the organization can delete an invitation.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: Invitation ID
+        in: path
+        name: invitationId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid data - invitation not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Delete a pending invitation to an organization
+      tags:
+      - organizations
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Update the code, link and expiration time of a pending invitation to an organization by email.
+        Resend the invitation email.
+        Only the admin of the organization can update an invitation.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: Invitation ID
+        in: path
+        name: invitationId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid data - invitation not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Update a pending invitation to an organization
       tags:
       - organizations
   /organizations/roles:
@@ -6711,7 +6711,7 @@ paths:
       summary: Download a stored object
       tags:
       - storage
-  /subscriptions/{address}/portal:
+  /subscriptions/{orgAddress}/portal:
     get:
       consumes:
       - application/json
@@ -6719,7 +6719,7 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       produces:
@@ -6794,7 +6794,7 @@ paths:
       summary: Create a subscription checkout session
       tags:
       - plans
-  /subscriptions/checkout/{sessionID}:
+  /subscriptions/checkout/{sessionId}:
     get:
       consumes:
       - application/json
@@ -6802,7 +6802,7 @@ paths:
       parameters:
       - description: Checkout session ID
         in: path
-        name: sessionID
+        name: sessionId
         required: true
         type: string
       produces:
