@@ -995,7 +995,7 @@ func randomProcessID() []byte {
 // enqueueAndPollJob posts to an async tx endpoint, asserts 202 + a job id, then polls
 // GET /jobs/{jobId} until the job leaves the pending state (or times out) and returns
 // the final job status. jsonBody/urlPath are forwarded to the action endpoint.
-func enqueueAndPollJob(t *testing.T, method, jwt string, jsonBody any, urlPath ...string) apicommon.JobStatusResponse {
+func enqueueAndPollJob(t *testing.T, method, jwt string, jsonBody any, urlPath ...string) apicommon.JobResponse {
 	t.Helper()
 	enq := requestAndParseWithAssertCode[apicommon.EnqueuedResponse](
 		http.StatusAccepted, t, method, jwt, jsonBody, urlPath...,
@@ -1005,11 +1005,11 @@ func enqueueAndPollJob(t *testing.T, method, jwt string, jsonBody any, urlPath .
 }
 
 // pollJob polls GET /jobs/{jobId} until the job is no longer pending or it times out.
-func pollJob(t *testing.T, jobID string) apicommon.JobStatusResponse {
+func pollJob(t *testing.T, jobID string) apicommon.JobResponse {
 	t.Helper()
 	deadline := time.Now().Add(60 * time.Second)
 	for {
-		js := requestAndParse[apicommon.JobStatusResponse](t, http.MethodGet, "", nil, "jobs", jobID)
+		js := requestAndParse[apicommon.JobResponse](t, http.MethodGet, "", nil, "jobs", jobID)
 		if js.Status != db.JobStatusPending {
 			return js
 		}

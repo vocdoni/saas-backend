@@ -86,7 +86,7 @@ func TestUpdateProcessCensus(t *testing.T) {
 	pid := created.ProcessID
 
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
-	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Error))
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
 
 	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
 	openElection := got.Questions[0].UpstreamID // question 0 has no eligibility subset → whole census
@@ -110,7 +110,7 @@ func TestUpdateProcessCensus(t *testing.T) {
 
 	// the on-chain maxCensusSize bump completes.
 	censusJob := pollJob(t, upd.JobID)
-	c.Assert(censusJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("census job error: %s", censusJob.Error))
+	c.Assert(censusJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("census job error: %s", censusJob.Errors))
 	elec, err = testAPI.account.Election(openElection)
 	c.Assert(err, qt.IsNil)
 	c.Assert(elec.Census.MaxCensusSize, qt.Equals, uint64(3), qt.Commentf("maxCensusSize should have grown to 3"))

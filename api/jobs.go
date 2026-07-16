@@ -12,20 +12,20 @@ import (
 
 // jobStatusHandler godoc
 //
-//	@Summary		Poll the status of an async transaction job
-//	@Description	Returns the current state of a transaction job created by an async endpoint
-//	@Description	(publish, status change or vote relay). Always responds 200; the `status` field
-//	@Description	carries the lifecycle state (`pending`, `completed` or `failed`). On `completed`
-//	@Description	the `result` field holds the public on-chain outcome; on `failed` the `error`
-//	@Description	field holds the reason. Public endpoint: the 32-byte job id is the capability and
-//	@Description	results contain only public on-chain data.
+//	@Summary		Poll the status of an async job
+//	@Description	Returns the current state of an async job (member/census import or a tx job: publish,
+//	@Description	status change, census update, vote relay), in the same unified shape as GET /jobs.
+//	@Description	Always responds 200; `status` carries the lifecycle state (`pending`, `completed`,
+//	@Description	`failed`) and `result` carries only the attributes the job produced (import counters
+//	@Description	`added`/`total`/`progress`, or tx `address`/`voteID`/`status`), each omitted when empty.
+//	@Description	Public endpoint: the 32-byte job id is the capability and results carry only public data.
 //	@Tags			jobs
 //	@Produce		json
-//	@Param			jobId	path		string						true	"Job id returned by the async endpoint (hex)"
-//	@Success		200		{object}	apicommon.JobStatusResponse	"Job status and (when completed) result"
-//	@Failure		400		{object}	errors.Error				"Invalid job id"
-//	@Failure		404		{object}	errors.Error				"Job not found"
-//	@Failure		500		{object}	errors.Error				"Internal server error"
+//	@Param			jobId	path		string					true	"Job id returned by the async endpoint (hex)"
+//	@Success		200		{object}	apicommon.JobResponse	"Unified job status and result"
+//	@Failure		400		{object}	errors.Error			"Invalid job id"
+//	@Failure		404		{object}	errors.Error			"Job not found"
+//	@Failure		500		{object}	errors.Error			"Internal server error"
 //	@Router			/jobs/{jobId} [get]
 func (a *API) jobStatusHandler(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "jobId")
@@ -44,13 +44,8 @@ func (a *API) jobStatusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	apicommon.HTTPWriteJSON(w, &apicommon.JobStatusResponse{
-		JobID:  job.JobID,
-		Type:   job.Type,
-		Status: job.Status,
-		Result: job.Result,
-		Error:  job.Error,
-	})
+	resp := apicommon.JobResponseFromDB(job)
+	apicommon.HTTPWriteJSON(w, &resp)
 }
 
 // jobsHandler godoc
@@ -64,6 +59,7 @@ func (a *API) jobStatusHandler(w http.ResponseWriter, r *http.Request) {
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			orgAddress	query		string	true	"Organization address"
+//	@Param			type		query		string	false	"Filter by job type (e.g. org_members, census_participants, relay_vote)"
 //	@Param			page		query		integer	false	"Page number (default: 1)"
 //	@Param			limit		query		integer	false	"Items per page (default: 10)"
 //	@Success		200			{object}	apicommon.JobsListResponse
@@ -92,7 +88,16 @@ func (a *API) jobsHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
-	totalItems, jobs, err := a.db.Jobs(orgAddress, params.Page, params.Limit, nil)
+	var jobType *db.JobType
+	if t := r.URL.Query().Get("type"); t != "" {
+		jt := db.JobType(t)
+		if !jt.IsValid() {
+			errors.ErrMalformedURLParam.Withf("invalid job type: %s", t).Write(w)
+			return
+		}
+		jobType = &jt
+	}
+	totalItems, jobs, err := a.db.Jobs(orgAddress, params.Page, params.Limit, jobType)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not get jobs: %v", err).Write(w)
 		return

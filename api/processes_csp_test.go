@@ -63,7 +63,7 @@ func TestProcessCSP(t *testing.T) {
 	pid := created.ProcessID
 
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
-	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Error))
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
 
 	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
 	c.Assert(got.Questions, qt.HasLen, 2)

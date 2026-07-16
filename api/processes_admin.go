@@ -195,6 +195,7 @@ func (a *API) votingProcessParticipantsHandler(w http.ResponseWriter, r *http.Re
 //	@Security		BearerAuth
 //	@Param			processId	path		string									true	"Process ID"
 //	@Param			request		body		apicommon.AddCensusParticipantsRequest	true	"Member IDs to add"
+//	@Success		200			{object}	apicommon.UpdateProcessCensusResponse	"Members added; no on-chain resize needed"
 //	@Success		202			{object}	apicommon.UpdateProcessCensusResponse	"Members added; maxCensusSize update enqueued"
 //	@Failure		400			{object}	errors.Error							"Invalid input data"
 //	@Failure		401			{object}	errors.Error							"Unauthorized"
@@ -268,9 +269,13 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, &apicommon.UpdateProcessCensusResponse{
-		JobID: jobID, Added: uint32(added), Errors: memberErrs,
-	})
+	resp := &apicommon.UpdateProcessCensusResponse{JobID: jobID, Added: uint32(added), Errors: memberErrs}
+	if jobID == "" {
+		// no whole-census election to resize (subset-only questions): nothing async is pending, so 200.
+		apicommon.HTTPWriteJSON(w, resp)
+		return
+	}
+	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, resp)
 }
 
 // enqueueCensusSizeUpdate submits a SET_PROCESS_CENSUS tx per published whole-census question to raise

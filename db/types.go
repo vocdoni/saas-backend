@@ -396,6 +396,9 @@ type OrgMemberAggregationResults struct {
 	Duplicates []primitive.ObjectID `json:"duplicates" bson:"duplicates"`
 	// MissingData is a list of member IDs that had columns found to be empty
 	MissingData []primitive.ObjectID `json:"missingData" bson:"missingData"`
+	// NotFound is a list of requested member IDs that matched no member of the organization
+	// (unknown, or belonging to another org). Only populated for the explicit-memberIds path.
+	NotFound []primitive.ObjectID `json:"notFound" bson:"notFound"`
 }
 
 const (
@@ -694,6 +697,17 @@ const (
 	// (batch of NEW_PROCESS txs) tx job
 	JobTypePublishVotingProcess JobType = "publish_voting_process"
 )
+
+// IsValid reports whether t is one of the known job types.
+func (t JobType) IsValid() bool {
+	switch t {
+	case JobTypeOrgMembers, JobTypeCensusParticipants, JobTypePublishProcess, JobTypeSetProcessStatus,
+		JobTypeSetProcessCensus, JobTypeRelayVote, JobTypePublishVotingProcess:
+		return true
+	default:
+		return false
+	}
+}
 
 // JobStatus is the lifecycle state of a transaction job (see CreateTxJob/SetJobStatus).
 type JobStatus string

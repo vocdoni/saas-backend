@@ -141,6 +141,23 @@ func (ms *MongoStorage) CompleteJob(jobID string, added int, errors []string) er
 	return nil
 }
 
+// UpdateJobProgress records the running count of processed items of an import job WITHOUT marking it
+// completed (no completedAt), so a client polling GET /jobs sees live progress. CompleteJob stamps the
+// final count + errors + completedAt at the end.
+func (ms *MongoStorage) UpdateJobProgress(jobID string, added int) error {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+
+	_, err := ms.jobs.UpdateOne(ctx, bson.M{"jobId": jobID}, bson.M{"$set": bson.M{"added": added}})
+	if err != nil {
+		return fmt.Errorf("failed to update job progress: %w", err)
+	}
+	return nil
+}
+
 // Jobs retrieves paginated jobs for an organization from the database.
 func (ms *MongoStorage) Jobs(orgAddress common.Address, page, limit int64, jobType *JobType) (int64, []Job, error) {
 	if orgAddress.Cmp(common.Address{}) == 0 {

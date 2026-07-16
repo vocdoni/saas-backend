@@ -76,7 +76,7 @@ func (a *API) validateProcessCensusHandler(w http.ResponseWriter, r *http.Reques
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	if len(results.Duplicates) > 0 || len(results.MissingData) > 0 {
+	if len(results.Duplicates) > 0 || len(results.MissingData) > 0 || len(results.NotFound) > 0 {
 		errors.ErrInvalidData.WithData(results).Write(w)
 		return
 	}

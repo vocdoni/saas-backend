@@ -251,12 +251,14 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 		var lastProgress *db.BulkOrgMembersJob
 		for p := range progressChan {
 			lastProgress = p
-			// When job completes, persist final results (job status is served from the persisted
-			// record via GET /jobs).
+			// Persist progress live so GET /jobs reflects it; stamp the final count + errors +
+			// completedAt only at the end.
 			if p.Progress == 100 {
 				if err := a.db.CompleteJob(jobID.String(), p.Added, p.ErrorsAsStrings()); err != nil {
 					log.Warnw("failed to persist job completion", "error", err, "jobId", jobID.String())
 				}
+			} else if err := a.db.UpdateJobProgress(jobID.String(), p.Added); err != nil {
+				log.Warnw("failed to persist job progress", "error", err, "jobId", jobID.String())
 			}
 		}
 

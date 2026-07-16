@@ -614,19 +614,6 @@ definitions:
       type:
         $ref: '#/definitions/db.JobType'
     type: object
-  apicommon.JobStatusResponse:
-    properties:
-      error:
-        type: string
-      jobId:
-        type: string
-      result:
-        $ref: '#/definitions/db.JobResult'
-      status:
-        $ref: '#/definitions/db.JobStatus'
-      type:
-        $ref: '#/definitions/db.JobType'
-    type: object
   apicommon.JobsListResponse:
     properties:
       jobs:
@@ -2045,17 +2032,6 @@ definitions:
       maxManagedOrgs:
         type: integer
     type: object
-  db.JobResult:
-    properties:
-      address:
-        example: deadbeef
-        type: string
-      status:
-        type: string
-      voteID:
-        example: deadbeef
-        type: string
-    type: object
   db.JobStatus:
     enum:
     - pending
@@ -3312,6 +3288,10 @@ paths:
         name: orgAddress
         required: true
         type: string
+      - description: Filter by job type (e.g. org_members, census_participants, relay_vote)
+        in: query
+        name: type
+        type: string
       - description: 'Page number (default: 1)'
         in: query
         name: page
@@ -3347,12 +3327,12 @@ paths:
   /jobs/{jobId}:
     get:
       description: |-
-        Returns the current state of a transaction job created by an async endpoint
-        (publish, status change or vote relay). Always responds 200; the `status` field
-        carries the lifecycle state (`pending`, `completed` or `failed`). On `completed`
-        the `result` field holds the public on-chain outcome; on `failed` the `error`
-        field holds the reason. Public endpoint: the 32-byte job id is the capability and
-        results contain only public on-chain data.
+        Returns the current state of an async job (member/census import or a tx job: publish,
+        status change, census update, vote relay), in the same unified shape as GET /jobs.
+        Always responds 200; `status` carries the lifecycle state (`pending`, `completed`,
+        `failed`) and `result` carries only the attributes the job produced (import counters
+        `added`/`total`/`progress`, or tx `address`/`voteID`/`status`), each omitted when empty.
+        Public endpoint: the 32-byte job id is the capability and results carry only public data.
       parameters:
       - description: Job id returned by the async endpoint (hex)
         in: path
@@ -3363,9 +3343,9 @@ paths:
       - application/json
       responses:
         "200":
-          description: Job status and (when completed) result
+          description: Unified job status and result
           schema:
-            $ref: '#/definitions/apicommon.JobStatusResponse'
+            $ref: '#/definitions/apicommon.JobResponse'
         "400":
           description: Invalid job id
           schema:
@@ -3378,7 +3358,7 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
-      summary: Poll the status of an async transaction job
+      summary: Poll the status of an async job
       tags:
       - jobs
   /oauth/login:
@@ -6095,6 +6075,10 @@ paths:
       produces:
       - application/json
       responses:
+        "200":
+          description: Members added; no on-chain resize needed
+          schema:
+            $ref: '#/definitions/apicommon.UpdateProcessCensusResponse'
         "202":
           description: Members added; maxCensusSize update enqueued
           schema:

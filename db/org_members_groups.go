@@ -376,7 +376,28 @@ func (ms *MongoStorage) CheckMembersFields(
 		}
 	}()
 
-	return aggregateMemberFields(ctx, cur, authFields, twoFaFields)
+	results, err := aggregateMemberFields(ctx, cur, authFields, twoFaFields)
+	if err != nil {
+		return nil, err
+	}
+	// Report requested ids that matched no member of this org (unknown or foreign). The create path
+	// silently drops these, so flag them here rather than returning a green pre-flight.
+	found := make(map[primitive.ObjectID]struct{}, len(results.Members)+len(results.Duplicates)+len(results.MissingData))
+	for _, set := range [][]primitive.ObjectID{results.Members, results.Duplicates, results.MissingData} {
+		for _, id := range set {
+			found[id] = struct{}{}
+		}
+	}
+	for _, hexID := range memberIDs {
+		oid, err := primitive.ObjectIDFromHex(hexID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid member ID %s: %w", hexID, ErrInvalidData)
+		}
+		if _, ok := found[oid]; !ok {
+			results.NotFound = append(results.NotFound, oid)
+		}
+	}
+	return results, nil
 }
 
 // aggregateMemberFields iterates a members cursor (projected to the given auth/2FA fields) and
@@ -391,6 +412,7 @@ func aggregateMemberFields(
 		Members:     make([]primitive.ObjectID, 0),
 		Duplicates:  make([]primitive.ObjectID, 0),
 		MissingData: make([]primitive.ObjectID, 0),
+		NotFound:    make([]primitive.ObjectID, 0),
 	}
 
 	seenKeys := make(map[string]primitive.ObjectID, cur.RemainingBatchLength())
@@ -470,7 +492,7 @@ func (ms *MongoStorage) getGroupMembersFields(
 		if !group.IsAutoGroup {
 			// Check if the group has members
 			if len(group.MemberIDs) == 0 {
-				return nil, fmt.Errorf("no members in group %s for organization %s", groupID, orgAddress)
+				return nil, fmt.Errorf("no members in group %s for organization %s: %w", groupID, orgAddress, ErrInvalidData)
 			}
 			objectIDs := make([]primitive.ObjectID, len(group.MemberIDs))
 			for i, id := range group.MemberIDs {

@@ -356,7 +356,7 @@ func TestVotingProcessResults(t *testing.T) {
 	requestAndAssertCode(http.StatusNotFound, t, http.MethodGet, "", nil, "processes", created.ProcessID, "results")
 
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", created.ProcessID, "publish")
-	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Error))
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
 
 	// published: one results entry per question, each with its on-chain election id and status
 	res := requestAndParse[apicommon.VotingProcessResultsResponse](
@@ -389,7 +389,7 @@ func TestVotingProcessPublicQuestionCensus(t *testing.T) {
 	)
 	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", created.ProcessID)
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", created.ProcessID, "publish")
-	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Error))
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
 
 	// public read (no token) of question 2 (the eligibility-restricted one): census config present,
 	// eligibleMemberIds NOT exposed. Assert against the raw JSON so a re-added field can't slip in.
@@ -424,7 +424,7 @@ func TestVotingProcessParticipant(t *testing.T) {
 		"processes", created.ProcessID, "participants", ids[0])
 
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", created.ProcessID, "publish")
-	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Error))
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
 
 	// once published, a valid process + participant id resolves (public, 200, placeholder body)
 	requestAndAssertCode(http.StatusOK, t, http.MethodGet, "", nil, "processes", created.ProcessID, "participants", ids[0])

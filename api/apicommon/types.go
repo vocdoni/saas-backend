@@ -1334,18 +1334,6 @@ type EnqueuedResponse struct {
 	JobID string `json:"jobId" example:"a1b2c3"`
 }
 
-// JobStatusResponse is returned by GET /jobs/{jobId}. It always responds 200; the
-// Status field carries the lifecycle state (pending|completed|failed). Result is set
-// only when completed; Error only when failed.
-// swagger:model JobStatusResponse
-type JobStatusResponse struct {
-	JobID  string        `json:"jobId"`
-	Type   db.JobType    `json:"type"`
-	Status db.JobStatus  `json:"status"`
-	Result *db.JobResult `json:"result,omitempty"`
-	Error  string        `json:"error,omitempty"`
-}
-
 // InitiateAuthRequest defines the payload for participant authentication.
 // swagger:model InitiateAuthRequest
 type InitiateAuthRequest struct {
