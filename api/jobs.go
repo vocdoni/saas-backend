@@ -18,7 +18,7 @@ import (
 //	@Description	the `result` field holds the public on-chain outcome; on `failed` the `error`
 //	@Description	field holds the reason. Public endpoint: the 32-byte job id is the capability and
 //	@Description	results contain only public on-chain data.
-//	@Tags			process
+//	@Tags			jobs
 //	@Produce		json
 //	@Param			jobId	path		string						true	"Job id returned by the async endpoint (hex)"
 //	@Success		200		{object}	apicommon.JobStatusResponse	"Job status and (when completed) result"

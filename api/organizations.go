@@ -516,7 +516,7 @@ func (a *API) organizationCreateTicket(w http.ResponseWriter, r *http.Request) {
 //
 //	@Summary		Get organization jobs
 //	@Description	Get the list of import jobs for an organization with pagination support
-//	@Tags			organizations
+//	@Tags			jobs
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth

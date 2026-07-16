@@ -30,7 +30,7 @@ import (
 //	@Description	worker; the call returns 202 with a job id. The chain's acceptance or rejection of
 //	@Description	the vote (proof, nullifier, election state) is decided when the worker submits it and
 //	@Description	reported on the job: poll GET /jobs/{jobId} for the voteID on success, or a failure.
-//	@Tags			process
+//	@Tags			vote
 //	@Accept			json
 //	@Produce		json
 //	@Param			request	body		apicommon.RelayVoteRequest	true	"Signed vote transaction payload"

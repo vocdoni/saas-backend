@@ -286,7 +286,7 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 //	@Description	job record (returned with progress 100).
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `members:write`).
-//	@Tags			organizations
+//	@Tags			jobs
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth

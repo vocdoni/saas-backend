@@ -24,7 +24,7 @@ import (
 //	@Description	`label` and at least one `scope` are required. Valid scopes are deny-by-default and
 //	@Description	must be a subset of: `quota:read`, `managed:read`, `managed:write`, `voting:write`,
 //	@Description	`members:write`. The optional `expiresAt`, when set, must be in the future.
-//	@Tags			apikeys
+//	@Tags			integrator
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
@@ -128,7 +128,7 @@ func (a *API) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 //	@Summary		List an organization's API keys
 //	@Description	Returns the metadata of all API keys owned by the organization (never the secret).
 //	@Description	The caller must be an admin of the organization.
-//	@Tags			apikeys
+//	@Tags			integrator
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			address	path		string	true	"Organization address"
@@ -164,7 +164,7 @@ func (a *API) apiKeysHandler(w http.ResponseWriter, r *http.Request) {
 //	@Summary		Revoke an organization's API key
 //	@Description	Revokes (permanently disables) the API key with the given ID. The caller must be
 //	@Description	an admin of the organization.
-//	@Tags			apikeys
+//	@Tags			integrator
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			address	path		string			true	"Organization address"
