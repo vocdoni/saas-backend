@@ -502,8 +502,15 @@ func (c *CSPHandlers) ProcessSignInfoHandler(w http.ResponseWriter, r *http.Requ
 			continue // question not yet on chain
 		}
 		cspProc, err := c.mainDB.CSPProcessByUserAndProcess(auth.UserID, q.UpstreamID)
-		if err != nil || !cspProc.Used {
-			continue // this voter has not consumed this question
+		if err != nil {
+			if errors.Is(err, db.ErrTokenNotFound) {
+				continue // this voter has not consumed this question
+			}
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+		if !cspProc.Used {
+			continue // authenticated for this question but not consumed
 		}
 		resp.Consumed = append(resp.Consumed, QuestionConsumedAddress{
 			QuestionID: q.ID.Hex(),

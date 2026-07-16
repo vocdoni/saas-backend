@@ -157,7 +157,7 @@ func (h *StripeHandlers) CreateSubscriptionCheckout(w http.ResponseWriter, r *ht
 func (h *StripeHandlers) GetCheckoutSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionId")
 	if sessionID == "" {
-		errors.ErrMalformedURLParam.Withf("sessionID is required").Write(w)
+		errors.ErrMalformedURLParam.Withf("sessionId is required").Write(w)
 		return
 	}
 

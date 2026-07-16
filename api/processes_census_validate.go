@@ -65,6 +65,11 @@ func (a *API) validateProcessCensusHandler(w http.ResponseWriter, r *http.Reques
 		results, err = a.db.CheckGroupMembersFields(req.OrgAddress, "", census.AuthFields, census.TwoFaFields)
 	}
 	if err != nil {
+		// bad input (malformed member id, unknown group) is a client error, not a 500.
+		if errors.Is(err, db.ErrInvalidData) {
+			errors.ErrInvalidData.WithErr(err).Write(w)
+			return
+		}
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
