@@ -57,9 +57,29 @@ func memberEligibleForQuestion(q *db.VotingProcessQuestion, memberID string) boo
 	return false
 }
 
-// ProcessAuthHandler handles voter authentication for a voting process. It mirrors the
-// bundle auth flow (identity + optional 2FA against the process census) but anchors the
-// issued token to the process id instead of a bundle id.
+// ProcessAuthHandler godoc
+//
+//	@Summary		Authenticate a voter for a voting process
+//	@Description	Two-step voter authentication for a multi-question voting process (the /processes
+//	@Description	replacement of the bundle auth flow); the issued token is anchored to the process.
+//	@Description	- Step 0: handlers.AuthRequest — member identification fields (name, surname,
+//	@Description	memberNumber, nationalId, birthDate, email, phone); which are required depends on the
+//	@Description	census auth configuration. If valid, a challenge is sent and a token returned.
+//	@Description	- Step 1: handlers.AuthChallengeRequest — { authToken, authData: [challenge solution] }.
+//	@Description	If valid the token is marked verified and returned. Auth-only censuses may not require
+//	@Description	a challenge solution.
+//	@Tags			processes
+//	@Accept			json
+//	@Produce		json
+//	@Param			processId	path		string					true	"Process ID"
+//	@Param			step		path		string					true	"Authentication step (0 or 1)"
+//	@Param			request		body		handlers.AuthRequest	true	"Step 0 body; step 1 uses AuthChallengeRequest (see description)"
+//	@Success		200			{object}	handlers.AuthResponse
+//	@Failure		400			{object}	errors.Error	"Invalid input data"
+//	@Failure		401			{object}	errors.Error	"Unauthorized, cooldown not reached, or invalid challenge"
+//	@Failure		404			{object}	errors.Error	"Process, census, organization, or participant not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/processes/{processId}/auth/{step} [post]
 func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request) {
 	oid, anchor, ok := parseProcessID(w, r)
 	if !ok {
@@ -76,7 +96,23 @@ func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request)
 	c.handleAuthStep(w, r, step, anchor, vp.CensusID.Hex())
 }
 
-// ProcessAuthResendHandler resends the OTP challenge for a non-verified process auth token.
+// ProcessAuthResendHandler godoc
+//
+//	@Summary		Resend a voting process auth challenge
+//	@Description	Resend the challenge for an existing (non-verified) authentication token of a voting
+//	@Description	process. The request must include the auth token and a valid contact method for the
+//	@Description	census type (email/phone). The same token is returned if the challenge is queued.
+//	@Tags			processes
+//	@Accept			json
+//	@Produce		json
+//	@Param			processId	path		string						true	"Process ID"
+//	@Param			request		body		handlers.AuthResendRequest	true	"Resend request with auth token and contact data"
+//	@Success		200			{object}	handlers.AuthResponse
+//	@Failure		400			{object}	errors.Error	"Malformed body, missing auth token, invalid contact, or token already verified"
+//	@Failure		401			{object}	errors.Error	"Invalid/expired token, token not belonging to the process, or contact mismatch"
+//	@Failure		404			{object}	errors.Error	"Census or organization not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/processes/{processId}/auth/resend [post]
 func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Request) {
 	oid, anchor, ok := parseProcessID(w, r)
 	if !ok {
@@ -140,9 +176,25 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 	apicommon.HTTPWriteJSON(w, &AuthResponse{AuthToken: req.AuthToken})
 }
 
-// ProcessSignHandler signs a voter's ballot for one question's election. It requires a
-// verified token bound to the process, authorizes the member against the question's
-// eligibility subset, and consumes the per-election signing slot.
+// ProcessSignHandler godoc
+//
+//	@Summary		Sign a ballot for a voting process question
+//	@Description	Sign a voter's ballot for one question's on-chain election. Requires a verified token
+//	@Description	bound to the process; authorizes the member against the question's eligibility subset
+//	@Description	and consumes the per-election signing slot (a question cannot be signed twice).
+//	@Description	Body: authToken, electionId (the question's on-chain election id) and payload (the voter
+//	@Description	address). tokenR is unused.
+//	@Tags			processes
+//	@Accept			json
+//	@Produce		json
+//	@Param			processId	path		string					true	"Process ID"
+//	@Param			request		body		handlers.SignRequest	true	"Sign request (see description for fields)"
+//	@Success		200			{object}	handlers.AuthResponse
+//	@Failure		400			{object}	errors.Error	"Invalid input data"
+//	@Failure		401			{object}	errors.Error	"Unauthorized, unverified token, election not in process, or member not eligible"
+//	@Failure		404			{object}	errors.Error	"Process, census, or user not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/processes/{processId}/sign [post]
 func (c *CSPHandlers) ProcessSignHandler(w http.ResponseWriter, r *http.Request) {
 	oid, anchor, ok := parseProcessID(w, r)
 	if !ok {
@@ -208,7 +260,22 @@ func (c *CSPHandlers) ProcessSignHandler(w http.ResponseWriter, r *http.Request)
 	c.signAndRespond(w, req.AuthToken, *address, question.UpstreamID, big.NewInt(int64(weight)).Bytes())
 }
 
-// ProcessWeightHandler returns the voter weight for a process (verified token required).
+// ProcessWeightHandler godoc
+//
+//	@Summary		Get a voter's weight for a voting process
+//	@Description	Return the voter's weight for a voting process. Requires a verified token bound to the
+//	@Description	process.
+//	@Tags			processes
+//	@Accept			json
+//	@Produce		json
+//	@Param			processId	path		string						true	"Process ID"
+//	@Param			request		body		handlers.UserWeightRequest	true	"Request with auth token"
+//	@Success		200			{object}	handlers.UserWeightResponse
+//	@Failure		400			{object}	errors.Error	"Invalid input data"
+//	@Failure		401			{object}	errors.Error	"Invalid token, token not verified, or token not belonging to the process"
+//	@Failure		404			{object}	errors.Error	"Process, user, or census not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/processes/{processId}/weight [post]
 func (c *CSPHandlers) ProcessWeightHandler(w http.ResponseWriter, r *http.Request) {
 	oid, anchor, ok := parseProcessID(w, r)
 	if !ok {
@@ -251,8 +318,23 @@ func (c *CSPHandlers) ProcessWeightHandler(w http.ResponseWriter, r *http.Reques
 	apicommon.HTTPWriteJSON(w, &UserWeightResponse{Weight: internal.HexBytes(big.NewInt(int64(weight)).Bytes())})
 }
 
-// ProcessCheckHandler returns the voter's status for a process: census membership, weight,
-// and per-question eligibility and vote status. Identified solely by the auth token.
+// ProcessCheckHandler godoc
+//
+//	@Summary		Check a voter's status for a voting process
+//	@Description	Report the voter's status for a voting process: census membership, weight, and per
+//	@Description	question eligibility and vote status. The voter is identified solely by the auth token
+//	@Description	(the only voter data the client stores); the token must be verified and issued for this
+//	@Description	process. Ineligibility is reported as belongsToProcess=false with HTTP 200, not an error.
+//	@Tags			processes
+//	@Accept			json
+//	@Produce		json
+//	@Param			processId	path		string							true	"Process ID"
+//	@Param			request		body		handlers.CheckMembershipRequest	true	"Request with auth token"
+//	@Success		200			{object}	handlers.ProcessCheckResponse
+//	@Failure		400			{object}	errors.Error	"Malformed body or missing auth token"
+//	@Failure		404			{object}	errors.Error	"Process or census not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/processes/{processId}/check [post]
 func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request) {
 	oid, anchor, ok := parseProcessID(w, r)
 	if !ok {
