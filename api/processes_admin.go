@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -51,26 +50,26 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	apicommon.HTTPWriteOK(w)
 }
 
-// votingProcessParticipantsCheckHandler godoc
+// votingProcessParticipantsHandler godoc
 //
-//	@Summary		Check voted participants of a voting process
+//	@Summary		List voted participants of a voting process
 //	@Description	Manager/Admin lookup of organization members by a single field (email, phone,
 //	@Description	memberNumber, nationalId), intersected with the process census, reporting each
 //	@Description	matched member's per-question voted status. For `phone` pass the plaintext number;
 //	@Description	it is hashed server-side. Requires Manager/Admin of the owning organization.
 //	@Tags			processes
-//	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			processId	path		string										true	"Process ID"
-//	@Param			request		body		apicommon.ProcessParticipantsCheckRequest	true	"Member lookup"
-//	@Success		200			{object}	apicommon.ProcessParticipantsCheckResponse
+//	@Param			processId	path		string	true	"Process ID"
+//	@Param			field		query		string	true	"Lookup field: email, phone, memberNumber or nationalId"
+//	@Param			value		query		string	true	"Value to match for the given field"
+//	@Success		200			{object}	apicommon.ProcessParticipantsResponse
 //	@Failure		400			{object}	errors.Error	"Invalid input data"
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
 //	@Failure		404			{object}	errors.Error	"Process not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
-//	@Router			/processes/{processId}/participants/check [post]
-func (a *API) votingProcessParticipantsCheckHandler(w http.ResponseWriter, r *http.Request) {
+//	@Router			/processes/{processId}/participants [get]
+func (a *API) votingProcessParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 	oid, ok := a.votingProcessID(w, r)
 	if !ok {
 		return
@@ -79,29 +78,25 @@ func (a *API) votingProcessParticipantsCheckHandler(w http.ResponseWriter, r *ht
 	if !ok {
 		return
 	}
-	var req apicommon.ProcessParticipantsCheckRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		errors.ErrMalformedBody.Write(w)
-		return
-	}
-	field := db.OrgMemberLookupField(req.FieldName)
+	field := db.OrgMemberLookupField(r.URL.Query().Get("field"))
 	if !field.IsValid() {
-		errors.ErrMalformedBody.Withf("invalid fieldName: must be one of email, phone, memberNumber, nationalId").Write(w)
+		errors.ErrMalformedBody.Withf("invalid field: must be one of email, phone, memberNumber, nationalId").Write(w)
 		return
 	}
-	if req.Value == "" {
+	value := r.URL.Query().Get("value")
+	if value == "" {
 		errors.ErrMalformedBody.Withf("missing value").Write(w)
 		return
 	}
 	// phone is stored hashed, so hash the plaintext before looking up.
-	var lookupValue any = req.Value
+	var lookupValue any = value
 	if field == db.OrgMemberLookupFieldPhone {
 		org, err := a.db.Organization(vp.OrgAddress)
 		if err != nil {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
-		hashed, err := db.NewHashedPhone(req.Value, org)
+		hashed, err := db.NewHashedPhone(value, org)
 		if err != nil || hashed.IsEmpty() {
 			errors.ErrMalformedBody.Withf("invalid phone").Write(w)
 			return
@@ -109,7 +104,7 @@ func (a *API) votingProcessParticipantsCheckHandler(w http.ResponseWriter, r *ht
 		lookupValue = hashed
 	}
 
-	resp := apicommon.ProcessParticipantsCheckResponse{Participants: []apicommon.ProcessParticipantEntry{}}
+	resp := apicommon.ProcessParticipantsResponse{Participants: []apicommon.ProcessParticipantEntry{}}
 	members, err := a.db.OrgMembersByField(vp.OrgAddress, field, lookupValue)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)

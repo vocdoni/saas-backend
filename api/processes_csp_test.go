@@ -140,10 +140,9 @@ func TestProcessCSP(t *testing.T) {
 	c.Assert(bytes.Equal(signInfo.Consumed[0].Address, voter.Address().Bytes()), qt.IsTrue)
 	c.Assert(signInfo.Consumed[0].Nullifier, qt.Not(qt.HasLen), 0)
 
-	// participants/check (manager): member 0 matched by email, voted only the open election
-	pc := requestAndParse[apicommon.ProcessParticipantsCheckResponse](t, http.MethodPost, token,
-		&apicommon.ProcessParticipantsCheckRequest{FieldName: string(db.OrgMemberLookupFieldEmail), Value: members[0].Email},
-		"processes", pid, "participants", "check")
+	// participants (manager): member 0 matched by email, voted only the open election
+	pc := requestAndParse[apicommon.ProcessParticipantsResponse](t, http.MethodGet, token, nil,
+		"processes", pid, "participants?field="+string(db.OrgMemberLookupFieldEmail)+"&value="+members[0].Email)
 	c.Assert(pc.Participants, qt.HasLen, 1)
 	c.Assert(pc.Participants[0].MemberID, qt.Equals, members[0].ID)
 	votedOpen := false
@@ -156,10 +155,9 @@ func TestProcessCSP(t *testing.T) {
 		}
 	}
 	c.Assert(votedOpen, qt.IsTrue)
-	// participants/check is Manager/Admin only
-	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "",
-		&apicommon.ProcessParticipantsCheckRequest{FieldName: string(db.OrgMemberLookupFieldEmail), Value: members[0].Email},
-		"processes", pid, "participants", "check")
+	// the participant lookup is Manager/Admin only
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodGet, "", nil,
+		"processes", pid, "participants?field="+string(db.OrgMemberLookupFieldEmail)+"&value="+members[0].Email)
 
 	// --- second member: authenticates but is not eligible for the restricted question ---
 	tok1 := authProcessCSP(t, pid, authReq(1))

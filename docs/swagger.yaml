@@ -1289,14 +1289,7 @@ definitions:
         format: hex
         type: string
     type: object
-  apicommon.ProcessParticipantsCheckRequest:
-    properties:
-      fieldName:
-        type: string
-      value:
-        type: string
-    type: object
-  apicommon.ProcessParticipantsCheckResponse:
+  apicommon.ProcessParticipantsResponse:
     properties:
       participants:
         items:
@@ -3007,7 +3000,7 @@ paths:
       - BearerAuth: []
       summary: Get integrator quota and usage
       tags:
-      - organizations
+      - integrator
   /integrator/organizations:
     get:
       description: |-
@@ -3048,7 +3041,7 @@ paths:
       - BearerAuth: []
       summary: List organizations managed by an integrator
       tags:
-      - organizations
+      - integrator
     post:
       consumes:
       - application/json
@@ -3100,7 +3093,7 @@ paths:
       - BearerAuth: []
       summary: Create a managed organization under an integrator
       tags:
-      - organizations
+      - integrator
   /integrator/organizations/{orgAddress}:
     delete:
       description: |-
@@ -3158,7 +3151,7 @@ paths:
       - BearerAuth: []
       summary: Delete a managed organization and all its data
       tags:
-      - organizations
+      - integrator
   /jobs/{jobId}:
     get:
       description: |-
@@ -3195,7 +3188,7 @@ paths:
             $ref: '#/definitions/errors.Error'
       summary: Poll the status of an async transaction job
       tags:
-      - process
+      - jobs
   /oauth/login:
     post:
       consumes:
@@ -3390,7 +3383,7 @@ paths:
       - BearerAuth: []
       summary: List an organization's API keys
       tags:
-      - apikeys
+      - integrator
     post:
       consumes:
       - application/json
@@ -3447,7 +3440,7 @@ paths:
       - BearerAuth: []
       summary: Create an API key for an organization
       tags:
-      - apikeys
+      - integrator
   /organizations/{address}/apikeys/{keyID}:
     delete:
       description: |-
@@ -3491,7 +3484,7 @@ paths:
       - BearerAuth: []
       summary: Revoke an organization's API key
       tags:
-      - apikeys
+      - integrator
   /organizations/{address}/censuses:
     get:
       consumes:
@@ -3923,7 +3916,7 @@ paths:
       - BearerAuth: []
       summary: Get organization jobs
       tags:
-      - organizations
+      - jobs
   /organizations/{address}/members:
     delete:
       consumes:
@@ -4165,7 +4158,7 @@ paths:
       - BearerAuth: []
       summary: Check the progress of adding members
       tags:
-      - organizations
+      - jobs
   /organizations/{address}/processes:
     get:
       consumes:
@@ -6118,35 +6111,6 @@ paths:
       tags:
       - processes
   /processes/{processId}/check:
-    get:
-      description: Publish-readiness dry-run. Returns { valid, errors } without changing
-        anything.
-      parameters:
-      - description: Process ID
-        in: path
-        name: processId
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.VotingProcessValidateResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Validate a voting process for publishing
-      tags:
-      - processes
     post:
       consumes:
       - application/json
@@ -6189,7 +6153,58 @@ paths:
       summary: Check a voter's status for a voting process
       tags:
       - processes
-  /processes/{processId}/participant/{participantId}:
+  /processes/{processId}/participants:
+    get:
+      description: |-
+        Manager/Admin lookup of organization members by a single field (email, phone,
+        memberNumber, nationalId), intersected with the process census, reporting each
+        matched member's per-question voted status. For `phone` pass the plaintext number;
+        it is hashed server-side. Requires Manager/Admin of the owning organization.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: 'Lookup field: email, phone, memberNumber or nationalId'
+        in: query
+        name: field
+        required: true
+        type: string
+      - description: Value to match for the given field
+        in: query
+        name: value
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessParticipantsResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: List voted participants of a voting process
+      tags:
+      - processes
+  /processes/{processId}/participants/{participantId}:
     get:
       description: |-
         Public participant info for a published voting process, mirroring the bundle
@@ -6222,55 +6237,6 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Get a voting process participant
-      tags:
-      - processes
-  /processes/{processId}/participants/check:
-    post:
-      consumes:
-      - application/json
-      description: |-
-        Manager/Admin lookup of organization members by a single field (email, phone,
-        memberNumber, nationalId), intersected with the process census, reporting each
-        matched member's per-question voted status. For `phone` pass the plaintext number;
-        it is hashed server-side. Requires Manager/Admin of the owning organization.
-      parameters:
-      - description: Process ID
-        in: path
-        name: processId
-        required: true
-        type: string
-      - description: Member lookup
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/apicommon.ProcessParticipantsCheckRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.ProcessParticipantsCheckResponse'
-        "400":
-          description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Process not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Check voted participants of a voting process
       tags:
       - processes
   /processes/{processId}/publish:
@@ -6543,6 +6509,36 @@ paths:
       summary: Get a voter's consumed sign info for a voting process
       tags:
       - processes
+  /processes/{processId}/validation:
+    get:
+      description: Publish-readiness dry-run. Returns { valid, errors } without changing
+        anything.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.VotingProcessValidateResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Validate a voting process for publishing
+      tags:
+      - processes
   /processes/{processId}/weight:
     post:
       consumes:
@@ -6813,6 +6809,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: Sign a transaction with the organization's private key. The user
         must have a role in the organization.
       parameters:
@@ -6854,6 +6851,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: Sign a message with the organization's private key. The user must
         have admin role for the organization.
       parameters:
@@ -7256,7 +7254,7 @@ paths:
             $ref: '#/definitions/errors.Error'
       summary: Relay an already-signed vote to the Vochain
       tags:
-      - process
+      - vote
 schemes:
 - http
 - https

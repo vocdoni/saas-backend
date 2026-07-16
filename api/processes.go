@@ -410,7 +410,7 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 //	@Success		200			{object}	apicommon.VotingProcessValidateResponse
 //	@Failure		401			{object}	errors.Error
 //	@Failure		404			{object}	errors.Error
-//	@Router			/processes/{processId}/check [get]
+//	@Router			/processes/{processId}/validation [get]
 func (a *API) validateVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
 	oid, ok := a.votingProcessID(w, r)
 	if !ok {
@@ -503,7 +503,7 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 //	@Success		200				{object}	interface{}	"Placeholder: null until participant info is surfaced"
 //	@Failure		400				{object}	errors.Error
 //	@Failure		404				{object}	errors.Error
-//	@Router			/processes/{processId}/participant/{participantId} [get]
+//	@Router			/processes/{processId}/participants/{participantId} [get]
 func (a *API) votingProcessParticipantHandler(w http.ResponseWriter, r *http.Request) {
 	oid, ok := a.votingProcessID(w, r)
 	if !ok {

@@ -100,14 +100,6 @@ type VotingProcessValidateResponse struct {
 	Errors []string `json:"errors"`
 }
 
-// ProcessParticipantsCheckRequest is the body of POST /processes/{processId}/participants/check:
-// a Manager/Admin lookup of org members by a single field. For "phone" the caller passes the
-// plaintext number and the backend hashes it before the lookup.
-type ProcessParticipantsCheckRequest struct {
-	FieldName string `json:"fieldName"`
-	Value     string `json:"value"`
-}
-
 // ProcessParticipantQuestionVote is one question's voted status for a matched participant
 // (hasVoted is true when the member has consumed that question's on-chain election).
 type ProcessParticipantQuestionVote struct {
@@ -127,9 +119,9 @@ type ProcessParticipantEntry struct {
 	Questions    []ProcessParticipantQuestionVote `json:"questions"`
 }
 
-// ProcessParticipantsCheckResponse holds the members matching the lookup that are participants of
+// ProcessParticipantsResponse holds the members matching the lookup that are participants of
 // the process census (empty when none match).
-type ProcessParticipantsCheckResponse struct {
+type ProcessParticipantsResponse struct {
 	Participants []ProcessParticipantEntry `json:"participants"`
 }
 

@@ -212,8 +212,9 @@ const (
 	processesCreateEndpoint = "/processes"
 	// PUT /processes/{processId} to update a draft; GET /processes/{processId} to read one (full)
 	processesEndpoint = "/processes/{processId}"
-	// GET /processes/{processId}/check publish-readiness dry-run (protected);
-	// POST /processes/{processId}/check voter eligibility/status (public)
+	// GET /processes/{processId}/validation publish-readiness dry-run (protected)
+	processesValidateEndpoint = "/processes/{processId}/validation"
+	// POST /processes/{processId}/check voter eligibility/status (public CSP)
 	processesCheckEndpoint = "/processes/{processId}/check"
 	// POST /processes/{processId}/publish to publish the process (one election per question)
 	processesPublishEndpoint = "/processes/{processId}/publish"
@@ -223,14 +224,13 @@ const (
 	processesQuestionStatusEndpoint = "/processes/{processId}/questions/{questionId}/status"
 	// GET /processes/{processId}/questions/{questionId} to read one question (public voter read)
 	processesQuestionEndpoint = "/processes/{processId}/questions/{questionId}"
-	// GET /processes/{processId}/participant/{participantId} for participant info (public);
-	// nested under the literal "participant" to avoid a chi param-vs-literal clash
-	processesParticipantEndpoint = "/processes/{processId}/participant/{participantId}"
+	// GET /processes/{processId}/participants/{participantId} for a single participant's info (public)
+	processesParticipantEndpoint = "/processes/{processId}/participants/{participantId}"
 	// GET /processes/{processId}/results for the per-question on-chain results (public)
 	processesResultsEndpoint = "/processes/{processId}/results"
-	// POST /processes/{processId}/participants/check — Manager/Admin lookup of org members by
+	// GET /processes/{processId}/participants?field=&value= — Manager/Admin lookup of org members by
 	// field intersected with the census, with per-question voted status (protected)
-	processesParticipantsCheckEndpoint = "/processes/{processId}/participants/check"
+	processesParticipantsEndpoint = "/processes/{processId}/participants"
 	// POST /processes/{processId}/sign-info — voter's per-question consumed address/nullifier (public)
 	processesSignInfoEndpoint = "/processes/{processId}/sign-info"
 	// CSP voter routes for a voting process (public)

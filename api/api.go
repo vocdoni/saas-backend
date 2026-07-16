@@ -38,14 +38,32 @@
 //	@tag.name					census
 //	@tag.description			Census management operations
 //
+//	@tag.name					processes
+//	@tag.description			Multi-question voting process operations (create, publish, results, voter CSP flow)
+//
 //	@tag.name					process
-//	@tag.description			Voting process operations
+//	@tag.description			Legacy voting process & bundle operations (deprecated — use processes)
+//
+//	@tag.name					vote
+//	@tag.description			Vote relay operations
+//
+//	@tag.name					jobs
+//	@tag.description			Async job status (member import, census publish, vote relay)
+//
+//	@tag.name					integrator
+//	@tag.description			Integrator operations: managed organizations & API keys
+//
+//	@tag.name					csp
+//	@tag.description			Legacy CSP voter operations (deprecated — use processes)
 //
 //	@tag.name					storage
 //	@tag.description			Object storage operations
 //
 //	@tag.name					transactions
-//	@tag.description			Transaction signing operations
+//	@tag.description			Transaction signing operations (deprecated)
+//
+//	@tag.name					health
+//	@tag.description			Service health & info
 package api
 
 import (
@@ -356,12 +374,12 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, processesCreateEndpoint, a.listVotingProcessesHandler)
 		handle(r, http.MethodPut, processesEndpoint, a.updateVotingProcessHandler)
 		handle(r, http.MethodGet, processesEndpoint, a.votingProcessInfoHandler)
-		handle(r, http.MethodGet, processesCheckEndpoint, a.validateVotingProcessHandler)
+		handle(r, http.MethodGet, processesValidateEndpoint, a.validateVotingProcessHandler)
 		handle(r, http.MethodPost, processesPublishEndpoint, a.publishVotingProcessHandler)
 		handle(r, http.MethodPut, processesQuestionsStatusEndpoint, a.setVotingProcessQuestionsStatusHandler)
 		handle(r, http.MethodPut, processesQuestionStatusEndpoint, a.setVotingProcessQuestionStatusHandler)
 		handle(r, http.MethodDelete, processesEndpoint, a.deleteVotingProcessHandler)
-		handle(r, http.MethodPost, processesParticipantsCheckEndpoint, a.votingProcessParticipantsCheckHandler)
+		handle(r, http.MethodGet, processesParticipantsEndpoint, a.votingProcessParticipantsHandler)
 	})
 
 	// Public routes

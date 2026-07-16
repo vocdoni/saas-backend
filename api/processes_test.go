@@ -98,7 +98,7 @@ func TestVotingProcessAuthoring(t *testing.T) {
 
 	// validate (dry-run): a complete draft is ready to publish
 	validation := requestAndParse[apicommon.VotingProcessValidateResponse](
-		t, http.MethodGet, adminToken, nil, "processes", pid, "check",
+		t, http.MethodGet, adminToken, nil, "processes", pid, "validation",
 	)
 	c.Assert(validation.Valid, qt.IsTrue, qt.Commentf("errors: %v", validation.Errors))
 
@@ -203,7 +203,7 @@ func TestVotingProcessEmptyCensusRejected(t *testing.T) {
 	)
 
 	val := requestAndParse[apicommon.VotingProcessValidateResponse](
-		t, http.MethodGet, token, nil, "processes", created.ProcessID, "check",
+		t, http.MethodGet, token, nil, "processes", created.ProcessID, "validation",
 	)
 	c.Assert(val.Valid, qt.IsFalse)
 	requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, token, nil, "processes", created.ProcessID, "publish")
@@ -298,7 +298,7 @@ func TestVotingProcessPublishPreflight(t *testing.T) {
 	pid := created.ProcessID
 
 	// the dry-run reports it not ready (previously it passed the structural-only check)
-	val := requestAndParse[apicommon.VotingProcessValidateResponse](t, http.MethodGet, token, nil, "processes", pid, "check")
+	val := requestAndParse[apicommon.VotingProcessValidateResponse](t, http.MethodGet, token, nil, "processes", pid, "validation")
 	c.Assert(val.Valid, qt.IsFalse)
 	c.Assert(len(val.Errors) > 0, qt.IsTrue)
 
@@ -420,18 +420,18 @@ func TestVotingProcessParticipant(t *testing.T) {
 
 	// a draft (unpublished) process is a public read: not revealed -> 404
 	requestAndAssertCode(http.StatusNotFound, t, http.MethodGet, "", nil,
-		"processes", created.ProcessID, "participant", ids[0])
+		"processes", created.ProcessID, "participants", ids[0])
 
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", created.ProcessID, "publish")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Error))
 
 	// once published, a valid process + participant id resolves (public, 200, placeholder body)
-	requestAndAssertCode(http.StatusOK, t, http.MethodGet, "", nil, "processes", created.ProcessID, "participant", ids[0])
+	requestAndAssertCode(http.StatusOK, t, http.MethodGet, "", nil, "processes", created.ProcessID, "participants", ids[0])
 	// a non-existent process is 404
 	requestAndAssertCode(http.StatusNotFound, t, http.MethodGet, "", nil,
-		"processes", primitive.NewObjectID().Hex(), "participant", ids[0])
+		"processes", primitive.NewObjectID().Hex(), "participants", ids[0])
 	// a malformed process id is 400
-	requestAndAssertCode(http.StatusBadRequest, t, http.MethodGet, "", nil, "processes", "not-an-id", "participant", ids[0])
+	requestAndAssertCode(http.StatusBadRequest, t, http.MethodGet, "", nil, "processes", "not-an-id", "participants", ids[0])
 }
 
 // TestVotingProcessStalePublishReclaim verifies the publishing marker is reclaimable once stale:
