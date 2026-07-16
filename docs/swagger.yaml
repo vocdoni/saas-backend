@@ -2430,6 +2430,32 @@ definitions:
         format: hex
         type: string
     type: object
+  handlers.ProcessCheckResponse:
+    properties:
+      belongsToProcess:
+        type: boolean
+      questions:
+        items:
+          $ref: '#/definitions/handlers.ProcessQuestionStatus'
+        type: array
+      weight:
+        example: 2a
+        format: hex
+        type: string
+    type: object
+  handlers.ProcessQuestionStatus:
+    properties:
+      canVote:
+        type: boolean
+      hasVoted:
+        type: boolean
+      questionId:
+        type: string
+      upstreamId:
+        example: deadbeef
+        format: hex
+        type: string
+    type: object
   handlers.ProcessSignInfoResponse:
     properties:
       consumed:
@@ -5987,6 +6013,110 @@ paths:
       summary: Update a voting process draft
       tags:
       - processes
+  /processes/{processId}/auth/{step}:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Two-step voter authentication for a multi-question voting process (the /processes
+        replacement of the bundle auth flow); the issued token is anchored to the process.
+        - Step 0: handlers.AuthRequest — member identification fields (name, surname,
+        memberNumber, nationalId, birthDate, email, phone); which are required depends on the
+        census auth configuration. If valid, a challenge is sent and a token returned.
+        - Step 1: handlers.AuthChallengeRequest — { authToken, authData: [challenge solution] }.
+        If valid the token is marked verified and returned. Auth-only censuses may not require
+        a challenge solution.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Authentication step (0 or 1)
+        in: path
+        name: step
+        required: true
+        type: string
+      - description: Step 0 body; step 1 uses AuthChallengeRequest (see description)
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.AuthRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.AuthResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized, cooldown not reached, or invalid challenge
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process, census, organization, or participant not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Authenticate a voter for a voting process
+      tags:
+      - processes
+  /processes/{processId}/auth/resend:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Resend the challenge for an existing (non-verified) authentication token of a voting
+        process. The request must include the auth token and a valid contact method for the
+        census type (email/phone). The same token is returned if the challenge is queued.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Resend request with auth token and contact data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.AuthResendRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.AuthResponse'
+        "400":
+          description: Malformed body, missing auth token, invalid contact, or token
+            already verified
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Invalid/expired token, token not belonging to the process,
+            or contact mismatch
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Census or organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Resend a voting process auth challenge
+      tags:
+      - processes
   /processes/{processId}/check:
     get:
       description: Publish-readiness dry-run. Returns { valid, errors } without changing
@@ -6015,6 +6145,48 @@ paths:
       security:
       - BearerAuth: []
       summary: Validate a voting process for publishing
+      tags:
+      - processes
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Report the voter's status for a voting process: census membership, weight, and per
+        question eligibility and vote status. The voter is identified solely by the auth token
+        (the only voter data the client stores); the token must be verified and issued for this
+        process. Ineligibility is reported as belongsToProcess=false with HTTP 200, not an error.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Request with auth token
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.CheckMembershipRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ProcessCheckResponse'
+        "400":
+          description: Malformed body or missing auth token
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process or census not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Check a voter's status for a voting process
       tags:
       - processes
   /processes/{processId}/participant/{participantId}:
@@ -6275,6 +6447,55 @@ paths:
       summary: Get a voting process results
       tags:
       - processes
+  /processes/{processId}/sign:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Sign a voter's ballot for one question's on-chain election. Requires a verified token
+        bound to the process; authorizes the member against the question's eligibility subset
+        and consumes the per-election signing slot (a question cannot be signed twice).
+        Body: authToken, electionId (the question's on-chain election id) and payload (the voter
+        address). tokenR is unused.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Sign request (see description for fields)
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.SignRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.AuthResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized, unverified token, election not in process, or
+            member not eligible
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process, census, or user not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Sign a ballot for a voting process question
+      tags:
+      - processes
   /processes/{processId}/sign-info:
     post:
       consumes:
@@ -6320,6 +6541,52 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Get a voter's consumed sign info for a voting process
+      tags:
+      - processes
+  /processes/{processId}/weight:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Return the voter's weight for a voting process. Requires a verified token bound to the
+        process.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Request with auth token
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.UserWeightRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.UserWeightResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Invalid token, token not verified, or token not belonging to
+            the process
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process, user, or census not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Get a voter's weight for a voting process
       tags:
       - processes
   /storage:
