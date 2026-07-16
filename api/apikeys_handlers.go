@@ -28,24 +28,24 @@ import (
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string							true	"Organization address"
-//	@Param			request	body		apicommon.CreateAPIKeyRequest	true	"API key information"
-//	@Success		200		{object}	apicommon.CreateAPIKeyResponse	"Created key including the one-time plaintext secret"
-//	@Failure		400		{object}	errors.Error					"Invalid input (bad address, missing label/scopes, unknown scope, past expiresAt)"
-//	@Failure		401		{object}	errors.Error					"Unauthorized"
-//	@Failure		403		{object}	errors.Error					"Organization is not an integrator"
-//	@Failure		404		{object}	errors.Error					"Organization not found"
-//	@Failure		500		{object}	errors.Error					"Internal server error"
-//	@Router			/organizations/{address}/apikeys [post]
+//	@Param			orgAddress	path		string							true	"Organization address"
+//	@Param			request		body		apicommon.CreateAPIKeyRequest	true	"API key information"
+//	@Success		200			{object}	apicommon.CreateAPIKeyResponse	"Created key including the one-time plaintext secret"
+//	@Failure		400			{object}	errors.Error					"Invalid input (bad address, missing label/scopes, unknown scope, past expiresAt)"
+//	@Failure		401			{object}	errors.Error					"Unauthorized"
+//	@Failure		403			{object}	errors.Error					"Organization is not an integrator"
+//	@Failure		404			{object}	errors.Error					"Organization not found"
+//	@Failure		500			{object}	errors.Error					"Internal server error"
+//	@Router			/integrator/organizations/{orgAddress}/apikeys [post]
 func (a *API) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
-	// validate the address up front: common.HexToAddress silently maps a malformed {address}
+	// validate the address up front: common.HexToAddress silently maps a malformed {orgAddress}
 	// to the zero address, which would otherwise surface as a confusing 401/404 instead of 400.
-	addr := chi.URLParam(r, "address")
+	addr := chi.URLParam(r, "orgAddress")
 	if !common.IsHexAddress(addr) {
 		errors.ErrMalformedURLParam.With("invalid organization address").Write(w)
 		return
@@ -131,18 +131,18 @@ func (a *API) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 //	@Tags			integrator
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string	true	"Organization address"
-//	@Success		200		{object}	apicommon.ListAPIKeysResponse
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/apikeys [get]
+//	@Param			orgAddress	path		string	true	"Organization address"
+//	@Success		200			{object}	apicommon.ListAPIKeysResponse
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/integrator/organizations/{orgAddress}/apikeys [get]
 func (a *API) apiKeysHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
-	orgAddr := common.HexToAddress(chi.URLParam(r, "address"))
+	orgAddr := common.HexToAddress(chi.URLParam(r, "orgAddress"))
 	if !user.HasRoleFor(orgAddr, db.AdminRole) {
 		errors.ErrUnauthorized.Withf("user is not admin of the organization").Write(w)
 		return
@@ -167,28 +167,28 @@ func (a *API) apiKeysHandler(w http.ResponseWriter, r *http.Request) {
 //	@Tags			integrator
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string			true	"Organization address"
-//	@Param			keyID	path		string			true	"API key ID"
-//	@Success		200		{string}	string			"OK"
-//	@Failure		400		{object}	errors.Error	"Invalid input data (missing key ID)"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		404		{object}	errors.Error	"API key not found"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/apikeys/{keyID} [delete]
+//	@Param			orgAddress	path		string			true	"Organization address"
+//	@Param			keyId		path		string			true	"API key ID"
+//	@Success		200			{string}	string			"OK"
+//	@Failure		400			{object}	errors.Error	"Invalid input data (missing key ID)"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		404			{object}	errors.Error	"API key not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/integrator/organizations/{orgAddress}/apikeys/{keyId} [delete]
 func (a *API) revokeAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
-	orgAddr := common.HexToAddress(chi.URLParam(r, "address"))
+	orgAddr := common.HexToAddress(chi.URLParam(r, "orgAddress"))
 	if !user.HasRoleFor(orgAddr, db.AdminRole) {
 		errors.ErrUnauthorized.Withf("user is not admin of the organization").Write(w)
 		return
 	}
-	keyID := chi.URLParam(r, "keyID")
+	keyID := chi.URLParam(r, "keyId")
 	if keyID == "" {
-		errors.ErrMalformedURLParam.Withf("keyID is required").Write(w)
+		errors.ErrMalformedURLParam.Withf("keyId is required").Write(w)
 		return
 	}
 	if err := a.db.RevokeAPIKey(orgAddr, keyID); err != nil {

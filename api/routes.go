@@ -118,10 +118,10 @@ const (
 	managedOrganizationsEndpoint = "/integrator/organizations"
 	// DELETE /integrator/organizations/{orgAddress} to delete a managed org and all its data.
 	managedOrganizationEndpoint = "/integrator/organizations/{orgAddress}"
-	// POST /organizations/{address}/apikeys to create an API key; GET to list them
-	organizationAPIKeysEndpoint = "/organizations/{address}/apikeys"
-	// DELETE /organizations/{address}/apikeys/{keyID} to revoke an API key
-	organizationAPIKeyEndpoint = "/organizations/{address}/apikeys/{keyID}"
+	// POST /integrator/organizations/{orgAddress}/apikeys to create an API key; GET to list them
+	integratorOrgAPIKeysEndpoint = "/integrator/organizations/{orgAddress}/apikeys"
+	// DELETE /integrator/organizations/{orgAddress}/apikeys/{keyId} to revoke an API key
+	integratorOrgAPIKeyEndpoint = "/integrator/organizations/{orgAddress}/apikeys/{keyId}"
 
 	// subscription routes
 	// GET /plans to get the public catalog of subscription plans

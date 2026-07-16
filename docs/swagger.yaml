@@ -3180,6 +3180,138 @@ paths:
       summary: Delete a managed organization and all its data
       tags:
       - integrator
+  /integrator/organizations/{orgAddress}/apikeys:
+    get:
+      description: |-
+        Returns the metadata of all API keys owned by the organization (never the secret).
+        The caller must be an admin of the organization.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ListAPIKeysResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: List an organization's API keys
+      tags:
+      - integrator
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Create a new API key owned by the organization at the given address. The caller
+        must be an admin of the organization, which must be enabled as an integrator —
+        API keys are integrator-only. The plaintext secret (prefixed "vsk_") is
+        returned ONCE in the response and cannot be retrieved again.
+
+        `label` and at least one `scope` are required. Valid scopes are deny-by-default and
+        must be a subset of: `quota:read`, `managed:read`, `managed:write`, `voting:write`,
+        `members:write`. The optional `expiresAt`, when set, must be in the future.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: API key information
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.CreateAPIKeyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Created key including the one-time plaintext secret
+          schema:
+            $ref: '#/definitions/apicommon.CreateAPIKeyResponse'
+        "400":
+          description: Invalid input (bad address, missing label/scopes, unknown scope,
+            past expiresAt)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Organization is not an integrator
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Create an API key for an organization
+      tags:
+      - integrator
+  /integrator/organizations/{orgAddress}/apikeys/{keyId}:
+    delete:
+      description: |-
+        Revokes (permanently disables) the API key with the given ID. The caller must be
+        an admin of the organization.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: API key ID
+        in: path
+        name: keyId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid input data (missing key ID)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: API key not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Revoke an organization's API key
+      tags:
+      - integrator
   /jobs/{jobId}:
     get:
       description: |-
@@ -3381,138 +3513,6 @@ paths:
       summary: Update organization information
       tags:
       - organizations
-  /organizations/{address}/apikeys:
-    get:
-      description: |-
-        Returns the metadata of all API keys owned by the organization (never the secret).
-        The caller must be an admin of the organization.
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.ListAPIKeysResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: List an organization's API keys
-      tags:
-      - integrator
-    post:
-      consumes:
-      - application/json
-      description: |-
-        Create a new API key owned by the organization at the given address. The caller
-        must be an admin of the organization, which must be enabled as an integrator —
-        API keys are integrator-only. The plaintext secret (prefixed "vsk_") is
-        returned ONCE in the response and cannot be retrieved again.
-
-        `label` and at least one `scope` are required. Valid scopes are deny-by-default and
-        must be a subset of: `quota:read`, `managed:read`, `managed:write`, `voting:write`,
-        `members:write`. The optional `expiresAt`, when set, must be in the future.
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: API key information
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/apicommon.CreateAPIKeyRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Created key including the one-time plaintext secret
-          schema:
-            $ref: '#/definitions/apicommon.CreateAPIKeyResponse'
-        "400":
-          description: Invalid input (bad address, missing label/scopes, unknown scope,
-            past expiresAt)
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "403":
-          description: Organization is not an integrator
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Create an API key for an organization
-      tags:
-      - integrator
-  /organizations/{address}/apikeys/{keyID}:
-    delete:
-      description: |-
-        Revokes (permanently disables) the API key with the given ID. The caller must be
-        an admin of the organization.
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: API key ID
-        in: path
-        name: keyID
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "400":
-          description: Invalid input data (missing key ID)
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: API key not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Revoke an organization's API key
-      tags:
-      - integrator
   /organizations/{address}/censuses:
     get:
       consumes:

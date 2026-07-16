@@ -247,7 +247,7 @@ func TestVotingProcessAPIKeyAuth(t *testing.T) {
 
 	// mint a voting:write key (managed:write is needed to create the managed org)
 	createBody := &apicommon.CreateAPIKeyRequest{Label: "voting", Scopes: []string{ScopeManagedWrite, ScopeVotingWrite}}
-	data, code := testRequest(t, http.MethodPost, token, createBody, "organizations", orgAddr.String(), "apikeys")
+	data, code := testRequest(t, http.MethodPost, token, createBody, "integrator", "organizations", orgAddr.String(), "apikeys")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("resp: %s", data))
 	var created apicommon.CreateAPIKeyResponse
 	c.Assert(json.Unmarshal(data, &created), qt.IsNil)
@@ -268,7 +268,7 @@ func TestVotingProcessAPIKeyAuth(t *testing.T) {
 
 	// a key without voting:write is refused (403)
 	noScopeBody := &apicommon.CreateAPIKeyRequest{Label: "noscope", Scopes: []string{ScopeManagedRead}}
-	data, code = testRequest(t, http.MethodPost, token, noScopeBody, "organizations", orgAddr.String(), "apikeys")
+	data, code = testRequest(t, http.MethodPost, token, noScopeBody, "integrator", "organizations", orgAddr.String(), "apikeys")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("resp: %s", data))
 	var noScope apicommon.CreateAPIKeyResponse
 	c.Assert(json.Unmarshal(data, &noScope), qt.IsNil)
