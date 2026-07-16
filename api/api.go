@@ -371,6 +371,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, processBundleParticipantsCheckEndpoint, a.checkProcessBundleVotedParticipantsHandler)
 		// multi-question voting processes: authoring + protected reads
 		handle(r, http.MethodPost, processesCreateEndpoint, a.createVotingProcessHandler)
+		handle(r, http.MethodPost, processesCensusValidateEndpoint, a.validateProcessCensusHandler)
 		handle(r, http.MethodGet, processesCreateEndpoint, a.listVotingProcessesHandler)
 		handle(r, http.MethodPut, processesEndpoint, a.updateVotingProcessHandler)
 		handle(r, http.MethodGet, processesEndpoint, a.votingProcessInfoHandler)

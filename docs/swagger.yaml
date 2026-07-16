@@ -1783,6 +1783,15 @@ definitions:
           $ref: '#/definitions/db.OrgMemberTwoFaField'
         type: array
     type: object
+  apicommon.ValidateProcessCensusRequest:
+    properties:
+      census:
+        $ref: '#/definitions/apicommon.CensusSpec'
+      orgAddress:
+        items:
+          type: integer
+        type: array
+    type: object
   apicommon.VotingProcessListResponse:
     properties:
       pagination:
@@ -2677,6 +2686,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Create a new census for an organization. Requires Manager/Admin role. Members are
         added later (see POST /census/{id}); this only creates the empty census.
@@ -2717,6 +2727,7 @@ paths:
     get:
       consumes:
       - application/json
+      deprecated: true
       description: Retrieve census information by ID. Returns census type, organization
         address, and creation time.
       parameters:
@@ -2750,6 +2761,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Add existing organization members to a census by member ID (synchronous). Members
         already in the census are skipped. Returns the number of participants added plus
@@ -2806,6 +2818,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Publish a census based on a specific organization members group for voting. Requires Manager/Admin role.
         The request body selects the CSP authentication: at least one of authFields or twoFaFields
@@ -2869,6 +2882,7 @@ paths:
     get:
       consumes:
       - application/json
+      deprecated: true
       description: Retrieve participants of a census by ID. Requires Manager/Admin
         role.
       parameters:
@@ -2909,6 +2923,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Publish a census for voting (the CSP public key becomes the census root). Requires
         Manager/Admin role. Returns the published census URI and root. Idempotent: a census
@@ -3817,6 +3832,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Checks the AuthFields for duplicates or empty fields and the TwoFaFields for empty ones.
         On failure the offending member IDs are returned in the error `data`. Needs admin or
@@ -6583,6 +6599,47 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Get a voter's weight for a voting process
+      tags:
+      - processes
+  /processes/census/validation:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Pre-flight check of a /processes census spec: verifies the chosen auth/2FA fields
+        produce unique, complete credentials over the target members — a group (groupId), an
+        explicit memberIds subset, or the whole organization when neither is set. Returns 400
+        with the offending member ids (duplicates / missingData) when the census is not usable,
+        otherwise 200. Requires Manager/Admin role of the organization.
+      parameters:
+      - description: Org address + census spec
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.ValidateProcessCensusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid census (duplicates or missing data)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Validate a voting process census
       tags:
       - processes
   /storage:

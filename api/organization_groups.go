@@ -476,7 +476,8 @@ func (a *API) listOrganizationMemberGroupsHandler(w http.ResponseWriter, r *http
 //	@Failure		401		{object}	errors.Error							"Unauthorized"
 //	@Failure		500		{object}	errors.Error							"Internal server error"
 //
-//	@Router			/organizations/{address}/groups/{groupID}/validate [post]
+//	@Deprecated
+//	@Router	/organizations/{address}/groups/{groupID}/validate [post]
 func (a *API) organizationMemberGroupValidateHandler(w http.ResponseWriter, r *http.Request) {
 	// get the group ID from the request path
 	groupID := chi.URLParam(r, "groupID")

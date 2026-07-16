@@ -37,7 +37,8 @@ const (
 //	@Failure		400		{object}	errors.Error					"Invalid input data or missing required fields"
 //	@Failure		401		{object}	errors.Error					"Unauthorized"
 //	@Failure		500		{object}	errors.Error					"Internal server error"
-//	@Router			/census [post]
+//	@Deprecated
+//	@Router	/census [post]
 func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse request
 	censusInfo := &apicommon.CreateCensusRequest{}
@@ -90,7 +91,8 @@ func (a *API) createCensusHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		400	{object}	errors.Error	"Invalid census ID"
 //	@Failure		404	{object}	errors.Error	"Census not found"
 //	@Failure		500	{object}	errors.Error	"Internal server error"
-//	@Router			/census/{id} [get]
+//	@Deprecated
+//	@Router	/census/{id} [get]
 func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 	censusID := internal.HexBytes{}
 	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
@@ -127,7 +129,8 @@ func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		403		{object}	errors.Error							"Plan census quota exceeded"
 //	@Failure		404		{object}	errors.Error							"Census not found"
 //	@Failure		500		{object}	errors.Error							"Internal server error"
-//	@Router			/census/{id} [post]
+//	@Deprecated
+//	@Router	/census/{id} [post]
 func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 	censusID := internal.HexBytes{}
 	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
@@ -218,7 +221,8 @@ func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Reques
 //	@Failure		401	{object}	errors.Error	"Unauthorized"
 //	@Failure		404	{object}	errors.Error	"Census not found or unsupported census type"
 //	@Failure		500	{object}	errors.Error	"Internal server error"
-//	@Router			/census/{id}/publish [post]
+//	@Deprecated
+//	@Router	/census/{id}/publish [post]
 func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 	censusID := internal.HexBytes{}
 	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
@@ -304,7 +308,8 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		403		{object}	errors.Error	"Plan census quota exceeded"
 //	@Failure		404		{object}	errors.Error	"Census not found, or neither authFields nor twoFaFields provided (ErrCensusTypeNotFound)"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/census/{id}/group/{groupid}/publish [post]
+//	@Deprecated
+//	@Router	/census/{id}/group/{groupid}/publish [post]
 func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) {
 	censusID := internal.HexBytes{}
 	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {
@@ -423,7 +428,8 @@ func (a *API) publishCensusGroupHandler(w http.ResponseWriter, r *http.Request) 
 //	@Failure		401	{object}	errors.Error	"Unauthorized"
 //	@Failure		404	{object}	errors.Error	"Census not found"
 //	@Failure		500	{object}	errors.Error	"Internal server error"
-//	@Router			/census/{id}/participants [get]
+//	@Deprecated
+//	@Router	/census/{id}/participants [get]
 func (a *API) censusParticipantsHandler(w http.ResponseWriter, r *http.Request) {
 	censusID := internal.HexBytes{}
 	if err := censusID.ParseString(chi.URLParam(r, "id")); err != nil {

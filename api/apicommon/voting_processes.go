@@ -52,6 +52,14 @@ type CreateVotingProcessRequest struct {
 	Questions   []VotingProcessQuestionRequest `json:"questions"`
 }
 
+// ValidateProcessCensusRequest is the body of POST /processes/census/validation: the same
+// orgAddress + census block as a create request, checked for member-field duplicates / missing data
+// before the process is created.
+type ValidateProcessCensusRequest struct {
+	OrgAddress common.Address `json:"orgAddress"`
+	Census     CensusSpec     `json:"census"`
+}
+
 // CreateVotingProcessResponse is returned by POST /processes.
 type CreateVotingProcessResponse struct {
 	ProcessID string `json:"processId"`

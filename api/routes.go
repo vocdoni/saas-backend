@@ -212,6 +212,8 @@ const (
 	processesCreateEndpoint = "/processes"
 	// PUT /processes/{processId} to update a draft; GET /processes/{processId} to read one (full)
 	processesEndpoint = "/processes/{processId}"
+	// POST /processes/census/validation validates a census spec (duplicates/missing fields) before create
+	processesCensusValidateEndpoint = "/processes/census/validation"
 	// GET /processes/{processId}/validation publish-readiness dry-run (protected)
 	processesValidateEndpoint = "/processes/{processId}/validation"
 	// POST /processes/{processId}/check voter eligibility/status (public CSP)
