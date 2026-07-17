@@ -20,6 +20,7 @@ func TestErrorCodesAreUnique(t *testing.T) {
 	fset := token.NewFileSet()
 
 	// Parse all non-test .go files in this directory
+	//nolint:staticcheck // SA1019: parser.ParseDir suffices here, this package has no build-tagged files
 	pkgs, err := parser.ParseDir(fset, ".", func(info fs.FileInfo) bool {
 		name := info.Name()
 		return strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go")

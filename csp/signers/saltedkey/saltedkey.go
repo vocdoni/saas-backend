@@ -61,6 +61,7 @@ func (sk *SaltedKey) SignECDSA(salt [SaltSize]byte, msg []byte) ([]byte, error) 
 	// get the bigNumber from salt
 	s := new(big.Int).SetBytes(salt[:])
 	// add it to the current key, so now we have a new private key (currentPrivKey + n)
+	//nolint:staticcheck // SA1019: mutating D is the point of salted-key derivation; predates the Go 1.26 deprecation
 	esk.Private.D.Add(esk.Private.D, s)
 	// return the signature
 	return esk.SignEthereum(msg)
@@ -117,6 +118,7 @@ func SaltECDSAPubKey(pubKey *ecdsa.PublicKey, salt [saltedkey.SaltSize]byte) ([]
 		return nil, fmt.Errorf("public key is nil")
 	}
 	x, y := pubKey.ScalarBaseMult(salt[:])
+	//nolint:staticcheck // SA1019: mutating X/Y is the point of salted-key derivation; predates the Go 1.26 deprecation
 	pubKey.X, pubKey.Y = pubKey.Add(pubKey.X, pubKey.Y, x, y)
 	return ethcrypto.FromECDSAPub(pubKey), nil
 }
