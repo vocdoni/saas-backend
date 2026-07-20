@@ -30,7 +30,7 @@ import (
 //	@Description	worker; the call returns 202 with a job id. The chain's acceptance or rejection of
 //	@Description	the vote (proof, nullifier, election state) is decided when the worker submits it and
 //	@Description	reported on the job: poll GET /jobs/{jobId} for the voteID on success, or a failure.
-//	@Tags			process
+//	@Tags			vote
 //	@Accept			json
 //	@Produce		json
 //	@Param			request	body		apicommon.RelayVoteRequest	true	"Signed vote transaction payload"
@@ -159,7 +159,8 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		404			{object}	errors.Error						"Process not found"
 //	@Failure		500			{object}	errors.Error						"Internal server error"
 //	@Failure		503			{object}	errors.Error						"Transaction queue is full"
-//	@Router			/process/{processId}/status [put]
+//	@Deprecated
+//	@Router	/process/{processId}/status [put]
 func (a *API) setProcessStatusHandler(w http.ResponseWriter, r *http.Request) {
 	objID, err := primitive.ObjectIDFromHex(chi.URLParam(r, "processId"))
 	if err != nil {

@@ -71,7 +71,7 @@ func TestDeleteManagedOrg(t *testing.T) {
 	managedWithPlan := enableProcessPlan(t, managed.Address)
 	activeDraft := seedDraftForManagedOrg(t, managed.Address)
 	pubJob := enqueueAndPollJob(t, http.MethodPost, token, nil, "process", activeDraft.Hex(), "publish")
-	c.Assert(pubJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish error: %s", pubJob.Error))
+	c.Assert(pubJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish error: %s", pubJob.Errors))
 	c.Assert(len(pubJob.Result.Address) > 0, qt.IsTrue)
 
 	// the published election autostarts (ElectionType.Autostart), so it is READY on-chain → 409.
@@ -92,7 +92,7 @@ func TestDeleteManagedOrg(t *testing.T) {
 	ended := enqueueAndPollJob(t, http.MethodPut, token,
 		&apicommon.SetProcessStatusRequest{Status: "ended"},
 		"process", activeDraft.Hex(), "status")
-	c.Assert(ended.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("status error: %s", ended.Error))
+	c.Assert(ended.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("status error: %s", ended.Errors))
 
 	// sanity: the now-ended election still belongs to the managed org before teardown
 	_, publishedBefore, err := testDB.ListProcesses(managed.Address, 1, 100, db.PublishedOnly)

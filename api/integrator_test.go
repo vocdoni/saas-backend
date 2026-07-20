@@ -168,7 +168,7 @@ func TestIntegratorManagedOrgs(t *testing.T) {
 	})
 	c.Assert(err, qt.IsNil)
 	pubJob := enqueueAndPollJob(t, http.MethodPost, token, nil, "process", draftID.Hex(), "publish")
-	c.Assert(pubJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", pubJob.Error))
+	c.Assert(pubJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", pubJob.Errors))
 	c.Assert(len(pubJob.Result.Address) > 0, qt.IsTrue)
 
 	// the integrator's aggregate process counter was bumped

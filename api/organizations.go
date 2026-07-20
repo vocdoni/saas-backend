@@ -69,7 +69,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	// find default plan
 	defaultPlan, err := a.db.DefaultPlan()
 	if err != nil || defaultPlan == nil {
-		errors.ErrNoDefaultPlan.WithErr((err)).Write(w)
+		errors.ErrNoDefaultPlan.WithErr(err).Write(w)
 		return
 	}
 	// integrator portal opt-in: subscribe the new org to the free integrator plan so it
@@ -198,12 +198,12 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
-//	@Param			address	path		string	true	"Organization address"
-//	@Success		200		{object}	apicommon.OrganizationInfo
-//	@Failure		400		{object}	errors.Error	"Invalid input data"
-//	@Failure		404		{object}	errors.Error	"Organization not found"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address} [get]
+//	@Param			orgAddress	path		string	true	"Organization address"
+//	@Success		200			{object}	apicommon.OrganizationInfo
+//	@Failure		400			{object}	errors.Error	"Invalid input data"
+//	@Failure		404			{object}	errors.Error	"Organization not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{orgAddress} [get]
 func (a *API) organizationInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
 	org, parent, ok := a.organizationFromRequest(r)
@@ -225,14 +225,14 @@ func (a *API) organizationInfoHandler(w http.ResponseWriter, r *http.Request) {
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string						true	"Organization address"
-//	@Param			request	body		apicommon.OrganizationInfo	true	"Organization information to update"
-//	@Success		200		{string}	string						"OK"
-//	@Failure		400		{object}	errors.Error				"Invalid input data"
-//	@Failure		401		{object}	errors.Error				"Unauthorized"
-//	@Failure		404		{object}	errors.Error				"Organization not found"
-//	@Failure		500		{object}	errors.Error				"Internal server error"
-//	@Router			/organizations/{address} [put]
+//	@Param			orgAddress	path		string						true	"Organization address"
+//	@Param			request		body		apicommon.OrganizationInfo	true	"Organization information to update"
+//	@Success		200			{string}	string						"OK"
+//	@Failure		400			{object}	errors.Error				"Invalid input data"
+//	@Failure		401			{object}	errors.Error				"Unauthorized"
+//	@Failure		404			{object}	errors.Error				"Organization not found"
+//	@Failure		500			{object}	errors.Error				"Internal server error"
+//	@Router			/organizations/{orgAddress} [put]
 func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -328,13 +328,13 @@ func (*API) organizationsTypesHandler(w http.ResponseWriter, _ *http.Request) {
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string	true	"Organization address"
-//	@Success		200		{object}	apicommon.OrganizationSubscriptionInfo
-//	@Failure		400		{object}	errors.Error	"Invalid input data"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		404		{object}	errors.Error	"Organization not found or no subscription"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/subscription [get]
+//	@Param			orgAddress	path		string	true	"Organization address"
+//	@Success		200			{object}	apicommon.OrganizationSubscriptionInfo
+//	@Failure		400			{object}	errors.Error	"Invalid input data"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		404			{object}	errors.Error	"Organization not found or no subscription"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{orgAddress}/subscription [get]
 func (a *API) organizationSubscriptionHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -378,13 +378,13 @@ func (a *API) organizationSubscriptionHandler(w http.ResponseWriter, r *http.Req
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string	true	"Organization address"
-//	@Success		200		{object}	apicommon.OrganizationCensuses
-//	@Failure		400		{object}	errors.Error	"Invalid input data"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		404		{object}	errors.Error	"Organization not found"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/censuses [get]
+//	@Param			orgAddress	path		string	true	"Organization address"
+//	@Success		200			{object}	apicommon.OrganizationCensuses
+//	@Failure		400			{object}	errors.Error	"Invalid input data"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		404			{object}	errors.Error	"Organization not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{orgAddress}/censuses [get]
 func (a *API) organizationCensusesHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -430,14 +430,14 @@ func (a *API) organizationCensusesHandler(w http.ResponseWriter, r *http.Request
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string										true	"Organization address"
-//	@Param			request	body		apicommon.CreateOrganizationTicketRequest	true	"Ticket request information"
-//	@Success		200		{string}	string										"OK"
-//	@Failure		400		{object}	errors.Error								"Invalid input data"
-//	@Failure		401		{object}	errors.Error								"Unauthorized"
-//	@Failure		404		{object}	errors.Error								"Organization not found"
-//	@Failure		500		{object}	errors.Error								"Internal server error"
-//	@Router			/organizations/{address}/ticket [post]
+//	@Param			orgAddress	path		string										true	"Organization address"
+//	@Param			request		body		apicommon.CreateOrganizationTicketRequest	true	"Ticket request information"
+//	@Success		200			{string}	string										"OK"
+//	@Failure		400			{object}	errors.Error								"Invalid input data"
+//	@Failure		401			{object}	errors.Error								"Unauthorized"
+//	@Failure		404			{object}	errors.Error								"Organization not found"
+//	@Failure		500			{object}	errors.Error								"Internal server error"
+//	@Router			/organizations/{orgAddress}/ticket [post]
 func (a *API) organizationCreateTicket(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -512,87 +512,6 @@ func (a *API) organizationCreateTicket(w http.ResponseWriter, r *http.Request) {
 	apicommon.HTTPWriteOK(w)
 }
 
-// organizationJobsHandler godoc
-//
-//	@Summary		Get organization jobs
-//	@Description	Get the list of import jobs for an organization with pagination support
-//	@Tags			organizations
-//	@Accept			json
-//	@Produce		json
-//	@Security		BearerAuth
-//	@Param			address	path		string	true	"Organization address"
-//	@Param			page	query		integer	false	"Page number (default: 1)"
-//	@Param			limit	query		integer	false	"Number of items per page (default: 10)"
-//	@Param			type	query		string	false	"Filter by job type (org_members or census_participants)"
-//	@Success		200		{object}	apicommon.JobsResponse
-//	@Failure		400		{object}	errors.Error	"Invalid input"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		404		{object}	errors.Error	"Organization not found"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/jobs [get]
-func (a *API) organizationJobsHandler(w http.ResponseWriter, r *http.Request) {
-	// get the user from the request context
-	user, ok := apicommon.UserFromContext(r.Context())
-	if !ok {
-		errors.ErrUnauthorized.Write(w)
-		return
-	}
-	// get the organization info from the request context
-	org, _, ok := a.organizationFromRequest(r)
-	if !ok {
-		errors.ErrNoOrganizationProvided.Write(w)
-		return
-	}
-	// check the user has the necessary permissions
-	if !user.HasRoleFor(org.Address, db.ManagerRole) && !user.HasRoleFor(org.Address, db.AdminRole) {
-		errors.ErrUnauthorized.Withf("user is not admin or manager of organization").Write(w)
-		return
-	}
-
-	// Parse job type filter
-	var jobType *db.JobType
-	if typeStr := r.URL.Query().Get("type"); typeStr != "" {
-		switch typeStr {
-		case string(db.JobTypeOrgMembers):
-			t := db.JobTypeOrgMembers
-			jobType = &t
-		case string(db.JobTypeCensusParticipants):
-			t := db.JobTypeCensusParticipants
-			jobType = &t
-		default:
-			errors.ErrMalformedURLParam.Withf("invalid job type: %s", typeStr).Write(w)
-			return
-		}
-	}
-
-	params, err := parsePaginationParams(r.URL.Query().Get(ParamPage), r.URL.Query().Get(ParamLimit))
-	if err != nil {
-		errors.ErrMalformedURLParam.WithErr(err).Write(w)
-		return
-	}
-	totalItems, jobs, err := a.db.Jobs(org.Address, params.Page, params.Limit, jobType)
-	if err != nil {
-		errors.ErrGenericInternalServerError.Withf("could not get jobs: %v", err).Write(w)
-		return
-	}
-	pagination, err := calculatePagination(params.Page, params.Limit, totalItems)
-	if err != nil {
-		errors.ErrMalformedURLParam.WithErr(err).Write(w)
-		return
-	}
-
-	// convert the jobs to the response format
-	jobsResponse := make([]apicommon.JobInfo, 0, len(jobs))
-	for _, job := range jobs {
-		jobsResponse = append(jobsResponse, apicommon.JobFromDB(&job))
-	}
-
-	apicommon.HTTPWriteJSON(w, &apicommon.JobsResponse{
-		Pagination: pagination,
-		Jobs:       jobsResponse,
-	})
-}
-
 // organizationBundlesHandler godoc
 //
 //	@Summary		List organization bundles and their main process
@@ -604,14 +523,15 @@ func (a *API) organizationJobsHandler(w http.ResponseWriter, r *http.Request) {
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string	true	"Organization address"
-//	@Param			page	query		int		false	"Page number (default 1)"
-//	@Param			limit	query		int		false	"Items per page (default 10, max 100)"
-//	@Success		200		{object}	apicommon.ListOrganizationBundles
-//	@Failure		400		{object}	errors.Error	"Invalid request or organization not found"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/processes [get]
+//	@Param			orgAddress	path		string	true	"Organization address"
+//	@Param			page		query		int		false	"Page number (default 1)"
+//	@Param			limit		query		int		false	"Items per page (default 10, max 100)"
+//	@Success		200			{object}	apicommon.ListOrganizationBundles
+//	@Failure		400			{object}	errors.Error	"Invalid request or organization not found"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Deprecated
+//	@Router	/organizations/{orgAddress}/processes [get]
 func (a *API) organizationBundlesHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())

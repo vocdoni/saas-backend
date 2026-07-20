@@ -48,7 +48,7 @@ func TestVotingProcessPublish(t *testing.T) {
 
 	// publish -> 202 { jobId }, poll to completion
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
-	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Error))
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
 	c.Assert(job.Type, qt.Equals, db.JobTypePublishVotingProcess)
 
 	// the process is now published with an on-chain election per question

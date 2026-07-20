@@ -27,7 +27,8 @@ import (
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
 //	@Failure		404		{object}	errors.Error	"Organization not found"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/transactions [post]
+//	@Deprecated
+//	@Router	/transactions [post]
 func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -168,7 +169,8 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		401		{object}	errors.Error	"Unauthorized"
 //	@Failure		404		{object}	errors.Error	"Organization not found"
 //	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/transactions/message [post]
+//	@Deprecated
+//	@Router	/transactions/message [post]
 func (a *API) signMessageHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())

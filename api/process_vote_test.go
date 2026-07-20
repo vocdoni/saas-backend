@@ -96,7 +96,7 @@ func TestProcessStatusLifecycle(t *testing.T) {
 
 	// publish (async) to obtain the on-chain process address
 	pubJob := enqueueAndPollJob(t, http.MethodPost, token, nil, "process", draftID.Hex(), "publish")
-	c.Assert(pubJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", pubJob.Error))
+	c.Assert(pubJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", pubJob.Errors))
 	c.Assert(len(pubJob.Result.Address) > 0, qt.IsTrue)
 	c.Assert(pubJob.Result.Status, qt.Equals, "READY")
 	addr := pubJob.Result.Address
@@ -116,7 +116,7 @@ func TestProcessStatusLifecycle(t *testing.T) {
 	for _, tr := range transitions {
 		job := enqueueAndPollJob(t, http.MethodPut, token,
 			&apicommon.SetProcessStatusRequest{Status: tr.request}, "process", draftID.Hex(), "status")
-		c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", job.Error))
+		c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", job.Errors))
 		c.Assert(job.Result.Status, qt.Equals, tr.respStatus)
 		waitForElectionStatus(t, addr, tr.chainStatus...)
 	}
@@ -141,7 +141,7 @@ func testRelayVoteRequest(t *testing.T, signer *ethereum.SignKeys, processID int
 	c.Assert(err, qt.IsNil)
 	job := enqueueAndPollJob(t, http.MethodPost, "",
 		&apicommon.RelayVoteRequest{TxPayload: stx}, "vote")
-	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", job.Error))
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", job.Errors))
 	c.Assert(job.Result.VoteID, qt.Not(qt.HasLen), 0)
 	return job.Result.VoteID
 }

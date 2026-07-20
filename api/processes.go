@@ -330,7 +330,7 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	census, _ := a.db.Census(vp.CensusID.Hex())
-	apicommon.HTTPWriteJSON(w, apicommon.VotingProcessResponseFromDB(vp, questions, census))
+	apicommon.HTTPWriteJSON(w, apicommon.VotingProcessResponseFromDB(vp, questions, census, a.account.ChainID()))
 }
 
 // listVotingProcessesHandler godoc
@@ -386,6 +386,7 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 		Processes:  make([]apicommon.VotingProcessResponse, 0, len(list)),
 		Pagination: pagination,
 	}
+	chainID := a.account.ChainID()
 	for i := range list {
 		vp := &list[i]
 		questions, err := a.db.QuestionsByProcess(vp.ID)
@@ -394,7 +395,7 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		census, _ := a.db.Census(vp.CensusID.Hex())
-		resp.Processes = append(resp.Processes, *apicommon.VotingProcessResponseFromDB(vp, questions, census))
+		resp.Processes = append(resp.Processes, *apicommon.VotingProcessResponseFromDB(vp, questions, census, chainID))
 	}
 	apicommon.HTTPWriteJSON(w, resp)
 }
@@ -410,7 +411,7 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 //	@Success		200			{object}	apicommon.VotingProcessValidateResponse
 //	@Failure		401			{object}	errors.Error
 //	@Failure		404			{object}	errors.Error
-//	@Router			/processes/{processId}/check [get]
+//	@Router			/processes/{processId}/validation [get]
 func (a *API) validateVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
 	oid, ok := a.votingProcessID(w, r)
 	if !ok {
@@ -503,7 +504,7 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 //	@Success		200				{object}	interface{}	"Placeholder: null until participant info is surfaced"
 //	@Failure		400				{object}	errors.Error
 //	@Failure		404				{object}	errors.Error
-//	@Router			/processes/{processId}/participant/{participantId} [get]
+//	@Router			/processes/{processId}/participants/{participantId} [get]
 func (a *API) votingProcessParticipantHandler(w http.ResponseWriter, r *http.Request) {
 	oid, ok := a.votingProcessID(w, r)
 	if !ok {

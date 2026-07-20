@@ -30,7 +30,7 @@ func TestAPIKeysAPI(t *testing.T) {
 
 	// create a key scoped to quota:read + managed:read
 	createBody := &apicommon.CreateAPIKeyRequest{Label: "ci", Scopes: []string{ScopeQuotaRead, ScopeManagedRead}}
-	data, code := testRequest(t, http.MethodPost, token, createBody, "organizations", orgAddr.String(), "apikeys")
+	data, code := testRequest(t, http.MethodPost, token, createBody, "integrator", "organizations", orgAddr.String(), "apikeys")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("resp: %s", data))
 	var created apicommon.CreateAPIKeyResponse
 	c.Assert(json.Unmarshal(data, &created), qt.IsNil)
@@ -41,7 +41,7 @@ func TestAPIKeysAPI(t *testing.T) {
 	// invalid scope is rejected at creation
 	_, code = testRequest(t, http.MethodPost, token,
 		&apicommon.CreateAPIKeyRequest{Label: "bad", Scopes: []string{"bogus:scope"}},
-		"organizations", orgAddr.String(), "apikeys")
+		"integrator", "organizations", orgAddr.String(), "apikeys")
 	c.Assert(code, qt.Equals, http.StatusBadRequest)
 
 	// the key works on allowlisted endpoints within its scopes (path-less: the integrator org is
@@ -59,11 +59,11 @@ func TestAPIKeysAPI(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusForbidden)
 
 	// non-allowlisted endpoint → 403 (API keys can't manage API keys)
-	_, code = testRequest(t, http.MethodGet, apiKey, nil, "organizations", orgAddr.String(), "apikeys")
+	_, code = testRequest(t, http.MethodGet, apiKey, nil, "integrator", "organizations", orgAddr.String(), "apikeys")
 	c.Assert(code, qt.Equals, http.StatusForbidden)
 
 	// listing with the JWT shows the key (no secret)
-	data, code = testRequest(t, http.MethodGet, token, nil, "organizations", orgAddr.String(), "apikeys")
+	data, code = testRequest(t, http.MethodGet, token, nil, "integrator", "organizations", orgAddr.String(), "apikeys")
 	c.Assert(code, qt.Equals, http.StatusOK)
 	var list apicommon.ListAPIKeysResponse
 	c.Assert(json.Unmarshal(data, &list), qt.IsNil)
@@ -72,7 +72,7 @@ func TestAPIKeysAPI(t *testing.T) {
 	c.Assert(list.APIKeys[0].Prefix, qt.Equals, created.Prefix)
 
 	// revoke with the JWT
-	_, code = testRequest(t, http.MethodDelete, token, nil, "organizations", orgAddr.String(), "apikeys", created.ID)
+	_, code = testRequest(t, http.MethodDelete, token, nil, "integrator", "organizations", orgAddr.String(), "apikeys", created.ID)
 	c.Assert(code, qt.Equals, http.StatusOK)
 
 	// the revoked key no longer authenticates
@@ -98,7 +98,7 @@ func TestIntegratorAPIKeyPathless(t *testing.T) {
 		Label:  "pathless",
 		Scopes: []string{ScopeQuotaRead, ScopeManagedRead, ScopeManagedWrite},
 	}
-	data, code := testRequest(t, http.MethodPost, token, createBody, "organizations", orgAddr.String(), "apikeys")
+	data, code := testRequest(t, http.MethodPost, token, createBody, "integrator", "organizations", orgAddr.String(), "apikeys")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("resp: %s", data))
 	var created apicommon.CreateAPIKeyResponse
 	c.Assert(json.Unmarshal(data, &created), qt.IsNil)
@@ -144,7 +144,7 @@ func TestIntegratorAPIKeyDeletesProcessDraft(t *testing.T) {
 		Label:  "voting",
 		Scopes: []string{ScopeManagedWrite, ScopeVotingWrite},
 	}
-	data, code := testRequest(t, http.MethodPost, token, createBody, "organizations", orgAddr.String(), "apikeys")
+	data, code := testRequest(t, http.MethodPost, token, createBody, "integrator", "organizations", orgAddr.String(), "apikeys")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("resp: %s", data))
 	var created apicommon.CreateAPIKeyResponse
 	c.Assert(json.Unmarshal(data, &created), qt.IsNil)
@@ -190,7 +190,7 @@ func TestIntegratorAPIKeyDeletesProcessDraft(t *testing.T) {
 
 	// a key without voting:write cannot delete (insufficient scope → 403)
 	noScopeBody := &apicommon.CreateAPIKeyRequest{Label: "noscope", Scopes: []string{ScopeManagedRead}}
-	data, code = testRequest(t, http.MethodPost, token, noScopeBody, "organizations", orgAddr.String(), "apikeys")
+	data, code = testRequest(t, http.MethodPost, token, noScopeBody, "integrator", "organizations", orgAddr.String(), "apikeys")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("resp: %s", data))
 	var noScope apicommon.CreateAPIKeyResponse
 	c.Assert(json.Unmarshal(data, &noScope), qt.IsNil)
@@ -208,11 +208,11 @@ func TestAPIKeysRequireIntegrator(t *testing.T) {
 
 	// a plain org admin cannot mint keys (integrator-only)
 	createBody := &apicommon.CreateAPIKeyRequest{Label: "ci", Scopes: []string{ScopeQuotaRead}}
-	_, code := testRequest(t, http.MethodPost, token, createBody, "organizations", orgAddr.String(), "apikeys")
+	_, code := testRequest(t, http.MethodPost, token, createBody, "integrator", "organizations", orgAddr.String(), "apikeys")
 	c.Assert(code, qt.Equals, http.StatusForbidden) // ErrNotAnIntegrator
 
-	// a malformed {address} path param is rejected with 400, not silently treated as the zero address
-	_, code = testRequest(t, http.MethodPost, token, createBody, "organizations", "not-an-address", "apikeys")
+	// a malformed {orgAddress} path param is rejected with 400, not silently treated as the zero address
+	_, code = testRequest(t, http.MethodPost, token, createBody, "integrator", "organizations", "not-an-address", "apikeys")
 	c.Assert(code, qt.Equals, http.StatusBadRequest)
 
 	// enable the org as an integrator (override) and creation now succeeds
@@ -221,7 +221,7 @@ func TestAPIKeysRequireIntegrator(t *testing.T) {
 	org.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 1}
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 
-	data, code := testRequest(t, http.MethodPost, token, createBody, "organizations", orgAddr.String(), "apikeys")
+	data, code := testRequest(t, http.MethodPost, token, createBody, "integrator", "organizations", orgAddr.String(), "apikeys")
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("resp: %s", data))
 	var created apicommon.CreateAPIKeyResponse
 	c.Assert(json.Unmarshal(data, &created), qt.IsNil)

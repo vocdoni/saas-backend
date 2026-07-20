@@ -340,16 +340,84 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 		}
 	}()
 
+	return aggregateMemberFields(ctx, cur, authFields, twoFaFields)
+}
+
+// CheckMembersFields checks that the provided auth/2FA fields are usable for authentication over an
+// explicit set of organization members (by member ID), reporting duplicates and members with missing
+// data. It is the member-list counterpart of [MongoStorage.CheckGroupMembersFields] and reuses the
+// same aggregation logic.
+func (ms *MongoStorage) CheckMembersFields(
+	orgAddress common.Address,
+	memberIDs []string,
+	authFields OrgMemberAuthFields,
+	twoFaFields OrgMemberTwoFaFields,
+) (*OrgMemberAggregationResults, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return nil, ErrInvalidData
+	}
+	if len(authFields) == 0 && len(twoFaFields) == 0 {
+		return nil, fmt.Errorf("no auth or twoFa fields provided")
+	}
+	if len(memberIDs) == 0 {
+		return nil, fmt.Errorf("no member IDs provided")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	cur, err := ms.getMembersFields(ctx, orgAddress, memberIDs, authFields, twoFaFields)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := cur.Close(ctx); err != nil {
+			log.Warnw("error closing cursor", "error", err)
+		}
+	}()
+
+	results, err := aggregateMemberFields(ctx, cur, authFields, twoFaFields)
+	if err != nil {
+		return nil, err
+	}
+	// Report requested ids that matched no member of this org (unknown or foreign). The create path
+	// silently drops these, so flag them here rather than returning a green pre-flight.
+	found := make(map[primitive.ObjectID]struct{}, len(results.Members)+len(results.Duplicates)+len(results.MissingData))
+	for _, set := range [][]primitive.ObjectID{results.Members, results.Duplicates, results.MissingData} {
+		for _, id := range set {
+			found[id] = struct{}{}
+		}
+	}
+	for _, hexID := range memberIDs {
+		oid, err := primitive.ObjectIDFromHex(hexID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid member ID %s: %w", hexID, ErrInvalidData)
+		}
+		if _, ok := found[oid]; !ok {
+			results.NotFound = append(results.NotFound, oid)
+		}
+	}
+	return results, nil
+}
+
+// aggregateMemberFields iterates a members cursor (projected to the given auth/2FA fields) and
+// classifies each member as valid, missing-data, or duplicate on the composite auth/2FA key.
+func aggregateMemberFields(
+	ctx context.Context,
+	cur *mongo.Cursor,
+	authFields OrgMemberAuthFields,
+	twoFaFields OrgMemberTwoFaFields,
+) (*OrgMemberAggregationResults, error) {
 	results := OrgMemberAggregationResults{
 		Members:     make([]primitive.ObjectID, 0),
 		Duplicates:  make([]primitive.ObjectID, 0),
 		MissingData: make([]primitive.ObjectID, 0),
+		NotFound:    make([]primitive.ObjectID, 0),
 	}
 
 	seenKeys := make(map[string]primitive.ObjectID, cur.RemainingBatchLength())
 	duplicates := make(map[primitive.ObjectID]struct{}, 0)
 
-	// 4) Iterate and detect
 	for cur.Next(ctx) {
 		// decode into a map so we can handle dynamic fields
 		var m OrgMember
@@ -361,8 +429,7 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 			return nil, err
 		}
 
-		// if any of the fields are empty, add to missing data
-		// and continue to the next member
+		// if any of the fields are empty, add to missing data and continue to the next member;
 		// we do not check for duplicates in empty rows
 		if hasAnyEmptyField(bm, authFields) {
 			results.MissingData = append(results.MissingData, m.ID)
@@ -374,8 +441,7 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 			continue
 		}
 
-		// if the key is already seen, add to duplicates
-		// and continue to the next member
+		// if the key is already seen, add to duplicates and continue to the next member
 		if len(authFields) > 0 || len(twoFaFields) > 0 {
 			key := buildCompositeKey(bm, authFields, twoFaFields)
 			if val, seen := seenKeys[key]; seen {
@@ -387,7 +453,7 @@ func (ms *MongoStorage) CheckGroupMembersFields(
 			seenKeys[key] = m.ID
 		}
 
-		// if thedata pass all checkss  append the member ID to the results
+		// if the data passes all checks append the member ID to the results
 		results.Members = append(results.Members, m.ID)
 	}
 	if err := cur.Err(); err != nil {
@@ -426,7 +492,7 @@ func (ms *MongoStorage) getGroupMembersFields(
 		if !group.IsAutoGroup {
 			// Check if the group has members
 			if len(group.MemberIDs) == 0 {
-				return nil, fmt.Errorf("no members in group %s for organization %s", groupID, orgAddress)
+				return nil, fmt.Errorf("no members in group %s for organization %s: %w", groupID, orgAddress, ErrInvalidData)
 			}
 			objectIDs := make([]primitive.ObjectID, len(group.MemberIDs))
 			for i, id := range group.MemberIDs {
@@ -442,21 +508,52 @@ func (ms *MongoStorage) getGroupMembersFields(
 		}
 	}
 
+	return ms.findMemberFieldsCursor(ctx, filter, authFields, twoFaFields)
+}
+
+// getMembersFields returns a projected members cursor for an explicit set of member IDs of an
+// organization (the member-list counterpart of getGroupMembersFields).
+func (ms *MongoStorage) getMembersFields(
+	ctx context.Context,
+	orgAddress common.Address,
+	memberIDs []string,
+	authFields OrgMemberAuthFields,
+	twoFaFields OrgMemberTwoFaFields,
+) (*mongo.Cursor, error) {
+	objectIDs := make([]primitive.ObjectID, len(memberIDs))
+	for i, id := range memberIDs {
+		objID, err := primitive.ObjectIDFromHex(id)
+		if err != nil {
+			return nil, fmt.Errorf("invalid member ID %s: %w", id, ErrInvalidData)
+		}
+		objectIDs[i] = objID
+	}
+	filter := bson.D{
+		{Key: "orgAddress", Value: orgAddress},
+		{Key: "_id", Value: bson.M{"$in": objectIDs}},
+	}
+	return ms.findMemberFieldsCursor(ctx, filter, authFields, twoFaFields)
+}
+
+// findMemberFieldsCursor runs a projected find over orgMembers for the given filter, returning only
+// _id/orgAddress plus the requested auth/2FA fields.
+func (ms *MongoStorage) findMemberFieldsCursor(
+	ctx context.Context,
+	filter bson.D,
+	authFields OrgMemberAuthFields,
+	twoFaFields OrgMemberTwoFaFields,
+) (*mongo.Cursor, error) {
 	proj := bson.D{
 		{Key: "_id", Value: 1},
 		{Key: "orgAddress", Value: 1},
 	}
-	// Add the authFields and twoFaFields to the projection
 	for _, f := range authFields {
 		proj = append(proj, bson.E{Key: string(f), Value: 1})
 	}
 	for _, f := range twoFaFields {
 		proj = append(proj, bson.E{Key: string(f), Value: 1})
 	}
-	findOpts := options.Find().SetProjection(proj)
-
-	// 2) Fetch all matching docs
-	return ms.orgMembers.Find(ctx, filter, findOpts)
+	return ms.orgMembers.Find(ctx, filter, options.Find().SetProjection(proj))
 }
 
 // Helper function to check if a string is in a slice

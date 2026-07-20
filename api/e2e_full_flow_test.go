@@ -99,7 +99,7 @@ func TestFullElectionLifecycle(t *testing.T) {
 	c.Assert(draftID.IsZero(), qt.IsFalse)
 
 	pubJob := enqueueAndPollJob(t, http.MethodPost, token, nil, "process", draftID.Hex(), "publish")
-	c.Assert(pubJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish error: %s", pubJob.Error))
+	c.Assert(pubJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish error: %s", pubJob.Errors))
 	c.Assert(len(pubJob.Result.Address) > 0, qt.IsTrue)
 	c.Assert(pubJob.Result.Status, qt.Equals, "READY")
 	addr := pubJob.Result.Address
@@ -126,7 +126,7 @@ func TestFullElectionLifecycle(t *testing.T) {
 		// the vote package must decode to state.VotePackage{Votes []int} ({"votes":[N]});
 		// a bare ["N"] array is accepted as an envelope but tallies to zero weight.
 		nullifier := testRelayVoteRequest(t, &voter, addr, proof,
-			[]byte(fmt.Sprintf(`{"votes":[%d]}`, votePlan[i])))
+			fmt.Appendf(nil, `{"votes":[%d]}`, votePlan[i]))
 		c.Assert(nullifier, qt.Not(qt.HasLen), 0)
 		_, dup := seenNullifiers[nullifier.String()]
 		c.Assert(dup, qt.IsFalse, qt.Commentf("voter %d reused nullifier %s", i, nullifier.String()))
@@ -136,7 +136,7 @@ func TestFullElectionLifecycle(t *testing.T) {
 	// --- end the election; the chain auto-advances ENDED -> RESULTS once tallied ---
 	endJob := enqueueAndPollJob(t, http.MethodPut, token,
 		&apicommon.SetProcessStatusRequest{Status: "ended"}, "process", draftID.Hex(), "status")
-	c.Assert(endJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("end error: %s", endJob.Error))
+	c.Assert(endJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("end error: %s", endJob.Errors))
 	c.Assert(endJob.Result.Status, qt.Equals, "ENDED")
 	waitForElectionStatus(t, addr, "ENDED", "RESULTS")
 

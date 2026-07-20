@@ -23,14 +23,14 @@ import (
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string	true	"Organization address"
-//	@Param			page	query		integer	false	"Page number (default: 1)"
-//	@Param			limit	query		integer	false	"Number of items per page (default: 10)"
-//	@Success		200		{object}	apicommon.OrganizationMemberGroupsResponse
-//	@Failure		400		{object}	errors.Error	"Invalid input data, or organization not found"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/groups [get]
+//	@Param			orgAddress	path		string	true	"Organization address"
+//	@Param			page		query		integer	false	"Page number (default: 1)"
+//	@Param			limit		query		integer	false	"Number of items per page (default: 10)"
+//	@Success		200			{object}	apicommon.OrganizationMemberGroupsResponse
+//	@Failure		400			{object}	errors.Error	"Invalid input data, or organization not found"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{orgAddress}/groups [get]
 func (a *API) organizationMemberGroupsHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -96,16 +96,16 @@ func (a *API) organizationMemberGroupsHandler(w http.ResponseWriter, r *http.Req
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string	true	"Organization address"
-//	@Param			groupID	path		string	true	"Group ID"
-//	@Success		200		{object}	apicommon.OrganizationMemberGroupInfo
-//	@Failure		400		{object}	errors.Error	"Invalid input data, or organization/group not found"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/groups/{groupID} [get]
+//	@Param			orgAddress	path		string	true	"Organization address"
+//	@Param			groupId		path		string	true	"Group ID"
+//	@Success		200			{object}	apicommon.OrganizationMemberGroupInfo
+//	@Failure		400			{object}	errors.Error	"Invalid input data, or organization/group not found"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{orgAddress}/groups/{groupId} [get]
 func (a *API) organizationMemberGroupHandler(w http.ResponseWriter, r *http.Request) {
 	// get the group ID from the request path
-	groupID := chi.URLParam(r, "groupID")
+	groupID := chi.URLParam(r, "groupId")
 	if groupID == "" {
 		errors.ErrInvalidData.Withf("group ID is required").Write(w)
 		return
@@ -173,13 +173,13 @@ func (a *API) organizationMemberGroupHandler(w http.ResponseWriter, r *http.Requ
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string											true	"Organization address"
-//	@Param			group	body		apicommon.CreateOrganizationMemberGroupRequest	true	"Group info to create"
-//	@Success		200		{object}	apicommon.OrganizationMemberGroupInfo
-//	@Failure		400		{object}	errors.Error	"Invalid input data, or organization not found"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/groups [post]
+//	@Param			orgAddress	path		string											true	"Organization address"
+//	@Param			group		body		apicommon.CreateOrganizationMemberGroupRequest	true	"Group info to create"
+//	@Success		200			{object}	apicommon.OrganizationMemberGroupInfo
+//	@Failure		400			{object}	errors.Error	"Invalid input data, or organization not found"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{orgAddress}/groups [post]
 func (a *API) createOrganizationMemberGroupHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -259,18 +259,18 @@ func (a *API) createOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string											true	"Organization address"
-//	@Param			groupID	path		string											true	"Group ID"
-//	@Param			group	body		apicommon.UpdateOrganizationMemberGroupsRequest	true	"Group info to update"
-//	@Success		200		{string}	string											"OK"
-//	@Failure		400		{object}	errors.Error									"Invalid input data, or organization/group not found"
-//	@Failure		401		{object}	errors.Error									"Unauthorized"
-//	@Failure		403		{object}	errors.Error									"Auto-generated group membership cannot be modified"
-//	@Failure		500		{object}	errors.Error									"Internal server error"
-//	@Router			/organizations/{address}/groups/{groupID} [put]
+//	@Param			orgAddress	path		string											true	"Organization address"
+//	@Param			groupId		path		string											true	"Group ID"
+//	@Param			group		body		apicommon.UpdateOrganizationMemberGroupsRequest	true	"Group info to update"
+//	@Success		200			{string}	string											"OK"
+//	@Failure		400			{object}	errors.Error									"Invalid input data, or organization/group not found"
+//	@Failure		401			{object}	errors.Error									"Unauthorized"
+//	@Failure		403			{object}	errors.Error									"Auto-generated group membership cannot be modified"
+//	@Failure		500			{object}	errors.Error									"Internal server error"
+//	@Router			/organizations/{orgAddress}/groups/{groupId} [put]
 func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *http.Request) {
 	// get the group ID from the request path
-	groupID := chi.URLParam(r, "groupID")
+	groupID := chi.URLParam(r, "groupId")
 	if groupID == "" {
 		errors.ErrInvalidData.Withf("group ID is required").Write(w)
 		return
@@ -332,17 +332,17 @@ func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string			true	"Organization address"
-//	@Param			groupID	path		string			true	"Group ID"
-//	@Success		200		{string}	string			"OK"
-//	@Failure		400		{object}	errors.Error	"Invalid input data, or organization/group not found"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		403		{object}	errors.Error	"Auto-generated group cannot be deleted"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/groups/{groupID} [delete]
+//	@Param			orgAddress	path		string			true	"Organization address"
+//	@Param			groupId		path		string			true	"Group ID"
+//	@Success		200			{string}	string			"OK"
+//	@Failure		400			{object}	errors.Error	"Invalid input data, or organization/group not found"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		403			{object}	errors.Error	"Auto-generated group cannot be deleted"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{orgAddress}/groups/{groupId} [delete]
 func (a *API) deleteOrganizationMemberGroupHandler(w http.ResponseWriter, r *http.Request) {
 	// get the member ID from the request path
-	groupID := chi.URLParam(r, "groupID")
+	groupID := chi.URLParam(r, "groupId")
 	if groupID == "" {
 		errors.ErrInvalidData.Withf("group ID is required").Write(w)
 		return
@@ -389,18 +389,18 @@ func (a *API) deleteOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string	true	"Organization address"
-//	@Param			groupID	path		string	true	"Group ID"
-//	@Param			page	query		int		false	"Page number for pagination"
-//	@Param			limit	query		int		false	"Number of items per page"
-//	@Success		200		{object}	apicommon.ListOrganizationMemberGroupResponse
-//	@Failure		400		{object}	errors.Error	"Invalid input data, or organization/group not found"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/groups/{groupID}/members [get]
+//	@Param			orgAddress	path		string	true	"Organization address"
+//	@Param			groupId		path		string	true	"Group ID"
+//	@Param			page		query		int		false	"Page number for pagination"
+//	@Param			limit		query		int		false	"Number of items per page"
+//	@Success		200			{object}	apicommon.ListOrganizationMemberGroupResponse
+//	@Failure		400			{object}	errors.Error	"Invalid input data, or organization/group not found"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{orgAddress}/groups/{groupId}/members [get]
 func (a *API) listOrganizationMemberGroupsHandler(w http.ResponseWriter, r *http.Request) {
 	// get the group ID from the request path
-	groupID := chi.URLParam(r, "groupID")
+	groupID := chi.URLParam(r, "groupId")
 	if groupID == "" {
 		errors.ErrInvalidData.Withf("group ID is required").Write(w)
 		return
@@ -468,18 +468,19 @@ func (a *API) listOrganizationMemberGroupsHandler(w http.ResponseWriter, r *http
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string									true	"Organization address"
-//	@Param			groupID	path		string									true	"Group ID"
-//	@Param			members	body		apicommon.ValidateMemberGroupRequest	true	"Members validation request"
-//	@Success		200		{string}	string									"OK"
-//	@Failure		400		{object}	errors.Error							"Invalid input data, duplicate/missing fields, or organization/group not found"
-//	@Failure		401		{object}	errors.Error							"Unauthorized"
-//	@Failure		500		{object}	errors.Error							"Internal server error"
+//	@Param			orgAddress	path		string									true	"Organization address"
+//	@Param			groupId		path		string									true	"Group ID"
+//	@Param			members		body		apicommon.ValidateMemberGroupRequest	true	"Members validation request"
+//	@Success		200			{string}	string									"OK"
+//	@Failure		400			{object}	errors.Error							"Invalid input data, duplicate/missing fields, or organization/group not found"
+//	@Failure		401			{object}	errors.Error							"Unauthorized"
+//	@Failure		500			{object}	errors.Error							"Internal server error"
 //
-//	@Router			/organizations/{address}/groups/{groupID}/validate [post]
+//	@Deprecated
+//	@Router	/organizations/{orgAddress}/groups/{groupId}/validate [post]
 func (a *API) organizationMemberGroupValidateHandler(w http.ResponseWriter, r *http.Request) {
 	// get the group ID from the request path
-	groupID := chi.URLParam(r, "groupID")
+	groupID := chi.URLParam(r, "groupId")
 	if groupID == "" {
 		errors.ErrInvalidData.Withf("group ID is required").Write(w)
 		return
