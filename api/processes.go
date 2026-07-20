@@ -330,7 +330,7 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	census, _ := a.db.Census(vp.CensusID.Hex())
-	apicommon.HTTPWriteJSON(w, apicommon.VotingProcessResponseFromDB(vp, questions, census))
+	apicommon.HTTPWriteJSON(w, apicommon.VotingProcessResponseFromDB(vp, questions, census, a.account.ChainID()))
 }
 
 // listVotingProcessesHandler godoc
@@ -386,6 +386,7 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 		Processes:  make([]apicommon.VotingProcessResponse, 0, len(list)),
 		Pagination: pagination,
 	}
+	chainID := a.account.ChainID()
 	for i := range list {
 		vp := &list[i]
 		questions, err := a.db.QuestionsByProcess(vp.ID)
@@ -394,7 +395,7 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		census, _ := a.db.Census(vp.CensusID.Hex())
-		resp.Processes = append(resp.Processes, *apicommon.VotingProcessResponseFromDB(vp, questions, census))
+		resp.Processes = append(resp.Processes, *apicommon.VotingProcessResponseFromDB(vp, questions, census, chainID))
 	}
 	apicommon.HTTPWriteJSON(w, resp)
 }

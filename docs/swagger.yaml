@@ -1839,6 +1839,11 @@ definitions:
     properties:
       census:
         $ref: '#/definitions/apicommon.CensusSpec'
+      chainId:
+        description: |-
+          ChainID is the Vochain chain id votes must be signed against; clients need it because vote
+          signatures are chain-id-bound (a mismatch makes the on-chain signer recovery diverge).
+        type: string
       description:
         $ref: '#/definitions/db.MultiLangString'
       endDate:

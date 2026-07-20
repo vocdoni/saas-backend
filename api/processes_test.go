@@ -73,6 +73,9 @@ func TestVotingProcessAuthoring(t *testing.T) {
 	)
 	c.Assert(got.ID, qt.Equals, pid)
 	c.Assert(got.Published, qt.IsFalse)
+	// chainId is exposed so clients sign votes against the right chain (vote sigs are chain-id-bound)
+	c.Assert(got.ChainID, qt.Equals, testAPI.account.ChainID())
+	c.Assert(got.ChainID, qt.Not(qt.Equals), "")
 	c.Assert(got.Questions, qt.HasLen, 2)
 	c.Assert(got.Questions[0].Type, qt.Equals, db.VotingTypeSingleChoice)
 	c.Assert(got.Questions[1].Type, qt.Equals, db.VotingTypeMultiChoice)
@@ -93,6 +96,7 @@ func TestVotingProcessAuthoring(t *testing.T) {
 		if p.ID == pid {
 			found = true
 			c.Assert(p.Questions, qt.HasLen, 2)
+			c.Assert(p.ChainID, qt.Equals, testAPI.account.ChainID())
 		}
 	}
 	c.Assert(found, qt.IsTrue)

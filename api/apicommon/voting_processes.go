@@ -91,6 +91,9 @@ type VotingProcessResponse struct {
 	StartDate   string                     `json:"startDate,omitempty"`
 	EndDate     string                     `json:"endDate,omitempty"`
 	Questions   []db.VotingProcessQuestion `json:"questions"`
+	// ChainID is the Vochain chain id votes must be signed against; clients need it because vote
+	// signatures are chain-id-bound (a mismatch makes the on-chain signer recovery diverge).
+	ChainID string `json:"chainId,omitempty"`
 }
 
 // VotingProcessListResponse is the paginated list of voting processes.
@@ -207,7 +210,7 @@ func PublicQuestionResponseFromDB(q *db.VotingProcessQuestion, census *db.Census
 // VotingProcessResponseFromDB builds the read response from a process, its (hydrated)
 // questions and its census. The census member list is never exposed — only its config.
 func VotingProcessResponseFromDB(
-	vp *db.VotingProcess, questions []db.VotingProcessQuestion, census *db.Census,
+	vp *db.VotingProcess, questions []db.VotingProcessQuestion, census *db.Census, chainID string,
 ) *VotingProcessResponse {
 	resp := &VotingProcessResponse{
 		ID:          vp.ID.Hex(),
@@ -218,6 +221,7 @@ func VotingProcessResponseFromDB(
 		Header:      vp.Header,
 		StreamURI:   vp.StreamURI,
 		Questions:   questions,
+		ChainID:     chainID,
 	}
 	if !vp.StartDate.IsZero() {
 		resp.StartDate = vp.StartDate.UTC().Format("2006-01-02T15:04:05Z")
