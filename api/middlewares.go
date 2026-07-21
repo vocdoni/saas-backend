@@ -26,6 +26,35 @@ func bearerToken(r *http.Request) string {
 	return ""
 }
 
+// optionalUser resolves the authenticated user from an optional JWT bearer token, or nil when the
+// request is anonymous or the token is absent/invalid/unverified. Unlike authenticator it never
+// writes a response — it lets an otherwise-public handler reveal extra data to an authenticated
+// user without requiring auth. JWT sessions only (API keys, which require a per-route scope, are
+// not resolved here).
+func (a *API) optionalUser(r *http.Request) *db.User {
+	raw := bearerToken(r)
+	if raw == "" || looksLikeAPIKey(raw) {
+		return nil
+	}
+	token, err := jwtauth.VerifyToken(a.auth, raw)
+	if err != nil || token == nil {
+		return nil
+	}
+	claim, ok := token.Get("userId") // the userId claim carries the user's email (see authenticator)
+	if !ok {
+		return nil
+	}
+	email, ok := claim.(string)
+	if !ok {
+		return nil
+	}
+	user, err := a.db.UserByEmail(email)
+	if err != nil || !user.Verified {
+		return nil
+	}
+	return user
+}
+
 // authenticator is a middleware that authenticates the user and returns a JWT
 // token. If successful, the decodes the user identifier (its email) from the
 // JWT token and gets the user information from the database, then adds the user
