@@ -396,6 +396,9 @@ type OrgMemberAggregationResults struct {
 	Duplicates []primitive.ObjectID `json:"duplicates" bson:"duplicates"`
 	// MissingData is a list of member IDs that had columns found to be empty
 	MissingData []primitive.ObjectID `json:"missingData" bson:"missingData"`
+	// NotFound is a list of requested member IDs that matched no member of the organization
+	// (unknown, or belonging to another org). Only populated for the explicit-memberIds path.
+	NotFound []primitive.ObjectID `json:"notFound" bson:"notFound"`
 }
 
 const (
@@ -600,8 +603,8 @@ type VotingProcess struct {
 // VotingProcessQuestion is one question of a VotingProcess. Each question maps to
 // exactly one on-chain election, identified after publish by UpstreamID. OrgAddress is
 // denormalized from the parent process so the vote relay and the status syncer can
-// resolve the owner without a join. Status is set to "ready" at publish and reconciled
-// against the chain by the status syncer (follow-up); it is empty for a draft.
+// resolve the owner without a join. Status is uppercase (matching the vochain), set to "READY"
+// at publish and reconciled against the chain by the status syncer; it is empty for a draft.
 //
 //nolint:lll
 type VotingProcessQuestion struct {
@@ -622,6 +625,14 @@ type VotingProcessQuestion struct {
 	MetadataURL       string             `json:"-" bson:"metadataURL,omitempty"`
 	Status            string             `json:"status,omitempty" bson:"status,omitempty"`
 	SyncedAt          time.Time          `json:"-" bson:"syncedAt,omitempty"`
+}
+
+// QuestionStatusRef is the minimal projection of a published question the status syncer and the
+// managed-org delete guard need: its on-chain election id, owning org, and stored status.
+type QuestionStatusRef struct {
+	UpstreamID internal.HexBytes `bson:"upstreamId"`
+	OrgAddress common.Address    `bson:"orgAddress"`
+	Status     string            `bson:"status"`
 }
 
 // HashedPhone represents a hashed phone number for database storage
@@ -686,12 +697,25 @@ const (
 	JobTypePublishProcess JobType = "publish_process"
 	// JobTypeSetProcessStatus represents a SET_PROCESS_STATUS tx job
 	JobTypeSetProcessStatus JobType = "set_process_status"
+	// JobTypeSetProcessCensus represents a SET_PROCESS_CENSUS tx job (raise maxCensusSize)
+	JobTypeSetProcessCensus JobType = "set_process_census"
 	// JobTypeRelayVote represents a vote-relay tx job
 	JobTypeRelayVote JobType = "relay_vote"
 	// JobTypePublishVotingProcess represents a multi-question voting-process publish
 	// (batch of NEW_PROCESS txs) tx job
 	JobTypePublishVotingProcess JobType = "publish_voting_process"
 )
+
+// IsValid reports whether t is one of the known job types.
+func (t JobType) IsValid() bool {
+	switch t {
+	case JobTypeOrgMembers, JobTypeCensusParticipants, JobTypePublishProcess, JobTypeSetProcessStatus,
+		JobTypeSetProcessCensus, JobTypeRelayVote, JobTypePublishVotingProcess:
+		return true
+	default:
+		return false
+	}
+}
 
 // JobStatus is the lifecycle state of a transaction job (see CreateTxJob/SetJobStatus).
 type JobStatus string

@@ -339,51 +339,45 @@ func TestOrganizationJobsHandler(t *testing.T) {
 	orgAddress := testCreateOrganization(t, token)
 
 	// Test getting jobs (should return empty list initially)
-	resp, code := testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String(), "jobs")
+	resp, code := testRequest(t, http.MethodGet, token, nil, "jobs?orgAddress="+orgAddress.String())
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
 
-	var jobsResp apicommon.JobsResponse
+	var jobsResp apicommon.JobsListResponse
 	c.Assert(json.Unmarshal(resp, &jobsResp), qt.IsNil)
 	c.Assert(jobsResp.Jobs, qt.HasLen, 0)
 	c.Assert(jobsResp.Pagination, qt.Not(qt.IsNil))
 
 	// Test with pagination parameters
-	resp, code = testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String(), "jobs?page=1&limit=5")
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+	_, code = testRequest(t, http.MethodGet, token, nil, "jobs?orgAddress="+orgAddress.String()+"&page=1&limit=5")
+	c.Assert(code, qt.Equals, http.StatusOK)
 
-	// Test with job type filter
-	resp, code = testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String(),
-		fmt.Sprintf("jobs?type=%s", string(db.JobTypeOrgMembers)))
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	resp, code = testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String(),
-		fmt.Sprintf("jobs?type=%s", string(db.JobTypeCensusParticipants)))
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	// Test with invalid job type filter
-	resp, code = testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String(), "jobs?type=invalid_type")
+	// Test with missing orgAddress
+	_, code = testRequest(t, http.MethodGet, token, nil, "jobs")
 	c.Assert(code, qt.Equals, http.StatusBadRequest)
-	c.Assert(string(resp), qt.Contains, "invalid job type")
+
+	// Test with invalid orgAddress
+	_, code = testRequest(t, http.MethodGet, token, nil, "jobs?orgAddress=invalid_address")
+	c.Assert(code, qt.Equals, http.StatusBadRequest)
 
 	// Test without authentication
-	_, code = testRequest(t, http.MethodGet, "", nil, "organizations", orgAddress.String(), "jobs")
+	_, code = testRequest(t, http.MethodGet, "", nil, "jobs?orgAddress="+orgAddress.String())
 	c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
 	// Test when user is not admin or manager
 	anotherUserToken := testCreateUser(t, "anotherpassword")
-	_, code = testRequest(t, http.MethodGet, anotherUserToken, nil, "organizations", orgAddress.String(), "jobs")
+	_, code = testRequest(t, http.MethodGet, anotherUserToken, nil, "jobs?orgAddress="+orgAddress.String())
 	c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
-	// Test with non-existent organization
+	// Test with a non-existent (no-role) organization → unauthorized
 	nonExistentAddr := common.HexToAddress("0x0000000000000000000000000000000000000001")
-	_, code = testRequest(t, http.MethodGet, token, nil, "organizations", nonExistentAddr.String(), "jobs")
-	c.Assert(code, qt.Equals, http.StatusBadRequest)
+	_, code = testRequest(t, http.MethodGet, token, nil, "jobs?orgAddress="+nonExistentAddr.String())
+	c.Assert(code, qt.Equals, http.StatusUnauthorized)
 
 	// Test with invalid pagination parameters
-	_, code = testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String(), "jobs?page=invalid")
+	_, code = testRequest(t, http.MethodGet, token, nil, "jobs?orgAddress="+orgAddress.String()+"&page=invalid")
 	c.Assert(code, qt.Equals, http.StatusBadRequest)
 
-	_, code = testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String(), "jobs?limit=invalid")
+	_, code = testRequest(t, http.MethodGet, token, nil, "jobs?orgAddress="+orgAddress.String()+"&limit=invalid")
 	c.Assert(code, qt.Equals, http.StatusBadRequest)
 }
 

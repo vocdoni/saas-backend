@@ -635,7 +635,7 @@ type CreateOrganizationRequest struct {
 	ProvisionAccount bool `json:"provisionAccount,omitempty"`
 }
 
-// CreateManagedOrganizationRequest is the body of POST /organizations/{address}/managed.
+// CreateManagedOrganizationRequest is the body of POST /integrator/organizations.
 // It carries the new organization's fields plus an optional owner to assign as its admin.
 type CreateManagedOrganizationRequest struct {
 	OrganizationInfo
@@ -650,7 +650,7 @@ type ListManagedOrganizations struct {
 }
 
 // DeleteManagedOrganizationResponse is returned by DELETE
-// /organizations/{address}/managed/{orgAddress} confirming the deleted address.
+// /integrator/organizations/{orgAddress} confirming the deleted address.
 type DeleteManagedOrganizationResponse struct {
 	Address string `json:"address"`
 }
@@ -683,7 +683,7 @@ type IntegratorLimits struct {
 	MaxEmails           int `json:"maxEmails"`
 }
 
-// IntegratorInfoResponse is returned by GET /organizations/{address}/integrator.
+// IntegratorInfoResponse is returned by the path-less GET /integrator.
 // Limits is only present when Enabled is true.
 type IntegratorInfoResponse struct {
 	Enabled bool              `json:"enabled"`
@@ -1233,22 +1233,6 @@ type AddMembersResponse struct {
 	JobID internal.HexBytes `json:"jobId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 }
 
-// AddMembersJobResponse defines the response for the status of an async job of member addition
-// swagger:model AddMembersJobResponse
-type AddMembersJobResponse struct {
-	// Number of members added
-	Added uint32 `json:"added"`
-
-	// Errors encountered during job
-	Errors []string `json:"errors"`
-
-	// Progress equals Added / Total * 100
-	Progress uint32 `json:"progress"`
-
-	// Total members in this job
-	Total uint32 `json:"total"`
-}
-
 // Request types for process operations
 
 // CreateProcessRequest defines the payload for creating a new voting process.
@@ -1330,8 +1314,8 @@ type RelayVoteResponse struct {
 // SetProcessStatusRequest is the body of PUT /process/{processId}/status.
 // swagger:model SetProcessStatusRequest
 type SetProcessStatusRequest struct {
-	// One of: ready, paused, ended, canceled
-	Status string `json:"status" example:"paused"`
+	// One of: READY, PAUSED, ENDED, CANCELED (case-insensitive on input; stored/returned uppercase)
+	Status string `json:"status" example:"PAUSED"`
 }
 
 // SetProcessStatusResponse is returned by PUT /process/{processId}/status with the
@@ -1348,18 +1332,6 @@ type SetProcessStatusResponse struct {
 type EnqueuedResponse struct {
 	// Opaque job id; poll GET /jobs/{jobId} for the outcome
 	JobID string `json:"jobId" example:"a1b2c3"`
-}
-
-// JobStatusResponse is returned by GET /jobs/{jobId}. It always responds 200; the
-// Status field carries the lifecycle state (pending|completed|failed). Result is set
-// only when completed; Error only when failed.
-// swagger:model JobStatusResponse
-type JobStatusResponse struct {
-	JobID  string        `json:"jobId"`
-	Type   db.JobType    `json:"type"`
-	Status db.JobStatus  `json:"status"`
-	Result *db.JobResult `json:"result,omitempty"`
-	Error  string        `json:"error,omitempty"`
 }
 
 // InitiateAuthRequest defines the payload for participant authentication.
@@ -1547,56 +1519,67 @@ type CreateOrganizationTicketRequest struct {
 	Description string `json:"description"`
 }
 
-// JobInfo represents a job in the API response.
-// swagger:model JobInfo
-type JobInfo struct {
-	// Unique job identifier
-	JobID string `json:"jobId"`
-
-	// Type of job
-	Type db.JobType `json:"type"`
-
-	// Total items to process
-	Total int `json:"total"`
-
-	// Items successfully processed
-	Added int `json:"added"`
-
-	// List of errors encountered
-	Errors []string `json:"errors"`
-
-	// Job creation timestamp
-	CreatedAt time.Time `json:"createdAt"`
-
-	// Job completion timestamp (zero if not completed)
-	CompletedAt time.Time `json:"completedAt"`
-
-	// Whether the job is completed
-	Completed bool `json:"completed"`
+// UnifiedJobResult is the merged result payload of GET /jobs: a superset of the tx-job outcome
+// (address/status/voteID) and the import-job counters (added/progress/total). Empty attributes are
+// omitted so a job only surfaces what its type produced.
+type UnifiedJobResult struct {
+	Address  internal.HexBytes `json:"address,omitempty" swaggertype:"string" example:"deadbeef"`
+	Status   string            `json:"status,omitempty"`
+	VoteID   internal.HexBytes `json:"voteID,omitempty" swaggertype:"string" example:"deadbeef"`
+	Added    int               `json:"added,omitempty"`
+	Progress int               `json:"progress,omitempty"`
+	Total    int               `json:"total,omitempty"`
 }
 
-// JobsResponse represents the response for listing organization jobs.
-// swagger:model JobsResponse
-type JobsResponse struct {
-	// Pagination fields
-	Pagination *Pagination `json:"pagination"`
-	// List of jobs
-	Jobs []JobInfo `json:"jobs"`
+func (r *UnifiedJobResult) isEmpty() bool {
+	return len(r.Address) == 0 && r.Status == "" && len(r.VoteID) == 0 &&
+		r.Added == 0 && r.Progress == 0 && r.Total == 0
 }
 
-// JobFromDB converts a db.Job to a JobInfo.
-func JobFromDB(job *db.Job) JobInfo {
-	if job == nil {
-		return JobInfo{}
+// JobResponse is one job in the GET /jobs list: the unified shape across import and tx jobs.
+// swagger:model JobResponse
+type JobResponse struct {
+	JobID  string            `json:"jobId"`
+	Type   db.JobType        `json:"type"`
+	Status db.JobStatus      `json:"status,omitempty"`
+	Errors []string          `json:"errors,omitempty"`
+	Result *UnifiedJobResult `json:"result,omitempty"`
+}
+
+// JobsListResponse is the paginated response of GET /jobs.
+// swagger:model JobsListResponse
+type JobsListResponse struct {
+	Pagination *Pagination   `json:"pagination"`
+	Jobs       []JobResponse `json:"jobs"`
+}
+
+// JobResponseFromDB builds the unified job response from a db.Job. Import jobs (which don't set
+// Status) fall back to completed/pending derived from CompletedAt, and expose added/progress/total;
+// tx jobs expose their Result (address/status/voteID). The result is omitted when empty.
+func JobResponseFromDB(job *db.Job) JobResponse {
+	status := job.Status
+	if status == "" {
+		status = db.JobStatusPending
+		if !job.CompletedAt.IsZero() {
+			status = db.JobStatusCompleted
+		}
 	}
-	return JobInfo{
-		JobID:       job.JobID,
-		Type:        job.Type,
-		Total:       job.Total,
-		Added:       job.Added,
-		Errors:      job.Errors,
-		CreatedAt:   job.CreatedAt,
-		CompletedAt: job.CompletedAt,
-		Completed:   !job.CompletedAt.IsZero(),
+	errs := job.Errors
+	if len(errs) == 0 && job.Error != "" {
+		errs = []string{job.Error}
 	}
+	res := &UnifiedJobResult{Added: job.Added, Total: job.Total}
+	if job.Result != nil {
+		res.Address = job.Result.Address
+		res.Status = job.Result.Status
+		res.VoteID = job.Result.VoteID
+	}
+	if job.Total > 0 {
+		res.Progress = job.Added * 100 / job.Total
+	}
+	resp := JobResponse{JobID: job.JobID, Type: job.Type, Status: status, Errors: errs}
+	if !res.isEmpty() {
+		resp.Result = res
+	}
+	return resp
 }

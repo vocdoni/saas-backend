@@ -45,7 +45,8 @@ import (
 //	@Failure		403		{object}	errors.Error					"Plan does not allow creating more drafts"
 //	@Failure		404		{object}	errors.Error					"Published census not found"
 //	@Failure		500		{object}	errors.Error					"Internal server error"
-//	@Router			/process [post]
+//	@Deprecated
+//	@Router	/process [post]
 func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 	// parse the process info from the request body
 	processInfo := &apicommon.CreateProcessRequest{}
@@ -145,7 +146,8 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		404			{object}	errors.Error					"Process not found"
 //	@Failure		409			{object}	errors.Error					"Process already published and not in draft mode"
 //	@Failure		500			{object}	errors.Error					"Internal server error"
-//	@Router			/process/{processId} [put]
+//	@Deprecated
+//	@Router	/process/{processId} [put]
 func (a *API) updateProcessHandler(w http.ResponseWriter, r *http.Request) {
 	processID := chi.URLParam(r, "processId")
 	if processID == "" {
@@ -245,7 +247,8 @@ func (a *API) updateProcessHandler(w http.ResponseWriter, r *http.Request) {
 //	@Failure		400			{object}	errors.Error	"Invalid process ID"
 //	@Failure		404			{object}	errors.Error	"Process not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
-//	@Router			/process/{processId} [get]
+//	@Deprecated
+//	@Router	/process/{processId} [get]
 func (a *API) processInfoHandler(w http.ResponseWriter, r *http.Request) {
 	processID := chi.URLParam(r, "processId")
 	if len(processID) == 0 {
@@ -433,7 +436,8 @@ func fetchExternalMetadata(ctx context.Context, url string) map[string]any {
 //	@Success		200	{object}	apicommon.ListOrganizationProcesses
 //	@Failure		404	{object}	errors.Error	"Process not found"
 //	@Failure		500	{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/processes/drafts [get]
+//	@Deprecated
+//	@Router	/organizations/{orgAddress}/processes/drafts [get]
 func (a *API) organizationListProcessDraftsHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)
@@ -496,7 +500,8 @@ func (a *API) organizationListProcessDraftsHandler(w http.ResponseWriter, r *htt
 //	@Failure		404			{object}	errors.Error	"Process not found"
 //	@Failure		409			{object}	errors.Error	"Process already published and not in draft mode"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
-//	@Router			/process/{processId} [delete]
+//	@Deprecated
+//	@Router	/process/{processId} [delete]
 func (a *API) deleteProcessHandler(w http.ResponseWriter, r *http.Request) {
 	processID := chi.URLParam(r, "processId")
 	if processID == "" {
@@ -611,7 +616,8 @@ func (a *API) reserveManagedProcessSlot(org *db.Organization, maxCensusSize uint
 //	@Failure		409			{object}	errors.Error						"A publish is already in progress for this draft"
 //	@Failure		500			{object}	errors.Error						"Internal server error"
 //	@Failure		503			{object}	errors.Error						"Transaction queue is full"
-//	@Router			/process/{processId}/publish [post]
+//	@Deprecated
+//	@Router	/process/{processId}/publish [post]
 func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 	processID := chi.URLParam(r, "processId")
 	if processID == "" {

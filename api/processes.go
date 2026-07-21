@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -61,11 +62,15 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrUnauthorized.Write(w)
 		return
 	}
-	if req.OrgAddress == (common.Address{}) {
-		errors.ErrMalformedBody.Withf("missing org address").Write(w)
+	// orgAddress is internal.HexBytes over the API (bare-hex JSON, like upstreamId); unlike
+	// common.Address it doesn't enforce a 20-byte length on decode, so validate it here. The
+	// zero address is treated as missing (it can never own an organization).
+	orgAddr := common.BytesToAddress(req.OrgAddress)
+	if len(req.OrgAddress) != common.AddressLength || orgAddr == (common.Address{}) {
+		errors.ErrMalformedBody.Withf("missing or invalid org address").Write(w)
 		return
 	}
-	if !user.HasRoleFor(req.OrgAddress, db.ManagerRole) && !user.HasRoleFor(req.OrgAddress, db.AdminRole) {
+	if !user.HasRoleFor(orgAddr, db.ManagerRole) && !user.HasRoleFor(orgAddr, db.AdminRole) {
 		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization").Write(w)
 		return
 	}
@@ -73,7 +78,7 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrMalformedBody.Withf("questions must be between 1 and %d", maxQuestionsPerProcess).Write(w)
 		return
 	}
-	if err := a.subscriptions.OrgCanCreateVotingProcessDraft(req.OrgAddress); err != nil {
+	if err := a.subscriptions.OrgCanCreateVotingProcessDraft(orgAddr); err != nil {
 		writeSubscriptionError(w, err)
 		return
 	}
@@ -82,14 +87,14 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrMalformedBody.WithErr(err).Write(w)
 		return
 	}
-	census, err := a.resolveOrCreateDefaultCensus(req.Census, req.OrgAddress)
+	census, err := a.resolveOrCreateDefaultCensus(req.Census, orgAddr)
 	if err != nil {
 		writeSubscriptionError(w, err)
 		return
 	}
 	// validate + build the questions (incl. eligibility against the census) before any process
 	// write, so a bad request rolls the census back and never creates a half-written draft.
-	built, err := a.buildQuestions(req.OrgAddress, req.Questions, census)
+	built, err := a.buildQuestions(orgAddr, req.Questions, census)
 	if err != nil {
 		_ = a.db.DelCensus(census.ID.Hex())
 		writeSubscriptionError(w, err)
@@ -97,7 +102,7 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	vp := &db.VotingProcess{
-		OrgAddress:  req.OrgAddress,
+		OrgAddress:  orgAddr,
 		Published:   false,
 		Title:       req.Title,
 		Description: req.Description,
@@ -326,7 +331,12 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	census, _ := a.db.Census(vp.CensusID.Hex())
-	apicommon.HTTPWriteJSON(w, apicommon.VotingProcessResponseFromDB(vp, questions, census))
+	// serve the stored status now; refresh each published question from the chain in the background
+	// to catch status changes made directly on-chain (outside this API).
+	for i := range questions {
+		a.enqueueReconcileIfStale(&questions[i])
+	}
+	apicommon.HTTPWriteJSON(w, apicommon.VotingProcessResponseFromDB(vp, questions, census, a.account.ChainID()))
 }
 
 // listVotingProcessesHandler godoc
@@ -368,7 +378,9 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
-	total, list, err := a.db.ListVotingProcesses(orgAddress, r.URL.Query().Get("status"), params.Page, params.Limit)
+	// stored question status is uppercase; upper-case the filter so client input stays case-insensitive.
+	statusFilter := strings.ToUpper(r.URL.Query().Get("status"))
+	total, list, err := a.db.ListVotingProcesses(orgAddress, statusFilter, params.Page, params.Limit)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
@@ -382,6 +394,7 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 		Processes:  make([]apicommon.VotingProcessResponse, 0, len(list)),
 		Pagination: pagination,
 	}
+	chainID := a.account.ChainID()
 	for i := range list {
 		vp := &list[i]
 		questions, err := a.db.QuestionsByProcess(vp.ID)
@@ -390,7 +403,7 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		census, _ := a.db.Census(vp.CensusID.Hex())
-		resp.Processes = append(resp.Processes, *apicommon.VotingProcessResponseFromDB(vp, questions, census))
+		resp.Processes = append(resp.Processes, *apicommon.VotingProcessResponseFromDB(vp, questions, census, chainID))
 	}
 	apicommon.HTTPWriteJSON(w, resp)
 }
@@ -406,7 +419,7 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 //	@Success		200			{object}	apicommon.VotingProcessValidateResponse
 //	@Failure		401			{object}	errors.Error
 //	@Failure		404			{object}	errors.Error
-//	@Router			/processes/{processId}/check [get]
+//	@Router			/processes/{processId}/validation [get]
 func (a *API) validateVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
 	oid, ok := a.votingProcessID(w, r)
 	if !ok {
@@ -482,6 +495,9 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	census, _ := a.db.Census(vp.CensusID.Hex())
+	// serve the stored status now; refresh it from the chain in the background so a status change
+	// made directly on-chain (outside this API) is picked up.
+	a.enqueueReconcileIfStale(question)
 	apicommon.HTTPWriteJSON(w, apicommon.PublicQuestionResponseFromDB(question, census))
 }
 
@@ -499,7 +515,7 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 //	@Success		200				{object}	interface{}	"Placeholder: null until participant info is surfaced"
 //	@Failure		400				{object}	errors.Error
 //	@Failure		404				{object}	errors.Error
-//	@Router			/processes/{processId}/participant/{participantId} [get]
+//	@Router			/processes/{processId}/participants/{participantId} [get]
 func (a *API) votingProcessParticipantHandler(w http.ResponseWriter, r *http.Request) {
 	oid, ok := a.votingProcessID(w, r)
 	if !ok {

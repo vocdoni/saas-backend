@@ -38,14 +38,32 @@
 //	@tag.name					census
 //	@tag.description			Census management operations
 //
+//	@tag.name					processes
+//	@tag.description			Multi-question voting process operations (create, publish, results, voter CSP flow)
+//
 //	@tag.name					process
-//	@tag.description			Voting process operations
+//	@tag.description			Legacy voting process & bundle operations (deprecated — use processes)
+//
+//	@tag.name					vote
+//	@tag.description			Vote relay operations
+//
+//	@tag.name					jobs
+//	@tag.description			Async job status (member import, census publish, vote relay)
+//
+//	@tag.name					integrator
+//	@tag.description			Integrator operations: managed organizations & API keys
+//
+//	@tag.name					csp
+//	@tag.description			Legacy CSP voter operations (deprecated — use processes)
 //
 //	@tag.name					storage
 //	@tag.description			Object storage operations
 //
 //	@tag.name					transactions
-//	@tag.description			Transaction signing operations
+//	@tag.description			Transaction signing operations (deprecated)
+//
+//	@tag.name					health
+//	@tag.description			Service health & info
 package api
 
 import (
@@ -63,6 +81,7 @@ import (
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/vocdoni/saas-backend/objectstorage"
 	"github.com/vocdoni/saas-backend/subscriptions"
@@ -110,6 +129,20 @@ type Config struct {
 	// the HTTP response is observed, restoring the happens-before that the async
 	// queue otherwise breaks. Leave false in production.
 	NotificationsSyncDelivery bool
+	// StatusSyncer enqueues question status reconciliations with the background
+	// syncer. Nil only when left unwired (e.g. tests) — enqueues become no-ops.
+	StatusSyncer StatusEnqueuer
+}
+
+// StatusEnqueuer hands question status reconciliations to the background syncer. It is satisfied by
+// *statussync.Syncer; a nil StatusEnqueuer (e.g. an API built without one in tests) makes enqueues
+// no-ops (see a.enqueueConfirm / a.enqueueReconcile).
+type StatusEnqueuer interface {
+	// EnqueueConfirm polls the chain until the question (by on-chain id) reaches expected.
+	EnqueueConfirm(upstreamID internal.HexBytes, expected string)
+	// EnqueueReconcile does one background chain read and converges the stored status to it; known
+	// is the status just served, used to guard the write against a concurrent change.
+	EnqueueReconcile(upstreamID internal.HexBytes, known string)
 }
 
 // API type represents the API HTTP server with JWT authentication capabilities.
@@ -139,6 +172,40 @@ type API struct {
 	otpExpiry       time.Duration
 	otpCooldown     time.Duration
 	notifySync      bool
+	statusSyncer    StatusEnqueuer
+}
+
+// enqueueConfirm asks the status syncer to confirm a status change landed on-chain; a no-op when
+// the syncer is disabled.
+func (a *API) enqueueConfirm(upstreamID internal.HexBytes, expected string) {
+	if a.statusSyncer != nil {
+		a.statusSyncer.EnqueueConfirm(upstreamID, expected)
+	}
+}
+
+// enqueueReconcile asks the status syncer to refresh a question's stored status from the chain in
+// the background; a no-op when the syncer is disabled.
+func (a *API) enqueueReconcile(upstreamID internal.HexBytes, known string) {
+	if a.statusSyncer != nil {
+		a.statusSyncer.EnqueueReconcile(upstreamID, known)
+	}
+}
+
+// statusReconcileMinAge throttles read-triggered reconciles: a question synced more recently than
+// this is not re-enqueued, bounding chain reads from the public question endpoint under load.
+const statusReconcileMinAge = 30 * time.Second
+
+// enqueueReconcileIfStale enqueues a background reconcile for a published question, unless it is a
+// draft (no on-chain id) or was synced within statusReconcileMinAge. Safe to call when the syncer
+// is disabled.
+func (a *API) enqueueReconcileIfStale(q *db.VotingProcessQuestion) {
+	if a.statusSyncer == nil || len(q.UpstreamID) == 0 {
+		return
+	}
+	if !q.SyncedAt.IsZero() && time.Since(q.SyncedAt) < statusReconcileMinAge {
+		return
+	}
+	a.enqueueReconcile(q.UpstreamID, q.Status)
 }
 
 // New creates a new API HTTP server. It does not start the server. Use Start() for that.
@@ -194,6 +261,7 @@ func New(ctx context.Context, conf *Config) *API {
 		otpExpiry:       otpExpiry,
 		otpCooldown:     otpCooldown,
 		notifySync:      conf.NotificationsSyncDelivery,
+		statusSyncer:    conf.StatusSyncer,
 	}
 	a.startTxQueue()
 	// clear any publishing markers stranded by a previous crash/restart so those processes are
@@ -309,7 +377,6 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, organizationMembersEndpoint, a.organizationMembersHandler)
 		handle(r, http.MethodPost, organizationAddMembersEndpoint, a.addOrganizationMembersHandler)
 		handle(r, http.MethodPut, organizationUpsertMemberEndpoint, a.upsertOrganizationMemberHandler)
-		handle(r, http.MethodGet, organizationAddMembersJobStatusEndpoint, a.addOrganizationMembersJobStatusHandler)
 		handle(r, http.MethodDelete, organizationDeleteMembersEndpoint, a.deleteOrganizationMembersHandler)
 		handle(r, http.MethodPost, organizationMetaEndpoint, a.addOrganizationMetaHandler)
 		handle(r, http.MethodPut, organizationMetaEndpoint, a.updateOrganizationMetaHandler)
@@ -323,15 +390,15 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPut, organizationGroupEndpoint, a.updateOrganizationMemberGroupHandler)
 		handle(r, http.MethodDelete, organizationGroupEndpoint, a.deleteOrganizationMemberGroupHandler)
 		handle(r, http.MethodPost, organizationGroupValidateEndpoint, a.organizationMemberGroupValidateHandler)
-		handle(r, http.MethodGet, organizationJobsEndpoint, a.organizationJobsHandler)
+		handle(r, http.MethodGet, jobsEndpoint, a.jobsHandler)
 		handle(r, http.MethodGet, organizationBundlesEndpoint, a.organizationBundlesHandler)
 		handle(r, http.MethodPost, managedOrganizationsEndpoint, a.createManagedOrganizationHandler)
 		handle(r, http.MethodGet, managedOrganizationsEndpoint, a.managedOrganizationsHandler)
 		handle(r, http.MethodDelete, managedOrganizationEndpoint, a.deleteManagedOrganizationHandler)
 		handle(r, http.MethodGet, integratorEndpoint, a.integratorInfoHandler)
-		handle(r, http.MethodPost, organizationAPIKeysEndpoint, a.createAPIKeyHandler)
-		handle(r, http.MethodGet, organizationAPIKeysEndpoint, a.apiKeysHandler)
-		handle(r, http.MethodDelete, organizationAPIKeyEndpoint, a.revokeAPIKeyHandler)
+		handle(r, http.MethodPost, integratorOrgAPIKeysEndpoint, a.createAPIKeyHandler)
+		handle(r, http.MethodGet, integratorOrgAPIKeysEndpoint, a.apiKeysHandler)
+		handle(r, http.MethodDelete, integratorOrgAPIKeyEndpoint, a.revokeAPIKeyHandler)
 		handle(r, http.MethodPost, subscriptionsCheckout, a.stripeHandlers.CreateSubscriptionCheckout)
 		handle(r, http.MethodGet, subscriptionsCheckoutSession, a.stripeHandlers.GetCheckoutSession)
 		handle(r, http.MethodGet, subscriptionsPortal, func(w http.ResponseWriter, r *http.Request) {
@@ -353,14 +420,18 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, processBundleParticipantsCheckEndpoint, a.checkProcessBundleVotedParticipantsHandler)
 		// multi-question voting processes: authoring + protected reads
 		handle(r, http.MethodPost, processesCreateEndpoint, a.createVotingProcessHandler)
+		handle(r, http.MethodPost, processesCensusValidateEndpoint, a.validateProcessCensusHandler)
 		handle(r, http.MethodGet, processesCreateEndpoint, a.listVotingProcessesHandler)
 		handle(r, http.MethodPut, processesEndpoint, a.updateVotingProcessHandler)
 		handle(r, http.MethodGet, processesEndpoint, a.votingProcessInfoHandler)
-		handle(r, http.MethodGet, processesCheckEndpoint, a.validateVotingProcessHandler)
+		handle(r, http.MethodGet, processesValidateEndpoint, a.validateVotingProcessHandler)
 		handle(r, http.MethodPost, processesPublishEndpoint, a.publishVotingProcessHandler)
 		handle(r, http.MethodPut, processesQuestionsStatusEndpoint, a.setVotingProcessQuestionsStatusHandler)
 		handle(r, http.MethodPut, processesQuestionStatusEndpoint, a.setVotingProcessQuestionStatusHandler)
 		handle(r, http.MethodGet, processesMemosEndpoint, a.votingProcessMemosHandler)
+		handle(r, http.MethodDelete, processesEndpoint, a.deleteVotingProcessHandler)
+		handle(r, http.MethodGet, processesParticipantsEndpoint, a.votingProcessParticipantsHandler)
+		handle(r, http.MethodPut, processesCensusEndpoint, a.updateVotingProcessCensusHandler)
 	})
 
 	// Public routes
@@ -410,6 +481,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, processesAuthResendEndpoint, cspHandlers.ProcessAuthResendHandler)
 		handle(r, http.MethodPost, processesSignEndpoint, cspHandlers.ProcessSignHandler)
 		handle(r, http.MethodPost, processesWeightEndpoint, cspHandlers.ProcessWeightHandler)
+		handle(r, http.MethodPost, processesSignInfoEndpoint, cspHandlers.ProcessSignInfoHandler)
 	})
 	a.router = r
 	return r

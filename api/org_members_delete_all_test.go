@@ -70,7 +70,7 @@ func TestDeleteAllOrganizationMembersDeletesGroups(t *testing.T) {
 	c.Assert(membersResponse.Pagination.CurrentPage, qt.Equals, int64(1))
 	c.Assert(membersResponse.Pagination.TotalItems, qt.Equals, int64(0))
 
-	// Verify that querying groups/{groupid}/members doesn't return anything weird
+	// Verify that querying groups/{groupId}/members doesn't return anything weird
 	{
 		groupMembersResp := requestAndParse[apicommon.ListOrganizationMemberGroupResponse](t, http.MethodGet, adminToken, nil,
 			"organizations", orgAddress.String(), "groups", groupInfo.ID, "members",

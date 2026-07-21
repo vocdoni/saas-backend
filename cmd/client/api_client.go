@@ -236,6 +236,8 @@ func stringField(obj map[string]any, key string) string {
 		if oid, ok := value["$oid"].(string); ok {
 			return strings.TrimSpace(oid)
 		}
+	default:
+		// unsupported type, fall back to the empty string below
 	}
 	return ""
 }

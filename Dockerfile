@@ -1,4 +1,5 @@
-FROM golang:1.24 AS builder
+ARG GOLANG_VERSION
+FROM golang:${GOLANG_VERSION} AS builder
 
 WORKDIR /src
 ENV CGO_ENABLED=1

@@ -10,6 +10,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.vocdoni.io/proto/build/go/models"
 )
 
 // TestDeleteManagedOrg exercises DELETE /integrator/organizations/{orgAddress}:
@@ -71,7 +72,7 @@ func TestDeleteManagedOrg(t *testing.T) {
 	managedWithPlan := enableProcessPlan(t, managed.Address)
 	activeDraft := seedDraftForManagedOrg(t, managed.Address)
 	pubJob := enqueueAndPollJob(t, http.MethodPost, token, nil, "process", activeDraft.Hex(), "publish")
-	c.Assert(pubJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish error: %s", pubJob.Error))
+	c.Assert(pubJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish error: %s", pubJob.Errors))
 	c.Assert(len(pubJob.Result.Address) > 0, qt.IsTrue)
 
 	// the published election autostarts (ElectionType.Autostart), so it is READY on-chain → 409.
@@ -92,7 +93,7 @@ func TestDeleteManagedOrg(t *testing.T) {
 	ended := enqueueAndPollJob(t, http.MethodPut, token,
 		&apicommon.SetProcessStatusRequest{Status: "ended"},
 		"process", activeDraft.Hex(), "status")
-	c.Assert(ended.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("status error: %s", ended.Error))
+	c.Assert(ended.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("status error: %s", ended.Errors))
 
 	// sanity: the now-ended election still belongs to the managed org before teardown
 	_, publishedBefore, err := testDB.ListProcesses(managed.Address, 1, 100, db.PublishedOnly)
@@ -126,6 +127,64 @@ func TestDeleteManagedOrg(t *testing.T) {
 	// We don't exercise a second create here to keep the test's on-chain footprint minimal
 	// (each managed-org create funds a faucet account), avoiding CI email-delivery timeouts.
 	_ = managedWithPlan
+}
+
+// TestDeleteManagedOrgQuestionGuard covers the new /processes question delete guard specifically
+// (emmdim review): a managed org whose only active election is surfaced as a /processes question
+// (no legacy Process row, so the legacy loop passes) is blocked with 409 while that question's
+// election is READY on-chain, and deletable once it is ENDED. This exercises the chain-based guard
+// added in place of the stored-status CountActiveQuestions check.
+func TestDeleteManagedOrgQuestionGuard(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "qguardadminpass123")
+	integratorAddr := testCreateOrganization(t, token)
+
+	integratorOrg, err := testDB.Organization(integratorAddr)
+	c.Assert(err, qt.IsNil)
+	integratorOrg.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 1}
+	c.Assert(testDB.SetOrganization(integratorOrg), qt.IsNil)
+
+	managed := requestAndParse[apicommon.OrganizationInfo](
+		t, http.MethodPost, token,
+		&apicommon.CreateManagedOrganizationRequest{OrganizationInfo: apicommon.OrganizationInfo{
+			Type:    string(db.CompanyType),
+			Website: "https://managed-qguard.example",
+		}},
+		"integrator", "organizations",
+	)
+	c.Assert(managed.Address, qt.Not(qt.Equals), common.Address{})
+	enableProcessPlan(t, managed.Address)
+
+	cspPubKey, err := testCSP.PubKey()
+	c.Assert(err, qt.IsNil)
+
+	// a READY election owned by the managed org, surfaced only as a /processes question — there is no
+	// legacy Process row, so the legacy active-election loop passes and only the question guard can block.
+	election := newSyncTestElection(t, token, managed.Address, cspPubKey)
+	vpID, err := testDB.SetVotingProcess(&db.VotingProcess{
+		OrgAddress: managed.Address, Published: true,
+		Title: db.MultiLangString{"default": "Guard process"}, //nolint:goconst
+	})
+	c.Assert(err, qt.IsNil)
+	_, err = testDB.SetQuestion(&db.VotingProcessQuestion{
+		ProcessID: vpID, OrgAddress: managed.Address, Order: 0,
+		Title: db.MultiLangString{"default": "Q"}, UpstreamID: election, Status: db.QuestionStatusReady,
+	})
+	c.Assert(err, qt.IsNil)
+
+	// READY question election → blocked with 409, nothing deleted.
+	_, code := testRequest(t, http.MethodDelete, token, nil, "integrator", "organizations", managed.Address.String())
+	c.Assert(code, qt.Equals, http.StatusConflict)
+	_, err = testDB.Organization(managed.Address)
+	c.Assert(err, qt.IsNil)
+
+	// end the election → ENDED is terminal (not READY/PAUSED), so the guard passes and delete succeeds.
+	setSyncTestElectionStatus(t, token, managed.Address, election, models.ProcessStatus_ENDED)
+	waitForElectionStatus(t, election, "ENDED", "RESULTS")
+	resp := requestAndParse[apicommon.DeleteManagedOrganizationResponse](
+		t, http.MethodDelete, token, nil, "integrator", "organizations", managed.Address.String(),
+	)
+	c.Assert(resp.Address, qt.Equals, managed.Address.String())
 }
 
 // enableProcessPlan subscribes the managed org to a process-capable plan so publish is allowed.

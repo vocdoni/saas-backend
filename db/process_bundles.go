@@ -12,6 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.vocdoni.io/dvote/log"
 )
 
 // SetProcessBundle creates a new process bundle or updates an existing one.
@@ -121,9 +122,8 @@ func (ms *MongoStorage) ProcessBundles() ([]*ProcessesBundle, error) {
 		return nil, fmt.Errorf("failed to find process bundles: %w", err)
 	}
 	defer func() {
-		err := cursor.Close(ctx)
-		if err != nil {
-			fmt.Println("failed to close cursor")
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("failed to close cursor", "error", err)
 		}
 	}()
 
@@ -153,9 +153,8 @@ func (ms *MongoStorage) ProcessBundlesByProcess(processID internal.HexBytes) ([]
 		return nil, fmt.Errorf("failed to find process bundles by process ID: %w", err)
 	}
 	defer func() {
-		err := cursor.Close(ctx)
-		if err != nil {
-			fmt.Println("failed to close cursor")
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("failed to close cursor", "error", err)
 		}
 	}()
 
@@ -185,9 +184,8 @@ func (ms *MongoStorage) ProcessBundlesByOrg(orgAddress common.Address) ([]*Proce
 		return nil, fmt.Errorf("failed to find process bundles by organization: %w", err)
 	}
 	defer func() {
-		err := cursor.Close(ctx)
-		if err != nil {
-			fmt.Println("failed to close cursor")
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("failed to close cursor", "error", err)
 		}
 	}()
 
@@ -233,7 +231,7 @@ func (ms *MongoStorage) ProcessBundlesByCensus(census *Census) ([]*ProcessesBund
 	}
 	defer func() {
 		if err := cursor.Close(ctx); err != nil {
-			fmt.Printf("failed to close cursor: %v", err)
+			log.Warnw("failed to close cursor", "error", err)
 		}
 	}()
 

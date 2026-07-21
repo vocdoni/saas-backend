@@ -63,7 +63,7 @@ func TestProcessCSP(t *testing.T) {
 	pid := created.ProcessID
 
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
-	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Error))
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
 
 	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
 	c.Assert(got.Questions, qt.HasLen, 2)
@@ -131,6 +131,33 @@ func TestProcessCSP(t *testing.T) {
 			Payload:   hex.EncodeToString(voter.Address().Bytes()),
 		}, "processes", pid, "sign")
 	c.Assert(sign0.Signature, qt.Not(qt.HasLen), 0)
+
+	// sign-info: member 0's consumed address + nullifier for the open election are now available
+	signInfo := requestAndParse[handlers.ProcessSignInfoResponse](t, http.MethodPost, "",
+		&handlers.ConsumedAddressRequest{AuthToken: tok0}, "processes", pid, "sign-info")
+	c.Assert(signInfo.Consumed, qt.HasLen, 1) // only the open election was signed
+	c.Assert(bytes.Equal(signInfo.Consumed[0].UpstreamID, openElection), qt.IsTrue)
+	c.Assert(bytes.Equal(signInfo.Consumed[0].Address, voter.Address().Bytes()), qt.IsTrue)
+	c.Assert(signInfo.Consumed[0].Nullifier, qt.Not(qt.HasLen), 0)
+
+	// participants (manager): member 0 matched by email, voted only the open election
+	pc := requestAndParse[apicommon.ProcessParticipantsResponse](t, http.MethodGet, token, nil,
+		"processes", pid, "participants?field="+string(db.OrgMemberLookupFieldEmail)+"&value="+members[0].Email)
+	c.Assert(pc.Participants, qt.HasLen, 1)
+	c.Assert(pc.Participants[0].MemberID, qt.Equals, members[0].ID)
+	votedOpen := false
+	for _, qv := range pc.Participants[0].Questions {
+		if bytes.Equal(qv.UpstreamID, openElection) {
+			c.Assert(qv.HasVoted, qt.IsTrue)
+			votedOpen = true
+		} else {
+			c.Assert(qv.HasVoted, qt.IsFalse)
+		}
+	}
+	c.Assert(votedOpen, qt.IsTrue)
+	// the participant lookup is Manager/Admin only
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodGet, "", nil,
+		"processes", pid, "participants?field="+string(db.OrgMemberLookupFieldEmail)+"&value="+members[0].Email)
 
 	// --- second member: authenticates but is not eligible for the restricted question ---
 	tok1 := authProcessCSP(t, pid, authReq(1))

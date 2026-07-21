@@ -390,7 +390,7 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 		pw.abandon()
 		return nil, fmt.Errorf("publish did not confirm all questions after %d rounds", maxPublishRounds)
 	}
-	if e := a.db.SetVotingProcessPublished(pw.vp.ID); e != nil {
+	if e := a.db.SetVotingProcessPublished(pw.vp.ID, pw.resolveStartDate()); e != nil {
 		// every election is already on-chain and its question persisted; clear the marker so a
 		// retry can re-run and simply re-mark the process published (pending is empty → no new
 		// elections). Leaving it set would make the process permanently unclaimable.
@@ -405,6 +405,19 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 		}
 	}
 	return &db.JobResult{Status: "READY"}, nil //nolint:goconst
+}
+
+// resolveStartDate returns the start date to persist on the process once its elections are
+// confirmed. An empty startDate becomes "start at the mined block" (StartTime=0) and a past
+// startDate is moved to "now" at build time (see electionStartDuration), so in both cases the
+// elections started at the block just mined and "now" is within seconds of the real start; a
+// still-future requested date is kept as-is. The N per-question elections may even mine in
+// different blocks (retry rounds), so a single exact chain date does not exist anyway.
+func (pw *publishWorker) resolveStartDate() time.Time {
+	if pw.vp.StartDate.After(time.Now()) {
+		return pw.vp.StartDate
+	}
+	return time.Now()
 }
 
 // abandon rolls back a failed/aborted publish: it resets the not-yet-mined questions (so a later
@@ -696,7 +709,8 @@ func (a *API) enqueueStatusChange(
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	statusStr := strings.ToLower(status.String())
+	// stored uppercase to match the vochain (status.String() is already uppercase).
+	statusStr := status.String()
 	orgLock := a.orgTxLocks.lock(org.Address)
 	if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
 		defer orgLock.Unlock()
@@ -719,6 +733,9 @@ func (a *API) enqueueStatusChange(
 			if err := a.db.SetQuestionStatus(published[i].ID, statusStr); err != nil {
 				log.Warnw("could not persist question status", "error", err)
 			}
+			// confirm the change landed on-chain in the background, correcting the optimistic
+			// write above if the tx never reaches the requested status.
+			a.enqueueConfirm(published[i].UpstreamID, statusStr)
 		}
 		return &db.JobResult{Status: statusStr}, nil
 	}}) {
@@ -732,9 +749,10 @@ func (a *API) enqueueStatusChange(
 	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, &apicommon.EnqueuedResponse{JobID: jobID})
 }
 
-// parseProcessStatus maps a status string to the on-chain enum.
+// parseProcessStatus maps a status string to the on-chain enum. Input is accepted case-insensitively
+// (upper-cased to match the uppercase QuestionStatus* constants).
 func parseProcessStatus(s string) (models.ProcessStatus, bool) {
-	switch strings.ToLower(s) {
+	switch strings.ToUpper(s) {
 	case db.QuestionStatusReady:
 		return models.ProcessStatus_READY, true
 	case db.QuestionStatusPaused:

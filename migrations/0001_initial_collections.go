@@ -15,6 +15,13 @@ func init() {
 	AddMigration(1, "initial_collections", upInitialCollections, downInitialCollections)
 }
 
+// Shared validator description strings, reused across collection validators.
+const (
+	descRequiredInt    = "must be an integer and is required"
+	descRequiredEmail  = "must be an email and is required"
+	descRequiredString = "must be a string and is required"
+)
+
 var collectionsToCreate = []string{
 	"users",
 	"verifications",
@@ -48,17 +55,17 @@ var usersCollectionValidator = bson.M{
 		"properties": bson.M{
 			"id": bson.M{
 				"bsonType":    "int",
-				"description": "must be an integer and is required",
+				"description": descRequiredInt,
 				"minimum":     1,
 			},
 			"email": bson.M{
 				"bsonType":    "string",
-				"description": "must be an email and is required",
+				"description": descRequiredEmail,
 				"pattern":     internal.EmailRegexTemplate,
 			},
 			"password": bson.M{
 				"bsonType":    "string",
-				"description": "must be a string and is required",
+				"description": descRequiredString,
 				"minLength":   8,
 			},
 		},
@@ -72,7 +79,7 @@ var organizationInvitesCollectionValidator = bson.M{
 		"properties": bson.M{
 			"invitationCode": bson.M{
 				"bsonType":    "string",
-				"description": "must be a string and is required",
+				"description": descRequiredString,
 				"minimum":     6,
 				"pattern":     `^[\w]{6,}$`,
 			},
@@ -82,13 +89,13 @@ var organizationInvitesCollectionValidator = bson.M{
 			},
 			"currentUserID": bson.M{
 				"bsonType":    "long",
-				"description": "must be an integer and is required",
+				"description": descRequiredInt,
 				"minimum":     1,
 				"pattern":     `^[1-9]+$`,
 			},
 			"newUserEmail": bson.M{
 				"bsonType":    "string",
-				"description": "must be an email and is required",
+				"description": descRequiredEmail,
 				"pattern":     internal.EmailRegexTemplate,
 			},
 			"expiration": bson.M{
@@ -106,7 +113,7 @@ var subscriptionCollectionValidator = bson.M{
 		"properties": bson.M{
 			"id": bson.M{
 				"bsonType":    "int",
-				"description": "must be an integer and is required",
+				"description": descRequiredInt,
 				"minimum":     1,
 			},
 			"name": bson.M{

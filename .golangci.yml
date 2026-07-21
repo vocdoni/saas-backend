@@ -6,6 +6,12 @@ linters:
     - misspell
     - revive
   settings:
+    goconst:
+      ignore-tests: true # repeated literals in test fixtures are fine
+      ignore-string-values:
+        # single-token strings are overwhelmingly bson field names, mongo query
+        # operators ($set, $exists...) and schema keys; consting them adds churn
+        - '^[\w.$-]+$'
     lll:
       line-length: 130
     revive:
@@ -15,6 +21,14 @@ linters:
         disabled: true
       - name: unnecessary-format # we prefer fmt.Errorf rather than errors.New
         disabled: true
+      - name: unhandled-error # ignore errors from stdout printing and in-memory writers (which never fail)
+        arguments:
+          - "fmt\\.Print(f|ln)?"
+          - "fmt\\.Fprint(f|ln)?"
+          - "strings\\.Builder\\.WriteString"
+          - "bytes\\.Buffer\\.Write"
+      - name: package-naming # the errors package intentionally mirrors the stdlib name
+        exclude: ["**/errors/*.go"]
       - name: function-length # test funcs are usually long and complex, and that's ok
         exclude: ["**/*_test.go"]
       - name: cognitive-complexity # test funcs are usually long and complex, and that's ok

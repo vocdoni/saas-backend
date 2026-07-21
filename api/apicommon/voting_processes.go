@@ -3,7 +3,6 @@ package apicommon
 //revive:disable:max-public-structs
 
 import (
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -17,6 +16,9 @@ type CensusSpec struct {
 	TwoFaFields db.OrgMemberTwoFaFields `json:"twoFaFields,omitempty"`
 	GroupID     string                  `json:"groupId,omitempty"`
 	MemberIDs   []string                `json:"memberIds,omitempty"`
+	// Size is the number of members in the census. Response-only (ignored on create/update): for a
+	// published process it equals the on-chain maxCensusSize of its whole-census questions.
+	Size int64 `json:"size,omitempty"`
 }
 
 // EligibilitySpec is an optional per-question subset of the process census, resolved to a
@@ -42,7 +44,7 @@ type VotingProcessQuestionRequest struct {
 // CreateVotingProcessRequest is the body of POST /processes (also used by PUT to update a
 // draft). Common params are shared by every question.
 type CreateVotingProcessRequest struct {
-	OrgAddress  common.Address                 `json:"orgAddress"`
+	OrgAddress  internal.HexBytes              `json:"orgAddress" swaggertype:"string" format:"hex" example:"a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"` //nolint:lll
 	Census      CensusSpec                     `json:"census"`
 	Title       db.MultiLangString             `json:"title"`
 	Description db.MultiLangString             `json:"description,omitempty"`
@@ -51,6 +53,23 @@ type CreateVotingProcessRequest struct {
 	StartDate   string                         `json:"startDate,omitempty"`
 	EndDate     string                         `json:"endDate,omitempty"`
 	Questions   []VotingProcessQuestionRequest `json:"questions"`
+}
+
+// ValidateProcessCensusRequest is the body of POST /processes/census/validation: the same
+// orgAddress + census block as a create request, checked for member-field duplicates / missing data
+// before the process is created.
+type ValidateProcessCensusRequest struct {
+	OrgAddress internal.HexBytes `json:"orgAddress" swaggertype:"string" format:"hex" example:"a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"` //nolint:lll
+	Census     CensusSpec        `json:"census"`
+}
+
+// UpdateProcessCensusResponse is the result of PUT /processes/{processId}/census: the number of
+// members added to the census synchronously, plus the async job id that raises each published
+// election's maxCensusSize on-chain (empty when no on-chain update was needed).
+type UpdateProcessCensusResponse struct {
+	JobID  string   `json:"jobId,omitempty"`
+	Added  uint32   `json:"added"`
+	Errors []string `json:"errors,omitempty"`
 }
 
 // CreateVotingProcessResponse is returned by POST /processes.
@@ -62,7 +81,7 @@ type CreateVotingProcessResponse struct {
 // and list endpoints. Questions are fully hydrated (including the synced status).
 type VotingProcessResponse struct {
 	ID          string                     `json:"id"`
-	OrgAddress  common.Address             `json:"orgAddress"`
+	OrgAddress  internal.HexBytes          `json:"orgAddress" swaggertype:"string" format:"hex" example:"a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"` //nolint:lll
 	Published   bool                       `json:"published"`
 	Census      CensusSpec                 `json:"census"`
 	Title       db.MultiLangString         `json:"title"`
@@ -72,6 +91,9 @@ type VotingProcessResponse struct {
 	StartDate   string                     `json:"startDate,omitempty"`
 	EndDate     string                     `json:"endDate,omitempty"`
 	Questions   []db.VotingProcessQuestion `json:"questions"`
+	// ChainID is the Vochain chain id votes must be signed against; clients need it because vote
+	// signatures are chain-id-bound (a mismatch makes the on-chain signer recovery diverge).
+	ChainID string `json:"chainId,omitempty"`
 }
 
 // VotingProcessListResponse is the paginated list of voting processes.
@@ -117,10 +139,35 @@ type VotingProcessValidateResponse struct {
 	Errors []string `json:"errors"`
 }
 
+// ProcessParticipantQuestionVote is one question's voted status for a matched participant
+// (hasVoted is true when the member has consumed that question's on-chain election).
+type ProcessParticipantQuestionVote struct {
+	QuestionID string            `json:"questionId"`
+	UpstreamID internal.HexBytes `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	HasVoted   bool              `json:"hasVoted"`
+}
+
+// ProcessParticipantEntry is a matched org member that is also a participant of the process
+// census, with its per-question voted status.
+type ProcessParticipantEntry struct {
+	MemberID     string                           `json:"memberId"`
+	Name         string                           `json:"name,omitempty"`
+	Surname      string                           `json:"surname,omitempty"`
+	Email        string                           `json:"email,omitempty"`
+	MemberNumber string                           `json:"memberNumber,omitempty"`
+	Questions    []ProcessParticipantQuestionVote `json:"questions"`
+}
+
+// ProcessParticipantsResponse holds the members matching the lookup that are participants of
+// the process census (empty when none match).
+type ProcessParticipantsResponse struct {
+	Participants []ProcessParticipantEntry `json:"participants"`
+}
+
 // SetQuestionsStatusRequest changes the on-chain status of many questions of a process to a
 // single target status. An empty Questions list targets every published question.
 type SetQuestionsStatusRequest struct {
-	Status    string             `json:"status" example:"ended"`
+	Status    string             `json:"status" example:"ENDED"`
 	Questions []QuestionStatusID `json:"questions,omitempty"`
 }
 
@@ -179,17 +226,18 @@ func PublicQuestionResponseFromDB(q *db.VotingProcessQuestion, census *db.Census
 // VotingProcessResponseFromDB builds the read response from a process, its (hydrated)
 // questions and its census. The census member list is never exposed — only its config.
 func VotingProcessResponseFromDB(
-	vp *db.VotingProcess, questions []db.VotingProcessQuestion, census *db.Census,
+	vp *db.VotingProcess, questions []db.VotingProcessQuestion, census *db.Census, chainID string,
 ) *VotingProcessResponse {
 	resp := &VotingProcessResponse{
 		ID:          vp.ID.Hex(),
-		OrgAddress:  vp.OrgAddress,
+		OrgAddress:  vp.OrgAddress.Bytes(),
 		Published:   vp.Published,
 		Title:       vp.Title,
 		Description: vp.Description,
 		Header:      vp.Header,
 		StreamURI:   vp.StreamURI,
 		Questions:   questions,
+		ChainID:     chainID,
 	}
 	if !vp.StartDate.IsZero() {
 		resp.StartDate = vp.StartDate.UTC().Format("2006-01-02T15:04:05Z")
@@ -202,6 +250,7 @@ func VotingProcessResponseFromDB(
 			Weighted:    census.Weighted,
 			AuthFields:  census.AuthFields,
 			TwoFaFields: census.TwoFaFields,
+			Size:        census.Size,
 		}
 	}
 	return resp

@@ -69,7 +69,7 @@ func TestPublishProcess(t *testing.T) {
 
 	// publish: async — returns 202 + jobId, then poll until completed
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "process", draftID.Hex(), "publish")
-	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", job.Error))
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", job.Errors))
 	c.Assert(job.Type, qt.Equals, db.JobTypePublishProcess)
 	c.Assert(job.Result, qt.Not(qt.IsNil))
 	c.Assert(len(job.Result.Address) > 0, qt.IsTrue)

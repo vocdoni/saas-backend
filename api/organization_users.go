@@ -25,13 +25,13 @@ import (
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string	true	"Organization address"
-//	@Success		200		{object}	apicommon.OrganizationUsers
-//	@Failure		400		{object}	errors.Error	"Invalid input data"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		404		{object}	errors.Error	"Organization not found"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/users [get]
+//	@Param			orgAddress	path		string	true	"Organization address"
+//	@Success		200			{object}	apicommon.OrganizationUsers
+//	@Failure		400			{object}	errors.Error	"Invalid input data"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		404			{object}	errors.Error	"Organization not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{orgAddress}/users [get]
 func (a *API) organizationUsersHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -91,14 +91,14 @@ func (a *API) organizationUsersHandler(w http.ResponseWriter, r *http.Request) {
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string							true	"Organization address"
-//	@Param			request	body		apicommon.OrganizationInvite	true	"Invitation information"
-//	@Success		200		{string}	string							"OK"
-//	@Failure		400		{object}	errors.Error					"Invalid input data"
-//	@Failure		401		{object}	errors.Error					"Unauthorized"
-//	@Failure		409		{object}	errors.Error					"User already has a role in the organization"
-//	@Failure		500		{object}	errors.Error					"Internal server error"
-//	@Router			/organizations/{address}/users [post]
+//	@Param			orgAddress	path		string							true	"Organization address"
+//	@Param			request		body		apicommon.OrganizationInvite	true	"Invitation information"
+//	@Success		200			{string}	string							"OK"
+//	@Failure		400			{object}	errors.Error					"Invalid input data"
+//	@Failure		401			{object}	errors.Error					"Unauthorized"
+//	@Failure		409			{object}	errors.Error					"User already has a role in the organization"
+//	@Failure		500			{object}	errors.Error					"Internal server error"
+//	@Router			/organizations/{orgAddress}/users [post]
 func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -200,15 +200,15 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 //	@Tags			organizations
 //	@Accept			json
 //	@Produce		json
-//	@Param			address	path		string									true	"Organization address"
-//	@Param			request	body		apicommon.AcceptOrganizationInvitation	true	"Invitation acceptance information"
-//	@Success		200		{string}	string									"OK"
-//	@Failure		400		{object}	errors.Error							"Invalid input data"
-//	@Failure		401		{object}	errors.Error							"Unauthorized or invalid invitation"
-//	@Failure		409		{object}	errors.Error							"User already has a role in the organization"
-//	@Failure		410		{object}	errors.Error							"Invitation expired"
-//	@Failure		500		{object}	errors.Error							"Internal server error"
-//	@Router			/organizations/{address}/users/accept [post]
+//	@Param			orgAddress	path		string									true	"Organization address"
+//	@Param			request		body		apicommon.AcceptOrganizationInvitation	true	"Invitation acceptance information"
+//	@Success		200			{string}	string									"OK"
+//	@Failure		400			{object}	errors.Error							"Invalid input data"
+//	@Failure		401			{object}	errors.Error							"Unauthorized or invalid invitation"
+//	@Failure		409			{object}	errors.Error							"User already has a role in the organization"
+//	@Failure		410			{object}	errors.Error							"Invitation expired"
+//	@Failure		500			{object}	errors.Error							"Internal server error"
+//	@Router			/organizations/{orgAddress}/users/accept [post]
 func (a *API) acceptOrganizationUserInvitationHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
 	org, _, ok := a.organizationFromRequest(r)
@@ -312,14 +312,14 @@ func (a *API) acceptOrganizationUserInvitationHandler(w http.ResponseWriter, r *
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address			path		string			true	"Organization address"
-//	@Param			invitationID	path		string			true	"Invitation ID"
+//	@Param			orgAddress		path		string			true	"Organization address"
+//	@Param			invitationId	path		string			true	"Invitation ID"
 //	@Success		200				{string}	string			"OK"
 //	@Failure		400				{object}	errors.Error	"Invalid input data"
 //	@Failure		401				{object}	errors.Error	"Unauthorized"
 //	@Failure		400				{object}	errors.Error	"Invalid data - invitation not found"
 //	@Failure		500				{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/users/pending/{invitationID} [put]
+//	@Router			/organizations/{orgAddress}/users/pending/{invitationId} [put]
 func (a *API) updatePendingUserInvitationHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -338,7 +338,7 @@ func (a *API) updatePendingUserInvitationHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	invitationID := chi.URLParam(r, "invitationID")
+	invitationID := chi.URLParam(r, "invitationId")
 	if invitationID == "" {
 		errors.ErrMalformedBody.With("invitation ID not provided").Write(w)
 		return
@@ -408,14 +408,14 @@ func (a *API) updatePendingUserInvitationHandler(w http.ResponseWriter, r *http.
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address			path		string			true	"Organization address"
-//	@Param			invitationID	path		string			true	"Invitation ID"
+//	@Param			orgAddress		path		string			true	"Organization address"
+//	@Param			invitationId	path		string			true	"Invitation ID"
 //	@Success		200				{string}	string			"OK"
 //	@Failure		400				{object}	errors.Error	"Invalid input data"
 //	@Failure		401				{object}	errors.Error	"Unauthorized"
 //	@Failure		400				{object}	errors.Error	"Invalid data - invitation not found"
 //	@Failure		500				{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/users/pending/{invitationID} [delete]
+//	@Router			/organizations/{orgAddress}/users/pending/{invitationId} [delete]
 func (a *API) deletePendingUserInvitationHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -434,7 +434,7 @@ func (a *API) deletePendingUserInvitationHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	invitationID := chi.URLParam(r, "invitationID")
+	invitationID := chi.URLParam(r, "invitationId")
 	if invitationID == "" {
 		errors.ErrMalformedBody.With("invitation ID not provided").Write(w)
 		return
@@ -477,13 +477,13 @@ func (a *API) deletePendingUserInvitationHandler(w http.ResponseWriter, r *http.
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string	true	"Organization address"
-//	@Success		200		{object}	apicommon.OrganizationInviteList
-//	@Failure		400		{object}	errors.Error	"Invalid input data"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		404		{object}	errors.Error	"Organization not found"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/users/pending [get]
+//	@Param			orgAddress	path		string	true	"Organization address"
+//	@Success		200			{object}	apicommon.OrganizationInviteList
+//	@Failure		400			{object}	errors.Error	"Invalid input data"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		404			{object}	errors.Error	"Organization not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{orgAddress}/users/pending [get]
 func (a *API) pendingOrganizationUsersHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -549,18 +549,18 @@ func (*API) organizationRolesHandler(w http.ResponseWriter, _ *http.Request) {
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string										true	"Organization address"
-//	@Param			userid	path		string										true	"User ID"
-//	@Param			request	body		apicommon.UpdateOrganizationUserRoleRequest	true	"Update user role information"
-//	@Success		200		{string}	string										"OK"
-//	@Failure		400		{object}	errors.Error								"Invalid input data"
-//	@Failure		401		{object}	errors.Error								"Unauthorized"
-//	@Failure		404		{object}	errors.Error								"Organization not found"
+//	@Param			orgAddress	path		string										true	"Organization address"
+//	@Param			userId		path		string										true	"User ID"
+//	@Param			request		body		apicommon.UpdateOrganizationUserRoleRequest	true	"Update user role information"
+//	@Success		200			{string}	string										"OK"
+//	@Failure		400			{object}	errors.Error								"Invalid input data"
+//	@Failure		401			{object}	errors.Error								"Unauthorized"
+//	@Failure		404			{object}	errors.Error								"Organization not found"
 //
 // Note: The implementation returns 200 OK even for non-existent users
 //
-//	@Failure		500		{object}	errors.Error								"Internal server error"
-//	@Router			/organizations/{address}/users/{userid} [put]
+//	@Failure		500			{object}	errors.Error								"Internal server error"
+//	@Router			/organizations/{orgAddress}/users/{userId} [put]
 func (a *API) updateOrganizationUserHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -579,7 +579,7 @@ func (a *API) updateOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	// get the user ID from the request path
-	userID := chi.URLParam(r, "userid")
+	userID := chi.URLParam(r, "userId")
 	if userID == "" {
 		errors.ErrMalformedBody.With("user ID not provided").Write(w)
 		return
@@ -638,18 +638,18 @@ func (a *API) updateOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string			true	"Organization address"
-//	@Param			userid	path		string			true	"User ID"
-//	@Success		200		{string}	string			"OK"
-//	@Failure		400		{object}	errors.Error	"Invalid input data"
-//	@Failure		401		{object}	errors.Error	"Unauthorized"
-//	@Failure		404		{object}	errors.Error	"Organization not found"
+//	@Param			orgAddress	path		string			true	"Organization address"
+//	@Param			userId		path		string			true	"User ID"
+//	@Success		200			{string}	string			"OK"
+//	@Failure		400			{object}	errors.Error	"Invalid input data"
+//	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		404			{object}	errors.Error	"Organization not found"
 //
 // Note: The implementation returns 200 OK even for non-existent users
 //
-//	@Failure		400		{object}	errors.Error	"Invalid input data - User cannot remove itself"
-//	@Failure		500		{object}	errors.Error	"Internal server error"
-//	@Router			/organizations/{address}/users/{userid} [delete]
+//	@Failure		400			{object}	errors.Error	"Invalid input data - User cannot remove itself"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/organizations/{orgAddress}/users/{userId} [delete]
 func (a *API) removeOrganizationUserHandler(w http.ResponseWriter, r *http.Request) {
 	// get the user from the request context
 	user, ok := apicommon.UserFromContext(r.Context())
@@ -668,7 +668,7 @@ func (a *API) removeOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	// get the user ID from the request path
-	userID := chi.URLParam(r, "userid")
+	userID := chi.URLParam(r, "userId")
 	if userID == "" {
 		errors.ErrMalformedBody.With("user ID not provided").Write(w)
 		return

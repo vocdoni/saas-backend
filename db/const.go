@@ -27,11 +27,11 @@ const (
 	MaxVoteOverwritesPerProcess = 10
 
 	// Voting-process question status values (derived at read; empty means draft).
-	QuestionStatusReady    = "ready"
-	QuestionStatusPaused   = "paused"
-	QuestionStatusEnded    = "ended"
-	QuestionStatusCanceled = "canceled"
-	QuestionStatusResults  = "results"
+	QuestionStatusReady    = "READY"
+	QuestionStatusPaused   = "PAUSED"
+	QuestionStatusEnded    = "ENDED"
+	QuestionStatusCanceled = "CANCELED"
+	QuestionStatusResults  = "RESULTS"
 
 	// Voting-process question ballot types (translated into on-chain vote options).
 	VotingTypeSingleChoice = "singlechoice"

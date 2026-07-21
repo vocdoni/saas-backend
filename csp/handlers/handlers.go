@@ -146,7 +146,8 @@ func (c *CSPHandlers) handleAuthStep(w http.ResponseWriter, r *http.Request,
 //	@Failure		404			{object}	errors.Error	"Bundle not found, census not found, organization not found"
 //	@Failure		404			{object}	errors.Error	"census participant not found (ErrCensusParticipantNotFound)"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
-//	@Router			/process/bundle/{bundleId}/auth/{step} [post]
+//	@Deprecated
+//	@Router	/process/bundle/{bundleId}/auth/{step} [post]
 func (c *CSPHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse the bundle ID and authentication step
 	bundleID, ok := parseBundleID(w, r)
@@ -186,7 +187,8 @@ func (c *CSPHandlers) BundleAuthHandler(w http.ResponseWriter, r *http.Request) 
 //	@Failure		401			{object}	errors.Error	"Unauthorized, invalid/expired token, token not belonging to bundle, or contact mismatch"
 //	@Failure		404			{object}	errors.Error	"Organization not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error (storage/challenge generation/notification failures)"
-//	@Router			/process/bundle/{bundleId}/auth/resend [post]
+//	@Deprecated
+//	@Router	/process/bundle/{bundleId}/auth/resend [post]
 func (c *CSPHandlers) BundleAuthResendHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse the bundle ID
 	bundleID, ok := parseBundleID(w, r)
@@ -373,7 +375,8 @@ func (c *CSPHandlers) signAndRespond(w http.ResponseWriter, authToken, address, 
 //	@Failure		401			{object}	errors.Error	"Unauthorized, invalid/unverified token, or process not in the bundle"
 //	@Failure		404			{object}	errors.Error	"Bundle not found or user not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
-//	@Router			/process/bundle/{bundleId}/sign [post]
+//	@Deprecated
+//	@Router	/process/bundle/{bundleId}/sign [post]
 func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse the bundle ID
 	bundleID, ok := parseBundleID(w, r)
@@ -462,7 +465,8 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 //	@Failure		401			{object}	errors.Error	"token not belonging to bundle"
 //	@Failure		404			{object}	errors.Error	"Bundle not found, user not found, or census not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
-//	@Router			/process/bundle/{bundleId}/weight [post]
+//	@Deprecated
+//	@Router	/process/bundle/{bundleId}/weight [post]
 func (c *CSPHandlers) UserWeightHandler(w http.ResponseWriter, r *http.Request) {
 	// get the bundle ID from the URL parameters
 	bundleID, ok := parseBundleID(w, r)
@@ -540,7 +544,8 @@ func (c *CSPHandlers) UserWeightHandler(w http.ResponseWriter, r *http.Request) 
 //	@Failure		400			{object}	errors.Error	"Malformed URL/body or missing auth token"
 //	@Failure		404			{object}	errors.Error	"Bundle not found or census not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
-//	@Router			/process/bundle/{bundleId}/check [post]
+//	@Deprecated
+//	@Router	/process/bundle/{bundleId}/check [post]
 func (c *CSPHandlers) BundleCheckHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse the bundle ID and load the bundle
 	bundleID, ok := parseBundleID(w, r)
@@ -654,7 +659,8 @@ func (c *CSPHandlers) BundleCheckHandler(w http.ResponseWriter, r *http.Request)
 //	@Failure		401			{object}	errors.Error	"Unauthorized, invalid token, or token not verified (ErrAuthTokenNotVerified)"
 //	@Failure		404			{object}	errors.Error	"Process not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
-//	@Router			/process/{processId}/sign-info [post]
+//	@Deprecated
+//	@Router	/process/{processId}/sign-info [post]
 func (c *CSPHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Request) {
 	// Resolve the process to its on-chain election id (needed for the CSP lookup and the
 	// nullifier below). Preferred form is the 24-hex ProcessID, consistent with the rest

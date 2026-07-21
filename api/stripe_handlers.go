@@ -149,15 +149,15 @@ func (h *StripeHandlers) CreateSubscriptionCheckout(w http.ResponseWriter, r *ht
 //	@Tags			plans
 //	@Accept			json
 //	@Produce		json
-//	@Param			sessionID	path		string	true	"Checkout session ID"
+//	@Param			sessionId	path		string	true	"Checkout session ID"
 //	@Success		200			{object}	stripe.CheckoutSessionStatus
 //	@Failure		400			{object}	errors.Error	"Invalid session ID"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
-//	@Router			/subscriptions/checkout/{sessionID} [get]
+//	@Router			/subscriptions/checkout/{sessionId} [get]
 func (h *StripeHandlers) GetCheckoutSession(w http.ResponseWriter, r *http.Request) {
-	sessionID := chi.URLParam(r, "sessionID")
+	sessionID := chi.URLParam(r, "sessionId")
 	if sessionID == "" {
-		errors.ErrMalformedURLParam.Withf("sessionID is required").Write(w)
+		errors.ErrMalformedURLParam.Withf("sessionId is required").Write(w)
 		return
 	}
 
@@ -178,13 +178,13 @@ func (h *StripeHandlers) GetCheckoutSession(w http.ResponseWriter, r *http.Reque
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			address	path		string				true	"Organization address"
-//	@Success		200		{object}	map[string]string	"Contains portalURL"
-//	@Failure		400		{object}	errors.Error		"Invalid input data"
-//	@Failure		401		{object}	errors.Error		"Unauthorized"
-//	@Failure		404		{object}	errors.Error		"Organization not found"
-//	@Failure		500		{object}	errors.Error		"Internal server error"
-//	@Router			/subscriptions/{address}/portal [get]
+//	@Param			orgAddress	path		string				true	"Organization address"
+//	@Success		200			{object}	map[string]string	"Contains portalURL"
+//	@Failure		400			{object}	errors.Error		"Invalid input data"
+//	@Failure		401			{object}	errors.Error		"Unauthorized"
+//	@Failure		404			{object}	errors.Error		"Organization not found"
+//	@Failure		500			{object}	errors.Error		"Internal server error"
+//	@Router			/subscriptions/{orgAddress}/portal [get]
 func (h *StripeHandlers) CreateSubscriptionPortalSession(w http.ResponseWriter, r *http.Request, a *API) {
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {
