@@ -273,6 +273,46 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(err, qt.Not(qt.IsNil))
 	})
 
+	t.Run("AddBulkOrgMembersLineErrors", func(_ *testing.T) {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+		c.Assert(testDB.SetOrganization(&Organization{Address: testOrgAddress, Country: "ES"}), qt.IsNil)
+
+		// second and third members carry invalid data; errors must point at their position
+		members := []*OrgMember{
+			{
+				OrgAddress:   testOrgAddress,
+				MemberNumber: "line1",
+				Email:        testMemberEmail,
+			},
+			{
+				OrgAddress:     testOrgAddress,
+				MemberNumber:   "line2",
+				Email:          "not-an-email",
+				PlaintextPhone: "123",
+			},
+			{
+				OrgAddress:   testOrgAddress,
+				MemberNumber: "line3",
+				BirthDate:    "not-a-date",
+			},
+		}
+
+		progressChan, err := testDB.AddBulkOrgMembers(testOrg, members, testSalt)
+		c.Assert(err, qt.IsNil)
+
+		var lastStatus *BulkOrgMembersJob
+		for status := range progressChan {
+			lastStatus = status
+		}
+		c.Assert(lastStatus, qt.Not(qt.IsNil))
+
+		errs := lastStatus.ErrorsAsStrings()
+		c.Assert(errs, qt.HasLen, 3)
+		c.Assert(errs[0], qt.Matches, `line 2: invalid email "not-an-email":.*`)
+		c.Assert(errs[1], qt.Matches, `line 2: invalid phone number 123.*`)
+		c.Assert(errs[2], qt.Matches, `line 3: invalid birthdate format: not-a-date`)
+	})
+
 	t.Run("ZeroAddressValidation", func(_ *testing.T) {
 		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 

@@ -1226,7 +1226,9 @@ type AddMembersResponse struct {
 	// Number of members added
 	Added uint32 `json:"added"`
 
-	// Errors encountered during job
+	// Errors encountered during job. Validation errors are prefixed with
+	// "line N:", the 1-based position of the offending member in the
+	// submitted members list.
 	Errors []string `json:"errors"`
 
 	// Job ID for tracking the addition process

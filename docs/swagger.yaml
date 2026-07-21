@@ -73,7 +73,10 @@ definitions:
         description: Number of members added
         type: integer
       errors:
-        description: Errors encountered during job
+        description: |-
+          Errors encountered during job. Validation errors are prefixed with
+          "line N:", the 1-based position of the offending member in the
+          submitted members list.
         items:
           type: string
         type: array
