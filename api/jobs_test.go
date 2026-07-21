@@ -1,12 +1,16 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/go-chi/jwtauth/v5"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 )
@@ -49,6 +53,21 @@ func TestJobStatusImportErrorsGatedByRole(t *testing.T) {
 	// (1) anonymous and (3) a non-member both get the stripped response.
 	assertStripped("anonymous", "")
 	assertStripped("stranger", strangerToken)
+
+	// (4) an EXPIRED admin token must not unlock the detail either (temporal validation gates it).
+	// Mint one for the admin's email, mirroring buildLoginResponse but with a past expiry.
+	valid, err := jwtauth.VerifyToken(testAPI.auth, adminToken)
+	c.Assert(err, qt.IsNil)
+	emailClaim, ok := valid.Get("userId")
+	c.Assert(ok, qt.IsTrue)
+	j := jwt.New()
+	c.Assert(j.Set("userId", emailClaim), qt.IsNil)
+	c.Assert(j.Set(jwt.ExpirationKey, time.Now().Add(-time.Hour)), qt.IsNil)
+	jmap, err := j.AsMap(context.Background())
+	c.Assert(err, qt.IsNil)
+	_, expiredToken, err := testAPI.auth.Encode(jmap)
+	c.Assert(err, qt.IsNil)
+	assertStripped("expired-admin", expiredToken)
 
 	// (2) the org admin sees the full per-row error detail on GET /jobs/{jobId}.
 	adminJob := requestAndParse[apicommon.JobResponse](t, http.MethodGet, adminToken, nil, "jobs", jobID)
