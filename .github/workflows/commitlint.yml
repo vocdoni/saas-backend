@@ -12,6 +12,10 @@ jobs:
   main:
     name: Lint
     runs-on: ubuntu-latest
+    # Skip promotion PRs (e.g. main -> stage): their commits were already
+    # linted in the PRs that introduced them, and re-linting old history
+    # would flag the whole PR range forever.
+    if: github.head_ref != 'main'
     permissions:
       pull-requests: write
       contents: read
@@ -20,9 +24,17 @@ jobs:
       - uses: wagoid/commitlint-github-action@v6 # lint commit messages
         if: always()
         id: lint_commits
+        with:
+          # Advisory only: results are reported via the sticky PR comment
+          # below instead of failing the check.
+          failOnErrors: false
+          failOnWarnings: false
       - uses: amannn/action-semantic-pull-request@v6
         if: always()
         id: lint_pr_title
+        # Advisory only: the error_message output feeds the sticky PR
+        # comment below; a bad title must not block the merge.
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Build combined message
