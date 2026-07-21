@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -26,6 +27,58 @@ func bearerToken(r *http.Request) string {
 	return ""
 }
 
+// Sentinel errors returned by userFromToken so callers can map them to the right response (or, for
+// the optional path, treat any of them as "anonymous").
+var (
+	errInvalidUserClaim = fmt.Errorf("invalid or missing userId claim")
+	errUserNotVerified  = fmt.Errorf("user account not verified")
+)
+
+// userFromToken resolves and validates the user referenced by an already signature/temporal-verified
+// JWT (the userId claim carries the user's email). It is shared by authenticator (required auth) and
+// optionalUser (optional auth): the callers verify the token first (via the Verifier middleware or
+// jwtauth.VerifyToken), and this does the claim → user → verified checks in one place so the two
+// paths cannot drift. Returns a nil user with a typed error the caller maps to a response.
+func (a *API) userFromToken(token jwt.Token) (*db.User, error) {
+	if token == nil || jwt.Validate(token, jwt.WithRequiredClaim("userId")) != nil {
+		return nil, errInvalidUserClaim
+	}
+	claim, _ := token.Get("userId")
+	email, ok := claim.(string)
+	if !ok {
+		return nil, errInvalidUserClaim
+	}
+	user, err := a.db.UserByEmail(email)
+	if err != nil {
+		return nil, err // db.ErrNotFound or an unexpected DB error
+	}
+	if !user.Verified {
+		return nil, errUserNotVerified
+	}
+	return user, nil
+}
+
+// optionalUser resolves the authenticated user from an optional JWT bearer token, or nil when the
+// request is anonymous or the token is absent/invalid/unverified. Unlike authenticator it never
+// writes a response — it lets an otherwise-public handler reveal extra data to an authenticated
+// user without requiring auth. JWT sessions only (API keys, which require a per-route scope, are
+// not resolved here).
+func (a *API) optionalUser(r *http.Request) *db.User {
+	raw := bearerToken(r)
+	if raw == "" || looksLikeAPIKey(raw) {
+		return nil
+	}
+	token, err := jwtauth.VerifyToken(a.auth, raw) // verifies signature + temporal claims (exp/nbf/iat)
+	if err != nil {
+		return nil
+	}
+	user, err := a.userFromToken(token) // any error → treat as anonymous
+	if err != nil {
+		return nil
+	}
+	return user
+}
+
 // authenticator is a middleware that authenticates the user and returns a JWT
 // token. If successful, the decodes the user identifier (its email) from the
 // JWT token and gets the user information from the database, then adds the user
@@ -41,45 +94,29 @@ func (a *API) authenticator(next http.Handler) http.Handler {
 			a.authenticateAPIKey(w, r, next, raw)
 			return
 		}
-		token, claims, err := jwtauth.FromContext(r.Context())
+		token, _, err := jwtauth.FromContext(r.Context())
 		if err != nil {
 			errors.ErrUnauthorized.Write(w)
 			return
 		}
-		if token == nil || jwt.Validate(token, jwt.WithRequiredClaim("userId")) != nil {
-			errors.ErrUnauthorized.Withf("userId claim not found in JWT token").Write(w)
-			return
-		}
-		// retrieve the `userId` from the claims and add it to the HTTP header
-		userIDValue, ok := claims["userId"]
-		if !ok {
-			errors.ErrUnauthorized.Withf("userId claim not found in JWT token").Write(w)
-			return
-		}
-		userEmail, ok := userIDValue.(string)
-		if !ok {
-			errors.ErrUnauthorized.Withf("userId claim is not a string").Write(w)
-			return
-		}
-		// get the user from the database
-		user, err := a.db.UserByEmail(userEmail)
+		// resolve+validate the user from the verified token (shared with optionalUser); map the
+		// typed failures back to the same responses this middleware has always returned.
+		user, err := a.userFromToken(token)
 		if err != nil {
-			if err == db.ErrNotFound {
+			switch err {
+			case errUserNotVerified:
+				errors.ErrUserNoVerified.With("user account not verified").Write(w)
+			case db.ErrNotFound:
 				errors.ErrUnauthorized.Withf("user not found").Write(w)
-				return
+			case errInvalidUserClaim:
+				errors.ErrUnauthorized.Withf("invalid or missing userId claim").Write(w)
+			default:
+				errors.ErrGenericInternalServerError.Withf("could not retrieve user from database: %v", err).Write(w)
 			}
-			errors.ErrGenericInternalServerError.Withf("could not retrieve user from database: %v", err).Write(w)
 			return
 		}
-		// check if the user is already verified
-		if !user.Verified {
-			errors.ErrUserNoVerified.With("user account not verified").Write(w)
-			return
-		}
-		// add the user to the context
+		// add the user to the context and pass the authenticated request through
 		ctx := context.WithValue(r.Context(), apicommon.UserMetadataKey, *user)
-		// token is authenticated, pass it through with the new context with the
-		// user information
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

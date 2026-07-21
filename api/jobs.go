@@ -19,8 +19,9 @@ import (
 //	@Description	`failed`) and `result` carries only the attributes the job produced (import counters
 //	@Description	`added`/`total`/`progress`, or tx `address`/`voteID`/`status`), each omitted when empty.
 //	@Description	Public endpoint: the 32-byte job id is the capability and results carry only public
-//	@Description	data. Per-row import error detail (which may reference member data) is not returned
-//	@Description	here — it is available only on the authenticated GET /jobs list.
+//	@Description	data. Per-row import error detail (which may reference member data) is returned only
+//	@Description	to an authenticated manager/admin of the job's organization (as on GET /jobs);
+//	@Description	anonymous callers get status and counters only.
 //	@Tags			jobs
 //	@Produce		json
 //	@Param			jobId	path		string					true	"Job id returned by the async endpoint (hex)"
@@ -47,12 +48,16 @@ func (a *API) jobStatusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := apicommon.JobResponseFromDB(job)
-	// Public endpoint (the jobId is the only capability): member-import error strings can embed row
-	// PII (emails/phones/birthdates of the failing members), so the per-row error detail is served
-	// only on the auth-gated GET /jobs list. Here expose status + counters. tx-job errors are chain
-	// failures (no PII) and are kept.
+	// Member-import error strings can embed row PII (emails/phones/birthdates of the failing
+	// members). Reveal that per-row detail only to an authenticated manager/admin of the job's org
+	// (the same gate as GET /jobs); anonymous callers (e.g. tx-job pollers, which use this endpoint
+	// without a token) and non-members get status + counters only. tx-job errors are chain failures
+	// (no PII) and are always kept.
 	if job.Type == db.JobTypeOrgMembers || job.Type == db.JobTypeCensusParticipants {
-		resp.Errors = nil
+		u := a.optionalUser(r)
+		if u == nil || (!u.HasRoleFor(job.OrgAddress, db.ManagerRole) && !u.HasRoleFor(job.OrgAddress, db.AdminRole)) {
+			resp.Errors = nil
+		}
 	}
 	apicommon.HTTPWriteJSON(w, &resp)
 }
