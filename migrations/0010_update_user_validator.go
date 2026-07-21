@@ -7,6 +7,7 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.vocdoni.io/dvote/log"
 )
 
 func init() {
@@ -23,12 +24,12 @@ func upUpdateUserValidator(ctx context.Context, database *mongo.Database) error 
 			"properties": bson.M{
 				"id": bson.M{
 					"bsonType":    "int",
-					"description": "must be an integer and is required",
+					"description": descRequiredInt,
 					"minimum":     1,
 				},
 				"email": bson.M{
 					"bsonType":    "string",
-					"description": "must be an email and is required",
+					"description": descRequiredEmail,
 					"pattern":     internal.EmailRegexTemplate,
 				},
 				"password": bson.M{
@@ -52,7 +53,7 @@ func upUpdateUserValidator(ctx context.Context, database *mongo.Database) error 
 		return fmt.Errorf("failed to update users collection validator: %w", err)
 	}
 
-	fmt.Println("Updated users collection validator to allow empty passwords for OAuth users")
+	log.Infow("updated users collection validator to allow empty passwords for oauth users")
 	return nil
 }
 
@@ -66,17 +67,17 @@ func downUpdateUserValidator(ctx context.Context, database *mongo.Database) erro
 			"properties": bson.M{
 				"id": bson.M{
 					"bsonType":    "int",
-					"description": "must be an integer and is required",
+					"description": descRequiredInt,
 					"minimum":     1,
 				},
 				"email": bson.M{
 					"bsonType":    "string",
-					"description": "must be an email and is required",
+					"description": descRequiredEmail,
 					"pattern":     internal.EmailRegexTemplate,
 				},
 				"password": bson.M{
 					"bsonType":    "string",
-					"description": "must be a string and is required",
+					"description": descRequiredString,
 					"minLength":   8,
 				},
 			},
@@ -95,6 +96,6 @@ func downUpdateUserValidator(ctx context.Context, database *mongo.Database) erro
 		return fmt.Errorf("failed to revert users collection validator: %w", err)
 	}
 
-	fmt.Println("Reverted users collection validator to require 8-character passwords")
+	log.Infow("reverted users collection validator to require 8-character passwords")
 	return nil
 }
