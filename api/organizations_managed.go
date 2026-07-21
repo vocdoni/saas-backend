@@ -445,6 +445,27 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		}
 	}
 
+	// new /processes questions: block deletion while any published question is active (READY|PAUSED).
+	// Read the live chain status of each non-terminal question (bounded by the org's active question
+	// count) rather than the stored value, so deletion — the one safety-critical moment — never runs
+	// on a status the on-demand syncer hasn't refreshed yet. A lookup error fails closed.
+	questionRefs, err := a.db.SyncableQuestionsByOrg(managedAddr)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	for _, ref := range questionRefs {
+		election, err := a.account.Election(ref.UpstreamID)
+		if err != nil {
+			errors.ErrVochainRequestFailed.WithErr(err).Write(w)
+			return
+		}
+		if election.Status == "READY" || election.Status == "PAUSED" {
+			errors.ErrManagedOrgHasActiveElections.Write(w)
+			return
+		}
+	}
+
 	// capture usage to roll back the integrator counters after deletion. The integrator's
 	// ManagedProcesses counter is bumped on publish only for non-test-sized elections
 	// (ElectionParams.MaxCensusSize > db.TestMaxCensusSize), by 1 (see api/process.go). The

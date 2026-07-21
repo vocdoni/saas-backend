@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	flag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -21,6 +22,7 @@ import (
 	"github.com/vocdoni/saas-backend/notifications/smtp"
 	"github.com/vocdoni/saas-backend/notifications/twilio"
 	"github.com/vocdoni/saas-backend/objectstorage"
+	"github.com/vocdoni/saas-backend/statussync"
 	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/log"
@@ -64,6 +66,10 @@ func main() {
 	flag.Duration("notificationQueueTTL", 0, "max age of a queued CSP notification before it is dropped (0 = default)")
 	flag.Int("notificationBreakerMaxFailures", 0, "provider failures that trip the CSP notification breaker (0 = default)")
 	flag.Duration("notificationBreakerCooldown", 0, "how long the CSP notification breaker stays open once tripped (0 = default)")
+	// on-demand question status sync worker (reconciles stored question statuses with the chain
+	// when a status changes through the API or a process/question is read)
+	flag.Duration("statusSyncInterval", 60*time.Second, "poll cadence for confirm retries + read freshness window (0=60s)")
+	flag.Duration("statusSyncConfirmTimeout", 5*time.Minute, "max wait for on-chain confirmation before reconciling (0=5m)")
 	// parse flags
 	flag.Parse()
 	// initialize Viper
@@ -240,6 +246,17 @@ func main() {
 		log.Fatalf("could not create the CSP service: %v", err)
 		return
 	}
+	// background worker: reconcile a published question's status with the chain on demand (a status
+	// change through the API, or a read of the process/question). Enqueues from the API handlers flow
+	// through apiConf.StatusSyncer.
+	syncer := statussync.New(ctx, &statussync.Config{
+		DB:             database,
+		Account:        acc,
+		Interval:       viper.GetDuration("statusSyncInterval"),
+		ConfirmTimeout: viper.GetDuration("statusSyncConfirmTimeout"),
+	})
+	apiConf.StatusSyncer = syncer
+	syncer.Start()
 	apiConf.Subscriptions = subscriptions.New(&subscriptions.Config{
 		DB: database,
 	})

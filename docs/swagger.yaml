@@ -1368,8 +1368,9 @@ definitions:
   apicommon.SetProcessStatusRequest:
     properties:
       status:
-        description: 'One of: ready, paused, ended, canceled'
-        example: paused
+        description: 'One of: READY, PAUSED, ENDED, CANCELED (case-insensitive on
+          input; stored/returned uppercase)'
+        example: PAUSED
         type: string
     type: object
   apicommon.SetQuestionsStatusRequest:
@@ -1379,7 +1380,7 @@ definitions:
           $ref: '#/definitions/apicommon.QuestionStatusID'
         type: array
       status:
-        example: ended
+        example: ENDED
         type: string
     type: object
   apicommon.SubscriptionCheckout:

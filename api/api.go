@@ -81,6 +81,7 @@ import (
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications"
 	"github.com/vocdoni/saas-backend/objectstorage"
 	"github.com/vocdoni/saas-backend/subscriptions"
@@ -128,6 +129,20 @@ type Config struct {
 	// the HTTP response is observed, restoring the happens-before that the async
 	// queue otherwise breaks. Leave false in production.
 	NotificationsSyncDelivery bool
+	// StatusSyncer enqueues question status reconciliations with the background
+	// syncer. Nil only when left unwired (e.g. tests) — enqueues become no-ops.
+	StatusSyncer StatusEnqueuer
+}
+
+// StatusEnqueuer hands question status reconciliations to the background syncer. It is satisfied by
+// *statussync.Syncer; a nil StatusEnqueuer (e.g. an API built without one in tests) makes enqueues
+// no-ops (see a.enqueueConfirm / a.enqueueReconcile).
+type StatusEnqueuer interface {
+	// EnqueueConfirm polls the chain until the question (by on-chain id) reaches expected.
+	EnqueueConfirm(upstreamID internal.HexBytes, expected string)
+	// EnqueueReconcile does one background chain read and converges the stored status to it; known
+	// is the status just served, used to guard the write against a concurrent change.
+	EnqueueReconcile(upstreamID internal.HexBytes, known string)
 }
 
 // API type represents the API HTTP server with JWT authentication capabilities.
@@ -157,6 +172,40 @@ type API struct {
 	otpExpiry       time.Duration
 	otpCooldown     time.Duration
 	notifySync      bool
+	statusSyncer    StatusEnqueuer
+}
+
+// enqueueConfirm asks the status syncer to confirm a status change landed on-chain; a no-op when
+// the syncer is disabled.
+func (a *API) enqueueConfirm(upstreamID internal.HexBytes, expected string) {
+	if a.statusSyncer != nil {
+		a.statusSyncer.EnqueueConfirm(upstreamID, expected)
+	}
+}
+
+// enqueueReconcile asks the status syncer to refresh a question's stored status from the chain in
+// the background; a no-op when the syncer is disabled.
+func (a *API) enqueueReconcile(upstreamID internal.HexBytes, known string) {
+	if a.statusSyncer != nil {
+		a.statusSyncer.EnqueueReconcile(upstreamID, known)
+	}
+}
+
+// statusReconcileMinAge throttles read-triggered reconciles: a question synced more recently than
+// this is not re-enqueued, bounding chain reads from the public question endpoint under load.
+const statusReconcileMinAge = 30 * time.Second
+
+// enqueueReconcileIfStale enqueues a background reconcile for a published question, unless it is a
+// draft (no on-chain id) or was synced within statusReconcileMinAge. Safe to call when the syncer
+// is disabled.
+func (a *API) enqueueReconcileIfStale(q *db.VotingProcessQuestion) {
+	if a.statusSyncer == nil || len(q.UpstreamID) == 0 {
+		return
+	}
+	if !q.SyncedAt.IsZero() && time.Since(q.SyncedAt) < statusReconcileMinAge {
+		return
+	}
+	a.enqueueReconcile(q.UpstreamID, q.Status)
 }
 
 // New creates a new API HTTP server. It does not start the server. Use Start() for that.
@@ -212,6 +261,7 @@ func New(ctx context.Context, conf *Config) *API {
 		otpExpiry:       otpExpiry,
 		otpCooldown:     otpCooldown,
 		notifySync:      conf.NotificationsSyncDelivery,
+		statusSyncer:    conf.StatusSyncer,
 	}
 	a.startTxQueue()
 	// clear any publishing markers stranded by a previous crash/restart so those processes are

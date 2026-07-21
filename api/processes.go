@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -330,6 +331,11 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	census, _ := a.db.Census(vp.CensusID.Hex())
+	// serve the stored status now; refresh each published question from the chain in the background
+	// to catch status changes made directly on-chain (outside this API).
+	for i := range questions {
+		a.enqueueReconcileIfStale(&questions[i])
+	}
 	apicommon.HTTPWriteJSON(w, apicommon.VotingProcessResponseFromDB(vp, questions, census, a.account.ChainID()))
 }
 
@@ -372,7 +378,9 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
 	}
-	total, list, err := a.db.ListVotingProcesses(orgAddress, r.URL.Query().Get("status"), params.Page, params.Limit)
+	// stored question status is uppercase; upper-case the filter so client input stays case-insensitive.
+	statusFilter := strings.ToUpper(r.URL.Query().Get("status"))
+	total, list, err := a.db.ListVotingProcesses(orgAddress, statusFilter, params.Page, params.Limit)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
@@ -487,6 +495,9 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	census, _ := a.db.Census(vp.CensusID.Hex())
+	// serve the stored status now; refresh it from the chain in the background so a status change
+	// made directly on-chain (outside this API) is picked up.
+	a.enqueueReconcileIfStale(question)
 	apicommon.HTTPWriteJSON(w, apicommon.PublicQuestionResponseFromDB(question, census))
 }
 

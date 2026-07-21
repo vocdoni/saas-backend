@@ -3,7 +3,9 @@ package db
 import (
 	"context"
 	"fmt"
+	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -156,4 +158,48 @@ func (ms *MongoStorage) ResetQuestionsPublish(processID primitive.ObjectID) erro
 		return fmt.Errorf("failed to reset questions publish state: %w", err)
 	}
 	return nil
+}
+
+// SyncableQuestionsByOrg returns the minimal refs of an organization's published questions whose
+// stored status can still change on-chain (READY|PAUSED|ENDED). Terminal statuses (CANCELED|RESULTS)
+// are final and excluded. It backs the managed-org delete guard, which reads each ref's live chain
+// status synchronously at delete time (projected to upstreamId, orgAddress, status).
+func (ms *MongoStorage) SyncableQuestionsByOrg(orgAddress common.Address) ([]QuestionStatusRef, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	filter := bson.M{
+		"orgAddress": orgAddress,                                                                              //nolint:goconst
+		"upstreamId": bson.M{"$exists": true},                                                                 //nolint:goconst
+		"status":     bson.M{"$in": []string{QuestionStatusReady, QuestionStatusPaused, QuestionStatusEnded}}, //nolint:goconst
+	}
+	proj := options.Find().SetProjection(bson.M{"upstreamId": 1, "orgAddress": 1, "status": 1}) //nolint:goconst
+	cur, err := ms.processesQuestions.Find(ctx, filter, proj)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list syncable questions: %w", err)
+	}
+	var refs []QuestionStatusRef
+	if err := cur.All(ctx, &refs); err != nil {
+		return nil, fmt.Errorf("failed to decode syncable questions: %w", err)
+	}
+	return refs, nil
+}
+
+// SetQuestionStatusSynced conditionally reconciles a question (by on-chain id) to next, stamping
+// syncedAt. The update applies only while the stored status still equals prev, so a concurrent
+// direct write (publish/status-change) is never clobbered by a stale syncer value — a mismatch
+// yields matched=false and the caller skips. Passing prev == next just refreshes syncedAt. Used by
+// the status syncer.
+func (ms *MongoStorage) SetQuestionStatusSynced(upstreamID internal.HexBytes, prev, next string) (bool, error) {
+	if len(upstreamID) == 0 {
+		return false, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	filter := bson.M{"upstreamId": upstreamID, "status": prev}               //nolint:goconst
+	update := bson.M{"$set": bson.M{"status": next, "syncedAt": time.Now()}} //nolint:goconst
+	res, err := ms.processesQuestions.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return false, fmt.Errorf("failed to set synced question status: %w", err)
+	}
+	return res.MatchedCount > 0, nil
 }

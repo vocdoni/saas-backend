@@ -1314,8 +1314,8 @@ type RelayVoteResponse struct {
 // SetProcessStatusRequest is the body of PUT /process/{processId}/status.
 // swagger:model SetProcessStatusRequest
 type SetProcessStatusRequest struct {
-	// One of: ready, paused, ended, canceled
-	Status string `json:"status" example:"paused"`
+	// One of: READY, PAUSED, ENDED, CANCELED (case-insensitive on input; stored/returned uppercase)
+	Status string `json:"status" example:"PAUSED"`
 }
 
 // SetProcessStatusResponse is returned by PUT /process/{processId}/status with the
