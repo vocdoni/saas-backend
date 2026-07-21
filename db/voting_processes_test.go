@@ -63,11 +63,13 @@ func TestVotingProcessCRUD(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(byUp.ID, qt.Equals, q1ID)
 
-	// publish flips draft count and published flag
-	c.Assert(testDB.SetVotingProcessPublished(id), qt.IsNil)
+	// publish flips draft count and published flag, and backfills the chain-resolved start date
+	startDate := time.Now().Truncate(time.Millisecond)
+	c.Assert(testDB.SetVotingProcessPublished(id, startDate), qt.IsNil)
 	got, err = testDB.VotingProcess(id)
 	c.Assert(err, qt.IsNil)
 	c.Assert(got.Published, qt.IsTrue)
+	c.Assert(got.StartDate.Equal(startDate), qt.IsTrue)
 	n, err = testDB.CountVotingProcesses(org, DraftOnly)
 	c.Assert(err, qt.IsNil)
 	c.Assert(n, qt.Equals, int64(0))

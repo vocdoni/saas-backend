@@ -390,7 +390,7 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 		pw.abandon()
 		return nil, fmt.Errorf("publish did not confirm all questions after %d rounds", maxPublishRounds)
 	}
-	if e := a.db.SetVotingProcessPublished(pw.vp.ID); e != nil {
+	if e := a.db.SetVotingProcessPublished(pw.vp.ID, pw.resolveStartDate()); e != nil {
 		// every election is already on-chain and its question persisted; clear the marker so a
 		// retry can re-run and simply re-mark the process published (pending is empty → no new
 		// elections). Leaving it set would make the process permanently unclaimable.
@@ -405,6 +405,19 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 		}
 	}
 	return &db.JobResult{Status: "READY"}, nil //nolint:goconst
+}
+
+// resolveStartDate returns the start date to persist on the process once its elections are
+// confirmed. An empty startDate becomes "start at the mined block" (StartTime=0) and a past
+// startDate is moved to "now" at build time (see electionStartDuration), so in both cases the
+// elections started at the block just mined and "now" is within seconds of the real start; a
+// still-future requested date is kept as-is. The N per-question elections may even mine in
+// different blocks (retry rounds), so a single exact chain date does not exist anyway.
+func (pw *publishWorker) resolveStartDate() time.Time {
+	if pw.vp.StartDate.After(time.Now()) {
+		return pw.vp.StartDate
+	}
+	return time.Now()
 }
 
 // abandon rolls back a failed/aborted publish: it resets the not-yet-mined questions (so a later
