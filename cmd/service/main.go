@@ -57,7 +57,7 @@ func main() {
 	flag.String("twilioFromNumber", "", "Twilio from number")
 	flag.String("stripeApiSecret", "", "Stripe API secret")
 	flag.String("stripeWebhookSecret", "", "Stripe Webhook secret")
-	flag.String("oauthServiceURL", "http://oauth.vocdoni.net", "OAuth service URL")
+	flag.String("oauthServiceURL", "https://oauth.vocdoni.net", "OAuth service URL")
 	// OTP / verification code tuning (0 = use built-in defaults, applies to both API and CSP)
 	flag.Duration("otpExpiry", 0, "validity window for one-time codes (0 = default 15m)")
 	flag.Duration("otpCooldown", 0, "min wait between notification requests for the same account (0 = default 60s)")

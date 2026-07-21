@@ -17,7 +17,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -363,7 +363,7 @@ func sortedVerificationTargets(targets map[string]verificationTarget) []verifica
 	for key := range targets {
 		keys = append(keys, key)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 
 	ordered := make([]verificationTarget, 0, len(keys))
 	for _, key := range keys {

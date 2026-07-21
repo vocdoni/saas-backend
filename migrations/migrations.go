@@ -2,9 +2,10 @@
 package migrations
 
 import (
+	"cmp"
 	"context"
 	"maps"
-	"sort"
+	"slices"
 
 	"go.mongodb.org/mongo-driver/mongo"
 )
@@ -42,7 +43,7 @@ func SortedByVersionAsc() []Migration {
 	for _, mig := range migrationRegistry {
 		migs = append(migs, mig)
 	}
-	sort.Slice(migs, func(i, j int) bool { return migs[i].Version < migs[j].Version })
+	slices.SortFunc(migs, func(a, b Migration) int { return cmp.Compare(a.Version, b.Version) })
 	return migs
 }
 

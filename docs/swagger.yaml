@@ -59,23 +59,6 @@ definitions:
           type: string
         type: array
     type: object
-  apicommon.AddMembersJobResponse:
-    properties:
-      added:
-        description: Number of members added
-        type: integer
-      errors:
-        description: Errors encountered during job
-        items:
-          type: string
-        type: array
-      progress:
-        description: Progress equals Added / Total * 100
-        type: integer
-      total:
-        description: Total members in this job
-        type: integer
-    type: object
   apicommon.AddMembersRequest:
     properties:
       members:
@@ -123,6 +106,11 @@ definitions:
         items:
           type: string
         type: array
+      size:
+        description: |-
+          Size is the number of members in the census. Response-only (ignored on create/update): for a
+          published process it equals the on-chain maxCensusSize of its whole-census questions.
+        type: integer
       twoFaFields:
         items:
           $ref: '#/definitions/db.OrgMemberTwoFaField'
@@ -518,9 +506,9 @@ definitions:
       header:
         type: string
       orgAddress:
-        items:
-          type: integer
-        type: array
+        example: a1b2c3d4e5f60718293a4b5c6d7e8f9012345678
+        format: hex
+        type: string
       questions:
         items:
           $ref: '#/definitions/apicommon.VotingProcessQuestionRequest'
@@ -611,60 +599,29 @@ definitions:
       sentVotes:
         type: integer
     type: object
-  apicommon.JobInfo:
+  apicommon.JobResponse:
     properties:
-      added:
-        description: Items successfully processed
-        type: integer
-      completed:
-        description: Whether the job is completed
-        type: boolean
-      completedAt:
-        description: Job completion timestamp (zero if not completed)
-        type: string
-      createdAt:
-        description: Job creation timestamp
-        type: string
       errors:
-        description: List of errors encountered
         items:
           type: string
         type: array
       jobId:
-        description: Unique job identifier
-        type: string
-      total:
-        description: Total items to process
-        type: integer
-      type:
-        allOf:
-        - $ref: '#/definitions/db.JobType'
-        description: Type of job
-    type: object
-  apicommon.JobStatusResponse:
-    properties:
-      error:
-        type: string
-      jobId:
         type: string
       result:
-        $ref: '#/definitions/db.JobResult'
+        $ref: '#/definitions/apicommon.UnifiedJobResult'
       status:
         $ref: '#/definitions/db.JobStatus'
       type:
         $ref: '#/definitions/db.JobType'
     type: object
-  apicommon.JobsResponse:
+  apicommon.JobsListResponse:
     properties:
       jobs:
-        description: List of jobs
         items:
-          $ref: '#/definitions/apicommon.JobInfo'
+          $ref: '#/definitions/apicommon.JobResponse'
         type: array
       pagination:
-        allOf:
-        - $ref: '#/definitions/apicommon.Pagination'
-        description: Pagination fields
+        $ref: '#/definitions/apicommon.Pagination'
     type: object
   apicommon.ListAPIKeysResponse:
     properties:
@@ -1261,6 +1218,41 @@ definitions:
       status:
         type: string
     type: object
+  apicommon.ProcessParticipantEntry:
+    properties:
+      email:
+        type: string
+      memberId:
+        type: string
+      memberNumber:
+        type: string
+      name:
+        type: string
+      questions:
+        items:
+          $ref: '#/definitions/apicommon.ProcessParticipantQuestionVote'
+        type: array
+      surname:
+        type: string
+    type: object
+  apicommon.ProcessParticipantQuestionVote:
+    properties:
+      hasVoted:
+        type: boolean
+      questionId:
+        type: string
+      upstreamId:
+        example: deadbeef
+        format: hex
+        type: string
+    type: object
+  apicommon.ProcessParticipantsResponse:
+    properties:
+      participants:
+        items:
+          $ref: '#/definitions/apicommon.ProcessParticipantEntry'
+        type: array
+    type: object
   apicommon.ProcessResultsResponse:
     properties:
       endDate:
@@ -1600,6 +1592,23 @@ definitions:
         format: base64
         type: string
     type: object
+  apicommon.UnifiedJobResult:
+    properties:
+      added:
+        type: integer
+      address:
+        example: deadbeef
+        type: string
+      progress:
+        type: integer
+      status:
+        type: string
+      total:
+        type: integer
+      voteID:
+        example: deadbeef
+        type: string
+    type: object
   apicommon.UpdateOrganizationMemberGroupsRequest:
     properties:
       addMembers:
@@ -1623,6 +1632,17 @@ definitions:
     properties:
       role:
         description: The new role to assign to the user
+        type: string
+    type: object
+  apicommon.UpdateProcessCensusResponse:
+    properties:
+      added:
+        type: integer
+      errors:
+        items:
+          type: string
+        type: array
+      jobId:
         type: string
     type: object
   apicommon.UpdateProcessRequest:
@@ -1749,6 +1769,15 @@ definitions:
           $ref: '#/definitions/db.OrgMemberTwoFaField'
         type: array
     type: object
+  apicommon.ValidateProcessCensusRequest:
+    properties:
+      census:
+        $ref: '#/definitions/apicommon.CensusSpec'
+      orgAddress:
+        example: a1b2c3d4e5f60718293a4b5c6d7e8f9012345678
+        format: hex
+        type: string
+    type: object
   apicommon.VotingProcessListResponse:
     properties:
       pagination:
@@ -1811,6 +1840,11 @@ definitions:
     properties:
       census:
         $ref: '#/definitions/apicommon.CensusSpec'
+      chainId:
+        description: |-
+          ChainID is the Vochain chain id votes must be signed against; clients need it because vote
+          signatures are chain-id-bound (a mismatch makes the on-chain signer recovery diverge).
+        type: string
       description:
         $ref: '#/definitions/db.MultiLangString'
       endDate:
@@ -1820,9 +1854,9 @@ definitions:
       id:
         type: string
       orgAddress:
-        items:
-          type: integer
-        type: array
+        example: a1b2c3d4e5f60718293a4b5c6d7e8f9012345678
+        format: hex
+        type: string
       published:
         type: boolean
       questions:
@@ -2004,17 +2038,6 @@ definitions:
       maxManagedOrgs:
         type: integer
     type: object
-  db.JobResult:
-    properties:
-      address:
-        example: deadbeef
-        type: string
-      status:
-        type: string
-      voteID:
-        example: deadbeef
-        type: string
-    type: object
   db.JobStatus:
     enum:
     - pending
@@ -2031,6 +2054,7 @@ definitions:
     - census_participants
     - publish_process
     - set_process_status
+    - set_process_census
     - relay_vote
     - publish_voting_process
     type: string
@@ -2039,6 +2063,7 @@ definitions:
     - JobTypeCensusParticipants
     - JobTypePublishProcess
     - JobTypeSetProcessStatus
+    - JobTypeSetProcessCensus
     - JobTypeRelayVote
     - JobTypePublishVotingProcess
   db.MultiLangString:
@@ -2389,6 +2414,58 @@ definitions:
         format: hex
         type: string
     type: object
+  handlers.ProcessCheckResponse:
+    properties:
+      belongsToProcess:
+        type: boolean
+      questions:
+        items:
+          $ref: '#/definitions/handlers.ProcessQuestionStatus'
+        type: array
+      weight:
+        example: 2a
+        format: hex
+        type: string
+    type: object
+  handlers.ProcessQuestionStatus:
+    properties:
+      canVote:
+        type: boolean
+      hasVoted:
+        type: boolean
+      questionId:
+        type: string
+      upstreamId:
+        example: deadbeef
+        format: hex
+        type: string
+    type: object
+  handlers.ProcessSignInfoResponse:
+    properties:
+      consumed:
+        items:
+          $ref: '#/definitions/handlers.QuestionConsumedAddress'
+        type: array
+    type: object
+  handlers.QuestionConsumedAddress:
+    properties:
+      address:
+        example: deadbeef
+        format: hex
+        type: string
+      at:
+        type: string
+      nullifier:
+        example: deadbeef
+        format: hex
+        type: string
+      questionId:
+        type: string
+      upstreamId:
+        example: deadbeef
+        format: hex
+        type: string
+    type: object
   handlers.SignRequest:
     properties:
       authToken:
@@ -2591,6 +2668,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Create a new census for an organization. Requires Manager/Admin role. Members are
         added later (see POST /census/{id}); this only creates the empty census.
@@ -2631,6 +2709,7 @@ paths:
     get:
       consumes:
       - application/json
+      deprecated: true
       description: Retrieve census information by ID. Returns census type, organization
         address, and creation time.
       parameters:
@@ -2664,6 +2743,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Add existing organization members to a census by member ID (synchronous). Members
         already in the census are skipped. Returns the number of participants added plus
@@ -2716,10 +2796,11 @@ paths:
       summary: Add organization members to a census
       tags:
       - census
-  /census/{id}/group/{groupid}/publish:
+  /census/{id}/group/{groupId}/publish:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Publish a census based on a specific organization members group for voting. Requires Manager/Admin role.
         The request body selects the CSP authentication: at least one of authFields or twoFaFields
@@ -2737,7 +2818,7 @@ paths:
         type: string
       - description: Group ID
         in: path
-        name: groupid
+        name: groupId
         required: true
         type: string
       - description: Census authentication configuration
@@ -2783,6 +2864,7 @@ paths:
     get:
       consumes:
       - application/json
+      deprecated: true
       description: Retrieve participants of a census by ID. Requires Manager/Admin
         role.
       parameters:
@@ -2823,6 +2905,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Publish a census for voting (the CSP public key becomes the census root). Requires
         Manager/Admin role. Returns the published census URI and root. Idempotent: a census
@@ -2914,7 +2997,7 @@ paths:
       - BearerAuth: []
       summary: Get integrator quota and usage
       tags:
-      - organizations
+      - integrator
   /integrator/organizations:
     get:
       description: |-
@@ -2955,7 +3038,7 @@ paths:
       - BearerAuth: []
       summary: List organizations managed by an integrator
       tags:
-      - organizations
+      - integrator
     post:
       consumes:
       - application/json
@@ -3007,7 +3090,7 @@ paths:
       - BearerAuth: []
       summary: Create a managed organization under an integrator
       tags:
-      - organizations
+      - integrator
   /integrator/organizations/{orgAddress}:
     delete:
       description: |-
@@ -3065,16 +3148,199 @@ paths:
       - BearerAuth: []
       summary: Delete a managed organization and all its data
       tags:
-      - organizations
+      - integrator
+  /integrator/organizations/{orgAddress}/apikeys:
+    get:
+      description: |-
+        Returns the metadata of all API keys owned by the organization (never the secret).
+        The caller must be an admin of the organization.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ListAPIKeysResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: List an organization's API keys
+      tags:
+      - integrator
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Create a new API key owned by the organization at the given address. The caller
+        must be an admin of the organization, which must be enabled as an integrator —
+        API keys are integrator-only. The plaintext secret (prefixed "vsk_") is
+        returned ONCE in the response and cannot be retrieved again.
+
+        `label` and at least one `scope` are required. Valid scopes are deny-by-default and
+        must be a subset of: `quota:read`, `managed:read`, `managed:write`, `voting:write`,
+        `members:write`. The optional `expiresAt`, when set, must be in the future.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: API key information
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.CreateAPIKeyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Created key including the one-time plaintext secret
+          schema:
+            $ref: '#/definitions/apicommon.CreateAPIKeyResponse'
+        "400":
+          description: Invalid input (bad address, missing label/scopes, unknown scope,
+            past expiresAt)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Organization is not an integrator
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Create an API key for an organization
+      tags:
+      - integrator
+  /integrator/organizations/{orgAddress}/apikeys/{keyId}:
+    delete:
+      description: |-
+        Revokes (permanently disables) the API key with the given ID. The caller must be
+        an admin of the organization.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: API key ID
+        in: path
+        name: keyId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid input data (missing key ID)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: API key not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Revoke an organization's API key
+      tags:
+      - integrator
+  /jobs:
+    get:
+      description: |-
+        Paginated list of an organization's async jobs — member/census imports and tx jobs
+        (publish, status change, census update, vote relay) — newest first. Requires
+        Manager/Admin role of the organization given by the `orgAddress` query parameter. Each
+        job carries a unified `result` that only includes the attributes its type produced.
+      parameters:
+      - description: Organization address
+        in: query
+        name: orgAddress
+        required: true
+        type: string
+      - description: Filter by job type (e.g. org_members, census_participants, relay_vote)
+        in: query
+        name: type
+        type: string
+      - description: 'Page number (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - description: 'Items per page (default: 10)'
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.JobsListResponse'
+        "400":
+          description: Invalid input
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: List an organization's jobs
+      tags:
+      - jobs
   /jobs/{jobId}:
     get:
       description: |-
-        Returns the current state of a transaction job created by an async endpoint
-        (publish, status change or vote relay). Always responds 200; the `status` field
-        carries the lifecycle state (`pending`, `completed` or `failed`). On `completed`
-        the `result` field holds the public on-chain outcome; on `failed` the `error`
-        field holds the reason. Public endpoint: the 32-byte job id is the capability and
-        results contain only public on-chain data.
+        Returns the current state of an async job (member/census import or a tx job: publish,
+        status change, census update, vote relay), in the same unified shape as GET /jobs.
+        Always responds 200; `status` carries the lifecycle state (`pending`, `completed`,
+        `failed`) and `result` carries only the attributes the job produced (import counters
+        `added`/`total`/`progress`, or tx `address`/`voteID`/`status`), each omitted when empty.
+        Public endpoint: the 32-byte job id is the capability and results carry only public
+        data. Per-row import error detail (which may reference member data) is not returned
+        here — it is available only on the authenticated GET /jobs list.
       parameters:
       - description: Job id returned by the async endpoint (hex)
         in: path
@@ -3085,9 +3351,9 @@ paths:
       - application/json
       responses:
         "200":
-          description: Job status and (when completed) result
+          description: Unified job status and result
           schema:
-            $ref: '#/definitions/apicommon.JobStatusResponse'
+            $ref: '#/definitions/apicommon.JobResponse'
         "400":
           description: Invalid job id
           schema:
@@ -3100,9 +3366,9 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
-      summary: Poll the status of an async transaction job
+      summary: Poll the status of an async job
       tags:
-      - process
+      - jobs
   /oauth/login:
     post:
       consumes:
@@ -3187,7 +3453,7 @@ paths:
       summary: Create a new organization
       tags:
       - organizations
-  /organizations/{address}:
+  /organizations/{orgAddress}:
     get:
       consumes:
       - application/json
@@ -3195,7 +3461,7 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       produces:
@@ -3230,7 +3496,7 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       - description: Organization information to update
@@ -3267,139 +3533,7 @@ paths:
       summary: Update organization information
       tags:
       - organizations
-  /organizations/{address}/apikeys:
-    get:
-      description: |-
-        Returns the metadata of all API keys owned by the organization (never the secret).
-        The caller must be an admin of the organization.
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.ListAPIKeysResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: List an organization's API keys
-      tags:
-      - apikeys
-    post:
-      consumes:
-      - application/json
-      description: |-
-        Create a new API key owned by the organization at the given address. The caller
-        must be an admin of the organization, which must be enabled as an integrator —
-        API keys are integrator-only. The plaintext secret (prefixed "vsk_") is
-        returned ONCE in the response and cannot be retrieved again.
-
-        `label` and at least one `scope` are required. Valid scopes are deny-by-default and
-        must be a subset of: `quota:read`, `managed:read`, `managed:write`, `voting:write`,
-        `members:write`. The optional `expiresAt`, when set, must be in the future.
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: API key information
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/apicommon.CreateAPIKeyRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Created key including the one-time plaintext secret
-          schema:
-            $ref: '#/definitions/apicommon.CreateAPIKeyResponse'
-        "400":
-          description: Invalid input (bad address, missing label/scopes, unknown scope,
-            past expiresAt)
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "403":
-          description: Organization is not an integrator
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Create an API key for an organization
-      tags:
-      - apikeys
-  /organizations/{address}/apikeys/{keyID}:
-    delete:
-      description: |-
-        Revokes (permanently disables) the API key with the given ID. The caller must be
-        an admin of the organization.
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: API key ID
-        in: path
-        name: keyID
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "400":
-          description: Invalid input data (missing key ID)
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: API key not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Revoke an organization's API key
-      tags:
-      - apikeys
-  /organizations/{address}/censuses:
+  /organizations/{orgAddress}/censuses:
     get:
       consumes:
       - application/json
@@ -3407,7 +3541,7 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       produces:
@@ -3438,7 +3572,7 @@ paths:
       summary: Get organization censuses
       tags:
       - organizations
-  /organizations/{address}/groups:
+  /organizations/{orgAddress}/groups:
     get:
       consumes:
       - application/json
@@ -3451,7 +3585,7 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       - description: 'Page number (default: 1)'
@@ -3497,7 +3631,7 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       - description: Group info to create
@@ -3530,7 +3664,7 @@ paths:
       summary: Create an organization member group
       tags:
       - organizations
-  /organizations/{address}/groups/{groupID}:
+  /organizations/{orgAddress}/groups/{groupId}:
     delete:
       consumes:
       - application/json
@@ -3542,12 +3676,12 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       - description: Group ID
         in: path
-        name: groupID
+        name: groupId
         required: true
         type: string
       produces:
@@ -3589,12 +3723,12 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       - description: Group ID
         in: path
-        name: groupID
+        name: groupId
         required: true
         type: string
       produces:
@@ -3633,12 +3767,12 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       - description: Group ID
         in: path
-        name: groupID
+        name: groupId
         required: true
         type: string
       - description: Group info to update
@@ -3675,7 +3809,7 @@ paths:
       summary: Update an organization member group
       tags:
       - organizations
-  /organizations/{address}/groups/{groupID}/members:
+  /organizations/{orgAddress}/groups/{groupId}/members:
     get:
       consumes:
       - application/json
@@ -3687,12 +3821,12 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       - description: Group ID
         in: path
-        name: groupID
+        name: groupId
         required: true
         type: string
       - description: Page number for pagination
@@ -3727,10 +3861,11 @@ paths:
       summary: Get the list of members with details of an organization member group
       tags:
       - organizations
-  /organizations/{address}/groups/{groupID}/validate:
+  /organizations/{orgAddress}/groups/{groupId}/validate:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Checks the AuthFields for duplicates or empty fields and the TwoFaFields for empty ones.
         On failure the offending member IDs are returned in the error `data`. Needs admin or
@@ -3740,12 +3875,12 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       - description: Group ID
         in: path
-        name: groupID
+        name: groupId
         required: true
         type: string
       - description: Members validation request
@@ -3779,59 +3914,7 @@ paths:
       summary: Validate organization group members data
       tags:
       - organizations
-  /organizations/{address}/jobs:
-    get:
-      consumes:
-      - application/json
-      description: Get the list of import jobs for an organization with pagination
-        support
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: 'Page number (default: 1)'
-        in: query
-        name: page
-        type: integer
-      - description: 'Number of items per page (default: 10)'
-        in: query
-        name: limit
-        type: integer
-      - description: Filter by job type (org_members or census_participants)
-        in: query
-        name: type
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.JobsResponse'
-        "400":
-          description: Invalid input
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Get organization jobs
-      tags:
-      - organizations
-  /organizations/{address}/members:
+  /organizations/{orgAddress}/members:
     delete:
       consumes:
       - application/json
@@ -3843,7 +3926,7 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       - description: Member IDs to delete or all flag
@@ -3886,7 +3969,7 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       - description: 'Page number (default: 1)'
@@ -3931,14 +4014,14 @@ paths:
       description: |-
         Add multiple members to an organization. Requires Manager/Admin role and is subject to the
         plan's member quota. With `async=true` the import runs in the background and the response
-        carries a `jobId` to poll via GET /organizations/{address}/members/job/{jobid}; otherwise it
+        carries a `jobId` to poll via GET /jobs/{jobId}; otherwise it
         completes synchronously. An empty members list is a no-op that returns added=0.
 
         Also callable with a scoped API key (scope: `members:write`).
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       - description: Process asynchronously and return job ID
@@ -3990,7 +4073,7 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       - description: Member data to insert or update
@@ -4021,564 +4104,6 @@ paths:
       security:
       - BearerAuth: []
       summary: Create or update an organization member
-      tags:
-      - organizations
-  /organizations/{address}/members/job/{jobid}:
-    get:
-      consumes:
-      - application/json
-      description: |-
-        Check the progress of a job to add members to an organization. Returns the progress of the job.
-        While a job is running its status is served from memory; once completed, the in-memory status
-        is evicted after 60 seconds. Completed jobs remain retrievable afterwards from the persisted
-        job record (returned with progress 100).
-
-        Also callable with a scoped API key (scope: `members:write`).
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: Job ID
-        in: path
-        name: jobid
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.AddMembersJobResponse'
-        "400":
-          description: Invalid job ID
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Job not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Check the progress of adding members
-      tags:
-      - organizations
-  /organizations/{address}/processes:
-    get:
-      consumes:
-      - application/json
-      description: |-
-        Returns a paginated list of process bundles for an organization.
-        Each entry contains the bundle ID, the primary vochain process ID
-        (first element of Processes when present), and all process IDs in the bundle.
-        Requires the user to be part of the organization (any role).
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: Page number (default 1)
-        in: query
-        name: page
-        type: integer
-      - description: Items per page (default 10, max 100)
-        in: query
-        name: limit
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.ListOrganizationBundles'
-        "400":
-          description: Invalid request or organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: List organization bundles and their main process
-      tags:
-      - process
-  /organizations/{address}/processes/drafts:
-    get:
-      consumes:
-      - application/json
-      description: Returns a list of voting process drafts.
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.ListOrganizationProcesses'
-        "404":
-          description: Process not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      summary: Get paginated list of process drafts
-      tags:
-      - process
-  /organizations/{address}/subscription:
-    get:
-      consumes:
-      - application/json
-      description: Get the subscription information for an organization
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.OrganizationSubscriptionInfo'
-        "400":
-          description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization not found or no subscription
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Get organization subscription
-      tags:
-      - organizations
-  /organizations/{address}/ticket:
-    post:
-      consumes:
-      - application/json
-      description: Create a new ticket for an organization. The user must have some
-        role in the organization (any role).
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: Ticket request information
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/apicommon.CreateOrganizationTicketRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "400":
-          description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Create a new ticket for an organization
-      tags:
-      - organizations
-  /organizations/{address}/users:
-    get:
-      consumes:
-      - application/json
-      description: Get the list of users with their roles in the organization
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.OrganizationUsers'
-        "400":
-          description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Get organization users
-      tags:
-      - organizations
-    post:
-      consumes:
-      - application/json
-      description: |-
-        Invite a new user to an organization. Only the admin of the organization can invite a new user.
-        It stores the invitation in the database and sends an email to the new user with the invitation code.
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: Invitation information
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/apicommon.OrganizationInvite'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "400":
-          description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "409":
-          description: User already has a role in the organization
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Invite a new user to an organization
-      tags:
-      - organizations
-  /organizations/{address}/users/{userid}:
-    delete:
-      consumes:
-      - application/json
-      description: Remove a user from the organization. Only the admin of the organization
-        can remove a user.
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: User ID
-        in: path
-        name: userid
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "400":
-          description: Invalid input data - User cannot remove itself
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Remove a user from the organization
-      tags:
-      - organizations
-    put:
-      consumes:
-      - application/json
-      description: Update the role of a user in an organization. Only the admin of
-        the organization can update the role.
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: User ID
-        in: path
-        name: userid
-        required: true
-        type: string
-      - description: Update user role information
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/apicommon.UpdateOrganizationUserRoleRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "400":
-          description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Update organization user role
-      tags:
-      - organizations
-  /organizations/{address}/users/accept:
-    post:
-      consumes:
-      - application/json
-      description: |-
-        Accept an invitation to an organization. It checks if the invitation is valid and not expired, and that the
-        user has no role in the organization yet. If the user does not exist, it creates a new user with the provided
-        information. If the user already exists and is verified, it assigns a role to the user in the organization.
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: Invitation acceptance information
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/apicommon.AcceptOrganizationInvitation'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "400":
-          description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized or invalid invitation
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "409":
-          description: User already has a role in the organization
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "410":
-          description: Invitation expired
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      summary: Accept an invitation to an organization
-      tags:
-      - organizations
-  /organizations/{address}/users/pending:
-    get:
-      consumes:
-      - application/json
-      description: Get the list of pending invitations for an organization
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.OrganizationInviteList'
-        "400":
-          description: Invalid input data
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Organization not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Get pending organization users
-      tags:
-      - organizations
-  /organizations/{address}/users/pending/{invitationID}:
-    delete:
-      consumes:
-      - application/json
-      description: |-
-        Delete a pending invitation to an organization by email.
-        Only the admin of the organization can delete an invitation.
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: Invitation ID
-        in: path
-        name: invitationID
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "400":
-          description: Invalid data - invitation not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Delete a pending invitation to an organization
-      tags:
-      - organizations
-    put:
-      consumes:
-      - application/json
-      description: |-
-        Update the code, link and expiration time of a pending invitation to an organization by email.
-        Resend the invitation email.
-        Only the admin of the organization can update an invitation.
-      parameters:
-      - description: Organization address
-        in: path
-        name: address
-        required: true
-        type: string
-      - description: Invitation ID
-        in: path
-        name: invitationID
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "400":
-          description: Invalid data - invitation not found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Update a pending invitation to an organization
       tags:
       - organizations
   /organizations/{orgAddress}/meta:
@@ -4770,6 +4295,516 @@ paths:
       summary: Update organization meta information
       tags:
       - organizations
+  /organizations/{orgAddress}/processes:
+    get:
+      consumes:
+      - application/json
+      deprecated: true
+      description: |-
+        Returns a paginated list of process bundles for an organization.
+        Each entry contains the bundle ID, the primary vochain process ID
+        (first element of Processes when present), and all process IDs in the bundle.
+        Requires the user to be part of the organization (any role).
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: Page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: Items per page (default 10, max 100)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ListOrganizationBundles'
+        "400":
+          description: Invalid request or organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: List organization bundles and their main process
+      tags:
+      - process
+  /organizations/{orgAddress}/processes/drafts:
+    get:
+      consumes:
+      - application/json
+      deprecated: true
+      description: Returns a list of voting process drafts.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ListOrganizationProcesses'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Get paginated list of process drafts
+      tags:
+      - process
+  /organizations/{orgAddress}/subscription:
+    get:
+      consumes:
+      - application/json
+      description: Get the subscription information for an organization
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.OrganizationSubscriptionInfo'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found or no subscription
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get organization subscription
+      tags:
+      - organizations
+  /organizations/{orgAddress}/ticket:
+    post:
+      consumes:
+      - application/json
+      description: Create a new ticket for an organization. The user must have some
+        role in the organization (any role).
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: Ticket request information
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.CreateOrganizationTicketRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Create a new ticket for an organization
+      tags:
+      - organizations
+  /organizations/{orgAddress}/users:
+    get:
+      consumes:
+      - application/json
+      description: Get the list of users with their roles in the organization
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.OrganizationUsers'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get organization users
+      tags:
+      - organizations
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Invite a new user to an organization. Only the admin of the organization can invite a new user.
+        It stores the invitation in the database and sends an email to the new user with the invitation code.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: Invitation information
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.OrganizationInvite'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: User already has a role in the organization
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Invite a new user to an organization
+      tags:
+      - organizations
+  /organizations/{orgAddress}/users/{userId}:
+    delete:
+      consumes:
+      - application/json
+      description: Remove a user from the organization. Only the admin of the organization
+        can remove a user.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: User ID
+        in: path
+        name: userId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid input data - User cannot remove itself
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Remove a user from the organization
+      tags:
+      - organizations
+    put:
+      consumes:
+      - application/json
+      description: Update the role of a user in an organization. Only the admin of
+        the organization can update the role.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: User ID
+        in: path
+        name: userId
+        required: true
+        type: string
+      - description: Update user role information
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.UpdateOrganizationUserRoleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Update organization user role
+      tags:
+      - organizations
+  /organizations/{orgAddress}/users/accept:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Accept an invitation to an organization. It checks if the invitation is valid and not expired, and that the
+        user has no role in the organization yet. If the user does not exist, it creates a new user with the provided
+        information. If the user already exists and is verified, it assigns a role to the user in the organization.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: Invitation acceptance information
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.AcceptOrganizationInvitation'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized or invalid invitation
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: User already has a role in the organization
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "410":
+          description: Invitation expired
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Accept an invitation to an organization
+      tags:
+      - organizations
+  /organizations/{orgAddress}/users/pending:
+    get:
+      consumes:
+      - application/json
+      description: Get the list of pending invitations for an organization
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.OrganizationInviteList'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get pending organization users
+      tags:
+      - organizations
+  /organizations/{orgAddress}/users/pending/{invitationId}:
+    delete:
+      consumes:
+      - application/json
+      description: |-
+        Delete a pending invitation to an organization by email.
+        Only the admin of the organization can delete an invitation.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: Invitation ID
+        in: path
+        name: invitationId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid data - invitation not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Delete a pending invitation to an organization
+      tags:
+      - organizations
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Update the code, link and expiration time of a pending invitation to an organization by email.
+        Resend the invitation email.
+        Only the admin of the organization can update an invitation.
+      parameters:
+      - description: Organization address
+        in: path
+        name: orgAddress
+        required: true
+        type: string
+      - description: Invitation ID
+        in: path
+        name: invitationId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid data - invitation not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Update a pending invitation to an organization
+      tags:
+      - organizations
   /organizations/roles:
     get:
       consumes:
@@ -4827,6 +4862,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Create a new voting process (draft). Requires Manager/Admin role of the owning organization. The
         request must reference the organization via either a `censusId` or an explicit `orgAddress`.
@@ -4880,6 +4916,7 @@ paths:
     delete:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Delete a draft voting process. Only unpublished drafts can be deleted; a process
         already published on-chain cannot be removed. Requires Manager/Admin role of the
@@ -4927,6 +4964,7 @@ paths:
     get:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Retrieve voting process information by ID. Returns process details including census and metadata.
         For encrypted (secretUntilTheEnd) elections the response additionally carries the election's
@@ -4963,6 +5001,7 @@ paths:
     put:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Update an existing draft voting process. Requires Manager/Admin role of the owning organization.
         Only drafts that have not yet been published on chain can be updated; updating a published process
@@ -5014,6 +5053,7 @@ paths:
       - process
   /process/{processId}/metadata:
     get:
+      deprecated: true
       description: |-
         Rebuilds and returns the raw ElectionMetadata JSON document of the process
         identified by its process id. The metadata is deterministically derived
@@ -5051,6 +5091,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Publishes an existing draft process (created via POST /process) as an on-chain
         election. The backend builds the election metadata and NewProcess transaction,
@@ -5110,6 +5151,7 @@ paths:
       - process
   /process/{processId}/results:
     get:
+      deprecated: true
       description: |-
         Fetches the current on-chain state of the election identified by its process id
         and returns a trimmed view of it: status, vote count, start/end dates, whether the
@@ -5147,6 +5189,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Get the address used to sign a process. Requires a verified token. Returns the address, nullifier,
         and timestamp of the consumption. {processId} accepts the 24-hex ProcessID (preferred)
@@ -5193,6 +5236,7 @@ paths:
     put:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Changes the status of an on-chain election (ready|paused|ended|canceled). The
         backend builds a SET_PROCESS_STATUS transaction, funds and signs it with the
@@ -5249,6 +5293,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Create a new process bundle linking a census to an optional list of on-chain processes,
         used by the CSP voter flow. Requires Manager/Admin role for the organization that owns
@@ -5290,6 +5335,7 @@ paths:
     get:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Retrieve process bundle information by ID. Returns bundle details including the associated census,
         census root, organization address, and list of processes.
@@ -5324,6 +5370,7 @@ paths:
     put:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Add additional on-chain processes to an existing bundle. Requires Manager/Admin role for
         the organization that owns the bundle. An empty process list is a no-op that returns the
@@ -5370,6 +5417,7 @@ paths:
     get:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Retrieve process information for a participant in a process bundle. Returns process details including
         the census and metadata.
@@ -5409,6 +5457,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Handle authentication for a process bundle. There are two steps in the authentication process:
         - Step 0: The user sends the participant ID and contact information (email or phone).
@@ -5469,6 +5518,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Resend the challenge for an existing (non-verified) authentication token.
         The request must include the auth token and a valid contact method for the bundle census type
@@ -5519,6 +5569,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Check whether the user behind a CSP auth token is an eligible participant of the bundle's census.
         The user is identified solely by the auth token (the only voter data the client stores). The token
@@ -5564,6 +5615,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Look up org members by one of the allowed identification fields
         (email, phone, memberNumber, nationalId, name, surname) and return
@@ -5618,6 +5670,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: |-
         Sign a process in a bundle. Requires a verified token. The server signs the address with the user data
         and returns the signature. Once signed, the process is marked as consumed and cannot be signed again.
@@ -5668,6 +5721,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: Get the weight of a user for a given bundle. Requires a verified
         token.
       parameters:
@@ -5786,6 +5840,45 @@ paths:
       tags:
       - processes
   /processes/{processId}:
+    delete:
+      description: |-
+        Delete an unpublished voting process draft together with its inline census. A
+        published process has on-chain elections and cannot be deleted. Requires
+        Manager/Admin role of the organization that owns the process.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Process already published
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Delete a voting process draft
+      tags:
+      - processes
     get:
       description: Read a voting process with its fully hydrated questions (protected
         read).
@@ -5860,14 +5953,233 @@ paths:
       summary: Update a voting process draft
       tags:
       - processes
-  /processes/{processId}/check:
-    get:
-      description: Publish-readiness dry-run. Returns { valid, errors } without changing
-        anything.
+  /processes/{processId}/auth/{step}:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Two-step voter authentication for a multi-question voting process (the /processes
+        replacement of the bundle auth flow); the issued token is anchored to the process.
+        - Step 0: handlers.AuthRequest — member identification fields (name, surname,
+        memberNumber, nationalId, birthDate, email, phone); which are required depends on the
+        census auth configuration. If valid, a challenge is sent and a token returned.
+        - Step 1: handlers.AuthChallengeRequest — { authToken, authData: [challenge solution] }.
+        If valid the token is marked verified and returned. Auth-only censuses may not require
+        a challenge solution.
       parameters:
       - description: Process ID
         in: path
         name: processId
+        required: true
+        type: string
+      - description: Authentication step (0 or 1)
+        in: path
+        name: step
+        required: true
+        type: string
+      - description: Step 0 body; step 1 uses AuthChallengeRequest (see description)
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.AuthRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.AuthResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized, cooldown not reached, or invalid challenge
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process, census, organization, or participant not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Authenticate a voter for a voting process
+      tags:
+      - processes
+  /processes/{processId}/auth/resend:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Resend the challenge for an existing (non-verified) authentication token of a voting
+        process. The request must include the auth token and a valid contact method for the
+        census type (email/phone). The same token is returned if the challenge is queued.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Resend request with auth token and contact data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.AuthResendRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.AuthResponse'
+        "400":
+          description: Malformed body, missing auth token, invalid contact, or token
+            already verified
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Invalid/expired token, token not belonging to the process,
+            or contact mismatch
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Census or organization not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Resend a voting process auth challenge
+      tags:
+      - processes
+  /processes/{processId}/census:
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Add existing organization members to the census of an already-published voting process
+        (same behaviour as POST /census/{id}, resolving the census from the process) and raise
+        each affected on-chain election's maxCensusSize so the new members can vote. Members are
+        added synchronously; the maxCensusSize update runs as an async job (poll GET /jobs/{jobId}).
+        Questions with an eligibility subset keep their fixed size and are unaffected. Requires
+        Manager/Admin role and is subject to the plan's census quota.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Member IDs to add
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.AddCensusParticipantsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Members added; no on-chain resize needed
+          schema:
+            $ref: '#/definitions/apicommon.UpdateProcessCensusResponse'
+        "202":
+          description: Members added; maxCensusSize update enqueued
+          schema:
+            $ref: '#/definitions/apicommon.UpdateProcessCensusResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Process is not published
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Add members to a published process's census
+      tags:
+      - processes
+  /processes/{processId}/check:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Report the voter's status for a voting process: census membership, weight, and per
+        question eligibility and vote status. The voter is identified solely by the auth token
+        (the only voter data the client stores); the token must be verified and issued for this
+        process. Ineligibility is reported as belongsToProcess=false with HTTP 200, not an error.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Request with auth token
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.CheckMembershipRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ProcessCheckResponse'
+        "400":
+          description: Malformed body or missing auth token
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process or census not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Check a voter's status for a voting process
+      tags:
+      - processes
+  /processes/{processId}/participants:
+    get:
+      description: |-
+        Manager/Admin lookup of organization members by a single field (email, phone,
+        memberNumber, nationalId), intersected with the process census, reporting each
+        matched member's per-question voted status. For `phone` pass the plaintext number;
+        it is hashed server-side. Requires Manager/Admin of the owning organization.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: 'Lookup field: email, phone, memberNumber or nationalId'
+        in: query
+        name: field
+        required: true
+        type: string
+      - description: Value to match for the given field
+        in: query
+        name: value
         required: true
         type: string
       produces:
@@ -5876,21 +6188,29 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/apicommon.VotingProcessValidateResponse'
+            $ref: '#/definitions/apicommon.ProcessParticipantsResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
-          description: Not Found
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
           schema:
             $ref: '#/definitions/errors.Error'
       security:
       - BearerAuth: []
-      summary: Validate a voting process for publishing
+      summary: List voted participants of a voting process
       tags:
       - processes
-  /processes/{processId}/participant/{participantId}:
+  /processes/{processId}/participants/{participantId}:
     get:
       description: |-
         Public participant info for a published voting process, mirroring the bundle
@@ -6099,6 +6419,219 @@ paths:
       summary: Get a voting process results
       tags:
       - processes
+  /processes/{processId}/sign:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Sign a voter's ballot for one question's on-chain election. Requires a verified token
+        bound to the process; authorizes the member against the question's eligibility subset
+        and consumes the per-election signing slot (a question cannot be signed twice).
+        Body: authToken, electionId (the question's on-chain election id) and payload (the voter
+        address). tokenR is unused.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Sign request (see description for fields)
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.SignRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.AuthResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized, unverified token, election not in process, or
+            member not eligible
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process, census, or user not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Sign a ballot for a voting process question
+      tags:
+      - processes
+  /processes/{processId}/sign-info:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Per-question consumed address, nullifier and timestamp for the voter identified
+        by a verified CSP auth token. Only questions the voter has already voted are
+        returned. This is the /processes replacement of the single-election sign-info.
+        Public endpoint (the token authenticates the voter).
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Auth token
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.ConsumedAddressRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ProcessSignInfoResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Get a voter's consumed sign info for a voting process
+      tags:
+      - processes
+  /processes/{processId}/validation:
+    get:
+      description: Publish-readiness dry-run. Returns { valid, errors } without changing
+        anything.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.VotingProcessValidateResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Validate a voting process for publishing
+      tags:
+      - processes
+  /processes/{processId}/weight:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Return the voter's weight for a voting process. Requires a verified token bound to the
+        process.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Request with auth token
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.UserWeightRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.UserWeightResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Invalid token, token not verified, or token not belonging to
+            the process
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process, user, or census not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Get a voter's weight for a voting process
+      tags:
+      - processes
+  /processes/census/validation:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Pre-flight check of a /processes census spec: verifies the chosen auth/2FA fields
+        produce unique, complete credentials over the target members — a group (groupId), an
+        explicit memberIds subset, or the whole organization when neither is set. Returns 400
+        with the offending member ids (duplicates / missingData) when the census is not usable,
+        otherwise 200. Requires Manager/Admin role of the organization.
+      parameters:
+      - description: Org address + census spec
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.ValidateProcessCensusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Invalid census (duplicates or missing data)
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Validate a voting process census
+      tags:
+      - processes
   /storage:
     post:
       consumes:
@@ -6175,7 +6708,7 @@ paths:
       summary: Download a stored object
       tags:
       - storage
-  /subscriptions/{address}/portal:
+  /subscriptions/{orgAddress}/portal:
     get:
       consumes:
       - application/json
@@ -6183,7 +6716,7 @@ paths:
       parameters:
       - description: Organization address
         in: path
-        name: address
+        name: orgAddress
         required: true
         type: string
       produces:
@@ -6258,7 +6791,7 @@ paths:
       summary: Create a subscription checkout session
       tags:
       - plans
-  /subscriptions/checkout/{sessionID}:
+  /subscriptions/checkout/{sessionId}:
     get:
       consumes:
       - application/json
@@ -6266,7 +6799,7 @@ paths:
       parameters:
       - description: Checkout session ID
         in: path
-        name: sessionID
+        name: sessionId
         required: true
         type: string
       produces:
@@ -6323,6 +6856,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: Sign a transaction with the organization's private key. The user
         must have a role in the organization.
       parameters:
@@ -6364,6 +6898,7 @@ paths:
     post:
       consumes:
       - application/json
+      deprecated: true
       description: Sign a message with the organization's private key. The user must
         have admin role for the organization.
       parameters:
@@ -6766,7 +7301,7 @@ paths:
             $ref: '#/definitions/errors.Error'
       summary: Relay an already-signed vote to the Vochain
       tags:
-      - process
+      - vote
 schemes:
 - http
 - https

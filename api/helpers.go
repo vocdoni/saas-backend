@@ -36,7 +36,7 @@ var (
 // URL parameters and retrieves the organization from the database. If the
 // organization is a suborganization, it also retrieves the parent organization.
 func (a *API) organizationFromRequest(r *http.Request) (org *db.Organization, parent *db.Organization, found bool) {
-	orgAddress := chi.URLParam(r, "address")
+	orgAddress := chi.URLParam(r, "orgAddress")
 	// if the organization address is not empty, get the organization from
 	// the database and add it to the context
 	if orgAddress != "" {

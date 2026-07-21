@@ -320,7 +320,6 @@ func (ms *MongoStorage) UpdateOrganizationMeta(address common.Address, metaUpdat
 		return fmt.Errorf("no organization found with address: %s", address)
 	}
 
-	fmt.Printf("Matched: %d, Modified: %d\n", result.MatchedCount, result.ModifiedCount)
 	return nil
 }
 

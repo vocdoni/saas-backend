@@ -38,14 +38,32 @@
 //	@tag.name					census
 //	@tag.description			Census management operations
 //
+//	@tag.name					processes
+//	@tag.description			Multi-question voting process operations (create, publish, results, voter CSP flow)
+//
 //	@tag.name					process
-//	@tag.description			Voting process operations
+//	@tag.description			Legacy voting process & bundle operations (deprecated — use processes)
+//
+//	@tag.name					vote
+//	@tag.description			Vote relay operations
+//
+//	@tag.name					jobs
+//	@tag.description			Async job status (member import, census publish, vote relay)
+//
+//	@tag.name					integrator
+//	@tag.description			Integrator operations: managed organizations & API keys
+//
+//	@tag.name					csp
+//	@tag.description			Legacy CSP voter operations (deprecated — use processes)
 //
 //	@tag.name					storage
 //	@tag.description			Object storage operations
 //
 //	@tag.name					transactions
-//	@tag.description			Transaction signing operations
+//	@tag.description			Transaction signing operations (deprecated)
+//
+//	@tag.name					health
+//	@tag.description			Service health & info
 package api
 
 import (
@@ -359,7 +377,6 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, organizationMembersEndpoint, a.organizationMembersHandler)
 		handle(r, http.MethodPost, organizationAddMembersEndpoint, a.addOrganizationMembersHandler)
 		handle(r, http.MethodPut, organizationUpsertMemberEndpoint, a.upsertOrganizationMemberHandler)
-		handle(r, http.MethodGet, organizationAddMembersJobStatusEndpoint, a.addOrganizationMembersJobStatusHandler)
 		handle(r, http.MethodDelete, organizationDeleteMembersEndpoint, a.deleteOrganizationMembersHandler)
 		handle(r, http.MethodPost, organizationMetaEndpoint, a.addOrganizationMetaHandler)
 		handle(r, http.MethodPut, organizationMetaEndpoint, a.updateOrganizationMetaHandler)
@@ -373,15 +390,15 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPut, organizationGroupEndpoint, a.updateOrganizationMemberGroupHandler)
 		handle(r, http.MethodDelete, organizationGroupEndpoint, a.deleteOrganizationMemberGroupHandler)
 		handle(r, http.MethodPost, organizationGroupValidateEndpoint, a.organizationMemberGroupValidateHandler)
-		handle(r, http.MethodGet, organizationJobsEndpoint, a.organizationJobsHandler)
+		handle(r, http.MethodGet, jobsEndpoint, a.jobsHandler)
 		handle(r, http.MethodGet, organizationBundlesEndpoint, a.organizationBundlesHandler)
 		handle(r, http.MethodPost, managedOrganizationsEndpoint, a.createManagedOrganizationHandler)
 		handle(r, http.MethodGet, managedOrganizationsEndpoint, a.managedOrganizationsHandler)
 		handle(r, http.MethodDelete, managedOrganizationEndpoint, a.deleteManagedOrganizationHandler)
 		handle(r, http.MethodGet, integratorEndpoint, a.integratorInfoHandler)
-		handle(r, http.MethodPost, organizationAPIKeysEndpoint, a.createAPIKeyHandler)
-		handle(r, http.MethodGet, organizationAPIKeysEndpoint, a.apiKeysHandler)
-		handle(r, http.MethodDelete, organizationAPIKeyEndpoint, a.revokeAPIKeyHandler)
+		handle(r, http.MethodPost, integratorOrgAPIKeysEndpoint, a.createAPIKeyHandler)
+		handle(r, http.MethodGet, integratorOrgAPIKeysEndpoint, a.apiKeysHandler)
+		handle(r, http.MethodDelete, integratorOrgAPIKeyEndpoint, a.revokeAPIKeyHandler)
 		handle(r, http.MethodPost, subscriptionsCheckout, a.stripeHandlers.CreateSubscriptionCheckout)
 		handle(r, http.MethodGet, subscriptionsCheckoutSession, a.stripeHandlers.GetCheckoutSession)
 		handle(r, http.MethodGet, subscriptionsPortal, func(w http.ResponseWriter, r *http.Request) {
@@ -403,13 +420,17 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, processBundleParticipantsCheckEndpoint, a.checkProcessBundleVotedParticipantsHandler)
 		// multi-question voting processes: authoring + protected reads
 		handle(r, http.MethodPost, processesCreateEndpoint, a.createVotingProcessHandler)
+		handle(r, http.MethodPost, processesCensusValidateEndpoint, a.validateProcessCensusHandler)
 		handle(r, http.MethodGet, processesCreateEndpoint, a.listVotingProcessesHandler)
 		handle(r, http.MethodPut, processesEndpoint, a.updateVotingProcessHandler)
 		handle(r, http.MethodGet, processesEndpoint, a.votingProcessInfoHandler)
-		handle(r, http.MethodGet, processesCheckEndpoint, a.validateVotingProcessHandler)
+		handle(r, http.MethodGet, processesValidateEndpoint, a.validateVotingProcessHandler)
 		handle(r, http.MethodPost, processesPublishEndpoint, a.publishVotingProcessHandler)
 		handle(r, http.MethodPut, processesQuestionsStatusEndpoint, a.setVotingProcessQuestionsStatusHandler)
 		handle(r, http.MethodPut, processesQuestionStatusEndpoint, a.setVotingProcessQuestionStatusHandler)
+		handle(r, http.MethodDelete, processesEndpoint, a.deleteVotingProcessHandler)
+		handle(r, http.MethodGet, processesParticipantsEndpoint, a.votingProcessParticipantsHandler)
+		handle(r, http.MethodPut, processesCensusEndpoint, a.updateVotingProcessCensusHandler)
 	})
 
 	// Public routes
@@ -459,6 +480,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, processesAuthResendEndpoint, cspHandlers.ProcessAuthResendHandler)
 		handle(r, http.MethodPost, processesSignEndpoint, cspHandlers.ProcessSignHandler)
 		handle(r, http.MethodPost, processesWeightEndpoint, cspHandlers.ProcessWeightHandler)
+		handle(r, http.MethodPost, processesSignInfoEndpoint, cspHandlers.ProcessSignInfoHandler)
 	})
 	a.router = r
 	return r

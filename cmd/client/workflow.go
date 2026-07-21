@@ -3,7 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -352,7 +352,7 @@ func sortedMemberIDs(memberIDs map[string]struct{}) []string {
 	for memberID := range memberIDs {
 		ids = append(ids, memberID)
 	}
-	sort.Strings(ids)
+	slices.Sort(ids)
 	return ids
 }
 

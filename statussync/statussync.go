@@ -174,6 +174,9 @@ func (s *Syncer) ProcessPending() int {
 
 // processDue removes and processes tasks that are due (or all, when force), through a bounded worker
 // pool. Confirm tasks that haven't converged reschedule themselves. Returns the count processed.
+// force is an internal due-vs-all selector (the ProcessPending test hook vs the interval loop).
+//
+//nolint:revive // flag-parameter: force is an internal mode selector, not user-facing control coupling
 func (s *Syncer) processDue(force bool) int {
 	now := time.Now()
 	s.mu.Lock()
@@ -191,13 +194,11 @@ func (s *Syncer) processDue(force bool) int {
 	sem := make(chan struct{}, s.workers)
 	var wg sync.WaitGroup
 	for _, t := range due {
-		wg.Add(1)
 		sem <- struct{}{}
-		go func(t *task) {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() { <-sem }()
 			s.process(t)
-		}(t)
+		})
 	}
 	wg.Wait()
 	return len(due)

@@ -3,7 +3,7 @@ name: API Swagger Docs
 on:
   push:
     branches:
-      - main
+      - stage
   pull_request:
     paths:
       - 'api/**/*'
@@ -54,7 +54,7 @@ jobs:
             ${{ steps.diff.outputs.stdout }}
             ```
 
-      - name: Commit and push if main is outdated
+      - name: Commit and push if stage is outdated
         if: ${{ github.event_name == 'push' && steps.diff.outputs.stdout }}
         run: |
           git config user.name "github-actions"

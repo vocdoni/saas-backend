@@ -995,7 +995,7 @@ func randomProcessID() []byte {
 // enqueueAndPollJob posts to an async tx endpoint, asserts 202 + a job id, then polls
 // GET /jobs/{jobId} until the job leaves the pending state (or times out) and returns
 // the final job status. jsonBody/urlPath are forwarded to the action endpoint.
-func enqueueAndPollJob(t *testing.T, method, jwt string, jsonBody any, urlPath ...string) apicommon.JobStatusResponse {
+func enqueueAndPollJob(t *testing.T, method, jwt string, jsonBody any, urlPath ...string) apicommon.JobResponse {
 	t.Helper()
 	enq := requestAndParseWithAssertCode[apicommon.EnqueuedResponse](
 		http.StatusAccepted, t, method, jwt, jsonBody, urlPath...,
@@ -1005,11 +1005,11 @@ func enqueueAndPollJob(t *testing.T, method, jwt string, jsonBody any, urlPath .
 }
 
 // pollJob polls GET /jobs/{jobId} until the job is no longer pending or it times out.
-func pollJob(t *testing.T, jobID string) apicommon.JobStatusResponse {
+func pollJob(t *testing.T, jobID string) apicommon.JobResponse {
 	t.Helper()
 	deadline := time.Now().Add(60 * time.Second)
 	for {
-		js := requestAndParse[apicommon.JobStatusResponse](t, http.MethodGet, "", nil, "jobs", jobID)
+		js := requestAndParse[apicommon.JobResponse](t, http.MethodGet, "", nil, "jobs", jobID)
 		if js.Status != db.JobStatusPending {
 			return js
 		}
@@ -1017,6 +1017,26 @@ func pollJob(t *testing.T, jobID string) apicommon.JobStatusResponse {
 			t.Fatalf("job %s still pending after timeout", jobID)
 		}
 		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// pollOrgJob polls the unified GET /jobs list for the given organization until the job with jobID is
+// no longer pending (or it times out), returning that job's unified response.
+func pollOrgJob(t *testing.T, jwt, orgAddress, jobID string) apicommon.JobResponse {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		list := requestAndParse[apicommon.JobsListResponse](t, http.MethodGet, jwt, nil,
+			"jobs?orgAddress="+orgAddress)
+		for _, j := range list.Jobs {
+			if j.JobID == jobID && j.Status != db.JobStatusPending {
+				return j
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("job %s still pending after timeout", jobID)
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 }
 
@@ -1241,21 +1261,21 @@ func joinQueryParams(queryParams ...string) string {
 }
 
 func organizationMembersURL(orgAddress string) string {
-	return strings.ReplaceAll(organizationMembersEndpoint, "{address}", orgAddress)
+	return strings.ReplaceAll(organizationMembersEndpoint, "{orgAddress}", orgAddress)
 }
 
 func organizationGroupsURL(orgAddress string) string {
-	return strings.ReplaceAll(organizationGroupsEndpoint, "{address}", orgAddress)
+	return strings.ReplaceAll(organizationGroupsEndpoint, "{orgAddress}", orgAddress)
 }
 
 func organizationInfoURL(orgAddress string) string {
-	return strings.ReplaceAll(organizationEndpoint, "{address}", orgAddress)
+	return strings.ReplaceAll(organizationEndpoint, "{orgAddress}", orgAddress)
 }
 
 func censusGroupPublishURL(censusID, groupID string) string {
 	s := censusGroupPublishEndpoint
 	s = strings.ReplaceAll(s, "{id}", censusID)
-	s = strings.ReplaceAll(s, "{groupid}", groupID)
+	s = strings.ReplaceAll(s, "{groupId}", groupID)
 	return s
 }
 

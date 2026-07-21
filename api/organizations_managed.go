@@ -70,7 +70,7 @@ func (a *API) releaseManagedOrgSlot(integratorAddr common.Address) {
 //	@Description	(defaults to the calling user); the per-user MaxOrgsPerUser cap is bypassed for managed orgs.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `managed:write`).
-//	@Tags			organizations
+//	@Tags			integrator
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
@@ -218,7 +218,7 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 //	@Description	URL). The caller must be an admin or manager of the integrator organization.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `managed:read`).
-//	@Tags			organizations
+//	@Tags			integrator
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			page	query		integer	false	"Page number (default: 1)"
@@ -277,7 +277,7 @@ func (a *API) managedOrganizationsHandler(w http.ResponseWriter, r *http.Request
 //	@Description	is omitted (usage counters are still returned). A 0 in any limit field means unlimited.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `quota:read`).
-//	@Tags			organizations
+//	@Tags			integrator
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Success		200	{object}	apicommon.IntegratorInfoResponse
@@ -370,7 +370,7 @@ func (a *API) integratorInfoHandler(w http.ResponseWriter, r *http.Request) {
 //	@Description	on the Vochain and are not affected — only DB-side data is removed.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `managed:write`).
-//	@Tags			organizations
+//	@Tags			integrator
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			orgAddress	path		string	true	"Managed organization address to delete"
@@ -413,7 +413,7 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	// the org must actually be managed by the integrator at {address}. Use a 404 (not 403) so a
+	// the org must actually be managed by the integrator at {orgAddress}. Use a 404 (not 403) so a
 	// caller cannot probe which addresses are managed by other integrators.
 	if managed.ManagedBy.Cmp(integratorAddr) != 0 {
 		errors.ErrOrganizationNotFound.Write(w)

@@ -93,15 +93,15 @@ func electionStartDuration(startDate, endDate time.Time) (startTime, duration ui
 			// range-check before truncating to the on-chain uint32 types: a wrapped
 			// start/duration would otherwise set a bogus election window and could slip a
 			// too-long duration under the plan limit (which compares the already-cast value).
-			start := startDate.Unix()
+			startSec := startDate.Unix()
 			dur := endDate.Sub(startDate).Seconds()
-			if start < 0 || start > math.MaxUint32 {
+			if startSec < 0 || startSec > math.MaxUint32 {
 				return 0, 0, fmt.Errorf("startDate out of range")
 			}
 			if dur < 0 || dur > math.MaxUint32 {
 				return 0, 0, fmt.Errorf("duration out of range")
 			}
-			return uint32(start), uint32(dur), nil
+			return uint32(startSec), uint32(dur), nil
 		}
 	}
 	d := time.Until(endDate)
@@ -206,6 +206,36 @@ func (a *Account) BuildSetProcessStatusTx(
 				Nonce:     acc.Nonce,
 				ProcessId: processID,
 				Status:    &st,
+			},
+		},
+	}, nil
+}
+
+// BuildSetProcessCensusTx builds an unsigned SET_PROCESS_CENSUS transaction that raises a published
+// election's maxCensusSize (keeping its census root/URI). The chain accepts a size increase without
+// DynamicCensus as long as the new size is not smaller than the current one; resend the existing
+// censusRoot/censusURI so they are preserved rather than cleared.
+func (a *Account) BuildSetProcessCensusTx(
+	orgAddress common.Address, processID, censusRoot []byte, censusURI string, maxCensusSize uint64,
+) (*models.Tx, error) {
+	if len(processID) == 0 {
+		return nil, fmt.Errorf("empty process id")
+	}
+	acc, err := a.client.Account(orgAddress.String())
+	if err != nil {
+		return nil, fmt.Errorf("could not fetch organization account: %w", err)
+	}
+	uri := censusURI
+	size := maxCensusSize
+	return &models.Tx{
+		Payload: &models.Tx_SetProcess{
+			SetProcess: &models.SetProcessTx{
+				Txtype:     models.TxType_SET_PROCESS_CENSUS,
+				Nonce:      acc.Nonce,
+				ProcessId:  processID,
+				CensusRoot: censusRoot,
+				CensusURI:  &uri,
+				CensusSize: &size,
 			},
 		},
 	}, nil

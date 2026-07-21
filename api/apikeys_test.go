@@ -60,7 +60,7 @@ func TestRequiredScopeForRoute(t *testing.T) {
 	c.Assert(scope, qt.Equals, ScopeManagedRead)
 
 	// account-sensitive / unmapped endpoints reject API keys (deny by default)
-	_, ok = requiredScopeForRoute("POST", organizationAPIKeysEndpoint)
+	_, ok = requiredScopeForRoute("POST", integratorOrgAPIKeysEndpoint)
 	c.Assert(ok, qt.IsFalse)
 	_, ok = requiredScopeForRoute("GET", usersMeEndpoint)
 	c.Assert(ok, qt.IsFalse)

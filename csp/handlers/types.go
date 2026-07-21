@@ -124,3 +124,20 @@ type ConsumedAddressResponse struct {
 	Nullifier internal.HexBytes `json:"nullifier" swaggertype:"string" format:"hex" example:"deadbeef"`
 	At        time.Time         `json:"at"`
 }
+
+// QuestionConsumedAddress is one question's consumed voting info for a voter: the address that
+// consumed that question's election, its nullifier, and when. Only questions the voter has voted
+// are included.
+type QuestionConsumedAddress struct {
+	QuestionID string            `json:"questionId"`
+	UpstreamID internal.HexBytes `json:"upstreamId" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Address    internal.HexBytes `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Nullifier  internal.HexBytes `json:"nullifier" swaggertype:"string" format:"hex" example:"deadbeef"`
+	At         time.Time         `json:"at"`
+}
+
+// ProcessSignInfoResponse is the per-question consumed-address view for a voter across a voting
+// process (the /processes replacement of the single-election ConsumedAddressResponse).
+type ProcessSignInfoResponse struct {
+	Consumed []QuestionConsumedAddress `json:"consumed"`
+}

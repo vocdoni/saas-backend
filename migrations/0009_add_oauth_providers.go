@@ -6,6 +6,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.vocdoni.io/dvote/log"
 )
 
 func init() {
@@ -24,7 +25,7 @@ func upAddOAuthProviders(ctx context.Context, database *mongo.Database) error {
 
 	// If field already exists in any document, migration already applied
 	if count > 0 {
-		fmt.Println("oauth field already exists, skipping migration")
+		log.Infow("oauth field already exists, skipping migration")
 		return nil
 	}
 
@@ -37,7 +38,7 @@ func upAddOAuthProviders(ctx context.Context, database *mongo.Database) error {
 		return fmt.Errorf("failed to add oauth field: %w", err)
 	}
 
-	fmt.Printf("Added oauth field to %d user documents\n", result.ModifiedCount)
+	log.Infow("added oauth field to user documents", "modified", result.ModifiedCount)
 	return nil
 }
 
@@ -56,7 +57,7 @@ func downAddOAuthProviders(ctx context.Context, database *mongo.Database) error 
 	}
 	defer func() {
 		if err := cursor.Close(ctx); err != nil {
-			fmt.Printf("Warning: failed to close cursor: %v\n", err)
+			log.Warnw("failed to close cursor", "error", err)
 		}
 	}()
 
@@ -105,7 +106,7 @@ func downAddOAuthProviders(ctx context.Context, database *mongo.Database) error 
 		return fmt.Errorf("cursor error: %w", err)
 	}
 
-	fmt.Printf("Migrated %d OAuth users back to password-based storage\n", migratedCount)
+	log.Infow("migrated oauth users back to password-based storage", "migrated", migratedCount)
 
 	// Now remove the oauth field from all users
 	result, err := users.UpdateMany(ctx,
@@ -116,6 +117,6 @@ func downAddOAuthProviders(ctx context.Context, database *mongo.Database) error 
 		return fmt.Errorf("failed to remove oauth field: %w", err)
 	}
 
-	fmt.Printf("Removed oauth field from %d user documents\n", result.ModifiedCount)
+	log.Infow("removed oauth field from user documents", "modified", result.ModifiedCount)
 	return nil
 }
