@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
@@ -33,6 +34,7 @@ func testCreateProvisionedOrganization(t *testing.T, token string) common.Addres
 // on-chain id and become ready and the process is marked published.
 func TestVotingProcessPublish(t *testing.T) {
 	c := qt.New(t)
+	testStart := time.Now()
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
@@ -58,6 +60,29 @@ func TestVotingProcessPublish(t *testing.T) {
 	for i := range got.Questions {
 		c.Assert(len(got.Questions[i].UpstreamID) > 0, qt.IsTrue, qt.Commentf("question %d has no upstreamId", i))
 	}
+
+	// the request carried no start date ("start immediately"), so publish backfills the actual
+	// on-chain start date and the read exposes it as a date around the publish moment
+	c.Assert(got.StartDate, qt.Not(qt.Equals), "")
+	startDate, err := time.Parse(time.RFC3339, got.StartDate)
+	c.Assert(err, qt.IsNil)
+	c.Assert(startDate.After(testStart.Add(-time.Minute)), qt.IsTrue,
+		qt.Commentf("backfilled start date %s is before the test started", got.StartDate))
+	c.Assert(startDate.Before(time.Now().Add(time.Minute)), qt.IsTrue,
+		qt.Commentf("backfilled start date %s is in the future", got.StartDate))
+
+	// the list endpoint carries the backfilled start date too
+	list := requestAndParse[apicommon.VotingProcessListResponse](
+		t, http.MethodGet, token, nil, fmt.Sprintf("processes?orgAddress=%s&limit=100", orgAddress.Hex()),
+	)
+	listed := false
+	for _, p := range list.Processes {
+		if p.ID == pid {
+			listed = true
+			c.Assert(p.StartDate, qt.Equals, got.StartDate)
+		}
+	}
+	c.Assert(listed, qt.IsTrue)
 
 	// the single-question read reports the ready status
 	q0 := requestAndParse[db.VotingProcessQuestion](

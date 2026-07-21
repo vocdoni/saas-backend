@@ -219,13 +219,21 @@ func (ms *MongoStorage) ClearVotingProcessPublishing(id primitive.ObjectID) erro
 
 // SetVotingProcessPublished marks a process as published and clears the publishing marker.
 // Called once, atomically, after every question of the process has been confirmed on-chain.
-func (ms *MongoStorage) SetVotingProcessPublished(id primitive.ObjectID) error {
+// startDate is the actual start of the on-chain elections (the chain assigns one when the
+// process was created without a start date, meaning "start immediately"); a non-zero value
+// replaces the stored date so reads expose when the process really started, while a zero
+// value leaves the stored date untouched.
+func (ms *MongoStorage) SetVotingProcessPublished(id primitive.ObjectID, startDate time.Time) error {
 	if id == primitive.NilObjectID {
 		return ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	update := bson.M{"$set": bson.M{"published": true, "updatedAt": time.Now()}, "$unset": bson.M{"publishing": ""}} //nolint:goconst
+	set := bson.M{"published": true, "updatedAt": time.Now()}
+	if !startDate.IsZero() {
+		set["startDate"] = startDate
+	}
+	update := bson.M{"$set": set, "$unset": bson.M{"publishing": ""}} //nolint:goconst
 	res, err := ms.votingProcesses.UpdateOne(ctx, bson.M{"_id": id}, update)
 	if err != nil {
 		return fmt.Errorf("failed to mark voting process published: %w", err)
