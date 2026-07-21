@@ -121,8 +121,17 @@ jobs:
       actions: read # download coverage artifacts (current PR run + main baseline)
       pull-requests: write # post the coverage report as a PR comment
     steps:
-      - name: Post per-package coverage diff report on the PR
+      - name: Generate per-package coverage diff report
+        id: coverage
         uses: fgrosse/go-coverage-report@v1.3.1
         with:
           coverage-artifact-name: code-coverage
           coverage-file-name: gocoverage.txt
+          # the action skips commenting when no Go files changed; post the
+          # comment ourselves so the PR always gets feedback
+          skip-comment: true
+      - name: Post coverage report on the PR
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: go-coverage
+          message: ${{ steps.coverage.outputs.coverage_report || '✅ No coverage changes detected in this PR.' }}
