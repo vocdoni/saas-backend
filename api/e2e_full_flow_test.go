@@ -160,4 +160,48 @@ func TestFullElectionLifecycle(t *testing.T) {
 	c.Assert(res.Results[0], qt.HasLen, 2)
 	c.Assert(res.Results[0][0], qt.Equals, "1") // value 0 ("No")
 	c.Assert(res.Results[0][1], qt.Equals, "2") // value 1 ("Yes")
+
+	// --- new /processes API: the same RESULTS election, surfaced per-question inline ---
+	// seed a published voting process whose first question points at the election above and is in
+	// RESULTS, plus a second question left READY (never on chain) that must NOT carry results.
+	vpID, err := testDB.SetVotingProcess(&db.VotingProcess{
+		OrgAddress: orgAddress, Published: true,
+		Title: db.MultiLangString{"default": "Results process"},
+	})
+	c.Assert(err, qt.IsNil)
+	qID, err := testDB.SetQuestion(&db.VotingProcessQuestion{
+		ProcessID: vpID, OrgAddress: orgAddress, Order: 0,
+		Title: db.MultiLangString{"default": "Do you approve?"},
+		Choices: []db.Choice{
+			{Title: db.MultiLangString{"default": "No"}, Value: 0},
+			{Title: db.MultiLangString{"default": "Yes"}, Value: 1},
+		},
+		UpstreamID: addr, Status: db.QuestionStatusResults,
+	})
+	c.Assert(err, qt.IsNil)
+	_, err = testDB.SetQuestion(&db.VotingProcessQuestion{
+		ProcessID: vpID, OrgAddress: orgAddress, Order: 1,
+		Title: db.MultiLangString{"default": "Draft q"}, Status: db.QuestionStatusReady,
+	})
+	c.Assert(err, qt.IsNil)
+
+	// manager GET /processes/{id}: the RESULTS question carries the tally inline; the READY one omits it.
+	info := requestAndParse[apicommon.VotingProcessResponse](
+		t, http.MethodGet, token, nil, "processes", vpID.Hex())
+	c.Assert(info.Questions, qt.HasLen, 2)
+	qr := info.Questions[0].Results
+	c.Assert(qr, qt.Not(qt.IsNil))
+	c.Assert(qr.VoteCount, qt.Equals, uint64(numVoters))
+	c.Assert(qr.FinalResults, qt.IsTrue)
+	c.Assert(qr.MaxVoters, qt.Equals, uint64(100)) // the election's on-chain maxCensusSize
+	// singlechoice question -> one ballot field -> one results row of value buckets [No, Yes].
+	c.Assert(qr.Results, qt.DeepEquals, [][]string{{"1", "2"}})
+	c.Assert(info.Questions[1].Results, qt.IsNil)
+
+	// public GET /processes/{id}/questions/{qId}: same tally on the voter-facing read.
+	pub := requestAndParse[apicommon.PublicQuestionResponse](
+		t, http.MethodGet, "", nil, "processes", vpID.Hex(), "questions", qID.Hex())
+	c.Assert(pub.Results, qt.Not(qt.IsNil))
+	c.Assert(pub.Results.VoteCount, qt.Equals, uint64(numVoters))
+	c.Assert(pub.Results.Results, qt.DeepEquals, [][]string{{"1", "2"}})
 }

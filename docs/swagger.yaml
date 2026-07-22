@@ -1303,6 +1303,12 @@ definitions:
         type: object
       parentProcessId:
         type: string
+      results:
+        allOf:
+        - $ref: '#/definitions/db.QuestionResults'
+        description: |-
+          Results is this question's on-chain tally, present only once the question reaches RESULTS status
+          (absent otherwise via omitempty), so clients treat its absence as "not yet final" and poll.
       secretUntilTheEnd:
         type: boolean
       status:
@@ -1825,22 +1831,23 @@ definitions:
     type: object
   apicommon.VotingProcessQuestionResults:
     properties:
-      endDate:
-        type: string
       finalResults:
         type: boolean
+      maxVoters:
+        type: integer
       questionId:
         type: string
       results:
+        description: |-
+          Results is the raw on-chain tally matrix (stringified big integers), one row per ballot field:
+          a single-choice question has one row indexed by choice value (0..MaxValue, so sparse choice
+          values leave empty buckets); a multi-choice question has one row per choice, each [notSelected,
+          selected]. Absent until the tally is published.
         items:
           items:
             type: string
           type: array
         type: array
-      startDate:
-        type: string
-      status:
-        type: string
       upstreamId:
         example: deadbeef
         format: hex
@@ -2226,6 +2233,26 @@ definitions:
       title:
         $ref: '#/definitions/db.MultiLangString'
     type: object
+  db.QuestionResults:
+    properties:
+      finalResults:
+        type: boolean
+      maxVoters:
+        type: integer
+      results:
+        description: |-
+          Results is the raw on-chain tally matrix (stringified big integers), one row per ballot field:
+          a single-choice question has one row indexed by choice value (0..MaxValue, so sparse choice
+          values leave empty buckets); a multi-choice question has one row per choice, each [notSelected,
+          selected]. Absent until the tally is published.
+        items:
+          items:
+            type: string
+          type: array
+        type: array
+      voteCount:
+        type: integer
+    type: object
   db.QuestionTypeSetup:
     properties:
       maxChoices:
@@ -2295,6 +2322,15 @@ definitions:
         type: object
       parentProcessId:
         type: string
+      results:
+        allOf:
+        - $ref: '#/definitions/db.QuestionResults'
+        description: |-
+          Results is this question's on-chain tally, resolved on read only when the question is in RESULTS
+          status (absent otherwise). Not persisted (bson:"-") — recomputed from the chain each read. Only
+          the single reads resolve it (GET /processes/{id} and the public question read); the list endpoint
+          leaves it nil to avoid an N+1 chain fan-out, so its absence in a LIST response means "not resolved
+          here", not "not final" — poll the single read for that.
       secretUntilTheEnd:
         type: boolean
       status:
@@ -6411,8 +6447,8 @@ paths:
     get:
       description: |-
         Public per-question on-chain results of a published voting process: one entry per
-        published question, each with the trimmed election state (status, vote count,
-        dates, whether final, and the tally). No authentication is required.
+        published question, each with its tally (vote count, max voters, whether final, and
+        the per-choice results). No authentication is required.
       parameters:
       - description: Process ID
         in: path

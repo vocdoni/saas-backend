@@ -630,6 +630,26 @@ type VotingProcessQuestion struct {
 	// JSON field is absent (not an empty array) until the keykeepers publish the keys, so clients
 	// treat its absence as "not yet published" and poll. Voters seal encrypted vote packages with these.
 	EncryptionKeys []EncryptionKey `json:"encryptionKeys,omitempty" bson:"encryptionKeys,omitempty"`
+	// Results is this question's on-chain tally, resolved on read only when the question is in RESULTS
+	// status (absent otherwise). Not persisted (bson:"-") — recomputed from the chain each read. Only
+	// the single reads resolve it (GET /processes/{id} and the public question read); the list endpoint
+	// leaves it nil to avoid an N+1 chain fan-out, so its absence in a LIST response means "not resolved
+	// here", not "not final" — poll the single read for that.
+	Results *QuestionResults `json:"results,omitempty" bson:"-"`
+}
+
+// QuestionResults is one question's on-chain election tally, resolved on read from its own election.
+// MaxVoters is that election's maxCensusSize — already restricted to the question's eligibility subset
+// (see account.ComputeMaxCensusSize) — not the whole process census.
+type QuestionResults struct {
+	VoteCount    uint64 `json:"voteCount"`
+	MaxVoters    uint64 `json:"maxVoters"`
+	FinalResults bool   `json:"finalResults"`
+	// Results is the raw on-chain tally matrix (stringified big integers), one row per ballot field:
+	// a single-choice question has one row indexed by choice value (0..MaxValue, so sparse choice
+	// values leave empty buckets); a multi-choice question has one row per choice, each [notSelected,
+	// selected]. Absent until the tally is published.
+	Results [][]string `json:"results,omitempty"`
 }
 
 // QuestionStatusRef is the minimal projection of a published question the status syncer and the
