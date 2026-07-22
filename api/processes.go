@@ -346,7 +346,9 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// resolve the on-chain tally of any question already in RESULTS status (concurrently), so a manager
 	// sees per-question results inline without a separate /results call. Non-RESULTS questions are skipped.
 	a.resolveQuestionResultsBatch(questions)
-	apicommon.HTTPWriteJSON(w, apicommon.VotingProcessResponseFromDB(vp, questions, census, a.account.ChainID()))
+	resp := apicommon.VotingProcessResponseFromDB(vp, questions, census, a.account.ChainID())
+	resp.Census.TotalWeight = a.censusTotalWeight(census)
+	apicommon.HTTPWriteJSON(w, resp)
 }
 
 // listVotingProcessesHandler godoc
@@ -574,6 +576,27 @@ func (a *API) resolveQuestionEncryptionKeys(q *db.VotingProcessQuestion) []db.En
 		log.Warnw("encryption keys: could not persist question keys", "question", q.ID.Hex(), "error", err)
 	}
 	return keys
+}
+
+// censusTotalWeight returns the whole-census total voting weight (sum of members' weights) exposed
+// on CensusSpec. A non-weighted census contributes weight 1 per member, so the total is just the
+// participant count (Size) with no query; a weighted census sums OrgMember.Weight over its members.
+// On aggregation failure it returns 0 (NOT Size): totalWeight backs a report/certification denominator,
+// where a plausible-but-wrong total is worse than an absent one — 0 makes omitempty drop the field so
+// the client renders "not available" instead of computing every percentage against a wrong total.
+func (a *API) censusTotalWeight(census *db.Census) int64 {
+	if census == nil {
+		return 0
+	}
+	if !census.Weighted {
+		return census.Size
+	}
+	total, err := a.db.CensusTotalWeight(census.ID.Hex())
+	if err != nil {
+		log.Warnw("census total weight: aggregation failed", "census", census.ID.Hex(), "error", err)
+		return 0
+	}
+	return total
 }
 
 // questionResultsFromElection maps a question's on-chain election onto the QuestionResults shape.
