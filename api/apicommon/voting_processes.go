@@ -19,6 +19,10 @@ type CensusSpec struct {
 	// Size is the number of members in the census. Response-only (ignored on create/update): for a
 	// published process it equals the on-chain maxCensusSize of its whole-census questions.
 	Size int64 `json:"size,omitempty"`
+	// TotalWeight is the whole-census total voting weight (sum of members' weights). Response-only;
+	// equals Size for a non-weighted census. Needed by clients (e.g. the results report) to turn
+	// per-answer weights into percentages.
+	TotalWeight int64 `json:"totalWeight,omitempty"`
 }
 
 // EligibilitySpec is an optional per-question subset of the process census, resolved to a
