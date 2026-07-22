@@ -131,7 +131,9 @@ func (ms *MongoStorage) SetQuestionStatus(id primitive.ObjectID, status string) 
 // by the keykeepers, so this is written once and only with a non-empty set (mirrors
 // SetProcessEncryptionKeys for the legacy single-election model).
 func (ms *MongoStorage) SetQuestionEncryptionKeys(id primitive.ObjectID, keys []EncryptionKey) error {
-	if id == primitive.NilObjectID {
+	// keys are immutable and written once; reject an empty set so a stray call can never clobber
+	// already-cached keys with an empty array (matches the "non-empty" contract above).
+	if id == primitive.NilObjectID || len(keys) == 0 {
 		return ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
