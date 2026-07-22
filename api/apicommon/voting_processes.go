@@ -194,6 +194,11 @@ type PublicQuestionResponse struct {
 	UpstreamID        internal.HexBytes    `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	Status            string               `json:"status,omitempty"`
 	Census            CensusSpec           `json:"census"`
+	// EncryptionKeys are the on-chain vote-encryption public keys (only for secretUntilTheEnd
+	// questions). Because of omitempty the field is absent (not an empty array) until the keykeepers
+	// publish the keys, so clients treat its absence as "not yet published" and poll. Voters seal
+	// encrypted ballots with them.
+	EncryptionKeys []db.EncryptionKey `json:"encryptionKeys,omitempty"`
 }
 
 // PublicQuestionResponseFromDB builds the public question read from a question and its parent
@@ -212,6 +217,7 @@ func PublicQuestionResponseFromDB(q *db.VotingProcessQuestion, census *db.Census
 		Metadata:          q.Metadata,
 		UpstreamID:        q.UpstreamID,
 		Status:            q.Status,
+		EncryptionKeys:    q.EncryptionKeys,
 	}
 	if census != nil {
 		resp.Census = CensusSpec{

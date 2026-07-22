@@ -73,7 +73,10 @@ definitions:
         description: Number of members added
         type: integer
       errors:
-        description: Errors encountered during job
+        description: |-
+          Errors encountered during job. Validation errors are prefixed with
+          "line N:", the 1-based position of the offending member in the
+          submitted members list.
         items:
           type: string
         type: array
@@ -1284,6 +1287,15 @@ definitions:
         type: array
       description:
         $ref: '#/definitions/db.MultiLangString'
+      encryptionKeys:
+        description: |-
+          EncryptionKeys are the on-chain vote-encryption public keys (only for secretUntilTheEnd
+          questions). Because of omitempty the field is absent (not an empty array) until the keykeepers
+          publish the keys, so clients treat its absence as "not yet published" and poll. Voters seal
+          encrypted ballots with them.
+        items:
+          $ref: '#/definitions/db.EncryptionKey'
+        type: array
       id:
         type: string
       metadata:
@@ -2288,6 +2300,15 @@ definitions:
       eligibleMemberIds:
         items:
           type: string
+        type: array
+      encryptionKeys:
+        description: |-
+          EncryptionKeys are the on-chain vote-encryption public keys of this question's election,
+          resolved on read and cached (only for secretUntilTheEnd questions). Because of omitempty the
+          JSON field is absent (not an empty array) until the keykeepers publish the keys, so clients
+          treat its absence as "not yet published" and poll. Voters seal encrypted vote packages with these.
+        items:
+          $ref: '#/definitions/db.EncryptionKey'
         type: array
       id:
         type: string
