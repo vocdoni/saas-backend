@@ -94,16 +94,25 @@ func (ms *MongoStorage) DeleteVotingProcess(id primitive.ObjectID) error {
 	return nil
 }
 
-// ListVotingProcesses returns a paginated list of voting processes for an organization.
-// When questionStatus is non-empty, only processes that have at least one question in
-// that status are returned.
+// ListVotingProcesses returns a paginated list of voting processes for an organization, filtered by
+// draft state (PublishedOnly serves the public/non-manager view; AllProcesses the manager view).
+// When questionStatus is non-empty, only processes that have at least one question in that status
+// are returned.
 func (ms *MongoStorage) ListVotingProcesses(
-	orgAddress common.Address, questionStatus string, page, limit int64,
+	orgAddress common.Address, questionStatus string, draft DraftFilter, page, limit int64,
 ) (int64, []VotingProcess, error) {
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return 0, nil, ErrInvalidData
 	}
 	filter := bson.M{"orgAddress": orgAddress} //nolint:goconst
+	switch draft {
+	case DraftOnly:
+		filter["published"] = false
+	case PublishedOnly:
+		filter["published"] = true
+	default:
+		// AllProcesses — no published filter
+	}
 	if questionStatus != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 		defer cancel()

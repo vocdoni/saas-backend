@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/jwtauth/v5"
 	"github.com/lestrrat-go/jwx/v2/jwt"
@@ -77,6 +78,42 @@ func (a *API) optionalUser(r *http.Request) *db.User {
 		return nil
 	}
 	return user
+}
+
+// userFromAPIKey resolves the db.User an API key acts as, but only when the key is valid (not
+// revoked/expired) and holds requiredScope. Returns nil otherwise. Like authenticateAPIKey, the key
+// acts as its creating user, so org authorization still flows through that user's roles. Used by the
+// optional-auth path of public handlers, so it never writes a response and skips last-used tracking.
+func (a *API) userFromAPIKey(raw, requiredScope string) *db.User {
+	key, err := a.db.APIKeyByHash(hashAPIKey(raw))
+	if err != nil || !slices.Contains(key.Scopes, requiredScope) {
+		return nil
+	}
+	user, err := a.db.UserByEmail(key.CreatedBy)
+	if err != nil || !user.Verified {
+		return nil
+	}
+	return user
+}
+
+// optionalCallerUser resolves the acting db.User from either a JWT bearer session or a voting:write
+// scoped API key (which acts as its creating user), or nil when the request is anonymous or the
+// credential is invalid/insufficient. Never writes a response — for public handlers that reveal extra
+// data to an authorized caller.
+func (a *API) optionalCallerUser(r *http.Request) *db.User {
+	if raw := bearerToken(r); looksLikeAPIKey(raw) {
+		return a.userFromAPIKey(raw, ScopeVotingWrite)
+	}
+	return a.optionalUser(r)
+}
+
+// optionalManager reports whether the request's optional credential (JWT or scoped API key) resolves
+// to a user with Manager or Admin role for orgAddress. Anonymous or insufficient callers get false —
+// the public view. Never writes a response.
+func (a *API) optionalManager(r *http.Request, orgAddress common.Address) bool {
+	user := a.optionalCallerUser(r)
+	return user != nil &&
+		(user.HasRoleFor(orgAddress, db.ManagerRole) || user.HasRoleFor(orgAddress, db.AdminRole))
 }
 
 // authenticator is a middleware that authenticates the user and returns a JWT

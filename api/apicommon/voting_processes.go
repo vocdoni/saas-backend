@@ -187,8 +187,9 @@ type PublicQuestionResponse struct {
 	// publish the keys, so clients treat its absence as "not yet published" and poll. Voters seal
 	// encrypted ballots with them.
 	EncryptionKeys []db.EncryptionKey `json:"encryptionKeys,omitempty"`
-	// Results is this question's on-chain tally, present only once the question reaches RESULTS status
-	// (absent otherwise via omitempty), so clients treat its absence as "not yet final" and poll.
+	// Results is this question's live on-chain tally, present for any published question; FinalResults
+	// marks live vs final. Absent (via omitempty) while a secretUntilTheEnd election is still encrypted
+	// or before any vote, so clients treat its absence as "nothing to show yet" and poll.
 	Results *db.QuestionResults `json:"results,omitempty"`
 }
 

@@ -153,7 +153,8 @@ func (a *API) buildQuestions(
 			case db.VotingTypeMultiChoice:
 				if q.TypeSetup.MaxChoices < 1 || q.TypeSetup.MaxChoices > uint32(len(q.Choices)) {
 					return nil, errors.ErrInvalidData.Withf(
-						"question %d: maxChoices must be between 1 and the number of choices (%d)", i, len(q.Choices))
+						"question %d: maxChoices must be between 1 and the number of choices (%d)", i, len(q.Choices),
+					)
 				}
 				if q.TypeSetup.MinChoices > q.TypeSetup.MaxChoices {
 					return nil, errors.ErrInvalidData.Withf("question %d: minChoices cannot exceed maxChoices", i)
@@ -301,23 +302,19 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 // votingProcessInfoHandler godoc
 //
 //	@Summary		Get a voting process
-//	@Description	Read a voting process with its fully hydrated questions (protected read).
+//	@Description	Read a voting process with its hydrated questions (live per-question results included).
+//	@Description	Public for published processes; a draft is visible only to a Manager/Admin of the org
+//	@Description	(or a voting:write API key acting as one) and returns 404 otherwise. Non-managers never
+//	@Description	receive the per-question eligibleMemberIds.
 //	@Tags			processes
 //	@Produce		json
-//	@Security		BearerAuth
 //	@Param			processId	path		string	true	"Process ID"
 //	@Success		200			{object}	apicommon.VotingProcessResponse
-//	@Failure		401			{object}	errors.Error
 //	@Failure		404			{object}	errors.Error
 //	@Router			/processes/{processId} [get]
 func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 	oid, ok := a.votingProcessID(w, r)
 	if !ok {
-		return
-	}
-	user, ok := apicommon.UserFromContext(r.Context())
-	if !ok {
-		errors.ErrUnauthorized.Write(w)
 		return
 	}
 	vp, questions, err := a.db.ProcessWithQuestions(oid)
@@ -329,8 +326,11 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	if !user.HasRoleFor(vp.OrgAddress, db.ManagerRole) && !user.HasRoleFor(vp.OrgAddress, db.AdminRole) {
-		errors.ErrUnauthorized.Write(w)
+	// public read: published processes are visible to anyone; a draft only to a manager/admin of the
+	// owning org (and its existence is hidden from everyone else via 404).
+	isManager := a.optionalManager(r, vp.OrgAddress)
+	if !vp.Published && !isManager {
+		errors.ErrProcessNotFound.Write(w)
 		return
 	}
 	census, _ := a.db.Census(vp.CensusID.Hex())
@@ -340,37 +340,45 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 		a.enqueueReconcileIfStale(&questions[i])
 	}
 	// resolve the vote encryption keys of encrypted questions (so clients can seal encrypted ballots)
-	// concurrently: each encrypted question without cached keys needs a Vochain round-trip, so a
-	// bounded pool keeps this read fast for a process with many encrypted questions.
+	// and the live on-chain tally of each published question (finalResults marks final), concurrently:
+	// each needs a Vochain round-trip, so bounded pools keep this read fast for a many-question process.
 	a.resolveQuestionEncryptionKeysBatch(questions)
-	// resolve the on-chain tally of any question already in RESULTS status (concurrently), so a manager
-	// sees per-question results inline without a separate /results call. Non-RESULTS questions are skipped.
 	a.resolveQuestionResultsBatch(questions)
+	// non-managers must not see the per-question eligibility member ids (who can vote).
+	if !isManager {
+		redactQuestionsForPublic(questions)
+	}
 	resp := apicommon.VotingProcessResponseFromDB(vp, questions, census, a.account.ChainID())
 	resp.Census.TotalWeight = a.censusTotalWeight(census)
 	apicommon.HTTPWriteJSON(w, resp)
 }
 
+// redactQuestionsForPublic strips manager-only fields from questions before serving them to a
+// non-manager (anonymous, viewer, or other-org) caller — currently the per-question eligibility member
+// ids (the list of who may vote). Mutates the passed slice in place.
+func redactQuestionsForPublic(questions []db.VotingProcessQuestion) {
+	for i := range questions {
+		questions[i].EligibleMemberIDs = nil
+	}
+}
+
 // listVotingProcessesHandler godoc
 //
 //	@Summary		List voting processes
-//	@Description	Paginated list of an organization's voting processes (protected). Filter by question status.
+//	@Description	Paginated list of an organization's voting processes. Public: anonymous callers get
+//	@Description	published processes only (without per-question eligibleMemberIds). A Manager/Admin of
+//	@Description	the org (or a voting:write API key acting as one) also gets drafts and the eligibility.
+//	@Description	Filter by question status.
 //	@Tags			processes
 //	@Produce		json
-//	@Security		BearerAuth
 //	@Param			orgAddress	query		string	true	"Organization address"
 //	@Param			status		query		string	false	"Filter by question status"
 //	@Param			page		query		int		false	"Page (1-based)"
 //	@Param			limit		query		int		false	"Page size"
 //	@Success		200			{object}	apicommon.VotingProcessListResponse
-//	@Failure		401			{object}	errors.Error
+//	@Failure		400			{object}	errors.Error
 //	@Router			/processes [get]
 func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := apicommon.UserFromContext(r.Context())
-	if !ok {
-		errors.ErrUnauthorized.Write(w)
-		return
-	}
 	orgAddressStr := r.URL.Query().Get("orgAddress")
 	if orgAddressStr == "" {
 		errors.ErrMalformedURLParam.Withf("missing orgAddress").Write(w)
@@ -381,9 +389,12 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	orgAddress := common.HexToAddress(orgAddressStr)
-	if !user.HasRoleFor(orgAddress, db.ManagerRole) && !user.HasRoleFor(orgAddress, db.AdminRole) {
-		errors.ErrUnauthorized.Write(w)
-		return
+	// public read: anonymous callers see published processes only; a manager/admin of the org (or a
+	// voting:write API key acting as one) also sees drafts (and keeps the per-question eligibility).
+	isManager := a.optionalManager(r, orgAddress)
+	draft := db.PublishedOnly
+	if isManager {
+		draft = db.AllProcesses
 	}
 	params, err := parsePaginationParams(r.URL.Query().Get(ParamPage), r.URL.Query().Get(ParamLimit))
 	if err != nil {
@@ -392,7 +403,7 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 	}
 	// stored question status is uppercase; upper-case the filter so client input stays case-insensitive.
 	statusFilter := strings.ToUpper(r.URL.Query().Get("status"))
-	total, list, err := a.db.ListVotingProcesses(orgAddress, statusFilter, params.Page, params.Limit)
+	total, list, err := a.db.ListVotingProcesses(orgAddress, statusFilter, draft, params.Page, params.Limit)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
@@ -415,6 +426,9 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		census, _ := a.db.Census(vp.CensusID.Hex())
+		if !isManager {
+			redactQuestionsForPublic(questions)
+		}
 		resp.Processes = append(resp.Processes, *apicommon.VotingProcessResponseFromDB(vp, questions, census, chainID))
 	}
 	apicommon.HTTPWriteJSON(w, resp)
@@ -627,15 +641,15 @@ func questionResultsFromElection(e *dvoteapi.Election) db.QuestionResults {
 	return qr
 }
 
-// resolveQuestionResults returns a question's on-chain tally, but only once the question has reached
-// the terminal RESULTS status; it is a no-op (nil, no chain call) for every other status and for
-// unpublished drafts. Unlike encryption keys it is not cached: RESULTS is terminal so the read is
-// bounded, and caching would need a db type/method — add one if this read ever gets hot.
+// resolveQuestionResults returns a question's live on-chain tally for any published (on-chain)
+// question — the caller distinguishes live from final via QuestionResults.FinalResults. It is a no-op
+// (nil, no chain call) only for an unpublished draft (no UpstreamID). A secretUntilTheEnd question
+// returns empty results until the keys are revealed (the node hides the tally, not this gate).
+//
+// ponytail: not cached, so a live read hits the chain per poll (one Election call per published
+// question); add a short-TTL cache if this read gets hot — /results already does the same per poll.
 func (a *API) resolveQuestionResults(q *db.VotingProcessQuestion) *db.QuestionResults {
-	// gate: only surface results for questions the chain has moved to RESULTS; keeps others chain-free.
-	if q.Status != db.QuestionStatusResults {
-		return nil
-	}
+	// nothing on chain yet (draft) — no results.
 	if len(q.UpstreamID) == 0 {
 		return nil
 	}

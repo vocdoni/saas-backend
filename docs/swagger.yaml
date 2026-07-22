@@ -1313,8 +1313,9 @@ definitions:
         allOf:
         - $ref: '#/definitions/db.QuestionResults'
         description: |-
-          Results is this question's on-chain tally, present only once the question reaches RESULTS status
-          (absent otherwise via omitempty), so clients treat its absence as "not yet final" and poll.
+          Results is this question's live on-chain tally, present for any published question; FinalResults
+          marks live vs final. Absent (via omitempty) while a secretUntilTheEnd election is still encrypted
+          or before any vote, so clients treat its absence as "nothing to show yet" and poll.
       secretUntilTheEnd:
         type: boolean
       status:
@@ -2332,11 +2333,12 @@ definitions:
         allOf:
         - $ref: '#/definitions/db.QuestionResults'
         description: |-
-          Results is this question's on-chain tally, resolved on read only when the question is in RESULTS
-          status (absent otherwise). Not persisted (bson:"-") — recomputed from the chain each read. Only
-          the single reads resolve it (GET /processes/{id} and the public question read); the list endpoint
-          leaves it nil to avoid an N+1 chain fan-out, so its absence in a LIST response means "not resolved
-          here", not "not final" — poll the single read for that.
+          Results is this question's live on-chain tally, resolved on read for any published (on-chain)
+          question; FinalResults marks live vs final (absent while a secretUntilTheEnd election is still
+          encrypted, or before any vote). Not persisted (bson:"-") — recomputed from the chain each read.
+          Only the single reads resolve it (GET /processes/{id} and the public question read); the list
+          endpoint leaves it nil to avoid an N+1 chain fan-out, so its absence in a LIST response means "not
+          resolved here", not "not final" — poll the single read for that.
       secretUntilTheEnd:
         type: boolean
       status:
@@ -5828,7 +5830,10 @@ paths:
       - csp
   /processes:
     get:
-      description: Paginated list of an organization's voting processes (protected).
+      description: |-
+        Paginated list of an organization's voting processes. Public: anonymous callers get
+        published processes only (without per-question eligibleMemberIds). A Manager/Admin of
+        the org (or a voting:write API key acting as one) also gets drafts and the eligibility.
         Filter by question status.
       parameters:
       - description: Organization address
@@ -5855,12 +5860,10 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/apicommon.VotingProcessListResponse'
-        "401":
-          description: Unauthorized
+        "400":
+          description: Bad Request
           schema:
             $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
       summary: List voting processes
       tags:
       - processes
@@ -5944,8 +5947,11 @@ paths:
       tags:
       - processes
     get:
-      description: Read a voting process with its fully hydrated questions (protected
-        read).
+      description: |-
+        Read a voting process with its hydrated questions (live per-question results included).
+        Public for published processes; a draft is visible only to a Manager/Admin of the org
+        (or a voting:write API key acting as one) and returns 404 otherwise. Non-managers never
+        receive the per-question eligibleMemberIds.
       parameters:
       - description: Process ID
         in: path
@@ -5959,16 +5965,10 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/apicommon.VotingProcessResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
         "404":
           description: Not Found
           schema:
             $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
       summary: Get a voting process
       tags:
       - processes
