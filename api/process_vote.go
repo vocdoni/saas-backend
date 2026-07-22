@@ -7,7 +7,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
-	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
@@ -226,7 +225,7 @@ func (a *API) setProcessStatusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	orgSigner, err := account.OrganizationSigner(a.secret, org.Creator, org.Nonce)
+	orgSigner, err := a.organizationSigner(org)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not restore organization signer: %v", err).Write(w)
 		return
