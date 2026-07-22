@@ -61,12 +61,12 @@ Cross-cutting themes).
 `UserWeightHandler` (`:483`), and `BundleCheckHandler` (`:580`) all enforce
 `bytes.Equal(*bundleID, auth.BundleID)`. The **signing** endpoint — the one that actually mints
 ballot signatures — does not, and the census-participant check is dead/commented (`:436-439`,
-referencing a `checkCensusParticipant` method that does not exist anywhere). Consequence: a member of
-org O who verifies a token for bundle A (census A) can `POST /process/bundle/B/sign` with that token
-and sign a process in bundle B of the same org, **bypassing census-B eligibility**. Server-side
-weight computation prevents weight inflation, but cross-census vote authorization within an org is a
-genuine integrity hole. **Fix:** add the `bytes.Equal(*bundleID, auth.BundleID)` guard the siblings
-have, and restore a real census-participant check.
+referencing a `checkCensusParticipant` method that does not exist anywhere). Consequence: a token
+verified for bundle A (census A) is accepted at `POST /process/bundle/B/sign` for bundle B of the
+same org, so census-B eligibility is never enforced on the signing path. Server-side weight
+computation prevents weight inflation, but cross-census vote authorization within an org is a genuine
+integrity hole. **Fix:** add the `bytes.Equal(*bundleID, auth.BundleID)` guard the siblings have, and
+restore a real census-participant check.
 
 ### H2. `SetOrganization` update path can silently DELETE an existing organization — `(verified)` — data-integrity/bug
 `db/organizations.go:104-112`. `SetOrganization` is used for both create and update. On any update,
@@ -83,14 +83,14 @@ when the upsert actually inserted), and don't treat a missing/transient creator 
 the hasher (**nothing**, here) to `b` — it does not hash `b`. So `HashSortedFields` returns
 `fmt.Append(nil, sortedData)` (the plaintext member fields: name/surname/nationalID/birthdate/email/
 phone) followed by a fixed 32-byte constant (`SHA256("")`). These bytes are stored hex-encoded as
-`loginHash`/`loginHashEmail` (`db/types.go`), so anyone with DB read access recovers every member's
-identity fields verbatim. The code comment (utils.go:44-51) defends the construction on
-back-compat grounds and **explicitly says not to "fix" it** — but never acknowledges it leaks
-plaintext. `HashVerificationCode` has the identical defect (currently no callers — dead code).
-**Fix:** the on-wire format can't change without a data migration, but it must become a real keyed
-hash (HMAC with a server secret) on a versioned migration; at minimum document the exposure and lock
-down DB access. Note: `HashPassword` (argon2id) is *correct* — this defect is isolated to the
-login-hash lookup keys.
+`loginHash`/`loginHashEmail` (`db/types.go`), so any actor with DB read access reads every member's
+identity fields verbatim — the values are not obscured at all. The code comment (utils.go:44-51)
+defends the construction on back-compat grounds and **explicitly says not to "fix" it** — but never
+acknowledges the fields are stored in the clear. `HashVerificationCode` has the identical defect
+(currently no callers — dead code). **Fix:** the on-wire format can't change without a data
+migration, but it must become a real keyed hash (HMAC with a server secret) on a versioned migration;
+at minimum document the exposure and lock down DB access. Note: `HashPassword` (argon2id) is
+*correct* — this defect is isolated to the login-hash lookup keys.
 
 ### H4. `publishCensusHandler` stores the wrong key as the census root — `(verified)` — bug
 `api/census.go:260-263`. This endpoint sets `census.Published.Root = a.account.PubKey` (the
@@ -100,25 +100,27 @@ The CSP is what actually signs voter ballots, so the persisted root returned to 
 not match the key that authorizes votes against that census. A `// TODO: use a different key` sits on
 the offending line. **Fix:** use `a.csp.PubKey()` here to match the other five paths.
 
-### H5. SMTP header injection via un-sanitized `Subject` — `(verified)` — security
+### H5. SMTP `Subject` is written without CRLF sanitization — mail header integrity gap — `(verified)` — security
 `notifications/smtp/smtp.go:148`. `To`/`Cc`/`Reply-To` are validated through `mail.ParseAddress`
 (rejects CRLF), but `Subject` is written raw. Subjects interpolate user/org-controlled fields:
 support-ticket subject includes request-body `Title`/`Type` (`api/organizations.go:480`, only checked
-non-empty); OTP/invite subjects include the org name. A `Title` containing `\r\n` injects arbitrary
-headers (e.g. `Bcc:`) into mail sent to the support inbox and to voters. **Fix:** strip CR/LF from
-`Subject` (and any header-bound value) and RFC 2047-encode non-ASCII subjects (see M-notifications).
+non-empty); OTP/invite subjects include the org name. A CRLF sequence in `Title` would be emitted
+into the header block instead of being confined to the subject line, so additional headers could be
+introduced on mail sent to the support inbox and to voters. **Fix:** strip CR/LF from `Subject` (and
+any header-bound value) and RFC 2047-encode non-ASCII subjects (see M-notifications).
 
-### H6. Organization invitation codes are brute-forceable — short code, public endpoint, no attempt cap — `(reported)` — security
+### H6. Organization invitation codes have low entropy and an uncapped public lookup — `(reported)` — security
 `api/organization_users.go:212-303`, `api/apicommon/const.go:30`. Invite codes are
-`RandomHex(VerificationCodeLength)` with `VerificationCodeLength = 3` → 6 hex chars ≈ 2²⁴, valid 5
-days, stored in **plaintext**. `POST /organizations/{address}/users/accept` is public and does a
-bare global `InvitationByCode(code)` with **no per-invite attempt cap and no per-IP rate limit** —
-unlike account-verification/reset codes of the same length, which are capped at 3 attempts. The
-lookup isn't org-scoped, giving a birthday advantage across all pending invites platform-wide. A
-successful guess grants an org role and, for a not-yet-registered invitee, creates a **verified**
-account under the victim's email with the attacker's password. **Fix:** fold invites into the same
-attempt-capped, sealed-code path the OTP hardening pass used; lengthen the code; scope lookups to the
-org. This is the invitation-flow gap in the otherwise-completed OTP hardening (theme below).
+`RandomHex(VerificationCodeLength)` with `VerificationCodeLength = 3` → 6 hex chars (24 bits of
+entropy), valid 5 days, stored in **plaintext**. `POST /organizations/{address}/users/accept` is
+public and does a bare global `InvitationByCode(code)` with **no per-invite attempt cap and no per-IP
+rate limit** — unlike account-verification/reset codes of the same length, which are capped at 3
+attempts. The lookup isn't org-scoped, so a single code matches against all pending invites
+platform-wide, reducing the effective entropy further. A matched code grants an org role and, for a
+not-yet-registered invitee, creates a **verified** account bound to the invited email. **Fix:** fold
+invites into the same attempt-capped, sealed-code path the OTP hardening pass used; lengthen the code;
+scope lookups to the org. This is the invitation-flow gap in the otherwise-completed OTP hardening
+(theme below).
 
 ### H7. Bulk-insert error paths nil-deref and crash the process — `(reported)` — bug
 `db/org_members.go:245-253` (`InsertMany`) and `db/census_participant.go:726-727` (`BulkWrite`). On a
@@ -129,13 +131,13 @@ driver returns `result == nil`, and the code immediately reads `result.InsertedI
 `processBatch` at census_participant.go:364, which checks `err` first.) **Fix:** check `err` before
 dereferencing the result on both paths; don't panic from a detached goroutine.
 
-### H8. Public unauthenticated endpoint leaks Stripe billing email + internal usage counters — `(reported)` — security
+### H8. Public unauthenticated endpoint exposes Stripe billing email + internal usage counters — `(reported)` — security
 `api/organizations.go:207-216` (public group) → `apicommon.OrganizationFromDB` → `types.go:894-901`.
 `GET /organizations/{address}` returns the full `OrganizationInfo`, including `Subscription.Email`
 (the Stripe customer billing email) and `Counters` (SentSMS/SentEmails/SentVotes/Users/Processes).
-Org addresses are public on-chain, so this exposes PII and business metrics to anyone. An
-admin-only `/organizations/{address}/subscription` endpoint exists precisely for this data.
-**Fix:** strip `Subscription`/`Counters` from the public projection.
+Org addresses are public on-chain, so this response surfaces billing PII and business metrics without
+authentication. An admin-only `/organizations/{address}/subscription` endpoint exists precisely for
+this data. **Fix:** strip `Subscription`/`Counters` from the public projection.
 
 ---
 
@@ -145,13 +147,14 @@ admin-only `/organizations/{address}/subscription` endpoint exists precisely for
 - **M1. No session invalidation** — `(reported)` — `api/auth.go:54-69`, `api/users.go:679-760`,
   `jwtExpiration = 360h`. Password change/reset does not revoke outstanding JWTs (stateless, keyed on
   email), and `POST /auth/refresh` lets any valid token mint a fresh 15-day token indefinitely — no
-  absolute session lifetime, no token version/nonce in the user record. A stolen session outlives a
-  password reset by up to 15 days. **Fix:** add a per-user token version claim bumped on
-  password/email change; cap absolute session age.
+  absolute session lifetime, no token version/nonce in the user record. A session issued before a
+  password reset stays valid up to 15 days after it. **Fix:** add a per-user token version claim
+  bumped on password/email change; cap absolute session age.
 - **M2. Single hardcoded global password salt** — `(reported)` — `api/api.go:75`
   (`passwordSalt = "vocdoni365"`), `internal/utils.go:102`. Argon2id params are good, but one static
-  salt means identical passwords → identical hashes (bulk cracking, reuse detection across accounts).
-  **Fix:** per-user random salt stored alongside the hash.
+  salt means identical passwords produce identical hashes, which removes the per-account isolation a
+  salt is meant to provide (offline hash comparison, reuse detection across accounts). **Fix:**
+  per-user random salt stored alongside the hash.
 - **M3. API keys are not bound to their org** — `(reported)` — `api/middlewares.go:107-123`. Only the
   three `/integrator` endpoints consult `key.OrgAddress`; every other endpoint authorizes via the
   creator's `HasRoleFor(org.Address, …)`, so a key minted for integrator org A can act on **any** org
@@ -217,13 +220,15 @@ don't).
 
 ### Object storage & notifications
 - **M15. Unbounded upload allocation + short read** — `(reported)` —
-  `objectstorage/objectstorage.go:166-172`. `make([]byte, size)` uses the attacker-controlled
-  multipart `Size` header (memory-exhaustion vector) and a single `data.Read(buff)` can short-read.
-  The handler sets only a 32 MB in-memory parse threshold, no total-request cap. **Fix:**
-  `http.MaxBytesReader` + `io.ReadFull`/`io.LimitReader`.
+  `objectstorage/objectstorage.go:166-172`. `make([]byte, size)` sizes the allocation from the
+  client-supplied multipart `Size` header (a resource-exhaustion path — a large declared size drives a
+  large allocation) and a single `data.Read(buff)` can short-read. The handler sets only a 32 MB
+  in-memory parse threshold, no total-request cap. **Fix:** `http.MaxBytesReader` +
+  `io.ReadFull`/`io.LimitReader`.
 - **M16. Missing `nosniff` on public inline object download** — `(reported)` —
   `objectstorage/handlers.go:159-162`. Public route serves user content `inline` with no
-  `X-Content-Type-Options: nosniff`. **Fix:** add the header (cheap defense against polyglot/MIME-sniff).
+  `X-Content-Type-Options: nosniff`. **Fix:** add the header (cheap defense against MIME-sniffing of
+  uploaded content).
 - **M17. Non-ASCII email subject / Content-Transfer-Encoding bugs** — `(reported)` —
   `notifications/smtp/smtp.go:148,162-173`. Localized subjects (`Código…`, `Invitación…`) are emitted
   as raw UTF-8 in an ASCII-only header, and both MIME parts declare `7bit` while bodies are 8-bit
@@ -246,12 +251,12 @@ don't).
 - **M21. Unauthenticated public fan-out to N chain / N DB calls** — `(reported)` —
   `api/processes.go:566-599` (`GET /processes/{id}/results` → one Vochain `Election()` per question,
   up to 100, no cache, no auth), `csp/handlers/processes.go:293-313` (`POST /processes/{id}/check`
-  → N+1 Mongo). An unauthenticated caller can force ~100 chain round-trips per request. **Fix:**
+  → N+1 Mongo). A single unauthenticated request can trigger ~100 chain round-trips. **Fix:**
   cache results / batch the lookups / bound the fan-out.
 - **M22. User-controlled `$regex` in member search** — `(reported)` — `db/org_members.go:509-517`,
   fed verbatim from the query string (`api/org_members.go:115`). Unescaped, applied to six fields —
-  malformed patterns → 500s, catastrophic patterns → ReDoS. **Fix:** `regexp.QuoteMeta` or an
-  anchored text index.
+  malformed patterns → 500s, pathological patterns → super-linear matching cost (unbounded query
+  time). **Fix:** `regexp.QuoteMeta` or an anchored text index.
 
 ---
 
@@ -287,12 +292,12 @@ don't).
 **Security (low)**
 - CORS `AllowedOrigins: ["*"]` with `AllowCredentials: true` (`api/api.go:242`) — inert with Bearer
   auth, a footgun if cookies are ever added.
-- Inconsistent user-enumeration posture: register/verify/reset leak account existence while recovery
+- Inconsistent user-enumeration posture: register/verify/reset reveal account existence while recovery
   deliberately doesn't (`api/users.go:71,222,694`); login skips argon2 for nonexistent users (timing).
 - `db` structs expose password/hash fields via json tags (`OrgMember.HashedPass json:"pass"`,
   `User.Password json:"password"`) — safe only because `apicommon` converts; any handler returning a
-  db struct verbatim leaks argon2 hashes.
-- `ConsumedAddressHandler` lacks bundle binding (`csp/handlers/handlers.go:658`) — exposes only the
+  db struct verbatim would serialize argon2 hashes.
+- `ConsumedAddressHandler` lacks bundle binding (`csp/handlers/handlers.go:658`) — returns only the
   token's own user's data, so minimal impact.
 - CSP overwrite budget is a hardcoded `MaxVoteOverwritesPerProcess = 10` (`db/const.go:27`) ignoring
   the election's configured `MaxVoteOverwrites` — signing-oracle looseness, bounded on-chain.
@@ -339,17 +344,17 @@ don't).
 ## Test coverage
 
 Genuinely strong integration suite by Go-backend standards (~250 test functions, real
-Mongo/MailHog/in-process Voconed, negative-path coverage including the OTP brute-force lockout
-regression). `check-qt-patterns.sh` passes clean and runs in CI. The material gaps cluster in one
+Mongo/MailHog/in-process Voconed, negative-path coverage including the OTP lockout regression).
+`check-qt-patterns.sh` passes clean and runs in CI. The material gaps cluster in one
 place — **the billing surface** — plus migration data-correctness:
 
 **Highest-risk untested areas (ranked):**
 1. **Stripe checkout/portal endpoints — zero coverage** (`api/stripe_handlers.go:93,157,188`). Money
    entry points; permission/plan/error paths unverified. `stripe/client.go` has no mock seam.
 2. **Webhook signature verification bypassed by tests** — `stripe_webhook_test.go` calls
-   `HandleEvent` directly, skipping `ConstructEvent`. A regression accepting forged webhooks (which
-   can change an org's plan) would not be caught. Product-update sync subtests are commented out
-   (`:267-304`, `// TODO: needs refactoring`).
+   `HandleEvent` directly, skipping `ConstructEvent`. A regression that accepted invalid webhook
+   signatures (which can change an org's plan) would not be caught. Product-update sync subtests are
+   commented out (`:267-304`, `// TODO: needs refactoring`).
 3. **Migrations only smoke-tested on near-empty DBs.** `0008` (unique login-hash indexes, **no dedupe
    step** — will hard-fail on any census with duplicate hashes), `0014` (rewrites every org's plan id,
    drops plan docs, env-var-dependent product id that falls back to a **sandbox** id), and `0011`
