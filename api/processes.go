@@ -569,10 +569,12 @@ func (a *API) resolveQuestionEncryptionKeys(q *db.VotingProcessQuestion) []db.En
 	return keys
 }
 
-// questionResultsFromElection maps a question's on-chain election onto the trimmed QuestionResults
-// shape. MaxVoters is the election's own maxCensusSize — already restricted to the question's
-// eligibility subset at publish (account.ComputeMaxCensusSize). Results is the single-field tally
-// (each question is its own one-field election), stringified; it stays nil until the tally publishes.
+// questionResultsFromElection maps a question's on-chain election onto the QuestionResults shape.
+// MaxVoters is the election's own maxCensusSize — already restricted to the question's eligibility
+// subset at publish (account.ComputeMaxCensusSize). Results is the full tally matrix stringified
+// verbatim (one row per ballot field), so both single-choice (one row of value buckets) and
+// multi-choice (one row per choice) questions are represented losslessly; it stays nil until the
+// tally publishes.
 func questionResultsFromElection(e *dvoteapi.Election) db.QuestionResults {
 	qr := db.QuestionResults{
 		VoteCount:    e.VoteCount,
@@ -582,11 +584,15 @@ func questionResultsFromElection(e *dvoteapi.Election) db.QuestionResults {
 		qr.MaxVoters = e.Census.MaxCensusSize
 	}
 	if len(e.Results) > 0 {
-		values := make([]string, len(e.Results[0]))
-		for i, v := range e.Results[0] {
-			values[i] = v.String()
+		results := make([][]string, len(e.Results))
+		for i, field := range e.Results {
+			values := make([]string, len(field))
+			for j, v := range field {
+				values[j] = v.String()
+			}
+			results[i] = values
 		}
-		qr.Results = values
+		qr.Results = results
 	}
 	return qr
 }

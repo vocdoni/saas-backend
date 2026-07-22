@@ -194,7 +194,8 @@ func TestFullElectionLifecycle(t *testing.T) {
 	c.Assert(qr.VoteCount, qt.Equals, uint64(numVoters))
 	c.Assert(qr.FinalResults, qt.IsTrue)
 	c.Assert(qr.MaxVoters, qt.Equals, uint64(100)) // the election's on-chain maxCensusSize
-	c.Assert(qr.Results, qt.DeepEquals, []string{"1", "2"})
+	// singlechoice question -> one ballot field -> one results row of value buckets [No, Yes].
+	c.Assert(qr.Results, qt.DeepEquals, [][]string{{"1", "2"}})
 	c.Assert(info.Questions[1].Results, qt.IsNil)
 
 	// public GET /processes/{id}/questions/{qId}: same tally on the voter-facing read.
@@ -202,5 +203,5 @@ func TestFullElectionLifecycle(t *testing.T) {
 		t, http.MethodGet, "", nil, "processes", vpID.Hex(), "questions", qID.Hex())
 	c.Assert(pub.Results, qt.Not(qt.IsNil))
 	c.Assert(pub.Results.VoteCount, qt.Equals, uint64(numVoters))
-	c.Assert(pub.Results.Results, qt.DeepEquals, []string{"1", "2"})
+	c.Assert(pub.Results.Results, qt.DeepEquals, [][]string{{"1", "2"}})
 }

@@ -1838,8 +1838,15 @@ definitions:
       questionId:
         type: string
       results:
+        description: |-
+          Results is the raw on-chain tally matrix (stringified big integers), one row per ballot field:
+          a single-choice question has one row indexed by choice value (0..MaxValue, so sparse choice
+          values leave empty buckets); a multi-choice question has one row per choice, each [notSelected,
+          selected]. Absent until the tally is published.
         items:
-          type: string
+          items:
+            type: string
+          type: array
         type: array
       upstreamId:
         example: deadbeef
@@ -2233,8 +2240,15 @@ definitions:
       maxVoters:
         type: integer
       results:
+        description: |-
+          Results is the raw on-chain tally matrix (stringified big integers), one row per ballot field:
+          a single-choice question has one row indexed by choice value (0..MaxValue, so sparse choice
+          values leave empty buckets); a multi-choice question has one row per choice, each [notSelected,
+          selected]. Absent until the tally is published.
         items:
-          type: string
+          items:
+            type: string
+          type: array
         type: array
       voteCount:
         type: integer
@@ -2313,7 +2327,10 @@ definitions:
         - $ref: '#/definitions/db.QuestionResults'
         description: |-
           Results is this question's on-chain tally, resolved on read only when the question is in RESULTS
-          status (absent otherwise). Not persisted (bson:"-") — recomputed from the chain each read.
+          status (absent otherwise). Not persisted (bson:"-") — recomputed from the chain each read. Only
+          the single reads resolve it (GET /processes/{id} and the public question read); the list endpoint
+          leaves it nil to avoid an N+1 chain fan-out, so its absence in a LIST response means "not resolved
+          here", not "not final" — poll the single read for that.
       secretUntilTheEnd:
         type: boolean
       status:

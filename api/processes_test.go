@@ -14,6 +14,8 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	dvoteapi "go.vocdoni.io/dvote/api"
+	"go.vocdoni.io/dvote/types"
 )
 
 // newVotingProcessRequest builds a 2-question (singlechoice + multichoice) create request
@@ -340,6 +342,38 @@ func TestVotingProcessUpdateNoCensusOrphan(t *testing.T) {
 	}
 }
 
+// TestQuestionResultsFromElection checks the chain->QuestionResults mapping directly (no chain):
+// the full tally matrix is preserved verbatim, so single-choice (one field) and multi-choice (one
+// field per choice) shapes are both represented losslessly; maxVoters comes from the election census
+// (nil-safe); an untallied election yields nil results.
+func TestQuestionResultsFromElection(t *testing.T) {
+	c := qt.New(t)
+	bi := func(n uint64) *types.BigInt { return new(types.BigInt).SetUint64(n) }
+
+	// multi-choice: one row per choice, each [notSelected, selected].
+	multi := questionResultsFromElection(&dvoteapi.Election{
+		ElectionSummary: dvoteapi.ElectionSummary{
+			VoteCount: 3, FinalResults: true,
+			Results: [][]*types.BigInt{{bi(1), bi(2)}, {bi(1), bi(2)}, {bi(2), bi(1)}},
+		},
+		Census: &dvoteapi.ElectionCensus{MaxCensusSize: 5},
+	})
+	c.Assert(multi.VoteCount, qt.Equals, uint64(3))
+	c.Assert(multi.FinalResults, qt.IsTrue)
+	c.Assert(multi.MaxVoters, qt.Equals, uint64(5))
+	c.Assert(multi.Results, qt.DeepEquals, [][]string{{"1", "2"}, {"1", "2"}, {"2", "1"}})
+
+	// single-choice: one row of value buckets; nil census is tolerated (maxVoters 0).
+	single := questionResultsFromElection(&dvoteapi.Election{
+		ElectionSummary: dvoteapi.ElectionSummary{Results: [][]*types.BigInt{{bi(4), bi(6)}}},
+	})
+	c.Assert(single.Results, qt.DeepEquals, [][]string{{"4", "6"}})
+	c.Assert(single.MaxVoters, qt.Equals, uint64(0))
+
+	// no tally published yet: results absent.
+	c.Assert(questionResultsFromElection(&dvoteapi.Election{}).Results, qt.IsNil)
+}
+
 // TestVotingProcessResults verifies the public per-question results endpoint: a draft has no
 // results (404), and a published process returns one entry per question with its on-chain status.
 func TestVotingProcessResults(t *testing.T) {
@@ -362,10 +396,11 @@ func TestVotingProcessResults(t *testing.T) {
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", created.ProcessID, "publish")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
 
-	// published (no votes yet): one entry per question. Nothing has voted, so voteCount is 0, the
-	// tally is not final and every choice bucket reads "0" (both questions have two choices).
+	// published (no votes yet): one entry per question, voteCount 0, tally not final, buckets "0".
 	// maxVoters is the per-question eligible count: Q1 is whole-census (2 members), Q2 restricts
-	// eligibility to the first member (1).
+	// eligibility to the first member (1). The results matrix has one row per ballot field: the
+	// singlechoice Q1 is one field (one row of value buckets), the multichoice Q2 is one field per
+	// choice (a row per choice), so the two shapes differ.
 	res := requestAndParse[apicommon.VotingProcessResultsResponse](
 		t, http.MethodGet, "", nil, "processes", created.ProcessID, "results",
 	)
@@ -376,8 +411,11 @@ func TestVotingProcessResults(t *testing.T) {
 		c.Assert(len(q.UpstreamID) > 0, qt.IsTrue)
 		c.Assert(q.VoteCount, qt.Equals, uint64(0))
 		c.Assert(q.FinalResults, qt.IsFalse)
-		c.Assert(q.Results, qt.DeepEquals, []string{"0", "0"})
 	}
+	// Q1 singlechoice: one field, two value buckets. Q2 multichoice: one field per choice (two), each
+	// [notSelected, selected].
+	c.Assert(res.Questions[0].Results, qt.DeepEquals, [][]string{{"0", "0"}})
+	c.Assert(res.Questions[1].Results, qt.DeepEquals, [][]string{{"0", "0"}, {"0", "0"}})
 	c.Assert(res.Questions[0].MaxVoters, qt.Equals, uint64(2)) // whole census
 	c.Assert(res.Questions[1].MaxVoters, qt.Equals, uint64(1)) // eligibility subset of one
 }

@@ -111,7 +111,7 @@ type VotingProcessQuestionResults struct {
 }
 
 // VotingProcessResultsResponse is the multi-question results of a published voting process: one
-// entry per published question, each mirroring the legacy single-process results shape.
+// entry per published question, each carrying that question's QuestionResults tally.
 type VotingProcessResultsResponse struct {
 	ID        string                         `json:"id"`
 	Questions []VotingProcessQuestionResults `json:"questions"`
