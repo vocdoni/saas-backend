@@ -14,6 +14,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	dvoteapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -342,6 +343,9 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// concurrently: each encrypted question without cached keys needs a Vochain round-trip, so a
 	// bounded pool keeps this read fast for a process with many encrypted questions.
 	a.resolveQuestionEncryptionKeysBatch(questions)
+	// resolve the on-chain tally of any question already in RESULTS status (concurrently), so a manager
+	// sees per-question results inline without a separate /results call. Non-RESULTS questions are skipped.
+	a.resolveQuestionResultsBatch(questions)
 	resp := apicommon.VotingProcessResponseFromDB(vp, questions, census, a.account.ChainID())
 	resp.Census.TotalWeight = a.censusTotalWeight(census)
 	apicommon.HTTPWriteJSON(w, resp)
@@ -508,26 +512,35 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 	a.enqueueReconcileIfStale(question)
 	// resolve the vote encryption keys so voters can seal an encrypted ballot for this question.
 	question.EncryptionKeys = a.resolveQuestionEncryptionKeys(question)
+	// surface the on-chain tally once the question is in RESULTS status (nil/no chain call otherwise).
+	question.Results = a.resolveQuestionResults(question)
 	apicommon.HTTPWriteJSON(w, apicommon.PublicQuestionResponseFromDB(question, census))
 }
 
-// resolveQuestionEncryptionKeysBatch resolves the vote encryption keys of every question
-// concurrently (bounded), setting q.EncryptionKeys in place. Each encrypted question without cached
-// keys needs a Vochain round-trip; a bounded worker pool keeps GET /processes/{id} fast for a process
-// with many encrypted questions (up to maxQuestionsPerProcess) instead of doing the calls
-// sequentially. Gated/cached questions return immediately (no chain call).
-func (a *API) resolveQuestionEncryptionKeysBatch(questions []db.VotingProcessQuestion) {
+// parallelForEach runs fn(0..n-1) concurrently with a bounded worker pool and waits for all to
+// finish. It backs the per-question read resolvers and the results handler, which each fan out one
+// Vochain round-trip per question: the bound keeps GET /processes/{id} and /results fast for a process
+// with many questions (up to maxQuestionsPerProcess) without an unbounded goroutine burst.
+func parallelForEach(n int, fn func(i int)) {
 	const workers = 8
 	sem := make(chan struct{}, workers)
 	var wg sync.WaitGroup
-	for i := range questions {
+	for i := range n {
 		sem <- struct{}{}
 		wg.Go(func() {
 			defer func() { <-sem }()
-			questions[i].EncryptionKeys = a.resolveQuestionEncryptionKeys(&questions[i])
+			fn(i)
 		})
 	}
 	wg.Wait()
+}
+
+// resolveQuestionEncryptionKeysBatch resolves the vote encryption keys of every question concurrently
+// (bounded), setting q.EncryptionKeys in place. Gated/cached questions return immediately (no chain call).
+func (a *API) resolveQuestionEncryptionKeysBatch(questions []db.VotingProcessQuestion) {
+	parallelForEach(len(questions), func(i int) {
+		questions[i].EncryptionKeys = a.resolveQuestionEncryptionKeys(&questions[i])
+	})
 }
 
 // resolveQuestionEncryptionKeys returns the vote-encryption public keys of a question's on-chain
@@ -586,6 +599,103 @@ func (a *API) censusTotalWeight(census *db.Census) int64 {
 	return total
 }
 
+// questionResultsFromElection maps a question's on-chain election onto the QuestionResults shape.
+// MaxVoters is the election's own maxCensusSize — already restricted to the question's eligibility
+// subset at publish (account.ComputeMaxCensusSize). Results is the full tally matrix stringified
+// verbatim (one row per ballot field), so both single-choice (one row of value buckets) and
+// multi-choice (one row per choice) questions are represented losslessly; it stays nil until the
+// tally publishes.
+func questionResultsFromElection(e *dvoteapi.Election) db.QuestionResults {
+	qr := db.QuestionResults{
+		VoteCount:    e.VoteCount,
+		FinalResults: e.FinalResults,
+	}
+	if e.Census != nil {
+		qr.MaxVoters = e.Census.MaxCensusSize
+	}
+	if len(e.Results) > 0 {
+		results := make([][]string, len(e.Results))
+		for i, field := range e.Results {
+			values := make([]string, len(field))
+			for j, v := range field {
+				values[j] = v.String()
+			}
+			results[i] = values
+		}
+		qr.Results = results
+	}
+	return qr
+}
+
+// resolveQuestionResults returns a question's on-chain tally, but only once the question has reached
+// the terminal RESULTS status; it is a no-op (nil, no chain call) for every other status and for
+// unpublished drafts. Unlike encryption keys it is not cached: RESULTS is terminal so the read is
+// bounded, and caching would need a db type/method — add one if this read ever gets hot.
+func (a *API) resolveQuestionResults(q *db.VotingProcessQuestion) *db.QuestionResults {
+	// gate: only surface results for questions the chain has moved to RESULTS; keeps others chain-free.
+	if q.Status != db.QuestionStatusResults {
+		return nil
+	}
+	if len(q.UpstreamID) == 0 {
+		return nil
+	}
+	election, err := a.account.Election(q.UpstreamID)
+	if err != nil {
+		log.Warnw("results: election fetch failed",
+			"question", q.ID.Hex(), "upstreamId", q.UpstreamID.String(), "error", err)
+		return nil
+	}
+	qr := questionResultsFromElection(election)
+	return &qr
+}
+
+// resolveQuestionResultsBatch resolves the on-chain tally of every RESULTS question concurrently
+// (bounded), setting q.Results in place. Non-RESULTS questions short-circuit to nil without a chain
+// call, so a bounded worker pool keeps GET /processes/{id} fast when several questions are in results.
+func (a *API) resolveQuestionResultsBatch(questions []db.VotingProcessQuestion) {
+	parallelForEach(len(questions), func(i int) {
+		questions[i].Results = a.resolveQuestionResults(&questions[i])
+	})
+}
+
+// electionResultsBatch fetches the on-chain tally of every published question concurrently (bounded)
+// and maps each to a results entry, preserving question order. Questions not yet on chain are skipped.
+// Unlike the read resolvers it is all-or-error: the first election fetch failure (by question order)
+// is returned so GET /processes/{id}/results never emits a silent partial tally set. Returns nil when
+// no question is on chain (preserving the endpoint's "questions": null shape for that case).
+func (a *API) electionResultsBatch(
+	questions []db.VotingProcessQuestion,
+) ([]apicommon.VotingProcessQuestionResults, error) {
+	entries := make([]*apicommon.VotingProcessQuestionResults, len(questions))
+	errs := make([]error, len(questions))
+	parallelForEach(len(questions), func(i int) {
+		q := &questions[i]
+		if len(q.UpstreamID) == 0 {
+			return // question not yet on chain
+		}
+		election, err := a.account.Election(q.UpstreamID)
+		if err != nil {
+			errs[i] = fmt.Errorf("question %s: %w", q.ID.Hex(), err)
+			return
+		}
+		entries[i] = &apicommon.VotingProcessQuestionResults{
+			QuestionID:      q.ID.Hex(),
+			UpstreamID:      q.UpstreamID,
+			QuestionResults: questionResultsFromElection(election),
+		}
+	})
+	var out []apicommon.VotingProcessQuestionResults
+	for i := range questions {
+		if errs[i] != nil {
+			return nil, errs[i]
+		}
+		if entries[i] != nil {
+			out = append(out, *entries[i])
+		}
+	}
+	return out, nil
+}
+
 // votingProcessParticipantHandler godoc
 //
 //	@Summary		Get a voting process participant
@@ -630,8 +740,8 @@ func (a *API) votingProcessParticipantHandler(w http.ResponseWriter, r *http.Req
 //
 //	@Summary		Get a voting process results
 //	@Description	Public per-question on-chain results of a published voting process: one entry per
-//	@Description	published question, each with the trimmed election state (status, vote count,
-//	@Description	dates, whether final, and the tally). No authentication is required.
+//	@Description	published question, each with its tally (vote count, max voters, whether final, and
+//	@Description	the per-choice results). No authentication is required.
 //	@Tags			processes
 //	@Produce		json
 //	@Param			processId	path		string	true	"Process ID"
@@ -659,42 +769,14 @@ func (a *API) votingProcessResultsHandler(w http.ResponseWriter, r *http.Request
 		errors.ErrProcessNotFound.Withf("process not published").Write(w)
 		return
 	}
-	resp := &apicommon.VotingProcessResultsResponse{ID: oid.Hex()}
-	for i := range questions {
-		q := &questions[i]
-		if len(q.UpstreamID) == 0 {
-			continue // question not yet on chain
-		}
-		election, err := a.account.Election(q.UpstreamID)
-		if err != nil {
-			errors.ErrVochainRequestFailed.WithErr(err).Write(w)
-			return
-		}
-		entry := apicommon.VotingProcessQuestionResults{
-			QuestionID: q.ID.Hex(),
-			UpstreamID: q.UpstreamID,
-			ProcessResultsResponse: apicommon.ProcessResultsResponse{
-				Status:       election.Status,
-				VoteCount:    election.VoteCount,
-				StartDate:    election.StartDate,
-				EndDate:      election.EndDate,
-				FinalResults: election.FinalResults,
-			},
-		}
-		if len(election.Results) > 0 {
-			results := make([][]string, len(election.Results))
-			for j, question := range election.Results {
-				values := make([]string, len(question))
-				for k, value := range question {
-					values[k] = value.String()
-				}
-				results[j] = values
-			}
-			entry.Results = results
-		}
-		resp.Questions = append(resp.Questions, entry)
+	// fetch every published question's tally concurrently (bounded); all-or-error so this endpoint
+	// never emits a partial tally set (a transient chain error on one question fails the response).
+	entries, err := a.electionResultsBatch(questions)
+	if err != nil {
+		errors.ErrVochainRequestFailed.WithErr(err).Write(w)
+		return
 	}
-	apicommon.HTTPWriteJSON(w, resp)
+	apicommon.HTTPWriteJSON(w, &apicommon.VotingProcessResultsResponse{ID: oid.Hex(), Questions: entries})
 }
 
 // votingProcessID parses and validates the {processId} URL param.
