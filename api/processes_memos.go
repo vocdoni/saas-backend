@@ -4,18 +4,31 @@ import (
 	"net/http"
 
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"go.vocdoni.io/proto/build/go/models"
 )
+
+// openChoice returns the question's single open-value choice (the one accepting a voter memo) and
+// true if one is defined. buildQuestions guarantees at most one, so the first match is authoritative.
+func openChoice(choices []db.Choice) (db.Choice, bool) {
+	for _, c := range choices {
+		if c.OpenValue {
+			return c, true
+		}
+	}
+	return db.Choice{}, false
+}
 
 // votingProcessMemosHandler godoc
 //
 //	@Summary		Get a voting process voter memos
 //	@Description	Per-question raw voter memos of a published voting process, restricted to
-//	@Description	questions whose on-chain election has reached RESULTS status: one entry per such
-//	@Description	question, each listing every free-text memo submitted with a vote, repeated once
-//	@Description	per vote that carried it (votes without a memo are omitted). Questions not yet in
-//	@Description	results are excluded. Requires Manager/Admin role of the owning organization.
+//	@Description	questions whose on-chain election has reached RESULTS status and that define an
+//	@Description	open-value choice: one entry per such question, listing every free-text memo cast
+//	@Description	by a vote that selected the open choice, repeated once per such vote. Questions not
+//	@Description	yet in results, or without an open-value choice, are excluded. Requires
+//	@Description	Manager/Admin role of the owning organization.
 //	@Tags			processes
 //	@Produce		json
 //	@Security		BearerAuth
@@ -57,7 +70,13 @@ func (a *API) votingProcessMemosHandler(w http.ResponseWriter, r *http.Request) 
 		if election.Status != models.ProcessStatus_RESULTS.String() {
 			continue
 		}
-		memos, err := a.account.ElectionMemos(q.UpstreamID)
+		// memos are gated to the question's single "open" choice: only votes that selected it carry
+		// a meaningful memo. A question without an open choice surfaces no memos and is omitted.
+		open, ok := openChoice(q.Choices)
+		if !ok {
+			continue
+		}
+		memos, err := a.account.ElectionMemos(q.UpstreamID, open.Value)
 		if err != nil {
 			errors.ErrVochainRequestFailed.WithErr(err).Write(w)
 			return
