@@ -568,7 +568,9 @@ func (a *API) resolveQuestionEncryptionKeys(q *db.VotingProcessQuestion) []db.En
 // censusTotalWeight returns the whole-census total voting weight (sum of members' weights) exposed
 // on CensusSpec. A non-weighted census contributes weight 1 per member, so the total is just the
 // participant count (Size) with no query; a weighted census sums OrgMember.Weight over its members.
-// On aggregation failure it falls back to Size (never worse than the count) so the field is still set.
+// On aggregation failure it returns 0 (NOT Size): totalWeight backs a report/certification denominator,
+// where a plausible-but-wrong total is worse than an absent one — 0 makes omitempty drop the field so
+// the client renders "not available" instead of computing every percentage against a wrong total.
 func (a *API) censusTotalWeight(census *db.Census) int64 {
 	if census == nil {
 		return 0
@@ -579,7 +581,7 @@ func (a *API) censusTotalWeight(census *db.Census) int64 {
 	total, err := a.db.CensusTotalWeight(census.ID.Hex())
 	if err != nil {
 		log.Warnw("census total weight: aggregation failed", "census", census.ID.Hex(), "error", err)
-		return census.Size
+		return 0
 	}
 	return total
 }
