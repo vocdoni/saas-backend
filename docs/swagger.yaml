@@ -6430,8 +6430,8 @@ paths:
     get:
       description: |-
         Public per-question on-chain results of a published voting process: one entry per
-        published question, each with the trimmed election state (status, vote count,
-        dates, whether final, and the tally). No authentication is required.
+        published question, each with its tally (vote count, max voters, whether final, and
+        the per-choice results). No authentication is required.
       parameters:
       - description: Process ID
         in: path

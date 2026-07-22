@@ -14,7 +14,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.vocdoni.io/dvote/api"
+	dvoteapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -573,7 +573,7 @@ func (a *API) resolveQuestionEncryptionKeys(q *db.VotingProcessQuestion) []db.En
 // shape. MaxVoters is the election's own maxCensusSize — already restricted to the question's
 // eligibility subset at publish (account.ComputeMaxCensusSize). Results is the single-field tally
 // (each question is its own one-field election), stringified; it stays nil until the tally publishes.
-func questionResultsFromElection(e *api.Election) db.QuestionResults {
+func questionResultsFromElection(e *dvoteapi.Election) db.QuestionResults {
 	qr := db.QuestionResults{
 		VoteCount:    e.VoteCount,
 		FinalResults: e.FinalResults,
@@ -674,8 +674,8 @@ func (a *API) votingProcessParticipantHandler(w http.ResponseWriter, r *http.Req
 //
 //	@Summary		Get a voting process results
 //	@Description	Public per-question on-chain results of a published voting process: one entry per
-//	@Description	published question, each with the trimmed election state (status, vote count,
-//	@Description	dates, whether final, and the tally). No authentication is required.
+//	@Description	published question, each with its tally (vote count, max voters, whether final, and
+//	@Description	the per-choice results). No authentication is required.
 //	@Tags			processes
 //	@Produce		json
 //	@Param			processId	path		string	true	"Process ID"
