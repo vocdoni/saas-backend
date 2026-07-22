@@ -211,8 +211,15 @@ func (a *API) organizationInfoHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrNoOrganizationProvided.Write(w)
 		return
 	}
+	// this endpoint is public: strip the Subscription block, which carries the
+	// Stripe customer billing email (PII) and payment details. Those are only
+	// exposed to org admins via the dedicated /organizations/{address}/subscription
+	// endpoint. Usage counters are intentionally kept: member dashboards (including
+	// non-admins, who cannot reach the admin subscription endpoint) read them here.
+	orgInfo := apicommon.OrganizationFromDB(org, parent)
+	orgInfo.Subscription = nil
 	// send the organization back to the user
-	apicommon.HTTPWriteJSON(w, apicommon.OrganizationFromDB(org, parent))
+	apicommon.HTTPWriteJSON(w, orgInfo)
 }
 
 // updateOrganizationHandler godoc
