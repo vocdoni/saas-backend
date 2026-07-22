@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -122,7 +123,11 @@ func (s *Service) handleSubscriptionCreateOrUpdate(subscriptionInfo *Subscriptio
 	org.Subscription.StartDate = subscriptionInfo.StartDate
 	org.Subscription.RenewalDate = subscriptionInfo.EndDate
 	org.Subscription.Active = (subscriptionInfo.Status == stripeapi.SubscriptionStatusActive)
-	org.Subscription.Email = subscriptionInfo.Customer.Email
+	// the customer object is not always expanded in the webhook payload; only
+	// overwrite the stored email when the event actually carries one
+	if subscriptionInfo.Customer != nil && subscriptionInfo.Customer.Email != "" {
+		org.Subscription.Email = subscriptionInfo.Customer.Email
+	}
 
 	// Save subscription
 	if err := s.db.SetOrganization(org); err != nil {
@@ -130,16 +135,22 @@ func (s *Service) handleSubscriptionCreateOrUpdate(subscriptionInfo *Subscriptio
 			subscriptionInfo.ID, plan.ID, subscriptionInfo.Status, subscriptionInfo.OrgAddress, err)
 	}
 
-	// Update if needed customer metadata with organization address
-	if subscriptionInfo.Customer.Metadata["address"] != "" {
-		return fmt.Errorf("customer metadata address mismatch")
-	}
-	if err := s.client.UpdateCustomerMetadata(
-		subscriptionInfo.Customer.ID,
-		map[string]string{"address": subscriptionInfo.OrgAddress.String()},
-	); err != nil {
-		log.Warnf("stripe webhook: failed to update customer %s metadata: %v",
-			subscriptionInfo.Customer.ID, err)
+	// Update the customer metadata with the organization address. Only error when
+	// the customer already carries a *different* address (a genuine mismatch);
+	// re-seeing the same address is the normal case and must not fail the event.
+	if subscriptionInfo.Customer != nil {
+		existingAddr := subscriptionInfo.Customer.Metadata["address"]
+		if existingAddr != "" && !strings.EqualFold(existingAddr, subscriptionInfo.OrgAddress.String()) {
+			return fmt.Errorf("customer %s metadata address %q does not match organization %s",
+				subscriptionInfo.Customer.ID, existingAddr, subscriptionInfo.OrgAddress)
+		}
+		if err := s.client.UpdateCustomerMetadata(
+			subscriptionInfo.Customer.ID,
+			map[string]string{"address": subscriptionInfo.OrgAddress.String()},
+		); err != nil {
+			log.Warnf("stripe webhook: failed to update customer %s metadata: %v",
+				subscriptionInfo.Customer.ID, err)
+		}
 	}
 	log.Infof("stripe webhook: subscription %s (planID=%s, status=%s) saved for organization %s",
 		subscriptionInfo.ID, plan.ID, subscriptionInfo.Status, subscriptionInfo.OrgAddress)
