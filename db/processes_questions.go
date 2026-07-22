@@ -126,6 +126,28 @@ func (ms *MongoStorage) SetQuestionStatus(id primitive.ObjectID, status string) 
 	return nil
 }
 
+// SetQuestionEncryptionKeys sets only the encryptionKeys field of a question (targeted update),
+// leaving every other field untouched. The vote-encryption public keys are immutable once published
+// by the keykeepers, so this is written once and only with a non-empty set (mirrors
+// SetProcessEncryptionKeys for the legacy single-election model).
+func (ms *MongoStorage) SetQuestionEncryptionKeys(id primitive.ObjectID, keys []EncryptionKey) error {
+	// keys are immutable and written once; reject an empty set so a stray call can never clobber
+	// already-cached keys with an empty array (matches the "non-empty" contract above).
+	if id == primitive.NilObjectID || len(keys) == 0 {
+		return ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.processesQuestions.UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$set": bson.M{"encryptionKeys": keys}})
+	if err != nil {
+		return fmt.Errorf("failed to set question encryption keys: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // DeleteQuestion removes a single question document (used when replacing a draft's
 // questions on update).
 func (ms *MongoStorage) DeleteQuestion(id primitive.ObjectID) error {

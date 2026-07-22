@@ -625,6 +625,11 @@ type VotingProcessQuestion struct {
 	MetadataURL       string             `json:"-" bson:"metadataURL,omitempty"`
 	Status            string             `json:"status,omitempty" bson:"status,omitempty"`
 	SyncedAt          time.Time          `json:"-" bson:"syncedAt,omitempty"`
+	// EncryptionKeys are the on-chain vote-encryption public keys of this question's election,
+	// resolved on read and cached (only for secretUntilTheEnd questions). Because of omitempty the
+	// JSON field is absent (not an empty array) until the keykeepers publish the keys, so clients
+	// treat its absence as "not yet published" and poll. Voters seal encrypted vote packages with these.
+	EncryptionKeys []EncryptionKey `json:"encryptionKeys,omitempty" bson:"encryptionKeys,omitempty"`
 }
 
 // QuestionStatusRef is the minimal projection of a published question the status syncer and the
