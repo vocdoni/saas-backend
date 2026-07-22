@@ -1313,9 +1313,11 @@ definitions:
         allOf:
         - $ref: '#/definitions/db.QuestionResults'
         description: |-
-          Results is this question's live on-chain tally, present for any published question; FinalResults
-          marks live vs final. Absent (via omitempty) while a secretUntilTheEnd election is still encrypted
-          or before any vote, so clients treat its absence as "nothing to show yet" and poll.
+          Results is this question's live on-chain tally, present (non-null) for any published question and
+          carrying voteCount/maxVoters/finalResults; FinalResults marks live vs final. The inner per-choice
+          matrix (results.results) is omitted until a tally exists — empty while a secretUntilTheEnd election
+          is still encrypted or before any vote — so clients poll on an empty tally. The whole object is
+          absent (omitempty) only for a draft (no election yet).
       secretUntilTheEnd:
         type: boolean
       status:
@@ -2334,11 +2336,13 @@ definitions:
         - $ref: '#/definitions/db.QuestionResults'
         description: |-
           Results is this question's live on-chain tally, resolved on read for any published (on-chain)
-          question; FinalResults marks live vs final (absent while a secretUntilTheEnd election is still
-          encrypted, or before any vote). Not persisted (bson:"-") — recomputed from the chain each read.
-          Only the single reads resolve it (GET /processes/{id} and the public question read); the list
-          endpoint leaves it nil to avoid an N+1 chain fan-out, so its absence in a LIST response means "not
-          resolved here", not "not final" — poll the single read for that.
+          question; FinalResults marks live vs final. The results object itself is present whenever the
+          question is published — it's the inner per-choice matrix (QuestionResults.Results) that is omitted
+          until a tally exists (empty while a secretUntilTheEnd election is still encrypted, or before any
+          vote). The whole object is absent (omitempty) only for a draft (no election yet). Not persisted
+          (bson:"-") — recomputed from the chain each read. Only the single reads resolve it (GET
+          /processes/{id} and the public question read); the list endpoint leaves it nil to avoid an N+1
+          chain fan-out, so its absence in a LIST response means "not resolved here", not "not published".
       secretUntilTheEnd:
         type: boolean
       status:

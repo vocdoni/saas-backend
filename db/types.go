@@ -631,11 +631,13 @@ type VotingProcessQuestion struct {
 	// treat its absence as "not yet published" and poll. Voters seal encrypted vote packages with these.
 	EncryptionKeys []EncryptionKey `json:"encryptionKeys,omitempty" bson:"encryptionKeys,omitempty"`
 	// Results is this question's live on-chain tally, resolved on read for any published (on-chain)
-	// question; FinalResults marks live vs final (absent while a secretUntilTheEnd election is still
-	// encrypted, or before any vote). Not persisted (bson:"-") — recomputed from the chain each read.
-	// Only the single reads resolve it (GET /processes/{id} and the public question read); the list
-	// endpoint leaves it nil to avoid an N+1 chain fan-out, so its absence in a LIST response means "not
-	// resolved here", not "not final" — poll the single read for that.
+	// question; FinalResults marks live vs final. The results object itself is present whenever the
+	// question is published — it's the inner per-choice matrix (QuestionResults.Results) that is omitted
+	// until a tally exists (empty while a secretUntilTheEnd election is still encrypted, or before any
+	// vote). The whole object is absent (omitempty) only for a draft (no election yet). Not persisted
+	// (bson:"-") — recomputed from the chain each read. Only the single reads resolve it (GET
+	// /processes/{id} and the public question read); the list endpoint leaves it nil to avoid an N+1
+	// chain fan-out, so its absence in a LIST response means "not resolved here", not "not published".
 	Results *QuestionResults `json:"results,omitempty" bson:"-"`
 }
 

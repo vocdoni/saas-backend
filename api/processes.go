@@ -389,6 +389,12 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	orgAddress := common.HexToAddress(orgAddressStr)
+	// IsHexAddress accepts the zero address; reject it as malformed (400) so it never reaches the db
+	// layer (which errors on it and would otherwise surface as a 500 on this now-public endpoint).
+	if orgAddress == (common.Address{}) {
+		errors.ErrMalformedURLParam.Withf("invalid orgAddress").Write(w)
+		return
+	}
 	// public read: anonymous callers see published processes only; a manager/admin of the org (or a
 	// voting:write API key acting as one) also sees drafts (and keeps the per-question eligibility).
 	isManager := a.optionalManager(r, orgAddress)

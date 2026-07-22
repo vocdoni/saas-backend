@@ -511,6 +511,10 @@ func TestVotingProcessPublicReads(t *testing.T) {
 	mgrList := requestAndParse[apicommon.VotingProcessListResponse](t, http.MethodGet, token, nil, listURL)
 	c.Assert(hasProcess(mgrList.Processes, published.ProcessID), qt.IsTrue)
 	c.Assert(hasProcess(mgrList.Processes, draft.ProcessID), qt.IsTrue)
+
+	// a zero orgAddress passes IsHexAddress but is malformed -> 400 (not a 500 from the db layer).
+	requestAndAssertCode(http.StatusBadRequest, t, http.MethodGet, "", nil,
+		"processes?orgAddress=0x0000000000000000000000000000000000000000")
 }
 
 // TestVotingProcessPublicQuestionCensus verifies the public single-question read of a PUBLISHED
