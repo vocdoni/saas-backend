@@ -102,12 +102,12 @@ type VotingProcessListResponse struct {
 	Pagination *Pagination             `json:"pagination"`
 }
 
-// VotingProcessQuestionResults carries one question's on-chain election results (the same
-// trimmed shape as the legacy ProcessResultsResponse) keyed by the question id.
+// VotingProcessQuestionResults carries one question's on-chain election tally, keyed by the
+// question id. The embedded QuestionResults flattens voteCount/maxVoters/finalResults/results.
 type VotingProcessQuestionResults struct {
 	QuestionID string            `json:"questionId"`
 	UpstreamID internal.HexBytes `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
-	ProcessResultsResponse
+	db.QuestionResults
 }
 
 // VotingProcessResultsResponse is the multi-question results of a published voting process: one
@@ -183,6 +183,9 @@ type PublicQuestionResponse struct {
 	// publish the keys, so clients treat its absence as "not yet published" and poll. Voters seal
 	// encrypted ballots with them.
 	EncryptionKeys []db.EncryptionKey `json:"encryptionKeys,omitempty"`
+	// Results is this question's on-chain tally, present only once the question reaches RESULTS status
+	// (absent otherwise via omitempty), so clients treat its absence as "not yet final" and poll.
+	Results *db.QuestionResults `json:"results,omitempty"`
 }
 
 // PublicQuestionResponseFromDB builds the public question read from a question and its parent
@@ -202,6 +205,7 @@ func PublicQuestionResponseFromDB(q *db.VotingProcessQuestion, census *db.Census
 		UpstreamID:        q.UpstreamID,
 		Status:            q.Status,
 		EncryptionKeys:    q.EncryptionKeys,
+		Results:           q.Results,
 	}
 	if census != nil {
 		resp.Census = CensusSpec{

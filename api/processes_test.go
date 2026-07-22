@@ -362,7 +362,10 @@ func TestVotingProcessResults(t *testing.T) {
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", created.ProcessID, "publish")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
 
-	// published: one results entry per question, each with its on-chain election id and status
+	// published (no votes yet): one entry per question. Nothing has voted, so voteCount is 0, the
+	// tally is not final and every choice bucket reads "0" (both questions have two choices).
+	// maxVoters is the per-question eligible count: Q1 is whole-census (2 members), Q2 restricts
+	// eligibility to the first member (1).
 	res := requestAndParse[apicommon.VotingProcessResultsResponse](
 		t, http.MethodGet, "", nil, "processes", created.ProcessID, "results",
 	)
@@ -371,8 +374,12 @@ func TestVotingProcessResults(t *testing.T) {
 	for _, q := range res.Questions {
 		c.Assert(q.QuestionID, qt.Not(qt.Equals), "")
 		c.Assert(len(q.UpstreamID) > 0, qt.IsTrue)
-		c.Assert(q.Status, qt.Not(qt.Equals), "")
+		c.Assert(q.VoteCount, qt.Equals, uint64(0))
+		c.Assert(q.FinalResults, qt.IsFalse)
+		c.Assert(q.Results, qt.DeepEquals, []string{"0", "0"})
 	}
+	c.Assert(res.Questions[0].MaxVoters, qt.Equals, uint64(2)) // whole census
+	c.Assert(res.Questions[1].MaxVoters, qt.Equals, uint64(1)) // eligibility subset of one
 }
 
 // TestVotingProcessPublicQuestionCensus verifies the public single-question read of a PUBLISHED

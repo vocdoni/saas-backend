@@ -14,6 +14,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -342,6 +343,9 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// concurrently: each encrypted question without cached keys needs a Vochain round-trip, so a
 	// bounded pool keeps this read fast for a process with many encrypted questions.
 	a.resolveQuestionEncryptionKeysBatch(questions)
+	// resolve the on-chain tally of any question already in RESULTS status (concurrently), so a manager
+	// sees per-question results inline without a separate /results call. Non-RESULTS questions are skipped.
+	a.resolveQuestionResultsBatch(questions)
 	apicommon.HTTPWriteJSON(w, apicommon.VotingProcessResponseFromDB(vp, questions, census, a.account.ChainID()))
 }
 
@@ -506,6 +510,8 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 	a.enqueueReconcileIfStale(question)
 	// resolve the vote encryption keys so voters can seal an encrypted ballot for this question.
 	question.EncryptionKeys = a.resolveQuestionEncryptionKeys(question)
+	// surface the on-chain tally once the question is in RESULTS status (nil/no chain call otherwise).
+	question.Results = a.resolveQuestionResults(question)
 	apicommon.HTTPWriteJSON(w, apicommon.PublicQuestionResponseFromDB(question, census))
 }
 
@@ -561,6 +567,67 @@ func (a *API) resolveQuestionEncryptionKeys(q *db.VotingProcessQuestion) []db.En
 		log.Warnw("encryption keys: could not persist question keys", "question", q.ID.Hex(), "error", err)
 	}
 	return keys
+}
+
+// questionResultsFromElection maps a question's on-chain election onto the trimmed QuestionResults
+// shape. MaxVoters is the election's own maxCensusSize — already restricted to the question's
+// eligibility subset at publish (account.ComputeMaxCensusSize). Results is the single-field tally
+// (each question is its own one-field election), stringified; it stays nil until the tally publishes.
+func questionResultsFromElection(e *api.Election) db.QuestionResults {
+	qr := db.QuestionResults{
+		VoteCount:    e.VoteCount,
+		FinalResults: e.FinalResults,
+	}
+	if e.Census != nil {
+		qr.MaxVoters = e.Census.MaxCensusSize
+	}
+	if len(e.Results) > 0 {
+		values := make([]string, len(e.Results[0]))
+		for i, v := range e.Results[0] {
+			values[i] = v.String()
+		}
+		qr.Results = values
+	}
+	return qr
+}
+
+// resolveQuestionResults returns a question's on-chain tally, but only once the question has reached
+// the terminal RESULTS status; it is a no-op (nil, no chain call) for every other status and for
+// unpublished drafts. Unlike encryption keys it is not cached: RESULTS is terminal so the read is
+// bounded, and caching would need a db type/method — add one if this read ever gets hot.
+func (a *API) resolveQuestionResults(q *db.VotingProcessQuestion) *db.QuestionResults {
+	// gate: only surface results for questions the chain has moved to RESULTS; keeps others chain-free.
+	if q.Status != db.QuestionStatusResults {
+		return nil
+	}
+	if len(q.UpstreamID) == 0 {
+		return nil
+	}
+	election, err := a.account.Election(q.UpstreamID)
+	if err != nil {
+		log.Warnw("results: election fetch failed",
+			"question", q.ID.Hex(), "upstreamId", q.UpstreamID.String(), "error", err)
+		return nil
+	}
+	qr := questionResultsFromElection(election)
+	return &qr
+}
+
+// resolveQuestionResultsBatch resolves the on-chain tally of every RESULTS question concurrently
+// (bounded), setting q.Results in place. Non-RESULTS questions short-circuit to nil without a chain
+// call, so a bounded worker pool keeps GET /processes/{id} fast when several questions are in results.
+func (a *API) resolveQuestionResultsBatch(questions []db.VotingProcessQuestion) {
+	const workers = 8
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	for i := range questions {
+		sem <- struct{}{}
+		wg.Go(func() {
+			defer func() { <-sem }()
+			questions[i].Results = a.resolveQuestionResults(&questions[i])
+		})
+	}
+	wg.Wait()
 }
 
 // votingProcessParticipantHandler godoc
@@ -647,29 +714,11 @@ func (a *API) votingProcessResultsHandler(w http.ResponseWriter, r *http.Request
 			errors.ErrVochainRequestFailed.WithErr(err).Write(w)
 			return
 		}
-		entry := apicommon.VotingProcessQuestionResults{
-			QuestionID: q.ID.Hex(),
-			UpstreamID: q.UpstreamID,
-			ProcessResultsResponse: apicommon.ProcessResultsResponse{
-				Status:       election.Status,
-				VoteCount:    election.VoteCount,
-				StartDate:    election.StartDate,
-				EndDate:      election.EndDate,
-				FinalResults: election.FinalResults,
-			},
-		}
-		if len(election.Results) > 0 {
-			results := make([][]string, len(election.Results))
-			for j, question := range election.Results {
-				values := make([]string, len(question))
-				for k, value := range question {
-					values[k] = value.String()
-				}
-				results[j] = values
-			}
-			entry.Results = results
-		}
-		resp.Questions = append(resp.Questions, entry)
+		resp.Questions = append(resp.Questions, apicommon.VotingProcessQuestionResults{
+			QuestionID:      q.ID.Hex(),
+			UpstreamID:      q.UpstreamID,
+			QuestionResults: questionResultsFromElection(election),
+		})
 	}
 	apicommon.HTTPWriteJSON(w, resp)
 }

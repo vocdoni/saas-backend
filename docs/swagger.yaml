@@ -1303,6 +1303,12 @@ definitions:
         type: object
       parentProcessId:
         type: string
+      results:
+        allOf:
+        - $ref: '#/definitions/db.QuestionResults'
+        description: |-
+          Results is this question's on-chain tally, present only once the question reaches RESULTS status
+          (absent otherwise via omitempty), so clients treat its absence as "not yet final" and poll.
       secretUntilTheEnd:
         type: boolean
       status:
@@ -1825,22 +1831,16 @@ definitions:
     type: object
   apicommon.VotingProcessQuestionResults:
     properties:
-      endDate:
-        type: string
       finalResults:
         type: boolean
+      maxVoters:
+        type: integer
       questionId:
         type: string
       results:
         items:
-          items:
-            type: string
-          type: array
+          type: string
         type: array
-      startDate:
-        type: string
-      status:
-        type: string
       upstreamId:
         example: deadbeef
         format: hex
@@ -2226,6 +2226,19 @@ definitions:
       title:
         $ref: '#/definitions/db.MultiLangString'
     type: object
+  db.QuestionResults:
+    properties:
+      finalResults:
+        type: boolean
+      maxVoters:
+        type: integer
+      results:
+        items:
+          type: string
+        type: array
+      voteCount:
+        type: integer
+    type: object
   db.QuestionTypeSetup:
     properties:
       maxChoices:
@@ -2295,6 +2308,12 @@ definitions:
         type: object
       parentProcessId:
         type: string
+      results:
+        allOf:
+        - $ref: '#/definitions/db.QuestionResults'
+        description: |-
+          Results is this question's on-chain tally, resolved on read only when the question is in RESULTS
+          status (absent otherwise). Not persisted (bson:"-") — recomputed from the chain each read.
       secretUntilTheEnd:
         type: boolean
       status:
