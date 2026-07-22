@@ -1284,6 +1284,13 @@ definitions:
         type: array
       description:
         $ref: '#/definitions/db.MultiLangString'
+      encryptionKeys:
+        description: |-
+          EncryptionKeys are the on-chain vote-encryption public keys (only for secretUntilTheEnd
+          questions, and empty until the keykeepers publish them). Voters seal encrypted ballots with them.
+        items:
+          $ref: '#/definitions/db.EncryptionKey'
+        type: array
       id:
         type: string
       metadata:
@@ -2266,6 +2273,14 @@ definitions:
       eligibleMemberIds:
         items:
           type: string
+        type: array
+      encryptionKeys:
+        description: |-
+          EncryptionKeys are the on-chain vote-encryption public keys of this question's election,
+          resolved on read and cached (only for secretUntilTheEnd questions; empty until the keykeepers
+          publish them). Voters seal encrypted vote packages with these.
+        items:
+          $ref: '#/definitions/db.EncryptionKey'
         type: array
       id:
         type: string

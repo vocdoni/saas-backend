@@ -13,6 +13,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.vocdoni.io/dvote/log"
 )
 
 // maxQuestionsPerProcess bounds the number of questions of a voting process (the node
@@ -332,9 +333,11 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	census, _ := a.db.Census(vp.CensusID.Hex())
 	// serve the stored status now; refresh each published question from the chain in the background
-	// to catch status changes made directly on-chain (outside this API).
+	// to catch status changes made directly on-chain (outside this API). Also resolve the vote
+	// encryption keys of encrypted questions so clients can seal encrypted ballots.
 	for i := range questions {
 		a.enqueueReconcileIfStale(&questions[i])
+		questions[i].EncryptionKeys = a.resolveQuestionEncryptionKeys(&questions[i])
 	}
 	apicommon.HTTPWriteJSON(w, apicommon.VotingProcessResponseFromDB(vp, questions, census, a.account.ChainID()))
 }
@@ -498,7 +501,44 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 	// serve the stored status now; refresh it from the chain in the background so a status change
 	// made directly on-chain (outside this API) is picked up.
 	a.enqueueReconcileIfStale(question)
+	// resolve the vote encryption keys so voters can seal an encrypted ballot for this question.
+	question.EncryptionKeys = a.resolveQuestionEncryptionKeys(question)
 	apicommon.HTTPWriteJSON(w, apicommon.PublicQuestionResponseFromDB(question, census))
+}
+
+// resolveQuestionEncryptionKeys returns the vote-encryption public keys of a question's on-chain
+// election, fetching them from the Vochain only when needed and caching them on the question once
+// published. It is a no-op (nil, no chain call) for non-encrypted questions and unpublished drafts,
+// and serves cached keys without a chain round-trip. The result is cached only when non-empty:
+// between an election's creation and the keykeepers publishing its keys the node returns an empty
+// set, and a later read must still resolve them (mirror of resolveProcessEncryptionKeys).
+func (a *API) resolveQuestionEncryptionKeys(q *db.VotingProcessQuestion) []db.EncryptionKey {
+	// gate: only encrypted questions have encryption keys; keeps every other question chain-free.
+	if !q.SecretUntilTheEnd {
+		return nil
+	}
+	// nothing on chain yet (draft) — no keys to fetch.
+	if len(q.UpstreamID) == 0 {
+		return nil
+	}
+	// immutable once published: serve the cached keys without a chain round-trip.
+	if len(q.EncryptionKeys) > 0 {
+		return q.EncryptionKeys
+	}
+	keys, err := a.account.ElectionEncryptionKeys(q.UpstreamID)
+	if err != nil {
+		log.Warnw("encryption keys: election keys fetch failed",
+			"question", q.ID.Hex(), "upstreamId", q.UpstreamID.String(), "error", err)
+		return nil
+	}
+	// not published yet — do not cache an empty set so a later read still resolves them.
+	if len(keys) == 0 {
+		return nil
+	}
+	if err := a.db.SetQuestionEncryptionKeys(q.ID, keys); err != nil {
+		log.Warnw("encryption keys: could not persist question keys", "question", q.ID.Hex(), "error", err)
+	}
+	return keys
 }
 
 // votingProcessParticipantHandler godoc
