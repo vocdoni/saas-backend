@@ -117,9 +117,9 @@ type VotingProcessResultsResponse struct {
 	Questions []VotingProcessQuestionResults `json:"questions"`
 }
 
-// VotingProcessQuestionMemos carries every free-text voter memo submitted to one question's
-// on-chain election, each repeated once per vote that carried it (6 votes of "lalala" yield
-// "lalala" six times). Votes without a memo are omitted.
+// VotingProcessQuestionMemos carries every free-text voter memo cast alongside a question's
+// open-value choice, each repeated once per vote that carried it (6 such votes of "lalala" yield
+// "lalala" six times). Memos cast with any other choice, and votes without a memo, are omitted.
 type VotingProcessQuestionMemos struct {
 	QuestionID string            `json:"questionId"`
 	UpstreamID internal.HexBytes `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`

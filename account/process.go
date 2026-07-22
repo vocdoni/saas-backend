@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -270,13 +271,18 @@ func (a *Account) Election(processID []byte) (*api.Election, error) {
 }
 
 // ElectionMemos pages every vote of the on-chain election with the given id and returns each
-// non-empty voter memo, one entry per vote that carried one (so a memo cast N times appears N
-// times). Votes without a memo are skipped. The node's votes-list endpoint returns an empty
-// page past the last one, which terminates the loop.
+// non-empty voter memo cast alongside the open choice (the choice whose value is openValue),
+// one entry per matching vote (so a memo cast N times appears N times). A memo rides on the
+// whole vote, so we correlate it to a choice via the vote's selected values: the votes-list page
+// carries the memo but not the vote package, so for each memo-carrying vote we fetch the single
+// vote (which the node decrypts at RESULTS) and keep the memo only if the open choice's value is
+// among the selected ones. The node's votes-list endpoint returns an empty page past the last
+// one, which terminates the loop.
 //
-// ponytail: pages the whole election; fine for the manager-only read this backs. Add saas-side
-// pagination if a process ever accumulates memos in the millions.
-func (a *Account) ElectionMemos(electionID []byte) ([]string, error) {
+// ponytail: pages the whole election and does one extra GET per memo-carrying vote (N+1); fine for
+// the manager-only, RESULTS-only read this backs. Add saas-side pagination / a bounded fetch pool
+// if a process ever accumulates memos in the millions.
+func (a *Account) ElectionMemos(electionID []byte, openValue uint32) ([]string, error) {
 	var memos []string
 	for page := 0; ; page++ {
 		resp, code, err := a.client.Request(http.MethodGet, nil,
@@ -296,11 +302,45 @@ func (a *Account) ElectionMemos(electionID []byte) ([]string, error) {
 			return memos, nil
 		}
 		for _, v := range list.Votes {
-			if v.Memo != "" {
+			if v.Memo == "" {
+				continue
+			}
+			votes, err := a.voteSelectedValues(internal.HexBytes(v.VoteID))
+			if err != nil {
+				return nil, err
+			}
+			if slices.Contains(votes, int(openValue)) {
 				memos = append(memos, v.Memo)
 			}
 		}
 	}
+}
+
+// voteSelectedValues fetches a single vote by its id and returns the choice values it selected
+// (VotePackage.Votes). The node decrypts the package for encrypted elections once keys are revealed
+// (RESULTS); if the package is still opaque/absent it returns no values, so the caller drops the memo.
+func (a *Account) voteSelectedValues(voteID internal.HexBytes) ([]int, error) {
+	resp, code, err := a.client.Request(http.MethodGet, nil, "votes", voteID.String())
+	if err != nil {
+		return nil, fmt.Errorf("could not fetch vote %x: %w", voteID, err)
+	}
+	if code != http.StatusOK {
+		return nil, fmt.Errorf("could not fetch vote %x: unexpected status %d (%s)", voteID, code, resp)
+	}
+	var vote api.Vote
+	if err := json.Unmarshal(resp, &vote); err != nil {
+		return nil, fmt.Errorf("could not decode vote %x: %w", voteID, err)
+	}
+	if len(vote.VotePackage) == 0 {
+		return nil, nil
+	}
+	var pkg struct {
+		Votes []int `json:"votes"`
+	}
+	if err := json.Unmarshal(vote.VotePackage, &pkg); err != nil {
+		return nil, nil // opaque/encrypted package: no selectable values, memo is dropped
+	}
+	return pkg.Votes, nil
 }
 
 // ElectionEncryptionKeys fetches the encryption public keys of the on-chain election with

@@ -1984,6 +1984,11 @@ definitions:
     - CensusTypeSMSorMail
   db.Choice:
     properties:
+      openValue:
+        description: |-
+          OpenValue marks the one choice of a question that accepts a free-text voter memo; the memos
+          endpoint returns memos only for votes that selected this choice. At most one per question.
+        type: boolean
       title:
         $ref: '#/definitions/db.MultiLangString'
       value:
@@ -6467,10 +6472,11 @@ paths:
     get:
       description: |-
         Per-question raw voter memos of a published voting process, restricted to
-        questions whose on-chain election has reached RESULTS status: one entry per such
-        question, each listing every free-text memo submitted with a vote, repeated once
-        per vote that carried it (votes without a memo are omitted). Questions not yet in
-        results are excluded. Requires Manager/Admin role of the owning organization.
+        questions whose on-chain election has reached RESULTS status and that define an
+        open-value choice: one entry per such question, listing every free-text memo cast
+        by a vote that selected the open choice, repeated once per such vote. Questions not
+        yet in results, or without an open-value choice, are excluded. Requires
+        Manager/Admin role of the owning organization.
       parameters:
       - description: Process ID
         in: path

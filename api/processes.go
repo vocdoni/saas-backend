@@ -161,6 +161,17 @@ func (a *API) buildQuestions(
 				return nil, errors.ErrInvalidData.Withf("question %d: unsupported type %q", i, q.Type)
 			}
 		}
+		// a memo is gated to a single "open" choice per question: at most one choice may set
+		// openValue, since the memos endpoint correlates each vote's selected value against it.
+		open := 0
+		for _, c := range q.Choices {
+			if c.OpenValue {
+				open++
+			}
+		}
+		if open > 1 {
+			return nil, errors.ErrInvalidData.Withf("question %d: at most one choice can have openValue", i)
+		}
 		eligible, err := a.resolveEligibleMemberIDs(q.Eligibility, census, orgAddress)
 		if err != nil {
 			return nil, err

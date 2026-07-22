@@ -455,6 +455,9 @@ type MultiLangString map[string]string
 type Choice struct {
 	Title MultiLangString `json:"title" bson:"title"`
 	Value uint32          `json:"value" bson:"value"`
+	// OpenValue marks the one choice of a question that accepts a free-text voter memo; the memos
+	// endpoint returns memos only for votes that selected this choice. At most one per question.
+	OpenValue bool `json:"openValue,omitempty" bson:"openValue,omitempty"`
 }
 
 // Question is a single question of an election.

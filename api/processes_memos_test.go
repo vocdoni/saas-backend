@@ -81,23 +81,31 @@ func TestVotingProcessMemos(t *testing.T) {
 	}
 	twoFaFields := db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail}
 
-	// three voters: two carry the same memo, one carries no memo
+	// four voters. The memo is gated to the open choice (value 1): only memos cast by a vote that
+	// selected value 1 are surfaced. One/Two select the open choice with the same memo (both
+	// returned), Three selects it with no memo (omitted), Four selects the non-open choice (value 2)
+	// with a memo that must be dropped.
 	voters := []struct {
 		member apicommon.OrgMember
+		vote   int
 		memo   []byte
 	}{
 		{apicommon.OrgMember{
 			Name: "Voter", Surname: "One", MemberNumber: "M001", NationalID: "MEMO0001A", //nolint:goconst
 			BirthDate: "1990-01-01", Email: "memo1@example.com", Phone: "+34699000101", Weight: "1", //nolint:goconst
-		}, []byte("lalala")},
+		}, 1, []byte("lalala")},
 		{apicommon.OrgMember{
 			Name: "Voter", Surname: "Two", MemberNumber: "M002", NationalID: "MEMO0002B",
 			BirthDate: "1990-01-02", Email: "memo2@example.com", Phone: "+34699000102", Weight: "1",
-		}, []byte("lalala")},
+		}, 1, []byte("lalala")},
 		{apicommon.OrgMember{
 			Name: "Voter", Surname: "Three", MemberNumber: "M003", NationalID: "MEMO0003C",
 			BirthDate: "1990-01-03", Email: "memo3@example.com", Phone: "+34699000103", Weight: "1",
-		}, nil},
+		}, 1, nil},
+		{apicommon.OrgMember{
+			Name: "Voter", Surname: "Four", MemberNumber: "M004", NationalID: "MEMO0004D",
+			BirthDate: "1990-01-04", Email: "memo4@example.com", Phone: "+34699000104", Weight: "1",
+		}, 2, []byte("ignored")},
 	}
 	members := make([]apicommon.OrgMember, len(voters))
 	for i := range voters {
@@ -134,6 +142,10 @@ func TestVotingProcessMemos(t *testing.T) {
 		OrgAddress: orgAddress,
 		Order:      0,
 		Title:      db.MultiLangString{"default": "Q1"},
+		Choices: []db.Choice{
+			{Title: db.MultiLangString{"default": "Yes"}, Value: 1, OpenValue: true},
+			{Title: db.MultiLangString{"default": "No"}, Value: 2},
+		},
 		UpstreamID: processID,
 	})
 	c.Assert(err, qt.IsNil)
@@ -151,7 +163,9 @@ func TestVotingProcessMemos(t *testing.T) {
 		voterAddr := voter.Address().Bytes()
 		signature := testCSPSign(t, bundleID, authToken, processID, voterAddr)
 		proof := testGenerateVoteProof(processID, voterAddr, signature, 1)
-		testRelayVoteRequest(t, &voter, processID, proof, []byte("[\"1\"]"), voters[i].memo)
+		// canonical vote package so the memos endpoint can read the selected choice value.
+		votePackage := []byte(fmt.Sprintf(`{"votes":[%d]}`, voters[i].vote))
+		testRelayVoteRequest(t, &voter, processID, proof, votePackage, voters[i].memo)
 	}
 
 	// end the election so it advances to RESULTS status — memos are only exposed then.
@@ -166,19 +180,17 @@ func TestVotingProcessMemos(t *testing.T) {
 	signRemoteSignerAndSendVocdoniTx(t, endTx, token, vocdoniClient, orgAddress)
 	waitForElectionStatus(t, processID, "RESULTS")
 
-	// manager reads the memos: "lalala" twice, the no-memo vote omitted.
+	// manager reads the memos: only the two open-choice "lalala" memos come back — the no-memo vote
+	// and the non-open-choice "ignored" memo are both excluded.
 	resp := requestAndParse[apicommon.VotingProcessMemosResponse](
 		t, http.MethodGet, token, nil, "processes", vpID.Hex(), "results", "memos")
 	c.Assert(resp.Questions, qt.HasLen, 1)
 	c.Assert(resp.Questions[0].QuestionID, qt.Not(qt.HasLen), 0)
 	memos := resp.Questions[0].Memos
 	c.Assert(memos, qt.HasLen, 2)
-	count := 0
 	for _, m := range memos {
 		c.Assert(m, qt.Equals, "lalala")
-		count++
 	}
-	c.Assert(count, qt.Equals, 2)
 
 	// a user with no role for the org cannot read the memos.
 	otherToken := testCreateUser(t, "outsiderpass123")
