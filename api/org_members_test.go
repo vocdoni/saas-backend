@@ -192,9 +192,10 @@ func TestOrganizationMembers(t *testing.T) {
 		"organizations", orgAddress.String(), "members")
 	c.Assert(missingFieldsResponse.Added, qt.Equals, uint32(4))
 	c.Assert(missingFieldsResponse.Errors, qt.HasLen, 3)
-	c.Assert(missingFieldsResponse.Errors[0], qt.Matches, ".*invalid-email.*")
-	c.Assert(missingFieldsResponse.Errors[1], qt.Matches, ".*invalid-phone.*")
-	c.Assert(missingFieldsResponse.Errors[2], qt.Matches, ".*invalid-birthdate.*")
+	// errors point at the offending member's position (Pedro is the 3rd member)
+	c.Assert(missingFieldsResponse.Errors[0], qt.Matches, "line 3: .*invalid-email.*")
+	c.Assert(missingFieldsResponse.Errors[1], qt.Matches, "line 3: .*invalid-phone.*")
+	c.Assert(missingFieldsResponse.Errors[2], qt.Matches, "line 3: .*invalid-birthdate.*")
 
 	// Test 3: Get organization members (now with added members)
 	membersResponse := requestAndParse[apicommon.OrganizationMembersResponse](
@@ -320,9 +321,10 @@ func TestOrganizationMembers(t *testing.T) {
 	c.Assert(jobStatus.Result.Total, qt.Equals, 2)
 	c.Assert(jobStatus.Result.Progress, qt.Equals, 100)
 	c.Assert(jobStatus.Errors, qt.HasLen, 3)
-	c.Assert(jobStatus.Errors[0], qt.Matches, ".*invalid-email.*")
-	c.Assert(jobStatus.Errors[1], qt.Matches, ".*invalid-phone.*")
-	c.Assert(jobStatus.Errors[2], qt.Matches, ".*invalid-birthdate.*")
+	// errors point at the offending member's position (Alice is the 2nd member)
+	c.Assert(jobStatus.Errors[0], qt.Matches, "line 2: .*invalid-email.*")
+	c.Assert(jobStatus.Errors[1], qt.Matches, "line 2: .*invalid-phone.*")
+	c.Assert(jobStatus.Errors[2], qt.Matches, "line 2: .*invalid-birthdate.*")
 
 	// Check that the completion email was sent
 	mailBody := waitForEmail(t, user.Email)
