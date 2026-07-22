@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -333,12 +334,14 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	census, _ := a.db.Census(vp.CensusID.Hex())
 	// serve the stored status now; refresh each published question from the chain in the background
-	// to catch status changes made directly on-chain (outside this API). Also resolve the vote
-	// encryption keys of encrypted questions so clients can seal encrypted ballots.
+	// to catch status changes made directly on-chain (outside this API).
 	for i := range questions {
 		a.enqueueReconcileIfStale(&questions[i])
-		questions[i].EncryptionKeys = a.resolveQuestionEncryptionKeys(&questions[i])
 	}
+	// resolve the vote encryption keys of encrypted questions (so clients can seal encrypted ballots)
+	// concurrently: each encrypted question without cached keys needs a Vochain round-trip, so a
+	// bounded pool keeps this read fast for a process with many encrypted questions.
+	a.resolveQuestionEncryptionKeysBatch(questions)
 	apicommon.HTTPWriteJSON(w, apicommon.VotingProcessResponseFromDB(vp, questions, census, a.account.ChainID()))
 }
 
@@ -504,6 +507,25 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 	// resolve the vote encryption keys so voters can seal an encrypted ballot for this question.
 	question.EncryptionKeys = a.resolveQuestionEncryptionKeys(question)
 	apicommon.HTTPWriteJSON(w, apicommon.PublicQuestionResponseFromDB(question, census))
+}
+
+// resolveQuestionEncryptionKeysBatch resolves the vote encryption keys of every question
+// concurrently (bounded), setting q.EncryptionKeys in place. Each encrypted question without cached
+// keys needs a Vochain round-trip; a bounded worker pool keeps GET /processes/{id} fast for a process
+// with many encrypted questions (up to maxQuestionsPerProcess) instead of doing the calls
+// sequentially. Gated/cached questions return immediately (no chain call).
+func (a *API) resolveQuestionEncryptionKeysBatch(questions []db.VotingProcessQuestion) {
+	const workers = 8
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	for i := range questions {
+		sem <- struct{}{}
+		wg.Go(func() {
+			defer func() { <-sem }()
+			questions[i].EncryptionKeys = a.resolveQuestionEncryptionKeys(&questions[i])
+		})
+	}
+	wg.Wait()
 }
 
 // resolveQuestionEncryptionKeys returns the vote-encryption public keys of a question's on-chain

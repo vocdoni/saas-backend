@@ -179,7 +179,9 @@ type PublicQuestionResponse struct {
 	Status            string               `json:"status,omitempty"`
 	Census            CensusSpec           `json:"census"`
 	// EncryptionKeys are the on-chain vote-encryption public keys (only for secretUntilTheEnd
-	// questions, and empty until the keykeepers publish them). Voters seal encrypted ballots with them.
+	// questions). Because of omitempty the field is absent (not an empty array) until the keykeepers
+	// publish the keys, so clients treat its absence as "not yet published" and poll. Voters seal
+	// encrypted ballots with them.
 	EncryptionKeys []db.EncryptionKey `json:"encryptionKeys,omitempty"`
 }
 
