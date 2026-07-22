@@ -26,10 +26,14 @@ type CSPAuth struct {
 	CreatedAt time.Time         `json:"createdAt" bson:"createdat"`
 	// Secret is the per-token OTP challenge secret. It must never leave the
 	// server, so it is excluded from JSON serialization.
-	Secret     string    `json:"-" bson:"secret,omitempty"`
-	Attempts   int       `json:"attempts" bson:"attempts"`
-	Verified   bool      `json:"verified" bson:"verified"`
-	VerifiedAt time.Time `json:"verifiedAt" bson:"verifiedat"`
+	Secret   string `json:"-" bson:"secret,omitempty"`
+	Attempts int    `json:"attempts" bson:"attempts"`
+	// LastResendAt is the timestamp of the most recent OTP resend for this token.
+	// It gates the resend cooldown independently of CreatedAt, so successive
+	// resends of the same token are spaced apart. Zero until the first resend.
+	LastResendAt time.Time `json:"lastResendAt" bson:"lastresendat"`
+	Verified     bool      `json:"verified" bson:"verified"`
+	VerifiedAt   time.Time `json:"verifiedAt" bson:"verifiedat"`
 }
 
 // CSPProcess is the status of a process in a bundle of processes for a user
@@ -105,6 +109,41 @@ func (ms *MongoStorage) LastCSPAuth(userID, bundleID internal.HexBytes) (*CSPAut
 		return nil, err
 	}
 	return tokenData, nil
+}
+
+// TouchCSPAuthResend atomically enforces the resend cooldown for a token. It
+// updates the token's lastresendat to now only if at least cooldown has elapsed
+// since its previous resend, and reports whether the resend is allowed. The
+// first resend of a token (zero lastresendat) is always allowed so a voter who
+// did not receive the initial code can retry immediately; only successive
+// resends are spaced, which is what caps notification flooding. Doing the check
+// and the timestamp bump in a single conditional update makes it race-safe:
+// concurrent resends cannot both pass. The token must already exist (callers
+// fetch it first); a false result for an existing token means the cooldown has
+// not yet elapsed.
+func (ms *MongoStorage) TouchCSPAuthResend(token internal.HexBytes, cooldown time.Duration) (bool, error) {
+	if token == nil {
+		return false, ErrBadInputs
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	// create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	// only match (and update) the token when its last resend is older than the
+	// cooldown. A never-resent token has the zero time in lastresendat, which is
+	// always older than the threshold, so the first resend passes immediately.
+	threshold := time.Now().Add(-cooldown)
+	filter := bson.M{
+		"_id":          token,
+		"lastresendat": bson.M{"$lte": threshold},
+	}
+	update := bson.M{"$set": bson.M{"lastresendat": time.Now()}}
+	res, err := ms.cspTokens.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return false, errors.Join(ErrStoreToken, err)
+	}
+	return res.ModifiedCount > 0, nil
 }
 
 // VerifyCSPAuth method verifies a CSP authentication token. It returns an
