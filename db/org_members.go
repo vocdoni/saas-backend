@@ -139,6 +139,8 @@ func (ms *MongoStorage) OrgMemberByMemberNumber(orgAddress common.Address, membe
 }
 
 // BulkOrgMembersJob is returned by SetBulkOrgMembers to provide the output.
+// Each entry in Errors is prefixed with "line N:", where N is the 1-based
+// position of the offending member in the submitted list.
 type BulkOrgMembersJob struct {
 	Progress int
 	Total    int
@@ -175,7 +177,7 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 	member.Email = internal.NormalizeEmail(member.Email)
 	if member.Email != "" {
 		if _, err := mail.ParseAddress(member.Email); err != nil {
-			errors = append(errors, fmt.Errorf("could not parse email: %s %v", member.Email, err))
+			errors = append(errors, fmt.Errorf("invalid email %q: %w", member.Email, err))
 			// If email is invalid, set it to empty and store the error
 			member.Email = ""
 		}
@@ -185,7 +187,8 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 	if member.PlaintextPhone != "" {
 		phone, err := NewHashedPhone(member.PlaintextPhone, org)
 		if err != nil {
-			errors = append(errors, fmt.Errorf("invalid phone %q: %w", member.PlaintextPhone, err))
+			// the error already identifies the offending phone number
+			errors = append(errors, err)
 		} else {
 			member.Phone = phone
 		}
@@ -213,19 +216,25 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 
 // createOrgMemberBulkOperations creates a batch of members using bulk write operations,
 // and returns the number of members added and any errors encountered.
+// firstLine is the 1-based position of members[0] in the originally submitted list;
+// validation errors are prefixed with the line each offending member sits at, so
+// users can locate it in the imported file.
 func (ms *MongoStorage) createOrgMemberBulkOperations(
 	org *Organization,
 	members []*OrgMember,
 	salt string,
 	currentTime time.Time,
+	firstLine int,
 ) (int, []error) {
 	var preparedMembers []any
 	var errors []error
 
-	for _, m := range members {
+	for i, m := range members {
 		// Prepare the member
 		member, validationErrors := prepareOrgMember(org, m, salt, currentTime)
-		errors = append(errors, validationErrors...)
+		for _, err := range validationErrors {
+			errors = append(errors, fmt.Errorf("line %d: %w", firstLine+i, err))
+		}
 		preparedMembers = append(preparedMembers, member)
 	}
 
@@ -245,9 +254,10 @@ func (ms *MongoStorage) createOrgMemberBulkOperations(
 	result, err := ms.orgMembers.InsertMany(batchCtx, preparedMembers)
 	if err != nil {
 		log.Warnw("error during bulk addition of members batch", "error", err)
-		firstID := members[0].ID
-		lastID := members[len(members)-1].ID
-		errors = append(errors, fmt.Errorf("batch %s - %s: %w", firstID.Hex(), lastID.Hex(), err))
+		errors = append(errors, fmt.Errorf("lines %d-%d: %w", firstLine, firstLine+len(members)-1, err))
+	}
+	if result == nil {
+		return 0, errors
 	}
 
 	return len(result.InsertedIDs), errors
@@ -328,6 +338,7 @@ func (ms *MongoStorage) addOrgMemberBatches(
 			orgMembers[start:end],
 			salt,
 			currentTime,
+			start+1,
 		)
 
 		// Update job stats
