@@ -317,7 +317,7 @@ func TestMembersImportCompletionNotification(t *testing.T) {
 		c.Assert(plaintext.Body, qt.Contains, "{{.CompletedAt}}")
 	})
 
-	t.Run("ExecTemplate_Success", func(_ *testing.T) {
+	t.Run("ExecTemplate_Success", func(t *testing.T) {
 		c := qt.New(t)
 
 		// Test data for successful import
@@ -329,7 +329,7 @@ func TestMembersImportCompletionNotification(t *testing.T) {
 			AddedMembers     int
 			ErrorCount       int
 			Errors           []string
-			CompletedAt      string
+			CompletedAt      time.Time
 		}{
 			UserName:         "John Doe",
 			OrganizationName: "Test Organization",
@@ -338,7 +338,7 @@ func TestMembersImportCompletionNotification(t *testing.T) {
 			AddedMembers:     100,
 			ErrorCount:       0,
 			Errors:           nil,
-			CompletedAt:      "2023-10-03 12:00:00",
+			CompletedAt:      time.Date(2023, 10, 3, 12, 0, 0, 0, time.UTC),
 		}
 
 		// Execute template
@@ -357,7 +357,7 @@ func TestMembersImportCompletionNotification(t *testing.T) {
 		c.Assert(notification.PlainBody, qt.Contains, "2023-10-03 12:00:00")
 	})
 
-	t.Run("ExecTemplate_WithErrors", func(_ *testing.T) {
+	t.Run("ExecTemplate_WithErrors", func(t *testing.T) {
 		c := qt.New(t)
 
 		// Test data with errors
@@ -369,7 +369,7 @@ func TestMembersImportCompletionNotification(t *testing.T) {
 			AddedMembers     int
 			ErrorCount       int
 			Errors           []string
-			CompletedAt      string
+			CompletedAt      time.Time
 		}{
 			UserName:         "Jane Smith",
 			OrganizationName: "Error Test Org",
@@ -378,7 +378,7 @@ func TestMembersImportCompletionNotification(t *testing.T) {
 			AddedMembers:     45,
 			ErrorCount:       5,
 			Errors:           []string{"Invalid email format", "Duplicate entry", "Missing phone number"},
-			CompletedAt:      "2023-10-03 13:00:00",
+			CompletedAt:      time.Date(2023, 10, 3, 13, 0, 0, 0, time.UTC),
 		}
 
 		// Execute template

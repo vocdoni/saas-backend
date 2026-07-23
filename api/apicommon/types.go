@@ -94,14 +94,16 @@ func OrgDisplayName(meta map[string]any, fallback string) string {
 func BuildOrgMeta(base map[string]any, name, logo, description *MultilingualText, explicit map[string]any) map[string]any {
 	meta := make(map[string]any, len(base))
 	maps.Copy(meta, base)
+	// stored as unnamed map[string]string so db.Organization accessors
+	// (DisplayName/LogoURL) match the value before any Mongo round-trip
 	if name != nil {
-		meta["name"] = *name
+		meta["name"] = map[string]string(*name)
 	}
 	if logo != nil {
-		meta["logo"] = *logo
+		meta["logo"] = map[string]string(*logo)
 	}
 	if description != nil {
-		meta["description"] = *description
+		meta["description"] = map[string]string(*description)
 	}
 	maps.Copy(meta, explicit)
 	return meta
