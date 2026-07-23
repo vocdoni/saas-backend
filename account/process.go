@@ -279,9 +279,9 @@ func (a *Account) Election(processID []byte) (*api.Election, error) {
 // among the selected ones. The node's votes-list endpoint returns an empty page past the last
 // one, which terminates the loop.
 //
-// ponytail: pages the whole election and does one extra GET per memo-carrying vote (N+1); fine for
-// the manager-only, RESULTS-only read this backs. Add saas-side pagination / a bounded fetch pool
-// if a process ever accumulates memos in the millions.
+// ponytail: pages the whole election and does one extra GET per memo-carrying vote (N+1); fine for the
+// manager-only memo resolution folded into the results reads. Add saas-side pagination / a bounded
+// fetch pool if a process ever accumulates memos in the millions.
 func (a *Account) ElectionMemos(electionID []byte, openValue uint32) ([]string, error) {
 	var memos []string
 	for page := 0; ; page++ {

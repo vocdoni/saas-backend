@@ -354,7 +354,9 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// and the live on-chain tally of each published question (finalResults marks final), concurrently:
 	// each needs a Vochain round-trip, so bounded pools keep this read fast for a many-question process.
 	a.resolveQuestionEncryptionKeysBatch(questions)
-	a.resolveQuestionResultsBatch(questions)
+	// memos (free-text voter input on open-value choices) are manager-only, so they are resolved into
+	// the results only for a manager/admin caller — never for the public view.
+	a.resolveQuestionResultsBatch(questions, isManager)
 	// non-managers must not see the per-question eligibility member ids (who can vote).
 	if !isManager {
 		redactQuestionsForPublic(questions)
@@ -543,8 +545,9 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 	a.enqueueReconcileIfStale(question)
 	// resolve the vote encryption keys so voters can seal an encrypted ballot for this question.
 	question.EncryptionKeys = a.resolveQuestionEncryptionKeys(question)
-	// surface the on-chain tally once the question is in RESULTS status (nil/no chain call otherwise).
-	question.Results = a.resolveQuestionResults(question)
+	// surface the live on-chain tally for a published question; memos (manager-only) are included only
+	// when the caller is a manager/admin of the owning org.
+	question.Results = a.resolveQuestionResults(question, a.optionalManager(r, vp.OrgAddress))
 	apicommon.HTTPWriteJSON(w, apicommon.PublicQuestionResponseFromDB(question, census))
 }
 
@@ -658,14 +661,48 @@ func questionResultsFromElection(e *dvoteapi.Election) db.QuestionResults {
 	return qr
 }
 
+// openChoice returns the question's single open-value choice (the one accepting a voter memo) and true
+// if one is defined. buildQuestions guarantees at most one, so the first match is authoritative.
+func openChoice(choices []db.Choice) (db.Choice, bool) {
+	for _, c := range choices {
+		if c.OpenValue {
+			return c, true
+		}
+	}
+	return db.Choice{}, false
+}
+
+// resolveQuestionMemos returns the free-text voter memos cast alongside a published question's
+// open-value choice, or nil when the question has no open choice / no election. Best-effort: a chain
+// error yields nil (logged), never fails the read. Manager-gated by the caller (see withMemos).
+//
+// ponytail: ElectionMemos is an N+1 over the election's votes (page the list + a per-memo-vote fetch to
+// correlate the memo to a choice). Bounded to manager reads of open-value questions; add a short-TTL
+// cache if a manager polls a large open-value election hard.
+func (a *API) resolveQuestionMemos(q *db.VotingProcessQuestion) []string {
+	open, ok := openChoice(q.Choices)
+	if !ok || len(q.UpstreamID) == 0 {
+		return nil
+	}
+	memos, err := a.account.ElectionMemos(q.UpstreamID, open.Value)
+	if err != nil {
+		log.Warnw("results: memos fetch failed",
+			"question", q.ID.Hex(), "upstreamId", q.UpstreamID.String(), "error", err)
+		return nil
+	}
+	return memos
+}
+
 // resolveQuestionResults returns a question's live on-chain tally for any published (on-chain)
 // question — the caller distinguishes live from final via QuestionResults.FinalResults. It is a no-op
 // (nil, no chain call) only for an unpublished draft (no UpstreamID). A secretUntilTheEnd question
-// returns empty results until the keys are revealed (the node hides the tally, not this gate).
+// returns empty results until the keys are revealed (the node hides the tally, not this gate). When
+// withMemos is set (a manager/admin caller), the open-value question's voter memos are included too.
 //
 // ponytail: not cached, so a live read hits the chain per poll (one Election call per published
 // question); add a short-TTL cache if this read gets hot — /results already does the same per poll.
-func (a *API) resolveQuestionResults(q *db.VotingProcessQuestion) *db.QuestionResults {
+//nolint:revive // withMemos gates the manager-only memo fetch; a bool keeps the three resolvers uniform
+func (a *API) resolveQuestionResults(q *db.VotingProcessQuestion, withMemos bool) *db.QuestionResults {
 	// nothing on chain yet (draft) — no results.
 	if len(q.UpstreamID) == 0 {
 		return nil
@@ -677,15 +714,18 @@ func (a *API) resolveQuestionResults(q *db.VotingProcessQuestion) *db.QuestionRe
 		return nil
 	}
 	qr := questionResultsFromElection(election)
+	if withMemos {
+		qr.Memos = a.resolveQuestionMemos(q)
+	}
 	return &qr
 }
 
-// resolveQuestionResultsBatch resolves the on-chain tally of every RESULTS question concurrently
-// (bounded), setting q.Results in place. Non-RESULTS questions short-circuit to nil without a chain
-// call, so a bounded worker pool keeps GET /processes/{id} fast when several questions are in results.
-func (a *API) resolveQuestionResultsBatch(questions []db.VotingProcessQuestion) {
+// resolveQuestionResultsBatch resolves the on-chain tally of every published question concurrently
+// (bounded), setting q.Results in place. Draft questions short-circuit to nil without a chain call.
+// withMemos (a manager/admin caller) additionally includes each open-value question's voter memos.
+func (a *API) resolveQuestionResultsBatch(questions []db.VotingProcessQuestion, withMemos bool) {
 	parallelForEach(len(questions), func(i int) {
-		questions[i].Results = a.resolveQuestionResults(&questions[i])
+		questions[i].Results = a.resolveQuestionResults(&questions[i], withMemos)
 	})
 }
 
@@ -695,7 +735,7 @@ func (a *API) resolveQuestionResultsBatch(questions []db.VotingProcessQuestion) 
 // is returned so GET /processes/{id}/results never emits a silent partial tally set. Returns nil when
 // no question is on chain (preserving the endpoint's "questions": null shape for that case).
 func (a *API) electionResultsBatch(
-	questions []db.VotingProcessQuestion,
+	questions []db.VotingProcessQuestion, withMemos bool,
 ) ([]apicommon.VotingProcessQuestionResults, error) {
 	entries := make([]*apicommon.VotingProcessQuestionResults, len(questions))
 	errs := make([]error, len(questions))
@@ -709,10 +749,14 @@ func (a *API) electionResultsBatch(
 			errs[i] = fmt.Errorf("question %s: %w", q.ID.Hex(), err)
 			return
 		}
+		qr := questionResultsFromElection(election)
+		if withMemos {
+			qr.Memos = a.resolveQuestionMemos(q)
+		}
 		entries[i] = &apicommon.VotingProcessQuestionResults{
 			QuestionID:      q.ID.Hex(),
 			UpstreamID:      q.UpstreamID,
-			QuestionResults: questionResultsFromElection(election),
+			QuestionResults: qr,
 		}
 	})
 	var out []apicommon.VotingProcessQuestionResults
@@ -772,7 +816,8 @@ func (a *API) votingProcessParticipantHandler(w http.ResponseWriter, r *http.Req
 //	@Summary		Get a voting process results
 //	@Description	Public per-question on-chain results of a published voting process: one entry per
 //	@Description	published question, each with its tally (vote count, max voters, whether final, and
-//	@Description	the per-choice results). No authentication is required.
+//	@Description	the per-choice results). Auth is optional: a Manager/Admin of the org (or a voting:write
+//	@Description	API key) additionally receives each open-value question's free-text voter memos.
 //	@Tags			processes
 //	@Produce		json
 //	@Param			processId	path		string	true	"Process ID"
@@ -802,7 +847,8 @@ func (a *API) votingProcessResultsHandler(w http.ResponseWriter, r *http.Request
 	}
 	// fetch every published question's tally concurrently (bounded); all-or-error so this endpoint
 	// never emits a partial tally set (a transient chain error on one question fails the response).
-	entries, err := a.electionResultsBatch(questions)
+	// memos (manager-only) are folded in only for a manager/admin caller.
+	entries, err := a.electionResultsBatch(questions, a.optionalManager(r, vp.OrgAddress))
 	if err != nil {
 		errors.ErrVochainRequestFailed.WithErr(err).Write(w)
 		return

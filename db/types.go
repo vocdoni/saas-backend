@@ -656,6 +656,11 @@ type QuestionResults struct {
 	// values leave empty buckets); a multi-choice question has one row per choice, each [notSelected,
 	// selected]. Absent until the tally is published.
 	Results [][]string `json:"results,omitempty"`
+	// Memos are the free-text voter memos cast alongside the question's open-value choice, one entry
+	// per such vote. Manager/Admin-only — absent for public callers — and only for a question that has
+	// an openValue choice. Live: empty while a secretUntilTheEnd election is still encrypted (the memo
+	// cannot be correlated to a choice until the vote package is decryptable at RESULTS).
+	Memos []string `json:"memos,omitempty"`
 }
 
 // QuestionStatusRef is the minimal projection of a published question the status syncer and the

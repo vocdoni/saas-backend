@@ -15,10 +15,10 @@ import (
 	"go.vocdoni.io/proto/build/go/models"
 )
 
-// TestVotingProcessMemos casts several CSP votes carrying free-text memos (one memo repeated,
-// one voter with no memo), ends the election so it reaches RESULTS status, and asserts
-// GET /processes/{id}/results/memos returns every memo repeated once per vote that carried it,
-// gated to the owning org's managers. Memos are only exposed once the election is in results.
+// TestVotingProcessMemos casts several CSP votes carrying free-text memos (one memo repeated, one
+// voter with no memo, one memo cast with a non-open choice), ends the election, and asserts the memos
+// are folded into the per-question QuestionResults — only for a manager/admin caller, and only the
+// memos cast alongside the question's open-value choice. Anonymous callers never receive them.
 func TestVotingProcessMemos(t *testing.T) {
 	c := qt.New(t)
 
@@ -163,12 +163,13 @@ func TestVotingProcessMemos(t *testing.T) {
 		voterAddr := voter.Address().Bytes()
 		signature := testCSPSign(t, bundleID, authToken, processID, voterAddr)
 		proof := testGenerateVoteProof(processID, voterAddr, signature, 1)
-		// canonical vote package so the memos endpoint can read the selected choice value.
+		// canonical vote package so the results can correlate the memo to the selected choice value.
 		votePackage := []byte(fmt.Sprintf(`{"votes":[%d]}`, voters[i].vote))
 		testRelayVoteRequest(t, &voter, processID, proof, votePackage, voters[i].memo)
 	}
 
-	// end the election so it advances to RESULTS status — memos are only exposed then.
+	// end the election so the tally is final and the votes are fully indexed (memos correlate live for
+	// this non-encrypted election, but ending makes the assertions deterministic).
 	endNonce := fetchVocdoniAccountNonce(t, vocdoniClient, orgAddress)
 	endStatus := models.ProcessStatus_ENDED
 	endTx := &models.Tx{Payload: &models.Tx_SetProcess{SetProcess: &models.SetProcessTx{
@@ -180,20 +181,30 @@ func TestVotingProcessMemos(t *testing.T) {
 	signRemoteSignerAndSendVocdoniTx(t, endTx, token, vocdoniClient, orgAddress)
 	waitForElectionStatus(t, processID, "RESULTS")
 
-	// manager reads the memos: only the two open-choice "lalala" memos come back — the no-memo vote
-	// and the non-open-choice "ignored" memo are both excluded.
-	resp := requestAndParse[apicommon.VotingProcessMemosResponse](
-		t, http.MethodGet, token, nil, "processes", vpID.Hex(), "results", "memos")
-	c.Assert(resp.Questions, qt.HasLen, 1)
-	c.Assert(resp.Questions[0].QuestionID, qt.Not(qt.HasLen), 0)
-	memos := resp.Questions[0].Memos
-	c.Assert(memos, qt.HasLen, 2)
-	for _, m := range memos {
+	// manager GET /processes/{id}/results: the open-value question's results carry only the two
+	// open-choice "lalala" memos — the no-memo vote and the non-open-choice "ignored" memo are excluded.
+	res := requestAndParse[apicommon.VotingProcessResultsResponse](
+		t, http.MethodGet, token, nil, "processes", vpID.Hex(), "results")
+	c.Assert(res.Questions, qt.HasLen, 1)
+	c.Assert(res.Questions[0].Memos, qt.HasLen, 2)
+	for _, m := range res.Questions[0].Memos {
 		c.Assert(m, qt.Equals, "lalala")
 	}
 
-	// a user with no role for the org cannot read the memos.
-	otherToken := testCreateUser(t, "outsiderpass123")
-	requestAndAssertCode(http.StatusUnauthorized,
-		t, http.MethodGet, otherToken, nil, "processes", vpID.Hex(), "results", "memos")
+	// manager GET /processes/{id}: same memos folded inline into the question's results.
+	info := requestAndParse[apicommon.VotingProcessResponse](
+		t, http.MethodGet, token, nil, "processes", vpID.Hex())
+	c.Assert(info.Questions, qt.HasLen, 1)
+	c.Assert(info.Questions[0].Results, qt.Not(qt.IsNil))
+	c.Assert(info.Questions[0].Results.Memos, qt.HasLen, 2)
+
+	// memos are manager-only: an anonymous caller reads the results but never the memos.
+	anonRes := requestAndParse[apicommon.VotingProcessResultsResponse](
+		t, http.MethodGet, "", nil, "processes", vpID.Hex(), "results")
+	c.Assert(anonRes.Questions, qt.HasLen, 1)
+	c.Assert(anonRes.Questions[0].Memos, qt.HasLen, 0)
+	anonInfo := requestAndParse[apicommon.VotingProcessResponse](
+		t, http.MethodGet, "", nil, "processes", vpID.Hex())
+	c.Assert(anonInfo.Questions[0].Results, qt.Not(qt.IsNil))
+	c.Assert(anonInfo.Questions[0].Results.Memos, qt.HasLen, 0)
 }

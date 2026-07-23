@@ -426,7 +426,6 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, processesPublishEndpoint, a.publishVotingProcessHandler)
 		handle(r, http.MethodPut, processesQuestionsStatusEndpoint, a.setVotingProcessQuestionsStatusHandler)
 		handle(r, http.MethodPut, processesQuestionStatusEndpoint, a.setVotingProcessQuestionStatusHandler)
-		handle(r, http.MethodGet, processesMemosEndpoint, a.votingProcessMemosHandler)
 		handle(r, http.MethodDelete, processesEndpoint, a.deleteVotingProcessHandler)
 		handle(r, http.MethodGet, processesParticipantsEndpoint, a.votingProcessParticipantsHandler)
 		handle(r, http.MethodPut, processesCensusEndpoint, a.updateVotingProcessCensusHandler)

@@ -1814,28 +1814,6 @@ definitions:
           $ref: '#/definitions/apicommon.VotingProcessResponse'
         type: array
     type: object
-  apicommon.VotingProcessMemosResponse:
-    properties:
-      id:
-        type: string
-      questions:
-        items:
-          $ref: '#/definitions/apicommon.VotingProcessQuestionMemos'
-        type: array
-    type: object
-  apicommon.VotingProcessQuestionMemos:
-    properties:
-      memos:
-        items:
-          type: string
-        type: array
-      questionId:
-        type: string
-      upstreamId:
-        example: deadbeef
-        format: hex
-        type: string
-    type: object
   apicommon.VotingProcessQuestionRequest:
     properties:
       ballotProtocol:
@@ -1866,6 +1844,15 @@ definitions:
         type: boolean
       maxVoters:
         type: integer
+      memos:
+        description: |-
+          Memos are the free-text voter memos cast alongside the question's open-value choice, one entry
+          per such vote. Manager/Admin-only — absent for public callers — and only for a question that has
+          an openValue choice. Live: empty while a secretUntilTheEnd election is still encrypted (the memo
+          cannot be correlated to a choice until the vote package is decryptable at RESULTS).
+        items:
+          type: string
+        type: array
       questionId:
         type: string
       results:
@@ -2275,6 +2262,15 @@ definitions:
         type: boolean
       maxVoters:
         type: integer
+      memos:
+        description: |-
+          Memos are the free-text voter memos cast alongside the question's open-value choice, one entry
+          per such vote. Manager/Admin-only — absent for public callers — and only for a question that has
+          an openValue choice. Live: empty while a secretUntilTheEnd election is still encrypted (the memo
+          cannot be correlated to a choice until the vote package is decryptable at RESULTS).
+        items:
+          type: string
+        type: array
       results:
         description: |-
           Results is the raw on-chain tally matrix (stringified big integers), one row per ballot field:
@@ -6485,7 +6481,8 @@ paths:
       description: |-
         Public per-question on-chain results of a published voting process: one entry per
         published question, each with its tally (vote count, max voters, whether final, and
-        the per-choice results). No authentication is required.
+        the per-choice results). Auth is optional: a Manager/Admin of the org (or a voting:write
+        API key) additionally receives each open-value question's free-text voter memos.
       parameters:
       - description: Process ID
         in: path
@@ -6512,49 +6509,6 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Get a voting process results
-      tags:
-      - processes
-  /processes/{processId}/results/memos:
-    get:
-      description: |-
-        Per-question raw voter memos of a published voting process, restricted to
-        questions whose on-chain election has reached RESULTS status and that define an
-        open-value choice: one entry per such question, listing every free-text memo cast
-        by a vote that selected the open choice, repeated once per such vote. Questions not
-        yet in results, or without an open-value choice, are excluded. Requires
-        Manager/Admin role of the owning organization.
-      parameters:
-      - description: Process ID
-        in: path
-        name: processId
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/apicommon.VotingProcessMemosResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/errors.Error'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/errors.Error'
-      security:
-      - BearerAuth: []
-      summary: Get a voting process voter memos
       tags:
       - processes
   /processes/{processId}/sign:

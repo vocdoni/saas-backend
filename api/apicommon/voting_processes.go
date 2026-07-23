@@ -121,22 +121,6 @@ type VotingProcessResultsResponse struct {
 	Questions []VotingProcessQuestionResults `json:"questions"`
 }
 
-// VotingProcessQuestionMemos carries every free-text voter memo cast alongside a question's
-// open-value choice, each repeated once per vote that carried it (6 such votes of "lalala" yield
-// "lalala" six times). Memos cast with any other choice, and votes without a memo, are omitted.
-type VotingProcessQuestionMemos struct {
-	QuestionID string            `json:"questionId"`
-	UpstreamID internal.HexBytes `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
-	Memos      []string          `json:"memos"`
-}
-
-// VotingProcessMemosResponse is the manager/admin view of every free-text memo submitted to a
-// published voting process, grouped per published question, each memo repeated per occurrence.
-type VotingProcessMemosResponse struct {
-	ID        string                       `json:"id"`
-	Questions []VotingProcessQuestionMemos `json:"questions"`
-}
-
 // VotingProcessValidateResponse is the publish-readiness dry-run result.
 type VotingProcessValidateResponse struct {
 	Valid  bool     `json:"valid"`
