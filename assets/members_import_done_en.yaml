@@ -1,8 +1,8 @@
-subject: "Members import completed for {{.OrganizationName}}"
+subject: "Members import completed{{if .OrganizationName}} for {{.OrganizationName}}{{end}}"
 body: |
   Hello {{.UserName}},
 
-  Your members import for organization "{{.OrganizationName}}" has been completed.
+  Your members import{{if .OrganizationName}} for organization "{{.OrganizationName}}"{{end}} has been completed.
 
   Import Summary:
   - Total members processed: {{.TotalMembers}}

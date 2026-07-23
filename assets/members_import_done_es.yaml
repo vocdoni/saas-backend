@@ -1,8 +1,8 @@
-subject: "Importación de miembros completada para {{.OrganizationName}}"
+subject: "Importación de miembros completada{{if .OrganizationName}} para {{.OrganizationName}}{{end}}"
 body: |
   Hola {{.UserName}},
 
-  La importación de miembros para la organización "{{.OrganizationName}}" se ha completado exitosamente.
+  La importación de miembros{{if .OrganizationName}} para la organización "{{.OrganizationName}}"{{end}} se ha completado exitosamente.
 
   Resumen de la importación:
   - Total de miembros procesados: {{.TotalMembers}}

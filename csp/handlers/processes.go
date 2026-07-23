@@ -422,7 +422,7 @@ func (c *CSPHandlers) orgMember(orgAddress common.Address, auth *db.CSPAuth) (*d
 // orgNameAndLogo returns the organization display name and logo, falling back to defaults.
 func orgNameAndLogo(org *db.Organization) (name, logo string) {
 	name, logo = DefaultOrgName, DefaultOrgLogo
-	if n, ok := org.Meta["name"].(string); ok {
+	if n := org.DisplayName(); n != "" {
 		name = n
 		if l, ok := org.Meta["logo"].(string); ok {
 			logo = l
