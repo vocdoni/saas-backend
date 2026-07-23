@@ -80,6 +80,18 @@ func (a *API) optionalUser(r *http.Request) *db.User {
 	return user
 }
 
+// apiKeyActingUser loads the verified db.User an API key acts as (its CreatedBy owner), or nil if that
+// user is missing or unverified. Single source of truth for "which user does a key act as", shared by
+// authenticateAPIKey (required auth) and userFromAPIKey (optional public-read auth) so the two cannot
+// drift — a future hardening check on the acting user (e.g. a suspended-user flag) lives here once.
+func (a *API) apiKeyActingUser(key *db.APIKey) *db.User {
+	user, err := a.db.UserByEmail(key.CreatedBy)
+	if err != nil || !user.Verified {
+		return nil
+	}
+	return user
+}
+
 // userFromAPIKey resolves the db.User an API key acts as, but only when the key is valid (not
 // revoked/expired) and holds requiredScope. Returns nil otherwise. Like authenticateAPIKey, the key
 // acts as its creating user, so org authorization still flows through that user's roles. Used by the
@@ -89,11 +101,7 @@ func (a *API) userFromAPIKey(raw, requiredScope string) *db.User {
 	if err != nil || !slices.Contains(key.Scopes, requiredScope) {
 		return nil
 	}
-	user, err := a.db.UserByEmail(key.CreatedBy)
-	if err != nil || !user.Verified {
-		return nil
-	}
-	return user
+	return a.apiKeyActingUser(key)
 }
 
 // optionalCallerUser resolves the acting db.User from either a JWT bearer session or a voting:write
@@ -178,14 +186,11 @@ func (a *API) authenticateAPIKey(w http.ResponseWriter, r *http.Request, next ht
 		errors.ErrInsufficientAPIKeyScope.Withf("endpoint requires the %q scope", scope).Write(w)
 		return
 	}
-	// the key acts as its creating user, reusing the existing per-organization role checks
-	user, err := a.db.UserByEmail(key.CreatedBy)
-	if err != nil {
-		errors.ErrInvalidAPIKey.Withf("key owner no longer exists").Write(w)
-		return
-	}
-	if !user.Verified {
-		errors.ErrUserNoVerified.With("user account not verified").Write(w)
+	// the key acts as its creating user (shared resolver, so this and the public-read path can't drift),
+	// reusing the existing per-organization role checks
+	user := a.apiKeyActingUser(key)
+	if user == nil {
+		errors.ErrInvalidAPIKey.Withf("key owner missing or unverified").Write(w)
 		return
 	}
 	// best-effort last-used tracking; never block the request on it
