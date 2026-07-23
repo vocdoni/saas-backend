@@ -97,6 +97,19 @@ type Organization struct {
 	IntegratorLimits *IntegratorLimits `json:"integratorLimits,omitempty" bson:"integratorLimits,omitempty"`
 }
 
+// DisplayName returns the organization display name stored in its metadata,
+// or an empty string if the organization has no name set.
+func (o *Organization) DisplayName() string {
+	if o == nil || o.Meta == nil {
+		return ""
+	}
+	name, ok := o.Meta["name"].(string)
+	if !ok {
+		return ""
+	}
+	return name
+}
+
 // IntegratorLimits caps how many organizations an integrator may manage. The
 // aggregate process and census-size caps across those managed orgs are taken from
 // the integrator's plan top-level limits (Plan.Organization.MaxProcesses /
