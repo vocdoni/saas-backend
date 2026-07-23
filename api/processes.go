@@ -701,6 +701,7 @@ func (a *API) resolveQuestionMemos(q *db.VotingProcessQuestion) []string {
 //
 // ponytail: not cached, so a live read hits the chain per poll (one Election call per published
 // question); add a short-TTL cache if this read gets hot — /results already does the same per poll.
+//
 //nolint:revive // withMemos gates the manager-only memo fetch; a bool keeps the three resolvers uniform
 func (a *API) resolveQuestionResults(q *db.VotingProcessQuestion, withMemos bool) *db.QuestionResults {
 	// nothing on chain yet (draft) — no results.
