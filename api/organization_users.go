@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
@@ -176,10 +175,10 @@ func (a *API) inviteOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 	// the invite link
 	if err := a.sendMail(r.Context(), invite.Email, mailtemplates.InviteNotification,
 		struct {
-			Organization common.Address
+			Organization string
 			Code         string
 			Link         string
-		}{org.Address, code, link},
+		}{apicommon.OrgDisplayName(org.Meta, org.Address.String()), code, link},
 		time.Now().Add(apicommon.InvitationExpiration),
 	); err != nil {
 		// in this case we don't DecrementOrganizationUsersCounter because the invite was actually created,
@@ -386,10 +385,10 @@ func (a *API) updatePendingUserInvitationHandler(w http.ResponseWriter, r *http.
 	// the invite link
 	if err := a.sendMail(r.Context(), orgInvite.NewUserEmail, mailtemplates.InviteNotification,
 		struct {
-			Organization common.Address
+			Organization string
 			Code         string
 			Link         string
-		}{org.Address, code, link},
+		}{apicommon.OrgDisplayName(org.Meta, org.Address.String()), code, link},
 		time.Now().Add(apicommon.InvitationExpiration),
 	); err != nil {
 		log.Warnw("could not send verification code email", "error", err)

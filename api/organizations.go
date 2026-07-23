@@ -480,11 +480,17 @@ func (a *API) organizationCreateTicket(w http.ResponseWriter, r *http.Request) {
 	notification, err := mailtemplates.SupportNotification.Localized(lang).ExecTemplate(
 		struct {
 			Type         string
-			Organization common.Address
+			Organization string
 			Title        string
 			Description  string
 			Email        string
-		}{ticketReq.TicketType, org.Address, ticketReq.Title, ticketReq.Description, user.Email},
+		}{
+			Type:         ticketReq.TicketType,
+			Organization: apicommon.OrgDisplayName(org.Meta, org.Address.String()),
+			Title:        ticketReq.Title,
+			Description:  ticketReq.Description,
+			Email:        user.Email,
+		},
 	)
 	if err != nil {
 		log.Warnw("could not execute support notification template", "error", err)

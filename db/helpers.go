@@ -9,7 +9,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -127,21 +126,4 @@ func paginatedDocuments[T any](collection *mongo.Collection, page, limit int64,
 	}
 
 	return totalCount, list, nil
-}
-
-func ParseVochainOrganizationMeta(meta *api.AccountMetadata) (name string, logo string) {
-	if meta == nil {
-		return "", ""
-	}
-	// get the organization name
-	if meta.Name != nil {
-		if n, ok := meta.Name["default"]; ok {
-			name = n
-		}
-	}
-	// get the organization logo
-	if meta.Media != nil {
-		logo = meta.Media.Avatar
-	}
-	return name, logo
 }
