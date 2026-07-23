@@ -644,6 +644,15 @@ func TestCensusParticipant(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(upsertCount, qt.Equals, int64(3))
 
+		// Regression (H7): a non-write error (here a cancelled context) makes the
+		// driver return a nil BulkWrite result. The function must return the error
+		// instead of dereferencing the nil result and panicking.
+		cancelledCtx, cancelNow := context.WithCancel(context.Background())
+		cancelNow()
+		count, err := testDB.setBulkCensusParticipant(cancelledCtx, census, groupID)
+		c.Assert(err, qt.Not(qt.IsNil))
+		c.Assert(count, qt.Equals, int64(0))
+
 		// Get all participants
 		participants, err := testDB.CensusParticipants(censusID)
 		c.Assert(err, qt.IsNil)

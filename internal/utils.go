@@ -70,8 +70,11 @@ func SanitizeAndVerifyPhoneNumber(phone, country string) (string, error) {
 	if !phonenumbers.IsValidNumber(pn) {
 		return "", fmt.Errorf("invalid phone number %s", phone)
 	}
-	// Build the phone number string
-	return fmt.Sprintf("+%d%d", pn.GetCountryCode(), pn.GetNationalNumber()), nil
+	// use the library's canonical E.164 formatter rather than assembling the
+	// string by hand: GetNationalNumber returns a uint64, so "+%d%d" formatting
+	// drops any leading zero in the national number (e.g. Italian numbers) and
+	// produces a wrong number.
+	return phonenumbers.Format(pn, phonenumbers.E164), nil
 }
 
 // RandomInt returns a secure random integer in the range [0, maxInt).

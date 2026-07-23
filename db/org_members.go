@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"net/mail"
+	"regexp"
 	"strings"
 	"time"
 
@@ -260,7 +261,14 @@ func (ms *MongoStorage) createOrgMemberBulkOperations(
 		return 0, errors
 	}
 
-	return len(result.InsertedIDs), errors
+	// on a non-write error (e.g. context deadline or network failure) the driver
+	// returns a nil result, so guard the dereference: this runs inside a detached
+	// goroutine and a nil-deref panic would crash the whole service.
+	inserted := 0
+	if result != nil {
+		inserted = len(result.InsertedIDs)
+	}
+	return inserted, errors
 }
 
 // startOrgMemberProgressReporter starts a goroutine that reports progress periodically
@@ -518,13 +526,17 @@ func (ms *MongoStorage) OrgMembers(orgAddress common.Address, page, limit int64,
 		"orgAddress": orgAddress,
 	}
 	if len(search) > 0 {
+		// escape the user-supplied term so it is matched literally: an unescaped
+		// value would be interpreted as a regular expression, allowing accidental
+		// wildcard matches and catastrophic-backtracking (ReDoS) patterns against Mongo.
+		escaped := regexp.QuoteMeta(search)
 		filter["$or"] = []bson.M{
-			{"email": bson.M{"$regex": search, "$options": "i"}},
-			{"memberNumber": bson.M{"$regex": search, "$options": "i"}},
-			{"nationalId": bson.M{"$regex": search, "$options": "i"}},
-			{"name": bson.M{"$regex": search, "$options": "i"}},
-			{"surname": bson.M{"$regex": search, "$options": "i"}},
-			{"birthDate": bson.M{"$regex": search, "$options": "i"}},
+			{"email": bson.M{"$regex": escaped, "$options": "i"}},
+			{"memberNumber": bson.M{"$regex": escaped, "$options": "i"}},
+			{"nationalId": bson.M{"$regex": escaped, "$options": "i"}},
+			{"name": bson.M{"$regex": escaped, "$options": "i"}},
+			{"surname": bson.M{"$regex": escaped, "$options": "i"}},
+			{"birthDate": bson.M{"$regex": escaped, "$options": "i"}},
 		}
 	}
 

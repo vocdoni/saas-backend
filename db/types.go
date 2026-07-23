@@ -30,6 +30,11 @@ type User struct {
 	OAuth         map[string]OAuthProvider `json:"oauth,omitempty" bson:"oauth,omitempty"` // OAuth providers by name
 	Organizations []OrganizationUser       `json:"organizations" bson:"organizations"`
 	Verified      bool                     `json:"verified" bson:"verified"`
+	// TokenVersion is bumped whenever the user's credentials change (password
+	// change or reset) to invalidate every previously issued JWT: login tokens
+	// embed the value at mint time and the authenticator rejects any token whose
+	// embedded version no longer matches. It is never exposed to API clients.
+	TokenVersion uint64 `json:"-" bson:"tokenVersion,omitempty"`
 }
 
 type CodeType string

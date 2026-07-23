@@ -93,7 +93,8 @@ func (ms *MongoStorage) SetOrganization(org *Organization) error {
 	}
 	// set upsert to true to create the document if it doesn't exist
 	opts := options.Update().SetUpsert(true)
-	if _, err := ms.organizations.UpdateOne(ctx, bson.M{"_id": org.Address}, updateDoc, opts); err != nil {
+	result, err := ms.organizations.UpdateOne(ctx, bson.M{"_id": org.Address}, updateDoc, opts)
+	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
 			return ErrAlreadyExists
 		}
@@ -103,9 +104,13 @@ func (ms *MongoStorage) SetOrganization(org *Organization) error {
 	// in the organizations list of the user if it's not already there as admin
 	if org.Creator != "" {
 		if err := ms.addOrganizationToUser(ctx, org.Creator, org.Address, AdminRole); err != nil {
-			// if an error occurs, delete the organization from the database
-			if _, delErr := ms.organizations.DeleteOne(ctx, bson.M{"_id": org.Address}); delErr != nil {
-				return errors.Join(err, delErr)
+			// only compensate by deleting the organization when this call actually
+			// created it (upsert insert). On the update path the organization already
+			// existed, so a transient creator-lookup failure must never destroy it.
+			if result.UpsertedCount > 0 {
+				if _, delErr := ms.organizations.DeleteOne(ctx, bson.M{"_id": org.Address}); delErr != nil {
+					return errors.Join(err, delErr)
+				}
 			}
 			return err
 		}
@@ -124,6 +129,19 @@ func (ms *MongoStorage) DelOrganization(org *Organization) error {
 	// delete the organization from the database
 	_, err := ms.organizations.DeleteOne(ctx, bson.M{"_id": org.Address})
 	return err
+}
+
+// CountOrganizationsByCreator returns how many organizations were created by the
+// given email. It is used to guard operations that would break the deterministic
+// per-organization signing key, which is derived from the creator email.
+func (ms *MongoStorage) CountOrganizationsByCreator(email string) (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	count, err := ms.organizations.CountDocuments(ctx, bson.M{"creator": email})
+	if err != nil {
+		return 0, fmt.Errorf("counting organizations by creator: %w", err)
+	}
+	return count, nil
 }
 
 // ReplaceCreatorEmail method replaces the creator email in the organizations
@@ -200,8 +218,10 @@ func (ms *MongoStorage) UpdateOrganizationUserRole(address common.Address, userI
 	return nil
 }
 
-// RemoveOrganizationUser method removes the user from the organization
-// with the given address.
+// RemoveOrganizationUser method removes the user from the organization with the
+// given address. It returns ErrNotFound when the user did not belong to the
+// organization (nothing was removed), so callers can avoid mutating quota
+// counters for a no-op deletion.
 func (ms *MongoStorage) RemoveOrganizationUser(address common.Address, userID uint64) error {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
@@ -219,9 +239,14 @@ func (ms *MongoStorage) RemoveOrganizationUser(address common.Address, userID ui
 			},
 		},
 	}
-	_, err := ms.users.UpdateOne(ctx, filter, update)
+	result, err := ms.users.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return err
+	}
+	// no membership matched/changed: report not found so the caller does not
+	// decrement the organization users counter for a removal that never happened.
+	if result.ModifiedCount == 0 {
+		return ErrNotFound
 	}
 	return nil
 }

@@ -8,13 +8,49 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
+	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/proto/build/go/models"
 	"google.golang.org/protobuf/proto"
 )
+
+// TestOrganizationSignerAddressGuard verifies the C1 defensive guard: the
+// per-org signing key is derived from the creator email, so the helper must
+// refuse to sign when the re-derived address no longer matches the fixed
+// on-chain org.Address (e.g. after a creator email change).
+func TestOrganizationSignerAddressGuard(t *testing.T) {
+	c := qt.New(t)
+	const secret = "test-secret"
+	const nonce = "0123456789012345"
+	a := &API{secret: secret}
+
+	signer, err := account.OrganizationSigner(secret, "creator@example.com", nonce)
+	c.Assert(err, qt.IsNil)
+
+	// matching address: the helper returns the signer
+	org := &db.Organization{Address: signer.Address(), Creator: "creator@example.com", Nonce: nonce}
+	got, err := a.organizationSigner(org)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.Address(), qt.Equals, signer.Address())
+
+	// mismatched stored address: the helper must refuse rather than sign with a
+	// key whose account differs from the organization's on-chain address
+	badOrg := &db.Organization{Address: common.Address{}, Creator: "creator@example.com", Nonce: nonce}
+	_, err = a.organizationSigner(badOrg)
+	c.Assert(err, qt.Not(qt.IsNil))
+	c.Assert(err.Error(), qt.Contains, "does not match organization address")
+
+	// a changed creator email derives a different key, which the guard rejects
+	// against the original org address
+	changed := &db.Organization{Address: signer.Address(), Creator: "changed@example.com", Nonce: nonce}
+	_, err = a.organizationSigner(changed)
+	c.Assert(err, qt.Not(qt.IsNil))
+}
 
 const (
 	// VerificationCodeLength is the length of the verification code in bytes

@@ -232,6 +232,32 @@ func TestObjectStorage(t *testing.T) {
 		_, err := client.Put(errorReader, 10, "test@example.com")
 		c.Assert(err, qt.Not(qt.IsNil))
 	})
+
+	t.Run("SizeLimit", func(_ *testing.T) {
+		c := qt.New(t)
+
+		// a declared size beyond the cap is rejected up front
+		_, err := client.Put(bytes.NewReader([]byte{0xff, 0xd8, 0xff}), MaxObjectSize+1, "test@example.com")
+		c.Assert(err, qt.ErrorMatches, ".*exceeds maximum.*")
+
+		// content that actually exceeds the cap is rejected even when it declares
+		// a small (lying) size, proving the limit is enforced on bytes read
+		oversized := io.MultiReader(
+			bytes.NewReader([]byte{0xff, 0xd8, 0xff, 0xe0}),
+			io.LimitReader(zeroReader{}, MaxObjectSize),
+		)
+		_, err = client.Put(oversized, 4, "test@example.com")
+		c.Assert(err, qt.ErrorMatches, ".*exceeds maximum.*")
+	})
+}
+
+// zeroReader is an endless source of zero bytes, used to synthesize oversized
+// uploads without allocating them up front.
+type zeroReader struct{}
+
+// Read fills p with zero bytes and never returns an error.
+func (zeroReader) Read(p []byte) (int, error) {
+	return len(p), nil
 }
 
 // ErrorReader is a mock reader that always returns an error.

@@ -50,6 +50,13 @@ func TestSanitizePhone(t *testing.T) {
 			want:  "+12125552368",
 		},
 		{
+			name: "valid italian number preserves leading zero",
+			// the national number keeps a leading zero; the old "+%d%d" formatting
+			// dropped it (uint64), producing +39212345678
+			phone: "+390212345678",
+			want:  "+390212345678",
+		},
+		{
 			name:  "valid UK phone number with country code",
 			phone: "+447911123456",
 			want:  "+447911123456",

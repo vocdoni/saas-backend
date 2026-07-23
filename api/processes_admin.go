@@ -5,7 +5,6 @@ import (
 	stderrors "errors"
 	"net/http"
 
-	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
@@ -299,7 +298,7 @@ func (a *API) enqueueCensusSizeUpdate(
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return "", false
 	}
-	orgSigner, err := account.OrganizationSigner(a.secret, org.Creator, org.Nonce)
+	orgSigner, err := a.organizationSigner(org)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not restore organization signer: %v", err).Write(w)
 		return "", false

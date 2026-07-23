@@ -203,6 +203,43 @@ func TestStripeWebhook(t *testing.T) {
 		}
 	})
 
+	t.Run("CustomerMetadataAndNilCustomer", func(*testing.T) {
+		// use a dedicated org so plan/subscription state is independent of the
+		// other subtests
+		orgAddr := testCreateOrganization(t, testCreateUser(t, testPass))
+
+		// M11: a customer that already carries the *matching* address in metadata
+		// (the normal case after the first event) must NOT fail the event.
+		{
+			s := mockStripeSubscription(orgAddr, mockEssentialPlan.ID)
+			s.Customer.Metadata = map[string]string{"address": orgAddr.String()}
+			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeCustomerSubscriptionCreated, s))
+			c.Assert(err, qt.IsNil)
+		}
+
+		// M11: a customer carrying a *different* address is a genuine mismatch and
+		// must fail the event.
+		{
+			s := mockStripeSubscription(orgAddr, mockEssentialPlan.ID)
+			s.Customer.Metadata = map[string]string{"address": common.HexToAddress(util.RandomHex(20)).String()}
+			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeCustomerSubscriptionCreated, s))
+			c.Assert(err, qt.ErrorMatches, ".*does not match organization.*")
+		}
+
+		// M12: a nil customer (unexpanded/absent in the payload) must not panic; the
+		// event is still processed and the subscription plan is applied.
+		{
+			s := mockStripeSubscription(orgAddr, mockPremiumPlan.ID)
+			s.Customer = nil
+			err := service.HandleEvent(mockStripeEvent(stripeapi.EventTypeCustomerSubscriptionUpdated, s))
+			c.Assert(err, qt.IsNil)
+
+			org, err := testDB.Organization(orgAddr)
+			c.Assert(err, qt.IsNil)
+			c.Assert(org.Subscription.PlanID, qt.Equals, mockPremiumPlan.ID)
+		}
+	})
+
 	t.Run("InvoicePaymentSucceeded", func(*testing.T) {
 		date := time.Now()
 

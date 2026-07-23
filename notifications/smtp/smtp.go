@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"mime"
 	"mime/multipart"
 	"net/mail"
 	"net/smtp"
@@ -145,7 +147,10 @@ func (se *Email) composeBody(notification *notifications.Notification) ([]byte, 
 		}
 		fmt.Fprintf(&headers, "Cc: %s\r\n", cc.String())
 	}
-	fmt.Fprintf(&headers, "Subject: %s\r\n", notification.Subject)
+	// RFC 2047-encode the subject. This both renders non-ASCII (UTF-8) subjects
+	// correctly and neutralizes header injection: any CR/LF in the subject is a
+	// control byte, so QEncoding encodes it (=0D=0A) instead of emitting it raw.
+	fmt.Fprintf(&headers, "Subject: %s\r\n", mime.QEncoding.Encode("UTF-8", notification.Subject))
 	if !notification.EnableTracking {
 		fmt.Fprintf(&headers, "X-SMTPAPI: %s\r\n", disableTrackingFilter)
 	}
@@ -158,20 +163,24 @@ func (se *Email) composeBody(notification *notifications.Notification) ([]byte, 
 	if err := writer.SetBoundary(boundary); err != nil {
 		return nil, fmt.Errorf("could not set boundary: %v", err)
 	}
-	// plain text part
+	// plain text part. The bodies are UTF-8 and may contain 8-bit characters, so
+	// they are declared as 8bit; declaring 7bit while writing raw UTF-8 (as
+	// before) is a Content-Transfer-Encoding violation that mail servers may
+	// mangle or reject. 8bit keeps the body bytes literal (unlike
+	// quoted-printable, which would rewrite '=' in URLs to '=3D').
 	textPart, _ := writer.CreatePart(textproto.MIMEHeader{
 		"Content-Type":              {"text/plain; charset=\"UTF-8\""},
-		"Content-Transfer-Encoding": {"7bit"},
+		"Content-Transfer-Encoding": {"8bit"},
 	})
-	if _, err := textPart.Write([]byte(notification.PlainBody)); err != nil {
+	if _, err := io.WriteString(textPart, notification.PlainBody); err != nil {
 		return nil, fmt.Errorf("could not write plain text part: %v", err)
 	}
 	// HTML part
 	htmlPart, _ := writer.CreatePart(textproto.MIMEHeader{
 		"Content-Type":              {"text/html; charset=\"UTF-8\""},
-		"Content-Transfer-Encoding": {"7bit"},
+		"Content-Transfer-Encoding": {"8bit"},
 	})
-	if _, err := htmlPart.Write([]byte(notification.Body)); err != nil {
+	if _, err := io.WriteString(htmlPart, notification.Body); err != nil {
 		return nil, fmt.Errorf("could not write HTML part: %v", err)
 	}
 	if err := writer.Close(); err != nil {

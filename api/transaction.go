@@ -2,16 +2,38 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/proto/build/go/models"
 	"google.golang.org/protobuf/proto"
 )
+
+// organizationSigner deterministically re-derives the on-chain signer for the
+// given organization and verifies it still matches the organization's fixed
+// address. The signing key is derived from org.Creator (see
+// account.OrganizationSigner), while org.Address is fixed at creation. If the
+// creator email was ever changed without re-deriving the address, the derived
+// key would silently sign with a different account whose transactions the chain
+// rejects. Returning an error here fails loudly instead of signing with the
+// wrong key.
+func (a *API) organizationSigner(org *db.Organization) (*ethereum.SignKeys, error) {
+	signer, err := account.OrganizationSigner(a.secret, org.Creator, org.Nonce)
+	if err != nil {
+		return nil, fmt.Errorf("could not restore the signer of the organization: %w", err)
+	}
+	if signer.Address() != org.Address {
+		return nil, fmt.Errorf("derived signer address %s does not match organization address %s: "+
+			"the organization creator email may have changed", signer.Address().Hex(), org.Address.Hex())
+	}
+	return signer, nil
+}
 
 // signTxHandler godoc
 //
@@ -65,7 +87,7 @@ func (a *API) signTxHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// get the user signer from secret, organization creator and organization nonce
-	organizationSigner, err := account.OrganizationSigner(a.secret, org.Creator, org.Nonce)
+	organizationSigner, err := a.organizationSigner(org)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not restore the signer of the organization: %v", err).Write(w)
 		return
@@ -206,7 +228,7 @@ func (a *API) signMessageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// get the user signer from secret, organization creator and organization nonce
-	organizationSigner, err := account.OrganizationSigner(a.secret, org.Creator, org.Nonce)
+	organizationSigner, err := a.organizationSigner(org)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not restore the signer of the organization: %v", err).Write(w)
 		return
