@@ -424,7 +424,7 @@ func orgNameAndLogo(org *db.Organization) (name, logo string) {
 	name, logo = DefaultOrgName, DefaultOrgLogo
 	if n := org.DisplayName(); n != "" {
 		name = n
-		if l, ok := org.Meta["logo"].(string); ok {
+		if l := org.LogoURL(); l != "" {
 			logo = l
 		}
 	}

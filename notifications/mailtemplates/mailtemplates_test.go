@@ -393,7 +393,7 @@ func TestMembersImportCompletionNotification(t *testing.T) {
 		c.Assert(notification.PlainBody, qt.Contains, "5")
 	})
 
-	t.Run("ExecTemplate_WithoutOrganizationName", func(_ *testing.T) {
+	t.Run("ExecTemplate_WithoutOrganizationName", func(t *testing.T) {
 		c := qt.New(t)
 
 		// An organization without a name in its metadata must not produce a
@@ -406,13 +406,13 @@ func TestMembersImportCompletionNotification(t *testing.T) {
 			AddedMembers     int
 			ErrorCount       int
 			Errors           []string
-			CompletedAt      string
+			CompletedAt      time.Time
 		}{
 			UserName:     "John Doe",
 			Link:         "https://example.com/complex",
 			TotalMembers: 10,
 			AddedMembers: 10,
-			CompletedAt:  "2023-10-03 12:00:00",
+			CompletedAt:  time.Date(2023, 10, 3, 12, 0, 0, 0, time.UTC),
 		}
 
 		notification, err := template.ExecTemplate(data)
@@ -421,7 +421,7 @@ func TestMembersImportCompletionNotification(t *testing.T) {
 		c.Assert(notification.PlainBody, qt.Not(qt.Contains), "for organization")
 	})
 
-	t.Run("ExecTemplate_AllLanguages", func(_ *testing.T) {
+	t.Run("ExecTemplate_AllLanguages", func(t *testing.T) {
 		c := qt.New(t)
 
 		// Every localization must execute against the real data shape,
@@ -434,14 +434,14 @@ func TestMembersImportCompletionNotification(t *testing.T) {
 			AddedMembers     int
 			ErrorCount       int
 			Errors           []string
-			CompletedAt      string
+			CompletedAt      time.Time
 		}{
 			UserName:         "John Doe",
 			OrganizationName: "Test Organization",
 			Link:             "https://example.com/complex",
 			TotalMembers:     10,
 			AddedMembers:     10,
-			CompletedAt:      "2023-10-03 12:00:00",
+			CompletedAt:      time.Date(2023, 10, 3, 12, 0, 0, 0, time.UTC),
 		}
 
 		for _, lang := range []string{"en", "es", "ca"} {
