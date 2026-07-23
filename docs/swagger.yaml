@@ -1844,6 +1844,15 @@ definitions:
         type: boolean
       maxVoters:
         type: integer
+      memos:
+        description: |-
+          Memos are the free-text voter memos cast alongside the question's open-value choice, one entry
+          per such vote. Manager/Admin-only — absent for public callers — and only for a question that has
+          an openValue choice. Live: empty while a secretUntilTheEnd election is still encrypted (the memo
+          cannot be correlated to a choice until the vote package is decryptable at RESULTS).
+        items:
+          type: string
+        type: array
       questionId:
         type: string
       results:
@@ -1978,6 +1987,11 @@ definitions:
     - CensusTypeSMSorMail
   db.Choice:
     properties:
+      openValue:
+        description: |-
+          OpenValue marks the one choice of a question that accepts a free-text voter memo; the memos
+          endpoint returns memos only for votes that selected this choice. At most one per question.
+        type: boolean
       title:
         $ref: '#/definitions/db.MultiLangString'
       value:
@@ -2248,6 +2262,15 @@ definitions:
         type: boolean
       maxVoters:
         type: integer
+      memos:
+        description: |-
+          Memos are the free-text voter memos cast alongside the question's open-value choice, one entry
+          per such vote. Manager/Admin-only — absent for public callers — and only for a question that has
+          an openValue choice. Live: empty while a secretUntilTheEnd election is still encrypted (the memo
+          cannot be correlated to a choice until the vote package is decryptable at RESULTS).
+        items:
+          type: string
+        type: array
       results:
         description: |-
           Results is the raw on-chain tally matrix (stringified big integers), one row per ballot field:
@@ -6458,7 +6481,8 @@ paths:
       description: |-
         Public per-question on-chain results of a published voting process: one entry per
         published question, each with its tally (vote count, max voters, whether final, and
-        the per-choice results). No authentication is required.
+        the per-choice results). Auth is optional: a Manager/Admin of the org (or a voting:write
+        API key) additionally receives each open-value question's free-text voter memos.
       parameters:
       - description: Process ID
         in: path

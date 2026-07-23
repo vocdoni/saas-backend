@@ -174,6 +174,14 @@ func TestVotingProcessAuthoringErrors(t *testing.T) {
 	badType.Questions[0].Type = "quadratic"
 	requestAndAssertError(errors.ErrInvalidData, t, http.MethodPost, adminToken, badType, processesCreateEndpoint)
 
+	// two choices marking openValue -> 400 (at most one memo-open choice per question)
+	twoOpen := newVotingProcessRequest(orgAddress, ids)
+	twoOpen.Questions[0].Choices = []db.Choice{
+		{Title: db.MultiLangString{"default": "Yes"}, Value: 0, OpenValue: true},
+		{Title: db.MultiLangString{"default": "No"}, Value: 1, OpenValue: true},
+	}
+	requestAndAssertError(errors.ErrInvalidData, t, http.MethodPost, adminToken, twoOpen, processesCreateEndpoint)
+
 	// every create above failed, so no orphaned draft was left behind (they roll back)
 	count, err := testDB.CountVotingProcesses(orgAddress, db.AllProcesses)
 	qt.Assert(t, err, qt.IsNil)

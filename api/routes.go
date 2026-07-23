@@ -228,7 +228,8 @@ const (
 	processesQuestionEndpoint = "/processes/{processId}/questions/{questionId}"
 	// GET /processes/{processId}/participants/{participantId} for a single participant's info (public)
 	processesParticipantEndpoint = "/processes/{processId}/participants/{participantId}"
-	// GET /processes/{processId}/results for the per-question on-chain results (public)
+	// GET /processes/{processId}/results for the per-question on-chain results (public; a manager/admin
+	// caller additionally receives each open-value question's free-text voter memos)
 	processesResultsEndpoint = "/processes/{processId}/results"
 	// GET /processes/{processId}/participants?field=&value= — Manager/Admin lookup of org members by
 	// field intersected with the census, with per-question voted status (protected)
