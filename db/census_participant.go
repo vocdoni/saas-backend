@@ -746,6 +746,49 @@ func (ms *MongoStorage) CountCensusParticipants(censusID string) (int64, error) 
 	return ms.censusParticipants.CountDocuments(ctx, filter)
 }
 
+// CensusTotalWeight returns the sum of the weights of a census's members, joining each participant
+// (whose participantID is its org member's hex ObjectID) to its OrgMember and summing OrgMember.Weight.
+// It backs the census total voting weight exposed on the /processes read; it is only meaningful for
+// weighted censuses (for a non-weighted census every member counts as 1, so the total equals the
+// participant count). Returns 0 for a census with no participants.
+func (ms *MongoStorage) CensusTotalWeight(censusID string) (int64, error) {
+	if len(censusID) == 0 {
+		return 0, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{"censusId": censusID}}},
+		// participantID is the member's ObjectID hex; convert it (bad/missing ids drop out via the join).
+		{{Key: "$addFields", Value: bson.M{"memberOID": bson.M{
+			"$convert": bson.M{"input": "$participantID", "to": "objectId", "onError": nil, "onNull": nil},
+		}}}},
+		{{Key: "$lookup", Value: bson.M{
+			"from":         "orgMembers",
+			"localField":   "memberOID",
+			"foreignField": "_id",
+			"as":           "member",
+		}}},
+		{{Key: "$unwind", Value: "$member"}},
+		{{Key: "$group", Value: bson.M{"_id": nil, "total": bson.M{"$sum": "$member.weight"}}}},
+	}
+	cur, err := ms.censusParticipants.Aggregate(ctx, pipeline)
+	if err != nil {
+		return 0, fmt.Errorf("failed to aggregate census total weight: %w", err)
+	}
+	defer func() { _ = cur.Close(ctx) }()
+	var res []struct {
+		Total int64 `bson:"total"`
+	}
+	if err := cur.All(ctx, &res); err != nil {
+		return 0, fmt.Errorf("failed to decode census total weight: %w", err)
+	}
+	if len(res) == 0 {
+		return 0, nil
+	}
+	return res[0].Total, nil
+}
+
 // CensusParticipants retrieves all the census participants for a given census.
 func (ms *MongoStorage) CensusParticipants(censusID string) ([]CensusParticipant, error) {
 	// create a context with a timeout

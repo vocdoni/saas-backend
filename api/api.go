@@ -418,12 +418,10 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, processBundleEndpoint, a.createProcessBundleHandler)
 		handle(r, http.MethodPut, processBundleUpdateEndpoint, a.updateProcessBundleHandler)
 		handle(r, http.MethodPost, processBundleParticipantsCheckEndpoint, a.checkProcessBundleVotedParticipantsHandler)
-		// multi-question voting processes: authoring + protected reads
+		// multi-question voting processes: authoring (the GET reads are public — see below)
 		handle(r, http.MethodPost, processesCreateEndpoint, a.createVotingProcessHandler)
 		handle(r, http.MethodPost, processesCensusValidateEndpoint, a.validateProcessCensusHandler)
-		handle(r, http.MethodGet, processesCreateEndpoint, a.listVotingProcessesHandler)
 		handle(r, http.MethodPut, processesEndpoint, a.updateVotingProcessHandler)
-		handle(r, http.MethodGet, processesEndpoint, a.votingProcessInfoHandler)
 		handle(r, http.MethodGet, processesValidateEndpoint, a.validateVotingProcessHandler)
 		handle(r, http.MethodPost, processesPublishEndpoint, a.publishVotingProcessHandler)
 		handle(r, http.MethodPut, processesQuestionsStatusEndpoint, a.setVotingProcessQuestionsStatusHandler)
@@ -472,7 +470,11 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, processBundleSignEndpoint, cspHandlers.BundleSignHandler)
 		handle(r, http.MethodPost, processBundleCheckEndpoint, cspHandlers.BundleCheckHandler)
 		handle(r, http.MethodGet, processBundleMemberEndpoint, a.processBundleParticipantInfoHandler)
-		// multi-question voting processes: public voter reads + CSP
+		// multi-question voting processes: public voter reads + CSP. The process list and single-read
+		// are public for published processes; drafts + per-question eligibility are gated in-handler to
+		// a manager/admin (or a voting:write API key) via optionalManager.
+		handle(r, http.MethodGet, processesCreateEndpoint, a.listVotingProcessesHandler)
+		handle(r, http.MethodGet, processesEndpoint, a.votingProcessInfoHandler)
 		handle(r, http.MethodGet, processesQuestionEndpoint, a.votingProcessQuestionHandler)
 		handle(r, http.MethodGet, processesParticipantEndpoint, a.votingProcessParticipantHandler)
 		handle(r, http.MethodGet, processesResultsEndpoint, a.votingProcessResultsHandler)

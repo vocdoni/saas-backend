@@ -14,6 +14,8 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	dvoteapi "go.vocdoni.io/dvote/api"
+	"go.vocdoni.io/dvote/types"
 )
 
 // newVotingProcessRequest builds a 2-question (singlechoice + multichoice) create request
@@ -196,11 +198,14 @@ func TestVotingProcessAuthoringErrors(t *testing.T) {
 	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, otherToken,
 		newVotingProcessRequest(orgAddress, ids), processesCreateEndpoint)
 
-	// unauthenticated read of a process -> 401
+	// a draft is hidden from an anonymous caller (the single read is public, but drafts 404 for
+	// non-managers so their existence isn't revealed).
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, adminToken, newVotingProcessRequest(orgAddress, ids), processesCreateEndpoint,
 	)
-	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodGet, "", nil, "processes", created.ProcessID)
+	requestAndAssertCode(http.StatusNotFound, t, http.MethodGet, "", nil, "processes", created.ProcessID)
+	// ...and from an authenticated user with no role on the org.
+	requestAndAssertCode(http.StatusNotFound, t, http.MethodGet, otherToken, nil, "processes", created.ProcessID)
 }
 
 // TestVotingProcessEmptyCensusRejected verifies the preflight rejects a process whose census has
@@ -279,6 +284,11 @@ func TestVotingProcessAPIKeyAuth(t *testing.T) {
 	)
 	c.Assert(proc.ProcessID, qt.Not(qt.Equals), "")
 
+	// the voting:write key reads its managed org's DRAFT via the now-public single read (optionalManager
+	// resolves the key to its admin user); anonymous callers get 404 (the draft's existence is hidden).
+	requestAndAssertCode(http.StatusOK, t, http.MethodGet, apiKey, nil, "processes", proc.ProcessID)
+	requestAndAssertCode(http.StatusNotFound, t, http.MethodGet, "", nil, "processes", proc.ProcessID)
+
 	// a key without voting:write is refused (403)
 	noScopeBody := &apicommon.CreateAPIKeyRequest{Label: "noscope", Scopes: []string{ScopeManagedRead}}
 	data, code = testRequest(t, http.MethodPost, token, noScopeBody, "integrator", "organizations", orgAddr.String(), "apikeys")
@@ -287,6 +297,8 @@ func TestVotingProcessAPIKeyAuth(t *testing.T) {
 	c.Assert(json.Unmarshal(data, &noScope), qt.IsNil)
 	requestAndAssertCode(http.StatusForbidden, t, http.MethodPost, noScope.Secret,
 		minimalVotingProcessRequest(managed.Address), processesCreateEndpoint)
+	// a key without voting:write is treated as anonymous on the public read, so the draft is 404.
+	requestAndAssertCode(http.StatusNotFound, t, http.MethodGet, noScope.Secret, nil, "processes", proc.ProcessID)
 }
 
 // TestVotingProcessPublishPreflight verifies the publish-readiness dry-run now catches plan
@@ -348,6 +360,38 @@ func TestVotingProcessUpdateNoCensusOrphan(t *testing.T) {
 	}
 }
 
+// TestQuestionResultsFromElection checks the chain->QuestionResults mapping directly (no chain):
+// the full tally matrix is preserved verbatim, so single-choice (one field) and multi-choice (one
+// field per choice) shapes are both represented losslessly; maxVoters comes from the election census
+// (nil-safe); an untallied election yields nil results.
+func TestQuestionResultsFromElection(t *testing.T) {
+	c := qt.New(t)
+	bi := func(n uint64) *types.BigInt { return new(types.BigInt).SetUint64(n) }
+
+	// multi-choice: one row per choice, each [notSelected, selected].
+	multi := questionResultsFromElection(&dvoteapi.Election{
+		ElectionSummary: dvoteapi.ElectionSummary{
+			VoteCount: 3, FinalResults: true,
+			Results: [][]*types.BigInt{{bi(1), bi(2)}, {bi(1), bi(2)}, {bi(2), bi(1)}},
+		},
+		Census: &dvoteapi.ElectionCensus{MaxCensusSize: 5},
+	})
+	c.Assert(multi.VoteCount, qt.Equals, uint64(3))
+	c.Assert(multi.FinalResults, qt.IsTrue)
+	c.Assert(multi.MaxVoters, qt.Equals, uint64(5))
+	c.Assert(multi.Results, qt.DeepEquals, [][]string{{"1", "2"}, {"1", "2"}, {"2", "1"}})
+
+	// single-choice: one row of value buckets; nil census is tolerated (maxVoters 0).
+	single := questionResultsFromElection(&dvoteapi.Election{
+		ElectionSummary: dvoteapi.ElectionSummary{Results: [][]*types.BigInt{{bi(4), bi(6)}}},
+	})
+	c.Assert(single.Results, qt.DeepEquals, [][]string{{"4", "6"}})
+	c.Assert(single.MaxVoters, qt.Equals, uint64(0))
+
+	// no tally published yet: results absent.
+	c.Assert(questionResultsFromElection(&dvoteapi.Election{}).Results, qt.IsNil)
+}
+
 // TestVotingProcessResults verifies the public per-question results endpoint: a draft has no
 // results (404), and a published process returns one entry per question with its on-chain status.
 func TestVotingProcessResults(t *testing.T) {
@@ -370,7 +414,11 @@ func TestVotingProcessResults(t *testing.T) {
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", created.ProcessID, "publish")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
 
-	// published: one results entry per question, each with its on-chain election id and status
+	// published (no votes yet): one entry per question, voteCount 0, tally not final, buckets "0".
+	// maxVoters is the per-question eligible count: Q1 is whole-census (2 members), Q2 restricts
+	// eligibility to the first member (1). The results matrix has one row per ballot field: the
+	// singlechoice Q1 is one field (one row of value buckets), the multichoice Q2 is one field per
+	// choice (a row per choice), so the two shapes differ.
 	res := requestAndParse[apicommon.VotingProcessResultsResponse](
 		t, http.MethodGet, "", nil, "processes", created.ProcessID, "results",
 	)
@@ -379,8 +427,102 @@ func TestVotingProcessResults(t *testing.T) {
 	for _, q := range res.Questions {
 		c.Assert(q.QuestionID, qt.Not(qt.Equals), "")
 		c.Assert(len(q.UpstreamID) > 0, qt.IsTrue)
-		c.Assert(q.Status, qt.Not(qt.Equals), "")
+		c.Assert(q.VoteCount, qt.Equals, uint64(0))
+		c.Assert(q.FinalResults, qt.IsFalse)
 	}
+	// Q1 singlechoice: one field, two value buckets. Q2 multichoice: one field per choice (two), each
+	// [notSelected, selected].
+	c.Assert(res.Questions[0].Results, qt.DeepEquals, [][]string{{"0", "0"}})
+	c.Assert(res.Questions[1].Results, qt.DeepEquals, [][]string{{"0", "0"}, {"0", "0"}})
+	c.Assert(res.Questions[0].MaxVoters, qt.Equals, uint64(2)) // whole census
+	c.Assert(res.Questions[1].MaxVoters, qt.Equals, uint64(1)) // eligibility subset of one
+
+	// live results: the inline reads now surface the tally for a published (non-RESULTS) question too,
+	// with finalResults=false — the old gate would have left results nil until RESULTS.
+	info := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", created.ProcessID)
+	c.Assert(info.Questions, qt.HasLen, 2)
+	for _, q := range info.Questions {
+		c.Assert(q.Results, qt.Not(qt.IsNil), qt.Commentf("question %s missing live results", q.ID.Hex()))
+		c.Assert(q.Results.FinalResults, qt.IsFalse)
+	}
+	pub := requestAndParse[apicommon.PublicQuestionResponse](
+		t, http.MethodGet, "", nil, "processes", created.ProcessID, "questions", info.Questions[0].ID.Hex())
+	c.Assert(pub.Results, qt.Not(qt.IsNil))
+	c.Assert(pub.Results.FinalResults, qt.IsFalse)
+}
+
+// TestVotingProcessPublicReads verifies the process list and single read are public for published
+// processes (with per-question eligibleMemberIds stripped for non-managers), while drafts and the
+// eligibility are visible only to a manager/admin of the org.
+func TestVotingProcessPublicReads(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+	otherToken := testCreateUser(t, "otherpass123") // a user with no role in the org
+
+	// a published process (Q2 = multichoice, restricts eligibility to the first member)
+	pubReq := newVotingProcessRequest(orgAddress, ids)
+	pubReq.StartDate = ""
+	published := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, pubReq, processesCreateEndpoint)
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", published.ProcessID, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish error: %s", job.Errors))
+
+	// a draft, kept unpublished
+	draft := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, newVotingProcessRequest(orgAddress, ids), processesCreateEndpoint)
+
+	// eligibility of the restricted (multichoice) question in a hydrated response
+	restrictedEligibility := func(qs []db.VotingProcessQuestion) []string {
+		for _, q := range qs {
+			if q.Type == db.VotingTypeMultiChoice {
+				return q.EligibleMemberIDs
+			}
+		}
+		return nil
+	}
+	hasProcess := func(ps []apicommon.VotingProcessResponse, id string) bool {
+		for _, p := range ps {
+			if p.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+
+	// anonymous single read of the PUBLISHED process: 200, eligibility stripped; manager sees it.
+	anon := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, "", nil, "processes", published.ProcessID)
+	c.Assert(anon.Questions, qt.HasLen, 2)
+	c.Assert(restrictedEligibility(anon.Questions), qt.HasLen, 0)
+	mgr := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", published.ProcessID)
+	c.Assert(restrictedEligibility(mgr.Questions), qt.HasLen, 1)
+
+	// the DRAFT is hidden (404) from anonymous and a non-manager user; the manager sees it with eligibility.
+	requestAndAssertCode(http.StatusNotFound, t, http.MethodGet, "", nil, "processes", draft.ProcessID)
+	requestAndAssertCode(http.StatusNotFound, t, http.MethodGet, otherToken, nil, "processes", draft.ProcessID)
+	draftMgr := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", draft.ProcessID)
+	c.Assert(restrictedEligibility(draftMgr.Questions), qt.HasLen, 1)
+
+	// anonymous list: only the published process, eligibility stripped.
+	listURL := fmt.Sprintf("processes?orgAddress=%s&limit=100", orgAddress.Hex())
+	anonList := requestAndParse[apicommon.VotingProcessListResponse](t, http.MethodGet, "", nil, listURL)
+	c.Assert(hasProcess(anonList.Processes, published.ProcessID), qt.IsTrue)
+	c.Assert(hasProcess(anonList.Processes, draft.ProcessID), qt.IsFalse)
+	for _, p := range anonList.Processes {
+		c.Assert(restrictedEligibility(p.Questions), qt.HasLen, 0)
+	}
+
+	// manager list: both the published process and the draft.
+	mgrList := requestAndParse[apicommon.VotingProcessListResponse](t, http.MethodGet, token, nil, listURL)
+	c.Assert(hasProcess(mgrList.Processes, published.ProcessID), qt.IsTrue)
+	c.Assert(hasProcess(mgrList.Processes, draft.ProcessID), qt.IsTrue)
+
+	// a zero orgAddress passes IsHexAddress but is malformed -> 400 (not a 500 from the db layer).
+	requestAndAssertCode(http.StatusBadRequest, t, http.MethodGet, "", nil,
+		"processes?orgAddress=0x0000000000000000000000000000000000000000")
 }
 
 // TestVotingProcessPublicQuestionCensus verifies the public single-question read of a PUBLISHED

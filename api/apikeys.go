@@ -82,11 +82,10 @@ var apiKeyAllowlist = map[string]string{
 	"POST " + censusIDEndpoint:                     ScopeVotingWrite,
 	"POST " + processBundleEndpoint:                ScopeVotingWrite,
 	"PUT " + processBundleUpdateEndpoint:           ScopeVotingWrite,
-	// multi-question voting processes (writes + protected reads)
+	// multi-question voting processes (writes; the GET list/single reads are public — a voting:write
+	// key still unlocks drafts + eligibility there, resolved in-handler via optionalManager, not here)
 	"POST " + processesCreateEndpoint:         ScopeVotingWrite,
-	"GET " + processesCreateEndpoint:          ScopeVotingWrite,
 	"PUT " + processesEndpoint:                ScopeVotingWrite,
-	"GET " + processesEndpoint:                ScopeVotingWrite,
 	"GET " + processesValidateEndpoint:        ScopeVotingWrite,
 	"POST " + processesPublishEndpoint:        ScopeVotingWrite,
 	"PUT " + processesQuestionsStatusEndpoint: ScopeVotingWrite,
