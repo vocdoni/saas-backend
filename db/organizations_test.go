@@ -1,12 +1,10 @@
 package db
 
 import (
-	"encoding/json"
 	"testing"
 	"time"
 
 	qt "github.com/frankban/quicktest"
-	vocapi "go.vocdoni.io/dvote/api"
 )
 
 func TestOrganizations(t *testing.T) {
@@ -82,26 +80,7 @@ func TestOrganizations(t *testing.T) {
 			Address: newOrgAddress,
 			Creator: testUserEmail,
 		}), qt.IsNil)
-		validMetadataJSON := `{
-			"version": "1.0",  
-			"name": {  
-				"default": "TestCSPORg"
-			},  
-			"description": {  
-				"default": ""
-			},  
-			"newsFeed": {  
-				"default": ""
-			},  
-			"media": {
-				"avatar": "https://example.com/logo.png"
-			},  
-			"meta": {} 
-		}`
-		var validMetadata vocapi.AccountMetadata
-		err = json.Unmarshal([]byte(validMetadataJSON), &validMetadata)
-		c.Assert(err, qt.IsNil)
-		org.Meta["name"], org.Meta["logo"] = ParseVochainOrganizationMeta(&validMetadata)
+		org.Meta["name"], org.Meta["logo"] = "TestCSPORg", "https://example.com/logo.png"
 		c.Assert(testDB.SetOrganization(org), qt.IsNil)
 		org, err = testDB.Organization(address)
 		c.Assert(err, qt.IsNil)

@@ -309,7 +309,7 @@ func TestMembersImportCompletionNotification(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Test template field values
-		c.Assert(plaintext.Subject, qt.Contains, "Members import completed for {{.OrganizationName}}")
+		c.Assert(plaintext.Subject, qt.Contains, "Members import completed{{if .OrganizationName}} for {{.OrganizationName}}{{end}}")
 		c.Assert(plaintext.Body, qt.Contains, "Hello {{.UserName}}")
 		c.Assert(plaintext.Body, qt.Contains, "{{.TotalMembers}}")
 		c.Assert(plaintext.Body, qt.Contains, "{{.AddedMembers}}")
@@ -317,7 +317,7 @@ func TestMembersImportCompletionNotification(t *testing.T) {
 		c.Assert(plaintext.Body, qt.Contains, "{{.CompletedAt}}")
 	})
 
-	t.Run("ExecTemplate_Success", func(_ *testing.T) {
+	t.Run("ExecTemplate_Success", func(t *testing.T) {
 		c := qt.New(t)
 
 		// Test data for successful import
@@ -329,7 +329,7 @@ func TestMembersImportCompletionNotification(t *testing.T) {
 			AddedMembers     int
 			ErrorCount       int
 			Errors           []string
-			CompletedAt      string
+			CompletedAt      time.Time
 		}{
 			UserName:         "John Doe",
 			OrganizationName: "Test Organization",
@@ -338,7 +338,7 @@ func TestMembersImportCompletionNotification(t *testing.T) {
 			AddedMembers:     100,
 			ErrorCount:       0,
 			Errors:           nil,
-			CompletedAt:      "2023-10-03 12:00:00",
+			CompletedAt:      time.Date(2023, 10, 3, 12, 0, 0, 0, time.UTC),
 		}
 
 		// Execute template
@@ -357,7 +357,7 @@ func TestMembersImportCompletionNotification(t *testing.T) {
 		c.Assert(notification.PlainBody, qt.Contains, "2023-10-03 12:00:00")
 	})
 
-	t.Run("ExecTemplate_WithErrors", func(_ *testing.T) {
+	t.Run("ExecTemplate_WithErrors", func(t *testing.T) {
 		c := qt.New(t)
 
 		// Test data with errors
@@ -369,7 +369,7 @@ func TestMembersImportCompletionNotification(t *testing.T) {
 			AddedMembers     int
 			ErrorCount       int
 			Errors           []string
-			CompletedAt      string
+			CompletedAt      time.Time
 		}{
 			UserName:         "Jane Smith",
 			OrganizationName: "Error Test Org",
@@ -378,7 +378,7 @@ func TestMembersImportCompletionNotification(t *testing.T) {
 			AddedMembers:     45,
 			ErrorCount:       5,
 			Errors:           []string{"Invalid email format", "Duplicate entry", "Missing phone number"},
-			CompletedAt:      "2023-10-03 13:00:00",
+			CompletedAt:      time.Date(2023, 10, 3, 13, 0, 0, 0, time.UTC),
 		}
 
 		// Execute template
@@ -391,6 +391,66 @@ func TestMembersImportCompletionNotification(t *testing.T) {
 		c.Assert(notification.PlainBody, qt.Contains, "Duplicate entry")
 		c.Assert(notification.PlainBody, qt.Contains, "Missing phone number")
 		c.Assert(notification.PlainBody, qt.Contains, "5")
+	})
+
+	t.Run("ExecTemplate_WithoutOrganizationName", func(t *testing.T) {
+		c := qt.New(t)
+
+		// An organization without a name in its metadata must not produce a
+		// dangling "for " in the subject or body
+		data := struct {
+			UserName         string
+			OrganizationName string
+			Link             string
+			TotalMembers     int
+			AddedMembers     int
+			ErrorCount       int
+			Errors           []string
+			CompletedAt      time.Time
+		}{
+			UserName:     "John Doe",
+			Link:         "https://example.com/complex",
+			TotalMembers: 10,
+			AddedMembers: 10,
+			CompletedAt:  time.Date(2023, 10, 3, 12, 0, 0, 0, time.UTC),
+		}
+
+		notification, err := template.ExecTemplate(data)
+		c.Assert(err, qt.IsNil)
+		c.Assert(notification.Subject, qt.Equals, "Members import completed")
+		c.Assert(notification.PlainBody, qt.Not(qt.Contains), "for organization")
+	})
+
+	t.Run("ExecTemplate_AllLanguages", func(t *testing.T) {
+		c := qt.New(t)
+
+		// Every localization must execute against the real data shape,
+		// including the HTML body (guards against stale template variables)
+		data := struct {
+			UserName         string
+			OrganizationName string
+			Link             string
+			TotalMembers     int
+			AddedMembers     int
+			ErrorCount       int
+			Errors           []string
+			CompletedAt      time.Time
+		}{
+			UserName:         "John Doe",
+			OrganizationName: "Test Organization",
+			Link:             "https://example.com/complex",
+			TotalMembers:     10,
+			AddedMembers:     10,
+			CompletedAt:      time.Date(2023, 10, 3, 12, 0, 0, 0, time.UTC),
+		}
+
+		for _, lang := range []string{"en", "es", "ca"} {
+			notification, err := MembersImportCompletionNotification.Localized(lang).ExecTemplate(data)
+			c.Assert(err, qt.IsNil, qt.Commentf("lang %s", lang))
+			c.Assert(notification.Subject, qt.Contains, "Test Organization", qt.Commentf("lang %s", lang))
+			c.Assert(notification.PlainBody, qt.Contains, "Test Organization", qt.Commentf("lang %s", lang))
+			c.Assert(notification.Body, qt.Contains, "Test Organization", qt.Commentf("lang %s", lang))
+		}
 	})
 }
 

@@ -265,16 +265,7 @@ func (c *CSPHandlers) BundleAuthResendHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	name := DefaultOrgName
-	logo := DefaultOrgLogo
-
-	if n, ok := org.Meta["name"].(string); ok {
-		name = n
-		// if name is found then retrieve the logo as well
-		if l, ok := org.Meta["logo"].(string); ok {
-			logo = l
-		}
-	}
+	name, logo := orgNameAndLogo(org)
 
 	// Resend the challenge with the same token and new contact information
 	if err := c.csp.ResendChallenge(req.AuthToken, toDestination, challengeType, lang, name, logo, org.Address); err != nil {
@@ -934,16 +925,7 @@ func (c *CSPHandlers) authFirstStep(
 		return nil, err
 	}
 
-	name := DefaultOrgName
-	logo := DefaultOrgLogo
-
-	if n, ok := org.Meta["name"].(string); ok {
-		name = n
-		// if name is found then retrieve the logo as well
-		if l, ok := org.Meta["logo"].(string); ok {
-			logo = l
-		}
-	}
+	name, logo := orgNameAndLogo(org)
 
 	// Generate the token
 	return c.csp.BundleAuthToken(

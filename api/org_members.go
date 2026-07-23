@@ -41,13 +41,14 @@ func (a *API) sendMembersImportCompletionEmail(userEmail, userName string, org *
 	// Import the mailtemplates package dynamically to avoid import issues
 	// We'll use the sendMail method which handles the template execution
 	data := MembersImportCompletionData{
-		UserName:     userName,
-		TotalMembers: progress.Total,
-		AddedMembers: progress.Added,
-		Link:         link,
-		ErrorCount:   len(progress.Errors),
-		Errors:       progress.ErrorsAsStrings(),
-		CompletedAt:  time.Now(),
+		OrganizationName: org.DisplayName(),
+		UserName:         userName,
+		TotalMembers:     progress.Total,
+		AddedMembers:     progress.Added,
+		Link:             link,
+		ErrorCount:       len(progress.Errors),
+		Errors:           progress.ErrorsAsStrings(),
+		CompletedAt:      time.Now(),
 	}
 
 	// Create a background context for email sending

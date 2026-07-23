@@ -97,6 +97,43 @@ type Organization struct {
 	IntegratorLimits *IntegratorLimits `json:"integratorLimits,omitempty" bson:"integratorLimits,omitempty"`
 }
 
+// metaDefaultString extracts the "default" locale value from a meta entry that
+// may be stored as a plain string (legacy), a locale map, or the BSON-decoded
+// form of a locale map after a MongoDB round-trip (map[string]any).
+func metaDefaultString(v any) string {
+	switch m := v.(type) {
+	case string:
+		return m
+	case map[string]string:
+		return m["default"]
+	case map[string]any:
+		if s, ok := m["default"].(string); ok {
+			return s
+		}
+		return ""
+	default:
+		return ""
+	}
+}
+
+// DisplayName returns the organization display name stored in its metadata,
+// or an empty string if the organization has no name set.
+func (o *Organization) DisplayName() string {
+	if o == nil || o.Meta == nil {
+		return ""
+	}
+	return metaDefaultString(o.Meta["name"])
+}
+
+// LogoURL returns the organization logo URL stored in its metadata,
+// or an empty string if the organization has no logo set.
+func (o *Organization) LogoURL() string {
+	if o == nil || o.Meta == nil {
+		return ""
+	}
+	return metaDefaultString(o.Meta["logo"])
+}
+
 // IntegratorLimits caps how many organizations an integrator may manage. The
 // aggregate process and census-size caps across those managed orgs are taken from
 // the integrator's plan top-level limits (Plan.Organization.MaxProcesses /

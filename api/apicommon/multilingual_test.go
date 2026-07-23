@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/db"
 )
 
 func TestMultilingualTextUnmarshal(t *testing.T) {
@@ -57,15 +58,20 @@ func TestBuildOrgMeta(t *testing.T) {
 
 	// only name
 	m := BuildOrgMeta(nil, &name, nil, nil, nil)
-	c.Assert(m["name"], qt.DeepEquals, MultilingualText{"default": "Acme"})
+	c.Assert(m["name"], qt.DeepEquals, map[string]string{"default": "Acme"})
 	_, hasLogo := m["logo"]
 	c.Assert(hasLogo, qt.IsFalse)
 
 	// all three fields
 	m = BuildOrgMeta(nil, &name, &logo, &desc, nil)
-	c.Assert(m["name"], qt.DeepEquals, MultilingualText{"default": "Acme"})
-	c.Assert(m["logo"], qt.DeepEquals, MultilingualText{"default": "https://acme.com/logo.png"})
-	c.Assert(m["description"], qt.DeepEquals, MultilingualText{"default": "We make things"})
+	c.Assert(m["name"], qt.DeepEquals, map[string]string{"default": "Acme"})
+	c.Assert(m["logo"], qt.DeepEquals, map[string]string{"default": "https://acme.com/logo.png"})
+	c.Assert(m["description"], qt.DeepEquals, map[string]string{"default": "We make things"})
+
+	// db accessors must resolve the shorthand values before any Mongo round-trip
+	org := &db.Organization{Meta: m}
+	c.Assert(org.DisplayName(), qt.Equals, "Acme")
+	c.Assert(org.LogoURL(), qt.Equals, "https://acme.com/logo.png")
 
 	// explicit meta wins over shorthand
 	explicit := map[string]any{"name": MultilingualText{"default": "Override"}, "extra": "val"}
@@ -87,7 +93,7 @@ func TestBuildOrgMeta(t *testing.T) {
 	// base keys are preserved and shorthands override them; explicit wins last
 	base := map[string]any{"name": MultilingualText{"default": "Old"}, "keep": "me"}
 	m = BuildOrgMeta(base, &name, nil, nil, nil)
-	c.Assert(m["name"], qt.DeepEquals, MultilingualText{"default": "Acme"})
+	c.Assert(m["name"], qt.DeepEquals, map[string]string{"default": "Acme"})
 	c.Assert(m["keep"], qt.Equals, "me")
 }
 
