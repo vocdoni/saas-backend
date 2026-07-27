@@ -1068,16 +1068,21 @@ func OrganizationCensusFromDB(census *db.Census) OrganizationCensus {
 	if census == nil {
 		return OrganizationCensus{}
 	}
-	return OrganizationCensus{
+	out := OrganizationCensus{
 		ID:          census.ID.Hex(),
 		Type:        census.Type,
 		OrgAddress:  census.OrgAddress,
 		Size:        census.Size,
 		Weighted:    census.Weighted,
-		GroupID:     census.GroupID.Hex(),
 		AuthFields:  census.AuthFields,
 		TwoFaFields: census.TwoFaFields,
 	}
+	// guard the zero id so an organization-wide census reports no group at all: omitempty keys off the
+	// empty string, but a zero ObjectID hexes to 24 zeros and would serialize as a real group.
+	if !census.GroupID.IsZero() {
+		out.GroupID = census.GroupID.Hex()
+	}
+	return out
 }
 
 // OrganizationCensuses wraps a list of censuses of an organization.

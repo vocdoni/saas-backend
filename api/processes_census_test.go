@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 )
 
@@ -130,4 +132,61 @@ func TestUpdateProcessCensus(t *testing.T) {
 			AuthToken: tok, ProcessID: openElection, Payload: hex.EncodeToString(voter.Address().Bytes()),
 		}, "processes", pid, "sign")
 	c.Assert(sign.Signature, qt.Not(qt.HasLen), 0)
+}
+
+// TestProcessesCensusGroupID verifies the census groupId round-trips: a process created from an org
+// member group reports that group on both process reads and on the org census list, so a client can
+// restore the group a draft targeted. An organization-wide census reports no group at all — the
+// field must be absent, never a zero object id serialized as 24 zeros.
+func TestProcessesCensusGroupID(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "groupcensuspass123")
+	orgAddress := testCreateOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
+	group := postGroup(t, token, orgAddress, memberIDs(members)...)
+
+	// a process whose census is built from a group, and one over the whole organization.
+	groupReq := minimalVotingProcessRequest(orgAddress)
+	groupReq.Census.GroupID = group.ID
+	grouped := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, groupReq, processesCreateEndpoint,
+	)
+	orgWide := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, minimalVotingProcessRequest(orgAddress), processesCreateEndpoint,
+	)
+
+	// GET /processes/{id}: the group round-trips, the org-wide census carries no group.
+	got := requestAndParse[apicommon.VotingProcessResponse](
+		t, http.MethodGet, token, nil, "processes", grouped.ProcessID,
+	)
+	c.Assert(got.Census.GroupID, qt.Equals, group.ID)
+	c.Assert(got.Census.Size, qt.Equals, int64(len(members)))
+	plain := requestAndParse[apicommon.VotingProcessResponse](
+		t, http.MethodGet, token, nil, "processes", orgWide.ProcessID,
+	)
+	c.Assert(plain.Census.GroupID, qt.Equals, "")
+
+	// GET /processes: the list builds its census through the same helper, so it must agree with the
+	// single read (totalWeight, set per-handler, already diverges here — groupId must not).
+	list := requestAndParse[apicommon.VotingProcessListResponse](t, http.MethodGet, token, nil,
+		fmt.Sprintf("processes?orgAddress=%s&limit=100", orgAddress.Hex()))
+	listed := make(map[string]apicommon.CensusSpec, len(list.Processes))
+	for _, p := range list.Processes {
+		listed[p.ID] = p.Census
+	}
+	c.Assert(listed[grouped.ProcessID].GroupID, qt.Equals, group.ID)
+	c.Assert(listed[orgWide.ProcessID].GroupID, qt.Equals, "")
+
+	// the org census list reports the same, and must not invent a zero group for the org-wide census.
+	censuses := requestAndParse[apicommon.OrganizationCensuses](t, http.MethodGet, token, nil,
+		"organizations", orgAddress.String(), "censuses")
+	groups := make([]string, 0, len(censuses.Censuses))
+	for _, census := range censuses.Censuses {
+		groups = append(groups, census.GroupID)
+	}
+	c.Assert(groups, qt.Contains, group.ID)
+	c.Assert(groups, qt.Contains, "")
+	c.Assert(groups, qt.Not(qt.Contains), primitive.NilObjectID.Hex())
 }

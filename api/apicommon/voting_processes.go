@@ -14,8 +14,13 @@ type CensusSpec struct {
 	Weighted    bool                    `json:"weighted"`
 	AuthFields  db.OrgMemberAuthFields  `json:"authFields,omitempty"`
 	TwoFaFields db.OrgMemberTwoFaFields `json:"twoFaFields,omitempty"`
-	GroupID     string                  `json:"groupId,omitempty"`
-	MemberIDs   []string                `json:"memberIds,omitempty"`
+	// GroupID is the org member group the census was built from. Round-trips: it is echoed back on
+	// process reads, so a client can restore the group a draft targeted. Absent (not a zero id) when
+	// the census is organization-wide.
+	GroupID string `json:"groupId,omitempty"`
+	// MemberIDs selects the census members explicitly, as an alternative to GroupID. Write-only: the
+	// census member list is never exposed on a read, only its config.
+	MemberIDs []string `json:"memberIds,omitempty"`
 	// Size is the number of members in the census. Response-only (ignored on create/update): for a
 	// published process it equals the on-chain maxCensusSize of its whole-census questions.
 	Size int64 `json:"size,omitempty"`
@@ -252,6 +257,11 @@ func VotingProcessResponseFromDB(
 			AuthFields:  census.AuthFields,
 			TwoFaFields: census.TwoFaFields,
 			Size:        census.Size,
+		}
+		// guard the zero id so an organization-wide census reports no group at all: omitempty keys off
+		// the empty string, but a zero ObjectID hexes to 24 zeros and would serialize as a real group.
+		if !census.GroupID.IsZero() {
+			resp.Census.GroupID = census.GroupID.Hex()
 		}
 	}
 	return resp

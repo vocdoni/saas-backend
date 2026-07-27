@@ -104,8 +104,15 @@ definitions:
           $ref: '#/definitions/db.OrgMemberAuthField'
         type: array
       groupId:
+        description: |-
+          GroupID is the org member group the census was built from. Round-trips: it is echoed back on
+          process reads, so a client can restore the group a draft targeted. Absent (not a zero id) when
+          the census is organization-wide.
         type: string
       memberIds:
+        description: |-
+          MemberIDs selects the census members explicitly, as an alternative to GroupID. Write-only: the
+          census member list is never exposed on a read, only its config.
         items:
           type: string
         type: array
