@@ -15,9 +15,13 @@
 //
 // It defaults to a dry run and only writes when --apply is passed:
 //
-//	repairlogins --mongoURL "$VOCDONI_MONGOURL" --mongoDB saas          # report only
-//	repairlogins --mongoURL "$VOCDONI_MONGOURL" --mongoDB saas --apply  # repair
-//	repairlogins ... --org 0xabc… --apply                               # one organization
+//	repairlogins --mongoURL "$VOCDONI_MONGOURL"           # report only
+//	repairlogins --mongoURL "$VOCDONI_MONGOURL" --apply   # repair
+//	repairlogins ... --org 0xabc… --apply                 # one organization
+//
+// The database is taken from the mongoURL path, exactly as db.New resolves it;
+// pass --mongoDB (or VOCDONI_MONGODB) only when the URL carries no database or
+// you want to override it.
 //
 // IMPORTANT: run this *after* deploying the service, never before. Deploying
 // first and repairing second leaves a short window in which members whose hash
@@ -55,7 +59,7 @@ func main() {
 	log.Init(log.LogLevelDebug, "stdout", nil)
 
 	flag.StringP("mongoURL", "m", "", "MongoDB URL")
-	flag.StringP("mongoDB", "d", "", "MongoDB database name")
+	flag.StringP("mongoDB", "d", "", "MongoDB database name (defaults to the one in mongoURL)")
 	flag.Bool("apply", false, "write the changes; without it the run only reports what it would do")
 	flag.String("org", "", "restrict the run to a single organization address (hex)")
 	flag.Parse()
@@ -70,9 +74,19 @@ func main() {
 	if mongoURL == "" {
 		log.Fatal("mongoURL is required")
 	}
+	cs, err := connstring.ParseAndValidate(mongoURL)
+	if err != nil {
+		log.Fatalf("could not parse mongoURL: %v", err)
+	}
+	// Resolve the database the same way db.New does, so the same environment that
+	// runs the service also runs this: an explicit mongoDB wins, otherwise the one
+	// in the connection string path is used. Only complain when there is neither.
 	mongoDB := viper.GetString("mongoDB")
 	if mongoDB == "" {
-		log.Fatal("mongoDB is required")
+		mongoDB = cs.Database
+	}
+	if mongoDB == "" {
+		log.Fatal("no database name: put one in the mongoURL path or pass --mongoDB")
 	}
 	apply := viper.GetBool("apply")
 
@@ -88,7 +102,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
 	defer cancel()
 
-	client, err := connect(ctx, mongoURL)
+	client, err := connect(ctx, mongoURL, cs)
 	if err != nil {
 		log.Fatalf("could not connect to mongodb: %v", err)
 	}
@@ -110,11 +124,7 @@ func main() {
 
 // connect opens a MongoDB connection, appending authSource=admin when the URL
 // omits it, matching what db.New does so the same VOCDONI_MONGOURL works here.
-func connect(ctx context.Context, url string) (*mongo.Client, error) {
-	cs, err := connstring.ParseAndValidate(url)
-	if err != nil {
-		return nil, err
-	}
+func connect(ctx context.Context, url string, cs *connstring.ConnString) (*mongo.Client, error) {
 	if !cs.AuthSourceSet {
 		var sb strings.Builder
 		sb.WriteString(url)
