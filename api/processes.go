@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -368,15 +369,21 @@ func redactQuestionsForPublic(questions []db.VotingProcessQuestion) {
 //	@Description	Paginated list of an organization's voting processes. Public: anonymous callers get
 //	@Description	published processes only (without per-question eligibleMemberIds). A Manager/Admin of
 //	@Description	the org (or a voting:write API key acting as one) also gets drafts and the eligibility.
-//	@Description	Filter by question status.
+//	@Description	Filter by question status, and by published state.
+//	@Description	published=true returns published processes only; published=false returns drafts only and
+//	@Description	requires Manager/Admin (401 otherwise). Omitting it keeps the caller's default view.
+//	@Description	Combining published=false with status returns nothing: a draft's questions have no
+//	@Description	on-chain status yet, and status matches on that field.
 //	@Tags			processes
 //	@Produce		json
 //	@Param			orgAddress	query		string	true	"Organization address"
 //	@Param			status		query		string	false	"Filter by question status"
+//	@Param			published	query		bool	false	"Filter by published state; false (drafts) requires Manager/Admin"
 //	@Param			page		query		int		false	"Page (1-based)"
 //	@Param			limit		query		int		false	"Page size"
 //	@Success		200			{object}	apicommon.VotingProcessListResponse
 //	@Failure		400			{object}	errors.Error
+//	@Failure		401			{object}	errors.Error
 //	@Router			/processes [get]
 func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request) {
 	orgAddressStr := r.URL.Query().Get("orgAddress")
@@ -401,6 +408,24 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 	draft := db.PublishedOnly
 	if isManager {
 		draft = db.AllProcesses
+	}
+	// the optional published filter narrows that default view. Asking for drafts is manager-only,
+	// mirroring organizationListProcessDraftsHandler on the legacy routes.
+	if s := r.URL.Query().Get("published"); s != "" {
+		published, err := strconv.ParseBool(s)
+		if err != nil {
+			errors.ErrMalformedURLParam.Withf("invalid published").Write(w)
+			return
+		}
+		switch {
+		case published:
+			draft = db.PublishedOnly
+		case !isManager:
+			errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+			return
+		default:
+			draft = db.DraftOnly
+		}
 	}
 	params, err := parsePaginationParams(r.URL.Query().Get(ParamPage), r.URL.Query().Get(ParamLimit))
 	if err != nil {

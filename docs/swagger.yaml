@@ -5838,7 +5838,11 @@ paths:
         Paginated list of an organization's voting processes. Public: anonymous callers get
         published processes only (without per-question eligibleMemberIds). A Manager/Admin of
         the org (or a voting:write API key acting as one) also gets drafts and the eligibility.
-        Filter by question status.
+        Filter by question status, and by published state.
+        published=true returns published processes only; published=false returns drafts only and
+        requires Manager/Admin (401 otherwise). Omitting it keeps the caller's default view.
+        Combining published=false with status returns nothing: a draft's questions have no
+        on-chain status yet, and status matches on that field.
       parameters:
       - description: Organization address
         in: query
@@ -5849,6 +5853,10 @@ paths:
         in: query
         name: status
         type: string
+      - description: Filter by published state; false (drafts) requires Manager/Admin
+        in: query
+        name: published
+        type: boolean
       - description: Page (1-based)
         in: query
         name: page
@@ -5866,6 +5874,10 @@ paths:
             $ref: '#/definitions/apicommon.VotingProcessListResponse'
         "400":
           description: Bad Request
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
       summary: List voting processes
