@@ -41,8 +41,15 @@ func (o *orgTxMutex) lock(addr common.Address) *sync.Mutex {
 
 // pool sizes are consts; promote to config only if tuning is needed.
 const (
-	// txQueueSize bounds the number of queued-but-not-yet-running tx tasks.
-	txQueueSize = 100
+	// txQueueSize bounds the number of queued-but-not-yet-running tx tasks. It is sized to hold
+	// several full vote batches at once: POST /votes reserves one slot per envelope all-or-nothing,
+	// so a queue merely as large as maxVotesPerBatch would accept a full batch only on a completely
+	// idle service, and a client turned away falls back to relaying one vote at a time — the
+	// half-voted window that endpoint exists to close. The buffer is not the bottleneck (the
+	// workers below are), so a bigger one adds no chain load or concurrency; it only stops
+	// rejecting work the service can serve. A txTask is a string and two func pointers, so this
+	// costs tens of kilobytes.
+	txQueueSize = 512
 	// txQueueWorkers caps concurrent on-chain submits so a chain stall cannot drain
 	// the router's shared request budget or starve the public CSP voter path.
 	txQueueWorkers = 16

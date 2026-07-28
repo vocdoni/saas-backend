@@ -1588,6 +1588,15 @@ func JobResponseFromDB(job *db.Job) JobResponse {
 	if len(errs) == 0 && job.Error != "" {
 		errs = []string{job.Error}
 	}
+	// A batch vote job whose envelopes have all reported is finished, whatever its stored status
+	// says. The worker increments the counter and writes the terminal status as two operations, so
+	// a read can land between them — and if the process dies in that gap the job would otherwise
+	// stay pending forever, even though the outcome is fully determined by the entries. Derive it
+	// with the same function the worker closes the job with, so the two can never disagree.
+	if job.Type == db.JobTypeRelayVotes && status == db.JobStatusPending &&
+		job.Total > 0 && job.Added >= job.Total && job.Result != nil {
+		status, errs = db.TerminalVoteBatchStatus(job.Result.Votes)
+	}
 	res := &UnifiedJobResult{Added: job.Added, Total: job.Total}
 	if job.Result != nil {
 		res.Address = job.Result.Address

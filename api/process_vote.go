@@ -86,10 +86,22 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 const (
-	// maxVotesPerBatch bounds a POST /votes call. It matches the cap of the vochain batch
-	// transaction endpoint and equals txQueueSize, so the largest accepted batch can at most
-	// fill an empty queue.
-	maxVotesPerBatch = 100
+	// maxVotesPerBatch bounds a POST /votes call. A voter casts one vote per question, and a
+	// process cannot hold more questions than this, so the cap is expressed as what it actually
+	// depends on rather than a duplicated literal: raising it means raising maxQuestionsPerProcess
+	// first, and the vochain batch transaction endpoint above that. It is deliberately NOT tied to
+	// txQueueSize — the queue is sized to hold several full batches (see api/jobqueue.go), because
+	// a batch rejected for lack of queue room sends the client back to relaying one vote at a time,
+	// which is the half-voted window this endpoint exists to close.
+	//
+	// On the denial-of-service trade-off: one request can occupy up to this many worker slots, each
+	// blocked until its transaction is mined, and the endpoint is public and unauthenticated. That
+	// amortizes the existing relay surface, it does not enlarge it — the same client can reach the
+	// same state with maxVotesPerBatch sequential POST /vote calls, and the all-or-nothing 503 here
+	// is strictly better behaved than relaying a prefix and stopping. Rate limiting is intentionally
+	// out of scope for this endpoint; it belongs with the API-wide throttling applied to every route
+	// in initRouter (api/api.go).
+	maxVotesPerBatch = maxQuestionsPerProcess
 	// maxVoteBodyBytes bounds the request body of a single relayed envelope. A CSP-signed vote
 	// envelope marshals to ~300 bytes, ~600 characters once hex-encoded into the JSON field, so
 	// this leaves an order of magnitude of headroom for larger proofs while keeping these public,

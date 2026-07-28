@@ -119,6 +119,25 @@ func (ms *MongoStorage) CreateVoteBatchJob(jobID string, orgAddress common.Addre
 	})
 }
 
+// TerminalVoteBatchStatus derives the outcome of a batch vote job from its per-envelope entries:
+// completed only when every envelope was, failed otherwise, with one error line per failure.
+//
+// It is exported because two paths must agree on it — the worker that closes the job once the last
+// envelope reports, and the read path, which derives the same answer when it finds a job with every
+// envelope reported but no terminal status stored (a crash between those two writes, or simply a
+// read landing in the moment between them). Sharing the function is what keeps the stored and the
+// derived status from ever disagreeing.
+func TerminalVoteBatchStatus(votes []VoteJobResult) (JobStatus, []string) {
+	status, errs := JobStatusCompleted, []string{}
+	for i, vote := range votes {
+		if vote.Status != JobStatusCompleted {
+			status = JobStatusFailed
+			errs = append(errs, fmt.Sprintf("vote %d: %s", i, vote.Error))
+		}
+	}
+	return status, errs
+}
+
 // RecordBatchVoteOutcome records the terminal outcome of one envelope of a batch vote
 // job: pass the chain-returned voteID and an empty errMsg on success, or a nil voteID
 // and the failure reason. Workers run concurrently, so the per-envelope write and the
@@ -170,15 +189,11 @@ func (ms *MongoStorage) RecordBatchVoteOutcome(jobID string, index int, voteID i
 	}
 
 	// last envelope in: close the job.
-	jobStatus, errs := JobStatusCompleted, []string{}
+	var votes []VoteJobResult
 	if job.Result != nil {
-		for i, vote := range job.Result.Votes {
-			if vote.Status != JobStatusCompleted {
-				jobStatus = JobStatusFailed
-				errs = append(errs, fmt.Sprintf("vote %d: %s", i, vote.Error))
-			}
-		}
+		votes = job.Result.Votes
 	}
+	jobStatus, errs := TerminalVoteBatchStatus(votes)
 	closing := bson.M{"status": jobStatus, "completedAt": time.Now(), "errors": errs}
 	if jobStatus == JobStatusFailed {
 		closing["error"] = fmt.Sprintf("%d of %d votes failed", len(errs), job.Total)

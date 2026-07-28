@@ -131,6 +131,12 @@ func TestRecordBatchVoteOutcome(t *testing.T) {
 		c.Assert(job.Result.Votes[1].Nullifier, qt.DeepEquals, internal.HexBytes{0xaa, 1})
 		c.Assert(job.Result.Votes[1].VoteID, qt.HasLen, 0)
 		c.Assert(job.Result.Votes[2].Status, qt.Equals, JobStatusCompleted)
+
+		// the status the worker stored and the one derived from the entries must be the same, or a
+		// job read across the gap between the counter and the closing write would flip its answer
+		derivedStatus, derivedErrs := TerminalVoteBatchStatus(job.Result.Votes)
+		c.Assert(derivedStatus, qt.Equals, job.Status)
+		c.Assert(derivedErrs, qt.DeepEquals, job.Errors)
 	})
 
 	c.Run("unknown job", func(c *qt.C) {
