@@ -6449,15 +6449,17 @@ paths:
       description: |-
         Replace the list of organization members eligible to vote a single question. The body
         carries the complete list, not a delta, and every id must already be a participant of the
-        process census — add them with PUT /processes/{processId}/census first.
-        While the process is a draft the list is applied as given, so members can be added,
-        removed or replaced. Once the process is published the list may only grow: it must still
-        contain every member it already had (409 otherwise), a question that was open to the whole
-        census cannot be narrowed to a subset, and a subset cannot be widened back to the whole
-        census. Sending the list a question already has is a no-op.
-        Growing a published question's list raises its on-chain election maxCensusSize as an
-        async job (poll GET /jobs/{jobId}); without that the new members would be signed by the
-        CSP only for the chain to reject their vote. Requires Manager/Admin role.
+        process census — add them with PUT /processes/{processId}/census first. An empty list
+        opens the question to the whole census. Sending the list a question already has is a no-op.
+        While the process is a draft the list is applied as given. Once it is published members
+        may still be added and removed, with one restriction: a member who has already voted the
+        question cannot lose eligibility. Such a request is refused with 409 and the offending
+        ids in the error's data.votedMemberIds.
+        Adding members raises the question's on-chain election maxCensusSize as an async job
+        (poll GET /jobs/{jobId}) when the election is too small for them; without that the new
+        members would be signed by the CSP only for the chain to reject their vote. Removing
+        members never touches the chain — maxCensusSize is left as headroom, since eligibility
+        is enforced by the CSP, not by that number. Requires Manager/Admin role.
       parameters:
       - description: Process ID
         in: path
@@ -6499,7 +6501,7 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Would restrict a published question
+          description: A member that already voted would lose eligibility
           schema:
             $ref: '#/definitions/errors.Error'
         "500":

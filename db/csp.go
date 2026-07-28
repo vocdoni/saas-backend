@@ -411,6 +411,19 @@ func (ms *MongoStorage) GetOrgMembersByProcess(orgAddress common.Address, proces
 	return orgMembers, nil
 }
 
+// CSPProcessVoters returns the id of every member that has already cast a ballot in the given
+// process, as one query, without needing the candidate ids up front. Use it when the question is
+// "who has voted"; use MembersWithUsedCSPProcess when a specific handful of members must be
+// checked, since that one costs a round-trip per id.
+//
+// "Voted" is the same signal both use: a CSPProcess exists for (member, process) and was consumed.
+func (ms *MongoStorage) CSPProcessVoters(processID internal.HexBytes) ([]string, error) {
+	if processID == nil {
+		return nil, ErrBadInputs
+	}
+	return ms.distinctCSPProcessVotersByProcess(processID)
+}
+
 // MembersWithUsedCSPProcess returns the subset of the given memberIDs (each the
 // hex of an OrgMember ObjectID) that have already cast a ballot in the given
 // process. The returned map is keyed by the memberID hex string and only

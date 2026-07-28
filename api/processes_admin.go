@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"net/http"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/account"
@@ -287,15 +286,17 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 //	@Summary		Set the members eligible to vote one question
 //	@Description	Replace the list of organization members eligible to vote a single question. The body
 //	@Description	carries the complete list, not a delta, and every id must already be a participant of the
-//	@Description	process census — add them with PUT /processes/{processId}/census first.
-//	@Description	While the process is a draft the list is applied as given, so members can be added,
-//	@Description	removed or replaced. Once the process is published the list may only grow: it must still
-//	@Description	contain every member it already had (409 otherwise), a question that was open to the whole
-//	@Description	census cannot be narrowed to a subset, and a subset cannot be widened back to the whole
-//	@Description	census. Sending the list a question already has is a no-op.
-//	@Description	Growing a published question's list raises its on-chain election maxCensusSize as an
-//	@Description	async job (poll GET /jobs/{jobId}); without that the new members would be signed by the
-//	@Description	CSP only for the chain to reject their vote. Requires Manager/Admin role.
+//	@Description	process census — add them with PUT /processes/{processId}/census first. An empty list
+//	@Description	opens the question to the whole census. Sending the list a question already has is a no-op.
+//	@Description	While the process is a draft the list is applied as given. Once it is published members
+//	@Description	may still be added and removed, with one restriction: a member who has already voted the
+//	@Description	question cannot lose eligibility. Such a request is refused with 409 and the offending
+//	@Description	ids in the error's data.votedMemberIds.
+//	@Description	Adding members raises the question's on-chain election maxCensusSize as an async job
+//	@Description	(poll GET /jobs/{jobId}) when the election is too small for them; without that the new
+//	@Description	members would be signed by the CSP only for the chain to reject their vote. Removing
+//	@Description	members never touches the chain — maxCensusSize is left as headroom, since eligibility
+//	@Description	is enforced by the CSP, not by that number. Requires Manager/Admin role.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -308,7 +309,7 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 //	@Failure		400			{object}	errors.Error							"Invalid input data"
 //	@Failure		401			{object}	errors.Error							"Unauthorized"
 //	@Failure		404			{object}	errors.Error							"Process or question not found"
-//	@Failure		409			{object}	errors.Error							"Would restrict a published question"
+//	@Failure		409			{object}	errors.Error							"A member that already voted would lose eligibility"
 //	@Failure		500			{object}	errors.Error							"Internal server error"
 //	@Router			/processes/{processId}/questions/{questionId}/census [put]
 func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r *http.Request) {
@@ -356,9 +357,18 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 		writeSubscriptionError(w, err)
 		return
 	}
-	if vp.Published {
-		if apiErr, valid := checkEligibilityGrows(question.EligibleMemberIDs, eligible); !valid {
-			apiErr.Write(w)
+	// a member who already voted must keep the right they exercised. Only an on-chain question can
+	// have votes, so a draft skips the check entirely.
+	if len(question.UpstreamID) > 0 {
+		voters, err := a.db.CSPProcessVoters(question.UpstreamID)
+		if err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+		if blocked := votedMembersLosingEligibility(eligible, voters); len(blocked) > 0 {
+			errors.ErrQuestionEligibilityVoted.
+				Withf("%d member(s) losing eligibility already voted", len(blocked)).
+				WithData(map[string]any{"votedMemberIds": blocked}).Write(w)
 			return
 		}
 	}
@@ -384,14 +394,35 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 		return
 	}
 
-	// a published question's election was sized for its old eligible count, so it has no room for
-	// the members just added: raise its on-chain maxCensusSize to match.
+	// a published question's election was sized for its old eligible count, so it may have no room
+	// for the members just added. Only additions can require more room, so a removal never goes on
+	// chain — which is just as well, since the chain refuses to shrink maxCensusSize.
 	if len(question.UpstreamID) == 0 || added == 0 {
 		apicommon.HTTPWriteJSON(w, resp)
 		return
 	}
+	// an empty list means the whole census is eligible, so the election has to fit all of it.
+	needed := uint64(len(eligible))
+	if len(eligible) == 0 {
+		needed = uint64(census.Size)
+	}
+	// compare against what the election actually carries rather than against the list we replaced:
+	// an earlier update may have raised it above the old list's length, and re-submitting a smaller
+	// size would simply be rejected by the chain.
+	elec, err := a.account.Election(question.UpstreamID)
+	if err != nil {
+		errors.ErrVochainRequestFailed.WithErr(err).Write(w)
+		return
+	}
+	// when the election does not report a census at all, attempt the resize rather than skip it:
+	// a tx the chain rejects is visible on the job, whereas silently leaving the election too small
+	// would strand the members just added with no way to tell.
+	if elec.Census != nil && needed <= elec.Census.MaxCensusSize {
+		apicommon.HTTPWriteJSON(w, resp)
+		return
+	}
 	jobID, ok := a.enqueueSetProcessCensus(w, vp, census,
-		[]censusSizeTarget{{upstreamID: question.UpstreamID, size: uint64(len(eligible))}})
+		[]censusSizeTarget{{upstreamID: question.UpstreamID, size: needed}})
 	if !ok {
 		return
 	}
@@ -399,37 +430,30 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, resp)
 }
 
-// checkEligibilityGrows enforces the append-only rule of a published question: the new eligible set
-// must keep every member the stored one had. The two whole-census edges are not implied by that
-// containment check and are rejected explicitly — an empty stored list means "everyone", so
-// narrowing it to a subset restricts the electorate, and widening a subset back to everyone would
-// need the election resized to the full census, which is a different operation.
-// It reports the error to write back and false when the change is not allowed.
-func checkEligibilityGrows(stored, requested []string) (errors.Error, bool) {
-	switch {
-	case len(stored) == 0 && len(requested) > 0:
-		return errors.ErrQuestionEligibilityRestricted.Withf(
-			"question is open to the whole census; restricting it to %d members is not allowed once published",
-			len(requested)), false
-	case len(stored) > 0 && len(requested) == 0:
-		return errors.ErrQuestionEligibilityRestricted.With(
-			"opening a published question to the whole census is not allowed"), false
+// votedMembersLosingEligibility returns the members that requested would strip of a vote they have
+// already cast. voters are the members who consumed the question's election, so they were eligible
+// when they voted; any of them left out of requested is losing that eligibility retroactively.
+//
+// An empty requested list opens the question to the whole census, which takes eligibility from
+// nobody — that is the one case where a shorter list is not a removal at all.
+func votedMembersLosingEligibility(requested, voters []string) []string {
+	if len(requested) == 0 || len(voters) == 0 {
+		return nil
 	}
-	have := make(map[string]bool, len(requested))
+	stays := make(map[string]bool, len(requested))
 	for _, id := range requested {
-		have[id] = true
+		stays[id] = true
 	}
-	missing := make([]string, 0, len(stored))
-	for _, id := range stored {
-		if !have[id] {
-			missing = append(missing, id)
+	blocked := make([]string, 0, len(voters))
+	for _, id := range voters {
+		if !stays[id] {
+			blocked = append(blocked, id)
 		}
 	}
-	if len(missing) > 0 {
-		return errors.ErrQuestionEligibilityRestricted.Withf(
-			"would drop %d already-eligible member(s): %s", len(missing), strings.Join(missing, ", ")), false
+	if len(blocked) == 0 {
+		return nil
 	}
-	return errors.Error{}, true
+	return blocked
 }
 
 // diffEligibility counts the members added and removed between the stored and the new eligible list.

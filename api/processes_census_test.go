@@ -267,6 +267,53 @@ func TestUpdateQuestionCensus(t *testing.T) {
 			AuthToken: tok, ProcessID: election, Payload: hex.EncodeToString(voter.Address().Bytes()),
 		}, "processes", pid, "sign")
 	c.Assert(sign.Signature, qt.Not(qt.HasLen), 0)
+
+	// members[1] has now voted this question, so they can no longer be dropped from it. The error
+	// names them so the caller knows which ids to put back.
+	apiErr := requestAndExpectError(t, http.MethodPut, token,
+		&apicommon.UpdateQuestionCensusRequest{MemberIDs: ids[:1]},
+		"processes", pid, "questions", qid, "census")
+	c.Assert(apiErr.Code, qt.Equals, errors.ErrQuestionEligibilityVoted.Code)
+	data, isMap := apiErr.Data.(map[string]any)
+	c.Assert(isMap, qt.IsTrue, qt.Commentf("error data: %#v", apiErr.Data))
+	c.Assert(data["votedMemberIds"], qt.DeepEquals, []any{ids[1]})
+
+	// and the refusal changed nothing
+	got = requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	c.Assert(got.Questions[1].EligibleMemberIDs, qt.DeepEquals, ids)
+
+	// the member who never voted can be dropped, and that alone never goes on chain — the election
+	// keeps the headroom it already has.
+	drop := requestAndParseWithAssertCode[apicommon.UpdateQuestionCensusResponse](
+		http.StatusOK, t, http.MethodPut, token,
+		&apicommon.UpdateQuestionCensusRequest{MemberIDs: ids[1:]},
+		"processes", pid, "questions", qid, "census")
+	c.Assert(drop.Removed, qt.Equals, 1)
+	c.Assert(drop.Added, qt.Equals, 0)
+	c.Assert(drop.Eligible, qt.Equals, 1)
+	c.Assert(drop.JobID, qt.Equals, "")
+	elec, err = testAPI.account.Election(election)
+	c.Assert(err, qt.IsNil)
+	c.Assert(elec.Census.MaxCensusSize, qt.Equals, uint64(2), qt.Commentf("a removal must not resize the election"))
+
+	// question 0 is open to the whole census: narrowing it is a removal for everyone left out, and
+	// is allowed here because nobody has voted it. Reopening it takes eligibility from nobody.
+	openQID := got.Questions[0].ID.Hex()
+	narrow := requestAndParseWithAssertCode[apicommon.UpdateQuestionCensusResponse](
+		http.StatusOK, t, http.MethodPut, token,
+		&apicommon.UpdateQuestionCensusRequest{MemberIDs: ids[:1]},
+		"processes", pid, "questions", openQID, "census")
+	c.Assert(narrow.Eligible, qt.Equals, 1)
+	reopen := requestAndParseWithAssertCode[apicommon.UpdateQuestionCensusResponse](
+		http.StatusOK, t, http.MethodPut, token,
+		&apicommon.UpdateQuestionCensusRequest{MemberIDs: nil},
+		"processes", pid, "questions", openQID, "census")
+	c.Assert(reopen.Eligible, qt.Equals, 0)
+	c.Assert(reopen.Removed, qt.Equals, 1)
+
+	got = requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	c.Assert(got.Questions[0].EligibleMemberIDs, qt.HasLen, 0)
+	c.Assert(got.Questions[1].EligibleMemberIDs, qt.DeepEquals, ids[1:])
 }
 
 // TestUpdateQuestionCensusDraft verifies that while the process is still a draft the eligible list
@@ -333,7 +380,6 @@ func TestUpdateQuestionCensusRejects(t *testing.T) {
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
 
 	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
-	openQID := got.Questions[0].ID.Hex()   // whole census
 	subsetQID := got.Questions[1].ID.Hex() // restricted to ids[0]
 
 	for _, tc := range []struct {
@@ -343,21 +389,6 @@ func TestUpdateQuestionCensusRejects(t *testing.T) {
 		body     *apicommon.UpdateQuestionCensusRequest
 		expected errors.Error
 	}{
-		{
-			"drops an already-eligible member", subsetQID, token,
-			&apicommon.UpdateQuestionCensusRequest{MemberIDs: ids[1:2]},
-			errors.ErrQuestionEligibilityRestricted,
-		},
-		{
-			"restricts a whole-census question", openQID, token,
-			&apicommon.UpdateQuestionCensusRequest{MemberIDs: ids[:1]},
-			errors.ErrQuestionEligibilityRestricted,
-		},
-		{
-			"opens a restricted question to everyone", subsetQID, token,
-			&apicommon.UpdateQuestionCensusRequest{MemberIDs: nil},
-			errors.ErrQuestionEligibilityRestricted,
-		},
 		{
 			"member is not in the process census", subsetQID, token,
 			&apicommon.UpdateQuestionCensusRequest{MemberIDs: []string{ids[0], ids[2]}},
