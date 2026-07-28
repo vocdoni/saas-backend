@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -268,6 +269,32 @@ type OrgMember struct {
 	Other           map[string]any `json:"other" bson:"other"`
 	CreatedAt       time.Time      `json:"createdAt" bson:"createdAt"`
 	UpdatedAt       time.Time      `json:"updatedAt" bson:"updatedAt"`
+}
+
+// Normalized returns a copy of the member with every field that can feed the CSP
+// login hash reduced to its canonical form: surrounding whitespace trimmed, the
+// email lowercased, the birthdate canonicalized to YYYY-MM-DD.
+//
+// This is the single definition of that canonical form, and both sides of the
+// login-hash comparison go through it: members are stored normalized, and the
+// CSP normalizes the login request the same way before recomputing the hash.
+// Keeping the two in one place is the point — the hash is a byte-exact match
+// (see internal.HashSortedFields), so any drift between how a field is stored
+// and how it is compared silently locks the member out.
+//
+// It only normalizes. Invalid values are passed through in their trimmed form
+// rather than rejected, leaving validation to the caller: at login an
+// unparseable value should simply fail to match a participant, while at write
+// time prepareOrgMember still validates and reports what it rejects.
+func (m *OrgMember) Normalized() *OrgMember {
+	normalized := *m
+	normalized.Name = strings.TrimSpace(normalized.Name)
+	normalized.Surname = strings.TrimSpace(normalized.Surname)
+	normalized.MemberNumber = strings.TrimSpace(normalized.MemberNumber)
+	normalized.NationalID = strings.TrimSpace(normalized.NationalID)
+	normalized.Email = internal.NormalizeEmail(normalized.Email)
+	normalized.BirthDate = internal.NormalizeBirthDate(normalized.BirthDate)
+	return &normalized
 }
 
 // OrgMemberAuthFields defines the fields that can be used for member authentication.

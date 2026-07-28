@@ -77,14 +77,27 @@ type TrimReport struct {
 // that feed the CSP login hash, and recomputes the login hashes of every census
 // participant derived from those members so that existing censuses keep working.
 //
-// Members are processed one at a time and each is all-or-nothing: the recomputed
-// hashes are checked against the other participants of every census the member
-// belongs to before anything is written, and a member whose trimmed hash would
-// collide with another participant (rejected by the unique index from migration
-// 8) is skipped and reported rather than aborting the whole run.
+// Members are processed one at a time. Every recomputed hash is checked against
+// the other participants of every census the member belongs to before anything
+// is written, and a member whose trimmed hash would collide with another
+// participant (rejected by the unique index from migration 8) is skipped and
+// reported rather than aborting the whole run.
 //
-// The function is idempotent: once a member is trimmed it no longer matches the
-// prefilter, so a second run is a no-op.
+// The writes are not transactional — MongoDB multi-document transactions need a
+// replica set, which is not assumed here — so what a member actually gets is:
+// no write happens until all of its collision checks have passed, and its
+// participants are updated before the member itself. That ordering matters. A
+// participant left with a stale hash behind an already-trimmed member is exactly
+// what locks a voter out, so if the process dies mid-member the leftover state
+// is the harmless direction: some participants already carry the trimmed hash
+// while the member still holds the untrimmed values.
+//
+// Recovering from that needs no special handling. The member still matches the
+// whitespace prefilter, so a re-run picks it up, rewrites the same hashes to the
+// same values and completes the member update.
+//
+// The function is idempotent: once a member is fully trimmed it no longer
+// matches the prefilter, so a second run is a no-op.
 func TrimMemberFields(ctx context.Context, database *mongo.Database, opts TrimOptions) (TrimReport, error) {
 	var report TrimReport
 

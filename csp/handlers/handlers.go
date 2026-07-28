@@ -740,22 +740,6 @@ func validateEmail(email string) error {
 	return nil
 }
 
-// normalizeBirthDateInput canonicalizes a birthdate supplied at login the same way
-// db.prepareOrgMember canonicalizes it at member-creation time, so both sides of the
-// login-hash comparison agree. Stored birthdates are always YYYY-MM-DD, so accepting
-// the other formats internal.ParseBirthDate understands (DD/MM/YYYY and friends) can
-// only turn a failed match into a successful one.
-//
-// Input that ParseBirthDate cannot read is passed through trimmed rather than
-// rejected: validation of the birthdate is not this function's job, and an
-// unparseable value simply fails to match a participant, exactly as before.
-func normalizeBirthDateInput(birthDate string) string {
-	if _, normalized, err := internal.ParseBirthDate(birthDate); err == nil {
-		return normalized
-	}
-	return strings.TrimSpace(birthDate)
-}
-
 // validateAuthRequest validates the authentication request data
 func validateAuthRequest(req *AuthRequest, census *db.Census) error {
 	// Check request participant ID
@@ -905,21 +889,20 @@ func (c *CSPHandlers) authFirstStep(
 		return nil, errors.ErrInvalidData.WithErr(err)
 	}
 
-	// create an empty member and assign the input data where applicable.
-	// Every field is normalized exactly the way db.prepareOrgMember normalizes it
-	// at member-creation time, so the login hash recomputed from this input matches
-	// the one stored for the participant: surrounding whitespace is trimmed, the
-	// email is lowercased and the birthdate is canonicalized to YYYY-MM-DD.
-	inputMember := &db.OrgMember{
+	// create an empty member and assign the input data where applicable, then
+	// normalize it through the same method that normalized the member at
+	// creation time. Both sides of the login-hash comparison therefore derive
+	// from one definition of the canonical form, and cannot drift apart.
+	inputMember := (&db.OrgMember{
 		OrgAddress:   census.OrgAddress,
-		Name:         strings.TrimSpace(req.Name),
-		Surname:      strings.TrimSpace(req.Surname),
-		MemberNumber: strings.TrimSpace(req.MemberNumber),
-		NationalID:   strings.TrimSpace(req.NationalID),
-		BirthDate:    normalizeBirthDateInput(req.BirthDate),
-		Email:        internal.NormalizeEmail(req.Email),
+		Name:         req.Name,
+		Surname:      req.Surname,
+		MemberNumber: req.MemberNumber,
+		NationalID:   req.NationalID,
+		BirthDate:    req.BirthDate,
+		Email:        req.Email,
 		Phone:        phone,
-	}
+	}).Normalized()
 
 	// Check the participant is in the census
 	censusParticipant, err := c.mainDB.CensusParticipantByLoginHash(*census, *inputMember)
