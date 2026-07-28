@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -79,14 +80,105 @@ func (ms *MongoStorage) CreateJob(jobID string, jobType JobType, orgAddress comm
 // (import jobs), it carries no Total/Added counters; the outcome is recorded later
 // via SetJobStatus.
 func (ms *MongoStorage) CreateTxJob(jobID string, jobType JobType, orgAddress common.Address) error {
+	return ms.CreateTxJobWithResult(jobID, jobType, orgAddress, nil)
+}
+
+// CreateTxJobWithResult is CreateTxJob seeding the job with an already-known partial
+// result. A vote relay uses it to record the process id and the nullifier it derived
+// from the signed envelope, so both are readable while the job is still pending and
+// after it failed — SetJobStatus only overwrites `result` when it is handed a non-nil
+// one, so the seeded fields survive the terminal write.
+func (ms *MongoStorage) CreateTxJobWithResult(
+	jobID string, jobType JobType, orgAddress common.Address, result *JobResult,
+) error {
 	return ms.SetJob(&Job{
 		JobID:      jobID,
 		Type:       jobType,
 		OrgAddress: orgAddress,
 		Errors:     []string{},
 		Status:     JobStatusPending,
+		Result:     result,
 		CreatedAt:  time.Now(),
 	})
+}
+
+// CreateVoteBatchJob inserts the single pending job that covers a whole POST /votes
+// batch. votes is index-aligned with the request and already carries each envelope's
+// process id and nullifier; Total is the batch size, so job progress is the number of
+// envelopes that have reported an outcome.
+func (ms *MongoStorage) CreateVoteBatchJob(jobID string, orgAddress common.Address, votes []VoteJobResult) error {
+	return ms.SetJob(&Job{
+		JobID:      jobID,
+		Type:       JobTypeRelayVotes,
+		OrgAddress: orgAddress,
+		Total:      len(votes),
+		Errors:     []string{},
+		Status:     JobStatusPending,
+		Result:     &JobResult{Votes: votes},
+		CreatedAt:  time.Now(),
+	})
+}
+
+// RecordBatchVoteOutcome records the terminal outcome of one envelope of a batch vote
+// job: pass the chain-returned voteID and an empty errMsg on success, or a nil voteID
+// and the failure reason. Workers run concurrently, so the per-envelope write and the
+// progress counter are applied in a single atomic update; the worker that completes the
+// last envelope is the one that closes the job, marking it completed when every envelope
+// succeeded and failed otherwise.
+func (ms *MongoStorage) RecordBatchVoteOutcome(jobID string, index int, voteID internal.HexBytes, errMsg string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+
+	status := JobStatusCompleted
+	if errMsg != "" {
+		status = JobStatusFailed
+	}
+	item := fmt.Sprintf("result.votes.%d.", index)
+	set := bson.M{item + "status": status}
+	if len(voteID) > 0 {
+		set[item+"voteID"] = voteID
+	}
+	if errMsg != "" {
+		set[item+"error"] = errMsg
+	}
+
+	var job Job
+	err := ms.jobs.FindOneAndUpdate(ctx,
+		bson.M{"jobId": jobID},
+		bson.M{"$set": set, "$inc": bson.M{"added": 1}},
+		options.FindOneAndUpdate().SetReturnDocument(options.After),
+	).Decode(&job)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return ErrNotFound
+		}
+		return fmt.Errorf("failed to record batch vote outcome: %w", err)
+	}
+	if job.Added < job.Total {
+		return nil
+	}
+
+	// last envelope in: close the job.
+	jobStatus, errs := JobStatusCompleted, []string{}
+	if job.Result != nil {
+		for i, vote := range job.Result.Votes {
+			if vote.Status != JobStatusCompleted {
+				jobStatus = JobStatusFailed
+				errs = append(errs, fmt.Sprintf("vote %d: %s", i, vote.Error))
+			}
+		}
+	}
+	closing := bson.M{"status": jobStatus, "completedAt": time.Now(), "errors": errs}
+	if jobStatus == JobStatusFailed {
+		closing["error"] = fmt.Sprintf("%d of %d votes failed", len(errs), job.Total)
+	}
+	if _, err := ms.jobs.UpdateOne(ctx, bson.M{"jobId": jobID}, bson.M{"$set": closing}); err != nil {
+		return fmt.Errorf("failed to close batch vote job: %w", err)
+	}
+	return nil
 }
 
 // SetJobStatus records the terminal outcome of a transaction job. On success pass

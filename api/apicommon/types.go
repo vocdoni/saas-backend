@@ -1307,6 +1307,16 @@ type RelayVoteRequest struct {
 	TxPayload internal.HexBytes `json:"txPayload" swaggertype:"string" format:"hex" example:"deadbeef"`
 }
 
+// RelayVotesRequest is the body of POST /votes: the already-signed voter transactions of
+// one voter, typically the questions of a multi-question voting process. The batch is
+// accepted or rejected as a unit and relayed under a single job, whose result reports the
+// votes in the order they are given here.
+// swagger:model RelayVotesRequest
+type RelayVotesRequest struct {
+	// Signed vote transactions, at most 100
+	Votes []RelayVoteRequest `json:"votes"`
+}
+
 // RelayVoteResponse is returned by POST /vote with the vote nullifier (voteID)
 // assigned on chain.
 // swagger:model RelayVoteResponse
@@ -1524,20 +1534,25 @@ type CreateOrganizationTicketRequest struct {
 }
 
 // UnifiedJobResult is the merged result payload of GET /jobs: a superset of the tx-job outcome
-// (address/status/voteID) and the import-job counters (added/progress/total). Empty attributes are
-// omitted so a job only surfaces what its type produced.
+// (address/status/processId/nullifier/voteID, or votes for a batch vote relay) and the import-job
+// counters (added/progress/total). Empty attributes are omitted so a job only surfaces what its
+// type produced.
 type UnifiedJobResult struct {
-	Address  internal.HexBytes `json:"address,omitempty" swaggertype:"string" example:"deadbeef"`
-	Status   string            `json:"status,omitempty"`
-	VoteID   internal.HexBytes `json:"voteID,omitempty" swaggertype:"string" example:"deadbeef"`
-	Added    int               `json:"added,omitempty"`
-	Progress int               `json:"progress,omitempty"`
-	Total    int               `json:"total,omitempty"`
+	Address   internal.HexBytes `json:"address,omitempty" swaggertype:"string" example:"deadbeef"`
+	Status    string            `json:"status,omitempty"`
+	ProcessID internal.HexBytes `json:"processId,omitempty" swaggertype:"string" example:"deadbeef"`
+	Nullifier internal.HexBytes `json:"nullifier,omitempty" swaggertype:"string" example:"deadbeef"`
+	VoteID    internal.HexBytes `json:"voteID,omitempty" swaggertype:"string" example:"deadbeef"`
+	// Votes is the per-envelope outcome of a batch vote relay, in request order
+	Votes    []db.VoteJobResult `json:"votes,omitempty"`
+	Added    int                `json:"added,omitempty"`
+	Progress int                `json:"progress,omitempty"`
+	Total    int                `json:"total,omitempty"`
 }
 
 func (r *UnifiedJobResult) isEmpty() bool {
-	return len(r.Address) == 0 && r.Status == "" && len(r.VoteID) == 0 &&
-		r.Added == 0 && r.Progress == 0 && r.Total == 0
+	return len(r.Address) == 0 && r.Status == "" && len(r.ProcessID) == 0 && len(r.Nullifier) == 0 &&
+		len(r.VoteID) == 0 && len(r.Votes) == 0 && r.Added == 0 && r.Progress == 0 && r.Total == 0
 }
 
 // JobResponse is one job in the GET /jobs list: the unified shape across import and tx jobs.
@@ -1559,7 +1574,8 @@ type JobsListResponse struct {
 
 // JobResponseFromDB builds the unified job response from a db.Job. Import jobs (which don't set
 // Status) fall back to completed/pending derived from CompletedAt, and expose added/progress/total;
-// tx jobs expose their Result (address/status/voteID). The result is omitted when empty.
+// tx jobs expose their Result (address/status/processId/nullifier/voteID, or the per-vote entries of
+// a batch relay). The result is omitted when empty.
 func JobResponseFromDB(job *db.Job) JobResponse {
 	status := job.Status
 	if status == "" {
@@ -1576,7 +1592,10 @@ func JobResponseFromDB(job *db.Job) JobResponse {
 	if job.Result != nil {
 		res.Address = job.Result.Address
 		res.Status = job.Result.Status
+		res.ProcessID = job.Result.ProcessID
+		res.Nullifier = job.Result.Nullifier
 		res.VoteID = job.Result.VoteID
+		res.Votes = job.Result.Votes
 	}
 	if job.Total > 0 {
 		res.Progress = job.Added * 100 / job.Total

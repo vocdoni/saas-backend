@@ -11,7 +11,9 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/types"
 	"go.vocdoni.io/proto/build/go/models"
@@ -122,9 +124,9 @@ func TestProcessStatusLifecycle(t *testing.T) {
 	}
 }
 
-// testRelayVoteRequest signs a vote tx, wraps it as a SignedTx, posts it to
-// POST /vote, and returns the relayed vote nullifier.
-func testRelayVoteRequest(t *testing.T, signer *ethereum.SignKeys, processID internal.HexBytes,
+// testSignVoteTx builds a vote envelope for processID and signs it as the voter would,
+// returning the marshaled models.SignedTx the relay endpoints take as their payload.
+func testSignVoteTx(t *testing.T, signer *ethereum.SignKeys, processID internal.HexBytes,
 	proof *models.Proof, votePackage []byte,
 ) internal.HexBytes {
 	t.Helper()
@@ -139,17 +141,56 @@ func testRelayVoteRequest(t *testing.T, signer *ethereum.SignKeys, processID int
 	c.Assert(err, qt.IsNil)
 	stx, err := proto.Marshal(&models.SignedTx{Tx: txBytes, Signature: signature})
 	c.Assert(err, qt.IsNil)
+	return stx
+}
+
+// testRelayVoteRequest signs a vote tx, wraps it as a SignedTx, posts it to
+// POST /vote, and returns the relayed vote nullifier.
+func testRelayVoteRequest(t *testing.T, signer *ethereum.SignKeys, processID internal.HexBytes,
+	proof *models.Proof, votePackage []byte,
+) internal.HexBytes {
+	t.Helper()
+	c := qt.New(t)
+	stx := testSignVoteTx(t, signer, processID, proof, votePackage)
 	job := enqueueAndPollJob(t, http.MethodPost, "",
 		&apicommon.RelayVoteRequest{TxPayload: stx}, "vote")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("error: %s", job.Errors))
 	c.Assert(job.Result.VoteID, qt.Not(qt.HasLen), 0)
+	// the nullifier is derived from the envelope before it is submitted, so it is on the
+	// job regardless of what the chain replied, and it must match the chain's voteID.
+	c.Assert(job.Result.Nullifier, qt.DeepEquals, job.Result.VoteID)
+	c.Assert(job.Result.ProcessID, qt.DeepEquals, processID)
 	return job.Result.VoteID
 }
 
-// TestRelayVote builds the full CSP voting setup (org, census, bundle, on-chain
-// process) and casts a vote via the public relay endpoint instead of submitting it
-// directly to the chain, asserting the vote is counted and a nullifier is returned.
-func TestRelayVote(t *testing.T) {
+// relayVotingFixture is a voter authenticated against a CSP bundle covering one or more
+// on-chain processes, i.e. everything the relay endpoints need to accept a real vote.
+type relayVotingFixture struct {
+	token      string
+	client     *apiclient.HTTPclient
+	orgAddress common.Address
+	processIDs []internal.HexBytes
+	bundleID   string
+	authToken  internal.HexBytes
+	voter      *ethereum.SignKeys
+}
+
+// proofFor CSP-signs the voter's address for one of the fixture's processes and builds the
+// vote proof from it. The CSP consumes a process per user, not a bundle, so the same auth
+// token signs once for each process — which is exactly what a multi-question vote does.
+func (f *relayVotingFixture) proofFor(t *testing.T, processID internal.HexBytes) *models.Proof {
+	t.Helper()
+	voterAddr := f.voter.Address().Bytes()
+	signature := testCSPSign(t, f.bundleID, f.authToken, processID, voterAddr)
+	return testGenerateVoteProof(processID, voterAddr, signature, 1)
+}
+
+// setupRelayVoting builds the full CSP voting setup shared by the relay tests: an
+// organization with an on-chain account and a plan, processes many on-chain elections
+// whose census root is the CSP, a published group census bundled with them, and a voter
+// authenticated against that bundle.
+func setupRelayVoting(t *testing.T, processes int) *relayVotingFixture {
+	t.Helper()
 	c := qt.New(t)
 
 	// create a user and organization
@@ -182,32 +223,36 @@ func TestRelayVote(t *testing.T) {
 	}}}
 	signRemoteSignerAndSendVocdoniTx(t, accountTx, token, vocdoniClient, orgAddress)
 
-	// create an on-chain process whose census root is the CSP public key
+	// create the on-chain processes, whose census root is the CSP public key
 	cspPubKey, err := testCSP.PubKey()
 	c.Assert(err, qt.IsNil)
-	processNonce := fetchVocdoniAccountNonce(t, vocdoniClient, orgAddress)
-	processTx := &models.Tx{Payload: &models.Tx_NewProcess{NewProcess: &models.NewProcessTx{
-		Txtype: models.TxType_NEW_PROCESS,
-		Nonce:  processNonce,
-		Process: &models.Process{
-			EntityId:      orgAddress.Bytes(),
-			Duration:      120,
-			Status:        models.ProcessStatus_READY,
-			CensusOrigin:  models.CensusOrigin_OFF_CHAIN_CA,
-			CensusRoot:    cspPubKey,
-			MaxCensusSize: 10,
-			EnvelopeType:  &models.EnvelopeType{Anonymous: false, CostFromWeight: false},
-			VoteOptions:   &models.ProcessVoteOptions{MaxCount: 1, MaxValue: 5},
-			Mode:          &models.ProcessMode{AutoStart: true, Interruptible: true},
-		},
-	}}}
-	processIDBytes := signRemoteSignerAndSendVocdoniTx(t, processTx, token, vocdoniClient, orgAddress)
-	processID := internal.HexBytes(processIDBytes)
-	t.Logf("Created process with ID: %x", processIDBytes)
+	processIDs := make([]internal.HexBytes, processes)
+	rawProcessIDs := make([][]byte, processes)
+	for i := range processIDs {
+		processNonce := fetchVocdoniAccountNonce(t, vocdoniClient, orgAddress)
+		processTx := &models.Tx{Payload: &models.Tx_NewProcess{NewProcess: &models.NewProcessTx{
+			Txtype: models.TxType_NEW_PROCESS,
+			Nonce:  processNonce,
+			Process: &models.Process{
+				EntityId:      orgAddress.Bytes(),
+				Duration:      120,
+				Status:        models.ProcessStatus_READY,
+				CensusOrigin:  models.CensusOrigin_OFF_CHAIN_CA,
+				CensusRoot:    cspPubKey,
+				MaxCensusSize: 10,
+				EnvelopeType:  &models.EnvelopeType{Anonymous: false, CostFromWeight: false},
+				VoteOptions:   &models.ProcessVoteOptions{MaxCount: 1, MaxValue: 5},
+				Mode:          &models.ProcessMode{AutoStart: true, Interruptible: true},
+			},
+		}}}
+		rawProcessIDs[i] = signRemoteSignerAndSendVocdoniTx(t, processTx, token, vocdoniClient, orgAddress)
+		processIDs[i] = internal.HexBytes(rawProcessIDs[i])
+		t.Logf("Created process with ID: %x", rawProcessIDs[i])
 
-	// the relay handler requires the process to be known by its on-chain address
-	_, err = testDB.SetProcess(&db.Process{OrgAddress: orgAddress, Address: processID})
-	c.Assert(err, qt.IsNil)
+		// the relay handler requires the process to be known by its on-chain address
+		_, err = testDB.SetProcess(&db.Process{OrgAddress: orgAddress, Address: processIDs[i]})
+		c.Assert(err, qt.IsNil)
+	}
 
 	// create a census, add members and publish a group-based census
 	authFields := db.OrgMemberAuthFields{
@@ -217,13 +262,14 @@ func TestRelayVote(t *testing.T) {
 	}
 	twoFaFields := db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail}
 
+	suffix := internal.RandomInt(1000000)
 	members := []apicommon.OrgMember{{
 		Name:         "Relay",
 		Surname:      "Voter",
-		MemberNumber: "R001",
-		NationalID:   "RELAY0001A",
+		MemberNumber: fmt.Sprintf("R%06d", suffix),
+		NationalID:   fmt.Sprintf("RELAY%05dA", suffix),
 		BirthDate:    "1990-01-01",
-		Email:        "relay.voter@example.com",
+		Email:        fmt.Sprintf("relay.voter.%d@example.com", suffix),
 		Phone:        "+34699000001",
 		Weight:       "1",
 	}}
@@ -244,8 +290,8 @@ func TestRelayVote(t *testing.T) {
 			TwoFaFields: twoFaFields,
 		}, "census", censusID, "group", group.ID, "publish")
 
-	// create a bundle linking the census and process
-	bundleID, _ := postProcessBundle(t, token, censusID, processIDBytes)
+	// create a bundle linking the census and every process
+	bundleID, _ := postProcessBundle(t, token, censusID, rawProcessIDs...)
 
 	// authenticate the voter with the CSP
 	authToken := testCSPAuthenticateWithFields(t, bundleID, &handlers.AuthRequest{
@@ -255,26 +301,181 @@ func TestRelayVote(t *testing.T) {
 		Email:        members[0].Email,
 	})
 
-	// generate the voter key, CSP-sign its address and build the vote proof
-	voter := ethereum.SignKeys{}
+	voter := &ethereum.SignKeys{}
 	c.Assert(voter.Generate(), qt.IsNil)
-	voterAddr := voter.Address().Bytes()
-	signature := testCSPSign(t, bundleID, authToken, processID, voterAddr)
-	proof := testGenerateVoteProof(processID, voterAddr, signature, 1)
+
+	return &relayVotingFixture{
+		token:      token,
+		client:     vocdoniClient,
+		orgAddress: orgAddress,
+		processIDs: processIDs,
+		bundleID:   bundleID,
+		authToken:  authToken,
+		voter:      voter,
+	}
+}
+
+// TestRelayVote casts a vote via the public relay endpoint instead of submitting it
+// directly to the chain, asserting the vote is counted and a nullifier is returned.
+func TestRelayVote(t *testing.T) {
+	c := qt.New(t)
+	f := setupRelayVoting(t, 1)
+	processID := f.processIDs[0]
+	proof := f.proofFor(t, processID)
 
 	// relay the vote and assert the chain counted it
-	votesBefore, err := vocdoniClient.ElectionVoteCount(processID.Bytes())
+	votesBefore, err := f.client.ElectionVoteCount(processID.Bytes())
 	c.Assert(err, qt.IsNil)
 
-	nullifier := testRelayVoteRequest(t, &voter, processID, proof, []byte("[\"1\"]"))
+	nullifier := testRelayVoteRequest(t, f.voter, processID, proof, []byte("[\"1\"]"))
 	c.Assert(nullifier, qt.Not(qt.HasLen), 0)
 
-	votesAfter, err := vocdoniClient.ElectionVoteCount(processID.Bytes())
+	votesAfter, err := f.client.ElectionVoteCount(processID.Bytes())
 	c.Assert(err, qt.IsNil)
 	c.Assert(votesAfter, qt.Equals, votesBefore+1, qt.Commentf("expected 1 more vote, got %d", votesAfter))
 
 	// a chain-accepted relay meters the owning organization's SentVotes counter
-	orgAfter, err := testDB.Organization(orgAddress)
+	orgAfter, err := testDB.Organization(f.orgAddress)
 	c.Assert(err, qt.IsNil)
 	c.Assert(orgAfter.Counters.SentVotes, qt.Equals, 1)
+}
+
+// TestRelayVotesBatch relays the votes of a multi-question process in a single call and
+// asserts the batch lands as one job: every envelope's nullifier is readable from the job
+// before the chain has replied, and each ends up with the voteID the chain assigned it.
+func TestRelayVotesBatch(t *testing.T) {
+	c := qt.New(t)
+	const questions = 3
+	f := setupRelayVoting(t, questions)
+
+	req := &apicommon.RelayVotesRequest{Votes: make([]apicommon.RelayVoteRequest, questions)}
+	votesBefore := make([]uint32, questions)
+	for i, processID := range f.processIDs {
+		var err error
+		votesBefore[i], err = f.client.ElectionVoteCount(processID.Bytes())
+		c.Assert(err, qt.IsNil)
+		proof := f.proofFor(t, processID)
+		req.Votes[i] = apicommon.RelayVoteRequest{
+			TxPayload: testSignVoteTx(t, f.voter, processID, proof, []byte("[\"1\"]")),
+		}
+	}
+
+	enq := requestAndParseWithAssertCode[apicommon.EnqueuedResponse](
+		http.StatusAccepted, t, http.MethodPost, "", req, "votes")
+	c.Assert(enq.JobID, qt.Not(qt.Equals), "")
+
+	// the nullifiers are derived before submission, so they are on the job from the very
+	// first read — whether or not the chain has accepted anything yet.
+	early := requestAndParse[apicommon.JobResponse](t, http.MethodGet, "", nil, "jobs", enq.JobID)
+	c.Assert(early.Type, qt.Equals, db.JobTypeRelayVotes)
+	c.Assert(early.Result.Votes, qt.HasLen, questions)
+	for i, vote := range early.Result.Votes {
+		c.Assert(vote.Nullifier, qt.Not(qt.HasLen), 0, qt.Commentf("vote %d has no nullifier yet", i))
+		c.Assert(vote.ProcessID, qt.DeepEquals, f.processIDs[i])
+	}
+
+	job := pollJob(t, enq.JobID)
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("errors: %s", job.Errors))
+	c.Assert(job.Result.Total, qt.Equals, questions)
+	c.Assert(job.Result.Added, qt.Equals, questions)
+	c.Assert(job.Result.Votes, qt.HasLen, questions)
+	for i, vote := range job.Result.Votes {
+		comment := qt.Commentf("vote %d: %s", i, vote.Error)
+		c.Assert(vote.Status, qt.Equals, db.JobStatusCompleted, comment)
+		c.Assert(vote.ProcessID, qt.DeepEquals, f.processIDs[i], comment)
+		c.Assert(vote.VoteID, qt.Not(qt.HasLen), 0, comment)
+		// the chain assigns the very nullifier the handler derived from the envelope
+		c.Assert(vote.VoteID, qt.DeepEquals, vote.Nullifier, comment)
+	}
+
+	// every question got its vote, and every relayed envelope was metered
+	for i, processID := range f.processIDs {
+		votesAfter, err := f.client.ElectionVoteCount(processID.Bytes())
+		c.Assert(err, qt.IsNil)
+		c.Assert(votesAfter, qt.Equals, votesBefore[i]+1, qt.Commentf("process %d was not voted", i))
+	}
+	orgAfter, err := testDB.Organization(f.orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(orgAfter.Counters.SentVotes, qt.Equals, questions)
+}
+
+// TestRelayVotesRejectsBatch checks that a batch is validated as a unit: every rejection
+// happens before anything is enqueued, so a voter retries from a clean slate instead of
+// discovering that a prefix of their questions was voted.
+func TestRelayVotesRejectsBatch(t *testing.T) {
+	c := qt.New(t)
+	chainID := fetchVocdoniChainID(t, testNewVocdoniClient(t))
+
+	// two organizations, each owning a process the backend knows about. No chain
+	// interaction is needed: every case below is rejected by the synchronous checks.
+	newOrgProcess := func() (common.Address, internal.HexBytes) {
+		token := testCreateUser(t, "superpassword123")
+		orgAddress := testCreateOrganization(t, token)
+		processID := internal.HexBytes(randomProcessID())
+		_, err := testDB.SetProcess(&db.Process{OrgAddress: orgAddress, Address: processID})
+		c.Assert(err, qt.IsNil)
+		return orgAddress, processID
+	}
+	_, processA := newOrgProcess()
+	_, processB := newOrgProcess()
+
+	voter := &ethereum.SignKeys{}
+	c.Assert(voter.Generate(), qt.IsNil)
+	voteFor := func(processID internal.HexBytes) apicommon.RelayVoteRequest {
+		return apicommon.RelayVoteRequest{
+			TxPayload: testSignVoteTx(t, voter, processID, nil, []byte("[\"1\"]")),
+		}
+	}
+	// a well-formed SignedTx that is not a vote
+	notAVote, err := proto.Marshal(&models.Tx{Payload: &models.Tx_SetAccount{
+		SetAccount: &models.SetAccountTx{Txtype: models.TxType_CREATE_ACCOUNT},
+	}})
+	c.Assert(err, qt.IsNil)
+	signature, err := voter.SignVocdoniTx(notAVote, chainID)
+	c.Assert(err, qt.IsNil)
+	notAVoteTx, err := proto.Marshal(&models.SignedTx{Tx: notAVote, Signature: signature})
+	c.Assert(err, qt.IsNil)
+
+	for _, tc := range []struct {
+		name     string
+		votes    []apicommon.RelayVoteRequest
+		expected errors.Error
+	}{
+		{"empty batch", nil, errors.ErrVoteBatchEmpty},
+		{
+			"over the cap",
+			make([]apicommon.RelayVoteRequest, maxVotesPerBatch+1),
+			errors.ErrVoteBatchTooLarge,
+		},
+		{
+			"one payload missing",
+			[]apicommon.RelayVoteRequest{voteFor(processA), {}},
+			errors.ErrMalformedBody,
+		},
+		{
+			"one payload not a vote",
+			[]apicommon.RelayVoteRequest{voteFor(processA), {TxPayload: notAVoteTx}},
+			errors.ErrInvalidTxFormat,
+		},
+		{
+			"one process unknown",
+			[]apicommon.RelayVoteRequest{voteFor(processA), voteFor(internal.HexBytes(randomProcessID()))},
+			errors.ErrProcessNotFound,
+		},
+		{
+			"votes of two organizations",
+			[]apicommon.RelayVoteRequest{voteFor(processA), voteFor(processB)},
+			errors.ErrVoteBatchMixedOrganizations,
+		},
+		{
+			"the same vote twice",
+			[]apicommon.RelayVoteRequest{voteFor(processA), voteFor(processA)},
+			errors.ErrInvalidTxFormat,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requestAndAssertError(tc.expected, t, http.MethodPost, "",
+				&apicommon.RelayVotesRequest{Votes: tc.votes}, "votes")
+		})
+	}
 }

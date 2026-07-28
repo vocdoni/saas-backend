@@ -1392,6 +1392,14 @@ definitions:
         format: hex
         type: string
     type: object
+  apicommon.RelayVotesRequest:
+    properties:
+      votes:
+        description: Signed vote transactions, at most 100
+        items:
+          $ref: '#/definitions/apicommon.RelayVoteRequest'
+        type: array
+    type: object
   apicommon.SetProcessStatusRequest:
     properties:
       status:
@@ -1626,6 +1634,12 @@ definitions:
       address:
         example: deadbeef
         type: string
+      nullifier:
+        example: deadbeef
+        type: string
+      processId:
+        example: deadbeef
+        type: string
       progress:
         type: integer
       status:
@@ -1635,6 +1649,12 @@ definitions:
       voteID:
         example: deadbeef
         type: string
+      votes:
+        description: Votes is the per-envelope outcome of a batch vote relay, in request
+          order
+        items:
+          $ref: '#/definitions/db.VoteJobResult'
+        type: array
     type: object
   apicommon.UpdateOrganizationMemberGroupsRequest:
     properties:
@@ -2084,6 +2104,7 @@ definitions:
     - set_process_status
     - set_process_census
     - relay_vote
+    - relay_votes
     - publish_voting_process
     type: string
     x-enum-varnames:
@@ -2093,6 +2114,7 @@ definitions:
     - JobTypeSetProcessStatus
     - JobTypeSetProcessCensus
     - JobTypeRelayVote
+    - JobTypeRelayVotes
     - JobTypePublishVotingProcess
   db.MultiLangString:
     additionalProperties:
@@ -2281,6 +2303,22 @@ definitions:
     - AdminRole
     - ManagerRole
     - ViewerRole
+  db.VoteJobResult:
+    properties:
+      error:
+        type: string
+      nullifier:
+        example: deadbeef
+        type: string
+      processId:
+        example: deadbeef
+        type: string
+      status:
+        $ref: '#/definitions/db.JobStatus'
+      voteID:
+        example: deadbeef
+        type: string
+    type: object
   db.VoteType:
     properties:
       costExponent:
@@ -7368,6 +7406,59 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Relay an already-signed vote to the Vochain
+      tags:
+      - vote
+  /votes:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Relays several voter transactions, already signed by the voter, in one call. A
+        multi-question voting process is one vochain process per question, so a voter casts
+        one vote transaction per question; relaying them one by one leaves a window in which
+        some are on chain and the rest are not, and the voter ends up half-voted. This
+        endpoint closes that window. Public endpoint: no authentication is required.
+        The whole batch is checked synchronously and is accepted or rejected as a unit —
+        every payload must decode to a Vote envelope (else 400) for a process the backend
+        knows (else 404), all of them must belong to the same organization (else 400), and
+        the queue must have room for all of them (else 503). A rejected batch enqueues
+        nothing. At most 100 votes per call.
+        The call returns 202 with a single job id covering the batch. Poll
+        GET /jobs/{jobId}: its result carries one entry per vote, index-aligned with the
+        request, each with the process id and the nullifier — both known before submission,
+        so they are readable while the job is pending — plus the chain-assigned voteID once
+        that vote is accepted, or the reason it failed.
+      parameters:
+      - description: Signed vote transaction payloads
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.RelayVotesRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Job accepted; poll GET /jobs/{jobId}
+          schema:
+            $ref: '#/definitions/apicommon.EnqueuedResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Transaction queue is full
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Relay a batch of already-signed votes to the Vochain
       tags:
       - vote
 schemes:
