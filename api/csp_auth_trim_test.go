@@ -9,13 +9,14 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 )
 
-// TestCSPAuthNormalizesInput covers the whitespace fix end to end, over HTTP.
+// TestCSPAuthNormalizesInput covers the login normalization end to end, over HTTP.
 //
 // The CSP login hash is a byte-exact match over the census auth fields, so any
 // disagreement between how a field is stored and how it is typed at login locks
-// the voter out. Members are now stored trimmed, and the login input is
-// normalized the same way, so surrounding whitespace on either side is
-// irrelevant.
+// the voter out. Members are stored trimmed and the login input is normalized the
+// same way, so surrounding whitespace on either side is irrelevant; and the values
+// feeding the hash are folded to lowercase on both sides, so casing is too — while
+// the member document keeps the casing it was imported with.
 func TestCSPAuthNormalizesInput(t *testing.T) {
 	c := qt.New(t)
 
@@ -85,6 +86,34 @@ func TestCSPAuthNormalizesInput(t *testing.T) {
 			Surname:      " Doe",
 			MemberNumber: "M-001  ",
 		})
+	})
+
+	t.Run("login is case-insensitive while the member keeps its casing", func(_ *testing.T) {
+		authFields := db.OrgMemberAuthFields{
+			db.OrgMemberAuthFieldsName,
+			db.OrgMemberAuthFieldsSurname,
+			db.OrgMemberAuthFieldsMemberNumber,
+		}
+		censusID, _, _ := createGroupBasedCensus(t, adminToken, orgAddress, authFields,
+			db.OrgMemberTwoFaFields{}, john.ID)
+		bundleID, _ := postProcessBundle(t, adminToken, censusID, randomProcessID())
+
+		// The member was imported as "John Doe" / "M-001"; any casing resolves.
+		for _, req := range []*handlers.AuthRequest{
+			{Name: "John", Surname: "Doe", MemberNumber: "M-001"},
+			{Name: "john", Surname: "doe", MemberNumber: "m-001"},
+			{Name: "JOHN", Surname: "DOE", MemberNumber: "M-001"},
+			{Name: " jOhN ", Surname: "dOe", MemberNumber: " m-001"},
+		} {
+			postProcessBundleAuth0(t, bundleID, req)
+		}
+
+		// Folding is confined to the hash: the member still reads back with the
+		// casing it was imported with, which is what gets displayed and exported.
+		stored := getOrgMember(t, adminToken, orgAddress, john.ID)
+		c.Assert(stored.Name, qt.Equals, "John")
+		c.Assert(stored.Surname, qt.Equals, "Doe")
+		c.Assert(stored.MemberNumber, qt.Equals, "M-001")
 	})
 
 	t.Run("birthdate is canonicalized on both sides", func(_ *testing.T) {
