@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -307,6 +308,32 @@ type OrgMember struct {
 	UpdatedAt       time.Time      `json:"updatedAt" bson:"updatedAt"`
 }
 
+// Normalized returns a copy of the member with every field that can feed the CSP
+// login hash reduced to its canonical form: surrounding whitespace trimmed, the
+// email lowercased, the birthdate canonicalized to YYYY-MM-DD.
+//
+// This is the single definition of that canonical form, and both sides of the
+// login-hash comparison go through it: members are stored normalized, and the
+// CSP normalizes the login request the same way before recomputing the hash.
+// Keeping the two in one place is the point — the hash is a byte-exact match
+// (see internal.HashSortedFields), so any drift between how a field is stored
+// and how it is compared silently locks the member out.
+//
+// It only normalizes. Invalid values are passed through in their trimmed form
+// rather than rejected, leaving validation to the caller: at login an
+// unparseable value should simply fail to match a participant, while at write
+// time prepareOrgMember still validates and reports what it rejects.
+func (m *OrgMember) Normalized() *OrgMember {
+	normalized := *m
+	normalized.Name = strings.TrimSpace(normalized.Name)
+	normalized.Surname = strings.TrimSpace(normalized.Surname)
+	normalized.MemberNumber = strings.TrimSpace(normalized.MemberNumber)
+	normalized.NationalID = strings.TrimSpace(normalized.NationalID)
+	normalized.Email = internal.NormalizeEmail(normalized.Email)
+	normalized.BirthDate = internal.NormalizeBirthDate(normalized.BirthDate)
+	return &normalized
+}
+
 // OrgMemberAuthFields defines the fields that can be used for member authentication.
 type OrgMemberAuthField string
 
@@ -391,20 +418,37 @@ func (f OrgMemberTwoFaFields) GetCensusType() CensusType {
 // the auth and twoFa field and produces a sha256 hash of the concatenation of the
 // data that are included in the fields. The data are ordered by the field names
 // in order to make the hash reproducible.
+//
+// Text values are lowercased so that login is case-insensitive. That folding is
+// deliberately confined to this function and never written back to the member:
+// members keep the casing they were imported with, because that is what gets
+// displayed and exported. OrgMember.Normalized governs what is stored; this
+// governs what is compared. The phone is the exception — it is already a hash
+// (see HashedPhone), so it is raw bytes rather than text and folding it would
+// corrupt the value.
+//
+// strings.ToLower matches what internal.NormalizeEmail already applies to
+// emails. A full Unicode case-fold would be marginally more correct for a few
+// scripts, but diverging from the existing convention would be worse: the two
+// sides of the comparison only agree because they fold identically.
+//
+// IMPORTANT: migrations.hashMemberFields mirrors this function byte for byte so
+// that the repair tooling can recompute stored hashes without importing db. Any
+// change here MUST be made there too — db.TestRepairMatchesCanonicalHash guards that.
 func HashAuthTwoFaFields(memberData OrgMember, authFields OrgMemberAuthFields, twoFaFields OrgMemberTwoFaFields) []byte {
 	data := make([]string, 0, len(twoFaFields)+len(authFields))
 	for _, field := range authFields {
 		switch field {
 		case OrgMemberAuthFieldsName:
-			data = append(data, memberData.Name)
+			data = append(data, strings.ToLower(memberData.Name))
 		case OrgMemberAuthFieldsSurname:
-			data = append(data, memberData.Surname)
+			data = append(data, strings.ToLower(memberData.Surname))
 		case OrgMemberAuthFieldsMemberNumber:
-			data = append(data, memberData.MemberNumber)
+			data = append(data, strings.ToLower(memberData.MemberNumber))
 		case OrgMemberAuthFieldsNationalID:
-			data = append(data, memberData.NationalID)
+			data = append(data, strings.ToLower(memberData.NationalID))
 		case OrgMemberAuthFieldsBirthDate:
-			data = append(data, memberData.BirthDate)
+			data = append(data, strings.ToLower(memberData.BirthDate))
 		default:
 			// Ignore unknown fields
 			continue
@@ -413,9 +457,10 @@ func HashAuthTwoFaFields(memberData OrgMember, authFields OrgMemberAuthFields, t
 	for _, field := range twoFaFields {
 		switch field {
 		case OrgMemberTwoFaFieldEmail:
-			data = append(data, memberData.Email)
+			data = append(data, strings.ToLower(memberData.Email))
 		case OrgMemberTwoFaFieldPhone:
 			if !memberData.Phone.IsEmpty() {
+				// already hashed bytes, not text: never folded
 				data = append(data, string(memberData.Phone))
 			}
 		default:
