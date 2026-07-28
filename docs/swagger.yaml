@@ -6199,7 +6199,7 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: A member has already voted
+          description: Process is not published, or a member has already voted
           schema:
             $ref: '#/definitions/errors.Error'
         "500":

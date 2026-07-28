@@ -245,6 +245,18 @@ func TestRemoveProcessCensus(t *testing.T) {
 	}, "processes", pid, "auth", "0")
 	c.Assert(code, qt.Equals, http.StatusNotFound, qt.Commentf("resp: %s", resp))
 
+	// a malformed member id is a 400, not an internal failure. The ids reach code that hex-decodes
+	// them, and internal.HexBytesFromString panics by design on invalid input, so this asserts the
+	// request never gets that far.
+	for _, bad := range []string{"zz", "not-an-objectid", "", "0x"} {
+		requestAndAssertError(errors.ErrInvalidData, t, http.MethodDelete, token,
+			&apicommon.AddCensusParticipantsRequest{MemberIDs: []string{ids[0], bad}},
+			"processes", pid, "census")
+	}
+	// nothing was removed by the rejected requests
+	got = requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	c.Assert(got.Census.Size, qt.Equals, int64(1))
+
 	// the caller must manage the organization
 	requestAndAssertError(errors.ErrUnauthorized, t, http.MethodDelete, testCreateUser(t, "otherpassword123"),
 		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[:1]}, "processes", pid, "census")

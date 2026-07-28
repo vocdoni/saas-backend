@@ -9,6 +9,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -303,7 +304,7 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 //	@Failure		400			{object}	errors.Error							"Invalid input data"
 //	@Failure		401			{object}	errors.Error							"Unauthorized"
 //	@Failure		404			{object}	errors.Error							"Process not found"
-//	@Failure		409			{object}	errors.Error							"A member has already voted"
+//	@Failure		409			{object}	errors.Error							"Process is not published, or a member has already voted"
 //	@Failure		500			{object}	errors.Error							"Internal server error"
 //	@Router			/processes/{processId}/census [delete]
 func (a *API) removeVotingProcessCensusHandler(w http.ResponseWriter, r *http.Request) {
@@ -331,6 +332,14 @@ func (a *API) removeVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 	if len(req.MemberIDs) == 0 {
 		apicommon.HTTPWriteJSON(w, &apicommon.RemoveProcessCensusResponse{Removed: 0})
 		return
+	}
+	// member ids reach code that decodes them as hex, so reject a malformed one here with a 400
+	// rather than let it surface as an opaque failure deeper down.
+	for _, id := range req.MemberIDs {
+		if _, err := primitive.ObjectIDFromHex(id); err != nil {
+			errors.ErrInvalidData.Withf("invalid member id %q", id).Write(w)
+			return
+		}
 	}
 	// a ballot already cast cannot be taken back, so refuse rather than pretend the removal undid it
 	voted, apiErr := a.votedAmong(questions, req.MemberIDs)

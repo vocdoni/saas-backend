@@ -359,10 +359,19 @@ func (ms *MongoStorage) revokeCensusMembers(ctx context.Context, censusIDs, memb
 // they were still in the census cannot be spent afterwards. Consumption rows (cspTokensStatus) are
 // never touched — see purgeMembersFromCensuses.
 func (ms *MongoStorage) deleteCSPAuthByMembers(ctx context.Context, memberIDs []string) error {
-	// tokens key the member by the binary form of its ObjectID hex
+	// tokens key the member by the binary form of its ObjectID hex. Decode without
+	// internal.HexBytesFromString, which panics on a malformed id by design: an id that cannot be
+	// decoded cannot match a stored token either, so skipping it is both safe and total.
 	userIDs := make([]internal.HexBytes, 0, len(memberIDs))
 	for _, id := range memberIDs {
-		userIDs = append(userIDs, internal.HexBytesFromString(id))
+		userID := internal.HexBytes{}
+		if err := userID.ParseString(id); err != nil {
+			continue
+		}
+		userIDs = append(userIDs, userID)
+	}
+	if len(userIDs) == 0 {
+		return nil
 	}
 	if _, err := ms.cspTokens.DeleteMany(ctx, bson.M{"userid": bson.M{"$in": userIDs}}); err != nil {
 		return fmt.Errorf("failed to delete CSP auth tokens: %w", err)
