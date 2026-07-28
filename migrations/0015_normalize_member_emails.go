@@ -58,22 +58,22 @@ type participantHashDoc struct {
 // documents without importing db. That makes it a duplicate of a
 // correctness-critical function: if the two ever disagree, the repair writes
 // hashes the login path will never match and every repaired voter is locked out.
-// db.TestRepairMatchesCanonicalHash asserts they agree — including the case folding
-// below, which must stay identical to db.LoginHashValue.
+// db.TestRepairMatchesCanonicalHash asserts they agree — including the lowercasing
+// below, which makes login case-insensitive and must stay identical to db's.
 func hashMemberFields(m memberHashDoc, authFields, twoFaFields []string) []byte {
 	data := make([]string, 0, len(authFields)+len(twoFaFields))
 	for _, field := range authFields {
 		switch field {
 		case "name":
-			data = append(data, foldLoginValue(m.Name))
+			data = append(data, strings.ToLower(m.Name))
 		case "surname":
-			data = append(data, foldLoginValue(m.Surname))
+			data = append(data, strings.ToLower(m.Surname))
 		case "memberNumber":
-			data = append(data, foldLoginValue(m.MemberNumber))
+			data = append(data, strings.ToLower(m.MemberNumber))
 		case "nationalId":
-			data = append(data, foldLoginValue(m.NationalID))
+			data = append(data, strings.ToLower(m.NationalID))
 		case "birthDate": //nolint:goconst
-			data = append(data, foldLoginValue(m.BirthDate))
+			data = append(data, strings.ToLower(m.BirthDate))
 		default:
 			// ignore unknown fields, mirroring db.HashAuthTwoFaFields
 		}
@@ -81,7 +81,7 @@ func hashMemberFields(m memberHashDoc, authFields, twoFaFields []string) []byte 
 	for _, field := range twoFaFields {
 		switch field {
 		case "email": //nolint:goconst
-			data = append(data, foldLoginValue(m.Email))
+			data = append(data, strings.ToLower(m.Email))
 		case "phone":
 			if len(m.Phone) > 0 {
 				// already hashed bytes, not text: never folded
@@ -92,13 +92,6 @@ func hashMemberFields(m memberHashDoc, authFields, twoFaFields []string) []byte 
 		}
 	}
 	return internal.HashSortedFields(data)
-}
-
-// foldLoginValue mirrors db.LoginHashValue. Login is case-insensitive, so the
-// values that feed the hash are lowercased on both sides of the comparison while
-// the member document keeps its original casing.
-func foldLoginValue(value string) string {
-	return strings.ToLower(value)
 }
 
 // recomputeParticipantHashes produces exactly the hash keys that were originally

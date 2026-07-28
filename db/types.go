@@ -414,31 +414,23 @@ func (f OrgMemberTwoFaFields) GetCensusType() CensusType {
 	return CensusTypeAuthOnly
 }
 
-// LoginHashValue folds a member field value for login-hash purposes.
-//
-// It is deliberately NOT part of OrgMember.Normalized, and the folded value is
-// never written back to the member: members keep the casing they were imported
-// with, because that is what gets displayed and exported. Only what is hashed is
-// folded, on both sides of the comparison — when a census participant's hash is
-// computed and when the CSP recomputes it from a login request — which is what
-// makes login case-insensitive without touching stored member data.
-//
-// strings.ToLower matches what internal.NormalizeEmail already applies to
-// emails. A full Unicode case-fold would be marginally more correct for a few
-// scripts, but diverging from the existing convention would be worse: the two
-// sides of the hash only agree because they run the same function.
-func LoginHashValue(value string) string {
-	return strings.ToLower(value)
-}
-
 // HashAuthTwoFaFields helper function receives as input the data of a member and
 // the auth and twoFa field and produces a sha256 hash of the concatenation of the
 // data that are included in the fields. The data are ordered by the field names
 // in order to make the hash reproducible.
 //
-// Text values are folded through LoginHashValue so that login is case-insensitive.
-// The phone is the exception: it is already a hash (see HashedPhone), so it is
-// raw bytes rather than text and folding it would corrupt the value.
+// Text values are lowercased so that login is case-insensitive. That folding is
+// deliberately confined to this function and never written back to the member:
+// members keep the casing they were imported with, because that is what gets
+// displayed and exported. OrgMember.Normalized governs what is stored; this
+// governs what is compared. The phone is the exception — it is already a hash
+// (see HashedPhone), so it is raw bytes rather than text and folding it would
+// corrupt the value.
+//
+// strings.ToLower matches what internal.NormalizeEmail already applies to
+// emails. A full Unicode case-fold would be marginally more correct for a few
+// scripts, but diverging from the existing convention would be worse: the two
+// sides of the comparison only agree because they fold identically.
 //
 // IMPORTANT: migrations.hashMemberFields mirrors this function byte for byte so
 // that the repair tooling can recompute stored hashes without importing db. Any
@@ -448,15 +440,15 @@ func HashAuthTwoFaFields(memberData OrgMember, authFields OrgMemberAuthFields, t
 	for _, field := range authFields {
 		switch field {
 		case OrgMemberAuthFieldsName:
-			data = append(data, LoginHashValue(memberData.Name))
+			data = append(data, strings.ToLower(memberData.Name))
 		case OrgMemberAuthFieldsSurname:
-			data = append(data, LoginHashValue(memberData.Surname))
+			data = append(data, strings.ToLower(memberData.Surname))
 		case OrgMemberAuthFieldsMemberNumber:
-			data = append(data, LoginHashValue(memberData.MemberNumber))
+			data = append(data, strings.ToLower(memberData.MemberNumber))
 		case OrgMemberAuthFieldsNationalID:
-			data = append(data, LoginHashValue(memberData.NationalID))
+			data = append(data, strings.ToLower(memberData.NationalID))
 		case OrgMemberAuthFieldsBirthDate:
-			data = append(data, LoginHashValue(memberData.BirthDate))
+			data = append(data, strings.ToLower(memberData.BirthDate))
 		default:
 			// Ignore unknown fields
 			continue
@@ -465,7 +457,7 @@ func HashAuthTwoFaFields(memberData OrgMember, authFields OrgMemberAuthFields, t
 	for _, field := range twoFaFields {
 		switch field {
 		case OrgMemberTwoFaFieldEmail:
-			data = append(data, LoginHashValue(memberData.Email))
+			data = append(data, strings.ToLower(memberData.Email))
 		case OrgMemberTwoFaFieldPhone:
 			if !memberData.Phone.IsEmpty() {
 				// already hashed bytes, not text: never folded
