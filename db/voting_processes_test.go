@@ -175,3 +175,48 @@ func TestQuestionStatusSyncMethods(t *testing.T) {
 	_, err = testDB.SetQuestionStatusSynced(nil, QuestionStatusReady, QuestionStatusEnded)
 	c.Assert(err, qt.ErrorIs, ErrInvalidData)
 }
+
+// TestSetQuestionEligibleMemberIDs covers the targeted eligibility write: it leaves the fields the
+// publish path owns alone, treats "no restriction" the same however it was stored, and refuses a
+// write whose expected value is stale.
+func TestSetQuestionEligibleMemberIDs(t *testing.T) {
+	c := qt.New(t)
+	org := common.Address{0x33}
+	setupVotingProcessOrg(c, org)
+
+	vpID, err := testDB.SetVotingProcess(&VotingProcess{OrgAddress: org, Title: MultiLangString{"default": "P"}})
+	c.Assert(err, qt.IsNil)
+
+	// a question stored with no restriction: EligibleMemberIDs is nil, i.e. null in the database.
+	qID, err := testDB.SetQuestion(&VotingProcessQuestion{
+		ProcessID: vpID, OrgAddress: org, Type: VotingTypeSingleChoice,
+		UpstreamID: internal.HexBytes{0xab}, Status: "READY",
+	})
+	c.Assert(err, qt.IsNil)
+
+	// restricting it matches the stored null, and does not disturb the publish-owned fields
+	c.Assert(testDB.SetQuestionEligibleMemberIDs(qID, nil, []string{"a", "b"}), qt.IsNil)
+	got, err := testDB.Question(qID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.EligibleMemberIDs, qt.DeepEquals, []string{"a", "b"})
+	c.Assert(got.UpstreamID, qt.DeepEquals, internal.HexBytes{0xab})
+	c.Assert(got.Status, qt.Equals, "READY")
+
+	// appending against the value we just read succeeds
+	c.Assert(testDB.SetQuestionEligibleMemberIDs(qID, []string{"a", "b"}, []string{"a", "b", "c"}), qt.IsNil)
+
+	// a stale expected value loses instead of clobbering the concurrent write
+	err = testDB.SetQuestionEligibleMemberIDs(qID, []string{"a", "b"}, []string{"a", "b", "d"})
+	c.Assert(err, qt.Equals, ErrStaleWrite)
+	got, err = testDB.Question(qID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.EligibleMemberIDs, qt.DeepEquals, []string{"a", "b", "c"})
+
+	// clearing it back to "everyone", then matching that empty list however it is stored
+	c.Assert(testDB.SetQuestionEligibleMemberIDs(qID, []string{"a", "b", "c"}, nil), qt.IsNil)
+	c.Assert(testDB.SetQuestionEligibleMemberIDs(qID, nil, []string{"e"}), qt.IsNil)
+
+	// unknown question
+	c.Assert(testDB.SetQuestionEligibleMemberIDs(primitive.NewObjectID(), nil, []string{"a"}), qt.Equals, ErrNotFound)
+	c.Assert(testDB.SetQuestionEligibleMemberIDs(primitive.NilObjectID, nil, nil), qt.Equals, ErrInvalidData)
+}

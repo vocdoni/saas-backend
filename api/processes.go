@@ -511,7 +511,11 @@ func (a *API) validateVotingProcessHandler(w http.ResponseWriter, r *http.Reques
 // votingProcessQuestionHandler godoc
 //
 //	@Summary		Get a voting process question
-//	@Description	Public voter read of a single question, including its synced status and eligibility.
+//	@Description	Public voter read of a single question, including its synced status. The parent
+//	@Description	process's census config is not repeated here — read it from GET /processes/{parentProcessId},
+//	@Description	using the parentProcessId this response carries. A Manager/Admin of the owning organization
+//	@Description	(or a voting:write API key) additionally gets eligibleMemberIds, the members allowed to
+//	@Description	vote this question; it is never disclosed to a voter.
 //	@Tags			processes
 //	@Produce		json
 //	@Param			processId	path		string	true	"Process ID"
@@ -538,8 +542,8 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 		errors.ErrProcessNotFound.Withf("question not found").Write(w)
 		return
 	}
-	// hydrate the parent process's census config (the auth policy the voter must satisfy); the
-	// member list and per-question eligibility subset are never exposed on this public endpoint.
+	// the parent process is needed to gate the read and to resolve the caller's role; its census
+	// config is not repeated here — clients read it from GET /processes/{parentProcessId}.
 	vp, err := a.db.VotingProcess(oid)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -551,7 +555,6 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 		errors.ErrProcessNotFound.Withf("question not found").Write(w)
 		return
 	}
-	census, _ := a.db.Census(vp.CensusID.Hex())
 	// serve the stored status now; refresh it from the chain in the background so a status change
 	// made directly on-chain (outside this API) is picked up.
 	a.enqueueReconcileIfStale(question)
@@ -559,7 +562,13 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 	question.EncryptionKeys = a.resolveQuestionEncryptionKeys(question)
 	// surface the on-chain tally once the question is in RESULTS status (nil/no chain call otherwise).
 	question.Results = a.resolveQuestionResults(question)
-	apicommon.HTTPWriteJSON(w, apicommon.PublicQuestionResponseFromDB(question, census))
+	// who may vote this question is management information: a voter gets the question, a manager
+	// (or a voting:write API key) also gets the eligible member ids.
+	resp := apicommon.PublicQuestionResponseFromDB(question)
+	if a.optionalManager(r, vp.OrgAddress) {
+		resp = resp.WithEligibility(question)
+	}
+	apicommon.HTTPWriteJSON(w, resp)
 }
 
 // parallelForEach runs fn(0..n-1) concurrently with a bounded worker pool and waits for all to

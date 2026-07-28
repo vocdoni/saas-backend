@@ -27,6 +27,10 @@ var (
 	// ErrManagedQuotaReached is returned when an atomic integrator-quota reservation would
 	// exceed the integrator's managed-orgs, managed-processes or managed-census-size limit.
 	ErrManagedQuotaReached = fmt.Errorf("integrator managed quota reached")
+	// ErrStaleWrite is returned by a compare-and-set update whose document still exists but no
+	// longer holds the value the caller read: someone else changed it in between, so the caller
+	// must re-read and decide again rather than overwrite blindly.
+	ErrStaleWrite = fmt.Errorf("document changed since it was read")
 )
 
 // errorsAsStrings converts a slice of errors to a slice of strings

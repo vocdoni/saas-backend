@@ -90,6 +90,7 @@ var apiKeyAllowlist = map[string]string{
 	"POST " + processesPublishEndpoint:        ScopeVotingWrite,
 	"PUT " + processesQuestionsStatusEndpoint: ScopeVotingWrite,
 	"PUT " + processesQuestionStatusEndpoint:  ScopeVotingWrite,
+	"PUT " + processesQuestionCensusEndpoint:  ScopeVotingWrite,
 }
 
 // requiredScopeForRoute returns the scope required to call (method, pattern) with an API key and

@@ -148,6 +148,47 @@ func (ms *MongoStorage) SetQuestionEncryptionKeys(id primitive.ObjectID, keys []
 	return nil
 }
 
+// SetQuestionEligibleMemberIDs sets only the eligibleMemberIds field of a question (targeted
+// update), leaving the fields the publish path owns — upstreamId, status, metadataURL, syncedAt —
+// untouched. An empty list means every census member is eligible.
+//
+// The write is a compare-and-set: expected is the list the caller read before deciding what the
+// new one should be, and it is part of the filter, so two concurrent updates cannot silently drop
+// each other's members. A question that still exists but no longer matches expected yields
+// ErrStaleWrite, telling the caller to re-read and decide again.
+func (ms *MongoStorage) SetQuestionEligibleMemberIDs(id primitive.ObjectID, expected, ids []string) error {
+	if id == primitive.NilObjectID {
+		return ErrInvalidData
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	// "no restriction" reaches the database as null (a nil slice), as a missing field, or as an
+	// empty array depending on which write stored it, and all three mean the same thing — so match
+	// any of them rather than only the shape this caller happens to hold.
+	match := any(expected)
+	if len(expected) == 0 {
+		match = bson.M{"$in": bson.A{nil, bson.A{}}}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.processesQuestions.UpdateOne(ctx,
+		bson.M{"_id": id, "eligibleMemberIds": match},
+		bson.M{"$set": bson.M{"eligibleMemberIds": ids}})
+	if err != nil {
+		return fmt.Errorf("failed to set question eligible member ids: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		// tell "there is no such question" apart from "someone else changed it first".
+		n, cErr := ms.processesQuestions.CountDocuments(ctx, bson.M{"_id": id})
+		if cErr == nil && n > 0 {
+			return ErrStaleWrite
+		}
+		return ErrNotFound
+	}
+	return nil
+}
+
 // DeleteQuestion removes a single question document (used when replacing a draft's
 // questions on update).
 func (ms *MongoStorage) DeleteQuestion(id primitive.ObjectID) error {

@@ -1293,14 +1293,19 @@ definitions:
     properties:
       ballotProtocol:
         $ref: '#/definitions/db.BallotProtocol'
-      census:
-        $ref: '#/definitions/apicommon.CensusSpec'
       choices:
         items:
           $ref: '#/definitions/db.Choice'
         type: array
       description:
         $ref: '#/definitions/db.MultiLangString'
+      eligibleMemberIds:
+        description: |-
+          EligibleMemberIDs are the members allowed to vote this question; absent when the question is
+          open to the whole census, and always absent for a caller who is not a manager of the org.
+        items:
+          type: string
+        type: array
       encryptionKeys:
         description: |-
           EncryptionKeys are the on-chain vote-encryption public keys (only for secretUntilTheEnd
@@ -1703,6 +1708,27 @@ definitions:
           Additional metadata for the process
           Can be any key-value pairs
         type: object
+    type: object
+  apicommon.UpdateQuestionCensusRequest:
+    properties:
+      memberIds:
+        description: Member ids eligible for this question; each must be a participant
+          of the process census
+        items:
+          type: string
+        type: array
+    type: object
+  apicommon.UpdateQuestionCensusResponse:
+    properties:
+      added:
+        type: integer
+      eligible:
+        description: Eligible is the number of members eligible after the update
+        type: integer
+      jobId:
+        type: string
+      removed:
+        type: integer
     type: object
   apicommon.UserInfo:
     properties:
@@ -6385,8 +6411,12 @@ paths:
       - processes
   /processes/{processId}/questions/{questionId}:
     get:
-      description: Public voter read of a single question, including its synced status
-        and eligibility.
+      description: |-
+        Public voter read of a single question, including its synced status. The parent
+        process's census config is not repeated here — read it from GET /processes/{parentProcessId},
+        using the parentProcessId this response carries. A Manager/Admin of the owning organization
+        (or a voting:write API key) additionally gets eligibleMemberIds, the members allowed to
+        vote this question; it is never disclosed to a voter.
       parameters:
       - description: Process ID
         in: path
@@ -6410,6 +6440,75 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Get a voting process question
+      tags:
+      - processes
+  /processes/{processId}/questions/{questionId}/census:
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Replace the list of organization members eligible to vote a single question. The body
+        carries the complete list, not a delta, and every id must already be a participant of the
+        process census — add them with PUT /processes/{processId}/census first.
+        While the process is a draft the list is applied as given, so members can be added,
+        removed or replaced. Once the process is published the list may only grow: it must still
+        contain every member it already had (409 otherwise), a question that was open to the whole
+        census cannot be narrowed to a subset, and a subset cannot be widened back to the whole
+        census. Sending the list a question already has is a no-op.
+        Growing a published question's list raises its on-chain election maxCensusSize as an
+        async job (poll GET /jobs/{jobId}); without that the new members would be signed by the
+        CSP only for the chain to reject their vote. Requires Manager/Admin role.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Question ID
+        in: path
+        name: questionId
+        required: true
+        type: string
+      - description: Eligible member IDs
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.UpdateQuestionCensusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Applied; no on-chain resize needed
+          schema:
+            $ref: '#/definitions/apicommon.UpdateQuestionCensusResponse'
+        "202":
+          description: Applied; maxCensusSize update enqueued
+          schema:
+            $ref: '#/definitions/apicommon.UpdateQuestionCensusResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process or question not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Would restrict a published question
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Set the members eligible to vote one question
       tags:
       - processes
   /processes/{processId}/questions/{questionId}/status:

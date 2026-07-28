@@ -551,9 +551,9 @@ func TestVotingProcessPublicReads(t *testing.T) {
 		"processes?orgAddress=0x0000000000000000000000000000000000000000")
 }
 
-// TestVotingProcessPublicQuestionCensus verifies the public single-question read of a PUBLISHED
-// process includes the parent census config (the auth policy) but never the eligibility member
-// list, and that a restricted question's eligibleMemberIds is not serialized.
+// TestVotingProcessPublicQuestionCensus verifies the single-question read no longer repeats the
+// parent process's census config, and that its eligibility member list is management information:
+// present for a manager, never serialized for an anonymous voter.
 func TestVotingProcessPublicQuestionCensus(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
@@ -571,7 +571,7 @@ func TestVotingProcessPublicQuestionCensus(t *testing.T) {
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", created.ProcessID, "publish")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
 
-	// public read (no token) of question 2 (the eligibility-restricted one): census config present,
+	// public read (no token) of question 2 (the eligibility-restricted one): no census block, and
 	// eligibleMemberIds NOT exposed. Assert against the raw JSON so a re-added field can't slip in.
 	raw, code := testRequest(t, http.MethodGet, "", nil,
 		"processes", created.ProcessID, "questions", got.Questions[1].ID.Hex())
@@ -579,9 +579,23 @@ func TestVotingProcessPublicQuestionCensus(t *testing.T) {
 	var q apicommon.PublicQuestionResponse
 	c.Assert(json.Unmarshal(raw, &q), qt.IsNil)
 	c.Assert(q.ID, qt.Equals, got.Questions[1].ID)
-	c.Assert(q.Census.TwoFaFields, qt.Contains, db.OrgMemberTwoFaFieldEmail)
+	c.Assert(q.ParentProcessID.Hex(), qt.Equals, created.ProcessID)
+	c.Assert(q.EligibleMemberIDs, qt.HasLen, 0)
 	c.Assert(strings.Contains(string(raw), "eligibleMemberIds"), qt.IsFalse,
 		qt.Commentf("public read leaked eligibleMemberIds: %s", raw))
+	// the parent census config lives on the parent process, reachable via parentProcessId
+	c.Assert(strings.Contains(string(raw), `"census"`), qt.IsFalse,
+		qt.Commentf("question read still carries the parent census: %s", raw))
+
+	// the same read as a manager carries the eligibility list
+	mgr := requestAndParse[apicommon.PublicQuestionResponse](t, http.MethodGet, token, nil,
+		"processes", created.ProcessID, "questions", got.Questions[1].ID.Hex())
+	c.Assert(mgr.EligibleMemberIDs, qt.DeepEquals, ids[:1])
+
+	// a whole-census question has no eligibility list to show, even to a manager
+	mgrOpen := requestAndParse[apicommon.PublicQuestionResponse](t, http.MethodGet, token, nil,
+		"processes", created.ProcessID, "questions", got.Questions[0].ID.Hex())
+	c.Assert(mgrOpen.EligibleMemberIDs, qt.HasLen, 0)
 }
 
 // TestVotingProcessParticipant verifies the participant endpoint validates the process and

@@ -10,6 +10,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 )
@@ -189,4 +190,203 @@ func TestProcessesCensusGroupID(t *testing.T) {
 	c.Assert(groups, qt.Contains, group.ID)
 	c.Assert(groups, qt.Contains, "")
 	c.Assert(groups, qt.Not(qt.Contains), primitive.NilObjectID.Hex())
+}
+
+// TestUpdateQuestionCensus adds a member to a published question's eligibility subset and verifies
+// the member really can vote afterwards: the CSP signs for them AND the question's on-chain
+// maxCensusSize grew to fit them. Without the size bump the CSP would sign a ballot the chain then
+// rejects, so both halves matter.
+func TestUpdateQuestionCensus(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+
+	// question 1 is restricted to ids[0]; question 0 is open to the whole census.
+	req := newVotingProcessRequest(orgAddress, ids)
+	req.StartDate = ""
+	req.Census.AuthFields = db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsSurname}
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint)
+	pid := created.ProcessID
+
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
+
+	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	qid := got.Questions[1].ID.Hex()
+	election := got.Questions[1].UpstreamID
+	c.Assert(len(election) > 0, qt.IsTrue)
+	c.Assert(got.Questions[1].EligibleMemberIDs, qt.DeepEquals, ids[:1])
+
+	// the subset question's election was sized for exactly its one eligible member.
+	elec, err := testAPI.account.Election(election)
+	c.Assert(err, qt.IsNil)
+	c.Assert(elec.Census, qt.Not(qt.IsNil))
+	c.Assert(elec.Census.MaxCensusSize, qt.Equals, uint64(1))
+
+	// members[1] is already a census participant, so it only has to become eligible.
+	upd := requestAndParseWithAssertCode[apicommon.UpdateQuestionCensusResponse](
+		http.StatusAccepted, t, http.MethodPut, token,
+		&apicommon.UpdateQuestionCensusRequest{MemberIDs: ids},
+		"processes", pid, "questions", qid, "census")
+	c.Assert(upd.Added, qt.Equals, 1)
+	c.Assert(upd.Removed, qt.Equals, 0)
+	c.Assert(upd.Eligible, qt.Equals, 2)
+	c.Assert(upd.JobID, qt.Not(qt.Equals), "")
+
+	sizeJob := pollJob(t, upd.JobID)
+	c.Assert(sizeJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("size job error: %s", sizeJob.Errors))
+	elec, err = testAPI.account.Election(election)
+	c.Assert(err, qt.IsNil)
+	c.Assert(elec.Census.MaxCensusSize, qt.Equals, uint64(2),
+		qt.Commentf("the question's maxCensusSize should have grown to fit the new member"))
+
+	got = requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	c.Assert(got.Questions[1].EligibleMemberIDs, qt.DeepEquals, ids)
+
+	// replaying the same list changes nothing and enqueues no job.
+	replay := requestAndParseWithAssertCode[apicommon.UpdateQuestionCensusResponse](
+		http.StatusOK, t, http.MethodPut, token,
+		&apicommon.UpdateQuestionCensusRequest{MemberIDs: ids},
+		"processes", pid, "questions", qid, "census")
+	c.Assert(replay.Added, qt.Equals, 0)
+	c.Assert(replay.Eligible, qt.Equals, 2)
+	c.Assert(replay.JobID, qt.Equals, "")
+
+	// the newly eligible member can now authenticate and sign that question's election.
+	voter := ethereum.SignKeys{}
+	c.Assert(voter.Generate(), qt.IsNil)
+	tok := authProcessCSP(t, pid, &handlers.AuthRequest{
+		Name: members[1].Name, Surname: members[1].Surname, Email: members[1].Email,
+	})
+	sign := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "",
+		&handlers.SignRequest{
+			AuthToken: tok, ProcessID: election, Payload: hex.EncodeToString(voter.Address().Bytes()),
+		}, "processes", pid, "sign")
+	c.Assert(sign.Signature, qt.Not(qt.HasLen), 0)
+}
+
+// TestUpdateQuestionCensusDraft verifies that while the process is still a draft the eligible list
+// is simply replaced — members may be removed and swapped, and nothing goes on chain.
+func TestUpdateQuestionCensusDraft(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+
+	req := newVotingProcessRequest(orgAddress, ids)
+	req.StartDate = ""
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint)
+	pid := created.ProcessID
+	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	subsetQID := got.Questions[1].ID.Hex()
+	openQID := got.Questions[0].ID.Hex()
+
+	// swap the eligible member for the other one: one added, one removed, no job.
+	upd := requestAndParseWithAssertCode[apicommon.UpdateQuestionCensusResponse](
+		http.StatusOK, t, http.MethodPut, token,
+		&apicommon.UpdateQuestionCensusRequest{MemberIDs: ids[1:]},
+		"processes", pid, "questions", subsetQID, "census")
+	c.Assert(upd.Added, qt.Equals, 1)
+	c.Assert(upd.Removed, qt.Equals, 1)
+	c.Assert(upd.Eligible, qt.Equals, 1)
+	c.Assert(upd.JobID, qt.Equals, "")
+
+	// a draft may also be opened back up to the whole census, and restricted from it.
+	requestAndParseWithAssertCode[apicommon.UpdateQuestionCensusResponse](
+		http.StatusOK, t, http.MethodPut, token,
+		&apicommon.UpdateQuestionCensusRequest{MemberIDs: nil},
+		"processes", pid, "questions", subsetQID, "census")
+	requestAndParseWithAssertCode[apicommon.UpdateQuestionCensusResponse](
+		http.StatusOK, t, http.MethodPut, token,
+		&apicommon.UpdateQuestionCensusRequest{MemberIDs: ids[:1]},
+		"processes", pid, "questions", openQID, "census")
+
+	got = requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	c.Assert(got.Questions[0].EligibleMemberIDs, qt.DeepEquals, ids[:1])
+	c.Assert(got.Questions[1].EligibleMemberIDs, qt.HasLen, 0)
+}
+
+// TestUpdateQuestionCensusRejects covers the guards: a published question's electorate may only
+// grow, ids must already be census participants, and the caller must manage the organization.
+func TestUpdateQuestionCensusRejects(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
+	ids := memberIDs(members)
+
+	// census = the first two members; members[2] is an org member outside the census.
+	req := newVotingProcessRequest(orgAddress, ids[:2])
+	req.StartDate = ""
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint)
+	pid := created.ProcessID
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
+
+	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	openQID := got.Questions[0].ID.Hex()   // whole census
+	subsetQID := got.Questions[1].ID.Hex() // restricted to ids[0]
+
+	for _, tc := range []struct {
+		name     string
+		qid      string
+		jwt      string
+		body     *apicommon.UpdateQuestionCensusRequest
+		expected errors.Error
+	}{
+		{
+			"drops an already-eligible member", subsetQID, token,
+			&apicommon.UpdateQuestionCensusRequest{MemberIDs: ids[1:2]},
+			errors.ErrQuestionEligibilityRestricted,
+		},
+		{
+			"restricts a whole-census question", openQID, token,
+			&apicommon.UpdateQuestionCensusRequest{MemberIDs: ids[:1]},
+			errors.ErrQuestionEligibilityRestricted,
+		},
+		{
+			"opens a restricted question to everyone", subsetQID, token,
+			&apicommon.UpdateQuestionCensusRequest{MemberIDs: nil},
+			errors.ErrQuestionEligibilityRestricted,
+		},
+		{
+			"member is not in the process census", subsetQID, token,
+			&apicommon.UpdateQuestionCensusRequest{MemberIDs: []string{ids[0], ids[2]}},
+			errors.ErrInvalidData,
+		},
+		{
+			"question belongs to another process", primitive.NewObjectID().Hex(), token,
+			&apicommon.UpdateQuestionCensusRequest{MemberIDs: ids[:1]},
+			errors.ErrProcessNotFound,
+		},
+		{
+			"caller does not manage the organization", subsetQID, testCreateUser(t, "otherpassword123"),
+			&apicommon.UpdateQuestionCensusRequest{MemberIDs: ids[:2]},
+			errors.ErrUnauthorized,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requestAndAssertError(tc.expected, t, http.MethodPut, tc.jwt, tc.body,
+				"processes", pid, "questions", tc.qid, "census")
+		})
+	}
+
+	// a malformed question id is a 400, not a 404
+	requestAndAssertError(errors.ErrMalformedURLParam, t, http.MethodPut, token,
+		&apicommon.UpdateQuestionCensusRequest{MemberIDs: ids[:1]},
+		"processes", pid, "questions", "not-an-objectid", "census")
+
+	// none of the rejections changed the stored eligibility
+	got = requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	c.Assert(got.Questions[0].EligibleMemberIDs, qt.HasLen, 0)
+	c.Assert(got.Questions[1].EligibleMemberIDs, qt.DeepEquals, ids[:1])
 }

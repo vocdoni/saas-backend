@@ -224,6 +224,9 @@ const (
 	processesQuestionsStatusEndpoint = "/processes/{processId}/questions/status"
 	// PUT /processes/{processId}/questions/{questionId}/status to change one question's status
 	processesQuestionStatusEndpoint = "/processes/{processId}/questions/{questionId}/status"
+	// PUT /processes/{processId}/questions/{questionId}/census sets one question's eligible members.
+	// Append-only once the process is published; unrestricted while it is still a draft.
+	processesQuestionCensusEndpoint = "/processes/{processId}/questions/{questionId}/census"
 	// GET /processes/{processId}/questions/{questionId} to read one question (public voter read)
 	processesQuestionEndpoint = "/processes/{processId}/questions/{questionId}"
 	// GET /processes/{processId}/participants/{participantId} for a single participant's info (public)

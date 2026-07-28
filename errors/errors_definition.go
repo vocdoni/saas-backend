@@ -108,6 +108,7 @@ var (
 	ErrAPIKeyNotFound                         = Error{Code: 40160, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("API key not found")}
 	ErrManagedOrgHasActiveElections           = Error{Code: 40161, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("managed organization has active elections and cannot be deleted")}
 	ErrVotingTypeNotAllowed                   = Error{Code: 40163, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("voting type not allowed by the subscription plan")}
+	ErrQuestionEligibilityRestricted          = Error{Code: 40168, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("a published question's eligible members can only be added to")}
 
 	// CSP errors (408)
 	ErrZeroWeightVoter = Error{Code: 40801, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("voter weight cannot be zero")}

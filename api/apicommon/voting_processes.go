@@ -82,6 +82,26 @@ type UpdateProcessCensusResponse struct {
 	Errors []string `json:"errors,omitempty"`
 }
 
+// UpdateQuestionCensusRequest is the body of PUT /processes/{processId}/questions/{questionId}/census:
+// the complete list of members eligible to vote that question, not a delta. An empty list means every
+// census member is eligible. Once the process is published the list may only grow — it must still
+// contain every member it already had — so a retry of the same body is a no-op rather than an error.
+type UpdateQuestionCensusRequest struct {
+	// Member ids eligible for this question; each must be a participant of the process census
+	MemberIDs []string `json:"memberIds"`
+}
+
+// UpdateQuestionCensusResponse is the result of PUT /processes/{processId}/questions/{questionId}/census:
+// how the eligible list changed, plus the async job that raises the question's on-chain maxCensusSize
+// when it grew (empty for a draft, or when the list did not change).
+type UpdateQuestionCensusResponse struct {
+	JobID string `json:"jobId,omitempty"`
+	// Eligible is the number of members eligible after the update
+	Eligible int `json:"eligible"`
+	Added    int `json:"added"`
+	Removed  int `json:"removed,omitempty"`
+}
+
 // CreateVotingProcessResponse is returned by POST /processes.
 type CreateVotingProcessResponse struct {
 	ProcessID string `json:"processId"`
@@ -170,10 +190,11 @@ type QuestionStatusID struct {
 	ID string `json:"id"`
 }
 
-// PublicQuestionResponse is the voter-facing single-question read: the voter-safe question
-// fields plus the parent process's census config (the auth policy a voter must satisfy). It is
-// an explicit allow-list, NOT the raw db.VotingProcessQuestion — the census member list and the
-// per-question eligibility subset (member ids) are never exposed on this public endpoint.
+// PublicQuestionResponse is the voter-facing single-question read. It is an explicit allow-list,
+// NOT the raw db.VotingProcessQuestion. The parent process's census config is not repeated here —
+// read it from GET /processes/{parentProcessId} — and EligibleMemberIDs, which names the members
+// allowed to vote this question, is filled in only for a manager of the owning organization; an
+// anonymous voter never sees who the electorate is.
 type PublicQuestionResponse struct {
 	ID                primitive.ObjectID   `json:"id"`
 	ParentProcessID   primitive.ObjectID   `json:"parentProcessId"`
@@ -187,7 +208,9 @@ type PublicQuestionResponse struct {
 	Metadata          map[string]any       `json:"metadata,omitempty"`
 	UpstreamID        internal.HexBytes    `json:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	Status            string               `json:"status,omitempty"`
-	Census            CensusSpec           `json:"census"`
+	// EligibleMemberIDs are the members allowed to vote this question; absent when the question is
+	// open to the whole census, and always absent for a caller who is not a manager of the org.
+	EligibleMemberIDs []string `json:"eligibleMemberIds,omitempty"`
 	// EncryptionKeys are the on-chain vote-encryption public keys (only for secretUntilTheEnd
 	// questions). Because of omitempty the field is absent (not an empty array) until the keykeepers
 	// publish the keys, so clients treat its absence as "not yet published" and poll. Voters seal
@@ -201,9 +224,10 @@ type PublicQuestionResponse struct {
 	Results *db.QuestionResults `json:"results,omitempty"`
 }
 
-// PublicQuestionResponseFromDB builds the public question read from a question and its parent
-// process's census (config only). It copies only the voter-safe fields (no eligibility member ids).
-func PublicQuestionResponseFromDB(q *db.VotingProcessQuestion, census *db.Census) *PublicQuestionResponse {
+// PublicQuestionResponseFromDB builds the public question read from a question. It copies only the
+// voter-safe fields and never the eligible member ids: a caller entitled to those adds them
+// afterwards (see WithEligibility), so the default stays safe for the voter-facing route.
+func PublicQuestionResponseFromDB(q *db.VotingProcessQuestion) *PublicQuestionResponse {
 	resp := &PublicQuestionResponse{
 		ID:                q.ID,
 		ParentProcessID:   q.ProcessID,
@@ -220,14 +244,14 @@ func PublicQuestionResponseFromDB(q *db.VotingProcessQuestion, census *db.Census
 		EncryptionKeys:    q.EncryptionKeys,
 		Results:           q.Results,
 	}
-	if census != nil {
-		resp.Census = CensusSpec{
-			Weighted:    census.Weighted,
-			AuthFields:  census.AuthFields,
-			TwoFaFields: census.TwoFaFields,
-		}
-	}
 	return resp
+}
+
+// WithEligibility discloses which members may vote the question. Reserved for a manager of the
+// owning organization — a voter is told the question, not the electorate.
+func (r *PublicQuestionResponse) WithEligibility(q *db.VotingProcessQuestion) *PublicQuestionResponse {
+	r.EligibleMemberIDs = q.EligibleMemberIDs
+	return r
 }
 
 // VotingProcessResponseFromDB builds the read response from a process, its (hydrated)
