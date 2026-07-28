@@ -10,7 +10,9 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // testCreateProvisionedOrganization creates an organization with eager on-chain account
@@ -91,4 +93,65 @@ func TestVotingProcessPublish(t *testing.T) {
 
 	// re-publishing a published process is an idempotent no-op (200, not a new job)
 	requestAndAssertCode(http.StatusOK, t, http.MethodPost, token, nil, "processes", pid, "publish")
+}
+
+// TestVotingProcessPublishRejectsStrayQuestion covers the last-line guard of issue #614: a database
+// that already carries a duplicated question (written before the per-slot fix, or directly) must not
+// have it turned into a real on-chain election, which is the one step nothing can undo. Publish is
+// refused until the draft is saved again.
+func TestVotingProcessPublishRejectsStrayQuestion(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+
+	req := newVotingProcessRequest(orgAddress, ids)
+	req.StartDate = ""
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint)
+	pid := created.ProcessID
+	oid, err := primitive.ObjectIDFromHex(pid)
+	c.Assert(err, qt.IsNil)
+
+	// reproduce the corrupted state the old write path could leave behind: a third question row
+	// carrying this processId that the process itself does not list
+	stray := &db.VotingProcessQuestion{
+		ProcessID: oid, OrgAddress: orgAddress, Order: 1,
+		Title:     db.MultiLangString{"default": "stray"},
+		Type:      db.VotingTypeSingleChoice,
+		TypeSetup: db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1},
+		Choices:   []db.Choice{{Title: db.MultiLangString{"default": "Yes"}, Value: 0}},
+	}
+	_, err = testDB.SetQuestion(stray)
+	c.Assert(err, qt.IsNil)
+
+	stored, err := testDB.QuestionsByProcess(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(stored, qt.HasLen, 3)
+
+	// both the dry-run validation and publish itself refuse it
+	validation := requestAndParse[apicommon.VotingProcessValidateResponse](
+		t, http.MethodGet, token, nil, "processes", pid, "validation")
+	c.Assert(validation.Valid, qt.IsFalse)
+	c.Assert(fmt.Sprint(validation.Errors), qt.Contains, "stored questions do not match the process")
+
+	requestAndAssertError(errors.ErrMalformedBody, t, http.MethodPost, token, nil, "processes", pid, "publish")
+
+	// nothing reached the chain, and the process is still a draft
+	after := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	c.Assert(after.Published, qt.IsFalse)
+	for i := range after.Questions {
+		c.Assert(after.Questions[i].UpstreamID, qt.HasLen, 0)
+	}
+
+	// saving the draft again reconciles the stored set, and publish is allowed once more
+	requestAndAssertCode(http.StatusOK, t, http.MethodPut, token, req, "processes", pid)
+	stored, err = testDB.QuestionsByProcess(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(stored, qt.HasLen, 2)
+	validation = requestAndParse[apicommon.VotingProcessValidateResponse](
+		t, http.MethodGet, token, nil, "processes", pid, "validation")
+	c.Assert(validation.Valid, qt.IsTrue, qt.Commentf("errors: %v", validation.Errors))
 }

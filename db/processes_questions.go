@@ -32,6 +32,89 @@ func (ms *MongoStorage) SetQuestion(q *VotingProcessQuestion) (primitive.ObjectI
 	return q.ID, nil
 }
 
+// SetProcessQuestions replaces a process's questions, addressing each by the slot it occupies:
+// question i is upserted on (processId, order=i), and anything beyond the new length is deleted.
+// It returns the resulting ids in order, for the process's own QuestionIDs.
+//
+// This exists instead of delete-everything-then-insert-everything because that sequence is not safe
+// against a second writer. Two overlapping draft updates interleave so that one deletes rows the
+// other has not inserted yet, and the stragglers survive as duplicates carrying the same processId —
+// which publish then turns into real elections (issue #614). Addressing rows by slot means neither
+// writer deletes what the other is inserting: the worst a race can do is leave slot i belonging to
+// whichever request wrote it last, which is a state some client actually asked for.
+//
+// It also keeps a question's _id stable across draft edits, since an existing row in a slot is
+// replaced rather than dropped and re-created. Publish, the status syncer and the eligibility lists
+// all key off those ids.
+//
+// The final sweep deletes every other row of the process, not just the tail past the new length, so
+// re-saving a draft repairs a database that a pre-fix update had already duplicated.
+//
+// Note this is not atomic across slots: a concurrent reader can still observe a half-applied update.
+// What it guarantees is that no row is ever orphaned, which is the part that reaches the chain.
+func (ms *MongoStorage) SetProcessQuestions(
+	processID primitive.ObjectID, questions []*VotingProcessQuestion,
+) ([]primitive.ObjectID, error) {
+	if processID == primitive.NilObjectID {
+		return nil, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	ids := make([]primitive.ObjectID, 0, len(questions))
+	for i, q := range questions {
+		q.ProcessID = processID
+		q.Order = i
+		// the replacement carries no _id, so an existing row in this slot keeps the one it has and a
+		// brand new slot gets a server-generated one. Doing it in a single atomic find-and-replace
+		// (rather than reading the slot first) leaves no window for a second writer to insert
+		// between the read and the write, which would make the replacement fail on the immutable _id.
+		doc, err := questionDocWithoutID(q)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode question %d: %w", i, err)
+		}
+		filter := bson.M{"processId": processID, "order": i} //nolint:goconst
+		stored := struct {
+			ID primitive.ObjectID `bson:"_id"`
+		}{}
+		err = ms.processesQuestions.FindOneAndReplace(ctx, filter, doc,
+			options.FindOneAndReplace().
+				SetUpsert(true).
+				SetReturnDocument(options.After).
+				SetProjection(bson.M{"_id": 1}),
+		).Decode(&stored)
+		if err != nil {
+			return nil, fmt.Errorf("failed to store question %d: %w", i, err)
+		}
+		q.ID = stored.ID
+		ids = append(ids, q.ID)
+	}
+	// drop anything else still carrying this processId: the tail of a longer previous version, and
+	// any duplicate a pre-fix concurrent update had stranded in a slot we just rewrote
+	if _, err := ms.processesQuestions.DeleteMany(ctx, bson.M{
+		"processId": processID,
+		"_id":       bson.M{"$nin": ids},
+	}); err != nil {
+		return nil, fmt.Errorf("failed to remove surplus questions: %w", err)
+	}
+	return ids, nil
+}
+
+// questionDocWithoutID encodes a question for storage with its _id stripped, so a replacement
+// neither overwrites the id of the row it lands on nor fails on the immutable field.
+func questionDocWithoutID(q *VotingProcessQuestion) (bson.M, error) {
+	raw, err := bson.Marshal(q)
+	if err != nil {
+		return nil, err
+	}
+	doc := bson.M{}
+	if err := bson.Unmarshal(raw, &doc); err != nil {
+		return nil, err
+	}
+	delete(doc, "_id")
+	return doc, nil
+}
+
 // Question returns a single question by its hex ObjectID.
 func (ms *MongoStorage) Question(id primitive.ObjectID) (*VotingProcessQuestion, error) {
 	if id == primitive.NilObjectID {

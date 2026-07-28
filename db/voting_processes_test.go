@@ -175,3 +175,38 @@ func TestQuestionStatusSyncMethods(t *testing.T) {
 	_, err = testDB.SetQuestionStatusSynced(nil, QuestionStatusReady, QuestionStatusEnded)
 	c.Assert(err, qt.ErrorIs, ErrInvalidData)
 }
+
+// TestSetVotingProcessIfUnchanged covers the conditional write behind the optimistic-concurrency
+// token: it applies while the stored updatedAt still matches what the caller read, and refuses with
+// ErrConflict once anything else has written.
+func TestSetVotingProcessIfUnchanged(t *testing.T) {
+	c := qt.New(t)
+	org := common.Address{0x61, 0x14, 0x03}
+	setupVotingProcessOrg(c, org)
+
+	vp := &VotingProcess{OrgAddress: org, Title: MultiLangString{"default": "P"}}
+	id, err := testDB.SetVotingProcess(vp)
+	c.Assert(err, qt.IsNil)
+
+	read, err := testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	seen := read.UpdatedAt
+
+	read.Title = MultiLangString{"default": "edited"}
+	c.Assert(testDB.SetVotingProcessIfUnchanged(read, seen), qt.IsNil)
+	got, err := testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.Title["default"], qt.Equals, "edited")
+	c.Assert(got.UpdatedAt.After(seen), qt.IsTrue)
+
+	// the same token again is now stale: refused, and the stored document is left alone
+	stale := &VotingProcess{ID: id, OrgAddress: org, Title: MultiLangString{"default": "clobbered"}}
+	c.Assert(testDB.SetVotingProcessIfUnchanged(stale, seen), qt.Equals, ErrConflict)
+	got, err = testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.Title["default"], qt.Equals, "edited")
+
+	// an unknown id is a conflict, never an insert
+	orphan := &VotingProcess{ID: primitive.NewObjectID(), OrgAddress: org}
+	c.Assert(testDB.SetVotingProcessIfUnchanged(orphan, got.UpdatedAt), qt.Equals, ErrConflict)
+}

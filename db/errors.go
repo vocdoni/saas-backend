@@ -6,6 +6,9 @@ var (
 	ErrNotFound      = fmt.Errorf("not found")
 	ErrInvalidData   = fmt.Errorf("invalid data provided")
 	ErrAlreadyExists = fmt.Errorf("already exists")
+	// ErrConflict is returned by the conditional writers when the stored document changed since
+	// the caller read it, so the write was refused rather than applied on top of someone else's.
+	ErrConflict = fmt.Errorf("document changed since it was read")
 	// ErrTokenNotFound is returned if the token is not found in the database
 	ErrTokenNotFound = fmt.Errorf("token not found")
 	// ErrPrepareDocument is returned if the update document cannot be created

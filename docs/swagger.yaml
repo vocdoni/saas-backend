@@ -536,6 +536,13 @@ definitions:
         type: string
       title:
         $ref: '#/definitions/db.MultiLangString'
+      updatedAt:
+        description: |-
+          UpdatedAt, on a PUT, is the updatedAt the client last read. The update then applies only if
+          the process has not been written since, and is rejected with 409 otherwise, so two clients
+          editing the same draft cannot silently overwrite each other. Optional: omitting it keeps the
+          unconditional last-writer-wins behaviour. Ignored on POST.
+        type: string
     type: object
   apicommon.CreateVotingProcessResponse:
     properties:
@@ -1925,6 +1932,12 @@ definitions:
         type: string
       title:
         $ref: '#/definitions/db.MultiLangString'
+      updatedAt:
+        description: |-
+          UpdatedAt is the process's last-write timestamp, in millisecond precision. Echo it back in a
+          PUT to make the update conditional on nothing else having written in between (see
+          CreateVotingProcessRequest.UpdatedAt).
+        type: string
     type: object
   apicommon.VotingProcessResultsResponse:
     properties:
@@ -6037,8 +6050,11 @@ paths:
     put:
       consumes:
       - application/json
-      description: Update a voting process while it is still a draft (not published).
-        409 if already published.
+      description: |-
+        Update a voting process while it is still a draft (not published). 409 if already published.
+        Send the updatedAt read from GET /processes/{processId} to make the update conditional: it is
+        rejected with 409 (40171) if anything wrote the process in between, so two editors cannot
+        overwrite each other. Omitting updatedAt opts out of that guarantee and keeps last-writer-wins.
       parameters:
       - description: Process ID
         in: path

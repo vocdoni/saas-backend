@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -185,27 +186,14 @@ func (a *API) buildQuestions(
 	return built, nil
 }
 
-// writeQuestions replaces the process's stored questions with a pre-built (already validated)
-// set and updates its ordered QuestionIDs. Existing questions are removed first so a draft
-// update replaces them. Callers run buildQuestions first, so this only fails on infra errors.
+// writeQuestions replaces the process's stored questions with a pre-built (already validated) set
+// and records their ids on the process. The replacement is per slot rather than delete-all then
+// insert-all, so two overlapping draft updates cannot strand a row — see db.SetProcessQuestions.
+// Callers run buildQuestions first, so this only fails on infra errors.
 func (a *API) writeQuestions(vp *db.VotingProcess, built []*db.VotingProcessQuestion) error {
-	existing, err := a.db.QuestionsByProcess(vp.ID)
+	questionIDs, err := a.db.SetProcessQuestions(vp.ID, built)
 	if err != nil {
-		return fmt.Errorf("failed to load existing questions: %w", err)
-	}
-	for i := range existing {
-		if err := a.db.DeleteQuestion(existing[i].ID); err != nil {
-			return fmt.Errorf("failed to remove existing question: %w", err)
-		}
-	}
-	questionIDs := make([]primitive.ObjectID, 0, len(built))
-	for _, question := range built {
-		question.ProcessID = vp.ID
-		qID, err := a.db.SetQuestion(question)
-		if err != nil {
-			return fmt.Errorf("failed to store question: %w", err)
-		}
-		questionIDs = append(questionIDs, qID)
+		return fmt.Errorf("failed to store questions: %w", err)
 	}
 	vp.QuestionIDs = questionIDs
 	if _, err := a.db.SetVotingProcess(vp); err != nil {
@@ -214,10 +202,38 @@ func (a *API) writeQuestions(vp *db.VotingProcess, built []*db.VotingProcessQues
 	return nil
 }
 
+// parseUpdatedAt reads the optional conditional-update token of an update request. The zero time
+// means the client sent none and opts out of the check.
+func parseUpdatedAt(s string) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, nil
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid updatedAt %q: expected RFC3339 as returned by the read endpoint", s)
+	}
+	return t.UTC(), nil
+}
+
+// storeUpdatedProcess persists a draft edit, conditionally on seen when the client sent an
+// updatedAt token. It reports db.ErrConflict when someone else wrote the process in between.
+func (a *API) storeUpdatedProcess(vp *db.VotingProcess, seen time.Time) error {
+	if seen.IsZero() {
+		if _, err := a.db.SetVotingProcess(vp); err != nil {
+			return fmt.Errorf("failed to update voting process: %w", err)
+		}
+		return nil
+	}
+	return a.db.SetVotingProcessIfUnchanged(vp, seen)
+}
+
 // updateVotingProcessHandler godoc
 //
 //	@Summary		Update a voting process draft
 //	@Description	Update a voting process while it is still a draft (not published). 409 if already published.
+//	@Description	Send the updatedAt read from GET /processes/{processId} to make the update conditional: it is
+//	@Description	rejected with 409 (40171) if anything wrote the process in between, so two editors cannot
+//	@Description	overwrite each other. Omitting updatedAt opts out of that guarantee and keeps last-writer-wins.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -282,10 +298,21 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		writeSubscriptionError(w, err)
 		return
 	}
+	seen, err := parseUpdatedAt(req.UpdatedAt)
+	if err != nil {
+		_ = a.db.DelCensus(census.ID.Hex())
+		errors.ErrMalformedBody.WithErr(err).Write(w)
+		return
+	}
 	vp.Title, vp.Description, vp.Header, vp.StreamURI = req.Title, req.Description, req.Header, req.StreamURI
 	vp.StartDate, vp.EndDate, vp.CensusID = start, end, census.ID
-	if _, err := a.db.SetVotingProcess(vp); err != nil {
+	if err := a.storeUpdatedProcess(vp, seen); err != nil {
 		_ = a.db.DelCensus(census.ID.Hex())
+		if stderrors.Is(err, db.ErrConflict) {
+			errors.ErrStaleUpdate.Withf("the process was modified after updatedAt %s; refetch and retry",
+				req.UpdatedAt).Write(w)
+			return
+		}
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
@@ -878,7 +905,38 @@ func validateVotingProcessForPublish(
 			problems = append(problems, fmt.Sprintf("question %d has an unsupported type %q", i, q.Type))
 		}
 	}
+	if p := questionSetProblem(vp, questions); p != "" {
+		problems = append(problems, p)
+	}
 	return problems
+}
+
+// questionSetProblem reports a stored question set that does not match the ids the process itself
+// records. That means a row carrying this processId is not one of the questions the last writer
+// stored — a leftover from a pre-fix concurrent draft update, or a direct database write. Publishing
+// such a process is the one irreversible step in the whole flow (the stray becomes a real on-chain
+// election that cannot be withdrawn), so it is refused and the draft has to be saved again first.
+// Processes predating QuestionIDs carry none and are not checked.
+func questionSetProblem(vp *db.VotingProcess, questions []db.VotingProcessQuestion) string {
+	if len(vp.QuestionIDs) == 0 {
+		return ""
+	}
+	expected := make(map[primitive.ObjectID]bool, len(vp.QuestionIDs))
+	for _, id := range vp.QuestionIDs {
+		expected[id] = true
+	}
+	stray := 0
+	for i := range questions {
+		if !expected[questions[i].ID] {
+			stray++
+		}
+	}
+	if stray == 0 && len(questions) == len(vp.QuestionIDs) {
+		return ""
+	}
+	return fmt.Sprintf(
+		"stored questions do not match the process (%d found, %d expected, %d unknown): save the draft again",
+		len(questions), len(vp.QuestionIDs), stray)
 }
 
 // writeSubscriptionError writes a typed API error verbatim, falling back to 500.

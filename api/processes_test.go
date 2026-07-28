@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -657,4 +658,111 @@ func TestVotingProcessStalePublishReclaim(t *testing.T) {
 	won, err = testDB.ClaimVotingProcessForPublish(oid)
 	c.Assert(err, qt.IsNil)
 	c.Assert(won, qt.IsTrue, qt.Commentf("a stale marker must be reclaimable"))
+}
+
+// TestVotingProcessConcurrentUpdates is the regression test for issue #614: two overlapping draft
+// updates left a question stranded, and publish then turned the orphan into a real on-chain
+// election. The old write path deleted every question and re-inserted with fresh ids, so an
+// interleaved pair of writers could delete rows the other had not inserted yet.
+func TestVotingProcessConcurrentUpdates(t *testing.T) {
+	c := qt.New(t)
+	adminToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, adminToken)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, adminToken, newVotingProcessRequest(orgAddress, ids), processesCreateEndpoint)
+	pid := created.ProcessID
+
+	before := requestAndParse[apicommon.VotingProcessResponse](
+		t, http.MethodGet, adminToken, nil, "processes", pid)
+	c.Assert(before.Questions, qt.HasLen, 2)
+
+	// fire overlapping updates the way the wizard did: an auto-save on blur racing the submit. Each
+	// request is a complete, valid draft; whichever lands last is the one that should survive.
+	const writers = 6
+	var wg sync.WaitGroup
+	for i := range writers {
+		wg.Go(func() {
+			req := newVotingProcessRequest(orgAddress, ids)
+			req.Title = db.MultiLangString{"default": fmt.Sprintf("concurrent update %d", i)}
+			// tolerate whatever status the race produces; the assertion is on the stored state
+			_, _ = testRequest(t, http.MethodPut, adminToken, req, "processes", pid)
+		})
+	}
+	wg.Wait()
+
+	after := requestAndParse[apicommon.VotingProcessResponse](
+		t, http.MethodGet, adminToken, nil, "processes", pid)
+	c.Assert(after.Questions, qt.HasLen, 2,
+		qt.Commentf("concurrent updates must not leave a stranded question: %d found", len(after.Questions)))
+
+	// the surviving pair is one slot each, in order, with distinct ids reused from the original draft
+	c.Assert(after.Questions[0].Type, qt.Equals, db.VotingTypeSingleChoice)
+	c.Assert(after.Questions[1].Type, qt.Equals, db.VotingTypeMultiChoice)
+	c.Assert(after.Questions[0].ID, qt.Not(qt.Equals), after.Questions[1].ID)
+	c.Assert(after.Questions[0].ID, qt.Equals, before.Questions[0].ID,
+		qt.Commentf("question ids must survive a draft edit"))
+	c.Assert(after.Questions[1].ID, qt.Equals, before.Questions[1].ID)
+}
+
+// TestVotingProcessConditionalUpdate covers the optimistic-concurrency token of PUT /processes/{id}:
+// an update carrying the updatedAt the client read applies, the same token replayed after that write
+// is stale and rejected with 409, and an update with no token keeps working unconditionally.
+func TestVotingProcessConditionalUpdate(t *testing.T) {
+	c := qt.New(t)
+	adminToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, adminToken)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, adminToken, newVotingProcessRequest(orgAddress, ids), processesCreateEndpoint)
+	pid := created.ProcessID
+
+	read := requestAndParse[apicommon.VotingProcessResponse](
+		t, http.MethodGet, adminToken, nil, "processes", pid)
+	c.Assert(read.UpdatedAt, qt.Not(qt.Equals), "")
+	seen := read.UpdatedAt
+
+	// the token the client just read still matches: the update applies
+	req := newVotingProcessRequest(orgAddress, ids)
+	req.Title = db.MultiLangString{"default": "conditional edit"}
+	req.UpdatedAt = seen
+	requestAndAssertCode(http.StatusOK, t, http.MethodPut, adminToken, req, "processes", pid)
+
+	refetched := requestAndParse[apicommon.VotingProcessResponse](
+		t, http.MethodGet, adminToken, nil, "processes", pid)
+	c.Assert(refetched.Title["default"], qt.Equals, "conditional edit")
+	c.Assert(refetched.UpdatedAt, qt.Not(qt.Equals), seen)
+
+	// replaying the now-stale token is refused rather than overwriting the newer state
+	stale := newVotingProcessRequest(orgAddress, ids)
+	stale.Title = db.MultiLangString{"default": "should not land"}
+	stale.UpdatedAt = seen
+	requestAndAssertError(errors.ErrStaleUpdate, t, http.MethodPut, adminToken, stale, "processes", pid)
+
+	unchanged := requestAndParse[apicommon.VotingProcessResponse](
+		t, http.MethodGet, adminToken, nil, "processes", pid)
+	c.Assert(unchanged.Title["default"], qt.Equals, "conditional edit")
+
+	// the same request with the refreshed token succeeds
+	stale.UpdatedAt = unchanged.UpdatedAt
+	requestAndAssertCode(http.StatusOK, t, http.MethodPut, adminToken, stale, "processes", pid)
+
+	// and omitting the token keeps the previous unconditional behaviour
+	noToken := newVotingProcessRequest(orgAddress, ids)
+	noToken.Title = db.MultiLangString{"default": "unconditional"}
+	requestAndAssertCode(http.StatusOK, t, http.MethodPut, adminToken, noToken, "processes", pid)
+	final := requestAndParse[apicommon.VotingProcessResponse](
+		t, http.MethodGet, adminToken, nil, "processes", pid)
+	c.Assert(final.Title["default"], qt.Equals, "unconditional")
+
+	// a malformed token is a 400, not a silent opt-out
+	bad := newVotingProcessRequest(orgAddress, ids)
+	bad.UpdatedAt = "not-a-timestamp"
+	requestAndAssertError(errors.ErrMalformedBody, t, http.MethodPut, adminToken, bad, "processes", pid)
 }

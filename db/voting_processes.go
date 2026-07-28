@@ -44,6 +44,44 @@ func (ms *MongoStorage) SetVotingProcess(vp *VotingProcess) (primitive.ObjectID,
 	return vp.ID, nil
 }
 
+// SetVotingProcessIfUnchanged replaces a voting process only if its stored UpdatedAt still equals
+// seen, i.e. nothing has written the document since the caller read it. It reports ErrConflict
+// otherwise, leaving the stored document untouched, so two clients editing the same draft cannot
+// silently overwrite each other. Same semantics as SetVotingProcess in every other respect, except
+// that it never creates: an unknown id is a conflict, not an insert.
+func (ms *MongoStorage) SetVotingProcessIfUnchanged(vp *VotingProcess, seen time.Time) error {
+	if vp.ID.IsZero() || (vp.OrgAddress.Cmp(common.Address{}) == 0) {
+		return ErrInvalidData
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	// mongo stores datetimes with millisecond precision, so the token the client echoes back can
+	// only ever match a truncated value — compare against, and advance past, the same truncation
+	seen = seen.UTC().Truncate(time.Millisecond)
+	now := time.Now()
+	if !now.Truncate(time.Millisecond).After(seen) {
+		// two writes inside the same millisecond would leave the token unchanged, and the second
+		// client's already-consumed token would still match. Force it forward instead.
+		now = seen.Add(time.Millisecond)
+	}
+	prev := vp.UpdatedAt
+	vp.UpdatedAt = now
+	filter := bson.M{"_id": vp.ID, "updatedAt": seen}
+	res, err := ms.votingProcesses.ReplaceOne(ctx, filter, vp)
+	if err != nil {
+		vp.UpdatedAt = prev
+		return fmt.Errorf("failed to update voting process: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		vp.UpdatedAt = prev
+		return ErrConflict
+	}
+	return nil
+}
+
 // VotingProcess returns a voting process by its hex ObjectID.
 func (ms *MongoStorage) VotingProcess(id primitive.ObjectID) (*VotingProcess, error) {
 	if id == primitive.NilObjectID {
