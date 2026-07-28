@@ -445,7 +445,9 @@ func TestVotingProcessResults(t *testing.T) {
 
 // TestVotingProcessPublicReads verifies the process list and single read are public for published
 // processes (with per-question eligibleMemberIds stripped for non-managers), while drafts and the
-// eligibility are visible only to a manager/admin of the org.
+// eligibility are visible only to a manager/admin of the org. It also covers the optional published
+// filter on the list: it narrows the caller's default view, and asking for drafts without a
+// manager/admin role is refused rather than silently returning an empty list.
 func TestVotingProcessPublicReads(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
@@ -511,6 +513,38 @@ func TestVotingProcessPublicReads(t *testing.T) {
 	mgrList := requestAndParse[apicommon.VotingProcessListResponse](t, http.MethodGet, token, nil, listURL)
 	c.Assert(hasProcess(mgrList.Processes, published.ProcessID), qt.IsTrue)
 	c.Assert(hasProcess(mgrList.Processes, draft.ProcessID), qt.IsTrue)
+
+	// published=false narrows the manager view to drafts, published=true to published processes. The
+	// unfiltered manager list above is the third case: omitting the param still returns both.
+	draftsURL := listURL + "&published=false"
+	mgrDrafts := requestAndParse[apicommon.VotingProcessListResponse](t, http.MethodGet, token, nil, draftsURL)
+	c.Assert(hasProcess(mgrDrafts.Processes, draft.ProcessID), qt.IsTrue)
+	c.Assert(hasProcess(mgrDrafts.Processes, published.ProcessID), qt.IsFalse)
+	mgrPublished := requestAndParse[apicommon.VotingProcessListResponse](
+		t, http.MethodGet, token, nil, listURL+"&published=true")
+	c.Assert(hasProcess(mgrPublished.Processes, published.ProcessID), qt.IsTrue)
+	c.Assert(hasProcess(mgrPublished.Processes, draft.ProcessID), qt.IsFalse)
+
+	// the value is parsed with strconv.ParseBool, so "0" filters drafts exactly like "false".
+	mgrZero := requestAndParse[apicommon.VotingProcessListResponse](t, http.MethodGet, token, nil, listURL+"&published=0")
+	c.Assert(hasProcess(mgrZero.Processes, draft.ProcessID), qt.IsTrue)
+	c.Assert(hasProcess(mgrZero.Processes, published.ProcessID), qt.IsFalse)
+
+	// drafts are manager-only: anonymous and a non-member user are refused (401) rather than being
+	// served an empty list, which would read as "this org has no drafts".
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodGet, "", nil, draftsURL)
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodGet, otherToken, nil, draftsURL)
+
+	// published=true stays public.
+	anonPublished := requestAndParse[apicommon.VotingProcessListResponse](
+		t, http.MethodGet, "", nil, listURL+"&published=true")
+	c.Assert(hasProcess(anonPublished.Processes, published.ProcessID), qt.IsTrue)
+	c.Assert(hasProcess(anonPublished.Processes, draft.ProcessID), qt.IsFalse)
+
+	// an unparseable value is malformed (400) whatever the credentials — the parse precedes the
+	// manager check, so a bad param is never reported as an auth failure.
+	requestAndAssertCode(http.StatusBadRequest, t, http.MethodGet, token, nil, listURL+"&published=notabool")
+	requestAndAssertCode(http.StatusBadRequest, t, http.MethodGet, "", nil, listURL+"&published=notabool")
 
 	// a zero orgAddress passes IsHexAddress but is malformed -> 400 (not a 500 from the db layer).
 	requestAndAssertCode(http.StatusBadRequest, t, http.MethodGet, "", nil,
