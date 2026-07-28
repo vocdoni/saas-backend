@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/vocdoni/saas-backend/internal"
@@ -35,8 +36,9 @@ type memberHashDoc struct {
 // censusHashDoc holds the census authentication configuration needed to know
 // which fields feed each login hash.
 type censusHashDoc struct {
-	AuthFields  []string `bson:"orgMemberAuthFields"`
-	TwoFaFields []string `bson:"orgMemberTwoFaFields"`
+	ID          primitive.ObjectID `bson:"_id"`
+	AuthFields  []string           `bson:"orgMemberAuthFields"`
+	TwoFaFields []string           `bson:"orgMemberTwoFaFields"`
 }
 
 // participantHashDoc holds the census participant identifiers needed to locate
@@ -51,30 +53,38 @@ type participantHashDoc struct {
 // shared internal.HashSortedFields primitive. The append order is irrelevant
 // because HashSortedFields sorts before hashing, so only the set of values
 // must match the canonical implementation.
+//
+// It exists so the repair tooling can recompute stored hashes straight from bson
+// documents without importing db. That makes it a duplicate of a
+// correctness-critical function: if the two ever disagree, the repair writes
+// hashes the login path will never match and every repaired voter is locked out.
+// db.TestRepairMatchesCanonicalHash asserts they agree — including the case folding
+// below, which must stay identical to db.LoginHashValue.
 func hashMemberFields(m memberHashDoc, authFields, twoFaFields []string) []byte {
 	data := make([]string, 0, len(authFields)+len(twoFaFields))
 	for _, field := range authFields {
 		switch field {
 		case "name":
-			data = append(data, m.Name)
+			data = append(data, foldLoginValue(m.Name))
 		case "surname":
-			data = append(data, m.Surname)
+			data = append(data, foldLoginValue(m.Surname))
 		case "memberNumber":
-			data = append(data, m.MemberNumber)
+			data = append(data, foldLoginValue(m.MemberNumber))
 		case "nationalId":
-			data = append(data, m.NationalID)
-		case "birthDate":
-			data = append(data, m.BirthDate)
+			data = append(data, foldLoginValue(m.NationalID))
+		case "birthDate": //nolint:goconst
+			data = append(data, foldLoginValue(m.BirthDate))
 		default:
 			// ignore unknown fields, mirroring db.HashAuthTwoFaFields
 		}
 	}
 	for _, field := range twoFaFields {
 		switch field {
-		case "email":
-			data = append(data, m.Email)
+		case "email": //nolint:goconst
+			data = append(data, foldLoginValue(m.Email))
 		case "phone":
 			if len(m.Phone) > 0 {
+				// already hashed bytes, not text: never folded
 				data = append(data, string(m.Phone))
 			}
 		default:
@@ -84,18 +94,25 @@ func hashMemberFields(m memberHashDoc, authFields, twoFaFields []string) []byte 
 	return internal.HashSortedFields(data)
 }
 
-// recomputeParticipantHashes mirrors db.calculateParticipantHashesBson: it
-// produces exactly the same hash keys that were originally stored for a
-// participant, so the migration never adds or removes keys.
+// foldLoginValue mirrors db.LoginHashValue. Login is case-insensitive, so the
+// values that feed the hash are lowercased on both sides of the comparison while
+// the member document keeps its original casing.
+func foldLoginValue(value string) string {
+	return strings.ToLower(value)
+}
+
+// recomputeParticipantHashes produces exactly the hash keys that were originally
+// stored for a participant, so the migration never adds or removes keys. It
+// delegates to computeParticipantHashes so that this migration and the repair
+// tooling cannot drift apart in which variants they write.
 func recomputeParticipantHashes(m memberHashDoc, c censusHashDoc) bson.M {
-	hashes := bson.M{
-		"loginHash": hashMemberFields(m, c.AuthFields, c.TwoFaFields),
+	set := computeParticipantHashes(m, c)
+	hashes := bson.M{"loginHash": set.LoginHash}
+	if len(set.LoginHashEmail) > 0 {
+		hashes["loginHashEmail"] = set.LoginHashEmail
 	}
-	if len(c.TwoFaFields) == 2 && len(m.Email) > 0 {
-		hashes["loginHashEmail"] = hashMemberFields(m, c.AuthFields, []string{"email"})
-	}
-	if len(c.TwoFaFields) == 2 && len(m.Phone) > 0 {
-		hashes["loginHashPhone"] = hashMemberFields(m, c.AuthFields, []string{"phone"})
+	if len(set.LoginHashPhone) > 0 {
+		hashes["loginHashPhone"] = set.LoginHashPhone
 	}
 	return hashes
 }

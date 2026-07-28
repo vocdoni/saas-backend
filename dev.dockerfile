@@ -41,7 +41,7 @@ FROM base AS defaultplan
 RUN go build -o /usr/local/bin/defaultplan ./scripts/defaultplan/main.go
 CMD ["/usr/local/bin/defaultplan"]
 
-# Member whitespace repair target (one-shot maintenance; dry run unless --apply)
-FROM base AS trimmembers
-RUN go build -o /usr/local/bin/trimmembers ./scripts/trimmembers/main.go
-CMD ["/usr/local/bin/trimmembers"]
+# CSP login hash repair target (one-shot maintenance; dry run unless --apply)
+FROM base AS repairlogins
+RUN go build -o /usr/local/bin/repairlogins ./scripts/repairlogins/main.go
+CMD ["/usr/local/bin/repairlogins"]
