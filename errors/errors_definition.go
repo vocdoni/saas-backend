@@ -108,8 +108,12 @@ var (
 	ErrAPIKeyNotFound                         = Error{Code: 40160, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("API key not found")}
 	ErrManagedOrgHasActiveElections           = Error{Code: 40161, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("managed organization has active elections and cannot be deleted")}
 	ErrVotingTypeNotAllowed                   = Error{Code: 40163, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("voting type not allowed by the subscription plan")}
-	// 40164-40167 are claimed by the open batch-vote-relay PR and 40168 by the open per-question
-	// eligibility PR, so this range continues past them rather than filling what looks like a gap.
+	ErrVoteBatchEmpty                         = Error{Code: 40164, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("vote batch is empty")}
+	ErrVoteBatchTooLarge                      = Error{Code: 40165, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("vote batch is too large")}
+	ErrVoteBatchMixedOrganizations            = Error{Code: 40166, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("vote batch spans several organizations")}
+	ErrRequestBodyTooLarge                    = Error{Code: 40167, HTTPstatus: http.StatusRequestEntityTooLarge, Err: fmt.Errorf("request body is too large")}
+	// 40168 is claimed by the open per-question eligibility PR, so this continues past it rather
+	// than filling what will not stay a gap.
 	// "signed for" rather than "voted": the flag behind this is set when the CSP issues the
 	// signature, not when the ballot reaches the chain, so it can name a member who never submitted.
 	ErrCensusMemberAlreadyVoted   = Error{Code: 40169, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("members already signed for cannot lose eligibility")}

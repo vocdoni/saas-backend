@@ -40,3 +40,8 @@ CMD ["/usr/local/bin/fundaccount"]
 FROM base AS defaultplan
 RUN go build -o /usr/local/bin/defaultplan ./scripts/defaultplan/main.go
 CMD ["/usr/local/bin/defaultplan"]
+
+# CSP login hash repair target (one-shot maintenance; dry run unless --apply)
+FROM base AS repairlogins
+RUN go build -o /usr/local/bin/repairlogins ./scripts/repairlogins/main.go
+CMD ["/usr/local/bin/repairlogins"]

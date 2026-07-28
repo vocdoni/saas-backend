@@ -71,6 +71,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -168,6 +169,7 @@ type API struct {
 	oauthServiceURL string
 	stripeHandlers  *StripeHandlers
 	txQueue         chan txTask
+	txQueueMu       sync.Mutex
 	orgTxLocks      *orgTxMutex
 	otpExpiry       time.Duration
 	otpCooldown     time.Duration
@@ -460,6 +462,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, jobStatusEndpoint, a.jobStatusHandler)
 		handle(r, http.MethodGet, processEndpoint, a.processInfoHandler)
 		handle(r, http.MethodPost, voteEndpoint, a.relayVoteHandler)
+		handle(r, http.MethodPost, votesEndpoint, a.relayVotesHandler)
 		handle(r, http.MethodGet, processResultsEndpoint, a.processResultsHandler)
 		handle(r, http.MethodGet, processMetadataEndpoint, a.processMetadataHandler)
 		handle(r, http.MethodPost, processSignInfoEndpoint, cspHandlers.ConsumedAddressHandler)
