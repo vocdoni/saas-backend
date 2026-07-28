@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -231,6 +232,165 @@ func (ms *MongoStorage) DelCensusParticipant(censusID, participantID string) err
 		return fmt.Errorf("failed to delete census participant: %w", err)
 	}
 
+	return nil
+}
+
+// purgeMembersFromCensuses revokes the given members' ability to vote anything they have not voted
+// yet: it drops their census participant rows, removes them from every question's eligibility
+// subset, and deletes their CSP auth tokens so an already-issued session cannot be reused. The
+// affected censuses have their stored Size recounted.
+//
+// It deliberately does NOT delete cspTokensStatus (consumption) rows. Those pin the single address
+// a member was ever signed for; dropping one would let a member who is later re-added be signed for
+// a second address, producing a second nullifier and a double vote the chain would accept. They are
+// also the record CSPProcessVoters reads to refuse revoking someone who already voted.
+//
+// This cannot recall a signature the member already holds — that is a bearer credential the chain
+// accepts until the election closes. It only closes the door on future signatures.
+//
+// Assumes ms.keysLock is already held by the caller.
+func (ms *MongoStorage) purgeMembersFromCensuses(ctx context.Context, memberIDs []string) error {
+	if len(memberIDs) == 0 {
+		return nil
+	}
+	// the censuses that will need their size recounted, resolved before the rows are gone
+	censusIDs, err := ms.censusParticipants.Distinct(ctx, "censusId", bson.M{
+		"participantID": bson.M{"$in": memberIDs},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to resolve affected censuses: %w", err)
+	}
+	if _, err := ms.censusParticipants.DeleteMany(ctx, bson.M{
+		"participantID": bson.M{"$in": memberIDs},
+	}); err != nil {
+		return fmt.Errorf("failed to delete census participants: %w", err)
+	}
+	// the member is gone entirely, so their id has no business in any eligibility subset
+	if _, err := ms.processesQuestions.UpdateMany(ctx,
+		bson.M{"eligibleMemberIds": bson.M{"$in": memberIDs}},
+		bson.M{"$pull": bson.M{"eligibleMemberIds": bson.M{"$in": memberIDs}}},
+	); err != nil {
+		return fmt.Errorf("failed to prune question eligibility: %w", err)
+	}
+	if err := ms.deleteCSPAuthByMembers(ctx, memberIDs); err != nil {
+		return err
+	}
+	affected := make([]string, 0, len(censusIDs))
+	for _, raw := range censusIDs {
+		if censusID, ok := raw.(string); ok {
+			affected = append(affected, censusID)
+		}
+	}
+	return ms.recountCensuses(ctx, affected)
+}
+
+// RemoveCensusParticipantsByMemberIDs takes the given members off a census and revokes what that
+// implies: their eligibility on the census's processes and their CSP sessions. It is the inverse of
+// AddCensusParticipantsByMemberIDs, and returns how many participant rows were actually removed.
+//
+// It does not retract anything already voted — a signature the member holds stays valid on chain.
+func (ms *MongoStorage) RemoveCensusParticipantsByMemberIDs(censusID string, memberIDs []string) (int, error) {
+	if censusID == "" {
+		return 0, ErrInvalidData
+	}
+	if len(memberIDs) == 0 {
+		return 0, nil
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	res, err := ms.censusParticipants.DeleteMany(ctx, bson.M{
+		"censusId":      censusID,
+		"participantID": bson.M{"$in": memberIDs},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to remove census participants: %w", err)
+	}
+	if err := ms.revokeCensusMembers(ctx, []string{censusID}, memberIDs); err != nil {
+		return 0, err
+	}
+	return int(res.DeletedCount), nil
+}
+
+// revokeCensusMembers takes the given members off the given censuses' voting path without deleting
+// the members themselves: it prunes them from the eligibility subsets of those censuses' processes,
+// invalidates their CSP sessions and recounts the census sizes. The caller has already removed the
+// participant rows.
+//
+// Eligibility is pruned only for processes using these censuses — the same member may legitimately
+// remain in another census. Token deletion is deliberately not scoped: re-authenticating re-checks
+// census participation, so dropping a token can only force a fresh login, never grant anything.
+//
+// Like purgeMembersFromCensuses this leaves consumption rows untouched; see that function for why.
+// Assumes ms.keysLock is held.
+func (ms *MongoStorage) revokeCensusMembers(ctx context.Context, censusIDs, memberIDs []string) error {
+	if len(censusIDs) == 0 || len(memberIDs) == 0 {
+		return nil
+	}
+	censusOIDs := make([]primitive.ObjectID, 0, len(censusIDs))
+	for _, id := range censusIDs {
+		if oid, err := primitive.ObjectIDFromHex(id); err == nil {
+			censusOIDs = append(censusOIDs, oid)
+		}
+	}
+	if len(censusOIDs) > 0 {
+		processIDs, err := ms.votingProcesses.Distinct(ctx, "_id", bson.M{"censusId": bson.M{"$in": censusOIDs}})
+		if err != nil {
+			return fmt.Errorf("failed to resolve processes of the census: %w", err)
+		}
+		if len(processIDs) > 0 {
+			if _, err := ms.processesQuestions.UpdateMany(ctx,
+				bson.M{"processId": bson.M{"$in": processIDs}, "eligibleMemberIds": bson.M{"$in": memberIDs}},
+				bson.M{"$pull": bson.M{"eligibleMemberIds": bson.M{"$in": memberIDs}}},
+			); err != nil {
+				return fmt.Errorf("failed to prune question eligibility: %w", err)
+			}
+		}
+	}
+	if err := ms.deleteCSPAuthByMembers(ctx, memberIDs); err != nil {
+		return err
+	}
+	return ms.recountCensuses(ctx, censusIDs)
+}
+
+// deleteCSPAuthByMembers drops the CSP auth tokens of the given members so a session minted while
+// they were still in the census cannot be spent afterwards. Consumption rows (cspTokensStatus) are
+// never touched — see purgeMembersFromCensuses.
+func (ms *MongoStorage) deleteCSPAuthByMembers(ctx context.Context, memberIDs []string) error {
+	// tokens key the member by the binary form of its ObjectID hex
+	userIDs := make([]internal.HexBytes, 0, len(memberIDs))
+	for _, id := range memberIDs {
+		userIDs = append(userIDs, internal.HexBytesFromString(id))
+	}
+	if _, err := ms.cspTokens.DeleteMany(ctx, bson.M{"userid": bson.M{"$in": userIDs}}); err != nil {
+		return fmt.Errorf("failed to delete CSP auth tokens: %w", err)
+	}
+	return nil
+}
+
+// recountCensuses refreshes the stored Size of each census from its participant rows, so quota
+// checks and future publishes see the truth. The smaller number is never pushed to the chain:
+// maxCensusSize can only grow there, and the leftover headroom is harmless because the CSP, not
+// that number, decides who may vote.
+func (ms *MongoStorage) recountCensuses(ctx context.Context, censusIDs []string) error {
+	for _, censusID := range censusIDs {
+		oid, err := primitive.ObjectIDFromHex(censusID)
+		if err != nil {
+			continue
+		}
+		count, err := ms.censusParticipants.CountDocuments(ctx, bson.M{"censusId": censusID})
+		if err != nil {
+			return fmt.Errorf("failed to recount census participants: %w", err)
+		}
+		if _, err := ms.censuses.UpdateOne(ctx,
+			bson.M{"_id": oid},
+			bson.M{"$set": bson.M{"size": count, "updatedAt": time.Now()}},
+		); err != nil {
+			return fmt.Errorf("failed to update census size: %w", err)
+		}
+	}
 	return nil
 }
 

@@ -82,6 +82,13 @@ type UpdateProcessCensusResponse struct {
 	Errors []string `json:"errors,omitempty"`
 }
 
+// RemoveProcessCensusResponse is the result of DELETE /processes/{processId}/census: how many
+// participants were taken off the census. Nothing is sent on chain — an election's maxCensusSize
+// can only grow, and the leftover headroom is harmless because the CSP decides who may vote.
+type RemoveProcessCensusResponse struct {
+	Removed int `json:"removed"`
+}
+
 // CreateVotingProcessResponse is returned by POST /processes.
 type CreateVotingProcessResponse struct {
 	ProcessID string `json:"processId"`

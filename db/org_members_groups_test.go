@@ -1214,3 +1214,68 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		}
 	})
 }
+
+// TestGroupCensusRevocation covers the snapshot problem: a census built from a group does not track
+// the group, so removing a member must be propagated explicitly. Additions deliberately are not —
+// growing a census bills the organization and needs an on-chain resize.
+func TestGroupCensusRevocation(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	orgAddress := common.Address{0x5a}
+	c.Assert(testDB.SetOrganization(&Organization{
+		Address: orgAddress, Active: true, CreatedAt: time.Now(),
+	}), qt.IsNil)
+
+	newMember := func(suffix string) string {
+		m := &OrgMember{
+			ID: primitive.NewObjectID(), OrgAddress: orgAddress,
+			MemberNumber: "grp" + suffix, Email: "grp" + suffix + "@example.com",
+			CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		}
+		_, err := testDB.SetOrgMember("test_salt", m)
+		c.Assert(err, qt.IsNil)
+		return m.ID.Hex()
+	}
+	stays, leaves, outsider := newMember("_a"), newMember("_b"), newMember("_c")
+
+	groupID, err := testDB.CreateOrganizationMemberGroup(&OrganizationMemberGroup{
+		OrgAddress: orgAddress, Title: "voters", MemberIDs: []string{stays, leaves},
+	})
+	c.Assert(err, qt.IsNil)
+
+	census := &Census{
+		OrgAddress: orgAddress,
+		AuthFields: OrgMemberAuthFields{OrgMemberAuthFieldsMemberNumber},
+		CreatedAt:  time.Now(), UpdatedAt: time.Now(),
+	}
+	censusID, err := testDB.SetCensus(census)
+	c.Assert(err, qt.IsNil)
+	oid, err := primitive.ObjectIDFromHex(censusID)
+	c.Assert(err, qt.IsNil)
+	census.ID = oid
+	inserted, err := testDB.PopulateGroupCensus(census, groupID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(inserted, qt.Equals, int64(2))
+
+	// removing a member from the group takes them off the census it was built from
+	c.Assert(testDB.UpdateOrganizationMemberGroup(groupID, orgAddress, "", "", nil, []string{leaves}), qt.IsNil)
+	_, err = testDB.CensusParticipant(censusID, leaves)
+	c.Assert(err, qt.Equals, ErrNotFound, qt.Commentf("a member dropped from the group must leave its census"))
+	_, err = testDB.CensusParticipant(censusID, stays)
+	c.Assert(err, qt.IsNil)
+	updated, err := testDB.Census(censusID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(updated.Size, qt.Equals, int64(1))
+
+	// adding one does NOT silently grow the census
+	c.Assert(testDB.UpdateOrganizationMemberGroup(groupID, orgAddress, "", "", []string{outsider}, nil), qt.IsNil)
+	_, err = testDB.CensusParticipant(censusID, outsider)
+	c.Assert(err, qt.Equals, ErrNotFound,
+		qt.Commentf("additions go through PUT /processes/{processId}/census, which bills and resizes"))
+
+	// deleting the group takes its remaining members off the census too
+	c.Assert(testDB.DeleteOrganizationMemberGroup(groupID, orgAddress), qt.IsNil)
+	_, err = testDB.CensusParticipant(censusID, stays)
+	c.Assert(err, qt.Equals, ErrNotFound)
+}

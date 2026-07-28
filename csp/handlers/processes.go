@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
@@ -91,6 +92,12 @@ func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request)
 	}
 	vp, ok := c.getVotingProcess(w, oid)
 	if !ok {
+		return
+	}
+	// a draft has no on-chain election to vote, so authenticating against it only mints a token
+	// that outlives the draft and is spendable the moment it is published.
+	if !vp.Published {
+		errors.ErrProcessNotFound.Withf("process is not published").Write(w)
 		return
 	}
 	c.handleAuthStep(w, r, step, anchor, vp.CensusID.Hex())
@@ -236,6 +243,20 @@ func (c *CSPHandlers) ProcessSignHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrUnauthorized.Withf("member not eligible for this question").Write(w)
 		return
 	}
+	// only a live election may be signed for. Without this a voter can obtain a signature against a
+	// paused or ended question and hold it until the chain would accept it — the CSP is the only
+	// place that can refuse, since the signature it hands out carries no expiry.
+	if question.Status != db.QuestionStatusReady {
+		errors.ErrUnauthorized.Withf("question is not open for voting").Write(w)
+		return
+	}
+	// a process scheduled to start later is READY on chain but not yet accepting votes; refuse to
+	// hand out a signature that could simply be held until it opens. Only the start is checked:
+	// EndDate is optional (it may be zero), while publish always persists a start date.
+	if !vp.StartDate.IsZero() && time.Now().Before(vp.StartDate) {
+		errors.ErrUnauthorized.Withf("process has not started yet").Write(w)
+		return
+	}
 	member, ok := c.orgMemberFromAuth(w, vp.OrgAddress, auth)
 	if !ok {
 		return
@@ -243,6 +264,13 @@ func (c *CSPHandlers) ProcessSignHandler(w http.ResponseWriter, r *http.Request)
 	census, err := c.mainDB.Census(vp.CensusID.Hex())
 	if err != nil {
 		errors.ErrCensusNotFound.WithErr(err).Write(w)
+		return
+	}
+	// re-check census participation, which auth only checked when the token was minted. A token
+	// stays valid indefinitely, so without this a voter removed from the census afterwards — by a
+	// group edit, a member deletion or an explicit removal — would still be signed for.
+	if _, err := c.mainDB.CensusParticipant(vp.CensusID.Hex(), auth.UserID.String()); err != nil {
+		errors.ErrCensusParticipantNotFound.WithErr(err).Write(w)
 		return
 	}
 	weight := uint64(1)

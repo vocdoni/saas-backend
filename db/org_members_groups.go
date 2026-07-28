@@ -219,9 +219,40 @@ func (ms *MongoStorage) UpdateOrganizationMemberGroup(
 		if err != nil {
 			return err
 		}
+
+		// A census built from this group is a snapshot taken when it was created, so without this a
+		// member dropped from the group keeps voting a live election. Removals propagate; additions
+		// deliberately do not, because growing a census consumes plan quota and needs an on-chain
+		// maxCensusSize bump — that is what PUT /processes/{processId}/census is for, and doing it
+		// implicitly from a group edit would bill the organization for an unrelated action.
+		if len(removedMembers) > 0 {
+			if err := ms.purgeMembersFromGroupCensuses(ctx, updatedGroup, removedMembers); err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil
+}
+
+// purgeMembersFromGroupCensuses revokes the given members from every census derived from the group.
+// It is scoped to the group's own censuses: a member removed from one group may still legitimately
+// belong to another group's census. Assumes ms.keysLock is held.
+func (ms *MongoStorage) purgeMembersFromGroupCensuses(
+	ctx context.Context, group *OrganizationMemberGroup, memberIDs []string,
+) error {
+	if group == nil || len(group.CensusIDs) == 0 || len(memberIDs) == 0 {
+		return nil
+	}
+	// only the participant rows of this group's censuses; the shared purge would reach every census
+	// the member belongs to, including ones built from a different group.
+	if _, err := ms.censusParticipants.DeleteMany(ctx, bson.M{
+		"censusId":      bson.M{"$in": group.CensusIDs},
+		"participantID": bson.M{"$in": memberIDs},
+	}); err != nil {
+		return fmt.Errorf("failed to remove members from the group censuses: %w", err)
+	}
+	return ms.revokeCensusMembers(ctx, group.CensusIDs, memberIDs)
 }
 
 // AddOrganizationMemberGroupCensus adds a census to an organization member group
@@ -280,7 +311,9 @@ func (ms *MongoStorage) DeleteOrganizationMemberGroup(groupID string, orgAddress
 	if _, err := ms.orgMemberGroups.DeleteOne(ctx, filter); err != nil {
 		return fmt.Errorf("could not delete organization members group: %w", err)
 	}
-	return nil
+	// the censuses built from this group outlive it, so deleting the group must also take its
+	// members off them — otherwise a group can be deleted while its electorate keeps voting.
+	return ms.purgeMembersFromGroupCensuses(ctx, group, group.MemberIDs)
 }
 
 // ListOrganizationMemberGroup lists all the members of an organization member group (paginated)

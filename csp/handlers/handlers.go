@@ -421,16 +421,18 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Re-check the census here and not only at auth: the token outlives the request that minted it,
+	// so a voter dropped from the census in between must not still be signed for.
+	if _, err := c.mainDB.CensusParticipant(bundle.Census.ID.Hex(), oid.Hex()); err != nil {
+		errors.ErrCensusParticipantNotFound.WithErr(err).Write(w)
+		return
+	}
+
 	// default weight to 1 if not set
 	weight := uint64(1)
 	if census.Weighted {
 		weight = member.Weight
 	}
-
-	// // Check if the participant is in the census
-	// if !c.checkCensusParticipant(w, bundle.Census.ID.Hex(), string(auth.UserID)) {
-	// 	return
-	// }
 
 	// Parse the address from the payload
 	address, ok := parseAddress(w, req.Payload)

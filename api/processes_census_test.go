@@ -10,6 +10,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 )
@@ -189,4 +190,62 @@ func TestProcessesCensusGroupID(t *testing.T) {
 	c.Assert(groups, qt.Contains, group.ID)
 	c.Assert(groups, qt.Contains, "")
 	c.Assert(groups, qt.Not(qt.Contains), primitive.NilObjectID.Hex())
+}
+
+// TestRemoveProcessCensus covers DELETE /processes/{processId}/census: members can be taken off a
+// published census, but not once they have voted, and nothing is sent on chain either way.
+func TestRemoveProcessCensus(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+
+	req := newVotingProcessRequest(orgAddress, ids)
+	req.StartDate = ""
+	req.Census.AuthFields = db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsSurname}
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint)
+	pid := created.ProcessID
+
+	// a draft cannot be edited this way; it is rebuilt wholesale by PUT /processes
+	requestAndAssertError(errors.ErrDuplicateConflict, t, http.MethodDelete, token,
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[:1]}, "processes", pid, "census")
+
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
+	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	openElection := got.Questions[0].UpstreamID
+	c.Assert(got.Census.Size, qt.Equals, int64(2))
+
+	before, err := testAPI.account.Election(openElection)
+	c.Assert(err, qt.IsNil)
+	c.Assert(before.Census.MaxCensusSize, qt.Equals, uint64(2))
+
+	// an empty list is a no-op rather than an error
+	noop := requestAndParse[apicommon.RemoveProcessCensusResponse](t, http.MethodDelete, token,
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: nil}, "processes", pid, "census")
+	c.Assert(noop.Removed, qt.Equals, 0)
+
+	// removing a member who has not voted works, shrinks the stored size, and touches nothing on chain
+	removed := requestAndParse[apicommon.RemoveProcessCensusResponse](t, http.MethodDelete, token,
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[1:]}, "processes", pid, "census")
+	c.Assert(removed.Removed, qt.Equals, 1)
+	got = requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	c.Assert(got.Census.Size, qt.Equals, int64(1))
+	after, err := testAPI.account.Election(openElection)
+	c.Assert(err, qt.IsNil)
+	c.Assert(after.Census.MaxCensusSize, qt.Equals, uint64(2),
+		qt.Commentf("a removal must never resize the election: the chain only accepts growth"))
+
+	// the removed member can no longer authenticate
+	resp, code := testRequest(t, http.MethodPost, "", &handlers.AuthRequest{
+		Name: members[1].Name, Surname: members[1].Surname, Email: members[1].Email,
+	}, "processes", pid, "auth", "0")
+	c.Assert(code, qt.Equals, http.StatusNotFound, qt.Commentf("resp: %s", resp))
+
+	// the caller must manage the organization
+	requestAndAssertError(errors.ErrUnauthorized, t, http.MethodDelete, testCreateUser(t, "otherpassword123"),
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[:1]}, "processes", pid, "census")
 }

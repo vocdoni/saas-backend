@@ -994,3 +994,65 @@ func TestCreateCensusParticipantBulkOperationsFiltering(t *testing.T) {
 		}
 	})
 }
+
+// TestPurgeMembersFromCensuses covers the cascade that revokes a deleted member: their census
+// participation, question eligibility and CSP session all go, the census size is recounted — and,
+// critically, their consumption row survives.
+func TestPurgeMembersFromCensuses(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	member, census := setupTestCensusParticipantPrerequisites(t, "_purge")
+	memberID := member.ID.Hex()
+	censusID := census.ID.Hex()
+
+	added, memberErrs, err := testDB.AddCensusParticipantsByMemberIDs(censusID, []string{memberID})
+	c.Assert(err, qt.IsNil)
+	c.Assert(memberErrs, qt.HasLen, 0)
+	c.Assert(added, qt.Equals, 1)
+
+	// a process on that census, with the member in a question's eligibility subset
+	vpID, err := testDB.SetVotingProcess(&VotingProcess{
+		OrgAddress: testOrgAddress, Title: MultiLangString{"default": "P"}, CensusID: census.ID,
+	})
+	c.Assert(err, qt.IsNil)
+	election := internal.HexBytes{0xd0, 0x0d}
+	qID, err := testDB.SetQuestion(&VotingProcessQuestion{
+		ProcessID: vpID, OrgAddress: testOrgAddress, Type: VotingTypeSingleChoice,
+		EligibleMemberIDs: []string{memberID}, UpstreamID: election, Status: QuestionStatusReady,
+	})
+	c.Assert(err, qt.IsNil)
+
+	// an authenticated CSP session, and a consumed election (i.e. they already voted)
+	token := internal.HexBytes{0x01, 0x02, 0x03}
+	c.Assert(testDB.SetCSPAuth(token, internal.HexBytesFromString(memberID), internal.HexBytes{0x09}, "s"), qt.IsNil)
+	c.Assert(testDB.VerifyCSPAuth(token), qt.IsNil)
+	c.Assert(testDB.ConsumeCSPProcess(token, election, internal.HexBytes{0xaa}), qt.IsNil)
+
+	deleted, err := testDB.DeleteOrgMembers(testOrgAddress, []string{memberID})
+	c.Assert(err, qt.IsNil)
+	c.Assert(deleted, qt.Equals, 1)
+
+	// census participation is gone and the stored size follows
+	_, err = testDB.CensusParticipant(censusID, memberID)
+	c.Assert(err, qt.Equals, ErrNotFound)
+	updatedCensus, err := testDB.Census(censusID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(updatedCensus.Size, qt.Equals, int64(0))
+
+	// the eligibility subset no longer counts them
+	q, err := testDB.Question(qID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(q.EligibleMemberIDs, qt.HasLen, 0)
+
+	// the CSP session is invalidated, so a token minted earlier cannot be spent
+	_, err = testDB.CSPAuth(token)
+	c.Assert(err, qt.Not(qt.IsNil))
+
+	// ...but the consumption row survives. Deleting it would let this member, if ever re-added, be
+	// signed for a second address — a second nullifier, and a double vote the chain would accept.
+	voters, err := testDB.MembersWithUsedCSPProcess(election, []string{memberID})
+	c.Assert(err, qt.IsNil)
+	c.Assert(voters[memberID], qt.IsTrue,
+		qt.Commentf("consumption rows must outlive the member, or removal opens a double-vote hole"))
+}

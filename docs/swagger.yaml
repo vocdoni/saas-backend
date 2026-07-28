@@ -1400,6 +1400,11 @@ definitions:
         format: hex
         type: string
     type: object
+  apicommon.RemoveProcessCensusResponse:
+    properties:
+      removed:
+        type: integer
+    type: object
   apicommon.SetProcessStatusRequest:
     properties:
       status:
@@ -6146,6 +6151,66 @@ paths:
       tags:
       - processes
   /processes/{processId}/census:
+    delete:
+      consumes:
+      - application/json
+      description: |-
+        Take organization members off the census of an already-published voting process, so
+        they can no longer authenticate or be signed for by the CSP. Their participant rows
+        are deleted, they are pruned from every question's eligibility subset, and their CSP
+        sessions are invalidated, so a token minted while they were still in the census cannot
+        be spent afterwards.
+        A member who has already voted any of the process's questions cannot be removed: the
+        request is refused with 409 and the offending ids in the error's data.votedMemberIds.
+        Their ballot is already on chain and removing them would only hide that, not undo it.
+        Nothing is sent on chain — an election's maxCensusSize can only grow, and the leftover
+        headroom is harmless because the CSP, not that number, decides who may vote. Note that a
+        CSP signature already handed out stays valid until the election closes; removal closes
+        the door on new signatures, it cannot recall one. Requires Manager/Admin role.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Member IDs to remove
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.AddCensusParticipantsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Members removed
+          schema:
+            $ref: '#/definitions/apicommon.RemoveProcessCensusResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: A member has already voted
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Remove members from a published process's census
+      tags:
+      - processes
     put:
       consumes:
       - application/json

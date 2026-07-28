@@ -11,6 +11,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.vocdoni.io/dvote/crypto/ethereum"
@@ -192,4 +193,100 @@ func TestProcessCSP(t *testing.T) {
 	// a malformed process id is a client error
 	requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, "",
 		&handlers.CheckMembershipRequest{AuthToken: tok0}, "processes", "not-a-valid-id", "check")
+}
+
+// TestProcessCSPRevocation covers what happens when the electorate changes under a live election.
+// It pins the guarantee the backend can make (a voter taken off the census stops being signed for)
+// and, just as importantly, the one it cannot (a signature already handed out still votes).
+func TestProcessCSPRevocation(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
+	ids := memberIDs(members)
+
+	req := newVotingProcessRequest(orgAddress, ids)
+	req.StartDate = ""
+	req.Census.AuthFields = db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsSurname}
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint)
+	pid := created.ProcessID
+
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
+	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	openElection := got.Questions[0].UpstreamID
+
+	authReq := func(i int) *handlers.AuthRequest {
+		return &handlers.AuthRequest{Name: members[i].Name, Surname: members[i].Surname, Email: members[i].Email}
+	}
+	// --- member 0 authenticates, is then removed from the census, and is refused at sign ---
+	tok0 := authProcessCSP(t, pid, authReq(0))
+	voter0 := ethereum.SignKeys{}
+	c.Assert(voter0.Generate(), qt.IsNil)
+
+	removed := requestAndParse[apicommon.RemoveProcessCensusResponse](t, http.MethodDelete, token,
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[:1]}, "processes", pid, "census")
+	c.Assert(removed.Removed, qt.Equals, 1)
+
+	// the token was minted while they were still in the census; removal invalidates the session, so
+	// it is not spendable now
+	_, code := testRequest(t, http.MethodPost, "", &handlers.SignRequest{
+		AuthToken: tok0, ProcessID: openElection, Payload: hex.EncodeToString(voter0.Address().Bytes()),
+	}, "processes", pid, "sign")
+	c.Assert(code, qt.Equals, http.StatusUnauthorized, qt.Commentf("a removed member must not be signed for"))
+
+	// and they cannot authenticate again either
+	resp, code := testRequest(t, http.MethodPost, "", authReq(0), "processes", pid, "auth", "0")
+	c.Assert(code, qt.Equals, http.StatusNotFound, qt.Commentf("resp: %s", resp))
+
+	// --- member 2 keeps a live token while the participant row disappears underneath it, which is
+	// what a group edit does. Sign must re-check the census rather than trust the token. ---
+	tok2 := authProcessCSP(t, pid, authReq(2))
+	voter2 := ethereum.SignKeys{}
+	c.Assert(voter2.Generate(), qt.IsNil)
+	processOID, err := primitive.ObjectIDFromHex(pid)
+	c.Assert(err, qt.IsNil)
+	vp, err := testDB.VotingProcess(processOID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(testDB.DelCensusParticipant(vp.CensusID.Hex(), ids[2]), qt.IsNil)
+
+	_, code = testRequest(t, http.MethodPost, "", &handlers.SignRequest{
+		AuthToken: tok2, ProcessID: openElection, Payload: hex.EncodeToString(voter2.Address().Bytes()),
+	}, "processes", pid, "sign")
+	c.Assert(code, qt.Equals, http.StatusNotFound,
+		qt.Commentf("sign must re-check census participation, not trust the token"))
+
+	// --- member 1 signs FIRST, then is removed: the signature still votes ---
+	tok1 := authProcessCSP(t, pid, authReq(1))
+	voter1 := ethereum.SignKeys{}
+	c.Assert(voter1.Generate(), qt.IsNil)
+	sign1 := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "",
+		&handlers.SignRequest{
+			AuthToken: tok1, ProcessID: openElection, Payload: hex.EncodeToString(voter1.Address().Bytes()),
+		}, "processes", pid, "sign")
+	c.Assert(sign1.Signature, qt.Not(qt.HasLen), 0)
+
+	// removing them is now refused: the ballot is already theirs to cast and hiding that would be
+	// a lie. The error names them.
+	errResp := requestAndExpectError(t, http.MethodDelete, token,
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[1:2]}, "processes", pid, "census")
+	c.Assert(errResp.Code, qt.Equals, errors.ErrCensusMemberAlreadyVoted.Code)
+	data, isMap := errResp.Data.(map[string]any)
+	c.Assert(isMap, qt.IsTrue, qt.Commentf("error data: %#v", errResp.Data))
+	c.Assert(data["votedMemberIds"], qt.DeepEquals, []any{ids[1]})
+
+	// the signature they already hold still produces a vote the chain accepts — the documented
+	// ceiling: revocation closes the door on new signatures, it cannot recall one.
+	vocdoniClient := testNewVocdoniClient(t)
+	votesBefore, err := vocdoniClient.ElectionVoteCount(openElection.Bytes())
+	c.Assert(err, qt.IsNil)
+	proof := testGenerateVoteProof(openElection, voter1.Address().Bytes(), sign1.Signature, 1)
+	nullifier := testRelayVoteRequest(t, &voter1, openElection, proof, []byte("[\"1\"]"))
+	c.Assert(nullifier, qt.Not(qt.HasLen), 0)
+	votesAfter, err := vocdoniClient.ElectionVoteCount(openElection.Bytes())
+	c.Assert(err, qt.IsNil)
+	c.Assert(votesAfter, qt.Equals, votesBefore+1,
+		qt.Commentf("an already-issued CSP signature cannot be revoked and still votes"))
 }

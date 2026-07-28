@@ -278,6 +278,111 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, resp)
 }
 
+// removeVotingProcessCensusHandler godoc
+//
+//	@Summary		Remove members from a published process's census
+//	@Description	Take organization members off the census of an already-published voting process, so
+//	@Description	they can no longer authenticate or be signed for by the CSP. Their participant rows
+//	@Description	are deleted, they are pruned from every question's eligibility subset, and their CSP
+//	@Description	sessions are invalidated, so a token minted while they were still in the census cannot
+//	@Description	be spent afterwards.
+//	@Description	A member who has already voted any of the process's questions cannot be removed: the
+//	@Description	request is refused with 409 and the offending ids in the error's data.votedMemberIds.
+//	@Description	Their ballot is already on chain and removing them would only hide that, not undo it.
+//	@Description	Nothing is sent on chain — an election's maxCensusSize can only grow, and the leftover
+//	@Description	headroom is harmless because the CSP, not that number, decides who may vote. Note that a
+//	@Description	CSP signature already handed out stays valid until the election closes; removal closes
+//	@Description	the door on new signatures, it cannot recall one. Requires Manager/Admin role.
+//	@Tags			processes
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			processId	path		string									true	"Process ID"
+//	@Param			request		body		apicommon.AddCensusParticipantsRequest	true	"Member IDs to remove"
+//	@Success		200			{object}	apicommon.RemoveProcessCensusResponse	"Members removed"
+//	@Failure		400			{object}	errors.Error							"Invalid input data"
+//	@Failure		401			{object}	errors.Error							"Unauthorized"
+//	@Failure		404			{object}	errors.Error							"Process not found"
+//	@Failure		409			{object}	errors.Error							"A member has already voted"
+//	@Failure		500			{object}	errors.Error							"Internal server error"
+//	@Router			/processes/{processId}/census [delete]
+func (a *API) removeVotingProcessCensusHandler(w http.ResponseWriter, r *http.Request) {
+	oid, ok := a.votingProcessID(w, r)
+	if !ok {
+		return
+	}
+	// loads the process + questions and gates on Manager/Admin of the owning org.
+	vp, questions, ok := a.authorizeStatusChange(w, r, oid)
+	if !ok {
+		return
+	}
+	// a draft's census is rebuilt wholesale by PUT /processes/{processId}; this endpoint exists for
+	// the published case, where that is not possible.
+	if !vp.Published {
+		errors.ErrDuplicateConflict.
+			Withf("process is not published; edit the draft via PUT /processes/{processId}").Write(w)
+		return
+	}
+	var req apicommon.AddCensusParticipantsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errors.ErrMalformedBody.Withf("couldn't decode participant IDs").Write(w)
+		return
+	}
+	if len(req.MemberIDs) == 0 {
+		apicommon.HTTPWriteJSON(w, &apicommon.RemoveProcessCensusResponse{Removed: 0})
+		return
+	}
+	// a ballot already cast cannot be taken back, so refuse rather than pretend the removal undid it
+	voted, apiErr := a.votedAmong(questions, req.MemberIDs)
+	if apiErr != nil {
+		apiErr.Write(w)
+		return
+	}
+	if len(voted) > 0 {
+		errors.ErrCensusMemberAlreadyVoted.
+			Withf("%d of the %d members to remove already voted", len(voted), len(req.MemberIDs)).
+			WithData(map[string]any{"votedMemberIds": voted}).Write(w)
+		return
+	}
+
+	removed, err := a.db.RemoveCensusParticipantsByMemberIDs(vp.CensusID.Hex(), req.MemberIDs)
+	if err != nil {
+		if stderrors.Is(err, db.ErrNotFound) {
+			errors.ErrCensusNotFound.Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	apicommon.HTTPWriteJSON(w, &apicommon.RemoveProcessCensusResponse{Removed: removed})
+}
+
+// votedAmong returns which of the given members have already voted any of the process's on-chain
+// questions, sorted so the response is stable. It reports the API error to write back on failure.
+func (a *API) votedAmong(questions []db.VotingProcessQuestion, memberIDs []string) ([]string, *errors.Error) {
+	seen := make(map[string]bool)
+	for i := range questions {
+		if len(questions[i].UpstreamID) == 0 {
+			continue // not on chain, so nothing can have been voted
+		}
+		votedInQuestion, err := a.db.MembersWithUsedCSPProcess(questions[i].UpstreamID, memberIDs)
+		if err != nil {
+			e := errors.ErrGenericInternalServerError.WithErr(err)
+			return nil, &e
+		}
+		for id := range votedInQuestion {
+			seen[id] = true
+		}
+	}
+	voted := make([]string, 0, len(seen))
+	for _, id := range memberIDs {
+		if seen[id] {
+			voted = append(voted, id)
+		}
+	}
+	return voted, nil
+}
+
 // enqueueCensusSizeUpdate submits a SET_PROCESS_CENSUS tx per published whole-census question to raise
 // its on-chain maxCensusSize to the census's new size. Questions with an eligibility subset keep their
 // fixed size and are skipped. Returns the job id (empty when nothing on-chain needs updating) and false
@@ -285,14 +390,27 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 func (a *API) enqueueCensusSizeUpdate(
 	w http.ResponseWriter, vp *db.VotingProcess, census *db.Census, questions []db.VotingProcessQuestion,
 ) (string, bool) {
+	size := uint64(census.Size)
 	published := make([]db.VotingProcessQuestion, 0, len(questions))
 	for i := range questions {
-		if len(questions[i].UpstreamID) > 0 && len(questions[i].EligibleMemberIDs) == 0 {
-			published = append(published, questions[i])
+		if len(questions[i].UpstreamID) == 0 || len(questions[i].EligibleMemberIDs) > 0 {
+			continue
 		}
+		// the chain only accepts a maxCensusSize increase, and the census can now shrink (a removed
+		// member, a group edit), so compare against what the election actually carries instead of
+		// submitting census.Size blindly and having the tx rejected.
+		elec, err := a.account.Election(questions[i].UpstreamID)
+		if err != nil {
+			errors.ErrVochainRequestFailed.WithErr(err).Write(w)
+			return "", false
+		}
+		if elec.Census != nil && size <= elec.Census.MaxCensusSize {
+			continue
+		}
+		published = append(published, questions[i])
 	}
 	if len(published) == 0 {
-		return "", true // no whole-census election on chain: nothing to resize
+		return "", true // no whole-census election on chain needs a bigger size
 	}
 	org, err := a.db.Organization(vp.OrgAddress)
 	if err != nil {
@@ -315,7 +433,6 @@ func (a *API) enqueueCensusSizeUpdate(
 	}
 	root := census.Published.Root
 	uri := census.Published.URI
-	size := uint64(census.Size)
 	orgLock := a.orgTxLocks.lock(org.Address)
 	if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
 		defer orgLock.Unlock()

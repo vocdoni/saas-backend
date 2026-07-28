@@ -610,6 +610,13 @@ func (ms *MongoStorage) DeleteOrgMembers(orgAddress common.Address, ids []string
 		return 0, fmt.Errorf("failed to update groups after deleting orgMembers: %w", err)
 	}
 
+	// A deleted member must stop being able to vote. Their census participant rows, question
+	// eligibility and CSP sessions all outlive the member document otherwise, and a live election
+	// would keep accepting them.
+	if err := ms.purgeMembersFromCensuses(ctx, stringIDs); err != nil {
+		return 0, fmt.Errorf("failed to purge deleted members from censuses: %w", err)
+	}
+
 	// Clean up the auto group if the org now has no members.
 	if err := ms.DeleteAutoMemberGroupIfEmpty(orgAddress); err != nil {
 		log.Warnw("could not clean up auto member group after DeleteOrgMembers", "error", err)
@@ -636,6 +643,12 @@ func (ms *MongoStorage) DeleteAllOrgMembers(orgAddress common.Address) (int, err
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
+	// collect the ids before the documents go, so the census/CSP cascade below knows who to revoke
+	memberIDs, err := ms.GetAllOrgMemberIDs(orgAddress)
+	if err != nil {
+		return 0, err
+	}
+
 	result, err := ms.orgMembers.DeleteMany(ctx, filter)
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete all orgMembers: %w", err)
@@ -655,6 +668,11 @@ func (ms *MongoStorage) DeleteAllOrgMembers(orgAddress common.Address) (int, err
 	_, err = ms.orgMemberGroups.UpdateMany(ctx, groupFilter, groupUpdate)
 	if err != nil {
 		return 0, fmt.Errorf("failed to update groups after deleting all orgMembers: %w", err)
+	}
+
+	// see DeleteOrgMembers: deleted members must lose census participation and their CSP sessions.
+	if err := ms.purgeMembersFromCensuses(ctx, memberIDs); err != nil {
+		return 0, fmt.Errorf("failed to purge deleted members from censuses: %w", err)
 	}
 
 	// All members are gone — remove the auto group too.
