@@ -1721,8 +1721,10 @@ definitions:
   apicommon.UpdateQuestionCensusResponse:
     properties:
       added:
-        description: Added and Removed count the members whose eligibility changed
-          with this request
+        description: |-
+          Added and Removed count the members whose eligibility changed with this request. Both are
+          always present: omitting a zero would leave a client unable to tell "removed nobody" from
+          "this response does not report removals".
         type: integer
       eligible:
         description: |-
@@ -6457,8 +6459,8 @@ paths:
         process census — add them with PUT /processes/{processId}/census first. An empty list
         opens the question to the whole census. Sending the list a question already has is a no-op.
         While the process is a draft the list is applied as given. Once it is published members
-        may still be added and removed, with one restriction: a member who has already voted the
-        question cannot lose eligibility. Such a request is refused with 409 and the offending
+        may still be added and removed, with one restriction: a member the CSP has already signed
+        for on the question cannot lose eligibility. Such a request is refused with 409 and the offending
         ids in the error's data.votedMemberIds.
         Adding members raises the question's on-chain election maxCensusSize as an async job
         (poll GET /jobs/{jobId}) when the election is too small for them; without that the new
@@ -6506,7 +6508,7 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: A member that already voted would lose eligibility
+          description: A member already signed for would lose eligibility
           schema:
             $ref: '#/definitions/errors.Error'
         "500":

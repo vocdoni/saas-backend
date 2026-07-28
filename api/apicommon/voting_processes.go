@@ -87,8 +87,9 @@ type UpdateProcessCensusResponse struct {
 // census member is eligible. Sending the list a question already has is a no-op rather than an error.
 //
 // While the process is a draft the list is applied as given. Once it is published members may still
-// be added and removed, with one restriction: a member who has already voted the question cannot
-// lose eligibility, and a request that would drop one is refused with 409.
+// be added and removed, with one restriction: a member the CSP has already signed for on the
+// question cannot lose eligibility, and a request that would drop one is refused with 409. Note that
+// is "signed for", not "voted on chain" — they hold a valid signature either way.
 type UpdateQuestionCensusRequest struct {
 	// Member ids eligible for this question; each must be a participant of the process census
 	MemberIDs []string `json:"memberIds"`
@@ -103,9 +104,11 @@ type UpdateQuestionCensusResponse struct {
 	// question is open to the WHOLE census rather than to nobody — an empty list is "no
 	// restriction", the same convention the request body uses.
 	Eligible int `json:"eligible"`
-	// Added and Removed count the members whose eligibility changed with this request
+	// Added and Removed count the members whose eligibility changed with this request. Both are
+	// always present: omitting a zero would leave a client unable to tell "removed nobody" from
+	// "this response does not report removals".
 	Added   int `json:"added"`
-	Removed int `json:"removed,omitempty"`
+	Removed int `json:"removed"`
 }
 
 // CreateVotingProcessResponse is returned by POST /processes.

@@ -289,8 +289,8 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 //	@Description	process census — add them with PUT /processes/{processId}/census first. An empty list
 //	@Description	opens the question to the whole census. Sending the list a question already has is a no-op.
 //	@Description	While the process is a draft the list is applied as given. Once it is published members
-//	@Description	may still be added and removed, with one restriction: a member who has already voted the
-//	@Description	question cannot lose eligibility. Such a request is refused with 409 and the offending
+//	@Description	may still be added and removed, with one restriction: a member the CSP has already signed
+//	@Description	for on the question cannot lose eligibility. Such a request is refused with 409 and the offending
 //	@Description	ids in the error's data.votedMemberIds.
 //	@Description	Adding members raises the question's on-chain election maxCensusSize as an async job
 //	@Description	(poll GET /jobs/{jobId}) when the election is too small for them; without that the new
@@ -309,7 +309,7 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 //	@Failure		400			{object}	errors.Error							"Invalid input data"
 //	@Failure		401			{object}	errors.Error							"Unauthorized"
 //	@Failure		404			{object}	errors.Error							"Process or question not found"
-//	@Failure		409			{object}	errors.Error							"A member that already voted would lose eligibility"
+//	@Failure		409			{object}	errors.Error							"A member already signed for would lose eligibility"
 //	@Failure		500			{object}	errors.Error							"Internal server error"
 //	@Router			/processes/{processId}/questions/{questionId}/census [put]
 func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r *http.Request) {
@@ -322,14 +322,15 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 		errors.ErrMalformedURLParam.Withf("invalid question ID").Write(w)
 		return
 	}
+	// loads the process + questions and gates on Manager/Admin of the owning org. Authorize before
+	// touching the body, matching the sibling handler: an unauthorized caller's input is not parsed.
+	vp, questions, ok := a.authorizeStatusChange(w, r, oid)
+	if !ok {
+		return
+	}
 	var req apicommon.UpdateQuestionCensusRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		errors.ErrMalformedBody.Write(w)
-		return
-	}
-	// loads the process + questions and gates on Manager/Admin of the owning org.
-	vp, questions, ok := a.authorizeStatusChange(w, r, oid)
-	if !ok {
 		return
 	}
 	var question *db.VotingProcessQuestion
@@ -359,6 +360,12 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 	}
 	// a member who already voted must keep the right they exercised. Only an on-chain question can
 	// have votes, so a draft skips the check entirely.
+	//
+	// This read and the write below are not atomic: a vote landing in between is stored against a
+	// member the write has just made ineligible. The compare-and-set guards concurrent eligibility
+	// writes, not this — closing it would need a transaction spanning two collections for a window
+	// that closes itself, and the outcome is a stored list that briefly contradicts the invariant
+	// rather than a vote lost or double-counted.
 	if len(question.UpstreamID) > 0 {
 		voters, err := a.db.CSPProcessVoters(question.UpstreamID)
 		if err != nil {
@@ -367,7 +374,7 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 		}
 		if blocked := votedMembersLosingEligibility(eligible, voters); len(blocked) > 0 {
 			errors.ErrQuestionEligibilityVoted.
-				Withf("%d member(s) losing eligibility already voted", len(blocked)).
+				Withf("%d member(s) losing eligibility have already been signed for", len(blocked)).
 				WithData(map[string]any{"votedMemberIds": blocked}).Write(w)
 			return
 		}
@@ -394,30 +401,36 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 		return
 	}
 
-	// a published question's election was sized for its old eligible count, so it may have no room
-	// for the members just added. Only additions can require more room, so a removal never goes on
-	// chain — which is just as well, since the chain refuses to shrink maxCensusSize.
-	if len(question.UpstreamID) == 0 || added == 0 {
-		apicommon.HTTPWriteJSON(w, resp)
-		return
+	// a published question's election was sized for its old eligible list, so it may have no room
+	// for whoever is eligible now. An empty list means the whole census is eligible, on both sides
+	// of the comparison — which is the case that matters here: reopening a restricted question adds
+	// nobody by name yet can multiply the electorate, so keying this off `added` would skip the
+	// resize exactly when it is most needed and leave the new voters signable but unable to vote.
+	previous := uint64(len(question.EligibleMemberIDs))
+	if len(question.EligibleMemberIDs) == 0 {
+		previous = uint64(census.Size)
 	}
-	// an empty list means the whole census is eligible, so the election has to fit all of it.
 	needed := uint64(len(eligible))
 	if len(eligible) == 0 {
 		needed = uint64(census.Size)
 	}
-	// compare against what the election actually carries rather than against the list we replaced:
-	// an earlier update may have raised it above the old list's length, and re-submitting a smaller
-	// size would simply be rejected by the chain.
-	elec, err := a.account.Election(question.UpstreamID)
-	if err != nil {
-		errors.ErrVochainRequestFailed.WithErr(err).Write(w)
+	if len(question.UpstreamID) == 0 || needed <= previous {
+		// a draft, or a change that cannot need more room than the election already has. Removals
+		// land here and never reach the chain, which is just as well: it refuses to shrink
+		// maxCensusSize anyway.
+		apicommon.HTTPWriteJSON(w, resp)
 		return
 	}
-	// when the election does not report a census at all, attempt the resize rather than skip it:
-	// a tx the chain rejects is visible on the job, whereas silently leaving the election too small
-	// would strand the members just added with no way to tell.
-	if elec.Census != nil && needed <= elec.Census.MaxCensusSize {
+	// the stored list is only a lower bound on what the election carries — an earlier update may
+	// have raised it further — so ask the chain before submitting a size it would reject.
+	elec, err := a.account.Election(question.UpstreamID)
+	if err != nil {
+		// the eligibility write has already committed, so failing the request here would report
+		// failure for work that was done. Enqueue instead: growth is genuinely required to reach
+		// this point, so the tx cannot be a shrink, and a chain problem surfaces on the job.
+		log.Warnw("could not read election size, enqueuing the resize anyway",
+			"upstreamId", question.UpstreamID.String(), "error", err)
+	} else if elec.Census != nil && needed <= elec.Census.MaxCensusSize {
 		apicommon.HTTPWriteJSON(w, resp)
 		return
 	}

@@ -421,3 +421,69 @@ func TestUpdateQuestionCensusRejects(t *testing.T) {
 	c.Assert(got.Questions[0].EligibleMemberIDs, qt.HasLen, 0)
 	c.Assert(got.Questions[1].EligibleMemberIDs, qt.DeepEquals, ids[:1])
 }
+
+// TestUpdateQuestionCensusReopen covers the transition that adds nobody by name yet can multiply the
+// electorate: a published question restricted to a subset, reopened to the whole census. Its election
+// was sized for the subset, so it must be resized — keying the resize off the count of added members
+// would skip it here, and the newly eligible members would be signed by the CSP only for the chain to
+// reject their ballots.
+func TestUpdateQuestionCensusReopen(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
+	ids := memberIDs(members)
+
+	// a census of three; question 1 is restricted to a single member, so its election is published
+	// with room for exactly one voter while the census has three.
+	req := newVotingProcessRequest(orgAddress, ids)
+	req.StartDate = ""
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint)
+	pid := created.ProcessID
+
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
+
+	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	c.Assert(got.Census.Size, qt.Equals, int64(3))
+	qid := got.Questions[1].ID.Hex()
+	election := got.Questions[1].UpstreamID
+	c.Assert(got.Questions[1].EligibleMemberIDs, qt.DeepEquals, ids[:1])
+
+	elec, err := testAPI.account.Election(election)
+	c.Assert(err, qt.IsNil)
+	c.Assert(elec.Census.MaxCensusSize, qt.Equals, uint64(1),
+		qt.Commentf("a subset question is published sized for its subset"))
+
+	// reopening it to the whole census: nobody is named, so nothing is "added", but two more members
+	// become eligible and the election has no room for them.
+	reopen := requestAndParseWithAssertCode[apicommon.UpdateQuestionCensusResponse](
+		http.StatusAccepted, t, http.MethodPut, token,
+		&apicommon.UpdateQuestionCensusRequest{MemberIDs: nil},
+		"processes", pid, "questions", qid, "census")
+	c.Assert(reopen.Eligible, qt.Equals, 0)
+	c.Assert(reopen.Added, qt.Equals, 0)
+	c.Assert(reopen.Removed, qt.Equals, 1)
+	c.Assert(reopen.JobID, qt.Not(qt.Equals), "")
+
+	sizeJob := pollJob(t, reopen.JobID)
+	c.Assert(sizeJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("size job error: %s", sizeJob.Errors))
+	elec, err = testAPI.account.Election(election)
+	c.Assert(err, qt.IsNil)
+	c.Assert(elec.Census.MaxCensusSize, qt.Equals, uint64(3),
+		qt.Commentf("reopening to the whole census must resize the election to fit it"))
+
+	// a member who was never in the subset can now authenticate and be signed for the question
+	voter := ethereum.SignKeys{}
+	c.Assert(voter.Generate(), qt.IsNil)
+	tok := authProcessCSP(t, pid, &handlers.AuthRequest{
+		Name: members[2].Name, Surname: members[2].Surname, Email: members[2].Email,
+	})
+	sign := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "",
+		&handlers.SignRequest{
+			AuthToken: tok, ProcessID: election, Payload: hex.EncodeToString(voter.Address().Bytes()),
+		}, "processes", pid, "sign")
+	c.Assert(sign.Signature, qt.Not(qt.HasLen), 0)
+}
