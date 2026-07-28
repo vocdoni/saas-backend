@@ -19,6 +19,12 @@ import (
 	"go.vocdoni.io/dvote/vochain/state"
 )
 
+// startDateGrace is how far ahead of a process's stored start date signing is still allowed. The
+// gate compares this host's clock against a date the backend wrote, neither of which is the chain,
+// so a small window keeps a host running marginally behind from refusing voters on an election that
+// is already open.
+const startDateGrace = time.Minute
+
 // parseProcessID parses the {processId} URL param (a voting-process Mongo ObjectID) and
 // returns both the ObjectID and its bytes, which are used as the CSP token anchor.
 func parseProcessID(w http.ResponseWriter, r *http.Request) (primitive.ObjectID, internal.HexBytes, bool) {
@@ -253,7 +259,13 @@ func (c *CSPHandlers) ProcessSignHandler(w http.ResponseWriter, r *http.Request)
 	// a process scheduled to start later is READY on chain but not yet accepting votes; refuse to
 	// hand out a signature that could simply be held until it opens. Only the start is checked:
 	// EndDate is optional (it may be zero), while publish always persists a start date.
-	if !vp.StartDate.IsZero() && time.Now().Before(vp.StartDate) {
+	//
+	// The comparison is against this host's clock and a stored date, not against the chain, so an
+	// exact one would turn a host running slightly behind into 401s on an election the chain is
+	// already accepting. The grace window makes the gate err towards letting a legitimate voter
+	// through: the worst it allows is a signature minted seconds early, which the chain will refuse
+	// anyway until the election opens.
+	if !vp.StartDate.IsZero() && time.Now().Add(startDateGrace).Before(vp.StartDate) {
 		errors.ErrUnauthorized.Withf("process has not started yet").Write(w)
 		return
 	}
