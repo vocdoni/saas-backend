@@ -145,14 +145,22 @@ func (ms *MongoStorage) RecordBatchVoteOutcome(jobID string, index int, voteID i
 		set[item+"error"] = errMsg
 	}
 
+	// require the entry to already exist: a $set on an out-of-range array index would pad the array
+	// with nulls up to it, and the $inc would count an envelope that is not part of the batch and
+	// close the job early. Matching on $exists makes an out-of-range write a no-op instead.
 	var job Job
 	err := ms.jobs.FindOneAndUpdate(ctx,
-		bson.M{"jobId": jobID},
+		bson.M{"jobId": jobID, fmt.Sprintf("result.votes.%d", index): bson.M{"$exists": true}},
 		bson.M{"$set": set, "$inc": bson.M{"added": 1}},
 		options.FindOneAndUpdate().SetReturnDocument(options.After),
 	).Decode(&job)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
+			// tell a missing job apart from a bad index, so an out-of-range write is not reported as
+			// a job that does not exist.
+			if n, cErr := ms.jobs.CountDocuments(ctx, bson.M{"jobId": jobID}); cErr == nil && n > 0 {
+				return fmt.Errorf("vote index %d is not part of batch job %s", index, jobID)
+			}
 			return ErrNotFound
 		}
 		return fmt.Errorf("failed to record batch vote outcome: %w", err)

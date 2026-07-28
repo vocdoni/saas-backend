@@ -399,6 +399,13 @@ func TestRelayVotesBatch(t *testing.T) {
 	c.Assert(orgAfter.Counters.SentVotes, qt.Equals, questions)
 }
 
+// TestRelayVoteRejectsOversizedBody checks that the single-vote relay, public and
+// unauthenticated like the batch one, also refuses a body it would otherwise buffer whole.
+func TestRelayVoteRejectsOversizedBody(t *testing.T) {
+	requestAndAssertError(errors.ErrRequestBodyTooLarge, t, http.MethodPost, "",
+		&apicommon.RelayVoteRequest{TxPayload: internal.HexBytes(make([]byte, maxVoteBodyBytes))}, "vote")
+}
+
 // TestRelayVotesRejectsBatch checks that a batch is validated as a unit: every rejection
 // happens before anything is enqueued, so a voter retries from a clean slate instead of
 // discovering that a prefix of their questions was voted.
@@ -471,6 +478,12 @@ func TestRelayVotesRejectsBatch(t *testing.T) {
 			"the same vote twice",
 			[]apicommon.RelayVoteRequest{voteFor(processA), voteFor(processA)},
 			errors.ErrInvalidTxFormat,
+		},
+		{
+			// the endpoint is public, so an oversized body is refused before it is buffered
+			"body over the size cap",
+			[]apicommon.RelayVoteRequest{{TxPayload: internal.HexBytes(make([]byte, maxVotesBodyBytes))}},
+			errors.ErrRequestBodyTooLarge,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

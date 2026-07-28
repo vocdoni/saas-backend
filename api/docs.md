@@ -2412,6 +2412,10 @@ If the worker queue is saturated the handler returns `503` and the client should
   relayed. Returns `202` + a single `{ "jobId" }` covering the batch; the job result
   carries one entry per vote, in request order.
 
+  Both relay endpoints are public, so their request body is capped before it is buffered
+  (8 KiB per envelope — a signed envelope is ~600 hex characters). An oversized body is
+  refused with `413` / `40167`.
+
 #### 🔍 Poll job status
 
 * **Path** `/jobs/{jobId}`

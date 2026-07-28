@@ -7397,6 +7397,10 @@ paths:
           description: Process not found
           schema:
             $ref: '#/definitions/errors.Error'
+        "413":
+          description: Request body too large
+          schema:
+            $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
           schema:
@@ -7448,6 +7452,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "404":
           description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "413":
+          description: Request body too large
           schema:
             $ref: '#/definitions/errors.Error'
         "500":

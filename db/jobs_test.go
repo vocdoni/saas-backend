@@ -136,6 +136,25 @@ func TestRecordBatchVoteOutcome(t *testing.T) {
 	c.Run("unknown job", func(c *qt.C) {
 		c.Assert(testDB.RecordBatchVoteOutcome("nope", 0, nil, ""), qt.Equals, ErrNotFound)
 	})
+
+	c.Run("index outside the batch", func(c *qt.C) {
+		jobID := "batch-vote-job-bad-index"
+		c.Assert(testDB.CreateVoteBatchJob(jobID, orgAddress, seed(2)), qt.IsNil)
+
+		// an out-of-range write must not pad result.votes with nulls, must not advance the
+		// progress counter, and must not be mistaken for a job that does not exist
+		for _, index := range []int{2, 7, -1} {
+			err := testDB.RecordBatchVoteOutcome(jobID, index, internal.HexBytes{0xff}, "")
+			c.Assert(err, qt.Not(qt.IsNil), qt.Commentf("index %d", index))
+			c.Assert(err, qt.Not(qt.Equals), ErrNotFound, qt.Commentf("index %d", index))
+		}
+
+		job, err := testDB.Job(jobID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(job.Result.Votes, qt.HasLen, 2)
+		c.Assert(job.Added, qt.Equals, 0)
+		c.Assert(job.Status, qt.Equals, JobStatusPending)
+	})
 }
 
 func TestSetJob(t *testing.T) {

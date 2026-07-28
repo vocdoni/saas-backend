@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	stderrors "errors"
 	"net/http"
 	"strings"
 
@@ -39,13 +40,14 @@ import (
 //	@Success		202		{object}	apicommon.EnqueuedResponse	"Job accepted; poll GET /jobs/{jobId}"
 //	@Failure		400		{object}	errors.Error				"Invalid input data"
 //	@Failure		404		{object}	errors.Error				"Process not found"
+//	@Failure		413		{object}	errors.Error				"Request body too large"
 //	@Failure		500		{object}	errors.Error				"Internal server error"
 //	@Failure		503		{object}	errors.Error				"Transaction queue is full"
 //	@Router			/vote [post]
 func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 	var req apicommon.RelayVoteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		errors.ErrMalformedBody.Write(w)
+	if err := decodeCappedJSON(w, r, &req, maxVoteBodyBytes); err != nil {
+		err.Write(w)
 		return
 	}
 
@@ -83,10 +85,35 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, &apicommon.EnqueuedResponse{JobID: jobID})
 }
 
-// maxVotesPerBatch bounds a POST /votes call. It matches the cap of the vochain batch
-// transaction endpoint and equals txQueueSize, so the largest accepted batch can at most
-// fill an empty queue.
-const maxVotesPerBatch = 100
+const (
+	// maxVotesPerBatch bounds a POST /votes call. It matches the cap of the vochain batch
+	// transaction endpoint and equals txQueueSize, so the largest accepted batch can at most
+	// fill an empty queue.
+	maxVotesPerBatch = 100
+	// maxVoteBodyBytes bounds the request body of a single relayed envelope. A CSP-signed vote
+	// envelope marshals to ~300 bytes, ~600 characters once hex-encoded into the JSON field, so
+	// this leaves an order of magnitude of headroom for larger proofs while keeping these public,
+	// unauthenticated endpoints from reading an unbounded body.
+	maxVoteBodyBytes = 8 << 10
+	// maxVotesBodyBytes bounds a whole batch: one envelope allowance each, plus slack for the
+	// JSON framing around them.
+	maxVotesBodyBytes = maxVotesPerBatch*maxVoteBodyBytes + 4<<10
+)
+
+// decodeCappedJSON reads at most limit bytes of the request body and decodes them into dst,
+// returning the API error to write back on a body that is too large or not the expected JSON.
+// The relay endpoints are public, so the body has to be bounded before it is buffered.
+func decodeCappedJSON(w http.ResponseWriter, r *http.Request, dst any, limit int64) *errors.Error {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		var tooLarge *http.MaxBytesError
+		if stderrors.As(err, &tooLarge) {
+			return asPtr(errors.ErrRequestBodyTooLarge.Withf("the limit is %d bytes", limit))
+		}
+		return asPtr(errors.ErrMalformedBody)
+	}
+	return nil
+}
 
 // relayVotesHandler godoc
 //
@@ -113,13 +140,14 @@ const maxVotesPerBatch = 100
 //	@Success		202		{object}	apicommon.EnqueuedResponse	"Job accepted; poll GET /jobs/{jobId}"
 //	@Failure		400		{object}	errors.Error				"Invalid input data"
 //	@Failure		404		{object}	errors.Error				"Process not found"
+//	@Failure		413		{object}	errors.Error				"Request body too large"
 //	@Failure		500		{object}	errors.Error				"Internal server error"
 //	@Failure		503		{object}	errors.Error				"Transaction queue is full"
 //	@Router			/votes [post]
 func (a *API) relayVotesHandler(w http.ResponseWriter, r *http.Request) {
 	var req apicommon.RelayVotesRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		errors.ErrMalformedBody.Write(w)
+	if err := decodeCappedJSON(w, r, &req, maxVotesBodyBytes); err != nil {
+		err.Write(w)
 		return
 	}
 	switch {

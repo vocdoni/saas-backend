@@ -111,6 +111,7 @@ var (
 	ErrVoteBatchEmpty                         = Error{Code: 40164, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("vote batch is empty")}
 	ErrVoteBatchTooLarge                      = Error{Code: 40165, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("vote batch is too large")}
 	ErrVoteBatchMixedOrganizations            = Error{Code: 40166, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("vote batch spans several organizations")}
+	ErrRequestBodyTooLarge                    = Error{Code: 40167, HTTPstatus: http.StatusRequestEntityTooLarge, Err: fmt.Errorf("request body is too large")}
 
 	// CSP errors (408)
 	ErrZeroWeightVoter = Error{Code: 40801, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("voter weight cannot be zero")}
