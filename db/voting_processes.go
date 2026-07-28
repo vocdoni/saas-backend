@@ -47,14 +47,20 @@ func (ms *MongoStorage) SetVotingProcess(vp *VotingProcess) (primitive.ObjectID,
 // SetVotingProcessIfUnchanged replaces a voting process only if its stored UpdatedAt still equals
 // seen, i.e. nothing has written the document since the caller read it. It reports ErrConflict
 // otherwise, leaving the stored document untouched, so two clients editing the same draft cannot
-// silently overwrite each other. Same semantics as SetVotingProcess in every other respect, except
-// that it never creates: an unknown id is a conflict, not an insert.
+// silently overwrite each other. It enforces the same organization invariant as SetVotingProcess but
+// never creates: an unknown id is a conflict, not an insert.
 func (ms *MongoStorage) SetVotingProcessIfUnchanged(vp *VotingProcess, seen time.Time) error {
 	if vp.ID.IsZero() || (vp.OrgAddress.Cmp(common.Address{}) == 0) {
 		return ErrInvalidData
 	}
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
+
+	// a voting process outlives its organization (nothing deletes votingProcesses on teardown), so
+	// this is checked here exactly as in SetVotingProcess rather than assumed from the caller
+	if _, err := ms.Organization(vp.OrgAddress); err != nil {
+		return fmt.Errorf("failed to get organization %s: %w", vp.OrgAddress, err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
@@ -78,6 +84,32 @@ func (ms *MongoStorage) SetVotingProcessIfUnchanged(vp *VotingProcess, seen time
 	if res.MatchedCount == 0 {
 		vp.UpdatedAt = prev
 		return ErrConflict
+	}
+	return nil
+}
+
+// SetVotingProcessQuestionIDs records the process's ordered question ids. It touches only that
+// field, so it cannot undo a concurrent edit of the rest of the document the way a whole-document
+// replace would, and it advances updatedAt without ever moving it backwards: the conditional-update
+// token of SetVotingProcessIfUnchanged has to stay monotonic, and this write can land inside the
+// same millisecond as the one that produced the token a client is holding.
+func (ms *MongoStorage) SetVotingProcessQuestionIDs(id primitive.ObjectID, questionIDs []primitive.ObjectID) error {
+	if id == primitive.NilObjectID {
+		return ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	// $max ignores a missing operand, so a document written before updatedAt existed just gets now
+	update := mongo.Pipeline{{{Key: "$set", Value: bson.M{
+		"questionIds": questionIDs,
+		"updatedAt":   bson.M{"$max": bson.A{"$updatedAt", time.Now()}},
+	}}}}
+	res, err := ms.votingProcesses.UpdateOne(ctx, bson.M{"_id": id}, update)
+	if err != nil {
+		return fmt.Errorf("failed to set voting process question ids: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
 	}
 	return nil
 }

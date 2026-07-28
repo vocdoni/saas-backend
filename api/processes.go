@@ -190,13 +190,17 @@ func (a *API) buildQuestions(
 // and records their ids on the process. The replacement is per slot rather than delete-all then
 // insert-all, so two overlapping draft updates cannot strand a row — see db.SetProcessQuestions.
 // Callers run buildQuestions first, so this only fails on infra errors.
+//
+// The ids are stored through a targeted update rather than a whole-document write: this runs right
+// after a conditional update may have forced updatedAt forward, and re-stamping the document with a
+// fresh time.Now() could push that token back to a value a client already spent.
 func (a *API) writeQuestions(vp *db.VotingProcess, built []*db.VotingProcessQuestion) error {
 	questionIDs, err := a.db.SetProcessQuestions(vp.ID, built)
 	if err != nil {
 		return fmt.Errorf("failed to store questions: %w", err)
 	}
 	vp.QuestionIDs = questionIDs
-	if _, err := a.db.SetVotingProcess(vp); err != nil {
+	if err := a.db.SetVotingProcessQuestionIDs(vp.ID, questionIDs); err != nil {
 		return fmt.Errorf("failed to update process questions: %w", err)
 	}
 	return nil
