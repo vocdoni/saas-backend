@@ -441,3 +441,69 @@ func TestOrgMembersByFieldTrackedSuite(t *testing.T) {
 		c.Assert(got, qt.HasLen, 0)
 	})
 }
+
+// TestOrgMemberFieldsTrimmedOnWrite covers the write side of the whitespace fix:
+// the fields feeding the CSP login hash are stored trimmed, whichever path
+// created the member. Whitespace picked up from a spreadsheet or CSV import
+// would otherwise make the member impossible to authenticate, because the login
+// hash is a byte-exact match.
+func TestOrgMemberFieldsTrimmedOnWrite(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	t.Run("SetOrgMember trims the login fields", func(_ *testing.T) {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+		c.Assert(testDB.SetOrganization(&Organization{Address: testOrgAddress}), qt.IsNil)
+
+		memberOID, err := testDB.SetOrgMember(testSalt, &OrgMember{
+			OrgAddress:   testOrgAddress,
+			Name:         "  John  ",
+			Surname:      "Doe ",
+			MemberNumber: " M-001",
+			NationalID:   " 12345678Z ",
+			Email:        "  John.Doe@Example.com ",
+		})
+		c.Assert(err, qt.IsNil)
+
+		stored, err := testDB.OrgMember(testOrgAddress, memberOID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(stored.Name, qt.Equals, "John")
+		c.Assert(stored.Surname, qt.Equals, "Doe")
+		c.Assert(stored.MemberNumber, qt.Equals, "M-001")
+		c.Assert(stored.NationalID, qt.Equals, "12345678Z")
+		// Email normalization already trimmed and lowercased.
+		c.Assert(stored.Email, qt.Equals, "john.doe@example.com")
+	})
+
+	t.Run("AddBulkOrgMembers trims the login fields", func(_ *testing.T) {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+		c.Assert(testDB.SetOrganization(&Organization{Address: testOrgAddress}), qt.IsNil)
+
+		progressChan, err := testDB.AddBulkOrgMembers(testOrg, []*OrgMember{
+			{
+				OrgAddress:   testOrgAddress,
+				Name:         "Jane ",
+				Surname:      " Roe",
+				MemberNumber: "M-002 ",
+				NationalID:   " 87654321X",
+			},
+		}, testSalt)
+		c.Assert(err, qt.IsNil)
+
+		var lastStatus *BulkOrgMembersJob
+		for status := range progressChan {
+			lastStatus = status
+		}
+		c.Assert(lastStatus, qt.Not(qt.IsNil))
+		c.Assert(lastStatus.Added, qt.Equals, 1)
+		c.Assert(lastStatus.Errors, qt.HasLen, 0)
+
+		// Looked up by the trimmed member number, proving it was stored trimmed.
+		stored, err := testDB.OrgMemberByMemberNumber(testOrgAddress, "M-002")
+		c.Assert(err, qt.IsNil)
+		c.Assert(stored.Name, qt.Equals, "Jane")
+		c.Assert(stored.Surname, qt.Equals, "Roe")
+		c.Assert(stored.MemberNumber, qt.Equals, "M-002")
+		c.Assert(stored.NationalID, qt.Equals, "87654321X")
+	})
+}
