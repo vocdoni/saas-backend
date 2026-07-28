@@ -1721,9 +1721,14 @@ definitions:
   apicommon.UpdateQuestionCensusResponse:
     properties:
       added:
+        description: Added and Removed count the members whose eligibility changed
+          with this request
         type: integer
       eligible:
-        description: Eligible is the number of members eligible after the update
+        description: |-
+          Eligible is the length of the stored eligible list after the update, so zero means the
+          question is open to the WHOLE census rather than to nobody — an empty list is "no
+          restriction", the same convention the request body uses.
         type: integer
       jobId:
         type: string

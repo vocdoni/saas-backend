@@ -84,8 +84,11 @@ type UpdateProcessCensusResponse struct {
 
 // UpdateQuestionCensusRequest is the body of PUT /processes/{processId}/questions/{questionId}/census:
 // the complete list of members eligible to vote that question, not a delta. An empty list means every
-// census member is eligible. Once the process is published the list may only grow — it must still
-// contain every member it already had — so a retry of the same body is a no-op rather than an error.
+// census member is eligible. Sending the list a question already has is a no-op rather than an error.
+//
+// While the process is a draft the list is applied as given. Once it is published members may still
+// be added and removed, with one restriction: a member who has already voted the question cannot
+// lose eligibility, and a request that would drop one is refused with 409.
 type UpdateQuestionCensusRequest struct {
 	// Member ids eligible for this question; each must be a participant of the process census
 	MemberIDs []string `json:"memberIds"`
@@ -96,10 +99,13 @@ type UpdateQuestionCensusRequest struct {
 // when it grew (empty for a draft, or when the list did not change).
 type UpdateQuestionCensusResponse struct {
 	JobID string `json:"jobId,omitempty"`
-	// Eligible is the number of members eligible after the update
+	// Eligible is the length of the stored eligible list after the update, so zero means the
+	// question is open to the WHOLE census rather than to nobody — an empty list is "no
+	// restriction", the same convention the request body uses.
 	Eligible int `json:"eligible"`
-	Added    int `json:"added"`
-	Removed  int `json:"removed,omitempty"`
+	// Added and Removed count the members whose eligibility changed with this request
+	Added   int `json:"added"`
+	Removed int `json:"removed,omitempty"`
 }
 
 // CreateVotingProcessResponse is returned by POST /processes.
