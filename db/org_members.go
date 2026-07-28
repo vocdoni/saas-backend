@@ -156,6 +156,7 @@ func (j *BulkOrgMembersJob) ErrorsAsStrings() []string {
 // prepareOrgMember processes a member for storage by:
 //   - Setting the organization address
 //   - Setting the creation timestamp
+//   - Trimming the fields that feed the CSP login hash
 //   - Hashing sensitive data (email, phone, password)
 //   - Not including original sensitive data
 func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime time.Time) (
@@ -172,6 +173,17 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 		member.UpdatedAt = currentTime
 	}
 	member.OrgAddress = org.Address
+
+	// Trim the auth fields. They feed a byte-exact login hash (see
+	// internal.HashSortedFields), so surrounding whitespace picked up from a
+	// spreadsheet or CSV import would make the member impossible to
+	// authenticate: the voter types the clean value and the recomputed hash
+	// never matches the stored one. Email and birthdate are canonicalized
+	// below by their own normalizers.
+	member.Name = strings.TrimSpace(member.Name)
+	member.Surname = strings.TrimSpace(member.Surname)
+	member.MemberNumber = strings.TrimSpace(member.MemberNumber)
+	member.NationalID = strings.TrimSpace(member.NationalID)
 
 	// normalize and validate the email
 	member.Email = internal.NormalizeEmail(member.Email)
