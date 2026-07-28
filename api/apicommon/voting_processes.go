@@ -18,8 +18,9 @@ type CensusSpec struct {
 	// process reads, so a client can restore the group a draft targeted. Absent (not a zero id) when
 	// the census is organization-wide.
 	GroupID string `json:"groupId,omitempty"`
-	// MemberIDs selects the census members explicitly, as an alternative to GroupID. Write-only: the
-	// census member list is never exposed on a read, only its config.
+	// MemberIDs selects the census members explicitly, as an alternative to GroupID. Write-only on
+	// this type: a process read echoes the census config, not the member list it resolved to. The
+	// list itself is read through the deprecated GET /census/{id}/participants (Manager/Admin).
 	MemberIDs []string `json:"memberIds,omitempty"`
 	// Size is the number of members in the census. Response-only (ignored on create/update): for a
 	// published process it equals the on-chain maxCensusSize of its whole-census questions.

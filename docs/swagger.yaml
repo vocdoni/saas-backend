@@ -111,8 +111,9 @@ definitions:
         type: string
       memberIds:
         description: |-
-          MemberIDs selects the census members explicitly, as an alternative to GroupID. Write-only: the
-          census member list is never exposed on a read, only its config.
+          MemberIDs selects the census members explicitly, as an alternative to GroupID. Write-only on
+          this type: a process read echoes the census config, not the member list it resolved to. The
+          list itself is read through the deprecated GET /census/{id}/participants (Manager/Admin).
         items:
           type: string
         type: array
