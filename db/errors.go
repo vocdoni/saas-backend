@@ -29,6 +29,28 @@ var (
 	ErrManagedQuotaReached = fmt.Errorf("integrator managed quota reached")
 )
 
+// CensusInUseByPublishedProcessError reports that an operation would tear down a census that a
+// published process is still voting on, naming the processes that block it. Deleting a group is a
+// metadata operation for every other purpose, so it must not double as a way to wipe a live
+// electorate; the caller removes members explicitly instead.
+type CensusInUseByPublishedProcessError struct {
+	ProcessIDs []string
+}
+
+func (e *CensusInUseByPublishedProcessError) Error() string {
+	return fmt.Sprintf("census is in use by %d published process(es)", len(e.ProcessIDs))
+}
+
+// MembersAlreadyVotedError reports the members an operation refuses to strip of eligibility because
+// they have already cast a ballot. Carrying the ids lets the caller name them back to the client.
+type MembersAlreadyVotedError struct {
+	MemberIDs []string
+}
+
+func (e *MembersAlreadyVotedError) Error() string {
+	return fmt.Sprintf("%d member(s) already voted", len(e.MemberIDs))
+}
+
 // errorsAsStrings converts a slice of errors to a slice of strings
 func errorsAsStrings(errs []error) []string {
 	s := []string{}

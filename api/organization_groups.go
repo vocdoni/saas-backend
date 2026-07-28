@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	stderrors "errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -308,6 +309,15 @@ func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 		toUpdate.RemoveMembers,
 	)
 	if err != nil {
+		// removing a member from a group takes their eligibility away, so it answers to the same
+		// rule as DELETE /processes/{processId}/census and reports it the same way.
+		var voted *db.MembersAlreadyVotedError
+		if stderrors.As(err, &voted) {
+			errors.ErrCensusMemberAlreadyVoted.
+				Withf("%d of the members being removed already voted", len(voted.MemberIDs)).
+				WithData(map[string]any{"votedMemberIds": voted.MemberIDs}).Write(w)
+			return
+		}
 		switch err {
 		case db.ErrNotFound, db.ErrInvalidData:
 			errors.ErrInvalidData.Withf("group not found").Write(w)
@@ -365,6 +375,17 @@ func (a *API) deleteOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 		return
 	}
 	if err := a.db.DeleteOrganizationMemberGroup(groupID, org.Address); err != nil {
+		// deleting the group would take its members off the censuses built from it, which for a
+		// published process means wiping a live electorate. Name the processes in the way.
+		var inUse *db.CensusInUseByPublishedProcessError
+		if stderrors.As(err, &inUse) {
+			errors.ErrCensusInUseByPublishedProc.
+				Withf("the group census is voted by %d published process(es); "+
+					"remove members with DELETE /processes/{processId}/census instead",
+					len(inUse.ProcessIDs)).
+				WithData(map[string]any{"processIds": inUse.ProcessIDs}).Write(w)
+			return
+		}
 		switch err {
 		case db.ErrNotFound:
 			errors.ErrInvalidData.Withf("group not found").Write(w)

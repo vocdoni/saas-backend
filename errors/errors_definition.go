@@ -108,7 +108,10 @@ var (
 	ErrAPIKeyNotFound                         = Error{Code: 40160, HTTPstatus: http.StatusNotFound, Err: fmt.Errorf("API key not found")}
 	ErrManagedOrgHasActiveElections           = Error{Code: 40161, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("managed organization has active elections and cannot be deleted")}
 	ErrVotingTypeNotAllowed                   = Error{Code: 40163, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("voting type not allowed by the subscription plan")}
-	ErrCensusMemberAlreadyVoted               = Error{Code: 40169, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("members that already voted cannot be removed from the census")}
+	// 40164-40167 are claimed by the open batch-vote-relay PR and 40168 by the open per-question
+	// eligibility PR, so this range continues past them rather than filling what looks like a gap.
+	ErrCensusMemberAlreadyVoted   = Error{Code: 40169, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("members that already voted cannot lose eligibility")}
+	ErrCensusInUseByPublishedProc = Error{Code: 40170, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("census is in use by a published process")}
 
 	// CSP errors (408)
 	ErrZeroWeightVoter = Error{Code: 40801, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("voter weight cannot be zero")}

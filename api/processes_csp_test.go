@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"net/http"
 	"testing"
+	"time"
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -289,4 +290,89 @@ func TestProcessCSPRevocation(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(votesAfter, qt.Equals, votesBefore+1,
 		qt.Commentf("an already-issued CSP signature cannot be revoked and still votes"))
+}
+
+// TestProcessCSPElectionStateGates pins the three refusals that decide whether a voter is allowed to
+// obtain a signature at all. They are the changes most likely to turn away a legitimate voter, so
+// each one is asserted explicitly rather than left to the happy path.
+func TestProcessCSPElectionStateGates(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+
+	authReq := func(i int) *handlers.AuthRequest {
+		return &handlers.AuthRequest{Name: members[i].Name, Surname: members[i].Surname, Email: members[i].Email}
+	}
+
+	// --- a draft cannot be authenticated against: the token would outlive the draft and be
+	// spendable the moment it is published ---
+	draftReq := newVotingProcessRequest(orgAddress, ids)
+	draftReq.StartDate = ""
+	draftReq.Census.AuthFields = db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsSurname}
+	draft := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, draftReq, processesCreateEndpoint)
+	resp, code := testRequest(t, http.MethodPost, "", authReq(0), "processes", draft.ProcessID, "auth", "0")
+	c.Assert(code, qt.Equals, http.StatusNotFound,
+		qt.Commentf("an unpublished process must not mint tokens: %s", resp))
+
+	// --- a published process that has not started yet cannot be signed for ---
+	futureReq := newVotingProcessRequest(orgAddress, ids)
+	futureReq.StartDate = time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339)
+	futureReq.Census.AuthFields = db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsSurname}
+	future := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, futureReq, processesCreateEndpoint)
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", future.ProcessID, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
+	futureGot := requestAndParse[apicommon.VotingProcessResponse](
+		t, http.MethodGet, token, nil, "processes", future.ProcessID)
+
+	voter := ethereum.SignKeys{}
+	c.Assert(voter.Generate(), qt.IsNil)
+	tokFuture := authProcessCSP(t, future.ProcessID, authReq(0))
+	_, code = testRequest(t, http.MethodPost, "", &handlers.SignRequest{
+		AuthToken: tokFuture, ProcessID: futureGot.Questions[0].UpstreamID,
+		Payload: hex.EncodeToString(voter.Address().Bytes()),
+	}, "processes", future.ProcessID, "sign")
+	c.Assert(code, qt.Equals, http.StatusUnauthorized,
+		qt.Commentf("a signature must not be obtainable before the process opens"))
+
+	// --- a question that is not READY cannot be signed for ---
+	liveReq := newVotingProcessRequest(orgAddress, ids)
+	liveReq.StartDate = ""
+	liveReq.Census.AuthFields = db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsSurname}
+	live := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, liveReq, processesCreateEndpoint)
+	job = enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", live.ProcessID, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
+	liveGot := requestAndParse[apicommon.VotingProcessResponse](
+		t, http.MethodGet, token, nil, "processes", live.ProcessID)
+	openQuestion := liveGot.Questions[0]
+
+	tokLive := authProcessCSP(t, live.ProcessID, authReq(1))
+	// signing works while the question is READY
+	ok := requestAndParse[handlers.AuthResponse](t, http.MethodPost, "", &handlers.SignRequest{
+		AuthToken: tokLive, ProcessID: openQuestion.UpstreamID,
+		Payload: hex.EncodeToString(voter.Address().Bytes()),
+	}, "processes", live.ProcessID, "sign")
+	c.Assert(ok.Signature, qt.Not(qt.HasLen), 0)
+
+	// pause it, and the same token is refused
+	statusJob := enqueueAndPollJob(t, http.MethodPut, token,
+		&apicommon.SetProcessStatusRequest{Status: "paused"},
+		"processes", live.ProcessID, "questions", openQuestion.ID.Hex(), "status")
+	c.Assert(statusJob.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("status job: %s", statusJob.Errors))
+	waitForElectionStatus(t, openQuestion.UpstreamID, "PAUSED")
+
+	paused := ethereum.SignKeys{}
+	c.Assert(paused.Generate(), qt.IsNil)
+	tokPaused := authProcessCSP(t, live.ProcessID, authReq(0))
+	_, code = testRequest(t, http.MethodPost, "", &handlers.SignRequest{
+		AuthToken: tokPaused, ProcessID: openQuestion.UpstreamID,
+		Payload: hex.EncodeToString(paused.Address().Bytes()),
+	}, "processes", live.ProcessID, "sign")
+	c.Assert(code, qt.Equals, http.StatusUnauthorized,
+		qt.Commentf("a paused question must not be signed for"))
 }

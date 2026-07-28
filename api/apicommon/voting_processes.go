@@ -82,6 +82,14 @@ type UpdateProcessCensusResponse struct {
 	Errors []string `json:"errors,omitempty"`
 }
 
+// RemoveCensusParticipantsRequest is the body of DELETE /processes/{processId}/census: the members
+// to take off the census. It mirrors AddCensusParticipantsRequest but is its own type so the
+// generated docs do not describe a removal with an "add" schema.
+type RemoveCensusParticipantsRequest struct {
+	// Member ids to remove from the census
+	MemberIDs []string `json:"memberIds"`
+}
+
 // RemoveProcessCensusResponse is the result of DELETE /processes/{processId}/census: how many
 // participants were taken off the census. Nothing is sent on chain — an election's maxCensusSize
 // can only grow, and the leftover headroom is harmless because the CSP decides who may vote.

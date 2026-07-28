@@ -1400,6 +1400,14 @@ definitions:
         format: hex
         type: string
     type: object
+  apicommon.RemoveCensusParticipantsRequest:
+    properties:
+      memberIds:
+        description: Member ids to remove from the census
+        items:
+          type: string
+        type: array
+    type: object
   apicommon.RemoveProcessCensusResponse:
     properties:
       removed:
@@ -6166,7 +6174,10 @@ paths:
         Nothing is sent on chain — an election's maxCensusSize can only grow, and the leftover
         headroom is harmless because the CSP, not that number, decides who may vote. Note that a
         CSP signature already handed out stays valid until the election closes; removal closes
-        the door on new signatures, it cannot recall one. Requires Manager/Admin role.
+        the door on new signatures, it cannot recall one.
+        Removal invalidates the member's CSP sessions across every process, not just this one,
+        so they will have to authenticate again elsewhere. Note also that this request carries a
+        body, which some proxies and HTTP clients drop on DELETE. Requires Manager/Admin role.
       parameters:
       - description: Process ID
         in: path
@@ -6178,7 +6189,7 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/apicommon.AddCensusParticipantsRequest'
+          $ref: '#/definitions/apicommon.RemoveCensusParticipantsRequest'
       produces:
       - application/json
       responses:

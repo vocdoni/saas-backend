@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -226,6 +227,17 @@ func (ms *MongoStorage) UpdateOrganizationMemberGroup(
 		// maxCensusSize bump — that is what PUT /processes/{processId}/census is for, and doing it
 		// implicitly from a group edit would bill the organization for an unrelated action.
 		if len(removedMembers) > 0 {
+			// removing someone from the group takes their eligibility away, so it answers to the
+			// same rule as DELETE /processes/{processId}/census: a ballot already cast cannot be
+			// taken back. Without this the endpoint's guard is bypassable — a manager refused there
+			// could strip the same voter by editing the group instead.
+			blocked, err := ms.membersWhoVotedGroupCensuses(ctx, updatedGroup.CensusIDs, removedMembers)
+			if err != nil {
+				return err
+			}
+			if len(blocked) > 0 {
+				return &MembersAlreadyVotedError{MemberIDs: blocked}
+			}
 			if err := ms.purgeMembersFromGroupCensuses(ctx, updatedGroup, removedMembers); err != nil {
 				return err
 			}
@@ -306,6 +318,17 @@ func (ms *MongoStorage) DeleteOrganizationMemberGroup(groupID string, orgAddress
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
+	// deleting a group takes its members off the censuses built from it, which for a published
+	// process means wiping a live electorate. That is too destructive to happen as a side effect of
+	// a metadata operation, so refuse and let the caller remove members explicitly instead.
+	inUse, err := ms.publishedProcessesUsingCensuses(ctx, group.CensusIDs)
+	if err != nil {
+		return err
+	}
+	if len(inUse) > 0 {
+		return &CensusInUseByPublishedProcessError{ProcessIDs: inUse}
+	}
+
 	// delete the group from the database
 	filter := bson.M{"_id": objID, "orgAddress": orgAddress}
 	if _, err := ms.orgMemberGroups.DeleteOne(ctx, filter); err != nil {
@@ -314,6 +337,89 @@ func (ms *MongoStorage) DeleteOrganizationMemberGroup(groupID string, orgAddress
 	// the censuses built from this group outlive it, so deleting the group must also take its
 	// members off them — otherwise a group can be deleted while its electorate keeps voting.
 	return ms.purgeMembersFromGroupCensuses(ctx, group, group.MemberIDs)
+}
+
+// publishedProcessesUsingCensuses returns the ids of the published processes voting on any of the
+// given censuses. Empty means the censuses are only backing drafts, or nothing at all.
+func (ms *MongoStorage) publishedProcessesUsingCensuses(
+	ctx context.Context, censusIDs []string,
+) ([]string, error) {
+	if len(censusIDs) == 0 {
+		return nil, nil
+	}
+	censusOIDs := make([]primitive.ObjectID, 0, len(censusIDs))
+	for _, id := range censusIDs {
+		oid, err := primitive.ObjectIDFromHex(id)
+		if err != nil {
+			log.Warnw("skipping undecodable census id on a group", "censusId", id)
+			continue
+		}
+		censusOIDs = append(censusOIDs, oid)
+	}
+	if len(censusOIDs) == 0 {
+		return nil, nil
+	}
+	raw, err := ms.votingProcesses.Distinct(ctx, "_id", bson.M{
+		"censusId":  bson.M{"$in": censusOIDs},
+		"published": true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve published processes of the group censuses: %w", err)
+	}
+	processIDs := make([]string, 0, len(raw))
+	for _, v := range raw {
+		if oid, ok := v.(primitive.ObjectID); ok {
+			processIDs = append(processIDs, oid.Hex())
+		}
+	}
+	return processIDs, nil
+}
+
+// membersWhoVotedGroupCensuses returns which of the given members have already cast a ballot in any
+// election of the processes voting on the group's censuses.
+func (ms *MongoStorage) membersWhoVotedGroupCensuses(
+	ctx context.Context, censusIDs, memberIDs []string,
+) ([]string, error) {
+	processIDs, err := ms.publishedProcessesUsingCensuses(ctx, censusIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(processIDs) == 0 {
+		return nil, nil
+	}
+	oids := make([]primitive.ObjectID, 0, len(processIDs))
+	for _, id := range processIDs {
+		if oid, err := primitive.ObjectIDFromHex(id); err == nil {
+			oids = append(oids, oid)
+		}
+	}
+	cur, err := ms.processesQuestions.Find(ctx,
+		bson.M{"processId": bson.M{"$in": oids}, "upstreamId": bson.M{"$exists": true}},
+		options.Find().SetProjection(bson.M{"upstreamId": 1}))
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve the questions of the group censuses: %w", err)
+	}
+	defer func() { _ = cur.Close(ctx) }()
+	var questions []VotingProcessQuestion
+	if err := cur.All(ctx, &questions); err != nil {
+		return nil, fmt.Errorf("failed to decode questions: %w", err)
+	}
+	elections := make([]internal.HexBytes, 0, len(questions))
+	for i := range questions {
+		elections = append(elections, questions[i].UpstreamID)
+	}
+	voted, err := ms.MembersWithUsedCSPProcesses(elections, memberIDs)
+	if err != nil {
+		return nil, err
+	}
+	// keep the caller's order so the reported ids are stable
+	blocked := make([]string, 0, len(voted))
+	for _, id := range memberIDs {
+		if voted[id] {
+			blocked = append(blocked, id)
+		}
+	}
+	return blocked, nil
 }
 
 // ListOrganizationMemberGroup lists all the members of an organization member group (paginated)

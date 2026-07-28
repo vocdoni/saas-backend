@@ -10,8 +10,10 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.vocdoni.io/dvote/log"
 )
 
 // CSPAuth represents a user authentication information for a bundle of processes
@@ -409,6 +411,57 @@ func (ms *MongoStorage) GetOrgMembersByProcess(orgAddress common.Address, proces
 		return nil, err
 	}
 	return orgMembers, nil
+}
+
+// MembersWithUsedCSPProcesses returns which of the given members have already cast a ballot in any
+// of the given processes, as one query. Prefer it over calling MembersWithUsedCSPProcess in a loop:
+// that one costs a round-trip per member, so a caller sweeping several elections turns
+// questions × members into that many queries.
+//
+// The returned map is keyed by the member id hex and only contains entries set to true. Undecodable
+// ids are skipped — they cannot have a CSP process — rather than failing the whole lookup.
+func (ms *MongoStorage) MembersWithUsedCSPProcesses(
+	processIDs []internal.HexBytes,
+	memberIDs []string,
+) (map[string]bool, error) {
+	result := make(map[string]bool, len(memberIDs))
+	if len(processIDs) == 0 || len(memberIDs) == 0 {
+		return result, nil
+	}
+	userIDs := make([]internal.HexBytes, 0, len(memberIDs))
+	for _, id := range memberIDs {
+		userID := internal.HexBytes{}
+		if err := userID.ParseString(id); err != nil {
+			continue
+		}
+		userIDs = append(userIDs, userID)
+	}
+	if len(userIDs) == 0 {
+		return result, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	// covered by the userid+processid index on cspTokensStatus (migrations/0002_initial_indexes.go)
+	voted, err := ms.cspTokensStatus.Distinct(ctx, "userid", bson.M{
+		"processid": bson.M{"$in": processIDs},
+		"userid":    bson.M{"$in": userIDs},
+		"consumed":  true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to query CSP process status: %w", err)
+	}
+	for _, raw := range voted {
+		switch v := raw.(type) {
+		case string:
+			result[v] = true
+		case primitive.Binary:
+			// HexBytes marshals to bson binary, so that is the shape stored userids come back in
+			result[internal.HexBytes(v.Data).String()] = true
+		default:
+			log.Warnw("unexpected userid type in CSP process status", "type", fmt.Sprintf("%T", raw))
+		}
+	}
+	return result, nil
 }
 
 // MembersWithUsedCSPProcess returns the subset of the given memberIDs (each the

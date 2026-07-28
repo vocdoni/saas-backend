@@ -248,6 +248,13 @@ func (ms *MongoStorage) DelCensusParticipant(censusID, participantID string) err
 // This cannot recall a signature the member already holds — that is a bearer credential the chain
 // accepts until the election closes. It only closes the door on future signatures.
 //
+// Unlike removal through the census endpoint or a group edit, this deliberately does NOT refuse
+// members who already voted. Deleting a member is erasure: their ballot is already on chain and
+// unaffected either way, and making the delete conditional would leave no way to remove a person
+// while any election they voted is live. The visible consequence is that census.Size can end up
+// below the number of ballots cast for that election, so a finished process may report more votes
+// than census members.
+//
 // Assumes ms.keysLock is already held by the caller.
 func (ms *MongoStorage) purgeMembersFromCensuses(ctx context.Context, memberIDs []string) error {
 	if len(memberIDs) == 0 {
@@ -321,7 +328,14 @@ func (ms *MongoStorage) RemoveCensusParticipantsByMemberIDs(censusID string, mem
 //
 // Eligibility is pruned only for processes using these censuses — the same member may legitimately
 // remain in another census. Token deletion is deliberately not scoped: re-authenticating re-checks
-// census participation, so dropping a token can only force a fresh login, never grant anything.
+// census participation, so dropping a token can only force a fresh login, never grant anything. The
+// cost is that removal from one process logs the member out of every other one too, so they need a
+// fresh OTP there; the endpoint documents it.
+//
+// Note the asymmetry when several processes share a census: this prunes eligibility on all of them,
+// while the caller's already-voted check only looks at the process it was asked about. One census
+// per process today makes it unreachable, but the plural lookup below is deliberate, so if that ever
+// changes the check has to widen with it.
 //
 // Like purgeMembersFromCensuses this leaves consumption rows untouched; see that function for why.
 // Assumes ms.keysLock is held.
@@ -331,9 +345,12 @@ func (ms *MongoStorage) revokeCensusMembers(ctx context.Context, censusIDs, memb
 	}
 	censusOIDs := make([]primitive.ObjectID, 0, len(censusIDs))
 	for _, id := range censusIDs {
-		if oid, err := primitive.ObjectIDFromHex(id); err == nil {
-			censusOIDs = append(censusOIDs, oid)
+		oid, err := primitive.ObjectIDFromHex(id)
+		if err != nil {
+			log.Warnw("skipping undecodable census id while revoking members", "censusId", id)
+			continue
 		}
+		censusOIDs = append(censusOIDs, oid)
 	}
 	if len(censusOIDs) > 0 {
 		processIDs, err := ms.votingProcesses.Distinct(ctx, "_id", bson.M{"censusId": bson.M{"$in": censusOIDs}})
@@ -387,6 +404,10 @@ func (ms *MongoStorage) recountCensuses(ctx context.Context, censusIDs []string)
 	for _, censusID := range censusIDs {
 		oid, err := primitive.ObjectIDFromHex(censusID)
 		if err != nil {
+			// a census id that does not decode means a participant row points at something that
+			// cannot exist; skipping keeps the sweep going, but say so rather than persist a size
+			// silently computed from a broken reference.
+			log.Warnw("skipping undecodable census id while recounting", "censusId", censusID)
 			continue
 		}
 		count, err := ms.censusParticipants.CountDocuments(ctx, bson.M{"censusId": censusID})

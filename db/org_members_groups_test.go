@@ -1,11 +1,13 @@
 package db
 
 import (
+	stderrors "errors"
 	"testing"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -1277,5 +1279,98 @@ func TestGroupCensusRevocation(t *testing.T) {
 	// deleting the group takes its remaining members off the census too
 	c.Assert(testDB.DeleteOrganizationMemberGroup(groupID, orgAddress), qt.IsNil)
 	_, err = testDB.CensusParticipant(censusID, stays)
+	c.Assert(err, qt.Equals, ErrNotFound)
+}
+
+// TestGroupCensusGuards covers the two refusals that keep group management from doubling as a way to
+// tamper with a live election: a group whose census is being voted cannot be deleted, and a member
+// who already voted cannot be removed from it.
+func TestGroupCensusGuards(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	orgAddress := common.Address{0x6b}
+	c.Assert(testDB.SetOrganization(&Organization{
+		Address: orgAddress, Active: true, CreatedAt: time.Now(),
+	}), qt.IsNil)
+
+	newMember := func(suffix string) string {
+		m := &OrgMember{
+			ID: primitive.NewObjectID(), OrgAddress: orgAddress,
+			MemberNumber: "gd" + suffix, Email: "gd" + suffix + "@example.com",
+			CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		}
+		_, err := testDB.SetOrgMember("test_salt", m)
+		c.Assert(err, qt.IsNil)
+		return m.ID.Hex()
+	}
+	voter, quiet := newMember("_v"), newMember("_q")
+
+	groupID, err := testDB.CreateOrganizationMemberGroup(&OrganizationMemberGroup{
+		OrgAddress: orgAddress, Title: "voters", MemberIDs: []string{voter, quiet},
+	})
+	c.Assert(err, qt.IsNil)
+
+	census := &Census{
+		OrgAddress: orgAddress,
+		AuthFields: OrgMemberAuthFields{OrgMemberAuthFieldsMemberNumber},
+		CreatedAt:  time.Now(), UpdatedAt: time.Now(),
+	}
+	censusID, err := testDB.SetCensus(census)
+	c.Assert(err, qt.IsNil)
+	censusOID, err := primitive.ObjectIDFromHex(censusID)
+	c.Assert(err, qt.IsNil)
+	census.ID = censusOID
+	_, err = testDB.PopulateGroupCensus(census, groupID)
+	c.Assert(err, qt.IsNil)
+
+	// a published process voting on that census, with one on-chain question
+	vpID, err := testDB.SetVotingProcess(&VotingProcess{
+		OrgAddress: orgAddress, Title: MultiLangString{"default": "P"},
+		CensusID: censusOID, Published: true,
+	})
+	c.Assert(err, qt.IsNil)
+	election := internal.HexBytes{0xbe, 0xef}
+	_, err = testDB.SetQuestion(&VotingProcessQuestion{
+		ProcessID: vpID, OrgAddress: orgAddress, Type: VotingTypeSingleChoice,
+		UpstreamID: election, Status: QuestionStatusReady,
+	})
+	c.Assert(err, qt.IsNil)
+
+	// deleting the group would wipe the electorate of a live election, so it is refused
+	err = testDB.DeleteOrganizationMemberGroup(groupID, orgAddress)
+	var inUse *CensusInUseByPublishedProcessError
+	c.Assert(stderrors.As(err, &inUse), qt.IsTrue, qt.Commentf("got %v", err))
+	c.Assert(inUse.ProcessIDs, qt.DeepEquals, []string{vpID.Hex()})
+	// and nothing was removed
+	_, err = testDB.CensusParticipant(censusID, voter)
+	c.Assert(err, qt.IsNil)
+
+	// one member votes
+	token := internal.HexBytes{0x0a, 0x0b}
+	c.Assert(testDB.SetCSPAuth(token, internal.HexBytesFromString(voter), internal.HexBytes{0x01}, "s"), qt.IsNil)
+	c.Assert(testDB.VerifyCSPAuth(token), qt.IsNil)
+	c.Assert(testDB.ConsumeCSPProcess(token, election, internal.HexBytes{0xcc}), qt.IsNil)
+
+	// removing them from the group is refused for the same reason the census endpoint refuses it,
+	// otherwise that endpoint's guard would be bypassable through group management
+	err = testDB.UpdateOrganizationMemberGroup(groupID, orgAddress, "", "", nil, []string{voter})
+	var votedErr *MembersAlreadyVotedError
+	c.Assert(stderrors.As(err, &votedErr), qt.IsTrue, qt.Commentf("got %v", err))
+	c.Assert(votedErr.MemberIDs, qt.DeepEquals, []string{voter})
+	_, err = testDB.CensusParticipant(censusID, voter)
+	c.Assert(err, qt.IsNil)
+
+	// the member who has not voted can still be removed
+	c.Assert(testDB.UpdateOrganizationMemberGroup(groupID, orgAddress, "", "", nil, []string{quiet}), qt.IsNil)
+	_, err = testDB.CensusParticipant(censusID, quiet)
+	c.Assert(err, qt.Equals, ErrNotFound)
+
+	// deleting the member outright is never blocked: the ballot is already on chain, and refusing
+	// would make erasure impossible
+	deleted, err := testDB.DeleteOrgMembers(orgAddress, []string{voter})
+	c.Assert(err, qt.IsNil)
+	c.Assert(deleted, qt.Equals, 1)
+	_, err = testDB.CensusParticipant(censusID, voter)
 	c.Assert(err, qt.Equals, ErrNotFound)
 }
