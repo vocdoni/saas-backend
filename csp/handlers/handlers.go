@@ -889,19 +889,20 @@ func (c *CSPHandlers) authFirstStep(
 		return nil, errors.ErrInvalidData.WithErr(err)
 	}
 
-	// create an empty member and assign the input data where applicable.
-	// The email is normalized to lowercase so the recomputed login hash matches
-	// the (also normalized) email stored at member-creation time.
-	inputMember := &db.OrgMember{
+	// create an empty member and assign the input data where applicable, then
+	// normalize it through the same method that normalized the member at
+	// creation time. Both sides of the login-hash comparison therefore derive
+	// from one definition of the canonical form, and cannot drift apart.
+	inputMember := (&db.OrgMember{
 		OrgAddress:   census.OrgAddress,
 		Name:         req.Name,
 		Surname:      req.Surname,
 		MemberNumber: req.MemberNumber,
 		NationalID:   req.NationalID,
 		BirthDate:    req.BirthDate,
-		Email:        internal.NormalizeEmail(req.Email),
+		Email:        req.Email,
 		Phone:        phone,
-	}
+	}).Normalized()
 
 	// Check the participant is in the census
 	censusParticipant, err := c.mainDB.CensusParticipantByLoginHash(*census, *inputMember)

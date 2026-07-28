@@ -55,8 +55,9 @@ func TestNormalizeMemberEmailsMigration(t *testing.T) {
 		_, err = testDB.orgMembers.InsertOne(ctx, member)
 		c.Assert(err, qt.IsNil)
 
-		// Seed the participant with the uppercase-derived login hash.
-		upperHash := HashAuthTwoFaFields(*member, census.AuthFields, census.TwoFaFields)
+		// Seed the participant the way a database written before the hash inputs
+		// were folded to lowercase holds it: derived from the exact-case email.
+		upperHash := unfoldedHash(*member, census.AuthFields, census.TwoFaFields)
 		participant := &CensusParticipant{
 			ParticipantID: member.ID.Hex(),
 			CensusID:      censusID,
@@ -113,7 +114,7 @@ func TestNormalizeMemberEmailsMigration(t *testing.T) {
 		}
 		_, err = testDB.orgMembers.InsertOne(ctx, lowerMember)
 		c.Assert(err, qt.IsNil)
-		lowerHash := HashAuthTwoFaFields(*lowerMember, census.AuthFields, census.TwoFaFields)
+		lowerHash := unfoldedHash(*lowerMember, census.AuthFields, census.TwoFaFields)
 		_, err = testDB.censusParticipants.InsertOne(ctx, &CensusParticipant{
 			ParticipantID: lowerMember.ID.Hex(), CensusID: censusID, LoginHash: lowerHash, CreatedAt: time.Now(),
 		})
@@ -125,7 +126,7 @@ func TestNormalizeMemberEmailsMigration(t *testing.T) {
 		}
 		_, err = testDB.orgMembers.InsertOne(ctx, upperMember)
 		c.Assert(err, qt.IsNil)
-		upperHash := HashAuthTwoFaFields(*upperMember, census.AuthFields, census.TwoFaFields)
+		upperHash := unfoldedHash(*upperMember, census.AuthFields, census.TwoFaFields)
 		_, err = testDB.censusParticipants.InsertOne(ctx, &CensusParticipant{
 			ParticipantID: upperMember.ID.Hex(), CensusID: censusID, LoginHash: upperHash, CreatedAt: time.Now(),
 		})
