@@ -6168,9 +6168,10 @@ paths:
         are deleted, they are pruned from every question's eligibility subset, and their CSP
         sessions are invalidated, so a token minted while they were still in the census cannot
         be spent afterwards.
-        A member who has already voted any of the process's questions cannot be removed: the
-        request is refused with 409 and the offending ids in the error's data.votedMemberIds.
-        Their ballot is already on chain and removing them would only hide that, not undo it.
+        A member the CSP has already signed for, on any of the process's questions, cannot be
+        removed: the request is refused with 409 and the offending ids in the error's
+        data.votedMemberIds. They hold a valid signature whether or not the ballot has reached
+        the chain yet, so removing them would only hide that, not undo it.
         Nothing is sent on chain — an election's maxCensusSize can only grow, and the leftover
         headroom is harmless because the CSP, not that number, decides who may vote. Note that a
         CSP signature already handed out stays valid until the election closes; removal closes
@@ -6210,7 +6211,7 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Process is not published, or a member has already voted
+          description: Process is not published, or a member was already signed for
           schema:
             $ref: '#/definitions/errors.Error'
         "500":

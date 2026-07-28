@@ -314,7 +314,7 @@ func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 		var voted *db.MembersAlreadyVotedError
 		if stderrors.As(err, &voted) {
 			errors.ErrCensusMemberAlreadyVoted.
-				Withf("%d of the members being removed already voted", len(voted.MemberIDs)).
+				Withf("%d of the members being removed have already been signed for", len(voted.MemberIDs)).
 				WithData(map[string]any{"votedMemberIds": voted.MemberIDs}).Write(w)
 			return
 		}

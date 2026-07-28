@@ -48,7 +48,7 @@ type MembersAlreadyVotedError struct {
 }
 
 func (e *MembersAlreadyVotedError) Error() string {
-	return fmt.Sprintf("%d member(s) already voted", len(e.MemberIDs))
+	return fmt.Sprintf("%d member(s) already signed for", len(e.MemberIDs))
 }
 
 // errorsAsStrings converts a slice of errors to a slice of strings

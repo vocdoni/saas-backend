@@ -293,9 +293,10 @@ const maxCensusRemovalBatch = 1000
 //	@Description	are deleted, they are pruned from every question's eligibility subset, and their CSP
 //	@Description	sessions are invalidated, so a token minted while they were still in the census cannot
 //	@Description	be spent afterwards.
-//	@Description	A member who has already voted any of the process's questions cannot be removed: the
-//	@Description	request is refused with 409 and the offending ids in the error's data.votedMemberIds.
-//	@Description	Their ballot is already on chain and removing them would only hide that, not undo it.
+//	@Description	A member the CSP has already signed for, on any of the process's questions, cannot be
+//	@Description	removed: the request is refused with 409 and the offending ids in the error's
+//	@Description	data.votedMemberIds. They hold a valid signature whether or not the ballot has reached
+//	@Description	the chain yet, so removing them would only hide that, not undo it.
 //	@Description	Nothing is sent on chain — an election's maxCensusSize can only grow, and the leftover
 //	@Description	headroom is harmless because the CSP, not that number, decides who may vote. Note that a
 //	@Description	CSP signature already handed out stays valid until the election closes; removal closes
@@ -313,7 +314,7 @@ const maxCensusRemovalBatch = 1000
 //	@Failure		400			{object}	errors.Error								"Invalid input data"
 //	@Failure		401			{object}	errors.Error								"Unauthorized"
 //	@Failure		404			{object}	errors.Error								"Process not found"
-//	@Failure		409			{object}	errors.Error								"Process is not published, or a member has already voted"
+//	@Failure		409			{object}	errors.Error								"Process is not published, or a member was already signed for"
 //	@Failure		500			{object}	errors.Error								"Internal server error"
 //	@Router			/processes/{processId}/census [delete]
 func (a *API) removeVotingProcessCensusHandler(w http.ResponseWriter, r *http.Request) {
@@ -363,7 +364,7 @@ func (a *API) removeVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 	}
 	if len(voted) > 0 {
 		errors.ErrCensusMemberAlreadyVoted.
-			Withf("%d of the %d members to remove already voted", len(voted), len(req.MemberIDs)).
+			Withf("%d of the %d members to remove have already been signed for", len(voted), len(req.MemberIDs)).
 			WithData(map[string]any{"votedMemberIds": voted}).Write(w)
 		return
 	}

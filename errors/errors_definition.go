@@ -110,7 +110,9 @@ var (
 	ErrVotingTypeNotAllowed                   = Error{Code: 40163, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("voting type not allowed by the subscription plan")}
 	// 40164-40167 are claimed by the open batch-vote-relay PR and 40168 by the open per-question
 	// eligibility PR, so this range continues past them rather than filling what looks like a gap.
-	ErrCensusMemberAlreadyVoted   = Error{Code: 40169, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("members that already voted cannot lose eligibility")}
+	// "signed for" rather than "voted": the flag behind this is set when the CSP issues the
+	// signature, not when the ballot reaches the chain, so it can name a member who never submitted.
+	ErrCensusMemberAlreadyVoted   = Error{Code: 40169, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("members already signed for cannot lose eligibility")}
 	ErrCensusInUseByPublishedProc = Error{Code: 40170, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("census is in use by a published process")}
 
 	// CSP errors (408)
