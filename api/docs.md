@@ -2400,7 +2400,21 @@ If the worker queue is saturated the handler returns `503` and the client should
   Body `{ "status": "ready|paused|ended|canceled" }`. Returns `202` + `{ "jobId" }`.
 * **Relay a signed vote** — `POST /vote` (public).
   Body `{ "txPayload": "<hex>" }`. Returns `202` + `{ "jobId" }`; the job result carries
-  the vote nullifier (`voteID`).
+  the target `processId` and the vote `nullifier` — both derived from the envelope, so
+  they are readable while the job is still pending — plus the chain-assigned `voteID`
+  once the vote is accepted.
+* **Relay a batch of signed votes** — `POST /votes` (public).
+  Body `{ "votes": [{ "txPayload": "<hex>" }, ...] }`, at most 100. A multi-question
+  voting process is one on-chain process per question, so relaying the questions one by
+  one can leave a voter half-voted; this endpoint takes them together. The batch is
+  validated and enqueued **all or nothing** — one bad envelope, a batch spanning two
+  organizations, or a queue without room for all of them rejects the call with nothing
+  relayed. Returns `202` + a single `{ "jobId" }` covering the batch; the job result
+  carries one entry per vote, in request order.
+
+  Both relay endpoints are public, so their request body is capped before it is buffered
+  (8 KiB per envelope — a signed envelope is ~600 hex characters). An oversized body is
+  refused with `413` / `40167`.
 
 #### 🔍 Poll job status
 
@@ -2419,10 +2433,34 @@ If the worker queue is saturated the handler returns `503` and the client should
   "status": "completed",
   "result": {
     "address": "deadbeef",   // on-chain process id (publish)
-    "voteID": "deadbeef",    // vote nullifier (relay vote)
+    "processId": "deadbeef", // target process (relay vote)
+    "nullifier": "deadbeef", // vote nullifier, known before submission (relay vote)
+    "voteID": "deadbeef",    // vote nullifier as assigned on chain (relay vote)
     "status": "READY"        // process status (publish / status change)
   },
   "error": ""                // failure reason when status is "failed"
+}
+```
+
+  A batch vote relay (`type: "relay_votes"`) reports every envelope instead, in the order
+  they were sent. `total` is the batch size and `added` the number that have finished, so
+  `progress` advances as the votes land; the job stays `pending` until the last one
+  reports and then ends `completed` only if every vote was accepted.
+```json
+{
+  "jobId": "a1b2c3...",
+  "type": "relay_votes",
+  "status": "failed",
+  "errors": ["vote 2: vote already exists"],
+  "result": {
+    "total": 3, "added": 3, "progress": 100,
+    "votes": [
+      { "processId": "9d3f...", "nullifier": "7ac1...", "voteID": "7ac1...", "status": "completed" },
+      { "processId": "4e77...", "nullifier": "b209...", "voteID": "b209...", "status": "completed" },
+      { "processId": "c015...", "nullifier": "33fa...", "status": "failed",
+        "error": "vote already exists" }
+    ]
+  }
 }
 ```
 

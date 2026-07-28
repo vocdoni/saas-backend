@@ -174,6 +174,11 @@ const (
 	// from the signed vote envelope itself, so no process id appears in the path.
 	voteEndpoint = "/vote"
 
+	// POST /votes to relay several already-signed votes in one call (public), so a voter
+	// casting the questions of a multi-question process cannot end up half-voted. The
+	// whole batch is validated and enqueued all or nothing, under a single job.
+	votesEndpoint = "/votes"
+
 	// GET /process/{processId}/results to get the trimmed on-chain election results (public).
 	// {processId} is the 24-hex ProcessID (not the on-chain election id).
 	processResultsEndpoint = "/process/{processId}/results"
