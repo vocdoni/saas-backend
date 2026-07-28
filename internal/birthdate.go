@@ -7,6 +7,21 @@ import (
 	"time"
 )
 
+// NormalizeBirthDate returns the canonical YYYY-MM-DD form of a birth date, and
+// the trimmed input when it cannot be parsed.
+//
+// Unlike ParseBirthDate it never fails, because it is the normalizer both sides
+// of the CSP login-hash comparison run their data through: the stored member at
+// write time and the login request at authentication time. Validating the value
+// is the caller's job — an unparseable birthdate simply fails to match a
+// participant, which is the same outcome as before it was normalized.
+func NormalizeBirthDate(value string) string {
+	if _, normalized, err := ParseBirthDate(value); err == nil {
+		return normalized
+	}
+	return strings.TrimSpace(value)
+}
+
 // ParseBirthDate normalizes the birth date into YYYY-MM-DD while allowing:
 //   - ISO-like dates with flexible separators (YYYY-MM-DD, YYYY/MM/DD, YYYY MM DD)
 //   - Day-first dates with flexible separators (DD/MM/YYYY, DD-MM-YYYY, DD MM YYYY)

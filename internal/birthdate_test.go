@@ -44,3 +44,34 @@ func TestParseBirthDate(t *testing.T) {
 		})
 	}
 }
+
+// TestNormalizeBirthDate covers the never-failing wrapper used on both sides of
+// the CSP login-hash comparison: stored birthdates are always canonical, so
+// accepting the other formats ParseBirthDate understands can only turn a failed
+// match into a successful one, and unparseable input must pass through rather
+// than be rejected.
+func TestNormalizeBirthDate(t *testing.T) {
+	c := qt.New(t)
+
+	// every accepted spelling below denotes this same date
+	const canonical = "1990-01-02"
+
+	for _, tc := range []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"canonical is unchanged", canonical, canonical},
+		{"surrounding whitespace is trimmed", "  " + canonical + " ", canonical},
+		{"day-first is canonicalized", "02/01/1990", canonical},
+		{"day-first with dashes is canonicalized", "02-01-1990", canonical},
+		{"year-first with slashes is canonicalized", "1990/01/02", canonical},
+		{"single-digit parts are padded", "1990-1-2", canonical},
+		{"unparseable input is passed through trimmed", " not-a-date ", "not-a-date"},
+		{"empty stays empty", "   ", ""},
+	} {
+		t.Run(tc.name, func(*testing.T) {
+			c.Assert(NormalizeBirthDate(tc.input), qt.Equals, tc.want)
+		})
+	}
+}

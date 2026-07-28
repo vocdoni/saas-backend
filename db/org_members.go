@@ -154,15 +154,20 @@ func (j *BulkOrgMembersJob) ErrorsAsStrings() []string {
 }
 
 // prepareOrgMember processes a member for storage by:
+//   - Normalizing the fields that feed the CSP login hash (OrgMember.Normalized)
 //   - Setting the organization address
 //   - Setting the creation timestamp
-//   - Trimming the fields that feed the CSP login hash
+//   - Validating what Normalized only canonicalized (email, birthdate)
 //   - Hashing sensitive data (email, phone, password)
 //   - Not including original sensitive data
 func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime time.Time) (
 	*OrgMember, []error,
 ) {
-	member := *m
+	// Normalize every field that can feed the login hash, so what is stored is
+	// byte-identical to what the CSP recomputes from a login request. Whitespace
+	// picked up from a spreadsheet or CSV import would otherwise make the member
+	// impossible to authenticate.
+	member := *m.Normalized()
 	var errors []error
 
 	// Assign a new internal ID if not provided
@@ -174,19 +179,7 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 	}
 	member.OrgAddress = org.Address
 
-	// Trim the auth fields. They feed a byte-exact login hash (see
-	// internal.HashSortedFields), so surrounding whitespace picked up from a
-	// spreadsheet or CSV import would make the member impossible to
-	// authenticate: the voter types the clean value and the recomputed hash
-	// never matches the stored one. Email and birthdate are canonicalized
-	// below by their own normalizers.
-	member.Name = strings.TrimSpace(member.Name)
-	member.Surname = strings.TrimSpace(member.Surname)
-	member.MemberNumber = strings.TrimSpace(member.MemberNumber)
-	member.NationalID = strings.TrimSpace(member.NationalID)
-
-	// normalize and validate the email
-	member.Email = internal.NormalizeEmail(member.Email)
+	// validate the (already normalized) email
 	if member.Email != "" {
 		if _, err := mail.ParseAddress(member.Email); err != nil {
 			errors = append(errors, fmt.Errorf("invalid email %q: %w", member.Email, err))

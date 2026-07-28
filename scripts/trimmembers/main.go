@@ -36,8 +36,9 @@ import (
 	"github.com/vocdoni/saas-backend/migrations"
 )
 
-// runTimeout bounds the whole repair. The scan is driven by an indexed-free
-// regex prefilter over orgMembers, so it is proportional to the member base.
+// runTimeout bounds the whole repair. The whitespace prefilter is a regex, which
+// no index can serve, so the scan is a collection scan over orgMembers and its
+// cost is proportional to the size of the member base.
 const runTimeout = 30 * time.Minute
 
 func main() {
@@ -118,7 +119,7 @@ func connect(ctx context.Context, url string) (*mongo.Client, error) {
 		sb.WriteString("authSource=admin")
 		url = sb.String()
 	}
-	log.Infow("connecting to mongodb", "url", url)
+	log.Infow("connecting to mongodb", "host", redactedHosts(cs))
 
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(url))
 	if err != nil {
@@ -128,6 +129,14 @@ func connect(ctx context.Context, url string) (*mongo.Client, error) {
 		return nil, err
 	}
 	return client, nil
+}
+
+// redactedHosts returns just the hosts of a parsed connection string, for
+// logging. The connection URL itself carries the username and password, so it
+// must never be logged: this command is run by hand against production, and its
+// output lands in terminal scrollback, shell logs and CI job output.
+func redactedHosts(cs *connstring.ConnString) string {
+	return strings.Join(cs.Hosts, ",")
 }
 
 // printReport summarizes the run. Skipped members are identified by member and
