@@ -46,7 +46,7 @@ type CSPProcess struct {
 	TimesVoted  int               `json:"timesVoted" bson:"timesVoted"`
 }
 
-// SetCSPAuth method stores a new CSP authentication token for a user and an
+// SetCSPAuth method stores a new CSP authentication token for a user and a
 // scope. It returns an error if the token, user ID or scope ID are nil.
 func (ms *MongoStorage) SetCSPAuth(token, userID, scopeID internal.HexBytes, secret string) error {
 	if token == nil || userID == nil || scopeID == nil {
@@ -189,6 +189,17 @@ func (ms *MongoStorage) CSPProcess(token, processID internal.HexBytes) (*CSPProc
 // true if the process has been consumed, false if it has not been consumed and
 // an error if the process does not exist or the token is not verified.
 func (ms *MongoStorage) IsCSPProcessConsumed(userID, processID internal.HexBytes) (bool, error) {
+	return ms.isCSPProcessConsumed(userID, processID, MaxVoteOverwritesPerProcess)
+}
+
+// IsCSPProcessConsumedBlind reports whether the voter has already taken an
+// anonymous signature for this election. That flow allows no overwrites (see
+// ConsumeCSPProcessBlind), so any previous signature consumes it.
+func (ms *MongoStorage) IsCSPProcessConsumedBlind(userID, processID internal.HexBytes) (bool, error) {
+	return ms.isCSPProcessConsumed(userID, processID, 0)
+}
+
+func (ms *MongoStorage) isCSPProcessConsumed(userID, processID internal.HexBytes, maxOverwrites int) (bool, error) {
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
@@ -210,17 +221,43 @@ func (ms *MongoStorage) IsCSPProcessConsumed(userID, processID internal.HexBytes
 	if !tokenData.Verified {
 		return false, ErrTokenNotVerified
 	}
-	return currentStatus.TimesVoted > MaxVoteOverwritesPerProcess, nil
+	return currentStatus.TimesVoted > maxOverwrites, nil
 }
 
 // ConsumeCSPProcess method consumes a CSP process for a user. It returns an
 // error if the token, processID or address are nil. It returns an error if
-// the token does not exist, the process has already been consumed or thecspAuthTokenStatusID(
+// the token does not exist, the process has already been consumed or the
 // token is not verified.
 func (ms *MongoStorage) ConsumeCSPProcess(token, processID, address internal.HexBytes) error {
 	if token == nil || processID == nil || address == nil {
 		return ErrBadInputs
 	}
+	return ms.consumeCSPProcess(token, processID, address, MaxVoteOverwritesPerProcess)
+}
+
+// ConsumeCSPProcessBlind consumes a CSP process for a user without recording an
+// address, for the anonymous signing flow where the CSP blind-signs a message it
+// cannot read and so never learns which address the voter casts with.
+//
+// Unlike the plain flow this is single-use: it allows no vote overwrites. Vote
+// overwriting is only safe while the CSP can pin every signature to one address,
+// which is what keeps the on-chain nullifier stable so a later vote replaces the
+// earlier one. A blind signature carries no address the CSP can check, so a
+// voter granted N overwrites could instead take N signatures for N different
+// addresses -- N distinct nullifiers, counted as N separate voters. Allowing one
+// signature per voter per election closes that.
+func (ms *MongoStorage) ConsumeCSPProcessBlind(token, processID internal.HexBytes) error {
+	if token == nil || processID == nil {
+		return ErrBadInputs
+	}
+	return ms.consumeCSPProcess(token, processID, nil, 0)
+}
+
+// consumeCSPProcess marks a process consumed by the token's user. A nil address
+// records no address (the anonymous flow); a non-nil one is stored and must stay
+// the same across vote overwrites. maxOverwrites bounds how many times the same
+// voter may re-sign for this election.
+func (ms *MongoStorage) consumeCSPProcess(token, processID, address internal.HexBytes, maxOverwrites int) error {
 	// lock the keys
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
@@ -238,14 +275,16 @@ func (ms *MongoStorage) ConsumeCSPProcess(token, processID, address internal.Hex
 		return err
 	}
 	// check if the token is already consumed
-	if tokenStatus != nil && tokenStatus.TimesVoted > MaxVoteOverwritesPerProcess {
+	if tokenStatus != nil && tokenStatus.TimesVoted > maxOverwrites {
 		return ErrProcessAlreadyConsumed
 	}
 	timesVoted := 1
 	if tokenStatus != nil {
 		timesVoted = tokenStatus.TimesVoted + 1
-		// check if the address is the same as the previous one used to vote
-		if tokenStatus.UsedAddress != nil && !tokenStatus.UsedAddress.Equals(address) {
+		// check if the address is the same as the previous one used to vote.
+		// Skipped when no address is supplied: the anonymous flow has none to
+		// compare, and it forbids overwrites outright instead.
+		if address != nil && tokenStatus.UsedAddress != nil && !tokenStatus.UsedAddress.Equals(address) {
 			return ErrInvalidData
 		}
 	}

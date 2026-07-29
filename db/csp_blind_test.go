@@ -125,6 +125,62 @@ func TestCSPBlindSessionConcurrentConsume(t *testing.T) {
 	c.Assert(notFound, qt.Equals, racers-1)
 }
 
+// TestConsumeCSPProcessBlind covers the two properties that make anonymous
+// consumption safe: no address is recorded, and it cannot be repeated.
+func TestConsumeCSPProcessBlind(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	blindToken := internal.HexBytes([]byte("blindConsumeToken"))
+	blindProcessID := internal.HexBytes([]byte("blindConsumeProcess"))
+
+	c.Run("nil inputs", func(c *qt.C) {
+		c.Assert(testDB.ConsumeCSPProcessBlind(nil, blindProcessID), qt.ErrorIs, ErrBadInputs)
+		c.Assert(testDB.ConsumeCSPProcessBlind(blindToken, nil), qt.ErrorIs, ErrBadInputs)
+	})
+
+	c.Run("records no address", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		c.Assert(testDB.SetCSPAuth(blindToken, testBlindUserID, testCSPBundleID, ""), qt.IsNil)
+		c.Assert(testDB.ConsumeCSPProcessBlind(blindToken, blindProcessID), qt.IsNil)
+
+		status, err := testDB.CSPProcess(blindToken, blindProcessID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(status.Used, qt.IsTrue)
+		c.Assert(status.TimesVoted, qt.Equals, 1)
+		// the whole point: no link from this member to a voting address
+		c.Assert(status.UsedAddress, qt.HasLen, 0)
+	})
+
+	c.Run("allows no overwrites", func(c *qt.C) {
+		// The plain flow permits MaxVoteOverwritesPerProcess re-signs because it
+		// pins them all to one address. Blind signatures carry no address the CSP
+		// can check, so a second signature could be spent on a second address and
+		// counted as a second voter.
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		c.Assert(testDB.SetCSPAuth(blindToken, testBlindUserID, testCSPBundleID, ""), qt.IsNil)
+		c.Assert(testDB.ConsumeCSPProcessBlind(blindToken, blindProcessID), qt.IsNil)
+
+		c.Assert(testDB.ConsumeCSPProcessBlind(blindToken, blindProcessID), qt.ErrorIs, ErrProcessAlreadyConsumed)
+	})
+
+	c.Run("consumed check is stricter than the plain one", func(c *qt.C) {
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		c.Assert(testDB.SetCSPAuth(blindToken, testBlindUserID, testCSPBundleID, ""), qt.IsNil)
+		c.Assert(testDB.VerifyCSPAuth(blindToken), qt.IsNil)
+		c.Assert(testDB.ConsumeCSPProcessBlind(blindToken, blindProcessID), qt.IsNil)
+
+		// one signature does not exhaust the plain overwrite budget...
+		consumed, err := testDB.IsCSPProcessConsumed(testBlindUserID, blindProcessID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(consumed, qt.IsFalse)
+		// ...but it does exhaust the anonymous one
+		consumed, err = testDB.IsCSPProcessConsumedBlind(testBlindUserID, blindProcessID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(consumed, qt.IsTrue)
+	})
+}
+
 // TestCSPBlindSessionIDNoAliasing guards the session key derivation against
 // append(userID, electionID...), which can write into userID's spare capacity
 // and corrupt the caller's slice.
