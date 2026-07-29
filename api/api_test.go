@@ -37,6 +37,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	dvoteapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/log"
@@ -666,6 +667,32 @@ func waitUntilTxIsMined(ctx context.Context, txHash []byte, c *apiclient.HTTPcli
 		case <-ctx.Done():
 			return fmt.Errorf("transaction %s never mined after %s: %w",
 				hex.EncodeToString(txHash), time.Since(startTime).String(), ctx.Err())
+		}
+	}
+}
+
+// waitUntilElectionKeys waits until the keykeepers have actually published the encryption keys of
+// the given election. apiclient.WaitUntilElectionKeys is not enough on its own: it returns as soon
+// as the keys endpoint answers without an HTTP error, which the node does with an empty body a
+// block before the ADD_PROCESS_KEYS tx is committed.
+func waitUntilElectionKeys(t *testing.T, c *apiclient.HTTPclient, electionID []byte) *dvoteapi.ElectionKeys {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	startTime := time.Now()
+	for {
+		ek, err := c.ElectionKeys(electionID)
+		if err == nil && len(ek.PublicKeys) > 0 {
+			log.Infow("election keys published", "election",
+				hex.EncodeToString(electionID), "duration", time.Since(startTime).String())
+			return ek
+		}
+		select {
+		case <-time.After(time.Second * 1):
+			continue
+		case <-ctx.Done():
+			t.Fatalf("election %s keys never published after %s: %v",
+				hex.EncodeToString(electionID), time.Since(startTime).String(), ctx.Err())
 		}
 	}
 }
