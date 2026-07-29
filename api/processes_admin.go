@@ -3,8 +3,10 @@ package api
 import (
 	"encoding/json"
 	stderrors "errors"
+	"fmt"
 	"net/http"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
@@ -269,8 +271,19 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	jobID, ok := a.enqueueCensusSizeUpdate(w, vp, census, questions)
-	if !ok {
+	// only whole-census questions grow when participants are added; one that names an eligibility
+	// subset is unaffected by who else joined the census.
+	targets := make([]censusSizeTarget, 0, len(questions))
+	for i := range questions {
+		if len(questions[i].EligibleMemberIDs) == 0 {
+			targets = append(targets, censusSizeTarget{
+				question: questions[i], census: census, size: uint64(census.Size),
+			})
+		}
+	}
+	jobID, err := a.enqueueSetProcessCensus(vp.OrgAddress, targets)
+	if err != nil {
+		writeSubscriptionError(w, err)
 		return
 	}
 	resp := &apicommon.UpdateProcessCensusResponse{JobID: jobID, Added: uint32(added), Errors: memberErrs}
@@ -282,49 +295,91 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, resp)
 }
 
-// enqueueCensusSizeUpdate submits a SET_PROCESS_CENSUS tx per published whole-census question to raise
-// its on-chain maxCensusSize to the census's new size. Questions with an eligibility subset keep their
-// fixed size and are skipped. Returns the job id (empty when nothing on-chain needs updating) and false
-// on failure (after writing the error response).
-func (a *API) enqueueCensusSizeUpdate(
-	w http.ResponseWriter, vp *db.VotingProcess, census *db.Census, questions []db.VotingProcessQuestion,
-) (string, bool) {
-	published := make([]db.VotingProcessQuestion, 0, len(questions))
-	for i := range questions {
-		if len(questions[i].UpstreamID) > 0 && len(questions[i].EligibleMemberIDs) == 0 {
-			published = append(published, questions[i])
-		}
-	}
-	if len(published) == 0 {
-		return "", true // no whole-census election on chain: nothing to resize
-	}
-	org, err := a.db.Organization(vp.OrgAddress)
+// censusSizeTarget is one published question whose on-chain election may need its maxCensusSize
+// raised, with the census the new size is read from. A single group census can back several
+// processes, so one request can produce targets spread across them.
+type censusSizeTarget struct {
+	question db.VotingProcessQuestion
+	census   *db.Census
+	// size is what the election has to hold from now on: the eligibility subset when the question
+	// names one, otherwise the whole census.
+	size uint64
+}
+
+// electionMaxCensusSize reads a published question's current on-chain maxCensusSize.
+func (a *API) electionMaxCensusSize(q *db.VotingProcessQuestion) (uint64, error) {
+	election, err := a.account.Election(q.UpstreamID)
 	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return "", false
+		return 0, err
+	}
+	if election.Census == nil {
+		return 0, fmt.Errorf("election %s carries no census", q.UpstreamID.String())
+	}
+	return election.Census.MaxCensusSize, nil
+}
+
+// enqueueSetProcessCensus submits one SET_PROCESS_CENSUS tx per target, as a single background job,
+// to raise those elections' maxCensusSize. It returns an empty job id when nothing needs raising.
+//
+// It returns an error rather than writing a response, so one request can drive several processes —
+// a group census can back more than one. Callers map it with writeSubscriptionError, which
+// preserves ErrTxQueueFull's 503.
+//
+// It never enqueues a shrink. The chain accepts an increase only, and a census can now lose members,
+// so blindly submitting the census size would eventually fail the job; each election is read first
+// and only a genuine increase is sent.
+//
+// A failed election read does not fail the request. By the time this runs, the participant or
+// eligibility write it follows has already committed, so reporting failure would report it for work
+// that landed — the tx goes out anyway and a chain refusal surfaces on the job with its real reason.
+func (a *API) enqueueSetProcessCensus(orgAddress common.Address, targets []censusSizeTarget) (string, error) {
+	growing := make([]censusSizeTarget, 0, len(targets))
+	for _, t := range targets {
+		if len(t.question.UpstreamID) == 0 || t.size == 0 {
+			continue // a draft has no election yet, and there is nothing to size against
+		}
+		current, err := a.electionMaxCensusSize(&t.question)
+		switch {
+		case err != nil:
+			log.Warnw("could not read election size, enqueueing the resize anyway",
+				"question", t.question.ID.Hex(),
+				"upstreamId", t.question.UpstreamID.String(), "error", err)
+		case t.size <= current:
+			continue // the election already has the room
+		default:
+			// a genuine increase
+		}
+		growing = append(growing, t)
+	}
+	if len(growing) == 0 {
+		return "", nil
+	}
+
+	org, err := a.db.Organization(orgAddress)
+	if err != nil {
+		return "", fmt.Errorf("could not load organization: %w", err)
 	}
 	orgSigner, err := account.OrganizationSigner(a.secret, org.Creator, org.Nonce)
 	if err != nil {
-		errors.ErrGenericInternalServerError.Withf("could not restore organization signer: %v", err).Write(w)
-		return "", false
+		return "", fmt.Errorf("could not restore organization signer: %w", err)
 	}
 	jobID, err := apicommon.NewJobID()
 	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return "", false
+		return "", fmt.Errorf("could not create job id: %w", err)
 	}
 	if err := a.db.CreateTxJob(jobID, db.JobTypeSetProcessCensus, org.Address); err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return "", false
+		return "", fmt.Errorf("could not create tx job: %w", err)
 	}
-	root := census.Published.Root
-	uri := census.Published.URI
-	size := uint64(census.Size)
+
 	orgLock := a.orgTxLocks.lock(org.Address)
 	if !a.enqueueTx(txTask{jobID: jobID, run: func() (*db.JobResult, error) {
 		defer orgLock.Unlock()
-		for i := range published {
-			tx, err := a.account.BuildSetProcessCensusTx(orgSigner.Address(), published[i].UpstreamID, root, uri, size)
+		for i := range growing {
+			t := &growing[i]
+			tx, err := a.account.BuildSetProcessCensusTx(
+				orgSigner.Address(), t.question.UpstreamID,
+				t.census.Published.Root, t.census.Published.URI, t.size,
+			)
 			if err != nil {
 				return nil, err
 			}
@@ -346,8 +401,7 @@ func (a *API) enqueueCensusSizeUpdate(
 		if e := a.db.SetJobStatus(jobID, db.JobStatusFailed, nil, "tx queue full"); e != nil {
 			log.Warnw("could not mark job failed after full queue", "error", e)
 		}
-		errors.ErrTxQueueFull.Write(w)
-		return "", false
+		return "", errors.ErrTxQueueFull
 	}
-	return jobID, true
+	return jobID, nil
 }
