@@ -203,10 +203,15 @@ type BallotShape struct {
 // Either way the result round-trips — which is what lets a client edit a question through either
 // half alone, and what keeps the API's answer equal to what the election will be.
 //
-// MinChoices is the one thing that cannot be derived, having no on-chain counterpart. It is
-// carried over from the input only when the resolved type is the type the input asked for, and
-// clamped to the resolved MaxChoices; a minimum stated against a shape the caller did not get
-// would be a UI enforcing a rule the ballot does not have.
+// Supplying both halves is only allowed when they agree, or when the protocol has no named shape
+// (the ranked ballot a client may still label singlechoice). Two named shapes that disagree are an
+// error rather than a silent win for the protocol: a client editing a question through its
+// TypeSetup would otherwise get a 200 and none of its edit.
+//
+// MinChoices is the one thing that cannot be derived, having no on-chain counterpart, and is
+// carried over from the input for multichoice only, clamped to the resolved MaxChoices. A
+// singlechoice ballot is the single field a voter always fills, so its minimum is canonically 1;
+// storing the 0 a caller gets by omitting TypeSetup would state a rule the ballot does not have.
 //
 // A question with no choices yet is returned untouched: it cannot be published (publish
 // validation rejects it) and there is nothing to derive a protocol from.
@@ -226,7 +231,22 @@ func ResolveBallotShape(in BallotShapeInput) (BallotShape, error) {
 	if !ok {
 		return BallotShape{Protocol: protocol}, nil
 	}
-	if qType == in.Type {
+	// Both halves supplied and both name a ballot: they have to name the same one. The protocol
+	// wins, so without this a client that reads a draft, edits its typeSetup and PUTs the whole
+	// body back would lose the edit silently — responses always carry a protocol now.
+	if in.Protocol != nil && in.Type != "" {
+		stated, err := BallotProtocolFromType(in.Type, in.TypeSetup, in.Choices)
+		if err == nil && *stated != *in.Protocol {
+			return BallotShape{}, fmt.Errorf(
+				"ballotProtocol describes a %s ballot, which contradicts the stated type %q and its typeSetup; "+
+					"omit ballotProtocol to define the ballot through type/typeSetup", qType, in.Type,
+			)
+		}
+	}
+	// MinChoices is the client's alone — the protocol has no counterpart to check it against. It is
+	// only meaningful for multichoice: a singlechoice ballot is the one field a voter always fills,
+	// so its minimum is canonically 1 whatever the caller stated.
+	if qType == in.Type && qType == db.VotingTypeMultiChoice {
 		setup.MinChoices = min(in.TypeSetup.MinChoices, setup.MaxChoices)
 	}
 	return BallotShape{Type: qType, TypeSetup: setup, Protocol: protocol}, nil

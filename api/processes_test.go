@@ -139,6 +139,74 @@ func TestVotingProcessUpdate(t *testing.T) {
 	c.Assert(got.Title["default"], qt.Equals, "Updated title")
 }
 
+// TestVotingProcessUpdateBallotShapeEcho covers the PUT path a client actually takes: read a
+// draft, change one field, send the whole body back. Responses always carry a ballotProtocol and a
+// supplied one is authoritative, so the echoed protocol has to either agree with the typeSetup
+// beside it or be refused — silently overriding the edit would be the same lie as #619, applied to
+// the client's intent instead of the ballot.
+func TestVotingProcessUpdateBallotShapeEcho(t *testing.T) {
+	c := qt.New(t)
+	adminToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, adminToken)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, adminToken, newVotingProcessRequest(orgAddress, ids), processesCreateEndpoint,
+	)
+	pid := created.ProcessID
+	before := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, adminToken, nil, "processes", pid)
+	c.Assert(before.Questions, qt.HasLen, 2)
+
+	// rebuild the request body out of the response, the way a UI holding the fetched draft does.
+	// Fresh each time so the mutations below cannot leak into one another.
+	echo := func() *apicommon.CreateVotingProcessRequest {
+		req := newVotingProcessRequest(orgAddress, ids)
+		req.Questions = make([]apicommon.VotingProcessQuestionRequest, len(before.Questions))
+		for i, q := range before.Questions {
+			req.Questions[i] = apicommon.VotingProcessQuestionRequest{
+				Title:             q.Title,
+				Description:       q.Description,
+				Choices:           q.Choices,
+				Type:              q.Type,
+				TypeSetup:         q.TypeSetup,
+				BallotProtocol:    q.BallotProtocol,
+				SecretUntilTheEnd: q.SecretUntilTheEnd,
+			}
+		}
+		return req
+	}
+
+	// echoing the draft back unchanged changes nothing: both halves agree, so both survive
+	requestAndAssertCode(http.StatusOK, t, http.MethodPut, adminToken, echo(), "processes", pid)
+	after := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, adminToken, nil, "processes", pid)
+	c.Assert(after.Questions, qt.HasLen, len(before.Questions))
+	for i := range after.Questions {
+		c.Assert(after.Questions[i].Type, qt.Equals, before.Questions[i].Type, qt.Commentf("question %d", i))
+		c.Assert(after.Questions[i].TypeSetup, qt.Equals, before.Questions[i].TypeSetup, qt.Commentf("question %d", i))
+		c.Assert(*after.Questions[i].BallotProtocol, qt.Equals, *before.Questions[i].BallotProtocol,
+			qt.Commentf("question %d", i))
+	}
+
+	// editing the multichoice maxChoices while echoing the protocol that still encodes the old one
+	// is refused: it used to return 200 with the edit dropped
+	stale := echo()
+	stale.Questions[1].TypeSetup.MaxChoices = 1
+	requestAndAssertError(errors.ErrInvalidData, t, http.MethodPut, adminToken, stale, "processes", pid)
+
+	// the documented way to make that edit: drop the protocol and let it be re-derived
+	edit := echo()
+	edit.Questions[1].TypeSetup.MaxChoices = 1
+	edit.Questions[1].BallotProtocol = nil
+	requestAndAssertCode(http.StatusOK, t, http.MethodPut, adminToken, edit, "processes", pid)
+	edited := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, adminToken, nil, "processes", pid)
+	c.Assert(edited.Questions[1].TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1})
+	c.Assert(*edited.Questions[1].BallotProtocol, qt.Equals, db.BallotProtocol{
+		MaxCount: 2, MaxValue: 1, CostExponent: 1, MaxTotalCost: 1,
+	})
+}
+
 func TestVotingProcessAuthoringErrors(t *testing.T) {
 	adminToken := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, adminToken)
@@ -927,7 +995,10 @@ func TestVotingProcessRankedBallotProtocol(t *testing.T) {
 	c.Assert(got.Questions[0].TypeSetup, qt.Equals, db.QuestionTypeSetup{})
 
 	// and it is still publishable: the plan's voting-type gate gates named types, and this shape
-	// has none (mockEssentialPlan does not grant Ranked either way)
+	// has none (mockEssentialPlan does not grant Ranked either way).
+	// NOTE: ungated is today's behaviour, not a guarantee — plan.VotingTypes.Ranked is enforced
+	// nowhere (see the TODO in subscriptions.OrgAllowsVotingType). This assertion has to flip for
+	// a plan without Ranked once it is.
 	validation := requestAndParse[apicommon.VotingProcessValidateResponse](
 		t, http.MethodGet, adminToken, nil, "processes", created.ProcessID, "validation")
 	c.Assert(validation.Valid, qt.IsTrue, qt.Commentf("errors: %v", validation.Errors))

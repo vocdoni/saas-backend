@@ -643,7 +643,10 @@ type ProcessesBundle struct {
 // (account.ResolveBallotShape), so the two always describe the same ballot.
 //
 // MinChoices is a validation hint only — the protocol has no on-chain minimum-count field, so it
-// is the one value that cannot be derived. UniqueChoices is not supported by either named type
+// is the one value that cannot be derived. It is kept as sent for multichoice (clamped to
+// MaxChoices), where a voter may legitimately be asked for at least N; for singlechoice it is
+// always 1, that ballot being the single field a voter fills, so a stated 0 would describe a
+// submission the chain cannot express. UniqueChoices is not supported by either named type
 // and requests setting it on a multichoice are rejected: with one 0/1 field per choice, a
 // unique-values ballot admits no vote at all (issue #619), while a voter already cannot select
 // the same choice twice. A ranked ballot is expressed as a BallotProtocol instead.

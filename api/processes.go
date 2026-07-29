@@ -51,9 +51,15 @@ func parseProcessDates(req *apicommon.CreateVotingProcessRequest) (start, end ti
 //	@Description	is derived, so the stored question always describes the election it will mint. A
 //	@Description	supplied `ballotProtocol` is authoritative — it is what reaches the chain — so `type`
 //	@Description	and `typeSetup` are re-derived from it, and come back empty when it encodes a shape
-//	@Description	with no named type (ranked, quadratic). **Omit `ballotProtocol` to author or edit a
-//	@Description	question through its `typeSetup`**: sending back a response body unchanged will
-//	@Description	otherwise re-apply the protocol it carries.
+//	@Description	with no named type (ranked, quadratic). Sending both halves is fine when they agree;
+//	@Description	when they describe two different named ballots it is a 400 rather than a silent win
+//	@Description	for the protocol. **Omit `ballotProtocol` to author or edit a question through its
+//	@Description	`typeSetup`** — responses always carry a protocol, so echoing one back unchanged
+//	@Description	re-applies it.
+//	@Description
+//	@Description	`typeSetup.minChoices` has no on-chain counterpart and is a validation hint for
+//	@Description	clients. It is stored as sent for multichoice, and is always `1` for singlechoice,
+//	@Description	whose ballot is the single field a voter fills.
 //	@Description
 //	@Description	`typeSetup.uniqueChoices` is rejected for multichoice: every choice is an independent
 //	@Description	yes/no field, so a unique-values ballot admits no vote and the election would tally
@@ -279,8 +285,9 @@ func (a *API) storeUpdatedProcess(vp *db.VotingProcess, seen time.Time) error {
 //	@Summary		Update a voting process draft
 //	@Description	Update a voting process while it is still a draft (not published). 409 if already published.
 //	@Description	The questions are replaced wholesale, and each one's ballot shape is reconciled exactly
-//	@Description	as on create — so omit `ballotProtocol` when editing a question through its `typeSetup`,
-//	@Description	or the protocol carried in the body wins and the edit is not applied.
+//	@Description	as on create. Reading a question and PUTting it back unchanged is a no-op; editing its
+//	@Description	`typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a
+//	@Description	400 — omit `ballotProtocol` to edit a question through its `typeSetup`.
 //	@Description
 //	@Description	Send the updatedAt read from GET /processes/{processId} to make the update conditional: it is
 //	@Description	rejected with 409 (40171) if anything wrote the process in between, so two editors cannot

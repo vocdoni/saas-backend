@@ -255,7 +255,6 @@ func TestResolveBallotShapeRoundTrip(t *testing.T) {
 	c := qt.New(t)
 	for _, in := range []BallotShapeInput{
 		{Type: db.VotingTypeSingleChoice, TypeSetup: db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1}, Choices: choices(1)},
-		{Type: db.VotingTypeSingleChoice, TypeSetup: db.QuestionTypeSetup{MinChoices: 0, MaxChoices: 1}, Choices: choices(4)},
 		{
 			Type: db.VotingTypeSingleChoice, TypeSetup: db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1},
 			Choices: valuedChoices(0, 2, 5),
@@ -272,11 +271,24 @@ func TestResolveBallotShapeRoundTrip(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(*shape.Protocol, qt.Equals, *want, qt.Commentf("%+v", in))
 	}
+
+	// singlechoice is the exception: typeSetup is optional for it, and a ballot of one field the
+	// voter always fills has no minimum a client can state, so the stored setup is canonical
+	// whatever came in — never the {minChoices: 0} an omitted typeSetup would otherwise leave.
+	for _, setup := range []db.QuestionTypeSetup{{}, {MinChoices: 0, MaxChoices: 1}, {MinChoices: 1, MaxChoices: 1}} {
+		shape, err := ResolveBallotShape(BallotShapeInput{
+			Type: db.VotingTypeSingleChoice, TypeSetup: setup, Choices: choices(4),
+		})
+		c.Assert(err, qt.IsNil)
+		c.Assert(shape.Type, qt.Equals, db.VotingTypeSingleChoice)
+		c.Assert(shape.TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1}, qt.Commentf("%+v", setup))
+	}
 }
 
 // TestResolveBallotShapeProtocolWins covers the half of the reconciliation a client can be
-// surprised by: a supplied protocol is what the election will be, so the named type is rewritten
-// to match it — and emptied when the protocol has no name.
+// surprised by: a supplied protocol is what the election will be, so the type is derived from it
+// and emptied when the protocol has no name. Where both halves name a ballot and disagree there is
+// nothing to prefer, so the request is refused instead of the edit being dropped.
 func TestResolveBallotShapeProtocolWins(t *testing.T) {
 	c := qt.New(t)
 
@@ -296,17 +308,38 @@ func TestResolveBallotShapeProtocolWins(t *testing.T) {
 		c.Assert(*shape.Protocol, qt.Equals, *ranked)
 	})
 
-	c.Run("a named protocol rewrites a disagreeing type", func(c *qt.C) {
-		shape, err := ResolveBallotShape(BallotShapeInput{
+	c.Run("two named halves that disagree are refused", func(c *qt.C) {
+		_, err := ResolveBallotShape(BallotShapeInput{
 			Type:      db.VotingTypeMultiChoice,
 			TypeSetup: db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 2},
 			Protocol:  &db.BallotProtocol{MaxCount: 1, MaxValue: 2},
 			Choices:   choices(3),
 		})
+		c.Assert(err, qt.Not(qt.IsNil))
+	})
+
+	c.Run("the stale-echo edit is refused rather than dropped", func(c *qt.C) {
+		// a client reads a draft, raises maxChoices and PUTs the whole body back: the protocol it
+		// echoes still encodes the old maximum, and used to win in silence
+		_, err := ResolveBallotShape(BallotShapeInput{
+			Type:      db.VotingTypeMultiChoice,
+			TypeSetup: db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 3},
+			Protocol:  &db.BallotProtocol{MaxCount: 4, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2},
+			Choices:   choices(4),
+		})
+		c.Assert(err, qt.Not(qt.IsNil))
+	})
+
+	c.Run("an honest echo of both halves is accepted", func(c *qt.C) {
+		shape, err := ResolveBallotShape(BallotShapeInput{
+			Type:      db.VotingTypeMultiChoice,
+			TypeSetup: db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 2},
+			Protocol:  &db.BallotProtocol{MaxCount: 4, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2},
+			Choices:   choices(4),
+		})
 		c.Assert(err, qt.IsNil)
-		c.Assert(shape.Type, qt.Equals, db.VotingTypeSingleChoice)
-		// the caller's minChoices described a shape they did not get, so it goes with it
-		c.Assert(shape.TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1})
+		c.Assert(shape.Type, qt.Equals, db.VotingTypeMultiChoice)
+		c.Assert(shape.TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 2})
 	})
 
 	c.Run("the type is inferred from a protocol alone", func(c *qt.C) {

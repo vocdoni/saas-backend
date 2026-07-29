@@ -5954,9 +5954,15 @@ paths:
         is derived, so the stored question always describes the election it will mint. A
         supplied `ballotProtocol` is authoritative — it is what reaches the chain — so `type`
         and `typeSetup` are re-derived from it, and come back empty when it encodes a shape
-        with no named type (ranked, quadratic). **Omit `ballotProtocol` to author or edit a
-        question through its `typeSetup`**: sending back a response body unchanged will
-        otherwise re-apply the protocol it carries.
+        with no named type (ranked, quadratic). Sending both halves is fine when they agree;
+        when they describe two different named ballots it is a 400 rather than a silent win
+        for the protocol. **Omit `ballotProtocol` to author or edit a question through its
+        `typeSetup`** — responses always carry a protocol, so echoing one back unchanged
+        re-applies it.
+
+        `typeSetup.minChoices` has no on-chain counterpart and is a validation hint for
+        clients. It is stored as sent for multichoice, and is always `1` for singlechoice,
+        whose ballot is the single field a voter fills.
 
         `typeSetup.uniqueChoices` is rejected for multichoice: every choice is an independent
         yes/no field, so a unique-values ballot admits no vote and the election would tally
@@ -6065,8 +6071,9 @@ paths:
       description: |-
         Update a voting process while it is still a draft (not published). 409 if already published.
         The questions are replaced wholesale, and each one's ballot shape is reconciled exactly
-        as on create — so omit `ballotProtocol` when editing a question through its `typeSetup`,
-        or the protocol carried in the body wins and the edit is not applied.
+        as on create. Reading a question and PUTting it back unchanged is a no-op; editing its
+        `typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a
+        400 — omit `ballotProtocol` to edit a question through its `typeSetup`.
 
         Send the updatedAt read from GET /processes/{processId} to make the update conditional: it is
         rejected with 409 (40171) if anything wrote the process in between, so two editors cannot
