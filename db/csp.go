@@ -189,17 +189,17 @@ func (ms *MongoStorage) CSPProcess(token, processID internal.HexBytes) (*CSPProc
 // true if the process has been consumed, false if it has not been consumed and
 // an error if the process does not exist or the token is not verified.
 func (ms *MongoStorage) IsCSPProcessConsumed(userID, processID internal.HexBytes) (bool, error) {
-	return ms.isCSPProcessConsumed(userID, processID, MaxVoteOverwritesPerProcess)
+	return ms.cspProcessConsumedBeyond(userID, processID, MaxVoteOverwritesPerProcess)
 }
 
 // IsCSPProcessConsumedBlind reports whether the voter has already taken an
 // anonymous signature for this election. That flow allows no overwrites (see
 // ConsumeCSPProcessBlind), so any previous signature consumes it.
 func (ms *MongoStorage) IsCSPProcessConsumedBlind(userID, processID internal.HexBytes) (bool, error) {
-	return ms.isCSPProcessConsumed(userID, processID, 0)
+	return ms.cspProcessConsumedBeyond(userID, processID, 0)
 }
 
-func (ms *MongoStorage) isCSPProcessConsumed(userID, processID internal.HexBytes, maxOverwrites int) (bool, error) {
+func (ms *MongoStorage) cspProcessConsumedBeyond(userID, processID internal.HexBytes, maxOverwrites int) (bool, error) {
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
@@ -232,7 +232,7 @@ func (ms *MongoStorage) ConsumeCSPProcess(token, processID, address internal.Hex
 	if token == nil || processID == nil || address == nil {
 		return ErrBadInputs
 	}
-	return ms.consumeCSPProcess(token, processID, address, MaxVoteOverwritesPerProcess)
+	return ms.markCSPProcessConsumed(token, processID, address, MaxVoteOverwritesPerProcess)
 }
 
 // ConsumeCSPProcessBlind consumes a CSP process for a user without recording an
@@ -250,14 +250,14 @@ func (ms *MongoStorage) ConsumeCSPProcessBlind(token, processID internal.HexByte
 	if token == nil || processID == nil {
 		return ErrBadInputs
 	}
-	return ms.consumeCSPProcess(token, processID, nil, 0)
+	return ms.markCSPProcessConsumed(token, processID, nil, 0)
 }
 
-// consumeCSPProcess marks a process consumed by the token's user. A nil address
+// markCSPProcessConsumed marks a process consumed by the token's user. A nil address
 // records no address (the anonymous flow); a non-nil one is stored and must stay
 // the same across vote overwrites. maxOverwrites bounds how many times the same
 // voter may re-sign for this election.
-func (ms *MongoStorage) consumeCSPProcess(token, processID, address internal.HexBytes, maxOverwrites int) error {
+func (ms *MongoStorage) markCSPProcessConsumed(token, processID, address internal.HexBytes, maxOverwrites int) error {
 	// lock the keys
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()

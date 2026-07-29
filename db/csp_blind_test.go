@@ -80,7 +80,8 @@ func TestCSPBlindSessionRoundTrip(t *testing.T) {
 		// A short positive TTL is used because SetCSPBlindSession treats a
 		// non-positive one as "apply the default".
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
-		c.Assert(testDB.SetCSPBlindSession(testBlindUserID, testBlindElectionID, testBlindSecretK, testBlindTokenR, time.Millisecond), qt.IsNil)
+		c.Assert(testDB.SetCSPBlindSession(
+			testBlindUserID, testBlindElectionID, testBlindSecretK, testBlindTokenR, time.Millisecond), qt.IsNil)
 		time.Sleep(20 * time.Millisecond)
 
 		_, err := testDB.ConsumeCSPBlindSession(testBlindUserID, testBlindElectionID, testBlindTokenR)
@@ -121,19 +122,20 @@ func TestCSPBlindSessionConcurrentConsume(t *testing.T) {
 		notFound  int
 	)
 	for range racers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, err := testDB.ConsumeCSPBlindSession(testBlindUserID, testBlindElectionID, testBlindTokenR)
 			mu.Lock()
 			defer mu.Unlock()
-			switch {
-			case err == nil:
+			switch err {
+			case nil:
 				succeeded++
-			case err == ErrCSPBlindSessionNotFound:
+			case ErrCSPBlindSessionNotFound:
 				notFound++
+			default:
+				// any other error is a real failure; leave both counters alone
+				// so the assertions below catch it
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

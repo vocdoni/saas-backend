@@ -64,7 +64,7 @@ func (c *CSP) prepareSaltedKeySigner(token, address, processID, weight internal.
 		return nil, nil, nil, ErrUserAlreadySigning
 	}
 	// check if the process is already consumed for this user
-	if err := c.checkProcessConsumed(authTokenData.UserID, processID, false); err != nil {
+	if err := checkProcessConsumed(authTokenData.UserID, processID, c.Storage.IsCSPProcessConsumed); err != nil {
 		return nil, nil, nil, err
 	}
 	// lock the user data to avoid concurrent signing
@@ -106,11 +106,15 @@ func saltFromProcessID(processID internal.HexBytes) (*[saltedkey.SaltSize]byte, 
 	return &salt, nil
 }
 
+// consumedCheck reports whether a voter has used up their signature(s) for an
+// election. The plain and anonymous flows differ only in how many they allow, so
+// callers pass the rule that applies to them.
+type consumedCheck func(userID, processID internal.HexBytes) (bool, error)
+
 // checkProcessConsumed reports whether the voter may still sign for this
-// election, translating storage errors into CSP ones. blind selects the stricter
-// anonymous rule, which permits no vote overwrites.
-func (c *CSP) checkProcessConsumed(userID, processID internal.HexBytes, blind bool) error {
-	consumed, err := c.consumedFor(userID, processID, blind)
+// election, translating storage errors into CSP ones.
+func checkProcessConsumed(userID, processID internal.HexBytes, consumedBy consumedCheck) error {
+	consumed, err := consumedBy(userID, processID)
 	if err != nil {
 		log.Warn(err)
 		switch err {
@@ -124,13 +128,6 @@ func (c *CSP) checkProcessConsumed(userID, processID internal.HexBytes, blind bo
 		return ErrProcessAlreadyConsumed
 	}
 	return nil
-}
-
-func (c *CSP) consumedFor(userID, processID internal.HexBytes, blind bool) (bool, error) {
-	if blind {
-		return c.Storage.IsCSPProcessConsumedBlind(userID, processID)
-	}
-	return c.Storage.IsCSPProcessConsumed(userID, processID)
 }
 
 func (c *CSP) finishSaltedKeySigner(token, address, processID internal.HexBytes) error {

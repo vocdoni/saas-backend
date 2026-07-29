@@ -157,15 +157,13 @@ func TestBlindSignConcurrentCompletion(t *testing.T) {
 		succeeded int
 	)
 	for i := range racers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if _, err := csp.CompleteBlindSign(testToken, electionID, tokenR, msgs[i]); err == nil {
 				mu.Lock()
 				succeeded++
 				mu.Unlock()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

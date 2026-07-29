@@ -47,7 +47,7 @@ func (c *CSP) PrepareBlindSign(
 	if !authTokenData.Verified {
 		return nil, nil, ErrAuthTokenNotVerified
 	}
-	if err := c.checkProcessConsumed(authTokenData.UserID, electionID, true); err != nil {
+	if err := checkProcessConsumed(authTokenData.UserID, electionID, c.Storage.IsCSPProcessConsumedBlind); err != nil {
 		return nil, nil, err
 	}
 	salt, err := saltFromProcessID(electionID)
@@ -111,7 +111,7 @@ func (c *CSP) CompleteBlindSign(token, electionID, tokenR, blindedMsg internal.H
 	c.lock(authTokenData.UserID, electionID)
 	defer c.unlock(authTokenData.UserID, electionID)
 
-	if err := c.checkProcessConsumed(authTokenData.UserID, electionID, true); err != nil {
+	if err := checkProcessConsumed(authTokenData.UserID, electionID, c.Storage.IsCSPProcessConsumedBlind); err != nil {
 		return nil, err
 	}
 	salt, err := saltFromProcessID(electionID)

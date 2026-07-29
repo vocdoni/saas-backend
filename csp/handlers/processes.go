@@ -233,7 +233,7 @@ func (c *CSPHandlers) ProcessSignHandler(w http.ResponseWriter, r *http.Request)
 //	@Param			request		body		handlers.AnonymousSignPrepareRequest	true	"Auth token and election id"
 //	@Success		200			{object}	handlers.AnonymousSignPrepareResponse
 //	@Failure		400			{object}	errors.Error	"Invalid input data"
-//	@Failure		401			{object}	errors.Error	"Unauthorized, unverified token, election not in process, member not eligible, or already signed"
+//	@Failure		401			{object}	errors.Error	"Unauthorized, unverified token, ineligible member, or already signed"
 //	@Failure		404			{object}	errors.Error	"Process, census, or user not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId}/sign/anonymous/prepare [post]
@@ -284,7 +284,7 @@ func (c *CSPHandlers) ProcessSignAnonymousPrepareHandler(w http.ResponseWriter, 
 //	@Param			request		body		handlers.AnonymousSignRequest	true	"Auth token, election id, tokenR and blinded payload"
 //	@Success		200			{object}	handlers.AuthResponse
 //	@Failure		400			{object}	errors.Error	"Invalid input data, or a blinded message that must be blinded again"
-//	@Failure		401			{object}	errors.Error	"Unauthorized, unverified token, election not in process, member not eligible, no live session, or already signed"
+//	@Failure		401			{object}	errors.Error	"Unauthorized, unverified token, ineligible member, no live session, or already signed"
 //	@Failure		404			{object}	errors.Error	"Process, census, or user not found"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId}/sign/anonymous [post]
