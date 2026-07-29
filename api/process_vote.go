@@ -237,6 +237,98 @@ func (a *API) relayVotesHandler(w http.ResponseWriter, r *http.Request) {
 	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, &apicommon.EnqueuedResponse{JobID: jobID})
 }
 
+const (
+	// nullifierSize is the length of a vote nullifier, which the chain derives as a hash
+	// (see state.GenerateNullifier), so anything else cannot name a vote.
+	nullifierSize = 32
+	// maxVerifyVotesBodyBytes bounds a POST /votes/verify body: a hex nullifier is 64
+	// characters, so 80 leaves room for the JSON quoting and separator around each, plus
+	// slack for the framing. Like the relay endpoints this one is public, so the body has
+	// to be bounded before it is buffered.
+	maxVerifyVotesBodyBytes = maxVotesPerBatch*80 + 4<<10
+)
+
+// verifyVotesHandler godoc
+//
+//	@Summary		Verify vote nullifiers against the Vochain
+//	@Description	Checks whether the Vochain has a vote for each of the given nullifiers, so a voter
+//	@Description	can confirm that the ballots relayed on their behalf are registered on chain. Public
+//	@Description	endpoint: no authentication is required, and it exposes only data that is already
+//	@Description	public on chain. Several nullifiers are accepted in one call because a multi-question
+//	@Description	voting process is one on-chain election per question, so a voter holds one nullifier
+//	@Description	per question. The response has one entry per requested nullifier, in the same order;
+//	@Description	an unknown nullifier is reported as verified=false rather than as an error, while a
+//	@Description	chain that cannot be reached fails the whole call so a voter is never told their vote
+//	@Description	is missing when it merely could not be looked up.
+//	@Tags			vote
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body		apicommon.VerifyVotesRequest	true	"Vote nullifiers to verify"
+//	@Success		200		{object}	apicommon.VerifyVotesResponse	"Verification outcome per nullifier"
+//	@Failure		400		{object}	errors.Error					"Invalid input data"
+//	@Failure		413		{object}	errors.Error					"Request body too large"
+//	@Failure		500		{object}	errors.Error					"Blockchain request failed"
+//	@Router			/votes/verify [post]
+func (a *API) verifyVotesHandler(w http.ResponseWriter, r *http.Request) {
+	var req apicommon.VerifyVotesRequest
+	if err := decodeCappedJSON(w, r, &req, maxVerifyVotesBodyBytes); err != nil {
+		err.Write(w)
+		return
+	}
+	switch {
+	case len(req.Nullifiers) == 0:
+		errors.ErrVoteBatchEmpty.Write(w)
+		return
+	case len(req.Nullifiers) > maxVotesPerBatch:
+		errors.ErrVoteBatchTooLarge.Withf("%d nullifiers, the maximum is %d",
+			len(req.Nullifiers), maxVotesPerBatch).Write(w)
+		return
+	}
+	for i, nullifier := range req.Nullifiers {
+		if len(nullifier) != nullifierSize {
+			errors.ErrMalformedBody.Withf("the nullifier at index %d is %d bytes, expected %d",
+				i, len(nullifier), nullifierSize).Write(w)
+			return
+		}
+	}
+
+	// one chain read per nullifier, fanned out with the same bounded pool the per-question
+	// resolvers use: a vote lookup costs ~250ms against a remote node, so at the batch cap a
+	// sequential loop would be a ~25s request. Each callback writes only its own index, so
+	// the result slices need no locking.
+	votes := make([]apicommon.VerifiedVote, len(req.Nullifiers))
+	errs := make([]error, len(req.Nullifiers))
+	parallelForEach(len(req.Nullifiers), func(i int) {
+		votes[i].Nullifier = req.Nullifiers[i]
+		// nobody is left to read the answer: stop asking the node for the rest of the batch.
+		if err := r.Context().Err(); err != nil {
+			errs[i] = err
+			return
+		}
+		vote, err := a.account.VoteByNullifier(req.Nullifiers[i])
+		if stderrors.Is(err, account.ErrVoteNotFound) {
+			return
+		}
+		if err != nil {
+			errs[i] = err
+			return
+		}
+		votes[i].Verified = true
+		votes[i].ProcessID = internal.HexBytes(vote.ElectionID)
+		votes[i].TxHash = internal.HexBytes(vote.TxHash)
+		votes[i].BlockHeight = vote.BlockHeight
+		votes[i].Date = vote.Date
+	})
+	// a nullifier the chain could not be asked about is not a verified=false: nothing is
+	// known about that vote, and reporting it as missing would be a lie to the voter.
+	if err := stderrors.Join(errs...); err != nil {
+		errors.ErrVochainRequestFailed.WithErr(err).Write(w)
+		return
+	}
+
+	apicommon.HTTPWriteJSON(w, &apicommon.VerifyVotesResponse{Votes: votes})
+}
+
 // parsedVote is one validated vote envelope: the payload to relay plus everything the
 // job needs to describe it before the chain has said anything about it.
 type parsedVote struct {

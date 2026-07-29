@@ -1840,6 +1840,48 @@ definitions:
         format: hex
         type: string
     type: object
+  apicommon.VerifiedVote:
+    properties:
+      blockHeight:
+        description: Block the vote was registered in
+        type: integer
+      date:
+        description: When the vote was registered on chain
+        type: string
+      nullifier:
+        description: The nullifier that was checked, echoed back
+        example: deadbeef
+        format: hex
+        type: string
+      processId:
+        description: On-chain election id the vote belongs to
+        example: deadbeef
+        format: hex
+        type: string
+      txHash:
+        description: Hash of the transaction that carried the vote
+        example: deadbeef
+        format: hex
+        type: string
+      verified:
+        description: Whether the chain has a vote with this nullifier
+        type: boolean
+    type: object
+  apicommon.VerifyVotesRequest:
+    properties:
+      nullifiers:
+        description: Vote nullifiers (32 bytes each), at most 100
+        items:
+          type: string
+        type: array
+    type: object
+  apicommon.VerifyVotesResponse:
+    properties:
+      votes:
+        items:
+          $ref: '#/definitions/apicommon.VerifiedVote'
+        type: array
+    type: object
   apicommon.VotingProcessListResponse:
     properties:
       pagination:
@@ -7506,6 +7548,49 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Relay a batch of already-signed votes to the Vochain
+      tags:
+      - vote
+  /votes/verify:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Checks whether the Vochain has a vote for each of the given nullifiers, so a voter
+        can confirm that the ballots relayed on their behalf are registered on chain. Public
+        endpoint: no authentication is required, and it exposes only data that is already
+        public on chain. Several nullifiers are accepted in one call because a multi-question
+        voting process is one on-chain election per question, so a voter holds one nullifier
+        per question. The response has one entry per requested nullifier, in the same order;
+        an unknown nullifier is reported as verified=false rather than as an error, while a
+        chain that cannot be reached fails the whole call so a voter is never told their vote
+        is missing when it merely could not be looked up.
+      parameters:
+      - description: Vote nullifiers to verify
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.VerifyVotesRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Verification outcome per nullifier
+          schema:
+            $ref: '#/definitions/apicommon.VerifyVotesResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "413":
+          description: Request body too large
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Blockchain request failed
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Verify vote nullifiers against the Vochain
       tags:
       - vote
 schemes:

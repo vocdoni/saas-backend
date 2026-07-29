@@ -179,6 +179,10 @@ const (
 	// whole batch is validated and enqueued all or nothing, under a single job.
 	votesEndpoint = "/votes"
 
+	// POST /votes/verify to check whether the Vochain knows the given vote nullifiers
+	// (public), so a voter can confirm on chain the ballots relayed on their behalf.
+	votesVerifyEndpoint = "/votes/verify"
+
 	// GET /process/{processId}/results to get the trimmed on-chain election results (public).
 	// {processId} is the 24-hex ProcessID (not the on-chain election id).
 	processResultsEndpoint = "/process/{processId}/results"

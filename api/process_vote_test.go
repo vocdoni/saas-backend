@@ -338,6 +338,24 @@ func TestRelayVote(t *testing.T) {
 	orgAfter, err := testDB.Organization(f.orgAddress)
 	c.Assert(err, qt.IsNil)
 	c.Assert(orgAfter.Counters.SentVotes, qt.Equals, 1)
+
+	// the voter can now verify that nullifier against the chain, and an unknown one is
+	// reported as unverified rather than failing the call
+	unknown := internal.HexBytes(internal.RandomBytes(nullifierSize))
+	verified := requestAndParse[apicommon.VerifyVotesResponse](t, http.MethodPost, "",
+		&apicommon.VerifyVotesRequest{Nullifiers: []internal.HexBytes{nullifier, unknown}},
+		"votes", "verify")
+	c.Assert(verified.Votes, qt.HasLen, 2)
+	c.Assert(verified.Votes[0].Nullifier, qt.DeepEquals, nullifier)
+	c.Assert(verified.Votes[0].Verified, qt.IsTrue)
+	c.Assert(verified.Votes[0].ProcessID, qt.DeepEquals, processID)
+	c.Assert(verified.Votes[0].TxHash, qt.Not(qt.HasLen), 0)
+	c.Assert(verified.Votes[1].Nullifier, qt.DeepEquals, unknown)
+	c.Assert(verified.Votes[1].Verified, qt.IsFalse)
+
+	// a nullifier that cannot name a vote is rejected outright, not looked up
+	requestAndAssertError(errors.ErrMalformedBody, t, http.MethodPost, "",
+		&apicommon.VerifyVotesRequest{Nullifiers: []internal.HexBytes{{0xde, 0xad}}}, "votes", "verify")
 }
 
 // TestRelayVotesBatch relays the votes of a multi-question process in a single call and
