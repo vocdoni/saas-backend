@@ -208,13 +208,22 @@ func (a *API) writeQuestions(vp *db.VotingProcess, built []*db.VotingProcessQues
 
 // parseUpdatedAt reads the optional conditional-update token of an update request. The zero time
 // means the client sent none and opts out of the check.
+//
+// It parses with apicommon.UpdatedAtLayout first — the exact shape the read endpoint emits, so the
+// round-trip of a value the client just read goes through the layout that documents itself as the
+// wire format — and falls back to RFC3339 for a client sending a different sub-second precision or a
+// non-Z offset.
 func parseUpdatedAt(s string) (time.Time, error) {
 	if s == "" {
 		return time.Time{}, nil
 	}
-	t, err := time.Parse(time.RFC3339, s)
+	t, err := time.Parse(apicommon.UpdatedAtLayout, s)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid updatedAt %q: expected RFC3339 as returned by the read endpoint", s)
+		if t, err = time.Parse(time.RFC3339, s); err != nil {
+			return time.Time{}, fmt.Errorf(
+				"invalid updatedAt %q: expected %s (or RFC3339) as returned by the read endpoint",
+				s, apicommon.UpdatedAtLayout)
+		}
 	}
 	return t.UTC(), nil
 }
