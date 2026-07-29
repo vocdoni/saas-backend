@@ -413,13 +413,24 @@ func (a *API) deleteOrganizationMembersHandler(w http.ResponseWriter, r *http.Re
 	var emptied []db.VotingProcessQuestion
 	var err error
 
-	// the ids at stake, and the censuses they would leave: the refusal below has to happen before
+	// The ids at stake, and the censuses they would leave: the refusal below has to happen before
 	// any write, so a blocked member keeps both their membership and their census participation.
-	targetIDs := members.IDs
+	//
+	// The submitted ids are scoped to this organization first. They reach the guard and the
+	// revocation cascade, neither of which is org-aware — a foreign id would otherwise revoke a
+	// member of another organization, or raise a 409 naming a voter this caller cannot even see.
+	var targetIDs []string
 	if members.All {
+		// already org-scoped by construction; filtering it again would only cost a second query
 		targetIDs, err = a.db.GetAllOrgMemberIDs(org.Address)
 		if err != nil {
 			errors.ErrGenericInternalServerError.Withf("could not list org members: %v", err).Write(w)
+			return
+		}
+	} else {
+		targetIDs, err = a.db.FilterOrgMemberIDs(org.Address, members.IDs)
+		if err != nil {
+			errors.ErrGenericInternalServerError.Withf("could not resolve org members: %v", err).Write(w)
 			return
 		}
 	}
@@ -450,7 +461,7 @@ func (a *API) deleteOrganizationMembersHandler(w http.ResponseWriter, r *http.Re
 			"user", user.Email)
 	} else {
 		// delete specific org members from the database
-		deleted, emptied, err = a.db.DeleteOrgMembers(org.Address, members.IDs)
+		deleted, emptied, err = a.db.DeleteOrgMembers(org.Address, targetIDs)
 		if err != nil {
 			errors.ErrGenericInternalServerError.Withf("could not delete org members: %v", err).Write(w)
 			return

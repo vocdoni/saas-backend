@@ -473,3 +473,46 @@ func TestGroupCensusGuards(t *testing.T) {
 	_, err = testDB.OrganizationMemberGroup(group.ID, orgAddress)
 	c.Assert(err, qt.IsNil)
 }
+
+// TestDeleteMembersIsOrgScoped pins that the member ids a caller submits are scoped to their own
+// organization before anything acts on them. The delete is org-scoped already, but the guard and
+// the revocation cascade resolve censuses from the ids alone: unscoped, an admin of one
+// organization could revoke the voters of another, and would be answered 409 naming a member they
+// cannot even see.
+func TestDeleteMembersIsOrgScoped(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+
+	// the organization under attack: a published process whose first member has been signed for
+	victim := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, victim, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, victim, newOrgMembers(3)...)
+	ids := memberIDs(members)
+	pid, got := publishedProcess(t, token, victim, ids)
+	open := got.Questions[0]
+	c.Assert(signAs(t, pid, members[0], open.UpstreamID), qt.Equals, http.StatusOK)
+
+	// a second organization, of the same user, asks to delete the first one's members
+	attacker := testCreateOrganization(t, token)
+	setOrganizationSubscription(t, attacker, mockEssentialPlan.ID)
+
+	del := requestAndParse[apicommon.DeleteMembersResponse](t, http.MethodDelete, token,
+		&apicommon.DeleteMembersRequest{IDs: ids},
+		"organizations", attacker.String(), "members")
+	c.Assert(del.Count, qt.Equals, 0,
+		qt.Commentf("foreign ids delete nothing, and must not be answered 409 either"))
+
+	// the victim's census is untouched, member by member
+	vp, err := testDB.VotingProcess(objectID(c, pid))
+	c.Assert(err, qt.IsNil)
+	for _, id := range ids {
+		_, err := testDB.CensusParticipant(vp.CensusID.Hex(), id)
+		c.Assert(err, qt.IsNil, qt.Commentf("member %s was revoked by another organization", id))
+	}
+	census, err := testDB.Census(vp.CensusID.Hex())
+	c.Assert(err, qt.IsNil)
+	c.Assert(census.Size, qt.Equals, int64(3))
+
+	// and its voters are still signed for
+	c.Assert(signAs(t, pid, members[1], open.UpstreamID), qt.Equals, http.StatusOK)
+}

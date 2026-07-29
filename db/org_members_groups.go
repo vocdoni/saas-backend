@@ -165,9 +165,20 @@ func (ms *MongoStorage) UpdateOrganizationMemberGroup(
 	// Members leaving the group leave the censuses built from it too, otherwise they would keep
 	// voting an election they are no longer part of. Runs before the group write, and outside
 	// keysLock, which is not reentrant.
+	//
+	// Only ids the group actually holds are revoked. Removing an id that is not a member of the
+	// group is already a no-op on the group document, but the revocation is not org- or
+	// group-aware: it would drop that member's census participation and CSP sessions wherever
+	// they are.
 	var emptied []VotingProcessQuestion
-	if len(removedMembers) > 0 && len(group.CensusIDs) > 0 {
-		emptied, err = ms.RevokeMembersFromCensuses(group.CensusIDs, removedMembers)
+	removedInGroup := make([]string, 0, len(removedMembers))
+	for _, id := range removedMembers {
+		if contains(group.MemberIDs, id) {
+			removedInGroup = append(removedInGroup, id)
+		}
+	}
+	if len(removedInGroup) > 0 && len(group.CensusIDs) > 0 {
+		emptied, err = ms.RevokeMembersFromCensuses(group.CensusIDs, removedInGroup)
 		if err != nil {
 			return nil, fmt.Errorf("could not revoke removed members from the group censuses: %w", err)
 		}

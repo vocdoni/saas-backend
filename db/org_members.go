@@ -658,8 +658,17 @@ func (ms *MongoStorage) DeleteOrgMembers(
 		oids = append(oids, objID)
 	}
 
+	// Scope the ids to this organization before revoking anything. The delete below is org-scoped
+	// but the revocation is not: it resolves the censuses to touch from the member ids alone, so an
+	// id belonging to another organization would be revoked from that organization's censuses while
+	// this delete matched nothing.
+	scoped, err := ms.FilterOrgMemberIDs(orgAddress, ids)
+	if err != nil {
+		return 0, nil, fmt.Errorf("could not scope member ids to the organization: %w", err)
+	}
+
 	// revoke before the memberbase write, and outside keysLock, which is not reentrant
-	emptied, err := ms.RevokeMembersEverywhere(ids)
+	emptied, err := ms.RevokeMembersEverywhere(scoped)
 	if err != nil {
 		return 0, nil, fmt.Errorf("could not revoke members from censuses: %w", err)
 	}
@@ -895,6 +904,67 @@ func (ms *MongoStorage) validateOrgMembers(ctx context.Context, orgAddress commo
 		}
 	}
 	return nil
+}
+
+// FilterOrgMemberIDs returns, in input order, the subset of ids that identify members of
+// orgAddress. Malformed, unknown and foreign ids are dropped rather than rejected: on the wire
+// such an id has always deleted nothing, and the census cascade must see exactly the set the
+// memberbase write will.
+//
+// The cascade derives the censuses to touch from the member ids themselves, so an id that reaches
+// it unscoped revokes a member of another organization — participants, eligibility lists and CSP
+// sessions included. Every caller must filter first.
+func (ms *MongoStorage) FilterOrgMemberIDs(orgAddress common.Address, ids []string) ([]string, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return nil, ErrInvalidData
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	objectIDs := make([]primitive.ObjectID, 0, len(ids))
+	for _, id := range ids {
+		objID, err := primitive.ObjectIDFromHex(id)
+		if err != nil {
+			continue // an id that is not an ObjectID cannot name a member
+		}
+		objectIDs = append(objectIDs, objID)
+	}
+	if len(objectIDs) == 0 {
+		return nil, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	cursor, err := ms.orgMembers.Find(ctx,
+		bson.M{"_id": bson.M{"$in": objectIDs}, "orgAddress": orgAddress},
+		options.Find().SetProjection(bson.M{"_id": 1}))
+	if err != nil {
+		return nil, fmt.Errorf("failed to query org members by id: %w", err)
+	}
+	defer func() {
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("error closing cursor", "error", err)
+		}
+	}()
+
+	var found []OrgMember
+	if err := cursor.All(ctx, &found); err != nil {
+		return nil, fmt.Errorf("failed to decode org members by id: %w", err)
+	}
+	owned := make(map[string]bool, len(found))
+	for _, member := range found {
+		owned[member.ID.Hex()] = true
+	}
+
+	scoped := make([]string, 0, len(found))
+	for _, id := range ids {
+		if owned[id] {
+			scoped = append(scoped, id)
+		}
+	}
+	return scoped, nil
 }
 
 // getOrgMembersByIDs retrieves organization members by their IDs

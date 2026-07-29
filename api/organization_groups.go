@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -309,8 +310,16 @@ func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 		return
 	}
 	// members leaving the group leave its censuses too, so the refusal has to happen before any
-	// write: otherwise a blocked member is dropped from the group but stays in the census.
-	if a.refuseBlockedVoters(w, group.CensusIDs, toUpdate.RemoveMembers) {
+	// write: otherwise a blocked member is dropped from the group but stays in the census. Only
+	// the ids the group actually holds are considered — the rest change nothing, and matching the
+	// set the DB layer revokes keeps the guard from answering 409 for a member it will not touch.
+	removedInGroup := make([]string, 0, len(toUpdate.RemoveMembers))
+	for _, id := range toUpdate.RemoveMembers {
+		if slices.Contains(group.MemberIDs, id) {
+			removedInGroup = append(removedInGroup, id)
+		}
+	}
+	if a.refuseBlockedVoters(w, group.CensusIDs, removedInGroup) {
 		return
 	}
 	// read-only checks that must refuse before the group is touched, so an over-quota request

@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
@@ -308,4 +309,110 @@ func TestRevokeMembersFromCensusesMatchesEmptyEligibilityEncodings(t *testing.T)
 	for _, q := range emptied {
 		c.Assert(q.ID, qt.Not(qt.Equals), f.openToAll)
 	}
+}
+
+// TestDeleteOrgMembersScopesToOrg pins that the revocation cascade never runs on a member of
+// another organization. The delete itself is org-scoped, but the cascade resolves the censuses to
+// touch from the member ids alone, so an unscoped id would strip a foreign member of their census
+// participation, their eligibility and their CSP session while this delete matched nothing.
+func TestDeleteOrgMembersScopesToOrg(t *testing.T) {
+	c := qt.New(t)
+	c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+	f := setupRevocationFixture(t)
+
+	// alice has been signed for and holds a live auth session
+	seedUsedCSPProcess(t, f.alice.ID.Hex(), internal.HexBytes(f.processID[:]), f.upstream)
+	aliceToken := internal.HexBytes(append([]byte{0xC5, 0x90}, f.upstream...))
+
+	// a second organization deletes, by id, a member it does not own
+	otherOrg := common.Address{0x77, 0x88, 0x99}
+	c.Assert(testDB.SetOrganization(&Organization{
+		Address: otherOrg, Active: true, CreatedAt: time.Now(),
+	}), qt.IsNil)
+
+	deleted, emptied, err := testDB.DeleteOrgMembers(otherOrg, []string{f.alice.ID.Hex()})
+	c.Assert(err, qt.IsNil)
+	c.Assert(deleted, qt.Equals, 0)
+	c.Assert(emptied, qt.HasLen, 0)
+
+	// nothing of the owning organization moved
+	participants, err := testDB.CensusParticipants(f.census.ID.Hex())
+	c.Assert(err, qt.IsNil)
+	c.Assert(participants, qt.HasLen, 3)
+
+	census, err := testDB.Census(f.census.ID.Hex())
+	c.Assert(err, qt.IsNil)
+	c.Assert(census.Size, qt.Equals, int64(3))
+
+	restricted, err := testDB.Question(f.restricted)
+	c.Assert(err, qt.IsNil)
+	c.Assert(restricted.EligibleMemberIDs, qt.DeepEquals, []string{f.alice.ID.Hex(), f.bob.ID.Hex()})
+
+	auth, err := testDB.CSPAuth(aliceToken)
+	c.Assert(err, qt.IsNil, qt.Commentf("a foreign delete must not drop the member's auth session"))
+	c.Assert(auth, qt.Not(qt.IsNil))
+
+	// the owning organization still deletes normally: the scoping must not over-filter
+	deleted, _, err = testDB.DeleteOrgMembers(testOrgAddress, []string{f.alice.ID.Hex()})
+	c.Assert(err, qt.IsNil)
+	c.Assert(deleted, qt.Equals, 1)
+	_, err = testDB.CensusParticipant(f.census.ID.Hex(), f.alice.ID.Hex())
+	c.Assert(err, qt.Equals, ErrNotFound)
+}
+
+// TestUpdateOrganizationMemberGroupRevokesOnlyGroupMembers pins that removing an id the group does
+// not hold changes nothing. The group document treats it as a no-op already, but the revocation is
+// neither group- nor org-aware: it would drop that member's CSP session wherever they are.
+func TestUpdateOrganizationMemberGroupRevokesOnlyGroupMembers(t *testing.T) {
+	c := qt.New(t)
+	c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+	f := setupRevocationFixture(t)
+
+	// a group holding alice and bob only, with a census built from it
+	groupID, err := testDB.CreateOrganizationMemberGroup(&OrganizationMemberGroup{
+		OrgAddress: testOrgAddress,
+		Title:      "voters",
+		MemberIDs:  []string{f.alice.ID.Hex(), f.bob.ID.Hex()},
+	})
+	c.Assert(err, qt.IsNil)
+	groupCensus := &Census{
+		OrgAddress:  testOrgAddress,
+		AuthFields:  OrgMemberAuthFields{OrgMemberAuthFieldsMemberNumber},
+		TwoFaFields: OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail},
+	}
+	_, err = testDB.PopulateGroupCensus(groupCensus, groupID)
+	c.Assert(err, qt.IsNil)
+
+	// carol is a member of the same organization, but not of this group
+	seedUsedCSPProcess(t, f.carol.ID.Hex(), internal.HexBytes(f.processID[:]), f.upstream)
+	carolToken := internal.HexBytes(append([]byte{0xC5, 0x90}, f.upstream...))
+
+	emptied, err := testDB.UpdateOrganizationMemberGroup(
+		groupID, testOrgAddress, "", "", nil, []string{f.carol.ID.Hex()})
+	c.Assert(err, qt.IsNil)
+	c.Assert(emptied, qt.HasLen, 0)
+
+	// carol keeps her participation and her session
+	_, err = testDB.CensusParticipant(f.census.ID.Hex(), f.carol.ID.Hex())
+	c.Assert(err, qt.IsNil)
+	auth, err := testDB.CSPAuth(carolToken)
+	c.Assert(err, qt.IsNil, qt.Commentf("removing a non-member must not drop anyone's session"))
+	c.Assert(auth, qt.Not(qt.IsNil))
+
+	// an id that names nobody is equally inert
+	_, err = testDB.UpdateOrganizationMemberGroup(
+		groupID, testOrgAddress, "", "", nil, []string{primitive.NewObjectID().Hex()})
+	c.Assert(err, qt.IsNil)
+	auth, err = testDB.CSPAuth(carolToken)
+	c.Assert(err, qt.IsNil)
+	c.Assert(auth, qt.Not(qt.IsNil))
+
+	// ...but a member the group does hold is still revoked from the group's census
+	_, err = testDB.UpdateOrganizationMemberGroup(
+		groupID, testOrgAddress, "", "", nil, []string{f.bob.ID.Hex()})
+	c.Assert(err, qt.IsNil)
+	_, err = testDB.CensusParticipant(groupCensus.ID.Hex(), f.bob.ID.Hex())
+	c.Assert(err, qt.Equals, ErrNotFound)
 }
