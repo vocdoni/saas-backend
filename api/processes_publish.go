@@ -105,12 +105,13 @@ func (a *API) publishPreflightProblems(
 	if !user.HasRoleFor(vp.OrgAddress, db.AdminRole) {
 		problems = append(problems, "publishing requires the admin role")
 	}
-	// per-question plan voting-type gate (skipped for raw ballot-protocol overrides)
+	// Per-question plan voting-type gate, on the ballot each question actually encodes rather
+	// than the type it is labelled with: a stored type is only a label, and a question written
+	// before the two halves were reconciled may carry one its protocol contradicts. Shapes with
+	// no named type (ranked, quadratic) resolve to an empty type and are not gated here; their
+	// plan limits ride on the built transaction instead.
 	for i := range questions {
-		if questions[i].BallotProtocol != nil {
-			continue
-		}
-		if err := a.subscriptions.OrgAllowsVotingType(vp.OrgAddress, questions[i].Type); err != nil {
+		if err := a.subscriptions.OrgAllowsVotingType(vp.OrgAddress, account.EffectiveQuestionType(&questions[i])); err != nil {
 			problems = append(problems, err.Error())
 		}
 	}

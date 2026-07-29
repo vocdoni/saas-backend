@@ -942,6 +942,12 @@ func validateVotingProcessForPublish(
 		if q.BallotProtocol == nil && q.Type != db.VotingTypeSingleChoice && q.Type != db.VotingTypeMultiChoice {
 			problems = append(problems, fmt.Sprintf("question %d has an unsupported type %q", i, q.Type))
 		}
+		// A question stored before authoring rejected these can still hold a ballot no voter can
+		// satisfy. Publishing it would mint an election that accepts every vote and tallies zero,
+		// with nothing on the way reporting a problem, so stop it at the last point that can.
+		if err := account.ValidateBallotProtocol(q.BallotProtocol); err != nil {
+			problems = append(problems, fmt.Sprintf("question %d has an invalid ballotProtocol: %v", i, err))
+		}
 	}
 	return problems
 }

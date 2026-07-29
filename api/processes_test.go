@@ -932,3 +932,52 @@ func TestVotingProcessRankedBallotProtocol(t *testing.T) {
 		t, http.MethodGet, adminToken, nil, "processes", created.ProcessID, "validation")
 	c.Assert(validation.Valid, qt.IsTrue, qt.Commentf("errors: %v", validation.Errors))
 }
+
+// TestVotingProcessPlanGateOnEffectiveType covers the gate a raw ballotProtocol used to walk past:
+// the plan's voting-type limits apply to the ballot a question encodes, not to the label it
+// carries, so an org whose plan forbids multiple-choice cannot mint one by describing it in raw
+// terms. A shape with no named type stays ungated — that is what the raw protocol is for.
+func TestVotingProcessPlanGateOnEffectiveType(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, token)
+
+	singleOnlyPlan := *mockEssentialPlan
+	singleOnlyPlan.ID = "prod_test_single_only"
+	singleOnlyPlan.Name = "Single Choice Only Plan"
+	singleOnlyPlan.StripeMonthlyPriceID = "price_month_test_single_only"
+	singleOnlyPlan.StripeYearlyPriceID = "price_year_test_single_only"
+	singleOnlyPlan.Public = false
+	singleOnlyPlan.VotingTypes.Multiple = false
+	c.Assert(testDB.SetPlan(&singleOnlyPlan), qt.IsNil)
+	setOrganizationSubscription(t, orgAddress, singleOnlyPlan.ID)
+
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+
+	// a multichoice ballot, stated in raw terms and with no type at all
+	rawMulti := newVotingProcessRequest(orgAddress, ids)
+	rawMulti.Questions = rawMulti.Questions[:1]
+	rawMulti.Questions[0].Type = ""
+	rawMulti.Questions[0].TypeSetup = db.QuestionTypeSetup{}
+	rawMulti.Questions[0].BallotProtocol = &db.BallotProtocol{
+		MaxCount: 2, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2,
+	}
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, rawMulti, processesCreateEndpoint)
+	val := requestAndParse[apicommon.VotingProcessValidateResponse](
+		t, http.MethodGet, token, nil, "processes", created.ProcessID, "validation")
+	c.Assert(val.Valid, qt.IsFalse, qt.Commentf("a plan without multiple-choice must not mint one"))
+
+	// the same org can still publish a ranked ballot: it has no named type to gate
+	ranked := newVotingProcessRequest(orgAddress, ids)
+	ranked.Questions = ranked.Questions[:1]
+	ranked.Questions[0].Type = ""
+	ranked.Questions[0].TypeSetup = db.QuestionTypeSetup{}
+	ranked.Questions[0].BallotProtocol = &db.BallotProtocol{MaxCount: 2, MaxValue: 1, UniqueValues: true}
+	created = requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, ranked, processesCreateEndpoint)
+	val = requestAndParse[apicommon.VotingProcessValidateResponse](
+		t, http.MethodGet, token, nil, "processes", created.ProcessID, "validation")
+	c.Assert(val.Valid, qt.IsTrue, qt.Commentf("errors: %v", val.Errors))
+}
