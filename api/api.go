@@ -432,6 +432,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, processesParticipantsEndpoint, a.votingProcessParticipantsHandler)
 		handle(r, http.MethodPut, processesCensusEndpoint, a.updateVotingProcessCensusHandler)
 		handle(r, http.MethodDelete, processesCensusEndpoint, a.removeVotingProcessCensusHandler)
+		handle(r, http.MethodPut, processesQuestionCensusEndpoint, a.updateVotingProcessQuestionCensusHandler)
 	})
 
 	// Public routes

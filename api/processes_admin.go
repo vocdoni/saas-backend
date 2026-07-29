@@ -7,10 +7,12 @@ import (
 	"net/http"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -293,6 +295,184 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, resp)
+}
+
+// updateVotingProcessQuestionCensusHandler godoc
+//
+//	@Summary		Set a question's eligibility list
+//	@Description	Replace the set of members eligible to vote one question of a voting process, for a
+//	@Description	draft or a published process (closes #611). Requires Manager/Admin role.
+//	@Description
+//	@Description	The body is the **complete desired list, not a delta**, so the request is idempotent:
+//	@Description	resend the whole list to change it. Every id must already be a participant of the
+//	@Description	process census. Input order is preserved and duplicates are dropped, so a client can
+//	@Description	diff what it reads back against its next request.
+//	@Description
+//	@Description	**An empty list does not mean "nobody": it is the encoding for "no restriction" and
+//	@Description	opens the question to every member of the census.** A response of `eligible: 0`
+//	@Description	therefore means the question is open to everyone.
+//	@Description
+//	@Description	Because reopening a restricted question can multiply its electorate while its election
+//	@Description	was sized on chain for the old subset, a maxCensusSize increase is enqueued as an async
+//	@Description	job whenever the question needs more room than it was published with (202; poll GET
+//	@Description	/jobs/{jobId}).
+//	@Description
+//	@Description	Removing a member the CSP has already signed for, while a question of this process is
+//	@Description	still READY or PAUSED, is refused with 409 and the offending ids in
+//	@Description	`data.votedMemberIds`.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `voting:write`).
+//	@Tags			processes
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			processId	path		string										true	"Process ID"
+//	@Param			questionId	path		string										true	"Question ID"
+//	@Param			request		body		apicommon.UpdateQuestionCensusRequest		true	"Complete desired eligibility list"
+//	@Success		200			{object}	apicommon.UpdateQuestionCensusResponse		"Eligibility updated; no on-chain resize needed"
+//	@Success		202			{object}	apicommon.UpdateQuestionCensusResponse		"Eligibility updated; maxCensusSize update enqueued"
+//	@Failure		400			{object}	errors.Error								"Invalid input data, or a member is not part of the census"
+//	@Failure		401			{object}	errors.Error								"Unauthorized"
+//	@Failure		404			{object}	errors.Error								"Process or question not found"
+//	@Failure		409			{object}	errors.Error								"Publish in progress, member already signed for, or list changed"
+//	@Failure		500			{object}	errors.Error								"Internal server error"
+//	@Router			/processes/{processId}/questions/{questionId}/census [put]
+func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r *http.Request) {
+	oid, ok := a.votingProcessID(w, r)
+	if !ok {
+		return
+	}
+	// loads the process + questions and gates on Manager/Admin of the owning org.
+	vp, questions, ok := a.authorizeStatusChange(w, r, oid)
+	if !ok {
+		return
+	}
+	// while a publish worker holds the process, its questions all look like drafts: an eligibility
+	// write would take the draft path, skip the resize, and the worker would then mint an election
+	// sized from its older snapshot.
+	if refusePublishInProgress(w, vp) {
+		return
+	}
+	question, ok := questionOfProcess(w, questions, chi.URLParam(r, "questionId"))
+	if !ok {
+		return
+	}
+
+	var req apicommon.UpdateQuestionCensusRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errors.ErrMalformedBody.Withf("couldn't decode member IDs").Write(w)
+		return
+	}
+	census, err := a.db.Census(vp.CensusID.Hex())
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	eligible, err := a.validateCensusParticipants(census.ID.Hex(), req.MemberIDs)
+	if err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
+
+	previous := question.EligibleMemberIDs
+	added, removed := diffMemberIDs(previous, eligible)
+	// members losing eligibility lose their ability to vote this question, so the refusal has to
+	// happen before the write
+	if a.refuseBlockedVoters(w, []string{census.ID.Hex()}, removed) {
+		return
+	}
+
+	won, err := a.db.SetQuestionEligibleMemberIDs(question.ID, previous, eligible)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if !won {
+		errors.ErrDuplicateConflict.Withf("the eligibility list changed while this request was being served").Write(w)
+		return
+	}
+
+	resp := &apicommon.UpdateQuestionCensusResponse{
+		Eligible: uint32(len(eligible)),
+		Added:    uint32(len(added)),
+		Removed:  uint32(len(removed)),
+	}
+
+	// Resize gate: compare what the election needs against what it needed before, with an empty
+	// list meaning the whole census on both sides.
+	//
+	// Keying this off "were members added" would skip the resize exactly where it matters most:
+	// reopening a restricted question adds nobody by name yet can multiply the electorate, and
+	// account.ComputeMaxCensusSize stamped that election at exactly the old subset size — zero
+	// headroom. The CSP would sign and the chain would reject.
+	before := uint64(len(previous))
+	if len(previous) == 0 {
+		before = uint64(census.Size)
+	}
+	needed := uint64(len(eligible))
+	if len(eligible) == 0 {
+		needed = uint64(census.Size)
+	}
+	if len(question.UpstreamID) == 0 || needed <= before {
+		// a draft has no election yet, and an election with the room already needs nothing
+		apicommon.HTTPWriteJSON(w, resp)
+		return
+	}
+
+	question.EligibleMemberIDs = eligible
+	jobID, err := a.enqueueSetProcessCensus(vp.OrgAddress, []censusSizeTarget{
+		{question: *question, census: census, size: needed},
+	})
+	if err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
+	if jobID == "" {
+		apicommon.HTTPWriteJSON(w, resp)
+		return
+	}
+	resp.JobID = jobID
+	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, resp)
+}
+
+// questionOfProcess resolves a question id against the process's own questions, so a question of
+// another process is a 404 rather than a cross-process write.
+func questionOfProcess(
+	w http.ResponseWriter, questions []db.VotingProcessQuestion, questionID string,
+) (*db.VotingProcessQuestion, bool) {
+	qid, err := primitive.ObjectIDFromHex(questionID)
+	if err != nil {
+		errors.ErrMalformedURLParam.Withf("invalid question ID").Write(w)
+		return nil, false
+	}
+	for i := range questions {
+		if questions[i].ID == qid {
+			return &questions[i], true
+		}
+	}
+	errors.ErrProcessNotFound.Withf("question not found").Write(w)
+	return nil, false
+}
+
+// diffMemberIDs reports which ids next gains over previous, and which it drops.
+func diffMemberIDs(previous, next []string) (added, removed []string) {
+	prev := make(map[string]bool, len(previous))
+	for _, id := range previous {
+		prev[id] = true
+	}
+	cur := make(map[string]bool, len(next))
+	for _, id := range next {
+		cur[id] = true
+		if !prev[id] {
+			added = append(added, id)
+		}
+	}
+	for _, id := range previous {
+		if !cur[id] {
+			removed = append(removed, id)
+		}
+	}
+	return added, removed
 }
 
 // removeVotingProcessCensusHandler godoc

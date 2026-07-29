@@ -85,6 +85,28 @@ type UpdateProcessCensusResponse struct {
 	Removed uint32 `json:"removed,omitempty"`
 }
 
+// UpdateQuestionCensusRequest is the body of PUT /processes/{processId}/questions/{questionId}/census.
+type UpdateQuestionCensusRequest struct {
+	// MemberIDs is the complete desired eligibility list, not a delta, so the request is
+	// idempotent: resend the whole list to change it.
+	//
+	// An empty list is not "nobody" — it is the encoding for "no restriction", which opens the
+	// question to every member of the process census.
+	MemberIDs []string `json:"memberIds"`
+}
+
+// UpdateQuestionCensusResponse is the result of PUT
+// /processes/{processId}/questions/{questionId}/census.
+type UpdateQuestionCensusResponse struct {
+	// JobID is the async job raising the election's on-chain maxCensusSize, present only when the
+	// question needed more room than it was published with (202).
+	JobID string `json:"jobId,omitempty"`
+	// Eligible is the size of the stored list. Zero means the question is open to the whole census.
+	Eligible uint32 `json:"eligible"`
+	Added    uint32 `json:"added"`
+	Removed  uint32 `json:"removed"`
+}
+
 // CreateVotingProcessResponse is returned by POST /processes.
 type CreateVotingProcessResponse struct {
 	ProcessID string `json:"processId"`
@@ -202,10 +224,16 @@ type PublicQuestionResponse struct {
 	// is still encrypted or before any vote — so clients poll on an empty tally. The whole object is
 	// absent (omitempty) only for a draft (no election yet).
 	Results *db.QuestionResults `json:"results,omitempty"`
+	// EligibleMemberIDs is the question's eligibility subset — who may vote it. Present only for a
+	// Manager/Admin of the owning organization; an anonymous or non-manager read never carries it.
+	// An empty/absent list on a manager read means the question is open to the whole census.
+	EligibleMemberIDs []string `json:"eligibleMemberIds,omitempty"`
 }
 
 // PublicQuestionResponseFromDB builds the public question read from a question and its parent
 // process's census (config only). It copies only the voter-safe fields (no eligibility member ids).
+// EligibleMemberIDs is left unset: it names who may vote, so the caller adds it only for a
+// Manager/Admin of the owning organization.
 func PublicQuestionResponseFromDB(q *db.VotingProcessQuestion, census *db.Census) *PublicQuestionResponse {
 	resp := &PublicQuestionResponse{
 		ID:                q.ID,

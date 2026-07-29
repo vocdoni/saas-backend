@@ -560,7 +560,8 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// hydrate the parent process's census config (the auth policy the voter must satisfy); the
-	// member list and per-question eligibility subset are never exposed on this public endpoint.
+	// census member list is never exposed here, and the per-question eligibility subset only to a
+	// manager/admin of the owning org.
 	vp, err := a.db.VotingProcess(oid)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -580,7 +581,12 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 	question.EncryptionKeys = a.resolveQuestionEncryptionKeys(question)
 	// surface the on-chain tally once the question is in RESULTS status (nil/no chain call otherwise).
 	question.Results = a.resolveQuestionResults(question)
-	apicommon.HTTPWriteJSON(w, apicommon.PublicQuestionResponseFromDB(question, census))
+	resp := apicommon.PublicQuestionResponseFromDB(question, census)
+	// the eligibility subset names who may vote: only a manager/admin of the owning org sees it
+	if a.optionalManager(r, vp.OrgAddress) {
+		resp.EligibleMemberIDs = question.EligibleMemberIDs
+	}
+	apicommon.HTTPWriteJSON(w, resp)
 }
 
 // parallelForEach runs fn(0..n-1) concurrently with a bounded worker pool and waits for all to

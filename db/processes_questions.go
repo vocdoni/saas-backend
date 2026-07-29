@@ -225,3 +225,40 @@ func (ms *MongoStorage) SetQuestionStatusSynced(upstreamID internal.HexBytes, pr
 	}
 	return res.MatchedCount > 0, nil
 }
+
+// SetQuestionEligibleMemberIDs replaces a question's eligibility list, but only while the stored
+// list still equals previous. It returns false when that compare-and-set lost the race.
+//
+// It is a targeted $set rather than SetQuestion, which is a whole-document ReplaceOne and would
+// clobber upstreamId, status, metadataURL and syncedAt — all of them written by the publish worker
+// and the status syncer, not by the caller holding this question.
+//
+// "No restriction" reaches Mongo as a missing field, an explicit null or an empty array depending on
+// how the document was last written, so an empty previous has to match all three. The new value is
+// always written as an array, so the eligibility $pull in the revocation cascade never meets a null.
+func (ms *MongoStorage) SetQuestionEligibleMemberIDs(
+	id primitive.ObjectID, previous, next []string,
+) (bool, error) {
+	if id == primitive.NilObjectID {
+		return false, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	filter := bson.M{"_id": id}
+	if len(previous) == 0 {
+		filter["eligibleMemberIds"] = bson.M{"$in": bson.A{nil, bson.A{}}}
+	} else {
+		filter["eligibleMemberIds"] = previous
+	}
+
+	value := next
+	if value == nil {
+		value = []string{}
+	}
+	res, err := ms.processesQuestions.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"eligibleMemberIds": value}})
+	if err != nil {
+		return false, fmt.Errorf("failed to set question eligible member ids: %w", err)
+	}
+	return res.MatchedCount == 1, nil
+}
