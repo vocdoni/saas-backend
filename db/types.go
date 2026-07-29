@@ -638,20 +638,29 @@ type ProcessesBundle struct {
 	Processes  []internal.HexBytes `json:"processes" bson:"processes" swaggertype:"array,string" format:"hex" example:"deadbeef"` // Array of process addresses included in this bundle
 }
 
-// QuestionTypeSetup carries the friendly ballot-type parameters for a
-// VotingProcessQuestion. It is translated into on-chain vote options at publish
-// time (see account.VoteTypeFromQuestion). MinChoices is a validation hint only
-// (the current protocol has no on-chain minimum-count field).
+// QuestionTypeSetup carries the friendly ballot-type parameters for a VotingProcessQuestion, and
+// is kept in step with its BallotProtocol: whichever half is supplied, the other is derived
+// (account.ResolveBallotShape), so the two always describe the same ballot.
+//
+// MinChoices is a validation hint only — the protocol has no on-chain minimum-count field, so it
+// is the one value that cannot be derived. UniqueChoices is not supported by either named type
+// and requests setting it on a multichoice are rejected: with one 0/1 field per choice, a
+// unique-values ballot admits no vote at all (issue #619), while a voter already cannot select
+// the same choice twice. A ranked ballot is expressed as a BallotProtocol instead.
 type QuestionTypeSetup struct {
 	MinChoices    uint32 `json:"minChoices" bson:"minChoices"`
 	MaxChoices    uint32 `json:"maxChoices" bson:"maxChoices"`
 	UniqueChoices bool   `json:"uniqueChoices" bson:"uniqueChoices"`
 }
 
-// BallotProtocol is an optional raw override of the on-chain ballot parameters. When
-// set on a VotingProcessQuestion it takes priority over Type/TypeSetup and is mapped
-// directly onto the election envelope and vote options, enabling ballot shapes
-// (approval, ranked, quadratic) before named types exist for them.
+// BallotProtocol is the on-chain ballot parameters of a VotingProcessQuestion, mapped directly
+// onto the election envelope and vote options. Every question written since the two halves were
+// reconciled carries one, derived from Type/TypeSetup when the client did not supply it.
+//
+// A client may supply it instead of a named type, which is what enables the ballot shapes that
+// have no name yet (ranked, quadratic). Supplying it alongside a type makes it authoritative —
+// it is what reaches the chain — so the type is re-derived from it, and emptied when it encodes
+// no named shape.
 type BallotProtocol struct {
 	MaxCount          uint32 `json:"maxCount" bson:"maxCount"`
 	MaxValue          uint32 `json:"maxValue" bson:"maxValue"`

@@ -319,9 +319,11 @@ func (p *Subscriptions) OrgCanCreateVotingProcessDraft(orgAddress common.Address
 
 // OrgAllowsVotingType checks that the organization's plan permits the given question ballot
 // type. It maps the friendly type to the plan's VotingTypes feature flags. An empty type is
-// allowed (it is validated elsewhere); a raw ballotProtocol override skips this check by
-// passing an empty voteType. Weighted elections stay gated separately via CostFromWeight in
-// hasElectionMetadataPermissions.
+// allowed (it is validated elsewhere), which is also how a ballot shape with no named type —
+// ranked, quadratic, expressed as a raw ballotProtocol — passes: there is no flag for it.
+// Callers pass account.EffectiveQuestionType, so a question is gated on the ballot it encodes
+// rather than the type it is labelled with. Weighted elections stay gated separately via
+// CostFromWeight in hasElectionMetadataPermissions.
 func (p *Subscriptions) OrgAllowsVotingType(orgAddress common.Address, voteType string) error {
 	if voteType == "" {
 		return nil
