@@ -45,6 +45,13 @@ func (a *API) blockedVoters(censusIDs, memberIDs []string) ([]string, error) {
 // It must be called before any write. Refusing after the memberbase has been updated would leave
 // the member out of their group but still in the census — exactly the disagreement between the two
 // that this cascade exists to remove — while reporting to the caller that nothing happened.
+//
+// The check and the write it guards are not atomic with respect to the CSP: ProcessSignHandler
+// (csp/handlers/processes.go) can issue a signature between this read and the participant delete in
+// RevokeMembersFromCensuses, leaving a member removed yet signed for. The window is one request
+// round trip, and the sign handler's own participation re-check narrows it but cannot close it —
+// that would need a lock shared by the api and csp paths, which a single stale signature (itself
+// bounded by the consumption row cspTokensStatus keeps) does not justify.
 func (a *API) refuseBlockedVoters(w http.ResponseWriter, censusIDs, memberIDs []string) bool {
 	blocked, err := a.blockedVoters(censusIDs, memberIDs)
 	if err != nil {
@@ -64,6 +71,10 @@ func (a *API) refuseBlockedVoters(w http.ResponseWriter, censusIDs, memberIDs []
 //
 // Returns the job id, empty when nothing needed resizing. A failure here is logged rather than
 // returned: the revocation it follows has already committed, so the removal did happen.
+//
+// The loop below reads a process and a census per question rather than batching them. Emptying a
+// question requires removing every member it named, so the input is the handful of published
+// questions a single request stripped bare — group them into one query if that ever stops holding.
 func (a *API) resizeEmptiedQuestions(orgAddress common.Address, emptied []db.VotingProcessQuestion) string {
 	if len(emptied) == 0 {
 		return ""

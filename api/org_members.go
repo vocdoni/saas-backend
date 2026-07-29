@@ -432,6 +432,10 @@ func (a *API) deleteOrganizationMembersHandler(w http.ResponseWriter, r *http.Re
 	// The submitted ids are scoped to this organization first. They reach the guard and the
 	// revocation cascade, neither of which is org-aware — a foreign id would otherwise revoke a
 	// member of another organization, or raise a 409 naming a voter this caller cannot even see.
+	//
+	// Every id then travels as one $in filter, and the `all` path materializes the whole
+	// memberbase to do it — the guard needs the exact set, and the delete re-derives it. Chunk
+	// both if organizations ever reach the hundreds of thousands of members.
 	var targetIDs []string
 	if members.All {
 		// already org-scoped by construction; filtering it again would only cost a second query
