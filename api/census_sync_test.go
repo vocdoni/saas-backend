@@ -54,6 +54,62 @@ func signAs(t *testing.T, pid string, member apicommon.OrgMember, election inter
 	return code
 }
 
+// TestProcessCSPElectionStateGates pins the three refusals that decide whether a voter can obtain a
+// signature at all. The CSP is the only place that can enforce them: the signature it issues carries
+// no expiry, so a voter could otherwise bank one against a closed election and spend it when the
+// chain opens. They are also the refusals most likely to turn away a legitimate voter, which is why
+// each is asserted rather than left to the happy path.
+//
+// The gates read the stored question status and start date, so the status is set directly here — a
+// status change driven through the API would be testing the status endpoint instead.
+func TestProcessCSPElectionStateGates(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+	authFields := db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsSurname}
+
+	// a draft mints no token: it would outlive the draft and be spendable the moment it publishes,
+	// and issuing it would burn the voter's email allowance for nothing
+	draftReq := newVotingProcessRequest(orgAddress, ids)
+	draftReq.Census.AuthFields = authFields
+	draft := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, draftReq, processesCreateEndpoint,
+	)
+	_, code := testRequest(t, http.MethodPost, "", &handlers.AuthRequest{
+		Name: members[0].Name, Surname: members[0].Surname, Email: members[0].Email,
+	}, "processes", draft.ProcessID, "auth", "0")
+	c.Assert(code, qt.Equals, http.StatusUnauthorized,
+		qt.Commentf("an unpublished process must not authenticate a voter"))
+
+	// a published process that has not opened yet authenticates but does not sign
+	futureReq := newVotingProcessRequest(orgAddress, ids) // its StartDate defaults to an hour out
+	futureReq.Census.AuthFields = authFields
+	future := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, futureReq, processesCreateEndpoint,
+	)
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", future.ProcessID, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish job error: %s", job.Errors))
+	futureGot := requestAndParse[apicommon.VotingProcessResponse](
+		t, http.MethodGet, token, nil, "processes", future.ProcessID)
+	c.Assert(signAs(t, future.ProcessID, members[0], futureGot.Questions[0].UpstreamID),
+		qt.Equals, http.StatusUnauthorized,
+		qt.Commentf("no signature may be obtainable before the process opens"))
+
+	// a question that is not READY does not sign either
+	pid, got := publishedProcess(t, token, orgAddress, ids)
+	open := got.Questions[0]
+	c.Assert(signAs(t, pid, members[0], open.UpstreamID), qt.Equals, http.StatusOK,
+		qt.Commentf("the same request must work while the question is READY"))
+
+	c.Assert(testDB.SetQuestionStatus(open.ID, db.QuestionStatusPaused), qt.IsNil)
+	// a second member, so the refusal is the pause and not the one-address-per-member rule
+	c.Assert(signAs(t, pid, members[1], open.UpstreamID), qt.Equals, http.StatusUnauthorized,
+		qt.Commentf("a paused question must not be signed for"))
+}
+
 // TestUpdateQuestionCensusReopen is the sharpest case of the #611 endpoint: reopening a restricted
 // question adds nobody by name yet multiplies its electorate, while ComputeMaxCensusSize stamped its
 // election at exactly the old subset size. Without the resize the CSP signs and the chain rejects.
