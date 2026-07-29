@@ -62,3 +62,44 @@ jobs:
           git add docs/swagger.yaml
           git commit -m "ci: regenerate swagger.yaml after merge"
           git push
+
+  deploy-pages:
+    name: Deploy Swagger UI to GitHub Pages
+    needs: api-swagger
+    # on.push.branches is already [stage], so a push event is always stage.
+    # Pull request runs must never publish.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # Scoped to this job on purpose: api-swagger pushes the regenerated
+    # swagger.yaml with the repo-default token, so it must keep its own scopes.
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      # The checked out swagger.yaml predates the "regenerate after merge"
+      # commit, so take the spec api-swagger just produced instead.
+      - name: Overwrite docs/swagger.yaml with the freshly generated spec
+        uses: actions/download-artifact@v4
+        with:
+          name: swagger.yaml
+          path: docs
+
+      - uses: actions/configure-pages@v5
+
+      - name: Upload docs/ (Swagger UI + spec)
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
