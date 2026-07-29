@@ -411,6 +411,16 @@ func TestUpdateQuestionCensusRejects(t *testing.T) {
 		})
 	}
 
+	// several bad ids are reported together: the whole list is validated in one query, so there
+	// is no reason to make a client discover them one request at a time.
+	outsider := primitive.NewObjectID().Hex()
+	apiErr := requestAndExpectError(t, http.MethodPut, token,
+		&apicommon.UpdateQuestionCensusRequest{MemberIDs: []string{ids[0], ids[2], outsider}},
+		"processes", pid, "questions", subsetQID, "census")
+	c.Assert(apiErr.Code, qt.Equals, errors.ErrInvalidData.Code)
+	c.Assert(apiErr.Error(), qt.Contains, ids[2])
+	c.Assert(apiErr.Error(), qt.Contains, outsider)
+
 	// a malformed question id is a 400, not a 404
 	requestAndAssertError(errors.ErrMalformedURLParam, t, http.MethodPut, token,
 		&apicommon.UpdateQuestionCensusRequest{MemberIDs: ids[:1]},
@@ -486,4 +496,34 @@ func TestUpdateQuestionCensusReopen(t *testing.T) {
 			AuthToken: tok, ProcessID: election, Payload: hex.EncodeToString(voter.Address().Bytes()),
 		}, "processes", pid, "sign")
 	c.Assert(sign.Signature, qt.Not(qt.HasLen), 0)
+}
+
+// TestUpdateQuestionCensusDedupsAndPreservesOrder pins the two properties the stored eligible list
+// has to keep now that it is validated with one bulk query instead of a per-id loop: a repeated id
+// counts once, and the list comes back in the order the caller sent it. The order is not cosmetic —
+// it is what the next request is diffed against to decide what was added and removed.
+func TestUpdateQuestionCensusDedupsAndPreservesOrder(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+
+	req := newVotingProcessRequest(orgAddress, ids)
+	req.StartDate = ""
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint)
+	pid := created.ProcessID
+	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	subsetQID := got.Questions[1].ID.Hex()
+
+	upd := requestAndParseWithAssertCode[apicommon.UpdateQuestionCensusResponse](
+		http.StatusOK, t, http.MethodPut, token,
+		&apicommon.UpdateQuestionCensusRequest{MemberIDs: []string{ids[1], ids[0], ids[1]}},
+		"processes", pid, "questions", subsetQID, "census")
+	c.Assert(upd.Eligible, qt.Equals, 2, qt.Commentf("the repeated id must be counted once"))
+
+	got = requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	c.Assert(got.Questions[1].EligibleMemberIDs, qt.DeepEquals, []string{ids[1], ids[0]})
 }

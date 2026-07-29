@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -93,7 +94,8 @@ func (a *API) resolveEligibleMemberIDs(
 	if len(memberIDs) == 0 {
 		return nil, nil
 	}
-	// validate each id is a participant of the census (subset ⊆ default invariant)
+	// dedup, keeping the caller's order: the resolved list is stored verbatim, read back by
+	// clients, and compared against the next request to decide what changed.
 	out := make([]string, 0, len(memberIDs))
 	seen := make(map[string]bool, len(memberIDs))
 	for _, id := range memberIDs {
@@ -101,10 +103,36 @@ func (a *API) resolveEligibleMemberIDs(
 			continue
 		}
 		seen[id] = true
-		if _, err := a.db.CensusParticipant(census.ID.Hex(), id); err != nil {
-			return nil, errors.ErrInvalidData.Withf("member %s is not part of the process census", id)
-		}
 		out = append(out, id)
 	}
-	return out, nil
+	// validate the subset ⊆ census invariant with one indexed query rather than one per id.
+	// PUT /processes/{processId}/questions/{questionId}/census takes the complete list every
+	// time, so the cost here follows the size of the electorate, not the size of the change — a
+	// per-id loop meant thousands of sequential round trips inside the request, on a live
+	// endpoint, for adding one member.
+	participants, err := a.db.CensusParticipantsByMemberIDs(census.ID.Hex(), out)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load census participants: %w", err)
+	}
+	inCensus := make(map[string]bool, len(participants))
+	for i := range participants {
+		inCensus[participants[i].ParticipantID] = true
+	}
+	// report every offending id, in the caller's order, so a bad list can be fixed in one pass
+	// instead of one id per request.
+	var missing []string
+	for _, id := range out {
+		if !inCensus[id] {
+			missing = append(missing, id)
+		}
+	}
+	switch len(missing) {
+	case 0:
+		return out, nil
+	case 1:
+		return nil, errors.ErrInvalidData.Withf("member %s is not part of the process census", missing[0])
+	default:
+		return nil, errors.ErrInvalidData.Withf("%d members are not part of the process census: %s",
+			len(missing), strings.Join(missing, ", "))
+	}
 }
