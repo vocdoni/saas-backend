@@ -6395,6 +6395,8 @@ paths:
         Publish a voting process: one on-chain election per question, submitted as a batch.
         Requires Admin role (or a `voting:write` key). Returns 202 with a job id; poll
         GET /jobs/{jobId}. Idempotent once published.
+        409 (40172) means the stored questions do not match the process and the draft has to be
+        saved again before it can be published.
       parameters:
       - description: Process ID
         in: path
@@ -6413,7 +6415,7 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.EnqueuedResponse'
         "400":
-          description: Bad Request
+          description: Not ready to publish
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -6425,7 +6427,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Conflict
+          description: Publish in progress, or the stored questions do not match the
+            process
           schema:
             $ref: '#/definitions/errors.Error'
         "503":

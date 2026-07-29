@@ -82,17 +82,25 @@ func (a *API) reconcileStalePublishing() {
 // determined synchronously (without building/funding a tx or touching the chain): the structural
 // checks, plus the plan/quota/permission denials that would otherwise only surface asynchronously
 // as an opaque job failure. It is shared by GET .../check (reported as {valid,errors}) and by
-// publish (enforced as a 400 before enqueueing). Funding and chain submission stay async.
+// publish (enforced before enqueueing). Funding and chain submission stay async.
+//
+// questionsMismatch singles out the one problem that is not the caller's request but the server's
+// own data state — a stored question set that does not match the process. Publish answers that with
+// a 409 rather than a 400; the dry-run ignores the flag and just reports the problem.
 func (a *API) publishPreflightProblems(
 	vp *db.VotingProcess, questions []db.VotingProcessQuestion, census *db.Census, user *db.User,
-) []string {
-	problems := validateVotingProcessForPublish(vp, questions, census)
+) (problems []string, questionsMismatch bool) {
+	problems = validateVotingProcessForPublish(vp, questions, census)
+	if p := questionSetProblem(vp, questions); p != "" {
+		problems = append(problems, p)
+		questionsMismatch = true
+	}
 	if census == nil {
-		return problems // plan checks below need the census
+		return problems, questionsMismatch // plan checks below need the census
 	}
 	orgDoc, err := a.db.Organization(vp.OrgAddress)
 	if err != nil {
-		return append(problems, "organization not found")
+		return append(problems, "organization not found"), questionsMismatch
 	}
 	if !user.HasRoleFor(vp.OrgAddress, db.AdminRole) {
 		problems = append(problems, "publishing requires the admin role")
@@ -118,7 +126,7 @@ func (a *API) publishPreflightProblems(
 	// the checks below but fail in the worker (electionParamsForQuestion). Reject it here.
 	if maxSize == 0 {
 		problems = append(problems, "census has no members")
-		return problems
+		return problems, questionsMismatch
 	}
 	start := vp.StartDate
 	if start.IsZero() || start.Before(time.Now()) {
@@ -149,7 +157,7 @@ func (a *API) publishPreflightProblems(
 	if err := a.subscriptions.OrgCanPublishCensus(census, notifyCount, voteCount); err != nil {
 		problems = append(problems, err.Error())
 	}
-	return problems
+	return problems, questionsMismatch
 }
 
 // publishVotingProcessHandler godoc
@@ -158,6 +166,8 @@ func (a *API) publishPreflightProblems(
 //	@Description	Publish a voting process: one on-chain election per question, submitted as a batch.
 //	@Description	Requires Admin role (or a `voting:write` key). Returns 202 with a job id; poll
 //	@Description	GET /jobs/{jobId}. Idempotent once published.
+//	@Description	409 (40172) means the stored questions do not match the process and the draft has to be
+//	@Description	saved again before it can be published.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -165,10 +175,10 @@ func (a *API) publishPreflightProblems(
 //	@Param			processId	path		string	true	"Process ID"
 //	@Success		202			{object}	apicommon.EnqueuedResponse
 //	@Success		200			{object}	apicommon.CreateVotingProcessResponse	"Already published"
-//	@Failure		400			{object}	errors.Error
+//	@Failure		400			{object}	errors.Error							"Not ready to publish"
 //	@Failure		401			{object}	errors.Error
 //	@Failure		404			{object}	errors.Error
-//	@Failure		409			{object}	errors.Error
+//	@Failure		409			{object}	errors.Error	"Publish in progress, or the stored questions do not match the process"
 //	@Failure		503			{object}	errors.Error
 //	@Router			/processes/{processId}/publish [post]
 func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
@@ -205,10 +215,17 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 	}
 	// full synchronous publish-readiness gate (same as GET .../check): structural checks plus
 	// plan voting-type, census-size, process-count, duration, managed-quota and email/SMS/vote
-	// allowance. Anything predictable is a 400 here rather than an opaque async job failure;
+	// allowance. Anything predictable is rejected here rather than as an opaque async job failure;
 	// only funding and chain submission are left to the worker.
-	if problems := a.publishPreflightProblems(vp, questions, census, user); len(problems) > 0 {
-		errors.ErrMalformedBody.Withf("process is not ready to publish: %s", strings.Join(problems, "; ")).Write(w)
+	if problems, questionsMismatch := a.publishPreflightProblems(vp, questions, census, user); len(problems) > 0 {
+		// a stored question set that does not match the process is server-side state, not a bad
+		// request, so it answers 409. It wins over any other problem present: it has to be repaired
+		// (by saving the draft again) before the rest of the draft is even worth looking at.
+		apiErr := errors.ErrMalformedBody
+		if questionsMismatch {
+			apiErr = errors.ErrProcessQuestionsMismatch
+		}
+		apiErr.Withf("process is not ready to publish: %s", strings.Join(problems, "; ")).Write(w)
 		return
 	}
 

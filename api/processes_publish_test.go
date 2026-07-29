@@ -137,7 +137,8 @@ func TestVotingProcessPublishRejectsStrayQuestion(t *testing.T) {
 	c.Assert(validation.Valid, qt.IsFalse)
 	c.Assert(fmt.Sprint(validation.Errors), qt.Contains, "stored questions do not match the process")
 
-	requestAndAssertError(errors.ErrMalformedBody, t, http.MethodPost, token, nil, "processes", pid, "publish")
+	// server-side data state, not a bad request: 409 (40172), not 400
+	requestAndAssertError(errors.ErrProcessQuestionsMismatch, t, http.MethodPost, token, nil, "processes", pid, "publish")
 
 	// nothing reached the chain, and the process is still a draft
 	after := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)

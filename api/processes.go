@@ -541,7 +541,9 @@ func (a *API) validateVotingProcessHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	census, _ := a.db.Census(vp.CensusID.Hex())
-	problems := a.publishPreflightProblems(vp, questions, census, user)
+	// the dry-run reports every problem the same way: a mismatched question set is just one more
+	// entry in errors, so the mismatch flag publish acts on is irrelevant here.
+	problems, _ := a.publishPreflightProblems(vp, questions, census, user)
 	apicommon.HTTPWriteJSON(w, &apicommon.VotingProcessValidateResponse{
 		Valid:  len(problems) == 0,
 		Errors: problems,
@@ -888,8 +890,9 @@ func (a *API) loadVotingProcess(w http.ResponseWriter, oid primitive.ObjectID) (
 	return vp, true
 }
 
-// validateVotingProcessForPublish returns the list of reasons a process cannot be published
-// (empty when it is ready). Used by GET .../check and by publish.
+// validateVotingProcessForPublish returns the structural reasons a process cannot be published
+// (empty when it is ready). The stored-question-set check lives in publishPreflightProblems instead,
+// which needs to tell that one apart from the rest to answer publish with a 409.
 func validateVotingProcessForPublish(
 	vp *db.VotingProcess, questions []db.VotingProcessQuestion, census *db.Census,
 ) []string {
@@ -917,9 +920,6 @@ func validateVotingProcessForPublish(
 		if q.BallotProtocol == nil && q.Type != db.VotingTypeSingleChoice && q.Type != db.VotingTypeMultiChoice {
 			problems = append(problems, fmt.Sprintf("question %d has an unsupported type %q", i, q.Type))
 		}
-	}
-	if p := questionSetProblem(vp, questions); p != "" {
-		problems = append(problems, p)
 	}
 	return problems
 }
