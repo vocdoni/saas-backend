@@ -336,12 +336,25 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// a new member joins the auto "All members" group, so it joins the censuses built from it.
+	// A new member joins the auto "All members" group, so it joins the censuses built from it.
 	// Quota and signer are checked first: an over-quota request must not create the member either.
+	//
+	// Only a creation grows a census, so only a creation is preflighted. Checking unconditionally
+	// would refuse every edit of an existing member once the census sits at the plan limit — the
+	// quota is on census size, and an edit does not change it. An id that names no member of this
+	// organization counts as a creation, which is what the upsert will do with it.
+	isUpdate := false
+	if member.ID != "" {
+		if _, err := a.db.OrgMember(org.Address, member.ID); err == nil {
+			isUpdate = true
+		}
+	}
 	autoCensuses := a.autoGroupCensuses(org.Address)
-	if err := a.preflightCensusGrowth(org, autoCensuses, 1); err != nil {
-		writeSubscriptionError(w, err)
-		return
+	if !isUpdate {
+		if err := a.preflightCensusGrowth(org, autoCensuses, 1); err != nil {
+			writeSubscriptionError(w, err)
+			return
+		}
 	}
 
 	// upsert the member in the database
