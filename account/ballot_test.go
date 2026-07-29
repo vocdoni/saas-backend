@@ -41,7 +41,11 @@ func TestVoteTypeFromQuestion(t *testing.T) {
 		c.Assert(vt.MaxValue, qt.Equals, uint32(1))
 		c.Assert(vt.CostExponent, qt.Equals, uint32(1))
 		c.Assert(vt.MaxTotalCost, qt.Equals, uint32(2)) // maxChoices
-		c.Assert(vt.UniqueChoices, qt.IsTrue)
+		// A legacy question stored before uniqueChoices was rejected keeps the flag in its
+		// TypeSetup, and publishing it must ignore it: one 0/1 field per choice plus
+		// uniqueValues is unsatisfiable, so the election would tally every vote to zero (#619).
+		// Everything else about the ballot is unchanged, which the assertions above pin.
+		c.Assert(vt.UniqueChoices, qt.IsFalse)
 	})
 
 	c.Run("ballotProtocol overrides type/typeSetup", func(c *qt.C) {
@@ -106,4 +110,294 @@ func TestVoteTypeSingleChoiceNonContiguousValues(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(vt.MaxCount, qt.Equals, uint32(1))
 	c.Assert(vt.MaxValue, qt.Equals, uint32(5))
+}
+
+// valuedChoices builds choices with the given explicit values, for the cases where the values are
+// not the contiguous 0..n-1 that choices() produces.
+func valuedChoices(values ...uint32) []db.Choice {
+	out := make([]db.Choice, len(values))
+	for i, v := range values {
+		out[i] = db.Choice{Value: v}
+	}
+	return out
+}
+
+// TestBallotProtocolFromType pins the one mapping table the whole reconciliation rests on: every
+// other direction is defined as equality against this function's output.
+func TestBallotProtocolFromType(t *testing.T) {
+	c := qt.New(t)
+
+	c.Run("singlechoice ignores typeSetup entirely", func(c *qt.C) {
+		want := db.BallotProtocol{MaxCount: 1, MaxValue: 2}
+		for _, setup := range []db.QuestionTypeSetup{
+			{},
+			{MinChoices: 1, MaxChoices: 1},
+			{MinChoices: 3, MaxChoices: 7, UniqueChoices: true},
+		} {
+			bp, err := BallotProtocolFromType(db.VotingTypeSingleChoice, setup, choices(3))
+			c.Assert(err, qt.IsNil)
+			c.Assert(*bp, qt.Equals, want, qt.Commentf("setup %+v", setup))
+		}
+	})
+
+	c.Run("singlechoice covers the highest choice value", func(c *qt.C) {
+		bp, err := BallotProtocolFromType(db.VotingTypeSingleChoice, db.QuestionTypeSetup{},
+			valuedChoices(0, 2, 5))
+		c.Assert(err, qt.IsNil)
+		c.Assert(*bp, qt.Equals, db.BallotProtocol{MaxCount: 1, MaxValue: 5})
+	})
+
+	c.Run("multichoice is the dense layout, never unique", func(c *qt.C) {
+		// the uniqueChoices in the setup is the #619 shape and must not reach the protocol
+		bp, err := BallotProtocolFromType(db.VotingTypeMultiChoice,
+			db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 2, UniqueChoices: true}, choices(4))
+		c.Assert(err, qt.IsNil)
+		c.Assert(*bp, qt.Equals, db.BallotProtocol{
+			MaxCount: 4, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2,
+		})
+	})
+
+	c.Run("errors", func(c *qt.C) {
+		_, err := BallotProtocolFromType(db.VotingTypeSingleChoice, db.QuestionTypeSetup{}, nil)
+		c.Assert(err, qt.Not(qt.IsNil))
+		_, err = BallotProtocolFromType("", db.QuestionTypeSetup{}, choices(2))
+		c.Assert(err, qt.Not(qt.IsNil))
+		_, err = BallotProtocolFromType("quadratic", db.QuestionTypeSetup{}, choices(2))
+		c.Assert(err, qt.Not(qt.IsNil))
+	})
+}
+
+// TestQuestionTypeFromBallotProtocol covers the reverse direction: which named type a raw protocol
+// encodes, and — more importantly — which ones it does not, since a shape wrongly given a name
+// would be a question describing a ballot it does not have.
+func TestQuestionTypeFromBallotProtocol(t *testing.T) {
+	c := qt.New(t)
+
+	c.Run("recognises the named shapes", func(c *qt.C) {
+		qType, setup, ok := QuestionTypeFromBallotProtocol(
+			&db.BallotProtocol{MaxCount: 1, MaxValue: 2}, choices(3))
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(qType, qt.Equals, db.VotingTypeSingleChoice)
+		c.Assert(setup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1})
+
+		qType, setup, ok = QuestionTypeFromBallotProtocol(
+			&db.BallotProtocol{MaxCount: 4, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2}, choices(4))
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(qType, qt.Equals, db.VotingTypeMultiChoice)
+		c.Assert(setup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 2})
+	})
+
+	c.Run("an unbounded approval ballot is still multichoice", func(c *qt.C) {
+		qType, setup, ok := QuestionTypeFromBallotProtocol(
+			&db.BallotProtocol{MaxCount: 3, MaxValue: 1, CostExponent: 1}, choices(3))
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(qType, qt.Equals, db.VotingTypeMultiChoice)
+		c.Assert(setup, qt.Equals, db.QuestionTypeSetup{MinChoices: 0, MaxChoices: 0})
+	})
+
+	c.Run("shapes with no named type", func(c *qt.C) {
+		for name, bp := range map[string]*db.BallotProtocol{
+			// a ranking: n fields each holding a distinct rank 0..n-1
+			"ranked":            {MaxCount: 3, MaxValue: 2, UniqueValues: true},
+			"vote overwrites":   {MaxCount: 1, MaxValue: 2, MaxVoteOverwrites: 1},
+			"weighted cost":     {MaxCount: 1, MaxValue: 2, CostFromWeight: true},
+			"quadratic":         {MaxCount: 3, MaxValue: 4, CostExponent: 2, MaxTotalCost: 12},
+			"padded max count":  {MaxCount: 9, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2},
+			"cost on a single":  {MaxCount: 1, MaxValue: 2, CostExponent: 1},
+			"single with total": {MaxCount: 1, MaxValue: 2, MaxTotalCost: 1},
+		} {
+			_, _, ok := QuestionTypeFromBallotProtocol(bp, choices(3))
+			c.Assert(ok, qt.IsFalse, qt.Commentf("%s was given a name it does not have", name))
+		}
+	})
+
+	c.Run("a protocol that cannot carry the choice values is not singlechoice", func(c *qt.C) {
+		// maxValue 2 admits values 0..2, but the question offers a choice valued 5
+		_, _, ok := QuestionTypeFromBallotProtocol(
+			&db.BallotProtocol{MaxCount: 1, MaxValue: 2}, valuedChoices(0, 2, 5))
+		c.Assert(ok, qt.IsFalse)
+	})
+
+	c.Run("nothing to recognise", func(c *qt.C) {
+		_, _, ok := QuestionTypeFromBallotProtocol(nil, choices(3))
+		c.Assert(ok, qt.IsFalse)
+		_, _, ok = QuestionTypeFromBallotProtocol(&db.BallotProtocol{MaxCount: 1}, nil)
+		c.Assert(ok, qt.IsFalse)
+	})
+}
+
+// TestBallotShapeUnambiguous guards the property the reverse direction rests on: the two named
+// types never produce the same protocol, so recognition is a function rather than a first-match
+// heuristic. If a future field change breaks this, recognition starts depending on candidate
+// order and this fails before anything subtler does.
+func TestBallotShapeUnambiguous(t *testing.T) {
+	c := qt.New(t)
+	for n := 1; n <= 8; n++ {
+		for _, cs := range [][]db.Choice{choices(n), valuedChoices(0, 2, 5)[:min(n, 3)]} {
+			for maxChoices := range uint32(n + 1) {
+				single, err := BallotProtocolFromType(db.VotingTypeSingleChoice,
+					db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1}, cs)
+				c.Assert(err, qt.IsNil)
+				multi, err := BallotProtocolFromType(db.VotingTypeMultiChoice,
+					db.QuestionTypeSetup{MaxChoices: maxChoices}, cs)
+				c.Assert(err, qt.IsNil)
+				c.Assert(*single, qt.Not(qt.Equals), *multi,
+					qt.Commentf("n=%d maxChoices=%d", n, maxChoices))
+			}
+		}
+	}
+}
+
+// TestResolveBallotShapeRoundTrip is the invariant the whole change exists to establish: a
+// question authored through its named type comes back describing the same type, and carries the
+// protocol that type derives. Nothing a client states about the ballot is lost or altered.
+func TestResolveBallotShapeRoundTrip(t *testing.T) {
+	c := qt.New(t)
+	for _, in := range []BallotShapeInput{
+		{Type: db.VotingTypeSingleChoice, TypeSetup: db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1}, Choices: choices(1)},
+		{Type: db.VotingTypeSingleChoice, TypeSetup: db.QuestionTypeSetup{MinChoices: 0, MaxChoices: 1}, Choices: choices(4)},
+		{
+			Type: db.VotingTypeSingleChoice, TypeSetup: db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1},
+			Choices: valuedChoices(0, 2, 5),
+		},
+		{Type: db.VotingTypeMultiChoice, TypeSetup: db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1}, Choices: choices(1)},
+		{Type: db.VotingTypeMultiChoice, TypeSetup: db.QuestionTypeSetup{MinChoices: 0, MaxChoices: 2}, Choices: choices(4)},
+		{Type: db.VotingTypeMultiChoice, TypeSetup: db.QuestionTypeSetup{MinChoices: 4, MaxChoices: 4}, Choices: choices(4)},
+	} {
+		shape, err := ResolveBallotShape(in)
+		c.Assert(err, qt.IsNil)
+		c.Assert(shape.Type, qt.Equals, in.Type, qt.Commentf("%+v", in))
+		c.Assert(shape.TypeSetup, qt.Equals, in.TypeSetup, qt.Commentf("%+v", in))
+		want, err := BallotProtocolFromType(in.Type, in.TypeSetup, in.Choices)
+		c.Assert(err, qt.IsNil)
+		c.Assert(*shape.Protocol, qt.Equals, *want, qt.Commentf("%+v", in))
+	}
+}
+
+// TestResolveBallotShapeProtocolWins covers the half of the reconciliation a client can be
+// surprised by: a supplied protocol is what the election will be, so the named type is rewritten
+// to match it — and emptied when the protocol has no name.
+func TestResolveBallotShapeProtocolWins(t *testing.T) {
+	c := qt.New(t)
+
+	c.Run("an unnamed protocol empties the type", func(c *qt.C) {
+		// the shape saas-integrator-demo sends for a ranked question: a permutation ballot,
+		// labelled singlechoice because the API demanded some type
+		ranked := &db.BallotProtocol{MaxCount: 3, MaxValue: 2, UniqueValues: true}
+		shape, err := ResolveBallotShape(BallotShapeInput{
+			Type:      db.VotingTypeSingleChoice,
+			TypeSetup: db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1},
+			Protocol:  ranked,
+			Choices:   choices(3),
+		})
+		c.Assert(err, qt.IsNil)
+		c.Assert(shape.Type, qt.Equals, "")
+		c.Assert(shape.TypeSetup, qt.Equals, db.QuestionTypeSetup{})
+		c.Assert(*shape.Protocol, qt.Equals, *ranked)
+	})
+
+	c.Run("a named protocol rewrites a disagreeing type", func(c *qt.C) {
+		shape, err := ResolveBallotShape(BallotShapeInput{
+			Type:      db.VotingTypeMultiChoice,
+			TypeSetup: db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 2},
+			Protocol:  &db.BallotProtocol{MaxCount: 1, MaxValue: 2},
+			Choices:   choices(3),
+		})
+		c.Assert(err, qt.IsNil)
+		c.Assert(shape.Type, qt.Equals, db.VotingTypeSingleChoice)
+		// the caller's minChoices described a shape they did not get, so it goes with it
+		c.Assert(shape.TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1})
+	})
+
+	c.Run("the type is inferred from a protocol alone", func(c *qt.C) {
+		shape, err := ResolveBallotShape(BallotShapeInput{
+			Protocol: &db.BallotProtocol{MaxCount: 4, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2},
+			Choices:  choices(4),
+		})
+		c.Assert(err, qt.IsNil)
+		c.Assert(shape.Type, qt.Equals, db.VotingTypeMultiChoice)
+		c.Assert(shape.TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 2})
+	})
+
+	c.Run("minChoices is clamped to the resolved maximum", func(c *qt.C) {
+		shape, err := ResolveBallotShape(BallotShapeInput{
+			Type:      db.VotingTypeMultiChoice,
+			TypeSetup: db.QuestionTypeSetup{MinChoices: 4, MaxChoices: 2},
+			Choices:   choices(4),
+		})
+		c.Assert(err, qt.IsNil)
+		c.Assert(shape.TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 2, MaxChoices: 2})
+	})
+
+	c.Run("a question with no choices is left alone", func(c *qt.C) {
+		shape, err := ResolveBallotShape(BallotShapeInput{Type: db.VotingTypeSingleChoice})
+		c.Assert(err, qt.IsNil)
+		c.Assert(shape.Type, qt.Equals, db.VotingTypeSingleChoice)
+		c.Assert(shape.Protocol, qt.IsNil)
+	})
+
+	c.Run("an unnamed type with no protocol is an error", func(c *qt.C) {
+		_, err := ResolveBallotShape(BallotShapeInput{Type: "quadratic", Choices: choices(2)})
+		c.Assert(err, qt.Not(qt.IsNil))
+	})
+}
+
+// TestValidateBallotProtocol pins that the guard rejects exactly the ballots no voter could
+// satisfy, and nothing else — a raw protocol exists to express shapes that have no name, so
+// over-validating it would close the door this API deliberately leaves open.
+func TestValidateBallotProtocol(t *testing.T) {
+	c := qt.New(t)
+
+	c.Run("unsatisfiable", func(c *qt.C) {
+		for name, bp := range map[string]*db.BallotProtocol{
+			"empty":                      {},
+			"issue 619 in raw form":      {MaxCount: 4, MaxValue: 1, UniqueValues: true},
+			"two fields, one value":      {MaxCount: 2, MaxValue: 0, UniqueValues: true},
+			"one short of a permutation": {MaxCount: 4, MaxValue: 2, UniqueValues: true},
+		} {
+			c.Assert(ValidateBallotProtocol(bp), qt.Not(qt.IsNil), qt.Commentf("%s", name))
+		}
+	})
+
+	c.Run("satisfiable", func(c *qt.C) {
+		for name, bp := range map[string]*db.BallotProtocol{
+			"ranked (the demo)":     {MaxCount: 3, MaxValue: 2, UniqueValues: true},
+			"unique over one field": {MaxCount: 1, MaxValue: 0, UniqueValues: true},
+			"singlechoice":          {MaxCount: 1, MaxValue: 2},
+			"multichoice":           {MaxCount: 4, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2},
+			"quadratic":             {MaxCount: 3, MaxValue: 4, CostExponent: 2, MaxTotalCost: 12},
+		} {
+			c.Assert(ValidateBallotProtocol(bp), qt.IsNil, qt.Commentf("%s", name))
+		}
+		c.Assert(ValidateBallotProtocol(nil), qt.IsNil)
+	})
+}
+
+// TestEffectiveQuestionType covers the question the plan gate has to ask: not what a stored
+// question calls itself, but what its ballot actually is.
+func TestEffectiveQuestionType(t *testing.T) {
+	c := qt.New(t)
+
+	c.Run("no protocol falls back to the stored type", func(c *qt.C) {
+		c.Assert(EffectiveQuestionType(&db.VotingProcessQuestion{
+			Type: db.VotingTypeMultiChoice, Choices: choices(3),
+		}), qt.Equals, db.VotingTypeMultiChoice)
+	})
+
+	c.Run("a legacy question whose type contradicts its protocol", func(c *qt.C) {
+		// stored before the halves were reconciled: labelled singlechoice, mints a ranking
+		c.Assert(EffectiveQuestionType(&db.VotingProcessQuestion{
+			Type:           db.VotingTypeSingleChoice,
+			Choices:        choices(3),
+			BallotProtocol: &db.BallotProtocol{MaxCount: 3, MaxValue: 2, UniqueValues: true},
+		}), qt.Equals, "")
+	})
+
+	c.Run("a raw protocol that is a named shape", func(c *qt.C) {
+		// the case the plan gate stops missing: no type stated, but this is a singlechoice
+		c.Assert(EffectiveQuestionType(&db.VotingProcessQuestion{
+			Choices:        choices(3),
+			BallotProtocol: &db.BallotProtocol{MaxCount: 1, MaxValue: 2},
+		}), qt.Equals, db.VotingTypeSingleChoice)
+	})
 }
