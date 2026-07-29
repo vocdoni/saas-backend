@@ -430,6 +430,9 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// each needs a Vochain round-trip, so bounded pools keep this read fast for a many-question process.
 	a.resolveQuestionEncryptionKeysBatch(questions)
 	a.resolveQuestionResultsBatch(questions)
+	// a draft written before the two ballot halves were reconciled is served reconciled, so the
+	// body a client echoes back is one authoring still accepts.
+	reconcileDraftQuestionShapes(questions)
 	// non-managers must not see the per-question eligibility member ids (who can vote).
 	if !isManager {
 		redactQuestionsForPublic(questions)
@@ -437,6 +440,42 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 	resp := apicommon.VotingProcessResponseFromDB(vp, questions, census, a.account.ChainID())
 	resp.Census.TotalWeight = a.censusTotalWeight(census)
 	apicommon.HTTPWriteJSON(w, resp)
+}
+
+// reconcileDraftQuestionShapes serves the reconciled ballot shape of the questions that have not
+// minted an election yet, mutating the passed slice in place.
+//
+// Questions stored before the two halves were reconciled can carry anything the old code accepted:
+// a typeSetup.uniqueChoices no named type supports, no ballotProtocol at all, or two halves that
+// contradict each other. Authoring now refuses all three, so a client that reads such a draft and
+// PUTs the question array back — the only way to edit one, since update replaces them wholesale —
+// would be refused for a lie it did not write. Serving the shape a publish would actually use makes
+// that round-trip work and makes the read consistent with the invariant.
+//
+// Only unminted questions: a published legacy question's election really does carry the parameters
+// it was minted with (the #619 elections have uniqueValues set on chain), so deriving a clean shape
+// for it would misreport the chain — and it cannot be edited anyway. Nothing is written back; the
+// first update persists it.
+func reconcileDraftQuestionShapes(questions []db.VotingProcessQuestion) {
+	for i := range questions {
+		q := &questions[i]
+		if len(q.UpstreamID) > 0 || len(q.Choices) == 0 {
+			continue
+		}
+		in := account.BallotShapeInput{
+			Type: q.Type, TypeSetup: q.TypeSetup, Protocol: q.BallotProtocol, Choices: q.Choices,
+		}
+		// a stored protocol is what publish would mint, so it wins over a stored type outright —
+		// asking to reconcile both halves would only reject a contradiction nobody can edit away.
+		if in.Protocol != nil {
+			in.Type, in.TypeSetup = "", db.QuestionTypeSetup{}
+		}
+		shape, err := account.ResolveBallotShape(in)
+		if err != nil {
+			continue // an unusable stored shape is publish's problem to report, not a read's
+		}
+		q.Type, q.TypeSetup, q.BallotProtocol = shape.Type, shape.TypeSetup, shape.Protocol
+	}
 }
 
 // redactQuestionsForPublic strips manager-only fields from questions before serving them to a
@@ -542,6 +581,7 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		census, _ := a.db.Census(vp.CensusID.Hex())
+		reconcileDraftQuestionShapes(questions)
 		if !isManager {
 			redactQuestionsForPublic(questions)
 		}
@@ -969,7 +1009,7 @@ func validateVotingProcessForPublish(
 		// satisfy. Publishing it would mint an election that accepts every vote and tallies zero,
 		// with nothing on the way reporting a problem, so stop it at the last point that can.
 		if err := account.ValidateBallotProtocol(q.BallotProtocol); err != nil {
-			problems = append(problems, fmt.Sprintf("question %d has an invalid ballotProtocol: %v", i, err))
+			problems = append(problems, fmt.Sprintf("question %d: invalid ballotProtocol: %v", i, err))
 		}
 	}
 	return problems

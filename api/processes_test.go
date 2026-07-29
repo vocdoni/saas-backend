@@ -139,6 +139,79 @@ func TestVotingProcessUpdate(t *testing.T) {
 	c.Assert(got.Title["default"], qt.Equals, "Updated title")
 }
 
+// TestVotingProcessLegacyDraftShapeRoundTrip covers a draft written before the two ballot halves
+// were reconciled. The old code stored whatever a client sent, so such a draft can hold shapes
+// authoring now refuses — and replacing the question array is the only way to edit one, so a read
+// that served them verbatim would freeze the draft with a 400 for a lie it did not write.
+func TestVotingProcessLegacyDraftShapeRoundTrip(t *testing.T) {
+	c := qt.New(t)
+	adminToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, adminToken)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, adminToken, newVotingProcessRequest(orgAddress, ids), processesCreateEndpoint,
+	)
+	pid := created.ProcessID
+	oid, err := primitive.ObjectIDFromHex(pid)
+	c.Assert(err, qt.IsNil)
+
+	// rewrite the stored questions as the pre-reconciliation code left them: Q1 carries the #619
+	// flag and no protocol at all, Q2 a type its protocol contradicts.
+	stored, err := testDB.QuestionsByProcess(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(stored, qt.HasLen, 2)
+	stored[0].Type = db.VotingTypeMultiChoice
+	stored[0].TypeSetup = db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 2, UniqueChoices: true}
+	stored[0].BallotProtocol = nil
+	stored[1].Type = db.VotingTypeMultiChoice
+	stored[1].TypeSetup = db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 2}
+	stored[1].BallotProtocol = &db.BallotProtocol{MaxCount: 1, MaxValue: 1} // in fact a singlechoice
+	for i := range stored {
+		_, err := testDB.SetQuestion(&stored[i])
+		c.Assert(err, qt.IsNil)
+	}
+
+	// the read serves the shape a publish would use: the unsupported flag gone, the missing
+	// protocol derived, and the contradicted label replaced by the one the protocol encodes
+	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, adminToken, nil, "processes", pid)
+	c.Assert(got.Questions, qt.HasLen, 2)
+	c.Assert(got.Questions[0].Type, qt.Equals, db.VotingTypeMultiChoice)
+	c.Assert(got.Questions[0].TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 2})
+	c.Assert(*got.Questions[0].BallotProtocol, qt.Equals, db.BallotProtocol{
+		MaxCount: 2, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2,
+	})
+	c.Assert(got.Questions[1].Type, qt.Equals, db.VotingTypeSingleChoice)
+	c.Assert(got.Questions[1].TypeSetup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1})
+	c.Assert(*got.Questions[1].BallotProtocol, qt.Equals, db.BallotProtocol{MaxCount: 1, MaxValue: 1})
+
+	// the read reconciles what it serves, not what is stored
+	unchanged, err := testDB.QuestionsByProcess(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(unchanged[0].TypeSetup.UniqueChoices, qt.IsTrue)
+	c.Assert(unchanged[0].BallotProtocol, qt.IsNil)
+
+	// and echoing that read back is accepted — the draft is editable again, and the update is what
+	// persists the reconciliation
+	echo := newVotingProcessRequest(orgAddress, ids)
+	echo.Questions = make([]apicommon.VotingProcessQuestionRequest, len(got.Questions))
+	for i, q := range got.Questions {
+		echo.Questions[i] = apicommon.VotingProcessQuestionRequest{
+			Title: q.Title, Choices: q.Choices, Type: q.Type, TypeSetup: q.TypeSetup, BallotProtocol: q.BallotProtocol,
+		}
+	}
+	requestAndAssertCode(http.StatusOK, t, http.MethodPut, adminToken, echo, "processes", pid)
+	persisted, err := testDB.QuestionsByProcess(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(persisted, qt.HasLen, 2)
+	for i := range persisted {
+		c.Assert(persisted[i].TypeSetup.UniqueChoices, qt.IsFalse, qt.Commentf("question %d", i))
+		c.Assert(persisted[i].BallotProtocol, qt.Not(qt.IsNil), qt.Commentf("question %d", i))
+	}
+}
+
 // TestVotingProcessUpdateBallotShapeEcho covers the PUT path a client actually takes: read a
 // draft, change one field, send the whole body back. Responses always carry a ballotProtocol and a
 // supplied one is authoritative, so the echoed protocol has to either agree with the typeSetup
