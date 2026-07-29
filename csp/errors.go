@@ -54,8 +54,6 @@ var (
 	// ErrWeightAttestation is returned when the weight attestation cannot be
 	// signed.
 	ErrWeightAttestation = fmt.Errorf("failed to sign weight attestation")
-	// ErrInvalidSignerType is returned when the signer type is invalid.
-	ErrInvalidSignerType = fmt.Errorf("invalid signer type")
 	// ErrAuthTokenNotVerified is returned when the token is not verified.
 	ErrAuthTokenNotVerified = fmt.Errorf("the token is not verified")
 	// ErrProcessAlreadyConsumed is returned when the user is already

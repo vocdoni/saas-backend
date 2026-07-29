@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/vocdoni/saas-backend/csp/signers"
 	"github.com/vocdoni/saas-backend/csp/signers/saltedkey"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
@@ -14,31 +13,27 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Sign method signs a message with the given token, address and processID. It
-// returns the signature as HexBytes or an error if the signer type is invalid
-// or the signature fails.
-func (c *CSP) Sign(
-	token, address, processID, weight internal.HexBytes,
-	signType signers.SignerType,
-) (internal.HexBytes, error) {
-	switch signType {
-	case signers.SignerTypeECDSASalted:
-		userID, salt, message, err := c.prepareSaltedKeySigner(token, address, processID, weight)
-		defer c.unlock(userID, processID)
-		if err != nil {
-			return nil, err
-		}
-		signature, err := c.Signer.SignECDSA(*salt, message)
-		if err != nil {
-			return nil, errors.Join(ErrSign, err)
-		}
-		if err := c.finishSaltedKeySigner(token, address, processID); err != nil {
-			return nil, err
-		}
-		return signature, nil
-	default:
-		return nil, ErrInvalidSignerType
+// Sign salted-ECDSA-signs a CA bundle for the given token, address and
+// processID, and consumes the voter's signing slot for that election. It returns
+// the signature as HexBytes, or an error if the voter is not entitled to it.
+//
+// The anonymous flow does not come through here: it takes no address, returns a
+// blinded scalar rather than a signature, and pairs with its own preparation
+// step. See PrepareBlindSign and CompleteBlindSign in sign_blind.go.
+func (c *CSP) Sign(token, address, processID, weight internal.HexBytes) (internal.HexBytes, error) {
+	userID, salt, message, err := c.prepareSaltedKeySigner(token, address, processID, weight)
+	defer c.unlock(userID, processID)
+	if err != nil {
+		return nil, err
 	}
+	signature, err := c.Signer.SignECDSA(*salt, message)
+	if err != nil {
+		return nil, errors.Join(ErrSign, err)
+	}
+	if err := c.finishSaltedKeySigner(token, address, processID); err != nil {
+		return nil, err
+	}
+	return signature, nil
 }
 
 // prepareSaltedKeySigner method prepares the data for the Ethereum signer.

@@ -183,7 +183,7 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 //	@Description	bound to the process; authorizes the member against the question's eligibility subset
 //	@Description	and consumes the per-election signing slot (a question cannot be signed twice).
 //	@Description	Body: authToken, electionId (the question's on-chain election id) and payload (the voter
-//	@Description	address). tokenR is unused.
+//	@Description	address).
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json

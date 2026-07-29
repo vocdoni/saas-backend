@@ -47,11 +47,12 @@ type AuthChallengeRequest struct {
 	AuthData  []string          `json:"authData,omitempty"` // reserved for the auth handler
 }
 
-// SignRequest defines the payload for the signature request. It includes the
-// tokenR, the authToken, the payload to sign, and the processID (election ID)
-// if applicable. Not all fields are required for all types of signatures.
+// SignRequest defines the payload for a plain signature request: the authToken,
+// the payload to sign (the voter address), and the processID (election ID).
+//
+// The anonymous flow has its own types; see AnonymousSignRequest, which is where
+// a tokenR is meaningful.
 type SignRequest struct {
-	TokenR    internal.HexBytes `json:"tokenR" swaggertype:"string" format:"hex" example:"deadbeef"`
 	AuthToken internal.HexBytes `json:"authToken" swaggertype:"string" format:"hex" example:"deadbeef"`
 	Payload   string            `json:"payload,omitempty"`
 	ProcessID internal.HexBytes `json:"electionId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`

@@ -2656,10 +2656,6 @@ definitions:
         type: string
       payload:
         type: string
-      tokenR:
-        example: deadbeef
-        format: hex
-        type: string
     type: object
   handlers.UserWeightRequest:
     properties:
@@ -5856,7 +5852,7 @@ paths:
         The signing process includes verifying that the participant is in the census, that the process is part of
         the bundle, and that the authentication token is valid and verified.
 
-        Body: authToken, electionId (the process/election ID) and payload (the voter address). tokenR is unused.
+        Body: authToken, electionId (the process/election ID) and payload (the voter address).
       parameters:
       - description: Bundle ID
         in: path
@@ -6617,7 +6613,7 @@ paths:
         bound to the process; authorizes the member against the question's eligibility subset
         and consumes the per-election signing slot (a question cannot be signed twice).
         Body: authToken, electionId (the question's on-chain election id) and payload (the voter
-        address). tokenR is unused.
+        address).
       parameters:
       - description: Process ID
         in: path
@@ -6740,8 +6736,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
-          description: Unauthorized, unverified token, election not in process, member
-            not eligible, no live session, or already signed
+          description: Unauthorized, unverified token, ineligible member, no live
+            session, or already signed
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
@@ -6792,8 +6788,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
-          description: Unauthorized, unverified token, election not in process, member
-            not eligible, or already signed
+          description: Unauthorized, unverified token, ineligible member, or already
+            signed
           schema:
             $ref: '#/definitions/errors.Error'
         "404":

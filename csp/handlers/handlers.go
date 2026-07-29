@@ -17,7 +17,6 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/notifications"
-	"github.com/vocdoni/saas-backend/csp/signers"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
@@ -338,7 +337,7 @@ func parseAddress(w http.ResponseWriter, payload string) (*internal.HexBytes, bo
 func (c *CSPHandlers) signAndRespond(w http.ResponseWriter, authToken, address, processID, weight internal.HexBytes) {
 	log.Debugw("new CSP sign request", "address", address, "procId", processID, "weight", weight)
 
-	signature, err := c.csp.Sign(authToken, address, processID, weight, signers.SignerTypeECDSASalted)
+	signature, err := c.csp.Sign(authToken, address, processID, weight)
 	if err != nil {
 		errors.ErrUnauthorized.WithErr(err).Write(w)
 		return
@@ -355,7 +354,7 @@ func (c *CSPHandlers) signAndRespond(w http.ResponseWriter, authToken, address, 
 //	@Description	The signing process includes verifying that the participant is in the census, that the process is part of
 //	@Description	the bundle, and that the authentication token is valid and verified.
 //	@Description
-//	@Description	Body: authToken, electionId (the process/election ID) and payload (the voter address). tokenR is unused.
+//	@Description	Body: authToken, electionId (the process/election ID) and payload (the voter address).
 //	@Tags			csp
 //	@Accept			json
 //	@Produce		json

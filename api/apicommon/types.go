@@ -1406,25 +1406,6 @@ type AuthRequest struct {
 	AuthData []string `json:"authData,omitempty"`
 }
 
-// SignRequest defines the payload for requesting a signature.
-// swagger:model SignRequest
-type SignRequest struct {
-	// Token R value
-	TokenR internal.HexBytes `json:"tokenR" swaggertype:"string" format:"hex" example:"deadbeef"`
-
-	// Authentication token
-	AuthToken *uuid.UUID `json:"authToken"`
-
-	// Blockchain address
-	Address string `json:"address,omitempty"`
-
-	// Payload to sign
-	Payload string `json:"payload,omitempty"`
-
-	// Election ID
-	ElectionID internal.HexBytes `json:"electionId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
-}
-
 // CreateProcessBundleRequest defines the payload for creating a new process bundle.
 // swagger:model CreateProcessBundleRequest
 type CreateProcessBundleRequest struct {

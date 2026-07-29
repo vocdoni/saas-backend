@@ -6,7 +6,6 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
-	"github.com/vocdoni/saas-backend/csp/signers"
 	"github.com/vocdoni/saas-backend/csp/signers/saltedkey"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
@@ -32,11 +31,6 @@ func TestSign(t *testing.T) {
 	})
 	c.Assert(err, qt.IsNil)
 
-	c.Run("invalid signer type", func(c *qt.C) {
-		_, err := csp.Sign(testToken, testAddress, testPID, testUserWeightBytes, "invalid")
-		c.Assert(err, qt.ErrorIs, ErrInvalidSignerType)
-	})
-
 	c.Run("ecdsa salted success", func(c *qt.C) {
 		pid := internal.HexBytes(util.RandomBytes(32))
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
@@ -44,7 +38,7 @@ func TestSign(t *testing.T) {
 		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testScopeID, ""), qt.IsNil)
 		// verify the token
 		c.Assert(csp.Storage.VerifyCSPAuth(testToken), qt.IsNil)
-		sign, err := csp.Sign(testToken, testAddress, pid, testUserWeightBytes, signers.SignerTypeECDSASalted)
+		sign, err := csp.Sign(testToken, testAddress, pid, testUserWeightBytes)
 		c.Assert(err, qt.IsNil)
 		c.Assert(sign, qt.Not(qt.IsNil))
 		c.Assert(csp.isLocked(testUserID, pid), qt.IsFalse)
