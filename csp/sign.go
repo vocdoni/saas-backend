@@ -64,16 +64,8 @@ func (c *CSP) prepareSaltedKeySigner(token, address, processID, weight internal.
 		return nil, nil, nil, ErrUserAlreadySigning
 	}
 	// check if the process is already consumed for this user
-	if consumed, err := c.Storage.IsCSPProcessConsumed(authTokenData.UserID, processID); err != nil {
-		log.Warn(err)
-		switch err {
-		case db.ErrTokenNotVerified:
-			return nil, nil, nil, ErrAuthTokenNotVerified
-		default:
-			return nil, nil, nil, ErrSign
-		}
-	} else if consumed {
-		return nil, nil, nil, ErrProcessAlreadyConsumed
+	if err := c.checkProcessConsumed(authTokenData.UserID, processID, false); err != nil {
+		return nil, nil, nil, err
 	}
 	// lock the user data to avoid concurrent signing
 	c.lock(authTokenData.UserID, processID)
@@ -94,12 +86,51 @@ func (c *CSP) prepareSaltedKeySigner(token, address, processID, weight internal.
 		return nil, nil, nil, ErrPrepareSignature
 	}
 	// generate the salt
-	salt := [saltedkey.SaltSize]byte{}
-	if len(processID) < saltedkey.SaltSize {
-		return nil, nil, nil, ErrInvalidSalt
+	salt, err := saltFromProcessID(processID)
+	if err != nil {
+		return nil, nil, nil, err
 	}
+	return authTokenData.UserID, salt, signatureMsg, nil
+}
+
+// saltFromProcessID derives the per-election signing salt: the first
+// SaltSize bytes of the on-chain election id. The chain applies the same salt to
+// the CSP public key when verifying a PIDSALTED proof, so this must stay in step
+// with dvote's saltedkey.
+func saltFromProcessID(processID internal.HexBytes) (*[saltedkey.SaltSize]byte, error) {
+	if len(processID) < saltedkey.SaltSize {
+		return nil, ErrInvalidSalt
+	}
+	salt := [saltedkey.SaltSize]byte{}
 	copy(salt[:], processID[:saltedkey.SaltSize])
-	return authTokenData.UserID, &salt, signatureMsg, nil
+	return &salt, nil
+}
+
+// checkProcessConsumed reports whether the voter may still sign for this
+// election, translating storage errors into CSP ones. blind selects the stricter
+// anonymous rule, which permits no vote overwrites.
+func (c *CSP) checkProcessConsumed(userID, processID internal.HexBytes, blind bool) error {
+	consumed, err := c.consumedFor(userID, processID, blind)
+	if err != nil {
+		log.Warn(err)
+		switch err {
+		case db.ErrTokenNotVerified:
+			return ErrAuthTokenNotVerified
+		default:
+			return ErrSign
+		}
+	}
+	if consumed {
+		return ErrProcessAlreadyConsumed
+	}
+	return nil
+}
+
+func (c *CSP) consumedFor(userID, processID internal.HexBytes, blind bool) (bool, error) {
+	if blind {
+		return c.Storage.IsCSPProcessConsumedBlind(userID, processID)
+	}
+	return c.Storage.IsCSPProcessConsumed(userID, processID)
 }
 
 func (c *CSP) finishSaltedKeySigner(token, address, processID internal.HexBytes) error {

@@ -42,6 +42,18 @@ var (
 	ErrStorageFailure = fmt.Errorf("storage service failure")
 	// ErrNotificationFailure is returned when the notification service fails.
 	ErrNotificationFailure = fmt.Errorf("notification service failure")
+	// ErrBlindSessionNotFound is returned when no live blind-signature session
+	// exists for the voter and election: never prepared, already used (sessions
+	// are single-use), or expired.
+	ErrBlindSessionNotFound = fmt.Errorf("blind signing session not found or expired")
+	// ErrRetryBlinding is returned when the blinded message the client sent is
+	// not exactly 32 bytes once minimally encoded, which the blind-signature
+	// library rejects. The client should blind again -- fresh blinding factors
+	// give a different value -- and retry. The session is left intact so it can.
+	ErrRetryBlinding = fmt.Errorf("blinded message must be 32 bytes, blind again and retry")
+	// ErrWeightAttestation is returned when the weight attestation cannot be
+	// signed.
+	ErrWeightAttestation = fmt.Errorf("failed to sign weight attestation")
 	// ErrInvalidSignerType is returned when the signer type is invalid.
 	ErrInvalidSignerType = fmt.Errorf("invalid signer type")
 	// ErrAuthTokenNotVerified is returned when the token is not verified.
