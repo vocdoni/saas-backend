@@ -376,9 +376,17 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 
 	previous := question.EligibleMemberIDs
 	added, removed := diffMemberIDs(previous, eligible)
-	// members losing eligibility lose their ability to vote this question, so the refusal has to
-	// happen before the write
-	if a.refuseBlockedVoters(w, []string{census.ID.Hex()}, removed) {
+	// Members losing eligibility lose their ability to vote this question, so the refusal has to
+	// happen before the write. It is keyed off who has been signed for, not off `removed`: a
+	// question open to the whole census names nobody, so restricting it drops voters that no diff
+	// against the stored list can report.
+	if a.refuseVotersLosingEligibility(w, question, eligible) {
+		return
+	}
+	if len(added) == 0 && len(removed) == 0 {
+		// an idempotent replay: the stored list already says this, so skip the compare-and-set and
+		// the resize check, which would only re-read the chain to conclude the same
+		apicommon.HTTPWriteJSON(w, &apicommon.UpdateQuestionCensusResponse{Eligible: uint32(len(eligible))})
 		return
 	}
 

@@ -11,6 +11,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.vocdoni.io/dvote/crypto/ethereum"
@@ -99,6 +100,56 @@ func TestUpdateQuestionCensusReopen(t *testing.T) {
 
 	// ...and the previously excluded member is really signed for it
 	c.Assert(signAs(t, pid, members[1], restricted.UpstreamID), qt.Equals, http.StatusOK)
+}
+
+// TestUpdateQuestionCensusRefusesStrippingASignedVoter is the case a diff against the stored list
+// cannot see. A question open to the whole census names nobody, so restricting it reports nobody as
+// removed — yet every member left out loses the vote, including one already holding a signature the
+// chain will accept. The guard therefore asks who has been signed for, not who was named before.
+func TestUpdateQuestionCensusRefusesStrippingASignedVoter(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
+	ids := memberIDs(members)
+
+	pid, got := publishedProcess(t, token, orgAddress, ids)
+	open := got.Questions[0] // whole census: EligibleMemberIDs is empty
+	c.Assert(open.EligibleMemberIDs, qt.HasLen, 0)
+
+	// members[2] is signed for while the question is open to everyone
+	c.Assert(signAs(t, pid, members[2], open.UpstreamID), qt.Equals, http.StatusOK)
+
+	// restricting the question to the other two takes the vote from them
+	errResp := requestAndExpectError(t, http.MethodPut, token,
+		&apicommon.UpdateQuestionCensusRequest{MemberIDs: []string{ids[0], ids[1]}},
+		"processes", pid, "questions", open.ID.Hex(), "census")
+	c.Assert(errResp.Code, qt.Equals, errors.ErrCensusMemberAlreadyVoted.Code)
+	data, ok := errResp.Data.(map[string]any)
+	c.Assert(ok, qt.IsTrue, qt.Commentf("data: %#v", errResp.Data))
+	c.Assert(data["votedMemberIds"], qt.DeepEquals, []any{ids[2]})
+
+	// and the question is still open to the whole census: the refusal happened before the write
+	readBack := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	c.Assert(readBack.Questions[0].EligibleMemberIDs, qt.HasLen, 0)
+
+	// a restriction that keeps the signed member is fine
+	upd := requestAndParseWithAssertCode[apicommon.UpdateQuestionCensusResponse](
+		http.StatusOK, t, http.MethodPut, token,
+		&apicommon.UpdateQuestionCensusRequest{MemberIDs: []string{ids[0], ids[2]}},
+		"processes", pid, "questions", open.ID.Hex(), "census",
+	)
+	c.Assert(upd.Eligible, qt.Equals, uint32(2))
+
+	// once the question is terminal it holds nobody, so the same strip goes through
+	c.Assert(testDB.SetQuestionStatus(open.ID, db.QuestionStatusEnded), qt.IsNil)
+	upd = requestAndParseWithAssertCode[apicommon.UpdateQuestionCensusResponse](
+		http.StatusOK, t, http.MethodPut, token,
+		&apicommon.UpdateQuestionCensusRequest{MemberIDs: []string{ids[0], ids[1]}},
+		"processes", pid, "questions", open.ID.Hex(), "census",
+	)
+	c.Assert(upd.Removed, qt.Equals, uint32(1))
 }
 
 // TestUpdateQuestionCensusNarrowAndValidate covers the rest of the endpoint's contract: the list is

@@ -203,6 +203,40 @@ func (ms *MongoStorage) MembersWithUsedCSPProcesses(
 	return result, nil
 }
 
+// SignedVotersForElections returns every member the CSP has signed for on any of the given
+// elections, in one query.
+//
+// Its sibling MembersWithUsedCSPProcesses answers the same question for a known handful of members.
+// This one is for "who has been signed for at all", which is what a question open to the whole
+// census needs: it names nobody, so there is no stored list to diff a restriction against.
+//
+// The ids come back in the CSP's own spelling — the lowercase hex of the member ObjectID — since
+// there is no caller list to echo.
+func (ms *MongoStorage) SignedVotersForElections(processIDs []internal.HexBytes) ([]string, error) {
+	if len(processIDs) == 0 {
+		return nil, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	filter := bson.M{"processid": bson.M{"$in": processIDs}, "consumed": true}
+	values, err := ms.cspTokensStatus.Distinct(ctx, "userid", filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query the signed voters of the elections: %w", err)
+	}
+
+	voters := make([]string, 0, len(values))
+	for _, v := range values {
+		s, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("unexpected userid type %T in consumed CSP processes", v)
+		}
+		voters = append(voters, s)
+	}
+	return voters, nil
+}
+
 // RevokeMembersFromCensuses removes members from the given censuses and from every question
 // eligibility list built on them, so a memberbase change takes effect on elections already running.
 //

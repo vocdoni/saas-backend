@@ -65,6 +65,49 @@ func (a *API) refuseBlockedVoters(w http.ResponseWriter, censusIDs, memberIDs []
 	return true
 }
 
+// refuseVotersLosingEligibility answers 409 when restricting a question to allowed would take the
+// vote away from a member the CSP has already signed for, and reports whether it did.
+//
+// It asks who has been signed for rather than diffing against the stored list, because the diff
+// cannot see the case that matters most: a question open to the whole census names nobody, so
+// nobody appears as removed even though every member outside allowed is losing the right to vote.
+//
+// Unlike refuseBlockedVoters this is scoped to the question's own election — losing eligibility for
+// one question says nothing about the others sharing the census — and only while that election can
+// still be voted. A draft has no election, and a terminal one releases its voters, matching what
+// OngoingQuestionsByCensuses treats as ongoing elsewhere.
+func (a *API) refuseVotersLosingEligibility(
+	w http.ResponseWriter, question *db.VotingProcessQuestion, allowed []string,
+) bool {
+	// an empty list is "no restriction": it opens the question up, and takes eligibility from nobody
+	if len(allowed) == 0 || len(question.UpstreamID) == 0 {
+		return false
+	}
+	if question.Status != db.QuestionStatusReady && question.Status != db.QuestionStatusPaused {
+		return false
+	}
+	voters, err := a.db.SignedVotersForElections([]internal.HexBytes{question.UpstreamID})
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return true
+	}
+	stays := make(map[string]bool, len(allowed))
+	for _, id := range allowed {
+		stays[id] = true
+	}
+	var blocked []string
+	for _, id := range voters {
+		if !stays[id] {
+			blocked = append(blocked, id)
+		}
+	}
+	if len(blocked) == 0 {
+		return false
+	}
+	errors.ErrCensusMemberAlreadyVoted.WithData(map[string]any{"votedMemberIds": blocked}).Write(w)
+	return true
+}
+
 // resizeEmptiedQuestions enqueues a maxCensusSize increase for questions whose eligibility list was
 // just pruned to empty. An empty list means the whole census, so each of those elections silently
 // went from a named subset to everyone while it was sized on chain for the subset.
