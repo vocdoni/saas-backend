@@ -12,6 +12,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
+	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
@@ -142,8 +143,9 @@ func (a *API) buildQuestions(
 ) ([]*db.VotingProcessQuestion, error) {
 	built := make([]*db.VotingProcessQuestion, 0, len(questions))
 	for i, q := range questions {
-		// ballot shape: a question must define EITHER a named type OR a raw BallotProtocol
-		// override; if both are set the BallotProtocol wins (VoteTypeFromQuestion uses it). For a
+		// ballot shape: a question must define a named type, a raw BallotProtocol, or both. The
+		// two halves are reconciled below so they describe the same ballot; a supplied protocol
+		// is what the election will be, so it wins and the type is re-derived from it. For a
 		// named type, typeSetup is required for every type except singlechoice (which ignores it
 		// on chain); a multichoice maps MaxChoices onto MaxTotalCost so it must be bounded.
 		if q.BallotProtocol == nil {
@@ -161,9 +163,29 @@ func (a *API) buildQuestions(
 				if q.TypeSetup.MinChoices > q.TypeSetup.MaxChoices {
 					return nil, errors.ErrInvalidData.Withf("question %d: minChoices cannot exceed maxChoices", i)
 				}
+				if q.TypeSetup.UniqueChoices {
+					// multichoice gives every choice its own 0/1 field, so a voter already cannot
+					// select one twice — and a unique-values ballot over those fields admits no
+					// vote at all: the election would accept every envelope and tally zero.
+					return nil, errors.ErrInvalidData.Withf(
+						"question %d: uniqueChoices is not supported for multichoice, where each choice is an "+
+							"independent yes/no field; use a ballotProtocol for a ranked ballot", i,
+					)
+				}
 			default:
 				return nil, errors.ErrInvalidData.Withf("question %d: unsupported type %q", i, q.Type)
 			}
+		} else if err := account.ValidateBallotProtocol(q.BallotProtocol); err != nil {
+			return nil, errors.ErrInvalidData.Withf("question %d: invalid ballotProtocol: %v", i, err)
+		}
+		shape, err := account.ResolveBallotShape(account.BallotShapeInput{
+			Type:      q.Type,
+			TypeSetup: q.TypeSetup,
+			Protocol:  q.BallotProtocol,
+			Choices:   q.Choices,
+		})
+		if err != nil {
+			return nil, errors.ErrInvalidData.Withf("question %d: %v", i, err)
 		}
 		eligible, err := a.resolveEligibleMemberIDs(q.Eligibility, census, orgAddress)
 		if err != nil {
@@ -175,9 +197,9 @@ func (a *API) buildQuestions(
 			Title:             q.Title,
 			Description:       q.Description,
 			Choices:           q.Choices,
-			Type:              q.Type,
-			TypeSetup:         q.TypeSetup,
-			BallotProtocol:    q.BallotProtocol,
+			Type:              shape.Type,
+			TypeSetup:         shape.TypeSetup,
+			BallotProtocol:    shape.Protocol,
 			SecretUntilTheEnd: q.SecretUntilTheEnd,
 			EligibleMemberIDs: eligible,
 			Metadata:          q.Metadata,
