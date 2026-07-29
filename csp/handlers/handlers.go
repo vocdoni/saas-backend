@@ -218,7 +218,7 @@ func (c *CSPHandlers) BundleAuthResendHandler(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
-	if !bytes.Equal(*bundleID, auth.BundleID) {
+	if !bytes.Equal(*bundleID, auth.ScopeID) {
 		errors.ErrUnauthorized.Withf("token does not belong to the bundle").Write(w)
 		return
 	}
@@ -475,7 +475,7 @@ func (c *CSPHandlers) UserWeightHandler(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	if !bytes.Equal(*bundleID, auth.BundleID) {
+	if !bytes.Equal(*bundleID, auth.ScopeID) {
 		errors.ErrUnauthorized.Withf("token does not belong to the bundle").Write(w)
 		return
 	}
@@ -573,7 +573,7 @@ func (c *CSPHandlers) BundleCheckHandler(w http.ResponseWriter, r *http.Request)
 	}
 	// The token must be verified and issued for this very bundle. A token from a
 	// different bundle (or an unverified one) does not grant access here.
-	if !auth.Verified || !bytes.Equal(*bundleID, auth.BundleID) {
+	if !auth.Verified || !bytes.Equal(*bundleID, auth.ScopeID) {
 		notEligible()
 		return
 	}
@@ -842,7 +842,7 @@ func determineContactMethod(
 // on the census type and provided contact information. Finally, it generates and
 // returns an authentication token that will be used in the second step. If the
 // cooldown period between authentication attempts has not elapsed, the underlying
-// BundleAuthToken call may return ErrAttemptCoolDownTime.
+// AuthToken call may return ErrAttemptCoolDownTime.
 func (c *CSPHandlers) authFirstStep(
 	r *http.Request,
 	bundleID internal.HexBytes,
@@ -929,7 +929,7 @@ func (c *CSPHandlers) authFirstStep(
 	name, logo := orgNameAndLogo(org)
 
 	// Generate the token
-	return c.csp.BundleAuthToken(
+	return c.csp.AuthToken(
 		bundleID,
 		internal.HexBytesFromString(orgMember.ID.Hex()),
 		toDestinations,
@@ -974,7 +974,7 @@ func (c *CSPHandlers) authSecondStep(r *http.Request) (internal.HexBytes, error)
 		return nil, errors.ErrInvalidUserData.Withf("challenge solution required")
 	}
 
-	switch err := c.csp.VerifyBundleAuthToken(req.AuthToken, req.AuthData[0]); err {
+	switch err := c.csp.VerifyAuthToken(req.AuthToken, req.AuthData[0]); err {
 	case nil:
 		return req.AuthToken, nil
 	case csp.ErrInvalidAuthToken, csp.ErrInvalidSolution, csp.ErrChallengeCodeFailure,

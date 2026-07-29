@@ -128,7 +128,7 @@ func TestNotificationChallengeQueue(t *testing.T) {
 		c.Assert(queue.Push(&NotificationChallenge{
 			Type:         EmailChallenge,
 			UserID:       []byte("user"),
-			BundleID:     []byte("bundle"),
+			ScopeID:      []byte("bundle"),
 			Notification: notification,
 			CreatedAt:    time.Now(),
 			Retries:      0,
@@ -162,7 +162,7 @@ func TestNotificationChallengeQueue(t *testing.T) {
 		c.Assert(queue.Push(&NotificationChallenge{
 			Type:         EmailChallenge,
 			UserID:       []byte("user"),
-			BundleID:     []byte("bundle"),
+			ScopeID:      []byte("bundle"),
 			Notification: notification,
 			CreatedAt:    time.Now().Add(-time.Hour),
 			Retries:      0,

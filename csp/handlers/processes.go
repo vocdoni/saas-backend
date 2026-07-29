@@ -19,7 +19,7 @@ import (
 )
 
 // parseProcessID parses the {processId} URL param (a voting-process Mongo ObjectID) and
-// returns both the ObjectID and its bytes, which are used as the CSP token anchor.
+// returns both the ObjectID and its bytes, which are used as the CSP token scope.
 func parseProcessID(w http.ResponseWriter, r *http.Request) (primitive.ObjectID, internal.HexBytes, bool) {
 	oid, err := primitive.ObjectIDFromHex(chi.URLParam(r, "processId"))
 	if err != nil {
@@ -61,7 +61,7 @@ func memberEligibleForQuestion(q *db.VotingProcessQuestion, memberID string) boo
 //
 //	@Summary		Authenticate a voter for a voting process
 //	@Description	Two-step voter authentication for a multi-question voting process (the /processes
-//	@Description	replacement of the bundle auth flow); the issued token is anchored to the process.
+//	@Description	replacement of the bundle auth flow); the issued token is scoped to the process.
 //	@Description	- Step 0: handlers.AuthRequest — member identification fields (name, surname,
 //	@Description	memberNumber, nationalId, birthDate, email, phone); which are required depends on the
 //	@Description	census auth configuration. If valid, a challenge is sent and a token returned.
@@ -81,7 +81,7 @@ func memberEligibleForQuestion(q *db.VotingProcessQuestion, memberID string) boo
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId}/auth/{step} [post]
 func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request) {
-	oid, anchor, ok := parseProcessID(w, r)
+	oid, scope, ok := parseProcessID(w, r)
 	if !ok {
 		return
 	}
@@ -93,7 +93,7 @@ func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	c.handleAuthStep(w, r, step, anchor, vp.CensusID.Hex())
+	c.handleAuthStep(w, r, step, scope, vp.CensusID.Hex())
 }
 
 // ProcessAuthResendHandler godoc
@@ -114,7 +114,7 @@ func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request)
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId}/auth/resend [post]
 func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Request) {
-	oid, anchor, ok := parseProcessID(w, r)
+	oid, scope, ok := parseProcessID(w, r)
 	if !ok {
 		return
 	}
@@ -135,7 +135,7 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	if !bytes.Equal(anchor, auth.BundleID) {
+	if !bytes.Equal(scope, auth.ScopeID) {
 		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
 		return
 	}
@@ -196,7 +196,7 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId}/sign [post]
 func (c *CSPHandlers) ProcessSignHandler(w http.ResponseWriter, r *http.Request) {
-	oid, anchor, ok := parseProcessID(w, r)
+	oid, scope, ok := parseProcessID(w, r)
 	if !ok {
 		return
 	}
@@ -216,7 +216,7 @@ func (c *CSPHandlers) ProcessSignHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrUnauthorized.WithErr(csp.ErrAuthTokenNotVerified).Write(w)
 		return
 	}
-	if !bytes.Equal(anchor, auth.BundleID) {
+	if !bytes.Equal(scope, auth.ScopeID) {
 		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
 		return
 	}
@@ -277,7 +277,7 @@ func (c *CSPHandlers) ProcessSignHandler(w http.ResponseWriter, r *http.Request)
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId}/weight [post]
 func (c *CSPHandlers) ProcessWeightHandler(w http.ResponseWriter, r *http.Request) {
-	oid, anchor, ok := parseProcessID(w, r)
+	oid, scope, ok := parseProcessID(w, r)
 	if !ok {
 		return
 	}
@@ -294,7 +294,7 @@ func (c *CSPHandlers) ProcessWeightHandler(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	if !bytes.Equal(anchor, auth.BundleID) {
+	if !bytes.Equal(scope, auth.ScopeID) {
 		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
 		return
 	}
@@ -336,7 +336,7 @@ func (c *CSPHandlers) ProcessWeightHandler(w http.ResponseWriter, r *http.Reques
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId}/check [post]
 func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request) {
-	oid, anchor, ok := parseProcessID(w, r)
+	oid, scope, ok := parseProcessID(w, r)
 	if !ok {
 		return
 	}
@@ -353,7 +353,7 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	if !bytes.Equal(anchor, auth.BundleID) {
+	if !bytes.Equal(scope, auth.ScopeID) {
 		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
 		return
 	}
@@ -466,7 +466,7 @@ func writeResendError(w http.ResponseWriter, err error) {
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId}/sign-info [post]
 func (c *CSPHandlers) ProcessSignInfoHandler(w http.ResponseWriter, r *http.Request) {
-	oid, anchor, ok := parseProcessID(w, r)
+	oid, scope, ok := parseProcessID(w, r)
 	if !ok {
 		return
 	}
@@ -482,7 +482,7 @@ func (c *CSPHandlers) ProcessSignInfoHandler(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	if !bytes.Equal(anchor, auth.BundleID) {
+	if !bytes.Equal(scope, auth.ScopeID) {
 		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
 		return
 	}

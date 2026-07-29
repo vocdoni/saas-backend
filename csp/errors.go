@@ -9,8 +9,8 @@ import (
 var (
 	// ErrNoUserID is returned when no user ID is provided.
 	ErrNoUserID = fmt.Errorf("no user ID provided for the user")
-	// ErrNoBundleID is returned when no bundle ID is provided.
-	ErrNoBundleID = fmt.Errorf("no bundle ID provided")
+	// ErrNoScopeID is returned when no scope ID is provided.
+	ErrNoScopeID = fmt.Errorf("no scope ID provided")
 	// ErrNoProcessID is returned when no process ID is provided.
 	ErrNoProcessID = fmt.Errorf("no process ID provided")
 	// ErrTooManyAttempts is returned when no more verification attempts are

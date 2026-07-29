@@ -26,7 +26,7 @@ var (
 	testSMSService      = new(testutil.MockSMS)
 	testRootKey         = new(internal.HexBytes).SetString("700e669712473377a92457f3ff2a4d8f6b17e139f127738018a80fe26983f410")
 	testUserID          = internal.HexBytes("userID")
-	testBundleID        = internal.HexBytes("bundleID")
+	testScopeID         = internal.HexBytes("scopeID")
 	testUserWeight      = uint64(42)
 	testUserWeightBytes = big.NewInt(int64(testUserWeight)).Bytes()
 	testPID             = internal.HexBytes(util.RandomBytes(32))

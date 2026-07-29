@@ -39,7 +39,7 @@ func TestSetGetCSPAuth(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(token.Token, qt.DeepEquals, testAuthToken)
 		c.Assert(token.UserID, qt.DeepEquals, testUserID)
-		c.Assert(token.BundleID, qt.DeepEquals, testCSPBundleID)
+		c.Assert(token.ScopeID, qt.DeepEquals, testCSPBundleID)
 		c.Assert(token.Verified, qt.IsFalse)
 	})
 	c.Run("last token", func(c *qt.C) {
@@ -55,7 +55,7 @@ func TestSetGetCSPAuth(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(token.Token, qt.DeepEquals, firtstToken)
 		c.Assert(token.UserID, qt.DeepEquals, testUserID)
-		c.Assert(token.BundleID, qt.DeepEquals, testCSPBundleID)
+		c.Assert(token.ScopeID, qt.DeepEquals, testCSPBundleID)
 		c.Assert(token.Verified, qt.IsFalse)
 		// wait 10 ms since token.CreatedAt has only ms precision
 		time.Sleep(10 * time.Millisecond)
@@ -67,7 +67,7 @@ func TestSetGetCSPAuth(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(token.Token, qt.DeepEquals, secondToken)
 		c.Assert(token.UserID, qt.DeepEquals, testUserID)
-		c.Assert(token.BundleID, qt.DeepEquals, testCSPBundleID)
+		c.Assert(token.ScopeID, qt.DeepEquals, testCSPBundleID)
 		c.Assert(token.Verified, qt.IsFalse)
 	})
 	c.Run("non existing token", func(c *qt.C) {
