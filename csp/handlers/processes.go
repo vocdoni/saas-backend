@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
@@ -57,6 +58,30 @@ func memberEligibleForQuestion(q *db.VotingProcessQuestion, memberID string) boo
 	return false
 }
 
+// startGrace keeps a voter arriving right on the start boundary from being turned away. The
+// comparison below is this host's clock against a stored date, and neither of them is the chain, so
+// it has to err toward letting a real voter through.
+const startGrace = time.Minute
+
+// refuseUnvotableElection answers 401 unless the question's election currently accepts a signature,
+// and reports whether it did.
+//
+// The CSP is the only place that can refuse on election state: the signature it issues carries no
+// expiry, so a voter could otherwise bank one against a paused election and spend it the moment the
+// chain opens.
+func refuseUnvotableElection(w http.ResponseWriter, vp *db.VotingProcess, q *db.VotingProcessQuestion) bool {
+	if q.Status != db.QuestionStatusReady {
+		errors.ErrUnauthorized.Withf("question is not open for voting").Write(w)
+		return true
+	}
+	// only StartDate is checked: publish always persists one, while EndDate is optional.
+	if !vp.StartDate.IsZero() && time.Now().Add(startGrace).Before(vp.StartDate) {
+		errors.ErrUnauthorized.Withf("process has not started yet").Write(w)
+		return true
+	}
+	return false
+}
+
 // ProcessAuthHandler godoc
 //
 //	@Summary		Authenticate a voter for a voting process
@@ -91,6 +116,12 @@ func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request)
 	}
 	vp, ok := c.getVotingProcess(w, oid)
 	if !ok {
+		return
+	}
+	// a draft has no election to vote: authenticating against it would only mint a token that can
+	// never be signed, and would burn the voter's email/SMS allowance doing so.
+	if !vp.Published {
+		errors.ErrUnauthorized.Withf("process is not published").Write(w)
 		return
 	}
 	c.handleAuthStep(w, r, step, anchor, vp.CensusID.Hex())
@@ -231,9 +262,26 @@ func (c *CSPHandlers) ProcessSignHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrUnauthorized.Withf("election not found in process").Write(w)
 		return
 	}
+	// the election must currently accept a signature
+	if refuseUnvotableElection(w, vp, question) {
+		return
+	}
 	// authorize the member against the question's eligibility subset
 	if !memberEligibleForQuestion(question, auth.UserID.String()) {
 		errors.ErrUnauthorized.Withf("member not eligible for this question").Write(w)
+		return
+	}
+	// Re-check census participation. The token was minted when the voter was in the census, and it
+	// never expires, so without this a member removed from the census (or from the group that
+	// backs it) would keep being signed for forever — this check is what makes the revocation
+	// cascade actually revoke.
+	memberID := auth.UserID.String()
+	if _, err := c.mainDB.CensusParticipant(vp.CensusID.Hex(), memberID); err != nil {
+		if err == db.ErrNotFound {
+			errors.ErrUnauthorized.Withf("member is no longer part of the census").Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 	member, ok := c.orgMemberFromAuth(w, vp.OrgAddress, auth)
