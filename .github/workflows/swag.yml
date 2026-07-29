@@ -73,6 +73,11 @@ jobs:
     # Scoped to this job on purpose: api-swagger pushes the regenerated
     # swagger.yaml with the repo-default token, so it must keep its own scopes.
     permissions:
+      # Same-run artifact downloads authenticate with the runner's
+      # ACTIONS_RUNTIME_TOKEN rather than GITHUB_TOKEN, so this is not strictly
+      # required today -- it is here so the job keeps working if it ever grows a
+      # github-token/run-id input to fetch artifacts from another run.
+      actions: read
       contents: read
       pages: write
       id-token: write
