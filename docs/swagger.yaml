@@ -4087,6 +4087,14 @@ paths:
         Delete specific members (by ID) or all members of an organization. Requires Manager/Admin
         role. An empty ID list (without the `all` flag) is a no-op that returns count=0.
 
+        An id that names no member of **this** organization — unknown, malformed, or belonging to
+        another organization — is ignored rather than rejected, so `count` is the number of members
+        actually deleted and may be lower than the number of ids submitted.
+
+        Deletion is refused with 409 for any member the CSP has already signed for while a
+        question of one of their processes is still READY or PAUSED; the offending ids come back
+        in `data.votedMemberIds`. Once voting closes on those questions the deletion succeeds.
+
         Also callable with a scoped API key (scope: `members:write`).
       parameters:
       - description: Organization address
@@ -4113,6 +4121,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: A member has already been signed for in an ongoing process
           schema:
             $ref: '#/definitions/errors.Error'
         "500":

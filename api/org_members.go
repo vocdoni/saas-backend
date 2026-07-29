@@ -385,6 +385,14 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 //	@Description	Delete specific members (by ID) or all members of an organization. Requires Manager/Admin
 //	@Description	role. An empty ID list (without the `all` flag) is a no-op that returns count=0.
 //	@Description
+//	@Description	An id that names no member of **this** organization — unknown, malformed, or belonging to
+//	@Description	another organization — is ignored rather than rejected, so `count` is the number of members
+//	@Description	actually deleted and may be lower than the number of ids submitted.
+//	@Description
+//	@Description	Deletion is refused with 409 for any member the CSP has already signed for while a
+//	@Description	question of one of their processes is still READY or PAUSED; the offending ids come back
+//	@Description	in `data.votedMemberIds`. Once voting closes on those questions the deletion succeeds.
+//	@Description
 //	@Description	Also callable with a scoped API key (scope: `members:write`).
 //	@Tags			organizations
 //	@Accept			json
@@ -395,6 +403,7 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 //	@Success		200			{object}	apicommon.DeleteMembersResponse
 //	@Failure		400			{object}	errors.Error	"Invalid input data"
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		409			{object}	errors.Error	"A member has already been signed for in an ongoing process"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/organizations/{orgAddress}/members [delete]
 func (a *API) deleteOrganizationMembersHandler(w http.ResponseWriter, r *http.Request) {
