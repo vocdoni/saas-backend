@@ -83,7 +83,8 @@ func (ms *MongoStorage) DelOrgMember(id string) ([]VotingProcessQuestion, error)
 	}
 
 	// revoke before the memberbase write, and outside keysLock, which is not reentrant
-	emptied, err := ms.RevokeMembersEverywhere([]string{id})
+	// the participant-row count is the caller's own DeletedCount below, not this one
+	_, emptied, err := ms.RevokeMembersEverywhere([]string{id})
 	if err != nil {
 		return nil, fmt.Errorf("could not revoke member from censuses: %w", err)
 	}
@@ -668,7 +669,7 @@ func (ms *MongoStorage) DeleteOrgMembers(
 	}
 
 	// revoke before the memberbase write, and outside keysLock, which is not reentrant
-	emptied, err := ms.RevokeMembersEverywhere(scoped)
+	_, emptied, err := ms.RevokeMembersEverywhere(scoped)
 	if err != nil {
 		return 0, nil, fmt.Errorf("could not revoke members from censuses: %w", err)
 	}
@@ -744,7 +745,7 @@ func (ms *MongoStorage) DeleteAllOrgMembers(orgAddress common.Address) (int, []V
 		return 0, nil, fmt.Errorf("could not list members before deletion: %w", err)
 	}
 	// revoke before the memberbase write, and outside keysLock, which is not reentrant
-	emptied, err := ms.RevokeMembersEverywhere(memberIDs)
+	_, emptied, err := ms.RevokeMembersEverywhere(memberIDs)
 	if err != nil {
 		return 0, nil, fmt.Errorf("could not revoke members from censuses: %w", err)
 	}

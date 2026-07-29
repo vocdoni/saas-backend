@@ -178,7 +178,7 @@ func (ms *MongoStorage) UpdateOrganizationMemberGroup(
 		}
 	}
 	if len(removedInGroup) > 0 && len(group.CensusIDs) > 0 {
-		emptied, err = ms.RevokeMembersFromCensuses(group.CensusIDs, removedInGroup)
+		_, emptied, err = ms.RevokeMembersFromCensuses(group.CensusIDs, removedInGroup)
 		if err != nil {
 			return nil, fmt.Errorf("could not revoke removed members from the group censuses: %w", err)
 		}
@@ -319,7 +319,7 @@ func (ms *MongoStorage) DeleteOrganizationMemberGroup(
 				"group", groupID, "org", orgAddress, "processes", ids)
 		}
 		// revoke before the group write, and outside keysLock, which is not reentrant
-		emptied, err = ms.RevokeMembersFromCensuses(group.CensusIDs, group.MemberIDs)
+		_, emptied, err = ms.RevokeMembersFromCensuses(group.CensusIDs, group.MemberIDs)
 		if err != nil {
 			return nil, fmt.Errorf("could not revoke the group members from its censuses: %w", err)
 		}

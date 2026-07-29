@@ -81,8 +81,10 @@ type UpdateProcessCensusResponse struct {
 	JobID  string   `json:"jobId,omitempty"`
 	Added  uint32   `json:"added"`
 	Errors []string `json:"errors,omitempty"`
-	// Removed is set by the DELETE; it is omitted by the PUT, which only adds.
-	Removed uint32 `json:"removed,omitempty"`
+	// Removed is how many census participants the DELETE actually removed — an id naming nobody
+	// does not count. Always present, like Added, so "none removed" is not indistinguishable from
+	// a field the PUT simply never sets.
+	Removed uint32 `json:"removed"`
 }
 
 // UpdateQuestionCensusRequest is the body of PUT /processes/{processId}/questions/{questionId}/census.

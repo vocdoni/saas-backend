@@ -215,6 +215,71 @@ func TestUpdateQuestionCensusNarrowAndValidate(t *testing.T) {
 // TestProcessCSPRevocation proves the revocation actually revokes: the sign handler re-checks census
 // participation, so a member removed from the census stops being signed for even though their token
 // is still valid. It also pins the ceiling — a signature already issued is not recalled.
+// TestRemoveProcessCensusContract covers DELETE /processes/{processId}/census beyond the happy path
+// the revocation tests already drive: what it refuses, what it reports, and the one thing it must
+// never do on chain.
+func TestRemoveProcessCensusContract(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+
+	// a draft is rebuilt wholesale by PUT /processes, so this endpoint refuses it
+	draftReq := newVotingProcessRequest(orgAddress, ids)
+	draft := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, draftReq, processesCreateEndpoint,
+	)
+	requestAndAssertError(errors.ErrDuplicateConflict, t, http.MethodDelete, token,
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[:1]}, "processes", draft.ProcessID, "census")
+
+	pid, got := publishedProcess(t, token, orgAddress, ids)
+	election := got.Questions[0].UpstreamID
+	c.Assert(got.Census.Size, qt.Equals, int64(2))
+	before, err := testAPI.account.Election(election)
+	c.Assert(err, qt.IsNil)
+	c.Assert(before.Census.MaxCensusSize, qt.Equals, uint64(2))
+
+	// an empty list is a no-op, and says so rather than omitting the field
+	noop := requestAndParse[apicommon.UpdateProcessCensusResponse](t, http.MethodDelete, token,
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: nil}, "processes", pid, "census")
+	c.Assert(noop.Removed, qt.Equals, uint32(0))
+
+	// an id that names no participant is reported as what it is: nothing removed
+	unknown := requestAndParse[apicommon.UpdateProcessCensusResponse](t, http.MethodDelete, token,
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: []string{primitive.NewObjectID().Hex()}},
+		"processes", pid, "census")
+	c.Assert(unknown.Removed, qt.Equals, uint32(0),
+		qt.Commentf("the count must be the rows deleted, not the ids submitted"))
+
+	// removing a real participant shrinks the stored census...
+	removed := requestAndParse[apicommon.UpdateProcessCensusResponse](t, http.MethodDelete, token,
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: []string{ids[1], ids[1]}},
+		"processes", pid, "census")
+	c.Assert(removed.Removed, qt.Equals, uint32(1), qt.Commentf("the same id twice is one removal"))
+	readBack := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	c.Assert(readBack.Census.Size, qt.Equals, int64(1))
+
+	// ...and leaves the election alone: the chain only accepts growth, so a removal never resizes
+	after, err := testAPI.account.Election(election)
+	c.Assert(err, qt.IsNil)
+	c.Assert(after.Census.MaxCensusSize, qt.Equals, uint64(2),
+		qt.Commentf("a removal must never resize the election"))
+
+	// the body is bounded
+	tooMany := make([]string, maxCensusRemoval+1)
+	for i := range tooMany {
+		tooMany[i] = primitive.NewObjectID().Hex()
+	}
+	requestAndAssertError(errors.ErrInvalidData, t, http.MethodDelete, token,
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: tooMany}, "processes", pid, "census")
+
+	// and the caller must manage the organization
+	requestAndAssertError(errors.ErrUnauthorized, t, http.MethodDelete, testCreateUser(t, "otherpassword123"),
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[:1]}, "processes", pid, "census")
+}
+
 func TestProcessCSPRevocation(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
@@ -251,7 +316,7 @@ func TestProcessCSPRevocation(t *testing.T) {
 	})
 	vp, err := testDB.VotingProcess(objectID(c, pid))
 	c.Assert(err, qt.IsNil)
-	_, err = testDB.RevokeMembersFromCensuses([]string{vp.CensusID.Hex()}, []string{ids[0]})
+	_, _, err = testDB.RevokeMembersFromCensuses([]string{vp.CensusID.Hex()}, []string{ids[0]})
 	c.Assert(err, qt.IsNil)
 	_, code = testRequest(t, http.MethodPost, "", &handlers.SignRequest{
 		AuthToken: tok, ProcessID: open.UpstreamID, Payload: hex.EncodeToString(voter.Address().Bytes()),
@@ -261,7 +326,7 @@ func TestProcessCSPRevocation(t *testing.T) {
 
 	// the ceiling: members[2]'s consumption survives their removal, because deleting it would let
 	// them be signed for a second address and vote twice.
-	_, err = testDB.RevokeMembersFromCensuses([]string{vp.CensusID.Hex()}, []string{ids[2]})
+	_, _, err = testDB.RevokeMembersFromCensuses([]string{vp.CensusID.Hex()}, []string{ids[2]})
 	c.Assert(err, qt.IsNil)
 	consumed, err := testDB.MembersWithUsedCSPProcesses(
 		[]internal.HexBytes{open.UpstreamID}, []string{ids[2]},

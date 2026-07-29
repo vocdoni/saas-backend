@@ -430,7 +430,12 @@ func (ms *MongoStorage) MembersWithUsedCSPProcess(
 
 	result := make(map[string]bool, len(memberIDs))
 	for _, id := range memberIDs {
-		userID := internal.HexBytesFromString(id)
+		// parsed rather than HexBytesFromString, which panics by design: an id that is not hex
+		// cannot have a CSP process, so it is skipped like one that simply has none
+		userID := internal.HexBytes{}
+		if err := userID.ParseString(id); err != nil {
+			continue
+		}
 		proc, err := ms.CSPProcessByUserAndProcess(userID, processID)
 		if err != nil {
 			if errors.Is(err, ErrTokenNotFound) {

@@ -187,7 +187,7 @@ func TestRevokeMembersFromCensuses(t *testing.T) {
 	// alice has been signed for, and holds a live auth session
 	seedUsedCSPProcess(t, f.alice.ID.Hex(), internal.HexBytes(f.processID[:]), f.upstream)
 
-	emptied, err := testDB.RevokeMembersFromCensuses(
+	_, emptied, err := testDB.RevokeMembersFromCensuses(
 		[]string{f.census.ID.Hex()}, []string{f.alice.ID.Hex()})
 	c.Assert(err, qt.IsNil)
 
@@ -229,7 +229,7 @@ func TestRevokeMembersFromCensusesReportsEmptiedQuestions(t *testing.T) {
 
 	// removing every named member opens the restricted question to the whole census, while its
 	// election is still sized on chain for the two it named
-	emptied, err := testDB.RevokeMembersFromCensuses(
+	_, emptied, err := testDB.RevokeMembersFromCensuses(
 		[]string{f.census.ID.Hex()}, []string{f.alice.ID.Hex(), f.bob.ID.Hex()})
 	c.Assert(err, qt.IsNil)
 	c.Assert(emptied, qt.HasLen, 1)
@@ -263,7 +263,7 @@ func TestRevokeMembersFromCensusesPrunesDrafts(t *testing.T) {
 	})
 	c.Assert(err, qt.IsNil)
 
-	emptied, err := testDB.RevokeMembersFromCensuses(
+	_, emptied, err := testDB.RevokeMembersFromCensuses(
 		[]string{f.census.ID.Hex()}, []string{f.alice.ID.Hex()})
 	c.Assert(err, qt.IsNil)
 	// a draft has no election to resize, so it is never reported
@@ -290,7 +290,7 @@ func TestRevokeMembersFromCensusesMatchesEmptyEligibilityEncodings(t *testing.T)
 			bson.M{"$set": bson.M{"eligibleMemberIds": encoding}})
 		c.Assert(err, qt.IsNil)
 
-		emptied, err := testDB.RevokeMembersFromCensuses(
+		_, emptied, err := testDB.RevokeMembersFromCensuses(
 			[]string{f.census.ID.Hex()}, []string{f.carol.ID.Hex()})
 		c.Assert(err, qt.IsNil)
 		for _, q := range emptied {
@@ -303,7 +303,7 @@ func TestRevokeMembersFromCensusesMatchesEmptyEligibilityEncodings(t *testing.T)
 		bson.M{"_id": f.openToAll},
 		bson.M{"$unset": bson.M{"eligibleMemberIds": ""}})
 	c.Assert(err, qt.IsNil)
-	emptied, err := testDB.RevokeMembersFromCensuses(
+	_, emptied, err := testDB.RevokeMembersFromCensuses(
 		[]string{f.census.ID.Hex()}, []string{f.bob.ID.Hex()})
 	c.Assert(err, qt.IsNil)
 	for _, q := range emptied {

@@ -534,7 +534,13 @@ func (a *API) removeVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if len(req.MemberIDs) == 0 {
-		apicommon.HTTPWriteJSON(w, &apicommon.UpdateProcessCensusResponse{Added: 0})
+		apicommon.HTTPWriteJSON(w, &apicommon.UpdateProcessCensusResponse{Removed: 0})
+		return
+	}
+	if len(req.MemberIDs) > maxCensusRemoval {
+		errors.ErrInvalidData.Withf(
+			"too many member ids: %d, the maximum per request is %d", len(req.MemberIDs), maxCensusRemoval,
+		).Write(w)
 		return
 	}
 
@@ -544,13 +550,15 @@ func (a *API) removeVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	emptied, err := a.db.RevokeMembersFromCensuses([]string{censusID}, req.MemberIDs)
+	removed, emptied, err := a.db.RevokeMembersFromCensuses([]string{censusID}, req.MemberIDs)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
 
-	resp := &apicommon.UpdateProcessCensusResponse{Removed: uint32(len(req.MemberIDs))}
+	// the participant rows actually deleted, not the ids submitted: an id naming nobody, or the
+	// same id twice, must not be reported as a removal
+	resp := &apicommon.UpdateProcessCensusResponse{Removed: uint32(removed)}
 	if jobID := a.resizeEmptiedQuestions(vp.OrgAddress, emptied); jobID != "" {
 		resp.JobID = jobID
 		apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, resp)
@@ -558,6 +566,11 @@ func (a *API) removeVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 	}
 	apicommon.HTTPWriteJSON(w, resp)
 }
+
+// maxCensusRemoval bounds one DELETE /processes/{processId}/census body. Every id travels as a
+// single $in filter through the guard and the three revocation writes, so an unbounded list is an
+// unbounded query; a caller with more to remove pages through.
+const maxCensusRemoval = 1000
 
 // censusSizeTarget is one published question whose on-chain election may need its maxCensusSize
 // raised, with the census the new size is read from. A single group census can back several

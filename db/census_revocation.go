@@ -240,23 +240,25 @@ func (ms *MongoStorage) SignedVotersForElections(processIDs []internal.HexBytes)
 // RevokeMembersFromCensuses removes members from the given censuses and from every question
 // eligibility list built on them, so a memberbase change takes effect on elections already running.
 //
-// It returns the published questions whose eligibility list became empty. An empty list means "the
-// whole census" (see VotingProcessQuestion.EligibleMemberIDs), so such a question just went from a
-// subset to the full census while its election was sized on chain for the subset: the caller must
-// enqueue a maxCensusSize resize for it.
+// It returns the number of participant rows actually removed — (census, member) pairs, so a member
+// in three of the given censuses counts three times — and the published questions whose eligibility
+// list became empty. An empty list means "the whole census" (see
+// VotingProcessQuestion.EligibleMemberIDs), so such a question just went from a subset to the full
+// census while its election was sized on chain for the subset: the caller must enqueue a
+// maxCensusSize resize for it.
 //
 // Callers must refuse the removal first for any member the CSP has already signed for
 // (MembersWithUsedCSPProcesses) — this function is the write, not the guard.
 func (ms *MongoStorage) RevokeMembersFromCensuses(
 	censusIDs, memberIDs []string,
-) ([]VotingProcessQuestion, error) {
+) (int64, []VotingProcessQuestion, error) {
 	if len(censusIDs) == 0 || len(memberIDs) == 0 {
-		return nil, nil
+		return 0, nil, nil
 	}
 
 	processes, err := ms.VotingProcessesByCensus(censusIDs)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	processIDs := make([]primitive.ObjectID, 0, len(processes))
 	for _, p := range processes {
@@ -270,30 +272,35 @@ func (ms *MongoStorage) RevokeMembersFromCensuses(
 	// with an empty list has silently become whole-census and needs its election resized.
 	candidates, err := ms.publishedQuestionsNaming(ctx, processIDs, memberIDs)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 
-	if err := ms.revokeWrites(ctx, censusIDs, memberIDs, processIDs); err != nil {
-		return nil, err
+	removed, err := ms.revokeWrites(ctx, censusIDs, memberIDs, processIDs)
+	if err != nil {
+		return 0, nil, err
 	}
 
 	// updateCensusSize takes keysLock through SetCensus, which is not reentrant, so it runs
 	// outside the write section above.
 	for _, censusID := range censusIDs {
 		if err := ms.updateCensusSize(censusID); err != nil {
-			return nil, fmt.Errorf("failed to recount census %s: %w", censusID, err)
+			return 0, nil, fmt.Errorf("failed to recount census %s: %w", censusID, err)
 		}
 	}
 
-	return ms.emptiedQuestions(ctx, candidates)
+	emptied, err := ms.emptiedQuestions(ctx, candidates)
+	if err != nil {
+		return 0, nil, err
+	}
+	return removed, emptied, nil
 }
 
 // RevokeMembersEverywhere revokes the given members from every census they participate in. This is
 // the member-deletion form of RevokeMembersFromCensuses, where the censuses are not known up front.
-func (ms *MongoStorage) RevokeMembersEverywhere(memberIDs []string) ([]VotingProcessQuestion, error) {
+func (ms *MongoStorage) RevokeMembersEverywhere(memberIDs []string) (int64, []VotingProcessQuestion, error) {
 	censusIDs, err := ms.CensusesForMembers(memberIDs)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	return ms.RevokeMembersFromCensuses(censusIDs, memberIDs)
 }
@@ -334,22 +341,26 @@ func (ms *MongoStorage) publishedQuestionsNaming(
 	return ids, nil
 }
 
-// revokeWrites performs the three deletions the revocation consists of, under the write lock.
+// revokeWrites performs the three deletions the revocation consists of, under the write lock, and
+// reports how many participant rows step 1 removed.
 func (ms *MongoStorage) revokeWrites(
 	ctx context.Context,
 	censusIDs, memberIDs []string,
 	processIDs []primitive.ObjectID,
-) error {
+) (int64, error) {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
 	// 1. the census participant rows. This is what actually revokes: the CSP re-checks
-	//    participation at sign time, and the census size is a count of these.
-	if _, err := ms.censusParticipants.DeleteMany(ctx, bson.M{
+	//    participation at sign time, and the census size is a count of these. Its DeletedCount is
+	//    the only honest answer to "how many members were removed" — the ids come from a request
+	//    body, so some of them routinely name nobody.
+	res, err := ms.censusParticipants.DeleteMany(ctx, bson.M{
 		"censusId":      bson.M{"$in": censusIDs},
 		"participantID": bson.M{"$in": memberIDs},
-	}); err != nil {
-		return fmt.Errorf("failed to delete census participants: %w", err)
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete census participants: %w", err)
 	}
 
 	// 2. the eligibility lists, for drafts as well as published questions — the memberbase is the
@@ -365,7 +376,7 @@ func (ms *MongoStorage) revokeWrites(
 			},
 			bson.M{"$pull": bson.M{"eligibleMemberIds": bson.M{"$in": memberIDs}}},
 		); err != nil {
-			return fmt.Errorf("failed to prune question eligibility lists: %w", err)
+			return 0, fmt.Errorf("failed to prune question eligibility lists: %w", err)
 		}
 	}
 
@@ -373,7 +384,7 @@ func (ms *MongoStorage) revokeWrites(
 	//    session the member may still hold for another election only forces a fresh login.
 	if userIDs := normalizeCSPUserIDs(memberIDs); len(userIDs) > 0 {
 		if _, err := ms.cspTokens.DeleteMany(ctx, bson.M{"userid": bson.M{"$in": userIDs}}); err != nil {
-			return fmt.Errorf("failed to delete CSP auth sessions: %w", err)
+			return 0, fmt.Errorf("failed to delete CSP auth sessions: %w", err)
 		}
 	}
 
@@ -382,7 +393,7 @@ func (ms *MongoStorage) revokeWrites(
 	//    signed for a second address, producing a second nullifier and a double vote the chain
 	//    accepts.
 
-	return nil
+	return res.DeletedCount, nil
 }
 
 // emptiedQuestions re-reads the given questions and returns those left with no eligible member.
