@@ -318,7 +318,7 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	// upsert the member in the database
-	memberID, err := a.db.UpsertOrgMemberAndCensusParticipants(org, member.ToDB(), passwordSalt)
+	memberID, _, err := a.db.UpsertOrgMemberAndCensusParticipants(org, member.ToDB(), passwordSalt)
 	switch {
 	case errors.Is(err, db.ErrUpdateWouldCreateDuplicates):
 		errors.ErrInvalidData.WithErr(err).Write(w)

@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"net/mail"
@@ -168,7 +169,8 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 	// picked up from a spreadsheet or CSV import would otherwise make the member
 	// impossible to authenticate.
 	member := *m.Normalized()
-	var errors []error
+	// named errs, not errors: this file imports the errors package
+	var errs []error
 
 	// Assign a new internal ID if not provided
 	if member.ID == primitive.NilObjectID {
@@ -182,7 +184,7 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 	// validate the (already normalized) email
 	if member.Email != "" {
 		if _, err := mail.ParseAddress(member.Email); err != nil {
-			errors = append(errors, fmt.Errorf("invalid email %q: %w", member.Email, err))
+			errs = append(errs, fmt.Errorf("invalid email %q: %w", member.Email, err))
 			// If email is invalid, set it to empty and store the error
 			member.Email = ""
 		}
@@ -193,7 +195,7 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 		phone, err := NewHashedPhone(member.PlaintextPhone, org)
 		if err != nil {
 			// the error already identifies the offending phone number
-			errors = append(errors, err)
+			errs = append(errs, err)
 		} else {
 			member.Phone = phone
 		}
@@ -211,12 +213,12 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 		var err error
 		member.ParsedBirthDate, member.BirthDate, err = internal.ParseBirthDate(member.BirthDate)
 		if err != nil {
-			errors = append(errors, err)
+			errs = append(errs, err)
 			member.BirthDate = "" // Reset invalid birthdate
 			member.ParsedBirthDate = time.Time{}
 		}
 	}
-	return &member, errors
+	return &member, errs
 }
 
 // createOrgMemberBulkOperations creates a batch of members using bulk write operations,
@@ -232,19 +234,19 @@ func (ms *MongoStorage) createOrgMemberBulkOperations(
 	firstLine int,
 ) (int, []error) {
 	var preparedMembers []any
-	var errors []error
+	var errs []error
 
 	for i, m := range members {
 		// Prepare the member
 		member, validationErrors := prepareOrgMember(org, m, salt, currentTime)
 		for _, err := range validationErrors {
-			errors = append(errors, fmt.Errorf("line %d: %w", firstLine+i, err))
+			errs = append(errs, fmt.Errorf("line %d: %w", firstLine+i, err))
 		}
 		preparedMembers = append(preparedMembers, member)
 	}
 
 	if len(preparedMembers) == 0 {
-		return 0, errors
+		return 0, errs
 	}
 
 	// Only lock the mutex during the actual database operations
@@ -259,13 +261,13 @@ func (ms *MongoStorage) createOrgMemberBulkOperations(
 	result, err := ms.orgMembers.InsertMany(batchCtx, preparedMembers)
 	if err != nil {
 		log.Warnw("error during bulk addition of members batch", "error", err)
-		errors = append(errors, fmt.Errorf("lines %d-%d: %w", firstLine, firstLine+len(members)-1, err))
+		errs = append(errs, fmt.Errorf("lines %d-%d: %w", firstLine, firstLine+len(members)-1, err))
 	}
 	if result == nil {
-		return 0, errors
+		return 0, errs
 	}
 
-	return len(result.InsertedIDs), errors
+	return len(result.InsertedIDs), errs
 }
 
 // startOrgMemberProgressReporter starts a goroutine that reports progress periodically
@@ -385,13 +387,49 @@ func (ms *MongoStorage) AddBulkOrgMembers(org *Organization, members []*OrgMembe
 	return progressChan, nil
 }
 
+// mergeLoginHashFields backfills onto member every field that feeds HashAuthTwoFaFields from the
+// stored document. The census login hashes are recomputed from the member being written, so a
+// partial update that omits a hashed field would otherwise hash a half-empty member and lock the
+// voter out of every census they belong to.
+//
+// Keep this list in step with HashAuthTwoFaFields (db/types.go): name, surname, memberNumber,
+// nationalId, birthDate and email/phone. Weight is deliberately not merged — it does not feed the
+// hash and is in the always-update tag list, so a zero weight is a deliberate write.
+func mergeLoginHashFields(member, stored *OrgMember) {
+	if member.Name == "" {
+		member.Name = stored.Name
+	}
+	if member.Surname == "" {
+		member.Surname = stored.Surname
+	}
+	if member.MemberNumber == "" {
+		member.MemberNumber = stored.MemberNumber
+	}
+	if member.NationalID == "" {
+		member.NationalID = stored.NationalID
+	}
+	if member.BirthDate == "" {
+		member.BirthDate = stored.BirthDate
+		member.ParsedBirthDate = stored.ParsedBirthDate
+	}
+	if member.Email == "" {
+		member.Email = stored.Email
+	}
+	// a plaintext phone in the request is hashed by prepareOrgMember and overwrites this
+	if member.Phone.IsEmpty() {
+		member.Phone = stored.Phone
+	}
+}
+
 // UpsertOrgMemberAndCensusParticipants updates or inserts an organization member in the database.
 // In case of update, this method updates the loginHashes of this member in all censuses
 // of processes where this member is a participant.
+// The returned bool reports whether the member was created rather than updated, so callers can
+// propagate a brand new member to the censuses of the organization's auto group.
 func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, member *OrgMember, salt string,
-) (primitive.ObjectID, error) {
+) (primitive.ObjectID, bool, error) {
 	if org.Address.Cmp(common.Address{}) == 0 {
-		return primitive.NilObjectID, ErrInvalidData
+		return primitive.NilObjectID, false, ErrInvalidData
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -400,37 +438,43 @@ func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, 
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
-	// if this member exists already, check the orgAddress is not being changed
+	// If this member exists already, check the orgAddress is not being changed and merge the
+	// stored login-hash fields in before anything hashes them. A read failure must not be
+	// swallowed: hashing a half-empty member locks the voter out of every census permanently.
+	created := false
 	orgMemberInDB := &OrgMember{}
-	if err := ms.orgMembers.FindOne(ctx, bson.M{"_id": member.ID}).Decode(orgMemberInDB); err == nil {
-		if member.Phone.IsEmpty() { // fill in with the HashedPhone stored in db
-			member.Phone = orgMemberInDB.Phone
-		}
+	switch err := ms.orgMembers.FindOne(ctx, bson.M{"_id": member.ID}).Decode(orgMemberInDB); {
+	case err == nil:
 		if orgMemberInDB.OrgAddress != org.Address {
-			return primitive.NilObjectID, fmt.Errorf("modifying orgAddress is not allowed")
+			return primitive.NilObjectID, false, fmt.Errorf("modifying orgAddress is not allowed")
 		}
+		mergeLoginHashFields(member, orgMemberInDB)
+	case errors.Is(err, mongo.ErrNoDocuments):
+		created = true
+	default:
+		return primitive.NilObjectID, false, fmt.Errorf("failed to read stored org member: %w", err)
 	}
 
 	preparedMember, validationErrors := prepareOrgMember(org, member, salt, time.Now())
 	if len(validationErrors) > 0 {
-		return primitive.NilObjectID, fmt.Errorf("errors: %s", errorsAsStrings(validationErrors))
+		return primitive.NilObjectID, false, fmt.Errorf("errors: %s", errorsAsStrings(validationErrors))
 	}
 
 	// Update the census participants first, to bail out early in case this would create any duplicates conflict
 	if err := ms.updateCensusParticipantsForMember(ctx, preparedMember); err != nil {
-		return primitive.NilObjectID, fmt.Errorf("failed to update census participants: %w", err)
+		return primitive.NilObjectID, false, fmt.Errorf("failed to update census participants: %w", err)
 	}
 
 	updateDoc, err := dynamicUpdateDocument(preparedMember, []string{"weight"})
 	if err != nil {
-		return primitive.NilObjectID, err
+		return primitive.NilObjectID, false, err
 	}
 
 	filter := bson.M{"_id": preparedMember.ID}
 	opts := options.Update().SetUpsert(true)
 	_, err = ms.orgMembers.UpdateOne(ctx, filter, updateDoc, opts)
 	if err != nil {
-		return primitive.NilObjectID, fmt.Errorf("failed to upsert org member: %w", err)
+		return primitive.NilObjectID, false, fmt.Errorf("failed to upsert org member: %w", err)
 	}
 
 	// Ensure the auto group exists now that at least one member is present.
@@ -438,7 +482,7 @@ func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, 
 		log.Warnw("could not ensure auto member group after upsert", "error", err)
 	}
 
-	return preparedMember.ID, nil
+	return preparedMember.ID, created, nil
 }
 
 // updateCensusParticipantsForMember updates all census participants where participantID == orgMemberID
