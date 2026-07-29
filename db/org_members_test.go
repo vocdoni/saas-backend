@@ -248,10 +248,13 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(lastStatus.Progress, qt.Equals, 100)
 		c.Assert(lastStatus.Added, qt.Equals, 2)
 		c.Assert(lastStatus.Errors, qt.HasLen, 0)
+		// the inserted ids are what the caller propagates to the auto group's censuses
+		c.Assert(lastStatus.MemberIDs, qt.HasLen, 2)
 
 		// Verify both members were created with hashed fields
 		member1, err := testDB.OrgMemberByMemberNumber(testOrgAddress, testMemberNumber)
 		c.Assert(err, qt.IsNil)
+		c.Assert(lastStatus.MemberIDs, qt.Contains, member1.ID.Hex())
 		c.Assert(member1.Phone.Bytes(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, testPlaintextPhone))
 		c.Assert(member1.HashedPass, qt.DeepEquals, internal.HashPassword(testSalt, testPassword))
 

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"maps"
 	"net/mail"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -147,11 +149,43 @@ type BulkOrgMembersJob struct {
 	Total    int
 	Added    int
 	Errors   []error
+	// MemberIDs are the hex ids of the members actually inserted, so the caller can propagate
+	// them to the censuses the organization's auto group backs.
+	MemberIDs []string
 }
 
 // ErrorsAsStrings returns the errors as a slice of strings
 func (j *BulkOrgMembersJob) ErrorsAsStrings() []string {
 	return errorsAsStrings(j.Errors)
+}
+
+// bulkOrgMembersProgress holds the job state addOrgMemberBatches accumulates while its progress
+// reporter ticks concurrently. The reporter must never publish the shared struct: a consumer reads
+// the value it received while the batch loop is still writing, so every send is a snapshot taken
+// under the mutex.
+type bulkOrgMembersProgress struct {
+	mu  sync.Mutex
+	job BulkOrgMembersJob
+}
+
+// record folds one finished batch into the job state.
+func (p *bulkOrgMembersProgress) record(memberIDs []string, errs []error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.job.Added += len(memberIDs)
+	p.job.MemberIDs = append(p.job.MemberIDs, memberIDs...)
+	p.job.Errors = append(p.job.Errors, errs...)
+	p.job.Progress = int(float64(p.job.Added) / float64(p.job.Total) * 100)
+}
+
+// snapshot returns a copy that stays valid once the next batch starts writing.
+func (p *bulkOrgMembersProgress) snapshot() *BulkOrgMembersJob {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	snap := p.job
+	snap.Errors = slices.Clone(p.job.Errors)
+	snap.MemberIDs = slices.Clone(p.job.MemberIDs)
+	return &snap
 }
 
 // prepareOrgMember processes a member for storage by:
@@ -222,7 +256,7 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 }
 
 // createOrgMemberBulkOperations creates a batch of members using bulk write operations,
-// and returns the number of members added and any errors encountered.
+// and returns the hex ids of the members inserted plus any errors encountered.
 // firstLine is the 1-based position of members[0] in the originally submitted list;
 // validation errors are prefixed with the line each offending member sits at, so
 // users can locate it in the imported file.
@@ -232,7 +266,7 @@ func (ms *MongoStorage) createOrgMemberBulkOperations(
 	salt string,
 	currentTime time.Time,
 	firstLine int,
-) (int, []error) {
+) ([]string, []error) {
 	var preparedMembers []any
 	var errs []error
 
@@ -246,7 +280,7 @@ func (ms *MongoStorage) createOrgMemberBulkOperations(
 	}
 
 	if len(preparedMembers) == 0 {
-		return 0, errs
+		return nil, errs
 	}
 
 	// Only lock the mutex during the actual database operations
@@ -264,21 +298,33 @@ func (ms *MongoStorage) createOrgMemberBulkOperations(
 		errs = append(errs, fmt.Errorf("lines %d-%d: %w", firstLine, firstLine+len(members)-1, err))
 	}
 	if result == nil {
-		return 0, errs
+		return nil, errs
 	}
 
-	return len(result.InsertedIDs), errs
+	insertedIDs := make([]string, 0, len(result.InsertedIDs))
+	for _, id := range result.InsertedIDs {
+		oid, ok := id.(primitive.ObjectID)
+		if !ok {
+			// InsertMany echoes back the _id prepareOrgMember set, so this cannot happen unless
+			// that changes; dropping the id is better than propagating a wrong one to a census.
+			log.Warnw("unexpected inserted id type in bulk member add", "id", id)
+			continue
+		}
+		insertedIDs = append(insertedIDs, oid.Hex())
+	}
+
+	return insertedIDs, errs
 }
 
 // startOrgMemberProgressReporter starts a goroutine that reports progress periodically
 func startOrgMemberProgressReporter(
 	ctx context.Context,
 	progressChan chan<- *BulkOrgMembersJob,
-	status *BulkOrgMembersJob,
+	progress *bulkOrgMembersProgress,
 ) {
 	defer close(progressChan)
 
-	if status.Total == 0 {
+	if progress.snapshot().Total == 0 {
 		return
 	}
 
@@ -286,15 +332,15 @@ func startOrgMemberProgressReporter(
 	defer ticker.Stop()
 
 	// Send initial progress
-	progressChan <- status
+	progressChan <- progress.snapshot()
 
 	for {
 		select {
 		case <-ticker.C:
-			progressChan <- status
+			progressChan <- progress.snapshot()
 		case <-ctx.Done():
 			// Send final progress (100%)
-			progressChan <- status
+			progressChan <- progress.snapshot()
 			return
 		}
 	}
@@ -314,33 +360,30 @@ func (ms *MongoStorage) addOrgMemberBatches(
 
 	// Process members in batches of 200
 	batchSize := 200
+	total := len(orgMembers)
 	currentTime := time.Now()
 
-	job := BulkOrgMembersJob{
-		Progress: 0,
-		Total:    len(orgMembers),
-		Added:    0,
-		Errors:   []error{},
-	}
+	progress := &bulkOrgMembersProgress{job: BulkOrgMembersJob{Total: total, Errors: []error{}}}
 
 	// Create a context for the progress reporter
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Start progress reporter in a separate goroutine
+	// Start progress reporter in a separate goroutine. It ticks while this loop runs, so the job
+	// state it reads is only ever touched through progress.
 	go startOrgMemberProgressReporter(
 		ctx,
 		progressChan,
-		&job,
+		progress,
 	)
 
 	// Process members in batches
-	for start := 0; start < job.Total; start += batchSize {
+	for start := 0; start < total; start += batchSize {
 		// Calculate end index for current batch
-		end := min(start+batchSize, job.Total)
+		end := min(start+batchSize, total)
 
-		// Process the batch and get number of added members
-		added, errs := ms.createOrgMemberBulkOperations(
+		// Process the batch and get the ids of the members added
+		memberIDs, errs := ms.createOrgMemberBulkOperations(
 			org,
 			orgMembers[start:end],
 			salt,
@@ -348,17 +391,11 @@ func (ms *MongoStorage) addOrgMemberBatches(
 			start+1,
 		)
 
-		// Update job stats
-		job = BulkOrgMembersJob{
-			Progress: int(float64(job.Added+added) / float64(job.Total) * 100),
-			Total:    job.Total,
-			Added:    job.Added + added,
-			Errors:   append(job.Errors, errs...),
-		}
+		progress.record(memberIDs, errs)
 	}
 
 	// Ensure the auto group exists now that members have been added.
-	if job.Added > 0 {
+	if progress.snapshot().Added > 0 {
 		ms.keysLock.Lock()
 		defer ms.keysLock.Unlock()
 		if err := ms.EnsureAutoMemberGroup(org.Address); err != nil {
