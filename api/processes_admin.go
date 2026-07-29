@@ -43,6 +43,10 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrDuplicateConflict.Withf("process already published and not in draft mode").Write(w)
 		return
 	}
+	// deleting mid-publish would orphan on chain whatever the worker has already mined.
+	if refusePublishInProgress(w, vp) {
+		return
+	}
 	if err := a.db.DeleteVotingProcess(oid); err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return

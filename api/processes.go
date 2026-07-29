@@ -185,6 +185,21 @@ func (a *API) buildQuestions(
 	return built, nil
 }
 
+// refusePublishInProgress answers 409 while a publish worker holds the process, and reports
+// whether it did.
+//
+// publishVotingProcessHandler snapshots the questions, claims the process and hands the snapshot to
+// a worker that runs for minutes. Throughout that window the process is still unpublished and its
+// questions carry no upstreamId, so every "is this a draft?" check reads true — and a mutation
+// taken on that basis lands on a process the worker is concurrently putting on chain.
+func refusePublishInProgress(w http.ResponseWriter, vp *db.VotingProcess) bool {
+	if !vp.PublishInProgress() {
+		return false
+	}
+	errors.ErrPublishInProgress.Write(w)
+	return true
+}
+
 // writeQuestions replaces the process's stored questions with a pre-built (already validated)
 // set and updates its ordered QuestionIDs. Existing questions are removed first so a draft
 // update replaces them. Callers run buildQuestions first, so this only fails on infra errors.
@@ -253,6 +268,9 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrDuplicateConflict.Withf("process already published and not in draft mode").Write(w)
 		return
 	}
+	if refusePublishInProgress(w, vp) {
+		return
+	}
 	if !user.HasRoleFor(vp.OrgAddress, db.ManagerRole) && !user.HasRoleFor(vp.OrgAddress, db.AdminRole) {
 		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization").Write(w)
 		return
@@ -284,6 +302,9 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	}
 	vp.Title, vp.Description, vp.Header, vp.StreamURI = req.Title, req.Description, req.Header, req.StreamURI
 	vp.StartDate, vp.EndDate, vp.CensusID = start, end, census.ID
+	// a stale marker got us past the guard above: editing the draft releases it rather than
+	// writing it back, matching what ClaimVotingProcessForPublish would reclaim anyway.
+	vp.Publishing = time.Time{}
 	if _, err := a.db.SetVotingProcess(vp); err != nil {
 		_ = a.db.DelCensus(census.ID.Hex())
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)

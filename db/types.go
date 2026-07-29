@@ -678,8 +678,24 @@ type VotingProcess struct {
 	EndDate     time.Time            `json:"endDate,omitempty" bson:"endDate,omitempty"`
 	CensusID    primitive.ObjectID   `json:"-" bson:"censusId"`    // internal ref to a db.Census
 	QuestionIDs []primitive.ObjectID `json:"-" bson:"questionIds"` // ordered question references
-	CreatedAt   time.Time            `json:"createdAt" bson:"createdAt"`
-	UpdatedAt   time.Time            `json:"updatedAt" bson:"updatedAt"`
+	// Publishing is the transient claim a publish worker holds on this process (see
+	// ClaimVotingProcessForPublish). It is a struct field rather than only a raw $set so that
+	// SetVotingProcess's ReplaceOne stops wiping a live claim, and so handlers can refuse to
+	// mutate a process while it is being published.
+	//
+	// omitempty is load-bearing: the duplicate-publish guard matches on the field being absent
+	// and the stale sweep on it being old, so a zero date persisted as a value would make every
+	// draft ever created look like a crashed publish.
+	Publishing time.Time `json:"-" bson:"publishing,omitempty"`
+	CreatedAt  time.Time `json:"createdAt" bson:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt" bson:"updatedAt"`
+}
+
+// PublishInProgress reports whether a publish worker currently holds this process. A marker older
+// than PublishStaleAfter counts as released, matching what ClaimVotingProcessForPublish reclaims,
+// so a worker that crashed cannot block edits forever.
+func (vp *VotingProcess) PublishInProgress() bool {
+	return !vp.Publishing.IsZero() && time.Since(vp.Publishing) < PublishStaleAfter
 }
 
 // VotingProcessQuestion is one question of a VotingProcess. Each question maps to

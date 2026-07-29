@@ -7,6 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -174,4 +175,90 @@ func TestQuestionStatusSyncMethods(t *testing.T) {
 	c.Assert(matched, qt.IsFalse)
 	_, err = testDB.SetQuestionStatusSynced(nil, QuestionStatusReady, QuestionStatusEnded)
 	c.Assert(err, qt.ErrorIs, ErrInvalidData)
+}
+
+// TestVotingProcessPublishingMarker pins the two properties the publish-window guard rests on: a
+// zero marker is absent from the document (or the duplicate-publish guard, which matches on the
+// field being missing, would treat every draft ever created as a crashed publish), and a live
+// marker survives SetVotingProcess's whole-document ReplaceOne.
+func TestVotingProcessPublishingMarker(t *testing.T) {
+	c := qt.New(t)
+	org := common.Address{0x13}
+	setupVotingProcessOrg(c, org)
+	id, err := testDB.SetVotingProcess(&VotingProcess{OrgAddress: org})
+	c.Assert(err, qt.IsNil)
+
+	rawDoc := func() bson.M {
+		var doc bson.M
+		c.Assert(testDB.votingProcesses.FindOne(t.Context(), bson.M{"_id": id}).Decode(&doc), qt.IsNil)
+		return doc
+	}
+
+	// a draft carries no marker at all
+	_, present := rawDoc()["publishing"]
+	c.Assert(present, qt.IsFalse)
+
+	vp, err := testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	c.Assert(vp.PublishInProgress(), qt.IsFalse)
+
+	// claiming sets it, and a read reports the process as held
+	claimed, err := testDB.ClaimVotingProcessForPublish(id)
+	c.Assert(err, qt.IsNil)
+	c.Assert(claimed, qt.IsTrue)
+
+	vp, err = testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	c.Assert(vp.Publishing.IsZero(), qt.IsFalse)
+	c.Assert(vp.PublishInProgress(), qt.IsTrue)
+
+	// a read-modify-write no longer wipes the live claim
+	vp.Title = MultiLangString{"default": "edited"}
+	_, err = testDB.SetVotingProcess(vp)
+	c.Assert(err, qt.IsNil)
+	vp, err = testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	c.Assert(vp.PublishInProgress(), qt.IsTrue)
+
+	// ...and writing the zero value clears it rather than persisting a zero date
+	vp.Publishing = time.Time{}
+	_, err = testDB.SetVotingProcess(vp)
+	c.Assert(err, qt.IsNil)
+	_, present = rawDoc()["publishing"]
+	c.Assert(present, qt.IsFalse)
+
+	// a marker older than PublishStaleAfter counts as released
+	vp, err = testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	vp.Publishing = time.Now().Add(-PublishStaleAfter - time.Minute)
+	_, err = testDB.SetVotingProcess(vp)
+	c.Assert(err, qt.IsNil)
+	vp, err = testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	c.Assert(vp.Publishing.IsZero(), qt.IsFalse)
+	c.Assert(vp.PublishInProgress(), qt.IsFalse)
+}
+
+// TestClaimVotingProcessForPublishReclaimsRepeatedly pins MatchedCount over ModifiedCount as the
+// claim signal. The filter already excludes a live claim, so matching is winning; but a reclaim
+// landing in the same millisecond as the marker it replaces writes an identical timestamp, which
+// Mongo reports as modified=0 and which ModifiedCount would report as a lost claim. Reclaiming in a
+// tight loop makes that collision happen.
+func TestClaimVotingProcessForPublishReclaimsRepeatedly(t *testing.T) {
+	c := qt.New(t)
+	org := common.Address{0x14}
+	setupVotingProcessOrg(c, org)
+	id, err := testDB.SetVotingProcess(&VotingProcess{OrgAddress: org})
+	c.Assert(err, qt.IsNil)
+
+	// every marker counts as stale, so every claim must win
+	restore := PublishStaleAfter
+	PublishStaleAfter = -time.Minute
+	defer func() { PublishStaleAfter = restore }()
+
+	for i := range 500 {
+		claimed, err := testDB.ClaimVotingProcessForPublish(id)
+		c.Assert(err, qt.IsNil)
+		c.Assert(claimed, qt.IsTrue, qt.Commentf("reclaim %d of a stale marker must win", i))
+	}
 }
