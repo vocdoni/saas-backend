@@ -40,8 +40,7 @@ func (ms *MongoStorage) SetQuestion(q *VotingProcessQuestion) (primitive.ObjectI
 // against a second writer. Two overlapping draft updates interleave so that one deletes rows the
 // other has not inserted yet, and the stragglers survive as duplicates carrying the same processId —
 // which publish then turns into real elections (issue #614). Addressing rows by slot means neither
-// writer deletes what the other is inserting: the worst a race can do is leave slot i belonging to
-// whichever request wrote it last, which is a state some client actually asked for.
+// writer deletes what the other is inserting.
 //
 // It also keeps a question's _id stable across draft edits, since an existing row in a slot is
 // replaced rather than dropped and re-created. Publish, the status syncer and the eligibility lists
@@ -50,8 +49,29 @@ func (ms *MongoStorage) SetQuestion(q *VotingProcessQuestion) (primitive.ObjectI
 // The final sweep deletes every other row of the process, not just the tail past the new length, so
 // re-saving a draft repairs a database that a pre-fix update had already duplicated.
 //
-// Note this is not atomic across slots: a concurrent reader can still observe a half-applied update.
-// What it guarantees is that no row is ever orphaned, which is the part that reaches the chain.
+// What concurrent writers can and cannot do to a slot:
+//
+//   - A slot that already holds a row is replaced atomically. The worst two writers do to it is
+//     leave it belonging to whichever wrote last, keeping the _id it already had — a state some
+//     client actually asked for.
+//   - A slot that does not exist yet is not protected. FindOneAndReplace is atomic only for a
+//     matched document, and there is no unique index on (processId, order), so two callers racing on
+//     an empty slot can both insert. Each one's sweep then deletes the other's row, leaving the slot
+//     empty and the process's QuestionIDs naming an id that no longer exists.
+//   - Either way at most one row per slot survives, so the residual failure loses a row rather than
+//     duplicating one. A row survives only if every other writer's sweep ran before that row was
+//     inserted, while each writer's own sweep always runs after its own insert; two survivors in one
+//     slot would need each writer's sweep to precede the other's, which cannot both hold.
+//     Duplication is the failure mode of issue #614, and that one is closed.
+//
+// Losing a row is fail-safe: the stored set no longer matches the process's QuestionIDs, so
+// questionSetProblem refuses the publish and saving the draft again repairs it. Closing the hole for
+// real needs a unique index on (processId, order), which is what makes each slot upsert genuinely
+// atomic. A transaction is not an option here — the repo opens no session anywhere, and the tests run
+// a standalone mongo:7.
+//
+// Note this is not atomic across slots either: a concurrent reader can still observe a half-applied
+// update.
 func (ms *MongoStorage) SetProcessQuestions(
 	processID primitive.ObjectID, questions []*VotingProcessQuestion,
 ) ([]primitive.ObjectID, error) {
