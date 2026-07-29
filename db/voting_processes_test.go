@@ -97,6 +97,35 @@ func TestClaimVotingProcessForPublish(t *testing.T) {
 	c.Assert(claimed, qt.IsTrue)
 }
 
+// TestReclaimStaleVotingProcessPublish covers the reclaim branch back to back, which
+// is where returning ModifiedCount instead of MatchedCount used to lose a claim it had
+// won: the marker is time.Now(), BSON truncates it to milliseconds, and two reclaims in
+// the same millisecond write identical bytes.
+//
+// This is a best-effort reproduction rather than a deterministic one -- forcing the
+// collision would need clock injection the code does not have -- but consecutive local
+// Mongo updates collide within a handful of iterations in practice, so the loop caught
+// the old behaviour reliably. Its companion is
+// api.TestVotingProcessStalePublishReclaim, which the same defect made flaky.
+func TestReclaimStaleVotingProcessPublish(t *testing.T) {
+	c := qt.New(t)
+	org := common.Address{0x13}
+	setupVotingProcessOrg(c, org)
+	id, err := testDB.SetVotingProcess(&VotingProcess{OrgAddress: org})
+	c.Assert(err, qt.IsNil)
+
+	// a negative window makes every marker stale, so each claim takes the reclaim branch
+	restore := PublishStaleAfter
+	PublishStaleAfter = -time.Minute
+	defer func() { PublishStaleAfter = restore }()
+
+	for i := range 100 {
+		claimed, err := testDB.ClaimVotingProcessForPublish(id)
+		c.Assert(err, qt.IsNil)
+		c.Assert(claimed, qt.IsTrue, qt.Commentf("reclaim %d of a stale marker must win", i))
+	}
+}
+
 // TestQuestionStatusSyncMethods covers the status-syncer DB methods: the org-scoped syncable-
 // candidate projection (only {READY,PAUSED,ENDED} with an upstreamId, backing the delete guard) and
 // the conditional reconcile write (status + syncedAt, applied only while the stored status still

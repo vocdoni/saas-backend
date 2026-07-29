@@ -180,7 +180,14 @@ func (ms *MongoStorage) ClaimVotingProcessForPublish(id primitive.ObjectID) (boo
 	if err != nil {
 		return false, fmt.Errorf("failed to claim voting process for publish: %w", err)
 	}
-	return res.ModifiedCount == 1, nil
+	// The filter is the concurrency gate, so matching it *is* winning the claim.
+	// Deliberately not ModifiedCount: that additionally asks whether the marker's
+	// value changed, and the marker is time.Now(), which BSON truncates to
+	// milliseconds. A reclaim landing in the same millisecond as the marker it
+	// replaces writes identical bytes, and Mongo would report
+	// MatchedCount: 1, ModifiedCount: 0 -- telling the winner it lost while it
+	// holds the lock, and stranding the marker it just wrote.
+	return res.MatchedCount == 1, nil
 }
 
 // StaleVotingProcesses returns the ids of processes whose publishing marker is stale (older

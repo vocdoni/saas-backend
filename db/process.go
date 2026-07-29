@@ -91,7 +91,12 @@ func (ms *MongoStorage) ClaimProcessForPublish(processID primitive.ObjectID) (bo
 	if err != nil {
 		return false, fmt.Errorf("failed to claim process for publish: %w", err)
 	}
-	return res.ModifiedCount == 1, nil
+	// As in ClaimVotingProcessForPublish: the filter is the gate, so matching is
+	// winning. ModifiedCount happens to agree here only because the filter
+	// requires status != PUBLISHING and the update sets exactly that -- an
+	// invariant invisible from this line, and one that breaks the moment another
+	// field joins the $set.
+	return res.MatchedCount == 1, nil
 }
 
 // ClearProcessPublishing reverts a draft from the PUBLISHING state back to an unpublished
