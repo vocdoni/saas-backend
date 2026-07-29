@@ -708,6 +708,58 @@ func TestVotingProcessConcurrentUpdates(t *testing.T) {
 	c.Assert(after.Questions[1].ID, qt.Equals, before.Questions[1].ID)
 }
 
+// TestVotingProcessConcurrentUpdatesVaryingLengths races draft updates of differing lengths, so the
+// writers contend over question slots that do not exist yet — the insert path
+// TestVotingProcessConcurrentUpdates never reaches, since every writer there sends the same two
+// questions. Whatever the race leaves behind, the stored set is never both inconsistent and
+// publishable: a lost row makes the process refuse to publish until the draft is saved again.
+func TestVotingProcessConcurrentUpdatesVaryingLengths(t *testing.T) {
+	c := qt.New(t)
+	adminToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, adminToken)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, adminToken, newVotingProcessRequest(orgAddress, ids), processesCreateEndpoint)
+	pid := created.ProcessID
+
+	const writers = 9
+	var wg sync.WaitGroup
+	for i := range writers {
+		wg.Go(func() {
+			req := newVotingProcessRequest(orgAddress, ids)
+			// 2, 3 or 4 questions: the extra slots are inserted rather than replaced
+			for range i % 3 {
+				req.Questions = append(req.Questions, req.Questions[0])
+			}
+			req.Title = db.MultiLangString{"default": fmt.Sprintf("varying update %d", i)}
+			// tolerate whatever status the race produces; the assertions are on the stored state
+			_, _ = testRequest(t, http.MethodPut, adminToken, req, "processes", pid)
+		})
+	}
+	wg.Wait()
+
+	after := requestAndParse[apicommon.VotingProcessResponse](
+		t, http.MethodGet, adminToken, nil, "processes", pid)
+	seen := make(map[string]bool, len(after.Questions))
+	for i := range after.Questions {
+		id := after.Questions[i].ID.Hex()
+		c.Assert(seen[id], qt.IsFalse, qt.Commentf("question %s stored twice (issue #614)", id))
+		seen[id] = true
+	}
+
+	// the fail-safe property end to end: the process is never reported ready to publish while its
+	// stored question set is inconsistent, and the only tolerated problem is that inconsistency.
+	validation := requestAndParse[apicommon.VotingProcessValidateResponse](
+		t, http.MethodGet, adminToken, nil, "processes", pid, "validation")
+	if !validation.Valid {
+		c.Assert(fmt.Sprint(validation.Errors), qt.Contains, "stored questions do not match the process",
+			qt.Commentf("unexpected validation errors: %v", validation.Errors))
+	}
+}
+
 // TestVotingProcessConditionalUpdate covers the optimistic-concurrency token of PUT /processes/{id}:
 // an update carrying the updatedAt the client read applies, the same token replayed after that write
 // is stale and rejected with 409, and an update with no token keeps working unconditionally.
