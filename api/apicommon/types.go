@@ -1240,6 +1240,38 @@ type AddMembersResponse struct {
 
 	// Job ID for tracking the addition process
 	JobID internal.HexBytes `json:"jobId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+
+	// CensusJobIDs are the async jobs raising the on-chain maxCensusSize of the elections whose
+	// census just grew, one per organization. Poll each with GET /jobs/{jobId}. Absent when no
+	// live census was affected.
+	CensusJobIDs []string `json:"censusJobIds,omitempty"`
+}
+
+// UpsertOrgMemberResponse is returned by PUT /organizations/{orgAddress}/members. The id is the
+// member's; censusJobIds are present only when creating the member grew a live census and the
+// on-chain maxCensusSize had to be raised.
+// swagger:model UpsertOrgMemberResponse
+type UpsertOrgMemberResponse struct {
+	// Member's internal unique ID
+	ID string `json:"id"`
+
+	// CensusJobIDs are the async jobs raising the on-chain maxCensusSize of the affected
+	// elections. Poll each with GET /jobs/{jobId}.
+	CensusJobIDs []string `json:"censusJobIds,omitempty"`
+}
+
+// UpdateOrganizationMemberGroupResponse is returned by PUT
+// /organizations/{orgAddress}/groups/{groupId} when there is something to report. The endpoint
+// answered a bare OK before and still does when both lists are empty, so existing clients are
+// unaffected.
+// swagger:model UpdateOrganizationMemberGroupResponse
+type UpdateOrganizationMemberGroupResponse struct {
+	// CensusJobIDs are the async jobs raising the on-chain maxCensusSize of the elections whose
+	// census just grew or reopened. Poll each with GET /jobs/{jobId}.
+	CensusJobIDs []string `json:"censusJobIds,omitempty"`
+
+	// Errors are per-census problems that did not stop the group update.
+	Errors []string `json:"errors,omitempty"`
 }
 
 // Request types for process operations

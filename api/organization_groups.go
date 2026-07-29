@@ -313,6 +313,12 @@ func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 	if a.refuseBlockedVoters(w, group.CensusIDs, toUpdate.RemoveMembers) {
 		return
 	}
+	// read-only checks that must refuse before the group is touched, so an over-quota request
+	// leaves the member in neither the group nor the census
+	if err := a.preflightCensusGrowth(org, group.CensusIDs, len(toUpdate.AddMembers)); err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
 
 	emptied, err := a.db.UpdateOrganizationMemberGroup(
 		groupID,
@@ -333,8 +339,23 @@ func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 		}
 		return
 	}
-	a.resizeEmptiedQuestions(org.Address, emptied)
-	apicommon.HTTPWriteOK(w)
+	resp := apicommon.UpdateOrganizationMemberGroupResponse{}
+	if jobID := a.resizeEmptiedQuestions(org.Address, emptied); jobID != "" {
+		resp.CensusJobIDs = append(resp.CensusJobIDs, jobID)
+	}
+	// members joining the group join its censuses too, drafts included: the census tracks the
+	// memberbase regardless, and it is only the on-chain resize that needs a published question.
+	if len(toUpdate.AddMembers) > 0 {
+		propagated := a.propagateMembersToCensuses(org.Address, group.CensusIDs, toUpdate.AddMembers)
+		resp.CensusJobIDs = append(resp.CensusJobIDs, propagated.JobIDs...)
+		resp.Errors = append(resp.Errors, propagated.Errors...)
+	}
+	// the endpoint answered a bare OK before; it still does when there is nothing to report
+	if len(resp.CensusJobIDs) == 0 && len(resp.Errors) == 0 {
+		apicommon.HTTPWriteOK(w)
+		return
+	}
+	apicommon.HTTPWriteJSON(w, &resp)
 }
 
 // deleteOrganizationMemberGroupHandler godoc

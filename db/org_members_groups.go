@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -661,6 +662,27 @@ func buildCompositeKey(bm bson.M, authFields OrgMemberAuthFields, twoFaFields Or
 	return strings.Join(keyParts, "|")
 }
 
+// AutoMemberGroup returns the organization's auto-generated "All members" group, or ErrNotFound if
+// it does not exist. It is the group a brand new member implicitly joins, so it resolves the
+// censuses a member creation has to propagate to.
+func (ms *MongoStorage) AutoMemberGroup(orgAddress common.Address) (*OrganizationMemberGroup, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return nil, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	group := &OrganizationMemberGroup{}
+	err := ms.orgMemberGroups.FindOne(ctx, bson.M{"orgAddress": orgAddress, "isAutoGroup": true}).Decode(group)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("could not get auto member group: %w", err)
+	}
+	return group, nil
+}
+
 // EnsureAutoMemberGroup creates the auto-generated "All members" group for an organization
 // if it does not already exist. It is idempotent and safe to call after every member addition.
 func (ms *MongoStorage) EnsureAutoMemberGroup(orgAddress common.Address) error {
@@ -713,6 +735,19 @@ func (ms *MongoStorage) DeleteAutoMemberGroupIfEmpty(orgAddress common.Address) 
 	}
 	if count > 0 {
 		return nil // still has members, keep the auto group
+	}
+	// Keep the group while censuses are built from it. EnsureAutoMemberGroup would recreate it
+	// with a fresh ObjectID, orphaning every census that references the old one.
+	group, err := ms.AutoMemberGroup(orgAddress)
+	switch {
+	case err == nil:
+		if len(group.CensusIDs) > 0 {
+			return nil
+		}
+	case errors.Is(err, ErrNotFound):
+		return nil // nothing to delete
+	default:
+		return fmt.Errorf("could not read auto member group: %w", err)
 	}
 	return ms.deleteAutoMemberGroup(orgAddress)
 }

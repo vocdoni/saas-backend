@@ -206,6 +206,15 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// the imported members join the auto "All members" group, so they join the censuses built from
+	// it. Quota and signer are checked first: an over-quota import must not create the members
+	// either.
+	autoCensuses := a.autoGroupCensuses(org.Address)
+	if err := a.preflightCensusGrowth(org, autoCensuses, len(members.Members)); err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
+
 	// add the org members to the database
 	progressChan, err := a.db.AddBulkOrgMembers(org, members.ToDB(), passwordSalt)
 	if err != nil {
@@ -227,10 +236,14 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 				"errors", len(p.Errors))
 		}
 
+		// the members that were actually inserted join the auto group's censuses
+		propagated := a.propagateMembersToCensuses(org.Address, autoCensuses, lastProgress.MemberIDs)
+
 		// Return the number of members added
 		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{
-			Added:  uint32(lastProgress.Added),
-			Errors: lastProgress.ErrorsAsStrings(),
+			Added:        uint32(lastProgress.Added),
+			Errors:       append(lastProgress.ErrorsAsStrings(), propagated.Errors...),
+			CensusJobIDs: propagated.JobIDs,
 		})
 		return
 	}
@@ -261,6 +274,12 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 			} else if err := a.db.UpdateJobProgress(jobID.String(), p.Added); err != nil {
 				log.Warnw("failed to persist job progress", "error", err, "jobId", jobID.String())
 			}
+		}
+
+		// the members that were actually inserted join the auto group's censuses. The import job
+		// has already completed at this point, so a failure here is logged, not reported.
+		if lastProgress != nil {
+			a.propagateMembersToCensuses(org.Address, autoCensuses, lastProgress.MemberIDs)
 		}
 
 		// Send completion email notification when async job is done
@@ -317,8 +336,16 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// a new member joins the auto "All members" group, so it joins the censuses built from it.
+	// Quota and signer are checked first: an over-quota request must not create the member either.
+	autoCensuses := a.autoGroupCensuses(org.Address)
+	if err := a.preflightCensusGrowth(org, autoCensuses, 1); err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
+
 	// upsert the member in the database
-	memberID, _, err := a.db.UpsertOrgMemberAndCensusParticipants(org, member.ToDB(), passwordSalt)
+	memberID, created, err := a.db.UpsertOrgMemberAndCensusParticipants(org, member.ToDB(), passwordSalt)
 	switch {
 	case errors.Is(err, db.ErrUpdateWouldCreateDuplicates):
 		errors.ErrInvalidData.WithErr(err).Write(w)
@@ -329,7 +356,14 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 	default:
 	}
 
-	apicommon.HTTPWriteJSON(w, apicommon.OrgMember{ID: memberID.Hex()})
+	resp := apicommon.UpsertOrgMemberResponse{ID: memberID.Hex()}
+	// Propagate on create only. AddCensusParticipantsByMemberIDs re-adds anything missing, so
+	// running it on an ordinary member edit would silently undo every revocation.
+	if created {
+		propagated := a.propagateMembersToCensuses(org.Address, autoCensuses, []string{memberID.Hex()})
+		resp.CensusJobIDs = propagated.JobIDs
+	}
+	apicommon.HTTPWriteJSON(w, resp)
 }
 
 // deleteOrganizationMembersHandler godoc
