@@ -110,6 +110,14 @@ func (a *API) publishPreflightProblems(
 	// before the two halves were reconciled may carry one its protocol contradicts. Shapes with
 	// no named type (ranked, quadratic) resolve to an empty type and are not gated here; their
 	// plan limits ride on the built transaction instead.
+	//
+	// This tightens what main did — which skipped the gate for every raw protocol — but does not
+	// close it. EffectiveQuestionType recognises a shape only when it is exactly canonical, which
+	// is what storage needs and what authorization does not: {maxCount:2, maxValue:1,
+	// maxTotalCost:2} is the same ballot as the multichoice one field-for-field bar costExponent,
+	// and stays ungated. Actually holding the gate needs a deliberately loose classifier
+	// (maxValue == 1 && maxCount > 1 ⇒ effectively multiple-choice, whatever else is set), not
+	// this one.
 	for i := range questions {
 		if err := a.subscriptions.OrgAllowsVotingType(vp.OrgAddress, account.EffectiveQuestionType(&questions[i])); err != nil {
 			problems = append(problems, err.Error())

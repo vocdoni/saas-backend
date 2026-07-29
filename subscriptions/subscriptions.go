@@ -336,6 +336,13 @@ func (p *Subscriptions) OrgAllowsVotingType(orgAddress common.Address, voteType 
 	if err != nil {
 		return err
 	}
+	// TODO:future the remaining plan.VotingTypes flags (Ranked, Approval, Cumulative) have no
+	// entry here because db has no type constant for them, so nothing can ever resolve to one and
+	// the flags are permissive by omission: an org whose plan lacks Ranked can still mint a ranked
+	// ballot through a raw ballotProtocol. Same gap as the type check noted in
+	// hasElectionMetadataPermissions above. Approval may not belong here at all — the multichoice
+	// dense layout is an approval ballot, so that flag may be subsumed by Multiple rather than
+	// missing; worth settling with whoever defined the plan tiers before adding it.
 	allowed := map[string]bool{
 		db.VotingTypeSingleChoice: plan.VotingTypes.Single,
 		db.VotingTypeMultiChoice:  plan.VotingTypes.Multiple,

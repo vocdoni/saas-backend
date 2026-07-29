@@ -680,6 +680,7 @@ func waitUntilElectionKeys(t *testing.T, c *apiclient.HTTPclient, electionID []b
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	startTime := time.Now()
+	var lastErr error
 	for {
 		ek, err := c.ElectionKeys(electionID)
 		if err == nil && len(ek.PublicKeys) > 0 {
@@ -687,12 +688,13 @@ func waitUntilElectionKeys(t *testing.T, c *apiclient.HTTPclient, electionID []b
 				hex.EncodeToString(electionID), "duration", time.Since(startTime).String())
 			return ek
 		}
+		lastErr = err // nil while the node answers but has no keys yet; set on a transport failure
 		select {
 		case <-time.After(time.Second * 1):
 			continue
 		case <-ctx.Done():
-			t.Fatalf("election %s keys never published after %s: %v",
-				hex.EncodeToString(electionID), time.Since(startTime).String(), ctx.Err())
+			t.Fatalf("election %s keys never published after %s: %v (last fetch error: %v)",
+				hex.EncodeToString(electionID), time.Since(startTime).String(), ctx.Err(), lastErr)
 		}
 	}
 }
