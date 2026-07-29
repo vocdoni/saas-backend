@@ -654,6 +654,25 @@ func (a *API) authorizeStatusChange(
 	return vp, questions, true
 }
 
+// refuseWhilePublishing writes a 409 and reports true when a publish worker already owns the
+// process, so the caller must return without touching it.
+//
+// The worker builds its elections from a snapshot taken before it claimed the process, and sizes
+// each one from the eligible list in that snapshot. Anything editing the process behind it is
+// therefore either lost or actively harmful: a census or eligibility change is not carried onto the
+// chain (the questions still have no UpstreamID, so the resize is skipped, and the members end up
+// signable by the CSP but rejected by the chain), while a draft rewrite or a delete pulls the
+// documents out from under the worker entirely. It is the same condition the publish handler itself
+// refuses a second publish with, refused here for the same reason.
+func refuseWhilePublishing(w http.ResponseWriter, vp *db.VotingProcess) bool {
+	if !vp.PublishInProgress() {
+		return false
+	}
+	errors.ErrPublishInProgress.
+		Withf("the process is being published; retry once the publish job finishes").Write(w)
+	return true
+}
+
 // selectStatusTargets returns the published questions matching the requested ids, or every
 // published question when no ids are given.
 func selectStatusTargets(

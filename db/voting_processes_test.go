@@ -1,12 +1,14 @@
 package db
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -219,4 +221,89 @@ func TestSetQuestionEligibleMemberIDs(t *testing.T) {
 	// unknown question
 	c.Assert(testDB.SetQuestionEligibleMemberIDs(primitive.NewObjectID(), nil, []string{"a"}), qt.Equals, ErrNotFound)
 	c.Assert(testDB.SetQuestionEligibleMemberIDs(primitive.NilObjectID, nil, nil), qt.Equals, ErrInvalidData)
+}
+
+// TestSetVotingProcessKeepsPublishingMarker pins that editing a process does not release the claim
+// a publish worker holds on it. SetVotingProcess replaces the whole document, so before the marker
+// was a field on the struct any draft edit silently wiped it — and a second publish could then be
+// claimed while the first was still running.
+func TestSetVotingProcessKeepsPublishingMarker(t *testing.T) {
+	c := qt.New(t)
+	org := common.Address{0x13}
+	setupVotingProcessOrg(c, org)
+	id, err := testDB.SetVotingProcess(&VotingProcess{OrgAddress: org, Title: MultiLangString{"default": "P"}})
+	c.Assert(err, qt.IsNil)
+
+	claimed, err := testDB.ClaimVotingProcessForPublish(id)
+	c.Assert(err, qt.IsNil)
+	c.Assert(claimed, qt.IsTrue)
+
+	vp, err := testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	c.Assert(vp.Publishing.IsZero(), qt.IsFalse, qt.Commentf("the claim must be readable through the struct"))
+	c.Assert(vp.PublishInProgress(), qt.IsTrue)
+
+	vp.Title = MultiLangString{"default": "edited"}
+	_, err = testDB.SetVotingProcess(vp)
+	c.Assert(err, qt.IsNil)
+
+	got, err := testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.Title["default"], qt.Equals, "edited")
+	c.Assert(got.Publishing.IsZero(), qt.IsFalse)
+	claimed, err = testDB.ClaimVotingProcessForPublish(id)
+	c.Assert(err, qt.IsNil)
+	c.Assert(claimed, qt.IsFalse, qt.Commentf("an edit must not release the publish claim"))
+}
+
+// TestVotingProcessOmitsZeroPublishingMarker pins the omitempty contract the duplicate-publish
+// guard rests on: it matches processes whose publishing field is ABSENT, and the stale sweep
+// matches those whose field is old. A zero date written into the document would satisfy the second
+// and make every draft ever created look like a crashed publish.
+func TestVotingProcessOmitsZeroPublishingMarker(t *testing.T) {
+	c := qt.New(t)
+	org := common.Address{0x14}
+	setupVotingProcessOrg(c, org)
+	id, err := testDB.SetVotingProcess(&VotingProcess{OrgAddress: org, Title: MultiLangString{"default": "P"}})
+	c.Assert(err, qt.IsNil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	var doc bson.M
+	c.Assert(testDB.votingProcesses.FindOne(ctx, bson.M{"_id": id}).Decode(&doc), qt.IsNil)
+	_, present := doc["publishing"]
+	c.Assert(present, qt.IsFalse, qt.Commentf("a never-claimed process must carry no publishing key"))
+
+	stale, err := testDB.StaleVotingProcesses()
+	c.Assert(err, qt.IsNil)
+	c.Assert(stale, qt.Not(qt.Contains), id, qt.Commentf("a fresh draft is not a crashed publish"))
+
+	claimed, err := testDB.ClaimVotingProcessForPublish(id)
+	c.Assert(err, qt.IsNil)
+	c.Assert(claimed, qt.IsTrue)
+}
+
+// TestPublishInProgress covers the predicate the mutating handlers gate on. The staleness boundary
+// has to agree with ClaimVotingProcessForPublish's own cutoff, or a process could be unpublishable
+// and uneditable at the same time — or claimable and editable at once.
+func TestPublishInProgress(t *testing.T) {
+	c := qt.New(t)
+	now := time.Now()
+	for name, tc := range map[string]struct {
+		vp   VotingProcess
+		want bool
+	}{
+		"never claimed":    {VotingProcess{}, false},
+		"claimed just now": {VotingProcess{Publishing: now}, true},
+		// the boundary itself is `<=`, matching the strict `$lt` the claim reclaims with, but a
+		// marker exactly on the cutoff cannot be asserted: time.Since moves past it between
+		// building this table and reading it. These bracket it instead.
+		"claim still inside the window": {VotingProcess{Publishing: now.Add(-PublishStaleAfter + time.Minute)}, true},
+		"claim just past the window":    {VotingProcess{Publishing: now.Add(-PublishStaleAfter - time.Minute)}, false},
+		"claim long since stale":        {VotingProcess{Publishing: now.Add(-2 * PublishStaleAfter)}, false},
+		"published, marker unset":       {VotingProcess{Published: true}, false},
+		"published, marker lagged":      {VotingProcess{Published: true, Publishing: now}, false},
+	} {
+		c.Assert(tc.vp.PublishInProgress(), qt.Equals, tc.want, qt.Commentf("%s", name))
+	}
 }

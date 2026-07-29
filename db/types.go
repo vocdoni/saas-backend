@@ -667,9 +667,14 @@ type BallotProtocol struct {
 // independent on-chain election) by id in the processesQuestions collection. It is a
 // draft while Published is false. It is unrelated to the single-election Process type.
 type VotingProcess struct {
-	ID          primitive.ObjectID   `json:"id" bson:"_id"`
-	OrgAddress  common.Address       `json:"orgAddress" bson:"orgAddress"`
-	Published   bool                 `json:"published" bson:"published"`
+	ID         primitive.ObjectID `json:"id" bson:"_id"`
+	OrgAddress common.Address     `json:"orgAddress" bson:"orgAddress"`
+	Published  bool               `json:"published" bson:"published"`
+	// Publishing is when a publish worker claimed this process, and is unset again the moment it
+	// finishes (see ClaimVotingProcessForPublish / PublishInProgress). It must stay omitempty: the
+	// duplicate-publish guard and the stale sweep both key off the field being absent, so writing a
+	// zero date would make every draft look like a crashed publish.
+	Publishing  time.Time            `json:"-" bson:"publishing,omitempty"`
 	Title       MultiLangString      `json:"title" bson:"title"`
 	Description MultiLangString      `json:"description,omitempty" bson:"description,omitempty"`
 	Header      string               `json:"header,omitempty" bson:"header,omitempty"`

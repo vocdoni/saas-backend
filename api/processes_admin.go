@@ -28,7 +28,7 @@ import (
 //	@Success		200			{string}	string			"OK"
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
 //	@Failure		404			{object}	errors.Error	"Process not found"
-//	@Failure		409			{object}	errors.Error	"Process already published"
+//	@Failure		409			{object}	errors.Error	"Process already published, or its publish is in flight"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId} [delete]
 func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
@@ -44,6 +44,12 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	// only a draft can be deleted; a published process lives on-chain and is immutable.
 	if vp.Published {
 		errors.ErrDuplicateConflict.Withf("process already published and not in draft mode").Write(w)
+		return
+	}
+	// a process being published is not a draft either, whatever its published flag says: deleting
+	// it would take the questions and the census out from under the worker and leave the elections
+	// it already mined on chain with nothing pointing at them.
+	if refuseWhilePublishing(w, vp) {
 		return
 	}
 	if err := a.db.DeleteVotingProcess(oid); err != nil {
@@ -221,6 +227,14 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 		errors.ErrDuplicateConflict.Withf("process is not published; edit the draft via PUT /processes/{processId}").Write(w)
 		return
 	}
+	// Unreachable today, and deliberately kept: a process being published is unpublished, so the
+	// check above already refuses it — but only as a side effect of a rule about drafts, and only
+	// while publishing and published stay mutually exclusive (SetVotingProcessPublished sets one
+	// and unsets the other in a single update). This states the real reason, and answers with the
+	// error that names it, if that ever stops holding.
+	if refuseWhilePublishing(w, vp) {
+		return
+	}
 	census, err := a.db.Census(vp.CensusID.Hex())
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -309,7 +323,7 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 //	@Failure		400			{object}	errors.Error							"Invalid input data"
 //	@Failure		401			{object}	errors.Error							"Unauthorized"
 //	@Failure		404			{object}	errors.Error							"Process or question not found"
-//	@Failure		409			{object}	errors.Error							"A member already signed for would lose eligibility"
+//	@Failure		409			{object}	errors.Error							"A member already signed for would lose eligibility, or the publish is in flight"
 //	@Failure		500			{object}	errors.Error							"Internal server error"
 //	@Router			/processes/{processId}/questions/{questionId}/census [put]
 func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r *http.Request) {
@@ -326,6 +340,14 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 	// touching the body, matching the sibling handler: an unauthorized caller's input is not parsed.
 	vp, questions, ok := a.authorizeStatusChange(w, r, oid)
 	if !ok {
+		return
+	}
+	// While a publish is in flight the questions still carry no UpstreamID, so this would take the
+	// draft path: it would store the new list and skip the resize, and the worker would then
+	// publish an election sized from the list it snapshotted before the claim. The members added
+	// here would be signed by the CSP and rejected by the chain — the exact failure this endpoint
+	// exists to prevent, and one a replay cannot repair, since an unchanged list is a no-op.
+	if refuseWhilePublishing(w, vp) {
 		return
 	}
 	var req apicommon.UpdateQuestionCensusRequest

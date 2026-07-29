@@ -154,6 +154,22 @@ func (ms *MongoStorage) CountVotingProcesses(orgAddress common.Address, draft Dr
 // worker — and becomes reclaimable by a new publish. It is a var so tests can shorten it.
 var PublishStaleAfter = 15 * time.Minute
 
+// PublishInProgress reports whether a publish worker currently owns this process: it has been
+// claimed, has not finished, and the claim has not gone stale. While that is true the process is
+// unpublished and its questions still carry no UpstreamID, so every "is this a draft?" test reads
+// true even though a worker is already building elections from its own snapshot of it — which is
+// why mutating handlers have to ask this instead.
+//
+// The staleness rule has to agree with ClaimVotingProcessForPublish's own $lt cutoff: a marker it
+// would reclaim must not block anything here either, or a crashed worker would leave the process
+// uneditable for as long as it leaves it unpublishable.
+func (vp *VotingProcess) PublishInProgress() bool {
+	if vp.Published || vp.Publishing.IsZero() {
+		return false
+	}
+	return time.Since(vp.Publishing) <= PublishStaleAfter
+}
+
 // ClaimVotingProcessForPublish atomically transitions an unpublished process into the
 // publishing state (published stays false, but a "publishing" timestamp marker is set) so two
 // concurrent publish requests cannot both proceed. It returns true when this call won the

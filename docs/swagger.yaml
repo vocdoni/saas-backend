@@ -6029,7 +6029,7 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Process already published
+          description: Process already published, or its publish is in flight
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -6070,8 +6070,10 @@ paths:
     put:
       consumes:
       - application/json
-      description: Update a voting process while it is still a draft (not published).
-        409 if already published.
+      description: |-
+        Update a voting process while it is still a draft (not published). 409 if already
+        published, and also while a publish is in flight: the worker is already building
+        elections from the draft, so it cannot be rewritten until that finishes.
       parameters:
       - description: Process ID
         in: path
@@ -6546,7 +6548,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: A member already signed for would lose eligibility
+          description: A member already signed for would lose eligibility, or the
+            publish is in flight
           schema:
             $ref: '#/definitions/errors.Error'
         "500":

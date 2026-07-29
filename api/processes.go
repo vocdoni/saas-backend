@@ -217,7 +217,9 @@ func (a *API) writeQuestions(vp *db.VotingProcess, built []*db.VotingProcessQues
 // updateVotingProcessHandler godoc
 //
 //	@Summary		Update a voting process draft
-//	@Description	Update a voting process while it is still a draft (not published). 409 if already published.
+//	@Description	Update a voting process while it is still a draft (not published). 409 if already
+//	@Description	published, and also while a publish is in flight: the worker is already building
+//	@Description	elections from the draft, so it cannot be rewritten until that finishes.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -253,6 +255,13 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrDuplicateConflict.Withf("process already published and not in draft mode").Write(w)
 		return
 	}
+	// The other half of the same rule: a process whose publish is in flight is not published yet,
+	// but it is no longer editable either. This rewrite replaces the whole document and recreates
+	// every question with new ids, so a worker mid-publish would be left stamping UpstreamIDs onto
+	// questions that no longer exist, against a census this call already deleted.
+	if refuseWhilePublishing(w, vp) {
+		return
+	}
 	if !user.HasRoleFor(vp.OrgAddress, db.ManagerRole) && !user.HasRoleFor(vp.OrgAddress, db.AdminRole) {
 		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization").Write(w)
 		return
@@ -284,6 +293,10 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	}
 	vp.Title, vp.Description, vp.Header, vp.StreamURI = req.Title, req.Description, req.Header, req.StreamURI
 	vp.StartDate, vp.EndDate, vp.CensusID = start, end, census.ID
+	// The only marker that survives the guard above is a stale one, left by a worker that died.
+	// Editing the draft is what releases it — writing it back through this whole-document replace
+	// would leave the process reported as stale forever, reconciled on every startup.
+	vp.Publishing = time.Time{}
 	if _, err := a.db.SetVotingProcess(vp); err != nil {
 		_ = a.db.DelCensus(census.ID.Hex())
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
