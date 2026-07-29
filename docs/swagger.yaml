@@ -72,6 +72,14 @@ definitions:
       added:
         description: Number of members added
         type: integer
+      censusJobIds:
+        description: |-
+          CensusJobIDs are the async jobs raising the on-chain maxCensusSize of the elections whose
+          census just grew, one per organization. Poll each with GET /jobs/{jobId}. Absent when no
+          live census was affected.
+        items:
+          type: string
+        type: array
       errors:
         description: |-
           Errors encountered during job. Validation errors are prefixed with
@@ -1301,6 +1309,14 @@ definitions:
         type: array
       description:
         $ref: '#/definitions/db.MultiLangString'
+      eligibleMemberIds:
+        description: |-
+          EligibleMemberIDs is the question's eligibility subset — who may vote it. Present only for a
+          Manager/Admin of the owning organization; an anonymous or non-manager read never carries it.
+          An empty/absent list on a manager read means the question is open to the whole census.
+        items:
+          type: string
+        type: array
       encryptionKeys:
         description: |-
           EncryptionKeys are the on-chain vote-encryption public keys (only for secretUntilTheEnd
@@ -1699,6 +1715,10 @@ definitions:
         type: array
       jobId:
         type: string
+      removed:
+        description: Removed is set by the DELETE; it is omitted by the PUT, which
+          only adds.
+        type: integer
     type: object
   apicommon.UpdateProcessRequest:
     properties:
@@ -1723,6 +1743,35 @@ definitions:
           Additional metadata for the process
           Can be any key-value pairs
         type: object
+    type: object
+  apicommon.UpdateQuestionCensusRequest:
+    properties:
+      memberIds:
+        description: |-
+          MemberIDs is the complete desired eligibility list, not a delta, so the request is
+          idempotent: resend the whole list to change it.
+
+          An empty list is not "nobody" — it is the encoding for "no restriction", which opens the
+          question to every member of the process census.
+        items:
+          type: string
+        type: array
+    type: object
+  apicommon.UpdateQuestionCensusResponse:
+    properties:
+      added:
+        type: integer
+      eligible:
+        description: Eligible is the size of the stored list. Zero means the question
+          is open to the whole census.
+        type: integer
+      jobId:
+        description: |-
+          JobID is the async job raising the election's on-chain maxCensusSize, present only when the
+          question needed more room than it was published with (202).
+        type: string
+      removed:
+        type: integer
     type: object
   apicommon.UserInfo:
     properties:
@@ -6184,6 +6233,70 @@ paths:
       tags:
       - processes
   /processes/{processId}/census:
+    delete:
+      consumes:
+      - application/json
+      description: |-
+        Remove members from a published voting process's census and from every question
+        eligibility list built on it, so the CSP stops signing for them. Refused with 409 for
+        any member the CSP has already signed for while a question of the process is still
+        READY or PAUSED; once voting closes on those questions the removal succeeds. The
+        offending ids come back in `data.votedMemberIds`.
+
+        Pruning a question's eligibility list to empty opens it to the whole census, so a
+        maxCensusSize increase may be enqueued as an async job (poll GET /jobs/{jobId}).
+        Requires Manager/Admin role.
+
+        Also callable with a scoped API key (scope: `voting:write`).
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Member IDs to remove
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.AddCensusParticipantsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Members removed
+          schema:
+            $ref: '#/definitions/apicommon.UpdateProcessCensusResponse'
+        "202":
+          description: Members removed; maxCensusSize update enqueued
+          schema:
+            $ref: '#/definitions/apicommon.UpdateProcessCensusResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Process is not published, or a member has already been signed
+            for
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Remove members from a published process census
+      tags:
+      - processes
     put:
       consumes:
       - application/json
@@ -6448,6 +6561,86 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Get a voting process question
+      tags:
+      - processes
+  /processes/{processId}/questions/{questionId}/census:
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Replace the set of members eligible to vote one question of a voting process, for a
+        draft or a published process (closes #611). Requires Manager/Admin role.
+
+        The body is the **complete desired list, not a delta**, so the request is idempotent:
+        resend the whole list to change it. Every id must already be a participant of the
+        process census. Input order is preserved and duplicates are dropped, so a client can
+        diff what it reads back against its next request.
+
+        **An empty list does not mean "nobody": it is the encoding for "no restriction" and
+        opens the question to every member of the census.** A response of `eligible: 0`
+        therefore means the question is open to everyone.
+
+        Because reopening a restricted question can multiply its electorate while its election
+        was sized on chain for the old subset, a maxCensusSize increase is enqueued as an async
+        job whenever the question needs more room than it was published with (202; poll GET
+        /jobs/{jobId}).
+
+        Removing a member the CSP has already signed for, while a question of this process is
+        still READY or PAUSED, is refused with 409 and the offending ids in
+        `data.votedMemberIds`.
+
+        Also callable with a scoped API key (scope: `voting:write`).
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Question ID
+        in: path
+        name: questionId
+        required: true
+        type: string
+      - description: Complete desired eligibility list
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.UpdateQuestionCensusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Eligibility updated; no on-chain resize needed
+          schema:
+            $ref: '#/definitions/apicommon.UpdateQuestionCensusResponse'
+        "202":
+          description: Eligibility updated; maxCensusSize update enqueued
+          schema:
+            $ref: '#/definitions/apicommon.UpdateQuestionCensusResponse'
+        "400":
+          description: Invalid input data, or a member is not part of the census
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process or question not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Publish in progress, member already signed for, or list changed
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Set a question's eligibility list
       tags:
       - processes
   /processes/{processId}/questions/{questionId}/status:
