@@ -113,11 +113,11 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Test deleting with invalid ID
-		err = testDB.DelOrgMember("invalid-id")
+		_, err = testDB.DelOrgMember("invalid-id")
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test deleting with valid ID
-		err = testDB.DelOrgMember(memberOID)
+		_, err = testDB.DelOrgMember(memberOID)
 		c.Assert(err, qt.IsNil)
 
 		// Verify the member was deleted
@@ -339,7 +339,7 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test DeleteOrgMembers with zero address - should fail
-		_, err = testDB.DeleteOrgMembers(common.Address{}, []string{"some-id"})
+		_, _, err = testDB.DeleteOrgMembers(common.Address{}, []string{"some-id"})
 		c.Assert(err, qt.Equals, ErrInvalidData)
 	})
 

@@ -43,6 +43,33 @@ func normalizeCSPUserIDs(memberIDs []string) []string {
 	return userIDs
 }
 
+// CensusesForMembers returns the ids of every census the given members participate in. Deleting a
+// member has to reach all of them, not only the ones reachable through a group.
+func (ms *MongoStorage) CensusesForMembers(memberIDs []string) ([]string, error) {
+	if len(memberIDs) == 0 {
+		return nil, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	values, err := ms.censusParticipants.Distinct(ctx, "censusId",
+		bson.M{"participantID": bson.M{"$in": memberIDs}})
+	if err != nil {
+		return nil, fmt.Errorf("failed to query censuses of members: %w", err)
+	}
+
+	censusIDs := make([]string, 0, len(values))
+	for _, v := range values {
+		id, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("unexpected censusId type %T in census participants", v)
+		}
+		censusIDs = append(censusIDs, id)
+	}
+	return censusIDs, nil
+}
+
 // VotingProcessesByCensus returns every voting process built on any of the given censuses.
 // A group census can back several processes, so this is the link from a memberbase change back
 // to the elections it has to reach.
@@ -225,6 +252,16 @@ func (ms *MongoStorage) RevokeMembersFromCensuses(
 	}
 
 	return ms.emptiedQuestions(ctx, candidates)
+}
+
+// RevokeMembersEverywhere revokes the given members from every census they participate in. This is
+// the member-deletion form of RevokeMembersFromCensuses, where the censuses are not known up front.
+func (ms *MongoStorage) RevokeMembersEverywhere(memberIDs []string) ([]VotingProcessQuestion, error) {
+	censusIDs, err := ms.CensusesForMembers(memberIDs)
+	if err != nil {
+		return nil, err
+	}
+	return ms.RevokeMembersFromCensuses(censusIDs, memberIDs)
 }
 
 // publishedQuestionsNaming returns the ids of published questions whose eligibility list contains

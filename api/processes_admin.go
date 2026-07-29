@@ -295,6 +295,82 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, resp)
 }
 
+// removeVotingProcessCensusHandler godoc
+//
+//	@Summary		Remove members from a published process census
+//	@Description	Remove members from a published voting process's census and from every question
+//	@Description	eligibility list built on it, so the CSP stops signing for them. Refused with 409 for
+//	@Description	any member the CSP has already signed for while a question of the process is still
+//	@Description	READY or PAUSED; once voting closes on those questions the removal succeeds. The
+//	@Description	offending ids come back in `data.votedMemberIds`.
+//	@Description
+//	@Description	Pruning a question's eligibility list to empty opens it to the whole census, so a
+//	@Description	maxCensusSize increase may be enqueued as an async job (poll GET /jobs/{jobId}).
+//	@Description	Requires Manager/Admin role.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `voting:write`).
+//	@Tags			processes
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			processId	path		string									true	"Process ID"
+//	@Param			request		body		apicommon.AddCensusParticipantsRequest	true	"Member IDs to remove"
+//	@Success		200			{object}	apicommon.UpdateProcessCensusResponse	"Members removed"
+//	@Success		202			{object}	apicommon.UpdateProcessCensusResponse	"Members removed; maxCensusSize update enqueued"
+//	@Failure		400			{object}	errors.Error							"Invalid input data"
+//	@Failure		401			{object}	errors.Error							"Unauthorized"
+//	@Failure		404			{object}	errors.Error							"Process not found"
+//	@Failure		409			{object}	errors.Error							"Process is not published, or a member has already been signed for"
+//	@Failure		500			{object}	errors.Error							"Internal server error"
+//	@Router			/processes/{processId}/census [delete]
+func (a *API) removeVotingProcessCensusHandler(w http.ResponseWriter, r *http.Request) {
+	oid, ok := a.votingProcessID(w, r)
+	if !ok {
+		return
+	}
+	// loads the process + questions and gates on Manager/Admin of the owning org.
+	vp, _, ok := a.authorizeStatusChange(w, r, oid)
+	if !ok {
+		return
+	}
+	if !vp.Published {
+		errors.ErrDuplicateConflict.Withf(
+			"process is not published; edit the draft via PUT /processes/{processId}",
+		).Write(w)
+		return
+	}
+
+	var req apicommon.AddCensusParticipantsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errors.ErrMalformedBody.Withf("couldn't decode participant IDs").Write(w)
+		return
+	}
+	if len(req.MemberIDs) == 0 {
+		apicommon.HTTPWriteJSON(w, &apicommon.UpdateProcessCensusResponse{Added: 0})
+		return
+	}
+
+	censusID := vp.CensusID.Hex()
+	// before any write, so a refusal leaves the census exactly as it was
+	if a.refuseBlockedVoters(w, []string{censusID}, req.MemberIDs) {
+		return
+	}
+
+	emptied, err := a.db.RevokeMembersFromCensuses([]string{censusID}, req.MemberIDs)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
+	resp := &apicommon.UpdateProcessCensusResponse{Removed: uint32(len(req.MemberIDs))}
+	if jobID := a.resizeEmptiedQuestions(vp.OrgAddress, emptied); jobID != "" {
+		resp.JobID = jobID
+		apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, resp)
+		return
+	}
+	apicommon.HTTPWriteJSON(w, resp)
+}
+
 // censusSizeTarget is one published question whose on-chain election may need its maxCensusSize
 // raised, with the census the new size is read from. A single group census can back several
 // processes, so one request can produce targets spread across them.

@@ -299,7 +299,22 @@ func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
-	err := a.db.UpdateOrganizationMemberGroup(
+	group, err := a.db.OrganizationMemberGroup(groupID, org.Address)
+	if err != nil {
+		if err == db.ErrNotFound {
+			errors.ErrInvalidData.Withf("group not found").Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.Withf("could not load organization member group: %v", err).Write(w)
+		return
+	}
+	// members leaving the group leave its censuses too, so the refusal has to happen before any
+	// write: otherwise a blocked member is dropped from the group but stays in the census.
+	if a.refuseBlockedVoters(w, group.CensusIDs, toUpdate.RemoveMembers) {
+		return
+	}
+
+	emptied, err := a.db.UpdateOrganizationMemberGroup(
 		groupID,
 		org.Address,
 		toUpdate.Title,
@@ -318,6 +333,7 @@ func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 		}
 		return
 	}
+	a.resizeEmptiedQuestions(org.Address, emptied)
 	apicommon.HTTPWriteOK(w)
 }
 
@@ -364,7 +380,23 @@ func (a *API) deleteOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
-	if err := a.db.DeleteOrganizationMemberGroup(groupID, org.Address); err != nil {
+	// deleting a group empties the censuses built from it, so every one of its members has to be
+	// removable — checked before the delete, which is not undoable.
+	group, err := a.db.OrganizationMemberGroup(groupID, org.Address)
+	switch err {
+	case nil:
+		if a.refuseBlockedVoters(w, group.CensusIDs, group.MemberIDs) {
+			return
+		}
+	case db.ErrNotFound:
+		// preserve the handler's existing behaviour: deleting a missing group succeeds
+	default:
+		errors.ErrGenericInternalServerError.Withf("could not load organization member group: %v", err).Write(w)
+		return
+	}
+
+	emptied, err := a.db.DeleteOrganizationMemberGroup(groupID, org.Address)
+	if err != nil {
 		switch err {
 		case db.ErrNotFound:
 			errors.ErrInvalidData.Withf("group not found").Write(w)
@@ -375,6 +407,7 @@ func (a *API) deleteOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 		}
 		return
 	}
+	a.resizeEmptiedQuestions(org.Address, emptied)
 	apicommon.HTTPWriteOK(w)
 }
 

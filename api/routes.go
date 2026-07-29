@@ -217,7 +217,8 @@ const (
 	processesEndpoint = "/processes/{processId}"
 	// POST /processes/census/validation validates a census spec (duplicates/missing fields) before create
 	processesCensusValidateEndpoint = "/processes/census/validation"
-	// PUT /processes/{processId}/census adds members to a published process's census (+ maxCensusSize bump)
+	// PUT /processes/{processId}/census adds members to a published process's census (+ maxCensusSize bump);
+	// DELETE removes them from it and from every question eligibility list built on it
 	processesCensusEndpoint = "/processes/{processId}/census"
 	// GET /processes/{processId}/validation publish-readiness dry-run (protected)
 	processesValidateEndpoint = "/processes/{processId}/validation"

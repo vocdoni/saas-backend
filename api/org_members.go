@@ -376,12 +376,36 @@ func (a *API) deleteOrganizationMembersHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	var deleted int
+	var emptied []db.VotingProcessQuestion
 	var err error
+
+	// the ids at stake, and the censuses they would leave: the refusal below has to happen before
+	// any write, so a blocked member keeps both their membership and their census participation.
+	targetIDs := members.IDs
+	if members.All {
+		targetIDs, err = a.db.GetAllOrgMemberIDs(org.Address)
+		if err != nil {
+			errors.ErrGenericInternalServerError.Withf("could not list org members: %v", err).Write(w)
+			return
+		}
+	}
+	if len(targetIDs) == 0 {
+		apicommon.HTTPWriteJSON(w, &apicommon.DeleteMembersResponse{Count: 0})
+		return
+	}
+	censusIDs, err := a.db.CensusesForMembers(targetIDs)
+	if err != nil {
+		errors.ErrGenericInternalServerError.Withf("could not resolve member censuses: %v", err).Write(w)
+		return
+	}
+	if a.refuseBlockedVoters(w, censusIDs, targetIDs) {
+		return
+	}
 
 	// check if we should delete all members
 	if members.All {
 		// delete all org members from the database
-		deleted, err = a.db.DeleteAllOrgMembers(org.Address)
+		deleted, emptied, err = a.db.DeleteAllOrgMembers(org.Address)
 		if err != nil {
 			errors.ErrGenericInternalServerError.Withf("could not delete all org members: %v", err).Write(w)
 			return
@@ -391,18 +415,17 @@ func (a *API) deleteOrganizationMembersHandler(w http.ResponseWriter, r *http.Re
 			"count", deleted,
 			"user", user.Email)
 	} else {
-		// check if there are member IDs to delete
-		if len(members.IDs) == 0 {
-			apicommon.HTTPWriteJSON(w, &apicommon.DeleteMembersResponse{Count: 0})
-			return
-		}
 		// delete specific org members from the database
-		deleted, err = a.db.DeleteOrgMembers(org.Address, members.IDs)
+		deleted, emptied, err = a.db.DeleteOrgMembers(org.Address, members.IDs)
 		if err != nil {
 			errors.ErrGenericInternalServerError.Withf("could not delete org members: %v", err).Write(w)
 			return
 		}
 	}
+
+	// pruning a question's eligibility list to empty opens it to the whole census, so its election
+	// needs the room.
+	a.resizeEmptiedQuestions(org.Address, emptied)
 
 	apicommon.HTTPWriteJSON(w, &apicommon.DeleteMembersResponse{Count: deleted})
 }

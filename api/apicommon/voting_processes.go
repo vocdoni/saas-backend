@@ -73,13 +73,16 @@ type ValidateProcessCensusRequest struct {
 	Census     CensusSpec        `json:"census"`
 }
 
-// UpdateProcessCensusResponse is the result of PUT /processes/{processId}/census: the number of
-// members added to the census synchronously, plus the async job id that raises each published
-// election's maxCensusSize on-chain (empty when no on-chain update was needed).
+// UpdateProcessCensusResponse is the result of PUT and DELETE /processes/{processId}/census: the
+// number of members added to or removed from the census synchronously, plus the async job id that
+// raises each published election's maxCensusSize on-chain (empty when no on-chain update was
+// needed).
 type UpdateProcessCensusResponse struct {
 	JobID  string   `json:"jobId,omitempty"`
 	Added  uint32   `json:"added"`
 	Errors []string `json:"errors,omitempty"`
+	// Removed is set by the DELETE; it is omitted by the PUT, which only adds.
+	Removed uint32 `json:"removed,omitempty"`
 }
 
 // CreateVotingProcessResponse is returned by POST /processes.

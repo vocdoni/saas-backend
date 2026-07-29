@@ -431,6 +431,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodDelete, processesEndpoint, a.deleteVotingProcessHandler)
 		handle(r, http.MethodGet, processesParticipantsEndpoint, a.votingProcessParticipantsHandler)
 		handle(r, http.MethodPut, processesCensusEndpoint, a.updateVotingProcessCensusHandler)
+		handle(r, http.MethodDelete, processesCensusEndpoint, a.removeVotingProcessCensusHandler)
 	})
 
 	// Public routes
