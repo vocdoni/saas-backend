@@ -448,8 +448,12 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 	elec, err := a.account.Election(question.UpstreamID)
 	if err != nil {
 		// the eligibility write has already committed, so failing the request here would report
-		// failure for work that was done. Enqueue instead: growth is genuinely required to reach
-		// this point, so the tx cannot be a shrink, and a chain problem surfaces on the job.
+		// failure for work that was done. Enqueue instead and let the chain judge the size: it
+		// may well already be larger than what is being asked for, since `previous` is only the
+		// stored list — narrow a resized question and widen it again and `needed` exceeds
+		// `previous` while sitting below the election. The chain refuses to shrink, so such a tx
+		// is rejected and the job says so, which is a better outcome than reporting a failed
+		// request for an eligibility change that did land.
 		log.Warnw("could not read election size, enqueuing the resize anyway",
 			"upstreamId", question.UpstreamID.String(), "error", err)
 	} else if elec.Census != nil && needed <= elec.Census.MaxCensusSize {
