@@ -690,7 +690,7 @@ type VotingProcess struct {
 //
 //nolint:lll
 type VotingProcessQuestion struct {
-	ID                primitive.ObjectID `json:"id" bson:"_id"`
+	ID                primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	ProcessID         primitive.ObjectID `json:"parentProcessId" bson:"processId"`
 	OrgAddress        common.Address     `json:"-" bson:"orgAddress"`
 	Order             int                `json:"-" bson:"order"`

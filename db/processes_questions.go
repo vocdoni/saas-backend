@@ -89,15 +89,12 @@ func (ms *MongoStorage) SetProcessQuestions(
 		// brand new slot gets a server-generated one. Doing it in a single atomic find-and-replace
 		// (rather than reading the slot first) leaves no window for a second writer to insert
 		// between the read and the write, which would make the replacement fail on the immutable _id.
-		doc, err := questionDocWithoutID(q)
-		if err != nil {
-			return nil, fmt.Errorf("failed to encode question %d: %w", i, err)
-		}
+		doc := questionDocWithoutID(q)
 		filter := bson.M{"processId": processID, "order": i} //nolint:goconst
 		stored := struct {
 			ID primitive.ObjectID `bson:"_id"`
 		}{}
-		err = ms.processesQuestions.FindOneAndReplace(ctx, filter, doc,
+		err := ms.processesQuestions.FindOneAndReplace(ctx, filter, doc,
 			options.FindOneAndReplace().
 				SetUpsert(true).
 				SetReturnDocument(options.After).
@@ -120,19 +117,14 @@ func (ms *MongoStorage) SetProcessQuestions(
 	return ids, nil
 }
 
-// questionDocWithoutID encodes a question for storage with its _id stripped, so a replacement
-// neither overwrites the id of the row it lands on nor fails on the immutable field.
-func questionDocWithoutID(q *VotingProcessQuestion) (bson.M, error) {
-	raw, err := bson.Marshal(q)
-	if err != nil {
-		return nil, err
-	}
-	doc := bson.M{}
-	if err := bson.Unmarshal(raw, &doc); err != nil {
-		return nil, err
-	}
-	delete(doc, "_id")
-	return doc, nil
+// questionDocWithoutID returns a copy of a question with its _id zeroed, so a replacement neither
+// overwrites the id of the row it lands on nor fails on the immutable field. The bson tag carries
+// omitempty and primitive.ObjectID implements IsZero, so the driver leaves the field out entirely —
+// no marshal/unmarshal round-trip needed for what runs once per question on every draft save.
+func questionDocWithoutID(q *VotingProcessQuestion) *VotingProcessQuestion {
+	doc := *q
+	doc.ID = primitive.NilObjectID
+	return &doc
 }
 
 // Question returns a single question by its hex ObjectID.
