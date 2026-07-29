@@ -38,7 +38,10 @@ type CSPBlindSession struct {
 	ElectionID internal.HexBytes `json:"electionID" bson:"electionid"`
 	// SecretK is the ephemeral scalar k, 32 bytes big-endian. It must never
 	// leave the server, so it is excluded from JSON serialization.
-	SecretK   []byte    `json:"-" bson:"secretk"`
+	SecretK []byte `json:"-" bson:"secretk"`
+	// TokenR is the public point handed to the voter, kept so the sign request
+	// can be matched against the session it was blinded for.
+	TokenR    []byte    `json:"tokenR" bson:"tokenr"`
 	CreatedAt time.Time `json:"createdAt" bson:"createdat"`
 	// ExpiresAt drives the TTL index. Mongo's TTL monitor only sweeps about once
 	// a minute, so reads also filter on it rather than trusting the sweep.
@@ -62,8 +65,10 @@ func cspBlindSessionID(userID, electionID internal.HexBytes) internal.HexBytes {
 // session, replacing any session that voter already had open on the same
 // election. Replacing is intentional: preparing again hands the client a fresh R
 // point, and the previous one must stop being signable.
-func (ms *MongoStorage) SetCSPBlindSession(userID, electionID internal.HexBytes, secretK []byte, ttl time.Duration) error {
-	if userID == nil || electionID == nil || len(secretK) == 0 {
+func (ms *MongoStorage) SetCSPBlindSession(
+	userID, electionID internal.HexBytes, secretK, tokenR []byte, ttl time.Duration,
+) error {
+	if userID == nil || electionID == nil || len(secretK) == 0 || len(tokenR) == 0 {
 		return ErrBadInputs
 	}
 	if ttl <= 0 {
@@ -80,6 +85,7 @@ func (ms *MongoStorage) SetCSPBlindSession(userID, electionID internal.HexBytes,
 		UserID:     userID,
 		ElectionID: electionID,
 		SecretK:    secretK,
+		TokenR:     tokenR,
 		CreatedAt:  now,
 		ExpiresAt:  now.Add(ttl),
 	}
@@ -95,10 +101,18 @@ func (ms *MongoStorage) SetCSPBlindSession(userID, electionID internal.HexBytes,
 // A second call for the same session returns ErrCSPBlindSessionNotFound, which
 // is what makes k single-use and keeps the salted private key safe.
 //
+// tokenR must be the point the session issued. It is part of the filter rather
+// than a check on the result, so a request quoting a stale R matches nothing and
+// leaves the session intact -- the voter can blind against the right R and
+// retry, instead of burning their one signature on a message that would never
+// have verified.
+//
 // Expired sessions are treated as absent even if the TTL sweep has not reached
 // them yet.
-func (ms *MongoStorage) ConsumeCSPBlindSession(userID, electionID internal.HexBytes) (*CSPBlindSession, error) {
-	if userID == nil || electionID == nil {
+func (ms *MongoStorage) ConsumeCSPBlindSession(
+	userID, electionID internal.HexBytes, tokenR []byte,
+) (*CSPBlindSession, error) {
+	if userID == nil || electionID == nil || len(tokenR) == 0 {
 		return nil, ErrBadInputs
 	}
 	ms.keysLock.Lock()
@@ -108,6 +122,7 @@ func (ms *MongoStorage) ConsumeCSPBlindSession(userID, electionID internal.HexBy
 
 	filter := bson.M{
 		"_id":       cspBlindSessionID(userID, electionID),
+		"tokenr":    tokenR,
 		"expiresat": bson.M{"$gt": time.Now()},
 	}
 	session := new(CSPBlindSession)

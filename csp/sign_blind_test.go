@@ -73,7 +73,7 @@ func TestBlindSignRoundTrip(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 
 	// 3. the CSP blind-signs a scalar it cannot interpret
-	blindedSig, err := csp.CompleteBlindSign(testToken, electionID, blindedMsg.Bytes())
+	blindedSig, err := csp.CompleteBlindSign(testToken, electionID, tokenR, blindedMsg.Bytes())
 	c.Assert(err, qt.IsNil)
 
 	// 4. the voter unblinds, and the signature verifies against the salted key
@@ -119,11 +119,11 @@ func TestBlindSignSessionIsSingleUse(t *testing.T) {
 		}
 	}
 
-	_, err = csp.CompleteBlindSign(testToken, electionID, blinded())
+	_, err = csp.CompleteBlindSign(testToken, electionID, tokenR, blinded())
 	c.Assert(err, qt.IsNil)
 
 	// a second signature under the same session must not be produced
-	_, err = csp.CompleteBlindSign(testToken, electionID, blinded())
+	_, err = csp.CompleteBlindSign(testToken, electionID, tokenR, blinded())
 	c.Assert(err, qt.Not(qt.IsNil))
 }
 
@@ -160,7 +160,7 @@ func TestBlindSignConcurrentCompletion(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := csp.CompleteBlindSign(testToken, electionID, msgs[i]); err == nil {
+			if _, err := csp.CompleteBlindSign(testToken, electionID, tokenR, msgs[i]); err == nil {
 				mu.Lock()
 				succeeded++
 				mu.Unlock()
@@ -203,7 +203,7 @@ func TestCompleteBlindSignRejectsShortMessageWithoutBurningSession(t *testing.T)
 
 	// a 31-byte value is exactly the case the signer would reject
 	short := internal.HexBytes(util.RandomBytes(31))
-	_, err = csp.CompleteBlindSign(testToken, electionID, short)
+	_, err = csp.CompleteBlindSign(testToken, electionID, tokenR, short)
 	c.Assert(err, qt.ErrorIs, ErrRetryBlinding)
 
 	// the session survived, so blinding again still works
@@ -217,7 +217,7 @@ func TestCompleteBlindSignRejectsShortMessageWithoutBurningSession(t *testing.T)
 			good = m.Bytes()
 		}
 	}
-	_, err = csp.CompleteBlindSign(testToken, electionID, good)
+	_, err = csp.CompleteBlindSign(testToken, electionID, tokenR, good)
 	c.Assert(err, qt.IsNil)
 }
 
@@ -266,7 +266,7 @@ func TestCompleteBlindSignWithoutSession(t *testing.T) {
 	// never prepared, so there is nothing to complete
 	msg := internal.HexBytes(util.RandomBytes(32))
 	msg[0] |= 0x80 // keep the minimal encoding a full 32 bytes
-	_, err := csp.CompleteBlindSign(testToken, electionID, msg)
+	_, err := csp.CompleteBlindSign(testToken, electionID, internal.HexBytes(util.RandomBytes(33)), msg)
 	c.Assert(err, qt.ErrorIs, ErrBlindSessionNotFound)
 }
 

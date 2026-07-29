@@ -69,14 +69,15 @@ func (c *CSP) PrepareBlindSign(
 
 	// k is stored zero-padded to a fixed width; it is read back with SetBytes,
 	// which recovers the same integer either way.
+	tokenR = r.Bytes()
 	if err := c.Storage.SetCSPBlindSession(
-		authTokenData.UserID, electionID, k.FillBytes(make([]byte, blindScalarLen)), 0,
+		authTokenData.UserID, electionID, k.FillBytes(make([]byte, blindScalarLen)), tokenR, 0,
 	); err != nil {
 		return nil, nil, errors.Join(ErrSign, err)
 	}
 
 	log.Debugw("opened blind signing session", "procId", electionID, "weight", weight)
-	return r.Bytes(), cert, nil
+	return tokenR, cert, nil
 }
 
 // CompleteBlindSign blind-signs the message a voter prepared earlier and marks
@@ -86,7 +87,7 @@ func (c *CSP) PrepareBlindSign(
 // putting it in a vote proof. The CSP never sees the ballot bundle, so it cannot
 // check what it is signing -- the authority comes entirely from the checks below
 // and from the session having been opened for this voter.
-func (c *CSP) CompleteBlindSign(token, electionID, blindedMsg internal.HexBytes) (internal.HexBytes, error) {
+func (c *CSP) CompleteBlindSign(token, electionID, tokenR, blindedMsg internal.HexBytes) (internal.HexBytes, error) {
 	authTokenData, err := c.Storage.CSPAuth(token)
 	if err != nil {
 		return nil, ErrInvalidAuthToken
@@ -121,9 +122,9 @@ func (c *CSP) CompleteBlindSign(token, electionID, blindedMsg internal.HexBytes)
 	// Fetch-and-delete in one step: k is single-use. Signing two different
 	// messages with one k reveals the salted private key, so this must never
 	// hand the same k out twice.
-	session, err := c.Storage.ConsumeCSPBlindSession(authTokenData.UserID, electionID)
+	session, err := c.Storage.ConsumeCSPBlindSession(authTokenData.UserID, electionID, tokenR)
 	if err != nil {
-		if errors.Is(err, db.ErrCSPBlindSessionNotFound) {
+		if errors.Is(err, db.ErrCSPBlindSessionNotFound) || errors.Is(err, db.ErrBadInputs) {
 			return nil, ErrBlindSessionNotFound
 		}
 		return nil, errors.Join(ErrSign, err)

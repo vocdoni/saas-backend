@@ -13,6 +13,7 @@ var (
 	testBlindUserID     = internal.HexBytes([]byte("blindUserID"))
 	testBlindElectionID = internal.HexBytes([]byte("blindElectionID"))
 	testBlindSecretK    = []byte("0123456789abcdef0123456789abcdef")
+	testBlindTokenR     = []byte("tokenRpoint")
 )
 
 func TestCSPBlindSessionRoundTrip(t *testing.T) {
@@ -20,21 +21,21 @@ func TestCSPBlindSessionRoundTrip(t *testing.T) {
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
 	c.Run("bad inputs", func(c *qt.C) {
-		c.Assert(testDB.SetCSPBlindSession(nil, testBlindElectionID, testBlindSecretK, 0), qt.ErrorIs, ErrBadInputs)
-		c.Assert(testDB.SetCSPBlindSession(testBlindUserID, nil, testBlindSecretK, 0), qt.ErrorIs, ErrBadInputs)
-		c.Assert(testDB.SetCSPBlindSession(testBlindUserID, testBlindElectionID, nil, 0), qt.ErrorIs, ErrBadInputs)
+		c.Assert(testDB.SetCSPBlindSession(nil, testBlindElectionID, testBlindSecretK, testBlindTokenR, 0), qt.ErrorIs, ErrBadInputs)
+		c.Assert(testDB.SetCSPBlindSession(testBlindUserID, nil, testBlindSecretK, testBlindTokenR, 0), qt.ErrorIs, ErrBadInputs)
+		c.Assert(testDB.SetCSPBlindSession(testBlindUserID, testBlindElectionID, nil, testBlindTokenR, 0), qt.ErrorIs, ErrBadInputs)
 
-		_, err := testDB.ConsumeCSPBlindSession(nil, testBlindElectionID)
+		_, err := testDB.ConsumeCSPBlindSession(nil, testBlindElectionID, testBlindTokenR)
 		c.Assert(err, qt.ErrorIs, ErrBadInputs)
-		_, err = testDB.ConsumeCSPBlindSession(testBlindUserID, nil)
+		_, err = testDB.ConsumeCSPBlindSession(testBlindUserID, nil, testBlindTokenR)
 		c.Assert(err, qt.ErrorIs, ErrBadInputs)
 	})
 
 	c.Run("store and consume", func(c *qt.C) {
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
-		c.Assert(testDB.SetCSPBlindSession(testBlindUserID, testBlindElectionID, testBlindSecretK, 0), qt.IsNil)
+		c.Assert(testDB.SetCSPBlindSession(testBlindUserID, testBlindElectionID, testBlindSecretK, testBlindTokenR, 0), qt.IsNil)
 
-		session, err := testDB.ConsumeCSPBlindSession(testBlindUserID, testBlindElectionID)
+		session, err := testDB.ConsumeCSPBlindSession(testBlindUserID, testBlindElectionID, testBlindTokenR)
 		c.Assert(err, qt.IsNil)
 		c.Assert(session.SecretK, qt.DeepEquals, testBlindSecretK)
 		c.Assert(session.UserID, qt.DeepEquals, testBlindUserID)
@@ -45,17 +46,32 @@ func TestCSPBlindSessionRoundTrip(t *testing.T) {
 		// This is the property that keeps the salted private key secret: signing
 		// two different blinded messages with one k reveals d.
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
-		c.Assert(testDB.SetCSPBlindSession(testBlindUserID, testBlindElectionID, testBlindSecretK, 0), qt.IsNil)
+		c.Assert(testDB.SetCSPBlindSession(testBlindUserID, testBlindElectionID, testBlindSecretK, testBlindTokenR, 0), qt.IsNil)
 
-		_, err := testDB.ConsumeCSPBlindSession(testBlindUserID, testBlindElectionID)
+		_, err := testDB.ConsumeCSPBlindSession(testBlindUserID, testBlindElectionID, testBlindTokenR)
 		c.Assert(err, qt.IsNil)
-		_, err = testDB.ConsumeCSPBlindSession(testBlindUserID, testBlindElectionID)
+		_, err = testDB.ConsumeCSPBlindSession(testBlindUserID, testBlindElectionID, testBlindTokenR)
 		c.Assert(err, qt.ErrorIs, ErrCSPBlindSessionNotFound)
 	})
 
 	c.Run("unknown session", func(c *qt.C) {
-		_, err := testDB.ConsumeCSPBlindSession(internal.HexBytes([]byte("nobody")), testBlindElectionID)
+		_, err := testDB.ConsumeCSPBlindSession(internal.HexBytes([]byte("nobody")), testBlindElectionID, testBlindTokenR)
 		c.Assert(err, qt.ErrorIs, ErrCSPBlindSessionNotFound)
+	})
+
+	c.Run("a stale tokenR does not consume the session", func(c *qt.C) {
+		// A client that blinded against a superseded R must not burn its one
+		// signature on a message that could never have verified.
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		c.Assert(testDB.SetCSPBlindSession(testBlindUserID, testBlindElectionID, testBlindSecretK, testBlindTokenR, 0), qt.IsNil)
+
+		_, err := testDB.ConsumeCSPBlindSession(testBlindUserID, testBlindElectionID, []byte("staleRpoint"))
+		c.Assert(err, qt.ErrorIs, ErrCSPBlindSessionNotFound)
+
+		// the real session is still there
+		session, err := testDB.ConsumeCSPBlindSession(testBlindUserID, testBlindElectionID, testBlindTokenR)
+		c.Assert(err, qt.IsNil)
+		c.Assert(session.SecretK, qt.DeepEquals, testBlindSecretK)
 	})
 
 	c.Run("expired session is not returned", func(c *qt.C) {
@@ -64,25 +80,25 @@ func TestCSPBlindSessionRoundTrip(t *testing.T) {
 		// A short positive TTL is used because SetCSPBlindSession treats a
 		// non-positive one as "apply the default".
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
-		c.Assert(testDB.SetCSPBlindSession(testBlindUserID, testBlindElectionID, testBlindSecretK, time.Millisecond), qt.IsNil)
+		c.Assert(testDB.SetCSPBlindSession(testBlindUserID, testBlindElectionID, testBlindSecretK, testBlindTokenR, time.Millisecond), qt.IsNil)
 		time.Sleep(20 * time.Millisecond)
 
-		_, err := testDB.ConsumeCSPBlindSession(testBlindUserID, testBlindElectionID)
+		_, err := testDB.ConsumeCSPBlindSession(testBlindUserID, testBlindElectionID, testBlindTokenR)
 		c.Assert(err, qt.ErrorIs, ErrCSPBlindSessionNotFound)
 	})
 
 	c.Run("preparing again replaces the previous session", func(c *qt.C) {
 		// The client gets a fresh R point, so the previous k must stop being usable.
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
-		c.Assert(testDB.SetCSPBlindSession(testBlindUserID, testBlindElectionID, testBlindSecretK, 0), qt.IsNil)
+		c.Assert(testDB.SetCSPBlindSession(testBlindUserID, testBlindElectionID, testBlindSecretK, testBlindTokenR, 0), qt.IsNil)
 		newK := []byte("fedcba9876543210fedcba9876543210")
-		c.Assert(testDB.SetCSPBlindSession(testBlindUserID, testBlindElectionID, newK, 0), qt.IsNil)
+		c.Assert(testDB.SetCSPBlindSession(testBlindUserID, testBlindElectionID, newK, testBlindTokenR, 0), qt.IsNil)
 
-		session, err := testDB.ConsumeCSPBlindSession(testBlindUserID, testBlindElectionID)
+		session, err := testDB.ConsumeCSPBlindSession(testBlindUserID, testBlindElectionID, testBlindTokenR)
 		c.Assert(err, qt.IsNil)
 		c.Assert(session.SecretK, qt.DeepEquals, newK)
 		// and only one session ever existed for this key
-		_, err = testDB.ConsumeCSPBlindSession(testBlindUserID, testBlindElectionID)
+		_, err = testDB.ConsumeCSPBlindSession(testBlindUserID, testBlindElectionID, testBlindTokenR)
 		c.Assert(err, qt.ErrorIs, ErrCSPBlindSessionNotFound)
 	})
 }
@@ -96,7 +112,7 @@ func TestCSPBlindSessionConcurrentConsume(t *testing.T) {
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
 	const racers = 8
-	c.Assert(testDB.SetCSPBlindSession(testBlindUserID, testBlindElectionID, testBlindSecretK, 0), qt.IsNil)
+	c.Assert(testDB.SetCSPBlindSession(testBlindUserID, testBlindElectionID, testBlindSecretK, testBlindTokenR, 0), qt.IsNil)
 
 	var (
 		wg        sync.WaitGroup
@@ -108,7 +124,7 @@ func TestCSPBlindSessionConcurrentConsume(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := testDB.ConsumeCSPBlindSession(testBlindUserID, testBlindElectionID)
+			_, err := testDB.ConsumeCSPBlindSession(testBlindUserID, testBlindElectionID, testBlindTokenR)
 			mu.Lock()
 			defer mu.Unlock()
 			switch {

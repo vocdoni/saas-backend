@@ -245,6 +245,9 @@ const (
 	processesAuthResendEndpoint = "/processes/{processId}/auth/resend"
 	processesSignEndpoint       = "/processes/{processId}/sign"
 	processesWeightEndpoint     = "/processes/{processId}/weight"
+	// anonymous (blind-signature) variant of the signing flow: prepare, then sign
+	processesSignAnonymousPrepareEndpoint = "/processes/{processId}/sign/anonymous/prepare"
+	processesSignAnonymousEndpoint        = "/processes/{processId}/sign/anonymous"
 
 	// // census auth routes (currently not implemented)
 	// // POST /process/{processId}/auth/0 to initiate auth
