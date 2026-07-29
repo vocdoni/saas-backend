@@ -12,9 +12,14 @@ import (
 // BallotProtocolFromType is the single mapping table, and the reverse direction is defined as
 // equality against it — QuestionTypeFromBallotProtocol asks "which named type would produce
 // exactly this protocol?". So the two can never drift apart, and ResolveBallotShape can fill in
-// whichever half a client left out. What is stored obeys:
+// whichever half a client left out. What is stored obeys, for any question with choices:
 //
 //	Type != "" ⇒ BallotProtocolFromType(Type, TypeSetup, Choices) == *BallotProtocol
+//
+// A question with no choices yet is the one carve-out: there is no ballot to derive either half
+// from, so a draft can be stored with neither a protocol nor a satisfied invariant. It cannot be
+// published (publish validation rejects a choiceless question), and adding its choices reconciles
+// it.
 //
 // Which matters because a question is immutable once published: a stored shape that disagreed
 // with the election it minted would go on disagreeing forever, and the API would keep serving
@@ -189,6 +194,10 @@ type BallotShapeInput struct {
 
 // BallotShape is a reconciled ballot specification, safe to store: Protocol is set, and when Type
 // is non-empty it re-derives Protocol exactly.
+//
+// Both hold for every question that has choices. For a choiceless one there is nothing to derive a
+// ballot from, so ResolveBallotShape passes the input through and Protocol stays whatever the
+// caller had — nil, if they supplied none.
 type BallotShape struct {
 	Type      string
 	TypeSetup db.QuestionTypeSetup

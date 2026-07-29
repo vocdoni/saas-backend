@@ -1,6 +1,7 @@
 package account
 
 import (
+	"math"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
@@ -387,6 +388,8 @@ func TestValidateBallotProtocol(t *testing.T) {
 			"issue 619 in raw form":      {MaxCount: 4, MaxValue: 1, UniqueValues: true},
 			"two fields, one value":      {MaxCount: 2, MaxValue: 0, UniqueValues: true},
 			"one short of a permutation": {MaxCount: 4, MaxValue: 2, UniqueValues: true},
+			// one value short of a permutation, at the top of the uint32 range
+			"one short at the uint32 ceiling": {MaxCount: math.MaxUint32, MaxValue: math.MaxUint32 - 2, UniqueValues: true},
 		} {
 			c.Assert(ValidateBallotProtocol(bp), qt.Not(qt.IsNil), qt.Commentf("%s", name))
 		}
@@ -399,6 +402,9 @@ func TestValidateBallotProtocol(t *testing.T) {
 			"singlechoice":          {MaxCount: 1, MaxValue: 2},
 			"multichoice":           {MaxCount: 4, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2},
 			"quadratic":             {MaxCount: 3, MaxValue: 4, CostExponent: 2, MaxTotalCost: 12},
+			// exactly enough values for the fields, where maxValue+1 overflows uint32: computed in
+			// uint32 it wraps to 0 and this permutation reads as unsatisfiable
+			"permutation at the uint32 ceiling": {MaxCount: math.MaxUint32, MaxValue: math.MaxUint32, UniqueValues: true},
 		} {
 			c.Assert(ValidateBallotProtocol(bp), qt.IsNil, qt.Commentf("%s", name))
 		}
