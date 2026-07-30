@@ -85,9 +85,7 @@ func (ms *MongoStorage) SetOrganization(org *Organization) error {
 	defer cancel()
 	// prepare the document to be updated in the database modifying only the
 	// fields that have changed
-	// define 'active' parameter to be updated always to update it even its new
-	// value is false
-	updateDoc, err := dynamicUpdateDocument(org, []string{"active"})
+	updateDoc, err := dynamicUpdateDocument(org, nil)
 	if err != nil {
 		return err
 	}

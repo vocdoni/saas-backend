@@ -25,7 +25,7 @@ func TestNormalizeMemberEmailsMigration(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
-	org := &Organization{Address: testOrgAddress, Active: true, CreatedAt: time.Now()}
+	org := &Organization{Address: testOrgAddress, CreatedAt: time.Now()}
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 
 	t.Run("normalizes email and recomputes login hashes", func(_ *testing.T) {

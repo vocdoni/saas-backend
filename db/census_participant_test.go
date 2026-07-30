@@ -19,7 +19,6 @@ func setupTestCensusParticipantPrerequisites(t *testing.T, memberSuffix string) 
 	// Create test organization
 	org := &Organization{
 		Address:   testOrgAddress,
-		Active:    true,
 		CreatedAt: time.Now(),
 	}
 
@@ -577,7 +576,6 @@ func TestCensusParticipant(t *testing.T) {
 		// Create organization and census
 		org := &Organization{
 			Address:   testOrgAddress,
-			Active:    true,
 			CreatedAt: time.Now(),
 		}
 		err := testDB.SetOrganization(org)
@@ -729,7 +727,6 @@ func setupCensusParticipantsByMemberIDsFixtureForTrackedTests(t *testing.T) *cen
 
 	org := &Organization{
 		Address:   testOrgAddress,
-		Active:    true,
 		CreatedAt: time.Now(),
 	}
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
@@ -864,7 +861,6 @@ func TestCreateCensusParticipantBulkOperationsFiltering(t *testing.T) {
 	// Create organization
 	org := &Organization{
 		Address:   testOrgAddress,
-		Active:    true,
 		CreatedAt: time.Now(),
 	}
 	err := testDB.SetOrganization(org)

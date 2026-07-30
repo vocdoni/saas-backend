@@ -29,7 +29,6 @@ func TestMigrations(t *testing.T) {
 
 		org := &Organization{
 			Address:   testOrgAddress,
-			Active:    true,
 			CreatedAt: time.Now(),
 			Website:   "testorg.com",
 		}

@@ -25,7 +25,6 @@ func setupCheckBundleFixture(t *testing.T) *checkBundleFixture {
 	org := &Organization{
 		Address:   testOrgAddress,
 		Country:   "ES",
-		Active:    true,
 		CreatedAt: time.Now(),
 	}
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)

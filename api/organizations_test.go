@@ -166,19 +166,15 @@ func TestUpdateOrganizationHandler(t *testing.T) {
 	_, code = testRequest(t, http.MethodPut, token, updateInfo, "organizations", nonExistentAddr.String())
 	c.Assert(code, qt.Equals, http.StatusBadRequest)
 
-	// Test updating active status
-	activeUpdateInfo := &apicommon.OrganizationInfo{
-		Active: false,
-	}
-	resp, code = testRequest(t, http.MethodPut, token, activeUpdateInfo, "organizations", orgAddress.String())
-	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
-
-	// Verify active status update
+	// The organization payload must not expose an `active` flag (issue #625): nothing enforced
+	// it, and because it was a plain bool on a partial update, any request omitting it silently
+	// deactivated the organization.
 	resp, code = testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String())
 	c.Assert(code, qt.Equals, http.StatusOK)
-	var orgWithUpdatedStatus apicommon.OrganizationInfo
-	c.Assert(json.Unmarshal(resp, &orgWithUpdatedStatus), qt.IsNil)
-	c.Assert(orgWithUpdatedStatus.Active, qt.IsFalse)
+	rawOrg := map[string]any{}
+	c.Assert(json.Unmarshal(resp, &rawOrg), qt.IsNil)
+	_, hasActive := rawOrg["active"]
+	c.Assert(hasActive, qt.IsFalse, qt.Commentf("response: %s", resp))
 }
 
 func TestOrganizationsTypesHandler(t *testing.T) {
@@ -487,7 +483,6 @@ func TestOrganizationWithOptionalFields(t *testing.T) {
 		Country:        "ES",
 		Subdomain:      "fullexample",
 		Timezone:       "Europe/Madrid",
-		Active:         true,
 		Communications: true,
 	}
 	resp, code := testRequest(t, http.MethodPost, token, orgInfo, organizationsEndpoint)
@@ -503,7 +498,6 @@ func TestOrganizationWithOptionalFields(t *testing.T) {
 	c.Assert(createdOrg.Country, qt.Equals, "ES")
 	c.Assert(createdOrg.Subdomain, qt.Equals, "fullexample")
 	c.Assert(createdOrg.Timezone, qt.Equals, "Europe/Madrid")
-	c.Assert(createdOrg.Active, qt.IsTrue)
 	c.Assert(createdOrg.Communications, qt.IsTrue)
 }
 

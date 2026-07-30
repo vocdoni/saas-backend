@@ -168,9 +168,6 @@ type OrganizationInfo struct {
 	// The organization's timezone
 	Timezone string `json:"timezone"`
 
-	// Whether the organization is active
-	Active bool `json:"active"`
-
 	// Whether the organization has enabled communications
 	Communications bool `json:"communications"`
 
@@ -612,7 +609,6 @@ func OrganizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 		Subdomain:      dbOrg.Subdomain,
 		Country:        dbOrg.Country,
 		Timezone:       dbOrg.Timezone,
-		Active:         dbOrg.Active,
 		Communications: dbOrg.Communications,
 		Meta:           meta,
 		Name:           multilingualFromAny(meta["name"]),
