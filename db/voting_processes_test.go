@@ -1,12 +1,14 @@
 package db
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/internal"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -174,4 +176,86 @@ func TestQuestionStatusSyncMethods(t *testing.T) {
 	c.Assert(matched, qt.IsFalse)
 	_, err = testDB.SetQuestionStatusSynced(nil, QuestionStatusReady, QuestionStatusEnded)
 	c.Assert(err, qt.ErrorIs, ErrInvalidData)
+}
+
+// TestSetVotingProcessIfUnchanged covers the conditional write behind the optimistic-concurrency
+// token: it applies while the stored updatedAt still matches what the caller read, and refuses with
+// ErrConflict once anything else has written.
+func TestSetVotingProcessIfUnchanged(t *testing.T) {
+	c := qt.New(t)
+	org := common.Address{0x61, 0x14, 0x03}
+	setupVotingProcessOrg(c, org)
+
+	vp := &VotingProcess{OrgAddress: org, Title: MultiLangString{"default": "P"}}
+	id, err := testDB.SetVotingProcess(vp)
+	c.Assert(err, qt.IsNil)
+
+	read, err := testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	seen := read.UpdatedAt
+
+	read.Title = MultiLangString{"default": "edited"}
+	c.Assert(testDB.SetVotingProcessIfUnchanged(read, seen), qt.IsNil)
+	got, err := testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.Title["default"], qt.Equals, "edited")
+	c.Assert(got.UpdatedAt.After(seen), qt.IsTrue)
+
+	// the same token again is now stale: refused, and the stored document is left alone
+	stale := &VotingProcess{ID: id, OrgAddress: org, Title: MultiLangString{"default": "clobbered"}}
+	c.Assert(testDB.SetVotingProcessIfUnchanged(stale, seen), qt.Equals, ErrConflict)
+	got, err = testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.Title["default"], qt.Equals, "edited")
+
+	// an unknown id is a conflict, never an insert
+	orphan := &VotingProcess{ID: primitive.NewObjectID(), OrgAddress: org}
+	c.Assert(testDB.SetVotingProcessIfUnchanged(orphan, got.UpdatedAt), qt.Equals, ErrConflict)
+
+	// a process whose organization no longer exists is refused, exactly as SetVotingProcess does:
+	// nothing deletes votingProcesses when an org is torn down, so drafts do outlive their org
+	noOrg := &VotingProcess{ID: id, OrgAddress: common.Address{0x61, 0x14, 0x04}, Title: got.Title}
+	c.Assert(testDB.SetVotingProcessIfUnchanged(noOrg, got.UpdatedAt), qt.ErrorMatches,
+		"failed to get organization .*")
+}
+
+// TestSetVotingProcessQuestionIDs covers the targeted question-ids write: it records the ids without
+// disturbing the rest of the document, reports an unknown process, and — the regression for the
+// conditional-update token — never moves updatedAt backwards, which a whole-document rewrite with a
+// fresh timestamp would do when it lands in the same millisecond as the token a client is holding.
+func TestSetVotingProcessQuestionIDs(t *testing.T) {
+	c := qt.New(t)
+	org := common.Address{0x61, 0x14, 0x05}
+	setupVotingProcessOrg(c, org)
+
+	id, err := testDB.SetVotingProcess(&VotingProcess{
+		OrgAddress: org, Title: MultiLangString{"default": "P"}, Header: "h",
+	})
+	c.Assert(err, qt.IsNil)
+
+	ids := []primitive.ObjectID{primitive.NewObjectID(), primitive.NewObjectID()}
+	c.Assert(testDB.SetVotingProcessQuestionIDs(id, ids), qt.IsNil)
+	got, err := testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.QuestionIDs, qt.DeepEquals, ids)
+	c.Assert(got.Title["default"], qt.Equals, "P") // the rest of the document is untouched
+	c.Assert(got.Header, qt.Equals, "h")
+
+	// a token ahead of the wall clock stands in for the forced-forward updatedAt a conditional
+	// update leaves behind: this write must not pull it back, or the spent token would match again
+	ahead := time.Now().Add(time.Hour).UTC().Truncate(time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	_, err = testDB.votingProcesses.UpdateOne(ctx,
+		bson.M{"_id": id}, bson.M{"$set": bson.M{"updatedAt": ahead}})
+	c.Assert(err, qt.IsNil)
+
+	c.Assert(testDB.SetVotingProcessQuestionIDs(id, ids[:1]), qt.IsNil)
+	got, err = testDB.VotingProcess(id)
+	c.Assert(err, qt.IsNil)
+	c.Assert(got.QuestionIDs, qt.HasLen, 1)
+	c.Assert(got.UpdatedAt.Equal(ahead), qt.IsTrue,
+		qt.Commentf("updatedAt moved backwards: %s < %s", got.UpdatedAt, ahead))
+
+	c.Assert(testDB.SetVotingProcessQuestionIDs(primitive.NewObjectID(), ids), qt.Equals, ErrNotFound)
 }

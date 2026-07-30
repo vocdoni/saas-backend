@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -185,39 +186,67 @@ func (a *API) buildQuestions(
 	return built, nil
 }
 
-// writeQuestions replaces the process's stored questions with a pre-built (already validated)
-// set and updates its ordered QuestionIDs. Existing questions are removed first so a draft
-// update replaces them. Callers run buildQuestions first, so this only fails on infra errors.
+// writeQuestions replaces the process's stored questions with a pre-built (already validated) set
+// and records their ids on the process. The replacement is per slot rather than delete-all then
+// insert-all, so two overlapping draft updates cannot strand a row — see db.SetProcessQuestions.
+// Callers run buildQuestions first, so this only fails on infra errors.
+//
+// The ids are stored through a targeted update rather than a whole-document write: this runs right
+// after a conditional update may have forced updatedAt forward, and re-stamping the document with a
+// fresh time.Now() could push that token back to a value a client already spent.
 func (a *API) writeQuestions(vp *db.VotingProcess, built []*db.VotingProcessQuestion) error {
-	existing, err := a.db.QuestionsByProcess(vp.ID)
+	questionIDs, err := a.db.SetProcessQuestions(vp.ID, built)
 	if err != nil {
-		return fmt.Errorf("failed to load existing questions: %w", err)
-	}
-	for i := range existing {
-		if err := a.db.DeleteQuestion(existing[i].ID); err != nil {
-			return fmt.Errorf("failed to remove existing question: %w", err)
-		}
-	}
-	questionIDs := make([]primitive.ObjectID, 0, len(built))
-	for _, question := range built {
-		question.ProcessID = vp.ID
-		qID, err := a.db.SetQuestion(question)
-		if err != nil {
-			return fmt.Errorf("failed to store question: %w", err)
-		}
-		questionIDs = append(questionIDs, qID)
+		return fmt.Errorf("failed to store questions: %w", err)
 	}
 	vp.QuestionIDs = questionIDs
-	if _, err := a.db.SetVotingProcess(vp); err != nil {
+	if err := a.db.SetVotingProcessQuestionIDs(vp.ID, questionIDs); err != nil {
 		return fmt.Errorf("failed to update process questions: %w", err)
 	}
 	return nil
+}
+
+// parseUpdatedAt reads the optional conditional-update token of an update request. The zero time
+// means the client sent none and opts out of the check.
+//
+// It parses with apicommon.UpdatedAtLayout first — the exact shape the read endpoint emits, so the
+// round-trip of a value the client just read goes through the layout that documents itself as the
+// wire format — and falls back to RFC3339 for a client sending a different sub-second precision or a
+// non-Z offset.
+func parseUpdatedAt(s string) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, nil
+	}
+	t, err := time.Parse(apicommon.UpdatedAtLayout, s)
+	if err != nil {
+		if t, err = time.Parse(time.RFC3339, s); err != nil {
+			return time.Time{}, fmt.Errorf(
+				"invalid updatedAt %q: expected %s (or RFC3339) as returned by the read endpoint",
+				s, apicommon.UpdatedAtLayout)
+		}
+	}
+	return t.UTC(), nil
+}
+
+// storeUpdatedProcess persists a draft edit, conditionally on seen when the client sent an
+// updatedAt token. It reports db.ErrConflict when someone else wrote the process in between.
+func (a *API) storeUpdatedProcess(vp *db.VotingProcess, seen time.Time) error {
+	if seen.IsZero() {
+		if _, err := a.db.SetVotingProcess(vp); err != nil {
+			return fmt.Errorf("failed to update voting process: %w", err)
+		}
+		return nil
+	}
+	return a.db.SetVotingProcessIfUnchanged(vp, seen)
 }
 
 // updateVotingProcessHandler godoc
 //
 //	@Summary		Update a voting process draft
 //	@Description	Update a voting process while it is still a draft (not published). 409 if already published.
+//	@Description	Send the updatedAt read from GET /processes/{processId} to make the update conditional: it is
+//	@Description	rejected with 409 (40171) if anything wrote the process in between, so two editors cannot
+//	@Description	overwrite each other. Omitting updatedAt opts out of that guarantee and keeps last-writer-wins.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -282,10 +311,21 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		writeSubscriptionError(w, err)
 		return
 	}
+	seen, err := parseUpdatedAt(req.UpdatedAt)
+	if err != nil {
+		_ = a.db.DelCensus(census.ID.Hex())
+		errors.ErrMalformedBody.WithErr(err).Write(w)
+		return
+	}
 	vp.Title, vp.Description, vp.Header, vp.StreamURI = req.Title, req.Description, req.Header, req.StreamURI
 	vp.StartDate, vp.EndDate, vp.CensusID = start, end, census.ID
-	if _, err := a.db.SetVotingProcess(vp); err != nil {
+	if err := a.storeUpdatedProcess(vp, seen); err != nil {
 		_ = a.db.DelCensus(census.ID.Hex())
+		if stderrors.Is(err, db.ErrConflict) {
+			errors.ErrStaleUpdate.Withf("the process was modified after updatedAt %s; refetch and retry",
+				req.UpdatedAt).Write(w)
+			return
+		}
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
@@ -501,7 +541,9 @@ func (a *API) validateVotingProcessHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	census, _ := a.db.Census(vp.CensusID.Hex())
-	problems := a.publishPreflightProblems(vp, questions, census, user)
+	// the dry-run reports every problem the same way: a mismatched question set is just one more
+	// entry in errors, so the mismatch flag publish acts on is irrelevant here.
+	problems, _ := a.publishPreflightProblems(vp, questions, census, user)
 	apicommon.HTTPWriteJSON(w, &apicommon.VotingProcessValidateResponse{
 		Valid:  len(problems) == 0,
 		Errors: problems,
@@ -848,8 +890,9 @@ func (a *API) loadVotingProcess(w http.ResponseWriter, oid primitive.ObjectID) (
 	return vp, true
 }
 
-// validateVotingProcessForPublish returns the list of reasons a process cannot be published
-// (empty when it is ready). Used by GET .../check and by publish.
+// validateVotingProcessForPublish returns the structural reasons a process cannot be published
+// (empty when it is ready). The stored-question-set check lives in publishPreflightProblems instead,
+// which needs to tell that one apart from the rest to answer publish with a 409.
 func validateVotingProcessForPublish(
 	vp *db.VotingProcess, questions []db.VotingProcessQuestion, census *db.Census,
 ) []string {
@@ -879,6 +922,34 @@ func validateVotingProcessForPublish(
 		}
 	}
 	return problems
+}
+
+// questionSetProblem reports a stored question set that does not match the ids the process itself
+// records. That means a row carrying this processId is not one of the questions the last writer
+// stored — a leftover from a pre-fix concurrent draft update, or a direct database write. Publishing
+// such a process is the one irreversible step in the whole flow (the stray becomes a real on-chain
+// election that cannot be withdrawn), so it is refused and the draft has to be saved again first.
+// Processes predating QuestionIDs carry none and are not checked.
+func questionSetProblem(vp *db.VotingProcess, questions []db.VotingProcessQuestion) string {
+	if len(vp.QuestionIDs) == 0 {
+		return ""
+	}
+	expected := make(map[primitive.ObjectID]bool, len(vp.QuestionIDs))
+	for _, id := range vp.QuestionIDs {
+		expected[id] = true
+	}
+	stray := 0
+	for i := range questions {
+		if !expected[questions[i].ID] {
+			stray++
+		}
+	}
+	if stray == 0 && len(questions) == len(vp.QuestionIDs) {
+		return ""
+	}
+	return fmt.Sprintf(
+		"stored questions do not match the process (%d found, %d expected, %d unknown): save the draft again",
+		len(questions), len(vp.QuestionIDs), stray)
 }
 
 // writeSubscriptionError writes a typed API error verbatim, falling back to 500.
