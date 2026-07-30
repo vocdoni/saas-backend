@@ -39,5 +39,5 @@ func TestDropOrganizationActiveMigration(t *testing.T) {
 	c.Assert(mig.Down(ctx, database), qt.IsNil)
 	raw = bson.M{}
 	c.Assert(testDB.organizations.FindOne(ctx, bson.M{"_id": testOrgAddress}).Decode(&raw), qt.IsNil)
-	c.Assert(raw["active"], qt.Equals, true)
+	c.Assert(raw["active"], qt.IsTrue)
 }
