@@ -12,6 +12,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
+	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
@@ -44,8 +45,26 @@ func parseProcessDates(req *apicommon.CreateVotingProcessRequest) (start, end ti
 //	@Summary		Create a voting process draft
 //	@Description	Create a multi-question voting process draft. Requires Manager/Admin role of the org
 //	@Description	(or a scoped API key with `voting:write`). Creates the inline census unpublished.
-//	@Description	Each question must define either a named `type` (with `typeSetup` for multichoice)
-//	@Description	or a raw `ballotProtocol` override; if both are given the `ballotProtocol` wins.
+//	@Description
+//	@Description	Each question must define a named `type` (with `typeSetup` for multichoice), a raw
+//	@Description	`ballotProtocol`, or both. The two are kept in sync: whichever is supplied, the other
+//	@Description	is derived, so the stored question always describes the election it will mint. A
+//	@Description	supplied `ballotProtocol` is authoritative — it is what reaches the chain — so `type`
+//	@Description	and `typeSetup` are re-derived from it, and come back empty when it encodes a shape
+//	@Description	with no named type (ranked, quadratic). Sending both halves is fine when they agree;
+//	@Description	when they describe two different named ballots it is a 400 rather than a silent win
+//	@Description	for the protocol. **Omit `ballotProtocol` to author or edit a question through its
+//	@Description	`typeSetup`** — responses always carry a protocol, so echoing one back unchanged
+//	@Description	re-applies it.
+//	@Description
+//	@Description	`typeSetup.minChoices` has no on-chain counterpart and is a validation hint for
+//	@Description	clients. It is stored as sent for multichoice, and is always `1` for singlechoice,
+//	@Description	whose ballot is the single field a voter fills.
+//	@Description
+//	@Description	`typeSetup.uniqueChoices` is rejected for multichoice: every choice is an independent
+//	@Description	yes/no field, so a unique-values ballot admits no vote and the election would tally
+//	@Description	every vote to zero. A `ballotProtocol` whose `uniqueValues` cannot be satisfied
+//	@Description	(fewer legal values than fields) is rejected for the same reason.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -142,8 +161,9 @@ func (a *API) buildQuestions(
 ) ([]*db.VotingProcessQuestion, error) {
 	built := make([]*db.VotingProcessQuestion, 0, len(questions))
 	for i, q := range questions {
-		// ballot shape: a question must define EITHER a named type OR a raw BallotProtocol
-		// override; if both are set the BallotProtocol wins (VoteTypeFromQuestion uses it). For a
+		// ballot shape: a question must define a named type, a raw BallotProtocol, or both. The
+		// two halves are reconciled below so they describe the same ballot; a supplied protocol
+		// is what the election will be, so it wins and the type is re-derived from it. For a
 		// named type, typeSetup is required for every type except singlechoice (which ignores it
 		// on chain); a multichoice maps MaxChoices onto MaxTotalCost so it must be bounded.
 		if q.BallotProtocol == nil {
@@ -161,9 +181,29 @@ func (a *API) buildQuestions(
 				if q.TypeSetup.MinChoices > q.TypeSetup.MaxChoices {
 					return nil, errors.ErrInvalidData.Withf("question %d: minChoices cannot exceed maxChoices", i)
 				}
+				if q.TypeSetup.UniqueChoices {
+					// multichoice gives every choice its own 0/1 field, so a voter already cannot
+					// select one twice — and a unique-values ballot over those fields admits no
+					// vote at all: the election would accept every envelope and tally zero.
+					return nil, errors.ErrInvalidData.Withf(
+						"question %d: uniqueChoices is not supported for multichoice, where each choice is an "+
+							"independent yes/no field; use a ballotProtocol for a ranked ballot", i,
+					)
+				}
 			default:
 				return nil, errors.ErrInvalidData.Withf("question %d: unsupported type %q", i, q.Type)
 			}
+		} else if err := account.ValidateBallotProtocol(q.BallotProtocol); err != nil {
+			return nil, errors.ErrInvalidData.Withf("question %d: invalid ballotProtocol: %v", i, err)
+		}
+		shape, err := account.ResolveBallotShape(account.BallotShapeInput{
+			Type:      q.Type,
+			TypeSetup: q.TypeSetup,
+			Protocol:  q.BallotProtocol,
+			Choices:   q.Choices,
+		})
+		if err != nil {
+			return nil, errors.ErrInvalidData.Withf("question %d: %v", i, err)
 		}
 		eligible, err := a.resolveEligibleMemberIDs(q.Eligibility, census, orgAddress)
 		if err != nil {
@@ -175,9 +215,9 @@ func (a *API) buildQuestions(
 			Title:             q.Title,
 			Description:       q.Description,
 			Choices:           q.Choices,
-			Type:              q.Type,
-			TypeSetup:         q.TypeSetup,
-			BallotProtocol:    q.BallotProtocol,
+			Type:              shape.Type,
+			TypeSetup:         shape.TypeSetup,
+			BallotProtocol:    shape.Protocol,
 			SecretUntilTheEnd: q.SecretUntilTheEnd,
 			EligibleMemberIDs: eligible,
 			Metadata:          q.Metadata,
@@ -244,6 +284,11 @@ func (a *API) storeUpdatedProcess(vp *db.VotingProcess, seen time.Time) error {
 //
 //	@Summary		Update a voting process draft
 //	@Description	Update a voting process while it is still a draft (not published). 409 if already published.
+//	@Description	The questions are replaced wholesale, and each one's ballot shape is reconciled exactly
+//	@Description	as on create. Reading a question and PUTting it back unchanged is a no-op; editing its
+//	@Description	`typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a
+//	@Description	400 — omit `ballotProtocol` to edit a question through its `typeSetup`.
+//	@Description
 //	@Description	Send the updatedAt read from GET /processes/{processId} to make the update conditional: it is
 //	@Description	rejected with 409 (40171) if anything wrote the process in between, so two editors cannot
 //	@Description	overwrite each other. Omitting updatedAt opts out of that guarantee and keeps last-writer-wins.
@@ -385,6 +430,9 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// each needs a Vochain round-trip, so bounded pools keep this read fast for a many-question process.
 	a.resolveQuestionEncryptionKeysBatch(questions)
 	a.resolveQuestionResultsBatch(questions)
+	// a draft written before the two ballot halves were reconciled is served reconciled, so the
+	// body a client echoes back is one authoring still accepts.
+	reconcileDraftQuestionShapes(questions)
 	// non-managers must not see the per-question eligibility member ids (who can vote).
 	if !isManager {
 		redactQuestionsForPublic(questions)
@@ -392,6 +440,42 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 	resp := apicommon.VotingProcessResponseFromDB(vp, questions, census, a.account.ChainID())
 	resp.Census.TotalWeight = a.censusTotalWeight(census)
 	apicommon.HTTPWriteJSON(w, resp)
+}
+
+// reconcileDraftQuestionShapes serves the reconciled ballot shape of the questions that have not
+// minted an election yet, mutating the passed slice in place.
+//
+// Questions stored before the two halves were reconciled can carry anything the old code accepted:
+// a typeSetup.uniqueChoices no named type supports, no ballotProtocol at all, or two halves that
+// contradict each other. Authoring now refuses all three, so a client that reads such a draft and
+// PUTs the question array back — the only way to edit one, since update replaces them wholesale —
+// would be refused for a lie it did not write. Serving the shape a publish would actually use makes
+// that round-trip work and makes the read consistent with the invariant.
+//
+// Only unminted questions: a published legacy question's election really does carry the parameters
+// it was minted with (the #619 elections have uniqueValues set on chain), so deriving a clean shape
+// for it would misreport the chain — and it cannot be edited anyway. Nothing is written back; the
+// first update persists it.
+func reconcileDraftQuestionShapes(questions []db.VotingProcessQuestion) {
+	for i := range questions {
+		q := &questions[i]
+		if len(q.UpstreamID) > 0 || len(q.Choices) == 0 {
+			continue
+		}
+		in := account.BallotShapeInput{
+			Type: q.Type, TypeSetup: q.TypeSetup, Protocol: q.BallotProtocol, Choices: q.Choices,
+		}
+		// a stored protocol is what publish would mint, so it wins over a stored type outright —
+		// asking to reconcile both halves would only reject a contradiction nobody can edit away.
+		if in.Protocol != nil {
+			in.Type, in.TypeSetup = "", db.QuestionTypeSetup{}
+		}
+		shape, err := account.ResolveBallotShape(in)
+		if err != nil {
+			continue // an unusable stored shape is publish's problem to report, not a read's
+		}
+		q.Type, q.TypeSetup, q.BallotProtocol = shape.Type, shape.TypeSetup, shape.Protocol
+	}
 }
 
 // redactQuestionsForPublic strips manager-only fields from questions before serving them to a
@@ -497,6 +581,7 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		census, _ := a.db.Census(vp.CensusID.Hex())
+		reconcileDraftQuestionShapes(questions)
 		if !isManager {
 			redactQuestionsForPublic(questions)
 		}
@@ -919,6 +1004,12 @@ func validateVotingProcessForPublish(
 		}
 		if q.BallotProtocol == nil && q.Type != db.VotingTypeSingleChoice && q.Type != db.VotingTypeMultiChoice {
 			problems = append(problems, fmt.Sprintf("question %d has an unsupported type %q", i, q.Type))
+		}
+		// A question stored before authoring rejected these can still hold a ballot no voter can
+		// satisfy. Publishing it would mint an election that accepts every vote and tallies zero,
+		// with nothing on the way reporting a problem, so stop it at the last point that can.
+		if err := account.ValidateBallotProtocol(q.BallotProtocol); err != nil {
+			problems = append(problems, fmt.Sprintf("question %d: invalid ballotProtocol: %v", i, err))
 		}
 	}
 	return problems
