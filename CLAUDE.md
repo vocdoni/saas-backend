@@ -13,7 +13,7 @@ authenticates voters and signs their ballots.
 ## Commands
 
 ```bash
-make test        # go test -v ./...  (spins up MongoDB + Voconed via testcontainers — needs Docker)
+make test        # go test -v ./...  (spins up MongoDB + MailHog via testcontainers — needs Docker)
 make lint        # golangci-lint run
 make swagger     # regenerate docs/swagger.yaml from swag annotations (run after changing API handlers/types)
 
@@ -29,11 +29,16 @@ docker compose up
 #   --profile local-smtp   fake SMTP capture server
 ```
 
-- **Tests require Docker.** `TestMain` starts ephemeral MongoDB (`mongo:7`) and Voconed
-  containers via `testcontainers-go`, each test run using a random database name (`test.RandomDatabaseName()`).
+- **Tests require Docker.** `TestMain` starts ephemeral MongoDB (`mongo:7`) and MailHog (email
+  capture) containers via `testcontainers-go`, each test run using a random database name
+  (`test.RandomDatabaseName()`). The Voconed test chain runs **in-process** via `test.SharedVoconed()`
+  (a shared singleton, not a container). Helpers for all of this live in the `test/` package.
   There are no unit-test-only mocks for the DB — integration tests hit a real containerized Mongo.
 - After editing any API handler, route, or `apicommon` request/response type, run `make swagger`
-  so `docs/swagger.yaml` stays in sync (it is generated from `//` swag annotations on `api/api.go` and handlers).
+  so `docs/swagger.yaml` stays in sync (it is generated from `//` swag annotations on `api/api.go`
+  and handlers). CI regenerates it on PRs touching `api/**` and posts the diff as a PR comment.
+- **Conventional Commits are enforced by CI** (commitlint on every commit message and a semantic
+  PR-title check), e.g. `feat(processes): ...`, `fix(users): ...`, `ci: ...`.
 
 ## Architecture
 
@@ -75,6 +80,9 @@ Component packages (each is a focused service composed in `main.go`):
 - **`cmd/`** — `service/` (the API server), `cli/` (DB query tool for process/voter stats),
   `client/` (HTTP client for CSV member import + census workflows).
 - **`assets/`** are embedded via `embed.go` (`//go:embed all:assets`).
+- **`plan/`** — design docs (not code) for the in-progress "chain-abstracted API" rework: making the
+  SaaS a complete REST election API so integrators no longer need `@vocdoni/sdk` + `RemoteSigner`.
+  Read `plan/SUMMARY.md` first when working on anything related to that effort.
 
 ## Conventions
 
@@ -94,3 +102,6 @@ These come from `.clinerules/` and `.gemini/styleguide.md` (the Vocdoni Go style
 - **Linting:** `revive` runs with `enable-all-rules`; a few rules (`exported`, `use-errors-new`,
   `add-constant`, complexity rules) are temporarily disabled in `.golangci.yml` — don't rely on them
   being off forever, but matching existing code is fine.
+- **Communication (from `.clinerules/04-communication.md`):** be direct and factually rigorous; don't
+  reflexively agree ("You're absolutely right!") when a statement may be incorrect; admit uncertainty
+  explicitly rather than speculating.

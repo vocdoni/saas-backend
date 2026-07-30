@@ -49,6 +49,26 @@ func TestSign(t *testing.T) {
 		c.Assert(sign, qt.Not(qt.IsNil))
 		c.Assert(csp.isLocked(testUserID, pid), qt.IsFalse)
 	})
+
+	c.Run("post-lock error releases lock", func(c *qt.C) {
+		pid := internal.HexBytes(util.RandomBytes(32))
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		// store an unverified token with no process record. Sign acquires the
+		// signing lock and then fails the verified check (a post-lock error path).
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID, ""), qt.IsNil)
+		_, err := csp.Sign(testToken, testAddress, pid, testUserWeightBytes, signers.SignerTypeECDSASalted)
+		c.Assert(err, qt.ErrorIs, ErrAuthTokenNotVerified)
+		// the deferred unlock must release the lock despite the error; otherwise
+		// the previous nil-userID return would leak it and permanently block this
+		// user+process from ever signing again
+		c.Assert(csp.isLocked(testUserID, pid), qt.IsFalse)
+		// a subsequent legitimate signature for the same user+process succeeds,
+		// proving the lock was actually released
+		c.Assert(csp.Storage.VerifyCSPAuth(testToken), qt.IsNil)
+		sign, err := csp.Sign(testToken, testAddress, pid, testUserWeightBytes, signers.SignerTypeECDSASalted)
+		c.Assert(err, qt.IsNil)
+		c.Assert(sign, qt.Not(qt.IsNil))
+	})
 }
 
 func TestPrepareSaltedKeySigner(t *testing.T) {

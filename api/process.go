@@ -62,9 +62,10 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// if it's a draft process
-	if processInfo.Address.Equals(nil) && processInfo.OrgAddress == (common.Address{}) {
-		errors.ErrMalformedBody.Withf("draft processes must provide an org address").Write(w)
+	// if it's a draft process without a census, an org address is required to
+	// resolve the organization (the census-only branch below resolves it instead)
+	if processInfo.Address.Equals(nil) && processInfo.OrgAddress == (common.Address{}) && processInfo.CensusID == nil {
+		errors.ErrMalformedBody.Withf("draft processes must provide an org address or census ID").Write(w)
 		return
 	}
 
@@ -739,7 +740,7 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
-	orgSigner, err := account.OrganizationSigner(a.secret, org.Creator, org.Nonce)
+	orgSigner, err := a.organizationSigner(org)
 	if err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not restore organization signer: %v", err).Write(w)
 		return

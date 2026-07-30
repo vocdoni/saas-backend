@@ -259,9 +259,14 @@ func (a *API) publishCensusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// if census.Type == CensusTypeSMSOrMail || census.Type == CenT {
-	// build the census and store it
-	cspSignerPubKey := a.account.PubKey // TODO: use a different key based on the censusID
+	// build the census and store it. The census root must be the CSP signer key,
+	// since the CSP is what signs voter ballots against this census (matching the
+	// other publish paths); the blockchain account key would not authorize votes.
+	cspSignerPubKey, err := a.csp.PubKey()
+	if err != nil {
+		errors.ErrGenericInternalServerError.Withf("failed to get CSP public key").Write(w)
+		return
+	}
 	switch census.Type {
 	case CensusTypeSMSOrMail, CensusTypeMail, CensusTypeSMS:
 		census.Published.Root = cspSignerPubKey

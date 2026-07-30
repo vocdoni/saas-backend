@@ -29,7 +29,9 @@ import (
 //	@Router			/users [post]
 func (a *API) registerHandler(w http.ResponseWriter, r *http.Request) {
 	userInfo := &apicommon.UserInfo{}
-	body, err := io.ReadAll(r.Body)
+	// this endpoint is public and unauthenticated: bound the body so a large
+	// payload cannot exhaust memory. A UserInfo registration is well under 64 KiB.
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxBodyBytes))
 	if err != nil {
 		errors.ErrMalformedBody.Write(w)
 		return
@@ -467,6 +469,24 @@ func (a *API) updateUserInfoHandler(w http.ResponseWriter, r *http.Request) {
 			errors.ErrEmailMalformed.Write(w)
 			return
 		}
+		// Organization signing keys are derived deterministically from the
+		// creator email (see account.OrganizationSigner). Changing the email of a
+		// user who created organizations rewrites org.Creator but not the fixed
+		// on-chain org.Address, permanently breaking every signing path for those
+		// orgs. Until the signer identity is decoupled from the email, refuse the
+		// change for users who own organizations.
+		if userInfo.Email != currentEmail {
+			count, err := a.db.CountOrganizationsByCreator(currentEmail)
+			if err != nil {
+				log.Warnw("could not count organizations by creator", "error", err)
+				errors.ErrGenericInternalServerError.Write(w)
+				return
+			}
+			if count > 0 {
+				errors.ErrEmailChangeNotAllowed.Write(w)
+				return
+			}
+		}
 		// update the user email and set the flag to true to update the user
 		// info
 		user.Email = userInfo.Email
@@ -560,6 +580,8 @@ func (a *API) updateUserPasswordHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	// hash and update the new password
 	user.Password = internal.HexHashPassword(passwordSalt, userPasswords.NewPassword)
+	// invalidate every previously issued token by bumping the token version (M1)
+	user.TokenVersion++
 	if _, err := a.db.SetUser(user); err != nil {
 		log.Warnw("could not update user password", "error", err)
 		errors.ErrGenericInternalServerError.Write(w)
@@ -751,6 +773,9 @@ func (a *API) resetUserPasswordHandler(w http.ResponseWriter, r *http.Request) {
 
 	// hash and update the new password
 	user.Password = internal.HexHashPassword(passwordSalt, userPasswords.NewPassword)
+	// invalidate every previously issued token by bumping the token version so a
+	// leaked-token attacker is logged out once the legitimate user resets (M1)
+	user.TokenVersion++
 	if _, err := a.db.SetUser(user); err != nil {
 		log.Warnw("could not update user password", "error", err)
 		errors.ErrGenericInternalServerError.Write(w)

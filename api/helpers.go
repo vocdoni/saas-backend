@@ -56,6 +56,17 @@ func (a *API) buildLoginResponse(id string) (*apicommon.LoginResponse, error) {
 	if err := j.Set("userId", id); err != nil {
 		return nil, err
 	}
+	// Embed the user's current token version so credential changes (password
+	// change/reset) can revoke every outstanding token. A missing user (e.g. a
+	// token minted for an address that never registered) defaults to version 0,
+	// which the authenticator compares against the stored value.
+	var tokenVersion uint64
+	if user, err := a.db.UserByEmail(id); err == nil {
+		tokenVersion = user.TokenVersion
+	}
+	if err := j.Set("tokenVersion", tokenVersion); err != nil {
+		return nil, err
+	}
 	// pass a time.Time so jwx encodes a proper NumericDate (seconds). An int64 here would be
 	// read as Unix *seconds*, so a nanosecond value would push expiry ~55 billion years out
 	// and jwt.Validate would never reject the token on expiry.

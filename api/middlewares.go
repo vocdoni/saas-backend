@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"slices"
@@ -33,6 +34,7 @@ func bearerToken(r *http.Request) string {
 var (
 	errInvalidUserClaim = fmt.Errorf("invalid or missing userId claim")
 	errUserNotVerified  = fmt.Errorf("user account not verified")
+	errStaleToken       = fmt.Errorf("token issued before last credential change")
 )
 
 // userFromToken resolves and validates the user referenced by an already signature/temporal-verified
@@ -55,6 +57,14 @@ func (a *API) userFromToken(token jwt.Token) (*db.User, error) {
 	}
 	if !user.Verified {
 		return nil, errUserNotVerified
+	}
+	// reject tokens minted before the last credential change: the token carries the token
+	// version it was issued with, and a password change/reset bumps the stored version, so a
+	// stale token no longer matches (M1). A missing or non-numeric claim is treated as version
+	// 0 for backward compatibility with tokens issued before this claim existed.
+	versionClaim, _ := token.Get("tokenVersion")
+	if tokenClaimVersion(versionClaim) != user.TokenVersion {
+		return nil, errStaleToken
 	}
 	return user, nil
 }
@@ -155,6 +165,8 @@ func (a *API) authenticator(next http.Handler) http.Handler {
 				errors.ErrUnauthorized.Withf("user not found").Write(w)
 			case errInvalidUserClaim:
 				errors.ErrUnauthorized.Withf("invalid or missing userId claim").Write(w)
+			case errStaleToken:
+				errors.ErrUnauthorized.Withf("session expired, please log in again").Write(w)
 			default:
 				errors.ErrGenericInternalServerError.Withf("could not retrieve user from database: %v", err).Write(w)
 			}
@@ -164,6 +176,34 @@ func (a *API) authenticator(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), apicommon.UserMetadataKey, *user)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// tokenClaimVersion normalizes the "tokenVersion" JWT claim to a uint64. The claim survives a
+// JSON round-trip, so it may surface as float64 or json.Number depending on the decoder; any
+// missing, negative, or non-numeric value is treated as version 0.
+func tokenClaimVersion(v any) uint64 {
+	switch n := v.(type) {
+	case float64:
+		if n < 0 {
+			return 0
+		}
+		return uint64(n)
+	case json.Number:
+		i, err := n.Int64()
+		if err != nil || i < 0 {
+			return 0
+		}
+		return uint64(i)
+	case int64:
+		if n < 0 {
+			return 0
+		}
+		return uint64(n)
+	case uint64:
+		return n
+	default:
+		return 0
+	}
 }
 
 // authenticateAPIKey resolves a request authenticated with an API key. It validates the key,

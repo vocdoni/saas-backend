@@ -115,6 +115,7 @@ func (a *API) organizationMembersHandler(w http.ResponseWriter, r *http.Request)
 	params, err := parsePaginationParams(r.URL.Query().Get(ParamPage), r.URL.Query().Get(ParamLimit))
 	if err != nil {
 		errors.ErrMalformedURLParam.WithErr(err).Write(w)
+		return
 	}
 
 	totalItems, members, err := a.db.OrgMembers(org.Address, params.Page, params.Limit, search)

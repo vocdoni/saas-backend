@@ -724,7 +724,12 @@ func (ms *MongoStorage) setBulkCensusParticipant(ctx context.Context, census *Ce
 	bulkOpts := options.BulkWrite().SetOrdered(false)
 
 	results, err := ms.censusParticipants.BulkWrite(ctx, docs, bulkOpts)
-	return results.UpsertedCount, err
+	// on a non-write error (e.g. context deadline or network failure) the driver
+	// returns a nil result, so check err before dereferencing to avoid a panic.
+	if err != nil {
+		return 0, err
+	}
+	return results.UpsertedCount, nil
 }
 
 // CountCensusMembers  counts the number of the members in a census

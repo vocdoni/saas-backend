@@ -683,11 +683,18 @@ func (a *API) removeOrganizationUserHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err := a.db.RemoveOrganizationUser(org.Address, uint64(userIDInt)); err != nil {
-		errors.ErrInvalidUserData.Withf("user not found: %v", err).Write(w)
+		// treat a no-op removal (user was not a member) as idempotent success
+		// without touching the counter, so repeated/bogus deletions cannot drive
+		// the organization users counter negative.
+		if err == db.ErrNotFound {
+			apicommon.HTTPWriteOK(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.Withf("could not remove organization user: %v", err).Write(w)
 		return
 	}
 
-	// update the org users counter
+	// update the org users counter only when a membership was actually removed
 	if err := a.db.DecrementOrganizationUsersCounter(org.Address); err != nil {
 		log.Errorf("decrement users: %v", err)
 		errors.ErrGenericInternalServerError.Withf("could not update organization users counter: %v", err).Write(w)

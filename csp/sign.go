@@ -75,11 +75,14 @@ func (c *CSP) prepareSaltedKeySigner(token, address, processID, weight internal.
 	} else if consumed {
 		return nil, nil, nil, ErrProcessAlreadyConsumed
 	}
-	// lock the user data to avoid concurrent signing
+	// lock the user data to avoid concurrent signing. From here on every error
+	// path must return authTokenData.UserID so the deferred unlock in Sign
+	// releases the lock we just took; returning a nil userID would compute a
+	// different lock key and leak the lock, permanently blocking this user.
 	c.lock(authTokenData.UserID, processID)
 	// ensure that the auth token has been verified
 	if !authTokenData.Verified {
-		return nil, nil, nil, ErrAuthTokenNotVerified
+		return authTokenData.UserID, nil, nil, ErrAuthTokenNotVerified
 	}
 
 	// prepare the data for the signature
@@ -91,12 +94,12 @@ func (c *CSP) prepareSaltedKeySigner(token, address, processID, weight internal.
 	// encode the data to sign
 	signatureMsg, err := proto.Marshal(caBundle)
 	if err != nil {
-		return nil, nil, nil, ErrPrepareSignature
+		return authTokenData.UserID, nil, nil, ErrPrepareSignature
 	}
 	// generate the salt
 	salt := [saltedkey.SaltSize]byte{}
 	if len(processID) < saltedkey.SaltSize {
-		return nil, nil, nil, ErrInvalidSalt
+		return authTokenData.UserID, nil, nil, ErrInvalidSalt
 	}
 	copy(salt[:], processID[:saltedkey.SaltSize])
 	return authTokenData.UserID, &salt, signatureMsg, nil

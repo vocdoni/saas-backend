@@ -80,6 +80,7 @@ var (
 	ErrDuplicateConflict           = Error{Code: 40901, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("resource already exists")}
 	ErrUpdateWouldCreateDuplicates = Error{Code: 40902, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("update would create duplicates")}
 	ErrPublishInProgress           = Error{Code: 40903, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("process publish already in progress")}
+	ErrEmailChangeNotAllowed       = Error{Code: 40904, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("cannot change email while owning organizations")}
 
 	// TODO: most of theses errors should be unauthorized
 	// Subscription errors (400)

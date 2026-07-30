@@ -40,6 +40,16 @@ var DefaultSupportedFileTypes = map[ObjectFileType]bool{
 	FileTypeJPG:  true,
 }
 
+const (
+	// MaxObjectSize is the maximum size in bytes of a single stored object. It
+	// bounds the memory a single upload can consume and is enforced on the bytes
+	// actually read, independent of any client-declared size.
+	MaxObjectSize = 10 << 20 // 10 MiB
+	// MaxUploadSize caps the total size of an upload request body, protecting the
+	// multipart parser from unbounded input.
+	MaxUploadSize = 32 << 20 // 32 MiB
+)
+
 // Config holds the configuration for the object storage client.
 // It includes the MongoDB storage, supported file types, and server URL.
 type Config struct {
@@ -164,11 +174,24 @@ func (osc *Client) storagePrefix() string {
 // the URL of the uploaded object image. It stores the object in the database.
 // If an error occurs, it returns an empty string and the error.
 func (osc *Client) Put(data io.Reader, size int64, userID string) (string, error) {
-	// Create a buffer of the appropriate size
-	buff := make([]byte, size)
-	_, err := data.Read(buff)
+	// reject early if the declared size already exceeds the cap
+	if size > MaxObjectSize {
+		return "", fmt.Errorf("object size %d exceeds maximum of %d bytes", size, MaxObjectSize)
+	}
+	// Read the whole object but never more than the cap. Reading one byte past
+	// MaxObjectSize lets us reject content whose declared size lied. Using
+	// io.ReadAll over a LimitReader also avoids allocating from the untrusted
+	// size and avoids the silent truncation of a single Read call, which is not
+	// guaranteed to fill its buffer.
+	buff, err := io.ReadAll(io.LimitReader(data, MaxObjectSize+1))
 	if err != nil {
-		return "", fmt.Errorf("cannot read file %s", err.Error())
+		return "", fmt.Errorf("cannot read file: %w", err)
+	}
+	if int64(len(buff)) > MaxObjectSize {
+		return "", fmt.Errorf("object exceeds maximum size of %d bytes", MaxObjectSize)
+	}
+	if len(buff) == 0 {
+		return "", fmt.Errorf("empty file")
 	}
 	// checking the content type
 	// so we don't allow files other than images

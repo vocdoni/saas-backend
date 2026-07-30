@@ -110,6 +110,10 @@ func (osc *Client) UploadImageWithFormHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// bound the total request body so the multipart parser cannot be forced to
+	// consume unbounded input
+	r.Body = http.MaxBytesReader(w, r.Body, MaxUploadSize)
+
 	// Parse multipart form
 	if !parseMultipartForm(w, r) {
 		return
@@ -155,9 +159,11 @@ func (osc *Client) DownloadImageInlineHandler(w http.ResponseWriter, r *http.Req
 		errors.ErrStorageInvalidObject.Withf("cannot get object %v", err).Write(w)
 		return
 	}
-	// write the object to the response
+	// write the object to the response. The content type is client-supplied at
+	// upload time, so prevent the browser from MIME-sniffing it into something
+	// executable (stored XSS) when served inline.
 	w.Header().Set("Content-Type", object.ContentType)
-	// w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Disposition", "inline")
 	if _, err := w.Write(object.Data); err != nil {
 		errors.ErrInternalStorageError.Withf("cannot write object %v", err).Write(w)

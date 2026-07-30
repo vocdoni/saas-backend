@@ -42,6 +42,37 @@ func TestOrganizations(t *testing.T) {
 		c.Assert(parentOrg.Address, qt.DeepEquals, parentAddress)
 	})
 
+	t.Run("SetOrganizationUpdateKeepsOrgOnCreatorFailure", func(_ *testing.T) {
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+
+		// create the creator user and an organization owned by them
+		creatorEmail := testUserEmail
+		_, err := testDB.SetUser(&User{
+			Email:     creatorEmail,
+			Password:  testUserPass,
+			FirstName: testUserFirstName,
+			LastName:  testUserLastName,
+		})
+		c.Assert(err, qt.IsNil)
+		address := testOrgAddress
+		c.Assert(testDB.SetOrganization(&Organization{
+			Address: address,
+			Creator: creatorEmail,
+		}), qt.IsNil)
+
+		// updating the existing organization with a creator that no longer resolves
+		// must return an error but must NOT delete the organization (regression: the
+		// compensating rollback used to destroy a live org on the update path).
+		c.Assert(testDB.SetOrganization(&Organization{
+			Address: address,
+			Creator: "missing-creator@example.com",
+		}), qt.IsNotNil)
+		org, err := testDB.Organization(address)
+		c.Assert(err, qt.IsNil)
+		c.Assert(org, qt.Not(qt.IsNil))
+		c.Assert(org.Address, qt.DeepEquals, address)
+	})
+
 	t.Run("SetOrganization", func(_ *testing.T) {
 		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
@@ -312,11 +343,17 @@ func TestOrganizations(t *testing.T) {
 		c.Assert(user, qt.Not(qt.IsNil))
 		c.Assert(user.Organizations, qt.HasLen, 0)
 
-		// Test removing a non-existent user
+		// Test removing a non-existent user: it must report ErrNotFound so the API
+		// layer skips the users-counter decrement for a no-op removal (see the
+		// removeOrganizationUserHandler regression that could drive the counter negative).
 		nonExistentUserID := uint64(9999)
 		err = testDB.RemoveOrganizationUser(orgAddress, nonExistentUserID)
-		// The function doesn't return an error for non-existent users, it just doesn't remove anything
-		c.Assert(err, qt.IsNil)
+		c.Assert(err, qt.Equals, ErrNotFound)
+
+		// Removing the same user twice: the second removal is a no-op and must also
+		// report ErrNotFound rather than silently succeeding.
+		err = testDB.RemoveOrganizationUser(orgAddress, userID)
+		c.Assert(err, qt.Equals, ErrNotFound)
 
 		// Create another user and add them to multiple organizations
 		secondUserEmail := "seconduser@example.com"

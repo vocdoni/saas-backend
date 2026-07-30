@@ -49,6 +49,41 @@ func TestUpdateUserInfo(t *testing.T) {
 		&apicommon.UserInfo{FirstName: "X"}, usersMeEndpoint)
 }
 
+// TestUpdateUserInfoEmailBlockedForOrgCreators verifies that a user who created
+// an organization cannot change their email: the org signing key is derived
+// deterministically from the creator email, so allowing the change would
+// permanently brick on-chain signing for that org (C1). Non-email updates and
+// same-email requests must still succeed.
+func TestUpdateUserInfoEmailBlockedForOrgCreators(t *testing.T) {
+	token := testCreateUser(t, testPass)
+	c := qt.New(t)
+	defer func() {
+		if err := testDB.DeleteAllDocuments(); err != nil {
+			c.Logf("cleanup: %v", err)
+		}
+	}()
+
+	// This user creates an organization, becoming its creator.
+	testCreateOrganization(t, token)
+
+	// Changing the email is now refused with 409 Conflict.
+	newEmail := fmt.Sprintf("blocked-%d@test.com", internal.RandomInt(100000000000))
+	requestAndAssertError(errors.ErrEmailChangeNotAllowed, t, http.MethodPut, token,
+		&apicommon.UserInfo{Email: newEmail}, usersMeEndpoint)
+
+	// Updating only the name must still succeed for an org creator.
+	res := requestAndParse[apicommon.LoginResponse](t, http.MethodPut, token,
+		&apicommon.UserInfo{FirstName: "StillAllowed"}, usersMeEndpoint)
+	c.Assert(res.Token, qt.Not(qt.Equals), "")
+
+	me := requestAndParse[apicommon.UserInfo](t, http.MethodGet, res.Token, nil, usersMeEndpoint)
+	c.Assert(me.FirstName, qt.Equals, "StillAllowed")
+
+	// Re-submitting the same email is not a change, so it must be allowed.
+	requestAndAssertCode(http.StatusOK, t, http.MethodPut, res.Token,
+		&apicommon.UserInfo{Email: me.Email}, usersMeEndpoint)
+}
+
 // TestUpdateUserPassword covers the updateUserPasswordHandler (PUT /users/password):
 // the too-short check runs before the old-password check, then a successful change.
 func TestUpdateUserPassword(t *testing.T) {

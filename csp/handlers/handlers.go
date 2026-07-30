@@ -392,6 +392,13 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
+	// the token must have been issued for this very bundle; otherwise a member could
+	// use a token verified for bundle A to sign a process in bundle B of the same org,
+	// bypassing bundle B's census eligibility (the sibling handlers enforce the same)
+	if !bytes.Equal(*bundleID, auth.BundleID) {
+		errors.ErrUnauthorized.Withf("token does not belong to the bundle").Write(w)
+		return
+	}
 	if !auth.Verified {
 		errors.ErrUnauthorized.WithErr(csp.ErrAuthTokenNotVerified).Write(w)
 		return
@@ -421,16 +428,23 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// the token's user must be a participant of the bundle's census, otherwise a
+	// verified org member who is not in this census could still obtain a ballot
+	// signature for it
+	if _, err := c.mainDB.CensusParticipant(bundle.Census.ID.Hex(), auth.UserID.String()); err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			errors.ErrUnauthorized.Withf("user is not a participant of the census").Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
 	// default weight to 1 if not set
 	weight := uint64(1)
 	if census.Weighted {
 		weight = member.Weight
 	}
-
-	// // Check if the participant is in the census
-	// if !c.checkCensusParticipant(w, bundle.Census.ID.Hex(), string(auth.UserID)) {
-	// 	return
-	// }
 
 	// Parse the address from the payload
 	address, ok := parseAddress(w, req.Payload)

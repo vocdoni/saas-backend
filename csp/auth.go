@@ -149,6 +149,30 @@ func (c *CSP) ResendChallenge(token internal.HexBytes, to string,
 			"token", token)
 		return ErrTokenExpired
 	}
+	// enforce a cooldown between resends to prevent OTP notification flooding
+	// (SMS/email bombing and cost amplification). The same cooldown that gates
+	// new token requests in BundleAuthToken spaces successive resends of one
+	// token; the check and timestamp bump are atomic so concurrent resends
+	// cannot both pass.
+	allowed, err := c.Storage.TouchCSPAuthResend(token, c.notificationCoolDownTime)
+	if err != nil {
+		log.Warnw("error enforcing resend cooldown",
+			"userID", authTokenData.UserID,
+			"bundleID", authTokenData.BundleID,
+			"token", token,
+			"error", err)
+		return ErrStorageFailure
+	}
+	if !allowed {
+		// allowed is only false once a prior resend has stamped lastresendat, so
+		// it is the reference for the remaining cooldown reported to the client.
+		remaining := max(c.notificationCoolDownTime-time.Since(authTokenData.LastResendAt), 0)
+		log.Warnw("resend cooldown not reached",
+			"userID", authTokenData.UserID,
+			"bundleID", authTokenData.BundleID,
+			"token", token)
+		return errors.ErrAttemptCoolDownTime.WithData(map[string]any{"coolDownTime": remaining.Milliseconds()})
+	}
 	// compose the notification challenge
 	orgInfo := notifications.OrganizationInfo{
 		Address: orgAddress,

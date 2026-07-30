@@ -404,6 +404,55 @@ func TestResendChallenge(t *testing.T) {
 	})
 }
 
+// TestResendChallengeCooldown verifies that successive resends of the same token
+// are rate-limited: the first resend is allowed, an immediate second is rejected
+// with the cooldown error, and once the cooldown elapses a further resend is
+// allowed again (M4).
+func TestResendChallengeCooldown(t *testing.T) {
+	c := qt.New(t)
+
+	testDB, err := db.New(testMongoURI, test.RandomDatabaseName())
+	c.Assert(err, qt.IsNil)
+
+	ctx := context.Background()
+	// a short cooldown keeps the recovery leg of the test fast
+	csp, err := New(ctx, &Config{
+		DB:                       testDB,
+		MailService:              testMailService,
+		SMSService:               testSMSService,
+		NotificationCoolDownTime: 800 * time.Millisecond,
+		NotificationTTL:          time.Second * 30,
+		RootKey:                  *testRootKey,
+	})
+	c.Assert(err, qt.IsNil)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID, gotp.RandomSecret(16)), qt.IsNil)
+
+	resend := func() error {
+		return csp.ResendChallenge(
+			testToken,
+			testUserEmail,
+			notifications.EmailChallenge,
+			apicommon.DefaultLang,
+			testOrgName,
+			testOrgLogo,
+			testAddress.Address(),
+		)
+	}
+
+	// the first resend is always allowed (no prior resend recorded); drain the
+	// delivered email so it does not pollute other tests' inbox searches
+	c.Assert(resend(), qt.IsNil)
+	fetchOTPCodeFromEmail(c, testUserEmail)
+	// an immediate second resend is blocked by the cooldown (no email delivered)
+	c.Assert(resend(), qt.ErrorIs, errors.ErrAttemptCoolDownTime)
+	// after the cooldown elapses, a further resend is allowed again
+	time.Sleep(time.Second)
+	c.Assert(resend(), qt.IsNil)
+	fetchOTPCodeFromEmail(c, testUserEmail)
+}
+
 func TestBundleAuthTokenResendAndVerifyFlow(t *testing.T) {
 	c := qt.New(t)
 
