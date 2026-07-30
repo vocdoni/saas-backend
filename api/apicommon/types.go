@@ -1322,6 +1322,41 @@ type RelayVotesRequest struct {
 	Votes []RelayVoteRequest `json:"votes"`
 }
 
+// VerifyVotesRequest is the body of POST /votes/verify: the vote nullifiers a voter wants
+// checked against the chain, typically the one nullifier per question of a multi-question
+// voting process.
+// swagger:model VerifyVotesRequest
+type VerifyVotesRequest struct {
+	// Vote nullifiers (up to 32 bytes each — anonymous ones may be shorter), capped at the
+	// shared vote batch limit (100)
+	Nullifiers []internal.HexBytes `json:"nullifiers" swaggertype:"array,string"`
+}
+
+// VerifiedVote is the outcome of checking one nullifier against the chain. Everything
+// beyond Verified comes from the on-chain vote and is absent when it was not found.
+// swagger:model VerifiedVote
+type VerifiedVote struct {
+	// The nullifier that was checked, echoed back
+	Nullifier internal.HexBytes `json:"nullifier" swaggertype:"string" format:"hex" example:"deadbeef"`
+	// Whether the chain has a vote with this nullifier
+	Verified bool `json:"verified"`
+	// On-chain election id the vote belongs to
+	ProcessID internal.HexBytes `json:"processId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	// Hash of the transaction that carried the vote
+	TxHash internal.HexBytes `json:"txHash,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	// Block the vote was registered in
+	BlockHeight uint32 `json:"blockHeight,omitempty"`
+	// When the vote was registered on chain
+	Date *time.Time `json:"date,omitempty"`
+}
+
+// VerifyVotesResponse is returned by POST /votes/verify, one entry per requested
+// nullifier in the order they were given.
+// swagger:model VerifyVotesResponse
+type VerifyVotesResponse struct {
+	Votes []VerifiedVote `json:"votes"`
+}
+
 // RelayVoteResponse is returned by POST /vote with the vote nullifier (voteID)
 // assigned on chain.
 // swagger:model RelayVoteResponse

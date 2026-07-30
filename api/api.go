@@ -462,6 +462,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, processEndpoint, a.processInfoHandler)
 		handle(r, http.MethodPost, voteEndpoint, a.relayVoteHandler)
 		handle(r, http.MethodPost, votesEndpoint, a.relayVotesHandler)
+		handle(r, http.MethodPost, votesVerifyEndpoint, a.verifyVotesHandler)
 		handle(r, http.MethodGet, processResultsEndpoint, a.processResultsHandler)
 		handle(r, http.MethodGet, processMetadataEndpoint, a.processMetadataHandler)
 		handle(r, http.MethodPost, processSignInfoEndpoint, cspHandlers.ConsumedAddressHandler)

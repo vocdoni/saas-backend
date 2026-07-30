@@ -338,6 +338,45 @@ func TestRelayVote(t *testing.T) {
 	orgAfter, err := testDB.Organization(f.orgAddress)
 	c.Assert(err, qt.IsNil)
 	c.Assert(orgAfter.Counters.SentVotes, qt.Equals, 1)
+
+	// the voter can now verify that nullifier against the chain: an unknown one is reported
+	// as unverified rather than failing the call, a repeated one gets the same answer
+	// (looked up only once), and a short one is accepted — anonymous (ZK) nullifiers are
+	// minimal big-endian field elements, so they may be under 32 bytes
+	unknown := internal.HexBytes(internal.RandomBytes(nullifierSize))
+	short := internal.HexBytes{0xde, 0xad}
+	verified := requestAndParse[apicommon.VerifyVotesResponse](t, http.MethodPost, "",
+		&apicommon.VerifyVotesRequest{Nullifiers: []internal.HexBytes{nullifier, unknown, nullifier, short}},
+		"votes", "verify")
+	c.Assert(verified.Votes, qt.HasLen, 4)
+	c.Assert(verified.Votes[0].Nullifier, qt.DeepEquals, nullifier)
+	c.Assert(verified.Votes[0].Verified, qt.IsTrue)
+	c.Assert(verified.Votes[0].ProcessID, qt.DeepEquals, processID)
+	c.Assert(verified.Votes[0].TxHash, qt.Not(qt.HasLen), 0)
+	c.Assert(verified.Votes[1].Nullifier, qt.DeepEquals, unknown)
+	c.Assert(verified.Votes[1].Verified, qt.IsFalse)
+	c.Assert(verified.Votes[2], qt.DeepEquals, verified.Votes[0])
+	c.Assert(verified.Votes[3].Nullifier, qt.DeepEquals, short)
+	c.Assert(verified.Votes[3].Verified, qt.IsFalse)
+
+	// a nullifier that cannot name a vote — empty or over 32 bytes — is rejected outright,
+	// not looked up
+	requestAndAssertError(errors.ErrMalformedBody, t, http.MethodPost, "",
+		&apicommon.VerifyVotesRequest{Nullifiers: []internal.HexBytes{{}}}, "votes", "verify")
+	requestAndAssertError(errors.ErrMalformedBody, t, http.MethodPost, "",
+		&apicommon.VerifyVotesRequest{
+			Nullifiers: []internal.HexBytes{internal.RandomBytes(nullifierSize + 1)},
+		}, "votes", "verify")
+
+	// an empty batch and one over the cap are rejected before any chain read
+	requestAndAssertError(errors.ErrVoteBatchEmpty, t, http.MethodPost, "",
+		&apicommon.VerifyVotesRequest{}, "votes", "verify")
+	tooMany := make([]internal.HexBytes, maxVotesPerBatch+1)
+	for i := range tooMany {
+		tooMany[i] = internal.RandomBytes(nullifierSize)
+	}
+	requestAndAssertError(errors.ErrVoteBatchTooLarge, t, http.MethodPost, "",
+		&apicommon.VerifyVotesRequest{Nullifiers: tooMany}, "votes", "verify")
 }
 
 // TestRelayVotesBatch relays the votes of a multi-question process in a single call and
