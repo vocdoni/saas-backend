@@ -180,11 +180,11 @@ func TestProcessCSP(t *testing.T) {
 			Payload:   hex.EncodeToString(voter.Address().Bytes()),
 		}, "processes", pid, "sign")
 
-	// a verified token anchored to a different process is rejected on this one
+	// a verified token scoped to a different process is rejected on this one
 	otherTok := internal.HexBytes(internal.RandomBytes(16))
 	otherOID := primitive.NewObjectID()
-	otherAnchor := internal.HexBytes(otherOID[:])
-	c.Assert(testDB.SetCSPAuth(otherTok, internal.HexBytesFromString(members[0].ID), otherAnchor, ""), qt.IsNil)
+	otherScope := internal.HexBytes(otherOID[:])
+	c.Assert(testDB.SetCSPAuth(otherTok, internal.HexBytesFromString(members[0].ID), otherScope, ""), qt.IsNil)
 	c.Assert(testDB.VerifyCSPAuth(otherTok), qt.IsNil)
 	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "",
 		&handlers.CheckMembershipRequest{AuthToken: otherTok}, "processes", pid, "check")

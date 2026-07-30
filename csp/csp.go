@@ -50,7 +50,7 @@ type Config struct {
 	NotificationBreakerCooldown    time.Duration
 	SMSService                     saasNotifications.NotificationService
 	MailService                    saasNotifications.NotificationService
-	// SyncDelivery makes BundleAuthToken and ResendChallenge block until the
+	// SyncDelivery makes AuthToken and ResendChallenge block until the
 	// challenge notification has actually been delivered, instead of returning as
 	// soon as it is enqueued. It exists to make tests deterministic; leave false
 	// in production (fire-and-forget).
@@ -101,7 +101,7 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 					"success", ch.Success,
 					"type", ch.Type,
 					"userID", ch.UserID,
-					"bundleID", ch.BundleID)
+					"scopeID", ch.ScopeID)
 				switch ch.Type {
 				case notifications.EmailChallenge:
 					if err := config.DB.IncrementOrganizationSentEmailsCounter(ch.OrgAddress); err != nil {

@@ -21,6 +21,10 @@ var (
 	ErrProcessAlreadyConsumed = fmt.Errorf("token already consumed")
 	// ErrTokenNotVerified is returned if the token has not been verified
 	ErrTokenNotVerified = fmt.Errorf("token not verified")
+	// ErrCSPBlindSessionNotFound is returned when no live blind-signature session
+	// exists for the voter and election: never prepared, already consumed (they
+	// are single-use), or expired.
+	ErrCSPBlindSessionNotFound = fmt.Errorf("blind signing session not found or expired")
 	// ErrUpdateWouldCreateDuplicates is returned when trying to update an OrgMember
 	ErrUpdateWouldCreateDuplicates = fmt.Errorf("update would create duplicates")
 	// ErrAutoGroupCannotBeDeleted is returned when trying to delete the auto-generated "All members" group

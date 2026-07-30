@@ -19,7 +19,7 @@ import (
 )
 
 // parseProcessID parses the {processId} URL param (a voting-process Mongo ObjectID) and
-// returns both the ObjectID and its bytes, which are used as the CSP token anchor.
+// returns both the ObjectID and its bytes, which are used as the CSP token scope.
 func parseProcessID(w http.ResponseWriter, r *http.Request) (primitive.ObjectID, internal.HexBytes, bool) {
 	oid, err := primitive.ObjectIDFromHex(chi.URLParam(r, "processId"))
 	if err != nil {
@@ -61,7 +61,7 @@ func memberEligibleForQuestion(q *db.VotingProcessQuestion, memberID string) boo
 //
 //	@Summary		Authenticate a voter for a voting process
 //	@Description	Two-step voter authentication for a multi-question voting process (the /processes
-//	@Description	replacement of the bundle auth flow); the issued token is anchored to the process.
+//	@Description	replacement of the bundle auth flow); the issued token is scoped to the process.
 //	@Description	- Step 0: handlers.AuthRequest — member identification fields (name, surname,
 //	@Description	memberNumber, nationalId, birthDate, email, phone); which are required depends on the
 //	@Description	census auth configuration. If valid, a challenge is sent and a token returned.
@@ -81,7 +81,7 @@ func memberEligibleForQuestion(q *db.VotingProcessQuestion, memberID string) boo
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId}/auth/{step} [post]
 func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request) {
-	oid, anchor, ok := parseProcessID(w, r)
+	oid, scope, ok := parseProcessID(w, r)
 	if !ok {
 		return
 	}
@@ -93,7 +93,7 @@ func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	c.handleAuthStep(w, r, step, anchor, vp.CensusID.Hex())
+	c.handleAuthStep(w, r, step, scope, vp.CensusID.Hex())
 }
 
 // ProcessAuthResendHandler godoc
@@ -114,7 +114,7 @@ func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request)
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId}/auth/resend [post]
 func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Request) {
-	oid, anchor, ok := parseProcessID(w, r)
+	oid, scope, ok := parseProcessID(w, r)
 	if !ok {
 		return
 	}
@@ -135,7 +135,7 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	if !bytes.Equal(anchor, auth.BundleID) {
+	if !bytes.Equal(scope, auth.ScopeID) {
 		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
 		return
 	}
@@ -183,7 +183,7 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 //	@Description	bound to the process; authorizes the member against the question's eligibility subset
 //	@Description	and consumes the per-election signing slot (a question cannot be signed twice).
 //	@Description	Body: authToken, electionId (the question's on-chain election id) and payload (the voter
-//	@Description	address). tokenR is unused.
+//	@Description	address).
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -196,11 +196,7 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId}/sign [post]
 func (c *CSPHandlers) ProcessSignHandler(w http.ResponseWriter, r *http.Request) {
-	oid, anchor, ok := parseProcessID(w, r)
-	if !ok {
-		return
-	}
-	vp, ok := c.getVotingProcess(w, oid)
+	oid, scope, ok := parseProcessID(w, r)
 	if !ok {
 		return
 	}
@@ -208,56 +204,208 @@ func (c *CSPHandlers) ProcessSignHandler(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	auth, ok := c.getAuthInfo(w, req.AuthToken)
+	authz, ok := c.authorizeSign(w, oid, scope, req.AuthToken, req.ProcessID)
 	if !ok {
 		return
-	}
-	if !auth.Verified {
-		errors.ErrUnauthorized.WithErr(csp.ErrAuthTokenNotVerified).Write(w)
-		return
-	}
-	if !bytes.Equal(anchor, auth.BundleID) {
-		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
-		return
-	}
-	// resolve the target question by its on-chain election id and verify it belongs to
-	// this process
-	question, err := c.mainDB.QuestionByUpstreamID(req.ProcessID)
-	if err != nil && err != db.ErrNotFound {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
-	}
-	if err != nil || question.ProcessID != oid {
-		errors.ErrUnauthorized.Withf("election not found in process").Write(w)
-		return
-	}
-	// authorize the member against the question's eligibility subset
-	if !memberEligibleForQuestion(question, auth.UserID.String()) {
-		errors.ErrUnauthorized.Withf("member not eligible for this question").Write(w)
-		return
-	}
-	member, ok := c.orgMemberFromAuth(w, vp.OrgAddress, auth)
-	if !ok {
-		return
-	}
-	census, err := c.mainDB.Census(vp.CensusID.Hex())
-	if err != nil {
-		errors.ErrCensusNotFound.WithErr(err).Write(w)
-		return
-	}
-	weight := uint64(1)
-	if census.Weighted {
-		if member.Weight == 0 {
-			errors.ErrZeroWeightVoter.Write(w)
-			return
-		}
-		weight = member.Weight
 	}
 	address, ok := parseAddress(w, req.Payload)
 	if !ok {
 		return
 	}
-	c.signAndRespond(w, req.AuthToken, *address, question.UpstreamID, big.NewInt(int64(weight)).Bytes())
+	c.signAndRespond(w, req.AuthToken, *address, authz.question.UpstreamID, new(big.Int).SetUint64(authz.weight).Bytes())
+}
+
+// ProcessSignAnonymousPrepareHandler godoc
+//
+//	@Summary		Prepare an anonymous ballot signature
+//	@Description	Open an anonymous signing session for one question's on-chain election and return
+//	@Description	the ephemeral point the voter blinds their ballot against, plus the CSP's
+//	@Description	attestation of their weight. Authorization is identical to /sign: a verified token
+//	@Description	bound to the process, the member eligible for the question.
+//	@Description	Unlike /sign this grants no vote overwrites -- one anonymous signature per voter
+//	@Description	per election.
+//	@Description	tokenR is returned in go-blindsecp256k1's own 33-byte compressed encoding, which
+//	@Description	is not SEC1; parse it with that library.
+//	@Tags			processes
+//	@Accept			json
+//	@Produce		json
+//	@Param			processId	path		string									true	"Process ID"
+//	@Param			request		body		handlers.AnonymousSignPrepareRequest	true	"Auth token and election id"
+//	@Success		200			{object}	handlers.AnonymousSignPrepareResponse
+//	@Failure		400			{object}	errors.Error	"Invalid input data"
+//	@Failure		401			{object}	errors.Error	"Unauthorized, unverified token, ineligible member, or already signed"
+//	@Failure		404			{object}	errors.Error	"Process, census, or user not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/processes/{processId}/sign/anonymous/prepare [post]
+func (c *CSPHandlers) ProcessSignAnonymousPrepareHandler(w http.ResponseWriter, r *http.Request) {
+	oid, scope, ok := parseProcessID(w, r)
+	if !ok {
+		return
+	}
+	var req AnonymousSignPrepareRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	if req.AuthToken == nil {
+		errors.ErrUnauthorized.Withf("missing auth token").Write(w)
+		return
+	}
+	authz, ok := c.authorizeSign(w, oid, scope, req.AuthToken, req.ProcessID)
+	if !ok {
+		return
+	}
+
+	tokenR, weightCert, err := c.csp.PrepareBlindSign(req.AuthToken, authz.question.UpstreamID, authz.weight)
+	if err != nil {
+		writeBlindSignError(w, err)
+		return
+	}
+	apicommon.HTTPWriteJSON(w, &AnonymousSignPrepareResponse{
+		TokenR:     tokenR,
+		Weight:     new(big.Int).SetUint64(authz.weight).Bytes(),
+		WeightCert: weightCert,
+	})
+}
+
+// ProcessSignAnonymousHandler godoc
+//
+//	@Summary		Sign a ballot anonymously
+//	@Description	Blind-sign a ballot for one question's on-chain election. The payload is the
+//	@Description	hex-encoded blinded message, which the CSP cannot read -- it never learns the
+//	@Description	address the voter casts with, and records none.
+//	@Description	The response is the blinded scalar; the client unblinds it and puts the result in
+//	@Description	an ECDSA_BLIND_PIDSALTED proof.
+//	@Description	tokenR must be the point returned by the prepare step.
+//	@Tags			processes
+//	@Accept			json
+//	@Produce		json
+//	@Param			processId	path		string							true	"Process ID"
+//	@Param			request		body		handlers.AnonymousSignRequest	true	"Auth token, election id, tokenR and blinded payload"
+//	@Success		200			{object}	handlers.AuthResponse
+//	@Failure		400			{object}	errors.Error	"Invalid input data, or a blinded message that must be blinded again"
+//	@Failure		401			{object}	errors.Error	"Unauthorized, unverified token, ineligible member, no live session, or already signed"
+//	@Failure		404			{object}	errors.Error	"Process, census, or user not found"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/processes/{processId}/sign/anonymous [post]
+func (c *CSPHandlers) ProcessSignAnonymousHandler(w http.ResponseWriter, r *http.Request) {
+	oid, scope, ok := parseProcessID(w, r)
+	if !ok {
+		return
+	}
+	var req AnonymousSignRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	if req.AuthToken == nil {
+		errors.ErrUnauthorized.Withf("missing auth token").Write(w)
+		return
+	}
+	// The session is not authority on its own: re-run the full authorization.
+	authz, ok := c.authorizeSign(w, oid, scope, req.AuthToken, req.ProcessID)
+	if !ok {
+		return
+	}
+	blindedMsg := new(internal.HexBytes)
+	if err := blindedMsg.ParseString(req.Payload); err != nil {
+		errors.ErrMalformedBody.WithErr(err).Write(w)
+		return
+	}
+
+	signature, err := c.csp.CompleteBlindSign(req.AuthToken, authz.question.UpstreamID, req.TokenR, *blindedMsg)
+	if err != nil {
+		writeBlindSignError(w, err)
+		return
+	}
+	apicommon.HTTPWriteJSON(w, &AuthResponse{Signature: signature})
+}
+
+// writeBlindSignError maps the CSP's blind-signing errors onto HTTP responses.
+// ErrRetryBlinding is a 400 rather than a 401 because it is the client's message
+// that is unusable, not its credentials -- and the session is still open, so
+// retrying with a freshly blinded message is the correct response.
+func writeBlindSignError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, csp.ErrRetryBlinding):
+		errors.ErrMalformedBody.WithErr(err).Write(w)
+	case errors.Is(err, csp.ErrAuthTokenNotVerified),
+		errors.Is(err, csp.ErrInvalidAuthToken),
+		errors.Is(err, csp.ErrProcessAlreadyConsumed),
+		errors.Is(err, csp.ErrBlindSessionNotFound),
+		errors.Is(err, csp.ErrUserAlreadySigning):
+		errors.ErrUnauthorized.WithErr(err).Write(w)
+	case errors.Is(err, csp.ErrInvalidSalt):
+		errors.ErrMalformedURLParam.WithErr(err).Write(w)
+	default:
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+	}
+}
+
+// signAuthorization is what a signing request has proven: a verified token
+// scoped to this process, a question that belongs to the process which the
+// member is eligible for, and the weight they are entitled to.
+type signAuthorization struct {
+	question *db.VotingProcessQuestion
+	weight   uint64
+}
+
+// authorizeSign runs the checks every signing request must pass, whatever it
+// then does with the signature. It lives in one place so the anonymous path
+// cannot drift into enforcing less than the plain one.
+func (c *CSPHandlers) authorizeSign(
+	w http.ResponseWriter, oid primitive.ObjectID, scope, authToken, electionID internal.HexBytes,
+) (*signAuthorization, bool) {
+	vp, ok := c.getVotingProcess(w, oid)
+	if !ok {
+		return nil, false
+	}
+	auth, ok := c.getAuthInfo(w, authToken)
+	if !ok {
+		return nil, false
+	}
+	if !auth.Verified {
+		errors.ErrUnauthorized.WithErr(csp.ErrAuthTokenNotVerified).Write(w)
+		return nil, false
+	}
+	if !bytes.Equal(scope, auth.ScopeID) {
+		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
+		return nil, false
+	}
+	// resolve the target question by its on-chain election id and verify it belongs to
+	// this process
+	question, err := c.mainDB.QuestionByUpstreamID(electionID)
+	if err != nil && err != db.ErrNotFound {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return nil, false
+	}
+	if err != nil || question.ProcessID != oid {
+		errors.ErrUnauthorized.Withf("election not found in process").Write(w)
+		return nil, false
+	}
+	// authorize the member against the question's eligibility subset
+	if !memberEligibleForQuestion(question, auth.UserID.String()) {
+		errors.ErrUnauthorized.Withf("member not eligible for this question").Write(w)
+		return nil, false
+	}
+	member, ok := c.orgMemberFromAuth(w, vp.OrgAddress, auth)
+	if !ok {
+		return nil, false
+	}
+	census, err := c.mainDB.Census(vp.CensusID.Hex())
+	if err != nil {
+		errors.ErrCensusNotFound.WithErr(err).Write(w)
+		return nil, false
+	}
+	weight := uint64(1)
+	if census.Weighted {
+		if member.Weight == 0 {
+			errors.ErrZeroWeightVoter.Write(w)
+			return nil, false
+		}
+		weight = member.Weight
+	}
+	return &signAuthorization{question: question, weight: weight}, true
 }
 
 // ProcessWeightHandler godoc
@@ -277,7 +425,7 @@ func (c *CSPHandlers) ProcessSignHandler(w http.ResponseWriter, r *http.Request)
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId}/weight [post]
 func (c *CSPHandlers) ProcessWeightHandler(w http.ResponseWriter, r *http.Request) {
-	oid, anchor, ok := parseProcessID(w, r)
+	oid, scope, ok := parseProcessID(w, r)
 	if !ok {
 		return
 	}
@@ -294,7 +442,7 @@ func (c *CSPHandlers) ProcessWeightHandler(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	if !bytes.Equal(anchor, auth.BundleID) {
+	if !bytes.Equal(scope, auth.ScopeID) {
 		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
 		return
 	}
@@ -336,7 +484,7 @@ func (c *CSPHandlers) ProcessWeightHandler(w http.ResponseWriter, r *http.Reques
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId}/check [post]
 func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request) {
-	oid, anchor, ok := parseProcessID(w, r)
+	oid, scope, ok := parseProcessID(w, r)
 	if !ok {
 		return
 	}
@@ -353,7 +501,7 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	if !bytes.Equal(anchor, auth.BundleID) {
+	if !bytes.Equal(scope, auth.ScopeID) {
 		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
 		return
 	}
@@ -466,7 +614,7 @@ func writeResendError(w http.ResponseWriter, err error) {
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId}/sign-info [post]
 func (c *CSPHandlers) ProcessSignInfoHandler(w http.ResponseWriter, r *http.Request) {
-	oid, anchor, ok := parseProcessID(w, r)
+	oid, scope, ok := parseProcessID(w, r)
 	if !ok {
 		return
 	}
@@ -482,7 +630,7 @@ func (c *CSPHandlers) ProcessSignInfoHandler(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	if !bytes.Equal(anchor, auth.BundleID) {
+	if !bytes.Equal(scope, auth.ScopeID) {
 		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
 		return
 	}
@@ -512,13 +660,19 @@ func (c *CSPHandlers) ProcessSignInfoHandler(w http.ResponseWriter, r *http.Requ
 		if !cspProc.Used {
 			continue // authenticated for this question but not consumed
 		}
-		resp.Consumed = append(resp.Consumed, QuestionConsumedAddress{
+		consumed := QuestionConsumedAddress{
 			QuestionID: q.ID.Hex(),
 			UpstreamID: q.UpstreamID,
-			Address:    cspProc.UsedAddress,
-			Nullifier:  state.GenerateNullifier(common.BytesToAddress(cspProc.UsedAddress), q.UpstreamID),
 			At:         cspProc.UsedAt,
-		})
+		}
+		// An anonymously signed election has no recorded address. Deriving a
+		// nullifier anyway would hash the zero address into a value that looks
+		// real and belongs to nobody.
+		if len(cspProc.UsedAddress) > 0 {
+			consumed.Address = cspProc.UsedAddress
+			consumed.Nullifier = state.GenerateNullifier(common.BytesToAddress(cspProc.UsedAddress), q.UpstreamID)
+		}
+		resp.Consumed = append(resp.Consumed, consumed)
 	}
 	apicommon.HTTPWriteJSON(w, resp)
 }

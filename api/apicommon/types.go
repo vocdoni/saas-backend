@@ -1310,6 +1310,11 @@ type ProcessResultsResponse struct {
 type RelayVoteRequest struct {
 	// Hex of a marshaled models.SignedTx whose inner Tx is a Vote
 	TxPayload internal.HexBytes `json:"txPayload" swaggertype:"string" format:"hex" example:"deadbeef"`
+	// WeightCert is the attestation issued by the anonymous-signing prepare step.
+	// Required only for a blind CSP proof that declares a vote weight: the CSP
+	// blind-signed a bundle it could not read, so this is the only chance to
+	// check the weight the voter put in it. Ignored otherwise.
+	WeightCert internal.HexBytes `json:"weightCert,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 }
 
 // RelayVotesRequest is the body of POST /votes: the already-signed voter transactions of
@@ -1399,25 +1404,6 @@ type AuthRequest struct {
 
 	// Authentication data (reserved for the auth handler)
 	AuthData []string `json:"authData,omitempty"`
-}
-
-// SignRequest defines the payload for requesting a signature.
-// swagger:model SignRequest
-type SignRequest struct {
-	// Token R value
-	TokenR internal.HexBytes `json:"tokenR" swaggertype:"string" format:"hex" example:"deadbeef"`
-
-	// Authentication token
-	AuthToken *uuid.UUID `json:"authToken"`
-
-	// Blockchain address
-	Address string `json:"address,omitempty"`
-
-	// Payload to sign
-	Payload string `json:"payload,omitempty"`
-
-	// Election ID
-	ElectionID internal.HexBytes `json:"electionId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 }
 
 // CreateProcessBundleRequest defines the payload for creating a new process bundle.

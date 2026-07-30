@@ -47,14 +47,48 @@ type AuthChallengeRequest struct {
 	AuthData  []string          `json:"authData,omitempty"` // reserved for the auth handler
 }
 
-// SignRequest defines the payload for the signature request. It includes the
-// tokenR, the authToken, the payload to sign, and the processID (election ID)
-// if applicable. Not all fields are required for all types of signatures.
+// SignRequest defines the payload for a plain signature request: the authToken,
+// the payload to sign (the voter address), and the processID (election ID).
+//
+// The anonymous flow has its own types; see AnonymousSignRequest, which is where
+// a tokenR is meaningful.
 type SignRequest struct {
-	TokenR    internal.HexBytes `json:"tokenR" swaggertype:"string" format:"hex" example:"deadbeef"`
 	AuthToken internal.HexBytes `json:"authToken" swaggertype:"string" format:"hex" example:"deadbeef"`
 	Payload   string            `json:"payload,omitempty"`
 	ProcessID internal.HexBytes `json:"electionId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+}
+
+// AnonymousSignPrepareRequest is the payload for opening an anonymous signing
+// session on one of a voting process's elections.
+type AnonymousSignPrepareRequest struct {
+	AuthToken internal.HexBytes `json:"authToken" swaggertype:"string" format:"hex" example:"deadbeef"`
+	ProcessID internal.HexBytes `json:"electionId" swaggertype:"string" format:"hex" example:"deadbeef"`
+}
+
+// AnonymousSignPrepareResponse carries what a voter needs in order to blind
+// their ballot: the CSP's ephemeral public point, and the weight the CSP
+// attests they are entitled to.
+type AnonymousSignPrepareResponse struct {
+	// TokenR is the ephemeral R point, 33 bytes in go-blindsecp256k1's own
+	// compressed encoding. It is not SEC1: parse it with that library, not with
+	// a general secp256k1 decoder.
+	TokenR internal.HexBytes `json:"tokenR" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Weight internal.HexBytes `json:"weight,omitempty" swaggertype:"string" format:"hex" example:"2a"`
+	// WeightCert attests {electionId, weight}. It binds no address -- it could
+	// not, without re-identifying the voter -- so it is a bearer token, the same
+	// for every voter of this weight on this election.
+	WeightCert internal.HexBytes `json:"weightCert,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+}
+
+// AnonymousSignRequest is the payload for completing an anonymous signature.
+// Payload is the hex-encoded blinded message; the CSP cannot read it.
+type AnonymousSignRequest struct {
+	AuthToken internal.HexBytes `json:"authToken" swaggertype:"string" format:"hex" example:"deadbeef"`
+	ProcessID internal.HexBytes `json:"electionId" swaggertype:"string" format:"hex" example:"deadbeef"`
+	// TokenR must be the point returned by the prepare step. Quoting a stale one
+	// is rejected without spending the session.
+	TokenR  internal.HexBytes `json:"tokenR" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Payload string            `json:"payload"`
 }
 
 // UserWeightRequest defines the payload for the request to get the
@@ -128,11 +162,15 @@ type ConsumedAddressResponse struct {
 // QuestionConsumedAddress is one question's consumed voting info for a voter: the address that
 // consumed that question's election, its nullifier, and when. Only questions the voter has voted
 // are included.
+//
+// Address and nullifier are omitted for an election signed anonymously: the CSP
+// never learned the address, so there is nothing to report and no nullifier to
+// derive from it.
 type QuestionConsumedAddress struct {
 	QuestionID string            `json:"questionId"`
 	UpstreamID internal.HexBytes `json:"upstreamId" swaggertype:"string" format:"hex" example:"deadbeef"`
-	Address    internal.HexBytes `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
-	Nullifier  internal.HexBytes `json:"nullifier" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Address    internal.HexBytes `json:"address,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Nullifier  internal.HexBytes `json:"nullifier,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	At         time.Time         `json:"at"`
 }
 

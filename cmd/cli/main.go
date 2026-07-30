@@ -227,14 +227,14 @@ func queryProcessOnly(database *db.MongoStorage, client *vocapi.HTTPclient, proc
 	}
 
 	// Count login attempts
-	loginAttempts, err := database.CountCSPAuthByBundle(bundleIDBytes)
+	loginAttempts, err := database.CountCSPAuthByScope(bundleIDBytes)
 	if err != nil {
 		return fmt.Errorf("failed to count login attempts: %w", err)
 	}
 	fmt.Printf("Login Attempts (CSP Tokens created):     %d\n", loginAttempts)
 
 	// Count verified logins
-	verifiedLogins, err := database.CountCSPAuthVerifiedByBundle(bundleIDBytes)
+	verifiedLogins, err := database.CountCSPAuthVerifiedByScope(bundleIDBytes)
 	if err != nil {
 		return fmt.Errorf("failed to count verified logins: %w", err)
 	}

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/vocdoni/saas-backend/csp/signers"
 	"github.com/vocdoni/saas-backend/csp/signers/saltedkey"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
@@ -14,31 +13,27 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Sign method signs a message with the given token, address and processID. It
-// returns the signature as HexBytes or an error if the signer type is invalid
-// or the signature fails.
-func (c *CSP) Sign(
-	token, address, processID, weight internal.HexBytes,
-	signType signers.SignerType,
-) (internal.HexBytes, error) {
-	switch signType {
-	case signers.SignerTypeECDSASalted:
-		userID, salt, message, err := c.prepareSaltedKeySigner(token, address, processID, weight)
-		defer c.unlock(userID, processID)
-		if err != nil {
-			return nil, err
-		}
-		signature, err := c.Signer.SignECDSA(*salt, message)
-		if err != nil {
-			return nil, errors.Join(ErrSign, err)
-		}
-		if err := c.finishSaltedKeySigner(token, address, processID); err != nil {
-			return nil, err
-		}
-		return signature, nil
-	default:
-		return nil, ErrInvalidSignerType
+// Sign salted-ECDSA-signs a CA bundle for the given token, address and
+// processID, and consumes the voter's signing slot for that election. It returns
+// the signature as HexBytes, or an error if the voter is not entitled to it.
+//
+// The anonymous flow does not come through here: it takes no address, returns a
+// blinded scalar rather than a signature, and pairs with its own preparation
+// step. See PrepareBlindSign and CompleteBlindSign in sign_blind.go.
+func (c *CSP) Sign(token, address, processID, weight internal.HexBytes) (internal.HexBytes, error) {
+	userID, salt, message, err := c.prepareSaltedKeySigner(token, address, processID, weight)
+	defer c.unlock(userID, processID)
+	if err != nil {
+		return nil, err
 	}
+	signature, err := c.Signer.SignECDSA(*salt, message)
+	if err != nil {
+		return nil, errors.Join(ErrSign, err)
+	}
+	if err := c.finishSaltedKeySigner(token, address, processID); err != nil {
+		return nil, err
+	}
+	return signature, nil
 }
 
 // prepareSaltedKeySigner method prepares the data for the Ethereum signer.
@@ -64,16 +59,8 @@ func (c *CSP) prepareSaltedKeySigner(token, address, processID, weight internal.
 		return nil, nil, nil, ErrUserAlreadySigning
 	}
 	// check if the process is already consumed for this user
-	if consumed, err := c.Storage.IsCSPProcessConsumed(authTokenData.UserID, processID); err != nil {
-		log.Warn(err)
-		switch err {
-		case db.ErrTokenNotVerified:
-			return nil, nil, nil, ErrAuthTokenNotVerified
-		default:
-			return nil, nil, nil, ErrSign
-		}
-	} else if consumed {
-		return nil, nil, nil, ErrProcessAlreadyConsumed
+	if err := checkProcessConsumed(authTokenData.UserID, processID, c.Storage.IsCSPProcessConsumed); err != nil {
+		return nil, nil, nil, err
 	}
 	// lock the user data to avoid concurrent signing
 	c.lock(authTokenData.UserID, processID)
@@ -94,12 +81,48 @@ func (c *CSP) prepareSaltedKeySigner(token, address, processID, weight internal.
 		return nil, nil, nil, ErrPrepareSignature
 	}
 	// generate the salt
-	salt := [saltedkey.SaltSize]byte{}
-	if len(processID) < saltedkey.SaltSize {
-		return nil, nil, nil, ErrInvalidSalt
+	salt, err := saltFromProcessID(processID)
+	if err != nil {
+		return nil, nil, nil, err
 	}
+	return authTokenData.UserID, salt, signatureMsg, nil
+}
+
+// saltFromProcessID derives the per-election signing salt: the first
+// SaltSize bytes of the on-chain election id. The chain applies the same salt to
+// the CSP public key when verifying a PIDSALTED proof, so this must stay in step
+// with dvote's saltedkey.
+func saltFromProcessID(processID internal.HexBytes) (*[saltedkey.SaltSize]byte, error) {
+	if len(processID) < saltedkey.SaltSize {
+		return nil, ErrInvalidSalt
+	}
+	salt := [saltedkey.SaltSize]byte{}
 	copy(salt[:], processID[:saltedkey.SaltSize])
-	return authTokenData.UserID, &salt, signatureMsg, nil
+	return &salt, nil
+}
+
+// consumedCheck reports whether a voter has used up their signature(s) for an
+// election. The plain and anonymous flows differ only in how many they allow, so
+// callers pass the rule that applies to them.
+type consumedCheck func(userID, processID internal.HexBytes) (bool, error)
+
+// checkProcessConsumed reports whether the voter may still sign for this
+// election, translating storage errors into CSP ones.
+func checkProcessConsumed(userID, processID internal.HexBytes, consumedBy consumedCheck) error {
+	consumed, err := consumedBy(userID, processID)
+	if err != nil {
+		log.Warn(err)
+		switch err {
+		case db.ErrTokenNotVerified:
+			return ErrAuthTokenNotVerified
+		default:
+			return ErrSign
+		}
+	}
+	if consumed {
+		return ErrProcessAlreadyConsumed
+	}
+	return nil
 }
 
 func (c *CSP) finishSaltedKeySigner(token, address, processID internal.HexBytes) error {

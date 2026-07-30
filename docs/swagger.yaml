@@ -1406,6 +1406,15 @@ definitions:
         example: deadbeef
         format: hex
         type: string
+      weightCert:
+        description: |-
+          WeightCert is the attestation issued by the anonymous-signing prepare step.
+          Required only for a blind CSP proof that declares a vote weight: the CSP
+          blind-signed a bundle it could not read, so this is the only chance to
+          check the weight the voter put in it. Ignored otherwise.
+        example: deadbeef
+        format: hex
+        type: string
     type: object
   apicommon.RelayVotesRequest:
     properties:
@@ -2457,6 +2466,60 @@ definitions:
       subscription_status:
         type: string
     type: object
+  handlers.AnonymousSignPrepareRequest:
+    properties:
+      authToken:
+        example: deadbeef
+        format: hex
+        type: string
+      electionId:
+        example: deadbeef
+        format: hex
+        type: string
+    type: object
+  handlers.AnonymousSignPrepareResponse:
+    properties:
+      tokenR:
+        description: |-
+          TokenR is the ephemeral R point, 33 bytes in go-blindsecp256k1's own
+          compressed encoding. It is not SEC1: parse it with that library, not with
+          a general secp256k1 decoder.
+        example: deadbeef
+        format: hex
+        type: string
+      weight:
+        example: 2a
+        format: hex
+        type: string
+      weightCert:
+        description: |-
+          WeightCert attests {electionId, weight}. It binds no address -- it could
+          not, without re-identifying the voter -- so it is a bearer token, the same
+          for every voter of this weight on this election.
+        example: deadbeef
+        format: hex
+        type: string
+    type: object
+  handlers.AnonymousSignRequest:
+    properties:
+      authToken:
+        example: deadbeef
+        format: hex
+        type: string
+      electionId:
+        example: deadbeef
+        format: hex
+        type: string
+      payload:
+        type: string
+      tokenR:
+        description: |-
+          TokenR must be the point returned by the prepare step. Quoting a stale one
+          is rejected without spending the session.
+        example: deadbeef
+        format: hex
+        type: string
+    type: object
   handlers.AuthRequest:
     properties:
       birthDate:
@@ -2605,10 +2668,6 @@ definitions:
         format: hex
         type: string
       payload:
-        type: string
-      tokenR:
-        example: deadbeef
-        format: hex
         type: string
     type: object
   handlers.UserWeightRequest:
@@ -5806,7 +5865,7 @@ paths:
         The signing process includes verifying that the participant is in the census, that the process is part of
         the bundle, and that the authentication token is valid and verified.
 
-        Body: authToken, electionId (the process/election ID) and payload (the voter address). tokenR is unused.
+        Body: authToken, electionId (the process/election ID) and payload (the voter address).
       parameters:
       - description: Bundle ID
         in: path
@@ -6101,7 +6160,7 @@ paths:
       - application/json
       description: |-
         Two-step voter authentication for a multi-question voting process (the /processes
-        replacement of the bundle auth flow); the issued token is anchored to the process.
+        replacement of the bundle auth flow); the issued token is scoped to the process.
         - Step 0: handlers.AuthRequest — member identification fields (name, surname,
         memberNumber, nationalId, birthDate, email, phone); which are required depends on the
         census auth configuration. If valid, a challenge is sent and a token returned.
@@ -6573,7 +6632,7 @@ paths:
         bound to the process; authorizes the member against the question's eligibility subset
         and consumes the per-election signing slot (a question cannot be signed twice).
         Body: authToken, electionId (the question's on-chain election id) and payload (the voter
-        address). tokenR is unused.
+        address).
       parameters:
       - description: Process ID
         in: path
@@ -6658,6 +6717,109 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Get a voter's consumed sign info for a voting process
+      tags:
+      - processes
+  /processes/{processId}/sign/anonymous:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Blind-sign a ballot for one question's on-chain election. The payload is the
+        hex-encoded blinded message, which the CSP cannot read -- it never learns the
+        address the voter casts with, and records none.
+        The response is the blinded scalar; the client unblinds it and puts the result in
+        an ECDSA_BLIND_PIDSALTED proof.
+        tokenR must be the point returned by the prepare step.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Auth token, election id, tokenR and blinded payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.AnonymousSignRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.AuthResponse'
+        "400":
+          description: Invalid input data, or a blinded message that must be blinded
+            again
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized, unverified token, ineligible member, no live
+            session, or already signed
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process, census, or user not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Sign a ballot anonymously
+      tags:
+      - processes
+  /processes/{processId}/sign/anonymous/prepare:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Open an anonymous signing session for one question's on-chain election and return
+        the ephemeral point the voter blinds their ballot against, plus the CSP's
+        attestation of their weight. Authorization is identical to /sign: a verified token
+        bound to the process, the member eligible for the question.
+        Unlike /sign this grants no vote overwrites -- one anonymous signature per voter
+        per election.
+        tokenR is returned in go-blindsecp256k1's own 33-byte compressed encoding, which
+        is not SEC1; parse it with that library.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Auth token and election id
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.AnonymousSignPrepareRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.AnonymousSignPrepareResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized, unverified token, ineligible member, or already
+            signed
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process, census, or user not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Prepare an anonymous ballot signature
       tags:
       - processes
   /processes/{processId}/validation:

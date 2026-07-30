@@ -52,7 +52,7 @@ type OrganizationInfo struct {
 type NotificationChallenge struct {
 	Type         notifications.NotificationType
 	UserID       internal.HexBytes
-	BundleID     internal.HexBytes
+	ScopeID      internal.HexBytes
 	OrgAddress   common.Address
 	Notification *notifications.Notification
 	CreatedAt    time.Time
@@ -69,7 +69,7 @@ type NotificationChallenge struct {
 func (nc *NotificationChallenge) Valid() bool {
 	switch nc.Type {
 	case SMSChallenge, EmailChallenge:
-		return nc.UserID != nil && nc.BundleID != nil && nc.Notification != nil
+		return nc.UserID != nil && nc.ScopeID != nil && nc.Notification != nil
 	default:
 		return false
 	}
@@ -101,14 +101,14 @@ func (nc *NotificationChallenge) Send(ctx context.Context, service notifications
 func NewNotificationChallenge(
 	cType notifications.NotificationType,
 	lang string,
-	userID, bundleID internal.HexBytes,
+	userID, scopeID internal.HexBytes,
 	to, code string,
 	orgInfo OrganizationInfo,
 	remainingTime string,
 ) (
 	*NotificationChallenge, error,
 ) {
-	if userID == nil || bundleID == nil || to == "" || code == "" {
+	if userID == nil || scopeID == nil || to == "" || code == "" {
 		return nil, ErrInvalidNotificationInputs
 	}
 	n, err := mailtemplates.VerifyOTPCodeNotification.Localized(lang).ExecTemplate(struct {
@@ -131,7 +131,7 @@ func NewNotificationChallenge(
 	return &NotificationChallenge{
 		OrgAddress:   orgInfo.Address,
 		UserID:       userID,
-		BundleID:     bundleID,
+		ScopeID:      scopeID,
 		Notification: n,
 		Type:         cType,
 	}, nil

@@ -91,13 +91,13 @@ func (*Queue) toItem(challenge *NotificationChallenge) *notifications.QueueItem 
 		challenge.CreatedAt = time.Now()
 	}
 	log.Debugw("notification challenge enqueued",
-		"bundleID", challenge.BundleID.String(),
+		"scopeID", challenge.ScopeID.String(),
 		"userID", challenge.UserID.String(),
 		"type", challenge.Type)
 	return &notifications.QueueItem{
 		Notification: challenge.Notification,
 		Type:         challenge.Type,
-		Label:        challenge.BundleID.String(),
+		Label:        challenge.ScopeID.String(),
 		CreatedAt:    challenge.CreatedAt,
 		ExpiresAt:    challenge.ExpiresAt,
 		Meta:         challenge,
