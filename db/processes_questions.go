@@ -54,21 +54,19 @@ func (ms *MongoStorage) SetQuestion(q *VotingProcessQuestion) (primitive.ObjectI
 //   - A slot that already holds a row is replaced atomically. The worst two writers do to it is
 //     leave it belonging to whichever wrote last, keeping the _id it already had — a state some
 //     client actually asked for.
-//   - A slot that does not exist yet is not protected. FindOneAndReplace is atomic only for a
-//     matched document, and there is no unique index on (processId, order), so two callers racing on
-//     an empty slot can both insert. Each one's sweep then deletes the other's row, leaving the slot
-//     empty and the process's QuestionIDs naming an id that no longer exists.
-//   - Either way at most one row per slot survives, so the residual failure loses a row rather than
-//     duplicating one. A row survives only if every other writer's sweep ran before that row was
-//     inserted, while each writer's own sweep always runs after its own insert; two survivors in one
-//     slot would need each writer's sweep to precede the other's, which cannot both hold.
-//     Duplication is the failure mode of issue #614, and that one is closed.
+//   - A slot that does not exist yet is protected by the unique (processId, order) index
+//     (migration 0018). Two callers racing on an empty slot cannot both insert: the loser's upsert
+//     fails with a duplicate-key error, and the retry below matches the winner's row and replaces
+//     it, preserving its _id. Duplication is the failure mode of issue #614, and it is closed both
+//     here and at the storage level.
+//   - Two token-less writers sending different lengths can still disagree about the tail: the
+//     shorter one's sweep may delete a slot the longer one just wrote, leaving the longer writer's
+//     QuestionIDs naming an id that no longer exists.
 //
-// Losing a row is fail-safe: the stored set no longer matches the process's QuestionIDs, so
-// questionSetProblem refuses the publish and saving the draft again repairs it. Closing the hole for
-// real needs a unique index on (processId, order), which is what makes each slot upsert genuinely
-// atomic. A transaction is not an option here — the repo opens no session anywhere, and the tests run
-// a standalone mongo:7.
+// That last case is fail-safe: the stored set no longer matches the process's QuestionIDs, so
+// questionSetProblem refuses the publish and saving the draft again repairs it. Closing it too
+// would take a transaction, which is not an option here — the repo opens no session anywhere, and
+// the tests run a standalone mongo:7.
 //
 // Note this is not atomic across slots either: a concurrent reader can still observe a half-applied
 // update.
@@ -94,12 +92,22 @@ func (ms *MongoStorage) SetProcessQuestions(
 		stored := struct {
 			ID primitive.ObjectID `bson:"_id"`
 		}{}
-		err := ms.processesQuestions.FindOneAndReplace(ctx, filter, doc,
-			options.FindOneAndReplace().
-				SetUpsert(true).
-				SetReturnDocument(options.After).
-				SetProjection(bson.M{"_id": 1}),
-		).Decode(&stored)
+		var err error
+		// losing the insert race on an empty slot surfaces as a duplicate-key error on the unique
+		// (processId, order) index; the retry then matches the winner's row and replaces it. More
+		// than one retry means the row keeps vanishing between attempts (a concurrent sweep), so
+		// give up after a few rather than spin.
+		for range 3 {
+			err = ms.processesQuestions.FindOneAndReplace(ctx, filter, doc,
+				options.FindOneAndReplace().
+					SetUpsert(true).
+					SetReturnDocument(options.After).
+					SetProjection(bson.M{"_id": 1}),
+			).Decode(&stored)
+			if !mongo.IsDuplicateKeyError(err) {
+				break
+			}
+		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to store question %d: %w", i, err)
 		}

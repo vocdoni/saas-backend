@@ -103,9 +103,10 @@ func TestSetProcessQuestionsConcurrent(t *testing.T) {
 // TestSetProcessQuestionsConcurrentGrowing races the insert path, which TestSetProcessQuestionsConcurrent
 // never reaches: every writer there sends the same number of questions, so each slot is always matched
 // and only the atomic replace is exercised. Writers of differing lengths make the tail slots brand new,
-// where two callers can both insert and then sweep each other's row away (documented on
-// SetProcessQuestions). What must still hold — and is the issue #614 regression — is that no slot ever
-// ends up carrying two rows.
+// where a losing insert now surfaces as a duplicate-key error on the unique (processId, order) index
+// (migration 0018) that SetProcessQuestions must absorb by retrying — every writer returning nil error
+// is that regression. What must also hold — the issue #614 regression — is that no slot ever ends up
+// carrying two rows.
 func TestSetProcessQuestionsConcurrentGrowing(t *testing.T) {
 	c := qt.New(t)
 	org := common.Address{0x61, 0x14, 0x03}
@@ -146,9 +147,10 @@ func TestSetProcessQuestionsConcurrentGrowing(t *testing.T) {
 		seenID[stored[i].ID] = true
 	}
 	// the bound is deliberately loose: slots 0 and 1 exist from the seed so they are always matched
-	// and can never be lost, while the grown tail is still exposed to the residual insert race
-	// documented on SetProcessQuestions. Only losing a row is tolerated, never gaining one.
+	// and can never be lost, while the grown tail depends on interleaving — a shorter writer's sweep
+	// may remove a slot a longer writer just wrote (documented on SetProcessQuestions). Only losing
+	// a tail row is tolerated, never gaining one.
 	c.Assert(len(stored) >= 2 && len(stored) <= 4, qt.IsTrue,
-		qt.Commentf("expected 2 to 4 rows, got %d: the tail may be lost to the residual insert race, "+
-			"but the seeded slots and the one-row-per-slot invariant may not", len(stored)))
+		qt.Commentf("expected 2 to 4 rows, got %d: the tail may be swept by a shorter concurrent writer, "+
+			"but the seeded slots and the one-row-per-slot invariant may not be violated", len(stored)))
 }

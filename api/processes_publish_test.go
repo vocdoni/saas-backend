@@ -115,10 +115,11 @@ func TestVotingProcessPublishRejectsStrayQuestion(t *testing.T) {
 	oid, err := primitive.ObjectIDFromHex(pid)
 	c.Assert(err, qt.IsNil)
 
-	// reproduce the corrupted state the old write path could leave behind: a third question row
-	// carrying this processId that the process itself does not list
+	// reproduce a corrupted state that is still representable now that the unique
+	// (processId, order) index forbids same-slot duplicates: a stray tail row carrying this
+	// processId that the process itself does not list (what a token-less sweep race leaves behind)
 	stray := &db.VotingProcessQuestion{
-		ProcessID: oid, OrgAddress: orgAddress, Order: 1,
+		ProcessID: oid, OrgAddress: orgAddress, Order: 2,
 		Title:     db.MultiLangString{"default": "stray"},
 		Type:      db.VotingTypeSingleChoice,
 		TypeSetup: db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1},
