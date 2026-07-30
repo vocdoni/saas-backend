@@ -688,3 +688,58 @@ func TestDeleteMembersIsOrgScoped(t *testing.T) {
 	// and its voters are still signed for
 	c.Assert(signAs(t, pid, members[1], open.UpstreamID), qt.Equals, http.StatusOK)
 }
+
+// TestRemoveProcessCensusIsOrgScoped is TestDeleteMembersIsOrgScoped for the other door into the
+// same cascade. DELETE /processes/{processId}/census reaches RevokeMembersFromCensuses directly
+// rather than through DeleteOrgMembers, so it does not inherit the scoping that lives there.
+//
+// Two of the three revocation writes are census-scoped, which makes a foreign id inert in them and
+// hides the hole. The third deletes CSP auth sessions by userid alone, so an unscoped id logs a
+// voter of another organization out mid-election — asserted here on an already-issued auth token,
+// since a fresh auth would silently paper over the deletion.
+func TestRemoveProcessCensusIsOrgScoped(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+
+	victim := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, victim, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, victim, newOrgMembers(2)...)
+	ids := memberIDs(members)
+	victimPID, victimGot := publishedProcess(t, token, victim, ids)
+	open := victimGot.Questions[0]
+
+	// the victim's voter authenticates but has not spent the token yet
+	victimToken := authProcessCSP(t, victimPID, &handlers.AuthRequest{
+		Name: members[0].Name, Surname: members[0].Surname, Email: members[0].Email,
+	})
+
+	// the attacker owns a published process of their own, so they are a legitimate caller of this
+	// endpoint — they simply name ids that are not theirs
+	attacker := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, attacker, mockEssentialPlan.ID)
+	attackerMembers := postOrgMembers(t, token, attacker, newOrgMembers(2)...)
+	attackerPID, _ := publishedProcess(t, token, attacker, memberIDs(attackerMembers))
+
+	removed := requestAndParse[apicommon.UpdateProcessCensusResponse](t, http.MethodDelete, token,
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids},
+		"processes", attackerPID, "census")
+	c.Assert(removed.Removed, qt.Equals, uint32(0),
+		qt.Commentf("foreign ids remove nothing, and must not be answered 409 either"))
+
+	// the victim's census is untouched, member by member
+	vp, err := testDB.VotingProcess(objectID(c, victimPID))
+	c.Assert(err, qt.IsNil)
+	for _, id := range ids {
+		_, err := testDB.CensusParticipant(vp.CensusID.Hex(), id)
+		c.Assert(err, qt.IsNil, qt.Commentf("member %s was revoked by another organization", id))
+	}
+
+	// and the token issued before the attack still signs: the auth session survived
+	voter := ethereum.SignKeys{}
+	c.Assert(voter.Generate(), qt.IsNil)
+	_, code := testRequest(t, http.MethodPost, "", &handlers.SignRequest{
+		AuthToken: victimToken, ProcessID: open.UpstreamID, Payload: hex.EncodeToString(voter.Address().Bytes()),
+	}, "processes", victimPID, "sign")
+	c.Assert(code, qt.Equals, http.StatusOK,
+		qt.Commentf("another organization deleted this voter's CSP auth session"))
+}

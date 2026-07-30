@@ -544,13 +544,29 @@ func (a *API) removeVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	censusID := vp.CensusID.Hex()
-	// before any write, so a refusal leaves the census exactly as it was
-	if a.refuseBlockedVoters(w, []string{censusID}, req.MemberIDs) {
+	// scoped before the guard and the write, exactly as deleteOrganizationMembersHandler does. The
+	// cascade derives the censuses to touch from the ids themselves and deletes CSP sessions by
+	// userid alone, so an id that reaches it unscoped revokes a member of another organization —
+	// being a Manager of *this* process's org is not authority over an id this org never owned.
+	// Unknown and foreign ids are dropped rather than rejected, so `removed` stays the count of
+	// rows actually deleted.
+	targetIDs, err := a.db.FilterOrgMemberIDs(vp.OrgAddress, req.MemberIDs)
+	if err != nil {
+		errors.ErrGenericInternalServerError.Withf("could not resolve org members: %v", err).Write(w)
+		return
+	}
+	if len(targetIDs) == 0 {
+		apicommon.HTTPWriteJSON(w, &apicommon.UpdateProcessCensusResponse{Removed: 0})
 		return
 	}
 
-	removed, emptied, err := a.db.RevokeMembersFromCensuses([]string{censusID}, req.MemberIDs)
+	censusID := vp.CensusID.Hex()
+	// before any write, so a refusal leaves the census exactly as it was
+	if a.refuseBlockedVoters(w, []string{censusID}, targetIDs) {
+		return
+	}
+
+	removed, emptied, err := a.db.RevokeMembersFromCensuses([]string{censusID}, targetIDs)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
