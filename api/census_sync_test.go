@@ -469,6 +469,63 @@ func TestProcessCSPRevocation(t *testing.T) {
 		qt.Commentf("the consumption row must survive revocation"))
 }
 
+// TestReAddedMemberCannotSignForASecondAddress drives the reason revocation never deletes
+// cspTokensStatus: the consumption row pins the one address a member was ever signed for, so a
+// member revoked and then re-added cannot be signed for a fresh address — a second address would be
+// a second nullifier, a double vote the chain accepts. Re-signing for the original address stays
+// allowed, which is the documented vote-overwrite budget.
+func TestReAddedMemberCannotSignForASecondAddress(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+
+	pid, got := publishedProcess(t, token, orgAddress, ids)
+	open := got.Questions[0]
+
+	// members[1] is signed for address A while a participant
+	addressA := ethereum.SignKeys{}
+	c.Assert(addressA.Generate(), qt.IsNil)
+	tok := authProcessCSP(t, pid, &handlers.AuthRequest{
+		Name: members[1].Name, Surname: members[1].Surname, Email: members[1].Email,
+	})
+	_, code := testRequest(t, http.MethodPost, "", &handlers.SignRequest{
+		AuthToken: tok, ProcessID: open.UpstreamID, Payload: hex.EncodeToString(addressA.Address().Bytes()),
+	}, "processes", pid, "sign")
+	c.Assert(code, qt.Equals, http.StatusOK)
+
+	// revoked underneath their signature — the DB call models the release the guard cannot see,
+	// exactly as TestProcessCSPRevocation does — then re-added through the census PUT
+	vp, err := testDB.VotingProcess(objectID(c, pid))
+	c.Assert(err, qt.IsNil)
+	_, _, err = testDB.RevokeMembersFromCensuses([]string{vp.CensusID.Hex()}, []string{ids[1]})
+	c.Assert(err, qt.IsNil)
+	readd := requestAndParse[apicommon.UpdateProcessCensusResponse](t, http.MethodPut, token,
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: []string{ids[1]}}, "processes", pid, "census")
+	c.Assert(readd.Added, qt.Equals, uint32(1))
+
+	// the revocation dropped their session, so they authenticate afresh — and the consumption row
+	// that survived it refuses a signature for any address but the pinned one
+	tok = authProcessCSP(t, pid, &handlers.AuthRequest{
+		Name: members[1].Name, Surname: members[1].Surname, Email: members[1].Email,
+	})
+	addressB := ethereum.SignKeys{}
+	c.Assert(addressB.Generate(), qt.IsNil)
+	_, code = testRequest(t, http.MethodPost, "", &handlers.SignRequest{
+		AuthToken: tok, ProcessID: open.UpstreamID, Payload: hex.EncodeToString(addressB.Address().Bytes()),
+	}, "processes", pid, "sign")
+	c.Assert(code, qt.Equals, http.StatusUnauthorized,
+		qt.Commentf("a re-added member must not be signed for a second address"))
+
+	// the original address is still signable: that is the vote-overwrite budget, not a new vote
+	_, code = testRequest(t, http.MethodPost, "", &handlers.SignRequest{
+		AuthToken: tok, ProcessID: open.UpstreamID, Payload: hex.EncodeToString(addressA.Address().Bytes()),
+	}, "processes", pid, "sign")
+	c.Assert(code, qt.Equals, http.StatusOK)
+}
+
 // TestMemberDeletionRefusedForVoter covers the §3 rule and its release: a member the CSP has signed
 // for cannot be deleted while the election is running, but can once it has ended.
 func TestMemberDeletionRefusedForVoter(t *testing.T) {
