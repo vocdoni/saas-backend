@@ -276,8 +276,10 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 			}
 		}
 
-		// the members that were actually inserted join the auto group's censuses. The import job
-		// has already completed at this point, so a failure here is logged, not reported.
+		// The members that were actually inserted join the auto group's censuses. Discarding the
+		// result is deliberate: the import job has already completed above, and CompleteJob $sets
+		// errors wholesale, so a second write would clobber the import errors rather than merge
+		// the propagation ones — a failure here is logged, not reported. #628 tracks surfacing it.
 		if lastProgress != nil {
 			a.propagateMembersToCensuses(org.Address, autoCensuses, lastProgress.MemberIDs)
 		}
