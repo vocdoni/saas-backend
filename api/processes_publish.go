@@ -105,12 +105,25 @@ func (a *API) publishPreflightProblems(
 	if !user.HasRoleFor(vp.OrgAddress, db.AdminRole) {
 		problems = append(problems, "publishing requires the admin role")
 	}
-	// per-question plan voting-type gate (skipped for raw ballot-protocol overrides)
+	// Per-question plan voting-type gate, on the ballot each question actually encodes rather
+	// than the type it is labelled with: a stored type is only a label, and a question written
+	// before the two halves were reconciled may carry one its protocol contradicts.
+	//
+	// Shapes with no named type (ranked, quadratic) resolve to an empty type and are gated
+	// nowhere: not here, and not on the build path either — hasElectionMetadataPermissions still
+	// carries the TODO for it, and plan.VotingTypes has no flag anything can resolve to (see the
+	// TODO on OrgAllowsVotingType's allowed map). That is pre-existing, and unchanged by this
+	// gate, but it is not "gated elsewhere".
+	//
+	// This tightens what main did — which skipped the gate for every raw protocol — but does not
+	// close it. EffectiveQuestionType recognises a shape only when it is exactly canonical, which
+	// is what storage needs and what authorization does not: {maxCount:2, maxValue:1,
+	// maxTotalCost:2} is the same ballot as the multichoice one field-for-field bar costExponent,
+	// and stays ungated. Actually holding the gate needs a deliberately loose classifier
+	// (maxValue == 1 && maxCount > 1 ⇒ effectively multiple-choice, whatever else is set), not
+	// this one.
 	for i := range questions {
-		if questions[i].BallotProtocol != nil {
-			continue
-		}
-		if err := a.subscriptions.OrgAllowsVotingType(vp.OrgAddress, questions[i].Type); err != nil {
+		if err := a.subscriptions.OrgAllowsVotingType(vp.OrgAddress, account.EffectiveQuestionType(&questions[i])); err != nil {
 			problems = append(problems, err.Error())
 		}
 	}

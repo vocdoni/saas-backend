@@ -6058,8 +6058,26 @@ paths:
       description: |-
         Create a multi-question voting process draft. Requires Manager/Admin role of the org
         (or a scoped API key with `voting:write`). Creates the inline census unpublished.
-        Each question must define either a named `type` (with `typeSetup` for multichoice)
-        or a raw `ballotProtocol` override; if both are given the `ballotProtocol` wins.
+
+        Each question must define a named `type` (with `typeSetup` for multichoice), a raw
+        `ballotProtocol`, or both. The two are kept in sync: whichever is supplied, the other
+        is derived, so the stored question always describes the election it will mint. A
+        supplied `ballotProtocol` is authoritative — it is what reaches the chain — so `type`
+        and `typeSetup` are re-derived from it, and come back empty when it encodes a shape
+        with no named type (ranked, quadratic). Sending both halves is fine when they agree;
+        when they describe two different named ballots it is a 400 rather than a silent win
+        for the protocol. **Omit `ballotProtocol` to author or edit a question through its
+        `typeSetup`** — responses always carry a protocol, so echoing one back unchanged
+        re-applies it.
+
+        `typeSetup.minChoices` has no on-chain counterpart and is a validation hint for
+        clients. It is stored as sent for multichoice, and is always `1` for singlechoice,
+        whose ballot is the single field a voter fills.
+
+        `typeSetup.uniqueChoices` is rejected for multichoice: every choice is an independent
+        yes/no field, so a unique-values ballot admits no vote and the election would tally
+        every vote to zero. A `ballotProtocol` whose `uniqueValues` cannot be satisfied
+        (fewer legal values than fields) is rejected for the same reason.
       parameters:
       - description: Voting process
         in: body
@@ -6162,6 +6180,11 @@ paths:
       - application/json
       description: |-
         Update a voting process while it is still a draft (not published). 409 if already published.
+        The questions are replaced wholesale, and each one's ballot shape is reconciled exactly
+        as on create. Reading a question and PUTting it back unchanged is a no-op; editing its
+        `typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a
+        400 — omit `ballotProtocol` to edit a question through its `typeSetup`.
+
         Send the updatedAt read from GET /processes/{processId} to make the update conditional: it is
         rejected with 409 (40171) if anything wrote the process in between, so two editors cannot
         overwrite each other. Omitting updatedAt opts out of that guarantee and keeps last-writer-wins.
