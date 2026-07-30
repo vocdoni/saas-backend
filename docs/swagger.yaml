@@ -1870,7 +1870,9 @@ definitions:
   apicommon.VerifyVotesRequest:
     properties:
       nullifiers:
-        description: Vote nullifiers (32 bytes each), at most 100
+        description: |-
+          Vote nullifiers (up to 32 bytes each — anonymous ones may be shorter), capped at the
+          shared vote batch limit (100)
         items:
           type: string
         type: array

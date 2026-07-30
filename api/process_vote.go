@@ -238,8 +238,10 @@ func (a *API) relayVotesHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 const (
-	// nullifierSize is the length of a vote nullifier, which the chain derives as a hash
-	// (see state.GenerateNullifier), so anything else cannot name a vote.
+	// nullifierSize is the maximum length of a vote nullifier. Regular nullifiers are
+	// 32-byte hashes (see state.GenerateNullifier), but anonymous (ZK) ones are the minimal
+	// big-endian bytes of a field element (zk.Proof.Nullifier), so shorter values are valid
+	// too — only empty or longer than 32 bytes cannot name a vote.
 	nullifierSize = 32
 	// maxVerifyVotesBodyBytes bounds a POST /votes/verify body: a hex nullifier is 64
 	// characters, so 80 leaves room for the JSON quoting and separator around each, plus
@@ -247,6 +249,14 @@ const (
 	// to be bounded before it is buffered.
 	maxVerifyVotesBodyBytes = maxVotesPerBatch*80 + 4<<10
 )
+
+// verifyLookupSem bounds concurrent node reads across every POST /votes/verify request.
+// Each request fans out through its own 8-worker parallelForEach pool, so without a shared
+// ceiling the node load scales with request concurrency on a public endpoint (the global
+// middleware.Throttle admits 100 requests → up to 800 concurrent reads). 32 lets four
+// fully-fanned batches run against the node; the typical single-nullifier request never
+// notices it.
+var verifyLookupSem = make(chan struct{}, 32)
 
 // verifyVotesHandler godoc
 //
@@ -286,8 +296,8 @@ func (a *API) verifyVotesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for i, nullifier := range req.Nullifiers {
-		if len(nullifier) != nullifierSize {
-			errors.ErrMalformedBody.Withf("the nullifier at index %d is %d bytes, expected %d",
+		if len(nullifier) == 0 || len(nullifier) > nullifierSize {
+			errors.ErrMalformedBody.Withf("the nullifier at index %d is %d bytes, expected 1..%d",
 				i, len(nullifier), nullifierSize).Write(w)
 			return
 		}
@@ -315,9 +325,12 @@ func (a *API) verifyVotesHandler(w http.ResponseWriter, r *http.Request) {
 	parallelForEach(len(distinct), func(d int) {
 		i := distinct[d]
 		votes[i].Nullifier = req.Nullifiers[i]
-		// nobody is left to read the answer: stop asking the node for the rest of the batch.
-		if err := r.Context().Err(); err != nil {
-			errs[d] = err
+		// wait for a cross-request lookup slot, unless nobody is left to read the answer.
+		select {
+		case verifyLookupSem <- struct{}{}:
+			defer func() { <-verifyLookupSem }()
+		case <-r.Context().Done():
+			errs[d] = r.Context().Err()
 			return
 		}
 		vote, err := a.account.VoteByNullifier(req.Nullifiers[i])
@@ -335,9 +348,12 @@ func (a *API) verifyVotesHandler(w http.ResponseWriter, r *http.Request) {
 		votes[i].Date = vote.Date
 	})
 	// a nullifier the chain could not be asked about is not a verified=false: nothing is
-	// known about that vote, and reporting it as missing would be a lie to the voter.
+	// known about that vote, and reporting it as missing would be a lie to the voter. The
+	// per-nullifier detail carries raw node responses, so it goes to the log, not to the
+	// unauthenticated caller.
 	if err := stderrors.Join(errs...); err != nil {
-		errors.ErrVochainRequestFailed.WithErr(err).Write(w)
+		log.Warnw("vote verification failed", "error", err)
+		errors.ErrVochainRequestFailed.Write(w)
 		return
 	}
 	// fan the answers back out to the duplicates (self-assignment for first occurrences).

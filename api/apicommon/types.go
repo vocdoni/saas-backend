@@ -1327,7 +1327,8 @@ type RelayVotesRequest struct {
 // voting process.
 // swagger:model VerifyVotesRequest
 type VerifyVotesRequest struct {
-	// Vote nullifiers (32 bytes each), at most 100
+	// Vote nullifiers (up to 32 bytes each — anonymous ones may be shorter), capped at the
+	// shared vote batch limit (100)
 	Nullifiers []internal.HexBytes `json:"nullifiers" swaggertype:"array,string"`
 }
 
