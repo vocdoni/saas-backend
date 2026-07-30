@@ -158,6 +158,65 @@ func TestUpdateQuestionCensusReopen(t *testing.T) {
 	c.Assert(signAs(t, pid, members[1], restricted.UpstreamID), qt.Equals, http.StatusOK)
 }
 
+// TestUpdateQuestionCensusRetriesAnUnenqueuedResize pins that the endpoint is idempotent on what is
+// left to do, not on the diff against the stored list.
+//
+// The list is committed before the resize is enqueued, so an enqueue that fails — a full tx queue
+// answers 503 — leaves them disagreeing. Nothing sweeps failed SetProcessCensus jobs, so the retry
+// is the whole recovery; a replay that short-circuits on the empty diff makes the state permanent,
+// with the CSP signing for voters the election has no room for.
+//
+// The interrupted request is reproduced by writing the list exactly as the handler does and never
+// enqueueing, which is the state it leaves behind.
+func TestUpdateQuestionCensusRetriesAnUnenqueuedResize(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
+	ids := memberIDs(members)
+
+	pid, got := publishedProcess(t, token, orgAddress, ids)
+	restricted := got.Questions[1]
+	c.Assert(restricted.EligibleMemberIDs, qt.DeepEquals, []string{ids[0]})
+
+	elec, err := testAPI.account.Election(restricted.UpstreamID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(elec.Census.MaxCensusSize, qt.Equals, uint64(1))
+
+	// the write half of a request whose enqueue then failed
+	widened := []string{ids[0], ids[1]}
+	won, err := testDB.SetQuestionEligibleMemberIDs(restricted.ID, []string{ids[0]}, widened)
+	c.Assert(err, qt.IsNil)
+	c.Assert(won, qt.IsTrue)
+
+	// replaying it diffs to nothing, and must still enqueue the resize
+	upd := requestAndParseWithAssertCode[apicommon.UpdateQuestionCensusResponse](
+		http.StatusAccepted, t, http.MethodPut, token,
+		&apicommon.UpdateQuestionCensusRequest{MemberIDs: widened},
+		"processes", pid, "questions", restricted.ID.Hex(), "census",
+	)
+	c.Assert(upd.Eligible, qt.Equals, uint32(2))
+	c.Assert(upd.Added, qt.Equals, uint32(0), qt.Commentf("the replay adds nobody by name"))
+	c.Assert(upd.Removed, qt.Equals, uint32(0))
+	c.Assert(upd.JobID, qt.Not(qt.Equals), "")
+
+	job := pollJob(t, upd.JobID)
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("resize job error: %s", job.Errors))
+
+	elec, err = testAPI.account.Election(restricted.UpstreamID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(elec.Census.MaxCensusSize, qt.Equals, uint64(2),
+		qt.Commentf("the retry must resize the election the first attempt never did"))
+
+	// and once there is genuinely nothing left, the replay is a plain 200
+	same := requestAndParse[apicommon.UpdateQuestionCensusResponse](t, http.MethodPut, token,
+		&apicommon.UpdateQuestionCensusRequest{MemberIDs: widened},
+		"processes", pid, "questions", restricted.ID.Hex(), "census")
+	c.Assert(same.Eligible, qt.Equals, uint32(2))
+	c.Assert(same.JobID, qt.Equals, "")
+}
+
 // TestUpdateQuestionCensusRefusesStrippingASignedVoter is the case a diff against the stored list
 // cannot see. A question open to the whole census names nobody, so restricting it reports nobody as
 // removed — yet every member left out loses the vote, including one already holding a signature the

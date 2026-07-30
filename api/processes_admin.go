@@ -383,9 +383,8 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 	if a.refuseVotersLosingEligibility(w, question, eligible) {
 		return
 	}
-	if len(added) == 0 && len(removed) == 0 {
-		// an idempotent replay: the stored list already says this, so skip the compare-and-set and
-		// the resize check, which would only re-read the chain to conclude the same
+	if len(added) == 0 && len(removed) == 0 && len(question.UpstreamID) == 0 {
+		// a draft that already says this: nothing to store, and no election to size
 		apicommon.HTTPWriteJSON(w, &apicommon.UpdateQuestionCensusResponse{Eligible: uint32(len(eligible))})
 		return
 	}
@@ -406,27 +405,25 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 		Removed:  uint32(len(removed)),
 	}
 
-	// Resize gate: compare what the election needs against what it needed before, with an empty
-	// list meaning the whole census on both sides.
+	// What the election needs, with an empty list meaning the whole census.
 	//
-	// Keying this off "were members added" would skip the resize exactly where it matters most:
-	// reopening a restricted question adds nobody by name yet can multiply the electorate, and
-	// account.ComputeMaxCensusSize stamped that election at exactly the old subset size — zero
-	// headroom. The CSP would sign and the chain would reject.
-	before := uint64(len(previous))
-	if len(previous) == 0 {
-		before = uint64(census.Size)
-	}
+	// This is always handed to enqueueSetProcessCensus rather than pre-filtered here against what
+	// the stored list implies the election was sized for. That proxy is wrong in exactly the case
+	// that matters: the list is committed above before the resize is enqueued, so a queue-full 503
+	// leaves the two disagreeing — and the retry, which is the whole recovery since nothing sweeps
+	// failed SetProcessCensus jobs, diffs to nothing and would conclude the election already has
+	// the room it never got. enqueueSetProcessCensus reads the election itself and enqueues only a
+	// genuine increase, so it is the one place that can tell a completed request from an
+	// interrupted one. The cost is a chain read on an idempotent replay.
+	//
+	// Note this is not keyed off "were members added" either: reopening a restricted question adds
+	// nobody by name yet can multiply the electorate, and account.ComputeMaxCensusSize stamped that
+	// election at exactly the old subset size — zero headroom. The CSP would sign and the chain
+	// would reject.
 	needed := uint64(len(eligible))
 	if len(eligible) == 0 {
 		needed = uint64(census.Size)
 	}
-	if len(question.UpstreamID) == 0 || needed <= before {
-		// a draft has no election yet, and an election with the room already needs nothing
-		apicommon.HTTPWriteJSON(w, resp)
-		return
-	}
-
 	question.EligibleMemberIDs = eligible
 	jobID, err := a.enqueueSetProcessCensus(vp.OrgAddress, []censusSizeTarget{
 		{question: *question, census: census, size: needed},
