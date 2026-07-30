@@ -392,6 +392,24 @@ func TestRemoveProcessCensusContract(t *testing.T) {
 		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[:1]}, "processes", pid, "census")
 }
 
+// TestResizeEmptiedQuestionsReportsFailures pins that a resize that could not even be planned comes
+// back as an error, not as an empty job id. The revocation the resize follows has already
+// committed and nothing sweeps a resize that was never enqueued, so an empty id alone would make a
+// lost resize read exactly like "no resize was needed" — the handlers put these errors in the
+// response body.
+func TestResizeEmptiedQuestionsReportsFailures(t *testing.T) {
+	c := qt.New(t)
+	emptied := []db.VotingProcessQuestion{{
+		ID:         primitive.NewObjectID(),
+		ProcessID:  primitive.NewObjectID(), // names no process, as after a failed load mid-cascade
+		UpstreamID: internal.HexBytes{0xde, 0xad},
+	}}
+	jobID, errs := testAPI.resizeEmptiedQuestions(common.Address{0x01}, emptied)
+	c.Assert(jobID, qt.Equals, "")
+	c.Assert(errs, qt.HasLen, 1)
+	c.Assert(errs[0], qt.Contains, emptied[0].ID.Hex())
+}
+
 // TestProcessCSPRevocation proves the revocation actually revokes: the sign handler re-checks census
 // participation, so a member removed from the census stops being signed for even though their token
 // is still valid. It also pins the ceiling — a signature already issued is not recalled.

@@ -55,14 +55,20 @@ func (a *API) propagateMembersToCensuses(
 		}
 		out.Errors = append(out.Errors, memberErrs...)
 
+		// A failure past this point skips only the resize planning — the members are in the
+		// census — but a question left without its target means an election the chain still
+		// sizes for fewer voters, so it is reported like the addition errors above, not only
+		// logged.
 		census, err := a.db.Census(censusID)
 		if err != nil {
 			log.Warnw("could not reload census after adding members", "census", censusID, "error", err)
+			out.Errors = append(out.Errors, fmt.Sprintf("census %s: %v", censusID, err))
 			continue
 		}
 		questions, err := a.db.OngoingQuestionsByCensuses([]string{censusID})
 		if err != nil {
 			log.Warnw("could not resolve the questions of a census", "census", censusID, "error", err)
+			out.Errors = append(out.Errors, fmt.Sprintf("census %s: %v", censusID, err))
 			continue
 		}
 		for i := range questions {

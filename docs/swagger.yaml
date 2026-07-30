@@ -589,6 +589,15 @@ definitions:
       count:
         description: Number of members deleted
         type: integer
+      errors:
+        description: |-
+          Errors are resize problems that did not stop the deletion. The members are gone either
+          way; what may be missing is the on-chain room for a question the deletion opened to the
+          whole census. An empty CensusJobIDs alone cannot report that — a deletion that needed no
+          resize looks identical.
+        items:
+          type: string
+        type: array
     type: object
   apicommon.EligibilitySpec:
     properties:

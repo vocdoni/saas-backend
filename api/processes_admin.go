@@ -572,7 +572,9 @@ func (a *API) removeVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 	// the participant rows actually deleted, not the ids submitted: an id naming nobody, or the
 	// same id twice, must not be reported as a removal
 	resp := &apicommon.UpdateProcessCensusResponse{Removed: uint32(removed)}
-	if jobID := a.resizeEmptiedQuestions(vp.OrgAddress, emptied); jobID != "" {
+	jobID, resizeErrs := a.resizeEmptiedQuestions(vp.OrgAddress, emptied)
+	resp.Errors = resizeErrs
+	if jobID != "" {
 		resp.JobID = jobID
 		apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, resp)
 		return

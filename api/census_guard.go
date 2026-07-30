@@ -112,28 +112,35 @@ func (a *API) refuseVotersLosingEligibility(
 // just pruned to empty. An empty list means the whole census, so each of those elections silently
 // went from a named subset to everyone while it was sized on chain for the subset.
 //
-// Returns the job id, empty when nothing needed resizing. A failure here is logged rather than
-// returned: the revocation it follows has already committed, so the removal did happen.
+// Returns the job id — empty when nothing needed resizing — and the failures that kept a question
+// from being resized. The revocation this follows has already committed, so a failure cannot fail
+// the request; but nothing sweeps a resize that was never enqueued, so an empty job id must not
+// read the same as "no resize was needed" — callers report the errors in the response body.
 //
 // The loop below reads a process and a census per question rather than batching them. Emptying a
 // question requires removing every member it named, so the input is the handful of published
 // questions a single request stripped bare — group them into one query if that ever stops holding.
-func (a *API) resizeEmptiedQuestions(orgAddress common.Address, emptied []db.VotingProcessQuestion) string {
+func (a *API) resizeEmptiedQuestions(
+	orgAddress common.Address, emptied []db.VotingProcessQuestion,
+) (string, []string) {
 	if len(emptied) == 0 {
-		return ""
+		return "", nil
 	}
+	var errs []string
 	targets := make([]censusSizeTarget, 0, len(emptied))
 	for i := range emptied {
 		vp, err := a.db.VotingProcess(emptied[i].ProcessID)
 		if err != nil {
 			log.Warnw("could not load the process of an emptied question",
 				"question", emptied[i].ID.Hex(), "error", err)
+			errs = append(errs, fmt.Sprintf("question %s: %v", emptied[i].ID.Hex(), err))
 			continue
 		}
 		census, err := a.db.Census(vp.CensusID.Hex())
 		if err != nil {
 			log.Warnw("could not load the census of an emptied question",
 				"question", emptied[i].ID.Hex(), "error", err)
+			errs = append(errs, fmt.Sprintf("question %s: %v", emptied[i].ID.Hex(), err))
 			continue
 		}
 		targets = append(targets, censusSizeTarget{
@@ -144,7 +151,8 @@ func (a *API) resizeEmptiedQuestions(orgAddress common.Address, emptied []db.Vot
 	if err != nil {
 		log.Warnw("could not enqueue the resize of newly whole-census questions",
 			"org", orgAddress, "questions", len(targets), "error", err)
-		return ""
+		errs = append(errs, err.Error())
+		return "", errs
 	}
-	return jobID
+	return jobID, errs
 }

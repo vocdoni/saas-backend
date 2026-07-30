@@ -508,8 +508,10 @@ func (a *API) deleteOrganizationMembersHandler(w http.ResponseWriter, r *http.Re
 	// pruning a question's eligibility list to empty opens it to the whole census, so its election
 	// needs the room.
 	resp := &apicommon.DeleteMembersResponse{Count: deleted}
-	if jobID := a.resizeEmptiedQuestions(org.Address, emptied); jobID != "" {
+	jobID, resizeErrs := a.resizeEmptiedQuestions(org.Address, emptied)
+	if jobID != "" {
 		resp.CensusJobIDs = []string{jobID}
 	}
+	resp.Errors = resizeErrs
 	apicommon.HTTPWriteJSON(w, resp)
 }

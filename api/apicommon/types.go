@@ -1133,6 +1133,12 @@ type DeleteMembersResponse struct {
 	// same on-chain effect through this endpoint as through DELETE /processes/{processId}/census,
 	// which reports its job — so this reports it too.
 	CensusJobIDs []string `json:"censusJobIds,omitempty"`
+
+	// Errors are resize problems that did not stop the deletion. The members are gone either
+	// way; what may be missing is the on-chain room for a question the deletion opened to the
+	// whole census. An empty CensusJobIDs alone cannot report that — a deletion that needed no
+	// resize looks identical.
+	Errors []string `json:"errors,omitempty"`
 }
 
 // OrgMember defines the structure of a member in the API.

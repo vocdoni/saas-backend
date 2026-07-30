@@ -363,9 +363,11 @@ func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 		return
 	}
 	resp := apicommon.UpdateOrganizationMemberGroupResponse{}
-	if jobID := a.resizeEmptiedQuestions(org.Address, emptied); jobID != "" {
+	jobID, resizeErrs := a.resizeEmptiedQuestions(org.Address, emptied)
+	if jobID != "" {
 		resp.CensusJobIDs = append(resp.CensusJobIDs, jobID)
 	}
+	resp.Errors = append(resp.Errors, resizeErrs...)
 	// members joining the group join its censuses too, drafts included: the census tracks the
 	// memberbase regardless, and it is only the on-chain resize that needs a published question.
 	if len(toUpdate.AddMembers) > 0 {
@@ -452,12 +454,15 @@ func (a *API) deleteOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 		return
 	}
 	// deleting a group can open its questions to the whole census, which needs the on-chain room —
-	// reported like every other path that causes a resize. Bare OK when there is nothing to report,
-	// as the group PUT already does.
-	if jobID := a.resizeEmptiedQuestions(org.Address, emptied); jobID != "" {
-		apicommon.HTTPWriteJSON(w, &apicommon.UpdateOrganizationMemberGroupResponse{
-			CensusJobIDs: []string{jobID},
-		})
+	// reported like every other path that causes a resize, failures included. Bare OK when there
+	// is nothing to report, as the group PUT already does.
+	jobID, resizeErrs := a.resizeEmptiedQuestions(org.Address, emptied)
+	if jobID != "" || len(resizeErrs) > 0 {
+		resp := &apicommon.UpdateOrganizationMemberGroupResponse{Errors: resizeErrs}
+		if jobID != "" {
+			resp.CensusJobIDs = []string{jobID}
+		}
+		apicommon.HTTPWriteJSON(w, resp)
 		return
 	}
 	apicommon.HTTPWriteOK(w)
