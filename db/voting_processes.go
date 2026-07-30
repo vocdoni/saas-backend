@@ -44,6 +44,94 @@ func (ms *MongoStorage) SetVotingProcess(vp *VotingProcess) (primitive.ObjectID,
 	return vp.ID, nil
 }
 
+// SetVotingProcessDraft replaces a voting process only while it is still an unpublished draft that
+// no publish worker holds, and — when seen is non-zero — only while its stored UpdatedAt still
+// equals it, i.e. nothing has written the document since the caller read it. It reports ErrConflict
+// otherwise, leaving the stored document untouched. It enforces the same organization invariant as
+// SetVotingProcess but never creates: an unknown id is a conflict, not an insert.
+//
+// The publish precondition is part of the write rather than a check the caller makes beforehand
+// because the caller's read is minutes stale by the time it writes: updateVotingProcessHandler
+// resolves a census and validates every question in between, and it clears Publishing on the way
+// out. A claim landing inside that window used to be replaced away, letting a second publish claim
+// a process the first worker was already putting on chain, with its census repointed and its
+// questions rewritten underneath it. A stale marker is still overwritten, which is the intended
+// release — ClaimVotingProcessForPublish would reclaim it anyway.
+//
+// The caller cannot tell the two refusals apart from ErrConflict alone; re-read the process to see
+// which precondition failed.
+func (ms *MongoStorage) SetVotingProcessDraft(vp *VotingProcess, seen time.Time) error {
+	if vp.ID.IsZero() || (vp.OrgAddress.Cmp(common.Address{}) == 0) {
+		return ErrInvalidData
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+
+	// a voting process outlives its organization (nothing deletes votingProcesses on teardown), so
+	// this is checked here exactly as in SetVotingProcess rather than assumed from the caller
+	if _, err := ms.Organization(vp.OrgAddress); err != nil {
+		return fmt.Errorf("failed to get organization %s: %w", vp.OrgAddress, err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	filter := bson.M{"_id": vp.ID, "published": false, "$or": bson.A{
+		bson.M{"publishing": bson.M{"$exists": false}},
+		bson.M{"publishing": bson.M{"$lt": time.Now().Add(-PublishStaleAfter)}},
+	}}
+	now := time.Now()
+	if !seen.IsZero() {
+		// mongo stores datetimes with millisecond precision, so the token the client echoes back
+		// can only ever match a truncated value — compare against, and advance past, the same
+		// truncation
+		seen = seen.UTC().Truncate(time.Millisecond)
+		if !now.Truncate(time.Millisecond).After(seen) {
+			// two writes inside the same millisecond would leave the token unchanged, and the
+			// second client's already-consumed token would still match. Force it forward instead.
+			now = seen.Add(time.Millisecond)
+		}
+		filter["updatedAt"] = seen
+	}
+	prev := vp.UpdatedAt
+	vp.UpdatedAt = now
+	res, err := ms.votingProcesses.ReplaceOne(ctx, filter, vp)
+	if err != nil {
+		vp.UpdatedAt = prev
+		return fmt.Errorf("failed to update voting process: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		vp.UpdatedAt = prev
+		return ErrConflict
+	}
+	return nil
+}
+
+// SetVotingProcessQuestionIDs records the process's ordered question ids. It touches only that
+// field, so it cannot undo a concurrent edit of the rest of the document the way a whole-document
+// replace would, and it advances updatedAt without ever moving it backwards: the conditional-update
+// token of SetVotingProcessDraft has to stay monotonic, and this write can land inside the same
+// millisecond as the one that produced the token a client is holding.
+func (ms *MongoStorage) SetVotingProcessQuestionIDs(id primitive.ObjectID, questionIDs []primitive.ObjectID) error {
+	if id == primitive.NilObjectID {
+		return ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	// $max ignores a missing operand, so a document written before updatedAt existed just gets now
+	update := mongo.Pipeline{{{Key: "$set", Value: bson.M{
+		"questionIds": questionIDs,
+		"updatedAt":   bson.M{"$max": bson.A{"$updatedAt", time.Now()}},
+	}}}}
+	res, err := ms.votingProcesses.UpdateOne(ctx, bson.M{"_id": id}, update)
+	if err != nil {
+		return fmt.Errorf("failed to set voting process question ids: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // VotingProcess returns a voting process by its hex ObjectID.
 func (ms *MongoStorage) VotingProcess(id primitive.ObjectID) (*VotingProcess, error) {
 	if id == primitive.NilObjectID {

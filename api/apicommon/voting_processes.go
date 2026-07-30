@@ -38,6 +38,11 @@ type EligibilitySpec struct {
 	MemberIDs []string `json:"memberIds,omitempty"`
 }
 
+// UpdatedAtLayout is the wire format of the conditional-update token carried by
+// VotingProcessResponse.UpdatedAt and CreateVotingProcessRequest.UpdatedAt: RFC3339 with the
+// millisecond precision mongo stores, so a value read and echoed back compares equal.
+const UpdatedAtLayout = "2006-01-02T15:04:05.000Z"
+
 // VotingProcessQuestionRequest is one question in a create/update request.
 type VotingProcessQuestionRequest struct {
 	Title             db.MultiLangString   `json:"title"`
@@ -63,6 +68,11 @@ type CreateVotingProcessRequest struct {
 	StartDate   string                         `json:"startDate,omitempty"`
 	EndDate     string                         `json:"endDate,omitempty"`
 	Questions   []VotingProcessQuestionRequest `json:"questions"`
+	// UpdatedAt, on a PUT, is the updatedAt the client last read. The update then applies only if
+	// the process has not been written since, and is rejected with 409 otherwise, so two clients
+	// editing the same draft cannot silently overwrite each other. Optional: omitting it keeps the
+	// unconditional last-writer-wins behaviour. Ignored on POST.
+	UpdatedAt string `json:"updatedAt,omitempty"`
 }
 
 // ValidateProcessCensusRequest is the body of POST /processes/census/validation: the same
@@ -131,6 +141,10 @@ type VotingProcessResponse struct {
 	// ChainID is the Vochain chain id votes must be signed against; clients need it because vote
 	// signatures are chain-id-bound (a mismatch makes the on-chain signer recovery diverge).
 	ChainID string `json:"chainId,omitempty"`
+	// UpdatedAt is the process's last-write timestamp, in millisecond precision. Echo it back in a
+	// PUT to make the update conditional on nothing else having written in between (see
+	// CreateVotingProcessRequest.UpdatedAt).
+	UpdatedAt string `json:"updatedAt,omitempty"`
 }
 
 // VotingProcessListResponse is the paginated list of voting processes.
@@ -284,6 +298,11 @@ func VotingProcessResponseFromDB(
 	}
 	if !vp.EndDate.IsZero() {
 		resp.EndDate = vp.EndDate.UTC().Format("2006-01-02T15:04:05Z")
+	}
+	if !vp.UpdatedAt.IsZero() {
+		// millisecond precision, because that is what mongo stores: a coarser format would never
+		// match the stored value when echoed back as a conditional-update token
+		resp.UpdatedAt = vp.UpdatedAt.UTC().Format(UpdatedAtLayout)
 	}
 	if census != nil {
 		resp.Census = CensusSpec{

@@ -112,6 +112,8 @@ var (
 	ErrVoteBatchTooLarge                      = Error{Code: 40165, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("vote batch is too large")}
 	ErrVoteBatchMixedOrganizations            = Error{Code: 40166, HTTPstatus: http.StatusBadRequest, Err: fmt.Errorf("vote batch spans several organizations")}
 	ErrRequestBodyTooLarge                    = Error{Code: 40167, HTTPstatus: http.StatusRequestEntityTooLarge, Err: fmt.Errorf("request body is too large")}
+	ErrStaleUpdate                            = Error{Code: 40171, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("resource changed since it was read"), LogLevel: "info"}
+	ErrProcessQuestionsMismatch               = Error{Code: 40172, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("stored questions do not match the process"), LogLevel: "warn"}
 	// ErrCensusMemberAlreadyVoted carries the offending ids in data.votedMemberIds. The wording is
 	// deliberate: the CSP records consumption when it issues the signature, not when the ballot
 	// reaches the chain, so this means "already signed for" and must never be reported as "voted".
