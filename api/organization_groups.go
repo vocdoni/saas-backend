@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	stderrors "errors"
 	"net/http"
 	"slices"
 
@@ -263,7 +264,7 @@ func (a *API) createOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 //	@Param			orgAddress	path		string											true	"Organization address"
 //	@Param			groupId		path		string											true	"Group ID"
 //	@Param			group		body		apicommon.UpdateOrganizationMemberGroupsRequest	true	"Group info to update"
-//	@Success		200			{string}	string											"OK"
+//	@Success		200			{object}	apicommon.UpdateOrganizationMemberGroupResponse	"Census resize jobs and errors; bare OK when neither"
 //	@Failure		400			{object}	errors.Error									"Invalid input data, or organization/group not found"
 //	@Failure		401			{object}	errors.Error									"Unauthorized"
 //	@Failure		403			{object}	errors.Error									"Auto-generated group membership cannot be modified"
@@ -302,7 +303,7 @@ func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 
 	group, err := a.db.OrganizationMemberGroup(groupID, org.Address)
 	if err != nil {
-		if err == db.ErrNotFound {
+		if stderrors.Is(err, db.ErrNotFound) {
 			errors.ErrInvalidData.Withf("group not found").Write(w)
 			return
 		}
@@ -323,8 +324,21 @@ func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 		return
 	}
 	// read-only checks that must refuse before the group is touched, so an over-quota request
-	// leaves the member in neither the group nor the census
-	if err := a.preflightCensusGrowth(org, group.CensusIDs, len(toUpdate.AddMembers)); err != nil {
+	// leaves the member in neither the group nor the census.
+	//
+	// Counted net of the group's current members, mirroring removedInGroup above:
+	// AddCensusParticipantsByMemberIDs skips anyone already in the census, so a re-submitted id
+	// grows nothing and must not consume quota. Group membership is a proxy for census membership
+	// rather than the same thing — a census can hold participants added by other paths — so this
+	// narrows the over-count rather than eliminating it, in the direction that stops refusing
+	// requests which would have fit.
+	addedNotInGroup := 0
+	for _, id := range toUpdate.AddMembers {
+		if !slices.Contains(group.MemberIDs, id) {
+			addedNotInGroup++
+		}
+	}
+	if err := a.preflightCensusGrowth(org, group.CensusIDs, addedNotInGroup); err != nil {
 		writeSubscriptionError(w, err)
 		return
 	}
@@ -378,13 +392,13 @@ func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			orgAddress	path		string			true	"Organization address"
-//	@Param			groupId		path		string			true	"Group ID"
-//	@Success		200			{string}	string			"OK"
-//	@Failure		400			{object}	errors.Error	"Invalid input data, or organization/group not found"
-//	@Failure		401			{object}	errors.Error	"Unauthorized"
-//	@Failure		403			{object}	errors.Error	"Auto-generated group cannot be deleted"
-//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Param			orgAddress	path		string											true	"Organization address"
+//	@Param			groupId		path		string											true	"Group ID"
+//	@Success		200			{object}	apicommon.UpdateOrganizationMemberGroupResponse	"Census resize job, if needed; bare OK otherwise"
+//	@Failure		400			{object}	errors.Error									"Invalid input data, or organization/group not found"
+//	@Failure		401			{object}	errors.Error									"Unauthorized"
+//	@Failure		403			{object}	errors.Error									"Auto-generated group cannot be deleted"
+//	@Failure		500			{object}	errors.Error									"Internal server error"
 //	@Router			/organizations/{orgAddress}/groups/{groupId} [delete]
 func (a *API) deleteOrganizationMemberGroupHandler(w http.ResponseWriter, r *http.Request) {
 	// get the member ID from the request path
@@ -413,12 +427,12 @@ func (a *API) deleteOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 	// deleting a group empties the censuses built from it, so every one of its members has to be
 	// removable — checked before the delete, which is not undoable.
 	group, err := a.db.OrganizationMemberGroup(groupID, org.Address)
-	switch err {
-	case nil:
+	switch {
+	case err == nil:
 		if a.refuseBlockedVoters(w, group.CensusIDs, group.MemberIDs) {
 			return
 		}
-	case db.ErrNotFound:
+	case stderrors.Is(err, db.ErrNotFound):
 		// preserve the handler's existing behaviour: deleting a missing group succeeds
 	default:
 		errors.ErrGenericInternalServerError.Withf("could not load organization member group: %v", err).Write(w)
@@ -437,7 +451,15 @@ func (a *API) deleteOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 		}
 		return
 	}
-	a.resizeEmptiedQuestions(org.Address, emptied)
+	// deleting a group can open its questions to the whole census, which needs the on-chain room —
+	// reported like every other path that causes a resize. Bare OK when there is nothing to report,
+	// as the group PUT already does.
+	if jobID := a.resizeEmptiedQuestions(org.Address, emptied); jobID != "" {
+		apicommon.HTTPWriteJSON(w, &apicommon.UpdateOrganizationMemberGroupResponse{
+			CensusJobIDs: []string{jobID},
+		})
+		return
+	}
 	apicommon.HTTPWriteOK(w)
 }
 

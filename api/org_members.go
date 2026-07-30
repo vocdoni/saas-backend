@@ -302,12 +302,12 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			orgAddress	path		string				true	"Organization address"
-//	@Param			request		body		apicommon.OrgMember	true	"Member data to insert or update"
-//	@Success		200			{object}	apicommon.OrgMember	"ID of member inserted or updated"
-//	@Failure		400			{object}	errors.Error		"Invalid input data"
-//	@Failure		401			{object}	errors.Error		"Unauthorized"
-//	@Failure		500			{object}	errors.Error		"Internal server error"
+//	@Param			orgAddress	path		string								true	"Organization address"
+//	@Param			request		body		apicommon.OrgMember					true	"Member data to insert or update"
+//	@Success		200			{object}	apicommon.UpsertOrgMemberResponse	"Member id, plus any census resize jobs and errors"
+//	@Failure		400			{object}	errors.Error						"Invalid input data"
+//	@Failure		401			{object}	errors.Error						"Unauthorized"
+//	@Failure		500			{object}	errors.Error						"Internal server error"
 //	@Router			/organizations/{orgAddress}/members [put]
 func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
@@ -343,6 +343,13 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 	// would refuse every edit of an existing member once the census sits at the plan limit — the
 	// quota is on census size, and an edit does not change it. An id that names no member of this
 	// organization counts as a creation, which is what the upsert will do with it.
+	//
+	// This read and the upsert are not atomic, and the upsert decides `created` from its own read
+	// under the keys lock. A member deleted in between therefore turns an edit into an unpreflighted
+	// creation, overshooting the quota by one. Bounded and self-correcting — the member is still
+	// propagated correctly, since that keys off the upsert's answer rather than this one, and the
+	// next request is refused. Closing it would mean a quota-checked upsert in the db layer, which
+	// would have to import subscriptions to do it.
 	isUpdate := false
 	if member.ID != "" {
 		if _, err := a.db.OrgMember(org.Address, member.ID); err == nil {
@@ -375,6 +382,10 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 	if created {
 		propagated := a.propagateMembersToCensuses(org.Address, autoCensuses, []string{memberID.Hex()})
 		resp.CensusJobIDs = propagated.JobIDs
+		// reported rather than dropped, as the bulk and group paths already do. The member is
+		// written either way, so this stays a 200 — but a create that could not join a live census,
+		// or whose resize could not be enqueued, must not read the same as a clean one.
+		resp.Errors = propagated.Errors
 	}
 	apicommon.HTTPWriteJSON(w, resp)
 }
@@ -496,7 +507,9 @@ func (a *API) deleteOrganizationMembersHandler(w http.ResponseWriter, r *http.Re
 
 	// pruning a question's eligibility list to empty opens it to the whole census, so its election
 	// needs the room.
-	a.resizeEmptiedQuestions(org.Address, emptied)
-
-	apicommon.HTTPWriteJSON(w, &apicommon.DeleteMembersResponse{Count: deleted})
+	resp := &apicommon.DeleteMembersResponse{Count: deleted}
+	if jobID := a.resizeEmptiedQuestions(org.Address, emptied); jobID != "" {
+		resp.CensusJobIDs = []string{jobID}
+	}
+	apicommon.HTTPWriteJSON(w, resp)
 }

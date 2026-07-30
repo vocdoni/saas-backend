@@ -327,9 +327,6 @@ func TestUpdateQuestionCensusNarrowAndValidate(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusBadRequest)
 }
 
-// TestProcessCSPRevocation proves the revocation actually revokes: the sign handler re-checks census
-// participation, so a member removed from the census stops being signed for even though their token
-// is still valid. It also pins the ceiling — a signature already issued is not recalled.
 // TestRemoveProcessCensusContract covers DELETE /processes/{processId}/census beyond the happy path
 // the revocation tests already drive: what it refuses, what it reports, and the one thing it must
 // never do on chain.
@@ -395,6 +392,9 @@ func TestRemoveProcessCensusContract(t *testing.T) {
 		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[:1]}, "processes", pid, "census")
 }
 
+// TestProcessCSPRevocation proves the revocation actually revokes: the sign handler re-checks census
+// participation, so a member removed from the census stops being signed for even though their token
+// is still valid. It also pins the ceiling — a signature already issued is not recalled.
 func TestProcessCSPRevocation(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")

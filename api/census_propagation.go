@@ -1,6 +1,7 @@
 package api
 
 import (
+	stderrors "errors"
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -94,6 +95,17 @@ func (a *API) propagateMembersToCensuses(
 // request changes nothing at all.
 //
 // The signer is not returned: enqueueSetProcessCensus restores its own. This only proves it can be.
+//
+// The quota is a soft limit. Counting participants is a read, so concurrent requests can each pass
+// against the same count and overshoot it by up to the number in flight. Making it hard would take
+// the check inside the locked write path, which would put a subscriptions dependency in the db
+// layer; the overshoot is small, bounded, and refused on the next request.
+//
+// count is an upper bound on the growth, not the growth itself: adding a member who is already a
+// census participant is a no-op, and callers that cannot cheaply tell (the bulk import, which
+// learns what was net-new only from the insert) pass the submitted count. Erring toward refusal is
+// the safe direction for a quota. Callers that already hold the current membership pass the net-new
+// count instead — see the group update.
 func (a *API) preflightCensusGrowth(org *db.Organization, censusIDs []string, count int) error {
 	if len(censusIDs) == 0 || count == 0 {
 		return nil
@@ -115,7 +127,7 @@ func (a *API) preflightCensusGrowth(org *db.Organization, censusIDs []string, co
 func (a *API) autoGroupCensuses(orgAddress common.Address) []string {
 	group, err := a.db.AutoMemberGroup(orgAddress)
 	if err != nil {
-		if err != db.ErrNotFound {
+		if !stderrors.Is(err, db.ErrNotFound) {
 			log.Warnw("could not resolve the auto member group", "org", orgAddress, "error", err)
 		}
 		return nil

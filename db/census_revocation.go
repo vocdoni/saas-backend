@@ -343,6 +343,18 @@ func (ms *MongoStorage) publishedQuestionsNaming(
 
 // revokeWrites performs the three deletions the revocation consists of, under the write lock, and
 // reports how many participant rows step 1 removed.
+//
+// The three are sequential, not transactional — keysLock is a process-local mutex and the repo opens
+// no mongo session anywhere. A failure part-way leaves the earlier steps committed. That is
+// deliberate rather than merely tolerated: step 1 is the one that revokes, since the CSP re-checks
+// participation at sign time, so it goes first and a partial failure leaves a member who cannot
+// vote either way. What survives is cosmetic — a stale entry in an eligibility list naming someone
+// no longer in the census, and a CSP session that fails its own participation re-check on first use.
+// Re-running the revocation is idempotent and clears both.
+//
+// The caller must have scoped memberIDs to an organization already; see FilterOrgMemberIDs. This
+// derives the censuses from the members, which is what makes it usable from the member, group and
+// erasure paths, and is also why it cannot do the scoping itself.
 func (ms *MongoStorage) revokeWrites(
 	ctx context.Context,
 	censusIDs, memberIDs []string,

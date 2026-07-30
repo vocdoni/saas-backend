@@ -1126,6 +1126,13 @@ type DeleteMembersRequest struct {
 type DeleteMembersResponse struct {
 	// Number of members deleted
 	Count int `json:"count"`
+
+	// CensusJobIDs are the async jobs raising the on-chain maxCensusSize of the elections whose
+	// questions the deletion opened to the whole census (pruning an eligibility list to empty is
+	// "no restriction", not "nobody"). Poll each with GET /jobs/{jobId}. Deleting a member has the
+	// same on-chain effect through this endpoint as through DELETE /processes/{processId}/census,
+	// which reports its job — so this reports it too.
+	CensusJobIDs []string `json:"censusJobIds,omitempty"`
 }
 
 // OrgMember defines the structure of a member in the API.
@@ -1258,6 +1265,12 @@ type UpsertOrgMemberResponse struct {
 	// CensusJobIDs are the async jobs raising the on-chain maxCensusSize of the affected
 	// elections. Poll each with GET /jobs/{jobId}.
 	CensusJobIDs []string `json:"censusJobIds,omitempty"`
+
+	// Errors are per-census problems that did not stop the member from being written. The member
+	// exists either way; what may be missing is their place in a live census, or the on-chain room
+	// for them to vote. Empty CensusJobIDs alone cannot report that — a create that needed no
+	// resize looks identical.
+	Errors []string `json:"errors,omitempty"`
 }
 
 // UpdateOrganizationMemberGroupResponse is returned by PUT

@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -277,7 +278,7 @@ func (c *CSPHandlers) ProcessSignHandler(w http.ResponseWriter, r *http.Request)
 	// cascade actually revoke.
 	memberID := auth.UserID.String()
 	if _, err := c.mainDB.CensusParticipant(vp.CensusID.Hex(), memberID); err != nil {
-		if err == db.ErrNotFound {
+		if stderrors.Is(err, db.ErrNotFound) {
 			errors.ErrUnauthorized.Withf("member is no longer part of the census").Write(w)
 			return
 		}

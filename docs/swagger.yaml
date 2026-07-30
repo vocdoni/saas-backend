@@ -576,6 +576,16 @@ definitions:
     type: object
   apicommon.DeleteMembersResponse:
     properties:
+      censusJobIds:
+        description: |-
+          CensusJobIDs are the async jobs raising the on-chain maxCensusSize of the elections whose
+          questions the deletion opened to the whole census (pruning an eligibility list to empty is
+          "no restriction", not "nobody"). Poll each with GET /jobs/{jobId}. Deleting a member has the
+          same on-chain effect through this endpoint as through DELETE /processes/{processId}/census,
+          which reports its job — so this reports it too.
+        items:
+          type: string
+        type: array
       count:
         description: Number of members deleted
         type: integer
@@ -1687,6 +1697,21 @@ definitions:
           $ref: '#/definitions/db.VoteJobResult'
         type: array
     type: object
+  apicommon.UpdateOrganizationMemberGroupResponse:
+    properties:
+      censusJobIds:
+        description: |-
+          CensusJobIDs are the async jobs raising the on-chain maxCensusSize of the elections whose
+          census just grew or reopened. Poll each with GET /jobs/{jobId}.
+        items:
+          type: string
+        type: array
+      errors:
+        description: Errors are per-census problems that did not stop the group update.
+        items:
+          type: string
+        type: array
+    type: object
   apicommon.UpdateOrganizationMemberGroupsRequest:
     properties:
       addMembers:
@@ -1781,6 +1806,28 @@ definitions:
         type: string
       removed:
         type: integer
+    type: object
+  apicommon.UpsertOrgMemberResponse:
+    properties:
+      censusJobIds:
+        description: |-
+          CensusJobIDs are the async jobs raising the on-chain maxCensusSize of the affected
+          elections. Poll each with GET /jobs/{jobId}.
+        items:
+          type: string
+        type: array
+      errors:
+        description: |-
+          Errors are per-census problems that did not stop the member from being written. The member
+          exists either way; what may be missing is their place in a live census, or the on-chain room
+          for them to vote. Empty CensusJobIDs alone cannot report that — a create that needed no
+          resize looks identical.
+        items:
+          type: string
+        type: array
+      id:
+        description: Member's internal unique ID
+        type: string
     type: object
   apicommon.UserInfo:
     properties:
@@ -3868,9 +3915,9 @@ paths:
       - application/json
       responses:
         "200":
-          description: OK
+          description: Census resize job, if needed; bare OK otherwise
           schema:
-            type: string
+            $ref: '#/definitions/apicommon.UpdateOrganizationMemberGroupResponse'
         "400":
           description: Invalid input data, or organization/group not found
           schema:
@@ -3965,9 +4012,9 @@ paths:
       - application/json
       responses:
         "200":
-          description: OK
+          description: Census resize jobs and errors; bare OK when neither
           schema:
-            type: string
+            $ref: '#/definitions/apicommon.UpdateOrganizationMemberGroupResponse'
         "400":
           description: Invalid input data, or organization/group not found
           schema:
@@ -4278,9 +4325,9 @@ paths:
       - application/json
       responses:
         "200":
-          description: ID of member inserted or updated
+          description: Member id, plus any census resize jobs and errors
           schema:
-            $ref: '#/definitions/apicommon.OrgMember'
+            $ref: '#/definitions/apicommon.UpsertOrgMemberResponse'
         "400":
           description: Invalid input data
           schema:
