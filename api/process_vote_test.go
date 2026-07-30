@@ -339,23 +339,35 @@ func TestRelayVote(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(orgAfter.Counters.SentVotes, qt.Equals, 1)
 
-	// the voter can now verify that nullifier against the chain, and an unknown one is
-	// reported as unverified rather than failing the call
+	// the voter can now verify that nullifier against the chain: an unknown one is reported
+	// as unverified rather than failing the call, and a repeated one gets the same answer
+	// (looked up only once)
 	unknown := internal.HexBytes(internal.RandomBytes(nullifierSize))
 	verified := requestAndParse[apicommon.VerifyVotesResponse](t, http.MethodPost, "",
-		&apicommon.VerifyVotesRequest{Nullifiers: []internal.HexBytes{nullifier, unknown}},
+		&apicommon.VerifyVotesRequest{Nullifiers: []internal.HexBytes{nullifier, unknown, nullifier}},
 		"votes", "verify")
-	c.Assert(verified.Votes, qt.HasLen, 2)
+	c.Assert(verified.Votes, qt.HasLen, 3)
 	c.Assert(verified.Votes[0].Nullifier, qt.DeepEquals, nullifier)
 	c.Assert(verified.Votes[0].Verified, qt.IsTrue)
 	c.Assert(verified.Votes[0].ProcessID, qt.DeepEquals, processID)
 	c.Assert(verified.Votes[0].TxHash, qt.Not(qt.HasLen), 0)
 	c.Assert(verified.Votes[1].Nullifier, qt.DeepEquals, unknown)
 	c.Assert(verified.Votes[1].Verified, qt.IsFalse)
+	c.Assert(verified.Votes[2], qt.DeepEquals, verified.Votes[0])
 
 	// a nullifier that cannot name a vote is rejected outright, not looked up
 	requestAndAssertError(errors.ErrMalformedBody, t, http.MethodPost, "",
 		&apicommon.VerifyVotesRequest{Nullifiers: []internal.HexBytes{{0xde, 0xad}}}, "votes", "verify")
+
+	// an empty batch and one over the cap are rejected before any chain read
+	requestAndAssertError(errors.ErrVoteBatchEmpty, t, http.MethodPost, "",
+		&apicommon.VerifyVotesRequest{}, "votes", "verify")
+	tooMany := make([]internal.HexBytes, maxVotesPerBatch+1)
+	for i := range tooMany {
+		tooMany[i] = internal.RandomBytes(nullifierSize)
+	}
+	requestAndAssertError(errors.ErrVoteBatchTooLarge, t, http.MethodPost, "",
+		&apicommon.VerifyVotesRequest{Nullifiers: tooMany}, "votes", "verify")
 }
 
 // TestRelayVotesBatch relays the votes of a multi-question process in a single call and

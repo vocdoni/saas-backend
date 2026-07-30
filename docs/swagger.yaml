@@ -7561,7 +7561,8 @@ paths:
         public on chain. Several nullifiers are accepted in one call because a multi-question
         voting process is one on-chain election per question, so a voter holds one nullifier
         per question. The response has one entry per requested nullifier, in the same order;
-        an unknown nullifier is reported as verified=false rather than as an error, while a
+        a repeated nullifier is looked up only once and every copy gets the same answer.
+        An unknown nullifier is reported as verified=false rather than as an error, while a
         chain that cannot be reached fails the whole call so a voter is never told their vote
         is missing when it merely could not be looked up.
       parameters:

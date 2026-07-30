@@ -257,7 +257,8 @@ const (
 //	@Description	public on chain. Several nullifiers are accepted in one call because a multi-question
 //	@Description	voting process is one on-chain election per question, so a voter holds one nullifier
 //	@Description	per question. The response has one entry per requested nullifier, in the same order;
-//	@Description	an unknown nullifier is reported as verified=false rather than as an error, while a
+//	@Description	a repeated nullifier is looked up only once and every copy gets the same answer.
+//	@Description	An unknown nullifier is reported as verified=false rather than as an error, while a
 //	@Description	chain that cannot be reached fails the whole call so a voter is never told their vote
 //	@Description	is missing when it merely could not be looked up.
 //	@Tags			vote
@@ -292,17 +293,31 @@ func (a *API) verifyVotesHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// one chain read per nullifier, fanned out with the same bounded pool the per-question
-	// resolvers use: a vote lookup costs ~250ms against a remote node, so at the batch cap a
-	// sequential loop would be a ~25s request. Each callback writes only its own index, so
-	// the result slices need no locking.
+	// a repeated nullifier is asked to the chain only once: the endpoint is public, so a
+	// caller must not be able to multiply chain reads by repeating one value. firstOf maps
+	// each nullifier to the index of its first occurrence, and after the fan-out every
+	// duplicate copies that occurrence's answer.
+	firstOf := make(map[string]int, len(req.Nullifiers))
+	var distinct []int
+	for i, nullifier := range req.Nullifiers {
+		if _, seen := firstOf[string(nullifier)]; !seen {
+			firstOf[string(nullifier)] = i
+			distinct = append(distinct, i)
+		}
+	}
+
+	// one chain read per distinct nullifier, fanned out with the same bounded pool the
+	// per-question resolvers use: a vote lookup costs ~250ms against a remote node, so at
+	// the batch cap a sequential loop would be a ~25s request. Each callback writes only
+	// its own index, so the result slices need no locking.
 	votes := make([]apicommon.VerifiedVote, len(req.Nullifiers))
-	errs := make([]error, len(req.Nullifiers))
-	parallelForEach(len(req.Nullifiers), func(i int) {
+	errs := make([]error, len(distinct))
+	parallelForEach(len(distinct), func(d int) {
+		i := distinct[d]
 		votes[i].Nullifier = req.Nullifiers[i]
 		// nobody is left to read the answer: stop asking the node for the rest of the batch.
 		if err := r.Context().Err(); err != nil {
-			errs[i] = err
+			errs[d] = err
 			return
 		}
 		vote, err := a.account.VoteByNullifier(req.Nullifiers[i])
@@ -310,7 +325,7 @@ func (a *API) verifyVotesHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != nil {
-			errs[i] = err
+			errs[d] = err
 			return
 		}
 		votes[i].Verified = true
@@ -324,6 +339,10 @@ func (a *API) verifyVotesHandler(w http.ResponseWriter, r *http.Request) {
 	if err := stderrors.Join(errs...); err != nil {
 		errors.ErrVochainRequestFailed.WithErr(err).Write(w)
 		return
+	}
+	// fan the answers back out to the duplicates (self-assignment for first occurrences).
+	for i, nullifier := range req.Nullifiers {
+		votes[i] = votes[firstOf[string(nullifier)]]
 	}
 
 	apicommon.HTTPWriteJSON(w, &apicommon.VerifyVotesResponse{Votes: votes})
