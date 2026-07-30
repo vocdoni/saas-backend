@@ -246,6 +246,30 @@ func TestRevokeMembersFromCensusesReportsEmptiedQuestions(t *testing.T) {
 	c.Assert(openToAll.EligibleMemberIDs, qt.HasLen, 0)
 }
 
+func TestRevokeMembersFromCensusesSurvivesARecountFailure(t *testing.T) {
+	c := qt.New(t)
+	c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+	f := setupRevocationFixture(t)
+
+	// A recount cannot run against a census document that is gone. The document is removed
+	// directly — DelCensus would cascade to the participant rows — so the participants survive
+	// for the revocation to delete. The revocation writes have already committed by the time the
+	// recount runs, so failing the call would report a 500 for a removal that happened — and a
+	// retry finds no candidates naming the members, so the emptied questions would be lost for
+	// good along with the resize they require.
+	res, err := testDB.censuses.DeleteOne(t.Context(), bson.M{"_id": f.census.ID})
+	c.Assert(err, qt.IsNil)
+	c.Assert(res.DeletedCount, qt.Equals, int64(1))
+
+	removed, emptied, err := testDB.RevokeMembersFromCensuses(
+		[]string{f.census.ID.Hex()}, []string{f.alice.ID.Hex(), f.bob.ID.Hex()})
+	c.Assert(err, qt.IsNil)
+	c.Assert(removed, qt.Equals, int64(2))
+	c.Assert(emptied, qt.HasLen, 1)
+	c.Assert(emptied[0].ID, qt.Equals, f.restricted)
+}
+
 func TestRevokeMembersFromCensusesPrunesDrafts(t *testing.T) {
 	c := qt.New(t)
 	c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)

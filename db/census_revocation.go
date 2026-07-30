@@ -280,18 +280,25 @@ func (ms *MongoStorage) RevokeMembersFromCensuses(
 		return 0, nil, err
 	}
 
-	// updateCensusSize takes keysLock through SetCensus, which is not reentrant, so it runs
-	// outside the write section above.
-	for _, censusID := range censusIDs {
-		if err := ms.updateCensusSize(censusID); err != nil {
-			return 0, nil, fmt.Errorf("failed to recount census %s: %w", censusID, err)
-		}
-	}
-
+	// Read before the recount below: the $pull has already committed, so a retry of this call
+	// finds no candidates naming the members — the emptied list is only observable now, and a
+	// failure past this point must not discard it or the caller's resize is lost for good.
 	emptied, err := ms.emptiedQuestions(ctx, candidates)
 	if err != nil {
 		return 0, nil, err
 	}
+
+	// updateCensusSize takes keysLock through SetCensus, which is not reentrant, so it runs
+	// outside the write section above. A recount failure is logged rather than returned: the
+	// revocation has committed, and a stale size after a removal errs high — the resize path
+	// never shrinks and reads the chain first, so an over-sized target is harmless while a
+	// misreported failure would hide the committed removal and the emptied questions.
+	for _, censusID := range censusIDs {
+		if err := ms.updateCensusSize(censusID); err != nil {
+			log.Warnw("failed to recount census after revocation", "census", censusID, "error", err)
+		}
+	}
+
 	return removed, emptied, nil
 }
 
