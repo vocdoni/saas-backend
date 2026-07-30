@@ -250,7 +250,11 @@ func (ms *MongoStorage) ClaimVotingProcessForPublish(id primitive.ObjectID) (boo
 	if err != nil {
 		return false, fmt.Errorf("failed to claim voting process for publish: %w", err)
 	}
-	return res.ModifiedCount == 1, nil
+	// The filter is what decides the claim, so matching it is winning it. ModifiedCount would not
+	// be: Mongo stores dates to the millisecond, so reclaiming a stale marker inside the same
+	// millisecond writes the value already there and the server reports nothing modified — a won
+	// claim reported as lost.
+	return res.MatchedCount == 1, nil
 }
 
 // StaleVotingProcesses returns the ids of processes whose publishing marker is stale (older

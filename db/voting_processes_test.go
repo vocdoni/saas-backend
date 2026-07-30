@@ -99,6 +99,30 @@ func TestClaimVotingProcessForPublish(t *testing.T) {
 	c.Assert(claimed, qt.IsTrue)
 }
 
+// TestReclaimVotingProcessInSameMillisecond pins that reclaiming a stale marker reports the win it
+// actually was. Mongo stores dates to the millisecond, so a reclaim landing in the same millisecond
+// as the marker it replaces writes an identical value and the server reports nothing modified —
+// while the filter, which is what decides the claim, matched. Claiming in a tight loop lands inside
+// one millisecond within a few iterations.
+func TestReclaimVotingProcessInSameMillisecond(t *testing.T) {
+	c := qt.New(t)
+	org := common.Address{0x12, 0x9a}
+	setupVotingProcessOrg(c, org)
+	id, err := testDB.SetVotingProcess(&VotingProcess{OrgAddress: org})
+	c.Assert(err, qt.IsNil)
+
+	// every marker is stale, so every claim must win
+	restore := PublishStaleAfter
+	PublishStaleAfter = -time.Minute
+	defer func() { PublishStaleAfter = restore }()
+
+	for i := range 200 {
+		claimed, err := testDB.ClaimVotingProcessForPublish(id)
+		c.Assert(err, qt.IsNil)
+		c.Assert(claimed, qt.IsTrue, qt.Commentf("reclaim %d of a stale marker must win", i))
+	}
+}
+
 // TestQuestionStatusSyncMethods covers the status-syncer DB methods: the org-scoped syncable-
 // candidate projection (only {READY,PAUSED,ENDED} with an upstreamId, backing the delete guard) and
 // the conditional reconcile write (status + syncedAt, applied only while the stored status still
