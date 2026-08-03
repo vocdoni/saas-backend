@@ -248,7 +248,11 @@ const (
 	processesAuthEndpoint       = "/processes/{processId}/auth/{step}"
 	processesAuthResendEndpoint = "/processes/{processId}/auth/resend"
 	processesSignEndpoint       = "/processes/{processId}/sign"
-	processesWeightEndpoint     = "/processes/{processId}/weight"
+	// POST /processes/{processId}/sign-batch to sign every question's ballot in one call, so a
+	// voter casting a multi-question process does not need one round trip per question. The
+	// batch is authorized as a unit and signs nothing on failure.
+	processesSignBatchEndpoint = "/processes/{processId}/sign-batch"
+	processesWeightEndpoint    = "/processes/{processId}/weight"
 
 	// // census auth routes (currently not implemented)
 	// // POST /process/{processId}/auth/0 to initiate auth

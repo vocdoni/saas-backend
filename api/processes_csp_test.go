@@ -11,6 +11,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.vocdoni.io/dvote/crypto/ethereum"
@@ -192,4 +193,97 @@ func TestProcessCSP(t *testing.T) {
 	// a malformed process id is a client error
 	requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, "",
 		&handlers.CheckMembershipRequest{AuthToken: tok0}, "processes", "not-a-valid-id", "check")
+}
+
+// TestProcessCSPSignBatch exercises POST /processes/{processId}/sign-batch: a batch is
+// authorized as a unit and signs nothing on failure, and once authorized every ballot is
+// signed with a per-ballot outcome.
+func TestProcessCSPSignBatch(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+
+	// same fixture as TestProcessCSP: question 2 is restricted to the first member.
+	req := newVotingProcessRequest(orgAddress, ids)
+	req.StartDate = ""
+	req.Census.AuthFields = db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsSurname}
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint)
+	pid := created.ProcessID
+
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
+
+	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	c.Assert(got.Questions, qt.HasLen, 2)
+	openElection := got.Questions[0].UpstreamID
+	restrictedElection := got.Questions[1].UpstreamID
+
+	authReq := func(i int) *handlers.AuthRequest {
+		return &handlers.AuthRequest{Name: members[i].Name, Surname: members[i].Surname, Email: members[i].Email}
+	}
+	voter := ethereum.SignKeys{}
+	c.Assert(voter.Generate(), qt.IsNil)
+	address := hex.EncodeToString(voter.Address().Bytes())
+	batch := func(authToken internal.HexBytes, elections ...internal.HexBytes) *handlers.SignBatchRequest {
+		items := make([]handlers.SignBatchItem, len(elections))
+		for i, e := range elections {
+			items[i] = handlers.SignBatchItem{ProcessID: e, Payload: address}
+		}
+		return &handlers.SignBatchRequest{AuthToken: authToken, Signatures: items}
+	}
+	consumed := func(authToken internal.HexBytes) []handlers.QuestionConsumedAddress {
+		return requestAndParse[handlers.ProcessSignInfoResponse](t, http.MethodPost, "",
+			&handlers.ConsumedAddressRequest{AuthToken: authToken}, "processes", pid, "sign-info").Consumed
+	}
+
+	// --- second member: eligible for the open question only, so a batch naming both is
+	// rejected as a unit and its eligible sibling is NOT signed ---
+	tok1 := authProcessCSP(t, pid, authReq(1))
+	requestAndAssertCode(http.StatusUnauthorized, t, http.MethodPost, "",
+		batch(tok1, openElection, restrictedElection), "processes", pid, "sign-batch")
+	c.Assert(consumed(tok1), qt.HasLen, 0)
+
+	// a repeated election, an empty batch and more ballots than the process has questions are
+	// all client errors, and none of them signs anything
+	requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, "",
+		batch(tok1, openElection, openElection), "processes", pid, "sign-batch")
+	requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, "",
+		batch(tok1), "processes", pid, "sign-batch")
+	requestAndAssertError(errors.ErrVoteBatchTooLarge, t, http.MethodPost, "",
+		&handlers.SignBatchRequest{AuthToken: tok1, Signatures: make([]handlers.SignBatchItem, 3)},
+		"processes", pid, "sign-batch")
+	c.Assert(consumed(tok1), qt.HasLen, 0)
+
+	// --- first member: both questions signed in one call ---
+	tok0 := authProcessCSP(t, pid, authReq(0))
+	signed := requestAndParse[handlers.SignBatchResponse](t, http.MethodPost, "",
+		batch(tok0, openElection, restrictedElection), "processes", pid, "sign-batch")
+	c.Assert(signed.Signatures, qt.HasLen, 2)
+	for i, s := range signed.Signatures {
+		c.Assert(s.Error, qt.Equals, "", qt.Commentf("ballot %d", i))
+		c.Assert(s.Signature, qt.Not(qt.HasLen), 0)
+		c.Assert(bytes.Equal(s.Weight, big.NewInt(1).Bytes()), qt.IsTrue)
+	}
+	c.Assert(bytes.Equal(signed.Signatures[0].ProcessID, openElection), qt.IsTrue)
+	c.Assert(bytes.Equal(signed.Signatures[1].ProcessID, restrictedElection), qt.IsTrue)
+	c.Assert(consumed(tok0), qt.HasLen, 2)
+
+	// --- a spent signing slot is a per-ballot error, not a failed batch: exhaust the open
+	// election's overwrites (it is at 1 after the batch above) and re-run the same batch ---
+	for i := 0; i < db.MaxVoteOverwritesPerProcess; i++ {
+		requestAndParse[handlers.AuthResponse](t, http.MethodPost, "",
+			&handlers.SignRequest{AuthToken: tok0, ProcessID: openElection, Payload: address},
+			"processes", pid, "sign")
+	}
+	again := requestAndParse[handlers.SignBatchResponse](t, http.MethodPost, "",
+		batch(tok0, openElection, restrictedElection), "processes", pid, "sign-batch")
+	c.Assert(again.Signatures, qt.HasLen, 2)
+	c.Assert(again.Signatures[0].Error, qt.Not(qt.Equals), "")
+	c.Assert(again.Signatures[0].Signature, qt.HasLen, 0)
+	c.Assert(again.Signatures[1].Error, qt.Equals, "")
+	c.Assert(again.Signatures[1].Signature, qt.Not(qt.HasLen), 0)
 }
