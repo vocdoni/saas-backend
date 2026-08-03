@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"net/http"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -277,7 +276,7 @@ func (c *CSPHandlers) resolveSignContext(
 	return &signContext{
 		process:  vp,
 		memberID: auth.UserID.String(),
-		weight:   big.NewInt(int64(weight)).Bytes(),
+		weight:   weightBytes(weight),
 	}, true
 }
 
@@ -288,6 +287,11 @@ func (c *CSPHandlers) resolveSignContext(
 func (c *CSPHandlers) authorizeQuestion(
 	sc *signContext, electionID internal.HexBytes,
 ) (internal.HexBytes, *errors.Error) {
+	// an empty id cannot name an election, and db.QuestionByUpstreamID reports it as
+	// ErrInvalidData, which the branch below would surface to the client as a 500.
+	if len(electionID) == 0 {
+		return nil, apiErr(errors.ErrMalformedBody.With("missing upstreamId"))
+	}
 	question, err := c.mainDB.QuestionByUpstreamID(electionID)
 	if err != nil && err != db.ErrNotFound {
 		return nil, apiErr(errors.ErrGenericInternalServerError.WithErr(err))
@@ -410,7 +414,7 @@ func (c *CSPHandlers) ProcessSignBatchHandler(w http.ResponseWriter, r *http.Req
 		if err != nil {
 			// per-ballot by nature: this election's signing slot is spent, or a concurrent
 			// request holds its lock. The batch's siblings are unaffected.
-			log.Warnw("could not sign a batch ballot", "procId", b.upstreamID, "error", err)
+			logSignFailure(b.upstreamID, err)
 			res.Error = err.Error()
 			continue
 		}
@@ -418,6 +422,18 @@ func (c *CSPHandlers) ProcessSignBatchHandler(w http.ResponseWriter, r *http.Req
 		res.Weight = sc.weight
 	}
 	apicommon.HTTPWriteJSON(w, resp)
+}
+
+// logSignFailure records why one ballot of a batch could not be signed. A spent signing slot and
+// a concurrent request for the same election are the normal outcomes of a voter retrying or of
+// two tabs racing, and the caller is told about them in the response anyway, so they are debug —
+// a warn per occurrence would bury the storage and signer failures that do need attention.
+func logSignFailure(upstreamID internal.HexBytes, err error) {
+	if errors.Is(err, csp.ErrProcessAlreadyConsumed) || errors.Is(err, csp.ErrUserAlreadySigning) {
+		log.Debugw("skipped a batch ballot", "procId", upstreamID, "reason", err)
+		return
+	}
+	log.Warnw("could not sign a batch ballot", "procId", upstreamID, "error", err)
 }
 
 // parseSignBatchRequest decodes a capped sign-batch body and checks it carries an auth token,
@@ -496,7 +512,7 @@ func (c *CSPHandlers) ProcessWeightHandler(w http.ResponseWriter, r *http.Reques
 	if census.Weighted {
 		weight = member.Weight
 	}
-	apicommon.HTTPWriteJSON(w, &UserWeightResponse{Weight: internal.HexBytes(big.NewInt(int64(weight)).Bytes())})
+	apicommon.HTTPWriteJSON(w, &UserWeightResponse{Weight: weightBytes(weight)})
 }
 
 // ProcessCheckHandler godoc
@@ -552,7 +568,7 @@ func (c *CSPHandlers) ProcessCheckHandler(w http.ResponseWriter, r *http.Request
 		if cErr == nil && census.Weighted {
 			weight = member.Weight
 		}
-		resp.Weight = internal.HexBytes(big.NewInt(int64(weight)).Bytes())
+		resp.Weight = weightBytes(weight)
 	}
 	questions, err := c.mainDB.QuestionsByProcess(oid)
 	if err != nil {

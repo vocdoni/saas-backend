@@ -324,6 +324,13 @@ func findProcessInBundle(bundle *db.ProcessesBundle, processID internal.HexBytes
 	return nil, false
 }
 
+// weightBytes encodes a voter weight as the minimal big-endian bytes carried in a CA bundle
+// and returned to voters. SetUint64 rather than big.NewInt(int64(w)): db.OrgMember.Weight is a
+// uint64, and the signed conversion would wrap to a negative value above 2^63.
+func weightBytes(w uint64) internal.HexBytes {
+	return new(big.Int).SetUint64(w).Bytes()
+}
+
 // parseAddress parses the address from the payload
 func parseAddress(w http.ResponseWriter, payload string) (*internal.HexBytes, bool) {
 	address := new(internal.HexBytes)
@@ -438,7 +445,7 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// Sign the request and send the response
-	c.signAndRespond(w, req.AuthToken, *address, processID, big.NewInt(int64(weight)).Bytes())
+	c.signAndRespond(w, req.AuthToken, *address, processID, weightBytes(weight))
 }
 
 // UserWeightHandler godoc
@@ -513,7 +520,7 @@ func (c *CSPHandlers) UserWeightHandler(w http.ResponseWriter, r *http.Request) 
 
 	// return the user weight for the bundle
 	apicommon.HTTPWriteJSON(w, &UserWeightResponse{
-		Weight: internal.HexBytes(big.NewInt(int64(weight)).Bytes()),
+		Weight: weightBytes(weight),
 	})
 }
 
@@ -629,7 +636,7 @@ func (c *CSPHandlers) BundleCheckHandler(w http.ResponseWriter, r *http.Request)
 
 	apicommon.HTTPWriteJSON(w, &CheckMembershipResponse{
 		Belongs:  true,
-		Weight:   internal.HexBytes(big.NewInt(int64(weight)).Bytes()),
+		Weight:   weightBytes(weight),
 		HasVoted: hasVoted,
 	})
 }

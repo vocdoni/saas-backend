@@ -249,8 +249,9 @@ const (
 	processesAuthResendEndpoint = "/processes/{processId}/auth/resend"
 	processesSignEndpoint       = "/processes/{processId}/sign"
 	// POST /processes/{processId}/sign-batch to sign every question's ballot in one call, so a
-	// voter casting a multi-question process does not need one round trip per question. The
-	// batch is authorized as a unit and signs nothing on failure.
+	// voter casting a multi-question process does not need one round trip per question.
+	// Authorization is all or nothing — a rejected batch signs nothing — but the signing that
+	// follows reports per ballot: one entry can fail while its siblings succeed.
 	processesSignBatchEndpoint = "/processes/{processId}/sign-batch"
 	processesWeightEndpoint    = "/processes/{processId}/weight"
 

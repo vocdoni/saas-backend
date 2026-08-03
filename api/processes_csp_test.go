@@ -133,6 +133,11 @@ func TestProcessCSP(t *testing.T) {
 		}, "processes", pid, "sign")
 	c.Assert(sign0.Signature, qt.Not(qt.HasLen), 0)
 
+	// a sign request naming no election is a client error, not an internal one
+	requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, "",
+		&handlers.SignRequest{AuthToken: tok0, Payload: hex.EncodeToString(voter.Address().Bytes())},
+		"processes", pid, "sign")
+
 	// sign-info: member 0's consumed address + nullifier for the open election are now available
 	signInfo := requestAndParse[handlers.ProcessSignInfoResponse](t, http.MethodPost, "",
 		&handlers.ConsumedAddressRequest{AuthToken: tok0}, "processes", pid, "sign-info")
@@ -261,6 +266,13 @@ func TestProcessCSPSignBatch(t *testing.T) {
 		&handlers.SignBatchRequest{
 			AuthToken: tok1,
 			Ballots:   []handlers.SignBatchBallot{{UpstreamID: openElection}},
+		}, "processes", pid, "sign-batch")
+	// ...and so is one without an election: an empty upstreamId is a client error, not the 500
+	// that db.QuestionByUpstreamID's ErrInvalidData would otherwise become
+	requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, "",
+		&handlers.SignBatchRequest{
+			AuthToken: tok1,
+			Ballots:   []handlers.SignBatchBallot{{Address: address}},
 		}, "processes", pid, "sign-batch")
 	c.Assert(consumed(tok1), qt.HasLen, 0)
 
