@@ -308,9 +308,9 @@ func (c *CSPHandlers) authorizeQuestion(
 // bounded before it is buffered.
 const maxSignBatchBodyBytes = 100*512 + 4<<10
 
-// ballot is one validated item of a sign batch: the on-chain election to sign for and the
-// voter address to sign, both resolved during the validation pass.
-type ballot struct {
+// authorizedBallot is one item of a sign batch that survived the authorization pass: the
+// question's on-chain election id, resolved from the request, and the voter address.
+type authorizedBallot struct {
 	upstreamID internal.HexBytes
 	address    internal.HexBytes
 }
@@ -322,12 +322,14 @@ type ballot struct {
 //	@Description	one on-chain election per question, so a voter holds one ballot per question and
 //	@Description	signing them one by one costs a round trip each. This signs them all under a single
 //	@Description	verified auth token. Public endpoint: the token authenticates the voter.
+//	@Description	Each ballot names a question by its on-chain election id (upstreamId, as returned by
+//	@Description	the check and sign-info endpoints) and the voter address to sign for it.
 //	@Description	The batch is authorized as a unit and signs nothing on failure — every ballot must
 //	@Description	name an election of this process (else 401) the member is eligible for (else 401),
-//	@Description	carry a parseable voter address (else 400), and no election may be repeated (else
-//	@Description	400). Once authorized, every ballot is signed and the response carries one entry per
-//	@Description	request item, in order: a signature and weight, or the reason that election could not
-//	@Description	be signed (its signing slot is spent, or a concurrent request holds it). Signing
+//	@Description	carry a voter address (else 400), and no election may be repeated (else 400). Once
+//	@Description	authorized, every ballot is signed and the response carries one entry per request
+//	@Description	item, in order: a signature and weight, or the reason that election could not be
+//	@Description	signed (its signing slot is spent, or a concurrent request holds it). Signing
 //	@Description	consumes a per-election slot that cannot be given back, so a failed entry is retried
 //	@Description	by calling again, not rolled back.
 //	@Tags			processes
@@ -358,41 +360,42 @@ func (c *CSPHandlers) ProcessSignBatchHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	switch {
-	case len(req.Signatures) == 0:
+	case len(req.Ballots) == 0:
 		errors.ErrVoteBatchEmpty.Write(w)
 		return
-	case len(req.Signatures) > len(sc.process.QuestionIDs):
+	case len(req.Ballots) > len(sc.process.QuestionIDs):
 		// a voter holds at most one ballot per question, so the process itself is the cap.
 		errors.ErrVoteBatchTooLarge.Withf("%d ballots, the process has %d questions",
-			len(req.Signatures), len(sc.process.QuestionIDs)).Write(w)
+			len(req.Ballots), len(sc.process.QuestionIDs)).Write(w)
 		return
 	}
 
 	// authorize the whole batch before signing anything: signing consumes a per-election slot
 	// that cannot be given back, so a rejected batch must leave the voter with nothing signed
 	// rather than with a signed prefix.
-	ballots := make([]ballot, len(req.Signatures))
-	seen := make(map[string]int, len(req.Signatures))
-	for i, item := range req.Signatures {
+	ballots := make([]authorizedBallot, len(req.Ballots))
+	seen := make(map[string]int, len(req.Ballots))
+	for i, item := range req.Ballots {
 		// a repeated election would contend with itself on the per-(user, election) signer
 		// lock, and a voter has at most one ballot per question anyway.
-		if first, dup := seen[string(item.ProcessID)]; dup {
+		if first, dup := seen[string(item.UpstreamID)]; dup {
 			errors.ErrMalformedBody.Withf(
 				"the ballot at index %d repeats the election of index %d", i, first).Write(w)
 			return
 		}
-		seen[string(item.ProcessID)] = i
-		upstreamID, sErr := c.authorizeQuestion(sc, item.ProcessID)
+		seen[string(item.UpstreamID)] = i
+		upstreamID, sErr := c.authorizeQuestion(sc, item.UpstreamID)
 		if sErr != nil {
 			sErr.Withf("at index %d", i).Write(w)
 			return
 		}
-		address := new(internal.HexBytes)
-		if err := address.ParseString(item.Payload); err != nil {
-			errors.ErrMalformedBody.WithErr(err).Withf("at index %d", i).Write(w)
+		// the address is what gets signed into the CA bundle and recorded as the consumer of
+		// the election, so an empty one is rejected here rather than deep in the storage layer.
+		if len(item.Address) == 0 {
+			errors.ErrMalformedBody.Withf("the ballot at index %d has no address", i).Write(w)
 			return
 		}
-		ballots[i] = ballot{upstreamID: upstreamID, address: *address}
+		ballots[i] = authorizedBallot{upstreamID: upstreamID, address: item.Address}
 	}
 
 	// ponytail: signed sequentially. db.ConsumeCSPProcess takes the storage write lock, so a
@@ -401,7 +404,7 @@ func (c *CSPHandlers) ProcessSignBatchHandler(w http.ResponseWriter, r *http.Req
 	resp := &SignBatchResponse{Signatures: make([]SignBatchResult, len(ballots))}
 	for i, b := range ballots {
 		res := &resp.Signatures[i]
-		res.ProcessID = b.upstreamID
+		res.UpstreamID = b.upstreamID
 		signature, err := c.csp.Sign(req.AuthToken, b.address, b.upstreamID, sc.weight,
 			signers.SignerTypeECDSASalted)
 		if err != nil {

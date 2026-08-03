@@ -227,13 +227,13 @@ func TestProcessCSPSignBatch(t *testing.T) {
 	}
 	voter := ethereum.SignKeys{}
 	c.Assert(voter.Generate(), qt.IsNil)
-	address := hex.EncodeToString(voter.Address().Bytes())
+	address := internal.HexBytes(voter.Address().Bytes())
 	batch := func(authToken internal.HexBytes, elections ...internal.HexBytes) *handlers.SignBatchRequest {
-		items := make([]handlers.SignBatchItem, len(elections))
+		ballots := make([]handlers.SignBatchBallot, len(elections))
 		for i, e := range elections {
-			items[i] = handlers.SignBatchItem{ProcessID: e, Payload: address}
+			ballots[i] = handlers.SignBatchBallot{UpstreamID: e, Address: address}
 		}
-		return &handlers.SignBatchRequest{AuthToken: authToken, Signatures: items}
+		return &handlers.SignBatchRequest{AuthToken: authToken, Ballots: ballots}
 	}
 	consumed := func(authToken internal.HexBytes) []handlers.QuestionConsumedAddress {
 		return requestAndParse[handlers.ProcessSignInfoResponse](t, http.MethodPost, "",
@@ -254,8 +254,14 @@ func TestProcessCSPSignBatch(t *testing.T) {
 	requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, "",
 		batch(tok1), "processes", pid, "sign-batch")
 	requestAndAssertError(errors.ErrVoteBatchTooLarge, t, http.MethodPost, "",
-		&handlers.SignBatchRequest{AuthToken: tok1, Signatures: make([]handlers.SignBatchItem, 3)},
+		&handlers.SignBatchRequest{AuthToken: tok1, Ballots: make([]handlers.SignBatchBallot, 3)},
 		"processes", pid, "sign-batch")
+	// a ballot without an address is rejected, and takes the batch with it
+	requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, "",
+		&handlers.SignBatchRequest{
+			AuthToken: tok1,
+			Ballots:   []handlers.SignBatchBallot{{UpstreamID: openElection}},
+		}, "processes", pid, "sign-batch")
 	c.Assert(consumed(tok1), qt.HasLen, 0)
 
 	// --- first member: both questions signed in one call ---
@@ -268,15 +274,15 @@ func TestProcessCSPSignBatch(t *testing.T) {
 		c.Assert(s.Signature, qt.Not(qt.HasLen), 0)
 		c.Assert(bytes.Equal(s.Weight, big.NewInt(1).Bytes()), qt.IsTrue)
 	}
-	c.Assert(bytes.Equal(signed.Signatures[0].ProcessID, openElection), qt.IsTrue)
-	c.Assert(bytes.Equal(signed.Signatures[1].ProcessID, restrictedElection), qt.IsTrue)
+	c.Assert(bytes.Equal(signed.Signatures[0].UpstreamID, openElection), qt.IsTrue)
+	c.Assert(bytes.Equal(signed.Signatures[1].UpstreamID, restrictedElection), qt.IsTrue)
 	c.Assert(consumed(tok0), qt.HasLen, 2)
 
 	// --- a spent signing slot is a per-ballot error, not a failed batch: exhaust the open
 	// election's overwrites (it is at 1 after the batch above) and re-run the same batch ---
 	for i := 0; i < db.MaxVoteOverwritesPerProcess; i++ {
 		requestAndParse[handlers.AuthResponse](t, http.MethodPost, "",
-			&handlers.SignRequest{AuthToken: tok0, ProcessID: openElection, Payload: address},
+			&handlers.SignRequest{AuthToken: tok0, ProcessID: openElection, Payload: address.String()},
 			"processes", pid, "sign")
 	}
 	again := requestAndParse[handlers.SignBatchResponse](t, http.MethodPost, "",

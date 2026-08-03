@@ -2638,13 +2638,15 @@ definitions:
         format: hex
         type: string
     type: object
-  handlers.SignBatchItem:
+  handlers.SignBatchBallot:
     properties:
-      electionId:
+      address:
         example: deadbeef
         format: hex
         type: string
-      payload:
+      upstreamId:
+        example: deadbeef
+        format: hex
         type: string
     type: object
   handlers.SignBatchRequest:
@@ -2653,9 +2655,9 @@ definitions:
         example: deadbeef
         format: hex
         type: string
-      signatures:
+      ballots:
         items:
-          $ref: '#/definitions/handlers.SignBatchItem'
+          $ref: '#/definitions/handlers.SignBatchBallot'
         type: array
     type: object
   handlers.SignBatchResponse:
@@ -2667,13 +2669,13 @@ definitions:
     type: object
   handlers.SignBatchResult:
     properties:
-      electionId:
-        example: deadbeef
-        format: hex
-        type: string
       error:
         type: string
       signature:
+        example: deadbeef
+        format: hex
+        type: string
+      upstreamId:
         example: deadbeef
         format: hex
         type: string
@@ -6733,12 +6735,14 @@ paths:
         one on-chain election per question, so a voter holds one ballot per question and
         signing them one by one costs a round trip each. This signs them all under a single
         verified auth token. Public endpoint: the token authenticates the voter.
+        Each ballot names a question by its on-chain election id (upstreamId, as returned by
+        the check and sign-info endpoints) and the voter address to sign for it.
         The batch is authorized as a unit and signs nothing on failure — every ballot must
         name an election of this process (else 401) the member is eligible for (else 401),
-        carry a parseable voter address (else 400), and no election may be repeated (else
-        400). Once authorized, every ballot is signed and the response carries one entry per
-        request item, in order: a signature and weight, or the reason that election could not
-        be signed (its signing slot is spent, or a concurrent request holds it). Signing
+        carry a voter address (else 400), and no election may be repeated (else 400). Once
+        authorized, every ballot is signed and the response carries one entry per request
+        item, in order: a signature and weight, or the reason that election could not be
+        signed (its signing slot is spent, or a concurrent request holds it). Signing
         consumes a per-election slot that cannot be given back, so a failed entry is retried
         by calling again, not rolled back.
       parameters:

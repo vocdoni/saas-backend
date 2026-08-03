@@ -58,17 +58,18 @@ type SignRequest struct {
 }
 
 // SignBatchRequest is the batch form of SignRequest: one auth token and one ballot per
-// question of a voting process, signed in a single call.
+// question of a voting process, signed in a single call. It follows the /processes naming
+// (upstreamId, address) rather than SignRequest's legacy electionId/payload.
 type SignBatchRequest struct {
-	AuthToken  internal.HexBytes `json:"authToken" swaggertype:"string" format:"hex" example:"deadbeef"`
-	Signatures []SignBatchItem   `json:"signatures"`
+	AuthToken internal.HexBytes `json:"authToken" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Ballots   []SignBatchBallot `json:"ballots"`
 }
 
-// SignBatchItem is one ballot of a SignBatchRequest: the question's on-chain election id and
-// the voter address to sign, matching SignRequest's electionId and payload fields.
-type SignBatchItem struct {
-	ProcessID internal.HexBytes `json:"electionId" swaggertype:"string" format:"hex" example:"deadbeef"`
-	Payload   string            `json:"payload"`
+// SignBatchBallot is one ballot of a SignBatchRequest: the question's on-chain election id
+// and the voter address to sign for it.
+type SignBatchBallot struct {
+	UpstreamID internal.HexBytes `json:"upstreamId" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Address    internal.HexBytes `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
 }
 
 // SignBatchResponse holds one result per requested ballot, in request order.
@@ -79,10 +80,10 @@ type SignBatchResponse struct {
 // SignBatchResult is one ballot's outcome: the signature and the weight it was signed with, or
 // the reason that election could not be signed. Exactly one of Signature and Error is set.
 type SignBatchResult struct {
-	ProcessID internal.HexBytes `json:"electionId" swaggertype:"string" format:"hex" example:"deadbeef"`
-	Signature internal.HexBytes `json:"signature,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
-	Weight    internal.HexBytes `json:"weight,omitempty" swaggertype:"string" format:"hex" example:"2a"`
-	Error     string            `json:"error,omitempty"`
+	UpstreamID internal.HexBytes `json:"upstreamId" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Signature  internal.HexBytes `json:"signature,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Weight     internal.HexBytes `json:"weight,omitempty" swaggertype:"string" format:"hex" example:"2a"`
+	Error      string            `json:"error,omitempty"`
 }
 
 // UserWeightRequest defines the payload for the request to get the
