@@ -871,6 +871,128 @@ func TestGroupCensusGuards(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 }
 
+// TestMemberDeletionReleasedByStaleSignature pins the #630 narrowing on the member-delete door: a
+// consumed signature only blocks a member while they still participate in the census it belongs
+// to. The stale state — signed for an ongoing election, yet out of its census — is exactly what
+// the guard/CSP race documented on refuseBlockedVoters leaves behind, modelled here with the same
+// direct RevokeMembersFromCensuses call as TestProcessCSPRevocation. Before the narrowing this
+// deletion answered 409 naming members[0], because members[1] kept the census in the request's
+// census union.
+func TestMemberDeletionReleasedByStaleSignature(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+
+	pid, got := publishedProcess(t, token, orgAddress, ids)
+	c.Assert(signAs(t, pid, members[0], got.Questions[0].UpstreamID), qt.Equals, http.StatusOK)
+
+	// revoked underneath their signature; the consumption row survives by design
+	vp, err := testDB.VotingProcess(objectID(c, pid))
+	c.Assert(err, qt.IsNil)
+	_, _, err = testDB.RevokeMembersFromCensuses([]string{vp.CensusID.Hex()}, []string{ids[0]})
+	c.Assert(err, qt.IsNil)
+
+	// deleting both members succeeds: members[0]'s signature belongs to a census they already
+	// left, and members[1] has signed nothing
+	del := requestAndParse[apicommon.DeleteMembersResponse](t, http.MethodDelete, token,
+		&apicommon.DeleteMembersRequest{IDs: ids},
+		"organizations", orgAddress.String(), "members")
+	c.Assert(del.Count, qt.Equals, 2)
+	_, err = testDB.CensusParticipant(vp.CensusID.Hex(), ids[1])
+	c.Assert(err, qt.Equals, db.ErrNotFound)
+}
+
+// TestGroupRemovalReleasedForNonParticipant is TestMemberDeletionReleasedByStaleSignature for the
+// group door: a group member already revoked from the group's census can leave the group even
+// though the CSP once signed for them on its still-ongoing election.
+func TestGroupRemovalReleasedForNonParticipant(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+
+	group := requestAndParse[apicommon.OrganizationMemberGroupInfo](
+		t, http.MethodPost, token, &apicommon.CreateOrganizationMemberGroupRequest{
+			Title: "voters", Description: "group census", MemberIDs: ids,
+		}, "organizations", orgAddress.String(), "groups",
+	)
+	req := newVotingProcessRequest(orgAddress, ids)
+	req.StartDate = ""
+	req.Census = apicommon.CensusSpec{
+		TwoFaFields: db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail},
+		AuthFields:  db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsSurname},
+		GroupID:     group.ID,
+	}
+	req.Questions = req.Questions[:1]
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint,
+	)
+	pid := created.ProcessID
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish job error: %s", job.Errors))
+
+	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	c.Assert(signAs(t, pid, members[0], got.Questions[0].UpstreamID), qt.Equals, http.StatusOK)
+
+	// out of the census, still in the group, signature consumed for an election still READY
+	vp, err := testDB.VotingProcess(objectID(c, pid))
+	c.Assert(err, qt.IsNil)
+	_, _, err = testDB.RevokeMembersFromCensuses([]string{vp.CensusID.Hex()}, []string{ids[0]})
+	c.Assert(err, qt.IsNil)
+
+	// removing them from the group succeeds now: it strips them from no election they are in
+	_, code := testRequest(t, http.MethodPut, token, &apicommon.UpdateOrganizationMemberGroupsRequest{
+		RemoveMembers: []string{ids[0]},
+	}, "organizations", orgAddress.String(), "groups", group.ID)
+	c.Assert(code, qt.Equals, http.StatusOK)
+	stored, err := testDB.OrganizationMemberGroup(group.ID, orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(stored.MemberIDs, qt.Not(qt.Contains), ids[0])
+}
+
+// TestBlockedVotersScopedAndDeduped exercises the guard predicate directly: blocked means signed
+// for an ongoing election of a census the member still participates in, answered once per member
+// in the caller's order however many censuses block them or however often the caller repeats them.
+func TestBlockedVotersScopedAndDeduped(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+
+	// two processes, each with its own census over the same members; members[0] signs on both
+	pid1, got1 := publishedProcess(t, token, orgAddress, ids)
+	pid2, got2 := publishedProcess(t, token, orgAddress, ids)
+	c.Assert(signAs(t, pid1, members[0], got1.Questions[0].UpstreamID), qt.Equals, http.StatusOK)
+	c.Assert(signAs(t, pid2, members[0], got2.Questions[0].UpstreamID), qt.Equals, http.StatusOK)
+	vp1, err := testDB.VotingProcess(objectID(c, pid1))
+	c.Assert(err, qt.IsNil)
+	vp2, err := testDB.VotingProcess(objectID(c, pid2))
+	c.Assert(err, qt.IsNil)
+	census1, census2 := vp1.CensusID.Hex(), vp2.CensusID.Hex()
+
+	// blocked by both censuses and repeated by the caller, yet answered once, in caller order
+	blocked, err := testAPI.blockedVoters([]string{census1, census2}, []string{ids[1], ids[0], ids[0]})
+	c.Assert(err, qt.IsNil)
+	c.Assert(blocked, qt.DeepEquals, []string{ids[0]})
+
+	// out of census1, their signature there stops blocking — while census2 still does
+	_, _, err = testDB.RevokeMembersFromCensuses([]string{census1}, []string{ids[0]})
+	c.Assert(err, qt.IsNil)
+	blocked, err = testAPI.blockedVoters([]string{census1}, []string{ids[0]})
+	c.Assert(err, qt.IsNil)
+	c.Assert(blocked, qt.HasLen, 0)
+	blocked, err = testAPI.blockedVoters([]string{census1, census2}, []string{ids[0]})
+	c.Assert(err, qt.IsNil)
+	c.Assert(blocked, qt.DeepEquals, []string{ids[0]})
+}
+
 // TestDeleteMembersIsOrgScoped pins that the member ids a caller submits are scoped to their own
 // organization before anything acts on them. The delete is org-scoped already, but the guard and
 // the revocation cascade resolve censuses from the ids alone: unscoped, an admin of one
