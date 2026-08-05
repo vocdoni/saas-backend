@@ -144,9 +144,12 @@ func QuestionTypeFromBallotProtocol(
 	if bp == nil || len(choices) == 0 {
 		return "", db.QuestionTypeSetup{}, false
 	}
-	// At most one candidate can ever match, whatever the order: each named type's image is disjoint
-	// from the others — ranked alone sets uniqueValues, cumulative alone sets maxValue 0,
-	// singlechoice alone sets maxCount 1 — pinned by TestBallotShapeUnambiguous.
+	// At most one candidate can ever match, whatever the order: each named type maps to a protocol
+	// image no other named type produces, so recognition is a function rather than a first-match
+	// heuristic. No single field is unique to one type — cumulative shares maxCount 1 with
+	// singlechoice at one choice, and maxValue 0 with singlechoice when its only choice is valued 0
+	// — but the full 7-field image is distinct for every pair (costExponent and maxTotalCost settle
+	// those degenerate cases), pinned by TestBallotShapeUnambiguous.
 	candidates := []struct {
 		qType string
 		setup db.QuestionTypeSetup
