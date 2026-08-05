@@ -237,6 +237,133 @@ func (a *API) relayVotesHandler(w http.ResponseWriter, r *http.Request) {
 	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, &apicommon.EnqueuedResponse{JobID: jobID})
 }
 
+const (
+	// nullifierSize is the maximum length of a vote nullifier. Regular nullifiers are
+	// 32-byte hashes (see state.GenerateNullifier), but anonymous (ZK) ones are the minimal
+	// big-endian bytes of a field element (zk.Proof.Nullifier), so shorter values are valid
+	// too — only empty or longer than 32 bytes cannot name a vote.
+	nullifierSize = 32
+	// maxVerifyVotesBodyBytes bounds a POST /votes/verify body: a hex nullifier is 64
+	// characters, so 80 leaves room for the JSON quoting and separator around each, plus
+	// slack for the framing. Like the relay endpoints this one is public, so the body has
+	// to be bounded before it is buffered.
+	maxVerifyVotesBodyBytes = maxVotesPerBatch*80 + 4<<10
+)
+
+// verifyLookupSem bounds concurrent node reads across every POST /votes/verify request.
+// Each request fans out through its own 8-worker parallelForEach pool, so without a shared
+// ceiling the node load scales with request concurrency on a public endpoint (the global
+// middleware.Throttle admits 100 requests → up to 800 concurrent reads). 32 lets four
+// fully-fanned batches run against the node; the typical single-nullifier request never
+// notices it.
+var verifyLookupSem = make(chan struct{}, 32)
+
+// verifyVotesHandler godoc
+//
+//	@Summary		Verify vote nullifiers against the Vochain
+//	@Description	Checks whether the Vochain has a vote for each of the given nullifiers, so a voter
+//	@Description	can confirm that the ballots relayed on their behalf are registered on chain. Public
+//	@Description	endpoint: no authentication is required, and it exposes only data that is already
+//	@Description	public on chain. Several nullifiers are accepted in one call because a multi-question
+//	@Description	voting process is one on-chain election per question, so a voter holds one nullifier
+//	@Description	per question. The response has one entry per requested nullifier, in the same order;
+//	@Description	a repeated nullifier is looked up only once and every copy gets the same answer.
+//	@Description	An unknown nullifier is reported as verified=false rather than as an error, while a
+//	@Description	chain that cannot be reached fails the whole call so a voter is never told their vote
+//	@Description	is missing when it merely could not be looked up.
+//	@Tags			vote
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body		apicommon.VerifyVotesRequest	true	"Vote nullifiers to verify"
+//	@Success		200		{object}	apicommon.VerifyVotesResponse	"Verification outcome per nullifier"
+//	@Failure		400		{object}	errors.Error					"Invalid input data"
+//	@Failure		413		{object}	errors.Error					"Request body too large"
+//	@Failure		500		{object}	errors.Error					"Blockchain request failed"
+//	@Router			/votes/verify [post]
+func (a *API) verifyVotesHandler(w http.ResponseWriter, r *http.Request) {
+	var req apicommon.VerifyVotesRequest
+	if err := decodeCappedJSON(w, r, &req, maxVerifyVotesBodyBytes); err != nil {
+		err.Write(w)
+		return
+	}
+	switch {
+	case len(req.Nullifiers) == 0:
+		errors.ErrVoteBatchEmpty.Write(w)
+		return
+	case len(req.Nullifiers) > maxVotesPerBatch:
+		errors.ErrVoteBatchTooLarge.Withf("%d nullifiers, the maximum is %d",
+			len(req.Nullifiers), maxVotesPerBatch).Write(w)
+		return
+	}
+	for i, nullifier := range req.Nullifiers {
+		if len(nullifier) == 0 || len(nullifier) > nullifierSize {
+			errors.ErrMalformedBody.Withf("the nullifier at index %d is %d bytes, expected 1..%d",
+				i, len(nullifier), nullifierSize).Write(w)
+			return
+		}
+	}
+
+	// a repeated nullifier is asked to the chain only once: the endpoint is public, so a
+	// caller must not be able to multiply chain reads by repeating one value. firstOf maps
+	// each nullifier to the index of its first occurrence, and after the fan-out every
+	// duplicate copies that occurrence's answer.
+	firstOf := make(map[string]int, len(req.Nullifiers))
+	var distinct []int
+	for i, nullifier := range req.Nullifiers {
+		if _, seen := firstOf[string(nullifier)]; !seen {
+			firstOf[string(nullifier)] = i
+			distinct = append(distinct, i)
+		}
+	}
+
+	// one chain read per distinct nullifier, fanned out with the same bounded pool the
+	// per-question resolvers use: a vote lookup costs ~250ms against a remote node, so at
+	// the batch cap a sequential loop would be a ~25s request. Each callback writes only
+	// its own index, so the result slices need no locking.
+	votes := make([]apicommon.VerifiedVote, len(req.Nullifiers))
+	errs := make([]error, len(distinct))
+	parallelForEach(len(distinct), func(d int) {
+		i := distinct[d]
+		votes[i].Nullifier = req.Nullifiers[i]
+		// wait for a cross-request lookup slot, unless nobody is left to read the answer.
+		select {
+		case verifyLookupSem <- struct{}{}:
+			defer func() { <-verifyLookupSem }()
+		case <-r.Context().Done():
+			errs[d] = r.Context().Err()
+			return
+		}
+		vote, err := a.account.VoteByNullifier(req.Nullifiers[i])
+		if stderrors.Is(err, account.ErrVoteNotFound) {
+			return
+		}
+		if err != nil {
+			errs[d] = err
+			return
+		}
+		votes[i].Verified = true
+		votes[i].ProcessID = internal.HexBytes(vote.ElectionID)
+		votes[i].TxHash = internal.HexBytes(vote.TxHash)
+		votes[i].BlockHeight = vote.BlockHeight
+		votes[i].Date = vote.Date
+	})
+	// a nullifier the chain could not be asked about is not a verified=false: nothing is
+	// known about that vote, and reporting it as missing would be a lie to the voter. The
+	// per-nullifier detail carries raw node responses, so it goes to the log, not to the
+	// unauthenticated caller.
+	if err := stderrors.Join(errs...); err != nil {
+		log.Warnw("vote verification failed", "error", err)
+		errors.ErrVochainRequestFailed.Write(w)
+		return
+	}
+	// fan the answers back out to the duplicates (self-assignment for first occurrences).
+	for i, nullifier := range req.Nullifiers {
+		votes[i] = votes[firstOf[string(nullifier)]]
+	}
+
+	apicommon.HTTPWriteJSON(w, &apicommon.VerifyVotesResponse{Votes: votes})
+}
+
 // parsedVote is one validated vote envelope: the payload to relay plus everything the
 // job needs to describe it before the chain has said anything about it.
 type parsedVote struct {
