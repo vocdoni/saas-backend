@@ -569,8 +569,10 @@ func TestOrgAllowsVotingType(t *testing.T) {
 	const planID = "plan-types"
 	mockDB := &mockMongoStorage{
 		plans: map[string]*db.Plan{planID: {
-			ID:          planID,
-			VotingTypes: db.VotingTypes{Single: true, Multiple: false},
+			ID: planID,
+			VotingTypes: db.VotingTypes{
+				Single: true, Multiple: false, Ranked: true, Cumulative: true,
+			},
 		}},
 		orgs: map[string]*db.Organization{addr.String(): {
 			Address:      addr,
@@ -580,10 +582,12 @@ func TestOrgAllowsVotingType(t *testing.T) {
 	subs := &Subscriptions{db: mockDB}
 
 	c.Assert(subs.OrgAllowsVotingType(addr, db.VotingTypeSingleChoice), qt.IsNil) // allowed
-	c.Assert(subs.OrgAllowsVotingType(addr, ""), qt.IsNil)                        // empty (ballotProtocol) skips
+	c.Assert(subs.OrgAllowsVotingType(addr, db.VotingTypeRanked), qt.IsNil)       // allowed
+	c.Assert(subs.OrgAllowsVotingType(addr, db.VotingTypeCumulative), qt.IsNil)   // allowed
+	c.Assert(subs.OrgAllowsVotingType(addr, ""), qt.IsNil)                        // empty (unnamed protocol) skips
 	c.Assert(subs.OrgAllowsVotingType(addr, db.VotingTypeMultiChoice),            // plan disallows
 		qt.ErrorIs, errors.ErrVotingTypeNotAllowed)
-	c.Assert(subs.OrgAllowsVotingType(addr, "quadratic"), qt.ErrorIs, errors.ErrInvalidData) // unknown
+	c.Assert(subs.OrgAllowsVotingType(addr, "quadratic"), qt.ErrorIs, errors.ErrInvalidData) // unknown type name
 }
 
 // Mock implementation of the necessary db.MongoStorage methods for testing

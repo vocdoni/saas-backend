@@ -646,24 +646,30 @@ type ProcessesBundle struct {
 // is the one value that cannot be derived. It is kept as sent for multichoice (clamped to
 // MaxChoices), where a voter may legitimately be asked for at least N; for singlechoice it is
 // always 1, that ballot being the single field a voter fills, so a stated 0 would describe a
-// submission the chain cannot express. UniqueChoices is not supported by either named type
-// and requests setting it on a multichoice are rejected: with one 0/1 field per choice, a
+// submission the chain cannot express. UniqueChoices is not supported by any named type and
+// requests setting it on a multichoice are rejected: with one 0/1 field per choice, a
 // unique-values ballot admits no vote at all (issue #619), while a voter already cannot select
-// the same choice twice. A ranked ballot is expressed as a BallotProtocol instead.
+// the same choice twice. A ranked ballot — the one shape that does use uniqueValues — is its own
+// named type and derives that flag from the type, not from this field.
+//
+// Budget and CostExponent parametrise a cumulative ballot (budget/quadratic): Budget is the total
+// credit a voter may spread across the choices (the protocol's MaxTotalCost) and CostExponent is 1
+// for a linear budget or 2 for quadratic. They are ignored by every other type.
 type QuestionTypeSetup struct {
 	MinChoices    uint32 `json:"minChoices" bson:"minChoices"`
 	MaxChoices    uint32 `json:"maxChoices" bson:"maxChoices"`
 	UniqueChoices bool   `json:"uniqueChoices" bson:"uniqueChoices"`
+	Budget        uint32 `json:"budget" bson:"budget"`
+	CostExponent  uint32 `json:"costExponent" bson:"costExponent"`
 }
 
 // BallotProtocol is the on-chain ballot parameters of a VotingProcessQuestion, mapped directly
 // onto the election envelope and vote options. Every question written since the two halves were
 // reconciled carries one, derived from Type/TypeSetup when the client did not supply it.
 //
-// A client may supply it instead of a named type, which is what enables the ballot shapes that
-// have no name yet (ranked, quadratic). Supplying it alongside a type makes it authoritative —
-// it is what reaches the chain — so the type is re-derived from it, and emptied when it encodes
-// no named shape.
+// A client may supply it instead of a named type, which is what enables ballot shapes beyond the
+// named ones. Supplying it alongside a type makes it authoritative — it is what reaches the chain
+// — so the type is re-derived from it, and emptied when it encodes no named shape.
 type BallotProtocol struct {
 	MaxCount          uint32 `json:"maxCount" bson:"maxCount"`
 	MaxValue          uint32 `json:"maxValue" bson:"maxValue"`
