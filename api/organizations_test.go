@@ -148,6 +148,12 @@ func TestUpdateOrganizationHandler(t *testing.T) {
 	c.Assert(updatedOrg.Color, qt.Equals, "#FF5733")
 	c.Assert(updatedOrg.Size, qt.Equals, "medium")
 
+	// The payload must not expose an `active` flag (issue #625).
+	rawOrg := map[string]any{}
+	c.Assert(json.Unmarshal(resp, &rawOrg), qt.IsNil)
+	_, hasActive := rawOrg["active"]
+	c.Assert(hasActive, qt.IsFalse, qt.Commentf("response: %s", resp))
+
 	// Test updating without authentication
 	_, code = testRequest(t, http.MethodPut, "", updateInfo, "organizations", orgAddress.String())
 	c.Assert(code, qt.Equals, http.StatusUnauthorized)
@@ -165,16 +171,6 @@ func TestUpdateOrganizationHandler(t *testing.T) {
 	nonExistentAddr := common.HexToAddress("0x0000000000000000000000000000000000000001")
 	_, code = testRequest(t, http.MethodPut, token, updateInfo, "organizations", nonExistentAddr.String())
 	c.Assert(code, qt.Equals, http.StatusBadRequest)
-
-	// The organization payload must not expose an `active` flag (issue #625): nothing enforced
-	// it, and because it was a plain bool on a partial update, any request omitting it silently
-	// deactivated the organization.
-	resp, code = testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String())
-	c.Assert(code, qt.Equals, http.StatusOK)
-	rawOrg := map[string]any{}
-	c.Assert(json.Unmarshal(resp, &rawOrg), qt.IsNil)
-	_, hasActive := rawOrg["active"]
-	c.Assert(hasActive, qt.IsFalse, qt.Commentf("response: %s", resp))
 }
 
 func TestOrganizationsTypesHandler(t *testing.T) {

@@ -15,11 +15,20 @@ func init() {
 
 // upDropOrganizationActive removes the organizations' `active` field (issue #625). Nothing ever
 // read it: no handler, middleware or subscription check gated on it, so an organization stored
-// with active=false stayed fully operational. The only writer that ever set it to false was a bug
-// — the partial update handler compared a plain bool, so a PUT body omitting `active` decoded to
-// false and was force-persisted — which left healthy organizations misreporting themselves to
-// clients. The field is gone from the model; this drops the stale values with it.
+// with active=false stayed fully operational. Deactivating one deliberately was possible — the
+// partial update handler had a branch for it — but a stored false does not prove that intent: the
+// same branch compared a plain bool, so a PUT body merely omitting `active` decoded to false and
+// was force-persisted, leaving healthy organizations misreporting themselves. Since the two cases
+// are indistinguishable and neither was enforced, the field is gone from the model and this drops
+// every stale value with it, logging the addresses it strips a false from.
 func upDropOrganizationActive(ctx context.Context, database *mongo.Database) error {
+	deactivated, err := database.Collection("organizations").Distinct(ctx, "_id", bson.M{"active": false})
+	if err != nil {
+		return fmt.Errorf("failed to list deactivated organizations: %w", err)
+	}
+	if len(deactivated) > 0 {
+		log.Infow("dropping stored organization active=false", "organizations", deactivated)
+	}
 	res, err := database.Collection("organizations").UpdateMany(ctx,
 		bson.M{"active": bson.M{"$exists": true}},
 		bson.M{"$unset": bson.M{"active": ""}},
@@ -31,11 +40,12 @@ func upDropOrganizationActive(ctx context.Context, database *mongo.Database) err
 	return nil
 }
 
-// downDropOrganizationActive restores the field as true, the only value the code ever wrote
-// deliberately: both creation paths hardcoded it, and every false was the bug described above.
+// downDropOrganizationActive restores the field as true on every organization: it is the value
+// both creation paths hardcoded, and a false surviving a partial up (or written by an old binary
+// mid-deploy) is the misreporting this migration exists to remove, so it is overwritten too.
 func downDropOrganizationActive(ctx context.Context, database *mongo.Database) error {
 	if _, err := database.Collection("organizations").UpdateMany(ctx,
-		bson.M{"active": bson.M{"$exists": false}},
+		bson.M{},
 		bson.M{"$set": bson.M{"active": true}},
 	); err != nil {
 		return fmt.Errorf("failed to restore active on organizations: %w", err)

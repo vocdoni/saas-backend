@@ -84,7 +84,11 @@ func (ms *MongoStorage) SetOrganization(org *Organization) error {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	// prepare the document to be updated in the database modifying only the
-	// fields that have changed
+	// fields that have changed.
+	// ponytail: zero values are not persisted — no field is force-updated, so a bool can only go
+	// false->true and a string can never be cleared. Force-updating is what made #625 possible (a
+	// PUT omitting `active` clobbered it), so a field that must reach its zero value needs its own
+	// $set here plus a pointer in the request type, not an entry in alwaysUpdateTags.
 	updateDoc, err := dynamicUpdateDocument(org, nil)
 	if err != nil {
 		return err

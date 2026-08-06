@@ -6,12 +6,11 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
-	"github.com/vocdoni/saas-backend/migrations"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
-// TestDropOrganizationActiveMigration checks that migration 0019 removes the `active` field left
-// behind by pre-#625 writers, including the false values a partial update wrote by accident.
+// TestDropOrganizationActiveMigration asserts migration 0019 strips the organizations' `active`
+// field, and that the rollback restores it as true (issue #625).
 func TestDropOrganizationActiveMigration(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
@@ -26,8 +25,7 @@ func TestDropOrganizationActiveMigration(t *testing.T) {
 		bson.M{"_id": testOrgAddress}, bson.M{"$set": bson.M{"active": false}})
 	c.Assert(err, qt.IsNil)
 
-	mig, ok := migrations.AsMap()[19]
-	c.Assert(ok, qt.IsTrue)
+	mig := migrationByVersion(c, 19)
 	c.Assert(mig.Up(ctx, database), qt.IsNil)
 
 	raw := bson.M{}
@@ -36,6 +34,16 @@ func TestDropOrganizationActiveMigration(t *testing.T) {
 	c.Assert(hasActive, qt.IsFalse)
 
 	// The rollback restores the only value the code ever wrote deliberately.
+	c.Assert(mig.Down(ctx, database), qt.IsNil)
+	raw = bson.M{}
+	c.Assert(testDB.organizations.FindOne(ctx, bson.M{"_id": testOrgAddress}).Decode(&raw), qt.IsNil)
+	c.Assert(raw["active"], qt.IsTrue)
+
+	// A false surviving a partial up, or written by an old binary mid-deploy, is overwritten too:
+	// the rollback restores true unconditionally, not only where the field is missing.
+	_, err = testDB.organizations.UpdateOne(ctx,
+		bson.M{"_id": testOrgAddress}, bson.M{"$set": bson.M{"active": false}})
+	c.Assert(err, qt.IsNil)
 	c.Assert(mig.Down(ctx, database), qt.IsNil)
 	raw = bson.M{}
 	c.Assert(testDB.organizations.FindOne(ctx, bson.M{"_id": testOrgAddress}).Decode(&raw), qt.IsNil)

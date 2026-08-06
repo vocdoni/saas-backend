@@ -557,7 +557,7 @@ This method invalidates any previous JWT token for the user, so it returns a new
   "country": "Germany",
   "timezone": "GMT+2",
   "language": "EN",
-  "communication": true
+  "communications": true
 }
 ```
 If the user want to create a sub org, the address of the root organization must be provided inside an organization object in `parent` param. The creator must be admin of the parent organization to be able to create suborganizations. Example:
@@ -635,8 +635,7 @@ Only the following parameters can be changed. Every parameter is optional.
   "subdomain": "mysubdomain",
   "country": "Germany",
   "timezone": "GMT+2",
-  "Language": "EN",
-  "communication": false
+  "Language": "EN"
 }
 ```
 

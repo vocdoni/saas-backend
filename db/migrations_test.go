@@ -15,6 +15,14 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
+// migrationByVersion returns the registered migration for the given version, so a test can drive
+// its Up/Down directly against the current test database state.
+func migrationByVersion(c *qt.C, version int) migrations.Migration {
+	mig, ok := migrations.AsMap()[version]
+	c.Assert(ok, qt.IsTrue)
+	return mig
+}
+
 func TestMigrations(t *testing.T) {
 	c := qt.New(t)
 
