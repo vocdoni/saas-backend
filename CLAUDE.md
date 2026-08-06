@@ -17,6 +17,8 @@ make test        # go test -v ./...  (spins up MongoDB + Voconed via testcontain
 make lint        # golangci-lint run
 make swagger     # regenerate docs/swagger.yaml from swag annotations (run after changing API handlers/types)
 
+./scripts/check-qt-patterns.sh   # quicktest anti-pattern gate — CI runs it alongside golangci-lint
+
 # Run a single test / package
 go test -run TestName ./api/
 go test -v ./db/
@@ -117,6 +119,12 @@ Component packages (each is a focused service composed in `main.go`):
   wires it from the optional `VOCDONI_BACKUPSMTP*` vars to fail over from the primary SMTP relay to a
   backup that shares the same sender identity. The CSP drains email/SMS through
   `csp/notifications.Queue`: a concurrent worker pool (default 16) with a per-provider circuit breaker.
+- **`statussync/`** — enqueue-driven worker reconciling a published question's stored on-chain status
+  with the Vochain (no timer sweep). Fed by two triggers: a status change via the API (confirm the tx
+  landed) and a read of a process/question (catch direct on-chain changes). Wired in
+  `cmd/service/main.go` into `api.Config.StatusSyncer` (a nil enqueuer — as in tests — makes enqueues
+  no-ops). The managed-org delete guard deliberately reads the chain *synchronously* rather than
+  trusting the stored status.
 - **`subscriptions/`** — permission/quota manager enforcing what an organization's plan allows.
 - **`stripe/`** — Stripe client, checkout/portal sessions, and webhook handling for billing.
 - **`objectstorage/`** — S3-like object storage (images) backed by Mongo, with upload/download handlers.
@@ -146,3 +154,16 @@ These come from `.clinerules/` and `.gemini/styleguide.md` (the Vocdoni Go style
 - **Linting:** `revive` runs with `enable-all-rules`; a few rules (`exported`, `use-errors-new`,
   `add-constant`, complexity rules) are temporarily disabled in `.golangci.yml` — don't rely on them
   being off forever, but matching existing code is fine.
+- **Commits & PR titles:** [Conventional Commits](https://www.conventionalcommits.org/)
+  (`fix(orgs): ...`). CI lints both but reports via a sticky PR comment instead of failing.
+- **Communication** (`.clinerules/04-communication.md`): be factually rigorous and direct; don't
+  reflexively agree ("You're absolutely right!") when the statement may be wrong; state uncertainty
+  explicitly rather than speculating.
+
+## CI
+
+`.github/workflows/main.yml` gates PRs on: `golangci-lint` (v2.12.2, `only-new-issues`),
+`./scripts/check-qt-patterns.sh`, a clean `go mod tidy` diff, and `go test -failfast -timeout=30m ./...`
+with coverage (a diff report is posted as a PR comment). `-race` runs only on `stage`/`release`
+branches. Merges to `main`/`stage`/`release`/`aragon` push Docker images — so the branch flow is
+`main → stage → release`, and promotion PRs (head branch `main`) skip commit linting.

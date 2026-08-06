@@ -114,6 +114,10 @@ var (
 	ErrRequestBodyTooLarge                    = Error{Code: 40167, HTTPstatus: http.StatusRequestEntityTooLarge, Err: fmt.Errorf("request body is too large")}
 	ErrStaleUpdate                            = Error{Code: 40171, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("resource changed since it was read"), LogLevel: "info"}
 	ErrProcessQuestionsMismatch               = Error{Code: 40172, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("stored questions do not match the process"), LogLevel: "warn"}
+	// ErrCensusMemberAlreadySignedFor carries the offending ids in data.signedMemberIds. The naming
+	// is deliberate: the CSP records consumption when it issues the signature, not when the ballot
+	// reaches the chain, so this means "already signed for" and must never be reported as "voted".
+	ErrCensusMemberAlreadySignedFor = Error{Code: 40173, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("member has already been signed for in an ongoing process")}
 
 	// CSP errors (408)
 	ErrZeroWeightVoter = Error{Code: 40801, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("voter weight cannot be zero")}

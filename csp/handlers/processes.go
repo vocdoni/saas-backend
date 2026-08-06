@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
@@ -58,6 +59,28 @@ func memberEligibleForQuestion(q *db.VotingProcessQuestion, memberID string) boo
 	return false
 }
 
+// startGrace keeps a voter arriving right on the start boundary from being turned away. The
+// comparison below is this host's clock against a stored date, and neither of them is the chain, so
+// it has to err toward letting a real voter through.
+const startGrace = time.Minute
+
+// unvotableElection returns the 401 to write when the question's election does not currently
+// accept a signature, or nil when it does.
+//
+// The CSP is the only place that can refuse on election state: the signature it issues carries no
+// expiry, so a voter could otherwise bank one against a paused election and spend it the moment the
+// chain opens.
+func unvotableElection(vp *db.VotingProcess, q *db.VotingProcessQuestion) *errors.Error {
+	if q.Status != db.QuestionStatusReady {
+		return errors.Ptr(errors.ErrUnauthorized.Withf("question is not open for voting"))
+	}
+	// only StartDate is checked: publish always persists one, while EndDate is optional.
+	if !vp.StartDate.IsZero() && time.Now().Add(startGrace).Before(vp.StartDate) {
+		return errors.Ptr(errors.ErrUnauthorized.Withf("process has not started yet"))
+	}
+	return nil
+}
+
 // ProcessAuthHandler godoc
 //
 //	@Summary		Authenticate a voter for a voting process
@@ -92,6 +115,12 @@ func (c *CSPHandlers) ProcessAuthHandler(w http.ResponseWriter, r *http.Request)
 	}
 	vp, ok := c.getVotingProcess(w, oid)
 	if !ok {
+		return
+	}
+	// a draft has no election to vote: authenticating against it would only mint a token that can
+	// never be signed, and would burn the voter's email/SMS allowance doing so.
+	if !vp.Published {
+		errors.ErrUnauthorized.Withf("process is not published").Write(w)
 		return
 	}
 	c.handleAuthStep(w, r, step, anchor, vp.CensusID.Hex())
@@ -253,6 +282,18 @@ func (c *CSPHandlers) resolveSignContext(
 		errors.ErrUnauthorized.Withf("token does not belong to the process").Write(w)
 		return nil, false
 	}
+	// Re-check census participation. The token was minted when the voter was in the census, and it
+	// never expires, so without this a member removed from the census (or from the group that
+	// backs it) would keep being signed for forever — this check is what makes the revocation
+	// cascade actually revoke.
+	if _, err := c.mainDB.CensusParticipant(vp.CensusID.Hex(), auth.UserID.String()); err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			errors.ErrUnauthorized.Withf("member is no longer part of the census").Write(w)
+			return nil, false
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return nil, false
+	}
 	member, ok := c.orgMemberFromAuth(w, vp.OrgAddress, auth)
 	if !ok {
 		return nil, false
@@ -302,14 +343,17 @@ func (c *CSPHandlers) authorizeQuestion(
 }
 
 // authorizeLoadedQuestion authorizes one already-loaded question (nil means the election id
-// resolved to nothing): it must belong to this process and the member must be in its
-// eligibility subset. Not-found and wrong-process collapse into the same 401 on purpose — a
-// caller learns nothing about elections outside the process it is signing for.
+// resolved to nothing): it must belong to this process, currently accept a signature, and the
+// member must be in its eligibility subset. Not-found and wrong-process collapse into the same
+// 401 on purpose — a caller learns nothing about elections outside the process it is signing for.
 func authorizeLoadedQuestion(
 	sc *signContext, question *db.VotingProcessQuestion,
 ) (internal.HexBytes, *errors.Error) {
 	if question == nil || question.ProcessID != sc.process.ID {
 		return nil, errors.Ptr(errors.ErrUnauthorized.Withf("election not found in process"))
+	}
+	if sErr := unvotableElection(sc.process, question); sErr != nil {
+		return nil, sErr
 	}
 	if !memberEligibleForQuestion(question, sc.memberID) {
 		return nil, errors.Ptr(errors.ErrUnauthorized.Withf("member not eligible for this question"))

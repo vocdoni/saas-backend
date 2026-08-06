@@ -222,6 +222,21 @@ func (a *API) buildQuestions(
 	return built, nil
 }
 
+// refusePublishInProgress answers 409 while a publish worker holds the process, and reports
+// whether it did.
+//
+// publishVotingProcessHandler snapshots the questions, claims the process and hands the snapshot to
+// a worker that runs for minutes. Throughout that window the process is still unpublished and its
+// questions carry no upstreamId, so every "is this a draft?" check reads true — and a mutation
+// taken on that basis lands on a process the worker is concurrently putting on chain.
+func refusePublishInProgress(w http.ResponseWriter, vp *db.VotingProcess) bool {
+	if !vp.PublishInProgress() {
+		return false
+	}
+	errors.ErrPublishInProgress.Write(w)
+	return true
+}
+
 // writeQuestions replaces the process's stored questions with a pre-built (already validated) set
 // and records their ids on the process. The replacement is per slot rather than delete-all then
 // insert-all, so two overlapping draft updates cannot strand a row — see db.SetProcessQuestions.
@@ -265,16 +280,23 @@ func parseUpdatedAt(s string) (time.Time, error) {
 	return t.UTC(), nil
 }
 
-// storeUpdatedProcess persists a draft edit, conditionally on seen when the client sent an
-// updatedAt token. It reports db.ErrConflict when someone else wrote the process in between.
-func (a *API) storeUpdatedProcess(vp *db.VotingProcess, seen time.Time) error {
-	if seen.IsZero() {
-		if _, err := a.db.SetVotingProcess(vp); err != nil {
-			return fmt.Errorf("failed to update voting process: %w", err)
-		}
-		return nil
+// writeDraftWriteConflict reports which of SetVotingProcessDraft's preconditions refused the write.
+// The function returns a bare db.ErrConflict, so the process is re-read to tell a publish that
+// started during the request apart from the optimistic-concurrency token going stale.
+func (a *API) writeDraftWriteConflict(w http.ResponseWriter, id primitive.ObjectID, updatedAt string) {
+	switch current, err := a.db.VotingProcess(id); {
+	case err != nil:
+		// the state that refused us is unreadable; the token is the likelier cause and the
+		// recovery — refetch and retry — is the same either way
+		errors.ErrStaleUpdate.Withf("the process changed while it was being updated; refetch and retry").Write(w)
+	case current.Published:
+		errors.ErrDuplicateConflict.Withf("process already published and not in draft mode").Write(w)
+	case current.PublishInProgress():
+		errors.ErrPublishInProgress.Write(w)
+	default:
+		errors.ErrStaleUpdate.Withf("the process was modified after updatedAt %s; refetch and retry",
+			updatedAt).Write(w)
 	}
-	return a.db.SetVotingProcessIfUnchanged(vp, seen)
 }
 
 // updateVotingProcessHandler godoc
@@ -324,6 +346,9 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrDuplicateConflict.Withf("process already published and not in draft mode").Write(w)
 		return
 	}
+	if refusePublishInProgress(w, vp) {
+		return
+	}
 	if !user.HasRoleFor(vp.OrgAddress, db.ManagerRole) && !user.HasRoleFor(vp.OrgAddress, db.AdminRole) {
 		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization").Write(w)
 		return
@@ -361,11 +386,15 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	}
 	vp.Title, vp.Description, vp.Header, vp.StreamURI = req.Title, req.Description, req.Header, req.StreamURI
 	vp.StartDate, vp.EndDate, vp.CensusID = start, end, census.ID
-	if err := a.storeUpdatedProcess(vp, seen); err != nil {
+	// a stale marker got us past the guard above: editing the draft releases it rather than
+	// writing it back, matching what ClaimVotingProcessForPublish would reclaim anyway. A marker
+	// that went live *after* that guard read is a different matter — the write's own precondition
+	// refuses it rather than replacing it away.
+	vp.Publishing = time.Time{}
+	if err := a.db.SetVotingProcessDraft(vp, seen); err != nil {
 		_ = a.db.DelCensus(census.ID.Hex())
 		if stderrors.Is(err, db.ErrConflict) {
-			errors.ErrStaleUpdate.Withf("the process was modified after updatedAt %s; refetch and retry",
-				req.UpdatedAt).Write(w)
+			a.writeDraftWriteConflict(w, vp.ID, req.UpdatedAt)
 			return
 		}
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -663,7 +692,8 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// hydrate the parent process's census config (the auth policy the voter must satisfy); the
-	// member list and per-question eligibility subset are never exposed on this public endpoint.
+	// census member list is never exposed here, and the per-question eligibility subset only to a
+	// manager/admin of the owning org.
 	vp, err := a.db.VotingProcess(oid)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -683,7 +713,12 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 	question.EncryptionKeys = a.resolveQuestionEncryptionKeys(question)
 	// surface the on-chain tally once the question is in RESULTS status (nil/no chain call otherwise).
 	question.Results = a.resolveQuestionResults(question)
-	apicommon.HTTPWriteJSON(w, apicommon.PublicQuestionResponseFromDB(question, census))
+	resp := apicommon.PublicQuestionResponseFromDB(question, census)
+	// the eligibility subset names who may vote: only a manager/admin of the owning org sees it
+	if a.optionalManager(r, vp.OrgAddress) {
+		resp.EligibleMemberIDs = question.EligibleMemberIDs
+	}
+	apicommon.HTTPWriteJSON(w, resp)
 }
 
 // parallelForEach runs fn(0..n-1) concurrently with a bounded worker pool and waits for all to

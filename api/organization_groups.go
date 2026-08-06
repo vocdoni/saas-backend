@@ -2,7 +2,9 @@ package api
 
 import (
 	"encoding/json"
+	stderrors "errors"
 	"net/http"
+	"slices"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -262,7 +264,7 @@ func (a *API) createOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 //	@Param			orgAddress	path		string											true	"Organization address"
 //	@Param			groupId		path		string											true	"Group ID"
 //	@Param			group		body		apicommon.UpdateOrganizationMemberGroupsRequest	true	"Group info to update"
-//	@Success		200			{string}	string											"OK"
+//	@Success		200			{object}	apicommon.UpdateOrganizationMemberGroupResponse	"Census resize jobs and errors; bare OK when neither"
 //	@Failure		400			{object}	errors.Error									"Invalid input data, or organization/group not found"
 //	@Failure		401			{object}	errors.Error									"Unauthorized"
 //	@Failure		403			{object}	errors.Error									"Auto-generated group membership cannot be modified"
@@ -299,7 +301,52 @@ func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
-	err := a.db.UpdateOrganizationMemberGroup(
+	group, err := a.db.OrganizationMemberGroup(groupID, org.Address)
+	if err != nil {
+		if stderrors.Is(err, db.ErrNotFound) {
+			errors.ErrInvalidData.Withf("group not found").Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.Withf("could not load organization member group: %v", err).Write(w)
+		return
+	}
+	// members leaving the group leave its censuses too, so the refusal has to happen before any
+	// write: otherwise a blocked member is dropped from the group but stays in the census. Only
+	// the ids the group actually holds are considered — the rest change nothing, and matching the
+	// set the DB layer revokes keeps the guard from answering 409 for a member it will not touch.
+	removedInGroup := make([]string, 0, len(toUpdate.RemoveMembers))
+	for _, id := range toUpdate.RemoveMembers {
+		if slices.Contains(group.MemberIDs, id) {
+			removedInGroup = append(removedInGroup, id)
+		}
+	}
+	if a.refuseBlockedVoters(w, group.CensusIDs, removedInGroup) {
+		return
+	}
+	// read-only checks that must refuse before the group is touched, so an over-quota request
+	// leaves the member in neither the group nor the census.
+	//
+	// Net of the group's current members, mirroring removedInGroup above. The same set is used for
+	// the quota preflight (AddCensusParticipantsByMemberIDs skips anyone already in the census, so a
+	// re-submitted id grows nothing and must not consume quota) and for the propagation below — a
+	// member revoked from a process census stays in group.MemberIDs, so propagating a still-listed
+	// id would re-add it and silently undo the revocation, exactly what the create-only rule on the
+	// member-edit path guards against. Group membership is a proxy for census membership rather than
+	// the same thing — a census can hold participants added by other paths — so this narrows the
+	// over-count rather than eliminating it, in the direction that stops refusing requests which
+	// would have fit.
+	addedMembers := make([]string, 0, len(toUpdate.AddMembers))
+	for _, id := range toUpdate.AddMembers {
+		if !slices.Contains(group.MemberIDs, id) {
+			addedMembers = append(addedMembers, id)
+		}
+	}
+	if err := a.preflightCensusGrowth(org, group.CensusIDs, len(addedMembers)); err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
+
+	emptied, err := a.db.UpdateOrganizationMemberGroup(
 		groupID,
 		org.Address,
 		toUpdate.Title,
@@ -318,7 +365,26 @@ func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 		}
 		return
 	}
-	apicommon.HTTPWriteOK(w)
+	resp := apicommon.UpdateOrganizationMemberGroupResponse{}
+	jobID, resizeErrs := a.resizeEmptiedQuestions(org.Address, emptied)
+	if jobID != "" {
+		resp.CensusJobIDs = append(resp.CensusJobIDs, jobID)
+	}
+	resp.Errors = append(resp.Errors, resizeErrs...)
+	// members joining the group join its censuses too, drafts included: the census tracks the
+	// memberbase regardless, and it is only the on-chain resize that needs a published question.
+	// Only the genuinely-new members are propagated — see addedMembers above.
+	if len(addedMembers) > 0 {
+		propagated := a.propagateMembersToCensuses(org.Address, group.CensusIDs, addedMembers)
+		resp.CensusJobIDs = append(resp.CensusJobIDs, propagated.JobIDs...)
+		resp.Errors = append(resp.Errors, propagated.Errors...)
+	}
+	// the endpoint answered a bare OK before; it still does when there is nothing to report
+	if len(resp.CensusJobIDs) == 0 && len(resp.Errors) == 0 {
+		apicommon.HTTPWriteOK(w)
+		return
+	}
+	apicommon.HTTPWriteJSON(w, &resp)
 }
 
 // deleteOrganizationMemberGroupHandler godoc
@@ -332,13 +398,13 @@ func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			orgAddress	path		string			true	"Organization address"
-//	@Param			groupId		path		string			true	"Group ID"
-//	@Success		200			{string}	string			"OK"
-//	@Failure		400			{object}	errors.Error	"Invalid input data, or organization/group not found"
-//	@Failure		401			{object}	errors.Error	"Unauthorized"
-//	@Failure		403			{object}	errors.Error	"Auto-generated group cannot be deleted"
-//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Param			orgAddress	path		string											true	"Organization address"
+//	@Param			groupId		path		string											true	"Group ID"
+//	@Success		200			{object}	apicommon.UpdateOrganizationMemberGroupResponse	"Census resize job, if needed; bare OK otherwise"
+//	@Failure		400			{object}	errors.Error									"Invalid input data, or organization/group not found"
+//	@Failure		401			{object}	errors.Error									"Unauthorized"
+//	@Failure		403			{object}	errors.Error									"Auto-generated group cannot be deleted"
+//	@Failure		500			{object}	errors.Error									"Internal server error"
 //	@Router			/organizations/{orgAddress}/groups/{groupId} [delete]
 func (a *API) deleteOrganizationMemberGroupHandler(w http.ResponseWriter, r *http.Request) {
 	// get the member ID from the request path
@@ -364,7 +430,23 @@ func (a *API) deleteOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 		errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
 		return
 	}
-	if err := a.db.DeleteOrganizationMemberGroup(groupID, org.Address); err != nil {
+	// deleting a group empties the censuses built from it, so every one of its members has to be
+	// removable — checked before the delete, which is not undoable.
+	group, err := a.db.OrganizationMemberGroup(groupID, org.Address)
+	switch {
+	case err == nil:
+		if a.refuseBlockedVoters(w, group.CensusIDs, group.MemberIDs) {
+			return
+		}
+	case stderrors.Is(err, db.ErrNotFound):
+		// preserve the handler's existing behaviour: deleting a missing group succeeds
+	default:
+		errors.ErrGenericInternalServerError.Withf("could not load organization member group: %v", err).Write(w)
+		return
+	}
+
+	emptied, err := a.db.DeleteOrganizationMemberGroup(groupID, org.Address)
+	if err != nil {
 		switch err {
 		case db.ErrNotFound:
 			errors.ErrInvalidData.Withf("group not found").Write(w)
@@ -373,6 +455,18 @@ func (a *API) deleteOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 		default:
 			errors.ErrGenericInternalServerError.Withf("could not delete organization member group: %v", err).Write(w)
 		}
+		return
+	}
+	// deleting a group can open its questions to the whole census, which needs the on-chain room —
+	// reported like every other path that causes a resize, failures included. Bare OK when there
+	// is nothing to report, as the group PUT already does.
+	jobID, resizeErrs := a.resizeEmptiedQuestions(org.Address, emptied)
+	if jobID != "" || len(resizeErrs) > 0 {
+		resp := &apicommon.UpdateOrganizationMemberGroupResponse{Errors: resizeErrs}
+		if jobID != "" {
+			resp.CensusJobIDs = []string{jobID}
+		}
+		apicommon.HTTPWriteJSON(w, resp)
 		return
 	}
 	apicommon.HTTPWriteOK(w)

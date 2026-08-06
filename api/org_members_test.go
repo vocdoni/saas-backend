@@ -798,3 +798,57 @@ func TestUpsertOrganizationMember(t *testing.T) {
 		})
 	})
 }
+
+// TestUpsertMemberEditAtCensusQuota pins that the census quota gates creations only. The limit is
+// on census size and an edit does not change it, so preflighting every upsert would lock an
+// organization sitting exactly at its plan limit out of editing any of its own members.
+func TestUpsertMemberEditAtCensusQuota(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockFreePlan.ID)
+
+	// fill the organization to its plan limit, and build the auto group's census from it: the
+	// census a newly created member would join is now exactly at quota
+	limit := mockFreePlan.Organization.MaxCensus
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(limit)...)
+	c.Assert(members, qt.HasLen, limit)
+
+	autoGroup, err := testDB.AutoMemberGroup(orgAddress)
+	c.Assert(err, qt.IsNil)
+	size, err := testDB.PopulateGroupCensus(&db.Census{
+		OrgAddress:  orgAddress,
+		AuthFields:  db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsSurname},
+		TwoFaFields: db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail},
+	}, autoGroup.ID.Hex())
+	c.Assert(err, qt.IsNil)
+	c.Assert(size, qt.Equals, int64(limit))
+
+	// editing an existing member adds nobody, so it goes through (a read-back member carries the
+	// hashed phone, so the edit names the fields it changes rather than echoing the whole member)
+	edited := apicommon.OrgMember{
+		ID:           members[0].ID,
+		Name:         "Renamed",
+		Surname:      members[0].Surname,
+		Email:        members[0].Email,
+		MemberNumber: members[0].MemberNumber,
+	}
+	c.Assert(putOrgMember(t, token, orgAddress, edited), qt.Equals, members[0].ID)
+	stored, err := testDB.OrgMember(orgAddress, members[0].ID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(stored.Name, qt.Equals, "Renamed")
+
+	// creating one is still refused, and creates nothing
+	apiErr := putOrgMemberAndExpectError(t, token, orgAddress, newOrgMember())
+	c.Assert(apiErr.Code, qt.Equals, errors.ErrProcessCensusSizeExceedsPlanLimit.Code)
+
+	// an id that names no member of this organization is a creation too, refused the same way
+	unknown := newOrgMember()
+	unknown.ID = primitive.NewObjectID().Hex()
+	apiErr = putOrgMemberAndExpectError(t, token, orgAddress, unknown)
+	c.Assert(apiErr.Code, qt.Equals, errors.ErrProcessCensusSizeExceedsPlanLimit.Code)
+
+	count, err := testDB.CountOrgMembers(orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(count, qt.Equals, int64(limit))
+}
