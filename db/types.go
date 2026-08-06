@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -307,6 +308,32 @@ type OrgMember struct {
 	UpdatedAt       time.Time      `json:"updatedAt" bson:"updatedAt"`
 }
 
+// Normalized returns a copy of the member with every field that can feed the CSP
+// login hash reduced to its canonical form: surrounding whitespace trimmed, the
+// email lowercased, the birthdate canonicalized to YYYY-MM-DD.
+//
+// This is the single definition of that canonical form, and both sides of the
+// login-hash comparison go through it: members are stored normalized, and the
+// CSP normalizes the login request the same way before recomputing the hash.
+// Keeping the two in one place is the point — the hash is a byte-exact match
+// (see internal.HashSortedFields), so any drift between how a field is stored
+// and how it is compared silently locks the member out.
+//
+// It only normalizes. Invalid values are passed through in their trimmed form
+// rather than rejected, leaving validation to the caller: at login an
+// unparseable value should simply fail to match a participant, while at write
+// time prepareOrgMember still validates and reports what it rejects.
+func (m *OrgMember) Normalized() *OrgMember {
+	normalized := *m
+	normalized.Name = strings.TrimSpace(normalized.Name)
+	normalized.Surname = strings.TrimSpace(normalized.Surname)
+	normalized.MemberNumber = strings.TrimSpace(normalized.MemberNumber)
+	normalized.NationalID = strings.TrimSpace(normalized.NationalID)
+	normalized.Email = internal.NormalizeEmail(normalized.Email)
+	normalized.BirthDate = internal.NormalizeBirthDate(normalized.BirthDate)
+	return &normalized
+}
+
 // OrgMemberAuthFields defines the fields that can be used for member authentication.
 type OrgMemberAuthField string
 
@@ -391,20 +418,37 @@ func (f OrgMemberTwoFaFields) GetCensusType() CensusType {
 // the auth and twoFa field and produces a sha256 hash of the concatenation of the
 // data that are included in the fields. The data are ordered by the field names
 // in order to make the hash reproducible.
+//
+// Text values are lowercased so that login is case-insensitive. That folding is
+// deliberately confined to this function and never written back to the member:
+// members keep the casing they were imported with, because that is what gets
+// displayed and exported. OrgMember.Normalized governs what is stored; this
+// governs what is compared. The phone is the exception — it is already a hash
+// (see HashedPhone), so it is raw bytes rather than text and folding it would
+// corrupt the value.
+//
+// strings.ToLower matches what internal.NormalizeEmail already applies to
+// emails. A full Unicode case-fold would be marginally more correct for a few
+// scripts, but diverging from the existing convention would be worse: the two
+// sides of the comparison only agree because they fold identically.
+//
+// IMPORTANT: migrations.hashMemberFields mirrors this function byte for byte so
+// that the repair tooling can recompute stored hashes without importing db. Any
+// change here MUST be made there too — db.TestRepairMatchesCanonicalHash guards that.
 func HashAuthTwoFaFields(memberData OrgMember, authFields OrgMemberAuthFields, twoFaFields OrgMemberTwoFaFields) []byte {
 	data := make([]string, 0, len(twoFaFields)+len(authFields))
 	for _, field := range authFields {
 		switch field {
 		case OrgMemberAuthFieldsName:
-			data = append(data, memberData.Name)
+			data = append(data, strings.ToLower(memberData.Name))
 		case OrgMemberAuthFieldsSurname:
-			data = append(data, memberData.Surname)
+			data = append(data, strings.ToLower(memberData.Surname))
 		case OrgMemberAuthFieldsMemberNumber:
-			data = append(data, memberData.MemberNumber)
+			data = append(data, strings.ToLower(memberData.MemberNumber))
 		case OrgMemberAuthFieldsNationalID:
-			data = append(data, memberData.NationalID)
+			data = append(data, strings.ToLower(memberData.NationalID))
 		case OrgMemberAuthFieldsBirthDate:
-			data = append(data, memberData.BirthDate)
+			data = append(data, strings.ToLower(memberData.BirthDate))
 		default:
 			// Ignore unknown fields
 			continue
@@ -413,9 +457,10 @@ func HashAuthTwoFaFields(memberData OrgMember, authFields OrgMemberAuthFields, t
 	for _, field := range twoFaFields {
 		switch field {
 		case OrgMemberTwoFaFieldEmail:
-			data = append(data, memberData.Email)
+			data = append(data, strings.ToLower(memberData.Email))
 		case OrgMemberTwoFaFieldPhone:
 			if !memberData.Phone.IsEmpty() {
+				// already hashed bytes, not text: never folded
 				data = append(data, string(memberData.Phone))
 			}
 		default:
@@ -596,20 +641,32 @@ type ProcessesBundle struct {
 	Processes  []internal.HexBytes `json:"processes" bson:"processes" swaggertype:"array,string" format:"hex" example:"deadbeef"` // Array of process addresses included in this bundle
 }
 
-// QuestionTypeSetup carries the friendly ballot-type parameters for a
-// VotingProcessQuestion. It is translated into on-chain vote options at publish
-// time (see account.VoteTypeFromQuestion). MinChoices is a validation hint only
-// (the current protocol has no on-chain minimum-count field).
+// QuestionTypeSetup carries the friendly ballot-type parameters for a VotingProcessQuestion, and
+// is kept in step with its BallotProtocol: whichever half is supplied, the other is derived
+// (account.ResolveBallotShape), so the two always describe the same ballot.
+//
+// MinChoices is a validation hint only — the protocol has no on-chain minimum-count field, so it
+// is the one value that cannot be derived. It is kept as sent for multichoice (clamped to
+// MaxChoices), where a voter may legitimately be asked for at least N; for singlechoice it is
+// always 1, that ballot being the single field a voter fills, so a stated 0 would describe a
+// submission the chain cannot express. UniqueChoices is not supported by either named type
+// and requests setting it on a multichoice are rejected: with one 0/1 field per choice, a
+// unique-values ballot admits no vote at all (issue #619), while a voter already cannot select
+// the same choice twice. A ranked ballot is expressed as a BallotProtocol instead.
 type QuestionTypeSetup struct {
 	MinChoices    uint32 `json:"minChoices" bson:"minChoices"`
 	MaxChoices    uint32 `json:"maxChoices" bson:"maxChoices"`
 	UniqueChoices bool   `json:"uniqueChoices" bson:"uniqueChoices"`
 }
 
-// BallotProtocol is an optional raw override of the on-chain ballot parameters. When
-// set on a VotingProcessQuestion it takes priority over Type/TypeSetup and is mapped
-// directly onto the election envelope and vote options, enabling ballot shapes
-// (approval, ranked, quadratic) before named types exist for them.
+// BallotProtocol is the on-chain ballot parameters of a VotingProcessQuestion, mapped directly
+// onto the election envelope and vote options. Every question written since the two halves were
+// reconciled carries one, derived from Type/TypeSetup when the client did not supply it.
+//
+// A client may supply it instead of a named type, which is what enables the ballot shapes that
+// have no name yet (ranked, quadratic). Supplying it alongside a type makes it authoritative —
+// it is what reaches the chain — so the type is re-derived from it, and emptied when it encodes
+// no named shape.
 type BallotProtocol struct {
 	MaxCount          uint32 `json:"maxCount" bson:"maxCount"`
 	MaxValue          uint32 `json:"maxValue" bson:"maxValue"`
@@ -648,7 +705,7 @@ type VotingProcess struct {
 //
 //nolint:lll
 type VotingProcessQuestion struct {
-	ID                primitive.ObjectID `json:"id" bson:"_id"`
+	ID                primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	ProcessID         primitive.ObjectID `json:"parentProcessId" bson:"processId"`
 	OrgAddress        common.Address     `json:"-" bson:"orgAddress"`
 	Order             int                `json:"-" bson:"order"`
@@ -774,6 +831,9 @@ const (
 	JobTypeSetProcessCensus JobType = "set_process_census"
 	// JobTypeRelayVote represents a vote-relay tx job
 	JobTypeRelayVote JobType = "relay_vote"
+	// JobTypeRelayVotes represents a batch vote-relay tx job: one job covering the
+	// several envelopes of a single POST /votes call, one JobResult.Votes entry each
+	JobTypeRelayVotes JobType = "relay_votes"
 	// JobTypePublishVotingProcess represents a multi-question voting-process publish
 	// (batch of NEW_PROCESS txs) tx job
 	JobTypePublishVotingProcess JobType = "publish_voting_process"
@@ -783,7 +843,7 @@ const (
 func (t JobType) IsValid() bool {
 	switch t {
 	case JobTypeOrgMembers, JobTypeCensusParticipants, JobTypePublishProcess, JobTypeSetProcessStatus,
-		JobTypeSetProcessCensus, JobTypeRelayVote, JobTypePublishVotingProcess:
+		JobTypeSetProcessCensus, JobTypeRelayVote, JobTypeRelayVotes, JobTypePublishVotingProcess:
 		return true
 	default:
 		return false
@@ -802,28 +862,49 @@ const (
 	JobStatusFailed JobStatus = "failed"
 )
 
+// VoteJobResult is the outcome of one relayed vote envelope inside a batch job
+// (JobTypeRelayVotes). ProcessID and Nullifier are known before submission and are
+// therefore set when the job is created, so a caller can tell which envelope an entry
+// belongs to while it is still pending or after it failed. VoteID is the nullifier as
+// returned by the chain and only appears once the vote has been accepted and mined.
+type VoteJobResult struct {
+	ProcessID internal.HexBytes `json:"processId,omitempty" bson:"processId,omitempty" swaggertype:"string" example:"deadbeef"`
+	Nullifier internal.HexBytes `json:"nullifier,omitempty" bson:"nullifier,omitempty" swaggertype:"string" example:"deadbeef"`
+	VoteID    internal.HexBytes `json:"voteID,omitempty" bson:"voteID,omitempty" swaggertype:"string" example:"deadbeef"`
+	Status    JobStatus         `json:"status,omitempty" bson:"status,omitempty"`
+	Error     string            `json:"error,omitempty" bson:"error,omitempty"`
+}
+
 // JobResult carries the public on-chain outcome of a transaction job. Fields are
 // populated depending on the job type (publish → Address+Status; status → Status;
-// vote → VoteID) and are omitted when empty.
+// vote → ProcessID+Nullifier+VoteID; batch vote → Votes) and are omitted when empty.
 type JobResult struct {
-	Address internal.HexBytes `json:"address,omitempty" bson:"address,omitempty" swaggertype:"string" example:"deadbeef"`
-	VoteID  internal.HexBytes `json:"voteID,omitempty" bson:"voteID,omitempty" swaggertype:"string" example:"deadbeef"`
-	Status  string            `json:"status,omitempty" bson:"status,omitempty"`
+	Address   internal.HexBytes `json:"address,omitempty" bson:"address,omitempty" swaggertype:"string" example:"deadbeef"`
+	ProcessID internal.HexBytes `json:"processId,omitempty" bson:"processId,omitempty" swaggertype:"string" example:"deadbeef"`
+	Nullifier internal.HexBytes `json:"nullifier,omitempty" bson:"nullifier,omitempty" swaggertype:"string" example:"deadbeef"`
+	VoteID    internal.HexBytes `json:"voteID,omitempty" bson:"voteID,omitempty" swaggertype:"string" example:"deadbeef"`
+	Status    string            `json:"status,omitempty" bson:"status,omitempty"`
+	// Votes carries the per-envelope outcome of a batch vote relay, index-aligned with
+	// the votes of the POST /votes request that created the job.
+	Votes []VoteJobResult `json:"votes,omitempty" bson:"votes,omitempty"`
 }
 
 // Job represents a persistent import or transaction job with its results and errors.
 // This allows clients to query job status and errors even after server restarts.
 type Job struct {
-	ID          primitive.ObjectID `json:"id" bson:"_id"`
-	JobID       string             `json:"jobId" bson:"jobId"`           // The hex job ID
-	Type        JobType            `json:"type" bson:"type"`             // Job type constant
-	OrgAddress  common.Address     `json:"orgAddress" bson:"orgAddress"` // For authorization
-	Total       int                `json:"total" bson:"total"`           // Total items processed
-	Added       int                `json:"added" bson:"added"`           // Items successfully added
-	Errors      []string           `json:"errors" bson:"errors"`         // All errors encountered
-	CreatedAt   time.Time          `json:"createdAt" bson:"createdAt"`
-	CompletedAt time.Time          `json:"completedAt" bson:"completedAt"`
-	// Transaction-job fields (JobTypePublishProcess/SetProcessStatus/RelayVote)
+	ID         primitive.ObjectID `json:"id" bson:"_id"`
+	JobID      string             `json:"jobId" bson:"jobId"`           // The hex job ID
+	Type       JobType            `json:"type" bson:"type"`             // Job type constant
+	OrgAddress common.Address     `json:"orgAddress" bson:"orgAddress"` // For authorization
+	Total      int                `json:"total" bson:"total"`           // Total items processed
+	// Added counts the items successfully added for import jobs. For a batch vote relay
+	// (JobTypeRelayVotes) it counts the envelopes that have *finished*, successfully or
+	// not, so that the progress reported to the caller advances on every outcome.
+	Added       int       `json:"added" bson:"added"`
+	Errors      []string  `json:"errors" bson:"errors"` // All errors encountered
+	CreatedAt   time.Time `json:"createdAt" bson:"createdAt"`
+	CompletedAt time.Time `json:"completedAt" bson:"completedAt"`
+	// Transaction-job fields (JobTypePublishProcess/SetProcessStatus/RelayVote/RelayVotes)
 	Status JobStatus  `json:"status,omitempty" bson:"status,omitempty"` // pending|completed|failed
 	Result *JobResult `json:"result,omitempty" bson:"result,omitempty"` // on-chain outcome when completed
 	Error  string     `json:"error,omitempty" bson:"error,omitempty"`   // failure reason when failed

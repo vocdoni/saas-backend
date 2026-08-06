@@ -82,27 +82,48 @@ func (a *API) reconcileStalePublishing() {
 // determined synchronously (without building/funding a tx or touching the chain): the structural
 // checks, plus the plan/quota/permission denials that would otherwise only surface asynchronously
 // as an opaque job failure. It is shared by GET .../check (reported as {valid,errors}) and by
-// publish (enforced as a 400 before enqueueing). Funding and chain submission stay async.
+// publish (enforced before enqueueing). Funding and chain submission stay async.
+//
+// questionsMismatch singles out the one problem that is not the caller's request but the server's
+// own data state — a stored question set that does not match the process. Publish answers that with
+// a 409 rather than a 400; the dry-run ignores the flag and just reports the problem.
 func (a *API) publishPreflightProblems(
 	vp *db.VotingProcess, questions []db.VotingProcessQuestion, census *db.Census, user *db.User,
-) []string {
-	problems := validateVotingProcessForPublish(vp, questions, census)
+) (problems []string, questionsMismatch bool) {
+	problems = validateVotingProcessForPublish(vp, questions, census)
+	if p := questionSetProblem(vp, questions); p != "" {
+		problems = append(problems, p)
+		questionsMismatch = true
+	}
 	if census == nil {
-		return problems // plan checks below need the census
+		return problems, questionsMismatch // plan checks below need the census
 	}
 	orgDoc, err := a.db.Organization(vp.OrgAddress)
 	if err != nil {
-		return append(problems, "organization not found")
+		return append(problems, "organization not found"), questionsMismatch
 	}
 	if !user.HasRoleFor(vp.OrgAddress, db.AdminRole) {
 		problems = append(problems, "publishing requires the admin role")
 	}
-	// per-question plan voting-type gate (skipped for raw ballot-protocol overrides)
+	// Per-question plan voting-type gate, on the ballot each question actually encodes rather
+	// than the type it is labelled with: a stored type is only a label, and a question written
+	// before the two halves were reconciled may carry one its protocol contradicts.
+	//
+	// Shapes with no named type (ranked, quadratic) resolve to an empty type and are gated
+	// nowhere: not here, and not on the build path either — hasElectionMetadataPermissions still
+	// carries the TODO for it, and plan.VotingTypes has no flag anything can resolve to (see the
+	// TODO on OrgAllowsVotingType's allowed map). That is pre-existing, and unchanged by this
+	// gate, but it is not "gated elsewhere".
+	//
+	// This tightens what main did — which skipped the gate for every raw protocol — but does not
+	// close it. EffectiveQuestionType recognises a shape only when it is exactly canonical, which
+	// is what storage needs and what authorization does not: {maxCount:2, maxValue:1,
+	// maxTotalCost:2} is the same ballot as the multichoice one field-for-field bar costExponent,
+	// and stays ungated. Actually holding the gate needs a deliberately loose classifier
+	// (maxValue == 1 && maxCount > 1 ⇒ effectively multiple-choice, whatever else is set), not
+	// this one.
 	for i := range questions {
-		if questions[i].BallotProtocol != nil {
-			continue
-		}
-		if err := a.subscriptions.OrgAllowsVotingType(vp.OrgAddress, questions[i].Type); err != nil {
+		if err := a.subscriptions.OrgAllowsVotingType(vp.OrgAddress, account.EffectiveQuestionType(&questions[i])); err != nil {
 			problems = append(problems, err.Error())
 		}
 	}
@@ -118,7 +139,7 @@ func (a *API) publishPreflightProblems(
 	// the checks below but fail in the worker (electionParamsForQuestion). Reject it here.
 	if maxSize == 0 {
 		problems = append(problems, "census has no members")
-		return problems
+		return problems, questionsMismatch
 	}
 	start := vp.StartDate
 	if start.IsZero() || start.Before(time.Now()) {
@@ -149,7 +170,7 @@ func (a *API) publishPreflightProblems(
 	if err := a.subscriptions.OrgCanPublishCensus(census, notifyCount, voteCount); err != nil {
 		problems = append(problems, err.Error())
 	}
-	return problems
+	return problems, questionsMismatch
 }
 
 // publishVotingProcessHandler godoc
@@ -158,6 +179,8 @@ func (a *API) publishPreflightProblems(
 //	@Description	Publish a voting process: one on-chain election per question, submitted as a batch.
 //	@Description	Requires Admin role (or a `voting:write` key). Returns 202 with a job id; poll
 //	@Description	GET /jobs/{jobId}. Idempotent once published.
+//	@Description	409 (40172) means the stored questions do not match the process and the draft has to be
+//	@Description	saved again before it can be published.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -165,10 +188,10 @@ func (a *API) publishPreflightProblems(
 //	@Param			processId	path		string	true	"Process ID"
 //	@Success		202			{object}	apicommon.EnqueuedResponse
 //	@Success		200			{object}	apicommon.CreateVotingProcessResponse	"Already published"
-//	@Failure		400			{object}	errors.Error
+//	@Failure		400			{object}	errors.Error							"Not ready to publish"
 //	@Failure		401			{object}	errors.Error
 //	@Failure		404			{object}	errors.Error
-//	@Failure		409			{object}	errors.Error
+//	@Failure		409			{object}	errors.Error	"Publish in progress, or the stored questions do not match the process"
 //	@Failure		503			{object}	errors.Error
 //	@Router			/processes/{processId}/publish [post]
 func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
@@ -205,10 +228,17 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 	}
 	// full synchronous publish-readiness gate (same as GET .../check): structural checks plus
 	// plan voting-type, census-size, process-count, duration, managed-quota and email/SMS/vote
-	// allowance. Anything predictable is a 400 here rather than an opaque async job failure;
+	// allowance. Anything predictable is rejected here rather than as an opaque async job failure;
 	// only funding and chain submission are left to the worker.
-	if problems := a.publishPreflightProblems(vp, questions, census, user); len(problems) > 0 {
-		errors.ErrMalformedBody.Withf("process is not ready to publish: %s", strings.Join(problems, "; ")).Write(w)
+	if problems, questionsMismatch := a.publishPreflightProblems(vp, questions, census, user); len(problems) > 0 {
+		// a stored question set that does not match the process is server-side state, not a bad
+		// request, so it answers 409. It wins over any other problem present: it has to be repaired
+		// (by saving the draft again) before the rest of the draft is even worth looking at.
+		apiErr := errors.ErrMalformedBody
+		if questionsMismatch {
+			apiErr = errors.ErrProcessQuestionsMismatch
+		}
+		apiErr.Withf("process is not ready to publish: %s", strings.Join(problems, "; ")).Write(w)
 		return
 	}
 

@@ -319,9 +319,11 @@ func (p *Subscriptions) OrgCanCreateVotingProcessDraft(orgAddress common.Address
 
 // OrgAllowsVotingType checks that the organization's plan permits the given question ballot
 // type. It maps the friendly type to the plan's VotingTypes feature flags. An empty type is
-// allowed (it is validated elsewhere); a raw ballotProtocol override skips this check by
-// passing an empty voteType. Weighted elections stay gated separately via CostFromWeight in
-// hasElectionMetadataPermissions.
+// allowed (it is validated elsewhere), which is also how a ballot shape with no named type —
+// ranked, quadratic, expressed as a raw ballotProtocol — passes: there is no flag for it.
+// Callers pass account.EffectiveQuestionType, so a question is gated on the ballot it encodes
+// rather than the type it is labelled with. Weighted elections stay gated separately via
+// CostFromWeight in hasElectionMetadataPermissions.
 func (p *Subscriptions) OrgAllowsVotingType(orgAddress common.Address, voteType string) error {
 	if voteType == "" {
 		return nil
@@ -334,6 +336,13 @@ func (p *Subscriptions) OrgAllowsVotingType(orgAddress common.Address, voteType 
 	if err != nil {
 		return err
 	}
+	// TODO:future the remaining plan.VotingTypes flags (Ranked, Approval, Cumulative) have no
+	// entry here because db has no type constant for them, so nothing can ever resolve to one and
+	// the flags are permissive by omission: an org whose plan lacks Ranked can still mint a ranked
+	// ballot through a raw ballotProtocol. Same gap as the type check noted in
+	// hasElectionMetadataPermissions above. Approval may not belong here at all — the multichoice
+	// dense layout is an approval ballot, so that flag may be subsumed by Multiple rather than
+	// missing; worth settling with whoever defined the plan tiers before adding it.
 	allowed := map[string]bool{
 		db.VotingTypeSingleChoice: plan.VotingTypes.Single,
 		db.VotingTypeMultiChoice:  plan.VotingTypes.Multiple,

@@ -2,14 +2,17 @@ package api
 
 import (
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
+	"github.com/vocdoni/saas-backend/account"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
@@ -42,8 +45,26 @@ func parseProcessDates(req *apicommon.CreateVotingProcessRequest) (start, end ti
 //	@Summary		Create a voting process draft
 //	@Description	Create a multi-question voting process draft. Requires Manager/Admin role of the org
 //	@Description	(or a scoped API key with `voting:write`). Creates the inline census unpublished.
-//	@Description	Each question must define either a named `type` (with `typeSetup` for multichoice)
-//	@Description	or a raw `ballotProtocol` override; if both are given the `ballotProtocol` wins.
+//	@Description
+//	@Description	Each question must define a named `type` (with `typeSetup` for multichoice), a raw
+//	@Description	`ballotProtocol`, or both. The two are kept in sync: whichever is supplied, the other
+//	@Description	is derived, so the stored question always describes the election it will mint. A
+//	@Description	supplied `ballotProtocol` is authoritative — it is what reaches the chain — so `type`
+//	@Description	and `typeSetup` are re-derived from it, and come back empty when it encodes a shape
+//	@Description	with no named type (ranked, quadratic). Sending both halves is fine when they agree;
+//	@Description	when they describe two different named ballots it is a 400 rather than a silent win
+//	@Description	for the protocol. **Omit `ballotProtocol` to author or edit a question through its
+//	@Description	`typeSetup`** — responses always carry a protocol, so echoing one back unchanged
+//	@Description	re-applies it.
+//	@Description
+//	@Description	`typeSetup.minChoices` has no on-chain counterpart and is a validation hint for
+//	@Description	clients. It is stored as sent for multichoice, and is always `1` for singlechoice,
+//	@Description	whose ballot is the single field a voter fills.
+//	@Description
+//	@Description	`typeSetup.uniqueChoices` is rejected for multichoice: every choice is an independent
+//	@Description	yes/no field, so a unique-values ballot admits no vote and the election would tally
+//	@Description	every vote to zero. A `ballotProtocol` whose `uniqueValues` cannot be satisfied
+//	@Description	(fewer legal values than fields) is rejected for the same reason.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -140,8 +161,9 @@ func (a *API) buildQuestions(
 ) ([]*db.VotingProcessQuestion, error) {
 	built := make([]*db.VotingProcessQuestion, 0, len(questions))
 	for i, q := range questions {
-		// ballot shape: a question must define EITHER a named type OR a raw BallotProtocol
-		// override; if both are set the BallotProtocol wins (VoteTypeFromQuestion uses it). For a
+		// ballot shape: a question must define a named type, a raw BallotProtocol, or both. The
+		// two halves are reconciled below so they describe the same ballot; a supplied protocol
+		// is what the election will be, so it wins and the type is re-derived from it. For a
 		// named type, typeSetup is required for every type except singlechoice (which ignores it
 		// on chain); a multichoice maps MaxChoices onto MaxTotalCost so it must be bounded.
 		if q.BallotProtocol == nil {
@@ -159,9 +181,29 @@ func (a *API) buildQuestions(
 				if q.TypeSetup.MinChoices > q.TypeSetup.MaxChoices {
 					return nil, errors.ErrInvalidData.Withf("question %d: minChoices cannot exceed maxChoices", i)
 				}
+				if q.TypeSetup.UniqueChoices {
+					// multichoice gives every choice its own 0/1 field, so a voter already cannot
+					// select one twice — and a unique-values ballot over those fields admits no
+					// vote at all: the election would accept every envelope and tally zero.
+					return nil, errors.ErrInvalidData.Withf(
+						"question %d: uniqueChoices is not supported for multichoice, where each choice is an "+
+							"independent yes/no field; use a ballotProtocol for a ranked ballot", i,
+					)
+				}
 			default:
 				return nil, errors.ErrInvalidData.Withf("question %d: unsupported type %q", i, q.Type)
 			}
+		} else if err := account.ValidateBallotProtocol(q.BallotProtocol); err != nil {
+			return nil, errors.ErrInvalidData.Withf("question %d: invalid ballotProtocol: %v", i, err)
+		}
+		shape, err := account.ResolveBallotShape(account.BallotShapeInput{
+			Type:      q.Type,
+			TypeSetup: q.TypeSetup,
+			Protocol:  q.BallotProtocol,
+			Choices:   q.Choices,
+		})
+		if err != nil {
+			return nil, errors.ErrInvalidData.Withf("question %d: %v", i, err)
 		}
 		// a memo is gated to a single "open" choice per question: at most one choice may set
 		// openValue, since the memos endpoint correlates each vote's selected value against it.
@@ -184,9 +226,9 @@ func (a *API) buildQuestions(
 			Title:             q.Title,
 			Description:       q.Description,
 			Choices:           q.Choices,
-			Type:              q.Type,
-			TypeSetup:         q.TypeSetup,
-			BallotProtocol:    q.BallotProtocol,
+			Type:              shape.Type,
+			TypeSetup:         shape.TypeSetup,
+			BallotProtocol:    shape.Protocol,
 			SecretUntilTheEnd: q.SecretUntilTheEnd,
 			EligibleMemberIDs: eligible,
 			Metadata:          q.Metadata,
@@ -195,39 +237,72 @@ func (a *API) buildQuestions(
 	return built, nil
 }
 
-// writeQuestions replaces the process's stored questions with a pre-built (already validated)
-// set and updates its ordered QuestionIDs. Existing questions are removed first so a draft
-// update replaces them. Callers run buildQuestions first, so this only fails on infra errors.
+// writeQuestions replaces the process's stored questions with a pre-built (already validated) set
+// and records their ids on the process. The replacement is per slot rather than delete-all then
+// insert-all, so two overlapping draft updates cannot strand a row — see db.SetProcessQuestions.
+// Callers run buildQuestions first, so this only fails on infra errors.
+//
+// The ids are stored through a targeted update rather than a whole-document write: this runs right
+// after a conditional update may have forced updatedAt forward, and re-stamping the document with a
+// fresh time.Now() could push that token back to a value a client already spent.
 func (a *API) writeQuestions(vp *db.VotingProcess, built []*db.VotingProcessQuestion) error {
-	existing, err := a.db.QuestionsByProcess(vp.ID)
+	questionIDs, err := a.db.SetProcessQuestions(vp.ID, built)
 	if err != nil {
-		return fmt.Errorf("failed to load existing questions: %w", err)
-	}
-	for i := range existing {
-		if err := a.db.DeleteQuestion(existing[i].ID); err != nil {
-			return fmt.Errorf("failed to remove existing question: %w", err)
-		}
-	}
-	questionIDs := make([]primitive.ObjectID, 0, len(built))
-	for _, question := range built {
-		question.ProcessID = vp.ID
-		qID, err := a.db.SetQuestion(question)
-		if err != nil {
-			return fmt.Errorf("failed to store question: %w", err)
-		}
-		questionIDs = append(questionIDs, qID)
+		return fmt.Errorf("failed to store questions: %w", err)
 	}
 	vp.QuestionIDs = questionIDs
-	if _, err := a.db.SetVotingProcess(vp); err != nil {
+	if err := a.db.SetVotingProcessQuestionIDs(vp.ID, questionIDs); err != nil {
 		return fmt.Errorf("failed to update process questions: %w", err)
 	}
 	return nil
+}
+
+// parseUpdatedAt reads the optional conditional-update token of an update request. The zero time
+// means the client sent none and opts out of the check.
+//
+// It parses with apicommon.UpdatedAtLayout first — the exact shape the read endpoint emits, so the
+// round-trip of a value the client just read goes through the layout that documents itself as the
+// wire format — and falls back to RFC3339 for a client sending a different sub-second precision or a
+// non-Z offset.
+func parseUpdatedAt(s string) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, nil
+	}
+	t, err := time.Parse(apicommon.UpdatedAtLayout, s)
+	if err != nil {
+		if t, err = time.Parse(time.RFC3339, s); err != nil {
+			return time.Time{}, fmt.Errorf(
+				"invalid updatedAt %q: expected %s (or RFC3339) as returned by the read endpoint",
+				s, apicommon.UpdatedAtLayout)
+		}
+	}
+	return t.UTC(), nil
+}
+
+// storeUpdatedProcess persists a draft edit, conditionally on seen when the client sent an
+// updatedAt token. It reports db.ErrConflict when someone else wrote the process in between.
+func (a *API) storeUpdatedProcess(vp *db.VotingProcess, seen time.Time) error {
+	if seen.IsZero() {
+		if _, err := a.db.SetVotingProcess(vp); err != nil {
+			return fmt.Errorf("failed to update voting process: %w", err)
+		}
+		return nil
+	}
+	return a.db.SetVotingProcessIfUnchanged(vp, seen)
 }
 
 // updateVotingProcessHandler godoc
 //
 //	@Summary		Update a voting process draft
 //	@Description	Update a voting process while it is still a draft (not published). 409 if already published.
+//	@Description	The questions are replaced wholesale, and each one's ballot shape is reconciled exactly
+//	@Description	as on create. Reading a question and PUTting it back unchanged is a no-op; editing its
+//	@Description	`typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a
+//	@Description	400 — omit `ballotProtocol` to edit a question through its `typeSetup`.
+//	@Description
+//	@Description	Send the updatedAt read from GET /processes/{processId} to make the update conditional: it is
+//	@Description	rejected with 409 (40171) if anything wrote the process in between, so two editors cannot
+//	@Description	overwrite each other. Omitting updatedAt opts out of that guarantee and keeps last-writer-wins.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -292,10 +367,21 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		writeSubscriptionError(w, err)
 		return
 	}
+	seen, err := parseUpdatedAt(req.UpdatedAt)
+	if err != nil {
+		_ = a.db.DelCensus(census.ID.Hex())
+		errors.ErrMalformedBody.WithErr(err).Write(w)
+		return
+	}
 	vp.Title, vp.Description, vp.Header, vp.StreamURI = req.Title, req.Description, req.Header, req.StreamURI
 	vp.StartDate, vp.EndDate, vp.CensusID = start, end, census.ID
-	if _, err := a.db.SetVotingProcess(vp); err != nil {
+	if err := a.storeUpdatedProcess(vp, seen); err != nil {
 		_ = a.db.DelCensus(census.ID.Hex())
+		if stderrors.Is(err, db.ErrConflict) {
+			errors.ErrStaleUpdate.Withf("the process was modified after updatedAt %s; refetch and retry",
+				req.UpdatedAt).Write(w)
+			return
+		}
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
@@ -357,6 +443,9 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// memos (free-text voter input on open-value choices) are manager-only, so they are resolved into
 	// the results only for a manager/admin caller — never for the public view.
 	a.resolveQuestionResultsBatch(questions, isManager)
+	// a draft written before the two ballot halves were reconciled is served reconciled, so the
+	// body a client echoes back is one authoring still accepts.
+	reconcileDraftQuestionShapes(questions)
 	// non-managers must not see the per-question eligibility member ids (who can vote).
 	if !isManager {
 		redactQuestionsForPublic(questions)
@@ -364,6 +453,42 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 	resp := apicommon.VotingProcessResponseFromDB(vp, questions, census, a.account.ChainID())
 	resp.Census.TotalWeight = a.censusTotalWeight(census)
 	apicommon.HTTPWriteJSON(w, resp)
+}
+
+// reconcileDraftQuestionShapes serves the reconciled ballot shape of the questions that have not
+// minted an election yet, mutating the passed slice in place.
+//
+// Questions stored before the two halves were reconciled can carry anything the old code accepted:
+// a typeSetup.uniqueChoices no named type supports, no ballotProtocol at all, or two halves that
+// contradict each other. Authoring now refuses all three, so a client that reads such a draft and
+// PUTs the question array back — the only way to edit one, since update replaces them wholesale —
+// would be refused for a lie it did not write. Serving the shape a publish would actually use makes
+// that round-trip work and makes the read consistent with the invariant.
+//
+// Only unminted questions: a published legacy question's election really does carry the parameters
+// it was minted with (the #619 elections have uniqueValues set on chain), so deriving a clean shape
+// for it would misreport the chain — and it cannot be edited anyway. Nothing is written back; the
+// first update persists it.
+func reconcileDraftQuestionShapes(questions []db.VotingProcessQuestion) {
+	for i := range questions {
+		q := &questions[i]
+		if len(q.UpstreamID) > 0 || len(q.Choices) == 0 {
+			continue
+		}
+		in := account.BallotShapeInput{
+			Type: q.Type, TypeSetup: q.TypeSetup, Protocol: q.BallotProtocol, Choices: q.Choices,
+		}
+		// a stored protocol is what publish would mint, so it wins over a stored type outright —
+		// asking to reconcile both halves would only reject a contradiction nobody can edit away.
+		if in.Protocol != nil {
+			in.Type, in.TypeSetup = "", db.QuestionTypeSetup{}
+		}
+		shape, err := account.ResolveBallotShape(in)
+		if err != nil {
+			continue // an unusable stored shape is publish's problem to report, not a read's
+		}
+		q.Type, q.TypeSetup, q.BallotProtocol = shape.Type, shape.TypeSetup, shape.Protocol
+	}
 }
 
 // redactQuestionsForPublic strips manager-only fields from questions before serving them to a
@@ -381,15 +506,21 @@ func redactQuestionsForPublic(questions []db.VotingProcessQuestion) {
 //	@Description	Paginated list of an organization's voting processes. Public: anonymous callers get
 //	@Description	published processes only (without per-question eligibleMemberIds). A Manager/Admin of
 //	@Description	the org (or a voting:write API key acting as one) also gets drafts and the eligibility.
-//	@Description	Filter by question status.
+//	@Description	Filter by question status, and by published state.
+//	@Description	published=true returns published processes only; published=false returns drafts only and
+//	@Description	requires Manager/Admin (401 otherwise). Omitting it keeps the caller's default view.
+//	@Description	Combining published=false with status returns nothing: a draft's questions have no
+//	@Description	on-chain status yet, and status matches on that field.
 //	@Tags			processes
 //	@Produce		json
 //	@Param			orgAddress	query		string	true	"Organization address"
 //	@Param			status		query		string	false	"Filter by question status"
+//	@Param			published	query		bool	false	"Filter by published state; false (drafts) requires Manager/Admin"
 //	@Param			page		query		int		false	"Page (1-based)"
 //	@Param			limit		query		int		false	"Page size"
 //	@Success		200			{object}	apicommon.VotingProcessListResponse
 //	@Failure		400			{object}	errors.Error
+//	@Failure		401			{object}	errors.Error
 //	@Router			/processes [get]
 func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request) {
 	orgAddressStr := r.URL.Query().Get("orgAddress")
@@ -414,6 +545,24 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 	draft := db.PublishedOnly
 	if isManager {
 		draft = db.AllProcesses
+	}
+	// the optional published filter narrows that default view. Asking for drafts is manager-only,
+	// mirroring organizationListProcessDraftsHandler on the legacy routes.
+	if s := r.URL.Query().Get("published"); s != "" {
+		published, err := strconv.ParseBool(s)
+		if err != nil {
+			errors.ErrMalformedURLParam.Withf("invalid published").Write(w)
+			return
+		}
+		switch {
+		case published:
+			draft = db.PublishedOnly
+		case !isManager:
+			errors.ErrUnauthorized.Withf("user is not admin of organization").Write(w)
+			return
+		default:
+			draft = db.DraftOnly
+		}
 	}
 	params, err := parsePaginationParams(r.URL.Query().Get(ParamPage), r.URL.Query().Get(ParamLimit))
 	if err != nil {
@@ -445,6 +594,7 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		census, _ := a.db.Census(vp.CensusID.Hex())
+		reconcileDraftQuestionShapes(questions)
 		if !isManager {
 			redactQuestionsForPublic(questions)
 		}
@@ -489,7 +639,9 @@ func (a *API) validateVotingProcessHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	census, _ := a.db.Census(vp.CensusID.Hex())
-	problems := a.publishPreflightProblems(vp, questions, census, user)
+	// the dry-run reports every problem the same way: a mismatched question set is just one more
+	// entry in errors, so the mismatch flag publish acts on is irrelevant here.
+	problems, _ := a.publishPreflightProblems(vp, questions, census, user)
 	apicommon.HTTPWriteJSON(w, &apicommon.VotingProcessValidateResponse{
 		Valid:  len(problems) == 0,
 		Errors: problems,
@@ -881,8 +1033,9 @@ func (a *API) loadVotingProcess(w http.ResponseWriter, oid primitive.ObjectID) (
 	return vp, true
 }
 
-// validateVotingProcessForPublish returns the list of reasons a process cannot be published
-// (empty when it is ready). Used by GET .../check and by publish.
+// validateVotingProcessForPublish returns the structural reasons a process cannot be published
+// (empty when it is ready). The stored-question-set check lives in publishPreflightProblems instead,
+// which needs to tell that one apart from the rest to answer publish with a 409.
 func validateVotingProcessForPublish(
 	vp *db.VotingProcess, questions []db.VotingProcessQuestion, census *db.Census,
 ) []string {
@@ -910,8 +1063,42 @@ func validateVotingProcessForPublish(
 		if q.BallotProtocol == nil && q.Type != db.VotingTypeSingleChoice && q.Type != db.VotingTypeMultiChoice {
 			problems = append(problems, fmt.Sprintf("question %d has an unsupported type %q", i, q.Type))
 		}
+		// A question stored before authoring rejected these can still hold a ballot no voter can
+		// satisfy. Publishing it would mint an election that accepts every vote and tallies zero,
+		// with nothing on the way reporting a problem, so stop it at the last point that can.
+		if err := account.ValidateBallotProtocol(q.BallotProtocol); err != nil {
+			problems = append(problems, fmt.Sprintf("question %d: invalid ballotProtocol: %v", i, err))
+		}
 	}
 	return problems
+}
+
+// questionSetProblem reports a stored question set that does not match the ids the process itself
+// records. That means a row carrying this processId is not one of the questions the last writer
+// stored — a leftover from a pre-fix concurrent draft update, or a direct database write. Publishing
+// such a process is the one irreversible step in the whole flow (the stray becomes a real on-chain
+// election that cannot be withdrawn), so it is refused and the draft has to be saved again first.
+// Processes predating QuestionIDs carry none and are not checked.
+func questionSetProblem(vp *db.VotingProcess, questions []db.VotingProcessQuestion) string {
+	if len(vp.QuestionIDs) == 0 {
+		return ""
+	}
+	expected := make(map[primitive.ObjectID]bool, len(vp.QuestionIDs))
+	for _, id := range vp.QuestionIDs {
+		expected[id] = true
+	}
+	stray := 0
+	for i := range questions {
+		if !expected[questions[i].ID] {
+			stray++
+		}
+	}
+	if stray == 0 && len(questions) == len(vp.QuestionIDs) {
+		return ""
+	}
+	return fmt.Sprintf(
+		"stored questions do not match the process (%d found, %d expected, %d unknown): save the draft again",
+		len(questions), len(vp.QuestionIDs), stray)
 }
 
 // writeSubscriptionError writes a typed API error verbatim, falling back to 500.

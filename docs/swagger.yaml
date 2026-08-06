@@ -104,8 +104,16 @@ definitions:
           $ref: '#/definitions/db.OrgMemberAuthField'
         type: array
       groupId:
+        description: |-
+          GroupID is the org member group the census was built from. Round-trips: it is echoed back on
+          process reads, so a client can restore the group a draft targeted. Absent (not a zero id) when
+          the census is organization-wide.
         type: string
       memberIds:
+        description: |-
+          MemberIDs selects the census members explicitly, as an alternative to GroupID. Write-only on
+          this type: a process read echoes the census config, not the member list it resolved to. The
+          list itself is read through the deprecated GET /census/{id}/participants (Manager/Admin).
         items:
           type: string
         type: array
@@ -528,6 +536,13 @@ definitions:
         type: string
       title:
         $ref: '#/definitions/db.MultiLangString'
+      updatedAt:
+        description: |-
+          UpdatedAt, on a PUT, is the updatedAt the client last read. The update then applies only if
+          the process has not been written since, and is rejected with 409 otherwise, so two clients
+          editing the same draft cannot silently overwrite each other. Optional: omitting it keeps the
+          unconditional last-writer-wins behaviour. Ignored on POST.
+        type: string
     type: object
   apicommon.CreateVotingProcessResponse:
     properties:
@@ -1392,6 +1407,14 @@ definitions:
         format: hex
         type: string
     type: object
+  apicommon.RelayVotesRequest:
+    properties:
+      votes:
+        description: Signed vote transactions, at most 100
+        items:
+          $ref: '#/definitions/apicommon.RelayVoteRequest'
+        type: array
+    type: object
   apicommon.SetProcessStatusRequest:
     properties:
       status:
@@ -1626,6 +1649,12 @@ definitions:
       address:
         example: deadbeef
         type: string
+      nullifier:
+        example: deadbeef
+        type: string
+      processId:
+        example: deadbeef
+        type: string
       progress:
         type: integer
       status:
@@ -1635,6 +1664,12 @@ definitions:
       voteID:
         example: deadbeef
         type: string
+      votes:
+        description: Votes is the per-envelope outcome of a batch vote relay, in request
+          order
+        items:
+          $ref: '#/definitions/db.VoteJobResult'
+        type: array
     type: object
   apicommon.UpdateOrganizationMemberGroupsRequest:
     properties:
@@ -1805,6 +1840,50 @@ definitions:
         format: hex
         type: string
     type: object
+  apicommon.VerifiedVote:
+    properties:
+      blockHeight:
+        description: Block the vote was registered in
+        type: integer
+      date:
+        description: When the vote was registered on chain
+        type: string
+      nullifier:
+        description: The nullifier that was checked, echoed back
+        example: deadbeef
+        format: hex
+        type: string
+      processId:
+        description: On-chain election id the vote belongs to
+        example: deadbeef
+        format: hex
+        type: string
+      txHash:
+        description: Hash of the transaction that carried the vote
+        example: deadbeef
+        format: hex
+        type: string
+      verified:
+        description: Whether the chain has a vote with this nullifier
+        type: boolean
+    type: object
+  apicommon.VerifyVotesRequest:
+    properties:
+      nullifiers:
+        description: |-
+          Vote nullifiers (up to 32 bytes each — anonymous ones may be shorter), capped at the
+          shared vote batch limit (100)
+        items:
+          type: string
+        type: array
+    type: object
+  apicommon.VerifyVotesResponse:
+    properties:
+      votes:
+        items:
+          $ref: '#/definitions/apicommon.VerifiedVote'
+        type: array
+    type: object
   apicommon.VotingProcessListResponse:
     properties:
       pagination:
@@ -1906,6 +1985,12 @@ definitions:
         type: string
       title:
         $ref: '#/definitions/db.MultiLangString'
+      updatedAt:
+        description: |-
+          UpdatedAt is the process's last-write timestamp, in millisecond precision. Echo it back in a
+          PUT to make the update conditional on nothing else having written in between (see
+          CreateVotingProcessRequest.UpdatedAt).
+        type: string
     type: object
   apicommon.VotingProcessResultsResponse:
     properties:
@@ -2098,6 +2183,7 @@ definitions:
     - set_process_status
     - set_process_census
     - relay_vote
+    - relay_votes
     - publish_voting_process
     type: string
     x-enum-varnames:
@@ -2107,6 +2193,7 @@ definitions:
     - JobTypeSetProcessStatus
     - JobTypeSetProcessCensus
     - JobTypeRelayVote
+    - JobTypeRelayVotes
     - JobTypePublishVotingProcess
   db.MultiLangString:
     additionalProperties:
@@ -2304,6 +2391,22 @@ definitions:
     - AdminRole
     - ManagerRole
     - ViewerRole
+  db.VoteJobResult:
+    properties:
+      error:
+        type: string
+      nullifier:
+        example: deadbeef
+        type: string
+      processId:
+        example: deadbeef
+        type: string
+      status:
+        $ref: '#/definitions/db.JobStatus'
+      voteID:
+        example: deadbeef
+        type: string
+    type: object
   db.VoteType:
     properties:
       costExponent:
@@ -5861,7 +5964,11 @@ paths:
         Paginated list of an organization's voting processes. Public: anonymous callers get
         published processes only (without per-question eligibleMemberIds). A Manager/Admin of
         the org (or a voting:write API key acting as one) also gets drafts and the eligibility.
-        Filter by question status.
+        Filter by question status, and by published state.
+        published=true returns published processes only; published=false returns drafts only and
+        requires Manager/Admin (401 otherwise). Omitting it keeps the caller's default view.
+        Combining published=false with status returns nothing: a draft's questions have no
+        on-chain status yet, and status matches on that field.
       parameters:
       - description: Organization address
         in: query
@@ -5872,6 +5979,10 @@ paths:
         in: query
         name: status
         type: string
+      - description: Filter by published state; false (drafts) requires Manager/Admin
+        in: query
+        name: published
+        type: boolean
       - description: Page (1-based)
         in: query
         name: page
@@ -5891,6 +6002,10 @@ paths:
           description: Bad Request
           schema:
             $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
       summary: List voting processes
       tags:
       - processes
@@ -5900,8 +6015,26 @@ paths:
       description: |-
         Create a multi-question voting process draft. Requires Manager/Admin role of the org
         (or a scoped API key with `voting:write`). Creates the inline census unpublished.
-        Each question must define either a named `type` (with `typeSetup` for multichoice)
-        or a raw `ballotProtocol` override; if both are given the `ballotProtocol` wins.
+
+        Each question must define a named `type` (with `typeSetup` for multichoice), a raw
+        `ballotProtocol`, or both. The two are kept in sync: whichever is supplied, the other
+        is derived, so the stored question always describes the election it will mint. A
+        supplied `ballotProtocol` is authoritative — it is what reaches the chain — so `type`
+        and `typeSetup` are re-derived from it, and come back empty when it encodes a shape
+        with no named type (ranked, quadratic). Sending both halves is fine when they agree;
+        when they describe two different named ballots it is a 400 rather than a silent win
+        for the protocol. **Omit `ballotProtocol` to author or edit a question through its
+        `typeSetup`** — responses always carry a protocol, so echoing one back unchanged
+        re-applies it.
+
+        `typeSetup.minChoices` has no on-chain counterpart and is a validation hint for
+        clients. It is stored as sent for multichoice, and is always `1` for singlechoice,
+        whose ballot is the single field a voter fills.
+
+        `typeSetup.uniqueChoices` is rejected for multichoice: every choice is an independent
+        yes/no field, so a unique-values ballot admits no vote and the election would tally
+        every vote to zero. A `ballotProtocol` whose `uniqueValues` cannot be satisfied
+        (fewer legal values than fields) is rejected for the same reason.
       parameters:
       - description: Voting process
         in: body
@@ -6002,8 +6135,16 @@ paths:
     put:
       consumes:
       - application/json
-      description: Update a voting process while it is still a draft (not published).
-        409 if already published.
+      description: |-
+        Update a voting process while it is still a draft (not published). 409 if already published.
+        The questions are replaced wholesale, and each one's ballot shape is reconciled exactly
+        as on create. Reading a question and PUTting it back unchanged is a no-op; editing its
+        `typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a
+        400 — omit `ballotProtocol` to edit a question through its `typeSetup`.
+
+        Send the updatedAt read from GET /processes/{processId} to make the update conditional: it is
+        rejected with 409 (40171) if anything wrote the process in between, so two editors cannot
+        overwrite each other. Omitting updatedAt opts out of that guarantee and keeps last-writer-wins.
       parameters:
       - description: Process ID
         in: path
@@ -6344,6 +6485,8 @@ paths:
         Publish a voting process: one on-chain election per question, submitted as a batch.
         Requires Admin role (or a `voting:write` key). Returns 202 with a job id; poll
         GET /jobs/{jobId}. Idempotent once published.
+        409 (40172) means the stored questions do not match the process and the draft has to be
+        saved again before it can be published.
       parameters:
       - description: Process ID
         in: path
@@ -6362,7 +6505,7 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.EnqueuedResponse'
         "400":
-          description: Bad Request
+          description: Not ready to publish
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -6374,7 +6517,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Conflict
+          description: Publish in progress, or the stored questions do not match the
+            process
           schema:
             $ref: '#/definitions/errors.Error'
         "503":
@@ -7383,6 +7527,10 @@ paths:
           description: Process not found
           schema:
             $ref: '#/definitions/errors.Error'
+        "413":
+          description: Request body too large
+          schema:
+            $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
           schema:
@@ -7392,6 +7540,107 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Relay an already-signed vote to the Vochain
+      tags:
+      - vote
+  /votes:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Relays several voter transactions, already signed by the voter, in one call. A
+        multi-question voting process is one vochain process per question, so a voter casts
+        one vote transaction per question; relaying them one by one leaves a window in which
+        some are on chain and the rest are not, and the voter ends up half-voted. This
+        endpoint closes that window. Public endpoint: no authentication is required.
+        The whole batch is checked synchronously and is accepted or rejected as a unit —
+        every payload must decode to a Vote envelope (else 400) for a process the backend
+        knows (else 404), all of them must belong to the same organization (else 400), and
+        the queue must have room for all of them (else 503). A rejected batch enqueues
+        nothing. At most 100 votes per call.
+        The call returns 202 with a single job id covering the batch. Poll
+        GET /jobs/{jobId}: its result carries one entry per vote, index-aligned with the
+        request, each with the process id and the nullifier — both known before submission,
+        so they are readable while the job is pending — plus the chain-assigned voteID once
+        that vote is accepted, or the reason it failed.
+      parameters:
+      - description: Signed vote transaction payloads
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.RelayVotesRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Job accepted; poll GET /jobs/{jobId}
+          schema:
+            $ref: '#/definitions/apicommon.EnqueuedResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "413":
+          description: Request body too large
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Transaction queue is full
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Relay a batch of already-signed votes to the Vochain
+      tags:
+      - vote
+  /votes/verify:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Checks whether the Vochain has a vote for each of the given nullifiers, so a voter
+        can confirm that the ballots relayed on their behalf are registered on chain. Public
+        endpoint: no authentication is required, and it exposes only data that is already
+        public on chain. Several nullifiers are accepted in one call because a multi-question
+        voting process is one on-chain election per question, so a voter holds one nullifier
+        per question. The response has one entry per requested nullifier, in the same order;
+        a repeated nullifier is looked up only once and every copy gets the same answer.
+        An unknown nullifier is reported as verified=false rather than as an error, while a
+        chain that cannot be reached fails the whole call so a voter is never told their vote
+        is missing when it merely could not be looked up.
+      parameters:
+      - description: Vote nullifiers to verify
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.VerifyVotesRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Verification outcome per nullifier
+          schema:
+            $ref: '#/definitions/apicommon.VerifyVotesResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "413":
+          description: Request body too large
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Blockchain request failed
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Verify vote nullifiers against the Vochain
       tags:
       - vote
 schemes:

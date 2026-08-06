@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"testing"
@@ -75,11 +74,7 @@ func TestProcessesEncryptionKeys(t *testing.T) {
 	encElection := internal.HexBytes(signRemoteSignerAndSendVocdoniTx(t, processTx, token, vocdoniClient, orgAddress))
 
 	// wait until the keykeepers publish the election encryption keys on chain
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	nodeKeys, err := vocdoniClient.WaitUntilElectionKeys(ctx, encElection.Bytes())
-	cancel()
-	c.Assert(err, qt.IsNil)
-	c.Assert(nodeKeys.PublicKeys, qt.Not(qt.HasLen), 0)
+	nodeKeys := waitUntilElectionKeys(t, vocdoniClient, encElection.Bytes())
 
 	// seed a published voting process with an encrypted question (points at the election above) and a
 	// non-encrypted one; the plain question keeps a distinct upstreamId to prove the secretUntilTheEnd

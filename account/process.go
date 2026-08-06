@@ -2,6 +2,7 @@ package account
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -14,6 +15,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"go.vocdoni.io/dvote/api"
+	"go.vocdoni.io/dvote/apiclient"
 	"go.vocdoni.io/proto/build/go/models"
 )
 
@@ -341,6 +343,35 @@ func (a *Account) voteSelectedValues(voteID internal.HexBytes) ([]int, error) {
 		return nil, nil // opaque/encrypted package: no selectable values, memo is dropped
 	}
 	return pkg.Votes, nil
+}
+
+// ErrVoteNotFound is returned by VoteByNullifier when the chain has no vote with the
+// given nullifier. It is a distinct sentinel because "the chain does not know this vote"
+// is an answer, while any other failure means the chain could not be asked.
+var ErrVoteNotFound = fmt.Errorf("vote not found")
+
+// VoteByNullifier fetches an on-chain vote by its nullifier (voteID) from the Vochain,
+// returning ErrVoteNotFound when the chain does not know it. The node keys this lookup on
+// the nullifier alone — unlike its /votes/verify route, which also needs the election id —
+// so a caller holding only a nullifier can still resolve the vote and the election it
+// belongs to. There is no apiclient wrapper for it, hence the raw request.
+func (a *Account) VoteByNullifier(nullifier []byte) (*api.Vote, error) {
+	resp, code, err := a.client.Request(apiclient.HTTPGET, nil, "votes", hex.EncodeToString(nullifier))
+	if err != nil {
+		return nil, fmt.Errorf("could not fetch vote %x: %w", nullifier, err)
+	}
+	switch code {
+	case http.StatusOK:
+		vote := &api.Vote{}
+		if err := json.Unmarshal(resp, vote); err != nil {
+			return nil, fmt.Errorf("could not decode vote %x: %w", nullifier, err)
+		}
+		return vote, nil
+	case http.StatusNotFound:
+		return nil, ErrVoteNotFound
+	default:
+		return nil, fmt.Errorf("could not fetch vote %x: status %d (%s)", nullifier, code, resp)
+	}
 }
 
 // ElectionEncryptionKeys fetches the encryption public keys of the on-chain election with

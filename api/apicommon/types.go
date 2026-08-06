@@ -1068,16 +1068,21 @@ func OrganizationCensusFromDB(census *db.Census) OrganizationCensus {
 	if census == nil {
 		return OrganizationCensus{}
 	}
-	return OrganizationCensus{
+	out := OrganizationCensus{
 		ID:          census.ID.Hex(),
 		Type:        census.Type,
 		OrgAddress:  census.OrgAddress,
 		Size:        census.Size,
 		Weighted:    census.Weighted,
-		GroupID:     census.GroupID.Hex(),
 		AuthFields:  census.AuthFields,
 		TwoFaFields: census.TwoFaFields,
 	}
+	// guard the zero id so an organization-wide census reports no group at all: omitempty keys off the
+	// empty string, but a zero ObjectID hexes to 24 zeros and would serialize as a real group.
+	if !census.GroupID.IsZero() {
+		out.GroupID = census.GroupID.Hex()
+	}
+	return out
 }
 
 // OrganizationCensuses wraps a list of censuses of an organization.
@@ -1307,6 +1312,51 @@ type RelayVoteRequest struct {
 	TxPayload internal.HexBytes `json:"txPayload" swaggertype:"string" format:"hex" example:"deadbeef"`
 }
 
+// RelayVotesRequest is the body of POST /votes: the already-signed voter transactions of
+// one voter, typically the questions of a multi-question voting process. The batch is
+// accepted or rejected as a unit and relayed under a single job, whose result reports the
+// votes in the order they are given here.
+// swagger:model RelayVotesRequest
+type RelayVotesRequest struct {
+	// Signed vote transactions, at most 100
+	Votes []RelayVoteRequest `json:"votes"`
+}
+
+// VerifyVotesRequest is the body of POST /votes/verify: the vote nullifiers a voter wants
+// checked against the chain, typically the one nullifier per question of a multi-question
+// voting process.
+// swagger:model VerifyVotesRequest
+type VerifyVotesRequest struct {
+	// Vote nullifiers (up to 32 bytes each — anonymous ones may be shorter), capped at the
+	// shared vote batch limit (100)
+	Nullifiers []internal.HexBytes `json:"nullifiers" swaggertype:"array,string"`
+}
+
+// VerifiedVote is the outcome of checking one nullifier against the chain. Everything
+// beyond Verified comes from the on-chain vote and is absent when it was not found.
+// swagger:model VerifiedVote
+type VerifiedVote struct {
+	// The nullifier that was checked, echoed back
+	Nullifier internal.HexBytes `json:"nullifier" swaggertype:"string" format:"hex" example:"deadbeef"`
+	// Whether the chain has a vote with this nullifier
+	Verified bool `json:"verified"`
+	// On-chain election id the vote belongs to
+	ProcessID internal.HexBytes `json:"processId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	// Hash of the transaction that carried the vote
+	TxHash internal.HexBytes `json:"txHash,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	// Block the vote was registered in
+	BlockHeight uint32 `json:"blockHeight,omitempty"`
+	// When the vote was registered on chain
+	Date *time.Time `json:"date,omitempty"`
+}
+
+// VerifyVotesResponse is returned by POST /votes/verify, one entry per requested
+// nullifier in the order they were given.
+// swagger:model VerifyVotesResponse
+type VerifyVotesResponse struct {
+	Votes []VerifiedVote `json:"votes"`
+}
+
 // RelayVoteResponse is returned by POST /vote with the vote nullifier (voteID)
 // assigned on chain.
 // swagger:model RelayVoteResponse
@@ -1524,20 +1574,25 @@ type CreateOrganizationTicketRequest struct {
 }
 
 // UnifiedJobResult is the merged result payload of GET /jobs: a superset of the tx-job outcome
-// (address/status/voteID) and the import-job counters (added/progress/total). Empty attributes are
-// omitted so a job only surfaces what its type produced.
+// (address/status/processId/nullifier/voteID, or votes for a batch vote relay) and the import-job
+// counters (added/progress/total). Empty attributes are omitted so a job only surfaces what its
+// type produced.
 type UnifiedJobResult struct {
-	Address  internal.HexBytes `json:"address,omitempty" swaggertype:"string" example:"deadbeef"`
-	Status   string            `json:"status,omitempty"`
-	VoteID   internal.HexBytes `json:"voteID,omitempty" swaggertype:"string" example:"deadbeef"`
-	Added    int               `json:"added,omitempty"`
-	Progress int               `json:"progress,omitempty"`
-	Total    int               `json:"total,omitempty"`
+	Address   internal.HexBytes `json:"address,omitempty" swaggertype:"string" example:"deadbeef"`
+	Status    string            `json:"status,omitempty"`
+	ProcessID internal.HexBytes `json:"processId,omitempty" swaggertype:"string" example:"deadbeef"`
+	Nullifier internal.HexBytes `json:"nullifier,omitempty" swaggertype:"string" example:"deadbeef"`
+	VoteID    internal.HexBytes `json:"voteID,omitempty" swaggertype:"string" example:"deadbeef"`
+	// Votes is the per-envelope outcome of a batch vote relay, in request order
+	Votes    []db.VoteJobResult `json:"votes,omitempty"`
+	Added    int                `json:"added,omitempty"`
+	Progress int                `json:"progress,omitempty"`
+	Total    int                `json:"total,omitempty"`
 }
 
 func (r *UnifiedJobResult) isEmpty() bool {
-	return len(r.Address) == 0 && r.Status == "" && len(r.VoteID) == 0 &&
-		r.Added == 0 && r.Progress == 0 && r.Total == 0
+	return len(r.Address) == 0 && r.Status == "" && len(r.ProcessID) == 0 && len(r.Nullifier) == 0 &&
+		len(r.VoteID) == 0 && len(r.Votes) == 0 && r.Added == 0 && r.Progress == 0 && r.Total == 0
 }
 
 // JobResponse is one job in the GET /jobs list: the unified shape across import and tx jobs.
@@ -1559,7 +1614,8 @@ type JobsListResponse struct {
 
 // JobResponseFromDB builds the unified job response from a db.Job. Import jobs (which don't set
 // Status) fall back to completed/pending derived from CompletedAt, and expose added/progress/total;
-// tx jobs expose their Result (address/status/voteID). The result is omitted when empty.
+// tx jobs expose their Result (address/status/processId/nullifier/voteID, or the per-vote entries of
+// a batch relay). The result is omitted when empty.
 func JobResponseFromDB(job *db.Job) JobResponse {
 	status := job.Status
 	if status == "" {
@@ -1572,11 +1628,23 @@ func JobResponseFromDB(job *db.Job) JobResponse {
 	if len(errs) == 0 && job.Error != "" {
 		errs = []string{job.Error}
 	}
+	// A batch vote job whose envelopes have all reported is finished, whatever its stored status
+	// says. The worker increments the counter and writes the terminal status as two operations, so
+	// a read can land between them — and if the process dies in that gap the job would otherwise
+	// stay pending forever, even though the outcome is fully determined by the entries. Derive it
+	// with the same function the worker closes the job with, so the two can never disagree.
+	if job.Type == db.JobTypeRelayVotes && status == db.JobStatusPending &&
+		job.Total > 0 && job.Added >= job.Total && job.Result != nil {
+		status, errs = db.TerminalVoteBatchStatus(job.Result.Votes)
+	}
 	res := &UnifiedJobResult{Added: job.Added, Total: job.Total}
 	if job.Result != nil {
 		res.Address = job.Result.Address
 		res.Status = job.Result.Status
+		res.ProcessID = job.Result.ProcessID
+		res.Nullifier = job.Result.Nullifier
 		res.VoteID = job.Result.VoteID
+		res.Votes = job.Result.Votes
 	}
 	if job.Total > 0 {
 		res.Progress = job.Added * 100 / job.Total

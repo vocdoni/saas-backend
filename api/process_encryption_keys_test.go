@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"testing"
@@ -98,11 +97,7 @@ func TestProcessEncryptionKeys(t *testing.T) {
 	encObjID, encAddr := newProcess(true)
 
 	// wait until the keykeepers publish the election encryption keys on chain
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	nodeKeys, err := vocdoniClient.WaitUntilElectionKeys(ctx, encAddr.Bytes())
-	cancel()
-	c.Assert(err, qt.IsNil)
-	c.Assert(nodeKeys.PublicKeys, qt.Not(qt.HasLen), 0)
+	nodeKeys := waitUntilElectionKeys(t, vocdoniClient, encAddr.Bytes())
 
 	info := requestAndParse[apicommon.ProcessInfo](t, http.MethodGet, token, nil, "process", encObjID)
 	c.Assert(info.EncryptionKeys, qt.HasLen, len(nodeKeys.PublicKeys))
