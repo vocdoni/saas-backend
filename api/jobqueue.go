@@ -43,7 +43,7 @@ func (o *orgTxMutex) lock(addr common.Address) *sync.Mutex {
 const (
 	// txQueueSize bounds the number of queued-but-not-yet-running tx tasks. It is sized to hold
 	// several full vote batches at once: POST /votes reserves one slot per envelope all-or-nothing,
-	// so a queue merely as large as maxVotesPerBatch would accept a full batch only on a completely
+	// so a queue merely as large as one full batch (db.MaxQuestionsPerProcess) would accept it only on a completely
 	// idle service, and a client turned away falls back to relaying one vote at a time — the
 	// half-voted window that endpoint exists to close. The buffer is not the bottleneck (the
 	// workers below are), so a bigger one adds no chain load or concurrency; it only stops

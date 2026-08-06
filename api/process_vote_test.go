@@ -372,7 +372,7 @@ func TestRelayVote(t *testing.T) {
 	// an empty batch and one over the cap are rejected before any chain read
 	requestAndAssertError(errors.ErrVoteBatchEmpty, t, http.MethodPost, "",
 		&apicommon.VerifyVotesRequest{}, "votes", "verify")
-	tooMany := make([]internal.HexBytes, maxVotesPerBatch+1)
+	tooMany := make([]internal.HexBytes, db.MaxQuestionsPerProcess+1)
 	for i := range tooMany {
 		tooMany[i] = internal.RandomBytes(nullifierSize)
 	}
@@ -523,7 +523,7 @@ func TestRelayVotesRejectsBatch(t *testing.T) {
 		{"empty batch", nil, errors.ErrVoteBatchEmpty},
 		{
 			"over the cap",
-			make([]apicommon.RelayVoteRequest, maxVotesPerBatch+1),
+			make([]apicommon.RelayVoteRequest, db.MaxQuestionsPerProcess+1),
 			errors.ErrVoteBatchTooLarge,
 		},
 		{

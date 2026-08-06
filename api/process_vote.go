@@ -46,7 +46,7 @@ import (
 //	@Router			/vote [post]
 func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 	var req apicommon.RelayVoteRequest
-	if err := decodeCappedJSON(w, r, &req, maxVoteBodyBytes); err != nil {
+	if err := apicommon.DecodeCappedJSON(w, r, &req, maxVoteBodyBytes); err != nil {
 		err.Write(w)
 		return
 	}
@@ -85,23 +85,23 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, &apicommon.EnqueuedResponse{JobID: jobID})
 }
 
+// A POST /votes call is bounded by db.MaxQuestionsPerProcess, used directly rather than through a
+// local alias so the api package names the cap one way. A voter casts one vote per question, and a
+// process cannot hold more questions than that, so the cap is expressed as what it actually
+// depends on rather than a duplicated literal: raising it means raising db.MaxQuestionsPerProcess
+// first, and the vochain batch transaction endpoint above that. It is deliberately NOT tied to
+// txQueueSize — the queue is sized to hold several full batches (see api/jobqueue.go), because
+// a batch rejected for lack of queue room sends the client back to relaying one vote at a time,
+// which is the half-voted window this endpoint exists to close.
+//
+// On the denial-of-service trade-off: one request can occupy up to this many worker slots, each
+// blocked until its transaction is mined, and the endpoint is public and unauthenticated. That
+// amortizes the existing relay surface, it does not enlarge it — the same client can reach the
+// same state with as many sequential POST /vote calls, and the all-or-nothing 503 here
+// is strictly better behaved than relaying a prefix and stopping. Rate limiting is intentionally
+// out of scope for this endpoint; it belongs with the API-wide throttling applied to every route
+// in initRouter (api/api.go).
 const (
-	// maxVotesPerBatch bounds a POST /votes call. A voter casts one vote per question, and a
-	// process cannot hold more questions than this, so the cap is expressed as what it actually
-	// depends on rather than a duplicated literal: raising it means raising maxQuestionsPerProcess
-	// first, and the vochain batch transaction endpoint above that. It is deliberately NOT tied to
-	// txQueueSize — the queue is sized to hold several full batches (see api/jobqueue.go), because
-	// a batch rejected for lack of queue room sends the client back to relaying one vote at a time,
-	// which is the half-voted window this endpoint exists to close.
-	//
-	// On the denial-of-service trade-off: one request can occupy up to this many worker slots, each
-	// blocked until its transaction is mined, and the endpoint is public and unauthenticated. That
-	// amortizes the existing relay surface, it does not enlarge it — the same client can reach the
-	// same state with maxVotesPerBatch sequential POST /vote calls, and the all-or-nothing 503 here
-	// is strictly better behaved than relaying a prefix and stopping. Rate limiting is intentionally
-	// out of scope for this endpoint; it belongs with the API-wide throttling applied to every route
-	// in initRouter (api/api.go).
-	maxVotesPerBatch = maxQuestionsPerProcess
 	// maxVoteBodyBytes bounds the request body of a single relayed envelope. A CSP-signed vote
 	// envelope marshals to ~300 bytes, ~600 characters once hex-encoded into the JSON field, so
 	// this leaves an order of magnitude of headroom for larger proofs while keeping these public,
@@ -109,23 +109,8 @@ const (
 	maxVoteBodyBytes = 8 << 10
 	// maxVotesBodyBytes bounds a whole batch: one envelope allowance each, plus slack for the
 	// JSON framing around them.
-	maxVotesBodyBytes = maxVotesPerBatch*maxVoteBodyBytes + 4<<10
+	maxVotesBodyBytes = db.MaxQuestionsPerProcess*maxVoteBodyBytes + 4<<10
 )
-
-// decodeCappedJSON reads at most limit bytes of the request body and decodes them into dst,
-// returning the API error to write back on a body that is too large or not the expected JSON.
-// The relay endpoints are public, so the body has to be bounded before it is buffered.
-func decodeCappedJSON(w http.ResponseWriter, r *http.Request, dst any, limit int64) *errors.Error {
-	r.Body = http.MaxBytesReader(w, r.Body, limit)
-	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
-		var tooLarge *http.MaxBytesError
-		if stderrors.As(err, &tooLarge) {
-			return asPtr(errors.ErrRequestBodyTooLarge.Withf("the limit is %d bytes", limit))
-		}
-		return asPtr(errors.ErrMalformedBody)
-	}
-	return nil
-}
 
 // relayVotesHandler godoc
 //
@@ -158,7 +143,7 @@ func decodeCappedJSON(w http.ResponseWriter, r *http.Request, dst any, limit int
 //	@Router			/votes [post]
 func (a *API) relayVotesHandler(w http.ResponseWriter, r *http.Request) {
 	var req apicommon.RelayVotesRequest
-	if err := decodeCappedJSON(w, r, &req, maxVotesBodyBytes); err != nil {
+	if err := apicommon.DecodeCappedJSON(w, r, &req, maxVotesBodyBytes); err != nil {
 		err.Write(w)
 		return
 	}
@@ -166,8 +151,8 @@ func (a *API) relayVotesHandler(w http.ResponseWriter, r *http.Request) {
 	case len(req.Votes) == 0:
 		errors.ErrVoteBatchEmpty.Write(w)
 		return
-	case len(req.Votes) > maxVotesPerBatch:
-		errors.ErrVoteBatchTooLarge.Withf("%d votes, the maximum is %d", len(req.Votes), maxVotesPerBatch).Write(w)
+	case len(req.Votes) > db.MaxQuestionsPerProcess:
+		errors.ErrVoteBatchTooLarge.Withf("%d votes, the maximum is %d", len(req.Votes), db.MaxQuestionsPerProcess).Write(w)
 		return
 	}
 
@@ -186,13 +171,15 @@ func (a *API) relayVotesHandler(w http.ResponseWriter, r *http.Request) {
 		// The questions of a voting process share one, so a mixed batch is a client bug.
 		if i > 0 && vote.org != votes[0].org {
 			errors.ErrVoteBatchMixedOrganizations.Withf(
-				"vote index %d targets %s, vote index 0 targets %s", i, vote.org, votes[0].org).Write(w)
+				"vote index %d targets %s, vote index 0 targets %s", i, vote.org, votes[0].org,
+			).Write(w)
 			return
 		}
 		if len(vote.nullifier) > 0 {
 			if first, dup := seenNullifier[vote.nullifier.String()]; dup {
 				errors.ErrInvalidTxFormat.Withf(
-					"vote index %d repeats the nullifier of vote index %d", i, first).Write(w)
+					"vote index %d repeats the nullifier of vote index %d", i, first,
+				).Write(w)
 				return
 			}
 			seenNullifier[vote.nullifier.String()] = i
@@ -247,7 +234,7 @@ const (
 	// characters, so 80 leaves room for the JSON quoting and separator around each, plus
 	// slack for the framing. Like the relay endpoints this one is public, so the body has
 	// to be bounded before it is buffered.
-	maxVerifyVotesBodyBytes = maxVotesPerBatch*80 + 4<<10
+	maxVerifyVotesBodyBytes = db.MaxQuestionsPerProcess*80 + 4<<10
 )
 
 // verifyLookupSem bounds concurrent node reads across every POST /votes/verify request.
@@ -282,7 +269,7 @@ var verifyLookupSem = make(chan struct{}, 32)
 //	@Router			/votes/verify [post]
 func (a *API) verifyVotesHandler(w http.ResponseWriter, r *http.Request) {
 	var req apicommon.VerifyVotesRequest
-	if err := decodeCappedJSON(w, r, &req, maxVerifyVotesBodyBytes); err != nil {
+	if err := apicommon.DecodeCappedJSON(w, r, &req, maxVerifyVotesBodyBytes); err != nil {
 		err.Write(w)
 		return
 	}
@@ -290,9 +277,9 @@ func (a *API) verifyVotesHandler(w http.ResponseWriter, r *http.Request) {
 	case len(req.Nullifiers) == 0:
 		errors.ErrVoteBatchEmpty.Write(w)
 		return
-	case len(req.Nullifiers) > maxVotesPerBatch:
+	case len(req.Nullifiers) > db.MaxQuestionsPerProcess:
 		errors.ErrVoteBatchTooLarge.Withf("%d nullifiers, the maximum is %d",
-			len(req.Nullifiers), maxVotesPerBatch).Write(w)
+			len(req.Nullifiers), db.MaxQuestionsPerProcess).Write(w)
 		return
 	}
 	for i, nullifier := range req.Nullifiers {
@@ -378,26 +365,26 @@ type parsedVote struct {
 // the API error to write back, never both.
 func (a *API) parseRelayVote(payload internal.HexBytes) (*parsedVote, *errors.Error) {
 	if len(payload) == 0 {
-		return nil, asPtr(errors.ErrMalformedBody.Withf("missing txPayload"))
+		return nil, errors.Ptr(errors.ErrMalformedBody.Withf("missing txPayload"))
 	}
 
 	signedTx := &models.SignedTx{}
 	if err := proto.Unmarshal(payload, signedTx); err != nil {
-		return nil, asPtr(errors.ErrInvalidTxFormat.Withf("could not decode signed tx: %v", err))
+		return nil, errors.Ptr(errors.ErrInvalidTxFormat.Withf("could not decode signed tx: %v", err))
 	}
 	innerTx := &models.Tx{}
 	if err := proto.Unmarshal(signedTx.Tx, innerTx); err != nil {
-		return nil, asPtr(errors.ErrInvalidTxFormat.Withf("could not decode tx: %v", err))
+		return nil, errors.Ptr(errors.ErrInvalidTxFormat.Withf("could not decode tx: %v", err))
 	}
 
 	vote := innerTx.GetVote()
 	if vote == nil {
-		return nil, asPtr(errors.ErrInvalidTxFormat.With("not a vote tx"))
+		return nil, errors.Ptr(errors.ErrInvalidTxFormat.With("not a vote tx"))
 	}
 	// the target process is the one named in the signed vote envelope.
 	pid := internal.HexBytes(vote.ProcessId)
 	if len(pid) == 0 {
-		return nil, asPtr(errors.ErrInvalidTxFormat.With("vote has no process id"))
+		return nil, errors.Ptr(errors.ErrInvalidTxFormat.With("vote has no process id"))
 	}
 
 	// ensure we manage this election, resolving its owning organization. Legacy elections
@@ -415,12 +402,12 @@ func (a *API) parseRelayVote(payload internal.HexBytes) (*parsedVote, *errors.Er
 		case nil:
 			orgAddress = question.OrgAddress
 		case db.ErrNotFound:
-			return nil, asPtr(errors.ErrProcessNotFound)
+			return nil, errors.Ptr(errors.ErrProcessNotFound)
 		default:
-			return nil, asPtr(errors.ErrGenericInternalServerError.WithErr(qErr))
+			return nil, errors.Ptr(errors.ErrGenericInternalServerError.WithErr(qErr))
 		}
 	default:
-		return nil, asPtr(errors.ErrGenericInternalServerError.WithErr(err))
+		return nil, errors.Ptr(errors.ErrGenericInternalServerError.WithErr(err))
 	}
 
 	return &parsedVote{
@@ -494,9 +481,6 @@ func (a *API) recordBatchVote(jobID string, index int) func(*db.JobResult, error
 		}
 	}
 }
-
-// asPtr lifts an API error to a pointer, so parseRelayVote can signal "no error" with nil.
-func asPtr(e errors.Error) *errors.Error { return &e }
 
 // setProcessStatusHandler godoc
 //

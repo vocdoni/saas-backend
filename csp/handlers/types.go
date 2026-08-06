@@ -57,6 +57,39 @@ type SignRequest struct {
 	ProcessID internal.HexBytes `json:"electionId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 }
 
+// SignBatchRequest is the batch form of SignRequest: one auth token and one ballot per
+// question of a voting process, signed in a single call. It follows the /processes naming
+// (upstreamId, address) rather than SignRequest's legacy electionId/payload.
+type SignBatchRequest struct {
+	AuthToken internal.HexBytes `json:"authToken" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Ballots   []SignBatchBallot `json:"ballots"`
+}
+
+// SignBatchBallot is one ballot of a SignBatchRequest: the question's on-chain election id
+// and the voter address to sign for it.
+type SignBatchBallot struct {
+	UpstreamID internal.HexBytes `json:"upstreamId" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Address    internal.HexBytes `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
+}
+
+// SignBatchResponse holds one result per requested ballot, in request order.
+type SignBatchResponse struct {
+	Signatures []SignBatchResult `json:"signatures"`
+}
+
+// SignBatchResult is one ballot's outcome: the signature and the weight it was signed with, or
+// the reason that election could not be signed. On failure, Code is a stable machine-readable
+// reason — one of the signCode* constants in processes.go, which are the source of truth — and
+// Error is a sanitized message, never the raw signer detail, which is logged server-side.
+// Exactly one of Signature and Code is set.
+type SignBatchResult struct {
+	UpstreamID internal.HexBytes `json:"upstreamId" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Signature  internal.HexBytes `json:"signature,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Weight     internal.HexBytes `json:"weight,omitempty" swaggertype:"string" format:"hex" example:"2a"`
+	Code       string            `json:"code,omitempty"`
+	Error      string            `json:"error,omitempty"`
+}
+
 // UserWeightRequest defines the payload for the request to get the
 // weight of a user for a given bundle. It includes the authToken to query
 // the information.

@@ -22,6 +22,8 @@ make swagger     # regenerate docs/swagger.yaml from swag annotations (run after
 # Run a single test / package
 go test -run TestName ./api/
 go test -v ./db/
+# The api package is the slow one (~7 min for the whole suite) because every test
+# publishes real elections against the Voconed container — always narrow with -run.
 
 # Local dev stack (API + MongoDB + mongo-express on :8081)
 cp example.env .env   # then edit secrets
@@ -36,6 +38,14 @@ docker compose up
   There are no unit-test-only mocks for the DB — integration tests hit a real containerized Mongo.
 - After editing any API handler, route, or `apicommon` request/response type, run `make swagger`
   so `docs/swagger.yaml` stays in sync (it is generated from `//` swag annotations on `api/api.go` and handlers).
+  Gotcha: `scripts/generate-swagger.sh` deletes `docs/swagger.yaml` before regenerating and calls
+  `swag` without `$(go env GOPATH)/bin` on `PATH`, so on a machine without `swag` already installed
+  it deletes the file and then fails. Put that directory on `PATH` (or run `swag fmt -d ./` and
+  `swag init -g api/api.go -o docs --outputTypes yaml --parseDependency --parseInternal --parseDepth=4`
+  by hand) if the target errors out.
+- API integration tests drive the server over HTTP through generic helpers in `api/api_test.go`:
+  `requestAndParse[T]`, `requestAndAssertCode`, `requestAndAssertError`, and `enqueueAndPollJob` /
+  `pollJob` for the async job endpoints. Use those rather than hand-rolling requests.
 
 ## Architecture
 
@@ -43,6 +53,47 @@ Configuration flows through **Viper with the `VOCDONI_` env prefix** (e.g. `--mo
 `VOCDONI_MONGOURL`). `cmd/service/main.go` wires every component into an `api.Config` and calls
 `api.New(conf).Start()`. Services are optional and conditionally enabled based on whether their
 config is present (SMTP, Twilio SMS); Stripe is required.
+
+### Two generations of the process API live side by side
+
+This is the single most confusing thing in the codebase, and it is invisible from any one file.
+
+- **New (`/processes`, plural)** — a `db.VotingProcess` is a *container* of `db.VotingProcessQuestion`s,
+  and **each question is its own on-chain election**, identified after publish by its `UpstreamID`.
+  So a voter casts one vote transaction per question, holds one CSP signature per question, and one
+  nullifier per question. Anything taking an on-chain election id resolves it with
+  `db.QuestionByUpstreamID`. Voter-facing CSP handlers for this generation live in
+  `csp/handlers/processes.go`.
+- **Legacy (`/process`, singular, and `/process/bundle/...`)** — a `db.Process` *is* one on-chain
+  election, and a "bundle" groups several. Handlers live in `csp/handlers/handlers.go`. Deprecated
+  but still wired; several routes are marked `@Deprecated` in their swag annotations.
+
+Code that must serve both looks up the new collection and falls back to the legacy one — see
+`parseRelayVote` in `api/process_vote.go`, which tries `db.ProcessByAddress` then
+`db.QuestionByUpstreamID`. New work belongs on the `/processes` side; do not extend the legacy path.
+
+A consequence worth internalizing: because one voter action fans out to N elections, several
+endpoints exist purely in batch form so a voter cannot end up half-done — `POST /votes` (relay),
+`POST /votes/verify`, `POST /processes/{processId}/sign-batch`. They share a shape: cap the body,
+validate/authorize the **whole** batch before doing anything, then act.
+
+### On-chain writes are asynchronous jobs, not request-scoped
+
+Any endpoint that submits a transaction returns **202 + `{"jobId": ...}`** and the caller polls
+`GET /jobs/{jobId}`. The machinery is `api/jobqueue.go`:
+
+- `a.enqueueTx(txTask{...})` / `a.enqueueTxBatch(tasks)` push onto a buffered `txQueue`
+  (512 slots, 16 workers). `enqueueTxBatch` takes all the slots or none; a full queue is a 503.
+- A `txTask.run` closure does the submit *and* waits for the tx to be mined, so it blocks a worker
+  the whole time — never spend one on work that isn't an on-chain submit.
+- `txTask.record` overrides how the outcome is written. Tasks sharing one job (the envelopes of a
+  batch relay) need it, or the first to finish would mark the whole job terminal.
+- `a.orgTxLocks.lock(org)` serializes build→sign→submit per organization so two concurrent requests
+  cannot read the same account nonce. The lock is handed to the worker and released after submit.
+
+`statussync/` closes the loop in the other direction: an enqueue-driven worker that reconciles a
+published question's stored status against the Vochain, triggered by API status changes and by
+reads, rather than by a timer.
 
 Component packages (each is a focused service composed in `main.go`):
 
@@ -79,6 +130,7 @@ Component packages (each is a focused service composed in `main.go`):
 - **`objectstorage/`** — S3-like object storage (images) backed by Mongo, with upload/download handlers.
 - **`errors/`** — typed API `Error` (code + HTTP status + optional data), JSON-serializable; handlers
   return these. Predefined errors in `errors_definition.go`.
+- **`statussync/`** — the on-demand question-status reconciler described above.
 - **`internal/`** — shared primitives: `HexBytes`, birthdate parsing, phone/argon2 helpers.
 - **`cmd/`** — `service/` (the API server), `cli/` (DB query tool for process/voter stats),
   `client/` (HTTP client for CSV member import + census workflows).

@@ -2740,6 +2740,54 @@ definitions:
         format: hex
         type: string
     type: object
+  handlers.SignBatchBallot:
+    properties:
+      address:
+        example: deadbeef
+        format: hex
+        type: string
+      upstreamId:
+        example: deadbeef
+        format: hex
+        type: string
+    type: object
+  handlers.SignBatchRequest:
+    properties:
+      authToken:
+        example: deadbeef
+        format: hex
+        type: string
+      ballots:
+        items:
+          $ref: '#/definitions/handlers.SignBatchBallot'
+        type: array
+    type: object
+  handlers.SignBatchResponse:
+    properties:
+      signatures:
+        items:
+          $ref: '#/definitions/handlers.SignBatchResult'
+        type: array
+    type: object
+  handlers.SignBatchResult:
+    properties:
+      code:
+        type: string
+      error:
+        type: string
+      signature:
+        example: deadbeef
+        format: hex
+        type: string
+      upstreamId:
+        example: deadbeef
+        format: hex
+        type: string
+      weight:
+        example: 2a
+        format: hex
+        type: string
+    type: object
   handlers.SignRequest:
     properties:
       authToken:
@@ -6941,6 +6989,78 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Sign a ballot for a voting process question
+      tags:
+      - processes
+  /processes/{processId}/sign-batch:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Batch form of POST /processes/{processId}/sign. A multi-question voting process is
+        one on-chain election per question, so a voter holds one ballot per question and
+        signing them one by one costs a round trip each. This signs them all under a single
+        verified auth token. Public endpoint: the token authenticates the voter.
+        Each ballot names a question by its on-chain election id (upstreamId, as returned by
+        the check and sign-info endpoints) and the voter address to sign for it.
+        The batch is authorized as a unit and signs nothing on failure — every ballot must
+        name an election of this process (else 401) the member is eligible for (else 401),
+        carry a 20-byte voter address (else 400), and no election may be repeated (else
+        400). Authorization strictly precedes the first signature, so a rejected batch
+        consumes nothing.
+        Once authorized, every ballot is signed and the response is always 200 with one
+        entry per request item, in order — even if every ballot fails (the request was
+        honored; the outcome is per item). Each entry carries a signature and weight, or a
+        stable machine-readable code plus a message: already_consumed (that election's
+        signing slot is spent; not retryable), already_signing (a concurrent request holds
+        it; retry), auth_invalid (the token was invalidated mid-batch and every remaining
+        entry is stamped with it; authenticate again), address_mismatch (that election was
+        already signed for a different address; re-send with the address sign-info
+        reports) or sign_failed (internal failure; retry). Retry ONLY the entries that
+        carry a retryable code: re-sending the whole batch re-signs the ballots that
+        already succeeded, and each re-sign counts toward the election's finite overwrite
+        budget (MaxVoteOverwritesPerProcess, 10) — past it the election is permanently
+        locked.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Auth token and one ballot per question
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.SignBatchRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SignBatchResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized, unverified token, election not in process, or
+            member not eligible
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Census or user not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "413":
+          description: Request body too large
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Sign every question's ballot of a voting process in one call
       tags:
       - processes
   /processes/{processId}/sign-info:

@@ -49,6 +49,9 @@ var (
 	// ErrProcessAlreadyConsumed is returned when the user is already
 	// identified in the process.
 	ErrProcessAlreadyConsumed = fmt.Errorf("the user is already identified in the process")
+	// ErrAddressMismatch is returned when a signature is requested for a different address
+	// than the one the election was first consumed with (the slot is pinned to it).
+	ErrAddressMismatch = fmt.Errorf("the election was already signed for a different address")
 	// ErrProcessAlreadyVoted is returned when the user has already voted in
 	// the process.
 	ErrProcessAlreadyVoted = fmt.Errorf("the user has already voted in the process")

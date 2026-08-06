@@ -5,9 +5,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	stderrors "errors"
 	"net/http"
 
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -81,4 +83,21 @@ func NewJobID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// DecodeCappedJSON reads at most limit bytes of the request body and decodes them into dst,
+// returning the API error to write back on a body that is too large or not the expected JSON.
+// Shared by the public relay and CSP endpoints, whose bodies must be bounded before they are
+// buffered. Lives here (not in package api) so csp/handlers — which api imports — can use it
+// without an import cycle.
+func DecodeCappedJSON(w http.ResponseWriter, r *http.Request, dst any, limit int64) *errors.Error {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		var tooLarge *http.MaxBytesError
+		if stderrors.As(err, &tooLarge) {
+			return errors.Ptr(errors.ErrRequestBodyTooLarge.Withf("the limit is %d bytes", limit))
+		}
+		return errors.Ptr(errors.ErrMalformedBody)
+	}
+	return nil
 }

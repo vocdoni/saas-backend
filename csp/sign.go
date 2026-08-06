@@ -54,10 +54,22 @@ func (c *CSP) Sign(
 func (c *CSP) prepareSaltedKeySigner(token, address, processID, weight internal.HexBytes) (
 	internal.HexBytes, *[saltedkey.SaltSize]byte, internal.HexBytes, error,
 ) {
-	// get the data of the auth token and the user from the storage
+	// get the data of the auth token and the user from the storage. A token that is genuinely
+	// gone is an auth verdict; any other storage failure must NOT be — the batch endpoint
+	// aborts every remaining ballot on an auth verdict, and a Mongo blip is retryable.
 	authTokenData, err := c.Storage.CSPAuth(token)
 	if err != nil {
-		return nil, nil, nil, ErrInvalidAuthToken
+		if errors.Is(err, db.ErrTokenNotFound) {
+			return nil, nil, nil, ErrInvalidAuthToken
+		}
+		return nil, nil, nil, errors.Join(ErrSign, err)
+	}
+	// ensure that the auth token has been verified. Checked BEFORE taking the signer lock: an
+	// error return between lock and the deferred unlock in Sign used to leave the (user,
+	// election) lock held forever, because the nil userID returned alongside the error made the
+	// defer unlock a different key than the one locked.
+	if !authTokenData.Verified {
+		return nil, nil, nil, ErrAuthTokenNotVerified
 	}
 	// check if the user is already signing
 	if c.isLocked(authTokenData.UserID, processID) {
@@ -75,12 +87,10 @@ func (c *CSP) prepareSaltedKeySigner(token, address, processID, weight internal.
 	} else if consumed {
 		return nil, nil, nil, ErrProcessAlreadyConsumed
 	}
-	// lock the user data to avoid concurrent signing
+	// lock the user data to avoid concurrent signing. Every return below this line carries
+	// authTokenData.UserID — error or not — so Sign's deferred unlock always releases the key
+	// that was locked here.
 	c.lock(authTokenData.UserID, processID)
-	// ensure that the auth token has been verified
-	if !authTokenData.Verified {
-		return nil, nil, nil, ErrAuthTokenNotVerified
-	}
 
 	// prepare the data for the signature
 	caBundle := &models.CAbundle{
@@ -91,22 +101,26 @@ func (c *CSP) prepareSaltedKeySigner(token, address, processID, weight internal.
 	// encode the data to sign
 	signatureMsg, err := proto.Marshal(caBundle)
 	if err != nil {
-		return nil, nil, nil, ErrPrepareSignature
+		return authTokenData.UserID, nil, nil, ErrPrepareSignature
 	}
 	// generate the salt
 	salt := [saltedkey.SaltSize]byte{}
 	if len(processID) < saltedkey.SaltSize {
-		return nil, nil, nil, ErrInvalidSalt
+		return authTokenData.UserID, nil, nil, ErrInvalidSalt
 	}
 	copy(salt[:], processID[:saltedkey.SaltSize])
 	return authTokenData.UserID, &salt, signatureMsg, nil
 }
 
 func (c *CSP) finishSaltedKeySigner(token, address, processID internal.HexBytes) error {
-	// get the data of the auth token and the user from the storage
+	// get the data of the auth token and the user from the storage; same not-found vs
+	// storage-failure split as prepareSaltedKeySigner, and for the same reason.
 	authTokenData, err := c.Storage.CSPAuth(token)
 	if err != nil {
-		return ErrInvalidAuthToken
+		if errors.Is(err, db.ErrTokenNotFound) {
+			return ErrInvalidAuthToken
+		}
+		return errors.Join(ErrSign, err)
 	}
 	// ensure that the auth token has been verified
 	if !authTokenData.Verified {
@@ -125,6 +139,12 @@ func (c *CSP) finishSaltedKeySigner(token, address, processID internal.HexBytes)
 	// update the process data to mark it as consumed, and set the token used
 	if err := c.Storage.ConsumeCSPProcess(token, processID, address); err != nil {
 		log.Warn(err)
+		// a different address than the one this election was first consumed with is an
+		// authorization rejection (the slot is pinned to that address), not a signer failure —
+		// and it is recoverable: re-sign with the pinned address, which sign-info reports.
+		if errors.Is(err, db.ErrInvalidData) {
+			return ErrAddressMismatch
+		}
 		return ErrSign
 	}
 	return nil

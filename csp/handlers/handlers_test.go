@@ -1,15 +1,58 @@
 package handlers
 
 import (
+	stderrors "errors"
+	"fmt"
 	"testing"
 	"time"
 
 	qt "github.com/frankban/quicktest"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/notifications"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/internal"
 )
+
+func TestSignOutcome(t *testing.T) {
+	c := qt.New(t)
+	// each known sentinel maps to its stable code — including wrapped, the form csp.Sign
+	// actually returns for signer failures — and everything else to the retryable catch-all.
+	for _, tc := range []struct {
+		err  error
+		code string
+	}{
+		{csp.ErrProcessAlreadyConsumed, signCodeAlreadyConsumed},
+		{csp.ErrUserAlreadySigning, signCodeAlreadySigning},
+		{csp.ErrInvalidAuthToken, signCodeAuthInvalid},
+		{csp.ErrAuthTokenNotVerified, signCodeAuthInvalid},
+		{csp.ErrAddressMismatch, signCodeAddressMismatch},
+		{fmt.Errorf("wrapping: %w", csp.ErrProcessAlreadyConsumed), signCodeAlreadyConsumed},
+		{csp.ErrSign, signCodeFailed},
+		// the shape csp.Sign returns for a storage failure: joined, NOT an auth verdict, so a
+		// transient Mongo error stays a retryable per-ballot outcome instead of aborting the batch
+		{stderrors.Join(csp.ErrSign, fmt.Errorf("some storage blip")), signCodeFailed},
+		{fmt.Errorf("some storage blip"), signCodeFailed},
+	} {
+		code, message := signOutcome(tc.err)
+		c.Assert(code, qt.Equals, tc.code, qt.Commentf("error: %v", tc.err))
+		c.Assert(message, qt.Not(qt.Equals), "")
+		// the sanitized message must not echo the raw error text
+		c.Assert(message, qt.Not(qt.Contains), "blip")
+	}
+}
+
+func TestValidateVoterAddress(t *testing.T) {
+	c := qt.New(t)
+	// qt.IsNil rejects a typed-nil *errors.Error (it implements error), so compare the pointer.
+	c.Assert(validateVoterAddress(internal.HexBytes(make([]byte, common.AddressLength))),
+		qt.Equals, (*errors.Error)(nil))
+	c.Assert(validateVoterAddress(nil), qt.Not(qt.IsNil))
+	c.Assert(validateVoterAddress(internal.HexBytes(make([]byte, common.AddressLength-1))), qt.Not(qt.IsNil))
+	c.Assert(validateVoterAddress(internal.HexBytes(make([]byte, common.AddressLength+1))), qt.Not(qt.IsNil))
+}
 
 func TestHandlePhoneContact(t *testing.T) {
 	c := qt.New(t)
