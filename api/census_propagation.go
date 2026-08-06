@@ -128,15 +128,18 @@ func (a *API) preflightCensusGrowth(org *db.Organization, censusIDs []string, co
 }
 
 // autoGroupCensuses returns the censuses backed by the organization's auto "All members" group,
-// which is the group a newly created member implicitly joins. An organization without one (no
-// members yet, or none of its censuses is group-backed) has nothing to propagate to.
-func (a *API) autoGroupCensuses(orgAddress common.Address) []string {
+// which is the group a newly created member implicitly joins. ErrNotFound — no auto group yet, or
+// none of its censuses is group-backed — is the legitimate "nothing to propagate to" case and
+// returns an empty slice with no error. Any other failure is a real lookup error and is returned:
+// the caller must abort before writing the member, since swallowing it would create a silent
+// non-voter (no quota consumed, no propagation) behind a 200.
+func (a *API) autoGroupCensuses(orgAddress common.Address) ([]string, error) {
 	group, err := a.db.AutoMemberGroup(orgAddress)
 	if err != nil {
-		if !stderrors.Is(err, db.ErrNotFound) {
-			log.Warnw("could not resolve the auto member group", "org", orgAddress, "error", err)
+		if stderrors.Is(err, db.ErrNotFound) {
+			return nil, nil
 		}
-		return nil
+		return nil, fmt.Errorf("could not resolve the auto member group: %w", err)
 	}
-	return group.CensusIDs
+	return group.CensusIDs, nil
 }

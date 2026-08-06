@@ -668,6 +668,33 @@ func TestGroupReAddDoesNotUndoRevocation(t *testing.T) {
 	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
 }
 
+// TestAutoGroupCensusesReportsLookupFailures pins the two ways the auto-group lookup can come back
+// empty. They must not be conflated: ErrNotFound is the legitimate "nothing to propagate to" and
+// returns no error, while a real lookup failure is returned so the caller aborts before writing the
+// member. Swallowing the second — as this did before — created a silent non-voter behind a 200: no
+// quota consumed, no propagation, and only a log line to say so.
+func TestAutoGroupCensusesReportsLookupFailures(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, token)
+
+	// an organization with an auto group resolves without error (a fresh one is group-backed by
+	// nothing yet, so the list is legitimately empty)
+	_, err := testAPI.autoGroupCensuses(orgAddress)
+	c.Assert(err, qt.IsNil)
+
+	// an organization without one is not an error either: there is simply nothing to propagate to
+	censuses, err := testAPI.autoGroupCensuses(common.Address{0x62, 0x9})
+	c.Assert(err, qt.IsNil)
+	c.Assert(censuses, qt.HasLen, 0)
+
+	// a real lookup failure is reported rather than read as "no censuses". The zero address is the
+	// one such failure reachable without breaking the database under a live server.
+	censuses, err = testAPI.autoGroupCensuses(common.Address{})
+	c.Assert(err, qt.Not(qt.IsNil))
+	c.Assert(censuses, qt.HasLen, 0)
+}
+
 // TestVotingProcessMutationsRefusedWhilePublishing covers the publish-window guard: while a worker
 // holds the process every "is this a draft?" check reads true, so an edit or delete taken on that
 // basis lands on a process being put on chain.

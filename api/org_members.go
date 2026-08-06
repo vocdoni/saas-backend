@@ -208,8 +208,13 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 
 	// the imported members join the auto "All members" group, so they join the censuses built from
 	// it. Quota and signer are checked first: an over-quota import must not create the members
-	// either.
-	autoCensuses := a.autoGroupCensuses(org.Address)
+	// either. A failure to resolve those censuses is a real lookup error — abort before creating
+	// anyone, since swallowing it would import silent non-voters behind a 200.
+	autoCensuses, err := a.autoGroupCensuses(org.Address)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
 	if err := a.preflightCensusGrowth(org, autoCensuses, len(members.Members)); err != nil {
 		writeSubscriptionError(w, err)
 		return
@@ -358,7 +363,13 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 			isUpdate = true
 		}
 	}
-	autoCensuses := a.autoGroupCensuses(org.Address)
+	// resolved before the write: a failure here is a real lookup error, and creating the member
+	// anyway would leave a silent non-voter — no quota consumed, no propagation — behind a 200.
+	autoCensuses, err := a.autoGroupCensuses(org.Address)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
 	if !isUpdate {
 		if err := a.preflightCensusGrowth(org, autoCensuses, 1); err != nil {
 			writeSubscriptionError(w, err)
