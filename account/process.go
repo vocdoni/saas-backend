@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
-	"slices"
 	"strconv"
 	"time"
 
@@ -273,18 +273,18 @@ func (a *Account) Election(processID []byte) (*api.Election, error) {
 }
 
 // ElectionMemos pages every vote of the on-chain election with the given id and returns each
-// non-empty voter memo cast alongside the open choice (the choice whose value is openValue),
-// one entry per matching vote (so a memo cast N times appears N times). A memo rides on the
-// whole vote, so we correlate it to a choice via the vote's selected values: the votes-list page
-// carries the memo but not the vote package, so for each memo-carrying vote we fetch the single
-// vote (which the node decrypts at RESULTS) and keep the memo only if the open choice's value is
-// among the selected ones. The node's votes-list endpoint returns an empty page past the last
-// one, which terminates the loop.
+// non-empty voter memo cast alongside the open choice, one entry per matching vote (so a memo
+// cast N times appears N times). A memo rides on the whole vote, so we correlate it to a choice
+// via the vote package: the votes-list page carries the memo but not the package, so for each
+// memo-carrying vote we fetch the single vote (which the node decrypts at RESULTS) and keep the
+// memo only if selectsOpen reports its decoded values selected the open choice (the predicate
+// owns the ballot layout — see OpenChoiceMatcher). The node's votes-list endpoint returns an
+// empty page past the last one, which terminates the loop.
 //
 // ponytail: pages the whole election and does one extra GET per memo-carrying vote (N+1); fine for the
 // manager-only memo resolution folded into the results reads. Add saas-side pagination / a bounded
 // fetch pool if a process ever accumulates memos in the millions.
-func (a *Account) ElectionMemos(electionID []byte, openValue uint32) ([]string, error) {
+func (a *Account) ElectionMemos(electionID []byte, selectsOpen func(votes []int) bool) ([]string, error) {
 	var memos []string
 	for page := 0; ; page++ {
 		resp, code, err := a.client.Request(http.MethodGet, nil,
@@ -309,9 +309,14 @@ func (a *Account) ElectionMemos(electionID []byte, openValue uint32) ([]string, 
 			}
 			votes, err := a.voteSelectedValues(internal.HexBytes(v.VoteID))
 			if err != nil {
+				// the list page and the per-vote fetch can disagree transiently (indexing lag), so a
+				// vote the chain does not know yet only drops its own memo, not the whole list.
+				if errors.Is(err, ErrVoteNotFound) {
+					continue
+				}
 				return nil, err
 			}
-			if slices.Contains(votes, int(openValue)) {
+			if selectsOpen(votes) {
 				memos = append(memos, v.Memo)
 			}
 		}

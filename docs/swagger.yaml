@@ -6229,7 +6229,8 @@ paths:
         Read a voting process with its hydrated questions (live per-question results included).
         Public for published processes; a draft is visible only to a Manager/Admin of the org
         (or a voting:write API key acting as one) and returns 404 otherwise. Non-managers never
-        receive the per-question eligibleMemberIds.
+        receive the per-question eligibleMemberIds. A Manager/Admin caller additionally receives
+        each open-value question's free-text voter memos inside its results.
       parameters:
       - description: Process ID
         in: path
@@ -6715,8 +6716,11 @@ paths:
       - processes
   /processes/{processId}/questions/{questionId}:
     get:
-      description: Public voter read of a single question, including its synced status
-        and eligibility.
+      description: |-
+        Public voter read of a single question, including its synced status and live results.
+        Auth is optional: only a Manager/Admin of the org (or a voting:write API key) receives
+        the question's eligibleMemberIds and, for an open-value question, the free-text voter
+        memos inside its results.
       parameters:
       - description: Process ID
         in: path

@@ -198,6 +198,67 @@ func TestBallotProtocolFromType(t *testing.T) {
 	})
 }
 
+// TestOpenChoiceMatcher pins the per-type correlation between a decoded vote package and the
+// question's open-value choice — the predicate ElectionMemos uses to keep only memos cast alongside a
+// vote that selected "other". It returns nil for the types where "selected the open choice" has no
+// meaning: ranked (every choice is ranked on every ballot) and any unnamed/empty type, and whenever
+// there is no open choice at all.
+func TestOpenChoiceMatcher(t *testing.T) {
+	c := qt.New(t)
+
+	c.Run("no open choice is nil", func(c *qt.C) {
+		c.Assert(OpenChoiceMatcher(db.VotingTypeSingleChoice, choices(3)), qt.IsNil)
+	})
+
+	c.Run("singlechoice matches the open choice's value", func(c *qt.C) {
+		choices := []db.Choice{
+			{Value: 1, OpenValue: true},
+			{Value: 2},
+		}
+		match := OpenChoiceMatcher(db.VotingTypeSingleChoice, choices)
+		c.Assert(match, qt.Not(qt.IsNil))
+		c.Assert(match([]int{1}), qt.IsTrue)     // voted the open choice
+		c.Assert(match([]int{2}), qt.IsFalse)    // voted a closed choice
+		c.Assert(match([]int{}), qt.IsFalse)     // empty package
+		c.Assert(match([]int{1, 2}), qt.IsFalse) // singlechoice is exactly one field
+	})
+
+	c.Run("multichoice matches the open choice's index flag", func(c *qt.C) {
+		choices := []db.Choice{
+			{Value: 0},
+			{Value: 1, OpenValue: true},
+			{Value: 2},
+		}
+		match := OpenChoiceMatcher(db.VotingTypeMultiChoice, choices)
+		c.Assert(match, qt.Not(qt.IsNil))
+		c.Assert(match([]int{1, 1, 0}), qt.IsTrue)  // open flag set (one field per choice)
+		c.Assert(match([]int{1, 0, 0}), qt.IsFalse) // open flag not set
+		c.Assert(match([]int{0, 1}), qt.IsTrue)     // short package still carries the open index
+		c.Assert(match([]int{1}), qt.IsFalse)       // open index past the end of the package
+	})
+
+	c.Run("cumulative matches a positive credit on the open choice", func(c *qt.C) {
+		choices := []db.Choice{
+			{Value: 0, OpenValue: true},
+			{Value: 0},
+			{Value: 0},
+		}
+		match := OpenChoiceMatcher(db.VotingTypeCumulative, choices)
+		c.Assert(match, qt.Not(qt.IsNil))
+		c.Assert(match([]int{5, 0, 0}), qt.IsTrue)  // credits on the open choice
+		c.Assert(match([]int{0, 5, 0}), qt.IsFalse) // credits only on a closed choice
+	})
+
+	c.Run("ranked and unnamed types are nil", func(c *qt.C) {
+		choices := []db.Choice{{Value: 0, OpenValue: true}, {Value: 1}}
+		// ranked ranks every choice on every ballot, so "selected" is vacuous
+		c.Assert(OpenChoiceMatcher(db.VotingTypeRanked, choices), qt.IsNil)
+		// an unnamed type has no defined package layout to correlate against
+		c.Assert(OpenChoiceMatcher("quadratic", choices), qt.IsNil)
+		c.Assert(OpenChoiceMatcher("", choices), qt.IsNil)
+	})
+}
+
 // TestQuestionTypeFromBallotProtocol covers the reverse direction: which named type a raw protocol
 // encodes, and — more importantly — which ones it does not, since a shape wrongly given a name
 // would be a question describing a ballot it does not have.

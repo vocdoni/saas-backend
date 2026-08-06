@@ -142,6 +142,9 @@ func TestVotingProcessMemos(t *testing.T) {
 		OrgAddress: orgAddress,
 		Order:      0,
 		Title:      db.MultiLangString{"default": "Q1"},
+		// Type is what buildQuestions stores for a published question and what OpenChoiceMatcher
+		// correlates memos against; the on-chain election here is a singlechoice (MaxCount 1).
+		Type: db.VotingTypeSingleChoice,
 		Choices: []db.Choice{
 			{Title: db.MultiLangString{"default": "Yes"}, Value: 1, OpenValue: true},
 			{Title: db.MultiLangString{"default": "No"}, Value: 2},
