@@ -78,11 +78,15 @@ type SignBatchResponse struct {
 }
 
 // SignBatchResult is one ballot's outcome: the signature and the weight it was signed with, or
-// the reason that election could not be signed. Exactly one of Signature and Error is set.
+// the reason that election could not be signed. On failure, Code is a stable machine-readable
+// reason ("already_consumed", "already_signing", "sign_failed") and Error is a sanitized message
+// — never the raw signer detail, which is logged server-side. Exactly one of Signature and Code
+// is set.
 type SignBatchResult struct {
 	UpstreamID internal.HexBytes `json:"upstreamId" swaggertype:"string" format:"hex" example:"deadbeef"`
 	Signature  internal.HexBytes `json:"signature,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	Weight     internal.HexBytes `json:"weight,omitempty" swaggertype:"string" format:"hex" example:"2a"`
+	Code       string            `json:"code,omitempty"`
 	Error      string            `json:"error,omitempty"`
 }
 

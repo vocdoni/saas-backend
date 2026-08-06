@@ -331,11 +331,18 @@ func weightBytes(w uint64) internal.HexBytes {
 	return new(big.Int).SetUint64(w).Bytes()
 }
 
-// parseAddress parses the address from the payload
+// parseAddress parses the address from the payload. The address is signed into the CA bundle and
+// pinned as the election's consumer, after which a different address is rejected forever, so it
+// must be a full 20-byte Ethereum address — HexBytes would otherwise accept any length and pad
+// odd input, locking the voter out of the election with one bad value.
 func parseAddress(w http.ResponseWriter, payload string) (*internal.HexBytes, bool) {
 	address := new(internal.HexBytes)
 	if err := address.ParseString(payload); err != nil {
 		errors.ErrMalformedBody.WithErr(err).Write(w)
+		return nil, false
+	}
+	if len(*address) != common.AddressLength {
+		errors.ErrMalformedBody.Withf("address is %d bytes, expected %d", len(*address), common.AddressLength).Write(w)
 		return nil, false
 	}
 	return address, true

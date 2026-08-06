@@ -2669,6 +2669,8 @@ definitions:
     type: object
   handlers.SignBatchResult:
     properties:
+      code:
+        type: string
       error:
         type: string
       signature:
@@ -6739,12 +6741,16 @@ paths:
         the check and sign-info endpoints) and the voter address to sign for it.
         The batch is authorized as a unit and signs nothing on failure — every ballot must
         name an election of this process (else 401) the member is eligible for (else 401),
-        carry a voter address (else 400), and no election may be repeated (else 400). Once
-        authorized, every ballot is signed and the response carries one entry per request
-        item, in order: a signature and weight, or the reason that election could not be
-        signed (its signing slot is spent, or a concurrent request holds it). Signing
-        consumes a per-election slot that cannot be given back, so a failed entry is retried
-        by calling again, not rolled back.
+        carry a 20-byte voter address (else 400), and no election may be repeated (else
+        400). Authorization strictly precedes the first signature, so a rejected batch
+        consumes nothing.
+        Once authorized, every ballot is signed and the response is always 200 with one
+        entry per request item, in order — even if every ballot fails (the request was
+        honored; the outcome is per item). Each entry carries a signature and weight, or a
+        stable machine-readable code plus a message. Retry ONLY the entries that carry a
+        code: re-sending the whole batch re-signs the ballots that already succeeded, and
+        each re-sign counts toward the election's finite overwrite budget
+        (MaxVoteOverwritesPerProcess, 10) — past it the election is permanently locked.
       parameters:
       - description: Process ID
         in: path
@@ -6774,7 +6780,7 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
-          description: Process, census, or user not found
+          description: Census or user not found
           schema:
             $ref: '#/definitions/errors.Error'
         "413":

@@ -21,10 +21,6 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-// maxQuestionsPerProcess bounds the number of questions of a voting process (the node
-// batch endpoint caps a batch at 100 transactions).
-const maxQuestionsPerProcess = 100
-
 // parseProcessDates parses the optional RFC3339 start/end dates of a create/update request.
 func parseProcessDates(req *apicommon.CreateVotingProcessRequest) (start, end time.Time, err error) {
 	if req.StartDate != "" {
@@ -98,8 +94,8 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization").Write(w)
 		return
 	}
-	if len(req.Questions) == 0 || len(req.Questions) > maxQuestionsPerProcess {
-		errors.ErrMalformedBody.Withf("questions must be between 1 and %d", maxQuestionsPerProcess).Write(w)
+	if len(req.Questions) == 0 || len(req.Questions) > db.MaxQuestionsPerProcess {
+		errors.ErrMalformedBody.Withf("questions must be between 1 and %d", db.MaxQuestionsPerProcess).Write(w)
 		return
 	}
 	if err := a.subscriptions.OrgCanCreateVotingProcessDraft(orgAddr); err != nil {
@@ -262,7 +258,8 @@ func parseUpdatedAt(s string) (time.Time, error) {
 		if t, err = time.Parse(time.RFC3339, s); err != nil {
 			return time.Time{}, fmt.Errorf(
 				"invalid updatedAt %q: expected %s (or RFC3339) as returned by the read endpoint",
-				s, apicommon.UpdatedAtLayout)
+				s, apicommon.UpdatedAtLayout,
+			)
 		}
 	}
 	return t.UTC(), nil
@@ -331,8 +328,8 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization").Write(w)
 		return
 	}
-	if len(req.Questions) == 0 || len(req.Questions) > maxQuestionsPerProcess {
-		errors.ErrMalformedBody.Withf("questions must be between 1 and %d", maxQuestionsPerProcess).Write(w)
+	if len(req.Questions) == 0 || len(req.Questions) > db.MaxQuestionsPerProcess {
+		errors.ErrMalformedBody.Withf("questions must be between 1 and %d", db.MaxQuestionsPerProcess).Write(w)
 		return
 	}
 	start, end, err := parseProcessDates(req)
@@ -692,7 +689,7 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 // parallelForEach runs fn(0..n-1) concurrently with a bounded worker pool and waits for all to
 // finish. It backs the per-question read resolvers and the results handler, which each fan out one
 // Vochain round-trip per question: the bound keeps GET /processes/{id} and /results fast for a process
-// with many questions (up to maxQuestionsPerProcess) without an unbounded goroutine burst.
+// with many questions (up to db.MaxQuestionsPerProcess) without an unbounded goroutine burst.
 func parallelForEach(n int, fn func(i int)) {
 	const workers = 8
 	sem := make(chan struct{}, workers)
@@ -1040,7 +1037,8 @@ func questionSetProblem(vp *db.VotingProcess, questions []db.VotingProcessQuesti
 	}
 	return fmt.Sprintf(
 		"stored questions do not match the process (%d found, %d expected, %d unknown): save the draft again",
-		len(questions), len(vp.QuestionIDs), stray)
+		len(questions), len(vp.QuestionIDs), stray,
+	)
 }
 
 // writeSubscriptionError writes a typed API error verbatim, falling back to 500.

@@ -19,8 +19,10 @@ import (
 	"go.vocdoni.io/dvote/vochain/state"
 )
 
-// apiErr lifts an API error to a pointer, so a helper can signal "no error" with nil.
-func apiErr(e errors.Error) *errors.Error { return &e }
+// apiErr lifts an API error to a pointer, so a helper can signal "no error" with nil. Named
+// asErr (not apiErr) because handlers.go has several `apiErr, ok := err.(errors.Error)` locals
+// that would shadow a same-named helper.
+func asErr(e errors.Error) *errors.Error { return &e }
 
 // parseProcessID parses the {processId} URL param (a voting-process Mongo ObjectID) and
 // returns both the ObjectID and its bytes, which are used as the CSP token anchor.
@@ -288,29 +290,30 @@ func (c *CSPHandlers) authorizeQuestion(
 	sc *signContext, electionID internal.HexBytes,
 ) (internal.HexBytes, *errors.Error) {
 	// an empty id cannot name an election, and db.QuestionByUpstreamID reports it as
-	// ErrInvalidData, which the branch below would surface to the client as a 500.
+	// ErrInvalidData, which the branch below would surface to the client as a 500. The message is
+	// field-neutral because the single-sign endpoint sends this same id as "electionId".
 	if len(electionID) == 0 {
-		return nil, apiErr(errors.ErrMalformedBody.With("missing upstreamId"))
+		return nil, asErr(errors.ErrMalformedBody.With("missing election id"))
 	}
 	question, err := c.mainDB.QuestionByUpstreamID(electionID)
-	if err != nil && err != db.ErrNotFound {
-		return nil, apiErr(errors.ErrGenericInternalServerError.WithErr(err))
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		return nil, asErr(errors.ErrGenericInternalServerError.WithErr(err))
 	}
 	if err != nil || question.ProcessID != sc.process.ID {
-		return nil, apiErr(errors.ErrUnauthorized.Withf("election not found in process"))
+		return nil, asErr(errors.ErrUnauthorized.Withf("election not found in process"))
 	}
 	if !memberEligibleForQuestion(question, sc.memberID) {
-		return nil, apiErr(errors.ErrUnauthorized.Withf("member not eligible for this question"))
+		return nil, asErr(errors.ErrUnauthorized.Withf("member not eligible for this question"))
 	}
 	return question.UpstreamID, nil
 }
 
 // maxSignBatchBodyBytes bounds a POST /processes/{processId}/sign-batch body. One ballot is an
 // election id plus a voter address, ~200 characters of JSON once hex-encoded and quoted, so 512
-// bytes each leaves ample headroom; a process holds at most 100 questions, and a voter at most
-// one ballot per question. Like the relay endpoints this one is public, so the body has to be
-// bounded before it is buffered.
-const maxSignBatchBodyBytes = 100*512 + 4<<10
+// bytes each leaves ample headroom. The cap tracks db.MaxQuestionsPerProcess (a voter holds at
+// most one ballot per question); like the relay endpoints this one is public, so the body has to
+// be bounded before it is buffered.
+const maxSignBatchBodyBytes = db.MaxQuestionsPerProcess*512 + 4<<10
 
 // authorizedBallot is one item of a sign batch that survived the authorization pass: the
 // question's on-chain election id, resolved from the request, and the voter address.
@@ -330,12 +333,16 @@ type authorizedBallot struct {
 //	@Description	the check and sign-info endpoints) and the voter address to sign for it.
 //	@Description	The batch is authorized as a unit and signs nothing on failure — every ballot must
 //	@Description	name an election of this process (else 401) the member is eligible for (else 401),
-//	@Description	carry a voter address (else 400), and no election may be repeated (else 400). Once
-//	@Description	authorized, every ballot is signed and the response carries one entry per request
-//	@Description	item, in order: a signature and weight, or the reason that election could not be
-//	@Description	signed (its signing slot is spent, or a concurrent request holds it). Signing
-//	@Description	consumes a per-election slot that cannot be given back, so a failed entry is retried
-//	@Description	by calling again, not rolled back.
+//	@Description	carry a 20-byte voter address (else 400), and no election may be repeated (else
+//	@Description	400). Authorization strictly precedes the first signature, so a rejected batch
+//	@Description	consumes nothing.
+//	@Description	Once authorized, every ballot is signed and the response is always 200 with one
+//	@Description	entry per request item, in order — even if every ballot fails (the request was
+//	@Description	honored; the outcome is per item). Each entry carries a signature and weight, or a
+//	@Description	stable machine-readable code plus a message. Retry ONLY the entries that carry a
+//	@Description	code: re-sending the whole batch re-signs the ballots that already succeeded, and
+//	@Description	each re-sign counts toward the election's finite overwrite budget
+//	@Description	(MaxVoteOverwritesPerProcess, 10) — past it the election is permanently locked.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -344,12 +351,10 @@ type authorizedBallot struct {
 //	@Success		200			{object}	handlers.SignBatchResponse
 //	@Failure		400			{object}	errors.Error	"Invalid input data"
 //	@Failure		401			{object}	errors.Error	"Unauthorized, unverified token, election not in process, or member not eligible"
-//	@Failure		404			{object}	errors.Error	"Process, census, or user not found"
+//	@Failure		404			{object}	errors.Error	"Census or user not found"
 //	@Failure		413			{object}	errors.Error	"Request body too large"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId}/sign-batch [post]
-//
-//nolint:lll
 func (c *CSPHandlers) ProcessSignBatchHandler(w http.ResponseWriter, r *http.Request) {
 	oid, _, ok := parseProcessID(w, r)
 	if !ok {
@@ -359,18 +364,22 @@ func (c *CSPHandlers) ProcessSignBatchHandler(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
-	sc, ok := c.resolveSignContext(w, oid, req.AuthToken)
-	if !ok {
-		return
-	}
+	// the size checks need only the parsed body, so they run before the four DB lookups of
+	// resolveSignContext — an empty or oversized batch never touches the database. The cap is the
+	// shared question limit, not the per-process QuestionIDs count: that field is empty for
+	// processes predating it (see questionSetProblem), which would otherwise make this endpoint
+	// reject every batch for them, including a single ballot.
 	switch {
 	case len(req.Ballots) == 0:
 		errors.ErrVoteBatchEmpty.Write(w)
 		return
-	case len(req.Ballots) > len(sc.process.QuestionIDs):
-		// a voter holds at most one ballot per question, so the process itself is the cap.
-		errors.ErrVoteBatchTooLarge.Withf("%d ballots, the process has %d questions",
-			len(req.Ballots), len(sc.process.QuestionIDs)).Write(w)
+	case len(req.Ballots) > db.MaxQuestionsPerProcess:
+		errors.ErrVoteBatchTooLarge.Withf("%d ballots, the maximum is %d",
+			len(req.Ballots), db.MaxQuestionsPerProcess).Write(w)
+		return
+	}
+	sc, ok := c.resolveSignContext(w, oid, req.AuthToken)
+	if !ok {
 		return
 	}
 
@@ -384,7 +393,8 @@ func (c *CSPHandlers) ProcessSignBatchHandler(w http.ResponseWriter, r *http.Req
 		// lock, and a voter has at most one ballot per question anyway.
 		if first, dup := seen[string(item.UpstreamID)]; dup {
 			errors.ErrMalformedBody.Withf(
-				"the ballot at index %d repeats the election of index %d", i, first).Write(w)
+				"the ballot at index %d repeats the election of index %d", i, first,
+			).Write(w)
 			return
 		}
 		seen[string(item.UpstreamID)] = i
@@ -393,10 +403,14 @@ func (c *CSPHandlers) ProcessSignBatchHandler(w http.ResponseWriter, r *http.Req
 			sErr.Withf("at index %d", i).Write(w)
 			return
 		}
-		// the address is what gets signed into the CA bundle and recorded as the consumer of
-		// the election, so an empty one is rejected here rather than deep in the storage layer.
-		if len(item.Address) == 0 {
-			errors.ErrMalformedBody.Withf("the ballot at index %d has no address", i).Write(w)
+		// the address is signed into the CA bundle and pinned as the election's consumer, after
+		// which a different address is rejected forever — so validate its length here. HexBytes
+		// accepts any length and pads odd input, which is exactly the silent corruption to stop.
+		if len(item.Address) != common.AddressLength {
+			errors.ErrMalformedBody.Withf(
+				"the ballot at index %d has an address of %d bytes, expected %d",
+				i, len(item.Address), common.AddressLength,
+			).Write(w)
 			return
 		}
 		ballots[i] = authorizedBallot{upstreamID: upstreamID, address: item.Address}
@@ -413,9 +427,10 @@ func (c *CSPHandlers) ProcessSignBatchHandler(w http.ResponseWriter, r *http.Req
 			signers.SignerTypeECDSASalted)
 		if err != nil {
 			// per-ballot by nature: this election's signing slot is spent, or a concurrent
-			// request holds its lock. The batch's siblings are unaffected.
-			logSignFailure(b.upstreamID, err)
-			res.Error = err.Error()
+			// request holds its lock. Map it to a stable code + sanitized message for the
+			// response; the raw error stays in the log.
+			res.Code, res.Error = signOutcome(err)
+			logSignFailure(oid, sc.memberID, b.upstreamID, err)
 			continue
 		}
 		res.Signature = signature
@@ -424,30 +439,41 @@ func (c *CSPHandlers) ProcessSignBatchHandler(w http.ResponseWriter, r *http.Req
 	apicommon.HTTPWriteJSON(w, resp)
 }
 
+// signOutcome maps a per-ballot signing error to a stable, machine-readable code and a message
+// safe for the public response body. The raw error (which for signer failures is
+// errors.Join(ErrSign, <internal detail>)) is kept out of the response and logged instead.
+func signOutcome(err error) (code, message string) {
+	switch {
+	case errors.Is(err, csp.ErrProcessAlreadyConsumed):
+		return "already_consumed", "this election's signing slot is already consumed"
+	case errors.Is(err, csp.ErrUserAlreadySigning):
+		return "already_signing", "a concurrent request is signing this election"
+	default:
+		return "sign_failed", "could not sign the ballot"
+	}
+}
+
 // logSignFailure records why one ballot of a batch could not be signed. A spent signing slot and
 // a concurrent request for the same election are the normal outcomes of a voter retrying or of
 // two tabs racing, and the caller is told about them in the response anyway, so they are debug —
-// a warn per occurrence would bury the storage and signer failures that do need attention.
-func logSignFailure(upstreamID internal.HexBytes, err error) {
+// a warn per occurrence would bury the storage and signer failures that do need attention. The
+// member and process ids make a warn attributable during an incident.
+func logSignFailure(oid primitive.ObjectID, memberID string, upstreamID internal.HexBytes, err error) {
 	if errors.Is(err, csp.ErrProcessAlreadyConsumed) || errors.Is(err, csp.ErrUserAlreadySigning) {
-		log.Debugw("skipped a batch ballot", "procId", upstreamID, "reason", err)
+		log.Debugw("skipped a batch ballot", "procId", oid.Hex(), "member", memberID,
+			"electionId", upstreamID, "reason", err)
 		return
 	}
-	log.Warnw("could not sign a batch ballot", "procId", upstreamID, "error", err)
+	log.Warnw("could not sign a batch ballot", "procId", oid.Hex(), "member", memberID,
+		"electionId", upstreamID, "error", err)
 }
 
 // parseSignBatchRequest decodes a capped sign-batch body and checks it carries an auth token,
 // writing the proper error and returning false on failure.
 func parseSignBatchRequest(w http.ResponseWriter, r *http.Request) (*SignBatchRequest, bool) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxSignBatchBodyBytes)
 	var req SignBatchRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			errors.ErrRequestBodyTooLarge.Withf("the limit is %d bytes", maxSignBatchBodyBytes).Write(w)
-			return nil, false
-		}
-		errors.ErrMalformedBody.Write(w)
+	if apiErr := apicommon.DecodeCappedJSON(w, r, &req, maxSignBatchBodyBytes); apiErr != nil {
+		apiErr.Write(w)
 		return nil, false
 	}
 	if req.AuthToken == nil {

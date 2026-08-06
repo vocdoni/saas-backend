@@ -46,7 +46,7 @@ import (
 //	@Router			/vote [post]
 func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 	var req apicommon.RelayVoteRequest
-	if err := decodeCappedJSON(w, r, &req, maxVoteBodyBytes); err != nil {
+	if err := apicommon.DecodeCappedJSON(w, r, &req, maxVoteBodyBytes); err != nil {
 		err.Write(w)
 		return
 	}
@@ -88,7 +88,7 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 const (
 	// maxVotesPerBatch bounds a POST /votes call. A voter casts one vote per question, and a
 	// process cannot hold more questions than this, so the cap is expressed as what it actually
-	// depends on rather than a duplicated literal: raising it means raising maxQuestionsPerProcess
+	// depends on rather than a duplicated literal: raising it means raising db.MaxQuestionsPerProcess
 	// first, and the vochain batch transaction endpoint above that. It is deliberately NOT tied to
 	// txQueueSize — the queue is sized to hold several full batches (see api/jobqueue.go), because
 	// a batch rejected for lack of queue room sends the client back to relaying one vote at a time,
@@ -101,7 +101,7 @@ const (
 	// is strictly better behaved than relaying a prefix and stopping. Rate limiting is intentionally
 	// out of scope for this endpoint; it belongs with the API-wide throttling applied to every route
 	// in initRouter (api/api.go).
-	maxVotesPerBatch = maxQuestionsPerProcess
+	maxVotesPerBatch = db.MaxQuestionsPerProcess
 	// maxVoteBodyBytes bounds the request body of a single relayed envelope. A CSP-signed vote
 	// envelope marshals to ~300 bytes, ~600 characters once hex-encoded into the JSON field, so
 	// this leaves an order of magnitude of headroom for larger proofs while keeping these public,
@@ -111,21 +111,6 @@ const (
 	// JSON framing around them.
 	maxVotesBodyBytes = maxVotesPerBatch*maxVoteBodyBytes + 4<<10
 )
-
-// decodeCappedJSON reads at most limit bytes of the request body and decodes them into dst,
-// returning the API error to write back on a body that is too large or not the expected JSON.
-// The relay endpoints are public, so the body has to be bounded before it is buffered.
-func decodeCappedJSON(w http.ResponseWriter, r *http.Request, dst any, limit int64) *errors.Error {
-	r.Body = http.MaxBytesReader(w, r.Body, limit)
-	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
-		var tooLarge *http.MaxBytesError
-		if stderrors.As(err, &tooLarge) {
-			return asPtr(errors.ErrRequestBodyTooLarge.Withf("the limit is %d bytes", limit))
-		}
-		return asPtr(errors.ErrMalformedBody)
-	}
-	return nil
-}
 
 // relayVotesHandler godoc
 //
@@ -158,7 +143,7 @@ func decodeCappedJSON(w http.ResponseWriter, r *http.Request, dst any, limit int
 //	@Router			/votes [post]
 func (a *API) relayVotesHandler(w http.ResponseWriter, r *http.Request) {
 	var req apicommon.RelayVotesRequest
-	if err := decodeCappedJSON(w, r, &req, maxVotesBodyBytes); err != nil {
+	if err := apicommon.DecodeCappedJSON(w, r, &req, maxVotesBodyBytes); err != nil {
 		err.Write(w)
 		return
 	}
@@ -186,13 +171,15 @@ func (a *API) relayVotesHandler(w http.ResponseWriter, r *http.Request) {
 		// The questions of a voting process share one, so a mixed batch is a client bug.
 		if i > 0 && vote.org != votes[0].org {
 			errors.ErrVoteBatchMixedOrganizations.Withf(
-				"vote index %d targets %s, vote index 0 targets %s", i, vote.org, votes[0].org).Write(w)
+				"vote index %d targets %s, vote index 0 targets %s", i, vote.org, votes[0].org,
+			).Write(w)
 			return
 		}
 		if len(vote.nullifier) > 0 {
 			if first, dup := seenNullifier[vote.nullifier.String()]; dup {
 				errors.ErrInvalidTxFormat.Withf(
-					"vote index %d repeats the nullifier of vote index %d", i, first).Write(w)
+					"vote index %d repeats the nullifier of vote index %d", i, first,
+				).Write(w)
 				return
 			}
 			seenNullifier[vote.nullifier.String()] = i
@@ -282,7 +269,7 @@ var verifyLookupSem = make(chan struct{}, 32)
 //	@Router			/votes/verify [post]
 func (a *API) verifyVotesHandler(w http.ResponseWriter, r *http.Request) {
 	var req apicommon.VerifyVotesRequest
-	if err := decodeCappedJSON(w, r, &req, maxVerifyVotesBodyBytes); err != nil {
+	if err := apicommon.DecodeCappedJSON(w, r, &req, maxVerifyVotesBodyBytes); err != nil {
 		err.Write(w)
 		return
 	}
