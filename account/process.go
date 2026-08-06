@@ -351,16 +351,9 @@ func (a *Account) ElectionMemos(electionID []byte, openValue uint32) ([]string, 
 // (VotePackage.Votes). The node decrypts the package for encrypted elections once keys are revealed
 // (RESULTS); if the package is still opaque/absent it returns no values, so the caller drops the memo.
 func (a *Account) voteSelectedValues(voteID internal.HexBytes) ([]int, error) {
-	resp, code, err := a.client.Request(http.MethodGet, nil, "votes", voteID.String())
+	vote, err := a.VoteByNullifier(voteID)
 	if err != nil {
-		return nil, fmt.Errorf("could not fetch vote %x: %w", voteID, err)
-	}
-	if code != http.StatusOK {
-		return nil, fmt.Errorf("could not fetch vote %x: unexpected status %d (%s)", voteID, code, resp)
-	}
-	var vote api.Vote
-	if err := json.Unmarshal(resp, &vote); err != nil {
-		return nil, fmt.Errorf("could not decode vote %x: %w", voteID, err)
+		return nil, err
 	}
 	if len(vote.VotePackage) == 0 {
 		return nil, nil
