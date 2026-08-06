@@ -85,23 +85,23 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, &apicommon.EnqueuedResponse{JobID: jobID})
 }
 
+// A POST /votes call is bounded by db.MaxQuestionsPerProcess, used directly rather than through a
+// local alias so the api package names the cap one way. A voter casts one vote per question, and a
+// process cannot hold more questions than that, so the cap is expressed as what it actually
+// depends on rather than a duplicated literal: raising it means raising db.MaxQuestionsPerProcess
+// first, and the vochain batch transaction endpoint above that. It is deliberately NOT tied to
+// txQueueSize — the queue is sized to hold several full batches (see api/jobqueue.go), because
+// a batch rejected for lack of queue room sends the client back to relaying one vote at a time,
+// which is the half-voted window this endpoint exists to close.
+//
+// On the denial-of-service trade-off: one request can occupy up to this many worker slots, each
+// blocked until its transaction is mined, and the endpoint is public and unauthenticated. That
+// amortizes the existing relay surface, it does not enlarge it — the same client can reach the
+// same state with as many sequential POST /vote calls, and the all-or-nothing 503 here
+// is strictly better behaved than relaying a prefix and stopping. Rate limiting is intentionally
+// out of scope for this endpoint; it belongs with the API-wide throttling applied to every route
+// in initRouter (api/api.go).
 const (
-	// maxVotesPerBatch bounds a POST /votes call. A voter casts one vote per question, and a
-	// process cannot hold more questions than this, so the cap is expressed as what it actually
-	// depends on rather than a duplicated literal: raising it means raising db.MaxQuestionsPerProcess
-	// first, and the vochain batch transaction endpoint above that. It is deliberately NOT tied to
-	// txQueueSize — the queue is sized to hold several full batches (see api/jobqueue.go), because
-	// a batch rejected for lack of queue room sends the client back to relaying one vote at a time,
-	// which is the half-voted window this endpoint exists to close.
-	//
-	// On the denial-of-service trade-off: one request can occupy up to this many worker slots, each
-	// blocked until its transaction is mined, and the endpoint is public and unauthenticated. That
-	// amortizes the existing relay surface, it does not enlarge it — the same client can reach the
-	// same state with maxVotesPerBatch sequential POST /vote calls, and the all-or-nothing 503 here
-	// is strictly better behaved than relaying a prefix and stopping. Rate limiting is intentionally
-	// out of scope for this endpoint; it belongs with the API-wide throttling applied to every route
-	// in initRouter (api/api.go).
-	maxVotesPerBatch = db.MaxQuestionsPerProcess
 	// maxVoteBodyBytes bounds the request body of a single relayed envelope. A CSP-signed vote
 	// envelope marshals to ~300 bytes, ~600 characters once hex-encoded into the JSON field, so
 	// this leaves an order of magnitude of headroom for larger proofs while keeping these public,
@@ -109,7 +109,7 @@ const (
 	maxVoteBodyBytes = 8 << 10
 	// maxVotesBodyBytes bounds a whole batch: one envelope allowance each, plus slack for the
 	// JSON framing around them.
-	maxVotesBodyBytes = maxVotesPerBatch*maxVoteBodyBytes + 4<<10
+	maxVotesBodyBytes = db.MaxQuestionsPerProcess*maxVoteBodyBytes + 4<<10
 )
 
 // relayVotesHandler godoc
@@ -151,8 +151,8 @@ func (a *API) relayVotesHandler(w http.ResponseWriter, r *http.Request) {
 	case len(req.Votes) == 0:
 		errors.ErrVoteBatchEmpty.Write(w)
 		return
-	case len(req.Votes) > maxVotesPerBatch:
-		errors.ErrVoteBatchTooLarge.Withf("%d votes, the maximum is %d", len(req.Votes), maxVotesPerBatch).Write(w)
+	case len(req.Votes) > db.MaxQuestionsPerProcess:
+		errors.ErrVoteBatchTooLarge.Withf("%d votes, the maximum is %d", len(req.Votes), db.MaxQuestionsPerProcess).Write(w)
 		return
 	}
 
@@ -234,7 +234,7 @@ const (
 	// characters, so 80 leaves room for the JSON quoting and separator around each, plus
 	// slack for the framing. Like the relay endpoints this one is public, so the body has
 	// to be bounded before it is buffered.
-	maxVerifyVotesBodyBytes = maxVotesPerBatch*80 + 4<<10
+	maxVerifyVotesBodyBytes = db.MaxQuestionsPerProcess*80 + 4<<10
 )
 
 // verifyLookupSem bounds concurrent node reads across every POST /votes/verify request.
@@ -277,9 +277,9 @@ func (a *API) verifyVotesHandler(w http.ResponseWriter, r *http.Request) {
 	case len(req.Nullifiers) == 0:
 		errors.ErrVoteBatchEmpty.Write(w)
 		return
-	case len(req.Nullifiers) > maxVotesPerBatch:
+	case len(req.Nullifiers) > db.MaxQuestionsPerProcess:
 		errors.ErrVoteBatchTooLarge.Withf("%d nullifiers, the maximum is %d",
-			len(req.Nullifiers), maxVotesPerBatch).Write(w)
+			len(req.Nullifiers), db.MaxQuestionsPerProcess).Write(w)
 		return
 	}
 	for i, nullifier := range req.Nullifiers {
