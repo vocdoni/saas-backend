@@ -2,10 +2,13 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"net/mail"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -59,11 +62,13 @@ func (ms *MongoStorage) SetOrgMember(salt string, orgMember *OrgMember) (string,
 	return member.ID.Hex(), nil
 }
 
-// DeleteOrgMember removes a orgMember
-func (ms *MongoStorage) DelOrgMember(id string) error {
+// DelOrgMember removes an orgMember and revokes them from every census they were part of.
+// The returned questions are those whose eligibility list became empty, so their elections are now
+// whole-census and undersized on chain; the caller resizes them.
+func (ms *MongoStorage) DelOrgMember(id string) ([]VotingProcessQuestion, error) {
 	objID, err := primitive.ObjectIDFromHex(id)
 	if err != nil {
-		return ErrInvalidData
+		return nil, ErrInvalidData
 	}
 
 	// Fetch the member first so we know which org it belongs to (needed for auto group cleanup).
@@ -72,9 +77,16 @@ func (ms *MongoStorage) DelOrgMember(id string) error {
 	var existing OrgMember
 	if err := ms.orgMembers.FindOne(ctxFetch, bson.M{"_id": objID}).Decode(&existing); err != nil {
 		if err == mongo.ErrNoDocuments {
-			return ErrNotFound
+			return nil, ErrNotFound
 		}
-		return fmt.Errorf("could not fetch member before deletion: %w", err)
+		return nil, fmt.Errorf("could not fetch member before deletion: %w", err)
+	}
+
+	// revoke before the memberbase write, and outside keysLock, which is not reentrant
+	// the participant-row count is the caller's own DeletedCount below, not this one
+	_, emptied, err := ms.RevokeMembersEverywhere([]string{id})
+	if err != nil {
+		return nil, fmt.Errorf("could not revoke member from censuses: %w", err)
 	}
 
 	ms.keysLock.Lock()
@@ -87,14 +99,14 @@ func (ms *MongoStorage) DelOrgMember(id string) error {
 	filter := bson.M{"_id": objID}
 	_, err = ms.orgMembers.DeleteOne(ctx, filter)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Clean up the auto group if the org now has no members.
 	if err := ms.DeleteAutoMemberGroupIfEmpty(existing.OrgAddress); err != nil {
 		log.Warnw("could not clean up auto member group after DelOrgMember", "error", err)
 	}
-	return nil
+	return emptied, nil
 }
 
 // OrgMember retrieves a orgMember from the DB based on it ID
@@ -146,11 +158,43 @@ type BulkOrgMembersJob struct {
 	Total    int
 	Added    int
 	Errors   []error
+	// MemberIDs are the hex ids of the members actually inserted, so the caller can propagate
+	// them to the censuses the organization's auto group backs.
+	MemberIDs []string
 }
 
 // ErrorsAsStrings returns the errors as a slice of strings
 func (j *BulkOrgMembersJob) ErrorsAsStrings() []string {
 	return errorsAsStrings(j.Errors)
+}
+
+// bulkOrgMembersProgress holds the job state addOrgMemberBatches accumulates while its progress
+// reporter ticks concurrently. The reporter must never publish the shared struct: a consumer reads
+// the value it received while the batch loop is still writing, so every send is a snapshot taken
+// under the mutex.
+type bulkOrgMembersProgress struct {
+	mu  sync.Mutex
+	job BulkOrgMembersJob
+}
+
+// record folds one finished batch into the job state.
+func (p *bulkOrgMembersProgress) record(memberIDs []string, errs []error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.job.Added += len(memberIDs)
+	p.job.MemberIDs = append(p.job.MemberIDs, memberIDs...)
+	p.job.Errors = append(p.job.Errors, errs...)
+	p.job.Progress = int(float64(p.job.Added) / float64(p.job.Total) * 100)
+}
+
+// snapshot returns a copy that stays valid once the next batch starts writing.
+func (p *bulkOrgMembersProgress) snapshot() *BulkOrgMembersJob {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	snap := p.job
+	snap.Errors = slices.Clone(p.job.Errors)
+	snap.MemberIDs = slices.Clone(p.job.MemberIDs)
+	return &snap
 }
 
 // prepareOrgMember processes a member for storage by:
@@ -168,7 +212,8 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 	// picked up from a spreadsheet or CSV import would otherwise make the member
 	// impossible to authenticate.
 	member := *m.Normalized()
-	var errors []error
+	// named errs, not errors: this file imports the errors package
+	var errs []error
 
 	// Assign a new internal ID if not provided
 	if member.ID == primitive.NilObjectID {
@@ -182,7 +227,7 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 	// validate the (already normalized) email
 	if member.Email != "" {
 		if _, err := mail.ParseAddress(member.Email); err != nil {
-			errors = append(errors, fmt.Errorf("invalid email %q: %w", member.Email, err))
+			errs = append(errs, fmt.Errorf("invalid email %q: %w", member.Email, err))
 			// If email is invalid, set it to empty and store the error
 			member.Email = ""
 		}
@@ -193,7 +238,7 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 		phone, err := NewHashedPhone(member.PlaintextPhone, org)
 		if err != nil {
 			// the error already identifies the offending phone number
-			errors = append(errors, err)
+			errs = append(errs, err)
 		} else {
 			member.Phone = phone
 		}
@@ -211,16 +256,16 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 		var err error
 		member.ParsedBirthDate, member.BirthDate, err = internal.ParseBirthDate(member.BirthDate)
 		if err != nil {
-			errors = append(errors, err)
+			errs = append(errs, err)
 			member.BirthDate = "" // Reset invalid birthdate
 			member.ParsedBirthDate = time.Time{}
 		}
 	}
-	return &member, errors
+	return &member, errs
 }
 
 // createOrgMemberBulkOperations creates a batch of members using bulk write operations,
-// and returns the number of members added and any errors encountered.
+// and returns the hex ids of the members inserted plus any errors encountered.
 // firstLine is the 1-based position of members[0] in the originally submitted list;
 // validation errors are prefixed with the line each offending member sits at, so
 // users can locate it in the imported file.
@@ -230,21 +275,21 @@ func (ms *MongoStorage) createOrgMemberBulkOperations(
 	salt string,
 	currentTime time.Time,
 	firstLine int,
-) (int, []error) {
+) ([]string, []error) {
 	var preparedMembers []any
-	var errors []error
+	var errs []error
 
 	for i, m := range members {
 		// Prepare the member
 		member, validationErrors := prepareOrgMember(org, m, salt, currentTime)
 		for _, err := range validationErrors {
-			errors = append(errors, fmt.Errorf("line %d: %w", firstLine+i, err))
+			errs = append(errs, fmt.Errorf("line %d: %w", firstLine+i, err))
 		}
 		preparedMembers = append(preparedMembers, member)
 	}
 
 	if len(preparedMembers) == 0 {
-		return 0, errors
+		return nil, errs
 	}
 
 	// Only lock the mutex during the actual database operations
@@ -259,24 +304,36 @@ func (ms *MongoStorage) createOrgMemberBulkOperations(
 	result, err := ms.orgMembers.InsertMany(batchCtx, preparedMembers)
 	if err != nil {
 		log.Warnw("error during bulk addition of members batch", "error", err)
-		errors = append(errors, fmt.Errorf("lines %d-%d: %w", firstLine, firstLine+len(members)-1, err))
+		errs = append(errs, fmt.Errorf("lines %d-%d: %w", firstLine, firstLine+len(members)-1, err))
 	}
 	if result == nil {
-		return 0, errors
+		return nil, errs
 	}
 
-	return len(result.InsertedIDs), errors
+	insertedIDs := make([]string, 0, len(result.InsertedIDs))
+	for _, id := range result.InsertedIDs {
+		oid, ok := id.(primitive.ObjectID)
+		if !ok {
+			// InsertMany echoes back the _id prepareOrgMember set, so this cannot happen unless
+			// that changes; dropping the id is better than propagating a wrong one to a census.
+			log.Warnw("unexpected inserted id type in bulk member add", "id", id)
+			continue
+		}
+		insertedIDs = append(insertedIDs, oid.Hex())
+	}
+
+	return insertedIDs, errs
 }
 
 // startOrgMemberProgressReporter starts a goroutine that reports progress periodically
 func startOrgMemberProgressReporter(
 	ctx context.Context,
 	progressChan chan<- *BulkOrgMembersJob,
-	status *BulkOrgMembersJob,
+	progress *bulkOrgMembersProgress,
 ) {
 	defer close(progressChan)
 
-	if status.Total == 0 {
+	if progress.snapshot().Total == 0 {
 		return
 	}
 
@@ -284,15 +341,15 @@ func startOrgMemberProgressReporter(
 	defer ticker.Stop()
 
 	// Send initial progress
-	progressChan <- status
+	progressChan <- progress.snapshot()
 
 	for {
 		select {
 		case <-ticker.C:
-			progressChan <- status
+			progressChan <- progress.snapshot()
 		case <-ctx.Done():
 			// Send final progress (100%)
-			progressChan <- status
+			progressChan <- progress.snapshot()
 			return
 		}
 	}
@@ -312,33 +369,30 @@ func (ms *MongoStorage) addOrgMemberBatches(
 
 	// Process members in batches of 200
 	batchSize := 200
+	total := len(orgMembers)
 	currentTime := time.Now()
 
-	job := BulkOrgMembersJob{
-		Progress: 0,
-		Total:    len(orgMembers),
-		Added:    0,
-		Errors:   []error{},
-	}
+	progress := &bulkOrgMembersProgress{job: BulkOrgMembersJob{Total: total, Errors: []error{}}}
 
 	// Create a context for the progress reporter
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Start progress reporter in a separate goroutine
+	// Start progress reporter in a separate goroutine. It ticks while this loop runs, so the job
+	// state it reads is only ever touched through progress.
 	go startOrgMemberProgressReporter(
 		ctx,
 		progressChan,
-		&job,
+		progress,
 	)
 
 	// Process members in batches
-	for start := 0; start < job.Total; start += batchSize {
+	for start := 0; start < total; start += batchSize {
 		// Calculate end index for current batch
-		end := min(start+batchSize, job.Total)
+		end := min(start+batchSize, total)
 
-		// Process the batch and get number of added members
-		added, errs := ms.createOrgMemberBulkOperations(
+		// Process the batch and get the ids of the members added
+		memberIDs, errs := ms.createOrgMemberBulkOperations(
 			org,
 			orgMembers[start:end],
 			salt,
@@ -346,17 +400,11 @@ func (ms *MongoStorage) addOrgMemberBatches(
 			start+1,
 		)
 
-		// Update job stats
-		job = BulkOrgMembersJob{
-			Progress: int(float64(job.Added+added) / float64(job.Total) * 100),
-			Total:    job.Total,
-			Added:    job.Added + added,
-			Errors:   append(job.Errors, errs...),
-		}
+		progress.record(memberIDs, errs)
 	}
 
 	// Ensure the auto group exists now that members have been added.
-	if job.Added > 0 {
+	if progress.snapshot().Added > 0 {
 		ms.keysLock.Lock()
 		defer ms.keysLock.Unlock()
 		if err := ms.EnsureAutoMemberGroup(org.Address); err != nil {
@@ -385,13 +433,49 @@ func (ms *MongoStorage) AddBulkOrgMembers(org *Organization, members []*OrgMembe
 	return progressChan, nil
 }
 
+// mergeLoginHashFields backfills onto member every field that feeds HashAuthTwoFaFields from the
+// stored document. The census login hashes are recomputed from the member being written, so a
+// partial update that omits a hashed field would otherwise hash a half-empty member and lock the
+// voter out of every census they belong to.
+//
+// Keep this list in step with HashAuthTwoFaFields (db/types.go): name, surname, memberNumber,
+// nationalId, birthDate and email/phone. Weight is deliberately not merged — it does not feed the
+// hash and is in the always-update tag list, so a zero weight is a deliberate write.
+func mergeLoginHashFields(member, stored *OrgMember) {
+	if member.Name == "" {
+		member.Name = stored.Name
+	}
+	if member.Surname == "" {
+		member.Surname = stored.Surname
+	}
+	if member.MemberNumber == "" {
+		member.MemberNumber = stored.MemberNumber
+	}
+	if member.NationalID == "" {
+		member.NationalID = stored.NationalID
+	}
+	if member.BirthDate == "" {
+		member.BirthDate = stored.BirthDate
+		member.ParsedBirthDate = stored.ParsedBirthDate
+	}
+	if member.Email == "" {
+		member.Email = stored.Email
+	}
+	// a plaintext phone in the request is hashed by prepareOrgMember and overwrites this
+	if member.Phone.IsEmpty() {
+		member.Phone = stored.Phone
+	}
+}
+
 // UpsertOrgMemberAndCensusParticipants updates or inserts an organization member in the database.
 // In case of update, this method updates the loginHashes of this member in all censuses
 // of processes where this member is a participant.
+// The returned bool reports whether the member was created rather than updated, so callers can
+// propagate a brand new member to the censuses of the organization's auto group.
 func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, member *OrgMember, salt string,
-) (primitive.ObjectID, error) {
+) (primitive.ObjectID, bool, error) {
 	if org.Address.Cmp(common.Address{}) == 0 {
-		return primitive.NilObjectID, ErrInvalidData
+		return primitive.NilObjectID, false, ErrInvalidData
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -400,37 +484,43 @@ func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, 
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
-	// if this member exists already, check the orgAddress is not being changed
+	// If this member exists already, check the orgAddress is not being changed and merge the
+	// stored login-hash fields in before anything hashes them. A read failure must not be
+	// swallowed: hashing a half-empty member locks the voter out of every census permanently.
+	created := false
 	orgMemberInDB := &OrgMember{}
-	if err := ms.orgMembers.FindOne(ctx, bson.M{"_id": member.ID}).Decode(orgMemberInDB); err == nil {
-		if member.Phone.IsEmpty() { // fill in with the HashedPhone stored in db
-			member.Phone = orgMemberInDB.Phone
-		}
+	switch err := ms.orgMembers.FindOne(ctx, bson.M{"_id": member.ID}).Decode(orgMemberInDB); {
+	case err == nil:
 		if orgMemberInDB.OrgAddress != org.Address {
-			return primitive.NilObjectID, fmt.Errorf("modifying orgAddress is not allowed")
+			return primitive.NilObjectID, false, fmt.Errorf("modifying orgAddress is not allowed")
 		}
+		mergeLoginHashFields(member, orgMemberInDB)
+	case errors.Is(err, mongo.ErrNoDocuments):
+		created = true
+	default:
+		return primitive.NilObjectID, false, fmt.Errorf("failed to read stored org member: %w", err)
 	}
 
 	preparedMember, validationErrors := prepareOrgMember(org, member, salt, time.Now())
 	if len(validationErrors) > 0 {
-		return primitive.NilObjectID, fmt.Errorf("errors: %s", errorsAsStrings(validationErrors))
+		return primitive.NilObjectID, false, fmt.Errorf("errors: %s", errorsAsStrings(validationErrors))
 	}
 
 	// Update the census participants first, to bail out early in case this would create any duplicates conflict
 	if err := ms.updateCensusParticipantsForMember(ctx, preparedMember); err != nil {
-		return primitive.NilObjectID, fmt.Errorf("failed to update census participants: %w", err)
+		return primitive.NilObjectID, false, fmt.Errorf("failed to update census participants: %w", err)
 	}
 
 	updateDoc, err := dynamicUpdateDocument(preparedMember, []string{"weight"})
 	if err != nil {
-		return primitive.NilObjectID, err
+		return primitive.NilObjectID, false, err
 	}
 
 	filter := bson.M{"_id": preparedMember.ID}
 	opts := options.Update().SetUpsert(true)
 	_, err = ms.orgMembers.UpdateOne(ctx, filter, updateDoc, opts)
 	if err != nil {
-		return primitive.NilObjectID, fmt.Errorf("failed to upsert org member: %w", err)
+		return primitive.NilObjectID, false, fmt.Errorf("failed to upsert org member: %w", err)
 	}
 
 	// Ensure the auto group exists now that at least one member is present.
@@ -438,7 +528,7 @@ func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, 
 		log.Warnw("could not ensure auto member group after upsert", "error", err)
 	}
 
-	return preparedMember.ID, nil
+	return preparedMember.ID, created, nil
 }
 
 // updateCensusParticipantsForMember updates all census participants where participantID == orgMemberID
@@ -547,21 +637,41 @@ func (ms *MongoStorage) OrgMembers(orgAddress common.Address, page, limit int64,
 	return paginatedDocuments[*OrgMember](ms.orgMembers, page, limit, filter, findOptions)
 }
 
-func (ms *MongoStorage) DeleteOrgMembers(orgAddress common.Address, ids []string) (int, error) {
+// DeleteOrgMembers removes the given members and revokes them from every census they were part of.
+// The returned questions are those whose eligibility list became empty, so their elections are now
+// whole-census and undersized on chain; the caller resizes them.
+func (ms *MongoStorage) DeleteOrgMembers(
+	orgAddress common.Address, ids []string,
+) (int, []VotingProcessQuestion, error) {
 	if orgAddress.Cmp(common.Address{}) == 0 {
-		return 0, ErrInvalidData
+		return 0, nil, ErrInvalidData
 	}
 	if len(ids) == 0 {
-		return 0, nil
+		return 0, nil, nil
 	}
 	// Convert string IDs to ObjectIDs
 	var oids []primitive.ObjectID
 	for _, id := range ids {
 		objID, err := primitive.ObjectIDFromHex(id)
 		if err != nil {
-			return 0, fmt.Errorf("invalid member ID %s: %w", id, ErrInvalidData)
+			return 0, nil, fmt.Errorf("invalid member ID %s: %w", id, ErrInvalidData)
 		}
 		oids = append(oids, objID)
+	}
+
+	// Scope the ids to this organization before revoking anything. The delete below is org-scoped
+	// but the revocation is not: it resolves the censuses to touch from the member ids alone, so an
+	// id belonging to another organization would be revoked from that organization's censuses while
+	// this delete matched nothing.
+	scoped, err := ms.FilterOrgMemberIDs(orgAddress, ids)
+	if err != nil {
+		return 0, nil, fmt.Errorf("could not scope member ids to the organization: %w", err)
+	}
+
+	// revoke before the memberbase write, and outside keysLock, which is not reentrant
+	_, emptied, err := ms.RevokeMembersEverywhere(scoped)
+	if err != nil {
+		return 0, nil, fmt.Errorf("could not revoke members from censuses: %w", err)
 	}
 
 	// create a context with a timeout
@@ -581,7 +691,7 @@ func (ms *MongoStorage) DeleteOrgMembers(orgAddress common.Address, ids []string
 
 	result, err := ms.orgMembers.DeleteMany(ctx, filter)
 	if err != nil {
-		return 0, fmt.Errorf("failed to delete orgMembers: %w", err)
+		return 0, nil, fmt.Errorf("failed to delete orgMembers: %w", err)
 	}
 
 	// Convert ObjectIDs to string IDs for group updates (groups store member IDs as strings)
@@ -612,7 +722,7 @@ func (ms *MongoStorage) DeleteOrgMembers(orgAddress common.Address, ids []string
 
 	_, err = ms.orgMemberGroups.UpdateMany(ctx, groupFilter, groupUpdate)
 	if err != nil {
-		return 0, fmt.Errorf("failed to update groups after deleting orgMembers: %w", err)
+		return 0, nil, fmt.Errorf("failed to update groups after deleting orgMembers: %w", err)
 	}
 
 	// Clean up the auto group if the org now has no members.
@@ -620,13 +730,24 @@ func (ms *MongoStorage) DeleteOrgMembers(orgAddress common.Address, ids []string
 		log.Warnw("could not clean up auto member group after DeleteOrgMembers", "error", err)
 	}
 
-	return int(result.DeletedCount), nil
+	return int(result.DeletedCount), emptied, nil
 }
 
-// DeleteAllOrgMembers removes all members from an organization
-func (ms *MongoStorage) DeleteAllOrgMembers(orgAddress common.Address) (int, error) {
+// DeleteAllOrgMembers removes all members from an organization, revoking them from every census
+// they were part of. The returned questions are those whose eligibility list became empty.
+func (ms *MongoStorage) DeleteAllOrgMembers(orgAddress common.Address) (int, []VotingProcessQuestion, error) {
 	if orgAddress.Cmp(common.Address{}) == 0 {
-		return 0, ErrInvalidData
+		return 0, nil, ErrInvalidData
+	}
+
+	memberIDs, err := ms.GetAllOrgMemberIDs(orgAddress)
+	if err != nil {
+		return 0, nil, fmt.Errorf("could not list members before deletion: %w", err)
+	}
+	// revoke before the memberbase write, and outside keysLock, which is not reentrant
+	_, emptied, err := ms.RevokeMembersEverywhere(memberIDs)
+	if err != nil {
+		return 0, nil, fmt.Errorf("could not revoke members from censuses: %w", err)
 	}
 
 	// create a context with a timeout
@@ -643,7 +764,7 @@ func (ms *MongoStorage) DeleteAllOrgMembers(orgAddress common.Address) (int, err
 
 	result, err := ms.orgMembers.DeleteMany(ctx, filter)
 	if err != nil {
-		return 0, fmt.Errorf("failed to delete all orgMembers: %w", err)
+		return 0, nil, fmt.Errorf("failed to delete all orgMembers: %w", err)
 	}
 
 	// Update all groups to remove the deleted member IDs
@@ -659,7 +780,7 @@ func (ms *MongoStorage) DeleteAllOrgMembers(orgAddress common.Address) (int, err
 
 	_, err = ms.orgMemberGroups.UpdateMany(ctx, groupFilter, groupUpdate)
 	if err != nil {
-		return 0, fmt.Errorf("failed to update groups after deleting all orgMembers: %w", err)
+		return 0, nil, fmt.Errorf("failed to update groups after deleting all orgMembers: %w", err)
 	}
 
 	// All members are gone — remove the auto group too.
@@ -667,7 +788,7 @@ func (ms *MongoStorage) DeleteAllOrgMembers(orgAddress common.Address) (int, err
 		log.Warnw("could not delete auto member group after DeleteAllOrgMembers", "error", err)
 	}
 
-	return int(result.DeletedCount), nil
+	return int(result.DeletedCount), emptied, nil
 }
 
 // GetAllOrgMemberIDs retrieves all member IDs for an organization
@@ -784,6 +905,67 @@ func (ms *MongoStorage) validateOrgMembers(ctx context.Context, orgAddress commo
 		}
 	}
 	return nil
+}
+
+// FilterOrgMemberIDs returns, in input order, the subset of ids that identify members of
+// orgAddress. Malformed, unknown and foreign ids are dropped rather than rejected: on the wire
+// such an id has always deleted nothing, and the census cascade must see exactly the set the
+// memberbase write will.
+//
+// The cascade derives the censuses to touch from the member ids themselves, so an id that reaches
+// it unscoped revokes a member of another organization — participants, eligibility lists and CSP
+// sessions included. Every caller must filter first.
+func (ms *MongoStorage) FilterOrgMemberIDs(orgAddress common.Address, ids []string) ([]string, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return nil, ErrInvalidData
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	objectIDs := make([]primitive.ObjectID, 0, len(ids))
+	for _, id := range ids {
+		objID, err := primitive.ObjectIDFromHex(id)
+		if err != nil {
+			continue // an id that is not an ObjectID cannot name a member
+		}
+		objectIDs = append(objectIDs, objID)
+	}
+	if len(objectIDs) == 0 {
+		return nil, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	cursor, err := ms.orgMembers.Find(ctx,
+		bson.M{"_id": bson.M{"$in": objectIDs}, "orgAddress": orgAddress},
+		options.Find().SetProjection(bson.M{"_id": 1}))
+	if err != nil {
+		return nil, fmt.Errorf("failed to query org members by id: %w", err)
+	}
+	defer func() {
+		if err := cursor.Close(ctx); err != nil {
+			log.Warnw("error closing cursor", "error", err)
+		}
+	}()
+
+	var found []OrgMember
+	if err := cursor.All(ctx, &found); err != nil {
+		return nil, fmt.Errorf("failed to decode org members by id: %w", err)
+	}
+	owned := make(map[string]bool, len(found))
+	for _, member := range found {
+		owned[member.ID.Hex()] = true
+	}
+
+	scoped := make([]string, 0, len(found))
+	for _, id := range ids {
+		if owned[id] {
+			scoped = append(scoped, id)
+		}
+	}
+	return scoped, nil
 }
 
 // getOrgMembersByIDs retrieves organization members by their IDs

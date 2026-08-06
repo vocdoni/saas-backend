@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -61,7 +62,8 @@ func (ms *MongoStorage) OrganizationMemberGroups(
 		{Key: "_id", Value: 1},
 	})
 	total, groups, err := paginatedDocuments[*OrganizationMemberGroup](
-		ms.orgMemberGroups, page, limit, filter, findOpts)
+		ms.orgMemberGroups, page, limit, filter, findOpts,
+	)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -129,34 +131,56 @@ func (ms *MongoStorage) CreateOrganizationMemberGroup(group *OrganizationMemberG
 func (ms *MongoStorage) UpdateOrganizationMemberGroup(
 	groupID string, orgAddress common.Address,
 	title, description string, addedMembers, removedMembers []string,
-) error {
+) ([]VotingProcessQuestion, error) {
 	if orgAddress.Cmp(common.Address{}) == 0 {
-		return ErrInvalidData
+		return nil, ErrInvalidData
 	}
 	group, err := ms.OrganizationMemberGroup(groupID, orgAddress)
 	if err != nil {
 		if err == ErrNotFound {
-			return ErrInvalidData
+			return nil, ErrInvalidData
 		}
-		return fmt.Errorf("could not retrieve organization members group: %w", err)
+		return nil, fmt.Errorf("could not retrieve organization members group: %w", err)
 	}
 	// Auto groups do not allow manual member manipulation.
 	if group.IsAutoGroup && (len(addedMembers) > 0 || len(removedMembers) > 0) {
-		return ErrAutoGroupMembersCannotBeModified
+		return nil, ErrAutoGroupMembersCannotBeModified
 	}
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	objID, err := primitive.ObjectIDFromHex(groupID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// check that the addedMembers contains valid IDs from the orgMembers collection
 	if len(addedMembers) > 0 {
 		err = ms.validateOrgMembers(ctx, group.OrgAddress, addedMembers)
 		if err != nil {
-			return err
+			return nil, err
+		}
+	}
+
+	// Members leaving the group leave the censuses built from it too, otherwise they would keep
+	// voting an election they are no longer part of. Runs before the group write, and outside
+	// keysLock, which is not reentrant.
+	//
+	// Only ids the group actually holds are revoked. Removing an id that is not a member of the
+	// group is already a no-op on the group document, but the revocation is not org- or
+	// group-aware: it would drop that member's census participation and CSP sessions wherever
+	// they are.
+	var emptied []VotingProcessQuestion
+	removedInGroup := make([]string, 0, len(removedMembers))
+	for _, id := range removedMembers {
+		if contains(group.MemberIDs, id) {
+			removedInGroup = append(removedInGroup, id)
+		}
+	}
+	if len(removedInGroup) > 0 && len(group.CensusIDs) > 0 {
+		_, emptied, err = ms.RevokeMembersFromCensuses(group.CensusIDs, removedInGroup)
+		if err != nil {
+			return nil, fmt.Errorf("could not revoke removed members from the group censuses: %w", err)
 		}
 	}
 
@@ -180,14 +204,14 @@ func (ms *MongoStorage) UpdateOrganizationMemberGroup(
 		metadataUpdate := bson.D{{Key: "$set", Value: updateFields}}
 		_, err = ms.orgMemberGroups.UpdateOne(ctx, filter, metadataUpdate)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	// Get the updated group to ensure we have the latest state
 	updatedGroup, err := ms.OrganizationMemberGroup(groupID, orgAddress)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Now handle member updates if needed
@@ -217,11 +241,11 @@ func (ms *MongoStorage) UpdateOrganizationMemberGroup(
 
 		_, err = ms.orgMemberGroups.UpdateOne(ctx, filter, memberUpdate)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
-	return nil
+	return emptied, nil
 }
 
 // AddOrganizationMemberGroupCensus adds a census to an organization member group
@@ -244,23 +268,32 @@ func (ms *MongoStorage) addOrganizationMemberGroupCensus(
 	return err
 }
 
-// DeleteOrganizationMemberGroup deletes an organization member group by its ID.
+// DeleteOrganizationMemberGroup deletes an organization member group by its ID, revoking every one
+// of its members from the censuses the group backs. The returned questions are those whose
+// eligibility list became empty.
+//
+// Deleting a group is therefore a destructive election operation: it empties the censuses of any
+// process built on it. It stays allowed — removals are refused for members already signed for — but
+// the affected processes are logged.
+//
 // Returns ErrAutoGroupCannotBeDeleted if the group is the auto-generated "All members" group.
-func (ms *MongoStorage) DeleteOrganizationMemberGroup(groupID string, orgAddress common.Address) error {
+func (ms *MongoStorage) DeleteOrganizationMemberGroup(
+	groupID string, orgAddress common.Address,
+) ([]VotingProcessQuestion, error) {
 	if orgAddress.Cmp(common.Address{}) == 0 {
-		return ErrInvalidData
+		return nil, ErrInvalidData
 	}
 	// Prevent deletion of the auto group.
 	group, err := ms.OrganizationMemberGroup(groupID, orgAddress)
 	if err != nil {
 		if err == ErrNotFound {
 			// Preserve original behaviour: silently succeed when group doesn't exist.
-			return nil
+			return nil, nil
 		}
-		return fmt.Errorf("could not retrieve group: %w", err)
+		return nil, fmt.Errorf("could not retrieve group: %w", err)
 	}
 	if group.IsAutoGroup {
-		return ErrAutoGroupCannotBeDeleted
+		return nil, ErrAutoGroupCannotBeDeleted
 	}
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -268,7 +301,28 @@ func (ms *MongoStorage) DeleteOrganizationMemberGroup(groupID string, orgAddress
 
 	objID, err := primitive.ObjectIDFromHex(groupID)
 	if err != nil {
-		return fmt.Errorf("invalid group ID: %w", err)
+		return nil, fmt.Errorf("invalid group ID: %w", err)
+	}
+
+	var emptied []VotingProcessQuestion
+	if len(group.MemberIDs) > 0 && len(group.CensusIDs) > 0 {
+		processes, err := ms.VotingProcessesByCensus(group.CensusIDs)
+		if err != nil {
+			return nil, fmt.Errorf("could not resolve the processes of the group censuses: %w", err)
+		}
+		if len(processes) > 0 {
+			ids := make([]string, 0, len(processes))
+			for _, p := range processes {
+				ids = append(ids, p.ID.Hex())
+			}
+			log.Warnw("deleting a member group empties the census of live processes",
+				"group", groupID, "org", orgAddress, "processes", ids)
+		}
+		// revoke before the group write, and outside keysLock, which is not reentrant
+		_, emptied, err = ms.RevokeMembersFromCensuses(group.CensusIDs, group.MemberIDs)
+		if err != nil {
+			return nil, fmt.Errorf("could not revoke the group members from its censuses: %w", err)
+		}
 	}
 
 	// Only lock the mutex during the actual database operations
@@ -278,9 +332,9 @@ func (ms *MongoStorage) DeleteOrganizationMemberGroup(groupID string, orgAddress
 	// delete the group from the database
 	filter := bson.M{"_id": objID, "orgAddress": orgAddress}
 	if _, err := ms.orgMemberGroups.DeleteOne(ctx, filter); err != nil {
-		return fmt.Errorf("could not delete organization members group: %w", err)
+		return nil, fmt.Errorf("could not delete organization members group: %w", err)
 	}
-	return nil
+	return emptied, nil
 }
 
 // ListOrganizationMemberGroup lists all the members of an organization member group (paginated)
@@ -619,6 +673,27 @@ func buildCompositeKey(bm bson.M, authFields OrgMemberAuthFields, twoFaFields Or
 	return strings.Join(keyParts, "|")
 }
 
+// AutoMemberGroup returns the organization's auto-generated "All members" group, or ErrNotFound if
+// it does not exist. It is the group a brand new member implicitly joins, so it resolves the
+// censuses a member creation has to propagate to.
+func (ms *MongoStorage) AutoMemberGroup(orgAddress common.Address) (*OrganizationMemberGroup, error) {
+	if orgAddress.Cmp(common.Address{}) == 0 {
+		return nil, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	group := &OrganizationMemberGroup{}
+	err := ms.orgMemberGroups.FindOne(ctx, bson.M{"orgAddress": orgAddress, "isAutoGroup": true}).Decode(group)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("could not get auto member group: %w", err)
+	}
+	return group, nil
+}
+
 // EnsureAutoMemberGroup creates the auto-generated "All members" group for an organization
 // if it does not already exist. It is idempotent and safe to call after every member addition.
 func (ms *MongoStorage) EnsureAutoMemberGroup(orgAddress common.Address) error {
@@ -671,6 +746,19 @@ func (ms *MongoStorage) DeleteAutoMemberGroupIfEmpty(orgAddress common.Address) 
 	}
 	if count > 0 {
 		return nil // still has members, keep the auto group
+	}
+	// Keep the group while censuses are built from it. EnsureAutoMemberGroup would recreate it
+	// with a fresh ObjectID, orphaning every census that references the old one.
+	group, err := ms.AutoMemberGroup(orgAddress)
+	switch {
+	case err == nil:
+		if len(group.CensusIDs) > 0 {
+			return nil
+		}
+	case errors.Is(err, ErrNotFound):
+		return nil // nothing to delete
+	default:
+		return fmt.Errorf("could not read auto member group: %w", err)
 	}
 	return ms.deleteAutoMemberGroup(orgAddress)
 }
