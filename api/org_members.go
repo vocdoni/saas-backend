@@ -414,8 +414,8 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 //	@Description	actually deleted and may be lower than the number of ids submitted.
 //	@Description
 //	@Description	Deletion is refused with 409 for any member the CSP has already signed for while a
-//	@Description	question of one of their processes is still READY or PAUSED; the offending ids come back
-//	@Description	in `data.signedMemberIds`. Once voting closes on those questions the deletion succeeds.
+//	@Description	question of a census they still participate in is READY or PAUSED; the offending ids come
+//	@Description	back in `data.signedMemberIds`. Once voting closes on those questions the deletion succeeds.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `members:write`).
 //	@Tags			organizations

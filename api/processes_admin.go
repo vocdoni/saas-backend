@@ -487,7 +487,8 @@ func diffMemberIDs(previous, next []string) (added, removed []string) {
 //	@Description	eligibility list built on it, so the CSP stops signing for them. Refused with 409 for
 //	@Description	any member the CSP has already signed for while a question of the process is still
 //	@Description	READY or PAUSED; once voting closes on those questions the removal succeeds. The
-//	@Description	offending ids come back in `data.signedMemberIds`.
+//	@Description	offending ids come back in `data.signedMemberIds`. Members no longer in the census are
+//	@Description	removed as a no-op rather than refused.
 //	@Description
 //	@Description	Pruning a question's eligibility list to empty opens it to the whole census, so a
 //	@Description	maxCensusSize increase may be enqueued as an async job (poll GET /jobs/{jobId}).

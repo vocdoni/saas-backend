@@ -12,31 +12,85 @@ import (
 )
 
 // blockedVoters returns the subset of memberIDs that may not be removed from the given censuses
-// because the CSP has already signed for them in a process that is still running.
+// because the CSP has already signed for them in a process the removal would actually strip them
+// from: an ongoing election of a census they still participate in. A signature on a census a
+// member has already left blocks nothing — the removal does not touch that election, so there is
+// nothing left to protect by refusing it (#630).
 //
-// "Still running" means a published question whose status is READY or PAUSED. ENDED, CANCELED and
+// "Ongoing" means a published question whose status is READY or PAUSED. ENDED, CANCELED and
 // RESULTS release their members, so once voting closes the removal goes through and erasure is
 // never permanently blocked.
 //
 // Refusing rather than silently revoking is what keeps census.Size an honest recount of live
-// participants, and votes <= censusSize true by construction: no signature the chain will accept can
-// belong to someone who is no longer counted.
+// participants, and votes <= censusSize true by construction: no signature the chain will accept
+// can belong to someone who is no longer counted. The participation scoping preserves exactly
+// that: a member with a signature but no participant row is already outside the count, and only
+// the censuses that would lose a counted member can lose the invariant. Question eligibility
+// lists deliberately play no part — eligibility is enforced once, at sign time
+// (ProcessSignHandler), and never re-checked afterwards, so a consumed signature is a live
+// potential vote whatever the list says today; participation is the only axis this removal
+// changes.
+//
+// One census is checked per iteration — the participant filter is per census, and matching it by
+// exact participantID string mirrors the $in delete in RevokeMembersFromCensuses, so the guard
+// refuses exactly what the write would remove. The handful of censuses a single request names
+// keeps this cheap; group the queries if that ever stops holding.
 func (a *API) blockedVoters(censusIDs, memberIDs []string) ([]string, error) {
 	if len(censusIDs) == 0 || len(memberIDs) == 0 {
 		return nil, nil
 	}
-	questions, err := a.db.OngoingQuestionsByCensuses(censusIDs)
-	if err != nil {
-		return nil, fmt.Errorf("could not resolve the ongoing questions of the censuses: %w", err)
+	blocked := make(map[string]bool, len(memberIDs))
+	for _, censusID := range censusIDs {
+		questions, err := a.db.OngoingQuestionsByCensuses([]string{censusID})
+		if err != nil {
+			return nil, fmt.Errorf("could not resolve the ongoing questions of the census: %w", err)
+		}
+		if len(questions) == 0 {
+			continue
+		}
+		participants, err := a.db.CensusParticipantsByMemberIDs(censusID, memberIDs)
+		if err != nil {
+			return nil, fmt.Errorf("could not resolve the participants of the census: %w", err)
+		}
+		if len(participants) == 0 {
+			continue
+		}
+		inCensus := make(map[string]bool, len(participants))
+		for i := range participants {
+			inCensus[participants[i].ParticipantID] = true
+		}
+		// the caller's own ids, filtered rather than the participant rows echoed, so
+		// MembersWithUsedCSPProcesses answers in the caller's spelling as before
+		present := make([]string, 0, len(participants))
+		for _, id := range memberIDs {
+			if inCensus[id] {
+				present = append(present, id)
+			}
+		}
+		elections := make([]internal.HexBytes, 0, len(questions))
+		for i := range questions {
+			elections = append(elections, questions[i].UpstreamID)
+		}
+		hit, err := a.db.MembersWithUsedCSPProcesses(elections, present)
+		if err != nil {
+			return nil, fmt.Errorf("could not resolve the members signed for on the census elections: %w", err)
+		}
+		for _, id := range hit {
+			blocked[id] = true
+		}
 	}
-	if len(questions) == 0 {
+	if len(blocked) == 0 {
 		return nil, nil
 	}
-	elections := make([]internal.HexBytes, 0, len(questions))
-	for i := range questions {
-		elections = append(elections, questions[i].UpstreamID)
+	// answer in the order the caller asked, each id once however many censuses block it
+	result := make([]string, 0, len(blocked))
+	for _, id := range memberIDs {
+		if blocked[id] {
+			result = append(result, id)
+			delete(blocked, id)
+		}
 	}
-	return a.db.MembersWithUsedCSPProcesses(elections, memberIDs)
+	return result, nil
 }
 
 // refuseBlockedVoters answers 409 when any of the members may not be removed, and reports whether
