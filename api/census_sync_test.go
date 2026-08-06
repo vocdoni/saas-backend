@@ -240,10 +240,10 @@ func TestUpdateQuestionCensusRefusesStrippingASignedVoter(t *testing.T) {
 	errResp := requestAndExpectError(t, http.MethodPut, token,
 		&apicommon.UpdateQuestionCensusRequest{MemberIDs: []string{ids[0], ids[1]}},
 		"processes", pid, "questions", open.ID.Hex(), "census")
-	c.Assert(errResp.Code, qt.Equals, errors.ErrCensusMemberAlreadyVoted.Code)
+	c.Assert(errResp.Code, qt.Equals, errors.ErrCensusMemberAlreadySignedFor.Code)
 	data, ok := errResp.Data.(map[string]any)
 	c.Assert(ok, qt.IsTrue, qt.Commentf("data: %#v", errResp.Data))
-	c.Assert(data["votedMemberIds"], qt.DeepEquals, []any{ids[2]})
+	c.Assert(data["signedMemberIds"], qt.DeepEquals, []any{ids[2]})
 
 	// and the question is still open to the whole census: the refusal happened before the write
 	readBack := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)

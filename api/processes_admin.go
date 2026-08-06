@@ -319,7 +319,7 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 //	@Description
 //	@Description	Removing a member the CSP has already signed for, while a question of this process is
 //	@Description	still READY or PAUSED, is refused with 409 and the offending ids in
-//	@Description	`data.votedMemberIds`.
+//	@Description	`data.signedMemberIds`.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
@@ -487,7 +487,7 @@ func diffMemberIDs(previous, next []string) (added, removed []string) {
 //	@Description	eligibility list built on it, so the CSP stops signing for them. Refused with 409 for
 //	@Description	any member the CSP has already signed for while a question of the process is still
 //	@Description	READY or PAUSED; once voting closes on those questions the removal succeeds. The
-//	@Description	offending ids come back in `data.votedMemberIds`.
+//	@Description	offending ids come back in `data.signedMemberIds`.
 //	@Description
 //	@Description	Pruning a question's eligibility list to empty opens it to the whole census, so a
 //	@Description	maxCensusSize increase may be enqueued as an async job (poll GET /jobs/{jobId}).

@@ -61,7 +61,7 @@ func (a *API) refuseBlockedVoters(w http.ResponseWriter, censusIDs, memberIDs []
 	if len(blocked) == 0 {
 		return false
 	}
-	errors.ErrCensusMemberAlreadyVoted.WithData(map[string]any{"votedMemberIds": blocked}).Write(w)
+	errors.ErrCensusMemberAlreadySignedFor.WithData(map[string]any{"signedMemberIds": blocked}).Write(w)
 	return true
 }
 
@@ -104,7 +104,7 @@ func (a *API) refuseVotersLosingEligibility(
 	if len(blocked) == 0 {
 		return false
 	}
-	errors.ErrCensusMemberAlreadyVoted.WithData(map[string]any{"votedMemberIds": blocked}).Write(w)
+	errors.ErrCensusMemberAlreadySignedFor.WithData(map[string]any{"signedMemberIds": blocked}).Write(w)
 	return true
 }
 

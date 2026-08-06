@@ -4208,7 +4208,7 @@ paths:
 
         Deletion is refused with 409 for any member the CSP has already signed for while a
         question of one of their processes is still READY or PAUSED; the offending ids come back
-        in `data.votedMemberIds`. Once voting closes on those questions the deletion succeeds.
+        in `data.signedMemberIds`. Once voting closes on those questions the deletion succeeds.
 
         Also callable with a scoped API key (scope: `members:write`).
       parameters:
@@ -6394,7 +6394,7 @@ paths:
         eligibility list built on it, so the CSP stops signing for them. Refused with 409 for
         any member the CSP has already signed for while a question of the process is still
         READY or PAUSED; once voting closes on those questions the removal succeeds. The
-        offending ids come back in `data.votedMemberIds`.
+        offending ids come back in `data.signedMemberIds`.
 
         Pruning a question's eligibility list to empty opens it to the whole census, so a
         maxCensusSize increase may be enqueued as an async job (poll GET /jobs/{jobId}).
@@ -6743,7 +6743,7 @@ paths:
 
         Removing a member the CSP has already signed for, while a question of this process is
         still READY or PAUSED, is refused with 409 and the offending ids in
-        `data.votedMemberIds`.
+        `data.signedMemberIds`.
 
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:
