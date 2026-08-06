@@ -36,7 +36,20 @@ const (
 	// Voting-process question ballot types (translated into on-chain vote options).
 	VotingTypeSingleChoice = "singlechoice"
 	VotingTypeMultiChoice  = "multichoice"
+	VotingTypeRanked       = "ranked"
+	VotingTypeCumulative   = "cumulative"
 )
+
+// IsNamedVotingType reports whether t is one of the named question ballot types the question API
+// accepts (singlechoice, multichoice, ranked, cumulative). A raw ballotProtocol is always allowed
+// alongside any of these, so callers use this only to guard a question that carries no protocol.
+func IsNamedVotingType(t string) bool {
+	switch t {
+	case VotingTypeSingleChoice, VotingTypeMultiChoice, VotingTypeRanked, VotingTypeCumulative:
+		return true
+	}
+	return false
+}
 
 // organizationWritePermissions is a map that contains if the role has organization write permission
 var organizationWritePermissions = map[UserRole]bool{

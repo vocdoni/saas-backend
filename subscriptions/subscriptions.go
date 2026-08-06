@@ -110,7 +110,13 @@ func hasElectionMetadataPermissions(process *models.NewProcessTx, plan *db.Plan)
 		return false, fmt.Errorf("duration is greater than the allowed")
 	}
 
-	// TODO:future check if the election voting type is supported by the plan
+	// TODO:future the voting-type plan gate (plan.VotingTypes.{Single,Multiple,Ranked,Cumulative})
+	// runs only at /processes publish preflight (OrgAllowsVotingType), not here — so POST
+	// /transactions and the legacy /process build path, which both build a NewProcessTx and route
+	// through HasTxPermission, bypass it: an org whose plan lacks a flag can still get that ballot
+	// signed. The tx carries the full ballot shape (VoteOptions + EnvelopeType map 1:1 to a
+	// BallotProtocol), so the gate can be closed here by recognising the type from the tx and
+	// checking it against the plan.
 	// TODO:future check if the streamURL is used and allowed by the plan
 
 	return true, nil
@@ -319,11 +325,11 @@ func (p *Subscriptions) OrgCanCreateVotingProcessDraft(orgAddress common.Address
 
 // OrgAllowsVotingType checks that the organization's plan permits the given question ballot
 // type. It maps the friendly type to the plan's VotingTypes feature flags. An empty type is
-// allowed (it is validated elsewhere), which is also how a ballot shape with no named type —
-// ranked, quadratic, expressed as a raw ballotProtocol — passes: there is no flag for it.
-// Callers pass account.EffectiveQuestionType, so a question is gated on the ballot it encodes
-// rather than the type it is labelled with. Weighted elections stay gated separately via
-// CostFromWeight in hasElectionMetadataPermissions.
+// allowed (it is validated elsewhere), which is how a ballot shape with no named type at all
+// (vote overwrites, weighted cost, or a hand-crafted non-canonical protocol) passes: there is no
+// flag for a shape that carries no name. Callers pass account.EffectiveQuestionType, so a
+// question is gated on the ballot it encodes rather than the type it is labelled with. Weighted
+// elections stay gated separately via CostFromWeight in hasElectionMetadataPermissions.
 func (p *Subscriptions) OrgAllowsVotingType(orgAddress common.Address, voteType string) error {
 	if voteType == "" {
 		return nil
@@ -336,16 +342,14 @@ func (p *Subscriptions) OrgAllowsVotingType(orgAddress common.Address, voteType 
 	if err != nil {
 		return err
 	}
-	// TODO:future the remaining plan.VotingTypes flags (Ranked, Approval, Cumulative) have no
-	// entry here because db has no type constant for them, so nothing can ever resolve to one and
-	// the flags are permissive by omission: an org whose plan lacks Ranked can still mint a ranked
-	// ballot through a raw ballotProtocol. Same gap as the type check noted in
-	// hasElectionMetadataPermissions above. Approval may not belong here at all — the multichoice
-	// dense layout is an approval ballot, so that flag may be subsumed by Multiple rather than
-	// missing; worth settling with whoever defined the plan tiers before adding it.
+	// Approval is intentionally absent: the multichoice dense layout is an approval ballot, so an
+	// org allowed to mint multichoice can already mint approval. The flag is subsumed by Multiple
+	// rather than gating anything itself.
 	allowed := map[string]bool{
 		db.VotingTypeSingleChoice: plan.VotingTypes.Single,
 		db.VotingTypeMultiChoice:  plan.VotingTypes.Multiple,
+		db.VotingTypeRanked:       plan.VotingTypes.Ranked,
+		db.VotingTypeCumulative:   plan.VotingTypes.Cumulative,
 	}
 	ok, known := allowed[voteType]
 	if !known {
@@ -473,8 +477,9 @@ func (p *Subscriptions) OrgCanPublishCensus(census *db.Census, notifyCount, vote
 // census size vs plan MaxCensus, per-org MaxProcesses count (non-managed), weighted allowance
 // and duration — mirroring the NEW_PROCESS checks in HasTxPermission so the /processes publish
 // path can surface them synchronously (as a 400 and in the dry-run) instead of as an opaque
-// async job failure. The authoritative enforcement remains HasTxPermission at build time; this
-// is an early, predictable subset. Anonymous/vote-overwrite are not used by the /processes flow.
+// async job failure. Every check here has a HasTxPermission twin at build time — except the
+// per-question voting type, which is enforced only at this preflight (see the TODO in
+// hasElectionMetadataPermissions). Anonymous/vote-overwrite are not used by the /processes flow.
 // Admin role is verified by the caller.
 //
 //nolint:revive // weighted is an election attribute being validated, not a control flag

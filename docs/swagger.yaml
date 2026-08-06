@@ -2449,6 +2449,10 @@ definitions:
     type: object
   db.QuestionTypeSetup:
     properties:
+      budget:
+        type: integer
+      costExponent:
+        type: integer
       maxChoices:
         type: integer
       minChoices:
@@ -6103,13 +6107,17 @@ paths:
         Create a multi-question voting process draft. Requires Manager/Admin role of the org
         (or a scoped API key with `voting:write`). Creates the inline census unpublished.
 
-        Each question must define a named `type` (with `typeSetup` for multichoice), a raw
-        `ballotProtocol`, or both. The two are kept in sync: whichever is supplied, the other
-        is derived, so the stored question always describes the election it will mint. A
-        supplied `ballotProtocol` is authoritative — it is what reaches the chain — so `type`
-        and `typeSetup` are re-derived from it, and come back empty when it encodes a shape
-        with no named type (ranked, quadratic). Sending both halves is fine when they agree;
-        when they describe two different named ballots it is a 400 rather than a silent win
+        Each question must define a named `type` — `singlechoice`, `multichoice`, `ranked`
+        or `cumulative` — a raw `ballotProtocol`, or both. `multichoice` and `cumulative`
+        need a `typeSetup` (maxChoices for the former, budget and costExponent for the
+        latter); `singlechoice` and `ranked` derive their whole protocol from the choices.
+        The two are kept in sync: whichever is supplied, the other is derived, so the
+        stored question always describes the election it will mint. A supplied
+        `ballotProtocol` is authoritative — it is what reaches the chain — so `type`
+        and `typeSetup` are re-derived from it, and come back empty only when it encodes a
+        shape with no named type at all (vote overwrites, weighted cost, or a hand-crafted
+        non-canonical shape). Sending both halves is fine when they agree; when they
+        describe two different named ballots it is a 400 rather than a silent win
         for the protocol. **Omit `ballotProtocol` to author or edit a question through its
         `typeSetup`** — responses always carry a protocol, so echoing one back unchanged
         re-applies it.

@@ -6,8 +6,9 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 )
 
-// A question describes its ballot twice: as a named type (singlechoice/multichoice) with its
-// TypeSetup, and as a raw BallotProtocol. This file keeps the two halves in step.
+// A question describes its ballot twice: as a named type (singlechoice, multichoice, ranked,
+// cumulative) with its TypeSetup, and as a raw BallotProtocol. This file keeps the two halves
+// in step.
 //
 // BallotProtocolFromType is the single mapping table, and the reverse direction is defined as
 // equality against it — QuestionTypeFromBallotProtocol asks "which named type would produce
@@ -54,14 +55,20 @@ func VoteTypeFromQuestion(q *db.VotingProcessQuestion) (db.VoteType, error) {
 }
 
 // BallotProtocolFromType derives the canonical on-chain ballot parameters of a named question
-// type. singlechoice picks one of N choices (one field, value = the chosen Choice.Value);
-// multichoice is approval-style (one field per choice, each 0/1, with MaxTotalCost bounding the
-// number of selections).
+// type:
+//   - singlechoice picks one of N choices (one field, value = the chosen Choice.Value);
+//   - multichoice is approval-style (one field per choice, each 0/1, with MaxTotalCost bounding
+//     the number of selections);
+//   - ranked assigns every choice a distinct rank (one field per choice holding its rank 0..N-1,
+//     so uniqueValues holds); the convention is highest-value-wins;
+//   - cumulative spreads a budget across the choices (maxValue 0 is the "amounts" marker; the
+//     per-value cap comes from MaxTotalCost and CostExponent, 1 for a linear budget or 2 for
+//     quadratic).
 //
 // setup.MinChoices has no protocol counterpart and is ignored — the chain has no minimum-count
-// field. setup.UniqueChoices is ignored too: a named type never produces a unique-values ballot,
-// because on the multichoice layout it would admit no vote (#619) and on singlechoice it is
-// vacuous. Callers reject it at the API boundary rather than silently dropping it.
+// field. setup.UniqueChoices is ignored too: the only named type that uses uniqueValues is ranked,
+// and it derives the flag from the type, not from this field. Callers reject a multichoice that
+// sets it at the API boundary rather than silently dropping it.
 //
 // MaxVoteOverwrites and CostFromWeight are always zero here: QuestionTypeSetup has no field that
 // could express them, so a protocol carrying either is simply not a named shape.
@@ -89,6 +96,32 @@ func BallotProtocolFromType(
 			CostExponent: 1,
 			MaxTotalCost: setup.MaxChoices,
 		}, nil
+	case db.VotingTypeRanked:
+		// Ranking needs at least two choices to mean anything. maxValue reaches N-1 so the N
+		// distinct ranks (0..N-1) fit, which is also what makes uniqueValues satisfiable.
+		if len(choices) < 2 {
+			return nil, fmt.Errorf("ranked ballot requires at least two choices")
+		}
+		return &db.BallotProtocol{
+			MaxCount:     uint32(len(choices)),
+			MaxValue:     uint32(len(choices) - 1),
+			UniqueValues: true,
+		}, nil
+	case db.VotingTypeCumulative:
+		// maxValue 0 is the protocol's "values are aggregable amounts" marker: each field holds a
+		// credit, bounded in total by MaxTotalCost (the budget) raised to CostExponent. CostExponent
+		// 1 is a linear budget, 2 is quadratic.
+		if setup.Budget == 0 {
+			return nil, fmt.Errorf("cumulative ballot requires a budget greater than zero")
+		}
+		if setup.CostExponent != 1 && setup.CostExponent != 2 {
+			return nil, fmt.Errorf("cumulative ballot costExponent must be 1 (linear) or 2 (quadratic)")
+		}
+		return &db.BallotProtocol{
+			MaxCount:     uint32(len(choices)),
+			CostExponent: setup.CostExponent,
+			MaxTotalCost: setup.Budget,
+		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported question type %q", qType)
 	}
@@ -99,8 +132,9 @@ func BallotProtocolFromType(
 // recognised only when BallotProtocolFromType reproduces the protocol exactly, so a recognised
 // type is guaranteed to re-derive the same on-chain parameters.
 //
-// ok is false for the shapes that have no named type — ranked, quadratic, anything using vote
-// overwrites or weighted cost — which stay expressible as a raw protocol.
+// ok is false for the shapes that have no named type — anything using vote overwrites or weighted
+// cost, or a cumulative/ranked protocol a client hand-crafted away from its canonical shape —
+// which stay expressible as a raw protocol.
 //
 // The choices are part of the question: a protocol whose MaxValue cannot carry the highest
 // Choice.Value is not singlechoice over those choices, however much it looks like one.
@@ -110,8 +144,12 @@ func QuestionTypeFromBallotProtocol(
 	if bp == nil || len(choices) == 0 {
 		return "", db.QuestionTypeSetup{}, false
 	}
-	// At most one candidate can ever match, whatever the order: CostExponent is unconditionally
-	// 0 for singlechoice and 1 for multichoice, so their images are always distinct.
+	// At most one candidate can ever match, whatever the order: each named type maps to a protocol
+	// image no other named type produces, so recognition is a function rather than a first-match
+	// heuristic. No single field is unique to one type — cumulative shares maxCount 1 with
+	// singlechoice at one choice, and maxValue 0 with singlechoice when its only choice is valued 0
+	// — but the full 7-field image is distinct for every pair (costExponent and maxTotalCost settle
+	// those degenerate cases), pinned by TestBallotShapeUnambiguous.
 	candidates := []struct {
 		qType string
 		setup db.QuestionTypeSetup
@@ -120,6 +158,11 @@ func QuestionTypeFromBallotProtocol(
 		{db.VotingTypeMultiChoice, db.QuestionTypeSetup{
 			MinChoices: minChoicesFor(bp.MaxTotalCost),
 			MaxChoices: bp.MaxTotalCost,
+		}},
+		{db.VotingTypeRanked, db.QuestionTypeSetup{}},
+		{db.VotingTypeCumulative, db.QuestionTypeSetup{
+			Budget:       bp.MaxTotalCost,
+			CostExponent: bp.CostExponent,
 		}},
 	}
 	for _, candidate := range candidates {
@@ -162,6 +205,18 @@ func ValidateBallotProtocol(bp *db.BallotProtocol) error {
 			"uniqueValues requires maxValue+1 (%d) to be at least maxCount (%d): no ballot can "+
 				"fill %d fields with distinct values drawn from 0..%d",
 			uint64(bp.MaxValue)+1, bp.MaxCount, bp.MaxCount, bp.MaxValue,
+		)
+	}
+	// maxValue 0 is the protocol's "values are aggregable amounts" marker: the per-value cap then
+	// comes from maxTotalCost (raised to costExponent) or, for a weighted election, the census
+	// weight (costFromWeight). With neither set the chain imposes no limit at all — a voter can put
+	// any uint32 on any field — so refuse it. Scoped to MaxCount > 1: at one field, maxValue 0 is
+	// also what a singlechoice over a single 0-valued choice derives, which is a legitimate ballot
+	// rather than the amounts-mode evasion this catches.
+	if bp.MaxValue == 0 && bp.MaxTotalCost == 0 && !bp.CostFromWeight && bp.MaxCount > 1 {
+		return fmt.Errorf(
+			"maxValue 0 with maxTotalCost 0 and costFromWeight false leaves every field unbounded: " +
+				"a cumulative ballot needs a budget (maxTotalCost > 0) or costFromWeight",
 		)
 	}
 	return nil
@@ -213,9 +268,9 @@ type BallotShape struct {
 // half alone, and what keeps the API's answer equal to what the election will be.
 //
 // Supplying both halves is only allowed when they agree, or when the protocol has no named shape
-// (the ranked ballot a client may still label singlechoice). Two named shapes that disagree are an
-// error rather than a silent win for the protocol: a client editing a question through its
-// TypeSetup would otherwise get a 200 and none of its edit.
+// at all (vote overwrites, weighted cost, or a hand-crafted non-canonical shape). Two named shapes
+// that disagree are an error rather than a silent win for the protocol: a client editing a
+// question through its TypeSetup would otherwise get a 200 and none of its edit.
 //
 // MinChoices is the one thing that cannot be derived, having no on-chain counterpart, and is
 // carried over from the input for multichoice only, clamped to the resolved MaxChoices. A

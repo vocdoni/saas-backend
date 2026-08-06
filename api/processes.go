@@ -46,13 +46,17 @@ func parseProcessDates(req *apicommon.CreateVotingProcessRequest) (start, end ti
 //	@Description	Create a multi-question voting process draft. Requires Manager/Admin role of the org
 //	@Description	(or a scoped API key with `voting:write`). Creates the inline census unpublished.
 //	@Description
-//	@Description	Each question must define a named `type` (with `typeSetup` for multichoice), a raw
-//	@Description	`ballotProtocol`, or both. The two are kept in sync: whichever is supplied, the other
-//	@Description	is derived, so the stored question always describes the election it will mint. A
-//	@Description	supplied `ballotProtocol` is authoritative — it is what reaches the chain — so `type`
-//	@Description	and `typeSetup` are re-derived from it, and come back empty when it encodes a shape
-//	@Description	with no named type (ranked, quadratic). Sending both halves is fine when they agree;
-//	@Description	when they describe two different named ballots it is a 400 rather than a silent win
+//	@Description	Each question must define a named `type` — `singlechoice`, `multichoice`, `ranked`
+//	@Description	or `cumulative` — a raw `ballotProtocol`, or both. `multichoice` and `cumulative`
+//	@Description	need a `typeSetup` (maxChoices for the former, budget and costExponent for the
+//	@Description	latter); `singlechoice` and `ranked` derive their whole protocol from the choices.
+//	@Description	The two are kept in sync: whichever is supplied, the other is derived, so the
+//	@Description	stored question always describes the election it will mint. A supplied
+//	@Description	`ballotProtocol` is authoritative — it is what reaches the chain — so `type`
+//	@Description	and `typeSetup` are re-derived from it, and come back empty only when it encodes a
+//	@Description	shape with no named type at all (vote overwrites, weighted cost, or a hand-crafted
+//	@Description	non-canonical shape). Sending both halves is fine when they agree; when they
+//	@Description	describe two different named ballots it is a 400 rather than a silent win
 //	@Description	for the protocol. **Omit `ballotProtocol` to author or edit a question through its
 //	@Description	`typeSetup`** — responses always carry a protocol, so echoing one back unchanged
 //	@Description	re-applies it.
@@ -163,15 +167,14 @@ func (a *API) buildQuestions(
 	for i, q := range questions {
 		// ballot shape: a question must define a named type, a raw BallotProtocol, or both. The
 		// two halves are reconciled below so they describe the same ballot; a supplied protocol
-		// is what the election will be, so it wins and the type is re-derived from it. For a
-		// named type, typeSetup is required for every type except singlechoice (which ignores it
-		// on chain); a multichoice maps MaxChoices onto MaxTotalCost so it must be bounded.
+		// is what the election will be, so it wins and the type is re-derived from it. typeSetup is
+		// required for multichoice and cumulative (singlechoice and ranked derive their whole
+		// protocol from the choices); a multichoice maps MaxChoices onto MaxTotalCost so it must be
+		// bounded.
 		if q.BallotProtocol == nil {
 			switch q.Type {
 			case "":
 				return nil, errors.ErrInvalidData.Withf("question %d: a type or a ballotProtocol is required", i)
-			case db.VotingTypeSingleChoice:
-				// singlechoice ignores typeSetup
 			case db.VotingTypeMultiChoice:
 				if q.TypeSetup.MaxChoices < 1 || q.TypeSetup.MaxChoices > uint32(len(q.Choices)) {
 					return nil, errors.ErrInvalidData.Withf(
@@ -187,9 +190,29 @@ func (a *API) buildQuestions(
 					// vote at all: the election would accept every envelope and tally zero.
 					return nil, errors.ErrInvalidData.Withf(
 						"question %d: uniqueChoices is not supported for multichoice, where each choice is an "+
-							"independent yes/no field; use a ballotProtocol for a ranked ballot", i,
+							"independent yes/no field; use type %q for a ranked ballot", i, db.VotingTypeRanked,
 					)
 				}
+			case db.VotingTypeRanked:
+				// ranked uses no typeSetup: its protocol is fixed by the choices. Reject a non-empty
+				// setup rather than silently dropping it, so a client does not believe it set a
+				// constraint the ballot does not have.
+				if q.TypeSetup != (db.QuestionTypeSetup{}) {
+					return nil, errors.ErrInvalidData.Withf(
+						"question %d: type %q takes no typeSetup; its ballot is fixed by the choices", i, q.Type,
+					)
+				}
+			case db.VotingTypeCumulative:
+				// cumulative uses only budget/costExponent (validated when the protocol is derived);
+				// the multichoice fields do not apply, so reject them rather than silently dropping them.
+				if q.TypeSetup.MinChoices != 0 || q.TypeSetup.MaxChoices != 0 || q.TypeSetup.UniqueChoices {
+					return nil, errors.ErrInvalidData.Withf(
+						"question %d: minChoices, maxChoices and uniqueChoices apply only to multichoice; "+
+							"cumulative is configured through typeSetup.budget and typeSetup.costExponent", i,
+					)
+				}
+			case db.VotingTypeSingleChoice:
+				// singlechoice ignores typeSetup
 			default:
 				return nil, errors.ErrInvalidData.Withf("question %d: unsupported type %q", i, q.Type)
 			}
@@ -1037,7 +1060,7 @@ func validateVotingProcessForPublish(
 		if len(q.Choices) == 0 {
 			problems = append(problems, fmt.Sprintf("question %d has no choices", i))
 		}
-		if q.BallotProtocol == nil && q.Type != db.VotingTypeSingleChoice && q.Type != db.VotingTypeMultiChoice {
+		if q.BallotProtocol == nil && !db.IsNamedVotingType(q.Type) {
 			problems = append(problems, fmt.Sprintf("question %d has an unsupported type %q", i, q.Type))
 		}
 		// A question stored before authoring rejected these can still hold a ballot no voter can
