@@ -214,6 +214,24 @@ func TestFinishSaltedKeySigner(t *testing.T) {
 		c.Assert(err, qt.ErrorIs, ErrUserIsNotAlreadySigning)
 	})
 
+	c.Run("address mismatch", func(c *qt.C) {
+		c.Cleanup(func() {
+			c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+			csp.unlock(testUserID, testPID)
+		})
+		// store and verify the token, then consume the election with testAddress
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID, ""), qt.IsNil)
+		c.Assert(csp.Storage.VerifyCSPAuth(testToken), qt.IsNil)
+		c.Assert(csp.Storage.ConsumeCSPProcess(testToken, testPID, testAddress), qt.IsNil)
+		// signing again for a DIFFERENT address is the pinned-address rejection, its own
+		// outcome — the fix that succeeds is re-signing with the pinned address, so it must
+		// not read as already_consumed (terminal) nor as a signer failure.
+		csp.lock(testUserID, testPID)
+		otherAddress := internal.HexBytes(util.RandomBytes(20))
+		err := csp.finishSaltedKeySigner(testToken, otherAddress, testPID)
+		c.Assert(err, qt.ErrorIs, ErrAddressMismatch)
+	})
+
 	c.Run("success", func(c *qt.C) {
 		c.Cleanup(func() {
 			c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)

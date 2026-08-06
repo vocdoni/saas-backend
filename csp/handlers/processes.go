@@ -395,11 +395,13 @@ type authorizedBallot struct {
 //	@Description	stable machine-readable code plus a message: already_consumed (that election's
 //	@Description	signing slot is spent; not retryable), already_signing (a concurrent request holds
 //	@Description	it; retry), auth_invalid (the token was invalidated mid-batch and every remaining
-//	@Description	entry is stamped with it; authenticate again) or sign_failed (internal failure;
-//	@Description	retry). Retry ONLY the entries that carry a retryable code: re-sending the whole
-//	@Description	batch re-signs the ballots that already succeeded, and each re-sign counts toward
-//	@Description	the election's finite overwrite budget (MaxVoteOverwritesPerProcess, 10) — past it
-//	@Description	the election is permanently locked.
+//	@Description	entry is stamped with it; authenticate again), address_mismatch (that election was
+//	@Description	already signed for a different address; re-send with the address sign-info
+//	@Description	reports) or sign_failed (internal failure; retry). Retry ONLY the entries that
+//	@Description	carry a retryable code: re-sending the whole batch re-signs the ballots that
+//	@Description	already succeeded, and each re-sign counts toward the election's finite overwrite
+//	@Description	budget (MaxVoteOverwritesPerProcess, 10) — past it the election is permanently
+//	@Description	locked.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -527,6 +529,9 @@ const (
 	// signCodeAuthInvalid: the auth token is gone or no longer verified; the voter must
 	// authenticate again — retrying with the same token cannot succeed, for ANY ballot.
 	signCodeAuthInvalid = "auth_invalid"
+	// signCodeAddressMismatch: the election was already signed for a different address; the
+	// retry that succeeds re-sends with the pinned address, which sign-info reports.
+	signCodeAddressMismatch = "address_mismatch"
 	// signCodeFailed: an internal signer or storage failure; retrying may succeed.
 	signCodeFailed = "sign_failed"
 )
@@ -542,6 +547,9 @@ func signOutcome(err error) (code, message string) {
 		return signCodeAlreadySigning, "a concurrent request is signing this election"
 	case errors.Is(err, csp.ErrInvalidAuthToken), errors.Is(err, csp.ErrAuthTokenNotVerified):
 		return signCodeAuthInvalid, "the auth token is no longer valid; authenticate again"
+	case errors.Is(err, csp.ErrAddressMismatch):
+		return signCodeAddressMismatch,
+			"this election was already signed for a different address; re-send using the address reported by sign-info"
 	default:
 		return signCodeFailed, "could not sign the ballot"
 	}
@@ -553,7 +561,8 @@ func signOutcome(err error) (code, message string) {
 // a warn per occurrence would bury the storage and signer failures that do need attention. The
 // member and process ids make a warn attributable during an incident.
 func logSignFailure(oid primitive.ObjectID, memberID string, upstreamID internal.HexBytes, err error) {
-	if errors.Is(err, csp.ErrProcessAlreadyConsumed) || errors.Is(err, csp.ErrUserAlreadySigning) {
+	if errors.Is(err, csp.ErrProcessAlreadyConsumed) || errors.Is(err, csp.ErrUserAlreadySigning) ||
+		errors.Is(err, csp.ErrAddressMismatch) {
 		log.Debugw("skipped a batch ballot", "procId", oid.Hex(), "member", memberID,
 			"electionId", upstreamID, "reason", err)
 		return

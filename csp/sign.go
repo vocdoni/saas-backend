@@ -54,10 +54,15 @@ func (c *CSP) Sign(
 func (c *CSP) prepareSaltedKeySigner(token, address, processID, weight internal.HexBytes) (
 	internal.HexBytes, *[saltedkey.SaltSize]byte, internal.HexBytes, error,
 ) {
-	// get the data of the auth token and the user from the storage
+	// get the data of the auth token and the user from the storage. A token that is genuinely
+	// gone is an auth verdict; any other storage failure must NOT be — the batch endpoint
+	// aborts every remaining ballot on an auth verdict, and a Mongo blip is retryable.
 	authTokenData, err := c.Storage.CSPAuth(token)
 	if err != nil {
-		return nil, nil, nil, ErrInvalidAuthToken
+		if errors.Is(err, db.ErrTokenNotFound) {
+			return nil, nil, nil, ErrInvalidAuthToken
+		}
+		return nil, nil, nil, errors.Join(ErrSign, err)
 	}
 	// ensure that the auth token has been verified. Checked BEFORE taking the signer lock: an
 	// error return between lock and the deferred unlock in Sign used to leave the (user,
@@ -108,10 +113,14 @@ func (c *CSP) prepareSaltedKeySigner(token, address, processID, weight internal.
 }
 
 func (c *CSP) finishSaltedKeySigner(token, address, processID internal.HexBytes) error {
-	// get the data of the auth token and the user from the storage
+	// get the data of the auth token and the user from the storage; same not-found vs
+	// storage-failure split as prepareSaltedKeySigner, and for the same reason.
 	authTokenData, err := c.Storage.CSPAuth(token)
 	if err != nil {
-		return ErrInvalidAuthToken
+		if errors.Is(err, db.ErrTokenNotFound) {
+			return ErrInvalidAuthToken
+		}
+		return errors.Join(ErrSign, err)
 	}
 	// ensure that the auth token has been verified
 	if !authTokenData.Verified {
@@ -131,9 +140,10 @@ func (c *CSP) finishSaltedKeySigner(token, address, processID internal.HexBytes)
 	if err := c.Storage.ConsumeCSPProcess(token, processID, address); err != nil {
 		log.Warn(err)
 		// a different address than the one this election was first consumed with is an
-		// authorization rejection (the slot is pinned to that address), not a signer failure.
+		// authorization rejection (the slot is pinned to that address), not a signer failure —
+		// and it is recoverable: re-sign with the pinned address, which sign-info reports.
 		if errors.Is(err, db.ErrInvalidData) {
-			return ErrProcessAlreadyConsumed
+			return ErrAddressMismatch
 		}
 		return ErrSign
 	}

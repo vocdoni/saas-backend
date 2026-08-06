@@ -7014,11 +7014,13 @@ paths:
         stable machine-readable code plus a message: already_consumed (that election's
         signing slot is spent; not retryable), already_signing (a concurrent request holds
         it; retry), auth_invalid (the token was invalidated mid-batch and every remaining
-        entry is stamped with it; authenticate again) or sign_failed (internal failure;
-        retry). Retry ONLY the entries that carry a retryable code: re-sending the whole
-        batch re-signs the ballots that already succeeded, and each re-sign counts toward
-        the election's finite overwrite budget (MaxVoteOverwritesPerProcess, 10) — past it
-        the election is permanently locked.
+        entry is stamped with it; authenticate again), address_mismatch (that election was
+        already signed for a different address; re-send with the address sign-info
+        reports) or sign_failed (internal failure; retry). Retry ONLY the entries that
+        carry a retryable code: re-sending the whole batch re-signs the ballots that
+        already succeeded, and each re-sign counts toward the election's finite overwrite
+        budget (MaxVoteOverwritesPerProcess, 10) — past it the election is permanently
+        locked.
       parameters:
       - description: Process ID
         in: path

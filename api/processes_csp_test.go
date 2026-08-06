@@ -325,6 +325,21 @@ func TestProcessCSPSignBatch(t *testing.T) {
 	c.Assert(signed.Signatures[1].UpstreamID, qt.DeepEquals, restrictedElection)
 	c.Assert(consumed(tok0), qt.HasLen, 2)
 
+	// re-signing a consumed election with a DIFFERENT address is its own recoverable outcome
+	// (address_mismatch, fix: re-send with the pinned address), not already_consumed
+	otherVoter := ethereum.SignKeys{}
+	c.Assert(otherVoter.Generate(), qt.IsNil)
+	mismatch := requestAndParse[handlers.SignBatchResponse](t, http.MethodPost, "",
+		&handlers.SignBatchRequest{
+			AuthToken: tok0,
+			Ballots: []handlers.SignBatchBallot{
+				{UpstreamID: openElection, Address: internal.HexBytes(otherVoter.Address().Bytes())},
+			},
+		}, "processes", pid, "sign-batch")
+	c.Assert(mismatch.Signatures, qt.HasLen, 1)
+	c.Assert(mismatch.Signatures[0].Code, qt.Equals, "address_mismatch")
+	c.Assert(mismatch.Signatures[0].Signature, qt.HasLen, 0)
+
 	// --- a spent signing slot is a per-ballot error, not a failed batch: exhaust the open
 	// election's overwrites (it is at 1 after the batch above) and re-run the same batch ---
 	for i := 0; i < db.MaxVoteOverwritesPerProcess; i++ {

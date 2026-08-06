@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	stderrors "errors"
 	"fmt"
 	"testing"
 	"time"
@@ -27,8 +28,12 @@ func TestSignOutcome(t *testing.T) {
 		{csp.ErrUserAlreadySigning, signCodeAlreadySigning},
 		{csp.ErrInvalidAuthToken, signCodeAuthInvalid},
 		{csp.ErrAuthTokenNotVerified, signCodeAuthInvalid},
+		{csp.ErrAddressMismatch, signCodeAddressMismatch},
 		{fmt.Errorf("wrapping: %w", csp.ErrProcessAlreadyConsumed), signCodeAlreadyConsumed},
 		{csp.ErrSign, signCodeFailed},
+		// the shape csp.Sign returns for a storage failure: joined, NOT an auth verdict, so a
+		// transient Mongo error stays a retryable per-ballot outcome instead of aborting the batch
+		{stderrors.Join(csp.ErrSign, fmt.Errorf("some storage blip")), signCodeFailed},
 		{fmt.Errorf("some storage blip"), signCodeFailed},
 	} {
 		code, message := signOutcome(tc.err)
