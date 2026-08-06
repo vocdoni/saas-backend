@@ -365,26 +365,26 @@ type parsedVote struct {
 // the API error to write back, never both.
 func (a *API) parseRelayVote(payload internal.HexBytes) (*parsedVote, *errors.Error) {
 	if len(payload) == 0 {
-		return nil, asPtr(errors.ErrMalformedBody.Withf("missing txPayload"))
+		return nil, errors.Ptr(errors.ErrMalformedBody.Withf("missing txPayload"))
 	}
 
 	signedTx := &models.SignedTx{}
 	if err := proto.Unmarshal(payload, signedTx); err != nil {
-		return nil, asPtr(errors.ErrInvalidTxFormat.Withf("could not decode signed tx: %v", err))
+		return nil, errors.Ptr(errors.ErrInvalidTxFormat.Withf("could not decode signed tx: %v", err))
 	}
 	innerTx := &models.Tx{}
 	if err := proto.Unmarshal(signedTx.Tx, innerTx); err != nil {
-		return nil, asPtr(errors.ErrInvalidTxFormat.Withf("could not decode tx: %v", err))
+		return nil, errors.Ptr(errors.ErrInvalidTxFormat.Withf("could not decode tx: %v", err))
 	}
 
 	vote := innerTx.GetVote()
 	if vote == nil {
-		return nil, asPtr(errors.ErrInvalidTxFormat.With("not a vote tx"))
+		return nil, errors.Ptr(errors.ErrInvalidTxFormat.With("not a vote tx"))
 	}
 	// the target process is the one named in the signed vote envelope.
 	pid := internal.HexBytes(vote.ProcessId)
 	if len(pid) == 0 {
-		return nil, asPtr(errors.ErrInvalidTxFormat.With("vote has no process id"))
+		return nil, errors.Ptr(errors.ErrInvalidTxFormat.With("vote has no process id"))
 	}
 
 	// ensure we manage this election, resolving its owning organization. Legacy elections
@@ -402,12 +402,12 @@ func (a *API) parseRelayVote(payload internal.HexBytes) (*parsedVote, *errors.Er
 		case nil:
 			orgAddress = question.OrgAddress
 		case db.ErrNotFound:
-			return nil, asPtr(errors.ErrProcessNotFound)
+			return nil, errors.Ptr(errors.ErrProcessNotFound)
 		default:
-			return nil, asPtr(errors.ErrGenericInternalServerError.WithErr(qErr))
+			return nil, errors.Ptr(errors.ErrGenericInternalServerError.WithErr(qErr))
 		}
 	default:
-		return nil, asPtr(errors.ErrGenericInternalServerError.WithErr(err))
+		return nil, errors.Ptr(errors.ErrGenericInternalServerError.WithErr(err))
 	}
 
 	return &parsedVote{
@@ -481,9 +481,6 @@ func (a *API) recordBatchVote(jobID string, index int) func(*db.JobResult, error
 		}
 	}
 }
-
-// asPtr lifts an API error to a pointer, so parseRelayVote can signal "no error" with nil.
-func asPtr(e errors.Error) *errors.Error { return &e }
 
 // setProcessStatusHandler godoc
 //

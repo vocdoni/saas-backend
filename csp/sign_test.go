@@ -49,6 +49,22 @@ func TestSign(t *testing.T) {
 		c.Assert(sign, qt.Not(qt.IsNil))
 		c.Assert(csp.isLocked(testUserID, pid), qt.IsFalse)
 	})
+
+	c.Run("failed sign does not leak the signer lock", func(c *qt.C) {
+		pid := internal.HexBytes(util.RandomBytes(32))
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		// an unverified token is rejected...
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID, ""), qt.IsNil)
+		_, err := csp.Sign(testToken, testAddress, pid, testUserWeightBytes, signers.SignerTypeECDSASalted)
+		c.Assert(err, qt.ErrorIs, ErrAuthTokenNotVerified)
+		// ...without leaving the (user, election) lock held: after verifying the same token,
+		// signing must succeed rather than report the user as already signing forever.
+		c.Assert(csp.isLocked(testUserID, pid), qt.IsFalse)
+		c.Assert(csp.Storage.VerifyCSPAuth(testToken), qt.IsNil)
+		sign, err := csp.Sign(testToken, testAddress, pid, testUserWeightBytes, signers.SignerTypeECDSASalted)
+		c.Assert(err, qt.IsNil)
+		c.Assert(sign, qt.Not(qt.IsNil))
+	})
 }
 
 func TestPrepareSaltedKeySigner(t *testing.T) {

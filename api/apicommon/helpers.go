@@ -95,11 +95,9 @@ func DecodeCappedJSON(w http.ResponseWriter, r *http.Request, dst any, limit int
 	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
 		var tooLarge *http.MaxBytesError
 		if stderrors.As(err, &tooLarge) {
-			tooLargeErr := errors.ErrRequestBodyTooLarge.Withf("the limit is %d bytes", limit)
-			return &tooLargeErr
+			return errors.Ptr(errors.ErrRequestBodyTooLarge.Withf("the limit is %d bytes", limit))
 		}
-		malformed := errors.ErrMalformedBody
-		return &malformed
+		return errors.Ptr(errors.ErrMalformedBody)
 	}
 	return nil
 }

@@ -59,6 +59,13 @@ func (c *CSP) prepareSaltedKeySigner(token, address, processID, weight internal.
 	if err != nil {
 		return nil, nil, nil, ErrInvalidAuthToken
 	}
+	// ensure that the auth token has been verified. Checked BEFORE taking the signer lock: an
+	// error return between lock and the deferred unlock in Sign used to leave the (user,
+	// election) lock held forever, because the nil userID returned alongside the error made the
+	// defer unlock a different key than the one locked.
+	if !authTokenData.Verified {
+		return nil, nil, nil, ErrAuthTokenNotVerified
+	}
 	// check if the user is already signing
 	if c.isLocked(authTokenData.UserID, processID) {
 		return nil, nil, nil, ErrUserAlreadySigning
@@ -75,12 +82,10 @@ func (c *CSP) prepareSaltedKeySigner(token, address, processID, weight internal.
 	} else if consumed {
 		return nil, nil, nil, ErrProcessAlreadyConsumed
 	}
-	// lock the user data to avoid concurrent signing
+	// lock the user data to avoid concurrent signing. Every return below this line carries
+	// authTokenData.UserID — error or not — so Sign's deferred unlock always releases the key
+	// that was locked here.
 	c.lock(authTokenData.UserID, processID)
-	// ensure that the auth token has been verified
-	if !authTokenData.Verified {
-		return nil, nil, nil, ErrAuthTokenNotVerified
-	}
 
 	// prepare the data for the signature
 	caBundle := &models.CAbundle{
@@ -91,12 +96,12 @@ func (c *CSP) prepareSaltedKeySigner(token, address, processID, weight internal.
 	// encode the data to sign
 	signatureMsg, err := proto.Marshal(caBundle)
 	if err != nil {
-		return nil, nil, nil, ErrPrepareSignature
+		return authTokenData.UserID, nil, nil, ErrPrepareSignature
 	}
 	// generate the salt
 	salt := [saltedkey.SaltSize]byte{}
 	if len(processID) < saltedkey.SaltSize {
-		return nil, nil, nil, ErrInvalidSalt
+		return authTokenData.UserID, nil, nil, ErrInvalidSalt
 	}
 	copy(salt[:], processID[:saltedkey.SaltSize])
 	return authTokenData.UserID, &salt, signatureMsg, nil
@@ -125,6 +130,11 @@ func (c *CSP) finishSaltedKeySigner(token, address, processID internal.HexBytes)
 	// update the process data to mark it as consumed, and set the token used
 	if err := c.Storage.ConsumeCSPProcess(token, processID, address); err != nil {
 		log.Warn(err)
+		// a different address than the one this election was first consumed with is an
+		// authorization rejection (the slot is pinned to that address), not a signer failure.
+		if errors.Is(err, db.ErrInvalidData) {
+			return ErrProcessAlreadyConsumed
+		}
 		return ErrSign
 	}
 	return nil

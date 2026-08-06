@@ -6747,10 +6747,14 @@ paths:
         Once authorized, every ballot is signed and the response is always 200 with one
         entry per request item, in order — even if every ballot fails (the request was
         honored; the outcome is per item). Each entry carries a signature and weight, or a
-        stable machine-readable code plus a message. Retry ONLY the entries that carry a
-        code: re-sending the whole batch re-signs the ballots that already succeeded, and
-        each re-sign counts toward the election's finite overwrite budget
-        (MaxVoteOverwritesPerProcess, 10) — past it the election is permanently locked.
+        stable machine-readable code plus a message: already_consumed (that election's
+        signing slot is spent; not retryable), already_signing (a concurrent request holds
+        it; retry), auth_invalid (the token was invalidated mid-batch and every remaining
+        entry is stamped with it; authenticate again) or sign_failed (internal failure;
+        retry). Retry ONLY the entries that carry a retryable code: re-sending the whole
+        batch re-signs the ballots that already succeeded, and each re-sign counts toward
+        the election's finite overwrite budget (MaxVoteOverwritesPerProcess, 10) — past it
+        the election is permanently locked.
       parameters:
       - description: Process ID
         in: path

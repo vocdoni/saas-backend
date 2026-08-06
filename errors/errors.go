@@ -131,6 +131,9 @@ func (e Error) Write(w http.ResponseWriter) {
 	http.Error(w, string(msg), e.HTTPstatus)
 }
 
+// Ptr lifts an Error to a pointer, so functions returning *Error can signal "no error" with nil.
+func Ptr(e Error) *Error { return &e }
+
 // Withf returns a copy of Error with the Sprintf formatted string appended at the end of e.Err
 func (e Error) Withf(format string, args ...any) Error {
 	return Error{
