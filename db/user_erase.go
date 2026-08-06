@@ -134,7 +134,7 @@ func (ms *MongoStorage) eraseOrgData(address common.Address) error {
 			errs = append(errs, fmt.Errorf("encoding bundle id %s: %w", b.ID.Hex(), err))
 			continue
 		}
-		if _, err := ms.DeleteCSPAuthByBundle(*bundleID); err != nil {
+		if _, err := ms.DeleteCSPAuthByScope(*bundleID); err != nil {
 			errs = append(errs, fmt.Errorf("deleting CSP auth tokens of bundle %s: %w", b.ID.Hex(), err))
 		}
 	}

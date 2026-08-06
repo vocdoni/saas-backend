@@ -20,7 +20,7 @@ require (
 	github.com/twilio/twilio-go v1.23.0
 	github.com/xlzd/gotp v0.1.0
 	go.mongodb.org/mongo-driver v1.14.0
-	go.vocdoni.io/dvote v1.10.2-0.20260714155402-0fadb29d9e3f
+	go.vocdoni.io/dvote v1.10.2-0.20260803071902-8dd52744108d
 	go.vocdoni.io/proto v1.15.12
 	golang.org/x/crypto v0.43.0
 	google.golang.org/protobuf v1.36.4

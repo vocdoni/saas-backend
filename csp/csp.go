@@ -29,6 +29,11 @@ type Config struct {
 	// signer stuff
 	PasswordSalt string
 	RootKey      internal.HexBytes
+	// ChainID is the vochain ChainID this CSP signs for. It selects, with each
+	// election's start time, whether the fixed CSP salt derivation is active (see
+	// genesis.CSPSaltedProofV2Active). The CSP talks to one chain, so one ID is
+	// enough; an empty or unknown ID keeps the legacy derivation, matching the chain.
+	ChainID string
 	// notification stuff
 	NotificationCoolDownTime time.Duration
 	// NotificationTTL is how long a CSP OTP challenge remains valid. After
@@ -50,7 +55,7 @@ type Config struct {
 	NotificationBreakerCooldown    time.Duration
 	SMSService                     saasNotifications.NotificationService
 	MailService                    saasNotifications.NotificationService
-	// SyncDelivery makes BundleAuthToken and ResendChallenge block until the
+	// SyncDelivery makes AuthToken and ResendChallenge block until the
 	// challenge notification has actually been delivered, instead of returning as
 	// soon as it is enqueued. It exists to make tests deterministic; leave false
 	// in production (fire-and-forget).
@@ -63,6 +68,7 @@ type CSP struct {
 	PasswordSalt string
 	Signer       *saltedkey.SaltedKey
 	Storage      *db.MongoStorage
+	chainID      string
 	signerLock   sync.Map
 	notifyQueue  *notifications.Queue
 	ctx          context.Context
@@ -101,7 +107,7 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 					"success", ch.Success,
 					"type", ch.Type,
 					"userID", ch.UserID,
-					"bundleID", ch.BundleID)
+					"scopeID", ch.ScopeID)
 				switch ch.Type {
 				case notifications.EmailChallenge:
 					if err := config.DB.IncrementOrganizationSentEmailsCounter(ch.OrgAddress); err != nil {
@@ -129,6 +135,7 @@ func New(ctx context.Context, config *Config) (*CSP, error) {
 	return &CSP{
 		Storage:                  config.DB,
 		Signer:                   s,
+		chainID:                  config.ChainID,
 		notifyQueue:              queue,
 		ctx:                      ctx,
 		notificationCoolDownTime: notificationCoolDownTime,

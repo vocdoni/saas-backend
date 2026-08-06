@@ -17,7 +17,6 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp"
 	"github.com/vocdoni/saas-backend/csp/notifications"
-	"github.com/vocdoni/saas-backend/csp/signers"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
@@ -218,7 +217,7 @@ func (c *CSPHandlers) BundleAuthResendHandler(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
-	if !bytes.Equal(*bundleID, auth.BundleID) {
+	if !bytes.Equal(*bundleID, auth.ScopeID) {
 		errors.ErrUnauthorized.Withf("token does not belong to the bundle").Write(w)
 		return
 	}
@@ -334,11 +333,15 @@ func parseAddress(w http.ResponseWriter, payload string) (*internal.HexBytes, bo
 	return address, true
 }
 
-// signAndRespond signs the request and sends the response
-func (c *CSPHandlers) signAndRespond(w http.ResponseWriter, authToken, address, processID, weight internal.HexBytes) {
+// signAndRespond signs the request and sends the response. startTime is the
+// election's on-chain start, selecting the CSP salt derivation (see csp.Sign);
+// legacy bundle elections pass 0, which keeps the legacy derivation.
+func (c *CSPHandlers) signAndRespond(
+	w http.ResponseWriter, authToken, address, processID, weight internal.HexBytes, startTime uint32,
+) {
 	log.Debugw("new CSP sign request", "address", address, "procId", processID, "weight", weight)
 
-	signature, err := c.csp.Sign(authToken, address, processID, weight, signers.SignerTypeECDSASalted)
+	signature, err := c.csp.Sign(authToken, address, processID, weight, startTime)
 	if err != nil {
 		errors.ErrUnauthorized.WithErr(err).Write(w)
 		return
@@ -355,7 +358,7 @@ func (c *CSPHandlers) signAndRespond(w http.ResponseWriter, authToken, address, 
 //	@Description	The signing process includes verifying that the participant is in the census, that the process is part of
 //	@Description	the bundle, and that the authentication token is valid and verified.
 //	@Description
-//	@Description	Body: authToken, electionId (the process/election ID) and payload (the voter address). tokenR is unused.
+//	@Description	Body: authToken, electionId (the process/election ID) and payload (the voter address).
 //	@Tags			csp
 //	@Accept			json
 //	@Produce		json
@@ -438,7 +441,7 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// Sign the request and send the response
-	c.signAndRespond(w, req.AuthToken, *address, processID, big.NewInt(int64(weight)).Bytes())
+	c.signAndRespond(w, req.AuthToken, *address, processID, big.NewInt(int64(weight)).Bytes(), 0)
 }
 
 // UserWeightHandler godoc
@@ -475,7 +478,7 @@ func (c *CSPHandlers) UserWeightHandler(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	if !bytes.Equal(*bundleID, auth.BundleID) {
+	if !bytes.Equal(*bundleID, auth.ScopeID) {
 		errors.ErrUnauthorized.Withf("token does not belong to the bundle").Write(w)
 		return
 	}
@@ -573,7 +576,7 @@ func (c *CSPHandlers) BundleCheckHandler(w http.ResponseWriter, r *http.Request)
 	}
 	// The token must be verified and issued for this very bundle. A token from a
 	// different bundle (or an unverified one) does not grant access here.
-	if !auth.Verified || !bytes.Equal(*bundleID, auth.BundleID) {
+	if !auth.Verified || !bytes.Equal(*bundleID, auth.ScopeID) {
 		notEligible()
 		return
 	}
@@ -842,7 +845,7 @@ func determineContactMethod(
 // on the census type and provided contact information. Finally, it generates and
 // returns an authentication token that will be used in the second step. If the
 // cooldown period between authentication attempts has not elapsed, the underlying
-// BundleAuthToken call may return ErrAttemptCoolDownTime.
+// AuthToken call may return ErrAttemptCoolDownTime.
 func (c *CSPHandlers) authFirstStep(
 	r *http.Request,
 	bundleID internal.HexBytes,
@@ -929,7 +932,7 @@ func (c *CSPHandlers) authFirstStep(
 	name, logo := orgNameAndLogo(org)
 
 	// Generate the token
-	return c.csp.BundleAuthToken(
+	return c.csp.AuthToken(
 		bundleID,
 		internal.HexBytesFromString(orgMember.ID.Hex()),
 		toDestinations,
@@ -974,7 +977,7 @@ func (c *CSPHandlers) authSecondStep(r *http.Request) (internal.HexBytes, error)
 		return nil, errors.ErrInvalidUserData.Withf("challenge solution required")
 	}
 
-	switch err := c.csp.VerifyBundleAuthToken(req.AuthToken, req.AuthData[0]); err {
+	switch err := c.csp.VerifyAuthToken(req.AuthToken, req.AuthData[0]); err {
 	case nil:
 		return req.AuthToken, nil
 	case csp.ErrInvalidAuthToken, csp.ErrInvalidSolution, csp.ErrChallengeCodeFailure,

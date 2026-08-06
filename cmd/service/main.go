@@ -166,6 +166,7 @@ func main() {
 	cspConf := &csp.Config{
 		RootKey:                        bPrivKey,
 		DB:                             database,
+		ChainID:                        apiClient.ChainID(),
 		NotificationTTL:                viper.GetDuration("otpExpiry"),
 		NotificationCoolDownTime:       viper.GetDuration("otpCooldown"),
 		NotificationQueueWorkers:       viper.GetInt("notificationWorkers"),

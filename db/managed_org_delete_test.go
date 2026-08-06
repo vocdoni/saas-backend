@@ -45,7 +45,7 @@ func seedMemberAndCensus(t *testing.T, addr common.Address, suffix string) (memb
 	return member.ID, censusOID
 }
 
-// TestDeleteCSPByBundleAndProcess covers DeleteCSPAuthByBundle and DeleteCSPProcessByProcess:
+// TestDeleteCSPByBundleAndProcess covers DeleteCSPAuthByScope and DeleteCSPProcessByProcess:
 // they remove only the rows matching the given bundle/process and leave unrelated rows intact.
 func TestDeleteCSPByBundleAndProcess(t *testing.T) {
 	c := qt.New(t)
@@ -62,7 +62,7 @@ func TestDeleteCSPByBundleAndProcess(t *testing.T) {
 	c.Assert(testDB.SetCSPAuth(internal.HexBytes("tokB1"), internal.HexBytes("u1"), bundleB, ""), qt.IsNil)
 
 	// delete bundle A's tokens → only bundle B's token survives
-	n, err := testDB.DeleteCSPAuthByBundle(bundleA)
+	n, err := testDB.DeleteCSPAuthByScope(bundleA)
 	c.Assert(err, qt.IsNil)
 	c.Assert(n, qt.Equals, int64(2))
 	// bundle A's tokens are gone
@@ -74,7 +74,7 @@ func TestDeleteCSPByBundleAndProcess(t *testing.T) {
 	c.Assert(last.Token, qt.DeepEquals, internal.HexBytes("tokB1"))
 
 	// nil bundleID is rejected
-	_, err = testDB.DeleteCSPAuthByBundle(nil)
+	_, err = testDB.DeleteCSPAuthByScope(nil)
 	c.Assert(err, qt.ErrorIs, ErrBadInputs)
 
 	// seed two CSP process-status rows (ConsumeCSPProcess requires a verified token) and delete

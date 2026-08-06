@@ -246,7 +246,7 @@ func (ms *MongoStorage) ProcessBundlesByCensus(census *Census) ([]*ProcessesBund
 // DeleteProcessBundlesByOrg removes every process bundle owned by the given organization.
 // Best-effort cleanup used when tearing down an organization. Returns the number of
 // deleted bundles. CSP auth tokens tied to those bundles must be cleaned up separately
-// (DeleteCSPAuthByBundle) before or after this call.
+// (DeleteCSPAuthByScope) before or after this call.
 func (ms *MongoStorage) DeleteProcessBundlesByOrg(orgAddress common.Address) (int64, error) {
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return 0, ErrInvalidData

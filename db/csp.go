@@ -14,15 +14,17 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// CSPAuth represents a user authentication information for a bundle of processes
+// CSPAuth represents a user authentication token bound to a scope (a voting
+// process, or a process bundle in the deprecated bundle flow)
 type CSPAuth struct {
 	Token internal.HexBytes `json:"token" bson:"_id"`
 	// UserID is the member ObjectID (hex) the token authenticates.
 	UserID internal.HexBytes `json:"userID" bson:"userid"`
-	// BundleID is the token's anchor: a process-bundle id in the legacy bundle flow, or a
-	// voting-process id in the new /processes flow. It only binds the token and gates the
-	// resend cooldown; per-election signing/consumption keys on the election id separately.
-	BundleID  internal.HexBytes `json:"bundleID" bson:"bundleid"`
+	// ScopeID is what the token is issued for: a voting-process id in the /processes flow, or a
+	// process-bundle id in the legacy deprecated bundle flow. It only binds the token and
+	// gates the resend cooldown; per-election signing/consumption keys on the election id
+	// separately.
+	ScopeID   internal.HexBytes `json:"scopeID" bson:"scopeid"`
 	CreatedAt time.Time         `json:"createdAt" bson:"createdat"`
 	// Secret is the per-token OTP challenge secret. It must never leave the
 	// server, so it is excluded from JSON serialization.
@@ -32,7 +34,7 @@ type CSPAuth struct {
 	VerifiedAt time.Time `json:"verifiedAt" bson:"verifiedat"`
 }
 
-// CSPProcess is the status of a process in a bundle of processes for a user
+// CSPProcess is the per-user consumption status of a single election
 type CSPProcess struct {
 	ID          internal.HexBytes `json:"id" bson:"_id"` // hash(userID + processID)
 	UserID      internal.HexBytes `json:"userID" bson:"userid"`
@@ -45,10 +47,9 @@ type CSPProcess struct {
 }
 
 // SetCSPAuth method stores a new CSP authentication token for a user and a
-// bundle of processes. It returns an error if the token, user ID or bundle
-// ID are nil.
-func (ms *MongoStorage) SetCSPAuth(token, userID, bundleID internal.HexBytes, secret string) error {
-	if token == nil || userID == nil || bundleID == nil {
+// scope. It returns an error if the token, user ID or scope ID are nil.
+func (ms *MongoStorage) SetCSPAuth(token, userID, scopeID internal.HexBytes, secret string) error {
+	if token == nil || userID == nil || scopeID == nil {
 		return ErrBadInputs
 	}
 	ms.keysLock.Lock()
@@ -60,7 +61,7 @@ func (ms *MongoStorage) SetCSPAuth(token, userID, bundleID internal.HexBytes, se
 	if _, err := ms.cspTokens.InsertOne(ctx, CSPAuth{
 		Token:     token,
 		UserID:    userID,
-		BundleID:  bundleID,
+		ScopeID:   scopeID,
 		CreatedAt: time.Now(),
 		Secret:    secret,
 		Verified:  false,
@@ -83,18 +84,17 @@ func (ms *MongoStorage) CSPAuth(token internal.HexBytes) (*CSPAuth, error) {
 }
 
 // LastCSPAuth method returns the last CSP authentication data for a given
-// user and bundle of processes. It returns an error if the user ID or bundle
-// ID are nil or the token does not exist.
-func (ms *MongoStorage) LastCSPAuth(userID, bundleID internal.HexBytes) (*CSPAuth, error) {
-	if userID == nil || bundleID == nil {
+// user and scope. It returns an error if the user ID or scope ID are nil or
+// the token does not exist.
+func (ms *MongoStorage) LastCSPAuth(userID, scopeID internal.HexBytes) (*CSPAuth, error) {
+	if userID == nil || scopeID == nil {
 		return nil, ErrBadInputs
 	}
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	// generate filter and options to find the last token for the user and
-	// bundle
-	filter := bson.M{"userid": userID, "bundleid": bundleID}
+	// generate filter and options to find the last token for the user and scope
+	filter := bson.M{"userid": userID, "scopeid": scopeID}
 	opts := options.FindOne().SetSort(bson.M{"createdat": -1})
 	tokenData := new(CSPAuth)
 	// find the last token
@@ -189,6 +189,17 @@ func (ms *MongoStorage) CSPProcess(token, processID internal.HexBytes) (*CSPProc
 // true if the process has been consumed, false if it has not been consumed and
 // an error if the process does not exist or the token is not verified.
 func (ms *MongoStorage) IsCSPProcessConsumed(userID, processID internal.HexBytes) (bool, error) {
+	return ms.cspProcessConsumedBeyond(userID, processID, MaxVoteOverwritesPerProcess)
+}
+
+// IsCSPProcessConsumedBlind reports whether the voter has already taken an
+// anonymous signature for this election. That flow allows no overwrites (see
+// ConsumeCSPProcessBlind), so any previous signature consumes it.
+func (ms *MongoStorage) IsCSPProcessConsumedBlind(userID, processID internal.HexBytes) (bool, error) {
+	return ms.cspProcessConsumedBeyond(userID, processID, 0)
+}
+
+func (ms *MongoStorage) cspProcessConsumedBeyond(userID, processID internal.HexBytes, maxOverwrites int) (bool, error) {
 	ms.keysLock.RLock()
 	defer ms.keysLock.RUnlock()
 	// create a context with a timeout
@@ -210,17 +221,43 @@ func (ms *MongoStorage) IsCSPProcessConsumed(userID, processID internal.HexBytes
 	if !tokenData.Verified {
 		return false, ErrTokenNotVerified
 	}
-	return currentStatus.TimesVoted > MaxVoteOverwritesPerProcess, nil
+	return currentStatus.TimesVoted > maxOverwrites, nil
 }
 
 // ConsumeCSPProcess method consumes a CSP process for a user. It returns an
 // error if the token, processID or address are nil. It returns an error if
-// the token does not exist, the process has already been consumed or thecspAuthTokenStatusID(
+// the token does not exist, the process has already been consumed or the
 // token is not verified.
 func (ms *MongoStorage) ConsumeCSPProcess(token, processID, address internal.HexBytes) error {
 	if token == nil || processID == nil || address == nil {
 		return ErrBadInputs
 	}
+	return ms.markCSPProcessConsumed(token, processID, address, MaxVoteOverwritesPerProcess)
+}
+
+// ConsumeCSPProcessBlind consumes a CSP process for a user without recording an
+// address, for the anonymous signing flow where the CSP blind-signs a message it
+// cannot read and so never learns which address the voter casts with.
+//
+// Unlike the plain flow this is single-use: it allows no vote overwrites. Vote
+// overwriting is only safe while the CSP can pin every signature to one address,
+// which is what keeps the on-chain nullifier stable so a later vote replaces the
+// earlier one. A blind signature carries no address the CSP can check, so a
+// voter granted N overwrites could instead take N signatures for N different
+// addresses -- N distinct nullifiers, counted as N separate voters. Allowing one
+// signature per voter per election closes that.
+func (ms *MongoStorage) ConsumeCSPProcessBlind(token, processID internal.HexBytes) error {
+	if token == nil || processID == nil {
+		return ErrBadInputs
+	}
+	return ms.markCSPProcessConsumed(token, processID, nil, 0)
+}
+
+// markCSPProcessConsumed marks a process consumed by the token's user. A nil address
+// records no address (the anonymous flow); a non-nil one is stored and must stay
+// the same across vote overwrites. maxOverwrites bounds how many times the same
+// voter may re-sign for this election.
+func (ms *MongoStorage) markCSPProcessConsumed(token, processID, address internal.HexBytes, maxOverwrites int) error {
 	// lock the keys
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
@@ -238,14 +275,16 @@ func (ms *MongoStorage) ConsumeCSPProcess(token, processID, address internal.Hex
 		return err
 	}
 	// check if the token is already consumed
-	if tokenStatus != nil && tokenStatus.TimesVoted > MaxVoteOverwritesPerProcess {
+	if tokenStatus != nil && tokenStatus.TimesVoted > maxOverwrites {
 		return ErrProcessAlreadyConsumed
 	}
 	timesVoted := 1
 	if tokenStatus != nil {
 		timesVoted = tokenStatus.TimesVoted + 1
-		// check if the address is the same as the previous one used to vote
-		if tokenStatus.UsedAddress != nil && !tokenStatus.UsedAddress.Equals(address) {
+		// check if the address is the same as the previous one used to vote.
+		// Skipped when no address is supplied: the anonymous flow has none to
+		// compare, and it forbids overwrites outright instead.
+		if address != nil && tokenStatus.UsedAddress != nil && !tokenStatus.UsedAddress.Equals(address) {
 			return ErrInvalidData
 		}
 	}
@@ -306,17 +345,17 @@ func cspAuthTokenStatusID(userID, processID internal.HexBytes) internal.HexBytes
 	return internal.HexBytes(hash[:])
 }
 
-// CountCSPAuthByBundle counts the total number of CSP authentication tokens
-// for a given bundle ID. Returns an error if the bundleID is nil.
-func (ms *MongoStorage) CountCSPAuthByBundle(bundleID internal.HexBytes) (int64, error) {
-	if bundleID == nil {
+// CountCSPAuthByScope counts the total number of CSP authentication tokens
+// for a given scope ID. Returns an error if the scopeID is nil.
+func (ms *MongoStorage) CountCSPAuthByScope(scopeID internal.HexBytes) (int64, error) {
+	if scopeID == nil {
 		return 0, ErrBadInputs
 	}
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	// count documents matching the bundle ID
-	filter := bson.M{"bundleid": bundleID}
+	// count documents matching the scope ID
+	filter := bson.M{"scopeid": scopeID}
 	distinctValues, err := ms.cspTokens.Distinct(ctx, "userid", filter)
 	if err != nil {
 		return 0, err
@@ -324,17 +363,17 @@ func (ms *MongoStorage) CountCSPAuthByBundle(bundleID internal.HexBytes) (int64,
 	return int64(len(distinctValues)), nil
 }
 
-// CountCSPAuthVerifiedByBundle counts the number of verified CSP authentication
-// tokens for a given bundle ID. Returns an error if the bundleID is nil.
-func (ms *MongoStorage) CountCSPAuthVerifiedByBundle(bundleID internal.HexBytes) (int64, error) {
-	if bundleID == nil {
+// CountCSPAuthVerifiedByScope counts the number of verified CSP authentication
+// tokens for a given scope ID. Returns an error if the scopeID is nil.
+func (ms *MongoStorage) CountCSPAuthVerifiedByScope(scopeID internal.HexBytes) (int64, error) {
+	if scopeID == nil {
 		return 0, ErrBadInputs
 	}
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	// count documents matching the bundle ID and verified status
-	filter := bson.M{"bundleid": bundleID, "verified": true}
+	// count documents matching the scope ID and verified status
+	filter := bson.M{"scopeid": scopeID, "verified": true}
 	distinctValues, err := ms.cspTokens.Distinct(ctx, "userid", filter)
 	if err != nil {
 		return 0, err
@@ -445,20 +484,20 @@ func (ms *MongoStorage) MembersWithUsedCSPProcess(
 	return result, nil
 }
 
-// DeleteCSPAuthByBundle removes every CSP authentication token tied to the given bundle.
+// DeleteCSPAuthByScope removes every CSP authentication token tied to the given scope.
 // It is a best-effort cleanup used when tearing down an organization (the bundle's
 // processes share a common census/auth flow). Returns the number of deleted tokens.
-func (ms *MongoStorage) DeleteCSPAuthByBundle(bundleID internal.HexBytes) (int64, error) {
-	if bundleID == nil {
+func (ms *MongoStorage) DeleteCSPAuthByScope(scopeID internal.HexBytes) (int64, error) {
+	if scopeID == nil {
 		return 0, ErrBadInputs
 	}
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	res, err := ms.cspTokens.DeleteMany(ctx, bson.M{"bundleid": bundleID})
+	res, err := ms.cspTokens.DeleteMany(ctx, bson.M{"scopeid": scopeID})
 	if err != nil {
-		return 0, fmt.Errorf("failed to delete CSP auth tokens by bundle: %w", err)
+		return 0, fmt.Errorf("failed to delete CSP auth tokens by scope: %w", err)
 	}
 	return res.DeletedCount, nil
 }

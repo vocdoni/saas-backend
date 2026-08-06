@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	stderrors "errors"
+	"math/big"
 	"net/http"
 	"strings"
 
@@ -51,7 +52,7 @@ func (a *API) relayVoteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	vote, apiErr := a.parseRelayVote(req.TxPayload)
+	vote, apiErr := a.parseRelayVote(req.TxPayload, req.WeightCert)
 	if apiErr != nil {
 		apiErr.Write(w)
 		return
@@ -177,7 +178,7 @@ func (a *API) relayVotesHandler(w http.ResponseWriter, r *http.Request) {
 	votes := make([]*parsedVote, len(req.Votes))
 	seenNullifier := make(map[string]int, len(req.Votes))
 	for i, item := range req.Votes {
-		vote, apiErr := a.parseRelayVote(item.TxPayload)
+		vote, apiErr := a.parseRelayVote(item.TxPayload, item.WeightCert)
 		if apiErr != nil {
 			apiErr.Withf("at vote index %d", i).Write(w)
 			return
@@ -376,7 +377,7 @@ type parsedVote struct {
 // parseRelayVote runs the synchronous checks of a vote relay: the payload must decode to
 // a vote envelope naming a process this backend manages. It returns the resolved vote or
 // the API error to write back, never both.
-func (a *API) parseRelayVote(payload internal.HexBytes) (*parsedVote, *errors.Error) {
+func (a *API) parseRelayVote(payload, weightCert internal.HexBytes) (*parsedVote, *errors.Error) {
 	if len(payload) == 0 {
 		return nil, asPtr(errors.ErrMalformedBody.Withf("missing txPayload"))
 	}
@@ -423,12 +424,90 @@ func (a *API) parseRelayVote(payload internal.HexBytes) (*parsedVote, *errors.Er
 		return nil, asPtr(errors.ErrGenericInternalServerError.WithErr(err))
 	}
 
+	if apiErr := a.checkBlindVoteWeight(vote, pid, weightCert); apiErr != nil {
+		return nil, apiErr
+	}
+
 	return &parsedVote{
 		payload:   payload,
 		processID: pid,
 		org:       orgAddress,
 		nullifier: voteNullifier(signedTx, vote, pid, a.account.ChainID()),
 	}, nil
+}
+
+// checkBlindVoteWeight rejects a blind CSP vote whose declared weight the CSP
+// never attested.
+//
+// It exists because a blind signature is made over a bundle the CSP cannot read:
+// the voter chooses the voteWeight inside it, and the chain takes that number at
+// face value (cspproof.Verify returns Bundle.VoteWeight as the vote's weight).
+// The relay is the one point where this backend sees the bundle in the clear, so
+// it is the only place the attestation can be checked at all.
+//
+// It is a backstop, not a security boundary. ProofCA has no field for the
+// attestation, so nothing checks it on chain, and a voter who submits their vote
+// directly to the Vochain instead of through this relay skips it entirely. It
+// catches honest clients and casual tampering, not a determined voter.
+func (a *API) checkBlindVoteWeight(
+	vote *models.VoteEnvelope, pid, weightCert internal.HexBytes,
+) *errors.Error {
+	proofCA := vote.GetProof().GetCa()
+	if proofCA == nil {
+		return nil
+	}
+	switch proofCA.GetType() {
+	case models.ProofCA_ECDSA_BLIND, models.ProofCA_ECDSA_BLIND_PIDSALTED:
+	default:
+		// a plain CSP proof is signed over the bundle the CSP itself built,
+		// weight included, so there is nothing extra to check
+		return nil
+	}
+	declared := proofCA.GetBundle().GetVoteWeight()
+	if len(declared) == 0 {
+		// no weight declared: the chain applies 1, which needs no attestation
+		return nil
+	}
+	weight := new(big.Int).SetBytes(declared)
+	if !weight.IsUint64() {
+		return asPtr(errors.ErrInvalidTxFormat.With("vote weight out of range"))
+	}
+	if len(weightCert) == 0 {
+		return asPtr(errors.ErrMalformedBody.With("missing weightCert for a weighted anonymous vote"))
+	}
+	startTime, err := a.electionStartTime(pid)
+	if err != nil {
+		return asPtr(errors.ErrGenericInternalServerError.WithErr(err))
+	}
+	ok, err := a.csp.VerifyWeightAttestation(pid, weightCert, weight.Uint64(), startTime)
+	if err != nil {
+		return asPtr(errors.ErrGenericInternalServerError.WithErr(err))
+	}
+	if !ok {
+		return asPtr(errors.ErrUnauthorized.With("vote weight was not attested by the CSP"))
+	}
+	return nil
+}
+
+// electionStartTime resolves the on-chain start time of the election a relayed
+// vote targets, so the salt derivation in csp.VerifyWeightAttestation matches the
+// one the chain (and the CSP sign path) used. A multi-question election is
+// resolved through its parent voting process's StartDate; a legacy single
+// election, which carries no start time, yields 0 — selecting the legacy
+// derivation, the correct one for the elections that predate the fork.
+func (a *API) electionStartTime(pid internal.HexBytes) (uint32, error) {
+	q, err := a.db.QuestionByUpstreamID(pid)
+	if err != nil {
+		if stderrors.Is(err, db.ErrNotFound) {
+			return 0, nil // legacy election: legacy derivation
+		}
+		return 0, err
+	}
+	vp, err := a.db.VotingProcess(q.ProcessID)
+	if err != nil {
+		return 0, err
+	}
+	return uint32(vp.StartDate.Unix()), nil
 }
 
 // voteNullifier works out the nullifier of an envelope without submitting it, so a vote

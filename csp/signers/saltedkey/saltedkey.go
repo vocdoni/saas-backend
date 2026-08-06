@@ -17,15 +17,19 @@ import (
 const (
 	// PrivKeyHexSize is the hexadecimal length of a private key
 	PrivKeyHexSize = 64
-	// SaltSize is the size of the salt used for derive the new key
-	SaltSize = 20
+	// SaltSize is the width (in bytes) of the salt the key-derivation primitives consume.
+	// It mirrors dvote's crypto/saltedkey.SaltSize; only the first SaltSize bytes of a salt
+	// are read, which is what lets the legacy derivation hand the primitives a full 32-byte
+	// processID and have them salt on its first 20.
+	SaltSize = saltedkey.SaltSize
 )
 
-// SaltedKey is a wrapper around ECDSA and ECDSA Blind that helps signing
-// messages with a known Salt. The Salt is added to the private key curve
-// point in order to derive a new deterministic signing key.
-// The same operation must be perform on the public key side in order to
-// verify the signed messages.
+// SaltedKey is a wrapper around ECDSA and ECDSA Blind that helps signing messages
+// with a per-election salt. The salt is added to the root private key to derive a
+// per-election deterministic signing key; the same salt is applied to the public
+// key to verify. The salt value itself is chosen by the caller — see
+// csp.electionSalt, which mirrors the chain's cspproof derivation (legacy or the
+// fixed hashed one, per the CSP soft fork).
 type SaltedKey struct {
 	rootKey *big.Int
 }
@@ -40,10 +44,8 @@ func NewSaltedKey(privKey string) (*SaltedKey, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	// Check the privKey point is a valid D value
-	_, err = ethcrypto.ToECDSA(pkb)
-	if err != nil {
+	if _, err = ethcrypto.ToECDSA(pkb); err != nil {
 		return nil, err
 	}
 	return &SaltedKey{
@@ -51,46 +53,52 @@ func NewSaltedKey(privKey string) (*SaltedKey, error) {
 	}, nil
 }
 
-// SignECDSA returns the signature payload of message (which will be hashed)
-// using the provided Salt.
-func (sk *SaltedKey) SignECDSA(salt [SaltSize]byte, msg []byte) ([]byte, error) {
-	esk := new(vocdonicrypto.SignKeys)
-	if err := esk.AddHexKey(fmt.Sprintf("%x", sk.rootKey.Bytes())); err != nil {
-		return nil, fmt.Errorf("cannot sign ECDSA salted: %w", err)
+// SignECDSA returns the Ethereum signature of msg signed with the per-election
+// salted private key. The salted key is (d + salt) mod n, derived by dvote's
+// SaltECDSAPrivKey so it stays byte-for-byte in step with the chain's
+// SaltECDSAPubKey verifier. The signature itself is exactly what
+// ethereum.SignKeys.SignEthereum produces (crypto.Sign of the vocdoni message
+// hash), so the wire format is unchanged.
+func (sk *SaltedKey) SignECDSA(salt, msg []byte) ([]byte, error) {
+	root, err := ethcrypto.ToECDSA(sk.rootKey.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("cannot load root key: %w", err)
 	}
-	// get the bigNumber from salt
-	s := new(big.Int).SetBytes(salt[:])
-	// add it to the current key, so now we have a new private key (currentPrivKey + n)
-	//nolint:staticcheck // SA1019: mutating D is the point of salted-key derivation; predates the Go 1.26 deprecation
-	esk.Private.D.Add(esk.Private.D, s)
-	// return the signature
-	return esk.SignEthereum(msg)
+	salted, err := saltedkey.SaltECDSAPrivKey(root, salt)
+	if err != nil {
+		return nil, fmt.Errorf("cannot derive salted ECDSA key: %w", err)
+	}
+	return ethcrypto.Sign(vocdonicrypto.Hash(msg), salted)
 }
 
-// SignBlind returns the signature payload of a blinded message using the provided Salt.
-// The Secretk number needs to be also provided.
-func (sk *SaltedKey) SignBlind(salt [SaltSize]byte, msgBlinded []byte, secretK *big.Int) ([]byte, error) {
+// SignBlind returns the blind signature of a blinded message, signed with the
+// per-election salted blind private key and the single-use secret k. The salted
+// key is (d + salt) mod n, derived by dvote's SaltBlindPrivKey to match the
+// chain's SaltBlindPubKey verifier.
+func (sk *SaltedKey) SignBlind(salt, msgBlinded []byte, secretK *big.Int) ([]byte, error) {
 	if secretK == nil {
 		return nil, fmt.Errorf("secretK is nil")
 	}
-	s := new(big.Int).SetBytes(salt[:])
-	privKey := s.Add(s, sk.rootKey)
-	blindPrivKey := blind.PrivateKey(*privKey)
+	root := blind.PrivateKey(*sk.rootKey)
+	salted, err := saltedkey.SaltBlindPrivKey(&root, salt)
+	if err != nil {
+		return nil, fmt.Errorf("cannot derive salted blind key: %w", err)
+	}
 	m := new(big.Int).SetBytes(msgBlinded)
-	signature, err := blindPrivKey.BlindSign(m, secretK)
+	signature, err := salted.BlindSign(m, secretK)
 	if err != nil {
 		return nil, err
 	}
 	return signature.Bytes(), nil
 }
 
-// BlindPubKey returns the root public key for blind signatures
+// BlindPubKey returns the root public key for blind signatures.
 func (sk *SaltedKey) BlindPubKey() *blind.PublicKey {
 	pk := blind.PrivateKey(*sk.rootKey)
 	return pk.Public()
 }
 
-// ECDSAPubKey returns the root ecdsa public key for plain signatures
+// ECDSAPubKey returns the root ecdsa public key for plain signatures.
 func (sk *SaltedKey) ECDSAPubKey() (*ecdsa.PublicKey, error) {
 	privK, err := ethcrypto.ToECDSA(sk.rootKey.Bytes())
 	if err != nil {
@@ -99,26 +107,32 @@ func (sk *SaltedKey) ECDSAPubKey() (*ecdsa.PublicKey, error) {
 	return &privK.PublicKey, nil
 }
 
-// SaltBlindPubKey returns the salted blind public key of pubKey applying the salt.
-func SaltBlindPubKey(pubKey *blind.PublicKey, salt [saltedkey.SaltSize]byte) (*blind.PublicKey, error) {
-	if pubKey == nil {
-		return nil, fmt.Errorf("public key is nil")
-	}
-	x, y := ethcrypto.S256().ScalarBaseMult(salt[:])
-	s := blind.Point{
-		X: x,
-		Y: y,
-	}
-	return (*blind.PublicKey)(pubKey.Point().Add(&s)), nil
+// Salt derives the per-election salt from the process id and vote weight,
+// mirroring dvote's crypto/saltedkey.Salt: keccak256(processID || weight[32-BE]).
+// A nil or empty weight is treated as 1; weights above 2^160 are rejected. This
+// is the post-fork derivation (see csp.electionSalt); the legacy one hands the
+// primitives the raw processID instead.
+func Salt(processID, weight []byte) ([]byte, error) {
+	return saltedkey.Salt(processID, weight)
 }
 
-// SaltECDSAPubKey returns the salted plain public key of pubKey applying the salt.
-func SaltECDSAPubKey(pubKey *ecdsa.PublicKey, salt [saltedkey.SaltSize]byte) ([]byte, error) {
+// SaltBlindPubKey returns the salted blind public key of pubKey applying the salt.
+func SaltBlindPubKey(pubKey *blind.PublicKey, salt []byte) (*blind.PublicKey, error) {
 	if pubKey == nil {
 		return nil, fmt.Errorf("public key is nil")
 	}
-	x, y := pubKey.ScalarBaseMult(salt[:])
-	//nolint:staticcheck // SA1019: mutating X/Y is the point of salted-key derivation; predates the Go 1.26 deprecation
-	pubKey.X, pubKey.Y = pubKey.Add(pubKey.X, pubKey.Y, x, y)
-	return ethcrypto.FromECDSAPub(pubKey), nil
+	return saltedkey.SaltBlindPubKey(pubKey, salt)
+}
+
+// SaltECDSAPubKey returns the salted plain public key of pubKey applying the salt,
+// as uncompressed bytes, for comparison against a recovered signer.
+func SaltECDSAPubKey(pubKey *ecdsa.PublicKey, salt []byte) ([]byte, error) {
+	if pubKey == nil {
+		return nil, fmt.Errorf("public key is nil")
+	}
+	salted, err := saltedkey.SaltECDSAPubKey(pubKey, salt)
+	if err != nil {
+		return nil, err
+	}
+	return ethcrypto.FromECDSAPub(salted), nil
 }

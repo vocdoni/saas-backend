@@ -17,8 +17,8 @@ func TestECDSAsaltedKey(t *testing.T) {
 	sk, err := NewSaltedKey(privHex)
 	qt.Assert(t, err, qt.IsNil)
 
-	salt := [SaltSize]byte{}
-	copy(salt[:], randomBytes(20))
+	salt := make([]byte, SaltSize)
+	copy(salt, randomBytes(20))
 	msg := []byte("hello world!")
 
 	signature, err := sk.SignECDSA(salt, msg)
@@ -40,8 +40,8 @@ func TestBlindsaltedKey(t *testing.T) {
 	sk, err := NewSaltedKey(privHex)
 	qt.Assert(t, err, qt.IsNil)
 
-	salt := [SaltSize]byte{}
-	copy(salt[:], randomBytes(20))
+	salt := make([]byte, SaltSize)
+	copy(salt, randomBytes(20))
 	msgHash := ethereum.HashRaw([]byte("hello world!"))
 
 	// Server: generate a new secretK and R (R is required for blinding and K for signing)

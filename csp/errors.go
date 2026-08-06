@@ -9,8 +9,8 @@ import (
 var (
 	// ErrNoUserID is returned when no user ID is provided.
 	ErrNoUserID = fmt.Errorf("no user ID provided for the user")
-	// ErrNoBundleID is returned when no bundle ID is provided.
-	ErrNoBundleID = fmt.Errorf("no bundle ID provided")
+	// ErrNoScopeID is returned when no scope ID is provided.
+	ErrNoScopeID = fmt.Errorf("no scope ID provided")
 	// ErrNoProcessID is returned when no process ID is provided.
 	ErrNoProcessID = fmt.Errorf("no process ID provided")
 	// ErrTooManyAttempts is returned when no more verification attempts are
@@ -42,8 +42,18 @@ var (
 	ErrStorageFailure = fmt.Errorf("storage service failure")
 	// ErrNotificationFailure is returned when the notification service fails.
 	ErrNotificationFailure = fmt.Errorf("notification service failure")
-	// ErrInvalidSignerType is returned when the signer type is invalid.
-	ErrInvalidSignerType = fmt.Errorf("invalid signer type")
+	// ErrBlindSessionNotFound is returned when no live blind-signature session
+	// exists for the voter and election: never prepared, already used (sessions
+	// are single-use), or expired.
+	ErrBlindSessionNotFound = fmt.Errorf("blind signing session not found or expired")
+	// ErrRetryBlinding is returned when the blinded message the client sent is
+	// not exactly 32 bytes once minimally encoded, which the blind-signature
+	// library rejects. The client should blind again -- fresh blinding factors
+	// give a different value -- and retry. The session is left intact so it can.
+	ErrRetryBlinding = fmt.Errorf("blinded message must be 32 bytes, blind again and retry")
+	// ErrWeightAttestation is returned when the weight attestation cannot be
+	// signed.
+	ErrWeightAttestation = fmt.Errorf("failed to sign weight attestation")
 	// ErrAuthTokenNotVerified is returned when the token is not verified.
 	ErrAuthTokenNotVerified = fmt.Errorf("the token is not verified")
 	// ErrProcessAlreadyConsumed is returned when the user is already
