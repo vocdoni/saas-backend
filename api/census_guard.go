@@ -26,8 +26,10 @@ import (
 // can belong to someone who is no longer counted. The participation scoping preserves exactly
 // that: a member with a signature but no participant row is already outside the count, and only
 // the censuses that would lose a counted member can lose the invariant. Question eligibility
-// lists deliberately play no part — a consumed signature is a live potential vote whatever the
-// list says today, and the CSP sign gate checks participation, not eligibility.
+// lists deliberately play no part — eligibility is enforced once, at sign time
+// (ProcessSignHandler), and never re-checked afterwards, so a consumed signature is a live
+// potential vote whatever the list says today; participation is the only axis this removal
+// changes.
 //
 // One census is checked per iteration — the participant filter is per census, and matching it by
 // exact participantID string mirrors the $in delete in RevokeMembersFromCensuses, so the guard
@@ -71,7 +73,7 @@ func (a *API) blockedVoters(censusIDs, memberIDs []string) ([]string, error) {
 		}
 		hit, err := a.db.MembersWithUsedCSPProcesses(elections, present)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("could not resolve the members signed for on the census elections: %w", err)
 		}
 		for _, id := range hit {
 			blocked[id] = true
