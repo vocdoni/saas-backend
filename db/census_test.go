@@ -18,7 +18,6 @@ func TestPopulateGroupCensus(t *testing.T) {
 		// Create test organization first
 		org := &Organization{
 			Address:   testOrgAddress,
-			Active:    true,
 			CreatedAt: time.Now(),
 		}
 		err := testDB.SetOrganization(org)
@@ -73,7 +72,6 @@ func TestPopulateGroupCensus(t *testing.T) {
 		// Create test organizations
 		org1 := &Organization{
 			Address:   testOrgAddress,
-			Active:    true,
 			CreatedAt: time.Now(),
 		}
 		err := testDB.SetOrganization(org1)
@@ -81,7 +79,6 @@ func TestPopulateGroupCensus(t *testing.T) {
 
 		org2 := &Organization{
 			Address:   testAnotherOrgAddress,
-			Active:    true,
 			CreatedAt: time.Now(),
 		}
 		err = testDB.SetOrganization(org2)
@@ -171,7 +168,6 @@ func TestPopulateGroupCensus(t *testing.T) {
 		// Create test organizations
 		org1 := &Organization{
 			Address:   testOrgAddress,
-			Active:    true,
 			CreatedAt: time.Now(),
 		}
 		err := testDB.SetOrganization(org1)
@@ -220,7 +216,6 @@ func TestPopulateGroupCensus(t *testing.T) {
 		// Create test organization
 		org := &Organization{
 			Address:   testOrgAddress,
-			Active:    true,
 			CreatedAt: time.Now(),
 		}
 		err := testDB.SetOrganization(org)
@@ -296,7 +291,6 @@ func TestPopulateGroupCensus(t *testing.T) {
 		// Create test organization
 		org := &Organization{
 			Address:   testOrgAddress,
-			Active:    true,
 			CreatedAt: time.Now(),
 		}
 		err := testDB.SetOrganization(org)
@@ -406,7 +400,6 @@ func TestCensus(t *testing.T) {
 		// Create test organization first
 		org := &Organization{
 			Address:   testOrgAddress,
-			Active:    true,
 			CreatedAt: time.Now(),
 		}
 		err = testDB.SetOrganization(org)
@@ -469,7 +462,6 @@ func TestCensus(t *testing.T) {
 		// Create test organization first
 		org := &Organization{
 			Address:   testOrgAddress,
-			Active:    true,
 			CreatedAt: time.Now(),
 		}
 		err := testDB.SetOrganization(org)
@@ -508,7 +500,6 @@ func TestCensus(t *testing.T) {
 		// Create test organization first
 		org := &Organization{
 			Address:   testOrgAddress,
-			Active:    true,
 			CreatedAt: time.Now(),
 		}
 		err := testDB.SetOrganization(org)
@@ -551,7 +542,6 @@ func TestCensus(t *testing.T) {
 		// Create test organization first
 		org := &Organization{
 			Address:   testOrgAddress,
-			Active:    true,
 			CreatedAt: time.Now(),
 		}
 		err := testDB.SetOrganization(org)

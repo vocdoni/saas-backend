@@ -80,7 +80,7 @@ func TestRepairLoginHashes(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
-	org := &Organization{Address: testOrgAddress, Active: true, CreatedAt: time.Now(), Country: "ES"}
+	org := &Organization{Address: testOrgAddress, CreatedAt: time.Now(), Country: "ES"}
 
 	newCensus := func(auth OrgMemberAuthFields, twoFa OrgMemberTwoFaFields) (*Census, string) {
 		census := &Census{
@@ -338,7 +338,7 @@ func TestRepairLoginHashes(t *testing.T) {
 
 	t.Run("restricts the run to the selected organization", func(_ *testing.T) {
 		reset()
-		other := &Organization{Address: testAnotherOrgAddress, Active: true, CreatedAt: time.Now()}
+		other := &Organization{Address: testAnotherOrgAddress, CreatedAt: time.Now()}
 		c.Assert(testDB.SetOrganization(other), qt.IsNil)
 
 		mine, mineID := newCensus(authFields, noTwoFa)
@@ -383,7 +383,7 @@ func TestRepairMatchesCanonicalHash(t *testing.T) {
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 	c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 
-	org := &Organization{Address: testOrgAddress, Active: true, CreatedAt: time.Now(), Country: "ES"}
+	org := &Organization{Address: testOrgAddress, CreatedAt: time.Now(), Country: "ES"}
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 	phone, err := NewHashedPhone(testPlaintextPhone, org)
 	c.Assert(err, qt.IsNil)

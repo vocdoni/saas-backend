@@ -245,9 +245,6 @@ definitions:
     type: object
   apicommon.CreateManagedOrganizationRequest:
     properties:
-      active:
-        description: Whether the organization is active
-        type: boolean
       address:
         description: The organization's blockchain address
         items:
@@ -359,9 +356,6 @@ definitions:
     type: object
   apicommon.CreateOrganizationRequest:
     properties:
-      active:
-        description: Whether the organization is active
-        type: boolean
       address:
         description: The organization's blockchain address
         items:
@@ -933,9 +927,6 @@ definitions:
     type: object
   apicommon.OrganizationInfo:
     properties:
-      active:
-        description: Whether the organization is active
-        type: boolean
       address:
         description: The organization's blockchain address
         items:

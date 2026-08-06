@@ -561,7 +561,7 @@ func TestUpsertOrgMemberPartialUpdateKeepsLoginHash(t *testing.T) {
 	c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
-	org := &Organization{Address: testOrgAddress, Active: true, CreatedAt: time.Now()}
+	org := &Organization{Address: testOrgAddress, CreatedAt: time.Now()}
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 
 	member := &OrgMember{
@@ -633,7 +633,7 @@ func TestUpsertOrgMemberReportsCreated(t *testing.T) {
 	c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
-	org := &Organization{Address: testOrgAddress, Active: true, CreatedAt: time.Now()}
+	org := &Organization{Address: testOrgAddress, CreatedAt: time.Now()}
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 
 	id, created, err := testDB.UpsertOrgMemberAndCensusParticipants(org, &OrgMember{

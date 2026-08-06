@@ -26,7 +26,6 @@ func TestHandlePhoneContact(t *testing.T) {
 
 	org := &db.Organization{
 		Address:   common.Address{0x01, 0x23, 0x45, 0x67, 0x89},
-		Active:    true,
 		CreatedAt: time.Now(),
 	}
 	org.Country = "ES"

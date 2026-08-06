@@ -29,7 +29,7 @@ func setupRevocationFixture(t *testing.T) *revocationFixture {
 	c := qt.New(t)
 
 	c.Assert(testDB.SetOrganization(&Organization{
-		Address: testOrgAddress, Active: true, CreatedAt: time.Now(),
+		Address: testOrgAddress, CreatedAt: time.Now(),
 	}), qt.IsNil)
 
 	newMember := func(number, email string) *OrgMember {
@@ -339,7 +339,7 @@ func TestDeleteOrgMembersScopesToOrg(t *testing.T) {
 	// a second organization deletes, by id, a member it does not own
 	otherOrg := common.Address{0x77, 0x88, 0x99}
 	c.Assert(testDB.SetOrganization(&Organization{
-		Address: otherOrg, Active: true, CreatedAt: time.Now(),
+		Address: otherOrg, CreatedAt: time.Now(),
 	}), qt.IsNil)
 
 	deleted, emptied, err := testDB.DeleteOrgMembers(otherOrg, []string{f.alice.ID.Hex()})

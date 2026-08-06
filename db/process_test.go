@@ -21,7 +21,6 @@ func setupTestPrerequisites1(c *qt.C, db *MongoStorage) *Census {
 	// Create test organization
 	org := &Organization{
 		Address:   testOrgAddress,
-		Active:    true,
 		CreatedAt: time.Now(),
 	}
 	err := db.SetOrganization(org)

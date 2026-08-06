@@ -13,7 +13,7 @@ import (
 )
 
 func setupVotingProcessOrg(c *qt.C, org common.Address) {
-	err := testDB.SetOrganization(&Organization{Address: org, Active: true, CreatedAt: time.Now()})
+	err := testDB.SetOrganization(&Organization{Address: org, CreatedAt: time.Now()})
 	c.Assert(err, qt.IsNil)
 }
 

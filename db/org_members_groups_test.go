@@ -16,7 +16,6 @@ func setupTestOrgMembersGroupPrerequisites(t *testing.T, memberSuffix string) (*
 	// Create test organization
 	org := &Organization{
 		Address:   testOrgAddress,
-		Active:    true,
 		CreatedAt: time.Now(),
 	}
 
@@ -202,7 +201,6 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			// Create a different organization
 			diffOrg := &Organization{
 				Address:   testAnotherOrgAddress,
-				Active:    true,
 				CreatedAt: time.Now(),
 			}
 			err := testDB.SetOrganization(diffOrg)
