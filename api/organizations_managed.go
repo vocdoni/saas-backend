@@ -530,7 +530,9 @@ func (a *API) deleteManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 	if _, err := a.db.DeleteAllOrgMemberGroups(managedAddr); err != nil {
 		log.Warnw("could not delete org member groups", "org", managedAddr.Hex(), "error", err)
 	}
-	if _, err := a.db.DeleteAllOrgMembers(managedAddr); err != nil {
+	// the emptied questions are ignored on purpose: this is an org teardown, so there is no
+	// election left to resize.
+	if _, _, err := a.db.DeleteAllOrgMembers(managedAddr); err != nil {
 		log.Warnw("could not delete org members", "org", managedAddr.Hex(), "error", err)
 	}
 	if _, err := a.db.DeleteJobsByOrg(managedAddr); err != nil {

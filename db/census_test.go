@@ -193,7 +193,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Remove the member to make it empty
-		err = testDB.UpdateOrganizationMemberGroup(
+		_, err = testDB.UpdateOrganizationMemberGroup(
 			groupID, testOrgAddress,
 			"", "",
 			nil, []string{member1ID}, // Remove the only member

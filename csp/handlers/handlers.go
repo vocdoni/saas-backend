@@ -421,16 +421,24 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Re-check census participation, which auth only verified when the token was minted. The token
+	// does not expire, so a member dropped from the census afterwards would otherwise keep being
+	// signed for. BundleCheckHandler already does this; here it had been commented out because the
+	// old helper looked the member up by member number, not because participation may go unchecked.
+	if _, err := c.mainDB.CensusParticipant(bundle.Census.ID.Hex(), oid.Hex()); err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			errors.ErrCensusParticipantNotFound.Withf("member is no longer part of the census").Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+
 	// default weight to 1 if not set
 	weight := uint64(1)
 	if census.Weighted {
 		weight = member.Weight
 	}
-
-	// // Check if the participant is in the census
-	// if !c.checkCensusParticipant(w, bundle.Census.ID.Hex(), string(auth.UserID)) {
-	// 	return
-	// }
 
 	// Parse the address from the payload
 	address, ok := parseAddress(w, req.Payload)

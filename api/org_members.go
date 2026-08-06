@@ -206,6 +206,20 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// the imported members join the auto "All members" group, so they join the censuses built from
+	// it. Quota and signer are checked first: an over-quota import must not create the members
+	// either. A failure to resolve those censuses is a real lookup error — abort before creating
+	// anyone, since swallowing it would import silent non-voters behind a 200.
+	autoCensuses, err := a.autoGroupCensuses(org.Address)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if err := a.preflightCensusGrowth(org, autoCensuses, len(members.Members)); err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
+
 	// add the org members to the database
 	progressChan, err := a.db.AddBulkOrgMembers(org, members.ToDB(), passwordSalt)
 	if err != nil {
@@ -227,10 +241,14 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 				"errors", len(p.Errors))
 		}
 
+		// the members that were actually inserted join the auto group's censuses
+		propagated := a.propagateMembersToCensuses(org.Address, autoCensuses, lastProgress.MemberIDs)
+
 		// Return the number of members added
 		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{
-			Added:  uint32(lastProgress.Added),
-			Errors: lastProgress.ErrorsAsStrings(),
+			Added:        uint32(lastProgress.Added),
+			Errors:       append(lastProgress.ErrorsAsStrings(), propagated.Errors...),
+			CensusJobIDs: propagated.JobIDs,
 		})
 		return
 	}
@@ -263,6 +281,14 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 			}
 		}
 
+		// The members that were actually inserted join the auto group's censuses. Discarding the
+		// result is deliberate: the import job has already completed above, and CompleteJob $sets
+		// errors wholesale, so a second write would clobber the import errors rather than merge
+		// the propagation ones — a failure here is logged, not reported. #628 tracks surfacing it.
+		if lastProgress != nil {
+			a.propagateMembersToCensuses(org.Address, autoCensuses, lastProgress.MemberIDs)
+		}
+
 		// Send completion email notification when async job is done
 		if lastProgress != nil {
 			a.sendMembersImportCompletionEmail(userEmail, userName, org, lastProgress)
@@ -283,12 +309,12 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			orgAddress	path		string				true	"Organization address"
-//	@Param			request		body		apicommon.OrgMember	true	"Member data to insert or update"
-//	@Success		200			{object}	apicommon.OrgMember	"ID of member inserted or updated"
-//	@Failure		400			{object}	errors.Error		"Invalid input data"
-//	@Failure		401			{object}	errors.Error		"Unauthorized"
-//	@Failure		500			{object}	errors.Error		"Internal server error"
+//	@Param			orgAddress	path		string								true	"Organization address"
+//	@Param			request		body		apicommon.OrgMember					true	"Member data to insert or update"
+//	@Success		200			{object}	apicommon.UpsertOrgMemberResponse	"Member id, plus any census resize jobs and errors"
+//	@Failure		400			{object}	errors.Error						"Invalid input data"
+//	@Failure		401			{object}	errors.Error						"Unauthorized"
+//	@Failure		500			{object}	errors.Error						"Internal server error"
 //	@Router			/organizations/{orgAddress}/members [put]
 func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Request) {
 	// get the organization info from the request context
@@ -317,8 +343,42 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// A new member joins the auto "All members" group, so it joins the censuses built from it.
+	// Quota and signer are checked first: an over-quota request must not create the member either.
+	//
+	// Only a creation grows a census, so only a creation is preflighted. Checking unconditionally
+	// would refuse every edit of an existing member once the census sits at the plan limit — the
+	// quota is on census size, and an edit does not change it. An id that names no member of this
+	// organization counts as a creation, which is what the upsert will do with it.
+	//
+	// This read and the upsert are not atomic, and the upsert decides `created` from its own read
+	// under the keys lock. A member deleted in between therefore turns an edit into an unpreflighted
+	// creation, overshooting the quota by one. Bounded and self-correcting — the member is still
+	// propagated correctly, since that keys off the upsert's answer rather than this one, and the
+	// next request is refused. Closing it would mean a quota-checked upsert in the db layer, which
+	// would have to import subscriptions to do it.
+	isUpdate := false
+	if member.ID != "" {
+		if _, err := a.db.OrgMember(org.Address, member.ID); err == nil {
+			isUpdate = true
+		}
+	}
+	// resolved before the write: a failure here is a real lookup error, and creating the member
+	// anyway would leave a silent non-voter — no quota consumed, no propagation — behind a 200.
+	autoCensuses, err := a.autoGroupCensuses(org.Address)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	if !isUpdate {
+		if err := a.preflightCensusGrowth(org, autoCensuses, 1); err != nil {
+			writeSubscriptionError(w, err)
+			return
+		}
+	}
+
 	// upsert the member in the database
-	memberID, err := a.db.UpsertOrgMemberAndCensusParticipants(org, member.ToDB(), passwordSalt)
+	memberID, created, err := a.db.UpsertOrgMemberAndCensusParticipants(org, member.ToDB(), passwordSalt)
 	switch {
 	case errors.Is(err, db.ErrUpdateWouldCreateDuplicates):
 		errors.ErrInvalidData.WithErr(err).Write(w)
@@ -329,7 +389,18 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 	default:
 	}
 
-	apicommon.HTTPWriteJSON(w, apicommon.OrgMember{ID: memberID.Hex()})
+	resp := apicommon.UpsertOrgMemberResponse{ID: memberID.Hex()}
+	// Propagate on create only. AddCensusParticipantsByMemberIDs re-adds anything missing, so
+	// running it on an ordinary member edit would silently undo every revocation.
+	if created {
+		propagated := a.propagateMembersToCensuses(org.Address, autoCensuses, []string{memberID.Hex()})
+		resp.CensusJobIDs = propagated.JobIDs
+		// reported rather than dropped, as the bulk and group paths already do. The member is
+		// written either way, so this stays a 200 — but a create that could not join a live census,
+		// or whose resize could not be enqueued, must not read the same as a clean one.
+		resp.Errors = propagated.Errors
+	}
+	apicommon.HTTPWriteJSON(w, resp)
 }
 
 // deleteOrganizationMembersHandler godoc
@@ -337,6 +408,14 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 //	@Summary		Delete organization members
 //	@Description	Delete specific members (by ID) or all members of an organization. Requires Manager/Admin
 //	@Description	role. An empty ID list (without the `all` flag) is a no-op that returns count=0.
+//	@Description
+//	@Description	An id that names no member of **this** organization — unknown, malformed, or belonging to
+//	@Description	another organization — is ignored rather than rejected, so `count` is the number of members
+//	@Description	actually deleted and may be lower than the number of ids submitted.
+//	@Description
+//	@Description	Deletion is refused with 409 for any member the CSP has already signed for while a
+//	@Description	question of a census they still participate in is READY or PAUSED; the offending ids come
+//	@Description	back in `data.signedMemberIds`. Once voting closes on those questions the deletion succeeds.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `members:write`).
 //	@Tags			organizations
@@ -348,6 +427,7 @@ func (a *API) upsertOrganizationMemberHandler(w http.ResponseWriter, r *http.Req
 //	@Success		200			{object}	apicommon.DeleteMembersResponse
 //	@Failure		400			{object}	errors.Error	"Invalid input data"
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
+//	@Failure		409			{object}	errors.Error	"A member has already been signed for in an ongoing process"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/organizations/{orgAddress}/members [delete]
 func (a *API) deleteOrganizationMembersHandler(w http.ResponseWriter, r *http.Request) {
@@ -376,12 +456,51 @@ func (a *API) deleteOrganizationMembersHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	var deleted int
+	var emptied []db.VotingProcessQuestion
 	var err error
+
+	// The ids at stake, and the censuses they would leave: the refusal below has to happen before
+	// any write, so a blocked member keeps both their membership and their census participation.
+	//
+	// The submitted ids are scoped to this organization first. They reach the guard and the
+	// revocation cascade, neither of which is org-aware — a foreign id would otherwise revoke a
+	// member of another organization, or raise a 409 naming a voter this caller cannot even see.
+	//
+	// Every id then travels as one $in filter, and the `all` path materializes the whole
+	// memberbase to do it — the guard needs the exact set, and the delete re-derives it. Chunk
+	// both if organizations ever reach the hundreds of thousands of members.
+	var targetIDs []string
+	if members.All {
+		// already org-scoped by construction; filtering it again would only cost a second query
+		targetIDs, err = a.db.GetAllOrgMemberIDs(org.Address)
+		if err != nil {
+			errors.ErrGenericInternalServerError.Withf("could not list org members: %v", err).Write(w)
+			return
+		}
+	} else {
+		targetIDs, err = a.db.FilterOrgMemberIDs(org.Address, members.IDs)
+		if err != nil {
+			errors.ErrGenericInternalServerError.Withf("could not resolve org members: %v", err).Write(w)
+			return
+		}
+	}
+	if len(targetIDs) == 0 {
+		apicommon.HTTPWriteJSON(w, &apicommon.DeleteMembersResponse{Count: 0})
+		return
+	}
+	censusIDs, err := a.db.CensusesForMembers(targetIDs)
+	if err != nil {
+		errors.ErrGenericInternalServerError.Withf("could not resolve member censuses: %v", err).Write(w)
+		return
+	}
+	if a.refuseBlockedVoters(w, censusIDs, targetIDs) {
+		return
+	}
 
 	// check if we should delete all members
 	if members.All {
 		// delete all org members from the database
-		deleted, err = a.db.DeleteAllOrgMembers(org.Address)
+		deleted, emptied, err = a.db.DeleteAllOrgMembers(org.Address)
 		if err != nil {
 			errors.ErrGenericInternalServerError.Withf("could not delete all org members: %v", err).Write(w)
 			return
@@ -391,18 +510,21 @@ func (a *API) deleteOrganizationMembersHandler(w http.ResponseWriter, r *http.Re
 			"count", deleted,
 			"user", user.Email)
 	} else {
-		// check if there are member IDs to delete
-		if len(members.IDs) == 0 {
-			apicommon.HTTPWriteJSON(w, &apicommon.DeleteMembersResponse{Count: 0})
-			return
-		}
 		// delete specific org members from the database
-		deleted, err = a.db.DeleteOrgMembers(org.Address, members.IDs)
+		deleted, emptied, err = a.db.DeleteOrgMembers(org.Address, targetIDs)
 		if err != nil {
 			errors.ErrGenericInternalServerError.Withf("could not delete org members: %v", err).Write(w)
 			return
 		}
 	}
 
-	apicommon.HTTPWriteJSON(w, &apicommon.DeleteMembersResponse{Count: deleted})
+	// pruning a question's eligibility list to empty opens it to the whole census, so its election
+	// needs the room.
+	resp := &apicommon.DeleteMembersResponse{Count: deleted}
+	jobID, resizeErrs := a.resizeEmptiedQuestions(org.Address, emptied)
+	if jobID != "" {
+		resp.CensusJobIDs = []string{jobID}
+	}
+	resp.Errors = resizeErrs
+	apicommon.HTTPWriteJSON(w, resp)
 }

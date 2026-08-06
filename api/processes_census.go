@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -90,21 +91,48 @@ func (a *API) resolveEligibleMemberIDs(
 		}
 		memberIDs = append(memberIDs, group.MemberIDs...)
 	}
-	if len(memberIDs) == 0 {
-		return nil, nil
-	}
-	// validate each id is a participant of the census (subset ⊆ default invariant)
-	out := make([]string, 0, len(memberIDs))
+	// every id must be a participant of the census (subset ⊆ default invariant)
+	return a.validateCensusParticipants(census.ID.Hex(), memberIDs)
+}
+
+// validateCensusParticipants returns memberIDs deduplicated and in input order, having checked in a
+// single query that every one of them is a participant of the census.
+//
+// The contract of the eligibility endpoints is "resend the whole list", so a per-id FindOne would
+// cost one round trip per member on every call. A Mongo failure is returned as a plain error so it
+// surfaces as a 500, never as "member X is not part of the census".
+func (a *API) validateCensusParticipants(censusID string, memberIDs []string) ([]string, error) {
+	ordered := make([]string, 0, len(memberIDs))
 	seen := make(map[string]bool, len(memberIDs))
 	for _, id := range memberIDs {
 		if seen[id] {
 			continue
 		}
 		seen[id] = true
-		if _, err := a.db.CensusParticipant(census.ID.Hex(), id); err != nil {
-			return nil, errors.ErrInvalidData.Withf("member %s is not part of the process census", id)
-		}
-		out = append(out, id)
+		ordered = append(ordered, id)
 	}
-	return out, nil
+	if len(ordered) == 0 {
+		return nil, nil
+	}
+
+	participants, err := a.db.CensusParticipantsByMemberIDs(censusID, ordered)
+	if err != nil {
+		return nil, fmt.Errorf("could not read census participants: %w", err)
+	}
+	present := make(map[string]bool, len(participants))
+	for i := range participants {
+		present[participants[i].ParticipantID] = true
+	}
+	var missing []string
+	for _, id := range ordered {
+		if !present[id] {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) > 0 {
+		return nil, errors.ErrInvalidData.Withf(
+			"members are not part of the process census: %s", strings.Join(missing, ", "),
+		)
+	}
+	return ordered, nil
 }

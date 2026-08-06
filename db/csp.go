@@ -202,13 +202,22 @@ func (ms *MongoStorage) IsCSPProcessConsumed(userID, processID internal.HexBytes
 		}
 		return false, err
 	}
-	// check if the token is verified
+	// Check the recorded token is verified. It can be gone rather than unverified: the census
+	// revocation cascade deletes a member's auth sessions by userid while deliberately keeping
+	// this consumption row, so a dangling UsedToken is a fact of a past revocation, not an
+	// inconsistency. The row itself is only ever written on a signature, which requires a
+	// verified token, so the row is evidence enough — erroring here would refuse the member's
+	// remaining vote overwrites for the pinned address in every election they were signed for.
 	tokenData, err := ms.fetchCSPAuthFromDB(ctx, currentStatus.UsedToken)
-	if err != nil {
+	switch {
+	case err == nil:
+		if !tokenData.Verified {
+			return false, ErrTokenNotVerified
+		}
+	case errors.Is(err, ErrTokenNotFound):
+		// revoked session; the consumption row stands on its own
+	default:
 		return false, err
-	}
-	if !tokenData.Verified {
-		return false, ErrTokenNotVerified
 	}
 	return currentStatus.TimesVoted > MaxVoteOverwritesPerProcess, nil
 }
@@ -430,7 +439,12 @@ func (ms *MongoStorage) MembersWithUsedCSPProcess(
 
 	result := make(map[string]bool, len(memberIDs))
 	for _, id := range memberIDs {
-		userID := internal.HexBytesFromString(id)
+		// parsed rather than HexBytesFromString, which panics by design: an id that is not hex
+		// cannot have a CSP process, so it is skipped like one that simply has none
+		userID := internal.HexBytes{}
+		if err := userID.ParseString(id); err != nil {
+			continue
+		}
 		proc, err := ms.CSPProcessByUserAndProcess(userID, processID)
 		if err != nil {
 			if errors.Is(err, ErrTokenNotFound) {
