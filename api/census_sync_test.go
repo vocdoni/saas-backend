@@ -604,6 +604,70 @@ func TestUpdatedMemberDoesNotRejoinRevokedCensus(t *testing.T) {
 	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
 }
 
+// TestGroupReAddDoesNotUndoRevocation is the group-update sibling of the test above. A member
+// revoked from a process census stays in group.MemberIDs (the cascade is census-scoped), so a later
+// group PUT whose AddMembers includes them must not re-propagate them: AddCensusParticipantsByMemberIDs
+// re-adds anything missing, which would silently undo the revocation. A genuinely-new member in the
+// same request still joins, so the additive path is untouched.
+func TestGroupReAddDoesNotUndoRevocation(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(3)...)
+	ids := memberIDs(members)
+
+	// a group holding the first two members, and a published process built from its census
+	group := requestAndParse[apicommon.OrganizationMemberGroupInfo](
+		t, http.MethodPost, token, &apicommon.CreateOrganizationMemberGroupRequest{
+			Title: "voters", Description: "group census", MemberIDs: ids[:2],
+		}, "organizations", orgAddress.String(), "groups",
+	)
+	req := newVotingProcessRequest(orgAddress, ids[:2])
+	req.StartDate = ""
+	req.Census = apicommon.CensusSpec{
+		TwoFaFields: db.OrgMemberTwoFaFields{db.OrgMemberTwoFaFieldEmail},
+		AuthFields:  db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsSurname},
+		GroupID:     group.ID,
+	}
+	req.Questions = req.Questions[:1]
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint)
+	pid := created.ProcessID
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish job error: %s", job.Errors))
+
+	// revoke ids[1] from the live census
+	requestAndParseWithAssertCode[apicommon.UpdateProcessCensusResponse](
+		http.StatusOK, t, http.MethodDelete, token,
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: []string{ids[1]}},
+		"processes", pid, "census")
+
+	// a group PUT resending ids[1] (still in the group) alongside a genuinely-new third member.
+	// Under the bug ids[1] is re-propagated and re-added; the fix propagates only the members new
+	// to the group, so ids[1] stays revoked while ids[2] joins. The PUT answers a bare OK: the
+	// prior revoke left the election sized for two, so growing the census back to two enqueues no
+	// resize, and the response carries nothing to parse.
+	requestAndAssertCode(http.StatusOK, t, http.MethodPut, token,
+		&apicommon.UpdateOrganizationMemberGroupsRequest{
+			AddMembers: []string{ids[1], ids[2]},
+		}, "organizations", orgAddress.String(), "groups", group.ID)
+
+	vp, err := testDB.VotingProcess(objectID(c, pid))
+	c.Assert(err, qt.IsNil)
+	_, err = testDB.CensusParticipant(vp.CensusID.Hex(), ids[1])
+	c.Assert(err, qt.Equals, db.ErrNotFound,
+		qt.Commentf("a group re-add must not undo a revocation"))
+	_, err = testDB.CensusParticipant(vp.CensusID.Hex(), ids[2])
+	c.Assert(err, qt.IsNil, qt.Commentf("a genuinely-new member still joins the census"))
+
+	// ids[1] stays unsignable: the CSP will not even authenticate a non-participant
+	_, code := testRequest(t, http.MethodPost, "", &handlers.AuthRequest{
+		Name: members[1].Name, Surname: members[1].Surname, Email: members[1].Email,
+	}, "processes", pid, "auth", "0")
+	c.Assert(code, qt.Not(qt.Equals), http.StatusOK)
+}
+
 // TestVotingProcessMutationsRefusedWhilePublishing covers the publish-window guard: while a worker
 // holds the process every "is this a draft?" check reads true, so an edit or delete taken on that
 // basis lands on a process being put on chain.

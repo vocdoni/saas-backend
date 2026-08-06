@@ -326,19 +326,22 @@ func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 	// read-only checks that must refuse before the group is touched, so an over-quota request
 	// leaves the member in neither the group nor the census.
 	//
-	// Counted net of the group's current members, mirroring removedInGroup above:
-	// AddCensusParticipantsByMemberIDs skips anyone already in the census, so a re-submitted id
-	// grows nothing and must not consume quota. Group membership is a proxy for census membership
-	// rather than the same thing — a census can hold participants added by other paths — so this
-	// narrows the over-count rather than eliminating it, in the direction that stops refusing
-	// requests which would have fit.
-	addedNotInGroup := 0
+	// Net of the group's current members, mirroring removedInGroup above. The same set is used for
+	// the quota preflight (AddCensusParticipantsByMemberIDs skips anyone already in the census, so a
+	// re-submitted id grows nothing and must not consume quota) and for the propagation below — a
+	// member revoked from a process census stays in group.MemberIDs, so propagating a still-listed
+	// id would re-add it and silently undo the revocation, exactly what the create-only rule on the
+	// member-edit path guards against. Group membership is a proxy for census membership rather than
+	// the same thing — a census can hold participants added by other paths — so this narrows the
+	// over-count rather than eliminating it, in the direction that stops refusing requests which
+	// would have fit.
+	addedMembers := make([]string, 0, len(toUpdate.AddMembers))
 	for _, id := range toUpdate.AddMembers {
 		if !slices.Contains(group.MemberIDs, id) {
-			addedNotInGroup++
+			addedMembers = append(addedMembers, id)
 		}
 	}
-	if err := a.preflightCensusGrowth(org, group.CensusIDs, addedNotInGroup); err != nil {
+	if err := a.preflightCensusGrowth(org, group.CensusIDs, len(addedMembers)); err != nil {
 		writeSubscriptionError(w, err)
 		return
 	}
@@ -370,8 +373,9 @@ func (a *API) updateOrganizationMemberGroupHandler(w http.ResponseWriter, r *htt
 	resp.Errors = append(resp.Errors, resizeErrs...)
 	// members joining the group join its censuses too, drafts included: the census tracks the
 	// memberbase regardless, and it is only the on-chain resize that needs a published question.
-	if len(toUpdate.AddMembers) > 0 {
-		propagated := a.propagateMembersToCensuses(org.Address, group.CensusIDs, toUpdate.AddMembers)
+	// Only the genuinely-new members are propagated — see addedMembers above.
+	if len(addedMembers) > 0 {
+		propagated := a.propagateMembersToCensuses(org.Address, group.CensusIDs, addedMembers)
 		resp.CensusJobIDs = append(resp.CensusJobIDs, propagated.JobIDs...)
 		resp.Errors = append(resp.Errors, propagated.Errors...)
 	}
