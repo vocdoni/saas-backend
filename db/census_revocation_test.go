@@ -255,9 +255,9 @@ func TestRevokeMembersFromCensusesSurvivesARecountFailure(t *testing.T) {
 	// A recount cannot run against a census document that is gone. The document is removed
 	// directly — DelCensus would cascade to the participant rows — so the participants survive
 	// for the revocation to delete. The revocation writes have already committed by the time the
-	// recount runs, so failing the call would report a 500 for a removal that happened — and a
-	// retry finds no candidates naming the members, so the emptied questions would be lost for
-	// good along with the resize they require.
+	// recount runs, so a recount failure is downgraded to a log rather than failing the call — and
+	// the emptied questions are still returned, because they are decided before the write
+	// (emptiedByRevocation), not by anything the post-commit recount touches.
 	res, err := testDB.censuses.DeleteOne(t.Context(), bson.M{"_id": f.census.ID})
 	c.Assert(err, qt.IsNil)
 	c.Assert(res.DeletedCount, qt.Equals, int64(1))
@@ -298,41 +298,28 @@ func TestRevokeMembersFromCensusesPrunesDrafts(t *testing.T) {
 	c.Assert(got.EligibleMemberIDs, qt.DeepEquals, []string{f.carol.ID.Hex()})
 }
 
-// TestRevokeMembersFromCensusesMatchesEmptyEligibilityEncodings pins the three shapes "no
-// restriction" reaches Mongo as: a missing field, an explicit null, and an empty array. All three
-// mean the whole census, so none of them may be reported as newly emptied.
-func TestRevokeMembersFromCensusesMatchesEmptyEligibilityEncodings(t *testing.T) {
+// TestRevokeMembersFromCensusesEmptiedByStrictSubset pins the pre-write emptiness check
+// (emptiedByRevocation): a question is emptied only when every member it names is revoked, not on
+// any overlap. restricted names alice and bob, so revoking alice alone leaves bob eligible and the
+// question is not reported — revoking both (TestRevokeMembersFromCensusesReportsEmptiedQuestions)
+// is. A whole-census question names no one, so the candidate lookup never returns it whatever its
+// eligibleMemberIds encoding (nil, empty array, missing), which is why the emptiness check never
+// has to match those encodings itself.
+func TestRevokeMembersFromCensusesEmptiedByStrictSubset(t *testing.T) {
 	c := qt.New(t)
 	c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 	f := setupRevocationFixture(t)
 
-	ctx := t.Context()
-	for _, encoding := range []any{nil, bson.A{}} {
-		_, err := testDB.processesQuestions.UpdateOne(ctx,
-			bson.M{"_id": f.openToAll},
-			bson.M{"$set": bson.M{"eligibleMemberIds": encoding}})
-		c.Assert(err, qt.IsNil)
-
-		_, emptied, err := testDB.RevokeMembersFromCensuses(
-			[]string{f.census.ID.Hex()}, []string{f.carol.ID.Hex()})
-		c.Assert(err, qt.IsNil)
-		for _, q := range emptied {
-			c.Assert(q.ID, qt.Not(qt.Equals), f.openToAll)
-		}
-	}
-
-	// a missing field behaves the same
-	_, err := testDB.processesQuestions.UpdateOne(ctx,
-		bson.M{"_id": f.openToAll},
-		bson.M{"$unset": bson.M{"eligibleMemberIds": ""}})
-	c.Assert(err, qt.IsNil)
 	_, emptied, err := testDB.RevokeMembersFromCensuses(
-		[]string{f.census.ID.Hex()}, []string{f.bob.ID.Hex()})
+		[]string{f.census.ID.Hex()}, []string{f.alice.ID.Hex()})
 	c.Assert(err, qt.IsNil)
-	for _, q := range emptied {
-		c.Assert(q.ID, qt.Not(qt.Equals), f.openToAll)
-	}
+	c.Assert(emptied, qt.HasLen, 0)
+
+	// bob remains eligible on the restricted question
+	restricted, err := testDB.Question(f.restricted)
+	c.Assert(err, qt.IsNil)
+	c.Assert(restricted.EligibleMemberIDs, qt.DeepEquals, []string{f.bob.ID.Hex()})
 }
 
 // TestDeleteOrgMembersScopesToOrg pins that the revocation cascade never runs on a member of

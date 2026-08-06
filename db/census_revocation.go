@@ -7,7 +7,6 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -268,24 +267,32 @@ func (ms *MongoStorage) RevokeMembersFromCensuses(
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	// The published questions that currently name one of these members: whichever of them ends up
-	// with an empty list has silently become whole-census and needs its election resized.
+	// The published questions that currently name one of these members. Whichever of them has no
+	// eligible member left once these are removed has silently become whole-census and needs its
+	// election resized. The emptiness is decided here, before the write, from each candidate's own
+	// eligibility list: a failure after the commit cannot lose the resize targets, and a retry that
+	// finds no candidates (the $pull already pruned them) is not needed to recompute them.
 	candidates, err := ms.publishedQuestionsNaming(ctx, processIDs, memberIDs)
 	if err != nil {
 		return 0, nil, err
 	}
+	revoked := make(map[string]struct{}, len(memberIDs))
+	for _, m := range memberIDs {
+		revoked[m] = struct{}{}
+	}
+	emptied := make([]VotingProcessQuestion, 0, len(candidates))
+	for _, q := range candidates {
+		if q.emptiedByRevocation(revoked) {
+			emptied = append(emptied, q)
+		}
+	}
 
 	removed, err := ms.revokeWrites(ctx, censusIDs, memberIDs, processIDs)
 	if err != nil {
-		return 0, nil, err
-	}
-
-	// Read before the recount below: the $pull has already committed, so a retry of this call
-	// finds no candidates naming the members — the emptied list is only observable now, and a
-	// failure past this point must not discard it or the caller's resize is lost for good.
-	emptied, err := ms.emptiedQuestions(ctx, candidates)
-	if err != nil {
-		return 0, nil, err
+		// emptied was decided before the write, so it is returned even on a partial-commit
+		// failure: the questions it names are emptied by whatever portion of the $pull committed,
+		// and the caller still needs to enqueue their resize.
+		return removed, emptied, err
 	}
 
 	// updateCensusSize takes keysLock through SetCensus, which is not reentrant, so it runs
@@ -312,13 +319,16 @@ func (ms *MongoStorage) RevokeMembersEverywhere(memberIDs []string) (int64, []Vo
 	return ms.RevokeMembersFromCensuses(censusIDs, memberIDs)
 }
 
-// publishedQuestionsNaming returns the ids of published questions whose eligibility list contains
-// any of the given members.
+// publishedQuestionsNaming returns the published questions whose eligibility list contains any of
+// the given members — the only questions a revocation can empty. A whole-census question holds no
+// named members (its eligibleMemberIds is nil, empty or missing), so the eligibleMemberIds $in
+// filter excludes it; that is why emptiedByRevocation never has to reason about the
+// null/missing/empty-array equivalence the write-side $pull has to guard against (see revokeWrites).
 func (ms *MongoStorage) publishedQuestionsNaming(
 	ctx context.Context,
 	processIDs []primitive.ObjectID,
 	memberIDs []string,
-) ([]primitive.ObjectID, error) {
+) ([]VotingProcessQuestion, error) {
 	if len(processIDs) == 0 {
 		return nil, nil
 	}
@@ -327,7 +337,7 @@ func (ms *MongoStorage) publishedQuestionsNaming(
 		"upstreamId":        bson.M{"$exists": true},
 		"eligibleMemberIds": bson.M{"$in": memberIDs},
 	}
-	cursor, err := ms.processesQuestions.Find(ctx, filter, options.Find().SetProjection(bson.M{"_id": 1}))
+	cursor, err := ms.processesQuestions.Find(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query questions naming the revoked members: %w", err)
 	}
@@ -341,11 +351,23 @@ func (ms *MongoStorage) publishedQuestionsNaming(
 	if err := cursor.All(ctx, &questions); err != nil {
 		return nil, fmt.Errorf("failed to decode questions naming the revoked members: %w", err)
 	}
-	ids := make([]primitive.ObjectID, 0, len(questions))
-	for _, q := range questions {
-		ids = append(ids, q.ID)
+	return questions, nil
+}
+
+// emptiedByRevocation reports whether removing the given members leaves the question with no
+// eligible member — i.e. every member it names is being revoked. A candidate (returned by
+// publishedQuestionsNaming) always names at least one revoked member, so a zero-length list never
+// reaches the loop; the guard keeps the method honest on its own.
+func (q VotingProcessQuestion) emptiedByRevocation(revoked map[string]struct{}) bool {
+	if len(q.EligibleMemberIDs) == 0 {
+		return false
 	}
-	return ids, nil
+	for _, id := range q.EligibleMemberIDs {
+		if _, ok := revoked[id]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // revokeWrites performs the three deletions the revocation consists of, under the write lock, and
@@ -413,32 +435,4 @@ func (ms *MongoStorage) revokeWrites(
 	//    accepts.
 
 	return res.DeletedCount, nil
-}
-
-// emptiedQuestions re-reads the given questions and returns those left with no eligible member.
-func (ms *MongoStorage) emptiedQuestions(
-	ctx context.Context,
-	candidates []primitive.ObjectID,
-) ([]VotingProcessQuestion, error) {
-	if len(candidates) == 0 {
-		return nil, nil
-	}
-	cursor, err := ms.processesQuestions.Find(ctx, bson.M{
-		"_id":               bson.M{"$in": candidates},
-		"eligibleMemberIds": bson.M{"$in": bson.A{nil, bson.A{}}},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to query emptied questions: %w", err)
-	}
-	defer func() {
-		if err := cursor.Close(ctx); err != nil {
-			log.Warnw("error closing cursor", "error", err)
-		}
-	}()
-
-	var questions []VotingProcessQuestion
-	if err := cursor.All(ctx, &questions); err != nil {
-		return nil, fmt.Errorf("failed to decode emptied questions: %w", err)
-	}
-	return questions, nil
 }
