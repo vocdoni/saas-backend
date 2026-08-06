@@ -72,6 +72,14 @@ definitions:
       added:
         description: Number of members added
         type: integer
+      censusJobIds:
+        description: |-
+          CensusJobIDs are the async jobs raising the on-chain maxCensusSize of the elections whose
+          census just grew, one per organization. Poll each with GET /jobs/{jobId}. Absent when no
+          live census was affected.
+        items:
+          type: string
+        type: array
       errors:
         description: |-
           Errors encountered during job. Validation errors are prefixed with
@@ -104,8 +112,16 @@ definitions:
           $ref: '#/definitions/db.OrgMemberAuthField'
         type: array
       groupId:
+        description: |-
+          GroupID is the org member group the census was built from. Round-trips: it is echoed back on
+          process reads, so a client can restore the group a draft targeted. Absent (not a zero id) when
+          the census is organization-wide.
         type: string
       memberIds:
+        description: |-
+          MemberIDs selects the census members explicitly, as an alternative to GroupID. Write-only on
+          this type: a process read echoes the census config, not the member list it resolved to. The
+          list itself is read through the deprecated GET /census/{id}/participants (Manager/Admin).
         items:
           type: string
         type: array
@@ -229,9 +245,6 @@ definitions:
     type: object
   apicommon.CreateManagedOrganizationRequest:
     properties:
-      active:
-        description: Whether the organization is active
-        type: boolean
       address:
         description: The organization's blockchain address
         items:
@@ -343,9 +356,6 @@ definitions:
     type: object
   apicommon.CreateOrganizationRequest:
     properties:
-      active:
-        description: Whether the organization is active
-        type: boolean
       address:
         description: The organization's blockchain address
         items:
@@ -528,6 +538,13 @@ definitions:
         type: string
       title:
         $ref: '#/definitions/db.MultiLangString'
+      updatedAt:
+        description: |-
+          UpdatedAt, on a PUT, is the updatedAt the client last read. The update then applies only if
+          the process has not been written since, and is rejected with 409 otherwise, so two clients
+          editing the same draft cannot silently overwrite each other. Optional: omitting it keeps the
+          unconditional last-writer-wins behaviour. Ignored on POST.
+        type: string
     type: object
   apicommon.CreateVotingProcessResponse:
     properties:
@@ -553,9 +570,28 @@ definitions:
     type: object
   apicommon.DeleteMembersResponse:
     properties:
+      censusJobIds:
+        description: |-
+          CensusJobIDs are the async jobs raising the on-chain maxCensusSize of the elections whose
+          questions the deletion opened to the whole census (pruning an eligibility list to empty is
+          "no restriction", not "nobody"). Poll each with GET /jobs/{jobId}. Deleting a member has the
+          same on-chain effect through this endpoint as through DELETE /processes/{processId}/census,
+          which reports its job — so this reports it too.
+        items:
+          type: string
+        type: array
       count:
         description: Number of members deleted
         type: integer
+      errors:
+        description: |-
+          Errors are resize problems that did not stop the deletion. The members are gone either
+          way; what may be missing is the on-chain room for a question the deletion opened to the
+          whole census. An empty CensusJobIDs alone cannot report that — a deletion that needed no
+          resize looks identical.
+        items:
+          type: string
+        type: array
     type: object
   apicommon.EligibilitySpec:
     properties:
@@ -891,9 +927,6 @@ definitions:
     type: object
   apicommon.OrganizationInfo:
     properties:
-      active:
-        description: Whether the organization is active
-        type: boolean
       address:
         description: The organization's blockchain address
         items:
@@ -1293,6 +1326,14 @@ definitions:
         type: array
       description:
         $ref: '#/definitions/db.MultiLangString'
+      eligibleMemberIds:
+        description: |-
+          EligibleMemberIDs is the question's eligibility subset — who may vote it. Present only for a
+          Manager/Admin of the owning organization; an anonymous or non-manager read never carries it.
+          An empty/absent list on a manager read means the question is open to the whole census.
+        items:
+          type: string
+        type: array
       encryptionKeys:
         description: |-
           EncryptionKeys are the on-chain vote-encryption public keys (only for secretUntilTheEnd
@@ -1391,6 +1432,14 @@ definitions:
         example: deadbeef
         format: hex
         type: string
+    type: object
+  apicommon.RelayVotesRequest:
+    properties:
+      votes:
+        description: Signed vote transactions, at most 100
+        items:
+          $ref: '#/definitions/apicommon.RelayVoteRequest'
+        type: array
     type: object
   apicommon.SetProcessStatusRequest:
     properties:
@@ -1626,6 +1675,12 @@ definitions:
       address:
         example: deadbeef
         type: string
+      nullifier:
+        example: deadbeef
+        type: string
+      processId:
+        example: deadbeef
+        type: string
       progress:
         type: integer
       status:
@@ -1635,6 +1690,27 @@ definitions:
       voteID:
         example: deadbeef
         type: string
+      votes:
+        description: Votes is the per-envelope outcome of a batch vote relay, in request
+          order
+        items:
+          $ref: '#/definitions/db.VoteJobResult'
+        type: array
+    type: object
+  apicommon.UpdateOrganizationMemberGroupResponse:
+    properties:
+      censusJobIds:
+        description: |-
+          CensusJobIDs are the async jobs raising the on-chain maxCensusSize of the elections whose
+          census just grew or reopened. Poll each with GET /jobs/{jobId}.
+        items:
+          type: string
+        type: array
+      errors:
+        description: Errors are per-census problems that did not stop the group update.
+        items:
+          type: string
+        type: array
     type: object
   apicommon.UpdateOrganizationMemberGroupsRequest:
     properties:
@@ -1671,6 +1747,12 @@ definitions:
         type: array
       jobId:
         type: string
+      removed:
+        description: |-
+          Removed is how many census participants the DELETE actually removed — an id naming nobody
+          does not count. Always present, like Added, so "none removed" is not indistinguishable from
+          a field the PUT simply never sets.
+        type: integer
     type: object
   apicommon.UpdateProcessRequest:
     properties:
@@ -1695,6 +1777,57 @@ definitions:
           Additional metadata for the process
           Can be any key-value pairs
         type: object
+    type: object
+  apicommon.UpdateQuestionCensusRequest:
+    properties:
+      memberIds:
+        description: |-
+          MemberIDs is the complete desired eligibility list, not a delta, so the request is
+          idempotent: resend the whole list to change it.
+
+          An empty list is not "nobody" — it is the encoding for "no restriction", which opens the
+          question to every member of the process census.
+        items:
+          type: string
+        type: array
+    type: object
+  apicommon.UpdateQuestionCensusResponse:
+    properties:
+      added:
+        type: integer
+      eligible:
+        description: Eligible is the size of the stored list. Zero means the question
+          is open to the whole census.
+        type: integer
+      jobId:
+        description: |-
+          JobID is the async job raising the election's on-chain maxCensusSize, present only when the
+          question needed more room than it was published with (202).
+        type: string
+      removed:
+        type: integer
+    type: object
+  apicommon.UpsertOrgMemberResponse:
+    properties:
+      censusJobIds:
+        description: |-
+          CensusJobIDs are the async jobs raising the on-chain maxCensusSize of the affected
+          elections. Poll each with GET /jobs/{jobId}.
+        items:
+          type: string
+        type: array
+      errors:
+        description: |-
+          Errors are per-census problems that did not stop the member from being written. The member
+          exists either way; what may be missing is their place in a live census, or the on-chain room
+          for them to vote. Empty CensusJobIDs alone cannot report that — a create that needed no
+          resize looks identical.
+        items:
+          type: string
+        type: array
+      id:
+        description: Member's internal unique ID
+        type: string
     type: object
   apicommon.UserInfo:
     properties:
@@ -1805,6 +1938,50 @@ definitions:
         format: hex
         type: string
     type: object
+  apicommon.VerifiedVote:
+    properties:
+      blockHeight:
+        description: Block the vote was registered in
+        type: integer
+      date:
+        description: When the vote was registered on chain
+        type: string
+      nullifier:
+        description: The nullifier that was checked, echoed back
+        example: deadbeef
+        format: hex
+        type: string
+      processId:
+        description: On-chain election id the vote belongs to
+        example: deadbeef
+        format: hex
+        type: string
+      txHash:
+        description: Hash of the transaction that carried the vote
+        example: deadbeef
+        format: hex
+        type: string
+      verified:
+        description: Whether the chain has a vote with this nullifier
+        type: boolean
+    type: object
+  apicommon.VerifyVotesRequest:
+    properties:
+      nullifiers:
+        description: |-
+          Vote nullifiers (up to 32 bytes each — anonymous ones may be shorter), capped at the
+          shared vote batch limit (100)
+        items:
+          type: string
+        type: array
+    type: object
+  apicommon.VerifyVotesResponse:
+    properties:
+      votes:
+        items:
+          $ref: '#/definitions/apicommon.VerifiedVote'
+        type: array
+    type: object
   apicommon.VotingProcessListResponse:
     properties:
       pagination:
@@ -1906,6 +2083,12 @@ definitions:
         type: string
       title:
         $ref: '#/definitions/db.MultiLangString'
+      updatedAt:
+        description: |-
+          UpdatedAt is the process's last-write timestamp, in millisecond precision. Echo it back in a
+          PUT to make the update conditional on nothing else having written in between (see
+          CreateVotingProcessRequest.UpdatedAt).
+        type: string
     type: object
   apicommon.VotingProcessResultsResponse:
     properties:
@@ -2098,6 +2281,7 @@ definitions:
     - set_process_status
     - set_process_census
     - relay_vote
+    - relay_votes
     - publish_voting_process
     type: string
     x-enum-varnames:
@@ -2107,6 +2291,7 @@ definitions:
     - JobTypeSetProcessStatus
     - JobTypeSetProcessCensus
     - JobTypeRelayVote
+    - JobTypeRelayVotes
     - JobTypePublishVotingProcess
   db.MultiLangString:
     additionalProperties:
@@ -2287,6 +2472,10 @@ definitions:
     type: object
   db.QuestionTypeSetup:
     properties:
+      budget:
+        type: integer
+      costExponent:
+        type: integer
       maxChoices:
         type: integer
       minChoices:
@@ -2304,6 +2493,22 @@ definitions:
     - AdminRole
     - ManagerRole
     - ViewerRole
+  db.VoteJobResult:
+    properties:
+      error:
+        type: string
+      nullifier:
+        example: deadbeef
+        type: string
+      processId:
+        example: deadbeef
+        type: string
+      status:
+        $ref: '#/definitions/db.JobStatus'
+      voteID:
+        example: deadbeef
+        type: string
+    type: object
   db.VoteType:
     properties:
       costExponent:
@@ -2555,6 +2760,54 @@ definitions:
         type: string
       upstreamId:
         example: deadbeef
+        format: hex
+        type: string
+    type: object
+  handlers.SignBatchBallot:
+    properties:
+      address:
+        example: deadbeef
+        format: hex
+        type: string
+      upstreamId:
+        example: deadbeef
+        format: hex
+        type: string
+    type: object
+  handlers.SignBatchRequest:
+    properties:
+      authToken:
+        example: deadbeef
+        format: hex
+        type: string
+      ballots:
+        items:
+          $ref: '#/definitions/handlers.SignBatchBallot'
+        type: array
+    type: object
+  handlers.SignBatchResponse:
+    properties:
+      signatures:
+        items:
+          $ref: '#/definitions/handlers.SignBatchResult'
+        type: array
+    type: object
+  handlers.SignBatchResult:
+    properties:
+      code:
+        type: string
+      error:
+        type: string
+      signature:
+        example: deadbeef
+        format: hex
+        type: string
+      upstreamId:
+        example: deadbeef
+        format: hex
+        type: string
+      weight:
+        example: 2a
         format: hex
         type: string
     type: object
@@ -3781,9 +4034,9 @@ paths:
       - application/json
       responses:
         "200":
-          description: OK
+          description: Census resize job, if needed; bare OK otherwise
           schema:
-            type: string
+            $ref: '#/definitions/apicommon.UpdateOrganizationMemberGroupResponse'
         "400":
           description: Invalid input data, or organization/group not found
           schema:
@@ -3878,9 +4131,9 @@ paths:
       - application/json
       responses:
         "200":
-          description: OK
+          description: Census resize jobs and errors; bare OK when neither
           schema:
-            type: string
+            $ref: '#/definitions/apicommon.UpdateOrganizationMemberGroupResponse'
         "400":
           description: Invalid input data, or organization/group not found
           schema:
@@ -4015,6 +4268,14 @@ paths:
         Delete specific members (by ID) or all members of an organization. Requires Manager/Admin
         role. An empty ID list (without the `all` flag) is a no-op that returns count=0.
 
+        An id that names no member of **this** organization — unknown, malformed, or belonging to
+        another organization — is ignored rather than rejected, so `count` is the number of members
+        actually deleted and may be lower than the number of ids submitted.
+
+        Deletion is refused with 409 for any member the CSP has already signed for while a
+        question of a census they still participate in is READY or PAUSED; the offending ids come
+        back in `data.signedMemberIds`. Once voting closes on those questions the deletion succeeds.
+
         Also callable with a scoped API key (scope: `members:write`).
       parameters:
       - description: Organization address
@@ -4041,6 +4302,10 @@ paths:
             $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: A member has already been signed for in an ongoing process
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
@@ -4179,9 +4444,9 @@ paths:
       - application/json
       responses:
         "200":
-          description: ID of member inserted or updated
+          description: Member id, plus any census resize jobs and errors
           schema:
-            $ref: '#/definitions/apicommon.OrgMember'
+            $ref: '#/definitions/apicommon.UpsertOrgMemberResponse'
         "400":
           description: Invalid input data
           schema:
@@ -5861,7 +6126,11 @@ paths:
         Paginated list of an organization's voting processes. Public: anonymous callers get
         published processes only (without per-question eligibleMemberIds). A Manager/Admin of
         the org (or a voting:write API key acting as one) also gets drafts and the eligibility.
-        Filter by question status.
+        Filter by question status, and by published state.
+        published=true returns published processes only; published=false returns drafts only and
+        requires Manager/Admin (401 otherwise). Omitting it keeps the caller's default view.
+        Combining published=false with status returns nothing: a draft's questions have no
+        on-chain status yet, and status matches on that field.
       parameters:
       - description: Organization address
         in: query
@@ -5872,6 +6141,10 @@ paths:
         in: query
         name: status
         type: string
+      - description: Filter by published state; false (drafts) requires Manager/Admin
+        in: query
+        name: published
+        type: boolean
       - description: Page (1-based)
         in: query
         name: page
@@ -5891,6 +6164,10 @@ paths:
           description: Bad Request
           schema:
             $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
       summary: List voting processes
       tags:
       - processes
@@ -5900,8 +6177,30 @@ paths:
       description: |-
         Create a multi-question voting process draft. Requires Manager/Admin role of the org
         (or a scoped API key with `voting:write`). Creates the inline census unpublished.
-        Each question must define either a named `type` (with `typeSetup` for multichoice)
-        or a raw `ballotProtocol` override; if both are given the `ballotProtocol` wins.
+
+        Each question must define a named `type` — `singlechoice`, `multichoice`, `ranked`
+        or `cumulative` — a raw `ballotProtocol`, or both. `multichoice` and `cumulative`
+        need a `typeSetup` (maxChoices for the former, budget and costExponent for the
+        latter); `singlechoice` and `ranked` derive their whole protocol from the choices.
+        The two are kept in sync: whichever is supplied, the other is derived, so the
+        stored question always describes the election it will mint. A supplied
+        `ballotProtocol` is authoritative — it is what reaches the chain — so `type`
+        and `typeSetup` are re-derived from it, and come back empty only when it encodes a
+        shape with no named type at all (vote overwrites, weighted cost, or a hand-crafted
+        non-canonical shape). Sending both halves is fine when they agree; when they
+        describe two different named ballots it is a 400 rather than a silent win
+        for the protocol. **Omit `ballotProtocol` to author or edit a question through its
+        `typeSetup`** — responses always carry a protocol, so echoing one back unchanged
+        re-applies it.
+
+        `typeSetup.minChoices` has no on-chain counterpart and is a validation hint for
+        clients. It is stored as sent for multichoice, and is always `1` for singlechoice,
+        whose ballot is the single field a voter fills.
+
+        `typeSetup.uniqueChoices` is rejected for multichoice: every choice is an independent
+        yes/no field, so a unique-values ballot admits no vote and the election would tally
+        every vote to zero. A `ballotProtocol` whose `uniqueValues` cannot be satisfied
+        (fewer legal values than fields) is rejected for the same reason.
       parameters:
       - description: Voting process
         in: body
@@ -5978,7 +6277,8 @@ paths:
         Read a voting process with its hydrated questions (live per-question results included).
         Public for published processes; a draft is visible only to a Manager/Admin of the org
         (or a voting:write API key acting as one) and returns 404 otherwise. Non-managers never
-        receive the per-question eligibleMemberIds.
+        receive the per-question eligibleMemberIds. A Manager/Admin caller additionally receives
+        each open-value question's free-text voter memos inside its results.
       parameters:
       - description: Process ID
         in: path
@@ -6002,8 +6302,16 @@ paths:
     put:
       consumes:
       - application/json
-      description: Update a voting process while it is still a draft (not published).
-        409 if already published.
+      description: |-
+        Update a voting process while it is still a draft (not published). 409 if already published.
+        The questions are replaced wholesale, and each one's ballot shape is reconciled exactly
+        as on create. Reading a question and PUTting it back unchanged is a no-op; editing its
+        `typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a
+        400 — omit `ballotProtocol` to edit a question through its `typeSetup`.
+
+        Send the updatedAt read from GET /processes/{processId} to make the update conditional: it is
+        rejected with 409 (40171) if anything wrote the process in between, so two editors cannot
+        overwrite each other. Omitting updatedAt opts out of that guarantee and keeps last-writer-wins.
       parameters:
       - description: Process ID
         in: path
@@ -6149,6 +6457,71 @@ paths:
       tags:
       - processes
   /processes/{processId}/census:
+    delete:
+      consumes:
+      - application/json
+      description: |-
+        Remove members from a published voting process's census and from every question
+        eligibility list built on it, so the CSP stops signing for them. Refused with 409 for
+        any member the CSP has already signed for while a question of the process is still
+        READY or PAUSED; once voting closes on those questions the removal succeeds. The
+        offending ids come back in `data.signedMemberIds`. Members no longer in the census are
+        removed as a no-op rather than refused.
+
+        Pruning a question's eligibility list to empty opens it to the whole census, so a
+        maxCensusSize increase may be enqueued as an async job (poll GET /jobs/{jobId}).
+        Requires Manager/Admin role.
+
+        Also callable with a scoped API key (scope: `voting:write`).
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Member IDs to remove
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.AddCensusParticipantsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Members removed
+          schema:
+            $ref: '#/definitions/apicommon.UpdateProcessCensusResponse'
+        "202":
+          description: Members removed; maxCensusSize update enqueued
+          schema:
+            $ref: '#/definitions/apicommon.UpdateProcessCensusResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Process is not published, or a member has already been signed
+            for
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Remove members from a published process census
+      tags:
+      - processes
     put:
       consumes:
       - application/json
@@ -6344,6 +6717,8 @@ paths:
         Publish a voting process: one on-chain election per question, submitted as a batch.
         Requires Admin role (or a `voting:write` key). Returns 202 with a job id; poll
         GET /jobs/{jobId}. Idempotent once published.
+        409 (40172) means the stored questions do not match the process and the draft has to be
+        saved again before it can be published.
       parameters:
       - description: Process ID
         in: path
@@ -6362,7 +6737,7 @@ paths:
           schema:
             $ref: '#/definitions/apicommon.EnqueuedResponse'
         "400":
-          description: Bad Request
+          description: Not ready to publish
           schema:
             $ref: '#/definitions/errors.Error'
         "401":
@@ -6374,7 +6749,8 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Conflict
+          description: Publish in progress, or the stored questions do not match the
+            process
           schema:
             $ref: '#/definitions/errors.Error'
         "503":
@@ -6388,8 +6764,11 @@ paths:
       - processes
   /processes/{processId}/questions/{questionId}:
     get:
-      description: Public voter read of a single question, including its synced status
-        and eligibility.
+      description: |-
+        Public voter read of a single question, including its synced status and live results.
+        Auth is optional: only a Manager/Admin of the org (or a voting:write API key) receives
+        the question's eligibleMemberIds and, for an open-value question, the free-text voter
+        memos inside its results.
       parameters:
       - description: Process ID
         in: path
@@ -6413,6 +6792,86 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Get a voting process question
+      tags:
+      - processes
+  /processes/{processId}/questions/{questionId}/census:
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Replace the set of members eligible to vote one question of a voting process, for a
+        draft or a published process (closes #611). Requires Manager/Admin role.
+
+        The body is the **complete desired list, not a delta**, so the request is idempotent:
+        resend the whole list to change it. Every id must already be a participant of the
+        process census. Input order is preserved and duplicates are dropped, so a client can
+        diff what it reads back against its next request.
+
+        **An empty list does not mean "nobody": it is the encoding for "no restriction" and
+        opens the question to every member of the census.** A response of `eligible: 0`
+        therefore means the question is open to everyone.
+
+        Because reopening a restricted question can multiply its electorate while its election
+        was sized on chain for the old subset, a maxCensusSize increase is enqueued as an async
+        job whenever the question needs more room than it was published with (202; poll GET
+        /jobs/{jobId}).
+
+        Removing a member the CSP has already signed for, while a question of this process is
+        still READY or PAUSED, is refused with 409 and the offending ids in
+        `data.signedMemberIds`.
+
+        Also callable with a scoped API key (scope: `voting:write`).
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Question ID
+        in: path
+        name: questionId
+        required: true
+        type: string
+      - description: Complete desired eligibility list
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.UpdateQuestionCensusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Eligibility updated; no on-chain resize needed
+          schema:
+            $ref: '#/definitions/apicommon.UpdateQuestionCensusResponse'
+        "202":
+          description: Eligibility updated; maxCensusSize update enqueued
+          schema:
+            $ref: '#/definitions/apicommon.UpdateQuestionCensusResponse'
+        "400":
+          description: Invalid input data, or a member is not part of the census
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process or question not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Publish in progress, member already signed for, or list changed
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Set a question's eligibility list
       tags:
       - processes
   /processes/{processId}/questions/{questionId}/status:
@@ -6558,6 +7017,78 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Sign a ballot for a voting process question
+      tags:
+      - processes
+  /processes/{processId}/sign-batch:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Batch form of POST /processes/{processId}/sign. A multi-question voting process is
+        one on-chain election per question, so a voter holds one ballot per question and
+        signing them one by one costs a round trip each. This signs them all under a single
+        verified auth token. Public endpoint: the token authenticates the voter.
+        Each ballot names a question by its on-chain election id (upstreamId, as returned by
+        the check and sign-info endpoints) and the voter address to sign for it.
+        The batch is authorized as a unit and signs nothing on failure — every ballot must
+        name an election of this process (else 401) the member is eligible for (else 401),
+        carry a 20-byte voter address (else 400), and no election may be repeated (else
+        400). Authorization strictly precedes the first signature, so a rejected batch
+        consumes nothing.
+        Once authorized, every ballot is signed and the response is always 200 with one
+        entry per request item, in order — even if every ballot fails (the request was
+        honored; the outcome is per item). Each entry carries a signature and weight, or a
+        stable machine-readable code plus a message: already_consumed (that election's
+        signing slot is spent; not retryable), already_signing (a concurrent request holds
+        it; retry), auth_invalid (the token was invalidated mid-batch and every remaining
+        entry is stamped with it; authenticate again), address_mismatch (that election was
+        already signed for a different address; re-send with the address sign-info
+        reports) or sign_failed (internal failure; retry). Retry ONLY the entries that
+        carry a retryable code: re-sending the whole batch re-signs the ballots that
+        already succeeded, and each re-sign counts toward the election's finite overwrite
+        budget (MaxVoteOverwritesPerProcess, 10) — past it the election is permanently
+        locked.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Auth token and one ballot per question
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.SignBatchRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SignBatchResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized, unverified token, election not in process, or
+            member not eligible
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Census or user not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "413":
+          description: Request body too large
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Sign every question's ballot of a voting process in one call
       tags:
       - processes
   /processes/{processId}/sign-info:
@@ -7383,6 +7914,10 @@ paths:
           description: Process not found
           schema:
             $ref: '#/definitions/errors.Error'
+        "413":
+          description: Request body too large
+          schema:
+            $ref: '#/definitions/errors.Error'
         "500":
           description: Internal server error
           schema:
@@ -7392,6 +7927,107 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Relay an already-signed vote to the Vochain
+      tags:
+      - vote
+  /votes:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Relays several voter transactions, already signed by the voter, in one call. A
+        multi-question voting process is one vochain process per question, so a voter casts
+        one vote transaction per question; relaying them one by one leaves a window in which
+        some are on chain and the rest are not, and the voter ends up half-voted. This
+        endpoint closes that window. Public endpoint: no authentication is required.
+        The whole batch is checked synchronously and is accepted or rejected as a unit —
+        every payload must decode to a Vote envelope (else 400) for a process the backend
+        knows (else 404), all of them must belong to the same organization (else 400), and
+        the queue must have room for all of them (else 503). A rejected batch enqueues
+        nothing. At most 100 votes per call.
+        The call returns 202 with a single job id covering the batch. Poll
+        GET /jobs/{jobId}: its result carries one entry per vote, index-aligned with the
+        request, each with the process id and the nullifier — both known before submission,
+        so they are readable while the job is pending — plus the chain-assigned voteID once
+        that vote is accepted, or the reason it failed.
+      parameters:
+      - description: Signed vote transaction payloads
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.RelayVotesRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Job accepted; poll GET /jobs/{jobId}
+          schema:
+            $ref: '#/definitions/apicommon.EnqueuedResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "413":
+          description: Request body too large
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "503":
+          description: Transaction queue is full
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Relay a batch of already-signed votes to the Vochain
+      tags:
+      - vote
+  /votes/verify:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Checks whether the Vochain has a vote for each of the given nullifiers, so a voter
+        can confirm that the ballots relayed on their behalf are registered on chain. Public
+        endpoint: no authentication is required, and it exposes only data that is already
+        public on chain. Several nullifiers are accepted in one call because a multi-question
+        voting process is one on-chain election per question, so a voter holds one nullifier
+        per question. The response has one entry per requested nullifier, in the same order;
+        a repeated nullifier is looked up only once and every copy gets the same answer.
+        An unknown nullifier is reported as verified=false rather than as an error, while a
+        chain that cannot be reached fails the whole call so a voter is never told their vote
+        is missing when it merely could not be looked up.
+      parameters:
+      - description: Vote nullifiers to verify
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.VerifyVotesRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Verification outcome per nullifier
+          schema:
+            $ref: '#/definitions/apicommon.VerifyVotesResponse'
+        "400":
+          description: Invalid input data
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "413":
+          description: Request body too large
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Blockchain request failed
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Verify vote nullifiers against the Vochain
       tags:
       - vote
 schemes:

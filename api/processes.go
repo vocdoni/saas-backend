@@ -225,7 +225,7 @@ func (a *API) buildQuestions(
 			return nil, errors.ErrInvalidData.Withf("question %d: %v", i, err)
 		}
 		// a memo is gated to a single "open" choice per question: at most one choice may set
-		// openValue, since the memos endpoint correlates each vote's selected value against it.
+		// openValue, since the memo resolution correlates each vote package against it.
 		open := 0
 		for _, c := range q.Choices {
 			if c.OpenValue {
@@ -234,6 +234,17 @@ func (a *API) buildQuestions(
 		}
 		if open > 1 {
 			return nil, errors.ErrInvalidData.Withf("question %d: at most one choice can have openValue", i)
+		}
+		// openValue only where "the vote selected the open choice" is well-defined (see
+		// account.OpenChoiceMatcher): ranked ranks every choice on every ballot, and an unnamed
+		// raw protocol has no defined package layout to correlate against.
+		if open == 1 {
+			switch shape.Type {
+			case db.VotingTypeSingleChoice, db.VotingTypeMultiChoice, db.VotingTypeCumulative:
+			default:
+				return nil, errors.ErrInvalidData.Withf(
+					"question %d: openValue requires a singlechoice, multichoice or cumulative question", i)
+			}
 		}
 		eligible, err := a.resolveEligibleMemberIDs(q.Eligibility, census, orgAddress)
 		if err != nil {
@@ -451,7 +462,8 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 //	@Description	Read a voting process with its hydrated questions (live per-question results included).
 //	@Description	Public for published processes; a draft is visible only to a Manager/Admin of the org
 //	@Description	(or a voting:write API key acting as one) and returns 404 otherwise. Non-managers never
-//	@Description	receive the per-question eligibleMemberIds.
+//	@Description	receive the per-question eligibleMemberIds. A Manager/Admin caller additionally receives
+//	@Description	each open-value question's free-text voter memos inside its results.
 //	@Tags			processes
 //	@Produce		json
 //	@Param			processId	path		string	true	"Process ID"
@@ -700,7 +712,10 @@ func (a *API) validateVotingProcessHandler(w http.ResponseWriter, r *http.Reques
 // votingProcessQuestionHandler godoc
 //
 //	@Summary		Get a voting process question
-//	@Description	Public voter read of a single question, including its synced status and eligibility.
+//	@Description	Public voter read of a single question, including its synced status and live results.
+//	@Description	Auth is optional: only a Manager/Admin of the org (or a voting:write API key) receives
+//	@Description	the question's eligibleMemberIds and, for an open-value question, the free-text voter
+//	@Description	memos inside its results.
 //	@Tags			processes
 //	@Produce		json
 //	@Param			processId	path		string	true	"Process ID"
@@ -748,7 +763,7 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 	// resolve the vote encryption keys so voters can seal an encrypted ballot for this question.
 	question.EncryptionKeys = a.resolveQuestionEncryptionKeys(question)
 	// surface the live on-chain tally for a published question; memos (manager-only) are included only
-	// when the caller is a manager/admin of the owning org, as is the eligibility subset below.
+	// when the caller is a manager/admin of the owning org.
 	isManager := a.optionalManager(r, vp.OrgAddress)
 	question.Results = a.resolveQuestionResults(question, isManager)
 	resp := apicommon.PublicQuestionResponseFromDB(question, census)
@@ -869,30 +884,21 @@ func questionResultsFromElection(e *dvoteapi.Election) db.QuestionResults {
 	return qr
 }
 
-// openChoice returns the question's single open-value choice (the one accepting a voter memo) and true
-// if one is defined. buildQuestions guarantees at most one, so the first match is authoritative.
-func openChoice(choices []db.Choice) (db.Choice, bool) {
-	for _, c := range choices {
-		if c.OpenValue {
-			return c, true
-		}
-	}
-	return db.Choice{}, false
-}
-
 // resolveQuestionMemos returns the free-text voter memos cast alongside a published question's
-// open-value choice, or nil when the question has no open choice / no election. Best-effort: a chain
-// error yields nil (logged), never fails the read. Manager-gated by the caller (see withMemos).
+// open-value choice, or nil when the question has no open choice / no election. The per-ballot-type
+// correlation lives in account.OpenChoiceMatcher; buildQuestions only accepts openValue on the types
+// it supports. Best-effort: a chain error yields nil (logged), never fails the read. Manager-gated
+// by the caller (see withMemos).
 //
 // ponytail: ElectionMemos is an N+1 over the election's votes (page the list + a per-memo-vote fetch to
 // correlate the memo to a choice). Bounded to manager reads of open-value questions; add a short-TTL
 // cache if a manager polls a large open-value election hard.
 func (a *API) resolveQuestionMemos(q *db.VotingProcessQuestion) []string {
-	open, ok := openChoice(q.Choices)
-	if !ok || len(q.UpstreamID) == 0 {
+	selectsOpen := account.OpenChoiceMatcher(q.Type, q.Choices)
+	if selectsOpen == nil || len(q.UpstreamID) == 0 {
 		return nil
 	}
-	memos, err := a.account.ElectionMemos(q.UpstreamID, open.Value)
+	memos, err := a.account.ElectionMemos(q.UpstreamID, selectsOpen)
 	if err != nil {
 		log.Warnw("results: memos fetch failed",
 			"question", q.ID.Hex(), "upstreamId", q.UpstreamID.String(), "error", err)
@@ -940,9 +946,12 @@ func (a *API) resolveQuestionResultsBatch(questions []db.VotingProcessQuestion, 
 
 // electionResultsBatch fetches the on-chain tally of every published question concurrently (bounded)
 // and maps each to a results entry, preserving question order. Questions not yet on chain are skipped.
+// withMemos (a manager/admin caller) additionally includes each open-value question's voter memos.
 // Unlike the read resolvers it is all-or-error: the first election fetch failure (by question order)
 // is returned so GET /processes/{id}/results never emits a silent partial tally set. Returns nil when
 // no question is on chain (preserving the endpoint's "questions": null shape for that case).
+//
+//nolint:revive // withMemos gates the manager-only memo fetch; a bool keeps the three resolvers uniform
 func (a *API) electionResultsBatch(
 	questions []db.VotingProcessQuestion, withMemos bool,
 ) ([]apicommon.VotingProcessQuestionResults, error) {

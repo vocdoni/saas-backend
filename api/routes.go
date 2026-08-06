@@ -217,7 +217,8 @@ const (
 	// multi-question voting-process routes (new /processes API, plural namespace)
 	// POST /processes to create a draft; GET /processes to list (paginated, filterable)
 	processesCreateEndpoint = "/processes"
-	// PUT /processes/{processId} to update a draft; GET /processes/{processId} to read one (full)
+	// PUT /processes/{processId} to update a draft; GET /processes/{processId} to read one (full;
+	// a manager/admin caller additionally gets each open-value question's voter memos in its results)
 	processesEndpoint = "/processes/{processId}"
 	// POST /processes/census/validation validates a census spec (duplicates/missing fields) before create
 	processesCensusValidateEndpoint = "/processes/census/validation"
@@ -234,7 +235,8 @@ const (
 	processesQuestionsStatusEndpoint = "/processes/{processId}/questions/status"
 	// PUT /processes/{processId}/questions/{questionId}/status to change one question's status
 	processesQuestionStatusEndpoint = "/processes/{processId}/questions/{questionId}/status"
-	// GET /processes/{processId}/questions/{questionId} to read one question (public voter read)
+	// GET /processes/{processId}/questions/{questionId} to read one question (public voter read; a
+	// manager/admin caller additionally gets an open-value question's voter memos in its results)
 	processesQuestionEndpoint = "/processes/{processId}/questions/{questionId}"
 	// PUT /processes/{processId}/questions/{questionId}/census sets one question's eligibility list
 	processesQuestionCensusEndpoint = "/processes/{processId}/questions/{questionId}/census"
@@ -248,9 +250,6 @@ const (
 	processesParticipantsEndpoint = "/processes/{processId}/participants"
 	// POST /processes/{processId}/sign-info — voter's per-question consumed address/nullifier (public)
 	processesSignInfoEndpoint = "/processes/{processId}/sign-info"
-	// GET /processes/{processId}/results/memos for per-question raw voter memos of questions in
-	// RESULTS status (manager/admin only)
-	processesMemosEndpoint = "/processes/{processId}/results/memos"
 	// CSP voter routes for a voting process (public)
 	processesAuthEndpoint       = "/processes/{processId}/auth/{step}"
 	processesAuthResendEndpoint = "/processes/{processId}/auth/resend"

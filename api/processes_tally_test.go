@@ -90,7 +90,7 @@ func TestVotingProcessMultichoiceTally(t *testing.T) {
 	c.Assert(sign.Signature, qt.Not(qt.HasLen), 0)
 
 	nullifier := testRelayVoteRequest(t, &voter, election,
-		testGenerateVoteProof(election, voterAddr, sign.Signature, 1), []byte(`{"votes":[1,0,1,0]}`))
+		testGenerateVoteProof(election, voterAddr, sign.Signature, 1), []byte(`{"votes":[1,0,1,0]}`), nil)
 	c.Assert(nullifier, qt.Not(qt.HasLen), 0)
 
 	// live results (the election is not secretUntilTheEnd, so no need to end it first)
