@@ -171,7 +171,9 @@ func (ms *MongoStorage) eraseOrgData(address common.Address) error {
 	if _, err := ms.DeleteAllOrgMemberGroups(address); err != nil {
 		errs = append(errs, fmt.Errorf("deleting member groups: %w", err))
 	}
-	if _, err := ms.DeleteAllOrgMembers(address); err != nil {
+	// the emptied questions are ignored on purpose: this is an erasure, so there is no election
+	// left to resize.
+	if _, _, err := ms.DeleteAllOrgMembers(address); err != nil {
 		errs = append(errs, fmt.Errorf("deleting members: %w", err))
 	}
 	if _, err := ms.DeleteJobsByOrg(address); err != nil {

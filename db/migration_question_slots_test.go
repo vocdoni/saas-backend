@@ -7,18 +7,10 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
-	"github.com/vocdoni/saas-backend/migrations"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 )
-
-// questionSlotsMigration returns migration 0018.
-func questionSlotsMigration(c *qt.C) migrations.Migration {
-	mig, ok := migrations.AsMap()[18]
-	c.Assert(ok, qt.IsTrue)
-	return mig
-}
 
 // TestUniqueProcessQuestionSlotsMigration seeds the duplicate slots a pre-fix concurrent draft
 // update stranded (issue #614) and asserts migration 0018 repairs them under its stated policy:
@@ -29,7 +21,7 @@ func TestUniqueProcessQuestionSlotsMigration(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 	ctx := context.Background()
-	mig := questionSlotsMigration(c)
+	mig := migrationByVersion(c, 18)
 	database := testDB.DBClient.Database(testDB.database)
 
 	// the test database is migrated on init, so the unique index already exists; roll it back to
@@ -114,11 +106,11 @@ func TestUniqueProcessQuestionSlotsMigrationDown(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() {
 		// restore the migrated state for the rest of the suite
-		c.Assert(questionSlotsMigration(c).Up(context.Background(), testDB.DBClient.Database(testDB.database)), qt.IsNil)
+		c.Assert(migrationByVersion(c, 18).Up(context.Background(), testDB.DBClient.Database(testDB.database)), qt.IsNil)
 		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 	})
 	ctx := context.Background()
-	mig := questionSlotsMigration(c)
+	mig := migrationByVersion(c, 18)
 	database := testDB.DBClient.Database(testDB.database)
 
 	c.Assert(mig.Down(ctx, database), qt.IsNil)

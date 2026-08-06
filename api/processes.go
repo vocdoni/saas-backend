@@ -46,13 +46,17 @@ func parseProcessDates(req *apicommon.CreateVotingProcessRequest) (start, end ti
 //	@Description	Create a multi-question voting process draft. Requires Manager/Admin role of the org
 //	@Description	(or a scoped API key with `voting:write`). Creates the inline census unpublished.
 //	@Description
-//	@Description	Each question must define a named `type` (with `typeSetup` for multichoice), a raw
-//	@Description	`ballotProtocol`, or both. The two are kept in sync: whichever is supplied, the other
-//	@Description	is derived, so the stored question always describes the election it will mint. A
-//	@Description	supplied `ballotProtocol` is authoritative — it is what reaches the chain — so `type`
-//	@Description	and `typeSetup` are re-derived from it, and come back empty when it encodes a shape
-//	@Description	with no named type (ranked, quadratic). Sending both halves is fine when they agree;
-//	@Description	when they describe two different named ballots it is a 400 rather than a silent win
+//	@Description	Each question must define a named `type` — `singlechoice`, `multichoice`, `ranked`
+//	@Description	or `cumulative` — a raw `ballotProtocol`, or both. `multichoice` and `cumulative`
+//	@Description	need a `typeSetup` (maxChoices for the former, budget and costExponent for the
+//	@Description	latter); `singlechoice` and `ranked` derive their whole protocol from the choices.
+//	@Description	The two are kept in sync: whichever is supplied, the other is derived, so the
+//	@Description	stored question always describes the election it will mint. A supplied
+//	@Description	`ballotProtocol` is authoritative — it is what reaches the chain — so `type`
+//	@Description	and `typeSetup` are re-derived from it, and come back empty only when it encodes a
+//	@Description	shape with no named type at all (vote overwrites, weighted cost, or a hand-crafted
+//	@Description	non-canonical shape). Sending both halves is fine when they agree; when they
+//	@Description	describe two different named ballots it is a 400 rather than a silent win
 //	@Description	for the protocol. **Omit `ballotProtocol` to author or edit a question through its
 //	@Description	`typeSetup`** — responses always carry a protocol, so echoing one back unchanged
 //	@Description	re-applies it.
@@ -163,15 +167,14 @@ func (a *API) buildQuestions(
 	for i, q := range questions {
 		// ballot shape: a question must define a named type, a raw BallotProtocol, or both. The
 		// two halves are reconciled below so they describe the same ballot; a supplied protocol
-		// is what the election will be, so it wins and the type is re-derived from it. For a
-		// named type, typeSetup is required for every type except singlechoice (which ignores it
-		// on chain); a multichoice maps MaxChoices onto MaxTotalCost so it must be bounded.
+		// is what the election will be, so it wins and the type is re-derived from it. typeSetup is
+		// required for multichoice and cumulative (singlechoice and ranked derive their whole
+		// protocol from the choices); a multichoice maps MaxChoices onto MaxTotalCost so it must be
+		// bounded.
 		if q.BallotProtocol == nil {
 			switch q.Type {
 			case "":
 				return nil, errors.ErrInvalidData.Withf("question %d: a type or a ballotProtocol is required", i)
-			case db.VotingTypeSingleChoice:
-				// singlechoice ignores typeSetup
 			case db.VotingTypeMultiChoice:
 				if q.TypeSetup.MaxChoices < 1 || q.TypeSetup.MaxChoices > uint32(len(q.Choices)) {
 					return nil, errors.ErrInvalidData.Withf(
@@ -187,9 +190,29 @@ func (a *API) buildQuestions(
 					// vote at all: the election would accept every envelope and tally zero.
 					return nil, errors.ErrInvalidData.Withf(
 						"question %d: uniqueChoices is not supported for multichoice, where each choice is an "+
-							"independent yes/no field; use a ballotProtocol for a ranked ballot", i,
+							"independent yes/no field; use type %q for a ranked ballot", i, db.VotingTypeRanked,
 					)
 				}
+			case db.VotingTypeRanked:
+				// ranked uses no typeSetup: its protocol is fixed by the choices. Reject a non-empty
+				// setup rather than silently dropping it, so a client does not believe it set a
+				// constraint the ballot does not have.
+				if q.TypeSetup != (db.QuestionTypeSetup{}) {
+					return nil, errors.ErrInvalidData.Withf(
+						"question %d: type %q takes no typeSetup; its ballot is fixed by the choices", i, q.Type,
+					)
+				}
+			case db.VotingTypeCumulative:
+				// cumulative uses only budget/costExponent (validated when the protocol is derived);
+				// the multichoice fields do not apply, so reject them rather than silently dropping them.
+				if q.TypeSetup.MinChoices != 0 || q.TypeSetup.MaxChoices != 0 || q.TypeSetup.UniqueChoices {
+					return nil, errors.ErrInvalidData.Withf(
+						"question %d: minChoices, maxChoices and uniqueChoices apply only to multichoice; "+
+							"cumulative is configured through typeSetup.budget and typeSetup.costExponent", i,
+					)
+				}
+			case db.VotingTypeSingleChoice:
+				// singlechoice ignores typeSetup
 			default:
 				return nil, errors.ErrInvalidData.Withf("question %d: unsupported type %q", i, q.Type)
 			}
@@ -237,6 +260,21 @@ func (a *API) buildQuestions(
 	return built, nil
 }
 
+// refusePublishInProgress answers 409 while a publish worker holds the process, and reports
+// whether it did.
+//
+// publishVotingProcessHandler snapshots the questions, claims the process and hands the snapshot to
+// a worker that runs for minutes. Throughout that window the process is still unpublished and its
+// questions carry no upstreamId, so every "is this a draft?" check reads true — and a mutation
+// taken on that basis lands on a process the worker is concurrently putting on chain.
+func refusePublishInProgress(w http.ResponseWriter, vp *db.VotingProcess) bool {
+	if !vp.PublishInProgress() {
+		return false
+	}
+	errors.ErrPublishInProgress.Write(w)
+	return true
+}
+
 // writeQuestions replaces the process's stored questions with a pre-built (already validated) set
 // and records their ids on the process. The replacement is per slot rather than delete-all then
 // insert-all, so two overlapping draft updates cannot strand a row — see db.SetProcessQuestions.
@@ -279,16 +317,23 @@ func parseUpdatedAt(s string) (time.Time, error) {
 	return t.UTC(), nil
 }
 
-// storeUpdatedProcess persists a draft edit, conditionally on seen when the client sent an
-// updatedAt token. It reports db.ErrConflict when someone else wrote the process in between.
-func (a *API) storeUpdatedProcess(vp *db.VotingProcess, seen time.Time) error {
-	if seen.IsZero() {
-		if _, err := a.db.SetVotingProcess(vp); err != nil {
-			return fmt.Errorf("failed to update voting process: %w", err)
-		}
-		return nil
+// writeDraftWriteConflict reports which of SetVotingProcessDraft's preconditions refused the write.
+// The function returns a bare db.ErrConflict, so the process is re-read to tell a publish that
+// started during the request apart from the optimistic-concurrency token going stale.
+func (a *API) writeDraftWriteConflict(w http.ResponseWriter, id primitive.ObjectID, updatedAt string) {
+	switch current, err := a.db.VotingProcess(id); {
+	case err != nil:
+		// the state that refused us is unreadable; the token is the likelier cause and the
+		// recovery — refetch and retry — is the same either way
+		errors.ErrStaleUpdate.Withf("the process changed while it was being updated; refetch and retry").Write(w)
+	case current.Published:
+		errors.ErrDuplicateConflict.Withf("process already published and not in draft mode").Write(w)
+	case current.PublishInProgress():
+		errors.ErrPublishInProgress.Write(w)
+	default:
+		errors.ErrStaleUpdate.Withf("the process was modified after updatedAt %s; refetch and retry",
+			updatedAt).Write(w)
 	}
-	return a.db.SetVotingProcessIfUnchanged(vp, seen)
 }
 
 // updateVotingProcessHandler godoc
@@ -338,6 +383,9 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrDuplicateConflict.Withf("process already published and not in draft mode").Write(w)
 		return
 	}
+	if refusePublishInProgress(w, vp) {
+		return
+	}
 	if !user.HasRoleFor(vp.OrgAddress, db.ManagerRole) && !user.HasRoleFor(vp.OrgAddress, db.AdminRole) {
 		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization").Write(w)
 		return
@@ -375,11 +423,15 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	}
 	vp.Title, vp.Description, vp.Header, vp.StreamURI = req.Title, req.Description, req.Header, req.StreamURI
 	vp.StartDate, vp.EndDate, vp.CensusID = start, end, census.ID
-	if err := a.storeUpdatedProcess(vp, seen); err != nil {
+	// a stale marker got us past the guard above: editing the draft releases it rather than
+	// writing it back, matching what ClaimVotingProcessForPublish would reclaim anyway. A marker
+	// that went live *after* that guard read is a different matter — the write's own precondition
+	// refuses it rather than replacing it away.
+	vp.Publishing = time.Time{}
+	if err := a.db.SetVotingProcessDraft(vp, seen); err != nil {
 		_ = a.db.DelCensus(census.ID.Hex())
 		if stderrors.Is(err, db.ErrConflict) {
-			errors.ErrStaleUpdate.Withf("the process was modified after updatedAt %s; refetch and retry",
-				req.UpdatedAt).Write(w)
+			a.writeDraftWriteConflict(w, vp.ID, req.UpdatedAt)
 			return
 		}
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -679,7 +731,8 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// hydrate the parent process's census config (the auth policy the voter must satisfy); the
-	// member list and per-question eligibility subset are never exposed on this public endpoint.
+	// census member list is never exposed here, and the per-question eligibility subset only to a
+	// manager/admin of the owning org.
 	vp, err := a.db.VotingProcess(oid)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -699,8 +752,14 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 	question.EncryptionKeys = a.resolveQuestionEncryptionKeys(question)
 	// surface the live on-chain tally for a published question; memos (manager-only) are included only
 	// when the caller is a manager/admin of the owning org.
-	question.Results = a.resolveQuestionResults(question, a.optionalManager(r, vp.OrgAddress))
-	apicommon.HTTPWriteJSON(w, apicommon.PublicQuestionResponseFromDB(question, census))
+	isManager := a.optionalManager(r, vp.OrgAddress)
+	question.Results = a.resolveQuestionResults(question, isManager)
+	resp := apicommon.PublicQuestionResponseFromDB(question, census)
+	// the eligibility subset names who may vote: only a manager/admin of the owning org sees it
+	if isManager {
+		resp.EligibleMemberIDs = question.EligibleMemberIDs
+	}
+	apicommon.HTTPWriteJSON(w, resp)
 }
 
 // parallelForEach runs fn(0..n-1) concurrently with a bounded worker pool and waits for all to
@@ -1060,7 +1119,7 @@ func validateVotingProcessForPublish(
 		if len(q.Choices) == 0 {
 			problems = append(problems, fmt.Sprintf("question %d has no choices", i))
 		}
-		if q.BallotProtocol == nil && q.Type != db.VotingTypeSingleChoice && q.Type != db.VotingTypeMultiChoice {
+		if q.BallotProtocol == nil && !db.IsNamedVotingType(q.Type) {
 			problems = append(problems, fmt.Sprintf("question %d has an unsupported type %q", i, q.Type))
 		}
 		// A question stored before authoring rejected these can still hold a ballot no voter can

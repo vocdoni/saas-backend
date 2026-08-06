@@ -16,7 +16,6 @@ func setupTestOrgMembersGroupPrerequisites(t *testing.T, memberSuffix string) (*
 	// Create test organization
 	org := &Organization{
 		Address:   testOrgAddress,
-		Active:    true,
 		CreatedAt: time.Now(),
 	}
 
@@ -202,7 +201,6 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			// Create a different organization
 			diffOrg := &Organization{
 				Address:   testAnotherOrgAddress,
-				Active:    true,
 				CreatedAt: time.Now(),
 			}
 			err := testDB.SetOrganization(diffOrg)
@@ -292,7 +290,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		t.Run("NonExistentGroup", func(_ *testing.T) {
 			// Test updating non-existent group
 			nonExistentID := primitive.NewObjectID().Hex()
-			err := testDB.UpdateOrganizationMemberGroup(
+			_, err := testDB.UpdateOrganizationMemberGroup(
 				nonExistentID, testOrgAddress,
 				"Updated Title", "Updated Description",
 				additionalMemberIDs, nil,
@@ -312,7 +310,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			c.Assert(err, qt.IsNil)
 
 			// Update only the metadata
-			err = testDB.UpdateOrganizationMemberGroup(
+			_, err = testDB.UpdateOrganizationMemberGroup(
 				groupID, testOrgAddress,
 				"Updated Title", "Updated Description",
 				nil, nil,
@@ -339,7 +337,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			c.Assert(err, qt.IsNil)
 
 			// Add additional members and remove the first original member
-			err = testDB.UpdateOrganizationMemberGroup(
+			_, err = testDB.UpdateOrganizationMemberGroup(
 				groupID, testOrgAddress,
 				"", "",
 				additionalMemberIDs, []string{memberIDs[0]},
@@ -382,7 +380,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			c.Assert(err, qt.IsNil)
 
 			// Try to add invalid members
-			err = testDB.UpdateOrganizationMemberGroup(
+			_, err = testDB.UpdateOrganizationMemberGroup(
 				groupID, testOrgAddress,
 				"", "",
 				[]string{"invalid_member_id"}, nil,
@@ -399,7 +397,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		t.Run("NonExistentGroup", func(_ *testing.T) {
 			// Test deleting non-existent group
 			nonExistentID := primitive.NewObjectID().Hex()
-			err := testDB.DeleteOrganizationMemberGroup(nonExistentID, testOrgAddress)
+			_, err := testDB.DeleteOrganizationMemberGroup(nonExistentID, testOrgAddress)
 			c.Assert(err, qt.IsNil) // Should not error for non-existent group
 		})
 
@@ -419,7 +417,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			c.Assert(err, qt.IsNil)
 
 			// Delete the group
-			err = testDB.DeleteOrganizationMemberGroup(groupID, testOrgAddress)
+			_, err = testDB.DeleteOrganizationMemberGroup(groupID, testOrgAddress)
 			c.Assert(err, qt.IsNil)
 
 			// Verify the group was deleted
@@ -439,7 +437,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			c.Assert(err, qt.IsNil)
 
 			// Try to delete with wrong organization address
-			err = testDB.DeleteOrganizationMemberGroup(groupID, testNonExistentOrg)
+			_, err = testDB.DeleteOrganizationMemberGroup(groupID, testNonExistentOrg)
 			c.Assert(err, qt.IsNil) // Should not error, just not delete anything
 
 			// Verify the group still exists
@@ -472,7 +470,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 			c.Assert(err, qt.IsNil)
 
 			// Remove the member to make it empty
-			err = testDB.UpdateOrganizationMemberGroup(
+			_, err = testDB.UpdateOrganizationMemberGroup(
 				groupID, testOrgAddress,
 				"", "",
 				nil, memberIDs[:1], // Remove the only member
@@ -576,11 +574,11 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test UpdateOrganizationMemberGroup with zero address - should fail
-		err = testDB.UpdateOrganizationMemberGroup("some-id", common.Address{}, "title", "desc", nil, nil)
+		_, err = testDB.UpdateOrganizationMemberGroup("some-id", common.Address{}, "title", "desc", nil, nil)
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test DeleteOrganizationMemberGroup with zero address - should fail
-		err = testDB.DeleteOrganizationMemberGroup("some-id", common.Address{})
+		_, err = testDB.DeleteOrganizationMemberGroup("some-id", common.Address{})
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test ListOrganizationMemberGroup with zero address - should fail
@@ -1180,7 +1178,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 
 		// Delete the first 2 members (indices 0 and 1)
 		membersToDelete := existingMemberIDs[:2]
-		deletedCount, err := testDB.DeleteOrgMembers(testOrgAddress, membersToDelete)
+		deletedCount, _, err := testDB.DeleteOrgMembers(testOrgAddress, membersToDelete)
 		c.Assert(err, qt.IsNil)
 		c.Assert(deletedCount, qt.Equals, 2)
 

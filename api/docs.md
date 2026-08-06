@@ -407,7 +407,6 @@ This endpoint only returns the addresses of the organizations where the current 
         "logo": "https://[...].png",
         "subdomain": "mysubdomain",
         "timezone": "GMT+2",
-        "active": true,
         "communications": false,
         "parent": {
           "...": "..."
@@ -558,11 +557,9 @@ This method invalidates any previous JWT token for the user, so it returns a new
   "country": "Germany",
   "timezone": "GMT+2",
   "language": "EN",
-  "communication": true
+  "communications": true
 }
 ```
-By default, the organization is created with `activated: true`.
-
 If the user want to create a sub org, the address of the root organization must be provided inside an organization object in `parent` param. The creator must be admin of the parent organization to be able to create suborganizations. Example:
 ```json
 {
@@ -584,7 +581,6 @@ If the user want to create a sub org, the address of the root organization must 
   "subdomain": "mysubdomain",
   "country": "Spain",
   "timezone": "GMT+2",
-  "active": true,
   "communications": false,
   "parent": {
     "...": {}
@@ -639,9 +635,7 @@ Only the following parameters can be changed. Every parameter is optional.
   "subdomain": "mysubdomain",
   "country": "Germany",
   "timezone": "GMT+2",
-  "Language": "EN",
-  "active": true,
-  "communication": false
+  "Language": "EN"
 }
 ```
 
@@ -671,7 +665,6 @@ Only the following parameters can be changed. Every parameter is optional.
   "subdomain": "mysubdomain",
   "country": "Spain",
   "timezone": "GMT+2",
-  "active": true,
   "communications": false,
   "parent": {
     "...": {}

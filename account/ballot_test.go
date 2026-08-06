@@ -158,12 +158,42 @@ func TestBallotProtocolFromType(t *testing.T) {
 		})
 	})
 
+	c.Run("ranked derives a unique-values permutation", func(c *qt.C) {
+		bp, err := BallotProtocolFromType(db.VotingTypeRanked, db.QuestionTypeSetup{}, choices(3))
+		c.Assert(err, qt.IsNil)
+		want := db.BallotProtocol{MaxCount: 3, MaxValue: 2, UniqueValues: true}
+		c.Assert(*bp, qt.Equals, want)
+	})
+
+	c.Run("cumulative reads budget and costExponent, maxValue 0", func(c *qt.C) {
+		// linear budget (costExponent 1)
+		bp, err := BallotProtocolFromType(db.VotingTypeCumulative,
+			db.QuestionTypeSetup{Budget: 10, CostExponent: 1}, choices(3))
+		c.Assert(err, qt.IsNil)
+		c.Assert(*bp, qt.Equals, db.BallotProtocol{MaxCount: 3, CostExponent: 1, MaxTotalCost: 10})
+		// quadratic (costExponent 2) — same shape, different exponent
+		bp, err = BallotProtocolFromType(db.VotingTypeCumulative,
+			db.QuestionTypeSetup{Budget: 12, CostExponent: 2}, choices(3))
+		c.Assert(err, qt.IsNil)
+		c.Assert(*bp, qt.Equals, db.BallotProtocol{MaxCount: 3, CostExponent: 2, MaxTotalCost: 12})
+	})
+
 	c.Run("errors", func(c *qt.C) {
 		_, err := BallotProtocolFromType(db.VotingTypeSingleChoice, db.QuestionTypeSetup{}, nil)
 		c.Assert(err, qt.Not(qt.IsNil))
 		_, err = BallotProtocolFromType("", db.QuestionTypeSetup{}, choices(2))
 		c.Assert(err, qt.Not(qt.IsNil))
 		_, err = BallotProtocolFromType("quadratic", db.QuestionTypeSetup{}, choices(2))
+		c.Assert(err, qt.Not(qt.IsNil)) // quadratic is not a type name; it is cumulative exp 2
+		// ranked needs at least two choices to mean anything
+		_, err = BallotProtocolFromType(db.VotingTypeRanked, db.QuestionTypeSetup{}, choices(1))
+		c.Assert(err, qt.Not(qt.IsNil))
+		// cumulative needs a budget and a 1-or-2 exponent
+		_, err = BallotProtocolFromType(db.VotingTypeCumulative,
+			db.QuestionTypeSetup{Budget: 0, CostExponent: 2}, choices(3))
+		c.Assert(err, qt.Not(qt.IsNil))
+		_, err = BallotProtocolFromType(db.VotingTypeCumulative,
+			db.QuestionTypeSetup{Budget: 10, CostExponent: 3}, choices(3))
 		c.Assert(err, qt.Not(qt.IsNil))
 	})
 }
@@ -186,6 +216,20 @@ func TestQuestionTypeFromBallotProtocol(t *testing.T) {
 		c.Assert(ok, qt.IsTrue)
 		c.Assert(qType, qt.Equals, db.VotingTypeMultiChoice)
 		c.Assert(setup, qt.Equals, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 2})
+
+		// ranked: the permutation ballot saas-integrator-demo sends, now named
+		qType, setup, ok = QuestionTypeFromBallotProtocol(
+			&db.BallotProtocol{MaxCount: 3, MaxValue: 2, UniqueValues: true}, choices(3))
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(qType, qt.Equals, db.VotingTypeRanked)
+		c.Assert(setup, qt.Equals, db.QuestionTypeSetup{})
+
+		// cumulative: maxValue 0 is the "amounts" marker; budget and exponent come back as setup
+		qType, setup, ok = QuestionTypeFromBallotProtocol(
+			&db.BallotProtocol{MaxCount: 3, MaxValue: 0, CostExponent: 2, MaxTotalCost: 12}, choices(3))
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(qType, qt.Equals, db.VotingTypeCumulative)
+		c.Assert(setup, qt.Equals, db.QuestionTypeSetup{Budget: 12, CostExponent: 2})
 	})
 
 	c.Run("an unbounded approval ballot is still multichoice", func(c *qt.C) {
@@ -198,8 +242,6 @@ func TestQuestionTypeFromBallotProtocol(t *testing.T) {
 
 	c.Run("shapes with no named type", func(c *qt.C) {
 		for name, bp := range map[string]*db.BallotProtocol{
-			// a ranking: n fields each holding a distinct rank 0..n-1
-			"ranked":            {MaxCount: 3, MaxValue: 2, UniqueValues: true},
 			"vote overwrites":   {MaxCount: 1, MaxValue: 2, MaxVoteOverwrites: 1},
 			"weighted cost":     {MaxCount: 1, MaxValue: 2, CostFromWeight: true},
 			"quadratic":         {MaxCount: 3, MaxValue: 4, CostExponent: 2, MaxTotalCost: 12},
@@ -227,23 +269,39 @@ func TestQuestionTypeFromBallotProtocol(t *testing.T) {
 	})
 }
 
-// TestBallotShapeUnambiguous guards the property the reverse direction rests on: the two named
-// types never produce the same protocol, so recognition is a function rather than a first-match
-// heuristic. If a future field change breaks this, recognition starts depending on candidate
-// order and this fails before anything subtler does.
+// TestBallotShapeUnambiguous guards the property the reverse direction rests on: the named types
+// never share a protocol image, so recognition is a function rather than a first-match heuristic.
+// If a future field change breaks this, recognition starts depending on candidate order and this
+// fails before anything subtler does.
 func TestBallotShapeUnambiguous(t *testing.T) {
 	c := qt.New(t)
 	for n := 1; n <= 8; n++ {
 		for _, cs := range [][]db.Choice{choices(n), valuedChoices(0, 2, 5)[:min(n, 3)]} {
-			for maxChoices := range uint32(n + 1) {
-				single, err := BallotProtocolFromType(db.VotingTypeSingleChoice,
-					db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1}, cs)
+			type named struct {
+				qType string
+				bp    db.BallotProtocol
+			}
+			var protos []named
+			add := func(qType string, setup db.QuestionTypeSetup) {
+				bp, err := BallotProtocolFromType(qType, setup, cs)
 				c.Assert(err, qt.IsNil)
-				multi, err := BallotProtocolFromType(db.VotingTypeMultiChoice,
-					db.QuestionTypeSetup{MaxChoices: maxChoices}, cs)
-				c.Assert(err, qt.IsNil)
-				c.Assert(*single, qt.Not(qt.Equals), *multi,
-					qt.Commentf("n=%d maxChoices=%d", n, maxChoices))
+				protos = append(protos, named{qType, *bp})
+			}
+			// every named type well-defined over cs. A single multichoice representative suffices:
+			// maxChoices only changes its MaxTotalCost, and multichoice is the only type whose image
+			// always carries uniqueValues:false with costExponent:1, so it can never collide with
+			// ranked (uniqueValues:true) or singlechoice (costExponent:0) for any maxTotalCost.
+			add(db.VotingTypeSingleChoice, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1})
+			add(db.VotingTypeMultiChoice, db.QuestionTypeSetup{MaxChoices: uint32(n)})
+			if n >= 2 { // ranked needs at least two choices
+				add(db.VotingTypeRanked, db.QuestionTypeSetup{})
+			}
+			add(db.VotingTypeCumulative, db.QuestionTypeSetup{Budget: 10, CostExponent: 2})
+			for i, a := range protos {
+				for _, b := range protos[i+1:] {
+					c.Assert(a.bp, qt.Not(qt.Equals), b.bp,
+						qt.Commentf("n=%d %s == %s", n, a.qType, b.qType))
+				}
 			}
 		}
 	}
@@ -263,6 +321,8 @@ func TestResolveBallotShapeRoundTrip(t *testing.T) {
 		{Type: db.VotingTypeMultiChoice, TypeSetup: db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1}, Choices: choices(1)},
 		{Type: db.VotingTypeMultiChoice, TypeSetup: db.QuestionTypeSetup{MinChoices: 0, MaxChoices: 2}, Choices: choices(4)},
 		{Type: db.VotingTypeMultiChoice, TypeSetup: db.QuestionTypeSetup{MinChoices: 4, MaxChoices: 4}, Choices: choices(4)},
+		{Type: db.VotingTypeRanked, Choices: choices(3)},
+		{Type: db.VotingTypeCumulative, TypeSetup: db.QuestionTypeSetup{Budget: 10, CostExponent: 2}, Choices: choices(3)},
 	} {
 		shape, err := ResolveBallotShape(in)
 		c.Assert(err, qt.IsNil)
@@ -294,19 +354,45 @@ func TestResolveBallotShapeProtocolWins(t *testing.T) {
 	c := qt.New(t)
 
 	c.Run("an unnamed protocol empties the type", func(c *qt.C) {
-		// the shape saas-integrator-demo sends for a ranked question: a permutation ballot,
-		// labelled singlechoice because the API demanded some type
-		ranked := &db.BallotProtocol{MaxCount: 3, MaxValue: 2, UniqueValues: true}
+		// a shape with no named type at all — vote overwrites — labelled singlechoice: the
+		// protocol is kept, the type it cannot be named is dropped
+		unnamed := &db.BallotProtocol{MaxCount: 1, MaxValue: 2, MaxVoteOverwrites: 1}
 		shape, err := ResolveBallotShape(BallotShapeInput{
 			Type:      db.VotingTypeSingleChoice,
 			TypeSetup: db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1},
-			Protocol:  ranked,
+			Protocol:  unnamed,
 			Choices:   choices(3),
 		})
 		c.Assert(err, qt.IsNil)
 		c.Assert(shape.Type, qt.Equals, "")
 		c.Assert(shape.TypeSetup, qt.Equals, db.QuestionTypeSetup{})
+		c.Assert(*shape.Protocol, qt.Equals, *unnamed)
+	})
+
+	c.Run("a ranked protocol is now named, not emptied", func(c *qt.C) {
+		// the permutation ballot saas-integrator-demo sends is recognised as ranked; with no
+		// stated type it resolves to ranked rather than to the empty type it used to
+		ranked := &db.BallotProtocol{MaxCount: 3, MaxValue: 2, UniqueValues: true}
+		shape, err := ResolveBallotShape(BallotShapeInput{
+			Protocol: ranked,
+			Choices:  choices(3),
+		})
+		c.Assert(err, qt.IsNil)
+		c.Assert(shape.Type, qt.Equals, db.VotingTypeRanked)
+		c.Assert(shape.TypeSetup, qt.Equals, db.QuestionTypeSetup{})
 		c.Assert(*shape.Protocol, qt.Equals, *ranked)
+	})
+
+	c.Run("a ranked protocol mislabelled singlechoice is refused", func(c *qt.C) {
+		// the demo's old request shape (type singlechoice + ranked protocol) is now a
+		// disagreement, since ranked is a named type: send it as type ranked instead
+		_, err := ResolveBallotShape(BallotShapeInput{
+			Type:      db.VotingTypeSingleChoice,
+			TypeSetup: db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1},
+			Protocol:  &db.BallotProtocol{MaxCount: 3, MaxValue: 2, UniqueValues: true},
+			Choices:   choices(3),
+		})
+		c.Assert(err, qt.Not(qt.IsNil))
 	})
 
 	c.Run("two named halves that disagree are refused", func(c *qt.C) {
@@ -390,6 +476,8 @@ func TestValidateBallotProtocol(t *testing.T) {
 			"one short of a permutation": {MaxCount: 4, MaxValue: 2, UniqueValues: true},
 			// one value short of a permutation, at the top of the uint32 range
 			"one short at the uint32 ceiling": {MaxCount: math.MaxUint32, MaxValue: math.MaxUint32 - 2, UniqueValues: true},
+			// amounts mode (maxValue 0) with no budget and no costFromWeight: every field unbounded
+			"unbounded cumulative": {MaxCount: 3, MaxValue: 0, CostExponent: 1, MaxTotalCost: 0},
 		} {
 			c.Assert(ValidateBallotProtocol(bp), qt.Not(qt.IsNil), qt.Commentf("%s", name))
 		}
@@ -401,6 +489,7 @@ func TestValidateBallotProtocol(t *testing.T) {
 			"unique over one field": {MaxCount: 1, MaxValue: 0, UniqueValues: true},
 			"singlechoice":          {MaxCount: 1, MaxValue: 2},
 			"multichoice":           {MaxCount: 4, MaxValue: 1, CostExponent: 1, MaxTotalCost: 2},
+			"cumulative/quadratic":  {MaxCount: 3, MaxValue: 0, CostExponent: 2, MaxTotalCost: 12},
 			"quadratic":             {MaxCount: 3, MaxValue: 4, CostExponent: 2, MaxTotalCost: 12},
 			// exactly enough values for the fields, where maxValue+1 overflows uint32: computed in
 			// uint32 it wraps to 0 and this permutation reads as unsatisfiable
@@ -424,12 +513,13 @@ func TestEffectiveQuestionType(t *testing.T) {
 	})
 
 	c.Run("a legacy question whose type contradicts its protocol", func(c *qt.C) {
-		// stored before the halves were reconciled: labelled singlechoice, mints a ranking
+		// stored before the halves were reconciled: labelled singlechoice, mints a ranking. The
+		// effective type comes from the ballot, not the label, so it is ranked.
 		c.Assert(EffectiveQuestionType(&db.VotingProcessQuestion{
 			Type:           db.VotingTypeSingleChoice,
 			Choices:        choices(3),
 			BallotProtocol: &db.BallotProtocol{MaxCount: 3, MaxValue: 2, UniqueValues: true},
-		}), qt.Equals, "")
+		}), qt.Equals, db.VotingTypeRanked)
 	})
 
 	c.Run("a raw protocol that is a named shape", func(c *qt.C) {

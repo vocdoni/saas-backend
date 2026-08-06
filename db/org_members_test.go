@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
@@ -112,11 +113,11 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Test deleting with invalid ID
-		err = testDB.DelOrgMember("invalid-id")
+		_, err = testDB.DelOrgMember("invalid-id")
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test deleting with valid ID
-		err = testDB.DelOrgMember(memberOID)
+		_, err = testDB.DelOrgMember(memberOID)
 		c.Assert(err, qt.IsNil)
 
 		// Verify the member was deleted
@@ -247,10 +248,13 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(lastStatus.Progress, qt.Equals, 100)
 		c.Assert(lastStatus.Added, qt.Equals, 2)
 		c.Assert(lastStatus.Errors, qt.HasLen, 0)
+		// the inserted ids are what the caller propagates to the auto group's censuses
+		c.Assert(lastStatus.MemberIDs, qt.HasLen, 2)
 
 		// Verify both members were created with hashed fields
 		member1, err := testDB.OrgMemberByMemberNumber(testOrgAddress, testMemberNumber)
 		c.Assert(err, qt.IsNil)
+		c.Assert(lastStatus.MemberIDs, qt.Contains, member1.ID.Hex())
 		c.Assert(member1.Phone.Bytes(), qt.DeepEquals, internal.HashOrgData(testOrgAddress, testPlaintextPhone))
 		c.Assert(member1.HashedPass, qt.DeepEquals, internal.HashPassword(testSalt, testPassword))
 
@@ -335,7 +339,7 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(err, qt.Equals, ErrInvalidData)
 
 		// Test DeleteOrgMembers with zero address - should fail
-		_, err = testDB.DeleteOrgMembers(common.Address{}, []string{"some-id"})
+		_, _, err = testDB.DeleteOrgMembers(common.Address{}, []string{"some-id"})
 		c.Assert(err, qt.Equals, ErrInvalidData)
 	})
 
@@ -546,4 +550,104 @@ func TestOrgMemberFieldsTrimmedOnWrite(t *testing.T) {
 		c.Assert(stored.MemberNumber, qt.Equals, "M-002")
 		c.Assert(stored.NationalID, qt.Equals, "87654321X")
 	})
+}
+
+// TestUpsertOrgMemberPartialUpdateKeepsLoginHash pins mergeLoginHashFields. The census login hashes
+// are recomputed from the member being written, so a partial update that omits them must merge the
+// stored values back in first — otherwise the recomputed hash no longer matches the credentials the
+// voter actually holds and they are locked out of every census they belong to.
+func TestUpsertOrgMemberPartialUpdateKeepsLoginHash(t *testing.T) {
+	c := qt.New(t)
+	c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	org := &Organization{Address: testOrgAddress, CreatedAt: time.Now()}
+	c.Assert(testDB.SetOrganization(org), qt.IsNil)
+
+	member := &OrgMember{
+		ID:           primitive.NewObjectID(),
+		OrgAddress:   testOrgAddress,
+		MemberNumber: "partial-update-1",
+		Name:         "Ada",
+		Surname:      "Lovelace",
+		NationalID:   "12345678Z",
+		BirthDate:    "1990-05-17",
+		Email:        "ada.partial@example.com",
+	}
+	_, err := testDB.SetOrgMember("test_salt", member)
+	c.Assert(err, qt.IsNil)
+
+	// every hashed field participates, so an unmerged update wipes all of them
+	census := &Census{
+		OrgAddress: testOrgAddress,
+		AuthFields: OrgMemberAuthFields{
+			OrgMemberAuthFieldsMemberNumber,
+			OrgMemberAuthFieldsName,
+			OrgMemberAuthFieldsSurname,
+			OrgMemberAuthFieldsNationalID,
+			OrgMemberAuthFieldsBirthDate,
+		},
+		TwoFaFields: OrgMemberTwoFaFields{OrgMemberTwoFaFieldEmail},
+	}
+	censusID, err := testDB.SetCensus(census)
+	c.Assert(err, qt.IsNil)
+
+	added, memberErrs, err := testDB.AddCensusParticipantsByMemberIDs(censusID, []string{member.ID.Hex()})
+	c.Assert(err, qt.IsNil)
+	c.Assert(memberErrs, qt.HasLen, 0)
+	c.Assert(added, qt.Equals, 1)
+
+	stored, err := testDB.OrgMember(testOrgAddress, member.ID.Hex())
+	c.Assert(err, qt.IsNil)
+
+	// the voter can log in before the update
+	found, err := testDB.CensusParticipantByLoginHash(*census, *stored)
+	c.Assert(err, qt.IsNil)
+	c.Assert(found.ParticipantID, qt.Equals, member.ID.Hex())
+
+	// a partial update carrying only the weight: every hashed field is absent from the request
+	_, created, err := testDB.UpsertOrgMemberAndCensusParticipants(
+		org, &OrgMember{ID: member.ID, Weight: 7}, "test_salt",
+	)
+	c.Assert(err, qt.IsNil)
+	c.Assert(created, qt.IsFalse)
+
+	// the member keeps its data and takes the new weight...
+	after, err := testDB.OrgMember(testOrgAddress, member.ID.Hex())
+	c.Assert(err, qt.IsNil)
+	c.Assert(after.Name, qt.Equals, "Ada")
+	c.Assert(after.Surname, qt.Equals, "Lovelace")
+	c.Assert(after.Email, qt.Equals, "ada.partial@example.com")
+	c.Assert(after.Weight, qt.Equals, uint64(7))
+
+	// ...and, the point of the fix, can still log in with the same credentials
+	found, err = testDB.CensusParticipantByLoginHash(*census, *after)
+	c.Assert(err, qt.IsNil)
+	c.Assert(found.ParticipantID, qt.Equals, member.ID.Hex())
+}
+
+// TestUpsertOrgMemberReportsCreated pins the created flag the census propagation hooks key off:
+// a brand new member must be propagated to the auto group's censuses, an edited one must not.
+func TestUpsertOrgMemberReportsCreated(t *testing.T) {
+	c := qt.New(t)
+	c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	org := &Organization{Address: testOrgAddress, CreatedAt: time.Now()}
+	c.Assert(testDB.SetOrganization(org), qt.IsNil)
+
+	id, created, err := testDB.UpsertOrgMemberAndCensusParticipants(org, &OrgMember{
+		MemberNumber: "created-1",
+		Name:         "Grace",
+		Email:        "grace.created@example.com",
+	}, "test_salt")
+	c.Assert(err, qt.IsNil)
+	c.Assert(created, qt.IsTrue)
+
+	_, created, err = testDB.UpsertOrgMemberAndCensusParticipants(org, &OrgMember{
+		ID:   id,
+		Name: "Grace Hopper",
+	}, "test_salt")
+	c.Assert(err, qt.IsNil)
+	c.Assert(created, qt.IsFalse)
 }

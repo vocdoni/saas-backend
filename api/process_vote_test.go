@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"testing"
@@ -378,6 +379,38 @@ func TestRelayVote(t *testing.T) {
 	}
 	requestAndAssertError(errors.ErrVoteBatchTooLarge, t, http.MethodPost, "",
 		&apicommon.VerifyVotesRequest{Nullifiers: tooMany}, "votes", "verify")
+}
+
+// TestBundleSignRefusesRevokedParticipant pins the census re-check on the bundle sign path. The
+// auth token does not expire, so a member dropped from the census after minting one would otherwise
+// keep being signed for — the check had been commented out, leaving the deprecated bundle flow
+// without the defence its /processes sibling has.
+func TestBundleSignRefusesRevokedParticipant(t *testing.T) {
+	c := qt.New(t)
+	f := setupRelayVoting(t, 1)
+	processID := f.processIDs[0]
+
+	// the fixture's token is verified, so it signs while the member is still a participant
+	bundle, err := testDB.ProcessBundle(internal.HexBytesFromString(f.bundleID))
+	c.Assert(err, qt.IsNil)
+	auth, err := testDB.CSPAuth(f.authToken)
+	c.Assert(err, qt.IsNil)
+	memberID := auth.UserID.String()
+	censusID := bundle.Census.ID.Hex()
+	_, err = testDB.CensusParticipant(censusID, memberID)
+	c.Assert(err, qt.IsNil)
+
+	// drop the participant row underneath the live token — what a group edit does to a voter —
+	// without touching the token itself, so only the sign-time re-check can catch it
+	c.Assert(testDB.DelCensusParticipant(censusID, memberID), qt.IsNil)
+
+	_, code := testRequest(t, http.MethodPost, "", &handlers.SignRequest{
+		AuthToken: f.authToken,
+		ProcessID: processID,
+		Payload:   hex.EncodeToString(f.voter.Address().Bytes()),
+	}, "process", "bundle", f.bundleID, "sign")
+	c.Assert(code, qt.Equals, errors.ErrCensusParticipantNotFound.HTTPstatus,
+		qt.Commentf("a token minted before the removal must not keep signing on the bundle path"))
 }
 
 // TestRelayVotesBatch relays the votes of a multi-question process in a single call and

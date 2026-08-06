@@ -19,7 +19,6 @@ func setupTestCensusParticipantPrerequisites(t *testing.T, memberSuffix string) 
 	// Create test organization
 	org := &Organization{
 		Address:   testOrgAddress,
-		Active:    true,
 		CreatedAt: time.Now(),
 	}
 
@@ -577,7 +576,6 @@ func TestCensusParticipant(t *testing.T) {
 		// Create organization and census
 		org := &Organization{
 			Address:   testOrgAddress,
-			Active:    true,
 			CreatedAt: time.Now(),
 		}
 		err := testDB.SetOrganization(org)
@@ -669,7 +667,7 @@ func TestCensusParticipant(t *testing.T) {
 		member0.PlaintextPhone = members[1].PlaintextPhone
 
 		{
-			_, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, member0, "test_salt")
+			_, _, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, member0, "test_salt")
 			c.Assert(err, qt.ErrorMatches, ".*update would create duplicates.*",
 				qt.Commentf("trying to UpdateOrgMember(%+v) should create a conflict with %+v", member0, members[1]))
 
@@ -684,8 +682,9 @@ func TestCensusParticipant(t *testing.T) {
 		oldHashedPhone := member1.Phone
 		member1.PlaintextPhone = "+34698123321"
 		{
-			_, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, member1, "test_salt")
+			_, created, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, member1, "test_salt")
 			c.Assert(err, qt.IsNil)
+			c.Assert(created, qt.IsFalse)
 
 			member, err := testDB.OrgMemberByMemberNumber(testOrgAddress, members[1].MemberNumber)
 			c.Assert(err, qt.IsNil)
@@ -696,8 +695,9 @@ func TestCensusParticipant(t *testing.T) {
 		// since duplicates in memberbase are allowed, and a new member is not part of any census
 		{
 			member0.ID = primitive.NilObjectID
-			newMemberID, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, member0, "test_salt")
+			newMemberID, created, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, member0, "test_salt")
 			c.Assert(err, qt.IsNil)
+			c.Assert(created, qt.IsTrue)
 			member, err := testDB.OrgMember(testOrgAddress, newMemberID.Hex())
 			c.Assert(err, qt.IsNil)
 			c.Assert(member.Email, qt.Equals, member0.Email)
@@ -706,8 +706,9 @@ func TestCensusParticipant(t *testing.T) {
 		// Passing an arbitrary (new) memberID should also work OK and create a new member
 		{
 			member0.ID = primitive.NewObjectID()
-			newMemberID, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, member0, "test_salt")
+			newMemberID, created, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, member0, "test_salt")
 			c.Assert(err, qt.IsNil)
+			c.Assert(created, qt.IsTrue)
 			member, err := testDB.OrgMember(testOrgAddress, newMemberID.Hex())
 			c.Assert(err, qt.IsNil)
 			c.Assert(member.Email, qt.Equals, member0.Email)
@@ -729,7 +730,6 @@ func setupCensusParticipantsByMemberIDsFixtureForTrackedTests(t *testing.T) *cen
 
 	org := &Organization{
 		Address:   testOrgAddress,
-		Active:    true,
 		CreatedAt: time.Now(),
 	}
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
@@ -864,7 +864,6 @@ func TestCreateCensusParticipantBulkOperationsFiltering(t *testing.T) {
 	// Create organization
 	org := &Organization{
 		Address:   testOrgAddress,
-		Active:    true,
 		CreatedAt: time.Now(),
 	}
 	err := testDB.SetOrganization(org)

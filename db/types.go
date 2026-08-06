@@ -83,7 +83,6 @@ type Organization struct {
 	Subdomain       string                   `json:"subdomain" bson:"subdomain"`
 	Country         string                   `json:"country" bson:"country"`
 	Timezone        string                   `json:"timezone" bson:"timezone"`
-	Active          bool                     `json:"active" bson:"active"`
 	Communications  bool                     `json:"communications" bson:"communications"`
 	TokensPurchased uint64                   `json:"tokensPurchased" bson:"tokensPurchased"`
 	TokensRemaining uint64                   `json:"tokensRemaining" bson:"tokensRemaining"`
@@ -649,24 +648,30 @@ type ProcessesBundle struct {
 // is the one value that cannot be derived. It is kept as sent for multichoice (clamped to
 // MaxChoices), where a voter may legitimately be asked for at least N; for singlechoice it is
 // always 1, that ballot being the single field a voter fills, so a stated 0 would describe a
-// submission the chain cannot express. UniqueChoices is not supported by either named type
-// and requests setting it on a multichoice are rejected: with one 0/1 field per choice, a
+// submission the chain cannot express. UniqueChoices is not supported by any named type and
+// requests setting it on a multichoice are rejected: with one 0/1 field per choice, a
 // unique-values ballot admits no vote at all (issue #619), while a voter already cannot select
-// the same choice twice. A ranked ballot is expressed as a BallotProtocol instead.
+// the same choice twice. A ranked ballot — the one shape that does use uniqueValues — is its own
+// named type and derives that flag from the type, not from this field.
+//
+// Budget and CostExponent parametrise a cumulative ballot (budget/quadratic): Budget is the total
+// credit a voter may spread across the choices (the protocol's MaxTotalCost) and CostExponent is 1
+// for a linear budget or 2 for quadratic. They are ignored by every other type.
 type QuestionTypeSetup struct {
 	MinChoices    uint32 `json:"minChoices" bson:"minChoices"`
 	MaxChoices    uint32 `json:"maxChoices" bson:"maxChoices"`
 	UniqueChoices bool   `json:"uniqueChoices" bson:"uniqueChoices"`
+	Budget        uint32 `json:"budget" bson:"budget"`
+	CostExponent  uint32 `json:"costExponent" bson:"costExponent"`
 }
 
 // BallotProtocol is the on-chain ballot parameters of a VotingProcessQuestion, mapped directly
 // onto the election envelope and vote options. Every question written since the two halves were
 // reconciled carries one, derived from Type/TypeSetup when the client did not supply it.
 //
-// A client may supply it instead of a named type, which is what enables the ballot shapes that
-// have no name yet (ranked, quadratic). Supplying it alongside a type makes it authoritative —
-// it is what reaches the chain — so the type is re-derived from it, and emptied when it encodes
-// no named shape.
+// A client may supply it instead of a named type, which is what enables ballot shapes beyond the
+// named ones. Supplying it alongside a type makes it authoritative — it is what reaches the chain
+// — so the type is re-derived from it, and emptied when it encodes no named shape.
 type BallotProtocol struct {
 	MaxCount          uint32 `json:"maxCount" bson:"maxCount"`
 	MaxValue          uint32 `json:"maxValue" bson:"maxValue"`
@@ -693,8 +698,24 @@ type VotingProcess struct {
 	EndDate     time.Time            `json:"endDate,omitempty" bson:"endDate,omitempty"`
 	CensusID    primitive.ObjectID   `json:"-" bson:"censusId"`    // internal ref to a db.Census
 	QuestionIDs []primitive.ObjectID `json:"-" bson:"questionIds"` // ordered question references
-	CreatedAt   time.Time            `json:"createdAt" bson:"createdAt"`
-	UpdatedAt   time.Time            `json:"updatedAt" bson:"updatedAt"`
+	// Publishing is the transient claim a publish worker holds on this process (see
+	// ClaimVotingProcessForPublish). It is a struct field rather than only a raw $set so that
+	// SetVotingProcess's ReplaceOne stops wiping a live claim, and so handlers can refuse to
+	// mutate a process while it is being published.
+	//
+	// omitempty is load-bearing: the duplicate-publish guard matches on the field being absent
+	// and the stale sweep on it being old, so a zero date persisted as a value would make every
+	// draft ever created look like a crashed publish.
+	Publishing time.Time `json:"-" bson:"publishing,omitempty"`
+	CreatedAt  time.Time `json:"createdAt" bson:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt" bson:"updatedAt"`
+}
+
+// PublishInProgress reports whether a publish worker currently holds this process. A marker older
+// than PublishStaleAfter counts as released, matching what ClaimVotingProcessForPublish reclaims,
+// so a worker that crashed cannot block edits forever.
+func (vp *VotingProcess) PublishInProgress() bool {
+	return !vp.Publishing.IsZero() && time.Since(vp.Publishing) < PublishStaleAfter
 }
 
 // VotingProcessQuestion is one question of a VotingProcess. Each question maps to

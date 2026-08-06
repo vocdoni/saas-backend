@@ -143,7 +143,6 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		Country:         orgInfo.Country,
 		Subdomain:       orgInfo.Subdomain,
 		Timezone:        orgInfo.Timezone,
-		Active:          true,
 		Communications:  orgInfo.Communications,
 		Meta:            apicommon.BuildOrgMeta(nil, orgInfo.Name, orgInfo.Logo, orgInfo.Description, orgInfo.Meta),
 		TokensPurchased: 0,
@@ -280,10 +279,6 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	if newOrgInfo.Timezone != "" {
 		org.Timezone = newOrgInfo.Timezone
-		updateOrg = true
-	}
-	if newOrgInfo.Active != org.Active {
-		org.Active = newOrgInfo.Active
 		updateOrg = true
 	}
 	if newOrgInfo.Name != nil || newOrgInfo.Logo != nil || newOrgInfo.Description != nil || len(newOrgInfo.Meta) > 0 {

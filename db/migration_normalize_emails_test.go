@@ -6,26 +6,22 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
-	"github.com/vocdoni/saas-backend/migrations"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // runNormalizeEmailsMigration invokes migration 0015's Up function directly
 // against the current test database state.
-func runNormalizeEmailsMigration(t *testing.T) {
-	t.Helper()
-	mig, ok := migrations.AsMap()[15]
-	qt.Assert(t, ok, qt.IsTrue)
-	err := mig.Up(context.Background(), testDB.DBClient.Database(testDB.database))
-	qt.Assert(t, err, qt.IsNil)
+func runNormalizeEmailsMigration(c *qt.C) {
+	mig := migrationByVersion(c, 15)
+	c.Assert(mig.Up(context.Background(), testDB.DBClient.Database(testDB.database)), qt.IsNil)
 }
 
 func TestNormalizeMemberEmailsMigration(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
-	org := &Organization{Address: testOrgAddress, Active: true, CreatedAt: time.Now()}
+	org := &Organization{Address: testOrgAddress, CreatedAt: time.Now()}
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 
 	t.Run("normalizes email and recomputes login hashes", func(_ *testing.T) {
@@ -67,7 +63,7 @@ func TestNormalizeMemberEmailsMigration(t *testing.T) {
 		_, err = testDB.censusParticipants.InsertOne(ctx, participant)
 		c.Assert(err, qt.IsNil)
 
-		runNormalizeEmailsMigration(t)
+		runNormalizeEmailsMigration(c)
 
 		// Email is now lowercase.
 		var got OrgMember
@@ -132,7 +128,7 @@ func TestNormalizeMemberEmailsMigration(t *testing.T) {
 		})
 		c.Assert(err, qt.IsNil)
 
-		runNormalizeEmailsMigration(t)
+		runNormalizeEmailsMigration(c)
 
 		// The uppercase member is left untouched (email and hash unchanged).
 		var gotUpper OrgMember

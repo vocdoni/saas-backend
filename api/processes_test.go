@@ -15,6 +15,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/internal"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	dvoteapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/types"
@@ -324,6 +325,37 @@ func TestVotingProcessAuthoringErrors(t *testing.T) {
 		{Title: db.MultiLangString{"default": "No"}, Value: 1, OpenValue: true},
 	}
 	requestAndAssertError(errors.ErrInvalidData, t, http.MethodPost, adminToken, twoOpen, processesCreateEndpoint)
+
+	// ranked needs at least two choices to rank -> 400
+	rankedTooFew := newVotingProcessRequest(orgAddress, ids)
+	rankedTooFew.Questions[0].Type = db.VotingTypeRanked
+	rankedTooFew.Questions[0].Choices = rankedTooFew.Questions[0].Choices[:1]
+	rankedTooFew.Questions[0].TypeSetup = db.QuestionTypeSetup{}
+	requestAndAssertError(errors.ErrInvalidData, t, http.MethodPost, adminToken, rankedTooFew, processesCreateEndpoint)
+
+	// cumulative needs a budget greater than zero -> 400
+	cumulativeNoBudget := newVotingProcessRequest(orgAddress, ids)
+	cumulativeNoBudget.Questions[0].Type = db.VotingTypeCumulative
+	cumulativeNoBudget.Questions[0].TypeSetup = db.QuestionTypeSetup{Budget: 0, CostExponent: 2}
+	requestAndAssertError(errors.ErrInvalidData, t, http.MethodPost, adminToken, cumulativeNoBudget, processesCreateEndpoint)
+
+	// cumulative costExponent must be 1 (linear) or 2 (quadratic) -> 400
+	cumulativeBadExp := newVotingProcessRequest(orgAddress, ids)
+	cumulativeBadExp.Questions[0].Type = db.VotingTypeCumulative
+	cumulativeBadExp.Questions[0].TypeSetup = db.QuestionTypeSetup{Budget: 10, CostExponent: 3}
+	requestAndAssertError(errors.ErrInvalidData, t, http.MethodPost, adminToken, cumulativeBadExp, processesCreateEndpoint)
+
+	// ranked takes no typeSetup; a non-empty one is rejected, not silently dropped -> 400
+	rankedSetup := newVotingProcessRequest(orgAddress, ids)
+	rankedSetup.Questions[0].Type = db.VotingTypeRanked
+	rankedSetup.Questions[0].TypeSetup = db.QuestionTypeSetup{MaxChoices: 2}
+	requestAndAssertError(errors.ErrInvalidData, t, http.MethodPost, adminToken, rankedSetup, processesCreateEndpoint)
+
+	// cumulative uses only budget/costExponent; the multichoice fields are rejected -> 400
+	cumulativeSpurious := newVotingProcessRequest(orgAddress, ids)
+	cumulativeSpurious.Questions[0].Type = db.VotingTypeCumulative
+	cumulativeSpurious.Questions[0].TypeSetup = db.QuestionTypeSetup{Budget: 10, CostExponent: 2, MaxChoices: 3}
+	requestAndAssertError(errors.ErrInvalidData, t, http.MethodPost, adminToken, cumulativeSpurious, processesCreateEndpoint)
 
 	// multichoice + uniqueChoices -> 400. Each choice is its own 0/1 field, so a unique-values
 	// ballot over them admits no vote: the election used to be accepted and then tally every
@@ -1040,15 +1072,25 @@ func TestVotingProcessBallotShapeConsistency(t *testing.T) {
 	}
 }
 
-// TestVotingProcessRankedBallotProtocol covers the shape saas-integrator-demo sends for a ranked
-// question: a permutation ballot (n fields, values 0..n-1, all distinct) carried by a raw protocol,
-// labelled singlechoice because the API used to demand a type. That ballot is satisfiable and must
-// keep working — the type it was labelled with is what goes, since it was never true.
+// TestVotingProcessRankedBallotProtocol covers ranked as a named type: a question authored as
+// type "ranked" reads back as ranked, carries the unique-values permutation protocol the type
+// derives, and is publishable under a plan that grants Ranked.
 func TestVotingProcessRankedBallotProtocol(t *testing.T) {
 	c := qt.New(t)
 	adminToken := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateOrganization(t, adminToken)
-	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+
+	// mockEssentialPlan allows drafts (MaxDrafts 5) but grants no Ranked, so clone it with Ranked
+	// on for this test.
+	rankedPlan := *mockEssentialPlan
+	rankedPlan.ID = "prod_test_ranked"
+	rankedPlan.Name = "Ranked Plan"
+	rankedPlan.StripeMonthlyPriceID = "price_month_test_ranked"
+	rankedPlan.StripeYearlyPriceID = "price_year_test_ranked"
+	rankedPlan.Public = false
+	rankedPlan.VotingTypes.Ranked = true
+	c.Assert(testDB.SetPlan(&rankedPlan), qt.IsNil)
+	setOrganizationSubscription(t, orgAddress, rankedPlan.ID)
 	members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
@@ -1060,35 +1102,65 @@ func TestVotingProcessRankedBallotProtocol(t *testing.T) {
 		{Title: db.MultiLangString{"default": "B"}, Value: 1},
 		{Title: db.MultiLangString{"default": "C"}, Value: 2},
 	}
-	req.Questions[0].Type = db.VotingTypeSingleChoice
-	req.Questions[0].TypeSetup = db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1}
-	req.Questions[0].BallotProtocol = ranked
+	req.Questions[0].Type = db.VotingTypeRanked
+	req.Questions[0].TypeSetup = db.QuestionTypeSetup{}
 
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, adminToken, req, processesCreateEndpoint)
 	got := requestAndParse[apicommon.VotingProcessResponse](
 		t, http.MethodGet, adminToken, nil, "processes", created.ProcessID)
 	c.Assert(got.Questions, qt.HasLen, 1)
-	c.Assert(*got.Questions[0].BallotProtocol, qt.Equals, *ranked)
-	// a ranking has no named type, so the question stops claiming one rather than claiming a
-	// wrong one
-	c.Assert(got.Questions[0].Type, qt.Equals, "")
+	c.Assert(got.Questions[0].Type, qt.Equals, db.VotingTypeRanked)
 	c.Assert(got.Questions[0].TypeSetup, qt.Equals, db.QuestionTypeSetup{})
+	c.Assert(*got.Questions[0].BallotProtocol, qt.Equals, *ranked)
 
-	// and it is still publishable: the plan's voting-type gate gates named types, and this shape
-	// has none (mockEssentialPlan does not grant Ranked either way).
-	// NOTE: ungated is today's behaviour, not a guarantee — plan.VotingTypes.Ranked is enforced
-	// nowhere (see the TODO in subscriptions.OrgAllowsVotingType). This assertion has to flip for
-	// a plan without Ranked once it is.
+	validation := requestAndParse[apicommon.VotingProcessValidateResponse](
+		t, http.MethodGet, adminToken, nil, "processes", created.ProcessID, "validation")
+	c.Assert(validation.Valid, qt.IsTrue, qt.Commentf("errors: %v", validation.Errors))
+}
+
+// TestVotingProcessCumulativeBallotType covers cumulative (budget/quadratic) as a named type: a
+// question authored as type "cumulative" with a budget and costExponent reads back with both, and
+// is publishable under a plan that grants Cumulative.
+func TestVotingProcessCumulativeBallotType(t *testing.T) {
+	c := qt.New(t)
+	adminToken := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, adminToken)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID) // Cumulative is granted
+	members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+
+	// quadratic: a budget of 12 credits, squared, spread across 3 choices
+	setup := db.QuestionTypeSetup{Budget: 12, CostExponent: 2}
+	quadratic := &db.BallotProtocol{MaxCount: 3, MaxValue: 0, CostExponent: 2, MaxTotalCost: 12}
+	req := newVotingProcessRequest(orgAddress, ids)
+	req.Questions = req.Questions[:1]
+	req.Questions[0].Choices = []db.Choice{
+		{Title: db.MultiLangString{"default": "A"}, Value: 0},
+		{Title: db.MultiLangString{"default": "B"}, Value: 1},
+		{Title: db.MultiLangString{"default": "C"}, Value: 2},
+	}
+	req.Questions[0].Type = db.VotingTypeCumulative
+	req.Questions[0].TypeSetup = setup
+
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, adminToken, req, processesCreateEndpoint)
+	got := requestAndParse[apicommon.VotingProcessResponse](
+		t, http.MethodGet, adminToken, nil, "processes", created.ProcessID)
+	c.Assert(got.Questions, qt.HasLen, 1)
+	c.Assert(got.Questions[0].Type, qt.Equals, db.VotingTypeCumulative)
+	c.Assert(got.Questions[0].TypeSetup, qt.Equals, setup)
+	c.Assert(*got.Questions[0].BallotProtocol, qt.Equals, *quadratic)
+
 	validation := requestAndParse[apicommon.VotingProcessValidateResponse](
 		t, http.MethodGet, adminToken, nil, "processes", created.ProcessID, "validation")
 	c.Assert(validation.Valid, qt.IsTrue, qt.Commentf("errors: %v", validation.Errors))
 }
 
 // TestVotingProcessPlanGateOnEffectiveType covers the gate a raw ballotProtocol used to walk past:
-// the plan's voting-type limits apply to the ballot a question encodes, not to the label it
-// carries, so an org whose plan forbids multiple-choice cannot mint one by describing it in raw
-// terms. A shape with no named type stays ungated — that is what the raw protocol is for.
+// the plan's voting-type limits apply to the ballot a question encodes, not the label it carries,
+// so an org whose plan forbids a type cannot mint one by describing it in raw terms. Ranked is a
+// named type now, so a raw ranked protocol is gated on plan.VotingTypes.Ranked like any other.
 func TestVotingProcessPlanGateOnEffectiveType(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "adminpassword123")
@@ -1101,13 +1173,14 @@ func TestVotingProcessPlanGateOnEffectiveType(t *testing.T) {
 	singleOnlyPlan.StripeYearlyPriceID = "price_year_test_single_only"
 	singleOnlyPlan.Public = false
 	singleOnlyPlan.VotingTypes.Multiple = false
+	singleOnlyPlan.VotingTypes.Ranked = false
 	c.Assert(testDB.SetPlan(&singleOnlyPlan), qt.IsNil)
 	setOrganizationSubscription(t, orgAddress, singleOnlyPlan.ID)
 
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
 
-	// a multichoice ballot, stated in raw terms and with no type at all
+	// a multichoice ballot, stated in raw terms and with no type at all, is gated on multiple
 	rawMulti := newVotingProcessRequest(orgAddress, ids)
 	rawMulti.Questions = rawMulti.Questions[:1]
 	rawMulti.Questions[0].Type = ""
@@ -1121,15 +1194,70 @@ func TestVotingProcessPlanGateOnEffectiveType(t *testing.T) {
 		t, http.MethodGet, token, nil, "processes", created.ProcessID, "validation")
 	c.Assert(val.Valid, qt.IsFalse, qt.Commentf("a plan without multiple-choice must not mint one"))
 
-	// the same org can still publish a ranked ballot: it has no named type to gate
-	ranked := newVotingProcessRequest(orgAddress, ids)
-	ranked.Questions = ranked.Questions[:1]
-	ranked.Questions[0].Type = ""
-	ranked.Questions[0].TypeSetup = db.QuestionTypeSetup{}
-	ranked.Questions[0].BallotProtocol = &db.BallotProtocol{MaxCount: 2, MaxValue: 1, UniqueValues: true}
+	// a ranked ballot stated the same way is gated on ranked: the raw protocol is recognised as
+	// the named type, so dropping the label no longer evades the plan
+	rawRanked := newVotingProcessRequest(orgAddress, ids)
+	rawRanked.Questions = rawRanked.Questions[:1]
+	rawRanked.Questions[0].Type = ""
+	rawRanked.Questions[0].TypeSetup = db.QuestionTypeSetup{}
+	rawRanked.Questions[0].BallotProtocol = &db.BallotProtocol{MaxCount: 2, MaxValue: 1, UniqueValues: true}
 	created = requestAndParse[apicommon.CreateVotingProcessResponse](
-		t, http.MethodPost, token, ranked, processesCreateEndpoint)
+		t, http.MethodPost, token, rawRanked, processesCreateEndpoint)
 	val = requestAndParse[apicommon.VotingProcessValidateResponse](
 		t, http.MethodGet, token, nil, "processes", created.ProcessID, "validation")
-	c.Assert(val.Valid, qt.IsTrue, qt.Commentf("errors: %v", val.Errors))
+	c.Assert(val.Valid, qt.IsFalse, qt.Commentf("a plan without ranked must not mint a ranked ballot: %v", val.Errors))
+}
+
+// TestVotingProcessPublishGateSkipsMinted covers the resume case: a question that already mined
+// (UpstreamID set) is immutable on chain, so the voting-type gate must skip it. Otherwise a plan
+// change after a partial publish wedges the process — the remaining questions can never be minted
+// while the mined one's election is live.
+func TestVotingProcessPublishGateSkipsMinted(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateOrganization(t, token)
+
+	singleOnlyPlan := *mockEssentialPlan
+	singleOnlyPlan.ID = "prod_test_single_only_minted"
+	singleOnlyPlan.Name = "Single Only (minted)"
+	singleOnlyPlan.StripeMonthlyPriceID = "price_month_test_single_only_minted"
+	singleOnlyPlan.StripeYearlyPriceID = "price_year_test_single_only_minted"
+	singleOnlyPlan.Public = false
+	singleOnlyPlan.VotingTypes.Multiple = false
+	singleOnlyPlan.VotingTypes.Ranked = false
+	c.Assert(testDB.SetPlan(&singleOnlyPlan), qt.IsNil)
+	setOrganizationSubscription(t, orgAddress, singleOnlyPlan.ID)
+
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+
+	// a ranked ballot over 2 choices; create does not gate voting type, only publish preflight does
+	req := newVotingProcessRequest(orgAddress, ids)
+	req.Questions = req.Questions[:1]
+	req.Questions[0].Type = ""
+	req.Questions[0].TypeSetup = db.QuestionTypeSetup{}
+	req.Questions[0].BallotProtocol = &db.BallotProtocol{MaxCount: 2, MaxValue: 1, UniqueValues: true}
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint)
+
+	// before mining: the plan has no Ranked flag, so the unmined question is gated
+	val := requestAndParse[apicommon.VotingProcessValidateResponse](
+		t, http.MethodGet, token, nil, "processes", created.ProcessID, "validation")
+	c.Assert(val.Valid, qt.IsFalse, qt.Commentf("unmined ranked question must be gated"))
+
+	// simulate the question having already mined on chain (UpstreamID set)
+	oid, err := primitive.ObjectIDFromHex(created.ProcessID)
+	c.Assert(err, qt.IsNil)
+	stored, err := testDB.QuestionsByProcess(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(stored, qt.HasLen, 1)
+	stored[0].UpstreamID = internal.HexBytes{0xab, 0xcd, 0xef, 0x01}
+	_, err = testDB.SetQuestion(&stored[0])
+	c.Assert(err, qt.IsNil)
+
+	// after mining: the gate skips it (immutable), so validation no longer reports the type — a
+	// resume can still mint the remaining questions
+	val = requestAndParse[apicommon.VotingProcessValidateResponse](
+		t, http.MethodGet, token, nil, "processes", created.ProcessID, "validation")
+	c.Assert(val.Valid, qt.IsTrue, qt.Commentf("a minted question must not block the process: %v", val.Errors))
 }
