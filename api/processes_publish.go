@@ -120,6 +120,12 @@ func (a *API) publishPreflightProblems(
 	// holding the gate needs a deliberately loose classifier (maxValue == 1 && maxCount > 1 ⇒
 	// effectively multiple-choice, whatever else is set), not this one.
 	for i := range questions {
+		// a question that already mined (UpstreamID set) is immutable on chain: its type cannot be
+		// changed, and gating it would only block a resume that mints the remaining questions. So the
+		// voting-type gate covers only questions still pending their first publish.
+		if len(questions[i].UpstreamID) > 0 {
+			continue
+		}
 		if err := a.subscriptions.OrgAllowsVotingType(vp.OrgAddress, account.EffectiveQuestionType(&questions[i])); err != nil {
 			problems = append(problems, err.Error())
 		}

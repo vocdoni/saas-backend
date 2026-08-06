@@ -110,8 +110,13 @@ func hasElectionMetadataPermissions(process *models.NewProcessTx, plan *db.Plan)
 		return false, fmt.Errorf("duration is greater than the allowed")
 	}
 
-	// The election voting type is gated per-question at publish preflight (OrgAllowsVotingType),
-	// not here: this check runs on an already-built tx that has no question type attached.
+	// TODO:future the voting-type plan gate (plan.VotingTypes.{Single,Multiple,Ranked,Cumulative})
+	// runs only at /processes publish preflight (OrgAllowsVotingType), not here — so POST
+	// /transactions and the legacy /process build path, which both build a NewProcessTx and route
+	// through HasTxPermission, bypass it: an org whose plan lacks a flag can still get that ballot
+	// signed. The tx carries the full ballot shape (VoteOptions + EnvelopeType map 1:1 to a
+	// BallotProtocol), so the gate can be closed here by recognising the type from the tx and
+	// checking it against the plan.
 	// TODO:future check if the streamURL is used and allowed by the plan
 
 	return true, nil
@@ -472,8 +477,9 @@ func (p *Subscriptions) OrgCanPublishCensus(census *db.Census, notifyCount, vote
 // census size vs plan MaxCensus, per-org MaxProcesses count (non-managed), weighted allowance
 // and duration — mirroring the NEW_PROCESS checks in HasTxPermission so the /processes publish
 // path can surface them synchronously (as a 400 and in the dry-run) instead of as an opaque
-// async job failure. The authoritative enforcement remains HasTxPermission at build time; this
-// is an early, predictable subset. Anonymous/vote-overwrite are not used by the /processes flow.
+// async job failure. Every check here has a HasTxPermission twin at build time — except the
+// per-question voting type, which is enforced only at this preflight (see the TODO in
+// hasElectionMetadataPermissions). Anonymous/vote-overwrite are not used by the /processes flow.
 // Admin role is verified by the caller.
 //
 //nolint:revive // weighted is an election attribute being validated, not a control flag

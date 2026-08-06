@@ -207,6 +207,18 @@ func ValidateBallotProtocol(bp *db.BallotProtocol) error {
 			uint64(bp.MaxValue)+1, bp.MaxCount, bp.MaxCount, bp.MaxValue,
 		)
 	}
+	// maxValue 0 is the protocol's "values are aggregable amounts" marker: the per-value cap then
+	// comes from maxTotalCost (raised to costExponent) or, for a weighted election, the census
+	// weight (costFromWeight). With neither set the chain imposes no limit at all — a voter can put
+	// any uint32 on any field — so refuse it. Scoped to MaxCount > 1: at one field, maxValue 0 is
+	// also what a singlechoice over a single 0-valued choice derives, which is a legitimate ballot
+	// rather than the amounts-mode evasion this catches.
+	if bp.MaxValue == 0 && bp.MaxTotalCost == 0 && !bp.CostFromWeight && bp.MaxCount > 1 {
+		return fmt.Errorf(
+			"maxValue 0 with maxTotalCost 0 and costFromWeight false leaves every field unbounded: " +
+				"a cumulative ballot needs a budget (maxTotalCost > 0) or costFromWeight",
+		)
+	}
 	return nil
 }
 

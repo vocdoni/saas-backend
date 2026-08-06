@@ -288,8 +288,9 @@ func TestBallotShapeUnambiguous(t *testing.T) {
 				protos = append(protos, named{qType, *bp})
 			}
 			// every named type well-defined over cs. A single multichoice representative suffices:
-			// maxChoices only changes its MaxTotalCost, and multichoice is the only type with
-			// maxValue 1, so no value of it can collide with another type's image.
+			// maxChoices only changes its MaxTotalCost, and multichoice is the only type whose image
+			// always carries uniqueValues:false with costExponent:1, so it can never collide with
+			// ranked (uniqueValues:true) or singlechoice (costExponent:0) for any maxTotalCost.
 			add(db.VotingTypeSingleChoice, db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1})
 			add(db.VotingTypeMultiChoice, db.QuestionTypeSetup{MaxChoices: uint32(n)})
 			if n >= 2 { // ranked needs at least two choices
@@ -475,6 +476,8 @@ func TestValidateBallotProtocol(t *testing.T) {
 			"one short of a permutation": {MaxCount: 4, MaxValue: 2, UniqueValues: true},
 			// one value short of a permutation, at the top of the uint32 range
 			"one short at the uint32 ceiling": {MaxCount: math.MaxUint32, MaxValue: math.MaxUint32 - 2, UniqueValues: true},
+			// amounts mode (maxValue 0) with no budget and no costFromWeight: every field unbounded
+			"unbounded cumulative": {MaxCount: 3, MaxValue: 0, CostExponent: 1, MaxTotalCost: 0},
 		} {
 			c.Assert(ValidateBallotProtocol(bp), qt.Not(qt.IsNil), qt.Commentf("%s", name))
 		}

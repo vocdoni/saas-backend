@@ -193,10 +193,26 @@ func (a *API) buildQuestions(
 							"independent yes/no field; use type %q for a ranked ballot", i, db.VotingTypeRanked,
 					)
 				}
-			case db.VotingTypeSingleChoice, db.VotingTypeRanked, db.VotingTypeCumulative:
-				// nothing the switch can usefully check: singlechoice and ranked ignore typeSetup,
-				// and cumulative's budget/costExponent are validated when the protocol is derived
-				// below (ResolveBallotShape -> BallotProtocolFromType).
+			case db.VotingTypeRanked:
+				// ranked uses no typeSetup: its protocol is fixed by the choices. Reject a non-empty
+				// setup rather than silently dropping it, so a client does not believe it set a
+				// constraint the ballot does not have.
+				if q.TypeSetup != (db.QuestionTypeSetup{}) {
+					return nil, errors.ErrInvalidData.Withf(
+						"question %d: type %q takes no typeSetup; its ballot is fixed by the choices", i, q.Type,
+					)
+				}
+			case db.VotingTypeCumulative:
+				// cumulative uses only budget/costExponent (validated when the protocol is derived);
+				// the multichoice fields do not apply, so reject them rather than silently dropping them.
+				if q.TypeSetup.MinChoices != 0 || q.TypeSetup.MaxChoices != 0 || q.TypeSetup.UniqueChoices {
+					return nil, errors.ErrInvalidData.Withf(
+						"question %d: minChoices, maxChoices and uniqueChoices apply only to multichoice; "+
+							"cumulative is configured through typeSetup.budget and typeSetup.costExponent", i,
+					)
+				}
+			case db.VotingTypeSingleChoice:
+				// singlechoice ignores typeSetup
 			default:
 				return nil, errors.ErrInvalidData.Withf("question %d: unsupported type %q", i, q.Type)
 			}
