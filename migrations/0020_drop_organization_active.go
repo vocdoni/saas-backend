@@ -10,7 +10,7 @@ import (
 )
 
 func init() {
-	AddMigration(19, "drop_organization_active", upDropOrganizationActive, downDropOrganizationActive)
+	AddMigration(20, "drop_organization_active", upDropOrganizationActive, downDropOrganizationActive)
 }
 
 // upDropOrganizationActive removes the organizations' `active` field (issue #625). Nothing ever

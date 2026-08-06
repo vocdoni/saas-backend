@@ -9,7 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 )
 
-// TestDropOrganizationActiveMigration asserts migration 0019 strips the organizations' `active`
+// TestDropOrganizationActiveMigration asserts migration 0020 strips the organizations' `active`
 // field, and that the rollback restores it as true (issue #625).
 func TestDropOrganizationActiveMigration(t *testing.T) {
 	c := qt.New(t)
@@ -25,7 +25,7 @@ func TestDropOrganizationActiveMigration(t *testing.T) {
 		bson.M{"_id": testOrgAddress}, bson.M{"$set": bson.M{"active": false}})
 	c.Assert(err, qt.IsNil)
 
-	mig := migrationByVersion(c, 19)
+	mig := migrationByVersion(c, 20)
 	c.Assert(mig.Up(ctx, database), qt.IsNil)
 
 	raw := bson.M{}
