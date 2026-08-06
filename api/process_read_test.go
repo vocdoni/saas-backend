@@ -151,7 +151,7 @@ func TestProcessReadProxies(t *testing.T) {
 	proof := testGenerateVoteProof(addr, voterAddr, signature, 1)
 
 	// relay one vote
-	nullifier := testRelayVoteRequest(t, &voter, addr, proof, []byte("[\"1\"]"))
+	nullifier := testRelayVoteRequest(t, &voter, addr, proof, []byte("[\"1\"]"), nil)
 	c.Assert(nullifier, qt.Not(qt.HasLen), 0)
 
 	// poll the public results endpoint until the vote is counted

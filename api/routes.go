@@ -217,7 +217,8 @@ const (
 	// multi-question voting-process routes (new /processes API, plural namespace)
 	// POST /processes to create a draft; GET /processes to list (paginated, filterable)
 	processesCreateEndpoint = "/processes"
-	// PUT /processes/{processId} to update a draft; GET /processes/{processId} to read one (full)
+	// PUT /processes/{processId} to update a draft; GET /processes/{processId} to read one (full;
+	// a manager/admin caller additionally gets each open-value question's voter memos in its results)
 	processesEndpoint = "/processes/{processId}"
 	// POST /processes/census/validation validates a census spec (duplicates/missing fields) before create
 	processesCensusValidateEndpoint = "/processes/census/validation"
@@ -234,13 +235,15 @@ const (
 	processesQuestionsStatusEndpoint = "/processes/{processId}/questions/status"
 	// PUT /processes/{processId}/questions/{questionId}/status to change one question's status
 	processesQuestionStatusEndpoint = "/processes/{processId}/questions/{questionId}/status"
-	// GET /processes/{processId}/questions/{questionId} to read one question (public voter read)
+	// GET /processes/{processId}/questions/{questionId} to read one question (public voter read; a
+	// manager/admin caller additionally gets an open-value question's voter memos in its results)
 	processesQuestionEndpoint = "/processes/{processId}/questions/{questionId}"
 	// PUT /processes/{processId}/questions/{questionId}/census sets one question's eligibility list
 	processesQuestionCensusEndpoint = "/processes/{processId}/questions/{questionId}/census"
 	// GET /processes/{processId}/participants/{participantId} for a single participant's info (public)
 	processesParticipantEndpoint = "/processes/{processId}/participants/{participantId}"
-	// GET /processes/{processId}/results for the per-question on-chain results (public)
+	// GET /processes/{processId}/results for the per-question on-chain results (public; a manager/admin
+	// caller additionally receives each open-value question's free-text voter memos)
 	processesResultsEndpoint = "/processes/{processId}/results"
 	// GET /processes/{processId}/participants?field=&value= — Manager/Admin lookup of org members by
 	// field intersected with the census, with per-question voted status (protected)

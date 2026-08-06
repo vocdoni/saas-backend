@@ -2,6 +2,7 @@ package account
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/vocdoni/saas-backend/db"
 )
@@ -124,6 +125,30 @@ func BallotProtocolFromType(
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported question type %q", qType)
+	}
+}
+
+// OpenChoiceMatcher returns a predicate reporting whether a decoded vote package (its votes values)
+// selected the question's open-value choice, or nil when the question has no open choice or its
+// ballot layout gives "selected" no meaning: ranked ranks every choice on every ballot, and an
+// unnamed protocol has no defined layout. Layouts follow BallotProtocolFromType — singlechoice's
+// single field holds the chosen Choice.Value; multichoice and cumulative carry one field per choice
+// (by position in the choices slice), holding a 0/1 selection flag and a credit amount respectively.
+func OpenChoiceMatcher(qType string, choices []db.Choice) func(votes []int) bool {
+	open := slices.IndexFunc(choices, func(c db.Choice) bool { return c.OpenValue })
+	if open == -1 {
+		return nil
+	}
+	switch qType {
+	case db.VotingTypeSingleChoice:
+		want := int(choices[open].Value)
+		return func(votes []int) bool { return len(votes) == 1 && votes[0] == want }
+	case db.VotingTypeMultiChoice:
+		return func(votes []int) bool { return open < len(votes) && votes[open] == 1 }
+	case db.VotingTypeCumulative:
+		return func(votes []int) bool { return open < len(votes) && votes[open] > 0 }
+	default:
+		return nil
 	}
 }
 

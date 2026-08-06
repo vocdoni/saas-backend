@@ -85,7 +85,9 @@ func startVoconed(ctx context.Context) (*Voconed, error) {
 	if err != nil {
 		return nil, fmt.Errorf("could not create vocone: %w", err)
 	}
-	vc.App.SetChainID("test-vocone")
+	// "vocdoni/TEST/1" activates the memo soft-fork from height 0 (see genesis.VoteMemoActive),
+	// so tests exercise VoteEnvelope.memo; a generic chain id would leave the fork inactive.
+	vc.App.SetChainID("vocdoni/TEST/1")
 	vc.App.SetBlockTimeTarget(time.Second)
 
 	go func() {
