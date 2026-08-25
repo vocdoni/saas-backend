@@ -304,7 +304,7 @@ func (a *Account) ElectionMemos(electionID []byte, selectsOpen func(votes []int)
 			return memos, nil
 		}
 		for _, v := range list.Votes {
-			if v.Memo == "" {
+			if len(v.Memo) == 0 {
 				continue
 			}
 			votes, err := a.voteSelectedValues(internal.HexBytes(v.VoteID))
@@ -317,7 +317,7 @@ func (a *Account) ElectionMemos(electionID []byte, selectsOpen func(votes []int)
 				return nil, err
 			}
 			if selectsOpen(votes) {
-				memos = append(memos, v.Memo)
+				memos = append(memos, string(v.Memo))
 			}
 		}
 	}
