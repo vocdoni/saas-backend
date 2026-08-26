@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -268,6 +270,77 @@ func (a *Account) Election(processID []byte) (*api.Election, error) {
 		return nil, fmt.Errorf("could not fetch election %x: %w", processID, err)
 	}
 	return election, nil
+}
+
+// ElectionMemos pages every vote of the on-chain election with the given id and returns each
+// non-empty voter memo cast alongside the open choice, one entry per matching vote (so a memo
+// cast N times appears N times). A memo rides on the whole vote, so we correlate it to a choice
+// via the vote package: the votes-list page carries the memo but not the package, so for each
+// memo-carrying vote we fetch the single vote (which the node decrypts at RESULTS) and keep the
+// memo only if selectsOpen reports its decoded values selected the open choice (the predicate
+// owns the ballot layout — see OpenChoiceMatcher). The node's votes-list endpoint returns an
+// empty page past the last one, which terminates the loop.
+//
+// ponytail: pages the whole election and does one extra GET per memo-carrying vote (N+1); fine for the
+// manager-only memo resolution folded into the results reads. Add saas-side pagination / a bounded
+// fetch pool if a process ever accumulates memos in the millions.
+func (a *Account) ElectionMemos(electionID []byte, selectsOpen func(votes []int) bool) ([]string, error) {
+	var memos []string
+	for page := 0; ; page++ {
+		resp, code, err := a.client.Request(http.MethodGet, nil,
+			"elections", internal.HexBytes(electionID).String(), "votes", "page", strconv.Itoa(page))
+		if err != nil {
+			return nil, fmt.Errorf("could not fetch votes of election %x: %w", electionID, err)
+		}
+		if code != http.StatusOK {
+			return nil, fmt.Errorf("could not fetch votes of election %x: unexpected status %d (%s)",
+				electionID, code, resp)
+		}
+		var list api.VotesList
+		if err := json.Unmarshal(resp, &list); err != nil {
+			return nil, fmt.Errorf("could not decode votes of election %x: %w", electionID, err)
+		}
+		if len(list.Votes) == 0 {
+			return memos, nil
+		}
+		for _, v := range list.Votes {
+			if len(v.Memo) == 0 {
+				continue
+			}
+			votes, err := a.voteSelectedValues(internal.HexBytes(v.VoteID))
+			if err != nil {
+				// the list page and the per-vote fetch can disagree transiently (indexing lag), so a
+				// vote the chain does not know yet only drops its own memo, not the whole list.
+				if errors.Is(err, ErrVoteNotFound) {
+					continue
+				}
+				return nil, err
+			}
+			if selectsOpen(votes) {
+				memos = append(memos, string(v.Memo))
+			}
+		}
+	}
+}
+
+// voteSelectedValues fetches a single vote by its id and returns the choice values it selected
+// (VotePackage.Votes). The node decrypts the package for encrypted elections once keys are revealed
+// (RESULTS); if the package is still opaque/absent it returns no values, so the caller drops the memo.
+func (a *Account) voteSelectedValues(voteID internal.HexBytes) ([]int, error) {
+	vote, err := a.VoteByNullifier(voteID)
+	if err != nil {
+		return nil, err
+	}
+	if len(vote.VotePackage) == 0 {
+		return nil, nil
+	}
+	var pkg struct {
+		Votes []int `json:"votes"`
+	}
+	if err := json.Unmarshal(vote.VotePackage, &pkg); err != nil {
+		return nil, nil // opaque/encrypted package: no selectable values, memo is dropped
+	}
+	return pkg.Votes, nil
 }
 
 // ErrVoteNotFound is returned by VoteByNullifier when the chain has no vote with the

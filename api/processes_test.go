@@ -318,6 +318,14 @@ func TestVotingProcessAuthoringErrors(t *testing.T) {
 	badType.Questions[0].Type = "quadratic"
 	requestAndAssertError(errors.ErrInvalidData, t, http.MethodPost, adminToken, badType, processesCreateEndpoint)
 
+	// two choices marking openValue -> 400 (at most one memo-open choice per question)
+	twoOpen := newVotingProcessRequest(orgAddress, ids)
+	twoOpen.Questions[0].Choices = []db.Choice{
+		{Title: db.MultiLangString{"default": "Yes"}, Value: 0, OpenValue: true},
+		{Title: db.MultiLangString{"default": "No"}, Value: 1, OpenValue: true},
+	}
+	requestAndAssertError(errors.ErrInvalidData, t, http.MethodPost, adminToken, twoOpen, processesCreateEndpoint)
+
 	// ranked needs at least two choices to rank -> 400
 	rankedTooFew := newVotingProcessRequest(orgAddress, ids)
 	rankedTooFew.Questions[0].Type = db.VotingTypeRanked
