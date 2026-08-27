@@ -148,6 +148,8 @@ func TestProcessBlindCSP(t *testing.T) {
 		time.Sleep(time.Second)
 	}
 	c.Assert(res.Questions, qt.HasLen, 1)
+	t.Logf("blind tally: results=%v voteCount=%d (want results=[[2 0]] voteCount=1)",
+		res.Questions[0].Results, res.Questions[0].VoteCount)
 	c.Assert(res.Questions[0].VoteCount, qt.Equals, uint64(1))
 	c.Assert(res.Questions[0].Results, qt.DeepEquals, [][]string{{"2", "0"}})
 
