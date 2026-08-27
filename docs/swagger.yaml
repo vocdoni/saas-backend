@@ -107,6 +107,12 @@ definitions:
     type: object
   apicommon.CensusSpec:
     properties:
+      anonymous:
+        description: |-
+          Anonymous selects blind-CSP voting: the process publishes with census origin OFF_CHAIN_CA_V2
+          and the CSP blind-signs each ballot so it cannot link a signature to the voter. Orthogonal to
+          the mail/sms/auth 2FA channel; may be combined with Weighted (V2 binds the weight into the salt).
+        type: boolean
       authFields:
         items:
           $ref: '#/definitions/db.OrgMemberAuthField'
@@ -2127,6 +2133,11 @@ definitions:
     type: object
   db.Census:
     properties:
+      anonymous:
+        description: |-
+          Anonymous marks a blind-CSP census: published with census origin OFF_CHAIN_CA_V2 and a blind
+          public-key root, so the CSP blind-signs ballots and cannot link a signature to the voter.
+        type: boolean
       authFields:
         items:
           $ref: '#/definitions/db.OrgMemberAuthField'
@@ -2668,6 +2679,75 @@ definitions:
         example: 2a
         format: hex
         type: string
+    type: object
+  handlers.BlindPointRequest:
+    properties:
+      authToken:
+        example: deadbeef
+        format: hex
+        type: string
+      electionIds:
+        example:
+        - deadbeef
+        items:
+          format: hex
+          type: string
+        type: array
+    type: object
+  handlers.BlindPointResponse:
+    properties:
+      points:
+        items:
+          $ref: '#/definitions/handlers.BlindPointResult'
+        type: array
+    type: object
+  handlers.BlindPointResult:
+    properties:
+      code:
+        type: string
+      error:
+        type: string
+      tokenR:
+        example: deadbeef
+        format: hex
+        type: string
+      upstreamId:
+        example: deadbeef
+        format: hex
+        type: string
+      weight:
+        example: 2a
+        format: hex
+        type: string
+    type: object
+  handlers.BlindSignBallot:
+    properties:
+      blindedMessage:
+        example: deadbeef
+        format: hex
+        type: string
+      upstreamId:
+        example: deadbeef
+        format: hex
+        type: string
+    type: object
+  handlers.BlindSignRequest:
+    properties:
+      authToken:
+        example: deadbeef
+        format: hex
+        type: string
+      ballots:
+        items:
+          $ref: '#/definitions/handlers.BlindSignBallot'
+        type: array
+    type: object
+  handlers.BlindSignResponse:
+    properties:
+      signatures:
+        items:
+          $ref: '#/definitions/handlers.SignBatchResult'
+        type: array
     type: object
   handlers.CheckMembershipRequest:
     properties:
@@ -6454,6 +6534,111 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Resend a voting process auth challenge
+      tags:
+      - processes
+  /processes/{processId}/blind-point:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Round 1 of the two-round blind CSP signing flow, for a process whose census is
+        anonymous (OFF_CHAIN_CA_V2). For each requested on-chain election id the CSP returns a
+        fresh blind point R (tokenR) the client uses to blind its CA bundle before calling
+        blind-sign, plus the CSP-authorized weight the client must carry in that bundle. The
+        batch is authorized as a unit (each election must belong to the process and the member
+        be eligible, else 401); per-election issuance failures are reported inline with a code.
+        Public endpoint: the verified auth token authenticates the voter. Rejected (400) for a
+        non-anonymous process — use the sign endpoints there.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Auth token and one election id per question
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.BlindPointRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.BlindPointResponse'
+        "400":
+          description: Invalid input data or non-anonymous process
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized, unverified token, election not in process, or
+            member not eligible
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "413":
+          description: Request body too large
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Issue blind points for a blind (anonymous) voting process (round 1)
+      tags:
+      - processes
+  /processes/{processId}/blind-sign:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Round 2 of the two-round blind CSP signing flow. For each election the client sends
+        the CA-bundle hash already blinded with the round-1 blind point; the CSP blind-signs it
+        without ever seeing the voter address, which is what keeps the ballot unlinkable. The
+        batch is authorized as a unit (same rules as sign-batch) and then each ballot is signed,
+        consuming that election's slot; the response is always 200 with one entry per item, in
+        order, carrying the raw blind-signature scalar or a stable code (blind_request_missing if
+        no round-1 point was issued; the other signing codes as usual). Public endpoint. Rejected
+        (400) for a non-anonymous process — use the sign endpoints there.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Auth token and one blinded ballot per question
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.BlindSignRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.BlindSignResponse'
+        "400":
+          description: Invalid input data or non-anonymous process
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized, unverified token, election not in process, or
+            member not eligible
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "413":
+          description: Request body too large
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Blind-sign every ballot of a blind (anonymous) voting process (round
+        2)
       tags:
       - processes
   /processes/{processId}/census:

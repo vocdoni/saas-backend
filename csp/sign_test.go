@@ -2,15 +2,18 @@ package csp
 
 import (
 	"context"
+	"math/big"
 	"testing"
 	"time"
 
+	blind "github.com/arnaucube/go-blindsecp256k1"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/csp/signers"
 	"github.com/vocdoni/saas-backend/csp/signers/saltedkey"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/test"
+	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/util"
 	"go.vocdoni.io/proto/build/go/models"
 	"google.golang.org/protobuf/proto"
@@ -64,6 +67,84 @@ func TestSign(t *testing.T) {
 		sign, err := csp.Sign(testToken, testAddress, pid, testUserWeightBytes, signers.SignerTypeECDSASalted)
 		c.Assert(err, qt.IsNil)
 		c.Assert(sign, qt.Not(qt.IsNil))
+	})
+}
+
+func TestBlindSign(t *testing.T) {
+	c := qt.New(t)
+
+	testDB, err := db.New(testMongoURI, test.RandomDatabaseName())
+	c.Assert(err, qt.IsNil)
+
+	ctx := context.Background()
+	csp, err := New(ctx, &Config{
+		DB:                       testDB,
+		MailService:              testMailService,
+		SMSService:               testSMSService,
+		NotificationCoolDownTime: time.Second * 5,
+		RootKey:                  *testRootKey,
+	})
+	c.Assert(err, qt.IsNil)
+
+	c.Run("blind sign before request fails", func(c *qt.C) {
+		pid := internal.HexBytes(util.RandomBytes(32))
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID, ""), qt.IsNil)
+		c.Assert(csp.Storage.VerifyCSPAuth(testToken), qt.IsNil)
+		// no NewBlindRequest issued yet: round 2 has no nonce to use
+		_, err := csp.BlindSign(testToken, pid, testUserWeightBytes, []byte("blinded"))
+		c.Assert(err, qt.ErrorIs, ErrBlindRequestNotFound)
+	})
+
+	c.Run("full two-round blind flow verifies and cannot be replayed", func(c *qt.C) {
+		pid := internal.HexBytes(util.RandomBytes(32))
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID, ""), qt.IsNil)
+		c.Assert(csp.Storage.VerifyCSPAuth(testToken), qt.IsNil)
+
+		// The two-round flow, retried on the ~1/256 case where the client's blinded message is not
+		// 32 bytes (go-blindsecp256k1 rejects it): a real client re-blinds against a fresh R. The
+		// server-side nonce is always full-width (NewBlindRequest guarantees it), so only the
+		// blinded-message half can flake here.
+		msgHash := ethereum.HashRaw([]byte("blind ballot"))
+		var signature *blind.Signature
+		for range 32 {
+			// round 1: the CSP issues R and stores the nonce
+			rBytes, err := csp.NewBlindRequest(testToken, pid)
+			c.Assert(err, qt.IsNil)
+			signerR, err := blind.NewPointFromBytes(rBytes)
+			c.Assert(err, qt.IsNil)
+			// client: blind the CA-bundle hash with R
+			msgBlinded, userSecretData, err := blind.Blind(new(big.Int).SetBytes(msgHash), signerR)
+			c.Assert(err, qt.IsNil)
+			// round 2: the CSP blind-signs with the V2-salted key and consumes the slot
+			blindedSig, err := csp.BlindSign(testToken, pid, testUserWeightBytes, msgBlinded.Bytes())
+			if err != nil {
+				c.Assert(err, qt.ErrorIs, ErrSign) // only the 32-byte flakiness; nonce not yet consumed
+				continue
+			}
+			signature = blind.Unblind(new(big.Int).SetBytes(blindedSig), userSecretData)
+			break
+		}
+		c.Assert(signature, qt.Not(qt.IsNil))
+
+		// verify against the CSP blind key salted with the SAME processID+weight
+		salt, err := saltedkey.V2Salt(pid, testUserWeightBytes)
+		c.Assert(err, qt.IsNil)
+		saltedPub, err := saltedkey.SaltBlindPubKey(csp.Signer.BlindPubKey(), salt)
+		c.Assert(err, qt.IsNil)
+		c.Assert(blind.Verify(new(big.Int).SetBytes(msgHash), signature, saltedPub), qt.IsTrue)
+
+		// a forged weight does not verify (V2 binds the weight into the salt)
+		otherSalt, err := saltedkey.V2Salt(pid, big.NewInt(int64(testUserWeight+1)).Bytes())
+		c.Assert(err, qt.IsNil)
+		forgedPub, err := saltedkey.SaltBlindPubKey(csp.Signer.BlindPubKey(), otherSalt)
+		c.Assert(err, qt.IsNil)
+		c.Assert(blind.Verify(new(big.Int).SetBytes(msgHash), signature, forgedPub), qt.IsFalse)
+
+		// the nonce was cleared on consume: a second round-2 without re-arming is refused
+		_, err = csp.BlindSign(testToken, pid, testUserWeightBytes, []byte("anything"))
+		c.Assert(err, qt.ErrorIs, ErrBlindRequestNotFound)
 	})
 }
 

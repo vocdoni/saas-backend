@@ -259,7 +259,11 @@ const (
 	// Authorization is all or nothing — a rejected batch signs nothing — but the signing that
 	// follows reports per ballot: one entry can fail while its siblings succeed.
 	processesSignBatchEndpoint = "/processes/{processId}/sign-batch"
-	processesWeightEndpoint    = "/processes/{processId}/weight"
+	// blind CSP (anonymous, OFF_CHAIN_CA_V2) two-round signing for a voting process (public):
+	// blind-point issues the round-1 blind points, blind-sign returns the round-2 blind signatures.
+	processesBlindPointEndpoint = "/processes/{processId}/blind-point"
+	processesBlindSignEndpoint  = "/processes/{processId}/blind-sign"
+	processesWeightEndpoint     = "/processes/{processId}/weight"
 
 	// // census auth routes (currently not implemented)
 	// // POST /process/{processId}/auth/0 to initiate auth

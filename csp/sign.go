@@ -4,7 +4,9 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"math/big"
 
+	blind "github.com/arnaucube/go-blindsecp256k1"
 	"github.com/vocdoni/saas-backend/csp/signers"
 	"github.com/vocdoni/saas-backend/csp/signers/saltedkey"
 	"github.com/vocdoni/saas-backend/db"
@@ -39,6 +41,107 @@ func (c *CSP) Sign(
 	default:
 		return nil, ErrInvalidSignerType
 	}
+}
+
+// NewBlindRequest issues the round-1 blind point R for a blind (OFF_CHAIN_CA_V2) signature on the
+// given election and stores the matching one-time nonce k for round 2. It validates the auth token
+// (verified, not yet fully consumed) but never sees the voter address — signing a message the CSP
+// cannot read is what keeps the vote unlinkable. R is a compressed blind point (33 bytes) the client
+// uses to blind its CA bundle before calling BlindSign.
+func (c *CSP) NewBlindRequest(token, processID internal.HexBytes) (internal.HexBytes, error) {
+	authTokenData, err := c.Storage.CSPAuth(token)
+	if err != nil {
+		if errors.Is(err, db.ErrTokenNotFound) {
+			return nil, ErrInvalidAuthToken
+		}
+		return nil, errors.Join(ErrSign, err)
+	}
+	if !authTokenData.Verified {
+		return nil, ErrAuthTokenNotVerified
+	}
+	if consumed, err := c.Storage.IsCSPProcessConsumed(authTokenData.UserID, processID); err != nil {
+		return nil, errors.Join(ErrSign, err)
+	} else if consumed {
+		return nil, ErrProcessAlreadyConsumed
+	}
+	// go-blindsecp256k1's BlindSign rejects a k whose big-endian encoding is not exactly 32 bytes
+	// (a ~1/256 leading-zero case). We control k, so regenerate until it is full-width and never
+	// leak that failure to round 2; the client still has to retry the ~1/256 blinded-message case.
+	var k *big.Int
+	var r *blind.Point
+	for range 128 {
+		k, r, err = blind.NewRequestParameters()
+		if err != nil {
+			return nil, errors.Join(ErrSign, err)
+		}
+		if len(k.Bytes()) == 32 {
+			break
+		}
+	}
+	if len(k.Bytes()) != 32 {
+		return nil, errors.Join(ErrSign, fmt.Errorf("could not derive a full-width blind nonce"))
+	}
+	if err := c.Storage.SetCSPProcessBlindSecret(token, processID, k.Bytes()); err != nil {
+		if errors.Is(err, db.ErrProcessAlreadyConsumed) {
+			return nil, ErrProcessAlreadyConsumed
+		}
+		return nil, errors.Join(ErrSign, err)
+	}
+	return r.Bytes(), nil
+}
+
+// BlindSign performs the round-2 blind signature: it loads the one-time nonce k stored in round 1,
+// blind-signs the client-supplied blinded message with the V2-salted key (the salt binds processID
+// and the CSP-authorized weight, so a forged bundle weight cannot verify), consumes the election for
+// the user, and clears k. It returns the raw blind-signature scalar; the client unblinds it into the
+// final ProofCA signature. The address is never seen here — anonymity holds by construction.
+func (c *CSP) BlindSign(token, processID, weight, blindedMsg internal.HexBytes) (internal.HexBytes, error) {
+	authTokenData, err := c.Storage.CSPAuth(token)
+	if err != nil {
+		if errors.Is(err, db.ErrTokenNotFound) {
+			return nil, ErrInvalidAuthToken
+		}
+		return nil, errors.Join(ErrSign, err)
+	}
+	if !authTokenData.Verified {
+		return nil, ErrAuthTokenNotVerified
+	}
+	// serialize concurrent round-2 requests for the same (user, election)
+	if c.isLocked(authTokenData.UserID, processID) {
+		return nil, ErrUserAlreadySigning
+	}
+	c.lock(authTokenData.UserID, processID)
+	defer c.unlock(authTokenData.UserID, processID)
+
+	proc, err := c.Storage.CSPProcessByUserAndProcess(authTokenData.UserID, processID)
+	if err != nil {
+		if errors.Is(err, db.ErrTokenNotFound) {
+			return nil, ErrBlindRequestNotFound
+		}
+		return nil, errors.Join(ErrSign, err)
+	}
+	if proc.BlindSecret == nil {
+		return nil, ErrBlindRequestNotFound
+	}
+	if proc.TimesVoted > db.MaxVoteOverwritesPerProcess {
+		return nil, ErrProcessAlreadyConsumed
+	}
+	salt, err := saltedkey.V2Salt(processID, weight)
+	if err != nil {
+		return nil, errors.Join(ErrSign, err)
+	}
+	secretK := new(big.Int).SetBytes(proc.BlindSecret)
+	signature, err := c.Signer.SignBlind(salt, blindedMsg, secretK)
+	if err != nil {
+		return nil, errors.Join(ErrSign, err)
+	}
+	if err := c.Storage.ConsumeCSPProcessBlind(token, processID); err != nil {
+		if errors.Is(err, db.ErrProcessAlreadyConsumed) {
+			return nil, ErrProcessAlreadyConsumed
+		}
+		return nil, errors.Join(ErrSign, err)
+	}
+	return signature, nil
 }
 
 // prepareSaltedKeySigner method prepares the data for the Ethereum signer.

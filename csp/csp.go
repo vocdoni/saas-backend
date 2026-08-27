@@ -2,6 +2,8 @@ package csp
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"fmt"
 	"sync"
 	"time"
 
@@ -168,4 +170,15 @@ func (c *CSP) PubKey() (internal.HexBytes, error) {
 		return nil, err
 	}
 	return ethcrypto.CompressPubkey(pub), nil
+}
+
+// BlindPubKey returns the CSP blind-signature root public key, serialized as a compressed
+// secp256k1 point. It is the census root of a blind (OFF_CHAIN_CA_V2) census: the Vochain
+// decompresses it and reads it back as a blind public key when verifying ECDSA_BLIND proofs.
+func (c *CSP) BlindPubKey() (internal.HexBytes, error) {
+	bp := c.Signer.BlindPubKey()
+	if bp == nil || bp.X == nil || bp.Y == nil {
+		return nil, fmt.Errorf("blind public key is not available")
+	}
+	return ethcrypto.CompressPubkey(&ecdsa.PublicKey{Curve: ethcrypto.S256(), X: bp.X, Y: bp.Y}), nil
 }

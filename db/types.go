@@ -266,10 +266,13 @@ const (
 
 // Census represents the information of a set of census participants
 type Census struct {
-	ID          primitive.ObjectID   `json:"id" bson:"_id"`
-	OrgAddress  common.Address       `json:"orgAddress" bson:"orgAddress"`
-	Type        CensusType           `json:"type" bson:"type"`
-	Weighted    bool                 `json:"weighted" bson:"weighted"`
+	ID         primitive.ObjectID `json:"id" bson:"_id"`
+	OrgAddress common.Address     `json:"orgAddress" bson:"orgAddress"`
+	Type       CensusType         `json:"type" bson:"type"`
+	Weighted   bool               `json:"weighted" bson:"weighted"`
+	// Anonymous marks a blind-CSP census: published with census origin OFF_CHAIN_CA_V2 and a blind
+	// public-key root, so the CSP blind-signs ballots and cannot link a signature to the voter.
+	Anonymous   bool                 `json:"anonymous" bson:"anonymous"`
 	Size        int64                `json:"size" bson:"size"`
 	GroupID     primitive.ObjectID   `json:"groupId" bson:"groupId"`
 	Published   PublishedCensus      `json:"published" bson:"published"`

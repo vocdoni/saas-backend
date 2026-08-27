@@ -238,6 +238,10 @@ func (c *CSPHandlers) ProcessSignHandler(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	if sc.anonymous {
+		errors.ErrMalformedBody.Withf("process uses a blind (anonymous) census; use the blind-point/blind-sign endpoints").Write(w)
+		return
+	}
 	upstreamID, sErr := c.authorizeQuestion(sc, req.ProcessID)
 	if sErr != nil {
 		sErr.Write(w)
@@ -258,6 +262,9 @@ type signContext struct {
 	process  *db.VotingProcess
 	memberID string
 	weight   internal.HexBytes
+	// anonymous is the census mode: true for a blind (OFF_CHAIN_CA_V2) census, which is served by
+	// the two-round blind-point/blind-sign endpoints instead of the plain ECDSA sign endpoints.
+	anonymous bool
 }
 
 // resolveSignContext runs the per-request half of a ballot signing request: load the voting
@@ -312,9 +319,10 @@ func (c *CSPHandlers) resolveSignContext(
 		weight = member.Weight
 	}
 	return &signContext{
-		process:  vp,
-		memberID: auth.UserID.String(),
-		weight:   weightBytes(weight),
+		process:   vp,
+		memberID:  auth.UserID.String(),
+		weight:    weightBytes(weight),
+		anonymous: census.Anonymous,
 	}, true
 }
 
@@ -441,6 +449,10 @@ func (c *CSPHandlers) ProcessSignBatchHandler(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
+	if sc.anonymous {
+		errors.ErrMalformedBody.Withf("process uses a blind (anonymous) census; use the blind-point/blind-sign endpoints").Write(w)
+		return
+	}
 
 	// authorize the whole batch before signing anything: signing consumes a per-election slot
 	// that cannot be given back, so a rejected batch must leave the voter with nothing signed
@@ -520,6 +532,236 @@ func (c *CSPHandlers) ProcessSignBatchHandler(w http.ResponseWriter, r *http.Req
 	apicommon.HTTPWriteJSON(w, resp)
 }
 
+// blindBallotAuth is one item of a blind batch that survived the authorization pass: the
+// question's on-chain election id, plus (round 2 only) the blinded message to sign for it.
+type blindBallotAuth struct {
+	upstreamID     internal.HexBytes
+	blindedMessage internal.HexBytes
+}
+
+// ProcessBlindPointHandler godoc
+//
+//	@Summary		Issue blind points for a blind (anonymous) voting process (round 1)
+//	@Description	Round 1 of the two-round blind CSP signing flow, for a process whose census is
+//	@Description	anonymous (OFF_CHAIN_CA_V2). For each requested on-chain election id the CSP returns a
+//	@Description	fresh blind point R (tokenR) the client uses to blind its CA bundle before calling
+//	@Description	blind-sign, plus the CSP-authorized weight the client must carry in that bundle. The
+//	@Description	batch is authorized as a unit (each election must belong to the process and the member
+//	@Description	be eligible, else 401); per-election issuance failures are reported inline with a code.
+//	@Description	Public endpoint: the verified auth token authenticates the voter. Rejected (400) for a
+//	@Description	non-anonymous process — use the sign endpoints there.
+//	@Tags			processes
+//	@Accept			json
+//	@Produce		json
+//	@Param			processId	path		string						true	"Process ID"
+//	@Param			request		body		handlers.BlindPointRequest	true	"Auth token and one election id per question"
+//	@Success		200			{object}	handlers.BlindPointResponse
+//	@Failure		400			{object}	errors.Error	"Invalid input data or non-anonymous process"
+//	@Failure		401			{object}	errors.Error	"Unauthorized, unverified token, election not in process, or member not eligible"
+//	@Failure		413			{object}	errors.Error	"Request body too large"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/processes/{processId}/blind-point [post]
+func (c *CSPHandlers) ProcessBlindPointHandler(w http.ResponseWriter, r *http.Request) {
+	oid, _, ok := parseProcessID(w, r)
+	if !ok {
+		return
+	}
+	var req BlindPointRequest
+	if apiErr := apicommon.DecodeCappedJSON(w, r, &req, maxSignBatchBodyBytes); apiErr != nil {
+		apiErr.Write(w)
+		return
+	}
+	if req.AuthToken == nil {
+		errors.ErrUnauthorized.Withf("missing auth token").Write(w)
+		return
+	}
+	switch {
+	case len(req.Elections) == 0:
+		errors.ErrVoteBatchEmpty.Write(w)
+		return
+	case len(req.Elections) > db.MaxQuestionsPerProcess:
+		errors.ErrVoteBatchTooLarge.Withf("%d elections, the maximum is %d",
+			len(req.Elections), db.MaxQuestionsPerProcess).Write(w)
+		return
+	}
+	sc, ok := c.resolveSignContext(w, oid, req.AuthToken)
+	if !ok {
+		return
+	}
+	if !sc.anonymous {
+		errors.ErrMalformedBody.Withf("process is not anonymous; use the sign endpoints").Write(w)
+		return
+	}
+	byUpstream, ok := c.questionsByUpstream(w, oid)
+	if !ok {
+		return
+	}
+	// authorize the whole batch before issuing any point, mirroring sign-batch: an ineligible or
+	// out-of-process election fails the request rather than issuing a partial set.
+	upstreamIDs := make([]internal.HexBytes, len(req.Elections))
+	seen := make(map[string]int, len(req.Elections))
+	for i, electionID := range req.Elections {
+		if first, dup := seen[string(electionID)]; dup {
+			errors.ErrMalformedBody.Withf("the election at index %d repeats index %d", i, first).Write(w)
+			return
+		}
+		seen[string(electionID)] = i
+		if len(electionID) == 0 {
+			errors.ErrMalformedBody.With("missing election id").Withf("at index %d", i).Write(w)
+			return
+		}
+		upstreamID, sErr := authorizeLoadedQuestion(sc, byUpstream[string(electionID)])
+		if sErr != nil {
+			sErr.Withf("at index %d", i).Write(w)
+			return
+		}
+		upstreamIDs[i] = upstreamID
+	}
+
+	resp := &BlindPointResponse{Points: make([]BlindPointResult, len(upstreamIDs))}
+	for i, upstreamID := range upstreamIDs {
+		res := &resp.Points[i]
+		res.UpstreamID = upstreamID
+		tokenR, err := c.csp.NewBlindRequest(req.AuthToken, upstreamID)
+		if err != nil {
+			res.Code, res.Error = signOutcome(err)
+			logSignFailure(oid, sc.memberID, upstreamID, err)
+			if res.Code == signCodeAuthInvalid {
+				for j := i + 1; j < len(upstreamIDs); j++ {
+					resp.Points[j].UpstreamID = upstreamIDs[j]
+					resp.Points[j].Code, resp.Points[j].Error = res.Code, res.Error
+				}
+				break
+			}
+			continue
+		}
+		res.TokenR = tokenR
+		res.Weight = sc.weight
+	}
+	apicommon.HTTPWriteJSON(w, resp)
+}
+
+// ProcessBlindSignHandler godoc
+//
+//	@Summary		Blind-sign every ballot of a blind (anonymous) voting process (round 2)
+//	@Description	Round 2 of the two-round blind CSP signing flow. For each election the client sends
+//	@Description	the CA-bundle hash already blinded with the round-1 blind point; the CSP blind-signs it
+//	@Description	without ever seeing the voter address, which is what keeps the ballot unlinkable. The
+//	@Description	batch is authorized as a unit (same rules as sign-batch) and then each ballot is signed,
+//	@Description	consuming that election's slot; the response is always 200 with one entry per item, in
+//	@Description	order, carrying the raw blind-signature scalar or a stable code (blind_request_missing if
+//	@Description	no round-1 point was issued; the other signing codes as usual). Public endpoint. Rejected
+//	@Description	(400) for a non-anonymous process — use the sign endpoints there.
+//	@Tags			processes
+//	@Accept			json
+//	@Produce		json
+//	@Param			processId	path		string						true	"Process ID"
+//	@Param			request		body		handlers.BlindSignRequest	true	"Auth token and one blinded ballot per question"
+//	@Success		200			{object}	handlers.BlindSignResponse
+//	@Failure		400			{object}	errors.Error	"Invalid input data or non-anonymous process"
+//	@Failure		401			{object}	errors.Error	"Unauthorized, unverified token, election not in process, or member not eligible"
+//	@Failure		413			{object}	errors.Error	"Request body too large"
+//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Router			/processes/{processId}/blind-sign [post]
+func (c *CSPHandlers) ProcessBlindSignHandler(w http.ResponseWriter, r *http.Request) {
+	oid, _, ok := parseProcessID(w, r)
+	if !ok {
+		return
+	}
+	var req BlindSignRequest
+	if apiErr := apicommon.DecodeCappedJSON(w, r, &req, maxSignBatchBodyBytes); apiErr != nil {
+		apiErr.Write(w)
+		return
+	}
+	if req.AuthToken == nil {
+		errors.ErrUnauthorized.Withf("missing auth token").Write(w)
+		return
+	}
+	switch {
+	case len(req.Ballots) == 0:
+		errors.ErrVoteBatchEmpty.Write(w)
+		return
+	case len(req.Ballots) > db.MaxQuestionsPerProcess:
+		errors.ErrVoteBatchTooLarge.Withf("%d ballots, the maximum is %d",
+			len(req.Ballots), db.MaxQuestionsPerProcess).Write(w)
+		return
+	}
+	sc, ok := c.resolveSignContext(w, oid, req.AuthToken)
+	if !ok {
+		return
+	}
+	if !sc.anonymous {
+		errors.ErrMalformedBody.Withf("process is not anonymous; use the sign endpoints").Write(w)
+		return
+	}
+	byUpstream, ok := c.questionsByUpstream(w, oid)
+	if !ok {
+		return
+	}
+	ballots := make([]blindBallotAuth, len(req.Ballots))
+	seen := make(map[string]int, len(req.Ballots))
+	for i, item := range req.Ballots {
+		if first, dup := seen[string(item.UpstreamID)]; dup {
+			errors.ErrMalformedBody.Withf("the ballot at index %d repeats the election of index %d", i, first).Write(w)
+			return
+		}
+		seen[string(item.UpstreamID)] = i
+		if len(item.UpstreamID) == 0 {
+			errors.ErrMalformedBody.With("missing election id").Withf("at index %d", i).Write(w)
+			return
+		}
+		upstreamID, sErr := authorizeLoadedQuestion(sc, byUpstream[string(item.UpstreamID)])
+		if sErr != nil {
+			sErr.Withf("at index %d", i).Write(w)
+			return
+		}
+		if len(item.BlindedMessage) == 0 {
+			errors.ErrMalformedBody.With("missing blinded message").Withf("at index %d", i).Write(w)
+			return
+		}
+		ballots[i] = blindBallotAuth{upstreamID: upstreamID, blindedMessage: item.BlindedMessage}
+	}
+
+	resp := &BlindSignResponse{Signatures: make([]SignBatchResult, len(ballots))}
+	for i, b := range ballots {
+		res := &resp.Signatures[i]
+		res.UpstreamID = b.upstreamID
+		signature, err := c.csp.BlindSign(req.AuthToken, b.upstreamID, sc.weight, b.blindedMessage)
+		if err != nil {
+			res.Code, res.Error = signOutcome(err)
+			logSignFailure(oid, sc.memberID, b.upstreamID, err)
+			if res.Code == signCodeAuthInvalid {
+				for j := i + 1; j < len(ballots); j++ {
+					resp.Signatures[j].UpstreamID = ballots[j].upstreamID
+					resp.Signatures[j].Code, resp.Signatures[j].Error = res.Code, res.Error
+				}
+				break
+			}
+			continue
+		}
+		res.Signature = signature
+		res.Weight = sc.weight
+	}
+	apicommon.HTTPWriteJSON(w, resp)
+}
+
+// questionsByUpstream loads a process's questions indexed by their on-chain election id, writing
+// the proper error and returning false on failure. Shared by the blind round-1 and round-2 handlers.
+func (c *CSPHandlers) questionsByUpstream(
+	w http.ResponseWriter, oid primitive.ObjectID,
+) (map[string]*db.VotingProcessQuestion, bool) {
+	questions, err := c.mainDB.QuestionsByProcess(oid)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return nil, false
+	}
+	byUpstream := make(map[string]*db.VotingProcessQuestion, len(questions))
+	for i := range questions {
+		byUpstream[string(questions[i].UpstreamID)] = &questions[i]
+	}
+	return byUpstream, true
+}
+
 // Stable, machine-readable outcomes of a failed csp.Sign, as returned by signOutcome.
 const (
 	// signCodeAlreadyConsumed: the election's signing slot is spent; retrying cannot succeed.
@@ -534,6 +776,9 @@ const (
 	signCodeAddressMismatch = "address_mismatch"
 	// signCodeFailed: an internal signer or storage failure; retrying may succeed.
 	signCodeFailed = "sign_failed"
+	// signCodeBlindRequestMissing: no round-1 blind point was issued for this election (or it was
+	// already consumed); the client must call blind-point again before blind-sign.
+	signCodeBlindRequestMissing = "blind_request_missing"
 )
 
 // signOutcome maps a signing error to a stable, machine-readable code and a message safe for
@@ -550,6 +795,8 @@ func signOutcome(err error) (code, message string) {
 	case errors.Is(err, csp.ErrAddressMismatch):
 		return signCodeAddressMismatch,
 			"this election was already signed for a different address; re-send using the address reported by sign-info"
+	case errors.Is(err, csp.ErrBlindRequestNotFound):
+		return signCodeBlindRequestMissing, "no blind point issued for this election; request one via blind-point first"
 	default:
 		return signCodeFailed, "could not sign the ballot"
 	}
@@ -838,13 +1085,18 @@ func (c *CSPHandlers) ProcessSignInfoHandler(w http.ResponseWriter, r *http.Requ
 		if !cspProc.Used {
 			continue // authenticated for this question but not consumed
 		}
-		resp.Consumed = append(resp.Consumed, QuestionConsumedAddress{
+		entry := QuestionConsumedAddress{
 			QuestionID: q.ID.Hex(),
 			UpstreamID: q.UpstreamID,
-			Address:    cspProc.UsedAddress,
-			Nullifier:  state.GenerateNullifier(common.BytesToAddress(cspProc.UsedAddress), q.UpstreamID),
 			At:         cspProc.UsedAt,
-		})
+		}
+		// a blind (anonymous) consumption pins no address — the CSP never learned it — so there is
+		// no server-side nullifier to report either; the voter derives its own from its address.
+		if cspProc.UsedAddress != nil {
+			entry.Address = cspProc.UsedAddress
+			entry.Nullifier = state.GenerateNullifier(common.BytesToAddress(cspProc.UsedAddress), q.UpstreamID)
+		}
+		resp.Consumed = append(resp.Consumed, entry)
 	}
 	apicommon.HTTPWriteJSON(w, resp)
 }

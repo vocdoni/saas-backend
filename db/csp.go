@@ -42,6 +42,10 @@ type CSPProcess struct {
 	UsedAt      time.Time         `json:"usedAt" bson:"consumedat"`
 	UsedAddress internal.HexBytes `json:"usedAddress" bson:"consumedaddress"`
 	TimesVoted  int               `json:"timesVoted" bson:"timesVoted"`
+	// BlindSecret holds the CSP's one-time blind-signature nonce k between the two rounds of a
+	// blind (OFF_CHAIN_CA_V2) signature: issued alongside R in round 1 and consumed in round 2.
+	// Never leaves the server; absent for the non-anonymous ECDSA flow.
+	BlindSecret internal.HexBytes `json:"-" bson:"blindsecret,omitempty"`
 }
 
 // SetCSPAuth method stores a new CSP authentication token for a user and a
@@ -280,6 +284,96 @@ func (ms *MongoStorage) ConsumeCSPProcess(token, processID, address internal.Hex
 	opts := options.Update().SetUpsert(true)
 	// update the token status
 	if _, err = ms.cspTokensStatus.UpdateOne(ctx, filter, updateDoc, opts); err != nil {
+		return errors.Join(ErrStoreToken, err)
+	}
+	return nil
+}
+
+// SetCSPProcessBlindSecret stores the CSP blind-signature nonce k for (token's user, processID),
+// the round-1 half of a blind (OFF_CHAIN_CA_V2) signature. It upserts only the blind secret, so a
+// concurrent consumption state is preserved. It refuses if the process is already fully consumed.
+func (ms *MongoStorage) SetCSPProcessBlindSecret(token, processID, secretK internal.HexBytes) error {
+	if token == nil || processID == nil || secretK == nil {
+		return ErrBadInputs
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	tokenData, err := ms.fetchCSPAuthFromDB(ctx, token)
+	if err != nil {
+		return err
+	}
+	// refuse to arm a new round on an election this user has already exhausted
+	tokenStatus, err := ms.fetchCSPProcessFromDB(ctx, tokenData.UserID, processID)
+	if err != nil && !errors.Is(err, ErrTokenNotFound) {
+		return err
+	}
+	if tokenStatus != nil && tokenStatus.TimesVoted > MaxVoteOverwritesPerProcess {
+		return ErrProcessAlreadyConsumed
+	}
+	id := cspAuthTokenStatusID(tokenData.UserID, processID)
+	// $set only the identity + secret (dynamicUpdateDocument omits zero fields), never the
+	// consume bookkeeping, so re-arming a round does not reset an in-progress vote count
+	updateDoc, err := dynamicUpdateDocument(CSPProcess{
+		ID:          id,
+		UserID:      tokenData.UserID,
+		ProcessID:   processID,
+		BlindSecret: secretK,
+	}, nil)
+	if err != nil {
+		return errors.Join(ErrPrepareDocument, err)
+	}
+	filter := bson.M{"_id": id}
+	opts := options.Update().SetUpsert(true)
+	if _, err := ms.cspTokensStatus.UpdateOne(ctx, filter, updateDoc, opts); err != nil {
+		return errors.Join(ErrStoreToken, err)
+	}
+	return nil
+}
+
+// ConsumeCSPProcessBlind consumes a blind (OFF_CHAIN_CA_V2) CSP process for the token's user. It is
+// the address-less counterpart of ConsumeCSPProcess: the CSP never learns the voter address in the
+// blind flow, so there is no address to pin. It increments the vote count and clears the one-time
+// blind secret so the nonce cannot be reused. Returns ErrProcessAlreadyConsumed past the overwrite cap.
+func (ms *MongoStorage) ConsumeCSPProcessBlind(token, processID internal.HexBytes) error {
+	if token == nil || processID == nil {
+		return ErrBadInputs
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	tokenData, err := ms.fetchCSPAuthFromDB(ctx, token)
+	if err != nil {
+		return err
+	}
+	tokenStatus, err := ms.fetchCSPProcessFromDB(ctx, tokenData.UserID, processID)
+	if err != nil && !errors.Is(err, ErrTokenNotFound) {
+		return err
+	}
+	if tokenStatus != nil && tokenStatus.TimesVoted > MaxVoteOverwritesPerProcess {
+		return ErrProcessAlreadyConsumed
+	}
+	timesVoted := 1
+	if tokenStatus != nil {
+		timesVoted = tokenStatus.TimesVoted + 1
+	}
+	id := cspAuthTokenStatusID(tokenData.UserID, processID)
+	filter := bson.M{"_id": id}
+	update := bson.M{
+		"$set": bson.M{
+			"userid":        tokenData.UserID,
+			"processid":     processID,
+			"consumed":      true,
+			"consumedat":    time.Now(),
+			"consumedtoken": token,
+			"timesVoted":    timesVoted,
+		},
+		"$unset": bson.M{"blindsecret": ""},
+	}
+	opts := options.Update().SetUpsert(true)
+	if _, err := ms.cspTokensStatus.UpdateOne(ctx, filter, update, opts); err != nil {
 		return errors.Join(ErrStoreToken, err)
 	}
 	return nil

@@ -21,6 +21,20 @@ const (
 	SaltSize = 20
 )
 
+// V2Salt derives the OFF_CHAIN_CA_V2 salt for a process and CSP-authorized vote weight,
+// matching the Vochain verifier: keccak256(processID || weight-as-32-byte-big-endian)[:20].
+// Binding the weight into the salt is what makes weighted blind-CSP votes unforgeable. It
+// delegates to dvote's saltedkey.Salt so the derivation stays identical to the node.
+func V2Salt(processID, voteWeight []byte) ([SaltSize]byte, error) {
+	var out [SaltSize]byte
+	s, err := saltedkey.Salt(processID, voteWeight)
+	if err != nil {
+		return out, fmt.Errorf("cannot derive v2 salt: %w", err)
+	}
+	copy(out[:], s)
+	return out, nil
+}
+
 // SaltedKey is a wrapper around ECDSA and ECDSA Blind that helps signing
 // messages with a known Salt. The Salt is added to the private key curve
 // point in order to derive a new deterministic signing key.

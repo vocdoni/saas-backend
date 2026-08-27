@@ -90,6 +90,53 @@ type SignBatchResult struct {
 	Error      string            `json:"error,omitempty"`
 }
 
+// BlindPointRequest is round 1 of the blind (anonymous) signing flow of a voting process: for each
+// named on-chain election the CSP returns a fresh blind point R the client uses to blind its CA
+// bundle before round 2. One verified auth token covers every election of the process.
+type BlindPointRequest struct {
+	AuthToken internal.HexBytes   `json:"authToken" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Elections []internal.HexBytes `json:"electionIds" swaggertype:"array,string" format:"hex" example:"deadbeef"`
+}
+
+// BlindPointResponse holds one blind point per requested election, in request order.
+type BlindPointResponse struct {
+	Points []BlindPointResult `json:"points"`
+}
+
+// BlindPointResult is one election's round-1 outcome: the blind point R (compressed, 33 bytes) and
+// the CSP-authorized weight the client must carry in its CA bundle, or a stable code plus message
+// when the point could not be issued (same signCode* vocabulary as signing). Exactly one of TokenR
+// and Code is set.
+type BlindPointResult struct {
+	UpstreamID internal.HexBytes `json:"upstreamId" swaggertype:"string" format:"hex" example:"deadbeef"`
+	TokenR     internal.HexBytes `json:"tokenR,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Weight     internal.HexBytes `json:"weight,omitempty" swaggertype:"string" format:"hex" example:"2a"`
+	Code       string            `json:"code,omitempty"`
+	Error      string            `json:"error,omitempty"`
+}
+
+// BlindSignRequest is round 2 of the blind signing flow: for each election the client sends the
+// blinded CA-bundle hash (blinded with the round-1 R). The voter address is never sent — that is
+// what keeps the ballot unlinkable — so the CSP blind-signs bytes it cannot read.
+type BlindSignRequest struct {
+	AuthToken internal.HexBytes `json:"authToken" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Ballots   []BlindSignBallot `json:"ballots"`
+}
+
+// BlindSignBallot is one ballot of a BlindSignRequest: the on-chain election id and the blinded
+// message to blind-sign for it.
+type BlindSignBallot struct {
+	UpstreamID     internal.HexBytes `json:"upstreamId" swaggertype:"string" format:"hex" example:"deadbeef"`
+	BlindedMessage internal.HexBytes `json:"blindedMessage" swaggertype:"string" format:"hex" example:"deadbeef"`
+}
+
+// BlindSignResponse holds one result per requested ballot, in request order. Each entry carries the
+// raw blind-signature scalar (the client unblinds it into the final ProofCA signature) or a stable
+// code plus message; it reuses SignBatchResult, the same shape as the ECDSA sign-batch.
+type BlindSignResponse struct {
+	Signatures []SignBatchResult `json:"signatures"`
+}
+
 // UserWeightRequest defines the payload for the request to get the
 // weight of a user for a given bundle. It includes the authToken to query
 // the information.
