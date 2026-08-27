@@ -622,7 +622,7 @@ func (c *CSPHandlers) ProcessBlindPointHandler(w http.ResponseWriter, r *http.Re
 	for i, upstreamID := range upstreamIDs {
 		res := &resp.Points[i]
 		res.UpstreamID = upstreamID
-		tokenR, err := c.csp.NewBlindRequest(req.AuthToken, upstreamID, sc.weight)
+		tokenR, pinnedWeight, err := c.csp.NewBlindRequest(req.AuthToken, upstreamID, sc.weight)
 		if err != nil {
 			res.Code, res.Error = signOutcome(err)
 			logSignFailure(oid, sc.memberID, upstreamID, err)
@@ -636,7 +636,9 @@ func (c *CSPHandlers) ProcessBlindPointHandler(w http.ResponseWriter, r *http.Re
 			continue
 		}
 		res.TokenR = tokenR
-		res.Weight = sc.weight
+		// report the PINNED weight (idempotent across a re-arm), not the live sc.weight, so the
+		// (R, weight) pair the client blinds always matches what round 2 salts with.
+		res.Weight = pinnedWeight
 	}
 	apicommon.HTTPWriteJSON(w, resp)
 }
@@ -726,7 +728,7 @@ func (c *CSPHandlers) ProcessBlindSignHandler(w http.ResponseWriter, r *http.Req
 	for i, b := range ballots {
 		res := &resp.Signatures[i]
 		res.UpstreamID = b.upstreamID
-		signature, err := c.csp.BlindSign(req.AuthToken, b.upstreamID, b.blindedMessage)
+		signature, pinnedWeight, err := c.csp.BlindSign(req.AuthToken, b.upstreamID, b.blindedMessage)
 		if err != nil {
 			res.Code, res.Error = signOutcome(err)
 			logSignFailure(oid, sc.memberID, b.upstreamID, err)
@@ -740,7 +742,9 @@ func (c *CSPHandlers) ProcessBlindSignHandler(w http.ResponseWriter, r *http.Req
 			continue
 		}
 		res.Signature = signature
-		res.Weight = sc.weight
+		// report the weight actually signed (the pinned round-1 weight), matching SignBatchResult's
+		// contract — not the live sc.weight, which may have drifted since round 1.
+		res.Weight = pinnedWeight
 	}
 	apicommon.HTTPWriteJSON(w, resp)
 }

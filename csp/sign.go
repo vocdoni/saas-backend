@@ -54,43 +54,47 @@ func (c *CSP) Sign(
 // CSP cannot read is what keeps the vote unlinkable. Arming is atomic and idempotent: a repeated
 // call for an already-armed, unconsumed election returns the same R (so a client that lost the first
 // R and a concurrent retry blind against a point that still matches the stored k). R is a compressed
-// blind point (33 bytes). Returns ErrProcessAlreadyConsumed once the election has been signed.
-func (c *CSP) NewBlindRequest(token, processID, weight internal.HexBytes) (internal.HexBytes, error) {
+// blind point (33 bytes), returned with the pinned weight the client must carry in its CA bundle.
+// Returns ErrProcessAlreadyConsumed once the election has been signed.
+func (c *CSP) NewBlindRequest(token, processID, weight internal.HexBytes) (r, pinnedWeight internal.HexBytes, err error) {
 	authTokenData, err := c.Storage.CSPAuth(token)
 	if err != nil {
 		if errors.Is(err, db.ErrTokenNotFound) {
-			return nil, ErrInvalidAuthToken
+			return nil, nil, ErrInvalidAuthToken
 		}
-		return nil, errors.Join(ErrSign, err)
+		return nil, nil, errors.Join(ErrSign, err)
 	}
 	if !authTokenData.Verified {
-		return nil, ErrAuthTokenNotVerified
+		return nil, nil, ErrAuthTokenNotVerified
 	}
 	// go-blindsecp256k1's BlindSign rejects a k whose big-endian encoding is not exactly 32 bytes
 	// (a ~1/256 leading-zero case). We control k, so regenerate until it is full-width; the client
 	// still has to retry the ~1/256 blinded-message case, which BlindSign rejects before consuming.
 	var k *big.Int
-	var r *blind.Point
+	var point *blind.Point
 	for range 128 {
-		k, r, err = blind.NewRequestParameters()
+		k, point, err = blind.NewRequestParameters()
 		if err != nil {
-			return nil, errors.Join(ErrSign, err)
+			return nil, nil, errors.Join(ErrSign, err)
 		}
 		if len(k.Bytes()) == 32 {
 			break
 		}
 	}
 	if len(k.Bytes()) != 32 {
-		return nil, errors.Join(ErrSign, fmt.Errorf("could not derive a full-width blind nonce"))
+		return nil, nil, errors.Join(ErrSign, fmt.Errorf("could not derive a full-width blind nonce"))
 	}
-	existingR, _, err := c.Storage.ArmCSPProcessBlind(token, processID, k.Bytes(), r.Bytes(), weight)
+	pinnedR, pinnedW, err := c.Storage.ArmCSPProcessBlind(token, processID, k.Bytes(), point.Bytes(), weight)
 	if err != nil {
 		if errors.Is(err, db.ErrProcessAlreadyConsumed) {
-			return nil, ErrProcessAlreadyConsumed
+			return nil, nil, ErrProcessAlreadyConsumed
 		}
-		return nil, errors.Join(ErrSign, err)
+		return nil, nil, errors.Join(ErrSign, err)
 	}
-	return existingR, nil
+	// return the PINNED (R, weight) pair — on an idempotent re-arm this is the originally armed
+	// weight, not the one just passed, so the pair the client blinds always matches what round 2
+	// salts with even if the member's live weight changed between the two round-1 calls.
+	return pinnedR, pinnedW, nil
 }
 
 // BlindSign performs the round-2 blind signature. It first validates the client-supplied blinded
@@ -101,50 +105,52 @@ func (c *CSP) NewBlindRequest(token, processID, weight internal.HexBytes) (inter
 // nonce reuse (two signatures d·m1'+k, d·m2'+k) algebraically leaks the salted signing key. It signs
 // with the claimed k and the weight PINNED at round 1 (so a mid-flow weight change cannot desync the
 // salt), and never sees the voter address. Because k is full-width and m' is pre-validated, SignBlind
-// cannot fail after the claim, so a claimed nonce always yields a signature.
-func (c *CSP) BlindSign(token, processID, blindedMsg internal.HexBytes) (internal.HexBytes, error) {
+// cannot fail after the claim, so a claimed nonce always yields a signature. It returns the signature
+// together with the pinned weight it salted with, so the handler can report the weight actually
+// signed (its documented contract) rather than the live member weight.
+func (c *CSP) BlindSign(token, processID, blindedMsg internal.HexBytes) (signature, pinnedWeight internal.HexBytes, err error) {
 	authTokenData, err := c.Storage.CSPAuth(token)
 	if err != nil {
 		if errors.Is(err, db.ErrTokenNotFound) {
-			return nil, ErrInvalidAuthToken
+			return nil, nil, ErrInvalidAuthToken
 		}
-		return nil, errors.Join(ErrSign, err)
+		return nil, nil, errors.Join(ErrSign, err)
 	}
 	if !authTokenData.Verified {
-		return nil, ErrAuthTokenNotVerified
+		return nil, nil, ErrAuthTokenNotVerified
 	}
 	// validate the blinded message against BlindSign's preconditions before claiming the nonce, so
 	// an invalid input never consumes the one-time nonce (which would strand the voter or, worse,
 	// force a same-nonce retry). N is the secp256k1 group order shared by go-blindsecp256k1.
 	m := new(big.Int).SetBytes(blindedMsg)
 	if m.Sign() == 0 || m.Cmp(ethcrypto.S256().Params().N) >= 0 || len(m.Bytes()) != saltSize32 {
-		return nil, ErrInvalidBlindedMessage
+		return nil, nil, ErrInvalidBlindedMessage
 	}
 	// atomically claim the nonce: the returned document carries the k, R and weight to sign with.
 	claimed, err := c.Storage.ClaimCSPProcessBlind(authTokenData.UserID, processID, token)
 	if err != nil {
 		switch {
 		case errors.Is(err, db.ErrBlindNonceNotFound):
-			return nil, ErrBlindRequestNotFound
+			return nil, nil, ErrBlindRequestNotFound
 		case errors.Is(err, db.ErrProcessAlreadyConsumed):
-			return nil, ErrProcessAlreadyConsumed
+			return nil, nil, ErrProcessAlreadyConsumed
 		default:
-			return nil, errors.Join(ErrSign, err)
+			return nil, nil, errors.Join(ErrSign, err)
 		}
 	}
 	salt, err := saltedkey.V2Salt(processID, claimed.BlindWeight)
 	if err != nil {
-		return nil, errors.Join(ErrSign, err)
+		return nil, nil, errors.Join(ErrSign, err)
 	}
 	secretK := new(big.Int).SetBytes(claimed.BlindSecret)
-	signature, err := c.Signer.SignBlind(salt, blindedMsg, secretK)
+	sig, err := c.Signer.SignBlind(salt, blindedMsg, secretK)
 	if err != nil {
 		// unreachable given the pre-validation above; the nonce is already claimed (spent) so this
 		// is a hard failure, not a retry — log loudly rather than silently strand the slot.
 		log.Errorw(errors.Join(ErrSign, err), "blind signature failed after claiming the nonce")
-		return nil, errors.Join(ErrSign, err)
+		return nil, nil, errors.Join(ErrSign, err)
 	}
-	return signature, nil
+	return sig, claimed.BlindWeight, nil
 }
 
 // prepareSaltedKeySigner method prepares the data for the Ethereum signer.

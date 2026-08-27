@@ -19,6 +19,16 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// requestBlindPoint runs a single round-1 blind-point call for one election and returns its result.
+func requestBlindPoint(t *testing.T, pid string, tok, election internal.HexBytes) handlers.BlindPointResult {
+	t.Helper()
+	point := requestAndParse[handlers.BlindPointResponse](t, http.MethodPost, "",
+		&handlers.BlindPointRequest{AuthToken: tok, Elections: []internal.HexBytes{election}},
+		"processes", pid, "blind-point")
+	qt.Assert(t, point.Points, qt.HasLen, 1)
+	return point.Points[0]
+}
+
 // testBlindSignBallot drives the two-round blind CSP flow for one election and returns the on-chain
 // ProofCA the voter casts. It retries the ~1/256 case where the client's blinded message is not a
 // valid blind-signature input (the CSP returns invalid_blinded_message without consuming the nonce,
@@ -166,4 +176,85 @@ func TestProcessBlindCSP(t *testing.T) {
 	c.Assert(signInfo.Consumed, qt.HasLen, 1)
 	c.Assert(signInfo.Consumed[0].Address, qt.HasLen, 0)
 	c.Assert(signInfo.Consumed[0].Nullifier, qt.HasLen, 0)
+}
+
+// TestProcessBlindCSPWeightPin is the regression test for the round-1 weight pin: it arms a blind
+// point at the member's weight, then changes the member's live weight, and asserts the re-armed
+// blind-point and the blind-sign response still report the ORIGINAL weight — and that the vote signed
+// under it verifies on chain and tallies at that weight, not the drifted one. Before the pin, a
+// re-armed blind-point paired the sticky R with the live weight, so the client blinded a bundle the
+// signature could never verify.
+func TestProcessBlindCSPWeightPin(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+	voterMember := members[1] // weight "2"
+
+	req := newVotingProcessRequest(orgAddress, ids)
+	req.StartDate = ""
+	req.Census.AuthFields = db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsSurname}
+	req.Census.Anonymous = true
+	req.Census.Weighted = true
+	req.Questions = req.Questions[:1]
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint)
+	pid := created.ProcessID
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
+
+	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	election := got.Questions[0].UpstreamID
+
+	vc := testNewVocdoniClient(t)
+	voter := ethereum.SignKeys{}
+	c.Assert(voter.Generate(), qt.IsNil)
+	tok := authProcessCSP(t, pid, &handlers.AuthRequest{
+		Name: voterMember.Name, Surname: voterMember.Surname, Email: voterMember.Email,
+	})
+
+	weight2 := internal.HexBytes(big.NewInt(2).Bytes())
+
+	// round 1 arms at the member's weight (2)
+	pt1 := requestBlindPoint(t, pid, tok, election)
+	c.Assert(pt1.Code, qt.Equals, "", qt.Commentf("blind-point error: %s", pt1.Error))
+	c.Assert(pt1.Weight, qt.DeepEquals, weight2)
+
+	// a manager changes the member's live weight to 9
+	upd := voterMember
+	upd.Phone = "" // a read-back member carries a trimmed phone hash; clear it before the update
+	upd.Weight = "9"
+	putOrgMember(t, token, orgAddress, upd)
+	// the CSP now computes weight 9 live ...
+	live := requestAndParse[handlers.UserWeightResponse](t, http.MethodPost, "",
+		&handlers.UserWeightRequest{AuthToken: tok}, "processes", pid, "weight")
+	c.Assert(live.Weight, qt.DeepEquals, internal.HexBytes(big.NewInt(9).Bytes()))
+
+	// ... but a re-armed blind-point still pins the round-1 R and weight (2), not the live 9
+	pt2 := requestBlindPoint(t, pid, tok, election)
+	c.Assert(pt2.Code, qt.Equals, "", qt.Commentf("blind-point error: %s", pt2.Error))
+	c.Assert(pt2.TokenR, qt.DeepEquals, pt1.TokenR)
+	c.Assert(pt2.Weight, qt.DeepEquals, weight2)
+
+	// round 2 signs under the pinned weight; the proof verifies on chain and tallies at 2, not 9
+	proof := testBlindSignBallot(t, pid, tok, election, voter.Address().Bytes())
+	c.Assert(proof.GetCa().Bundle.VoteWeight, qt.DeepEquals, []byte(weight2))
+	nullifier := testCastVote(t, vc, &voter, election, proof, []byte(`{"votes":[0]}`))
+	c.Assert(nullifier, qt.Not(qt.HasLen), 0)
+
+	var res apicommon.VotingProcessResultsResponse
+	for range 20 {
+		res = requestAndParse[apicommon.VotingProcessResultsResponse](
+			t, http.MethodGet, "", nil, "processes", pid, "results")
+		if len(res.Questions) > 0 && res.Questions[0].VoteCount > 0 {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	c.Assert(res.Questions, qt.HasLen, 1)
+	t.Logf("weight-pin tally: results=%v voteCount=%d (want results=[[2 0]] — pinned weight 2, not live 9)",
+		res.Questions[0].Results, res.Questions[0].VoteCount)
+	c.Assert(res.Questions[0].Results, qt.DeepEquals, [][]string{{"2", "0"}})
 }
