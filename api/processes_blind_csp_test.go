@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/hex"
+	"fmt"
 	"math/big"
 	"net/http"
 	"testing"
@@ -257,4 +258,85 @@ func TestProcessBlindCSPWeightPin(t *testing.T) {
 	t.Logf("weight-pin tally: results=%v voteCount=%d (want results=[[2 0]] — pinned weight 2, not live 9)",
 		res.Questions[0].Results, res.Questions[0].VoteCount)
 	c.Assert(res.Questions[0].Results, qt.DeepEquals, [][]string{{"2", "0"}})
+}
+
+// pollBlindResults reads the process results until the given question's tally matches want (or the
+// budget runs out), then asserts it — used to wait for a live tally to settle after a cast.
+func pollBlindResults(t *testing.T, pid string, want [][]string) apicommon.VotingProcessQuestionResults {
+	t.Helper()
+	var q apicommon.VotingProcessQuestionResults
+	for range 20 {
+		res := requestAndParse[apicommon.VotingProcessResultsResponse](
+			t, http.MethodGet, "", nil, "processes", pid, "results")
+		if len(res.Questions) > 0 {
+			q = res.Questions[0]
+			if fmt.Sprint(q.Results) == fmt.Sprint(want) {
+				break
+			}
+		}
+		time.Sleep(time.Second)
+	}
+	t.Logf("blind overwrite tally: results=%v voteCount=%d (want %v)", q.Results, q.VoteCount, want)
+	qt.Assert(t, q.Results, qt.DeepEquals, want)
+	return q
+}
+
+// TestProcessBlindCSPOverwrite proves a blind voter can overwrite their vote. Blind CSP issues
+// exactly one signature per (user, election), but that ProofCA is a signature over the bundle only,
+// so it is reusable: the voter re-casts on chain with the same proof and a different choice. The
+// election must allow overwrites (MaxVoteOverwrites > 0), which a singlechoice question does not
+// derive, so a raw ballot protocol enables it. The overwrite needs no second CSP call — and the CSP
+// still refuses one.
+func TestProcessBlindCSPOverwrite(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "adminpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID) // grants Anonymous + Overwrite
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+	ids := memberIDs(members)
+	voterMember := members[1] // weight 2
+
+	req := newVotingProcessRequest(orgAddress, ids)
+	req.StartDate = ""
+	req.Census.AuthFields = db.OrgMemberAuthFields{db.OrgMemberAuthFieldsName, db.OrgMemberAuthFieldsSurname}
+	req.Census.Anonymous = true
+	req.Census.Weighted = true
+	req.Questions = req.Questions[:1]
+	// a supplied ballot protocol wins over the named type, so this enables one on-chain overwrite on
+	// the otherwise-singlechoice question (Yes=value 0, No=value 1).
+	req.Questions[0].BallotProtocol = &db.BallotProtocol{MaxCount: 1, MaxValue: 1, MaxVoteOverwrites: 1}
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint)
+	pid := created.ProcessID
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
+
+	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	election := got.Questions[0].UpstreamID
+
+	vc := testNewVocdoniClient(t)
+	voter := ethereum.SignKeys{}
+	c.Assert(voter.Generate(), qt.IsNil)
+	tok := authProcessCSP(t, pid, &handlers.AuthRequest{
+		Name: voterMember.Name, Surname: voterMember.Surname, Email: voterMember.Email,
+	})
+
+	// a single blind signature, reused for the vote and the overwrite
+	proof := testBlindSignBallot(t, pid, tok, election, voter.Address().Bytes())
+
+	// first vote: Yes (value 0) → weight-2 in bucket 0
+	null1 := testCastVote(t, vc, &voter, election, proof, []byte(`{"votes":[0]}`))
+	c.Assert(null1, qt.Not(qt.HasLen), 0)
+	first := pollBlindResults(t, pid, [][]string{{"2", "0"}})
+	c.Assert(first.VoteCount, qt.Equals, uint64(1))
+
+	// overwrite: reuse the SAME proof, vote No (value 1) → the tally flips, still one voter
+	null2 := testCastVote(t, vc, &voter, election, proof, []byte(`{"votes":[1]}`))
+	c.Assert(null2, qt.DeepEquals, null1) // same voter address ⇒ same nullifier (an overwrite, not a new vote)
+	second := pollBlindResults(t, pid, [][]string{{"0", "2"}})
+	c.Assert(second.VoteCount, qt.Equals, uint64(1))
+
+	// single-use holds: the CSP still refuses a second signature, even though the chain accepted the
+	// overwrite (which reused the first proof rather than a new signature).
+	c.Assert(requestBlindPoint(t, pid, tok, election).Code, qt.Equals, "already_consumed")
 }
