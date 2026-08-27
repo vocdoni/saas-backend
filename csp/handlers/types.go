@@ -211,9 +211,11 @@ type ConsumedAddressResponse struct {
 type QuestionConsumedAddress struct {
 	QuestionID string            `json:"questionId"`
 	UpstreamID internal.HexBytes `json:"upstreamId" swaggertype:"string" format:"hex" example:"deadbeef"`
-	Address    internal.HexBytes `json:"address" swaggertype:"string" format:"hex" example:"deadbeef"`
-	Nullifier  internal.HexBytes `json:"nullifier" swaggertype:"string" format:"hex" example:"deadbeef"`
-	At         time.Time         `json:"at"`
+	// Address and Nullifier are omitted for a blind (anonymous) census: the CSP never learns the
+	// voter address, so it reports neither — the voter derives its own nullifier from its address.
+	Address   internal.HexBytes `json:"address,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	Nullifier internal.HexBytes `json:"nullifier,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	At        time.Time         `json:"at"`
 }
 
 // ProcessSignInfoResponse is the per-question consumed-address view for a voter across a voting

@@ -1,8 +1,11 @@
 package csp
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"math/big"
+	"sync"
 	"testing"
 	"time"
 
@@ -86,41 +89,68 @@ func TestBlindSign(t *testing.T) {
 	})
 	c.Assert(err, qt.IsNil)
 
+	// a syntactically valid blinded message: 32 bytes, non-zero, well below the curve order N.
+	validBlinded := bytes.Repeat([]byte{0x01}, 32)
+
 	c.Run("blind sign before request fails", func(c *qt.C) {
 		pid := internal.HexBytes(util.RandomBytes(32))
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID, ""), qt.IsNil)
 		c.Assert(csp.Storage.VerifyCSPAuth(testToken), qt.IsNil)
-		// no NewBlindRequest issued yet: round 2 has no nonce to use
-		_, err := csp.BlindSign(testToken, pid, testUserWeightBytes, []byte("blinded"))
+		// no NewBlindRequest issued yet: round 2 has no nonce to claim
+		_, err := csp.BlindSign(testToken, pid, validBlinded)
 		c.Assert(err, qt.ErrorIs, ErrBlindRequestNotFound)
 	})
 
-	c.Run("full two-round blind flow verifies and cannot be replayed", func(c *qt.C) {
+	c.Run("invalid blinded message is rejected without consuming the nonce", func(c *qt.C) {
+		pid := internal.HexBytes(util.RandomBytes(32))
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID, ""), qt.IsNil)
+		c.Assert(csp.Storage.VerifyCSPAuth(testToken), qt.IsNil)
+		_, err := csp.NewBlindRequest(testToken, pid, testUserWeightBytes)
+		c.Assert(err, qt.IsNil)
+		// a too-short (non-32-byte) message is refused before the nonce is claimed
+		_, err = csp.BlindSign(testToken, pid, []byte("short"))
+		c.Assert(err, qt.ErrorIs, ErrInvalidBlindedMessage)
+		// the nonce is still armed, so a valid message then claims it
+		_, err = csp.BlindSign(testToken, pid, validBlinded)
+		c.Assert(err, qt.IsNil)
+	})
+
+	c.Run("round 1 is idempotent while armed", func(c *qt.C) {
+		pid := internal.HexBytes(util.RandomBytes(32))
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID, ""), qt.IsNil)
+		c.Assert(csp.Storage.VerifyCSPAuth(testToken), qt.IsNil)
+		r1, err := csp.NewBlindRequest(testToken, pid, testUserWeightBytes)
+		c.Assert(err, qt.IsNil)
+		r2, err := csp.NewBlindRequest(testToken, pid, testUserWeightBytes)
+		c.Assert(err, qt.IsNil)
+		// a repeated round 1 returns the same R rather than clobbering the armed nonce
+		c.Assert(r2, qt.DeepEquals, r1)
+	})
+
+	c.Run("full two-round blind flow verifies, weight-bound, single-use", func(c *qt.C) {
 		pid := internal.HexBytes(util.RandomBytes(32))
 		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID, ""), qt.IsNil)
 		c.Assert(csp.Storage.VerifyCSPAuth(testToken), qt.IsNil)
 
 		// The two-round flow, retried on the ~1/256 case where the client's blinded message is not
-		// 32 bytes (go-blindsecp256k1 rejects it): a real client re-blinds against a fresh R. The
-		// server-side nonce is always full-width (NewBlindRequest guarantees it), so only the
-		// blinded-message half can flake here.
+		// 32 bytes (go-blindsecp256k1 rejects it): the CSP returns ErrInvalidBlindedMessage WITHOUT
+		// consuming the nonce, and the client re-blinds against the same (idempotent) R.
 		msgHash := ethereum.HashRaw([]byte("blind ballot"))
 		var signature *blind.Signature
 		for range 32 {
-			// round 1: the CSP issues R and stores the nonce
-			rBytes, err := csp.NewBlindRequest(testToken, pid)
+			rBytes, err := csp.NewBlindRequest(testToken, pid, testUserWeightBytes)
 			c.Assert(err, qt.IsNil)
 			signerR, err := blind.NewPointFromBytes(rBytes)
 			c.Assert(err, qt.IsNil)
-			// client: blind the CA-bundle hash with R
 			msgBlinded, userSecretData, err := blind.Blind(new(big.Int).SetBytes(msgHash), signerR)
 			c.Assert(err, qt.IsNil)
-			// round 2: the CSP blind-signs with the V2-salted key and consumes the slot
-			blindedSig, err := csp.BlindSign(testToken, pid, testUserWeightBytes, msgBlinded.Bytes())
+			blindedSig, err := csp.BlindSign(testToken, pid, msgBlinded.Bytes())
 			if err != nil {
-				c.Assert(err, qt.ErrorIs, ErrSign) // only the 32-byte flakiness; nonce not yet consumed
+				c.Assert(err, qt.ErrorIs, ErrInvalidBlindedMessage) // ~1/256; nonce not consumed
 				continue
 			}
 			signature = blind.Unblind(new(big.Int).SetBytes(blindedSig), userSecretData)
@@ -142,10 +172,60 @@ func TestBlindSign(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(blind.Verify(new(big.Int).SetBytes(msgHash), signature, forgedPub), qt.IsFalse)
 
-		// the nonce was cleared on consume: a second round-2 without re-arming is refused
-		_, err = csp.BlindSign(testToken, pid, testUserWeightBytes, []byte("anything"))
-		c.Assert(err, qt.ErrorIs, ErrBlindRequestNotFound)
+		// single-use: the nonce was consumed, so a second valid round-2 is refused, and round 1
+		// refuses to re-arm a signed election
+		_, err = csp.BlindSign(testToken, pid, validBlinded)
+		c.Assert(err, qt.ErrorIs, ErrProcessAlreadyConsumed)
+		_, err = csp.NewBlindRequest(testToken, pid, testUserWeightBytes)
+		c.Assert(err, qt.ErrorIs, ErrProcessAlreadyConsumed)
 	})
+
+	c.Run("concurrent round-2 claims yield exactly one signature", func(c *qt.C) {
+		pid := internal.HexBytes(util.RandomBytes(32))
+		c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+		c.Assert(csp.Storage.SetCSPAuth(testToken, testUserID, testBundleID, ""), qt.IsNil)
+		c.Assert(csp.Storage.VerifyCSPAuth(testToken), qt.IsNil)
+		_, err := csp.NewBlindRequest(testToken, pid, testUserWeightBytes)
+		c.Assert(err, qt.IsNil)
+
+		// two distinct, individually-valid blinded messages fired concurrently for the same nonce.
+		// The atomic claim must let exactly one through — signing both with one k leaks the key.
+		msgs := [][]byte{bytes.Repeat([]byte{0x01}, 32), bytes.Repeat([]byte{0x02}, 32)}
+		var wg sync.WaitGroup
+		results := make([]error, len(msgs))
+		wg.Add(len(msgs))
+		for i, m := range msgs {
+			go func() {
+				defer wg.Done()
+				_, results[i] = csp.BlindSign(testToken, pid, m)
+			}()
+		}
+		wg.Wait()
+
+		var ok, consumed int
+		for _, e := range results {
+			switch {
+			case e == nil:
+				ok++
+			case errIsAny(e, ErrProcessAlreadyConsumed, ErrBlindRequestNotFound):
+				consumed++
+			default:
+				c.Fatalf("unexpected blind-sign error: %v", e)
+			}
+		}
+		c.Assert(ok, qt.Equals, 1)
+		c.Assert(consumed, qt.Equals, 1)
+	})
+}
+
+// errIsAny reports whether err matches any of the targets.
+func errIsAny(err error, targets ...error) bool {
+	for _, t := range targets {
+		if errors.Is(err, t) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestPrepareSaltedKeySigner(t *testing.T) {

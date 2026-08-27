@@ -7,6 +7,7 @@ import (
 	"math/big"
 
 	blind "github.com/arnaucube/go-blindsecp256k1"
+	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/vocdoni/saas-backend/csp/signers"
 	"github.com/vocdoni/saas-backend/csp/signers/saltedkey"
 	"github.com/vocdoni/saas-backend/db"
@@ -15,6 +16,10 @@ import (
 	"go.vocdoni.io/proto/build/go/models"
 	"google.golang.org/protobuf/proto"
 )
+
+// saltSize32 is the exact big-endian byte width a blinded message (and the blind nonce k) must have
+// for go-blindsecp256k1's BlindSign to accept it; a shorter encoding means a leading zero byte.
+const saltSize32 = 32
 
 // Sign method signs a message with the given token, address and processID. It
 // returns the signature as HexBytes or an error if the signer type is invalid
@@ -44,11 +49,13 @@ func (c *CSP) Sign(
 }
 
 // NewBlindRequest issues the round-1 blind point R for a blind (OFF_CHAIN_CA_V2) signature on the
-// given election and stores the matching one-time nonce k for round 2. It validates the auth token
-// (verified, not yet fully consumed) but never sees the voter address — signing a message the CSP
-// cannot read is what keeps the vote unlinkable. R is a compressed blind point (33 bytes) the client
-// uses to blind its CA bundle before calling BlindSign.
-func (c *CSP) NewBlindRequest(token, processID internal.HexBytes) (internal.HexBytes, error) {
+// given election and arms the matching one-time nonce k, alongside the CSP-authorized weight used to
+// salt round 2. It validates the auth token but never sees the voter address — signing a message the
+// CSP cannot read is what keeps the vote unlinkable. Arming is atomic and idempotent: a repeated
+// call for an already-armed, unconsumed election returns the same R (so a client that lost the first
+// R and a concurrent retry blind against a point that still matches the stored k). R is a compressed
+// blind point (33 bytes). Returns ErrProcessAlreadyConsumed once the election has been signed.
+func (c *CSP) NewBlindRequest(token, processID, weight internal.HexBytes) (internal.HexBytes, error) {
 	authTokenData, err := c.Storage.CSPAuth(token)
 	if err != nil {
 		if errors.Is(err, db.ErrTokenNotFound) {
@@ -59,14 +66,9 @@ func (c *CSP) NewBlindRequest(token, processID internal.HexBytes) (internal.HexB
 	if !authTokenData.Verified {
 		return nil, ErrAuthTokenNotVerified
 	}
-	if consumed, err := c.Storage.IsCSPProcessConsumed(authTokenData.UserID, processID); err != nil {
-		return nil, errors.Join(ErrSign, err)
-	} else if consumed {
-		return nil, ErrProcessAlreadyConsumed
-	}
 	// go-blindsecp256k1's BlindSign rejects a k whose big-endian encoding is not exactly 32 bytes
-	// (a ~1/256 leading-zero case). We control k, so regenerate until it is full-width and never
-	// leak that failure to round 2; the client still has to retry the ~1/256 blinded-message case.
+	// (a ~1/256 leading-zero case). We control k, so regenerate until it is full-width; the client
+	// still has to retry the ~1/256 blinded-message case, which BlindSign rejects before consuming.
 	var k *big.Int
 	var r *blind.Point
 	for range 128 {
@@ -81,21 +83,26 @@ func (c *CSP) NewBlindRequest(token, processID internal.HexBytes) (internal.HexB
 	if len(k.Bytes()) != 32 {
 		return nil, errors.Join(ErrSign, fmt.Errorf("could not derive a full-width blind nonce"))
 	}
-	if err := c.Storage.SetCSPProcessBlindSecret(token, processID, k.Bytes()); err != nil {
+	existingR, _, err := c.Storage.ArmCSPProcessBlind(token, processID, k.Bytes(), r.Bytes(), weight)
+	if err != nil {
 		if errors.Is(err, db.ErrProcessAlreadyConsumed) {
 			return nil, ErrProcessAlreadyConsumed
 		}
 		return nil, errors.Join(ErrSign, err)
 	}
-	return r.Bytes(), nil
+	return existingR, nil
 }
 
-// BlindSign performs the round-2 blind signature: it loads the one-time nonce k stored in round 1,
-// blind-signs the client-supplied blinded message with the V2-salted key (the salt binds processID
-// and the CSP-authorized weight, so a forged bundle weight cannot verify), consumes the election for
-// the user, and clears k. It returns the raw blind-signature scalar; the client unblinds it into the
-// final ProofCA signature. The address is never seen here — anonymity holds by construction.
-func (c *CSP) BlindSign(token, processID, weight, blindedMsg internal.HexBytes) (internal.HexBytes, error) {
+// BlindSign performs the round-2 blind signature. It first validates the client-supplied blinded
+// message as a well-formed blind-signature input — 0 < m' < N and exactly 32 bytes — BEFORE touching
+// any state, so a malformed message is rejected without consuming the nonce and the client can retry
+// (that ~1/256 leading-zero case is the only expected retry). It then atomically CLAIMS the one-time
+// nonce: exactly one concurrent caller ever obtains k, which is essential because blind-signature
+// nonce reuse (two signatures d·m1'+k, d·m2'+k) algebraically leaks the salted signing key. It signs
+// with the claimed k and the weight PINNED at round 1 (so a mid-flow weight change cannot desync the
+// salt), and never sees the voter address. Because k is full-width and m' is pre-validated, SignBlind
+// cannot fail after the claim, so a claimed nonce always yields a signature.
+func (c *CSP) BlindSign(token, processID, blindedMsg internal.HexBytes) (internal.HexBytes, error) {
 	authTokenData, err := c.Storage.CSPAuth(token)
 	if err != nil {
 		if errors.Is(err, db.ErrTokenNotFound) {
@@ -106,39 +113,35 @@ func (c *CSP) BlindSign(token, processID, weight, blindedMsg internal.HexBytes) 
 	if !authTokenData.Verified {
 		return nil, ErrAuthTokenNotVerified
 	}
-	// serialize concurrent round-2 requests for the same (user, election)
-	if c.isLocked(authTokenData.UserID, processID) {
-		return nil, ErrUserAlreadySigning
+	// validate the blinded message against BlindSign's preconditions before claiming the nonce, so
+	// an invalid input never consumes the one-time nonce (which would strand the voter or, worse,
+	// force a same-nonce retry). N is the secp256k1 group order shared by go-blindsecp256k1.
+	m := new(big.Int).SetBytes(blindedMsg)
+	if m.Sign() == 0 || m.Cmp(ethcrypto.S256().Params().N) >= 0 || len(m.Bytes()) != saltSize32 {
+		return nil, ErrInvalidBlindedMessage
 	}
-	c.lock(authTokenData.UserID, processID)
-	defer c.unlock(authTokenData.UserID, processID)
-
-	proc, err := c.Storage.CSPProcessByUserAndProcess(authTokenData.UserID, processID)
+	// atomically claim the nonce: the returned document carries the k, R and weight to sign with.
+	claimed, err := c.Storage.ClaimCSPProcessBlind(authTokenData.UserID, processID, token)
 	if err != nil {
-		if errors.Is(err, db.ErrTokenNotFound) {
+		switch {
+		case errors.Is(err, db.ErrBlindNonceNotFound):
 			return nil, ErrBlindRequestNotFound
+		case errors.Is(err, db.ErrProcessAlreadyConsumed):
+			return nil, ErrProcessAlreadyConsumed
+		default:
+			return nil, errors.Join(ErrSign, err)
 		}
-		return nil, errors.Join(ErrSign, err)
 	}
-	if proc.BlindSecret == nil {
-		return nil, ErrBlindRequestNotFound
-	}
-	if proc.TimesVoted > db.MaxVoteOverwritesPerProcess {
-		return nil, ErrProcessAlreadyConsumed
-	}
-	salt, err := saltedkey.V2Salt(processID, weight)
+	salt, err := saltedkey.V2Salt(processID, claimed.BlindWeight)
 	if err != nil {
 		return nil, errors.Join(ErrSign, err)
 	}
-	secretK := new(big.Int).SetBytes(proc.BlindSecret)
+	secretK := new(big.Int).SetBytes(claimed.BlindSecret)
 	signature, err := c.Signer.SignBlind(salt, blindedMsg, secretK)
 	if err != nil {
-		return nil, errors.Join(ErrSign, err)
-	}
-	if err := c.Storage.ConsumeCSPProcessBlind(token, processID); err != nil {
-		if errors.Is(err, db.ErrProcessAlreadyConsumed) {
-			return nil, ErrProcessAlreadyConsumed
-		}
+		// unreachable given the pre-validation above; the nonce is already claimed (spent) so this
+		// is a hard failure, not a retry — log loudly rather than silently strand the slot.
+		log.Errorw(errors.Join(ErrSign, err), "blind signature failed after claiming the nonce")
 		return nil, errors.Join(ErrSign, err)
 	}
 	return signature, nil

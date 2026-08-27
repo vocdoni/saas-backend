@@ -622,7 +622,7 @@ func (c *CSPHandlers) ProcessBlindPointHandler(w http.ResponseWriter, r *http.Re
 	for i, upstreamID := range upstreamIDs {
 		res := &resp.Points[i]
 		res.UpstreamID = upstreamID
-		tokenR, err := c.csp.NewBlindRequest(req.AuthToken, upstreamID)
+		tokenR, err := c.csp.NewBlindRequest(req.AuthToken, upstreamID, sc.weight)
 		if err != nil {
 			res.Code, res.Error = signOutcome(err)
 			logSignFailure(oid, sc.memberID, upstreamID, err)
@@ -726,7 +726,7 @@ func (c *CSPHandlers) ProcessBlindSignHandler(w http.ResponseWriter, r *http.Req
 	for i, b := range ballots {
 		res := &resp.Signatures[i]
 		res.UpstreamID = b.upstreamID
-		signature, err := c.csp.BlindSign(req.AuthToken, b.upstreamID, sc.weight, b.blindedMessage)
+		signature, err := c.csp.BlindSign(req.AuthToken, b.upstreamID, b.blindedMessage)
 		if err != nil {
 			res.Code, res.Error = signOutcome(err)
 			logSignFailure(oid, sc.memberID, b.upstreamID, err)
@@ -779,6 +779,10 @@ const (
 	// signCodeBlindRequestMissing: no round-1 blind point was issued for this election (or it was
 	// already consumed); the client must call blind-point again before blind-sign.
 	signCodeBlindRequestMissing = "blind_request_missing"
+	// signCodeInvalidBlindedMessage: the blinded message was not a valid blind-signature input
+	// (~1/256 leading-zero case). The nonce is NOT consumed, so the client re-blinds against the
+	// same R (from blind-point, which is idempotent) and retries.
+	signCodeInvalidBlindedMessage = "invalid_blinded_message"
 )
 
 // signOutcome maps a signing error to a stable, machine-readable code and a message safe for
@@ -797,6 +801,8 @@ func signOutcome(err error) (code, message string) {
 			"this election was already signed for a different address; re-send using the address reported by sign-info"
 	case errors.Is(err, csp.ErrBlindRequestNotFound):
 		return signCodeBlindRequestMissing, "no blind point issued for this election; request one via blind-point first"
+	case errors.Is(err, csp.ErrInvalidBlindedMessage):
+		return signCodeInvalidBlindedMessage, "the blinded message is invalid; re-blind against the same blind point and retry"
 	default:
 		return signCodeFailed, "could not sign the ballot"
 	}

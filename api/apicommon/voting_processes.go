@@ -274,6 +274,7 @@ func PublicQuestionResponseFromDB(q *db.VotingProcessQuestion, census *db.Census
 	if census != nil {
 		resp.Census = CensusSpec{
 			Weighted:    census.Weighted,
+			Anonymous:   census.Anonymous,
 			AuthFields:  census.AuthFields,
 			TwoFaFields: census.TwoFaFields,
 		}

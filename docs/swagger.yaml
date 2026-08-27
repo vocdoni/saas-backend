@@ -2827,6 +2827,9 @@ definitions:
   handlers.QuestionConsumedAddress:
     properties:
       address:
+        description: |-
+          Address and Nullifier are omitted for a blind (anonymous) census: the CSP never learns the
+          voter address, so it reports neither — the voter derives its own nullifier from its address.
         example: deadbeef
         format: hex
         type: string

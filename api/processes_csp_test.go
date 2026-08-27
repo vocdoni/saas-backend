@@ -142,6 +142,12 @@ func TestProcessCSP(t *testing.T) {
 		&handlers.SignRequest{AuthToken: tok0, Payload: hex.EncodeToString(voter.Address().Bytes())},
 		"processes", pid, "sign")
 
+	// the blind endpoints reject a non-anonymous census (mirror of the anonymous-census guard on
+	// the plain sign endpoints, exercised in TestProcessBlindCSP)
+	requestAndAssertCode(http.StatusBadRequest, t, http.MethodPost, "",
+		&handlers.BlindPointRequest{AuthToken: tok0, Elections: []internal.HexBytes{openElection}},
+		"processes", pid, "blind-point")
+
 	// sign-info: member 0's consumed address + nullifier for the open election are now available
 	signInfo := requestAndParse[handlers.ProcessSignInfoResponse](t, http.MethodPost, "",
 		&handlers.ConsumedAddressRequest{AuthToken: tok0}, "processes", pid, "sign-info")
