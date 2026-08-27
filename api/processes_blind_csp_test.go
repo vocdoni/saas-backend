@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"net/http"
 	"testing"
+	"time"
 
 	blind "github.com/arnaucube/go-blindsecp256k1"
 	qt "github.com/frankban/quicktest"
@@ -74,8 +75,11 @@ func TestProcessBlindCSP(t *testing.T) {
 	token := testCreateUser(t, "adminpassword123")
 	orgAddress := testCreateProvisionedOrganization(t, token)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID) // plan grants Features.Anonymous
-	members := postOrgMembers(t, token, orgAddress, newOrgMembers(1)...)
+	// two members so the voter (members[1]) carries weight 2 — newOrgMembers assigns weights 1,2 —
+	// which lets the tally below prove the round-1-pinned weight reaches the weighted on-chain count.
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
 	ids := memberIDs(members)
+	voterMember := members[1] // weight 2
 
 	// an anonymous, weighted census that authenticates by name+surname with an email OTP
 	req := newVotingProcessRequest(orgAddress, ids)
@@ -111,7 +115,7 @@ func TestProcessBlindCSP(t *testing.T) {
 		models.CensusOrigin_name[int32(models.CensusOrigin_OFF_CHAIN_CA_V2)])
 
 	tok := authProcessCSP(t, pid, &handlers.AuthRequest{
-		Name: members[0].Name, Surname: members[0].Surname, Email: members[0].Email,
+		Name: voterMember.Name, Surname: voterMember.Surname, Email: voterMember.Email,
 	})
 
 	// the plain ECDSA sign endpoints reject an anonymous census (client must use the blind flow)
@@ -125,10 +129,27 @@ func TestProcessBlindCSP(t *testing.T) {
 			{UpstreamID: election, Address: voter.Address().Bytes()},
 		}}, "processes", pid, "sign-batch")
 
-	// two-round blind sign, then cast the unblinded proof on chain
+	// two-round blind sign, then cast the unblinded proof on chain. The vote package must decode to
+	// state.VotePackage{Votes []int} ({"votes":[N]}); a bare ["N"] array is accepted as an envelope
+	// but tallies to zero weight. Value 0 is "Yes" in newVotingProcessRequest.
 	proof := testBlindSignBallot(t, pid, tok, election, voter.Address().Bytes())
-	nullifier := testCastVote(t, vc, &voter, election, proof, []byte(`["0"]`))
+	nullifier := testCastVote(t, vc, &voter, election, proof, []byte(`{"votes":[0]}`))
 	c.Assert(nullifier, qt.Not(qt.HasLen), 0)
+
+	// the vote is not just accepted but counted correctly: the tally reflects one voter whose weight-2
+	// "Yes" was carried unforgeably through the blind bundle (single field, buckets [value0, value1]).
+	var res apicommon.VotingProcessResultsResponse
+	for range 20 {
+		res = requestAndParse[apicommon.VotingProcessResultsResponse](
+			t, http.MethodGet, "", nil, "processes", pid, "results")
+		if len(res.Questions) > 0 && res.Questions[0].VoteCount > 0 {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	c.Assert(res.Questions, qt.HasLen, 1)
+	c.Assert(res.Questions[0].VoteCount, qt.Equals, uint64(1))
+	c.Assert(res.Questions[0].Results, qt.DeepEquals, [][]string{{"2", "0"}})
 
 	// single-use: the election is consumed, so a fresh blind-point is refused
 	point := requestAndParse[handlers.BlindPointResponse](t, http.MethodPost, "",
