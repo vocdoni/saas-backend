@@ -219,3 +219,91 @@ docker compose down
 docker compose down -v
 ```
 
+
+## CLI tools
+
+Operational CLI tools shipped alongside the API server (`cmd/service`). All follow the
+same Viper convention as the server: flags or `VOCDONI_*` env vars.
+
+### [cmd/userdel](cmd/userdel/) — GDPR user erasure
+
+**What it does.** Erases a registered user and their personal data from MongoDB to serve
+right-to-erasure requests in a standardized way. The key logic is the org classification:
+organizations where the user is the **sole admin are deleted entirely** (members, groups,
+censuses, participants, processes, bundles, CSP tokens, jobs, invitations); organizations
+with other admins are kept and only the user's membership is removed. In kept orgs the
+user created, the creator email is deliberately retained — the org signing key is derived
+from `secret+creator+nonce`, so redacting it would break the org's on-chain account. Those
+orgs are flagged in the output for manual follow-up.
+
+**How to run.**
+
+```bash
+go run ./cmd/userdel -email user@example.com -dryRun   # impact report only
+go run ./cmd/userdel -email user@example.com           # report + "type 'yes'" prompt
+go run ./cmd/userdel -id 42 -yes                       # skip confirmation
+```
+
+Mongo connection via `-mongoURL`/`-mongoDB` flags or `VOCDONI_MONGOURL`/`VOCDONI_MONGODB`
+env vars.
+
+**Precautions.** This is the destructive one of the three. Always run `-dryRun` first and
+read the impact report — a sole-admin org takes its entire voting history down with it.
+Reserve `-yes` for scripted use. Watch for the `WARNING: creator email retained` lines in
+the output; those need manual follow-up. Stripe customer data and database backups are
+explicitly out of scope — handle those separately if the erasure request covers them.
+
+### [cmd/cli](cmd/cli/) — process/voter query tool (plus an integrator switch)
+
+**What it does.** A read-mostly diagnostic tool for querying voting process and voter
+information from the database. Two query modes: **process-only** (bundle, census, and CSP
+statistics for a process) and **process+user** (a specific voter's participation details,
+using the Vocdoni node API to compute nullifiers). It also carries one unrelated write
+operation: `--setIntegrator` flags an organization as an integrator and sets its
+`maxManagedOrgs` limit.
+
+**How to run.**
+
+```bash
+# process stats
+go run ./cmd/cli -i <processID-hex> -m <mongoURL> -d <mongoDB>
+# one voter's participation in that process
+go run ./cmd/cli -i <processID-hex> -u <userID-hex> -m <mongoURL> -d <mongoDB>
+# make an org an integrator
+go run ./cmd/cli --setIntegrator --orgAddress <hex> --maxManagedOrgs 5 -m <mongoURL> -d <mongoDB>
+```
+
+The node API defaults to `https://api-dev.vocdoni.net/v2` (`-v` to override) — point it at
+the API matching the environment your Mongo belongs to, or nullifier calculations will be
+wrong.
+
+**Precautions.** The query modes are read-only and safe. `--setIntegrator` writes to the
+organizations collection, so treat that path like any prod mutation: confirm the address
+and the target database first. Note the process ID here is the **on-chain** hex ID.
+
+### [cmd/client](cmd/client/) — org-side CSV member import client
+
+**What it does.** An HTTP client that acts *as an organization user against the backend
+API* (it logs in with email/password, no direct DB access). It drives the CSV
+member-import workflow: `import-members` imports members from a CSV, and
+`import-and-add-to-census` additionally adds them to the census derived from a bundle ID.
+It assumes the member base's unique identifier is either `nationalId` or `memberNumber`,
+prints a processing summary (created/updated/skipped/errors), and runs a verification pass
+checking imported members against expected email/phone. It's the only one of the three
+with tests (`workflow_test.go`).
+
+**How to run.**
+
+```bash
+go run ./cmd/client --orgAddress <hex-address> --email <email> --password <password> \
+  --action import-and-add-to-census --bundleId <bundle-id> --csv <path> \
+  --idField nationalId
+```
+
+**Precautions.** It mutates real member data through the API — existing members matching
+the ID field get **updated**, so a CSV with wrong data overwrites good records. Check the
+summary counts and verification pass/fail output before considering an import done. The
+password goes on the command line (shell history); the org's country is loaded from the
+API and used for phone normalization, so imports for an org with the wrong country set
+will mangle phone numbers. Since it goes through the normal API, plan quotas and
+permissions apply — failures may be subscription limits, not data errors.
