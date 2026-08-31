@@ -17,9 +17,10 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// saltSize32 is the exact big-endian byte width a blinded message (and the blind nonce k) must have
-// for go-blindsecp256k1's BlindSign to accept it; a shorter encoding means a leading zero byte.
-const saltSize32 = 32
+// blindScalarBytes is the exact big-endian byte width a blinded message (and the blind nonce k) must
+// have for go-blindsecp256k1's BlindSign to accept it; a shorter encoding means a leading zero byte.
+// It is the secp256k1 scalar width, unrelated to saltedkey.SaltSize (the 20-byte salt word).
+const blindScalarBytes = 32
 
 // Sign method signs a message with the given token, address and processID. It
 // returns the signature as HexBytes or an error if the signer type is invalid
@@ -123,7 +124,7 @@ func (c *CSP) BlindSign(token, processID, blindedMsg internal.HexBytes) (signatu
 	// an invalid input never consumes the one-time nonce (which would strand the voter or, worse,
 	// force a same-nonce retry). N is the secp256k1 group order shared by go-blindsecp256k1.
 	m := new(big.Int).SetBytes(blindedMsg)
-	if m.Sign() == 0 || m.Cmp(ethcrypto.S256().Params().N) >= 0 || len(m.Bytes()) != saltSize32 {
+	if m.Sign() == 0 || m.Cmp(ethcrypto.S256().Params().N) >= 0 || len(m.Bytes()) != blindScalarBytes {
 		return nil, nil, ErrInvalidBlindedMessage
 	}
 	// atomically claim the nonce: the returned document carries the k, R and weight to sign with.
