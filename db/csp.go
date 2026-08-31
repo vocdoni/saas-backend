@@ -42,6 +42,16 @@ type CSPProcess struct {
 	UsedAt      time.Time         `json:"usedAt" bson:"consumedat"`
 	UsedAddress internal.HexBytes `json:"usedAddress" bson:"consumedaddress"`
 	TimesVoted  int               `json:"timesVoted" bson:"timesVoted"`
+	// BlindSecret holds the CSP's one-time blind-signature nonce k between the two rounds of a
+	// blind (OFF_CHAIN_CA_V2) signature: armed in round 1 and atomically claimed in round 2.
+	// Never leaves the server; absent for the non-anonymous ECDSA flow and once claimed.
+	BlindSecret internal.HexBytes `json:"-" bson:"blindsecret,omitempty"`
+	// BlindR is the blind point R issued alongside BlindSecret in round 1, kept so a repeated
+	// round-1 call is idempotent (returns the same R rather than clobbering the armed nonce).
+	BlindR internal.HexBytes `json:"-" bson:"blindr,omitempty"`
+	// BlindWeight is the CSP-authorized weight captured at round 1 and used to salt the round-2
+	// signature, so a mid-flow weight change cannot desync the salt from the client's bundle.
+	BlindWeight internal.HexBytes `json:"-" bson:"blindweight,omitempty"`
 }
 
 // SetCSPAuth method stores a new CSP authentication token for a user and a
@@ -283,6 +293,105 @@ func (ms *MongoStorage) ConsumeCSPProcess(token, processID, address internal.Hex
 		return errors.Join(ErrStoreToken, err)
 	}
 	return nil
+}
+
+// ArmCSPProcessBlind arms the round-1 half of a blind (OFF_CHAIN_CA_V2) signature: it atomically
+// stores the one-time nonce k, its blind point R and the CSP-authorized weight for (token's user,
+// processID), but only while the election is not already signed (consumed) and no nonce is armed.
+// It is idempotent: a repeated round-1 call for an already-armed, unconsumed election returns the
+// existing R and weight instead of clobbering the nonce (so a client that lost the first R and a
+// concurrent retry both blind against the same R). It returns ErrProcessAlreadyConsumed once the
+// election has been signed — a blind census allows exactly one signature per (user, election).
+func (ms *MongoStorage) ArmCSPProcessBlind(
+	token, processID, secretK, blindR, weight internal.HexBytes,
+) (r, w internal.HexBytes, err error) {
+	if token == nil || processID == nil || secretK == nil || blindR == nil {
+		return nil, nil, ErrBadInputs
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	tokenData, err := ms.fetchCSPAuthFromDB(ctx, token)
+	if err != nil {
+		return nil, nil, err
+	}
+	id := cspAuthTokenStatusID(tokenData.UserID, processID)
+	// arm only if not yet consumed and not yet armed. upsert makes the first round-1 create the
+	// row atomically; a row that already carries a nonce (or is consumed) fails the filter and,
+	// because the filter pins _id, the upsert then hits the unique _id and returns a duplicate-key
+	// error — which we resolve by reading the existing row (idempotent return, or consumed).
+	filter := bson.M{"_id": id, "consumed": bson.M{"$ne": true}, "blindsecret": bson.M{"$exists": false}}
+	update := bson.M{"$set": bson.M{
+		"userid":      tokenData.UserID,
+		"processid":   processID,
+		"blindsecret": secretK,
+		"blindr":      blindR,
+		"blindweight": weight,
+	}}
+	opts := options.FindOneAndUpdate().
+		SetUpsert(true).SetReturnDocument(options.After)
+	armed := new(CSPProcess)
+	if err := ms.cspTokensStatus.FindOneAndUpdate(ctx, filter, update, opts).Decode(armed); err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			// a nonce is already armed (or the election is consumed): return the existing state
+			existing, ferr := ms.fetchCSPProcessFromDB(ctx, tokenData.UserID, processID)
+			if ferr != nil {
+				return nil, nil, ferr
+			}
+			if existing.Used {
+				return nil, nil, ErrProcessAlreadyConsumed
+			}
+			return existing.BlindR, existing.BlindWeight, nil
+		}
+		return nil, nil, errors.Join(ErrStoreToken, err)
+	}
+	return armed.BlindR, armed.BlindWeight, nil
+}
+
+// ClaimCSPProcessBlind atomically claims the round-2 half of a blind (OFF_CHAIN_CA_V2) signature for
+// the token's user: in a single conditional update it clears the one-time nonce and marks the
+// election consumed, so exactly one concurrent caller ever obtains the nonce (blind-signature nonce
+// reuse is catastrophic — it leaks the salted signing key). It returns the pre-claim document, which
+// still carries the claimed BlindSecret, BlindR and BlindWeight to sign with. A blind census is
+// address-less, so there is no address to pin; exactly-one-signature replaces the ECDSA overwrite
+// budget. Returns ErrBlindRequestNotFound if nothing is armed and ErrProcessAlreadyConsumed if the
+// election was already signed.
+func (ms *MongoStorage) ClaimCSPProcessBlind(userID, processID, token internal.HexBytes) (*CSPProcess, error) {
+	if userID == nil || processID == nil || token == nil {
+		return nil, ErrBadInputs
+	}
+	ms.keysLock.Lock()
+	defer ms.keysLock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	id := cspAuthTokenStatusID(userID, processID)
+	filter := bson.M{"_id": id, "blindsecret": bson.M{"$exists": true}, "consumed": bson.M{"$ne": true}}
+	update := bson.M{
+		"$set":   bson.M{"consumed": true, "consumedat": time.Now(), "consumedtoken": token, "timesVoted": 1},
+		"$unset": bson.M{"blindsecret": ""},
+	}
+	// return the document as it was BEFORE the claim, so the caller gets the nonce it just claimed
+	opts := options.FindOneAndUpdate().SetReturnDocument(options.Before)
+	claimed := new(CSPProcess)
+	if err := ms.cspTokensStatus.FindOneAndUpdate(ctx, filter, update, opts).Decode(claimed); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			// nothing matched: either no nonce is armed, or the election is already consumed
+			existing, ferr := ms.fetchCSPProcessFromDB(ctx, userID, processID)
+			if ferr != nil {
+				if errors.Is(ferr, ErrTokenNotFound) {
+					return nil, ErrBlindNonceNotFound
+				}
+				return nil, ferr
+			}
+			if existing.Used {
+				return nil, ErrProcessAlreadyConsumed
+			}
+			return nil, ErrBlindNonceNotFound
+		}
+		return nil, errors.Join(ErrStoreToken, err)
+	}
+	return claimed, nil
 }
 
 func (ms *MongoStorage) fetchCSPAuthFromDB(ctx context.Context, token internal.HexBytes) (*CSPAuth, error) {

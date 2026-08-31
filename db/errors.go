@@ -19,6 +19,9 @@ var (
 	ErrBadInputs = fmt.Errorf("bad inputs")
 	// ErrProcessAlreadyConsumed is returned if the process has already been consumed by the user
 	ErrProcessAlreadyConsumed = fmt.Errorf("token already consumed")
+	// ErrBlindNonceNotFound is returned when a round-2 blind claim finds no armed nonce for the
+	// (user, election): round 1 was never run, or the nonce was already claimed.
+	ErrBlindNonceNotFound = fmt.Errorf("no armed blind nonce")
 	// ErrTokenNotVerified is returned if the token has not been verified
 	ErrTokenNotVerified = fmt.Errorf("token not verified")
 	// ErrUpdateWouldCreateDuplicates is returned when trying to update an OrgMember

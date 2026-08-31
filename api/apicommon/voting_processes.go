@@ -11,7 +11,11 @@ import (
 // CensusSpec is the inline census definition of a voting process. The census type is
 // inferred from the auth/2FA fields; there is no prebuilt-by-id reference over the API.
 type CensusSpec struct {
-	Weighted    bool                    `json:"weighted"`
+	Weighted bool `json:"weighted"`
+	// Anonymous selects blind-CSP voting: the process publishes with census origin OFF_CHAIN_CA_V2
+	// and the CSP blind-signs each ballot so it cannot link a signature to the voter. Orthogonal to
+	// the mail/sms/auth 2FA channel; may be combined with Weighted (V2 binds the weight into the salt).
+	Anonymous   bool                    `json:"anonymous,omitempty"`
 	AuthFields  db.OrgMemberAuthFields  `json:"authFields,omitempty"`
 	TwoFaFields db.OrgMemberTwoFaFields `json:"twoFaFields,omitempty"`
 	// GroupID is the org member group the census was built from. Round-trips: it is echoed back on
@@ -270,6 +274,7 @@ func PublicQuestionResponseFromDB(q *db.VotingProcessQuestion, census *db.Census
 	if census != nil {
 		resp.Census = CensusSpec{
 			Weighted:    census.Weighted,
+			Anonymous:   census.Anonymous,
 			AuthFields:  census.AuthFields,
 			TwoFaFields: census.TwoFaFields,
 		}
@@ -307,6 +312,7 @@ func VotingProcessResponseFromDB(
 	if census != nil {
 		resp.Census = CensusSpec{
 			Weighted:    census.Weighted,
+			Anonymous:   census.Anonymous,
 			AuthFields:  census.AuthFields,
 			TwoFaFields: census.TwoFaFields,
 			Size:        census.Size,

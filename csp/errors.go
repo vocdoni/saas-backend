@@ -67,4 +67,11 @@ var (
 	ErrUserIsNotAlreadySigning = fmt.Errorf("the user is not signing")
 	// ErrInvalidSalt is returned when the salt is invalid.
 	ErrInvalidSalt = fmt.Errorf("invalid salt, length must be %d bytes", saltedkey.SaltSize)
+	// ErrBlindRequestNotFound is returned when a blind signature (round 2) is requested for an
+	// election that has no round-1 blind point issued for this user.
+	ErrBlindRequestNotFound = fmt.Errorf("no blind signature request in progress for this election")
+	// ErrInvalidBlindedMessage is returned when the client-supplied blinded message is not a valid
+	// blind-signature input (zero, not below the curve order, or not 32 bytes). It is a client
+	// input error checked before the nonce is claimed, so the round-1 nonce stays armed for a retry.
+	ErrInvalidBlindedMessage = fmt.Errorf("invalid blinded message")
 )

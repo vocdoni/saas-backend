@@ -303,13 +303,17 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 		errors.ErrGenericInternalServerError.Withf("could not restore organization signer: %v", err).Write(w)
 		return
 	}
+	// root = CSP public key; the on-chain census authorization is delegated to the CSP for every
+	// question. A blind (anonymous) census publishes the CSP blind public key instead, so the
+	// Vochain verifies each ballot's blind ECDSA proof against it under census origin OFF_CHAIN_CA_V2.
 	cspPubKey, err := a.csp.PubKey()
+	if census.Anonymous {
+		cspPubKey, err = a.csp.BlindPubKey()
+	}
 	if err != nil {
 		errors.ErrGenericInternalServerError.Withf("could not get csp public key: %v", err).Write(w)
 		return
 	}
-	// publish the census (root = CSP public key); the on-chain census authorization is
-	// delegated to the CSP for every question.
 	census.Published = db.PublishedCensus{Root: cspPubKey, URI: a.serverURL, CreatedAt: time.Now()}
 	if _, err := a.db.SetCensus(census); err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -511,6 +515,7 @@ func (pw *publishWorker) buildBatch(
 			Params:      ep,
 			CensusRoot:  pw.cspPubKey,
 			CensusURI:   a.serverURL,
+			Anonymous:   pw.census.Anonymous,
 			MetadataURL: q.MetadataURL,
 			Nonce:       &nonce,
 		})

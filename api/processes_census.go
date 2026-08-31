@@ -20,6 +20,7 @@ func (a *API) resolveOrCreateDefaultCensus(spec apicommon.CensusSpec, orgAddress
 	census := &db.Census{
 		OrgAddress:  orgAddress,
 		Weighted:    spec.Weighted,
+		Anonymous:   spec.Anonymous,
 		AuthFields:  spec.AuthFields,
 		TwoFaFields: spec.TwoFaFields,
 		CreatedAt:   time.Now(),

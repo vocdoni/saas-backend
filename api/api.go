@@ -488,6 +488,8 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, processesAuthResendEndpoint, cspHandlers.ProcessAuthResendHandler)
 		handle(r, http.MethodPost, processesSignEndpoint, cspHandlers.ProcessSignHandler)
 		handle(r, http.MethodPost, processesSignBatchEndpoint, cspHandlers.ProcessSignBatchHandler)
+		handle(r, http.MethodPost, processesBlindPointEndpoint, cspHandlers.ProcessBlindPointHandler)
+		handle(r, http.MethodPost, processesBlindSignEndpoint, cspHandlers.ProcessBlindSignHandler)
 		handle(r, http.MethodPost, processesWeightEndpoint, cspHandlers.ProcessWeightHandler)
 		handle(r, http.MethodPost, processesSignInfoEndpoint, cspHandlers.ProcessSignInfoHandler)
 	})

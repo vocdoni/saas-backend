@@ -96,6 +96,41 @@ func TestHasTxPermission(t *testing.T) {
 	c.Assert(err, qt.ErrorIs, errors.ErrInvalidData)
 }
 
+// TestHasElectionMetadataPermissionsAnonymous checks that Features.Anonymous gates both anonymity
+// mechanisms: the zk-SNARK envelope (EnvelopeType.Anonymous) and blind CSP, which is a normal CSP
+// census under origin OFF_CHAIN_CA_V2 whose envelope flag deliberately stays false.
+func TestHasElectionMetadataPermissionsAnonymous(t *testing.T) {
+	c := qt.New(t)
+	newProcess := func(origin models.CensusOrigin, zkAnon bool) *models.NewProcessTx {
+		return &models.NewProcessTx{Process: &models.Process{
+			CensusOrigin: origin,
+			EnvelopeType: &models.EnvelopeType{Anonymous: zkAnon},
+			VoteOptions:  &models.ProcessVoteOptions{},
+		}}
+	}
+	planWith := func(anon bool) *db.Plan {
+		return &db.Plan{Features: db.Features{Anonymous: anon}, Organization: db.PlanLimits{MaxDuration: 30}}
+	}
+
+	// blind CSP (OFF_CHAIN_CA_V2) is refused without the feature, allowed with it
+	ok, err := hasElectionMetadataPermissions(newProcess(models.CensusOrigin_OFF_CHAIN_CA_V2, false), planWith(false))
+	c.Assert(err, qt.Not(qt.IsNil))
+	c.Assert(ok, qt.IsFalse)
+	ok, err = hasElectionMetadataPermissions(newProcess(models.CensusOrigin_OFF_CHAIN_CA_V2, false), planWith(true))
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+
+	// a plain CSP census (OFF_CHAIN_CA) is not anonymous, so it is allowed regardless of the feature
+	ok, err = hasElectionMetadataPermissions(newProcess(models.CensusOrigin_OFF_CHAIN_CA, false), planWith(false))
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+
+	// the zk-SNARK anonymous envelope is gated too
+	ok, err = hasElectionMetadataPermissions(newProcess(models.CensusOrigin_OFF_CHAIN_TREE, true), planWith(false))
+	c.Assert(err, qt.Not(qt.IsNil))
+	c.Assert(ok, qt.IsFalse)
+}
+
 func TestHasDBPermission(t *testing.T) {
 	c := qt.New(t)
 	// Create a mock DB that returns specific users and organizations

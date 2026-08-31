@@ -70,10 +70,15 @@ func BuildElectionMetadata(params *db.ElectionParams) ([]byte, error) {
 
 // NewProcessParams bundles the inputs required to build a NewProcess transaction.
 type NewProcessParams struct {
-	OrgAddress  common.Address // organization (entity) that owns the election
-	Params      *db.ElectionParams
-	CensusRoot  []byte // census root (CSP public key)
-	CensusURI   string // census endpoint (SaaS CSP base URL)
+	OrgAddress common.Address // organization (entity) that owns the election
+	Params     *db.ElectionParams
+	CensusRoot []byte // census root: the CSP ECDSA public key, or its blind public key when Anonymous
+	CensusURI  string // census endpoint (SaaS CSP base URL)
+	// Anonymous selects blind CSP: the election is published with census origin OFF_CHAIN_CA_V2
+	// (the CSP blind-signs ballots so it cannot link a signature to the voter). CensusRoot must then
+	// be the CSP blind public key. This is unrelated to EnvelopeType.Anonymous (the zk-SNARK flag),
+	// which stays false — the Vochain routes both CA origins to the CSP verifier regardless of it.
+	Anonymous   bool
 	MetadataURL string // public https URL of the stored ElectionMetadata JSON
 	// Nonce, when set, is used as the tx account nonce instead of reading the current
 	// on-chain nonce. Batch publishing sets explicit consecutive nonces so N txs can be
@@ -145,13 +150,21 @@ func (a *Account) BuildNewProcessTx(p *NewProcessParams) (*models.Tx, error) {
 		return nil, err
 	}
 
+	// blind CSP publishes under the V2 origin (weight-binding salt); the plain ECDSA CSP stays on
+	// the legacy origin. Both are verified on-chain by the CSP verifier; the flag never touches
+	// EnvelopeType.Anonymous.
+	censusOrigin := models.CensusOrigin_OFF_CHAIN_CA
+	if p.Anonymous {
+		censusOrigin = models.CensusOrigin_OFF_CHAIN_CA_V2
+	}
+
 	metadataURL := p.MetadataURL
 	process := &models.Process{
 		EntityId:      p.OrgAddress.Bytes(),
 		Status:        models.ProcessStatus_READY,
 		StartTime:     startTime,
 		Duration:      duration,
-		CensusOrigin:  models.CensusOrigin_OFF_CHAIN_CA,
+		CensusOrigin:  censusOrigin,
 		CensusRoot:    p.CensusRoot,
 		MaxCensusSize: ep.MaxCensusSize,
 		Metadata:      &metadataURL,
