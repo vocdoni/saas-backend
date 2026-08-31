@@ -19,7 +19,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.40.0
 	github.com/twilio/twilio-go v1.23.0
 	github.com/xlzd/gotp v0.1.0
-	go.mongodb.org/mongo-driver v1.14.0
+	go.mongodb.org/mongo-driver v1.17.7
 	go.vocdoni.io/dvote v1.10.2-0.20260827105825-8fa12c003472
 	go.vocdoni.io/proto v1.15.14
 	golang.org/x/crypto v0.52.0
@@ -260,7 +260,7 @@ require (
 	github.com/moby/sys/sequential v0.6.0 // indirect
 	github.com/moby/sys/user v0.4.0 // indirect
 	github.com/moby/term v0.5.0 // indirect
-	github.com/montanaflynn/stats v0.0.0-20171201202039-1bf9dbcd8cbe // indirect
+	github.com/montanaflynn/stats v0.7.1 // indirect
 	github.com/morikuni/aec v1.0.0 // indirect
 	github.com/mr-tron/base58 v1.2.0 // indirect
 	github.com/multiformats/go-base32 v0.1.0 // indirect
