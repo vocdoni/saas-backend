@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	blind "github.com/arnaucube/go-blindsecp256k1"
+	blind "github.com/vocdoni/go-blindsecp256k1"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp/handlers"
@@ -66,7 +66,8 @@ func testBlindSignBallot(t *testing.T, pid string, tok, election, voterAddr inte
 			continue // re-blind against the same (idempotent) R
 		}
 		c.Assert(res.Code, qt.Equals, "", qt.Commentf("blind-sign error: %s", res.Error))
-		signature := blind.Unblind(new(big.Int).SetBytes(res.Signature), userSecretData)
+		signature, err := blind.Unblind(new(big.Int).SetBytes(res.Signature), userSecretData)
+		c.Assert(err, qt.IsNil)
 		return &models.Proof{Payload: &models.Proof_Ca{Ca: &models.ProofCA{
 			Type:      models.ProofCA_ECDSA_BLIND_PIDSALTED,
 			Signature: signature.BytesUncompressed(),

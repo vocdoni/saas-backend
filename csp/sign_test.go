@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	blind "github.com/arnaucube/go-blindsecp256k1"
 	qt "github.com/frankban/quicktest"
+	blind "github.com/vocdoni/go-blindsecp256k1"
 	"github.com/vocdoni/saas-backend/csp/signers"
 	"github.com/vocdoni/saas-backend/csp/signers/saltedkey"
 	"github.com/vocdoni/saas-backend/db"
@@ -161,7 +161,8 @@ func TestBlindSign(t *testing.T) {
 			}
 			// round 2 reports the pinned weight it actually salted with
 			c.Assert(signedWeight, qt.DeepEquals, internal.HexBytes(testUserWeightBytes))
-			signature = blind.Unblind(new(big.Int).SetBytes(blindedSig), userSecretData)
+			signature, err = blind.Unblind(new(big.Int).SetBytes(blindedSig), userSecretData)
+			c.Assert(err, qt.IsNil)
 			break
 		}
 		c.Assert(signature, qt.Not(qt.IsNil))

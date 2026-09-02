@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"math/big"
 
-	blind "github.com/arnaucube/go-blindsecp256k1"
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
+	blind "github.com/vocdoni/go-blindsecp256k1"
 	"github.com/vocdoni/saas-backend/csp/signers"
 	"github.com/vocdoni/saas-backend/csp/signers/saltedkey"
 	"github.com/vocdoni/saas-backend/db"
