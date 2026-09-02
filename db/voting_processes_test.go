@@ -8,8 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func setupVotingProcessOrg(c *qt.C, org common.Address) {
@@ -140,7 +139,7 @@ func TestQuestionStatusSyncMethods(t *testing.T) {
 
 	// upstreamIds are prefixed to stay unique across the shared test database.
 	up := func(s string) internal.HexBytes { return internal.HexBytes("ssm-" + s) }
-	seed := func(order int, upstream, status string) primitive.ObjectID {
+	seed := func(order int, upstream, status string) bson.ObjectID {
 		id, err := testDB.SetQuestion(&VotingProcessQuestion{
 			ProcessID: vpID, OrgAddress: org, Order: order,
 			UpstreamID: up(upstream), Status: status,
@@ -296,7 +295,7 @@ func TestSetVotingProcessDraft(t *testing.T) {
 	c.Assert(got.Title["default"], qt.Equals, "edited")
 
 	// an unknown id is a conflict, never an insert
-	orphan := &VotingProcess{ID: primitive.NewObjectID(), OrgAddress: org}
+	orphan := &VotingProcess{ID: bson.NewObjectID(), OrgAddress: org}
 	c.Assert(testDB.SetVotingProcessDraft(orphan, got.UpdatedAt), qt.Equals, ErrConflict)
 
 	// a process whose organization no longer exists is refused, exactly as SetVotingProcess does:
@@ -373,7 +372,7 @@ func TestSetVotingProcessQuestionIDs(t *testing.T) {
 	})
 	c.Assert(err, qt.IsNil)
 
-	ids := []primitive.ObjectID{primitive.NewObjectID(), primitive.NewObjectID()}
+	ids := []bson.ObjectID{bson.NewObjectID(), bson.NewObjectID()}
 	c.Assert(testDB.SetVotingProcessQuestionIDs(id, ids), qt.IsNil)
 	got, err := testDB.VotingProcess(id)
 	c.Assert(err, qt.IsNil)
@@ -397,5 +396,5 @@ func TestSetVotingProcessQuestionIDs(t *testing.T) {
 	c.Assert(got.UpdatedAt.Equal(ahead), qt.IsTrue,
 		qt.Commentf("updatedAt moved backwards: %s < %s", got.UpdatedAt, ahead))
 
-	c.Assert(testDB.SetVotingProcessQuestionIDs(primitive.NewObjectID(), ids), qt.Equals, ErrNotFound)
+	c.Assert(testDB.SetVotingProcessQuestionIDs(bson.NewObjectID(), ids), qt.Equals, ErrNotFound)
 }

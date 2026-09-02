@@ -14,7 +14,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func TestOrganizationMembers(t *testing.T) {
@@ -121,8 +121,8 @@ func TestOrganizationMembers(t *testing.T) {
 
 	// Test 2.5: Test with members missing some of the new optional fields
 	// Generate a new test member ID
-	pedroID := primitive.NewObjectID().Hex()
-	joanID := primitive.NewObjectID().Hex()
+	pedroID := bson.NewObjectID().Hex()
+	joanID := bson.NewObjectID().Hex()
 	membersWithMissingFields := &apicommon.AddMembersRequest{
 		Members: []apicommon.OrgMember{
 			{
@@ -844,7 +844,7 @@ func TestUpsertMemberEditAtCensusQuota(t *testing.T) {
 
 	// an id that names no member of this organization is a creation too, refused the same way
 	unknown := newOrgMember()
-	unknown.ID = primitive.NewObjectID().Hex()
+	unknown.ID = bson.NewObjectID().Hex()
 	apiErr = putOrgMemberAndExpectError(t, token, orgAddress, unknown)
 	c.Assert(apiErr.Code, qt.Equals, errors.ErrProcessCensusSizeExceedsPlanLimit.Code)
 

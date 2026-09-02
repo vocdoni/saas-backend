@@ -6,18 +6,17 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // SetProcess creates a new process or updates an existing one for an organization.
 // If the process already exists and is in draft mode, it will be updated.
-func (ms *MongoStorage) SetProcess(process *Process) (primitive.ObjectID, error) {
+func (ms *MongoStorage) SetProcess(process *Process) (bson.ObjectID, error) {
 	// validate input
 	if (process.OrgAddress.Cmp(common.Address{}) == 0) {
-		return primitive.NilObjectID, ErrInvalidData
+		return bson.NilObjectID, ErrInvalidData
 	}
 
 	ms.keysLock.Lock()
@@ -25,31 +24,31 @@ func (ms *MongoStorage) SetProcess(process *Process) (primitive.ObjectID, error)
 
 	// check that the org exists
 	if _, err := ms.Organization(process.OrgAddress); err != nil {
-		return primitive.NilObjectID, fmt.Errorf("failed to get organization %s: %w", process.OrgAddress, err)
+		return bson.NilObjectID, fmt.Errorf("failed to get organization %s: %w", process.OrgAddress, err)
 	}
 	// check that the census exists
 	if !process.Census.ID.IsZero() {
 		census, err := ms.Census(process.Census.ID.Hex())
 		if err != nil {
-			return primitive.NilObjectID, fmt.Errorf("failed to get census: %w", err)
+			return bson.NilObjectID, fmt.Errorf("failed to get census: %w", err)
 		}
 		if len(census.Published.Root) == 0 || len(census.Published.URI) == 0 {
-			return primitive.NilObjectID, fmt.Errorf("census %s does not have a published root or URI", census.ID.Hex())
+			return bson.NilObjectID, fmt.Errorf("census %s does not have a published root or URI", census.ID.Hex())
 		}
 		if census.OrgAddress.Cmp(process.OrgAddress) != 0 {
-			return primitive.NilObjectID, fmt.Errorf("census %s does not belong to organization %s",
+			return bson.NilObjectID, fmt.Errorf("census %s does not belong to organization %s",
 				census.ID.Hex(), process.OrgAddress.String())
 		}
 	}
 
 	if process.ID.IsZero() {
 		// if the process doesn't exist, create its id
-		process.ID = primitive.NewObjectID()
+		process.ID = bson.NewObjectID()
 	}
 
 	updateDoc, err := dynamicUpdateDocument(process, nil)
 	if err != nil {
-		return primitive.NilObjectID, fmt.Errorf("failed to create update document: %w", err)
+		return bson.NilObjectID, fmt.Errorf("failed to create update document: %w", err)
 	}
 
 	// create a context with a timeout
@@ -57,13 +56,13 @@ func (ms *MongoStorage) SetProcess(process *Process) (primitive.ObjectID, error)
 	defer cancel()
 	// Use ReplaceOne with upsert option to either update an existing process or insert a new one
 	filter := bson.M{"_id": process.ID}
-	opts := options.Update().SetUpsert(true)
+	opts := options.UpdateOne().SetUpsert(true)
 	res, err := ms.processes.UpdateOne(ctx, filter, updateDoc, opts)
 	if err != nil {
-		return primitive.NilObjectID, fmt.Errorf("failed to create or update process: %w", err)
+		return bson.NilObjectID, fmt.Errorf("failed to create or update process: %w", err)
 	}
 	if res.UpsertedID == nil {
-		return primitive.NilObjectID, nil
+		return bson.NilObjectID, nil
 	}
 
 	return process.ID, nil
@@ -75,8 +74,8 @@ func (ms *MongoStorage) SetProcess(process *Process) (primitive.ObjectID, error)
 // false when the draft was already publishing or published. This is the authoritative
 // duplicate-publish guard: because the check and set are one Mongo operation, two
 // concurrent publish requests cannot both proceed and sign two NEW_PROCESS txs.
-func (ms *MongoStorage) ClaimProcessForPublish(processID primitive.ObjectID) (bool, error) {
-	if processID == primitive.NilObjectID {
+func (ms *MongoStorage) ClaimProcessForPublish(processID bson.ObjectID) (bool, error) {
+	if processID == bson.NilObjectID {
 		return false, ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -99,8 +98,8 @@ func (ms *MongoStorage) ClaimProcessForPublish(processID primitive.ObjectID) (bo
 // which dynamicUpdateDocument would silently drop, so a publish that fails after claiming
 // the draft cannot leave it permanently stuck in PUBLISHING. The status filter makes it a
 // no-op if a worker already advanced the draft to READY.
-func (ms *MongoStorage) ClearProcessPublishing(processID primitive.ObjectID) error {
-	if processID == primitive.NilObjectID {
+func (ms *MongoStorage) ClearProcessPublishing(processID bson.ObjectID) error {
+	if processID == bson.NilObjectID {
 		return ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -116,8 +115,8 @@ func (ms *MongoStorage) ClearProcessPublishing(processID primitive.ObjectID) err
 // SetProcessMetadataURL sets only the metadataURL field of the process identified by
 // processID, leaving every other field untouched so a concurrent update to the same
 // process (status, publishedAt, counters...) is not clobbered by a stale full rewrite.
-func (ms *MongoStorage) SetProcessMetadataURL(processID primitive.ObjectID, metadataURL string) error {
-	if processID == primitive.NilObjectID {
+func (ms *MongoStorage) SetProcessMetadataURL(processID bson.ObjectID, metadataURL string) error {
+	if processID == bson.NilObjectID {
 		return ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -138,8 +137,8 @@ func (ms *MongoStorage) SetProcessMetadataURL(processID primitive.ObjectID, meta
 // by processID, leaving every other field untouched (same targeted-update rationale as
 // SetProcessMetadataURL). The encryption public keys are immutable once published by the
 // keykeepers, so this is written once and only with a non-empty set.
-func (ms *MongoStorage) SetProcessEncryptionKeys(processID primitive.ObjectID, keys []EncryptionKey) error {
-	if processID == primitive.NilObjectID {
+func (ms *MongoStorage) SetProcessEncryptionKeys(processID bson.ObjectID, keys []EncryptionKey) error {
+	if processID == bson.NilObjectID {
 		return ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -157,8 +156,8 @@ func (ms *MongoStorage) SetProcessEncryptionKeys(processID primitive.ObjectID, k
 }
 
 // DeleteProcess removes a process
-func (ms *MongoStorage) DelProcess(processID primitive.ObjectID) error {
-	if processID == primitive.NilObjectID {
+func (ms *MongoStorage) DelProcess(processID bson.ObjectID) error {
+	if processID == bson.NilObjectID {
 		return ErrInvalidData
 	}
 	ms.keysLock.Lock()
@@ -174,8 +173,8 @@ func (ms *MongoStorage) DelProcess(processID primitive.ObjectID) error {
 }
 
 // Process retrieves a process from the DB based on its ID
-func (ms *MongoStorage) Process(processID primitive.ObjectID) (*Process, error) {
-	if processID == primitive.NilObjectID {
+func (ms *MongoStorage) Process(processID bson.ObjectID) (*Process, error) {
+	if processID == bson.NilObjectID {
 		return nil, ErrInvalidData
 	}
 

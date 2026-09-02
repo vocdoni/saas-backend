@@ -11,7 +11,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // OAuthProvider represents OAuth authentication credentials for a specific provider
@@ -99,7 +99,8 @@ type Organization struct {
 
 // metaDefaultString extracts the "default" locale value from a meta entry that
 // may be stored as a plain string (legacy), a locale map, or the BSON-decoded
-// form of a locale map after a MongoDB round-trip (map[string]any).
+// form of a locale map after a MongoDB round-trip (bson.D with driver v2,
+// map[string]any with driver v1 data decoded through older code paths).
 func metaDefaultString(v any) string {
 	switch m := v.(type) {
 	case string:
@@ -109,6 +110,15 @@ func metaDefaultString(v any) string {
 	case map[string]any:
 		if s, ok := m["default"].(string); ok {
 			return s
+		}
+		return ""
+	case bson.D:
+		for _, e := range m {
+			if e.Key == "default" {
+				if s, ok := e.Value.(string); ok {
+					return s
+				}
+			}
 		}
 		return ""
 	default:
@@ -233,13 +243,13 @@ type OrganizationCounters struct {
 }
 
 type OrganizationInvite struct {
-	ID                  primitive.ObjectID `json:"id" bson:"_id"`
-	InvitationCode      string             `json:"invitationCode" bson:"invitationCode"`
-	OrganizationAddress common.Address     `json:"organizationAddress" bson:"organizationAddress"`
-	CurrentUserID       uint64             `json:"currentUserID" bson:"currentUserID"`
-	NewUserEmail        string             `json:"newUserEmail" bson:"newUserEmail"`
-	Role                UserRole           `json:"role" bson:"role"`
-	Expiration          time.Time          `json:"expiration" bson:"expiration"`
+	ID                  bson.ObjectID  `json:"id" bson:"_id"`
+	InvitationCode      string         `json:"invitationCode" bson:"invitationCode"`
+	OrganizationAddress common.Address `json:"organizationAddress" bson:"organizationAddress"`
+	CurrentUserID       uint64         `json:"currentUserID" bson:"currentUserID"`
+	NewUserEmail        string         `json:"newUserEmail" bson:"newUserEmail"`
+	Role                UserRole       `json:"role" bson:"role"`
+	Expiration          time.Time      `json:"expiration" bson:"expiration"`
 }
 
 // Object represents a user uploaded object Includes user defined ID and the data
@@ -266,15 +276,15 @@ const (
 
 // Census represents the information of a set of census participants
 type Census struct {
-	ID         primitive.ObjectID `json:"id" bson:"_id"`
-	OrgAddress common.Address     `json:"orgAddress" bson:"orgAddress"`
-	Type       CensusType         `json:"type" bson:"type"`
-	Weighted   bool               `json:"weighted" bson:"weighted"`
+	ID         bson.ObjectID  `json:"id" bson:"_id"`
+	OrgAddress common.Address `json:"orgAddress" bson:"orgAddress"`
+	Type       CensusType     `json:"type" bson:"type"`
+	Weighted   bool           `json:"weighted" bson:"weighted"`
 	// Anonymous marks a blind-CSP census: published with census origin OFF_CHAIN_CA_V2 and a blind
 	// public-key root, so the CSP blind-signs ballots and cannot link a signature to the voter.
 	Anonymous   bool                 `json:"anonymous" bson:"anonymous"`
 	Size        int64                `json:"size" bson:"size"`
-	GroupID     primitive.ObjectID   `json:"groupId" bson:"groupId"`
+	GroupID     bson.ObjectID        `json:"groupId" bson:"groupId"`
 	Published   PublishedCensus      `json:"published" bson:"published"`
 	AuthFields  OrgMemberAuthFields  `json:"authFields" bson:"orgMemberAuthFields"`
 	TwoFaFields OrgMemberTwoFaFields `json:"twoFaFields" bson:"orgMemberTwoFaFields"`
@@ -290,7 +300,7 @@ type Census struct {
 //nolint:lll
 type OrgMember struct {
 	// Also referred to as member UID
-	ID primitive.ObjectID `json:"id" bson:"_id"`
+	ID bson.ObjectID `json:"id" bson:"_id"`
 	// OrgAddress can be used for future sharding
 	OrgAddress      common.Address `json:"orgAddress" bson:"orgAddress"`
 	Email           string         `json:"email" bson:"email"`
@@ -475,14 +485,14 @@ func HashAuthTwoFaFields(memberData OrgMember, authFields OrgMemberAuthFields, t
 
 type OrgMemberAggregationResults struct {
 	// MemberIDs is a list of member IDs that are result of the aggregation
-	Members []primitive.ObjectID `json:"memberIds" bson:"memberIds"`
+	Members []bson.ObjectID `json:"memberIds" bson:"memberIds"`
 	// Duplicates is a list of member IDs that were found to be duplicates
-	Duplicates []primitive.ObjectID `json:"duplicates" bson:"duplicates"`
+	Duplicates []bson.ObjectID `json:"duplicates" bson:"duplicates"`
 	// MissingData is a list of member IDs that had columns found to be empty
-	MissingData []primitive.ObjectID `json:"missingData" bson:"missingData"`
+	MissingData []bson.ObjectID `json:"missingData" bson:"missingData"`
 	// NotFound is a list of requested member IDs that matched no member of the organization
 	// (unknown, or belonging to another org). Only populated for the explicit-memberIds path.
-	NotFound []primitive.ObjectID `json:"notFound" bson:"notFound"`
+	NotFound []bson.ObjectID `json:"notFound" bson:"notFound"`
 }
 
 const (
@@ -495,10 +505,10 @@ const (
 // An Organization members' group is a precursor of a census, and is simply a
 // collection of members that are grouped together for a specific purpose
 type OrganizationMemberGroup struct {
-	ID          primitive.ObjectID `json:"id" bson:"_id"`
-	OrgAddress  common.Address     `json:"orgAddress" bson:"orgAddress"`
-	Title       string             `json:"title" bson:"title"`
-	Description string             `json:"description" bson:"description"`
+	ID          bson.ObjectID  `json:"id" bson:"_id"`
+	OrgAddress  common.Address `json:"orgAddress" bson:"orgAddress"`
+	Title       string         `json:"title" bson:"title"`
+	Description string         `json:"description" bson:"description"`
 	// MemberIDs is intentionally empty for auto groups (IsAutoGroup == true).
 	// Their membership is derived dynamically from the full orgMembers collection.
 	MemberIDs []string  `json:"memberIds" bson:"memberIds"`
@@ -610,11 +620,11 @@ type ElectionParams struct {
 //
 //nolint:lll
 type Process struct {
-	ID         primitive.ObjectID `json:"id" bson:"_id"`
-	Address    internal.HexBytes  `json:"address" bson:"address"  swaggertype:"string" format:"hex" example:"deadbeef"`
-	OrgAddress common.Address     `json:"orgAdress" bson:"orgAddress"`
-	Census     Census             `json:"census" bson:"census"`
-	Metadata   map[string]any     `json:"metadata"  bson:"metadata"`
+	ID         bson.ObjectID     `json:"id" bson:"_id"`
+	Address    internal.HexBytes `json:"address" bson:"address"  swaggertype:"string" format:"hex" example:"deadbeef"`
+	OrgAddress common.Address    `json:"orgAdress" bson:"orgAddress"`
+	Census     Census            `json:"census" bson:"census"`
+	Metadata   map[string]any    `json:"metadata"  bson:"metadata"`
 	// MetadataURL is the generic reference to this process's canonical ElectionMetadata
 	// document. http(s) references are fetched — locally when they point at this service's
 	// object storage (including a relative "/storage/{name}" reference), otherwise via an
@@ -637,7 +647,7 @@ type Process struct {
 //
 //nolint:lll
 type ProcessesBundle struct {
-	ID         primitive.ObjectID  `json:"id" bson:"_id"`                                                                         // Unique identifier for the bundle
+	ID         bson.ObjectID       `json:"id" bson:"_id"`                                                                         // Unique identifier for the bundle
 	Census     Census              `json:"census" bson:"census"`                                                                  // The census associated with this bundle
 	OrgAddress common.Address      `json:"orgAddress" bson:"orgAddress"`                                                          // The organization that owns this bundle
 	Processes  []internal.HexBytes `json:"processes" bson:"processes" swaggertype:"array,string" format:"hex" example:"deadbeef"` // Array of process addresses included in this bundle
@@ -690,17 +700,17 @@ type BallotProtocol struct {
 // independent on-chain election) by id in the processesQuestions collection. It is a
 // draft while Published is false. It is unrelated to the single-election Process type.
 type VotingProcess struct {
-	ID          primitive.ObjectID   `json:"id" bson:"_id"`
-	OrgAddress  common.Address       `json:"orgAddress" bson:"orgAddress"`
-	Published   bool                 `json:"published" bson:"published"`
-	Title       MultiLangString      `json:"title" bson:"title"`
-	Description MultiLangString      `json:"description,omitempty" bson:"description,omitempty"`
-	Header      string               `json:"header,omitempty" bson:"header,omitempty"`
-	StreamURI   string               `json:"streamUri,omitempty" bson:"streamUri,omitempty"`
-	StartDate   time.Time            `json:"startDate,omitempty" bson:"startDate,omitempty"`
-	EndDate     time.Time            `json:"endDate,omitempty" bson:"endDate,omitempty"`
-	CensusID    primitive.ObjectID   `json:"-" bson:"censusId"`    // internal ref to a db.Census
-	QuestionIDs []primitive.ObjectID `json:"-" bson:"questionIds"` // ordered question references
+	ID          bson.ObjectID   `json:"id" bson:"_id"`
+	OrgAddress  common.Address  `json:"orgAddress" bson:"orgAddress"`
+	Published   bool            `json:"published" bson:"published"`
+	Title       MultiLangString `json:"title" bson:"title"`
+	Description MultiLangString `json:"description,omitempty" bson:"description,omitempty"`
+	Header      string          `json:"header,omitempty" bson:"header,omitempty"`
+	StreamURI   string          `json:"streamUri,omitempty" bson:"streamUri,omitempty"`
+	StartDate   time.Time       `json:"startDate,omitempty" bson:"startDate,omitempty"`
+	EndDate     time.Time       `json:"endDate,omitempty" bson:"endDate,omitempty"`
+	CensusID    bson.ObjectID   `json:"-" bson:"censusId"`    // internal ref to a db.Census
+	QuestionIDs []bson.ObjectID `json:"-" bson:"questionIds"` // ordered question references
 	// Publishing is the transient claim a publish worker holds on this process (see
 	// ClaimVotingProcessForPublish). It is a struct field rather than only a raw $set so that
 	// SetVotingProcess's ReplaceOne stops wiping a live claim, and so handlers can refuse to
@@ -729,23 +739,23 @@ func (vp *VotingProcess) PublishInProgress() bool {
 //
 //nolint:lll
 type VotingProcessQuestion struct {
-	ID                primitive.ObjectID `json:"id" bson:"_id,omitempty"`
-	ProcessID         primitive.ObjectID `json:"parentProcessId" bson:"processId"`
-	OrgAddress        common.Address     `json:"-" bson:"orgAddress"`
-	Order             int                `json:"-" bson:"order"`
-	Title             MultiLangString    `json:"title" bson:"title"`
-	Description       MultiLangString    `json:"description,omitempty" bson:"description,omitempty"`
-	Choices           []Choice           `json:"choices" bson:"choices"`
-	Type              string             `json:"type" bson:"type"`
-	TypeSetup         QuestionTypeSetup  `json:"typeSetup" bson:"typeSetup"`
-	BallotProtocol    *BallotProtocol    `json:"ballotProtocol,omitempty" bson:"ballotProtocol,omitempty"`
-	SecretUntilTheEnd bool               `json:"secretUntilTheEnd" bson:"secretUntilTheEnd"`
-	EligibleMemberIDs []string           `json:"eligibleMemberIds,omitempty" bson:"eligibleMemberIds"`
-	Metadata          map[string]any     `json:"metadata,omitempty" bson:"metadata,omitempty"`
-	UpstreamID        internal.HexBytes  `json:"upstreamId,omitempty" bson:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
-	MetadataURL       string             `json:"-" bson:"metadataURL,omitempty"`
-	Status            string             `json:"status,omitempty" bson:"status,omitempty"`
-	SyncedAt          time.Time          `json:"-" bson:"syncedAt,omitempty"`
+	ID                bson.ObjectID     `json:"id" bson:"_id,omitempty"`
+	ProcessID         bson.ObjectID     `json:"parentProcessId" bson:"processId"`
+	OrgAddress        common.Address    `json:"-" bson:"orgAddress"`
+	Order             int               `json:"-" bson:"order"`
+	Title             MultiLangString   `json:"title" bson:"title"`
+	Description       MultiLangString   `json:"description,omitempty" bson:"description,omitempty"`
+	Choices           []Choice          `json:"choices" bson:"choices"`
+	Type              string            `json:"type" bson:"type"`
+	TypeSetup         QuestionTypeSetup `json:"typeSetup" bson:"typeSetup"`
+	BallotProtocol    *BallotProtocol   `json:"ballotProtocol,omitempty" bson:"ballotProtocol,omitempty"`
+	SecretUntilTheEnd bool              `json:"secretUntilTheEnd" bson:"secretUntilTheEnd"`
+	EligibleMemberIDs []string          `json:"eligibleMemberIds,omitempty" bson:"eligibleMemberIds"`
+	Metadata          map[string]any    `json:"metadata,omitempty" bson:"metadata,omitempty"`
+	UpstreamID        internal.HexBytes `json:"upstreamId,omitempty" bson:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
+	MetadataURL       string            `json:"-" bson:"metadataURL,omitempty"`
+	Status            string            `json:"status,omitempty" bson:"status,omitempty"`
+	SyncedAt          time.Time         `json:"-" bson:"syncedAt,omitempty"`
 	// EncryptionKeys are the on-chain vote-encryption public keys of this question's election,
 	// resolved on read and cached (only for secretUntilTheEnd questions). Because of omitempty the
 	// JSON field is absent (not an empty array) until the keykeepers publish the keys, so clients
@@ -916,11 +926,11 @@ type JobResult struct {
 // Job represents a persistent import or transaction job with its results and errors.
 // This allows clients to query job status and errors even after server restarts.
 type Job struct {
-	ID         primitive.ObjectID `json:"id" bson:"_id"`
-	JobID      string             `json:"jobId" bson:"jobId"`           // The hex job ID
-	Type       JobType            `json:"type" bson:"type"`             // Job type constant
-	OrgAddress common.Address     `json:"orgAddress" bson:"orgAddress"` // For authorization
-	Total      int                `json:"total" bson:"total"`           // Total items processed
+	ID         bson.ObjectID  `json:"id" bson:"_id"`
+	JobID      string         `json:"jobId" bson:"jobId"`           // The hex job ID
+	Type       JobType        `json:"type" bson:"type"`             // Job type constant
+	OrgAddress common.Address `json:"orgAddress" bson:"orgAddress"` // For authorization
+	Total      int            `json:"total" bson:"total"`           // Total items processed
 	// Added counts the items successfully added for import jobs. For a batch vote relay
 	// (JobTypeRelayVotes) it counts the envelopes that have *finished*, successfully or
 	// not, so that the progress reported to the caller advances on every outcome.

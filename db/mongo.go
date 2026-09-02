@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/mongo/readpref"
-	"go.mongodb.org/mongo-driver/x/mongo/driver/connstring"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
+	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/connstring"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -104,16 +104,18 @@ func New(url, database string) (*MongoStorage, error) {
 	opts.ApplyURI(url)
 	opts.SetMaxConnecting(200)
 	opts.SetConnectTimeout(connectTimeout)
+	// keep driver v1 behavior: decode untyped embedded documents (e.g. locale maps
+	// inside Organization.Meta) as map[string]any instead of bson.D, which would
+	// leak into JSON responses as an array of {Key,Value} pairs
+	opts.SetBSONOptions(&options.BSONOptions{DefaultDocumentM: true})
 	// create a new client with the connection options
-	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
-	defer cancel()
-	client, err := mongo.Connect(ctx, opts)
+	client, err := mongo.Connect(opts)
 	if err != nil {
 		return nil, fmt.Errorf("cannot connect to mongodb: %w", err)
 	}
 	// check if the connection is successful
-	ctx, cancel2 := context.WithTimeout(context.Background(), connectTimeout)
-	defer cancel2()
+	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
+	defer cancel()
 	// try to ping the database
 	if err = client.Ping(ctx, readpref.Primary()); err != nil {
 		return nil, fmt.Errorf("cannot ping to mongodb: %w", err)
@@ -429,7 +431,7 @@ func (ms *MongoStorage) Import(jsonData []byte) error {
 	for _, user := range collection.Users {
 		filter := bson.M{"_id": user.ID}
 		update := bson.M{"$set": user}
-		opts := options.Update().SetUpsert(true)
+		opts := options.UpdateOne().SetUpsert(true)
 		_, err := ms.users.UpdateOne(ctx, filter, update, opts)
 		if err != nil {
 			log.Warnw("error upserting user", "error", err, "user", user.ID)
@@ -440,7 +442,7 @@ func (ms *MongoStorage) Import(jsonData []byte) error {
 	for _, org := range collection.Organizations {
 		filter := bson.M{"_id": org.Address}
 		update := bson.M{"$set": org}
-		opts := options.Update().SetUpsert(true)
+		opts := options.UpdateOne().SetUpsert(true)
 		_, err := ms.organizations.UpdateOne(ctx, filter, update, opts)
 		if err != nil {
 			log.Warnw("error upserting organization", "error", err, "organization", org.Address)
@@ -453,7 +455,7 @@ func (ms *MongoStorage) Import(jsonData []byte) error {
 	for _, census := range collection.Censuses {
 		filter := bson.M{"_id": census.ID}
 		update := bson.M{"$set": census}
-		opts := options.Update().SetUpsert(true)
+		opts := options.UpdateOne().SetUpsert(true)
 		_, err := ms.censuses.UpdateOne(ctx, filter, update, opts)
 		if err != nil {
 			log.Warnw("error upserting census", "error", err, "census", census.ID)
@@ -465,7 +467,7 @@ func (ms *MongoStorage) Import(jsonData []byte) error {
 	for _, orgMember := range collection.OrgMembers {
 		filter := bson.M{"_id": orgMember.ID}
 		update := bson.M{"$set": orgMember}
-		opts := options.Update().SetUpsert(true)
+		opts := options.UpdateOne().SetUpsert(true)
 		_, err := ms.orgMembers.UpdateOne(ctx, filter, update, opts)
 		if err != nil {
 			log.Warnw("error upserting organization member", "error", err, "orgMember", orgMember.ID)
@@ -480,7 +482,7 @@ func (ms *MongoStorage) Import(jsonData []byte) error {
 			"censusId":      censusParticipant.CensusID,
 		}
 		update := bson.M{"$set": censusParticipant}
-		opts := options.Update().SetUpsert(true)
+		opts := options.UpdateOne().SetUpsert(true)
 		_, err := ms.censusParticipants.UpdateOne(ctx, filter, update, opts)
 		if err != nil {
 			log.Warnw("error upserting census participant", "error", err, "censusParticipant", censusParticipant.ParticipantID)
@@ -492,7 +494,7 @@ func (ms *MongoStorage) Import(jsonData []byte) error {
 	for _, pubCensus := range collection.PublishedCensuses {
 		filter := bson.M{"root": pubCensus.Root, "uri": pubCensus.URI}
 		update := bson.M{"$set": pubCensus}
-		opts := options.Update().SetUpsert(true)
+		opts := options.UpdateOne().SetUpsert(true)
 		_, err := ms.publishedCensuses.UpdateOne(ctx, filter, update, opts)
 		if err != nil {
 			log.Warnw("error upserting published census", "error", err, "publishedCensus", pubCensus.Root)
@@ -504,7 +506,7 @@ func (ms *MongoStorage) Import(jsonData []byte) error {
 	for _, process := range collection.Processes {
 		filter := bson.M{"_id": process.ID}
 		update := bson.M{"$set": process}
-		opts := options.Update().SetUpsert(true)
+		opts := options.UpdateOne().SetUpsert(true)
 		_, err := ms.processes.UpdateOne(ctx, filter, update, opts)
 		if err != nil {
 			log.Warnw("error upserting process", "error", err, "process", process.ID.String())

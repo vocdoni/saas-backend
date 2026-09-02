@@ -6,7 +6,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // TestManagedOrgAggregates exercises the live integrator shared-pool readers against real
@@ -28,7 +28,7 @@ func TestManagedOrgAggregates(t *testing.T) {
 
 	addMember := func(addr common.Address, suffix string) {
 		_, err := testDB.SetOrgMember("test_salt", &OrgMember{
-			ID:           primitive.NewObjectID(),
+			ID:           bson.NewObjectID(),
 			OrgAddress:   addr,
 			MemberNumber: "mn-" + suffix,
 			Email:        "m-" + suffix + "@x.test",

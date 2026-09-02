@@ -12,7 +12,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // testCreateProvisionedOrganization creates an organization with eager on-chain account
@@ -112,7 +112,7 @@ func TestVotingProcessPublishRejectsStrayQuestion(t *testing.T) {
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, req, processesCreateEndpoint)
 	pid := created.ProcessID
-	oid, err := primitive.ObjectIDFromHex(pid)
+	oid, err := bson.ObjectIDFromHex(pid)
 	c.Assert(err, qt.IsNil)
 
 	// reproduce a corrupted state that is still representable now that the unique

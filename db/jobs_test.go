@@ -8,7 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func TestJobOperations(t *testing.T) {
@@ -182,7 +182,7 @@ func TestSetJob(t *testing.T) {
 	// Test SetJob (create)
 	err := testDB.SetJob(job)
 	c.Assert(err, qt.IsNil)
-	c.Assert(job.ID, qt.Not(qt.Equals), primitive.NilObjectID)
+	c.Assert(job.ID, qt.Not(qt.Equals), bson.NilObjectID)
 
 	// Test SetJob (update)
 	job.Added = 30

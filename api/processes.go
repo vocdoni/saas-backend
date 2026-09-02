@@ -16,7 +16,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	dvoteapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/log"
 )
@@ -328,7 +328,7 @@ func parseUpdatedAt(s string) (time.Time, error) {
 // writeDraftWriteConflict reports which of SetVotingProcessDraft's preconditions refused the write.
 // The function returns a bare db.ErrConflict, so the process is re-read to tell a publish that
 // started during the request apart from the optimistic-concurrency token going stale.
-func (a *API) writeDraftWriteConflict(w http.ResponseWriter, id primitive.ObjectID, updatedAt string) {
+func (a *API) writeDraftWriteConflict(w http.ResponseWriter, id bson.ObjectID, updatedAt string) {
 	switch current, err := a.db.VotingProcess(id); {
 	case err != nil:
 		// the state that refused us is unreadable; the token is the likelier cause and the
@@ -728,7 +728,7 @@ func (a *API) votingProcessQuestionHandler(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	qid, err := primitive.ObjectIDFromHex(chi.URLParam(r, "questionId"))
+	qid, err := bson.ObjectIDFromHex(chi.URLParam(r, "questionId"))
 	if err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid question ID").Write(w)
 		return
@@ -1075,17 +1075,17 @@ func (a *API) votingProcessResultsHandler(w http.ResponseWriter, r *http.Request
 }
 
 // votingProcessID parses and validates the {processId} URL param.
-func (*API) votingProcessID(w http.ResponseWriter, r *http.Request) (primitive.ObjectID, bool) {
-	oid, err := primitive.ObjectIDFromHex(chi.URLParam(r, "processId"))
+func (*API) votingProcessID(w http.ResponseWriter, r *http.Request) (bson.ObjectID, bool) {
+	oid, err := bson.ObjectIDFromHex(chi.URLParam(r, "processId"))
 	if err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid process ID").Write(w)
-		return primitive.NilObjectID, false
+		return bson.NilObjectID, false
 	}
 	return oid, true
 }
 
 // loadVotingProcess loads a voting process, writing the proper error on failure.
-func (a *API) loadVotingProcess(w http.ResponseWriter, oid primitive.ObjectID) (*db.VotingProcess, bool) {
+func (a *API) loadVotingProcess(w http.ResponseWriter, oid bson.ObjectID) (*db.VotingProcess, bool) {
 	vp, err := a.db.VotingProcess(oid)
 	if err != nil {
 		if err == db.ErrNotFound {
@@ -1148,7 +1148,7 @@ func questionSetProblem(vp *db.VotingProcess, questions []db.VotingProcessQuesti
 	if len(vp.QuestionIDs) == 0 {
 		return ""
 	}
-	expected := make(map[primitive.ObjectID]bool, len(vp.QuestionIDs))
+	expected := make(map[bson.ObjectID]bool, len(vp.QuestionIDs))
 	for _, id := range vp.QuestionIDs {
 		expected[id] = true
 	}

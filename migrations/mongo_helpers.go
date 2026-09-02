@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -79,7 +79,7 @@ func replaceIndexWithUpdateFunc(
 ) error {
 	// 1) drop old indexes
 	for _, name := range oldIndexes {
-		if _, err := collection.Indexes().DropOne(ctx, name); err != nil {
+		if err := collection.Indexes().DropOne(ctx, name); err != nil {
 			if strings.Contains(err.Error(), "IndexNotFound") {
 				continue
 			}

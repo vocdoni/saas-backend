@@ -11,7 +11,7 @@ import (
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 )
 
@@ -93,7 +93,7 @@ func TestFullElectionLifecycle(t *testing.T) {
 		VoteType:     db.VoteType{MaxCount: 1, MaxValue: 1},
 		ElectionType: db.ElectionType{Autostart: true, Interruptible: true},
 	}
-	draftID := requestAndParse[primitive.ObjectID](t, http.MethodPost, token,
+	draftID := requestAndParse[bson.ObjectID](t, http.MethodPost, token,
 		&apicommon.CreateProcessRequest{OrgAddress: orgAddress, ElectionParams: electionParams},
 		processCreateEndpoint)
 	c.Assert(draftID.IsZero(), qt.IsFalse)

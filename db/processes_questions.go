@@ -7,27 +7,26 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // SetQuestion creates or replaces a voting-process question document. It assigns an ID on
 // first insert. Questions are referenced (ordered) from their parent VotingProcess.
-func (ms *MongoStorage) SetQuestion(q *VotingProcessQuestion) (primitive.ObjectID, error) {
-	if q.ProcessID == primitive.NilObjectID {
-		return primitive.NilObjectID, ErrInvalidData
+func (ms *MongoStorage) SetQuestion(q *VotingProcessQuestion) (bson.ObjectID, error) {
+	if q.ProcessID == bson.NilObjectID {
+		return bson.NilObjectID, ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	if q.ID.IsZero() {
-		q.ID = primitive.NewObjectID()
+		q.ID = bson.NewObjectID()
 	}
 	filter := bson.M{"_id": q.ID} //nolint:goconst
 	opts := options.Replace().SetUpsert(true)
 	if _, err := ms.processesQuestions.ReplaceOne(ctx, filter, q, opts); err != nil {
-		return primitive.NilObjectID, fmt.Errorf("failed to create or update question: %w", err)
+		return bson.NilObjectID, fmt.Errorf("failed to create or update question: %w", err)
 	}
 	return q.ID, nil
 }
@@ -71,15 +70,15 @@ func (ms *MongoStorage) SetQuestion(q *VotingProcessQuestion) (primitive.ObjectI
 // Note this is not atomic across slots either: a concurrent reader can still observe a half-applied
 // update.
 func (ms *MongoStorage) SetProcessQuestions(
-	processID primitive.ObjectID, questions []*VotingProcessQuestion,
-) ([]primitive.ObjectID, error) {
-	if processID == primitive.NilObjectID {
+	processID bson.ObjectID, questions []*VotingProcessQuestion,
+) ([]bson.ObjectID, error) {
+	if processID == bson.NilObjectID {
 		return nil, ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	ids := make([]primitive.ObjectID, 0, len(questions))
+	ids := make([]bson.ObjectID, 0, len(questions))
 	for i, q := range questions {
 		q.ProcessID = processID
 		q.Order = i
@@ -90,7 +89,7 @@ func (ms *MongoStorage) SetProcessQuestions(
 		doc := questionDocWithoutID(q)
 		filter := bson.M{"processId": processID, "order": i} //nolint:goconst
 		stored := struct {
-			ID primitive.ObjectID `bson:"_id"`
+			ID bson.ObjectID `bson:"_id"`
 		}{}
 		var err error
 		// losing the insert race on an empty slot surfaces as a duplicate-key error on the unique
@@ -127,17 +126,17 @@ func (ms *MongoStorage) SetProcessQuestions(
 
 // questionDocWithoutID returns a copy of a question with its _id zeroed, so a replacement neither
 // overwrites the id of the row it lands on nor fails on the immutable field. The bson tag carries
-// omitempty and primitive.ObjectID implements IsZero, so the driver leaves the field out entirely —
+// omitempty and bson.ObjectID implements IsZero, so the driver leaves the field out entirely —
 // no marshal/unmarshal round-trip needed for what runs once per question on every draft save.
 func questionDocWithoutID(q *VotingProcessQuestion) *VotingProcessQuestion {
 	doc := *q
-	doc.ID = primitive.NilObjectID
+	doc.ID = bson.NilObjectID
 	return &doc
 }
 
 // Question returns a single question by its hex ObjectID.
-func (ms *MongoStorage) Question(id primitive.ObjectID) (*VotingProcessQuestion, error) {
-	if id == primitive.NilObjectID {
+func (ms *MongoStorage) Question(id bson.ObjectID) (*VotingProcessQuestion, error) {
+	if id == bson.NilObjectID {
 		return nil, ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -153,8 +152,8 @@ func (ms *MongoStorage) Question(id primitive.ObjectID) (*VotingProcessQuestion,
 }
 
 // QuestionsByProcess returns every question of a process, ordered by the Order field.
-func (ms *MongoStorage) QuestionsByProcess(processID primitive.ObjectID) ([]VotingProcessQuestion, error) {
-	if processID == primitive.NilObjectID {
+func (ms *MongoStorage) QuestionsByProcess(processID bson.ObjectID) ([]VotingProcessQuestion, error) {
+	if processID == bson.NilObjectID {
 		return nil, ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -193,9 +192,9 @@ func (ms *MongoStorage) QuestionByUpstreamID(upstreamID internal.HexBytes) (*Vot
 // SetQuestionPublished records the on-chain outcome of a single question in one targeted
 // update, leaving sibling questions untouched.
 func (ms *MongoStorage) SetQuestionPublished(
-	id primitive.ObjectID, upstreamID internal.HexBytes, metadataURL, status string,
+	id bson.ObjectID, upstreamID internal.HexBytes, metadataURL, status string,
 ) error {
-	if id == primitive.NilObjectID || len(upstreamID) == 0 {
+	if id == bson.NilObjectID || len(upstreamID) == 0 {
 		return ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -213,8 +212,8 @@ func (ms *MongoStorage) SetQuestionPublished(
 
 // SetQuestionStatus sets only the status field of a question (targeted update). Used by the
 // status-change handlers (optimistic write) and, later, the status syncer.
-func (ms *MongoStorage) SetQuestionStatus(id primitive.ObjectID, status string) error {
-	if id == primitive.NilObjectID {
+func (ms *MongoStorage) SetQuestionStatus(id bson.ObjectID, status string) error {
+	if id == bson.NilObjectID {
 		return ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -233,10 +232,10 @@ func (ms *MongoStorage) SetQuestionStatus(id primitive.ObjectID, status string) 
 // leaving every other field untouched. The vote-encryption public keys are immutable once published
 // by the keykeepers, so this is written once and only with a non-empty set (mirrors
 // SetProcessEncryptionKeys for the legacy single-election model).
-func (ms *MongoStorage) SetQuestionEncryptionKeys(id primitive.ObjectID, keys []EncryptionKey) error {
+func (ms *MongoStorage) SetQuestionEncryptionKeys(id bson.ObjectID, keys []EncryptionKey) error {
 	// keys are immutable and written once; reject an empty set so a stray call can never clobber
 	// already-cached keys with an empty array (matches the "non-empty" contract above).
-	if id == primitive.NilObjectID || len(keys) == 0 {
+	if id == bson.NilObjectID || len(keys) == 0 {
 		return ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -253,8 +252,8 @@ func (ms *MongoStorage) SetQuestionEncryptionKeys(id primitive.ObjectID, keys []
 
 // DeleteQuestion removes a single question document (used when replacing a draft's
 // questions on update).
-func (ms *MongoStorage) DeleteQuestion(id primitive.ObjectID) error {
-	if id == primitive.NilObjectID {
+func (ms *MongoStorage) DeleteQuestion(id bson.ObjectID) error {
+	if id == bson.NilObjectID {
 		return ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -268,8 +267,8 @@ func (ms *MongoStorage) DeleteQuestion(id primitive.ObjectID) error {
 // ResetQuestionsPublish clears the publish state (status, metadataURL) of the not-yet-mined
 // questions of a process (those without an upstreamId). Used to abandon a failed publish while
 // keeping any elections already on-chain, so a subsequent publish resumes the remaining ones.
-func (ms *MongoStorage) ResetQuestionsPublish(processID primitive.ObjectID) error {
-	if processID == primitive.NilObjectID {
+func (ms *MongoStorage) ResetQuestionsPublish(processID bson.ObjectID) error {
+	if processID == bson.NilObjectID {
 		return ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -340,9 +339,9 @@ func (ms *MongoStorage) SetQuestionStatusSynced(upstreamID internal.HexBytes, pr
 // how the document was last written, so an empty previous has to match all three. The new value is
 // always written as an array, so the eligibility $pull in the revocation cascade never meets a null.
 func (ms *MongoStorage) SetQuestionEligibleMemberIDs(
-	id primitive.ObjectID, previous, next []string,
+	id bson.ObjectID, previous, next []string,
 ) (bool, error) {
-	if id == primitive.NilObjectID {
+	if id == bson.NilObjectID {
 		return false, ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)

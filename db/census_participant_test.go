@@ -9,7 +9,7 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 const testParticipantID = "member123"
@@ -30,7 +30,7 @@ func setupTestCensusParticipantPrerequisites(t *testing.T, memberSuffix string) 
 	// Create test member with unique ID
 	memberNumber := testParticipantID + memberSuffix
 	member := &OrgMember{
-		ID:           primitive.NewObjectID(),
+		ID:           bson.NewObjectID(),
 		OrgAddress:   testOrgAddress,
 		MemberNumber: memberNumber,
 		Email:        "test" + memberSuffix + "@example.com",
@@ -55,7 +55,7 @@ func setupTestCensusParticipantPrerequisites(t *testing.T, memberSuffix string) 
 		t.Fatalf("failed to set census: %v", err)
 	}
 
-	oid, err := primitive.ObjectIDFromHex(censusID)
+	oid, err := bson.ObjectIDFromHex(censusID)
 	if err != nil {
 		t.Fatalf("failed to ObjectIDFromHex: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestCensusParticipant(t *testing.T) {
 		t.Run("NonExistentCensus", func(_ *testing.T) {
 			nonExistentParticipant := &CensusParticipant{
 				ParticipantID: testParticipantID,
-				CensusID:      primitive.NewObjectID().Hex(),
+				CensusID:      bson.NewObjectID().Hex(),
 			}
 			err := testDB.SetCensusParticipant(nonExistentParticipant)
 			c.Assert(err, qt.Not(qt.IsNil))
@@ -261,7 +261,7 @@ func TestCensusParticipant(t *testing.T) {
 				},
 			}
 			// Test with non-existent census
-			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", primitive.NewObjectID().Hex(), members)
+			progressChan, err := testDB.SetBulkCensusOrgMemberParticipant(testOrg, "test_salt", bson.NewObjectID().Hex(), members)
 			c.Assert(err, qt.Not(qt.IsNil))
 
 			// Channel should be closed immediately for non-existent census
@@ -391,7 +391,7 @@ func TestCensusParticipant(t *testing.T) {
 			member, census := setupTestCensusParticipantPrerequisites(t, "_memberIDs")
 
 			member2 := &OrgMember{
-				ID:           primitive.NewObjectID(),
+				ID:           bson.NewObjectID(),
 				OrgAddress:   testOrgAddress,
 				MemberNumber: "member2_memberIDs",
 				Email:        "member2_memberIDs@example.com",
@@ -401,7 +401,7 @@ func TestCensusParticipant(t *testing.T) {
 			_, err := testDB.SetOrgMember("test_salt", member2)
 			c.Assert(err, qt.IsNil)
 
-			unknownID := primitive.NewObjectID().Hex()
+			unknownID := bson.NewObjectID().Hex()
 			added, memberErrors, err := testDB.AddCensusParticipantsByMemberIDs(census.ID.Hex(),
 				[]string{member.ID.Hex(), member.ID.Hex(), unknownID, "", member2.ID.Hex()})
 			c.Assert(err, qt.IsNil)
@@ -428,7 +428,7 @@ func TestCensusParticipant(t *testing.T) {
 			member, census := setupTestCensusParticipantPrerequisites(t, "_memberIDs_conflict")
 
 			conflictingMember := &OrgMember{
-				ID:           primitive.NewObjectID(),
+				ID:           bson.NewObjectID(),
 				OrgAddress:   testOrgAddress,
 				MemberNumber: member.MemberNumber,
 				Name:         member.Name,
@@ -463,7 +463,7 @@ func TestCensusParticipant(t *testing.T) {
 			c.Assert(err, qt.IsNil)
 
 			member2 := &OrgMember{
-				ID:           primitive.NewObjectID(),
+				ID:           bson.NewObjectID(),
 				OrgAddress:   testOrgAddress,
 				MemberNumber: "member2_memberIDs_size",
 				Email:        "member2_memberIDs_size@example.com",
@@ -539,7 +539,7 @@ func TestCensusParticipant(t *testing.T) {
 		t.Run("InvalidData", func(_ *testing.T) {
 			// Test with empty login hash
 			censusWithNilID := *census
-			censusWithNilID.ID = primitive.NilObjectID
+			censusWithNilID.ID = bson.NilObjectID
 			_, err := testDB.CensusParticipantByLoginHash(censusWithNilID, *member)
 			c.Assert(err, qt.Equals, ErrInvalidData)
 		})
@@ -597,7 +597,7 @@ func TestCensusParticipant(t *testing.T) {
 		members := make([]*OrgMember, 0, 3)
 		for i := range 3 {
 			member := &OrgMember{
-				ID:             primitive.NewObjectID(),
+				ID:             bson.NewObjectID(),
 				OrgAddress:     testOrgAddress,
 				MemberNumber:   fmt.Sprintf("bulk-login-%d", i),
 				Name:           fmt.Sprintf("Bulk User %d", i),
@@ -628,7 +628,7 @@ func TestCensusParticipant(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 
 		// Update census with group ID
-		objID, err := primitive.ObjectIDFromHex(groupID)
+		objID, err := bson.ObjectIDFromHex(groupID)
 		c.Assert(err, qt.IsNil)
 		census.GroupID = objID
 		_, err = testDB.SetCensus(census)
@@ -694,7 +694,7 @@ func TestCensusParticipant(t *testing.T) {
 		// Trying to add a NEW member with the same details that caused a conflict should also succeed,
 		// since duplicates in memberbase are allowed, and a new member is not part of any census
 		{
-			member0.ID = primitive.NilObjectID
+			member0.ID = bson.NilObjectID
 			newMemberID, created, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, member0, "test_salt")
 			c.Assert(err, qt.IsNil)
 			c.Assert(created, qt.IsTrue)
@@ -705,7 +705,7 @@ func TestCensusParticipant(t *testing.T) {
 
 		// Passing an arbitrary (new) memberID should also work OK and create a new member
 		{
-			member0.ID = primitive.NewObjectID()
+			member0.ID = bson.NewObjectID()
 			newMemberID, created, err := testDB.UpsertOrgMemberAndCensusParticipants(testOrg, member0, "test_salt")
 			c.Assert(err, qt.IsNil)
 			c.Assert(created, qt.IsTrue)
@@ -736,7 +736,7 @@ func setupCensusParticipantsByMemberIDsFixtureForTrackedTests(t *testing.T) *cen
 
 	mkMember := func(memberNumber, email string) *OrgMember {
 		member := &OrgMember{
-			ID:           primitive.NewObjectID(),
+			ID:           bson.NewObjectID(),
 			OrgAddress:   testOrgAddress,
 			MemberNumber: memberNumber,
 			Email:        email,
@@ -758,7 +758,7 @@ func setupCensusParticipantsByMemberIDsFixtureForTrackedTests(t *testing.T) *cen
 	}
 	censusAID, err := testDB.SetCensus(censusA)
 	c.Assert(err, qt.IsNil)
-	censusAObjID, err := primitive.ObjectIDFromHex(censusAID)
+	censusAObjID, err := bson.ObjectIDFromHex(censusAID)
 	c.Assert(err, qt.IsNil)
 	censusA.ID = censusAObjID
 
@@ -768,7 +768,7 @@ func setupCensusParticipantsByMemberIDsFixtureForTrackedTests(t *testing.T) *cen
 	}
 	censusBID, err := testDB.SetCensus(censusB)
 	c.Assert(err, qt.IsNil)
-	censusBObjID, err := primitive.ObjectIDFromHex(censusBID)
+	censusBObjID, err := bson.ObjectIDFromHex(censusBID)
 	c.Assert(err, qt.IsNil)
 	censusB.ID = censusBObjID
 
@@ -871,7 +871,7 @@ func TestCreateCensusParticipantBulkOperationsFiltering(t *testing.T) {
 
 	// Create a census
 	census := &Census{
-		ID:         primitive.NewObjectID(),
+		ID:         bson.NewObjectID(),
 		OrgAddress: testOrgAddress,
 		Type:       CensusTypeMail,
 		CreatedAt:  time.Now(),
@@ -883,7 +883,7 @@ func TestCreateCensusParticipantBulkOperationsFiltering(t *testing.T) {
 	// Create test members
 	members := []*OrgMember{
 		{
-			ID:           primitive.NewObjectID(),
+			ID:           bson.NewObjectID(),
 			OrgAddress:   testOrgAddress,
 			MemberNumber: "filter-test-1",
 			Email:        "filter1@example.com",
@@ -891,7 +891,7 @@ func TestCreateCensusParticipantBulkOperationsFiltering(t *testing.T) {
 			UpdatedAt:    time.Now(),
 		},
 		{
-			ID:           primitive.NewObjectID(),
+			ID:           bson.NewObjectID(),
 			OrgAddress:   testOrgAddress,
 			MemberNumber: "filter-test-2",
 			Email:        "filter2@example.com",
@@ -907,7 +907,7 @@ func TestCreateCensusParticipantBulkOperationsFiltering(t *testing.T) {
 	}
 
 	// Get the census ObjectID
-	censusObjID, err := primitive.ObjectIDFromHex(censusID)
+	censusObjID, err := bson.ObjectIDFromHex(censusID)
 	c.Assert(err, qt.IsNil)
 
 	t.Run("InitialCreation", func(_ *testing.T) {

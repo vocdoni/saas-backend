@@ -10,7 +10,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // Using types from apicommon package
@@ -28,7 +28,7 @@ type AddProcessesToBundleRequest struct {
 func (a *API) resolveBundleProcessID(raw string) (internal.HexBytes, *errors.Error) {
 	// A ProcessID is exactly 24 hex chars, so it never collides with an on-chain id. Anything that
 	// isn't a 24-hex ObjectID is treated as the on-chain id directly, exactly as before.
-	if objID, err := primitive.ObjectIDFromHex(raw); err == nil {
+	if objID, err := bson.ObjectIDFromHex(raw); err == nil {
 		process, err := a.db.Process(objID)
 		if err != nil {
 			if err == db.ErrNotFound {

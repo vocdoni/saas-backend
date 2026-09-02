@@ -7,7 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // seedOrg persists an organization at addr (with Country so phone hashing would work) and returns it.
@@ -19,11 +19,11 @@ func seedOrg(t *testing.T, addr common.Address) {
 
 // seedMemberAndCensus creates an org member and a census owned by addr, returning their ids.
 // Both are prerequisites for several downstream collections (census participants, member groups).
-func seedMemberAndCensus(t *testing.T, addr common.Address, suffix string) (memberID, censusID primitive.ObjectID) {
+func seedMemberAndCensus(t *testing.T, addr common.Address, suffix string) (memberID, censusID bson.ObjectID) {
 	t.Helper()
 	c := qt.New(t)
 	member := &OrgMember{
-		ID:           primitive.NewObjectID(),
+		ID:           bson.NewObjectID(),
 		OrgAddress:   addr,
 		MemberNumber: "mn-" + suffix,
 		Email:        "m-" + suffix + "@x.test",
@@ -40,7 +40,7 @@ func seedMemberAndCensus(t *testing.T, addr common.Address, suffix string) (memb
 		UpdatedAt:   time.Now(),
 	})
 	c.Assert(err, qt.IsNil)
-	censusOID, err := primitive.ObjectIDFromHex(censusIDStr)
+	censusOID, err := bson.ObjectIDFromHex(censusIDStr)
 	c.Assert(err, qt.IsNil)
 	return member.ID, censusOID
 }

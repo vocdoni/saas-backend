@@ -17,7 +17,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/twilio/twilio-go v1.31.0
 	github.com/xlzd/gotp v0.1.0
-	go.mongodb.org/mongo-driver v1.17.9
+	go.mongodb.org/mongo-driver v1.17.9 // indirect
 	go.vocdoni.io/dvote v1.10.2-0.20260901150211-33a981e44494
 	go.vocdoni.io/proto v1.15.14
 	golang.org/x/crypto v0.55.0
@@ -30,6 +30,7 @@ require (
 	github.com/stripe/stripe-go/v82 v82.5.1
 	github.com/testcontainers/testcontainers-go/modules/mongodb v0.44.0
 	github.com/vocdoni/go-blindsecp256k1 v0.2.0
+	go.mongodb.org/mongo-driver/v2 v2.8.2
 )
 
 require (
@@ -347,7 +348,7 @@ require (
 	github.com/whyrusleeping/multiaddr-filter v0.0.0-20160516205228-e903e4adabd7 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
-	github.com/xdg-go/scram v1.1.2 // indirect
+	github.com/xdg-go/scram v1.2.0 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect

@@ -7,10 +7,9 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // SetJob creates a new job record in the database or updates an existing one.
@@ -22,8 +21,8 @@ func (ms *MongoStorage) SetJob(job *Job) error {
 	defer ms.keysLock.Unlock()
 
 	// If no ID is set, create a new one
-	if job.ID == primitive.NilObjectID {
-		job.ID = primitive.NewObjectID()
+	if job.ID == bson.NilObjectID {
+		job.ID = bson.NewObjectID()
 	}
 
 	// Create update document
@@ -34,7 +33,7 @@ func (ms *MongoStorage) SetJob(job *Job) error {
 
 	// Upsert the job
 	filter := bson.M{"jobId": job.JobID}
-	opts := options.Update().SetUpsert(true)
+	opts := options.UpdateOne().SetUpsert(true)
 	_, err = ms.jobs.UpdateOne(ctx, filter, updateDoc, opts)
 	if err != nil {
 		return fmt.Errorf("failed to upsert job: %w", err)

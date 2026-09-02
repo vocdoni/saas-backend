@@ -5,8 +5,8 @@ import (
 	stderrors "errors"
 	"fmt"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 func init() {
@@ -58,7 +58,7 @@ func downCensusRevocationIndexes(ctx context.Context, database *mongo.Database) 
 		{"cspTokens", "bundleid_1"},
 		{"votingProcesses", "censusId_1"},
 	} {
-		if _, err := database.Collection(idx.collection).Indexes().DropOne(ctx, idx.name); err != nil {
+		if err := database.Collection(idx.collection).Indexes().DropOne(ctx, idx.name); err != nil {
 			// Nothing to drop is not a failure to drop: IndexNotFound (27) means the up never got
 			// far enough to create it, NamespaceNotFound (26) that the collection itself is gone.
 			// The driver only forgives 26 on IndexView.List, so DropOne needs it spelled out here.

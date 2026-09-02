@@ -9,7 +9,7 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/proto/build/go/models"
 )
 
@@ -205,7 +205,7 @@ func enableProcessPlan(t *testing.T, orgAddress common.Address) struct{} {
 }
 
 // seedDraftForManagedOrg creates a publishable draft process owned by the managed org.
-func seedDraftForManagedOrg(t *testing.T, orgAddress common.Address) primitive.ObjectID {
+func seedDraftForManagedOrg(t *testing.T, orgAddress common.Address) bson.ObjectID {
 	t.Helper()
 	draftID, err := testDB.SetProcess(&db.Process{
 		OrgAddress: orgAddress,

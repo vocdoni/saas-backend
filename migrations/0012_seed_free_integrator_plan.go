@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func init() {
@@ -56,7 +56,7 @@ func upSeedFreeIntegratorPlan(ctx context.Context, database *mongo.Database) err
 	}
 	filter := bson.M{"_id": freeIntegratorPlanID}
 	update := bson.M{"$setOnInsert": doc}
-	opts := options.Update().SetUpsert(true)
+	opts := options.UpdateOne().SetUpsert(true)
 	if _, err := database.Collection("plans").UpdateOne(ctx, filter, update, opts); err != nil {
 		return fmt.Errorf("failed to seed free integrator plan: %w", err)
 	}

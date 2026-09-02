@@ -8,8 +8,7 @@ import (
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/bsontype"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // HexBytes is a []byte that encodes as hexadecimal in JSON (instead of the default base64).
@@ -114,13 +113,14 @@ func (hb *HexBytes) UnmarshalJSON(data []byte) error {
 
 // MarshalBSONValue makes HexBytes be marshalled to a string
 // rather than the default (binary)
-func (hb HexBytes) MarshalBSONValue() (bsontype.Type, []byte, error) {
-	return bson.MarshalValue(hb.String())
+func (hb HexBytes) MarshalBSONValue() (byte, []byte, error) {
+	t, data, err := bson.MarshalValue(hb.String())
+	return byte(t), data, err
 }
 
-func (hb *HexBytes) UnmarshalBSONValue(t bsontype.Type, data []byte) error {
+func (hb *HexBytes) UnmarshalBSONValue(t byte, data []byte) error {
 	var s string
-	if err := bson.UnmarshalValue(t, data, &s); err != nil {
+	if err := bson.UnmarshalValue(bson.Type(t), data, &s); err != nil {
 		return err
 	}
 	return hb.ParseString(s)

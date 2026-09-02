@@ -8,9 +8,8 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -345,9 +344,9 @@ func rehashCensus(
 func loadMembersFor(
 	ctx context.Context, database *mongo.Database, rows []participantHashRow,
 ) (map[string]memberHashDoc, error) {
-	ids := make([]primitive.ObjectID, 0, len(rows))
+	ids := make([]bson.ObjectID, 0, len(rows))
 	for _, row := range rows {
-		oid, err := primitive.ObjectIDFromHex(row.ParticipantID)
+		oid, err := bson.ObjectIDFromHex(row.ParticipantID)
 		if err != nil {
 			continue // malformed id: treated as an orphan below
 		}

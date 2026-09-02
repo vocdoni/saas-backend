@@ -12,7 +12,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -445,7 +445,7 @@ func (a *API) updateVotingProcessQuestionCensusHandler(w http.ResponseWriter, r 
 func questionOfProcess(
 	w http.ResponseWriter, questions []db.VotingProcessQuestion, questionID string,
 ) (*db.VotingProcessQuestion, bool) {
-	qid, err := primitive.ObjectIDFromHex(questionID)
+	qid, err := bson.ObjectIDFromHex(questionID)
 	if err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid question ID").Write(w)
 		return nil, false

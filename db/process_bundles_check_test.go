@@ -6,7 +6,7 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // setupCheckBundleFixture seeds an organization, three org members, a census
@@ -57,7 +57,7 @@ func setupCheckBundleFixture(t *testing.T) *checkBundleFixture {
 	}
 	censusIDStr, err := testDB.SetCensus(census)
 	c.Assert(err, qt.IsNil)
-	oid, err := primitive.ObjectIDFromHex(censusIDStr)
+	oid, err := bson.ObjectIDFromHex(censusIDStr)
 	c.Assert(err, qt.IsNil)
 	census.ID = oid
 

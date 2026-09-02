@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -94,7 +94,7 @@ func (ms *MongoStorage) SetOrganization(org *Organization) error {
 		return err
 	}
 	// set upsert to true to create the document if it doesn't exist
-	opts := options.Update().SetUpsert(true)
+	opts := options.UpdateOne().SetUpsert(true)
 	if _, err := ms.organizations.UpdateOne(ctx, bson.M{"_id": org.Address}, updateDoc, opts); err != nil {
 		if mongo.IsDuplicateKeyError(err) {
 			return ErrAlreadyExists

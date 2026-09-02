@@ -13,7 +13,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/dvote/vochain/state"
@@ -507,7 +507,7 @@ func (a *API) recordBatchVote(jobID string, index int) func(*db.JobResult, error
 //	@Deprecated
 //	@Router	/process/{processId}/status [put]
 func (a *API) setProcessStatusHandler(w http.ResponseWriter, r *http.Request) {
-	objID, err := primitive.ObjectIDFromHex(chi.URLParam(r, "processId"))
+	objID, err := bson.ObjectIDFromHex(chi.URLParam(r, "processId"))
 	if err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid process id").Write(w)
 		return

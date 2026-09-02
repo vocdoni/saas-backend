@@ -12,7 +12,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func TestCreateOrganizationHandler(t *testing.T) {
@@ -443,7 +443,7 @@ func testCreateOrganizationBundle(t *testing.T, orgAddress common.Address, proce
 	}
 	censusID, err := testDB.SetCensus(census)
 	c.Assert(err, qt.IsNil)
-	census.ID, err = primitive.ObjectIDFromHex(censusID)
+	census.ID, err = bson.ObjectIDFromHex(censusID)
 	c.Assert(err, qt.IsNil)
 
 	process := &db.Process{

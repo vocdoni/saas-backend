@@ -10,7 +10,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 )
 
@@ -188,5 +188,5 @@ func TestProcessesCensusGroupID(t *testing.T) {
 	}
 	c.Assert(groups, qt.Contains, group.ID)
 	c.Assert(groups, qt.Contains, "")
-	c.Assert(groups, qt.Not(qt.Contains), primitive.NilObjectID.Hex())
+	c.Assert(groups, qt.Not(qt.Contains), bson.NilObjectID.Hex())
 }

@@ -6,7 +6,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 var (
@@ -60,7 +60,7 @@ func TestProcessBundles(t *testing.T) {
 		nonExistentBundle := &ProcessesBundle{
 			OrgAddress: testNonExistentOrg,
 			Census: Census{
-				ID:         primitive.NewObjectID(),
+				ID:         bson.NewObjectID(),
 				OrgAddress: testNonExistentOrg,
 				Type:       CensusTypeMail,
 				Published: PublishedCensus{
@@ -217,7 +217,7 @@ func TestProcessBundles(t *testing.T) {
 		}
 		census2ID, err := testDB.SetCensus(census2)
 		c.Assert(err, qt.IsNil)
-		census2.ID, err = primitive.ObjectIDFromHex(census2ID)
+		census2.ID, err = bson.ObjectIDFromHex(census2ID)
 		c.Assert(err, qt.IsNil)
 
 		// Create test processes
@@ -273,7 +273,7 @@ func TestProcessBundles(t *testing.T) {
 		}
 		censusWithoutBundlesID, err := testDB.SetCensus(censusWithoutBundles)
 		c.Assert(err, qt.IsNil)
-		censusWithoutBundles.ID, err = primitive.ObjectIDFromHex(censusWithoutBundlesID)
+		censusWithoutBundles.ID, err = bson.ObjectIDFromHex(censusWithoutBundlesID)
 		c.Assert(err, qt.IsNil)
 
 		bundles, err = testDB.ProcessBundlesByCensus(censusWithoutBundles)
@@ -294,7 +294,7 @@ func TestProcessBundles(t *testing.T) {
 		}
 		otherCensusID, err := testDB.SetCensus(otherCensus)
 		c.Assert(err, qt.IsNil)
-		otherCensus.ID, err = primitive.ObjectIDFromHex(otherCensusID)
+		otherCensus.ID, err = bson.ObjectIDFromHex(otherCensusID)
 		c.Assert(err, qt.IsNil)
 
 		process1 := createTestProcess(c, testDB, testProcessID, census)

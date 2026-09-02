@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func init() {
@@ -25,7 +25,7 @@ func upInitialPlansStub(ctx context.Context, database *mongo.Database) error {
 	for _, p := range plans {
 		filter := bson.M{"_id": p.ID}
 		update := bson.M{"$set": p}
-		opts := options.Update().SetUpsert(true)
+		opts := options.UpdateOne().SetUpsert(true)
 		if _, err := database.Collection("plans").UpdateOne(ctx, filter, update, opts); err != nil {
 			return fmt.Errorf("failed to upsert plan with ID %d: %w", p.ID, err)
 		}

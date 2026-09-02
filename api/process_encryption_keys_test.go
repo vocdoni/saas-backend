@@ -10,7 +10,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/proto/build/go/models"
 )
 
@@ -107,7 +107,7 @@ func TestProcessEncryptionKeys(t *testing.T) {
 	}
 
 	// the keys are immutable once published, so they are cached on the stored process
-	encParsedID, err := primitive.ObjectIDFromHex(encObjID)
+	encParsedID, err := bson.ObjectIDFromHex(encObjID)
 	c.Assert(err, qt.IsNil)
 	stored, err := testDB.Process(encParsedID)
 	c.Assert(err, qt.IsNil)

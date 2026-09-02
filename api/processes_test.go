@@ -16,7 +16,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	dvoteapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/types"
 )
@@ -156,7 +156,7 @@ func TestVotingProcessLegacyDraftShapeRoundTrip(t *testing.T) {
 		t, http.MethodPost, adminToken, newVotingProcessRequest(orgAddress, ids), processesCreateEndpoint,
 	)
 	pid := created.ProcessID
-	oid, err := primitive.ObjectIDFromHex(pid)
+	oid, err := bson.ObjectIDFromHex(pid)
 	c.Assert(err, qt.IsNil)
 
 	// rewrite the stored questions as the pre-reconciliation code left them: Q1 carries the #619
@@ -823,7 +823,7 @@ func TestVotingProcessParticipant(t *testing.T) {
 	requestAndAssertCode(http.StatusOK, t, http.MethodGet, "", nil, "processes", created.ProcessID, "participants", ids[0])
 	// a non-existent process is 404
 	requestAndAssertCode(http.StatusNotFound, t, http.MethodGet, "", nil,
-		"processes", primitive.NewObjectID().Hex(), "participants", ids[0])
+		"processes", bson.NewObjectID().Hex(), "participants", ids[0])
 	// a malformed process id is 400
 	requestAndAssertCode(http.StatusBadRequest, t, http.MethodGet, "", nil, "processes", "not-an-id", "participants", ids[0])
 }
@@ -841,7 +841,7 @@ func TestVotingProcessStalePublishReclaim(t *testing.T) {
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, newVotingProcessRequest(orgAddress, ids), processesCreateEndpoint,
 	)
-	oid, err := primitive.ObjectIDFromHex(created.ProcessID)
+	oid, err := bson.ObjectIDFromHex(created.ProcessID)
 	c.Assert(err, qt.IsNil)
 
 	won, err := testDB.ClaimVotingProcessForPublish(oid)
@@ -1246,7 +1246,7 @@ func TestVotingProcessPublishGateSkipsMinted(t *testing.T) {
 	c.Assert(val.Valid, qt.IsFalse, qt.Commentf("unmined ranked question must be gated"))
 
 	// simulate the question having already mined on chain (UpstreamID set)
-	oid, err := primitive.ObjectIDFromHex(created.ProcessID)
+	oid, err := bson.ObjectIDFromHex(created.ProcessID)
 	c.Assert(err, qt.IsNil)
 	stored, err := testDB.QuestionsByProcess(oid)
 	c.Assert(err, qt.IsNil)

@@ -7,10 +7,9 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -80,7 +79,7 @@ func (ms *MongoStorage) SetCensusParticipant(participant *CensusParticipant) err
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	opts := options.Update().SetUpsert(true)
+	opts := options.UpdateOne().SetUpsert(true)
 	if _, err := ms.censusParticipants.UpdateOne(ctx, filter, updateDoc, opts); err != nil {
 		return fmt.Errorf("failed to set census participant: %w", err)
 	}
@@ -263,7 +262,7 @@ type BulkCensusParticipantStatus struct {
 func createCensusParticipantBulkOperations(
 	orgMembers []*OrgMember,
 	org *Organization,
-	censusID primitive.ObjectID,
+	censusID bson.ObjectID,
 	salt string,
 	currentTime time.Time,
 ) (orgMembersOps []mongo.WriteModel, censusParticipantOps []mongo.WriteModel) {
