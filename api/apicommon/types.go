@@ -1185,7 +1185,7 @@ func (p *OrgMember) ToDB() *db.OrgMember {
 		var err error
 		id, err = bson.ObjectIDFromHex(p.ID)
 		if err != nil {
-			log.Warnf("Failed to convert member ID %s to ObjectID: %v", p.ID, err)
+			log.Warnf("failed to convert member ID %s to ObjectID: %v", p.ID, err)
 		}
 	}
 	// if the weight is provided convert it to int, defaults to 1

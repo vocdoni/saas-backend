@@ -39,7 +39,7 @@ import (
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			request	body		apicommon.CreateProcessRequest	true	"Process creation information (optionally with electionParams)"
-//	@Success		200		{object}	bson.ObjectID				"Bare JSON string: 24-hex draft ProcessID, e.g. 507f1f77bcf86cd799439011"
+//	@Success		200		{string}	string							"Bare JSON string: 24-hex draft ProcessID, e.g. 507f1f77bcf86cd799439011"
 //	@Failure		400		{object}	errors.Error					"Invalid input data"
 //	@Failure		401		{object}	errors.Error					"Unauthorized"
 //	@Failure		403		{object}	errors.Error					"Plan does not allow creating more drafts"
