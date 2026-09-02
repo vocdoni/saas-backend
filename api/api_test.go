@@ -415,9 +415,9 @@ func TestMain(m *testing.M) {
 			SMTPUsername: adminUser,
 			SMTPPassword: adminPass,
 			SMTPServer:   mailHost,
-			SMTPPort:     smtpPort.Int(),
+			SMTPPort:     int(smtpPort.Num()),
 		},
-		TestAPIPort: apiPort.Int(),
+		TestAPIPort: int(apiPort.Num()),
 	}); err != nil {
 		panic(err)
 	}

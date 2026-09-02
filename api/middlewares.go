@@ -11,7 +11,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/jwtauth/v5"
-	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/lestrrat-go/jwx/v3/jwt"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
@@ -44,9 +44,8 @@ func (a *API) userFromToken(token jwt.Token) (*db.User, error) {
 	if token == nil || jwt.Validate(token, jwt.WithRequiredClaim("userId")) != nil {
 		return nil, errInvalidUserClaim
 	}
-	claim, _ := token.Get("userId")
-	email, ok := claim.(string)
-	if !ok {
+	var email string
+	if err := token.Get("userId", &email); err != nil {
 		return nil, errInvalidUserClaim
 	}
 	user, err := a.db.UserByEmail(email)

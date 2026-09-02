@@ -11,7 +11,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-chi/chi/v5"
-	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/lestrrat-go/jwx/v3/jwt"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
@@ -52,24 +52,16 @@ func (a *API) organizationFromRequest(r *http.Request) (org *db.Organization, pa
 // The token is signed with the API secret, following the JWT specification.
 // The token is valid for the period specified on jwtExpiration constant.
 func (a *API) buildLoginResponse(id string) (*apicommon.LoginResponse, error) {
-	j := jwt.New()
-	if err := j.Set("userId", id); err != nil {
-		return nil, err
-	}
 	// pass a time.Time so jwx encodes a proper NumericDate (seconds). An int64 here would be
 	// read as Unix *seconds*, so a nanosecond value would push expiry ~55 billion years out
 	// and jwt.Validate would never reject the token on expiry.
 	expiry := time.Now().Add(jwtExpiration)
-	if err := j.Set(jwt.ExpirationKey, expiry); err != nil {
-		return nil, err
-	}
 	lr := apicommon.LoginResponse{}
 	lr.Expirity = expiry
-	jmap, err := j.AsMap(context.Background())
-	if err != nil {
+	var err error
+	if _, lr.Token, err = a.auth.Encode(map[string]any{"userId": id, jwt.ExpirationKey: expiry}); err != nil {
 		return nil, err
 	}
-	_, lr.Token, _ = a.auth.Encode(jmap)
 	return &lr, nil
 }
 
