@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -10,7 +9,7 @@ import (
 
 	qt "github.com/frankban/quicktest"
 	"github.com/go-chi/jwtauth/v5"
-	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/lestrrat-go/jwx/v3/jwt"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 )
@@ -58,14 +57,12 @@ func TestJobStatusImportErrorsGatedByRole(t *testing.T) {
 	// Mint one for the admin's email, mirroring buildLoginResponse but with a past expiry.
 	valid, err := jwtauth.VerifyToken(testAPI.auth, adminToken)
 	c.Assert(err, qt.IsNil)
-	emailClaim, ok := valid.Get("userId")
-	c.Assert(ok, qt.IsTrue)
-	j := jwt.New()
-	c.Assert(j.Set("userId", emailClaim), qt.IsNil)
-	c.Assert(j.Set(jwt.ExpirationKey, time.Now().Add(-time.Hour)), qt.IsNil)
-	jmap, err := j.AsMap(context.Background())
-	c.Assert(err, qt.IsNil)
-	_, expiredToken, err := testAPI.auth.Encode(jmap)
+	var emailClaim string
+	c.Assert(valid.Get("userId", &emailClaim), qt.IsNil)
+	_, expiredToken, err := testAPI.auth.Encode(map[string]any{
+		"userId":          emailClaim,
+		jwt.ExpirationKey: time.Now().Add(-time.Hour),
+	})
 	c.Assert(err, qt.IsNil)
 	assertStripped("expired-admin", expiredToken)
 

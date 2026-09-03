@@ -14,7 +14,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 )
 
@@ -198,7 +198,7 @@ func TestProcessCSP(t *testing.T) {
 
 	// a verified token anchored to a different process is rejected on this one
 	otherTok := internal.HexBytes(internal.RandomBytes(16))
-	otherOID := primitive.NewObjectID()
+	otherOID := bson.NewObjectID()
 	otherAnchor := internal.HexBytes(otherOID[:])
 	c.Assert(testDB.SetCSPAuth(otherTok, internal.HexBytesFromString(members[0].ID), otherAnchor, ""), qt.IsNil)
 	c.Assert(testDB.VerifyCSPAuth(otherTok), qt.IsNil)

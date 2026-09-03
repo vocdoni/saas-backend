@@ -8,10 +8,9 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -23,7 +22,7 @@ func (ms *MongoStorage) OrganizationMemberGroup(
 	if orgAddress.Cmp(common.Address{}) == 0 {
 		return nil, ErrInvalidData
 	}
-	objID, err := primitive.ObjectIDFromHex(groupID)
+	objID, err := bson.ObjectIDFromHex(groupID)
 	if err != nil {
 		return nil, ErrInvalidData
 	}
@@ -108,7 +107,7 @@ func (ms *MongoStorage) CreateOrganizationMemberGroup(group *OrganizationMemberG
 		return "", err
 	}
 	// create the group id
-	group.ID = primitive.NewObjectID()
+	group.ID = bson.NewObjectID()
 	group.CreatedAt = time.Now()
 	group.UpdatedAt = time.Now()
 	group.CensusIDs = make([]string, 0)
@@ -149,7 +148,7 @@ func (ms *MongoStorage) UpdateOrganizationMemberGroup(
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	objID, err := primitive.ObjectIDFromHex(groupID)
+	objID, err := bson.ObjectIDFromHex(groupID)
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +255,7 @@ func (ms *MongoStorage) addOrganizationMemberGroupCensus(
 		return ErrInvalidData
 	}
 
-	objID, err := primitive.ObjectIDFromHex(groupID)
+	objID, err := bson.ObjectIDFromHex(groupID)
 	if err != nil {
 		return fmt.Errorf("invalid group ID: %w", err)
 	}
@@ -299,7 +298,7 @@ func (ms *MongoStorage) DeleteOrganizationMemberGroup(
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	objID, err := primitive.ObjectIDFromHex(groupID)
+	objID, err := bson.ObjectIDFromHex(groupID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid group ID: %w", err)
 	}
@@ -436,14 +435,14 @@ func (ms *MongoStorage) CheckMembersFields(
 	}
 	// Report requested ids that matched no member of this org (unknown or foreign). The create path
 	// silently drops these, so flag them here rather than returning a green pre-flight.
-	found := make(map[primitive.ObjectID]struct{}, len(results.Members)+len(results.Duplicates)+len(results.MissingData))
-	for _, set := range [][]primitive.ObjectID{results.Members, results.Duplicates, results.MissingData} {
+	found := make(map[bson.ObjectID]struct{}, len(results.Members)+len(results.Duplicates)+len(results.MissingData))
+	for _, set := range [][]bson.ObjectID{results.Members, results.Duplicates, results.MissingData} {
 		for _, id := range set {
 			found[id] = struct{}{}
 		}
 	}
 	for _, hexID := range memberIDs {
-		oid, err := primitive.ObjectIDFromHex(hexID)
+		oid, err := bson.ObjectIDFromHex(hexID)
 		if err != nil {
 			return nil, fmt.Errorf("invalid member ID %s: %w", hexID, ErrInvalidData)
 		}
@@ -463,14 +462,14 @@ func aggregateMemberFields(
 	twoFaFields OrgMemberTwoFaFields,
 ) (*OrgMemberAggregationResults, error) {
 	results := OrgMemberAggregationResults{
-		Members:     make([]primitive.ObjectID, 0),
-		Duplicates:  make([]primitive.ObjectID, 0),
-		MissingData: make([]primitive.ObjectID, 0),
-		NotFound:    make([]primitive.ObjectID, 0),
+		Members:     make([]bson.ObjectID, 0),
+		Duplicates:  make([]bson.ObjectID, 0),
+		MissingData: make([]bson.ObjectID, 0),
+		NotFound:    make([]bson.ObjectID, 0),
 	}
 
-	seenKeys := make(map[string]primitive.ObjectID, cur.RemainingBatchLength())
-	duplicates := make(map[primitive.ObjectID]struct{}, 0)
+	seenKeys := make(map[string]bson.ObjectID, cur.RemainingBatchLength())
+	duplicates := make(map[bson.ObjectID]struct{}, 0)
 
 	for cur.Next(ctx) {
 		// decode into a map so we can handle dynamic fields
@@ -548,9 +547,9 @@ func (ms *MongoStorage) getGroupMembersFields(
 			if len(group.MemberIDs) == 0 {
 				return nil, fmt.Errorf("no members in group %s for organization %s: %w", groupID, orgAddress, ErrInvalidData)
 			}
-			objectIDs := make([]primitive.ObjectID, len(group.MemberIDs))
+			objectIDs := make([]bson.ObjectID, len(group.MemberIDs))
 			for i, id := range group.MemberIDs {
-				objID, err := primitive.ObjectIDFromHex(id)
+				objID, err := bson.ObjectIDFromHex(id)
 				if err != nil {
 					return nil, fmt.Errorf("invalid member ID %s: %w", id, ErrInvalidData)
 				}
@@ -574,9 +573,9 @@ func (ms *MongoStorage) getMembersFields(
 	authFields OrgMemberAuthFields,
 	twoFaFields OrgMemberTwoFaFields,
 ) (*mongo.Cursor, error) {
-	objectIDs := make([]primitive.ObjectID, len(memberIDs))
+	objectIDs := make([]bson.ObjectID, len(memberIDs))
 	for i, id := range memberIDs {
-		objID, err := primitive.ObjectIDFromHex(id)
+		objID, err := bson.ObjectIDFromHex(id)
 		if err != nil {
 			return nil, fmt.Errorf("invalid member ID %s: %w", id, ErrInvalidData)
 		}
@@ -717,7 +716,7 @@ func (ms *MongoStorage) EnsureAutoMemberGroup(orgAddress common.Address) error {
 	defer cancel()
 
 	group := OrganizationMemberGroup{
-		ID:          primitive.NewObjectID(),
+		ID:          bson.NewObjectID(),
 		OrgAddress:  orgAddress,
 		Title:       AutoGroupTitle,
 		Description: AutoGroupDescription,

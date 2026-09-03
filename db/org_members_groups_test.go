@@ -6,7 +6,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 const testGroupMemberNumber = "member123"
@@ -107,7 +107,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 
 		t.Run("NonExistentGroup", func(_ *testing.T) {
 			// Test getting non-existent group
-			nonExistentID := primitive.NewObjectID().Hex()
+			nonExistentID := bson.NewObjectID().Hex()
 			_, err := testDB.OrganizationMemberGroup(nonExistentID, testOrgAddress)
 			c.Assert(err, qt.Equals, ErrNotFound)
 		})
@@ -289,7 +289,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 
 		t.Run("NonExistentGroup", func(_ *testing.T) {
 			// Test updating non-existent group
-			nonExistentID := primitive.NewObjectID().Hex()
+			nonExistentID := bson.NewObjectID().Hex()
 			_, err := testDB.UpdateOrganizationMemberGroup(
 				nonExistentID, testOrgAddress,
 				"Updated Title", "Updated Description",
@@ -396,7 +396,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 
 		t.Run("NonExistentGroup", func(_ *testing.T) {
 			// Test deleting non-existent group
-			nonExistentID := primitive.NewObjectID().Hex()
+			nonExistentID := bson.NewObjectID().Hex()
 			_, err := testDB.DeleteOrganizationMemberGroup(nonExistentID, testOrgAddress)
 			c.Assert(err, qt.IsNil) // Should not error for non-existent group
 		})
@@ -453,7 +453,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 
 		t.Run("NonExistentGroup", func(_ *testing.T) {
 			// Test listing members of non-existent group
-			nonExistentID := primitive.NewObjectID().Hex()
+			nonExistentID := bson.NewObjectID().Hex()
 			_, _, err := testDB.ListOrganizationMemberGroup(nonExistentID, testOrgAddress, 1, 10)
 			c.Assert(err, qt.Not(qt.IsNil))
 		})
@@ -753,7 +753,7 @@ func TestOrganizationMemberGroup(t *testing.T) {
 		c.Assert(err, qt.Not(qt.IsNil)) // Should return an error for empty auth fields
 
 		// Test 6: Edge case - non-existent group ID
-		nonExistentGroupID := primitive.NewObjectID().Hex()
+		nonExistentGroupID := bson.NewObjectID().Hex()
 		_, err = testDB.CheckGroupMembersFields(testOrgAddress, nonExistentGroupID, authFields, twoFaFields)
 		c.Assert(err, qt.Not(qt.IsNil)) // Should return an error for non-existent group
 

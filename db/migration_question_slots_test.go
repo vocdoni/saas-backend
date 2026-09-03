@@ -7,9 +7,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 // TestUniqueProcessQuestionSlotsMigration seeds the duplicate slots a pre-fix concurrent draft
@@ -69,7 +68,7 @@ func TestUniqueProcessQuestionSlotsMigration(t *testing.T) {
 
 	// the state is now unrepresentable: a direct duplicate write fails on the unique index
 	_, err = testDB.processesQuestions.InsertOne(ctx, &VotingProcessQuestion{
-		ID: primitive.NewObjectID(), ProcessID: pid, OrgAddress: org, Order: 0,
+		ID: bson.NewObjectID(), ProcessID: pid, OrgAddress: org, Order: 0,
 		Type: VotingTypeSingleChoice, Title: MultiLangString{"default": "dup"},
 	})
 	c.Assert(mongo.IsDuplicateKeyError(err), qt.IsTrue,
@@ -79,11 +78,11 @@ func TestUniqueProcessQuestionSlotsMigration(t *testing.T) {
 // seedQuestionRow inserts a question row directly with a chosen creation time (the _id timestamp
 // decides which duplicate is "oldest") and, when upstreamID is set, as published.
 func seedQuestionRow(
-	c *qt.C, pid primitive.ObjectID, org common.Address, order int, upstreamID []byte, createdAt time.Time,
-) primitive.ObjectID {
+	c *qt.C, pid bson.ObjectID, org common.Address, order int, upstreamID []byte, createdAt time.Time,
+) bson.ObjectID {
 	c.Helper()
 	q := &VotingProcessQuestion{
-		ID:         primitive.NewObjectIDFromTimestamp(createdAt),
+		ID:         bson.NewObjectIDFromTimestamp(createdAt),
 		ProcessID:  pid,
 		OrgAddress: org,
 		Order:      order,

@@ -13,7 +13,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 )
 
@@ -360,7 +360,7 @@ func TestRemoveProcessCensusContract(t *testing.T) {
 
 	// an id that names no participant is reported as what it is: nothing removed
 	unknown := requestAndParse[apicommon.UpdateProcessCensusResponse](t, http.MethodDelete, token,
-		&apicommon.AddCensusParticipantsRequest{MemberIDs: []string{primitive.NewObjectID().Hex()}},
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: []string{bson.NewObjectID().Hex()}},
 		"processes", pid, "census")
 	c.Assert(unknown.Removed, qt.Equals, uint32(0),
 		qt.Commentf("the count must be the rows deleted, not the ids submitted"))
@@ -382,7 +382,7 @@ func TestRemoveProcessCensusContract(t *testing.T) {
 	// the body is bounded
 	tooMany := make([]string, maxCensusRemoval+1)
 	for i := range tooMany {
-		tooMany[i] = primitive.NewObjectID().Hex()
+		tooMany[i] = bson.NewObjectID().Hex()
 	}
 	requestAndAssertError(errors.ErrInvalidData, t, http.MethodDelete, token,
 		&apicommon.AddCensusParticipantsRequest{MemberIDs: tooMany}, "processes", pid, "census")
@@ -400,8 +400,8 @@ func TestRemoveProcessCensusContract(t *testing.T) {
 func TestResizeEmptiedQuestionsReportsFailures(t *testing.T) {
 	c := qt.New(t)
 	emptied := []db.VotingProcessQuestion{{
-		ID:         primitive.NewObjectID(),
-		ProcessID:  primitive.NewObjectID(), // names no process, as after a failed load mid-cascade
+		ID:         bson.NewObjectID(),
+		ProcessID:  bson.NewObjectID(), // names no process, as after a failed load mid-cascade
 		UpstreamID: internal.HexBytes{0xde, 0xad},
 	}}
 	jobID, errs := testAPI.resizeEmptiedQuestions(common.Address{0x01}, emptied)
@@ -743,8 +743,8 @@ func TestVotingProcessMutationsRefusedWhilePublishing(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK)
 }
 
-func objectID(c *qt.C, hexID string) primitive.ObjectID {
-	oid, err := primitive.ObjectIDFromHex(hexID)
+func objectID(c *qt.C, hexID string) bson.ObjectID {
+	oid, err := bson.ObjectIDFromHex(hexID)
 	c.Assert(err, qt.IsNil)
 	return oid
 }

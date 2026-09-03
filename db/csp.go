@@ -9,9 +9,9 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // CSPAuth represents a user authentication information for a bundle of processes
@@ -287,7 +287,7 @@ func (ms *MongoStorage) ConsumeCSPProcess(token, processID, address internal.Hex
 	// set the filter and update options to create the document if it does not
 	// exist
 	filter := bson.M{"_id": id}
-	opts := options.Update().SetUpsert(true)
+	opts := options.UpdateOne().SetUpsert(true)
 	// update the token status
 	if _, err = ms.cspTokensStatus.UpdateOne(ctx, filter, updateDoc, opts); err != nil {
 		return errors.Join(ErrStoreToken, err)
@@ -435,8 +435,8 @@ func (ms *MongoStorage) CountCSPAuthByBundle(bundleID internal.HexBytes) (int64,
 	defer cancel()
 	// count documents matching the bundle ID
 	filter := bson.M{"bundleid": bundleID}
-	distinctValues, err := ms.cspTokens.Distinct(ctx, "userid", filter)
-	if err != nil {
+	var distinctValues []any
+	if err := ms.cspTokens.Distinct(ctx, "userid", filter).Decode(&distinctValues); err != nil {
 		return 0, err
 	}
 	return int64(len(distinctValues)), nil
@@ -453,8 +453,8 @@ func (ms *MongoStorage) CountCSPAuthVerifiedByBundle(bundleID internal.HexBytes)
 	defer cancel()
 	// count documents matching the bundle ID and verified status
 	filter := bson.M{"bundleid": bundleID, "verified": true}
-	distinctValues, err := ms.cspTokens.Distinct(ctx, "userid", filter)
-	if err != nil {
+	var distinctValues []any
+	if err := ms.cspTokens.Distinct(ctx, "userid", filter).Decode(&distinctValues); err != nil {
 		return 0, err
 	}
 	return int64(len(distinctValues)), nil
@@ -471,8 +471,8 @@ func (ms *MongoStorage) CountCSPProcessConsumedByProcess(processID internal.HexB
 	defer cancel()
 	// count documents matching the process ID and consumed status
 	filter := bson.M{"processid": processID, "consumed": true}
-	distinctValues, err := ms.cspTokensStatus.Distinct(ctx, "userid", filter)
-	if err != nil {
+	var distinctValues []any
+	if err := ms.cspTokensStatus.Distinct(ctx, "userid", filter).Decode(&distinctValues); err != nil {
 		return 0, err
 	}
 	return int64(len(distinctValues)), nil
@@ -502,8 +502,8 @@ func (ms *MongoStorage) distinctCSPProcessVotersByProcess(processID internal.Hex
 	filter := bson.M{"processid": processID, "consumed": true}
 	// execute the distinct operation
 	var results []string
-	distinctValues, err := ms.cspTokensStatus.Distinct(ctx, "userid", filter)
-	if err != nil {
+	var distinctValues []any
+	if err := ms.cspTokensStatus.Distinct(ctx, "userid", filter).Decode(&distinctValues); err != nil {
 		return nil, fmt.Errorf("failed to execute distinct query: %w", err)
 	}
 	// convert results to []internal.HexBytes

@@ -7,8 +7,8 @@ import (
 	"math/big"
 	"testing"
 
-	blind "github.com/arnaucube/go-blindsecp256k1"
 	qt "github.com/frankban/quicktest"
+	blind "github.com/vocdoni/go-blindsecp256k1"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 )
 
@@ -57,7 +57,8 @@ func TestBlindsaltedKey(t *testing.T) {
 	qt.Assert(t, err, qt.IsNil)
 
 	// Client: unblind the signature
-	signature := blind.Unblind(new(big.Int).SetBytes(blindedSignature), userSecretData)
+	signature, err := blind.Unblind(new(big.Int).SetBytes(blindedSignature), userSecretData)
+	qt.Assert(t, err, qt.IsNil)
 
 	// Any: verifies the signature (salting previously the pubKey with the common salt)
 	saltedPubKey, err := SaltBlindPubKey(sk.BlindPubKey(), salt)
@@ -96,7 +97,8 @@ func TestBlindSaltedKeyV2(t *testing.T) {
 		if err != nil {
 			continue
 		}
-		signature = blind.Unblind(new(big.Int).SetBytes(blindedSignature), userSecretData)
+		signature, err = blind.Unblind(new(big.Int).SetBytes(blindedSignature), userSecretData)
+		qt.Assert(t, err, qt.IsNil)
 		break
 	}
 	qt.Assert(t, signature, qt.Not(qt.IsNil))

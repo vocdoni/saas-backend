@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func init() {
@@ -258,7 +258,7 @@ func downInitialIndexes(ctx context.Context, database *mongo.Database) error {
 		"jobs",
 	} {
 		collection := database.Collection(collName)
-		if _, err := collection.Indexes().DropAll(ctx); err != nil {
+		if err := collection.Indexes().DropAll(ctx); err != nil {
 			return fmt.Errorf("failed to drop indexes for collection %s: %w", collName, err)
 		}
 	}

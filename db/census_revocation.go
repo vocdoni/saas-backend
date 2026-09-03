@@ -5,18 +5,17 @@ import (
 	"fmt"
 
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/log"
 )
 
 // censusObjectIDs converts census ids from their hex form to the ObjectID form votingProcesses
 // stores them in. Note the two representations coexist on purpose: censusParticipants keys the
 // census by its hex string, votingProcesses by the ObjectID itself.
-func censusObjectIDs(censusIDs []string) ([]primitive.ObjectID, error) {
-	oids := make([]primitive.ObjectID, 0, len(censusIDs))
+func censusObjectIDs(censusIDs []string) ([]bson.ObjectID, error) {
+	oids := make([]bson.ObjectID, 0, len(censusIDs))
 	for _, id := range censusIDs {
-		oid, err := primitive.ObjectIDFromHex(id)
+		oid, err := bson.ObjectIDFromHex(id)
 		if err != nil {
 			return nil, fmt.Errorf("invalid census id %q: %w", id, ErrInvalidData)
 		}
@@ -52,9 +51,9 @@ func (ms *MongoStorage) CensusesForMembers(memberIDs []string) ([]string, error)
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 
-	values, err := ms.censusParticipants.Distinct(ctx, "censusId",
-		bson.M{"participantID": bson.M{"$in": memberIDs}})
-	if err != nil {
+	var values []any
+	if err := ms.censusParticipants.Distinct(ctx, "censusId",
+		bson.M{"participantID": bson.M{"$in": memberIDs}}).Decode(&values); err != nil {
 		return nil, fmt.Errorf("failed to query censuses of members: %w", err)
 	}
 
@@ -113,7 +112,7 @@ func (ms *MongoStorage) OngoingQuestionsByCensuses(censusIDs []string) ([]Voting
 		return nil, nil
 	}
 
-	processIDs := make([]primitive.ObjectID, 0, len(processes))
+	processIDs := make([]bson.ObjectID, 0, len(processes))
 	for _, p := range processes {
 		processIDs = append(processIDs, p.ID)
 	}
@@ -174,8 +173,8 @@ func (ms *MongoStorage) MembersWithUsedCSPProcesses(
 		"userid":    bson.M{"$in": userIDs},
 		"consumed":  true,
 	}
-	values, err := ms.cspTokensStatus.Distinct(ctx, "userid", filter)
-	if err != nil {
+	var values []any
+	if err := ms.cspTokensStatus.Distinct(ctx, "userid", filter).Decode(&values); err != nil {
 		return nil, fmt.Errorf("failed to query consumed CSP processes: %w", err)
 	}
 
@@ -220,8 +219,8 @@ func (ms *MongoStorage) SignedVotersForElections(processIDs []internal.HexBytes)
 	defer cancel()
 
 	filter := bson.M{"processid": bson.M{"$in": processIDs}, "consumed": true}
-	values, err := ms.cspTokensStatus.Distinct(ctx, "userid", filter)
-	if err != nil {
+	var values []any
+	if err := ms.cspTokensStatus.Distinct(ctx, "userid", filter).Decode(&values); err != nil {
 		return nil, fmt.Errorf("failed to query the signed voters of the elections: %w", err)
 	}
 
@@ -259,7 +258,7 @@ func (ms *MongoStorage) RevokeMembersFromCensuses(
 	if err != nil {
 		return 0, nil, err
 	}
-	processIDs := make([]primitive.ObjectID, 0, len(processes))
+	processIDs := make([]bson.ObjectID, 0, len(processes))
 	for _, p := range processes {
 		processIDs = append(processIDs, p.ID)
 	}
@@ -326,7 +325,7 @@ func (ms *MongoStorage) RevokeMembersEverywhere(memberIDs []string) (int64, []Vo
 // null/missing/empty-array equivalence the write-side $pull has to guard against (see revokeWrites).
 func (ms *MongoStorage) publishedQuestionsNaming(
 	ctx context.Context,
-	processIDs []primitive.ObjectID,
+	processIDs []bson.ObjectID,
 	memberIDs []string,
 ) ([]VotingProcessQuestion, error) {
 	if len(processIDs) == 0 {
@@ -387,7 +386,7 @@ func (q VotingProcessQuestion) emptiedByRevocation(revoked map[string]struct{}) 
 func (ms *MongoStorage) revokeWrites(
 	ctx context.Context,
 	censusIDs, memberIDs []string,
-	processIDs []primitive.ObjectID,
+	processIDs []bson.ObjectID,
 ) (int64, error) {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()

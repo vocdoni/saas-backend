@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	blind "github.com/arnaucube/go-blindsecp256k1"
 	qt "github.com/frankban/quicktest"
+	blind "github.com/vocdoni/go-blindsecp256k1"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/csp/handlers"
 	"github.com/vocdoni/saas-backend/db"
@@ -66,7 +66,8 @@ func testBlindSignBallot(t *testing.T, pid string, tok, election, voterAddr inte
 			continue // re-blind against the same (idempotent) R
 		}
 		c.Assert(res.Code, qt.Equals, "", qt.Commentf("blind-sign error: %s", res.Error))
-		signature := blind.Unblind(new(big.Int).SetBytes(res.Signature), userSecretData)
+		signature, err := blind.Unblind(new(big.Int).SetBytes(res.Signature), userSecretData)
+		c.Assert(err, qt.IsNil)
 		return &models.Proof{Payload: &models.Proof_Ca{Ca: &models.ProofCA{
 			Type:      models.ProofCA_ECDSA_BLIND_PIDSALTED,
 			Signature: signature.BytesUncompressed(),
@@ -100,7 +101,8 @@ func TestProcessBlindCSP(t *testing.T) {
 	req.Census.Weighted = true
 	req.Questions = req.Questions[:1] // keep a single, everyone-eligible question
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
-		t, http.MethodPost, token, req, processesCreateEndpoint)
+		t, http.MethodPost, token, req, processesCreateEndpoint,
+	)
 	pid := created.ProcessID
 
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
@@ -152,7 +154,8 @@ func TestProcessBlindCSP(t *testing.T) {
 	var res apicommon.VotingProcessResultsResponse
 	for range 20 {
 		res = requestAndParse[apicommon.VotingProcessResultsResponse](
-			t, http.MethodGet, "", nil, "processes", pid, "results")
+			t, http.MethodGet, "", nil, "processes", pid, "results",
+		)
 		if len(res.Questions) > 0 && res.Questions[0].VoteCount > 0 {
 			break
 		}
@@ -201,7 +204,8 @@ func TestProcessBlindCSPWeightPin(t *testing.T) {
 	req.Census.Weighted = true
 	req.Questions = req.Questions[:1]
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
-		t, http.MethodPost, token, req, processesCreateEndpoint)
+		t, http.MethodPost, token, req, processesCreateEndpoint,
+	)
 	pid := created.ProcessID
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))
@@ -248,7 +252,8 @@ func TestProcessBlindCSPWeightPin(t *testing.T) {
 	var res apicommon.VotingProcessResultsResponse
 	for range 20 {
 		res = requestAndParse[apicommon.VotingProcessResultsResponse](
-			t, http.MethodGet, "", nil, "processes", pid, "results")
+			t, http.MethodGet, "", nil, "processes", pid, "results",
+		)
 		if len(res.Questions) > 0 && res.Questions[0].VoteCount > 0 {
 			break
 		}
@@ -267,7 +272,8 @@ func pollBlindResults(t *testing.T, pid string, want [][]string) apicommon.Votin
 	var q apicommon.VotingProcessQuestionResults
 	for range 20 {
 		res := requestAndParse[apicommon.VotingProcessResultsResponse](
-			t, http.MethodGet, "", nil, "processes", pid, "results")
+			t, http.MethodGet, "", nil, "processes", pid, "results",
+		)
 		if len(res.Questions) > 0 {
 			q = res.Questions[0]
 			if fmt.Sprint(q.Results) == fmt.Sprint(want) {
@@ -306,7 +312,8 @@ func TestProcessBlindCSPOverwrite(t *testing.T) {
 	// the otherwise-singlechoice question (Yes=value 0, No=value 1).
 	req.Questions[0].BallotProtocol = &db.BallotProtocol{MaxCount: 1, MaxValue: 1, MaxVoteOverwrites: 1}
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
-		t, http.MethodPost, token, req, processesCreateEndpoint)
+		t, http.MethodPost, token, req, processesCreateEndpoint,
+	)
 	pid := created.ProcessID
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("job error: %s", job.Errors))

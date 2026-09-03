@@ -8,9 +8,8 @@ import (
 	"time"
 
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -23,22 +22,22 @@ func init() {
 // driver unwraps the binData payload), matching string(HashedPhone) in the db
 // package.
 type memberHashDoc struct {
-	ID           primitive.ObjectID `bson:"_id"`
-	Email        string             `bson:"email"`
-	Phone        []byte             `bson:"phone"`
-	MemberNumber string             `bson:"memberNumber"`
-	NationalID   string             `bson:"nationalId"`
-	Name         string             `bson:"name"`
-	Surname      string             `bson:"surname"`
-	BirthDate    string             `bson:"birthDate"`
+	ID           bson.ObjectID `bson:"_id"`
+	Email        string        `bson:"email"`
+	Phone        []byte        `bson:"phone"`
+	MemberNumber string        `bson:"memberNumber"`
+	NationalID   string        `bson:"nationalId"`
+	Name         string        `bson:"name"`
+	Surname      string        `bson:"surname"`
+	BirthDate    string        `bson:"birthDate"`
 }
 
 // censusHashDoc holds the census authentication configuration needed to know
 // which fields feed each login hash.
 type censusHashDoc struct {
-	ID          primitive.ObjectID `bson:"_id"`
-	AuthFields  []string           `bson:"orgMemberAuthFields"`
-	TwoFaFields []string           `bson:"orgMemberTwoFaFields"`
+	ID          bson.ObjectID `bson:"_id"`
+	AuthFields  []string      `bson:"orgMemberAuthFields"`
+	TwoFaFields []string      `bson:"orgMemberTwoFaFields"`
 }
 
 // participantHashDoc holds the census participant identifiers needed to locate
@@ -131,7 +130,7 @@ func upNormalizeMemberEmails(ctx context.Context, database *mongo.Database) erro
 		if c, ok := censusCache[hexID]; ok {
 			return c, nil
 		}
-		oid, err := primitive.ObjectIDFromHex(hexID)
+		oid, err := bson.ObjectIDFromHex(hexID)
 		if err != nil {
 			censusCache[hexID] = nil
 			return nil, nil
@@ -259,7 +258,8 @@ func upNormalizeMemberEmails(ctx context.Context, database *mongo.Database) erro
 				return fmt.Errorf("failed to update participant hashes for member %s: %w", memberHex, err)
 			}
 		}
-		if _, err := orgMembers.UpdateOne(ctx,
+		if _, err := orgMembers.UpdateOne(
+			ctx,
 			bson.M{"_id": member.ID},
 			bson.M{"$set": bson.M{"email": lower, "updatedAt": now}},
 		); err != nil {

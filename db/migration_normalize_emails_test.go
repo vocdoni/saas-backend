@@ -6,8 +6,7 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // runNormalizeEmailsMigration invokes migration 0015's Up function directly
@@ -41,7 +40,7 @@ func TestNormalizeMemberEmailsMigration(t *testing.T) {
 		// Seed a member with an uppercase email directly, bypassing the write
 		// chokepoint that would normalize it (simulating pre-existing data).
 		member := &OrgMember{
-			ID:           primitive.NewObjectID(),
+			ID:           bson.NewObjectID(),
 			OrgAddress:   testOrgAddress,
 			MemberNumber: "M-1",
 			Email:        "User@Example.COM",
@@ -81,7 +80,7 @@ func TestNormalizeMemberEmailsMigration(t *testing.T) {
 		c.Assert(gotParticipant.LoginHash, qt.Not(qt.DeepEquals), upperHash)
 
 		// End-to-end: the participant is now found using a lowercase login input.
-		census.ID, err = primitive.ObjectIDFromHex(censusID)
+		census.ID, err = bson.ObjectIDFromHex(censusID)
 		c.Assert(err, qt.IsNil)
 		input := OrgMember{OrgAddress: testOrgAddress, MemberNumber: "M-1", Email: "user@example.com"}
 		found, err := testDB.CensusParticipantByLoginHash(*census, input)
@@ -106,7 +105,7 @@ func TestNormalizeMemberEmailsMigration(t *testing.T) {
 
 		// Member already stored in lowercase form.
 		lowerMember := &OrgMember{
-			ID: primitive.NewObjectID(), OrgAddress: testOrgAddress, Email: "clash@example.com", CreatedAt: time.Now(),
+			ID: bson.NewObjectID(), OrgAddress: testOrgAddress, Email: "clash@example.com", CreatedAt: time.Now(),
 		}
 		_, err = testDB.orgMembers.InsertOne(ctx, lowerMember)
 		c.Assert(err, qt.IsNil)
@@ -118,7 +117,7 @@ func TestNormalizeMemberEmailsMigration(t *testing.T) {
 
 		// Member stored with an uppercase variant of the same email.
 		upperMember := &OrgMember{
-			ID: primitive.NewObjectID(), OrgAddress: testOrgAddress, Email: "Clash@example.com", CreatedAt: time.Now(),
+			ID: bson.NewObjectID(), OrgAddress: testOrgAddress, Email: "Clash@example.com", CreatedAt: time.Now(),
 		}
 		_, err = testDB.orgMembers.InsertOne(ctx, upperMember)
 		c.Assert(err, qt.IsNil)

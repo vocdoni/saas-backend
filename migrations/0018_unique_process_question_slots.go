@@ -4,10 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -25,7 +24,8 @@ func init() {
 // The plain processId index from migration 0017 is dropped: the compound index below serves the
 // same prefix queries.
 func upUniqueProcessQuestionSlots(ctx context.Context, database *mongo.Database) error {
-	return replaceIndexWithUpdateFunc(ctx, database.Collection("processesQuestions"),
+	return replaceIndexWithUpdateFunc(
+		ctx, database.Collection("processesQuestions"),
 		[]string{"processId_1"},
 		[]mongo.IndexModel{{
 			Keys:    bson.D{{Key: "processId", Value: 1}, {Key: "order", Value: 1}}, //nolint:goconst
@@ -37,7 +37,8 @@ func upUniqueProcessQuestionSlots(ctx context.Context, database *mongo.Database)
 
 func downUniqueProcessQuestionSlots(ctx context.Context, database *mongo.Database) error {
 	// the repaired rows are not restored: the duplicates were the bug. Only the index reverts.
-	return replaceIndex(ctx, database.Collection("processesQuestions"),
+	return replaceIndex(
+		ctx, database.Collection("processesQuestions"),
 		[]string{"processId_1_order_1"},
 		[]mongo.IndexModel{{Keys: bson.D{{Key: "processId", Value: 1}}}},
 	)
@@ -45,14 +46,14 @@ func downUniqueProcessQuestionSlots(ctx context.Context, database *mongo.Databas
 
 // questionSlotKey identifies one question slot of a process.
 type questionSlotKey struct {
-	ProcessID primitive.ObjectID `bson:"processId"`
-	Order     int                `bson:"order"`
+	ProcessID bson.ObjectID `bson:"processId"`
+	Order     int           `bson:"order"`
 }
 
 // questionSlotRow is one row found in a slot, with what decides whether it may be deleted.
 type questionSlotRow struct {
-	ID         primitive.ObjectID `bson:"id"`
-	UpstreamID []byte             `bson:"upstreamId"`
+	ID         bson.ObjectID `bson:"id"`
+	UpstreamID []byte        `bson:"upstreamId"`
 }
 
 // questionSlotGroup is one (processId, order) slot holding more than one row.
@@ -90,7 +91,7 @@ func dedupeQuestionSlots(ctx context.Context, database *mongo.Database) error {
 		return nil
 	}
 	// next free slot per process, so a published extra can be moved rather than dropped
-	tail := map[primitive.ObjectID]int{}
+	tail := map[bson.ObjectID]int{}
 	for _, g := range groups {
 		pid := g.Key.ProcessID
 		listed, err := processQuestionIDs(ctx, database, pid)
@@ -133,7 +134,7 @@ func dedupeQuestionSlots(ctx context.Context, database *mongo.Database) error {
 
 // pickKeeper chooses the row that keeps the slot: a published one first (it has an on-chain
 // election), then the one the process itself lists, then the oldest.
-func pickKeeper(g questionSlotGroup, listed map[primitive.ObjectID]bool) primitive.ObjectID {
+func pickKeeper(g questionSlotGroup, listed map[bson.ObjectID]bool) bson.ObjectID {
 	for _, row := range g.Rows {
 		if len(row.UpstreamID) > 0 {
 			return row.ID
@@ -150,16 +151,16 @@ func pickKeeper(g questionSlotGroup, listed map[primitive.ObjectID]bool) primiti
 // processQuestionIDs is the set of question ids the process itself records, empty for a process
 // predating the field.
 func processQuestionIDs(
-	ctx context.Context, database *mongo.Database, processID primitive.ObjectID,
-) (map[primitive.ObjectID]bool, error) {
+	ctx context.Context, database *mongo.Database, processID bson.ObjectID,
+) (map[bson.ObjectID]bool, error) {
 	var vp struct {
-		QuestionIDs []primitive.ObjectID `bson:"questionIds"`
+		QuestionIDs []bson.ObjectID `bson:"questionIds"`
 	}
 	err := database.Collection("votingProcesses").FindOne(ctx, bson.M{"_id": processID}).Decode(&vp)
 	if err != nil && err != mongo.ErrNoDocuments {
 		return nil, fmt.Errorf("failed to read process %s: %w", processID.Hex(), err)
 	}
-	listed := make(map[primitive.ObjectID]bool, len(vp.QuestionIDs))
+	listed := make(map[bson.ObjectID]bool, len(vp.QuestionIDs))
 	for _, id := range vp.QuestionIDs {
 		listed[id] = true
 	}
@@ -167,7 +168,7 @@ func processQuestionIDs(
 }
 
 // nextFreeOrder is one past the highest slot currently used by the process.
-func nextFreeOrder(ctx context.Context, questions *mongo.Collection, processID primitive.ObjectID) (int, error) {
+func nextFreeOrder(ctx context.Context, questions *mongo.Collection, processID bson.ObjectID) (int, error) {
 	var highest struct {
 		Order int `bson:"order"`
 	}

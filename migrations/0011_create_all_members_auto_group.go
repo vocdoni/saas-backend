@@ -5,10 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func init() {
@@ -70,7 +69,7 @@ func upCreateAllMembersAutoGroup(ctx context.Context, database *mongo.Database) 
 
 		now := time.Now()
 		group := bson.M{
-			"_id":         primitive.NewObjectID(),
+			"_id":         bson.NewObjectID(),
 			"orgAddress":  addr,
 			"title":       "All members",
 			"description": "This group is automatically generated and always contains every member of your member base.",

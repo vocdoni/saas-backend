@@ -6,7 +6,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func TestPopulateGroupCensus(t *testing.T) {
@@ -51,7 +51,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 				OrgMemberTwoFaFieldEmail,
 			},
 		}
-		nonExistentGroupID := primitive.NewObjectID().Hex()
+		nonExistentGroupID := bson.NewObjectID().Hex()
 		_, err = testDB.PopulateGroupCensus(nonExistentGroupCensus, nonExistentGroupID)
 		c.Assert(err, qt.Not(qt.IsNil))
 		c.Assert(err.Error(), qt.Contains, "invalid data provided")
@@ -111,7 +111,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 		}
 		group1ID, err := testDB.CreateOrganizationMemberGroup(group1)
 		c.Assert(err, qt.IsNil)
-		group1OID, err := primitive.ObjectIDFromHex(group1ID)
+		group1OID, err := bson.ObjectIDFromHex(group1ID)
 		c.Assert(err, qt.IsNil)
 
 		// Create a group for org2
@@ -136,7 +136,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 		c.Assert(err.Error(), qt.Contains, "invalid data provided")
 
 		// Test with valid group and organization combination
-		census2ID := primitive.NewObjectID()
+		census2ID := bson.NewObjectID()
 		census2 := &Census{
 			ID:         census2ID,
 			GroupID:    group1OID,
@@ -240,7 +240,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 		}
 		groupID, err := testDB.CreateOrganizationMemberGroup(group)
 		c.Assert(err, qt.IsNil)
-		groupOID, err := primitive.ObjectIDFromHex(groupID)
+		groupOID, err := bson.ObjectIDFromHex(groupID)
 		c.Assert(err, qt.IsNil)
 
 		// Test creating new census with group
@@ -325,7 +325,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 		singleGroupID, err := testDB.CreateOrganizationMemberGroup(singleMemberGroup)
 		c.Assert(err, qt.IsNil)
 
-		censusOID2 := primitive.NewObjectID()
+		censusOID2 := bson.NewObjectID()
 		census2 := &Census{
 			ID:         censusOID2,
 			OrgAddress: testOrgAddress,
@@ -353,7 +353,7 @@ func TestPopulateGroupCensus(t *testing.T) {
 		multiGroupID, err := testDB.CreateOrganizationMemberGroup(multiMemberGroup)
 		c.Assert(err, qt.IsNil)
 
-		censusOID3 := primitive.NewObjectID()
+		censusOID3 := bson.NewObjectID()
 		census3 := &Census{
 			ID:         censusOID3,
 			OrgAddress: testOrgAddress,
@@ -532,7 +532,7 @@ func TestCensus(t *testing.T) {
 		c.Assert(retrievedCensus.CreatedAt.IsZero(), qt.IsFalse)
 
 		// Test getting non-existent census
-		nonExistentID := primitive.NewObjectID().Hex()
+		nonExistentID := bson.NewObjectID().Hex()
 		_, err = testDB.Census(nonExistentID)
 		c.Assert(err, qt.Not(qt.IsNil))
 	})

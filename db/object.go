@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // The Object entity represents a generic object stored in the database
@@ -45,10 +45,8 @@ func (ms *MongoStorage) SetObject(objectID, userID, contentType string, data []b
 		UserID:      userID,
 		ContentType: contentType,
 	}
-	opts := options.ReplaceOptions{}
-	opts.Upsert = new(bool)
-	*opts.Upsert = true
-	_, err := ms.objects.ReplaceOne(ctx, bson.M{"_id": object.ID}, object, &opts)
+	opts := options.Replace().SetUpsert(true)
+	_, err := ms.objects.ReplaceOne(ctx, bson.M{"_id": object.ID}, object, opts)
 	if err != nil {
 		return fmt.Errorf("cannot update object: %w", err)
 	}

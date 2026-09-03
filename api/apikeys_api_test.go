@@ -11,7 +11,7 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // TestAPIKeysAPI exercises the API-key lifecycle and the auth/scope/allowlist enforcement:
@@ -194,7 +194,7 @@ func TestIntegratorAPIKeyDeletesProcessDraft(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("resp: %s", data))
 	var noScope apicommon.CreateAPIKeyResponse
 	c.Assert(json.Unmarshal(data, &noScope), qt.IsNil)
-	_, code = testRequest(t, http.MethodDelete, noScope.Secret, nil, "process", primitive.NewObjectID().Hex())
+	_, code = testRequest(t, http.MethodDelete, noScope.Secret, nil, "process", bson.NewObjectID().Hex())
 	c.Assert(code, qt.Equals, http.StatusForbidden)
 }
 

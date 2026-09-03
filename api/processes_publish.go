@@ -13,7 +13,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/crypto/ethereum"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/proto/build/go/models"
@@ -635,7 +635,7 @@ func (a *API) setVotingProcessQuestionStatusHandler(w http.ResponseWriter, r *ht
 	if !ok {
 		return
 	}
-	qid, err := primitive.ObjectIDFromHex(chi.URLParam(r, "questionId"))
+	qid, err := bson.ObjectIDFromHex(chi.URLParam(r, "questionId"))
 	if err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid question ID").Write(w)
 		return
@@ -669,7 +669,7 @@ func (a *API) setVotingProcessQuestionStatusHandler(w http.ResponseWriter, r *ht
 
 // authorizeStatusChange loads the process + questions and checks the caller's role.
 func (a *API) authorizeStatusChange(
-	w http.ResponseWriter, r *http.Request, oid primitive.ObjectID,
+	w http.ResponseWriter, r *http.Request, oid bson.ObjectID,
 ) (*db.VotingProcess, []db.VotingProcessQuestion, bool) {
 	user, ok := apicommon.UserFromContext(r.Context())
 	if !ok {

@@ -16,7 +16,7 @@ import (
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/subscriptions"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	dvoteapi "go.vocdoni.io/dvote/api"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/proto/build/go/models"
@@ -39,7 +39,7 @@ import (
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			request	body		apicommon.CreateProcessRequest	true	"Process creation information (optionally with electionParams)"
-//	@Success		200		{object}	primitive.ObjectID				"Bare JSON string: 24-hex draft ProcessID, e.g. 507f1f77bcf86cd799439011"
+//	@Success		200		{string}	string							"Bare JSON string: 24-hex draft ProcessID, e.g. 507f1f77bcf86cd799439011"
 //	@Failure		400		{object}	errors.Error					"Invalid input data"
 //	@Failure		401		{object}	errors.Error					"Unauthorized"
 //	@Failure		403		{object}	errors.Error					"Plan does not allow creating more drafts"
@@ -107,7 +107,7 @@ func (a *API) createProcessHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// if it's a new draft process
-	if process.Address.Equals(nil) && process.ID == primitive.NilObjectID {
+	if process.Address.Equals(nil) && process.ID == bson.NilObjectID {
 		if err := a.subscriptions.OrgHasPermission(process.OrgAddress, subscriptions.CreateDraft); err != nil {
 			if apierr, ok := err.(errors.Error); ok {
 				apierr.Write(w)
@@ -154,7 +154,7 @@ func (a *API) updateProcessHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrMalformedURLParam.Withf("missing process ID").Write(w)
 		return
 	}
-	parsedID, err := primitive.ObjectIDFromHex(processID)
+	parsedID, err := bson.ObjectIDFromHex(processID)
 	if err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid process ID").Write(w)
 		return
@@ -255,7 +255,7 @@ func (a *API) processInfoHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrMalformedURLParam.Withf("missing process ID").Write(w)
 		return
 	}
-	parsedID, err := primitive.ObjectIDFromHex(processID)
+	parsedID, err := bson.ObjectIDFromHex(processID)
 	if err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid process ID").Write(w)
 		return
@@ -508,7 +508,7 @@ func (a *API) deleteProcessHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrMalformedURLParam.Withf("missing process ID").Write(w)
 		return
 	}
-	parsedID, err := primitive.ObjectIDFromHex(processID)
+	parsedID, err := bson.ObjectIDFromHex(processID)
 	if err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid process ID").Write(w)
 		return
@@ -624,7 +624,7 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 		errors.ErrMalformedURLParam.Withf("missing process ID").Write(w)
 		return
 	}
-	parsedID, err := primitive.ObjectIDFromHex(processID)
+	parsedID, err := bson.ObjectIDFromHex(processID)
 	if err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid process ID").Write(w)
 		return

@@ -6,7 +6,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // questionSet builds n questions for a process, titled so a rewrite is distinguishable.
@@ -77,7 +77,7 @@ func TestSetProcessQuestionsConcurrent(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 
 	const writers = 8
-	results := make([][]primitive.ObjectID, writers)
+	results := make([][]bson.ObjectID, writers)
 	errs := make([]error, writers)
 	var wg sync.WaitGroup
 	for i := range writers {
@@ -119,7 +119,7 @@ func TestSetProcessQuestionsConcurrentGrowing(t *testing.T) {
 
 	// lengths cycle 2, 3, 4 so slots 2 and 3 are inserted rather than replaced
 	const writers = 9
-	results := make([][]primitive.ObjectID, writers)
+	results := make([][]bson.ObjectID, writers)
 	errs := make([]error, writers)
 	lengths := make([]int, writers)
 	var wg sync.WaitGroup
@@ -138,7 +138,7 @@ func TestSetProcessQuestionsConcurrentGrowing(t *testing.T) {
 	stored, err := testDB.QuestionsByProcess(pid)
 	c.Assert(err, qt.IsNil)
 	seenOrder := make(map[int]bool, len(stored))
-	seenID := make(map[primitive.ObjectID]bool, len(stored))
+	seenID := make(map[bson.ObjectID]bool, len(stored))
 	for i := range stored {
 		c.Assert(seenOrder[stored[i].Order], qt.IsFalse,
 			qt.Commentf("two rows share slot %d: a concurrent update duplicated a question (issue #614)", stored[i].Order))

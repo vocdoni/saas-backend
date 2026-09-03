@@ -8,10 +8,9 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -20,7 +19,7 @@ import (
 // Returns the bundle ID as a hex string on success.
 func (ms *MongoStorage) SetProcessBundle(bundle *ProcessesBundle) (internal.HexBytes, error) {
 	if bundle.ID.IsZero() {
-		bundle.ID = primitive.NewObjectID()
+		bundle.ID = bson.NewObjectID()
 	}
 
 	// Check that the org exists
@@ -43,8 +42,7 @@ func (ms *MongoStorage) SetProcessBundle(bundle *ProcessesBundle) (internal.HexB
 	// If the bundle has an ID, update it, otherwise create a new one
 	filter := bson.M{"_id": bundle.ID}
 	update := bson.M{"$set": bundle}
-	opts := &options.UpdateOptions{}
-	opts.SetUpsert(true)
+	opts := options.UpdateOne().SetUpsert(true)
 
 	if _, err := ms.processBundles.UpdateOne(ctx, filter, update, opts); err != nil {
 		return nil, fmt.Errorf("failed to update process bundle: %w", err)
@@ -56,7 +54,7 @@ func (ms *MongoStorage) SetProcessBundle(bundle *ProcessesBundle) (internal.HexB
 // DelProcessBundle removes a process bundle by ID.
 // Returns ErrInvalidData if the bundleID is zero, or ErrNotFound if no bundle with the given ID exists.
 func (ms *MongoStorage) DelProcessBundle(hbBundleID internal.HexBytes) error {
-	bundleID, err := primitive.ObjectIDFromHex(hbBundleID.String())
+	bundleID, err := bson.ObjectIDFromHex(hbBundleID.String())
 	if err != nil {
 		return ErrInvalidData
 	}
@@ -87,7 +85,7 @@ func (ms *MongoStorage) DelProcessBundle(hbBundleID internal.HexBytes) error {
 // ProcessBundle retrieves a process bundle from the database based on its ID.
 // Returns the bundle with all its associated data including census information and processes.
 func (ms *MongoStorage) ProcessBundle(hbBundleID internal.HexBytes) (*ProcessesBundle, error) {
-	bundleID, err := primitive.ObjectIDFromHex(hbBundleID.String())
+	bundleID, err := bson.ObjectIDFromHex(hbBundleID.String())
 	if err != nil {
 		return nil, ErrInvalidData
 	}
@@ -215,7 +213,7 @@ func (ms *MongoStorage) ListOrganizationBundles(orgAddress common.Address, page,
 // ProcessBundlesByCensus retrieves process bundles that belong to a specific census.
 // This allows finding all bundles created for a particular census.
 func (ms *MongoStorage) ProcessBundlesByCensus(census *Census) ([]*ProcessesBundle, error) {
-	if census == nil || census.ID == primitive.NilObjectID {
+	if census == nil || census.ID == bson.NilObjectID {
 		return nil, ErrInvalidData
 	}
 
@@ -265,7 +263,7 @@ func (ms *MongoStorage) DeleteProcessBundlesByOrg(orgAddress common.Address) (in
 // AddProcessesToBundle adds processes to an existing bundle if they don't already exist.
 // It checks each process to avoid duplicates and only updates the database if new processes were added.
 func (ms *MongoStorage) AddProcessesToBundle(hbBundleID internal.HexBytes, processes []internal.HexBytes) error {
-	bundleID, err := primitive.ObjectIDFromHex(hbBundleID.String())
+	bundleID, err := bson.ObjectIDFromHex(hbBundleID.String())
 	if err != nil {
 		return ErrInvalidData
 	}
@@ -279,7 +277,7 @@ func (ms *MongoStorage) AddProcessesToBundle(hbBundleID internal.HexBytes, proce
 	}
 
 	if bundle.ID.IsZero() {
-		bundle.ID = primitive.NewObjectID()
+		bundle.ID = bson.NewObjectID()
 	}
 
 	ms.keysLock.Lock()
@@ -321,6 +319,6 @@ func (ms *MongoStorage) AddProcessesToBundle(hbBundleID internal.HexBytes, proce
 
 // NewBundleID generates a new unique ObjectID for a process bundle.
 // This is used when creating a new bundle to ensure it has a unique identifier.
-func (*MongoStorage) NewBundleID() primitive.ObjectID {
-	return primitive.NewObjectID()
+func (*MongoStorage) NewBundleID() bson.ObjectID {
+	return bson.NewObjectID()
 }

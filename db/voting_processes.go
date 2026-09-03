@@ -6,30 +6,29 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // SetVotingProcess creates or replaces a voting process document. It assigns an ID and
 // CreatedAt on first insert and always refreshes UpdatedAt. The referenced questions are
 // stored separately (see SetQuestion); this only persists the container and its ordered
 // QuestionIDs.
-func (ms *MongoStorage) SetVotingProcess(vp *VotingProcess) (primitive.ObjectID, error) {
+func (ms *MongoStorage) SetVotingProcess(vp *VotingProcess) (bson.ObjectID, error) {
 	if (vp.OrgAddress.Cmp(common.Address{}) == 0) {
-		return primitive.NilObjectID, ErrInvalidData
+		return bson.NilObjectID, ErrInvalidData
 	}
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 
 	if _, err := ms.Organization(vp.OrgAddress); err != nil {
-		return primitive.NilObjectID, fmt.Errorf("failed to get organization %s: %w", vp.OrgAddress, err)
+		return bson.NilObjectID, fmt.Errorf("failed to get organization %s: %w", vp.OrgAddress, err)
 	}
 
 	now := time.Now()
 	if vp.ID.IsZero() {
-		vp.ID = primitive.NewObjectID()
+		vp.ID = bson.NewObjectID()
 		vp.CreatedAt = now
 	}
 	vp.UpdatedAt = now
@@ -39,7 +38,7 @@ func (ms *MongoStorage) SetVotingProcess(vp *VotingProcess) (primitive.ObjectID,
 	filter := bson.M{"_id": vp.ID} //nolint:goconst
 	opts := options.Replace().SetUpsert(true)
 	if _, err := ms.votingProcesses.ReplaceOne(ctx, filter, vp, opts); err != nil {
-		return primitive.NilObjectID, fmt.Errorf("failed to create or update voting process: %w", err)
+		return bson.NilObjectID, fmt.Errorf("failed to create or update voting process: %w", err)
 	}
 	return vp.ID, nil
 }
@@ -111,8 +110,8 @@ func (ms *MongoStorage) SetVotingProcessDraft(vp *VotingProcess, seen time.Time)
 // replace would, and it advances updatedAt without ever moving it backwards: the conditional-update
 // token of SetVotingProcessDraft has to stay monotonic, and this write can land inside the same
 // millisecond as the one that produced the token a client is holding.
-func (ms *MongoStorage) SetVotingProcessQuestionIDs(id primitive.ObjectID, questionIDs []primitive.ObjectID) error {
-	if id == primitive.NilObjectID {
+func (ms *MongoStorage) SetVotingProcessQuestionIDs(id bson.ObjectID, questionIDs []bson.ObjectID) error {
+	if id == bson.NilObjectID {
 		return ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -133,8 +132,8 @@ func (ms *MongoStorage) SetVotingProcessQuestionIDs(id primitive.ObjectID, quest
 }
 
 // VotingProcess returns a voting process by its hex ObjectID.
-func (ms *MongoStorage) VotingProcess(id primitive.ObjectID) (*VotingProcess, error) {
-	if id == primitive.NilObjectID {
+func (ms *MongoStorage) VotingProcess(id bson.ObjectID) (*VotingProcess, error) {
+	if id == bson.NilObjectID {
 		return nil, ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -151,7 +150,7 @@ func (ms *MongoStorage) VotingProcess(id primitive.ObjectID) (*VotingProcess, er
 
 // ProcessWithQuestions returns a voting process together with its questions ordered by
 // their Order field.
-func (ms *MongoStorage) ProcessWithQuestions(id primitive.ObjectID) (*VotingProcess, []VotingProcessQuestion, error) {
+func (ms *MongoStorage) ProcessWithQuestions(id bson.ObjectID) (*VotingProcess, []VotingProcessQuestion, error) {
 	vp, err := ms.VotingProcess(id)
 	if err != nil {
 		return nil, nil, err
@@ -165,8 +164,8 @@ func (ms *MongoStorage) ProcessWithQuestions(id primitive.ObjectID) (*VotingProc
 
 // DeleteVotingProcess removes a voting process and all of its questions. On-chain
 // elections already created are immutable and are not affected.
-func (ms *MongoStorage) DeleteVotingProcess(id primitive.ObjectID) error {
-	if id == primitive.NilObjectID {
+func (ms *MongoStorage) DeleteVotingProcess(id bson.ObjectID) error {
+	if id == bson.NilObjectID {
 		return ErrInvalidData
 	}
 	ms.keysLock.Lock()
@@ -204,11 +203,11 @@ func (ms *MongoStorage) ListVotingProcesses(
 	if questionStatus != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 		defer cancel()
-		ids, err := ms.processesQuestions.Distinct(ctx, "processId", bson.M{
+		var ids []any
+		if err := ms.processesQuestions.Distinct(ctx, "processId", bson.M{
 			"orgAddress": orgAddress,
 			"status":     questionStatus, //nolint:goconst
-		})
-		if err != nil {
+		}).Decode(&ids); err != nil {
 			return 0, nil, fmt.Errorf("failed to filter processes by question status: %w", err)
 		}
 		filter["_id"] = bson.M{"$in": ids} //nolint:goconst
@@ -248,8 +247,8 @@ var PublishStaleAfter = 15 * time.Minute
 // claim. A marker older than PublishStaleAfter is treated as stale and reclaimable, so a
 // crash/restart mid-publish cannot leave a process permanently unclaimable. It is the
 // authoritative duplicate-publish guard for voting processes.
-func (ms *MongoStorage) ClaimVotingProcessForPublish(id primitive.ObjectID) (bool, error) {
-	if id == primitive.NilObjectID {
+func (ms *MongoStorage) ClaimVotingProcessForPublish(id bson.ObjectID) (bool, error) {
+	if id == bson.NilObjectID {
 		return false, ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -278,7 +277,7 @@ func (ms *MongoStorage) ClaimVotingProcessForPublish(id primitive.ObjectID) (boo
 // StaleVotingProcesses returns the ids of processes whose publishing marker is stale (older
 // than PublishStaleAfter): a worker crashed or the service restarted mid-publish. The caller
 // clears the marker and resets their questions (see the startup reconciliation).
-func (ms *MongoStorage) StaleVotingProcesses() ([]primitive.ObjectID, error) {
+func (ms *MongoStorage) StaleVotingProcesses() ([]bson.ObjectID, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	cutoff := time.Now().Add(-PublishStaleAfter)
@@ -289,10 +288,10 @@ func (ms *MongoStorage) StaleVotingProcesses() ([]primitive.ObjectID, error) {
 		return nil, fmt.Errorf("failed to query stale publishing processes: %w", err)
 	}
 	defer func() { _ = cur.Close(ctx) }()
-	var out []primitive.ObjectID
+	var out []bson.ObjectID
 	for cur.Next(ctx) {
 		var doc struct {
-			ID primitive.ObjectID `bson:"_id"`
+			ID bson.ObjectID `bson:"_id"`
 		}
 		if err := cur.Decode(&doc); err != nil {
 			return nil, fmt.Errorf("failed to decode stale process id: %w", err)
@@ -305,8 +304,8 @@ func (ms *MongoStorage) StaleVotingProcesses() ([]primitive.ObjectID, error) {
 // ClearVotingProcessPublishing clears the transient publishing marker set by
 // ClaimVotingProcessForPublish, so a publish that fails after claiming does not leave the
 // process permanently unclaimable. No-op once the process is published.
-func (ms *MongoStorage) ClearVotingProcessPublishing(id primitive.ObjectID) error {
-	if id == primitive.NilObjectID {
+func (ms *MongoStorage) ClearVotingProcessPublishing(id bson.ObjectID) error {
+	if id == bson.NilObjectID {
 		return ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -324,8 +323,8 @@ func (ms *MongoStorage) ClearVotingProcessPublishing(id primitive.ObjectID) erro
 // process was created without a start date, meaning "start immediately"); a non-zero value
 // replaces the stored date so reads expose when the process really started, while a zero
 // value leaves the stored date untouched.
-func (ms *MongoStorage) SetVotingProcessPublished(id primitive.ObjectID, startDate time.Time) error {
-	if id == primitive.NilObjectID {
+func (ms *MongoStorage) SetVotingProcessPublished(id bson.ObjectID, startDate time.Time) error {
+	if id == bson.NilObjectID {
 		return ErrInvalidData
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)

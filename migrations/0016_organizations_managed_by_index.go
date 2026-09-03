@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func init() {
@@ -41,7 +41,7 @@ func upOrganizationsManagedByIndex(ctx context.Context, database *mongo.Database
 // to the documents, so unlike data-bearing collections this rollback is safe to perform.
 func downOrganizationsManagedByIndex(ctx context.Context, database *mongo.Database) error {
 	coll := database.Collection("organizations")
-	if _, err := coll.Indexes().DropOne(ctx, managedByIndexName); err != nil {
+	if err := coll.Indexes().DropOne(ctx, managedByIndexName); err != nil {
 		return fmt.Errorf("failed to drop managedBy index on organizations: %w", err)
 	}
 	return nil

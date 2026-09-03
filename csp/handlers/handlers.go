@@ -21,7 +21,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/dvote/vochain/state"
 )
@@ -238,7 +238,7 @@ func (c *CSPHandlers) BundleAuthResendHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	oid, err := primitive.ObjectIDFromHex(auth.UserID.String())
+	oid, err := bson.ObjectIDFromHex(auth.UserID.String())
 	if err != nil {
 		errors.ErrUnauthorized.WithErr(fmt.Errorf("invalid user ID in token: %w", err)).Write(w)
 		return
@@ -439,7 +439,7 @@ func (c *CSPHandlers) BundleSignHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	oid, err := primitive.ObjectIDFromHex(auth.UserID.String())
+	oid, err := bson.ObjectIDFromHex(auth.UserID.String())
 	if err != nil {
 		errors.ErrUnauthorized.WithErr(fmt.Errorf("invalid user ID in token: %w", err)).Write(w)
 		return
@@ -532,7 +532,7 @@ func (c *CSPHandlers) UserWeightHandler(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	oid, err := primitive.ObjectIDFromHex(auth.UserID.String())
+	oid, err := bson.ObjectIDFromHex(auth.UserID.String())
 	if err != nil {
 		errors.ErrUnauthorized.WithErr(fmt.Errorf("invalid user ID in token: %w", err)).Write(w)
 		return
@@ -622,7 +622,7 @@ func (c *CSPHandlers) BundleCheckHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Resolve the org member referenced by the token.
-	oid, err := primitive.ObjectIDFromHex(auth.UserID.String())
+	oid, err := bson.ObjectIDFromHex(auth.UserID.String())
 	if err != nil {
 		notEligible()
 		return
@@ -703,7 +703,7 @@ func (c *CSPHandlers) ConsumedAddressHandler(w http.ResponseWriter, r *http.Requ
 	// collides with the 64-hex on-chain id.
 	raw := chi.URLParam(r, "processId")
 	processID := new(internal.HexBytes)
-	if objID, oerr := primitive.ObjectIDFromHex(raw); oerr == nil {
+	if objID, oerr := bson.ObjectIDFromHex(raw); oerr == nil {
 		process, err := c.mainDB.Process(objID)
 		if err != nil {
 			if err == db.ErrNotFound {

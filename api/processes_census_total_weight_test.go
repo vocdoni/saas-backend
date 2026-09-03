@@ -8,7 +8,7 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // TestProcessesCensusTotalWeight verifies the whole-census totalWeight surfaced on
@@ -49,7 +49,7 @@ func TestProcessesCensusTotalWeight(t *testing.T) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(added, qt.Equals, len(memberIDs))
 
-		censusOID, err := primitive.ObjectIDFromHex(censusID)
+		censusOID, err := bson.ObjectIDFromHex(censusID)
 		c.Assert(err, qt.IsNil)
 		vpID, err := testDB.SetVotingProcess(&db.VotingProcess{
 			OrgAddress: orgAddress, Published: true, CensusID: censusOID,

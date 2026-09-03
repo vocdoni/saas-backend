@@ -41,10 +41,10 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	flag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/mongo/readpref"
-	"go.mongodb.org/mongo-driver/x/mongo/driver/connstring"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
+	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/connstring"
 	"go.vocdoni.io/dvote/log"
 
 	"github.com/vocdoni/saas-backend/migrations"
@@ -141,7 +141,7 @@ func connect(ctx context.Context, url string, cs *connstring.ConnString) (*mongo
 	}
 	log.Infow("connecting to mongodb", "host", redactedHosts(cs))
 
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(url))
+	client, err := mongo.Connect(options.Client().ApplyURI(url))
 	if err != nil {
 		return nil, err
 	}

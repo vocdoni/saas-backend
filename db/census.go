@@ -9,10 +9,9 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -35,12 +34,12 @@ func (ms *MongoStorage) SetCensus(census *Census) (string, error) {
 		return "", fmt.Errorf("organization not found: %w", err)
 	}
 
-	if census.ID != primitive.NilObjectID {
+	if census.ID != bson.NilObjectID {
 		// if the census exists, update it with the new data
 		census.UpdatedAt = time.Now()
 	} else {
 		// if the census doesn't exist, create its id
-		census.ID = primitive.NewObjectID()
+		census.ID = bson.NewObjectID()
 		census.CreatedAt = time.Now()
 	}
 	census.Type = census.TwoFaFields.GetCensusType()
@@ -52,7 +51,7 @@ func (ms *MongoStorage) SetCensus(census *Census) (string, error) {
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	filter := bson.M{"_id": census.ID}
-	opts := options.Update().SetUpsert(true)
+	opts := options.UpdateOne().SetUpsert(true)
 	_, err = ms.censuses.UpdateOne(ctx, filter, updateDoc, opts)
 	if err != nil {
 		return "", err
@@ -86,12 +85,12 @@ func (ms *MongoStorage) PopulateGroupCensus(
 		return 0, fmt.Errorf("error retrieving organization: %w", err)
 	}
 
-	if census.ID != primitive.NilObjectID {
+	if census.ID != bson.NilObjectID {
 		// if the census exists, update it with the new data
 		census.UpdatedAt = time.Now()
 	} else {
 		// if the census doesn't exist, create its id
-		census.ID = primitive.NewObjectID()
+		census.ID = bson.NewObjectID()
 		census.CreatedAt = time.Now()
 	}
 	census.Type = census.TwoFaFields.GetCensusType()
@@ -126,7 +125,7 @@ func (ms *MongoStorage) PopulateGroupCensus(
 		return 0, err
 	}
 	filter := bson.M{"_id": census.ID}
-	opts := options.Update().SetUpsert(true)
+	opts := options.UpdateOne().SetUpsert(true)
 	_, err = ms.censuses.UpdateOne(ctx, filter, updateDoc, opts)
 	if err != nil {
 		return 0, err
@@ -136,7 +135,7 @@ func (ms *MongoStorage) PopulateGroupCensus(
 
 // DeleteCensus removes a census and all its members
 func (ms *MongoStorage) DelCensus(censusID string) error {
-	objID, err := primitive.ObjectIDFromHex(censusID)
+	objID, err := bson.ObjectIDFromHex(censusID)
 	if err != nil {
 		return ErrInvalidData
 	}
@@ -161,7 +160,7 @@ func (ms *MongoStorage) DelCensus(censusID string) error {
 
 // Census retrieves a census from the DB based on its ID
 func (ms *MongoStorage) Census(censusID string) (*Census, error) {
-	objID, err := primitive.ObjectIDFromHex(censusID)
+	objID, err := bson.ObjectIDFromHex(censusID)
 	if err != nil {
 		return nil, ErrInvalidData
 	}

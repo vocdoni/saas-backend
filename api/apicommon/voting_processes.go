@@ -5,7 +5,7 @@ package apicommon
 import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // CensusSpec is the inline census definition of a voting process. The census type is
@@ -220,8 +220,8 @@ type QuestionStatusID struct {
 // an explicit allow-list, NOT the raw db.VotingProcessQuestion — the census member list and the
 // per-question eligibility subset (member ids) are never exposed on this public endpoint.
 type PublicQuestionResponse struct {
-	ID                primitive.ObjectID   `json:"id"`
-	ParentProcessID   primitive.ObjectID   `json:"parentProcessId"`
+	ID                bson.ObjectID        `json:"id"`
+	ParentProcessID   bson.ObjectID        `json:"parentProcessId"`
 	Title             db.MultiLangString   `json:"title"`
 	Description       db.MultiLangString   `json:"description,omitempty"`
 	Choices           []db.Choice          `json:"choices"`

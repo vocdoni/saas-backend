@@ -7,17 +7,16 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // revocationFixture is a census of three members backed by one voting process with two published
 // questions: one restricted to alice and bob, one open to the whole census.
 type revocationFixture struct {
 	census     *Census
-	processID  primitive.ObjectID
-	restricted primitive.ObjectID
-	openToAll  primitive.ObjectID
+	processID  bson.ObjectID
+	restricted bson.ObjectID
+	openToAll  bson.ObjectID
 	upstream   internal.HexBytes
 	alice      *OrgMember
 	bob        *OrgMember
@@ -414,7 +413,7 @@ func TestUpdateOrganizationMemberGroupRevokesOnlyGroupMembers(t *testing.T) {
 
 	// an id that names nobody is equally inert
 	_, err = testDB.UpdateOrganizationMemberGroup(
-		groupID, testOrgAddress, "", "", nil, []string{primitive.NewObjectID().Hex()})
+		groupID, testOrgAddress, "", "", nil, []string{bson.NewObjectID().Hex()})
 	c.Assert(err, qt.IsNil)
 	auth, err = testDB.CSPAuth(carolToken)
 	c.Assert(err, qt.IsNil)

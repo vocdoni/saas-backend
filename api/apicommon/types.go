@@ -14,7 +14,7 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/notifications"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -1179,13 +1179,13 @@ type OrgMember struct {
 func (p *OrgMember) ToDB() *db.OrgMember {
 	// TODO: this could happen right during UnmarshalJSON,
 	// if apicommon.OrgMember.ID is an ObjectID rather than a string.
-	id := primitive.NilObjectID
+	id := bson.NilObjectID
 	if len(p.ID) > 0 {
 		// Convert the ID from string to ObjectID
 		var err error
-		id, err = primitive.ObjectIDFromHex(p.ID)
+		id, err = bson.ObjectIDFromHex(p.ID)
 		if err != nil {
-			log.Warnf("Failed to convert member ID %s to ObjectID: %v", p.ID, err)
+			log.Warnf("failed to convert member ID %s to ObjectID: %v", p.ID, err)
 		}
 	}
 	// if the weight is provided convert it to int, defaults to 1

@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -22,8 +22,9 @@ func init() {
 // are indistinguishable and neither was enforced, the field is gone from the model and this drops
 // every stale value with it, logging the addresses it strips a false from.
 func upDropOrganizationActive(ctx context.Context, database *mongo.Database) error {
-	deactivated, err := database.Collection("organizations").Distinct(ctx, "_id", bson.M{"active": false})
-	if err != nil {
+	var deactivated []any
+	if err := database.Collection("organizations").
+		Distinct(ctx, "_id", bson.M{"active": false}).Decode(&deactivated); err != nil {
 		return fmt.Errorf("failed to list deactivated organizations: %w", err)
 	}
 	if len(deactivated) > 0 {

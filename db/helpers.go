@@ -6,9 +6,9 @@ import (
 	"reflect"
 	"strings"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -91,7 +91,7 @@ func dynamicUpdateDocument(item any, alwaysUpdateTags []string) (bson.M, error) 
 // paginatedDocuments returns totalCount of collection.CountDocuments()
 // and a slice of collection.Find(), filtered and paginated.
 func paginatedDocuments[T any](collection *mongo.Collection, page, limit int64,
-	filter any, findOptions *options.FindOptions,
+	filter any, findOptions *options.FindOptionsBuilder,
 ) (int64, []T, error) {
 	// create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)

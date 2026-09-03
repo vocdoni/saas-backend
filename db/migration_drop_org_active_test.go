@@ -6,7 +6,7 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
-	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // TestDropOrganizationActiveMigration asserts migration 0020 strips the organizations' `active`

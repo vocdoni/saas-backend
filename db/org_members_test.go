@@ -9,7 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func TestOrgMembers(t *testing.T) {
@@ -159,7 +159,7 @@ func TestOrgMembers(t *testing.T) {
 		c.Assert(retrievedMember.CreatedAt, qt.Not(qt.IsNil))
 
 		// Test getting non-existent member
-		nonExistentID := primitive.NewObjectID().Hex()
+		nonExistentID := bson.NewObjectID().Hex()
 		_, err = testDB.OrgMember(testOrgAddress, nonExistentID)
 		c.Assert(err, qt.Not(qt.IsNil))
 	})
@@ -565,7 +565,7 @@ func TestUpsertOrgMemberPartialUpdateKeepsLoginHash(t *testing.T) {
 	c.Assert(testDB.SetOrganization(org), qt.IsNil)
 
 	member := &OrgMember{
-		ID:           primitive.NewObjectID(),
+		ID:           bson.NewObjectID(),
 		OrgAddress:   testOrgAddress,
 		MemberNumber: "partial-update-1",
 		Name:         "Ada",

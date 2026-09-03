@@ -20,7 +20,8 @@ func TestBuildLoginResponseExpiry(t *testing.T) {
 	token, err := testAPI.auth.Decode(res.Token)
 	c.Assert(err, qt.IsNil)
 
-	exp := token.Expiration()
+	exp, ok := token.Expiration()
+	c.Assert(ok, qt.IsTrue)
 	now := time.Now()
 	// expiry is in the future and close to now+jwtExpiration — not decades/eons away
 	c.Assert(exp.After(now), qt.IsTrue)

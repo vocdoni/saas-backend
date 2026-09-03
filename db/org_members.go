@@ -13,10 +13,9 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -48,7 +47,7 @@ func (ms *MongoStorage) SetOrgMember(salt string, orgMember *OrgMember) (string,
 	ms.keysLock.Lock()
 	defer ms.keysLock.Unlock()
 	filter := bson.M{"_id": member.ID}
-	opts := options.Update().SetUpsert(true)
+	opts := options.UpdateOne().SetUpsert(true)
 	_, err = ms.orgMembers.UpdateOne(ctx, filter, updateDoc, opts)
 	if err != nil {
 		return "", err
@@ -66,7 +65,7 @@ func (ms *MongoStorage) SetOrgMember(salt string, orgMember *OrgMember) (string,
 // The returned questions are those whose eligibility list became empty, so their elections are now
 // whole-census and undersized on chain; the caller resizes them.
 func (ms *MongoStorage) DelOrgMember(id string) ([]VotingProcessQuestion, error) {
-	objID, err := primitive.ObjectIDFromHex(id)
+	objID, err := bson.ObjectIDFromHex(id)
 	if err != nil {
 		return nil, ErrInvalidData
 	}
@@ -111,7 +110,7 @@ func (ms *MongoStorage) DelOrgMember(id string) ([]VotingProcessQuestion, error)
 
 // OrgMember retrieves a orgMember from the DB based on it ID
 func (ms *MongoStorage) OrgMember(orgAddress common.Address, id string) (*OrgMember, error) {
-	objID, err := primitive.ObjectIDFromHex(id)
+	objID, err := bson.ObjectIDFromHex(id)
 	if err != nil {
 		return nil, ErrInvalidData
 	}
@@ -216,8 +215,8 @@ func prepareOrgMember(org *Organization, m *OrgMember, salt string, currentTime 
 	var errs []error
 
 	// Assign a new internal ID if not provided
-	if member.ID == primitive.NilObjectID {
-		member.ID = primitive.NewObjectID()
+	if member.ID == bson.NilObjectID {
+		member.ID = bson.NewObjectID()
 		member.CreatedAt = currentTime
 	} else {
 		member.UpdatedAt = currentTime
@@ -312,7 +311,7 @@ func (ms *MongoStorage) createOrgMemberBulkOperations(
 
 	insertedIDs := make([]string, 0, len(result.InsertedIDs))
 	for _, id := range result.InsertedIDs {
-		oid, ok := id.(primitive.ObjectID)
+		oid, ok := id.(bson.ObjectID)
 		if !ok {
 			// InsertMany echoes back the _id prepareOrgMember set, so this cannot happen unless
 			// that changes; dropping the id is better than propagating a wrong one to a census.
@@ -473,9 +472,9 @@ func mergeLoginHashFields(member, stored *OrgMember) {
 // The returned bool reports whether the member was created rather than updated, so callers can
 // propagate a brand new member to the censuses of the organization's auto group.
 func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, member *OrgMember, salt string,
-) (primitive.ObjectID, bool, error) {
+) (bson.ObjectID, bool, error) {
 	if org.Address.Cmp(common.Address{}) == 0 {
-		return primitive.NilObjectID, false, ErrInvalidData
+		return bson.NilObjectID, false, ErrInvalidData
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
@@ -492,35 +491,35 @@ func (ms *MongoStorage) UpsertOrgMemberAndCensusParticipants(org *Organization, 
 	switch err := ms.orgMembers.FindOne(ctx, bson.M{"_id": member.ID}).Decode(orgMemberInDB); {
 	case err == nil:
 		if orgMemberInDB.OrgAddress != org.Address {
-			return primitive.NilObjectID, false, fmt.Errorf("modifying orgAddress is not allowed")
+			return bson.NilObjectID, false, fmt.Errorf("modifying orgAddress is not allowed")
 		}
 		mergeLoginHashFields(member, orgMemberInDB)
 	case errors.Is(err, mongo.ErrNoDocuments):
 		created = true
 	default:
-		return primitive.NilObjectID, false, fmt.Errorf("failed to read stored org member: %w", err)
+		return bson.NilObjectID, false, fmt.Errorf("failed to read stored org member: %w", err)
 	}
 
 	preparedMember, validationErrors := prepareOrgMember(org, member, salt, time.Now())
 	if len(validationErrors) > 0 {
-		return primitive.NilObjectID, false, fmt.Errorf("errors: %s", errorsAsStrings(validationErrors))
+		return bson.NilObjectID, false, fmt.Errorf("errors: %s", errorsAsStrings(validationErrors))
 	}
 
 	// Update the census participants first, to bail out early in case this would create any duplicates conflict
 	if err := ms.updateCensusParticipantsForMember(ctx, preparedMember); err != nil {
-		return primitive.NilObjectID, false, fmt.Errorf("failed to update census participants: %w", err)
+		return bson.NilObjectID, false, fmt.Errorf("failed to update census participants: %w", err)
 	}
 
 	updateDoc, err := dynamicUpdateDocument(preparedMember, []string{"weight"})
 	if err != nil {
-		return primitive.NilObjectID, false, err
+		return bson.NilObjectID, false, err
 	}
 
 	filter := bson.M{"_id": preparedMember.ID}
-	opts := options.Update().SetUpsert(true)
+	opts := options.UpdateOne().SetUpsert(true)
 	_, err = ms.orgMembers.UpdateOne(ctx, filter, updateDoc, opts)
 	if err != nil {
-		return primitive.NilObjectID, false, fmt.Errorf("failed to upsert org member: %w", err)
+		return bson.NilObjectID, false, fmt.Errorf("failed to upsert org member: %w", err)
 	}
 
 	// Ensure the auto group exists now that at least one member is present.
@@ -650,9 +649,9 @@ func (ms *MongoStorage) DeleteOrgMembers(
 		return 0, nil, nil
 	}
 	// Convert string IDs to ObjectIDs
-	var oids []primitive.ObjectID
+	var oids []bson.ObjectID
 	for _, id := range ids {
-		objID, err := primitive.ObjectIDFromHex(id)
+		objID, err := bson.ObjectIDFromHex(id)
 		if err != nil {
 			return 0, nil, fmt.Errorf("invalid member ID %s: %w", id, ErrInvalidData)
 		}
@@ -824,7 +823,7 @@ func (ms *MongoStorage) GetAllOrgMemberIDs(orgAddress common.Address) ([]string,
 	var memberIDs []string
 	for cursor.Next(ctx) {
 		var member struct {
-			ID primitive.ObjectID `bson:"_id"`
+			ID bson.ObjectID `bson:"_id"`
 		}
 		if err := cursor.Decode(&member); err != nil {
 			return nil, fmt.Errorf("failed to decode member ID: %w", err)
@@ -865,9 +864,9 @@ func (ms *MongoStorage) validateOrgMembers(ctx context.Context, orgAddress commo
 	}
 
 	// Convert string IDs to ObjectIDs
-	var objectIDs []primitive.ObjectID
+	var objectIDs []bson.ObjectID
 	for _, id := range members {
-		objID, err := primitive.ObjectIDFromHex(id)
+		objID, err := bson.ObjectIDFromHex(id)
 		if err != nil {
 			return fmt.Errorf("invalid ObjectID format: %s", id)
 		}
@@ -923,9 +922,9 @@ func (ms *MongoStorage) FilterOrgMemberIDs(orgAddress common.Address, ids []stri
 		return nil, nil
 	}
 
-	objectIDs := make([]primitive.ObjectID, 0, len(ids))
+	objectIDs := make([]bson.ObjectID, 0, len(ids))
 	for _, id := range ids {
-		objID, err := primitive.ObjectIDFromHex(id)
+		objID, err := bson.ObjectIDFromHex(id)
 		if err != nil {
 			continue // an id that is not an ObjectID cannot name a member
 		}
@@ -979,9 +978,9 @@ func (ms *MongoStorage) orgMembersByIDs(
 	}
 
 	// Convert string IDs to ObjectIDs
-	var objectIDs []primitive.ObjectID
+	var objectIDs []bson.ObjectID
 	for _, id := range memberIDs {
-		objID, err := primitive.ObjectIDFromHex(id)
+		objID, err := bson.ObjectIDFromHex(id)
 		if err != nil {
 			return 0, nil, fmt.Errorf("invalid ObjectID format: %s", id)
 		}

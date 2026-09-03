@@ -8,8 +8,7 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/internal"
 	"github.com/vocdoni/saas-backend/migrations"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // runRepair invokes the login-hash repair against the current test database
@@ -88,7 +87,7 @@ func TestRepairLoginHashes(t *testing.T) {
 		}
 		id, err := testDB.SetCensus(census)
 		c.Assert(err, qt.IsNil)
-		census.ID, err = primitive.ObjectIDFromHex(id)
+		census.ID, err = bson.ObjectIDFromHex(id)
 		c.Assert(err, qt.IsNil)
 		return census, id
 	}
@@ -107,7 +106,7 @@ func TestRepairLoginHashes(t *testing.T) {
 			bson.M{"participantID": memberID, "censusId": censusID}).Decode(&got), qt.IsNil)
 		return got
 	}
-	storedMember := func(id primitive.ObjectID) OrgMember {
+	storedMember := func(id bson.ObjectID) OrgMember {
 		var got OrgMember
 		c.Assert(testDB.orgMembers.FindOne(context.Background(), bson.M{"_id": id}).Decode(&got), qt.IsNil)
 		return got
@@ -118,7 +117,7 @@ func TestRepairLoginHashes(t *testing.T) {
 		census, censusID := newCensus(authFields, noTwoFa)
 
 		member := &OrgMember{
-			ID: primitive.NewObjectID(), OrgAddress: testOrgAddress,
+			ID: bson.NewObjectID(), OrgAddress: testOrgAddress,
 			Name: "John", Surname: "Doe", MemberNumber: "M-001", CreatedAt: time.Now(),
 		}
 		seedLegacyParticipant(t, censusID, member,
@@ -162,7 +161,7 @@ func TestRepairLoginHashes(t *testing.T) {
 		census, censusID := newCensus(authFields, noTwoFa)
 
 		member := &OrgMember{
-			ID: primitive.NewObjectID(), OrgAddress: testOrgAddress,
+			ID: bson.NewObjectID(), OrgAddress: testOrgAddress,
 			Name: "Jane ", Surname: " Roe", MemberNumber: "M-002 ", CreatedAt: time.Now(),
 		}
 		seedLegacyParticipant(t, censusID, member,
@@ -192,7 +191,7 @@ func TestRepairLoginHashes(t *testing.T) {
 		census, censusID := newCensus(authFields, noTwoFa)
 
 		member := &OrgMember{
-			ID: primitive.NewObjectID(), OrgAddress: testOrgAddress,
+			ID: bson.NewObjectID(), OrgAddress: testOrgAddress,
 			Name: "already", Surname: "lower", MemberNumber: "m-003", CreatedAt: time.Now(),
 		}
 		seedLegacyParticipant(t, censusID, member,
@@ -213,7 +212,7 @@ func TestRepairLoginHashes(t *testing.T) {
 		phone, err := NewHashedPhone(testPlaintextPhone, org)
 		c.Assert(err, qt.IsNil)
 		member := &OrgMember{
-			ID: primitive.NewObjectID(), OrgAddress: testOrgAddress,
+			ID: bson.NewObjectID(), OrgAddress: testOrgAddress,
 			Name: "Mixed", Surname: "Case", Email: "mixed.case@example.com",
 			Phone: phone, CreatedAt: time.Now(),
 		}
@@ -256,7 +255,7 @@ func TestRepairLoginHashes(t *testing.T) {
 		census, censusID := newCensus(authFields, noTwoFa)
 
 		member := &OrgMember{
-			ID: primitive.NewObjectID(), OrgAddress: testOrgAddress,
+			ID: bson.NewObjectID(), OrgAddress: testOrgAddress,
 			Name: "Dry ", Surname: "Run", MemberNumber: "M-004", CreatedAt: time.Now(),
 		}
 		legacy := unfoldedHash(*member, census.AuthFields, census.TwoFaFields)
@@ -276,11 +275,11 @@ func TestRepairLoginHashes(t *testing.T) {
 
 		// Two members differing only by case: folding maps them onto one hash.
 		upper := &OrgMember{
-			ID: primitive.NewObjectID(), OrgAddress: testOrgAddress,
+			ID: bson.NewObjectID(), OrgAddress: testOrgAddress,
 			Name: "Casey", Surname: "Clash", MemberNumber: "M-005", CreatedAt: time.Now(),
 		}
 		lower := &OrgMember{
-			ID: primitive.NewObjectID(), OrgAddress: testOrgAddress,
+			ID: bson.NewObjectID(), OrgAddress: testOrgAddress,
 			Name: "casey", Surname: "clash", MemberNumber: "m-005", CreatedAt: time.Now(),
 		}
 		upperHash := unfoldedHash(*upper, census.AuthFields, census.TwoFaFields)
@@ -303,7 +302,7 @@ func TestRepairLoginHashes(t *testing.T) {
 		census, censusID := newCensus(authFields, noTwoFa)
 
 		member := &OrgMember{
-			ID: primitive.NewObjectID(), OrgAddress: testOrgAddress,
+			ID: bson.NewObjectID(), OrgAddress: testOrgAddress,
 			Name: "Ghost", Surname: "Member", MemberNumber: "M-006", CreatedAt: time.Now(),
 		}
 		legacy := unfoldedHash(*member, census.AuthFields, census.TwoFaFields)
@@ -321,7 +320,7 @@ func TestRepairLoginHashes(t *testing.T) {
 		reset()
 		census, censusID := newCensus(authFields, noTwoFa)
 		member := &OrgMember{
-			ID: primitive.NewObjectID(), OrgAddress: testOrgAddress,
+			ID: bson.NewObjectID(), OrgAddress: testOrgAddress,
 			Name: " Ida", Surname: "Potent ", MemberNumber: "M-007", CreatedAt: time.Now(),
 		}
 		seedLegacyParticipant(t, censusID, member,
@@ -343,7 +342,7 @@ func TestRepairLoginHashes(t *testing.T) {
 
 		mine, mineID := newCensus(authFields, noTwoFa)
 		mineMember := &OrgMember{
-			ID: primitive.NewObjectID(), OrgAddress: testOrgAddress,
+			ID: bson.NewObjectID(), OrgAddress: testOrgAddress,
 			Name: "Mine", Surname: "Org", MemberNumber: "M-008", CreatedAt: time.Now(),
 		}
 		seedLegacyParticipant(t, mineID, mineMember,
@@ -356,7 +355,7 @@ func TestRepairLoginHashes(t *testing.T) {
 		theirsID, err := testDB.SetCensus(theirs)
 		c.Assert(err, qt.IsNil)
 		theirsMember := &OrgMember{
-			ID: primitive.NewObjectID(), OrgAddress: testAnotherOrgAddress,
+			ID: bson.NewObjectID(), OrgAddress: testAnotherOrgAddress,
 			Name: "Their", Surname: "Org", MemberNumber: "M-009", CreatedAt: time.Now(),
 		}
 		theirsHash := unfoldedHash(*theirsMember, theirs.AuthFields, theirs.TwoFaFields)
@@ -404,7 +403,7 @@ func TestRepairMatchesCanonicalHash(t *testing.T) {
 	}
 
 	type seeded struct {
-		memberID primitive.ObjectID
+		memberID bson.ObjectID
 		censusID string
 		census   Census
 	}
@@ -416,12 +415,12 @@ func TestRepairMatchesCanonicalHash(t *testing.T) {
 		}
 		censusID, err := testDB.SetCensus(census)
 		c.Assert(err, qt.IsNil)
-		census.ID, err = primitive.ObjectIDFromHex(censusID)
+		census.ID, err = bson.ObjectIDFromHex(censusID)
 		c.Assert(err, qt.IsNil)
 
 		// Deliberately mixed case and padded, so every rule has to fire.
 		member := OrgMember{
-			ID: primitive.NewObjectID(), OrgAddress: testOrgAddress,
+			ID: bson.NewObjectID(), OrgAddress: testOrgAddress,
 			Name: " MiXeD ", Surname: "CaSe ", MemberNumber: "M-00" + string(rune('A'+i)),
 			NationalID: "DnI00" + string(rune('1'+i)), BirthDate: "1990-01-02",
 			Email: "person@example.com", Phone: phone, CreatedAt: time.Now(),

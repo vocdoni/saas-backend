@@ -8,7 +8,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -29,7 +29,7 @@ import (
 //	@Deprecated
 //	@Router	/process/{processId}/results [get]
 func (a *API) processResultsHandler(w http.ResponseWriter, r *http.Request) {
-	objID, err := primitive.ObjectIDFromHex(chi.URLParam(r, "processId"))
+	objID, err := bson.ObjectIDFromHex(chi.URLParam(r, "processId"))
 	if err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid process id").Write(w)
 		return
@@ -95,7 +95,7 @@ func (a *API) processResultsHandler(w http.ResponseWriter, r *http.Request) {
 //	@Deprecated
 //	@Router	/process/{processId}/metadata [get]
 func (a *API) processMetadataHandler(w http.ResponseWriter, r *http.Request) {
-	objID, err := primitive.ObjectIDFromHex(chi.URLParam(r, "processId"))
+	objID, err := bson.ObjectIDFromHex(chi.URLParam(r, "processId"))
 	if err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid process id").Write(w)
 		return

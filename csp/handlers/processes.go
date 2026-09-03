@@ -15,24 +15,24 @@ import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/internal"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/log"
 	"go.vocdoni.io/dvote/vochain/state"
 )
 
 // parseProcessID parses the {processId} URL param (a voting-process Mongo ObjectID) and
 // returns both the ObjectID and its bytes, which are used as the CSP token anchor.
-func parseProcessID(w http.ResponseWriter, r *http.Request) (primitive.ObjectID, internal.HexBytes, bool) {
-	oid, err := primitive.ObjectIDFromHex(chi.URLParam(r, "processId"))
+func parseProcessID(w http.ResponseWriter, r *http.Request) (bson.ObjectID, internal.HexBytes, bool) {
+	oid, err := bson.ObjectIDFromHex(chi.URLParam(r, "processId"))
 	if err != nil {
 		errors.ErrMalformedURLParam.Withf("invalid process ID").Write(w)
-		return primitive.NilObjectID, nil, false
+		return bson.NilObjectID, nil, false
 	}
 	return oid, internal.HexBytes(oid[:]), true
 }
 
 // getVotingProcess loads a voting process by id, writing the proper error on failure.
-func (c *CSPHandlers) getVotingProcess(w http.ResponseWriter, oid primitive.ObjectID) (*db.VotingProcess, bool) {
+func (c *CSPHandlers) getVotingProcess(w http.ResponseWriter, oid bson.ObjectID) (*db.VotingProcess, bool) {
 	vp, err := c.mainDB.VotingProcess(oid)
 	if err != nil {
 		if err == db.ErrNotFound {
@@ -271,7 +271,7 @@ type signContext struct {
 // process, check the auth token is verified and anchored to it, resolve the org member behind
 // it and compute their census weight. It writes the proper error and returns false on failure.
 func (c *CSPHandlers) resolveSignContext(
-	w http.ResponseWriter, oid primitive.ObjectID, authToken internal.HexBytes,
+	w http.ResponseWriter, oid bson.ObjectID, authToken internal.HexBytes,
 ) (*signContext, bool) {
 	vp, ok := c.getVotingProcess(w, oid)
 	if !ok {
@@ -752,7 +752,7 @@ func (c *CSPHandlers) ProcessBlindSignHandler(w http.ResponseWriter, r *http.Req
 // questionsByUpstream loads a process's questions indexed by their on-chain election id, writing
 // the proper error and returning false on failure. Shared by the blind round-1 and round-2 handlers.
 func (c *CSPHandlers) questionsByUpstream(
-	w http.ResponseWriter, oid primitive.ObjectID,
+	w http.ResponseWriter, oid bson.ObjectID,
 ) (map[string]*db.VotingProcessQuestion, bool) {
 	questions, err := c.mainDB.QuestionsByProcess(oid)
 	if err != nil {
@@ -817,7 +817,7 @@ func signOutcome(err error) (code, message string) {
 // two tabs racing, and the caller is told about them in the response anyway, so they are debug —
 // a warn per occurrence would bury the storage and signer failures that do need attention. The
 // member and process ids make a warn attributable during an incident.
-func logSignFailure(oid primitive.ObjectID, memberID string, upstreamID internal.HexBytes, err error) {
+func logSignFailure(oid bson.ObjectID, memberID string, upstreamID internal.HexBytes, err error) {
 	if errors.Is(err, csp.ErrProcessAlreadyConsumed) || errors.Is(err, csp.ErrUserAlreadySigning) ||
 		errors.Is(err, csp.ErrAddressMismatch) {
 		log.Debugw("skipped a batch ballot", "procId", oid.Hex(), "member", memberID,
@@ -995,7 +995,7 @@ func (c *CSPHandlers) orgMemberFromAuth(
 
 // orgMember resolves the org member referenced by an auth token (member ObjectID hex).
 func (c *CSPHandlers) orgMember(orgAddress common.Address, auth *db.CSPAuth) (*db.OrgMember, error) {
-	oid, err := primitive.ObjectIDFromHex(auth.UserID.String())
+	oid, err := bson.ObjectIDFromHex(auth.UserID.String())
 	if err != nil {
 		return nil, fmt.Errorf("invalid user ID in token: %w", err)
 	}
