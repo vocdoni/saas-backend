@@ -72,6 +72,11 @@ type CreateVotingProcessRequest struct {
 	StartDate   string                         `json:"startDate,omitempty"`
 	EndDate     string                         `json:"endDate,omitempty"`
 	Questions   []VotingProcessQuestionRequest `json:"questions"`
+	// Paused, when true, publishes every question's on-chain election in the PAUSED state,
+	// so voting only opens after an admin sets each question to READY. Persists on the draft
+	// and takes effect at publish time; a paused publish forces the election to be
+	// interruptible so it can be unpaused later.
+	Paused bool `json:"paused,omitempty"`
 	// UpdatedAt, on a PUT, is the updatedAt the client last read. The update then applies only if
 	// the process has not been written since, and is rejected with 409 otherwise, so two clients
 	// editing the same draft cannot silently overwrite each other. Optional: omitting it keeps the
@@ -142,6 +147,10 @@ type VotingProcessResponse struct {
 	StartDate   string                     `json:"startDate,omitempty"`
 	EndDate     string                     `json:"endDate,omitempty"`
 	Questions   []db.VotingProcessQuestion `json:"questions"`
+	// Paused echoes the draft's paused flag: when true, publishing this process will start every
+	// question's on-chain election in the PAUSED state (voting opens once an admin sets each to
+	// READY). Absent for a process created without the flag.
+	Paused bool `json:"paused,omitempty"`
 	// ChainID is the Vochain chain id votes must be signed against; clients need it because vote
 	// signatures are chain-id-bound (a mismatch makes the on-chain signer recovery diverge).
 	ChainID string `json:"chainId,omitempty"`
@@ -296,6 +305,7 @@ func VotingProcessResponseFromDB(
 		Header:      vp.Header,
 		StreamURI:   vp.StreamURI,
 		Questions:   questions,
+		Paused:      vp.Paused,
 		ChainID:     chainID,
 	}
 	if !vp.StartDate.IsZero() {
