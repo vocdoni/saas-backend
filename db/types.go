@@ -99,8 +99,9 @@ type Organization struct {
 
 // metaDefaultString extracts the "default" locale value from a meta entry that
 // may be stored as a plain string (legacy), a locale map, or the BSON-decoded
-// form of a locale map after a MongoDB round-trip (bson.D with driver v2,
-// map[string]any with driver v1 data decoded through older code paths).
+// form of a locale map after a MongoDB round-trip: bson.D by default, or
+// bson.M when the client is configured with DefaultDocumentM (as ours is, see
+// db/mongo.go) — a named type distinct from the unnamed map[string]any.
 func metaDefaultString(v any) string {
 	switch m := v.(type) {
 	case string:
@@ -108,6 +109,11 @@ func metaDefaultString(v any) string {
 	case map[string]string:
 		return m["default"]
 	case map[string]any:
+		if s, ok := m["default"].(string); ok {
+			return s
+		}
+		return ""
+	case bson.M:
 		if s, ok := m["default"].(string); ok {
 			return s
 		}
