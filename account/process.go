@@ -84,6 +84,28 @@ type NewProcessParams struct {
 	// on-chain nonce. Batch publishing sets explicit consecutive nonces so N txs can be
 	// signed and submitted together; single publishes leave it nil to read the nonce.
 	Nonce *uint32
+	// InitialStatus is the on-chain status the election is created with. Only READY (the
+	// default when unset / PROCESS_UNKNOWN) and PAUSED are accepted, matching the vochain
+	// whitelist for NewProcess. PAUSED requires Mode.Interruptible so the admin can later
+	// unpause; BuildNewProcessTx forces the flag on when this is PAUSED, since a paused
+	// election that can never be started would be permanently unreachable.
+	InitialStatus models.ProcessStatus
+}
+
+// resolveInitialStatus validates s and returns the on-chain status to publish an election
+// with. The zero value (PROCESS_UNKNOWN) resolves to READY, preserving the historical
+// behaviour for callers that do not set InitialStatus. Any status other than READY or
+// PAUSED is rejected — the vochain refuses the transaction otherwise (see
+// vocdoni-node vochain/transaction/election_tx.go).
+func resolveInitialStatus(s models.ProcessStatus) (models.ProcessStatus, error) {
+	switch s {
+	case models.ProcessStatus_PROCESS_UNKNOWN, models.ProcessStatus_READY:
+		return models.ProcessStatus_READY, nil
+	case models.ProcessStatus_PAUSED:
+		return models.ProcessStatus_PAUSED, nil
+	default:
+		return 0, fmt.Errorf("initialStatus must be READY or PAUSED, got %s", s)
+	}
 }
 
 // electionStartDuration maps the high-level start/end dates to the on-chain
@@ -136,6 +158,10 @@ func (a *Account) BuildNewProcessTx(p *NewProcessParams) (*models.Tx, error) {
 	if ep.MaxCensusSize == 0 {
 		return nil, fmt.Errorf("maxCensusSize must be greater than zero")
 	}
+	initialStatus, err := resolveInitialStatus(p.InitialStatus)
+	if err != nil {
+		return nil, err
+	}
 	nonce := p.Nonce
 	if nonce == nil {
 		acc, err := a.client.Account(p.OrgAddress.String())
@@ -158,10 +184,18 @@ func (a *Account) BuildNewProcessTx(p *NewProcessParams) (*models.Tx, error) {
 		censusOrigin = models.CensusOrigin_OFF_CHAIN_CA_V2
 	}
 
+	// a PAUSED election can only be resumed by SET_PROCESS_STATUS, which the vochain refuses
+	// unless the process is interruptible; a paused non-interruptible election would be
+	// permanently stuck, so force the flag on when publishing paused (whatever the caller set).
+	interruptible := ep.ElectionType.Interruptible
+	if initialStatus == models.ProcessStatus_PAUSED {
+		interruptible = true
+	}
+
 	metadataURL := p.MetadataURL
 	process := &models.Process{
 		EntityId:      p.OrgAddress.Bytes(),
-		Status:        models.ProcessStatus_READY,
+		Status:        initialStatus,
 		StartTime:     startTime,
 		Duration:      duration,
 		CensusOrigin:  censusOrigin,
@@ -184,7 +218,7 @@ func (a *Account) BuildNewProcessTx(p *NewProcessParams) (*models.Tx, error) {
 		},
 		Mode: &models.ProcessMode{
 			AutoStart:     ep.ElectionType.Autostart,
-			Interruptible: ep.ElectionType.Interruptible,
+			Interruptible: interruptible,
 			DynamicCensus: ep.ElectionType.DynamicCensus,
 		},
 	}

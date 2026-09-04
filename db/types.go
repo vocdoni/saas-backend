@@ -618,6 +618,11 @@ type ElectionParams struct {
 	ElectionType  ElectionType          `json:"electionType" bson:"electionType"`
 	TypeMetadata  *ElectionTypeMetadata `json:"type,omitempty" bson:"type,omitempty"`
 	MaxCensusSize uint64                `json:"maxCensusSize,omitempty" bson:"maxCensusSize,omitempty"`
+	// Paused, when true, publishes the on-chain election in the PAUSED state instead of READY,
+	// so voting only opens once an admin explicitly sets it to READY via SET_PROCESS_STATUS.
+	// The vochain requires an interruptible election to be unpaused, so the publisher forces
+	// Mode.Interruptible on when this is true (see account.BuildNewProcessTx).
+	Paused bool `json:"paused,omitempty" bson:"paused,omitempty"`
 }
 
 // Process represents a voting process in the vochain
@@ -715,6 +720,11 @@ type VotingProcess struct {
 	StreamURI   string          `json:"streamUri,omitempty" bson:"streamUri,omitempty"`
 	StartDate   time.Time       `json:"startDate,omitempty" bson:"startDate,omitempty"`
 	EndDate     time.Time       `json:"endDate,omitempty" bson:"endDate,omitempty"`
+	// Paused, when true, publishes every question's on-chain election in the PAUSED state
+	// (initial status), so voting only opens after an admin sets each question to READY via
+	// SET_PROCESS_STATUS. Applies at publish time only; a paused publish forces
+	// Mode.Interruptible on for each election (the vochain requires it to unpause later).
+	Paused      bool            `json:"paused,omitempty" bson:"paused,omitempty"`
 	CensusID    bson.ObjectID   `json:"-" bson:"censusId"`    // internal ref to a db.Census
 	QuestionIDs []bson.ObjectID `json:"-" bson:"questionIds"` // ordered question references
 	// Publishing is the transient claim a publish worker holds on this process (see

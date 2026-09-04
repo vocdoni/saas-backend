@@ -441,7 +441,11 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 			log.Warnw("could not update organization process counter", "error", e)
 		}
 	}
-	return &db.JobResult{Status: "READY"}, nil //nolint:goconst
+	status := db.QuestionStatusReady
+	if pw.vp.Paused {
+		status = db.QuestionStatusPaused
+	}
+	return &db.JobResult{Status: status}, nil
 }
 
 // resolveStartDate returns the start date to persist on the process once its elections are
@@ -510,14 +514,19 @@ func (pw *publishWorker) buildBatch(
 		}
 		q.MetadataURL = a.objectStorage.LocalURL(objectName)
 		nonce := startNonce + uint32(i)
+		initialStatus := models.ProcessStatus_READY
+		if pw.vp.Paused {
+			initialStatus = models.ProcessStatus_PAUSED
+		}
 		tx, err := a.account.BuildNewProcessTx(&account.NewProcessParams{
-			OrgAddress:  pw.vp.OrgAddress,
-			Params:      ep,
-			CensusRoot:  pw.cspPubKey,
-			CensusURI:   a.serverURL,
-			Anonymous:   pw.census.Anonymous,
-			MetadataURL: q.MetadataURL,
-			Nonce:       &nonce,
+			OrgAddress:    pw.vp.OrgAddress,
+			Params:        ep,
+			CensusRoot:    pw.cspPubKey,
+			CensusURI:     a.serverURL,
+			Anonymous:     pw.census.Anonymous,
+			MetadataURL:   q.MetadataURL,
+			Nonce:         &nonce,
+			InitialStatus: initialStatus,
 		})
 		if err != nil {
 			return nil, false, err
@@ -570,8 +579,12 @@ func (pw *publishWorker) confirmBatch(pending []*db.VotingProcessQuestion, resul
 			allConfirmed = false
 			continue
 		}
+		initialStatus := db.QuestionStatusReady
+		if pw.vp.Paused {
+			initialStatus = db.QuestionStatusPaused
+		}
 		if err := a.db.SetQuestionPublished(
-			pending[i].ID, res.UpstreamID, pending[i].MetadataURL, db.QuestionStatusReady,
+			pending[i].ID, res.UpstreamID, pending[i].MetadataURL, initialStatus,
 		); err != nil {
 			// leave UpstreamID unset so the question stays pending and is retried, rather
 			// than letting the process be marked published with an unpersisted row.

@@ -534,6 +534,13 @@ definitions:
         example: a1b2c3d4e5f60718293a4b5c6d7e8f9012345678
         format: hex
         type: string
+      paused:
+        description: |-
+          Paused, when true, publishes every question's on-chain election in the PAUSED state,
+          so voting only opens after an admin sets each question to READY. Persists on the draft
+          and takes effect at publish time; a paused publish forces the election to be
+          interruptible so it can be unpaused later.
+        type: boolean
       questions:
         items:
           $ref: '#/definitions/apicommon.VotingProcessQuestionRequest'
@@ -2077,6 +2084,12 @@ definitions:
         example: a1b2c3d4e5f60718293a4b5c6d7e8f9012345678
         format: hex
         type: string
+      paused:
+        description: |-
+          Paused, when true, means publishing this process will start every question's on-chain
+          election in the PAUSED state (voting opens once an admin sets each to READY). Absent when
+          false — bool + omitempty cannot distinguish "not paused" from "unset".
+        type: boolean
       published:
         type: boolean
       questions:
@@ -2203,6 +2216,13 @@ definitions:
         type: string
       maxCensusSize:
         type: integer
+      paused:
+        description: |-
+          Paused, when true, publishes the on-chain election in the PAUSED state instead of READY,
+          so voting only opens once an admin explicitly sets it to READY via SET_PROCESS_STATUS.
+          The vochain requires an interruptible election to be unpaused, so the publisher forces
+          Mode.Interruptible on when this is true (see account.BuildNewProcessTx).
+        type: boolean
       questions:
         items:
           $ref: '#/definitions/db.Question'
