@@ -2086,9 +2086,9 @@ definitions:
         type: string
       paused:
         description: |-
-          Paused echoes the draft's paused flag: when true, publishing this process will start every
-          question's on-chain election in the PAUSED state (voting opens once an admin sets each to
-          READY). Absent for a process created without the flag.
+          Paused, when true, means publishing this process will start every question's on-chain
+          election in the PAUSED state (voting opens once an admin sets each to READY). Absent when
+          false — bool + omitempty cannot distinguish "not paused" from "unset".
         type: boolean
       published:
         type: boolean

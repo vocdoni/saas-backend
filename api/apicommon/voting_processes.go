@@ -147,9 +147,9 @@ type VotingProcessResponse struct {
 	StartDate   string                     `json:"startDate,omitempty"`
 	EndDate     string                     `json:"endDate,omitempty"`
 	Questions   []db.VotingProcessQuestion `json:"questions"`
-	// Paused echoes the draft's paused flag: when true, publishing this process will start every
-	// question's on-chain election in the PAUSED state (voting opens once an admin sets each to
-	// READY). Absent for a process created without the flag.
+	// Paused, when true, means publishing this process will start every question's on-chain
+	// election in the PAUSED state (voting opens once an admin sets each to READY). Absent when
+	// false — bool + omitempty cannot distinguish "not paused" from "unset".
 	Paused bool `json:"paused,omitempty"`
 	// ChainID is the Vochain chain id votes must be signed against; clients need it because vote
 	// signatures are chain-id-bound (a mismatch makes the on-chain signer recovery diverge).
