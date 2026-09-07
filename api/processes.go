@@ -111,6 +111,11 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrMalformedBody.WithErr(err).Write(w)
 		return
 	}
+	initialStatus, err := account.NormalizeInitialStatus(req.InitialStatus)
+	if err != nil {
+		errors.ErrMalformedBody.WithErr(err).Write(w)
+		return
+	}
 	census, err := a.resolveOrCreateDefaultCensus(req.Census, orgAddr)
 	if err != nil {
 		writeSubscriptionError(w, err)
@@ -126,16 +131,16 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	vp := &db.VotingProcess{
-		OrgAddress:  orgAddr,
-		Published:   false,
-		Title:       req.Title,
-		Description: req.Description,
-		Header:      req.Header,
-		StreamURI:   req.StreamURI,
-		StartDate:   start,
-		EndDate:     end,
-		Paused:      req.Paused,
-		CensusID:    census.ID,
+		OrgAddress:    orgAddr,
+		Published:     false,
+		Title:         req.Title,
+		Description:   req.Description,
+		Header:        req.Header,
+		StreamURI:     req.StreamURI,
+		StartDate:     start,
+		EndDate:       end,
+		InitialStatus: initialStatus,
+		CensusID:      census.ID,
 	}
 	vpID, err := a.db.SetVotingProcess(vp)
 	if err != nil {
@@ -430,9 +435,15 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrMalformedBody.WithErr(err).Write(w)
 		return
 	}
+	initialStatus, err := account.NormalizeInitialStatus(req.InitialStatus)
+	if err != nil {
+		_ = a.db.DelCensus(census.ID.Hex())
+		errors.ErrMalformedBody.WithErr(err).Write(w)
+		return
+	}
 	vp.Title, vp.Description, vp.Header, vp.StreamURI = req.Title, req.Description, req.Header, req.StreamURI
 	vp.StartDate, vp.EndDate, vp.CensusID = start, end, census.ID
-	vp.Paused = req.Paused
+	vp.InitialStatus = initialStatus
 	// a stale marker got us past the guard above: editing the draft releases it rather than
 	// writing it back, matching what ClaimVotingProcessForPublish would reclaim anyway. A marker
 	// that went live *after* that guard read is a different matter — the write's own precondition

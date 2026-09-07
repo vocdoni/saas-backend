@@ -782,12 +782,14 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// build the NewProcess tx (CSP census). A draft flagged Paused publishes the election in
-	// the PAUSED state so voting only opens once an admin sets it to READY; the legacy path has
-	// no separate Anonymous knob, so a paused publish still uses the plain CSP origin.
-	initialStatus := models.ProcessStatus_READY
-	if draft.ElectionParams.Paused {
-		initialStatus = models.ProcessStatus_PAUSED
+	// build the NewProcess tx (CSP census). A draft that carries InitialStatus="PAUSED"
+	// publishes the election in the PAUSED state so voting only opens once an admin sets
+	// it to READY; the legacy path has no separate Anonymous knob, so a paused publish
+	// still uses the plain CSP origin.
+	initialStatus, err := account.ParseInitialStatus(draft.ElectionParams.InitialStatus)
+	if err != nil {
+		errors.ErrMalformedBody.WithErr(err).Write(w)
+		return
 	}
 	tx, err := a.account.BuildNewProcessTx(&account.NewProcessParams{
 		OrgAddress:    draft.OrgAddress,

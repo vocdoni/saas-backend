@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -86,10 +87,40 @@ type NewProcessParams struct {
 	Nonce *uint32
 	// InitialStatus is the on-chain status the election is created with. Only READY (the
 	// default when unset / PROCESS_UNKNOWN) and PAUSED are accepted, matching the vochain
-	// whitelist for NewProcess. PAUSED requires Mode.Interruptible so the admin can later
-	// unpause; BuildNewProcessTx forces the flag on when this is PAUSED, since a paused
-	// election that can never be started would be permanently unreachable.
+	// whitelist for NewProcess. PAUSED→READY has no interruptible requirement on the
+	// vochain, so a paused election can always be resumed regardless of Mode.Interruptible.
 	InitialStatus models.ProcessStatus
+}
+
+// ParseInitialStatus turns a wire-level initialStatus string (as carried by the HTTP API and
+// persisted on the draft) into the on-chain enum used by NewProcessParams.InitialStatus.
+// The empty string resolves to READY, preserving the historical default. Comparison is
+// case-insensitive so callers can send "PAUSED" or "paused". Any value other than
+// ""/"READY"/"PAUSED" is rejected — the vochain would refuse NewProcess for any other status.
+func ParseInitialStatus(s string) (models.ProcessStatus, error) {
+	switch strings.ToUpper(s) {
+	case "", models.ProcessStatus_READY.String():
+		return models.ProcessStatus_READY, nil
+	case models.ProcessStatus_PAUSED.String():
+		return models.ProcessStatus_PAUSED, nil
+	default:
+		return 0, fmt.Errorf("initialStatus must be READY or PAUSED, got %q", s)
+	}
+}
+
+// NormalizeInitialStatus canonicalizes a wire-level initialStatus string for persistence:
+// "" and "READY" both collapse to "" (the default), "PAUSED" stays "PAUSED", anything else
+// is rejected. Storing "" for the default keeps `initialStatus,omitempty` responses concise
+// and gives DB queries a single canonical shape for "not paused".
+func NormalizeInitialStatus(s string) (string, error) {
+	st, err := ParseInitialStatus(s)
+	if err != nil {
+		return "", err
+	}
+	if st == models.ProcessStatus_READY {
+		return "", nil
+	}
+	return st.String(), nil
 }
 
 // resolveInitialStatus validates s and returns the on-chain status to publish an election
@@ -184,14 +215,6 @@ func (a *Account) BuildNewProcessTx(p *NewProcessParams) (*models.Tx, error) {
 		censusOrigin = models.CensusOrigin_OFF_CHAIN_CA_V2
 	}
 
-	// a PAUSED election can only be resumed by SET_PROCESS_STATUS, which the vochain refuses
-	// unless the process is interruptible; a paused non-interruptible election would be
-	// permanently stuck, so force the flag on when publishing paused (whatever the caller set).
-	interruptible := ep.ElectionType.Interruptible
-	if initialStatus == models.ProcessStatus_PAUSED {
-		interruptible = true
-	}
-
 	metadataURL := p.MetadataURL
 	process := &models.Process{
 		EntityId:      p.OrgAddress.Bytes(),
@@ -218,7 +241,7 @@ func (a *Account) BuildNewProcessTx(p *NewProcessParams) (*models.Tx, error) {
 		},
 		Mode: &models.ProcessMode{
 			AutoStart:     ep.ElectionType.Autostart,
-			Interruptible: interruptible,
+			Interruptible: ep.ElectionType.Interruptible,
 			DynamicCensus: ep.ElectionType.DynamicCensus,
 		},
 	}

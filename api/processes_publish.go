@@ -442,7 +442,7 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 		}
 	}
 	status := db.QuestionStatusReady
-	if pw.vp.Paused {
+	if pw.vp.InitialStatus == db.QuestionStatusPaused {
 		status = db.QuestionStatusPaused
 	}
 	return &db.JobResult{Status: status}, nil
@@ -499,6 +499,10 @@ func (pw *publishWorker) buildBatch(
 ) (stxs [][]byte, ok bool, err error) {
 	a := pw.a
 	stxs = make([][]byte, 0, len(pending))
+	initialStatus, err := account.ParseInitialStatus(pw.vp.InitialStatus)
+	if err != nil {
+		return nil, false, err
+	}
 	for i, q := range pending {
 		ep, err := electionParamsForQuestion(pw.vp, q, pw.census)
 		if err != nil {
@@ -514,10 +518,6 @@ func (pw *publishWorker) buildBatch(
 		}
 		q.MetadataURL = a.objectStorage.LocalURL(objectName)
 		nonce := startNonce + uint32(i)
-		initialStatus := models.ProcessStatus_READY
-		if pw.vp.Paused {
-			initialStatus = models.ProcessStatus_PAUSED
-		}
 		tx, err := a.account.BuildNewProcessTx(&account.NewProcessParams{
 			OrgAddress:    pw.vp.OrgAddress,
 			Params:        ep,
@@ -580,7 +580,7 @@ func (pw *publishWorker) confirmBatch(pending []*db.VotingProcessQuestion, resul
 			continue
 		}
 		initialStatus := db.QuestionStatusReady
-		if pw.vp.Paused {
+		if pw.vp.InitialStatus == db.QuestionStatusPaused {
 			initialStatus = db.QuestionStatusPaused
 		}
 		if err := a.db.SetQuestionPublished(

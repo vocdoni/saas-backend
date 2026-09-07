@@ -53,8 +53,10 @@ func TestElectionStartDuration(t *testing.T) {
 
 // TestBuildNewProcessTxInitialStatus covers the InitialStatus knob on BuildNewProcessTx:
 // the default (unset) resolves to READY (historical behaviour), an explicit PAUSED is
-// honoured and forces Mode.Interruptible on so the admin can later unpause, and any
-// status outside the vochain's NewProcess whitelist is rejected without a chain call.
+// honoured, the caller's Interruptible choice is preserved in every case (PAUSED→READY
+// on the vochain has no interruptible requirement, so a paused election is always
+// resumable), and any status outside the vochain's NewProcess whitelist is rejected
+// without a chain call.
 //
 // The tests pass an explicit Nonce so BuildNewProcessTx skips the client account lookup
 // and no *apiclient.HTTPclient is needed on the receiver.
@@ -99,18 +101,19 @@ func TestBuildNewProcessTxInitialStatus(t *testing.T) {
 		c.Assert(p.GetMode().GetInterruptible(), qt.IsFalse)
 	})
 
-	t.Run("explicit PAUSED forces Interruptible on", func(t *testing.T) {
+	t.Run("PAUSED preserves caller Interruptible=false", func(t *testing.T) {
 		c := qt.New(t)
+		// PAUSED→READY on the vochain has no interruptible check (see vocdoni-node
+		// vochain/state/process.go:SetProcessStatus), so a paused non-interruptible election
+		// is not stuck — it can still be unpaused. The builder must not override the caller.
 		tx, err := a.BuildNewProcessTx(newParams(models.ProcessStatus_PAUSED, false))
 		c.Assert(err, qt.IsNil)
 		p := tx.GetNewProcess().GetProcess()
 		c.Assert(p.GetStatus(), qt.Equals, models.ProcessStatus_PAUSED)
-		// a paused election that is not interruptible can never be resumed on-chain (the
-		// vochain refuses SET_PROCESS_STATUS on it), so the builder must override the caller.
-		c.Assert(p.GetMode().GetInterruptible(), qt.IsTrue)
+		c.Assert(p.GetMode().GetInterruptible(), qt.IsFalse)
 	})
 
-	t.Run("PAUSED keeps Interruptible when caller already asked for it", func(t *testing.T) {
+	t.Run("PAUSED keeps Interruptible when caller asked for it", func(t *testing.T) {
 		c := qt.New(t)
 		tx, err := a.BuildNewProcessTx(newParams(models.ProcessStatus_PAUSED, true))
 		c.Assert(err, qt.IsNil)
@@ -131,4 +134,56 @@ func TestBuildNewProcessTxInitialStatus(t *testing.T) {
 				qt.Commentf("status=%s", bad))
 		}
 	})
+}
+
+// TestParseInitialStatus covers the wire-string → on-chain enum parser used at the HTTP
+// boundary: empty and "READY" (case-insensitive) resolve to READY, "PAUSED" resolves to
+// PAUSED, anything else is rejected.
+func TestParseInitialStatus(t *testing.T) {
+	c := qt.New(t)
+
+	for _, tc := range []struct {
+		in   string
+		want models.ProcessStatus
+	}{
+		{"", models.ProcessStatus_READY},
+		{"READY", models.ProcessStatus_READY},
+		{"ready", models.ProcessStatus_READY},
+		{"PAUSED", models.ProcessStatus_PAUSED},
+		{"paused", models.ProcessStatus_PAUSED},
+	} {
+		got, err := ParseInitialStatus(tc.in)
+		c.Assert(err, qt.IsNil, qt.Commentf("in=%q", tc.in))
+		c.Assert(got, qt.Equals, tc.want, qt.Commentf("in=%q", tc.in))
+	}
+
+	for _, bad := range []string{"ENDED", "CANCELED", "RESULTS", "unknown", "1"} {
+		_, err := ParseInitialStatus(bad)
+		c.Assert(err, qt.ErrorMatches, `initialStatus must be READY or PAUSED, got .*`,
+			qt.Commentf("in=%q", bad))
+	}
+}
+
+// TestNormalizeInitialStatus covers the wire-string → canonical-DB-string normalizer used
+// on write: empty and "READY" collapse to "" (default), "PAUSED" stays "PAUSED", anything
+// else is rejected via ParseInitialStatus.
+func TestNormalizeInitialStatus(t *testing.T) {
+	c := qt.New(t)
+
+	for _, tc := range []struct {
+		in, want string
+	}{
+		{"", ""},
+		{"READY", ""},
+		{"ready", ""},
+		{"PAUSED", "PAUSED"},
+		{"paused", "PAUSED"},
+	} {
+		got, err := NormalizeInitialStatus(tc.in)
+		c.Assert(err, qt.IsNil, qt.Commentf("in=%q", tc.in))
+		c.Assert(got, qt.Equals, tc.want, qt.Commentf("in=%q", tc.in))
+	}
+
+	_, err := NormalizeInitialStatus("ENDED")
+	c.Assert(err, qt.ErrorMatches, `initialStatus must be READY or PAUSED, got .*`)
 }
