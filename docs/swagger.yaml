@@ -530,6 +530,15 @@ definitions:
         type: string
       header:
         type: string
+      initialStatus:
+        description: |-
+          InitialStatus is the on-chain status every question's election is published with.
+          Empty (default) means READY; "PAUSED" publishes them PAUSED so voting only opens after
+          an admin sets each question to READY. Only "" / "READY" / "PAUSED" are accepted (the
+          vochain whitelist for NewProcess); anything else is rejected with 400. Persisted on
+          the draft and applied at publish time.
+        example: PAUSED
+        type: string
       orgAddress:
         example: a1b2c3d4e5f60718293a4b5c6d7e8f9012345678
         format: hex
@@ -2073,6 +2082,14 @@ definitions:
         type: string
       id:
         type: string
+      initialStatus:
+        description: |-
+          InitialStatus echoes the draft's initialStatus: the on-chain status every question's
+          election was (or will be) published with. Empty/absent means READY (the default);
+          "PAUSED" means every question was published PAUSED. Publish-time only — it does not
+          track later per-question status changes.
+        example: PAUSED
+        type: string
       orgAddress:
         example: a1b2c3d4e5f60718293a4b5c6d7e8f9012345678
         format: hex
@@ -2200,6 +2217,14 @@ definitions:
       endDate:
         type: string
       header:
+        type: string
+      initialStatus:
+        description: |-
+          InitialStatus is the on-chain status the election is published with. Empty (the default)
+          means READY; "PAUSED" publishes it in the PAUSED state, so voting only opens once an
+          admin sets it to READY via SET_PROCESS_STATUS. Only "" / "READY" / "PAUSED" are
+          accepted, matching the vochain whitelist for NewProcess. Publish-time only: this field
+          is not updated when the on-chain status changes later.
         type: string
       maxCensusSize:
         type: integer

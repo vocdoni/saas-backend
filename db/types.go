@@ -618,6 +618,12 @@ type ElectionParams struct {
 	ElectionType  ElectionType          `json:"electionType" bson:"electionType"`
 	TypeMetadata  *ElectionTypeMetadata `json:"type,omitempty" bson:"type,omitempty"`
 	MaxCensusSize uint64                `json:"maxCensusSize,omitempty" bson:"maxCensusSize,omitempty"`
+	// InitialStatus is the on-chain status the election is published with. Empty (the default)
+	// means READY; "PAUSED" publishes it in the PAUSED state, so voting only opens once an
+	// admin sets it to READY via SET_PROCESS_STATUS. Only "" / "READY" / "PAUSED" are
+	// accepted, matching the vochain whitelist for NewProcess. Publish-time only: this field
+	// is not updated when the on-chain status changes later.
+	InitialStatus string `json:"initialStatus,omitempty" bson:"initialStatus,omitempty"`
 }
 
 // Process represents a voting process in the vochain
@@ -715,8 +721,15 @@ type VotingProcess struct {
 	StreamURI   string          `json:"streamUri,omitempty" bson:"streamUri,omitempty"`
 	StartDate   time.Time       `json:"startDate,omitempty" bson:"startDate,omitempty"`
 	EndDate     time.Time       `json:"endDate,omitempty" bson:"endDate,omitempty"`
-	CensusID    bson.ObjectID   `json:"-" bson:"censusId"`    // internal ref to a db.Census
-	QuestionIDs []bson.ObjectID `json:"-" bson:"questionIds"` // ordered question references
+	// InitialStatus is the on-chain status every question's election is published with.
+	// Empty (default) means READY; "PAUSED" publishes every question's election in the
+	// PAUSED state, so voting only opens after an admin sets each question to READY via
+	// SET_PROCESS_STATUS. Only "" / "READY" / "PAUSED" are accepted. Publish-time only:
+	// after publish, each question's status evolves independently and this field is not
+	// updated to reflect them (it documents how the process was published).
+	InitialStatus string          `json:"initialStatus,omitempty" bson:"initialStatus,omitempty"`
+	CensusID      bson.ObjectID   `json:"-" bson:"censusId"`    // internal ref to a db.Census
+	QuestionIDs   []bson.ObjectID `json:"-" bson:"questionIds"` // ordered question references
 	// Publishing is the transient claim a publish worker holds on this process (see
 	// ClaimVotingProcessForPublish). It is a struct field rather than only a raw $set so that
 	// SetVotingProcess's ReplaceOne stops wiping a live claim, and so handlers can refuse to

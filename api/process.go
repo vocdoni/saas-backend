@@ -782,13 +782,22 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// build the NewProcess tx (CSP census)
+	// build the NewProcess tx (CSP census). A draft that carries InitialStatus="PAUSED"
+	// publishes the election in the PAUSED state so voting only opens once an admin sets
+	// it to READY; the legacy path has no separate Anonymous knob, so a paused publish
+	// still uses the plain CSP origin.
+	initialStatus, err := account.ParseInitialStatus(draft.ElectionParams.InitialStatus)
+	if err != nil {
+		errors.ErrMalformedBody.WithErr(err).Write(w)
+		return
+	}
 	tx, err := a.account.BuildNewProcessTx(&account.NewProcessParams{
-		OrgAddress:  draft.OrgAddress,
-		Params:      draft.ElectionParams,
-		CensusRoot:  cspPubKey,
-		CensusURI:   a.serverURL,
-		MetadataURL: metadataURL,
+		OrgAddress:    draft.OrgAddress,
+		Params:        draft.ElectionParams,
+		CensusRoot:    cspPubKey,
+		CensusURI:     a.serverURL,
+		MetadataURL:   metadataURL,
+		InitialStatus: initialStatus,
 	})
 	if err != nil {
 		errors.ErrMalformedBody.Withf("could not build election: %v", err).Write(w)
@@ -853,7 +862,7 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 			return nil, err
 		}
 		draft.Address = internal.HexBytes(data)
-		draft.Status = "READY"
+		draft.Status = initialStatus.String()
 		draft.PublishedAt = time.Now()
 		if _, err := a.db.SetProcess(draft); err != nil {
 			return nil, err
@@ -864,7 +873,7 @@ func (a *API) publishProcessHandler(w http.ResponseWriter, r *http.Request) {
 				log.Warnw("could not update organization process counter", "error", err)
 			}
 		}
-		return &db.JobResult{Address: draft.Address, Status: "READY"}, nil
+		return &db.JobResult{Address: draft.Address, Status: initialStatus.String()}, nil
 	}}) {
 		// full queue: mark the job failed so it is not orphaned pending; the deferred
 		// unlock, publishing-claim release and reservation rollback all fire on return.

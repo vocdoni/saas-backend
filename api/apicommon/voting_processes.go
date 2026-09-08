@@ -72,6 +72,12 @@ type CreateVotingProcessRequest struct {
 	StartDate   string                         `json:"startDate,omitempty"`
 	EndDate     string                         `json:"endDate,omitempty"`
 	Questions   []VotingProcessQuestionRequest `json:"questions"`
+	// InitialStatus is the on-chain status every question's election is published with.
+	// Empty (default) means READY; "PAUSED" publishes them PAUSED so voting only opens after
+	// an admin sets each question to READY. Only "" / "READY" / "PAUSED" are accepted (the
+	// vochain whitelist for NewProcess); anything else is rejected with 400. Persisted on
+	// the draft and applied at publish time.
+	InitialStatus string `json:"initialStatus,omitempty" example:"PAUSED"`
 	// UpdatedAt, on a PUT, is the updatedAt the client last read. The update then applies only if
 	// the process has not been written since, and is rejected with 409 otherwise, so two clients
 	// editing the same draft cannot silently overwrite each other. Optional: omitting it keeps the
@@ -142,6 +148,11 @@ type VotingProcessResponse struct {
 	StartDate   string                     `json:"startDate,omitempty"`
 	EndDate     string                     `json:"endDate,omitempty"`
 	Questions   []db.VotingProcessQuestion `json:"questions"`
+	// InitialStatus echoes the draft's initialStatus: the on-chain status every question's
+	// election was (or will be) published with. Empty/absent means READY (the default);
+	// "PAUSED" means every question was published PAUSED. Publish-time only — it does not
+	// track later per-question status changes.
+	InitialStatus string `json:"initialStatus,omitempty" example:"PAUSED"`
 	// ChainID is the Vochain chain id votes must be signed against; clients need it because vote
 	// signatures are chain-id-bound (a mismatch makes the on-chain signer recovery diverge).
 	ChainID string `json:"chainId,omitempty"`
@@ -288,15 +299,16 @@ func VotingProcessResponseFromDB(
 	vp *db.VotingProcess, questions []db.VotingProcessQuestion, census *db.Census, chainID string,
 ) *VotingProcessResponse {
 	resp := &VotingProcessResponse{
-		ID:          vp.ID.Hex(),
-		OrgAddress:  vp.OrgAddress.Bytes(),
-		Published:   vp.Published,
-		Title:       vp.Title,
-		Description: vp.Description,
-		Header:      vp.Header,
-		StreamURI:   vp.StreamURI,
-		Questions:   questions,
-		ChainID:     chainID,
+		ID:            vp.ID.Hex(),
+		OrgAddress:    vp.OrgAddress.Bytes(),
+		Published:     vp.Published,
+		Title:         vp.Title,
+		Description:   vp.Description,
+		Header:        vp.Header,
+		StreamURI:     vp.StreamURI,
+		Questions:     questions,
+		InitialStatus: vp.InitialStatus,
+		ChainID:       chainID,
 	}
 	if !vp.StartDate.IsZero() {
 		resp.StartDate = vp.StartDate.UTC().Format("2006-01-02T15:04:05Z")

@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -84,6 +85,58 @@ type NewProcessParams struct {
 	// on-chain nonce. Batch publishing sets explicit consecutive nonces so N txs can be
 	// signed and submitted together; single publishes leave it nil to read the nonce.
 	Nonce *uint32
+	// InitialStatus is the on-chain status the election is created with. Only READY (the
+	// default when unset / PROCESS_UNKNOWN) and PAUSED are accepted, matching the vochain
+	// whitelist for NewProcess. PAUSED→READY has no interruptible requirement on the
+	// vochain, so a paused election can always be resumed regardless of Mode.Interruptible.
+	InitialStatus models.ProcessStatus
+}
+
+// ParseInitialStatus turns a wire-level initialStatus string (as carried by the HTTP API and
+// persisted on the draft) into the on-chain enum used by NewProcessParams.InitialStatus.
+// The empty string resolves to READY, preserving the historical default. Comparison is
+// case-insensitive so callers can send "PAUSED" or "paused". Any value other than
+// ""/"READY"/"PAUSED" is rejected — the vochain would refuse NewProcess for any other status.
+func ParseInitialStatus(s string) (models.ProcessStatus, error) {
+	switch strings.ToUpper(s) {
+	case "", models.ProcessStatus_READY.String():
+		return models.ProcessStatus_READY, nil
+	case models.ProcessStatus_PAUSED.String():
+		return models.ProcessStatus_PAUSED, nil
+	default:
+		return 0, fmt.Errorf("initialStatus must be READY or PAUSED, got %q", s)
+	}
+}
+
+// NormalizeInitialStatus canonicalizes a wire-level initialStatus string for persistence:
+// "" and "READY" both collapse to "" (the default), "PAUSED" stays "PAUSED", anything else
+// is rejected. Storing "" for the default keeps `initialStatus,omitempty` responses concise
+// and gives DB queries a single canonical shape for "not paused".
+func NormalizeInitialStatus(s string) (string, error) {
+	st, err := ParseInitialStatus(s)
+	if err != nil {
+		return "", err
+	}
+	if st == models.ProcessStatus_READY {
+		return "", nil
+	}
+	return st.String(), nil
+}
+
+// resolveInitialStatus validates s and returns the on-chain status to publish an election
+// with. The zero value (PROCESS_UNKNOWN) resolves to READY, preserving the historical
+// behaviour for callers that do not set InitialStatus. Any status other than READY or
+// PAUSED is rejected — the vochain refuses the transaction otherwise (see
+// vocdoni-node vochain/transaction/election_tx.go).
+func resolveInitialStatus(s models.ProcessStatus) (models.ProcessStatus, error) {
+	switch s {
+	case models.ProcessStatus_PROCESS_UNKNOWN, models.ProcessStatus_READY:
+		return models.ProcessStatus_READY, nil
+	case models.ProcessStatus_PAUSED:
+		return models.ProcessStatus_PAUSED, nil
+	default:
+		return 0, fmt.Errorf("initialStatus must be READY or PAUSED, got %s", s)
+	}
 }
 
 // electionStartDuration maps the high-level start/end dates to the on-chain
@@ -136,6 +189,10 @@ func (a *Account) BuildNewProcessTx(p *NewProcessParams) (*models.Tx, error) {
 	if ep.MaxCensusSize == 0 {
 		return nil, fmt.Errorf("maxCensusSize must be greater than zero")
 	}
+	initialStatus, err := resolveInitialStatus(p.InitialStatus)
+	if err != nil {
+		return nil, err
+	}
 	nonce := p.Nonce
 	if nonce == nil {
 		acc, err := a.client.Account(p.OrgAddress.String())
@@ -161,7 +218,7 @@ func (a *Account) BuildNewProcessTx(p *NewProcessParams) (*models.Tx, error) {
 	metadataURL := p.MetadataURL
 	process := &models.Process{
 		EntityId:      p.OrgAddress.Bytes(),
-		Status:        models.ProcessStatus_READY,
+		Status:        initialStatus,
 		StartTime:     startTime,
 		Duration:      duration,
 		CensusOrigin:  censusOrigin,
