@@ -198,6 +198,64 @@ func TestIntegratorAPIKeyDeletesProcessDraft(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusForbidden)
 }
 
+// TestIntegratorAPIKeyDeletesVotingProcessDraft is the multi-question companion of
+// TestIntegratorAPIKeyDeletesProcessDraft: verifies that a scoped API key (voting:write) can delete
+// a draft on the new /processes API (VotingProcess), the same way #559 unblocked the legacy
+// /process route. Without DELETE /processes/{processId} in the allowlist the call is rejected with
+// 403 (ErrAPIKeyNotAllowed) and quota-blocked drafts are permanently stuck for key-only integrators.
+func TestIntegratorAPIKeyDeletesVotingProcessDraft(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "deletevpdraftpass123")
+	orgAddr := testCreateOrganization(t, token)
+
+	org, err := testDB.Organization(orgAddr)
+	c.Assert(err, qt.IsNil)
+	org.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 2}
+	c.Assert(testDB.SetOrganization(org), qt.IsNil)
+
+	createBody := &apicommon.CreateAPIKeyRequest{
+		Label:  "voting",
+		Scopes: []string{ScopeManagedWrite, ScopeVotingWrite},
+	}
+	data, code := testRequest(t, http.MethodPost, token, createBody, "integrator", "organizations", orgAddr.String(), "apikeys")
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("resp: %s", data))
+	var created apicommon.CreateAPIKeyResponse
+	c.Assert(json.Unmarshal(data, &created), qt.IsNil)
+	apiKey := created.Secret
+
+	mbody := &apicommon.CreateManagedOrganizationRequest{
+		OrganizationInfo: apicommon.OrganizationInfo{Type: string(db.CompanyType), Website: "https://mdvp.example"},
+	}
+	managed := requestAndParse[apicommon.OrganizationInfo](t, http.MethodPost, apiKey, mbody, "integrator", "organizations")
+	c.Assert(managed.Address, qt.Not(qt.Equals), common.Address{})
+
+	// seed a draft directly in the votingProcesses collection, mirroring the legacy setup.
+	vpID, err := testDB.SetVotingProcess(&db.VotingProcess{
+		OrgAddress: managed.Address,
+		Title:      db.MultiLangString{"default": "Voting draft to delete"},
+		EndDate:    time.Now().Add(2 * time.Hour),
+	})
+	c.Assert(err, qt.IsNil)
+	c.Assert(vpID.IsZero(), qt.IsFalse)
+
+	// the key (voting:write) can delete the managed org's voting-process draft
+	_, code = testRequest(t, http.MethodDelete, apiKey, nil, "processes", vpID.Hex())
+	c.Assert(code, qt.Equals, http.StatusOK)
+
+	// the draft is gone
+	_, err = testDB.VotingProcess(vpID)
+	c.Assert(err, qt.Equals, db.ErrNotFound)
+
+	// a key without voting:write cannot delete (insufficient scope → 403)
+	noScopeBody := &apicommon.CreateAPIKeyRequest{Label: "noscope", Scopes: []string{ScopeManagedRead}}
+	data, code = testRequest(t, http.MethodPost, token, noScopeBody, "integrator", "organizations", orgAddr.String(), "apikeys")
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("resp: %s", data))
+	var noScope apicommon.CreateAPIKeyResponse
+	c.Assert(json.Unmarshal(data, &noScope), qt.IsNil)
+	_, code = testRequest(t, http.MethodDelete, noScope.Secret, nil, "processes", bson.NewObjectID().Hex())
+	c.Assert(code, qt.Equals, http.StatusForbidden)
+}
+
 // TestAPIKeysRequireIntegrator verifies that API keys can only be created by integrator
 // organizations: a plain (non-integrator) org admin is rejected with 403, while the same
 // org once enabled as an integrator (override) is allowed.
