@@ -456,6 +456,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPost, organizationAcceptUserEndpoint, a.acceptOrganizationUserInvitationHandler)
 		handle(r, http.MethodGet, organizationRolesEndpoint, a.organizationRolesHandler)
 		handle(r, http.MethodGet, organizationTypesEndpoint, a.organizationsTypesHandler)
+		handle(r, http.MethodGet, organizationLanguagesEndpoint, a.organizationsLanguagesHandler)
 		handle(r, http.MethodGet, plansEndpoint, a.plansHandler)
 		handle(r, http.MethodPost, subscriptionsWebhook, a.stripeHandlers.HandleWebhook)
 		handle(r, http.MethodGet, objectStorageDownloadTypedEndpoint, a.objectStorage.DownloadImageInlineHandler)

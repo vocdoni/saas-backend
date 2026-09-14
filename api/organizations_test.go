@@ -201,6 +201,19 @@ func TestOrganizationsTypesHandler(t *testing.T) {
 	c.Assert(typeMap[string(db.AssociationType)], qt.Not(qt.Equals), "")
 }
 
+func TestOrganizationsLanguagesHandler(t *testing.T) {
+	c := qt.New(t)
+
+	// Test getting supported languages (no authentication required)
+	resp, code := testRequest(t, http.MethodGet, "", nil, "organizations", "languages")
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+	var langList apicommon.OrganizationLanguageList
+	c.Assert(json.Unmarshal(resp, &langList), qt.IsNil)
+	c.Assert(langList.Languages, qt.DeepEquals, apicommon.SupportedLangs)
+	c.Assert(langList.Default, qt.Equals, apicommon.DefaultLang)
+}
+
 func TestOrganizationSubscriptionHandler(t *testing.T) {
 	c := qt.New(t)
 

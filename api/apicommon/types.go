@@ -295,6 +295,16 @@ type OrganizationTypeList struct {
 	Types []*OrganizationType `json:"types"`
 }
 
+// OrganizationLanguageList represents the languages supported for notifications.
+// swagger:model OrganizationLanguageList
+type OrganizationLanguageList struct {
+	// Languages accepted for notifications, both as the lang query parameter
+	// and as an organization defaultLang
+	Languages []string `json:"languages"`
+	// Default language used when no other applies
+	Default string `json:"default"`
+}
+
 // OrganizationAddMetaRequest represents a request to add or update meta information for an organization.
 // swagger:model OrganizationAddMetaRequest
 type OrganizationAddMetaRequest struct {

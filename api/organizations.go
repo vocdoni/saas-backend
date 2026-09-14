@@ -329,6 +329,23 @@ func (*API) organizationsTypesHandler(w http.ResponseWriter, _ *http.Request) {
 	apicommon.HTTPWriteJSON(w, &apicommon.OrganizationTypeList{Types: organizationTypes})
 }
 
+// organizationsLanguagesHandler godoc
+//
+//	@Summary		Get supported notification languages
+//	@Description	Get the list of languages supported for notifications, accepted both as the ?lang= query
+//	@Description	parameter and as an organization defaultLang, plus the default used when none applies
+//	@Tags			organizations
+//	@Accept			json
+//	@Produce		json
+//	@Success		200	{object}	apicommon.OrganizationLanguageList
+//	@Router			/organizations/languages [get]
+func (*API) organizationsLanguagesHandler(w http.ResponseWriter, _ *http.Request) {
+	apicommon.HTTPWriteJSON(w, &apicommon.OrganizationLanguageList{
+		Languages: apicommon.SupportedLangs,
+		Default:   apicommon.DefaultLang,
+	})
+}
+
 // organizationSubscriptionHandler godoc
 //
 //	@Summary		Get organization subscription
