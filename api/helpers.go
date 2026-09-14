@@ -97,6 +97,15 @@ func (*API) getLanguageFromContext(ctx context.Context) string {
 	return apicommon.DefaultLang // default fallback
 }
 
+// orgLangCtx returns a context carrying the notification language for
+// org-scoped mails: the explicit ?lang= request param wins, then the
+// organization's default language, then apicommon.DefaultLang. Wrap the
+// request context with it before calling sendMail when an organization is in
+// scope.
+func orgLangCtx(ctx context.Context, org *db.Organization) context.Context {
+	return context.WithValue(ctx, apicommon.LangMetadataKey, apicommon.NotificationLang(ctx, org))
+}
+
 // generateVerificationCodeAndLink method generates and stores in the database
 // a new verification code for the target provided according to the database
 // code type selected. Then it generates a verification link to the web app

@@ -485,7 +485,7 @@ func (a *API) organizationCreateTicket(w http.ResponseWriter, r *http.Request) {
 		errors.ErrEmailMalformed.With("invalid user email address").Write(w)
 		return
 	}
-	lang := a.getLanguageFromContext(r.Context())
+	lang := apicommon.NotificationLang(r.Context(), org)
 	notification, err := mailtemplates.SupportNotification.Localized(lang).ExecTemplate(
 		struct {
 			Type         string

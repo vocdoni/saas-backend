@@ -27,8 +27,12 @@ type MembersImportCompletionData struct {
 	CompletedAt      time.Time
 }
 
-// sendMembersImportCompletionEmail sends an email notification when members import is completed
-func (a *API) sendMembersImportCompletionEmail(userEmail, userName string, org *db.Organization, progress *db.BulkOrgMembersJob) {
+// sendMembersImportCompletionEmail sends an email notification when members import is completed.
+// lang must be resolved from the original request context before spawning the
+// async job (see apicommon.NotificationLang), since this runs detached from it.
+func (a *API) sendMembersImportCompletionEmail(userEmail, userName, lang string, org *db.Organization,
+	progress *db.BulkOrgMembersJob,
+) {
 	if a.mail == nil {
 		return // Email service not configured
 	}
@@ -51,8 +55,9 @@ func (a *API) sendMembersImportCompletionEmail(userEmail, userName string, org *
 		CompletedAt:      time.Now(),
 	}
 
-	// Create a background context for email sending
-	ctx := context.Background()
+	// Create a background context for email sending, carrying the language
+	// resolved from the original request
+	ctx := context.WithValue(context.Background(), apicommon.LangMetadataKey, lang)
 
 	// We need to import mailtemplates here to use the template
 	// For now, let's create a simple notification structure
@@ -262,9 +267,11 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 		// Continue with in-memory only (fallback)
 	}
 
-	// Capture user and org info for the async goroutine
+	// Capture user, org and language info for the async goroutine (the request
+	// context is dead once the handler returns)
 	userEmail := user.Email
 	userName := user.FirstName + " " + user.LastName
+	lang := apicommon.NotificationLang(r.Context(), org)
 
 	go func() {
 		var lastProgress *db.BulkOrgMembersJob
@@ -291,7 +298,7 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 
 		// Send completion email notification when async job is done
 		if lastProgress != nil {
-			a.sendMembersImportCompletionEmail(userEmail, userName, org, lastProgress)
+			a.sendMembersImportCompletionEmail(userEmail, userName, lang, org, lastProgress)
 		}
 	}()
 
