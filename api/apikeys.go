@@ -86,6 +86,7 @@ var apiKeyAllowlist = map[string]string{
 	// key still unlocks drafts + eligibility there, resolved in-handler via optionalManager, not here)
 	"POST " + processesCreateEndpoint:         ScopeVotingWrite,
 	"PUT " + processesEndpoint:                ScopeVotingWrite,
+	"DELETE " + processesEndpoint:             ScopeVotingWrite,
 	"GET " + processesValidateEndpoint:        ScopeVotingWrite,
 	"POST " + processesPublishEndpoint:        ScopeVotingWrite,
 	"PUT " + processesQuestionsStatusEndpoint: ScopeVotingWrite,
