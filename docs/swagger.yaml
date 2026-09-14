@@ -6346,6 +6346,8 @@ paths:
         Delete an unpublished voting process draft together with its inline census. A
         published process has on-chain elections and cannot be deleted. Requires
         Manager/Admin role of the organization that owns the process.
+
+        Also callable with a scoped API key (scope: `voting:write`).
       parameters:
       - description: Process ID
         in: path
