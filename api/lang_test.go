@@ -92,9 +92,10 @@ func TestLanguageParameterInUserRegistration(t *testing.T) {
 	t.Run("Catalan Registration Email", func(*testing.T) { test("ca") })
 }
 
-// TestOrgDefaultLangNotifications tests that the organization defaultLang is
-// used as the notification language when the request carries no lang param,
-// and that an explicit lang param still wins over it.
+// TestOrgDefaultLangNotifications tests that the organization defaultLang,
+// when set, decides the notification language — including over an explicit
+// lang param. The lang param only applies for organizations without a
+// defaultLang (covered by TestLanguageParameterInEmails, whose orgs set none).
 func TestOrgDefaultLangNotifications(t *testing.T) {
 	c := qt.New(t)
 
@@ -147,11 +148,11 @@ func TestOrgDefaultLangNotifications(t *testing.T) {
 	c.Assert(resendResp.AuthToken, qt.Not(qt.HasLen), 0)
 	assertContentMatches(t, waitForEmail(t, members[0].Email), "ca", otpRegexps)
 
-	// an explicit lang param wins over the org default
+	// the org default wins even over an explicit lang param
 	authResp = requestAndParse[handlers.AuthResponse](t, "POST", "", authReq(members[1]),
 		"process", "bundle", bundleID, "auth", "0?lang=es")
 	c.Assert(authResp.AuthToken, qt.Not(qt.HasLen), 0)
-	assertContentMatches(t, waitForEmail(t, members[1].Email), "es", otpRegexps)
+	assertContentMatches(t, waitForEmail(t, members[1].Email), "ca", otpRegexps)
 }
 
 // TestOrgDefaultLangInMembersImport tests that the async members-import

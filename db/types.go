@@ -83,11 +83,11 @@ type Organization struct {
 	Subdomain string           `json:"subdomain" bson:"subdomain"`
 	Country   string           `json:"country" bson:"country"`
 	Timezone  string           `json:"timezone" bson:"timezone"`
-	// DefaultLang is the fallback language for notifications sent on behalf of
-	// the organization when the request carries no ?lang= param. Since
-	// dynamicUpdateDocument skips zero-valued fields (see SetOrganization), it
-	// can be overwritten but never cleared back to "" — setting "en" is
-	// behaviorally identical to unset.
+	// DefaultLang is the preferred language for notifications sent on behalf
+	// of the organization; when set it overrides the request's ?lang= param.
+	// Since dynamicUpdateDocument skips zero-valued fields (see
+	// SetOrganization), it can be overwritten but never cleared back to "" —
+	// setting "en" is behaviorally identical to unset.
 	DefaultLang     string                   `json:"defaultLang,omitempty" bson:"defaultLang,omitempty"`
 	Communications  bool                     `json:"communications" bson:"communications"`
 	TokensPurchased uint64                   `json:"tokensPurchased" bson:"tokensPurchased"`

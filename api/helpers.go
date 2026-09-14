@@ -98,10 +98,9 @@ func (*API) getLanguageFromContext(ctx context.Context) string {
 }
 
 // orgLangCtx returns a context carrying the notification language for
-// org-scoped mails: the explicit ?lang= request param wins, then the
-// organization's default language, then apicommon.DefaultLang. Wrap the
-// request context with it before calling sendMail when an organization is in
-// scope.
+// org-scoped mails: the organization's default language wins when set, then
+// the ?lang= request param, then apicommon.DefaultLang. Wrap the request
+// context with it before calling sendMail when an organization is in scope.
 func orgLangCtx(ctx context.Context, org *db.Organization) context.Context {
 	return context.WithValue(ctx, apicommon.LangMetadataKey, apicommon.NotificationLang(ctx, org))
 }
