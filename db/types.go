@@ -87,7 +87,7 @@ type Organization struct {
 	TokensPurchased uint64                   `json:"tokensPurchased" bson:"tokensPurchased"`
 	TokensRemaining uint64                   `json:"tokensRemaining" bson:"tokensRemaining"`
 	Parent          common.Address           `json:"parent" bson:"parent"`
-	Meta            map[string]any           `json:"meta" bson:"meta"`
+	Meta            UntypedDoc               `json:"meta" bson:"meta"`
 	Subscription    OrganizationSubscription `json:"subscription" bson:"subscription"`
 	Counters        OrganizationCounters     `json:"counters" bson:"counters"`
 	ManagedBy       common.Address           `json:"managedBy,omitempty" bson:"managedBy,omitempty"`
@@ -99,9 +99,13 @@ type Organization struct {
 
 // metaDefaultString extracts the "default" locale value from a meta entry that
 // may be stored as a plain string (legacy), a locale map, or the BSON-decoded
-// form of a locale map after a MongoDB round-trip: bson.D by default, or
-// bson.M when the client is configured with DefaultDocumentM (as ours is, see
-// db/mongo.go) — a named type distinct from the unnamed map[string]any.
+// form of a locale map after a MongoDB round-trip.
+//
+// Organization.Meta is an UntypedDoc, so a round-tripped value reaches us as a
+// plain map[string]any. The bson.M and bson.D branches only remain for raw
+// decodes that bypass that normalization (an ad-hoc bson.Unmarshal into a
+// map, an aggregation result) — they are cheap and keep the helper honest for
+// any caller that hands us a driver type directly.
 func metaDefaultString(v any) string {
 	switch m := v.(type) {
 	case string:
@@ -321,7 +325,7 @@ type OrgMember struct {
 	Password        string         `json:"password" bson:"password"`
 	HashedPass      []byte         `json:"pass" bson:"pass" swaggertype:"string" format:"base64" example:"aGVsbG8gd29ybGQ="`
 	Weight          uint64         `json:"weight" bson:"weight"`
-	Other           map[string]any `json:"other" bson:"other"`
+	Other           UntypedDoc     `json:"other" bson:"other"`
 	CreatedAt       time.Time      `json:"createdAt" bson:"createdAt"`
 	UpdatedAt       time.Time      `json:"updatedAt" bson:"updatedAt"`
 }
@@ -636,7 +640,7 @@ type Process struct {
 	Address    internal.HexBytes `json:"address" bson:"address"  swaggertype:"string" format:"hex" example:"deadbeef"`
 	OrgAddress common.Address    `json:"orgAdress" bson:"orgAddress"`
 	Census     Census            `json:"census" bson:"census"`
-	Metadata   map[string]any    `json:"metadata"  bson:"metadata"`
+	Metadata   UntypedDoc        `json:"metadata"  bson:"metadata"`
 	// MetadataURL is the generic reference to this process's canonical ElectionMetadata
 	// document. http(s) references are fetched — locally when they point at this service's
 	// object storage (including a relative "/storage/{name}" reference), otherwise via an
@@ -770,7 +774,7 @@ type VotingProcessQuestion struct {
 	BallotProtocol    *BallotProtocol   `json:"ballotProtocol,omitempty" bson:"ballotProtocol,omitempty"`
 	SecretUntilTheEnd bool              `json:"secretUntilTheEnd" bson:"secretUntilTheEnd"`
 	EligibleMemberIDs []string          `json:"eligibleMemberIds,omitempty" bson:"eligibleMemberIds"`
-	Metadata          map[string]any    `json:"metadata,omitempty" bson:"metadata,omitempty"`
+	Metadata          UntypedDoc        `json:"metadata,omitempty" bson:"metadata,omitempty"`
 	UpstreamID        internal.HexBytes `json:"upstreamId,omitempty" bson:"upstreamId,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	MetadataURL       string            `json:"-" bson:"metadataURL,omitempty"`
 	Status            string            `json:"status,omitempty" bson:"status,omitempty"`

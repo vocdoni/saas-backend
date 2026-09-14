@@ -104,9 +104,11 @@ func New(url, database string) (*MongoStorage, error) {
 	opts.ApplyURI(url)
 	opts.SetMaxConnecting(200)
 	opts.SetConnectTimeout(connectTimeout)
-	// keep driver v1 behavior: decode untyped embedded documents (e.g. locale maps
-	// inside Organization.Meta) as map[string]any instead of bson.D, which would
-	// leak into JSON responses as an array of {Key,Value} pairs
+	// keep driver v1 behavior: decode untyped embedded documents as bson.M rather
+	// than bson.D, which would leak into JSON responses as an array of {Key,Value}
+	// pairs. bson.M is still a named type that a `case map[string]any` type switch
+	// does not match, so schemaless fields are declared as UntypedDoc (db/untyped.go)
+	// to get plain map[string]any all the way down.
 	opts.SetBSONOptions(&options.BSONOptions{DefaultDocumentM: true})
 	// create a new client with the connection options
 	client, err := mongo.Connect(opts)

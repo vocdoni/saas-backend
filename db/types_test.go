@@ -1,7 +1,6 @@
 package db
 
 import (
-	"bytes"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
@@ -60,7 +59,8 @@ func TestOrganizationDisplayNameAndLogoURL(t *testing.T) {
 		// db/mongo.go), which makes untyped embedded documents decode as the
 		// named type bson.M rather than the unnamed map[string]any. Reproduce
 		// that exact decode path here instead of the plain bson.Unmarshal used
-		// by BsonRoundTrip above, which doesn't set this option.
+		// by BsonRoundTrip above, which doesn't set this option. Meta is an
+		// UntypedDoc, so the driver type must not reach the accessors.
 		org := Organization{Meta: map[string]any{
 			"name": map[string]string{"default": "Acme"},
 			"logo": map[string]string{"default": "https://acme.org/logo.png"},
@@ -68,12 +68,10 @@ func TestOrganizationDisplayNameAndLogoURL(t *testing.T) {
 		raw, err := bson.Marshal(org)
 		c.Assert(err, qt.IsNil)
 
-		dec := bson.NewDecoder(bson.NewDocumentReader(bytes.NewReader(raw)))
-		dec.DefaultDocumentM()
 		var decoded Organization
-		c.Assert(dec.Decode(&decoded), qt.IsNil)
+		decodeDefaultDocumentM(c, raw, &decoded)
 
-		_, ok := decoded.Meta["name"].(bson.M)
+		_, ok := decoded.Meta["name"].(map[string]any)
 		c.Assert(ok, qt.IsTrue)
 
 		c.Assert(decoded.DisplayName(), qt.Equals, "Acme")
