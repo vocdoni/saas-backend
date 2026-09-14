@@ -168,6 +168,10 @@ type OrganizationInfo struct {
 	// The organization's timezone
 	Timezone string `json:"timezone"`
 
+	// Default language for notifications sent on behalf of the organization,
+	// used when the request carries no lang param (supported: en, es, ca)
+	DefaultLang string `json:"defaultLang,omitempty"`
+
 	// Whether the organization has enabled communications
 	Communications bool `json:"communications"`
 
@@ -609,6 +613,7 @@ func OrganizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 		Subdomain:      dbOrg.Subdomain,
 		Country:        dbOrg.Country,
 		Timezone:       dbOrg.Timezone,
+		DefaultLang:    dbOrg.DefaultLang,
 		Communications: dbOrg.Communications,
 		Meta:           meta,
 		Name:           multilingualFromAny(meta["name"]),

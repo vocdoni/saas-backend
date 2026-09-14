@@ -66,6 +66,11 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		errors.ErrMalformedBody.Withf("invalid organization type").Write(w)
 		return
 	}
+	// check if the default language is valid (optional field)
+	if orgInfo.DefaultLang != "" && !apicommon.IsValidLang(orgInfo.DefaultLang) {
+		errors.ErrMalformedBody.Withf("invalid defaultLang").Write(w)
+		return
+	}
 	// find default plan
 	defaultPlan, err := a.db.DefaultPlan()
 	if err != nil || defaultPlan == nil {
@@ -143,6 +148,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		Country:         orgInfo.Country,
 		Subdomain:       orgInfo.Subdomain,
 		Timezone:        orgInfo.Timezone,
+		DefaultLang:     orgInfo.DefaultLang,
 		Communications:  orgInfo.Communications,
 		Meta:            apicommon.BuildOrgMeta(nil, orgInfo.Name, orgInfo.Logo, orgInfo.Description, orgInfo.Meta),
 		TokensPurchased: 0,
@@ -279,6 +285,14 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	if newOrgInfo.Timezone != "" {
 		org.Timezone = newOrgInfo.Timezone
+		updateOrg = true
+	}
+	if newOrgInfo.DefaultLang != "" {
+		if !apicommon.IsValidLang(newOrgInfo.DefaultLang) {
+			errors.ErrMalformedBody.Withf("invalid defaultLang").Write(w)
+			return
+		}
+		org.DefaultLang = newOrgInfo.DefaultLang
 		updateOrg = true
 	}
 	if newOrgInfo.Name != nil || newOrgInfo.Logo != nil || newOrgInfo.Description != nil || len(newOrgInfo.Meta) > 0 {

@@ -272,6 +272,11 @@ definitions:
       createdAt:
         description: Creation timestamp in RFC3339 format
         type: string
+      defaultLang:
+        description: |-
+          Default language for notifications sent on behalf of the organization,
+          used when the request carries no lang param (supported: en, es, ca)
+        type: string
       description:
         allOf:
         - $ref: '#/definitions/apicommon.MultilingualText'
@@ -382,6 +387,11 @@ definitions:
         type: string
       createdAt:
         description: Creation timestamp in RFC3339 format
+        type: string
+      defaultLang:
+        description: |-
+          Default language for notifications sent on behalf of the organization,
+          used when the request carries no lang param (supported: en, es, ca)
         type: string
       description:
         allOf:
@@ -962,6 +972,11 @@ definitions:
         type: string
       createdAt:
         description: Creation timestamp in RFC3339 format
+        type: string
+      defaultLang:
+        description: |-
+          Default language for notifications sent on behalf of the organization,
+          used when the request carries no lang param (supported: en, es, ca)
         type: string
       description:
         allOf:
