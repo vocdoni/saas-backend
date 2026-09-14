@@ -633,7 +633,10 @@ type ElectionParams struct {
 //nolint:lll
 type Process struct {
 	ID         bson.ObjectID     `json:"id" bson:"_id"`
-	Address    internal.HexBytes `json:"address" bson:"address"  swaggertype:"string" format:"hex" example:"deadbeef"`
+	// Empty for a draft (never on-chain). `omitempty` keeps the underlying document field
+	// off the disk for drafts so the "unpublished" filter stays `{$eq: null}` — see the
+	// paired normalisation in `internal.HexBytes.MarshalBSONValue`.
+	Address    internal.HexBytes `json:"address,omitempty" bson:"address,omitempty" swaggertype:"string" format:"hex" example:"deadbeef"`
 	OrgAddress common.Address    `json:"orgAdress" bson:"orgAddress"`
 	Census     Census            `json:"census" bson:"census"`
 	Metadata   map[string]any    `json:"metadata"  bson:"metadata"`

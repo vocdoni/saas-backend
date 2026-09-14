@@ -111,14 +111,33 @@ func (hb *HexBytes) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// MarshalBSONValue makes HexBytes be marshalled to a string
-// rather than the default (binary)
+// MarshalBSONValue makes HexBytes be marshalled to a string rather than the default (binary).
+//
+// An empty HexBytes — whether the slice is nil or a zero-length non-nil (`HexBytes{}`) —
+// marshals as BSON null. The distinction between the two is a Go-side accident: a struct
+// field left unset is nil, but the same field decoded from BSON `""` via UnmarshalBSONValue,
+// or built by JSON decode of `""`, becomes a zero-length non-nil slice. Persisting the
+// non-nil form as `""` created a class of documents invisible to `{$eq: null}` queries yet
+// visible to any code that reads the field back and re-writes it, so an anomaly here was
+// self-perpetuating (see the drafts-quota vs list-drafts discrepancy observed 2026-09-14).
+// Normalising empty to null on write closes the loop for good.
 func (hb HexBytes) MarshalBSONValue() (byte, []byte, error) {
+	if len(hb) == 0 {
+		return byte(bson.TypeNull), nil, nil
+	}
 	t, data, err := bson.MarshalValue(hb.String())
 	return byte(t), data, err
 }
 
 func (hb *HexBytes) UnmarshalBSONValue(t byte, data []byte) error {
+	// A null value on the wire (either a legitimate absence or a legacy empty string decoded
+	// into null on write) leaves the receiver as the nil slice. Round-tripping such a value
+	// back through MarshalBSONValue must produce the same null, not `""`, so the two write
+	// paths (never-set vs read-null-and-write) stay consistent.
+	if bson.Type(t) == bson.TypeNull {
+		*hb = nil
+		return nil
+	}
 	var s string
 	if err := bson.UnmarshalValue(bson.Type(t), data, &s); err != nil {
 		return err

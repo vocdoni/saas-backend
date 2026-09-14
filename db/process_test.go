@@ -178,6 +178,39 @@ func TestProcess(t *testing.T) {
 		c.Assert(err, qt.Equals, ErrInvalidData)
 	})
 
+	t.Run("TestEmptyAddressPersistsAsNull", func(_ *testing.T) {
+		// Regression: a draft written with an empty non-nil HexBytes address (as produced
+		// by re-writing a document that had been previously stored with `address: ""` on
+		// disk, or by any code path that explicitly sets `process.Address = internal.HexBytes{}`)
+		// used to persist `address: ""` in Mongo, which is invisible to the drafts filter
+		// `{$eq: null}` while still counting against per-org draft quota. The fix in
+		// `internal.HexBytes.MarshalBSONValue` normalises empty to null on every write so
+		// the CountProcesses/ListProcesses filter agrees with the quota check.
+		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
+		census := setupTestPrerequisites1(c, testDB)
+
+		draft := &Process{
+			Address:    internal.HexBytes{}, // empty non-nil — the failure case
+			OrgAddress: testOrgAddress,
+			Census:     *census,
+			Metadata:   map[string]any{"type": "draft"},
+		}
+		_, err := testDB.SetProcess(draft)
+		c.Assert(err, qt.IsNil)
+
+		// The two lenses that used to disagree: quota check reaches count, list handler
+		// reaches the paginated find. They must return the same number for the same filter.
+		count, err := testDB.CountProcesses(testOrgAddress, DraftOnly)
+		c.Assert(err, qt.IsNil)
+		c.Assert(count, qt.Equals, int64(1))
+
+		total, processes, err := testDB.ListProcesses(testOrgAddress, 1, 10, DraftOnly)
+		c.Assert(err, qt.IsNil)
+		c.Assert(total, qt.Equals, int64(1))
+		c.Assert(processes, qt.HasLen, 1)
+		c.Assert(processes[0].Address, qt.IsNil)
+	})
+
 	t.Run("TestListProcesses", func(_ *testing.T) {
 		c.Assert(testDB.DeleteAllDocuments(), qt.IsNil)
 		census := setupTestPrerequisites1(c, testDB)
