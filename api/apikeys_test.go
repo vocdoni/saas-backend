@@ -75,6 +75,9 @@ func TestRequiredScopeForRoute(t *testing.T) {
 	scope, ok = requiredScopeForRoute("PUT", processStatusEndpoint) // change election status
 	c.Assert(ok, qt.IsTrue)
 	c.Assert(scope, qt.Equals, ScopeVotingWrite)
+	scope, ok = requiredScopeForRoute("DELETE", processesEndpoint) // delete voting-process draft
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(scope, qt.Equals, ScopeVotingWrite)
 	// the previously-wrong keys must not linger (they matched no real route)
 	_, ok = requiredScopeForRoute("POST", censusParticipantsEndpoint)
 	c.Assert(ok, qt.IsFalse)

@@ -22,6 +22,8 @@ import (
 //	@Description	Delete an unpublished voting process draft together with its inline census. A
 //	@Description	published process has on-chain elections and cannot be deleted. Requires
 //	@Description	Manager/Admin role of the organization that owns the process.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
 //	@Produce		json
 //	@Security		BearerAuth
