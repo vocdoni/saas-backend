@@ -69,7 +69,7 @@ func downAddOAuthProviders(ctx context.Context, database *mongo.Database) error 
 		}
 
 		// Get the oauth map
-		oauthMap, ok := user["oauth"].(bson.M)
+		oauthMap, ok := user["oauth"].(map[string]any)
 		if !ok || len(oauthMap) == 0 {
 			continue
 		}
@@ -78,7 +78,7 @@ func downAddOAuthProviders(ctx context.Context, database *mongo.Database) error 
 		// We iterate over the map to get the first provider (google/github/facebook)
 		var signatureHash string
 		for _, providerData := range oauthMap {
-			if provider, ok := providerData.(bson.M); ok {
+			if provider, ok := providerData.(map[string]any); ok {
 				if hash, ok := provider["signatureHash"].(string); ok {
 					signatureHash = hash
 					break

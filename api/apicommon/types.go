@@ -52,7 +52,7 @@ func (m *MultilingualText) UnmarshalJSON(data []byte) error {
 // multilingualFromAny extracts a MultilingualText from a meta map value. It handles:
 //   - plain string (legacy storage): normalised to {"default": "<string>"}
 //   - MultilingualText / map[string]string (in-memory, set at creation time)
-//   - map[string]any (BSON-decoded form after a MongoDB round-trip)
+//   - map[string]any (BSON-decoded form; plain, not bson.M — see db/mongo.go)
 func multilingualFromAny(v any) *MultilingualText {
 	switch m := v.(type) {
 	case string:
