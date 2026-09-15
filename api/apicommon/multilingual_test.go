@@ -115,8 +115,7 @@ func TestMultilingualFromAny(t *testing.T) {
 	c.Assert(got, qt.IsNotNil)
 	c.Assert(*got, qt.DeepEquals, MultilingualText{"default": "world"})
 
-	// map[string]any with string values (the BSON-decoded form: our mongo client
-	// sets DefaultDocumentMap, see db/mongo.go, so this is what reads hand us)
+	// map[string]any with string values (the BSON-decoded form, see db/mongo.go)
 	ma := map[string]any{"default": "bson", "es": "bson-es"}
 	got = multilingualFromAny(ma)
 	c.Assert(got, qt.IsNotNil)
@@ -142,10 +141,9 @@ func TestMultilingualFromAny(t *testing.T) {
 }
 
 // TestOrganizationFromDBAfterMongoRoundTrip is the regression test for #679: the
-// name/logo/description shorthands used to vanish from every read of an organization,
-// because the driver decodes untyped subdocuments as the named type bson.M and
-// multilingualFromAny's `case map[string]any` does not match a named type. The client
-// now sets DefaultDocumentMap instead, so reads decode to plain maps.
+// name/logo/description shorthands used to vanish from every read, because the driver
+// decoded untyped subdocuments as bson.M and multilingualFromAny only matches
+// map[string]any.
 func TestOrganizationFromDBAfterMongoRoundTrip(t *testing.T) {
 	c := qt.New(t)
 
@@ -160,7 +158,7 @@ func TestOrganizationFromDBAfterMongoRoundTrip(t *testing.T) {
 	raw, err := bson.Marshal(stored)
 	c.Assert(err, qt.IsNil)
 
-	// our mongo.Client sets DefaultDocumentMap (see db/mongo.go) — reproduce that decode
+	// reproduce the client's decode path (see db/mongo.go)
 	dec := bson.NewDecoder(bson.NewDocumentReader(bytes.NewReader(raw)))
 	dec.DefaultDocumentMap()
 	var decoded db.Organization

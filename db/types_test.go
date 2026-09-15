@@ -56,11 +56,8 @@ func TestOrganizationDisplayNameAndLogoURL(t *testing.T) {
 	t.Run("DefaultDocumentMapDecode", func(t *testing.T) {
 		c := qt.New(t)
 
-		// Our mongo.Client is configured with DefaultDocumentMap (see db/mongo.go),
-		// which decodes untyped embedded documents as plain map[string]any rather
-		// than bson.D (plain bson.Unmarshal, as BsonRoundTrip above) or the named
-		// bson.M. Reproduce that exact decode path: no driver type may reach the
-		// accessors, or a `case map[string]any` type switch misses it (#679).
+		// reproduce the client's decode path (see db/mongo.go): no driver type may
+		// reach the accessors, or a `case map[string]any` misses it (#679)
 		org := Organization{Meta: map[string]any{
 			"name": map[string]string{"default": "Acme"},
 			"logo": map[string]string{"default": "https://acme.org/logo.png"},
