@@ -71,6 +71,8 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 //	@Description	memberNumber, nationalId), intersected with the process census, reporting each
 //	@Description	matched member's per-question voted status. For `phone` pass the plaintext number;
 //	@Description	it is hashed server-side. Requires Manager/Admin of the owning organization.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
 //	@Produce		json
 //	@Security		BearerAuth

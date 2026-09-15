@@ -18,6 +18,8 @@ import (
 //	@Description	explicit memberIds subset, or the whole organization when neither is set. Returns 400
 //	@Description	with the offending member ids (duplicates / missingData) when the census is not usable,
 //	@Description	otherwise 200. Requires Manager/Admin role of the organization.
+//	@Description
+//	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
