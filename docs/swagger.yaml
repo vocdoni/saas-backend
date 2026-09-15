@@ -6845,6 +6845,8 @@ paths:
         memberNumber, nationalId), intersected with the process census, reporting each
         matched member's per-question voted status. For `phone` pass the plaintext number;
         it is hashed server-side. Requires Manager/Admin of the owning organization.
+
+        Also callable with a scoped API key (scope: `voting:write`).
       parameters:
       - description: Process ID
         in: path
@@ -7439,6 +7441,8 @@ paths:
         explicit memberIds subset, or the whole organization when neither is set. Returns 400
         with the offending member ids (duplicates / missingData) when the census is not usable,
         otherwise 200. Requires Manager/Admin role of the organization.
+
+        Also callable with a scoped API key (scope: `voting:write`).
       parameters:
       - description: Org address + census spec
         in: body
