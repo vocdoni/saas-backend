@@ -206,12 +206,15 @@ func (a *API) authenticateAPIKey(w http.ResponseWriter, r *http.Request, next ht
 func (*API) setLang(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+		// unsupported values are dropped rather than rejected, so a stale client
+		// falls back to the default language instead of failing the request. The
+		// accepted set is the one advertised by GET /organizations/languages.
 		// get the lang from URL params
-		if lang := chi.URLParam(r, string(apicommon.LangMetadataKey)); lang != "" {
+		if lang := chi.URLParam(r, string(apicommon.LangMetadataKey)); apicommon.IsValidLang(lang) {
 			ctx = context.WithValue(r.Context(), apicommon.LangMetadataKey, lang)
 		}
 		// get the lang from query params
-		if lang := r.URL.Query().Get(string(apicommon.LangMetadataKey)); lang != "" {
+		if lang := r.URL.Query().Get(string(apicommon.LangMetadataKey)); apicommon.IsValidLang(lang) {
 			ctx = context.WithValue(r.Context(), apicommon.LangMetadataKey, lang)
 		}
 		// add lang to the context

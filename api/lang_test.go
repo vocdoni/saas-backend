@@ -12,15 +12,29 @@ import (
 	"github.com/vocdoni/saas-backend/internal"
 )
 
-// TestLanguageParameterInEmails tests that the lang parameter is correctly processed
-// and affects the language of emails sent to users during CSP authentication.
-func TestLanguageParameterInEmails(t *testing.T) {
+// otpEmailRegexps matches a distinctive word of the CSP OTP email in each
+// supported language.
+var otpEmailRegexps = map[string]*regexp.Regexp{
+	"es": regexp.MustCompile(`(?i)\s(código|verificación|cuenta)\s`),
+	"en": regexp.MustCompile(`(?i)\s(code|verification|account)\s`),
+	"ca": regexp.MustCompile(`(?i)\s(codi|verificació|compte)\s`),
+}
+
+// TestOrgLangInCSPEmails tests that the organization language decides the
+// language of the OTP emails sent during CSP authentication. An organization
+// always has one: it is assigned at creation, so the lang query parameter no
+// longer reaches these emails (see TestOrgDefaultLangNotifications).
+func TestOrgLangInCSPEmails(t *testing.T) {
 	test := func(lang string) {
 		c := qt.New(t)
 
 		// Set up test environment with user, org, and census
 		token := testCreateUser(t, "superpassword123")
 		orgAddress := testCreateOrganization(t, token)
+		if lang != "" {
+			requestAndAssertCode(200, t, "PUT", token, &apicommon.OrganizationInfo{DefaultLang: lang},
+				"organizations", orgAddress.String())
+		}
 		member := newOrgMember()
 		addedMembers := postOrgMembers(t, token, orgAddress, member)
 		censusID, _, _ := createGroupBasedCensus(t, token, orgAddress,
@@ -35,7 +49,6 @@ func TestLanguageParameterInEmails(t *testing.T) {
 			addedMembers[0].ID)
 		bundleID, _ := postProcessBundle(t, token, censusID, randomProcessID())
 
-		// Test with Spanish language parameter
 		authReq := &handlers.AuthRequest{
 			Name:         member.Name,
 			Surname:      member.Surname,
@@ -43,22 +56,11 @@ func TestLanguageParameterInEmails(t *testing.T) {
 			Email:        member.Email,
 		}
 
-		// Make the request with lang query parameter
-		query := "0"
-		if lang != "" {
-			query = fmt.Sprintf("0?lang=%s", lang)
-		}
 		authResp := requestAndParse[handlers.AuthResponse](t, "POST", "", authReq,
-			"process", "bundle", bundleID, "auth", query)
+			"process", "bundle", bundleID, "auth", "0")
 		c.Assert(authResp.AuthToken, qt.Not(qt.Equals), "", qt.Commentf("auth token should not be empty"))
 
-		mailBody := waitForEmail(t, member.Email)
-		assertContentMatches(t, mailBody, lang,
-			map[string]*regexp.Regexp{
-				"es": regexp.MustCompile(`(?i)\s(código|verificación|cuenta)\s`),
-				"en": regexp.MustCompile(`(?i)\s(code|verification|account)\s`),
-				"ca": regexp.MustCompile(`(?i)\s(codi|verificació|compte)\s`),
-			})
+		assertContentMatches(t, waitForEmail(t, member.Email), lang, otpEmailRegexps)
 	}
 
 	t.Run("Default CSP Auth Email", func(*testing.T) { test("") })
@@ -79,31 +81,19 @@ func TestLanguageParameterInUserRegistration(t *testing.T) {
 		// Register user with lang parameter
 		requestAndAssertCode(200, t, "POST", "", userInfo, fmt.Sprintf("users?lang=%s", lang))
 
-		mailBody := waitForEmail(t, userInfo.Email)
-		assertContentMatches(t, mailBody, lang,
-			map[string]*regexp.Regexp{
-				"es": regexp.MustCompile(`(?i)\s(código|verificación|cuenta)\s`),
-				"en": regexp.MustCompile(`(?i)\s(code|verification|account)\s`),
-				"ca": regexp.MustCompile(`(?i)\s(codi|verificació|compte)\s`),
-			})
+		assertContentMatches(t, waitForEmail(t, userInfo.Email), lang, otpEmailRegexps)
 	}
 	t.Run("Spanish Registration Email", func(*testing.T) { test("es") })
 	t.Run("English Registration Email", func(*testing.T) { test("en") })
 	t.Run("Catalan Registration Email", func(*testing.T) { test("ca") })
 }
 
-// TestOrgDefaultLangNotifications tests that the organization defaultLang,
-// when set, decides the notification language — including over an explicit
-// lang param. The lang param only applies for organizations without a
-// defaultLang (covered by TestLanguageParameterInEmails, whose orgs set none).
+// TestOrgDefaultLangNotifications tests that the organization defaultLang
+// decides the notification language even against an explicit lang param. The
+// param only reaches user-scoped mails (see TestLanguageParameterInUserRegistration)
+// and the resolution chain itself is unit-tested in apicommon.
 func TestOrgDefaultLangNotifications(t *testing.T) {
 	c := qt.New(t)
-
-	otpRegexps := map[string]*regexp.Regexp{
-		"es": regexp.MustCompile(`(?i)\s(código|verificación|cuenta)\s`),
-		"en": regexp.MustCompile(`(?i)\s(code|verification|account)\s`),
-		"ca": regexp.MustCompile(`(?i)\s(codi|verificació|compte)\s`),
-	}
 
 	// set up an organization with catalan as default language
 	token := testCreateUser(t, "superpassword123")
@@ -139,25 +129,25 @@ func TestOrgDefaultLangNotifications(t *testing.T) {
 	authResp := requestAndParse[handlers.AuthResponse](t, "POST", "", authReq(members[0]),
 		"process", "bundle", bundleID, "auth", "0")
 	c.Assert(authResp.AuthToken, qt.Not(qt.HasLen), 0)
-	assertContentMatches(t, waitForEmail(t, members[0].Email), "ca", otpRegexps)
+	assertContentMatches(t, waitForEmail(t, members[0].Email), "ca", otpEmailRegexps)
 
 	// a resend without a lang param must also fall back to the org default
 	resendResp := requestAndParse[handlers.AuthResponse](t, "POST", "",
 		&handlers.AuthResendRequest{AuthToken: authResp.AuthToken, Email: members[0].Email},
 		"process", "bundle", bundleID, "auth", "resend")
 	c.Assert(resendResp.AuthToken, qt.Not(qt.HasLen), 0)
-	assertContentMatches(t, waitForEmail(t, members[0].Email), "ca", otpRegexps)
+	assertContentMatches(t, waitForEmail(t, members[0].Email), "ca", otpEmailRegexps)
 
 	// the org default wins even over an explicit lang param
 	authResp = requestAndParse[handlers.AuthResponse](t, "POST", "", authReq(members[1]),
 		"process", "bundle", bundleID, "auth", "0?lang=es")
 	c.Assert(authResp.AuthToken, qt.Not(qt.HasLen), 0)
-	assertContentMatches(t, waitForEmail(t, members[1].Email), "ca", otpRegexps)
+	assertContentMatches(t, waitForEmail(t, members[1].Email), "ca", otpEmailRegexps)
 }
 
 // TestOrgDefaultLangInMembersImport tests that the async members-import
-// completion email uses the org default language (the sending goroutine has no
-// request context to take a lang param from).
+// completion email uses the org default language, even though it is sent from
+// a goroutine that outlives the request.
 func TestOrgDefaultLangInMembersImport(t *testing.T) {
 	c := qt.New(t)
 

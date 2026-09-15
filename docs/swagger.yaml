@@ -274,8 +274,10 @@ definitions:
         type: string
       defaultLang:
         description: |-
-          Preferred language for notifications sent on behalf of the organization;
-          when set it overrides the request lang param (supported: en, es, ca)
+          Language of the notifications sent on behalf of the organization, and it
+          decides over the request lang param (supported: en, es, ca). Optional on
+          creation, where it defaults to en; on update an empty value leaves it
+          unchanged, it cannot be cleared
         type: string
       description:
         allOf:
@@ -390,8 +392,10 @@ definitions:
         type: string
       defaultLang:
         description: |-
-          Preferred language for notifications sent on behalf of the organization;
-          when set it overrides the request lang param (supported: en, es, ca)
+          Language of the notifications sent on behalf of the organization, and it
+          decides over the request lang param (supported: en, es, ca). Optional on
+          creation, where it defaults to en; on update an empty value leaves it
+          unchanged, it cannot be cleared
         type: string
       description:
         allOf:
@@ -975,8 +979,10 @@ definitions:
         type: string
       defaultLang:
         description: |-
-          Preferred language for notifications sent on behalf of the organization;
-          when set it overrides the request lang param (supported: en, es, ca)
+          Language of the notifications sent on behalf of the organization, and it
+          decides over the request lang param (supported: en, es, ca). Optional on
+          creation, where it defaults to en; on update an empty value leaves it
+          unchanged, it cannot be cleared
         type: string
       description:
         allOf:
