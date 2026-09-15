@@ -97,11 +97,9 @@ type Organization struct {
 	IntegratorLimits *IntegratorLimits `json:"integratorLimits,omitempty" bson:"integratorLimits,omitempty"`
 }
 
-// metaDefaultString extracts the "default" locale value from a meta entry that
-// may be stored as a plain string (legacy), a locale map, or the BSON-decoded
-// form of a locale map after a MongoDB round-trip: bson.D by default, or
-// bson.M when the client is configured with DefaultDocumentM (as ours is, see
-// db/mongo.go) — a named type distinct from the unnamed map[string]any.
+// metaDefaultString extracts the "default" locale value from a meta entry, stored
+// either as a plain string (legacy) or as a locale map. The bson.D case covers a
+// plain bson.Unmarshal, which ignores the client's DefaultDocumentMap.
 func metaDefaultString(v any) string {
 	switch m := v.(type) {
 	case string:
@@ -109,11 +107,6 @@ func metaDefaultString(v any) string {
 	case map[string]string:
 		return m["default"]
 	case map[string]any:
-		if s, ok := m["default"].(string); ok {
-			return s
-		}
-		return ""
-	case bson.M:
 		if s, ok := m["default"].(string); ok {
 			return s
 		}

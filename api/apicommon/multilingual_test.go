@@ -1,11 +1,14 @@
 package apicommon
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	"github.com/vocdoni/saas-backend/db"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func TestMultilingualTextUnmarshal(t *testing.T) {
@@ -112,7 +115,7 @@ func TestMultilingualFromAny(t *testing.T) {
 	c.Assert(got, qt.IsNotNil)
 	c.Assert(*got, qt.DeepEquals, MultilingualText{"default": "world"})
 
-	// map[string]any with string values (BSON-decoded form)
+	// map[string]any with string values (the BSON-decoded form, see db/mongo.go)
 	ma := map[string]any{"default": "bson", "es": "bson-es"}
 	got = multilingualFromAny(ma)
 	c.Assert(got, qt.IsNotNil)
@@ -135,4 +138,43 @@ func TestMultilingualFromAny(t *testing.T) {
 	// unknown type → nil
 	got = multilingualFromAny(123)
 	c.Assert(got, qt.IsNil)
+}
+
+// TestOrganizationFromDBAfterMongoRoundTrip is the regression test for #679: the
+// name/logo/description shorthands used to vanish from every read, because the driver
+// decoded untyped subdocuments as bson.M and multilingualFromAny only matches
+// map[string]any.
+func TestOrganizationFromDBAfterMongoRoundTrip(t *testing.T) {
+	c := qt.New(t)
+
+	stored := db.Organization{
+		Address: common.HexToAddress("0xc98ec39e73dd24945397dfbdbd7721373bd4af70"),
+		Meta: BuildOrgMeta(nil,
+			&MultilingualText{"default": "TestOrg", "es": "OrgDePrueba"},
+			&MultilingualText{"default": "https://acme.org/logo.png"},
+			&MultilingualText{"default": "We make things"},
+			nil),
+	}
+	raw, err := bson.Marshal(stored)
+	c.Assert(err, qt.IsNil)
+
+	// reproduce the client's decode path (see db/mongo.go)
+	dec := bson.NewDecoder(bson.NewDocumentReader(bytes.NewReader(raw)))
+	dec.DefaultDocumentMap()
+	var decoded db.Organization
+	c.Assert(dec.Decode(&decoded), qt.IsNil)
+
+	got := OrganizationFromDB(&decoded, nil)
+	c.Assert(got.Name, qt.IsNotNil)
+	c.Assert(*got.Name, qt.DeepEquals, MultilingualText{"default": "TestOrg", "es": "OrgDePrueba"})
+	c.Assert(got.Logo, qt.IsNotNil)
+	c.Assert(*got.Logo, qt.DeepEquals, MultilingualText{"default": "https://acme.org/logo.png"})
+	c.Assert(got.Description, qt.IsNotNil)
+	c.Assert(*got.Description, qt.DeepEquals, MultilingualText{"default": "We make things"})
+
+	// the shorthands must agree with the meta map they mirror
+	c.Assert(got.Meta["name"], qt.DeepEquals, map[string]any{"default": "TestOrg", "es": "OrgDePrueba"})
+
+	// and the display-name helper used for emails and on-chain account names
+	c.Assert(OrgDisplayName(decoded.Meta, decoded.Address.String()), qt.Equals, "TestOrg")
 }
