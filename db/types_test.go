@@ -1,6 +1,7 @@
 package db
 
 import (
+	"bytes"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
@@ -52,15 +53,14 @@ func TestOrganizationDisplayNameAndLogoURL(t *testing.T) {
 		c.Assert(decoded.LogoURL(), qt.Equals, "https://acme.org/logo.png")
 	})
 
-	t.Run("DefaultDocumentMDecode", func(t *testing.T) {
+	t.Run("DefaultDocumentMapDecode", func(t *testing.T) {
 		c := qt.New(t)
 
-		// Our mongo.Client is configured with DefaultDocumentM: true (see
-		// db/mongo.go), which makes untyped embedded documents decode as the
-		// named type bson.M rather than the unnamed map[string]any. Reproduce
-		// that exact decode path here instead of the plain bson.Unmarshal used
-		// by BsonRoundTrip above, which doesn't set this option. Meta is an
-		// UntypedDoc, so the driver type must not reach the accessors.
+		// Our mongo.Client is configured with DefaultDocumentMap (see db/mongo.go),
+		// which decodes untyped embedded documents as plain map[string]any rather
+		// than bson.D (plain bson.Unmarshal, as BsonRoundTrip above) or the named
+		// bson.M. Reproduce that exact decode path: no driver type may reach the
+		// accessors, or a `case map[string]any` type switch misses it (#679).
 		org := Organization{Meta: map[string]any{
 			"name": map[string]string{"default": "Acme"},
 			"logo": map[string]string{"default": "https://acme.org/logo.png"},
@@ -68,8 +68,10 @@ func TestOrganizationDisplayNameAndLogoURL(t *testing.T) {
 		raw, err := bson.Marshal(org)
 		c.Assert(err, qt.IsNil)
 
+		dec := bson.NewDecoder(bson.NewDocumentReader(bytes.NewReader(raw)))
+		dec.DefaultDocumentMap()
 		var decoded Organization
-		decodeDefaultDocumentM(c, raw, &decoded)
+		c.Assert(dec.Decode(&decoded), qt.IsNil)
 
 		_, ok := decoded.Meta["name"].(map[string]any)
 		c.Assert(ok, qt.IsTrue)

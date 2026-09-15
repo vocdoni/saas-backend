@@ -251,7 +251,7 @@ func TestDraftProcess(t *testing.T) {
 		updatedProcess := requestAndParse[db.Process](t,
 			http.MethodGet, adminToken, nil, "process", pids[0])
 		c.Assert(updatedProcess.Address, qt.IsNotNil, qt.Commentf("Process should no longer be a draft"))
-		c.Assert(updatedProcess.Metadata, qt.DeepEquals, db.UntypedDoc(updatedProcessInfo.Metadata),
+		c.Assert(updatedProcess.Metadata, qt.DeepEquals, updatedProcessInfo.Metadata,
 			qt.Commentf("Process metadata should be updated"))
 		t.Log("Verified process is no longer in draft mode and metadata was updated")
 	}

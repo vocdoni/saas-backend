@@ -104,12 +104,13 @@ func New(url, database string) (*MongoStorage, error) {
 	opts.ApplyURI(url)
 	opts.SetMaxConnecting(200)
 	opts.SetConnectTimeout(connectTimeout)
-	// keep driver v1 behavior: decode untyped embedded documents as bson.M rather
-	// than bson.D, which would leak into JSON responses as an array of {Key,Value}
-	// pairs. bson.M is still a named type that a `case map[string]any` type switch
-	// does not match, so schemaless fields are declared as UntypedDoc (db/untyped.go)
-	// to get plain map[string]any all the way down.
-	opts.SetBSONOptions(&options.BSONOptions{DefaultDocumentM: true})
+	// decode untyped embedded documents (organization meta, member "other" fields,
+	// election metadata) as plain map[string]any at every depth, rather than the
+	// driver's default bson.D or the named bson.M: a Go type switch matches exact
+	// types, not underlying types, so `case map[string]any` silently misses a bson.M
+	// and every consumer would have to learn about driver types on its own — that is
+	// what broke the organization name/logo shorthands (#679).
+	opts.SetBSONOptions(&options.BSONOptions{DefaultDocumentMap: true})
 	// create a new client with the connection options
 	client, err := mongo.Connect(opts)
 	if err != nil {

@@ -14,7 +14,7 @@ var (
 	testProcessID       = internal.HexBytes("test_process_id")
 	testProcessRoot     = "0xabcde"
 	testProcessURI      = "test_process_uri"
-	testProcessMetadata = UntypedDoc{"key1": "value1", "key2": "value2"}
+	testProcessMetadata = map[string]any{"key1": "value1", "key2": "value2"}
 )
 
 func setupTestPrerequisites1(c *qt.C, db *MongoStorage) *Census {
