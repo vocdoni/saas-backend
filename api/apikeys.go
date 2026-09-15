@@ -85,12 +85,14 @@ var apiKeyAllowlist = map[string]string{
 	// multi-question voting processes (writes; the GET list/single reads are public — a voting:write
 	// key still unlocks drafts + eligibility there, resolved in-handler via optionalManager, not here)
 	"POST " + processesCreateEndpoint:         ScopeVotingWrite,
+	"POST " + processesCensusValidateEndpoint: ScopeVotingWrite,
 	"PUT " + processesEndpoint:                ScopeVotingWrite,
 	"DELETE " + processesEndpoint:             ScopeVotingWrite,
 	"GET " + processesValidateEndpoint:        ScopeVotingWrite,
 	"POST " + processesPublishEndpoint:        ScopeVotingWrite,
 	"PUT " + processesQuestionsStatusEndpoint: ScopeVotingWrite,
 	"PUT " + processesQuestionStatusEndpoint:  ScopeVotingWrite,
+	"GET " + processesParticipantsEndpoint:    ScopeVotingWrite,
 	"PUT " + processesCensusEndpoint:          ScopeVotingWrite,
 	"DELETE " + processesCensusEndpoint:       ScopeVotingWrite,
 	"PUT " + processesQuestionCensusEndpoint:  ScopeVotingWrite,
