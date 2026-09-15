@@ -28,9 +28,10 @@ type MembersImportCompletionData struct {
 }
 
 // sendMembersImportCompletionEmail sends an email notification when members import is completed.
-// lang must be resolved from the original request context before spawning the
-// async job (see apicommon.NotificationLang), since this runs detached from it.
-func (a *API) sendMembersImportCompletionEmail(userEmail, userName, lang string, org *db.Organization,
+// It runs detached from the request, so ctx must be derived with
+// context.WithoutCancel to keep the request values (the language among them)
+// alive after the handler has returned.
+func (a *API) sendMembersImportCompletionEmail(ctx context.Context, user *db.User, org *db.Organization,
 	progress *db.BulkOrgMembersJob,
 ) {
 	if a.mail == nil {
@@ -42,11 +43,9 @@ func (a *API) sendMembersImportCompletionEmail(userEmail, userName, lang string,
 		log.Errorf("failed to build web app URL for members import completion email: %v", err)
 	}
 
-	// Import the mailtemplates package dynamically to avoid import issues
-	// We'll use the sendMail method which handles the template execution
 	data := MembersImportCompletionData{
 		OrganizationName: org.DisplayName(),
-		UserName:         userName,
+		UserName:         user.FirstName + " " + user.LastName,
 		TotalMembers:     progress.Total,
 		AddedMembers:     progress.Added,
 		Link:             link,
@@ -55,19 +54,14 @@ func (a *API) sendMembersImportCompletionEmail(userEmail, userName, lang string,
 		CompletedAt:      time.Now(),
 	}
 
-	// Create a background context for email sending, carrying the language
-	// resolved from the original request
-	ctx := context.WithValue(context.Background(), apicommon.LangMetadataKey, lang)
-
-	// We need to import mailtemplates here to use the template
-	// For now, let's create a simple notification structure
-	if err := a.sendMail(ctx, userEmail, mailtemplates.MembersImportCompletionNotification, data, time.Time{}); err != nil {
-		log.Errorf("failed to send members import completion email to %s for org %s: %v", userEmail, org.Address, err)
+	if err := a.sendMail(ctx, org, user.Email, mailtemplates.MembersImportCompletionNotification,
+		data, time.Time{}); err != nil {
+		log.Errorf("failed to send members import completion email to %s for org %s: %v", user.Email, org.Address, err)
 		return
 	}
 
 	log.Infow("members import completion email sent",
-		"user", userEmail,
+		"user", user.Email,
 		"org", org.Address,
 		"added", progress.Added,
 		"total", progress.Total,
@@ -267,11 +261,9 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 		// Continue with in-memory only (fallback)
 	}
 
-	// Capture user, org and language info for the async goroutine (the request
-	// context is dead once the handler returns)
-	userEmail := user.Email
-	userName := user.FirstName + " " + user.LastName
-	lang := apicommon.NotificationLang(r.Context(), org)
+	// The request context is cancelled once the handler returns, but the
+	// completion mail still needs its values (the language among them).
+	mailCtx := context.WithoutCancel(r.Context())
 
 	go func() {
 		var lastProgress *db.BulkOrgMembersJob
@@ -298,7 +290,7 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 
 		// Send completion email notification when async job is done
 		if lastProgress != nil {
-			a.sendMembersImportCompletionEmail(userEmail, userName, lang, org, lastProgress)
+			a.sendMembersImportCompletionEmail(mailCtx, user, org, lastProgress)
 		}
 	}()
 

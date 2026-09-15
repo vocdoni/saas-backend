@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"math"
 	"net/http"
@@ -86,23 +85,6 @@ func (a *API) buildWebAppURL(path string, params map[string]any) (string, error)
 	// include the encoded query string in the URL
 	url.RawQuery = q.Encode()
 	return url.String(), nil
-}
-
-// getLanguageFromContext extracts the language from the request context.
-// Returns apicommon.DefaultLang as default if no language is found.
-func (*API) getLanguageFromContext(ctx context.Context) string {
-	if lang, ok := ctx.Value(apicommon.LangMetadataKey).(string); ok && lang != "" {
-		return lang
-	}
-	return apicommon.DefaultLang // default fallback
-}
-
-// orgLangCtx returns a context carrying the notification language for
-// org-scoped mails: the organization's default language wins when set, then
-// the ?lang= request param, then apicommon.DefaultLang. Wrap the request
-// context with it before calling sendMail when an organization is in scope.
-func orgLangCtx(ctx context.Context, org *db.Organization) context.Context {
-	return context.WithValue(ctx, apicommon.LangMetadataKey, apicommon.NotificationLang(ctx, org))
 }
 
 // generateVerificationCodeAndLink method generates and stores in the database
