@@ -202,7 +202,9 @@ func (a *API) authenticateAPIKey(w http.ResponseWriter, r *http.Request, next ht
 }
 
 // setLang is a middleware that sets the lang parameter in the request context
-// and passes it to the next handler.
+// and passes it to the next handler. It runs for every request, public or
+// protected; whether a notification honours the value is decided later, by
+// apicommon.NotificationLang.
 func (*API) setLang(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
