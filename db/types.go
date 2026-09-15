@@ -84,12 +84,14 @@ type Organization struct {
 	Country   string           `json:"country" bson:"country"`
 	Timezone  string           `json:"timezone" bson:"timezone"`
 	// DefaultLang is the language of the notifications sent on behalf of the
-	// organization. It is assigned at creation (defaulting to "en") and decides
-	// the language of everything sent from a protected endpoint, where the
-	// caller acts for the organization; on public ones an explicit ?lang= wins
-	// (see apicommon.NotificationLang). It can be changed but not cleared:
-	// dynamicUpdateDocument skips zero-valued fields (see SetOrganization).
-	// That is harmless, as "en" resolves identically to an empty value.
+	// organization. Every organization has one: it is assigned at creation
+	// (defaulting to "en") and migration 0021 backfilled the organizations that
+	// predate the field. It decides the language of everything sent from a
+	// protected endpoint, where the caller acts for the organization; on public
+	// ones an explicit ?lang= wins (see apicommon.NotificationLang). It can be
+	// changed but not cleared: dynamicUpdateDocument skips zero-valued fields
+	// (see SetOrganization). That is harmless, as "en" resolves identically to
+	// an empty value.
 	DefaultLang     string                   `json:"defaultLang,omitempty" bson:"defaultLang,omitempty"`
 	Communications  bool                     `json:"communications" bson:"communications"`
 	TokensPurchased uint64                   `json:"tokensPurchased" bson:"tokensPurchased"`
