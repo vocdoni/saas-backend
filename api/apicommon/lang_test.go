@@ -11,13 +11,11 @@ import (
 func TestNotificationLang(t *testing.T) {
 	c := qt.New(t)
 
-	// public mimics a request served by the public route group: the setLang
-	// middleware ran, the authenticator did not.
+	// public: setLang ran, the authenticator did not.
 	public := func(lang string) context.Context {
 		return context.WithValue(context.Background(), LangMetadataKey, lang)
 	}
-	// protected mimics a request served by the protected group, where the
-	// authenticator stored the caller before the handler ran.
+	// protected: the authenticator stored the caller before the handler ran.
 	protected := func(lang string) context.Context {
 		return context.WithValue(public(lang), UserMetadataKey, db.User{Email: "admin@example.com"})
 	}

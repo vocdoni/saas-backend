@@ -9,13 +9,12 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-// TestOrganizationDefaultLangMigration asserts migration 0021 stamps the default language on the
-// two shapes an organization predating the field can have — the key missing entirely, and a stored
-// empty string — while leaving a deliberate language alone, and that its down removes the field
-// from all of them.
+// TestOrganizationDefaultLangMigration asserts migration 0021 stamps the default language on both
+// shapes an organization predating the field can have, leaves a deliberate language alone, and
+// that its down removes the field.
 //
-// The filter is what this pins: `defaultLang` is `omitempty`, so the missing-key case is the one
-// real deployments hold, and a plain `{"defaultLang": ""}` equality would not match it.
+// It pins the filter: the field is omitempty, so real deployments hold the missing-key shape,
+// which a plain {"defaultLang": ""} equality would not match.
 func TestOrganizationDefaultLangMigration(t *testing.T) {
 	c := qt.New(t)
 	ctx := context.Background()
@@ -47,8 +46,7 @@ func TestOrganizationDefaultLangMigration(t *testing.T) {
 	c.Assert(lang(empty), qt.Equals, "en")
 	c.Assert(lang(chosen), qt.Equals, "ca")
 
-	// re-running over the already-migrated state matches nothing and changes nothing, so a redeploy
-	// that replays the migration cannot overwrite a language chosen in between
+	// re-running matches nothing, so a redeploy cannot overwrite a language chosen in between
 	c.Assert(mig.Up(ctx, database), qt.IsNil)
 	c.Assert(lang(chosen), qt.Equals, "ca")
 

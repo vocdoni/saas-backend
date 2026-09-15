@@ -516,10 +516,9 @@ func (a *API) organizationCreateTicket(w http.ResponseWriter, r *http.Request) {
 		errors.ErrEmailMalformed.With("invalid user email address").Write(w)
 		return
 	}
-	// the ticket is addressed to Vocdoni's support desk with the requesting user
-	// CC'd, so it is not sent on behalf of the organization and must not carry
-	// its language: the nil org resolves to the default one on this protected
-	// endpoint.
+	// the ticket goes to Vocdoni's support desk, not to the organization's
+	// people, so it must not carry the organization's language. The nil org
+	// makes it the default one, this endpoint being protected.
 	lang := apicommon.NotificationLang(r.Context(), nil)
 	notification, err := mailtemplates.SupportNotification.Localized(lang).ExecTemplate(
 		struct {

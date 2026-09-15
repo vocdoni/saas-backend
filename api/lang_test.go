@@ -20,11 +20,10 @@ var otpEmailRegexps = map[string]*regexp.Regexp{
 	"ca": regexp.MustCompile(`(?i)\s(codi|verificació|compte)\s`),
 }
 
-// TestOrgLangInCSPEmails tests that the organization language decides the
-// language of the OTP emails sent during CSP authentication when the voter
-// sends no lang parameter. An organization always has one, assigned at
-// creation. A voter who does send the parameter overrides it, since the CSP
-// endpoints are public (see TestOrgDefaultLangNotifications).
+// TestOrgLangInCSPEmails tests that the organization language decides the OTP
+// emails sent during CSP authentication when the voter sends no lang
+// parameter. A voter who does send one overrides it, the CSP endpoints being
+// public (see TestOrgDefaultLangNotifications).
 func TestOrgLangInCSPEmails(t *testing.T) {
 	test := func(lang string) {
 		c := qt.New(t)
@@ -89,12 +88,11 @@ func TestLanguageParameterInUserRegistration(t *testing.T) {
 	t.Run("Catalan Registration Email", func(*testing.T) { test("ca") })
 }
 
-// TestOrgDefaultLangNotifications tests that the organization defaultLang is
-// the notification language on the voter-facing CSP endpoints, and that a
-// voter who sends an explicit lang param overrides it — those endpoints are
-// public, so the requester is the recipient. The opposite case, an
-// authenticated caller whose param is ignored, is TestOrgLangInInvites; the
-// resolution chain itself is unit-tested in apicommon.
+// TestOrgDefaultLangNotifications tests the public side of the rule on the
+// voter-facing CSP endpoints: the organization defaultLang applies by default,
+// and a voter sending an explicit lang param overrides it. The protected side
+// is TestOrgLangInInvites; the resolution chain itself is unit-tested in
+// apicommon.
 func TestOrgDefaultLangNotifications(t *testing.T) {
 	c := qt.New(t)
 
@@ -141,8 +139,8 @@ func TestOrgDefaultLangNotifications(t *testing.T) {
 	c.Assert(resendResp.AuthToken, qt.Not(qt.HasLen), 0)
 	assertContentMatches(t, waitForEmail(t, members[0].Email), "ca", otpEmailRegexps)
 
-	// a voter sending an explicit lang param overrides the org default: the CSP
-	// endpoints are public, so the param is the recipient's own choice
+	// a voter's explicit lang param overrides the org default: the CSP endpoints
+	// are public, so the param is the recipient's own choice
 	authResp = requestAndParse[handlers.AuthResponse](t, "POST", "", authReq(members[1]),
 		"process", "bundle", bundleID, "auth", "0?lang=es")
 	c.Assert(authResp.AuthToken, qt.Not(qt.HasLen), 0)
@@ -151,8 +149,7 @@ func TestOrgDefaultLangNotifications(t *testing.T) {
 
 // TestOrgLangInInvites tests that an admin's lang param does not reach a
 // notification sent on behalf of the organization. Inviting a user is a
-// protected endpoint, so the organization's language decides regardless of the
-// locale the requesting admin's dashboard happens to be in.
+// protected endpoint, so the organization's language decides.
 func TestOrgLangInInvites(t *testing.T) {
 	inviteRegexps := map[string]*regexp.Regexp{
 		"en": regexp.MustCompile(`You have been invited`),

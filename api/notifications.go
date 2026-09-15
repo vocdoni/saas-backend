@@ -14,11 +14,10 @@ import (
 )
 
 // sendMail enqueues a localized notification to the given email address.
-// org is the organization the notification is sent on behalf of, and decides
-// the language together with the context (see apicommon.NotificationLang):
-// its language is used whenever the request is authenticated, and the ?lang=
-// param only on public endpoints. It must be nil for user-scoped mails such as
-// account verification or password reset.
+// org is the organization the mail is sent on behalf of, and resolves the
+// language together with the context (see apicommon.NotificationLang). It must
+// be nil for mail sent to the user themselves, such as account verification or
+// password reset.
 // It executes the template and pushes the result onto the notify queue for
 // async delivery with retry and circuit breaking. expiresAt, if non-zero, is
 // the deadline after which the content (e.g. an OTP code) is stale and the
