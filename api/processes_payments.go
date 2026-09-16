@@ -2,7 +2,9 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -10,6 +12,7 @@ import (
 	"github.com/vocdoni/saas-backend/errors"
 	"github.com/vocdoni/saas-backend/pricing"
 	"github.com/vocdoni/saas-backend/stripe"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -56,6 +59,144 @@ func (a *API) processQuote(vp *db.VotingProcess) (pricing.Quote, pricing.QuoteIn
 		return pricing.Quote{}, pricing.QuoteInput{}, errors.ErrMalformedBody.WithErr(err)
 	}
 	return quote, input, nil
+}
+
+// paymentDueForPublish decides whether publication must be refused for lack of payment.
+// A non-nil quote is what is still owed (answer 402 with it). Nil means clear to
+// publish: the process is free, already paid, or managed (its integrator wallet is
+// debited inside the publish path instead).
+func (a *API) paymentDueForPublish(vp *db.VotingProcess) (*pricing.Quote, error) {
+	org, err := a.db.Organization(vp.OrgAddress)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get organization: %w", err)
+	}
+	if org.ManagedBy != (common.Address{}) {
+		return nil, nil
+	}
+	quote, input, err := a.processQuote(vp)
+	if err != nil {
+		return nil, err
+	}
+	if quote.TotalCents == 0 {
+		return nil, nil
+	}
+	payment, err := a.db.ProcessPayment(vp.ID)
+	if err != nil {
+		if err == db.ErrNotFound {
+			return &quote, nil
+		}
+		return nil, fmt.Errorf("failed to get process payment: %w", err)
+	}
+	if payment.Status != db.ProcessPaymentPaid {
+		return &quote, nil
+	}
+	// paid wins even when the draft no longer matches what was paid for: the money was
+	// taken and paid is terminal, so refusing here could never be resolved by the user.
+	// The edit guard makes this unreachable outside a tiny race; log it if it happens.
+	if payment.QuoteHash != pricing.QuoteHash(input, quote.TotalCents) {
+		log.Warnw("paid quote does not match the current draft, publishing anyway",
+			"processId", vp.ID.Hex(), "paidCents", payment.AmountCents, "quotedCents", quote.TotalCents)
+	}
+	return nil, nil
+}
+
+// debitManagedProcessWallet charges a managed organization's process to its integrator's
+// prepaid wallet: atomic, at most once per process (a publish retry keeps the original
+// debit and passes), refused without touching the balance when it does not cover the
+// price. The paid state is recorded afterwards; the wallet document itself is the
+// authoritative record, so a failure there only logs.
+func (a *API) debitManagedProcessWallet(vp *db.VotingProcess, org *db.Organization) error {
+	quote, _, err := a.processQuote(vp)
+	if err != nil {
+		return err
+	}
+	if quote.TotalCents == 0 {
+		return nil
+	}
+	if err := a.db.DebitWalletForProcess(org.ManagedBy, quote.TotalCents, vp.ID); err != nil {
+		if err == db.ErrInsufficientWalletBalance {
+			wallet, werr := a.db.Wallet(org.ManagedBy)
+			if werr != nil {
+				return errors.ErrInsufficientWalletBalance
+			}
+			return errors.ErrInsufficientWalletBalance.WithData(map[string]int64{
+				"requiredCents":  quote.TotalCents,
+				"availableCents": wallet.BalanceCents,
+			})
+		}
+		return fmt.Errorf("failed to debit integrator wallet: %w", err)
+	}
+	if _, err := a.db.SetProcessPaymentPaidByWallet(&db.ProcessPayment{
+		ProcessID:   vp.ID,
+		OrgAddress:  vp.OrgAddress,
+		AmountCents: quote.TotalCents,
+		Currency:    "eur",
+	}); err != nil {
+		log.Warnw("could not record wallet-paid process payment",
+			"processId", vp.ID.Hex(), "error", err)
+	}
+	return nil
+}
+
+// publishPaidProcess is the webhook fulfillment hook (stripe.Service.OnProcessPaid): a
+// verified payment landed, publish the process as the user who requested the checkout.
+// It fires only on the fulfillment that won the paid CAS, so it cannot double-publish;
+// startProcessPublish's claim guards the race with a concurrent manual publish. Any
+// refusal leaves the process paid — publishing later is free, never a second charge.
+func (a *API) publishPaidProcess(processID bson.ObjectID) {
+	vp, questions, err := a.db.ProcessWithQuestions(processID)
+	if err != nil {
+		log.Warnw("paid process not found for publication", "processId", processID.Hex(), "error", err)
+		return
+	}
+	if vp.Published {
+		return
+	}
+	payment, err := a.db.ProcessPayment(processID)
+	if err != nil {
+		log.Warnw("paid process has no payment record", "processId", processID.Hex(), "error", err)
+		return
+	}
+	user, err := a.db.UserByEmail(payment.RequestedBy)
+	if err != nil {
+		log.Warnw("paid process cannot auto-publish: requesting user not found, publish manually",
+			"processId", processID.Hex(), "requestedBy", payment.RequestedBy, "error", err)
+		return
+	}
+	census, err := a.db.Census(vp.CensusID.Hex())
+	if err != nil {
+		log.Warnw("paid process census not found", "processId", processID.Hex(), "error", err)
+		return
+	}
+	if problems, _ := a.publishPreflightProblems(vp, questions, census, user); len(problems) > 0 {
+		log.Warnw("paid process failed publish preflight, staying paid for a manual publish",
+			"processId", processID.Hex(), "problems", strings.Join(problems, "; "))
+		return
+	}
+	jobID, err := a.startProcessPublish(vp, questions, census, user)
+	if err != nil {
+		if err != errProcessAlreadyPublished {
+			log.Warnw("could not start publication of paid process",
+				"processId", processID.Hex(), "error", err)
+		}
+		return
+	}
+	log.Infow("paid process publication enqueued", "processId", processID.Hex(), "jobId", jobID)
+}
+
+// refusePaymentLocked refuses draft mutations while a payment is processing or paid: the
+// amount charged (or charging) was quoted for the draft exactly as it is. Pending
+// payments do not lock — the open session is expired and replaced at the next checkout.
+func (a *API) refusePaymentLocked(w http.ResponseWriter, oid bson.ObjectID) bool {
+	payment, err := a.db.ProcessPayment(oid)
+	if err != nil {
+		return false // no payment; a read failure surfaces on the write path instead
+	}
+	if payment.Status == db.ProcessPaymentProcessing || payment.Status == db.ProcessPaymentPaid {
+		errors.ErrPaymentSessionConflict.Withf("the draft is locked by its payment").Write(w)
+		return true
+	}
+	return false
 }
 
 // processPriceHandler godoc
@@ -197,9 +338,6 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 	previousSessionID := ""
 	if payment, err := a.db.ProcessPayment(oid); err == nil {
 		switch payment.Status {
-		case db.ProcessPaymentProcessing, db.ProcessPaymentPaid:
-			errors.ErrPaymentSessionConflict.Write(w)
-			return
 		case db.ProcessPaymentPending:
 			session, err := a.paymentGW.GetPaymentSession(payment.CheckoutSessionID)
 			if err != nil {
@@ -234,7 +372,8 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 		case db.ProcessPaymentFailed:
 			previousSessionID = payment.CheckoutSessionID
 		default:
-			// unknown stored status: fail closed rather than risking a second charge
+			// processing, paid, or an unknown stored status: fail closed rather than
+			// risking a second charge
 			errors.ErrPaymentSessionConflict.Write(w)
 			return
 		}

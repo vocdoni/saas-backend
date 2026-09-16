@@ -7226,6 +7226,9 @@ paths:
         GET /jobs/{jobId}. Idempotent once published.
         409 (40172) means the stored questions do not match the process and the draft has to be
         saved again before it can be published.
+        402 (40174) means the process is priced and unpaid — the current quote travels in the
+        error data; start checkout via POST /processes/{processId}/checkout. For a managed
+        organization, 402 (40175) means its integrator's wallet does not cover the price.
       parameters:
       - description: Process ID
         in: path
@@ -7249,6 +7252,11 @@ paths:
             $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "402":
+          description: Payment required (quote in data), or insufficient integrator
+            wallet balance
           schema:
             $ref: '#/definitions/errors.Error'
         "404":

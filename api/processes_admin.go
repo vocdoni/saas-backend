@@ -53,6 +53,23 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	if refusePublishInProgress(w, vp) {
 		return
 	}
+	// a processing or paid payment refuses deletion (the user would lose what they
+	// paid); a pending one is released: expire its open session so it can never be
+	// paid, then drop the payment record with the draft.
+	if payment, err := a.db.ProcessPayment(oid); err == nil {
+		if a.refusePaymentLocked(w, oid) {
+			return
+		}
+		if payment.CheckoutSessionID != "" && a.paymentGW != nil {
+			if err := a.paymentGW.ExpirePaymentSession(payment.CheckoutSessionID); err != nil {
+				log.Warnw("could not expire checkout session of deleted draft",
+					"processId", oid.Hex(), "sessionId", payment.CheckoutSessionID, "error", err)
+			}
+		}
+		if err := a.db.DeleteProcessPayment(oid); err != nil {
+			log.Warnw("could not delete process payment", "processId", oid.Hex(), "error", err)
+		}
+	}
 	if err := a.db.DeleteVotingProcess(oid); err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
@@ -228,6 +245,14 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 	// only a published process can have its on-chain census extended; drafts use PUT /processes.
 	if !vp.Published {
 		errors.ErrDuplicateConflict.Withf("process is not published; edit the draft via PUT /processes/{processId}").Write(w)
+		return
+	}
+	// pay-per-process: the price was calculated from the census size at payment time,
+	// so a paid process cannot grow its census — that would be voters the payment never
+	// covered. Growth beyond the paid size requires a new quote (not self-service yet).
+	if payment, err := a.db.ProcessPayment(oid); err == nil && payment.Status == db.ProcessPaymentPaid {
+		errors.ErrPaymentRequired.
+			Withf("the census cannot grow beyond the size the process was paid for").Write(w)
 		return
 	}
 	census, err := a.db.Census(vp.CensusID.Hex())
