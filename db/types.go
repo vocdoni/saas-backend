@@ -730,7 +730,7 @@ type VotingProcess struct {
 	QuestionIDs   []bson.ObjectID `json:"-" bson:"questionIds"` // ordered question references
 	// AddOns are the paid per-process options selected on the draft. The 2FA add-ons are
 	// not here: they derive from the census TwoFaFields. Priced by the pricing package.
-	AddOns ProcessAddOns `json:"addOns,omitempty" bson:"addOns,omitempty"`
+	AddOns ProcessAddOns `json:"addOns,omitzero" bson:"addOns,omitempty"`
 	// Publishing is the transient claim a publish worker holds on this process (see
 	// ClaimVotingProcessForPublish). It is a struct field rather than only a raw $set so that
 	// SetVotingProcess's ReplaceOne stops wiping a live claim, and so handlers can refuse to

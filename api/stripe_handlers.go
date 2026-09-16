@@ -260,6 +260,8 @@ func (a *API) InitializeStripeService() error {
 
 	// Create handlers
 	a.stripeHandlers = NewStripeHandlers(service)
+	// wire the pay-per-process seam: the same service backs one-time checkout
+	a.paymentGW = service
 
 	log.Infof("Stripe service initialized successfully")
 	return nil
