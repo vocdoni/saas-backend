@@ -59,6 +59,13 @@ func TestRequiredScopeForRoute(t *testing.T) {
 	c.Assert(ok, qt.IsTrue)
 	c.Assert(scope, qt.Equals, ScopeManagedRead)
 
+	// the wallet read is key-visible (quota:read); the top-up is checkout and stays JWT-only
+	scope, ok = requiredScopeForRoute("GET", walletEndpoint)
+	c.Assert(ok, qt.IsTrue)
+	c.Assert(scope, qt.Equals, ScopeQuotaRead)
+	_, ok = requiredScopeForRoute("POST", walletTopUpEndpoint)
+	c.Assert(ok, qt.IsFalse)
+
 	// account-sensitive / unmapped endpoints reject API keys (deny by default)
 	_, ok = requiredScopeForRoute("POST", integratorOrgAPIKeysEndpoint)
 	c.Assert(ok, qt.IsFalse)

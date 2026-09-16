@@ -2244,6 +2244,28 @@ definitions:
       valid:
         type: boolean
     type: object
+  apicommon.WalletResponse:
+    properties:
+      balanceCents:
+        type: integer
+      currency:
+        type: string
+      ledger:
+        items:
+          $ref: '#/definitions/db.WalletLedgerEntry'
+        type: array
+      pagination:
+        $ref: '#/definitions/apicommon.Pagination'
+    type: object
+  apicommon.WalletTopUpRequest:
+    properties:
+      amountCents:
+        type: integer
+      locale:
+        type: string
+      returnURL:
+        type: string
+    type: object
   db.BallotProtocol:
     properties:
       costExponent:
@@ -2770,6 +2792,23 @@ definitions:
         type: boolean
       weighted:
         type: boolean
+    type: object
+  db.WalletLedgerEntry:
+    properties:
+      amountCents:
+        type: integer
+      createdAt:
+        type: string
+      id:
+        type: string
+      kind:
+        type: string
+      orgAddress:
+        items:
+          type: integer
+        type: array
+      processId:
+        type: string
     type: object
   errors.Error:
     properties:
@@ -8552,6 +8591,92 @@ paths:
       summary: Verify vote nullifiers against the Vochain
       tags:
       - vote
+  /wallet:
+    get:
+      description: |-
+        Prepaid EUR balance and paged ledger (top-ups and per-process debits, newest
+        first) of the caller's integrator organization, resolved from the authenticated
+        principal (path-less, like the other integrator endpoints).
+
+        Also callable with a scoped API key (scope: `quota:read`).
+      parameters:
+      - description: Page number, starting at 1
+        in: query
+        name: page
+        type: string
+      - description: Items per page
+        in: query
+        name: limit
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.WalletResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Not an integrator
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get the integrator wallet
+      tags:
+      - integrator
+  /wallet/topup:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Opens a one-time Stripe checkout session that credits the caller's integrator
+        wallet once the payment is verified by webhook — never before. The amount is
+        EUR cents, VAT excluded (Stripe Tax adds VAT at checkout). Requires a user
+        session whose user is an Admin of the integrator organization; deliberately not
+        callable with an API key.
+      parameters:
+      - description: Top-up parameters
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.WalletTopUpRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessCheckoutResponse'
+        "400":
+          description: Amount out of bounds
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Not an integrator
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Top up the integrator wallet
+      tags:
+      - integrator
 schemes:
 - http
 - https
