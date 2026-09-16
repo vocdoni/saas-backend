@@ -128,12 +128,13 @@ func TestUpdateOrganizationHandler(t *testing.T) {
 
 	// Test updating organization with valid data
 	updateInfo := &apicommon.OrganizationInfo{
-		Website:   "https://updated.com",
-		Subdomain: "updated-subdomain",
-		Color:     "#FF5733",
-		Size:      "medium",
-		Country:   "US",
-		Timezone:  "America/New_York",
+		Website:     "https://updated.com",
+		Subdomain:   "updated-subdomain",
+		Color:       "#FF5733",
+		Size:        "medium",
+		Country:     "US",
+		Timezone:    "America/New_York",
+		DefaultLang: "es",
 	}
 	resp, code := testRequest(t, http.MethodPut, token, updateInfo, "organizations", orgAddress.String())
 	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
@@ -147,6 +148,18 @@ func TestUpdateOrganizationHandler(t *testing.T) {
 	c.Assert(updatedOrg.Subdomain, qt.Equals, "updated-subdomain")
 	c.Assert(updatedOrg.Color, qt.Equals, "#FF5733")
 	c.Assert(updatedOrg.Size, qt.Equals, "medium")
+	c.Assert(updatedOrg.DefaultLang, qt.Equals, "es")
+
+	// Test updating with an unsupported default language: it must be rejected
+	// before anything is persisted, leaving the previous value in place
+	_, code = testRequest(t, http.MethodPut, token, &apicommon.OrganizationInfo{DefaultLang: "xx"},
+		"organizations", orgAddress.String())
+	c.Assert(code, qt.Equals, http.StatusBadRequest)
+	rejectedResp, code := testRequest(t, http.MethodGet, token, nil, "organizations", orgAddress.String())
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", rejectedResp))
+	var unchangedOrg apicommon.OrganizationInfo
+	c.Assert(json.Unmarshal(rejectedResp, &unchangedOrg), qt.IsNil)
+	c.Assert(unchangedOrg.DefaultLang, qt.Equals, "es")
 
 	// The payload must not expose an `active` flag (issue #625).
 	rawOrg := map[string]any{}
@@ -192,6 +205,19 @@ func TestOrganizationsTypesHandler(t *testing.T) {
 	c.Assert(typeMap[string(db.CompanyType)], qt.Not(qt.Equals), "")
 	c.Assert(typeMap[string(db.CooperativeType)], qt.Not(qt.Equals), "")
 	c.Assert(typeMap[string(db.AssociationType)], qt.Not(qt.Equals), "")
+}
+
+func TestOrganizationsLanguagesHandler(t *testing.T) {
+	c := qt.New(t)
+
+	// Test getting supported languages (no authentication required)
+	resp, code := testRequest(t, http.MethodGet, "", nil, "organizations", "languages")
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+
+	var langList apicommon.OrganizationLanguageList
+	c.Assert(json.Unmarshal(resp, &langList), qt.IsNil)
+	c.Assert(langList.Languages, qt.DeepEquals, apicommon.SupportedLangs)
+	c.Assert(langList.Default, qt.Equals, apicommon.DefaultLang)
 }
 
 func TestOrganizationSubscriptionHandler(t *testing.T) {
@@ -479,6 +505,7 @@ func TestOrganizationWithOptionalFields(t *testing.T) {
 		Country:        "ES",
 		Subdomain:      "fullexample",
 		Timezone:       "Europe/Madrid",
+		DefaultLang:    "ca",
 		Communications: true,
 	}
 	resp, code := testRequest(t, http.MethodPost, token, orgInfo, organizationsEndpoint)
@@ -494,7 +521,25 @@ func TestOrganizationWithOptionalFields(t *testing.T) {
 	c.Assert(createdOrg.Country, qt.Equals, "ES")
 	c.Assert(createdOrg.Subdomain, qt.Equals, "fullexample")
 	c.Assert(createdOrg.Timezone, qt.Equals, "Europe/Madrid")
+	c.Assert(createdOrg.DefaultLang, qt.Equals, "ca")
 	c.Assert(createdOrg.Communications, qt.IsTrue)
+
+	// Test creating organization with an unsupported default language
+	badOrgInfo := &apicommon.OrganizationInfo{
+		Type:        string(db.AssociationType),
+		DefaultLang: "xx",
+	}
+	resp, code = testRequest(t, http.MethodPost, token, badOrgInfo, organizationsEndpoint)
+	c.Assert(code, qt.Equals, http.StatusBadRequest, qt.Commentf("response: %s", resp))
+
+	// An organization always has a notification language: omitting it on
+	// creation assigns the default one
+	resp, code = testRequest(t, http.MethodPost, token,
+		&apicommon.OrganizationInfo{Type: string(db.AssociationType)}, organizationsEndpoint)
+	c.Assert(code, qt.Equals, http.StatusOK, qt.Commentf("response: %s", resp))
+	var defaultLangOrg apicommon.OrganizationInfo
+	c.Assert(json.Unmarshal(resp, &defaultLangOrg), qt.IsNil)
+	c.Assert(defaultLangOrg.DefaultLang, qt.Equals, apicommon.DefaultLang)
 }
 
 func TestOrganizationPartialUpdate(t *testing.T) {

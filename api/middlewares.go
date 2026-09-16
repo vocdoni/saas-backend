@@ -201,20 +201,17 @@ func (a *API) authenticateAPIKey(w http.ResponseWriter, r *http.Request, next ht
 	next.ServeHTTP(w, r.WithContext(ctx))
 }
 
-// setLang is a middleware that sets the lang parameter in the request context
-// and passes it to the next handler.
+// setLang is a middleware that sets the lang query parameter in the request
+// context and passes it to the next handler. It runs on every request;
+// apicommon.NotificationLang decides later whether to honour the value.
 func (*API) setLang(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		// get the lang from URL params
-		if lang := chi.URLParam(r, string(apicommon.LangMetadataKey)); lang != "" {
-			ctx = context.WithValue(r.Context(), apicommon.LangMetadataKey, lang)
+		// unsupported values are dropped rather than rejected, so a stale client
+		// falls back to the default language instead of failing
+		if lang := r.URL.Query().Get(string(apicommon.LangMetadataKey)); apicommon.IsValidLang(lang) {
+			ctx = context.WithValue(ctx, apicommon.LangMetadataKey, lang)
 		}
-		// get the lang from query params
-		if lang := r.URL.Query().Get(string(apicommon.LangMetadataKey)); lang != "" {
-			ctx = context.WithValue(r.Context(), apicommon.LangMetadataKey, lang)
-		}
-		// add lang to the context
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

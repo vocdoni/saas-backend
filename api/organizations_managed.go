@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -128,6 +129,9 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		errors.ErrMalformedBody.Withf("invalid organization type").Write(w)
 		return
 	}
+	if !validateDefaultLang(w, req.DefaultLang) {
+		return
+	}
 	creatorEmail := user.Email
 	if req.OwnerEmail != "" {
 		// validate the owner exists up front, before provisioning an on-chain account, so a
@@ -164,6 +168,7 @@ func (a *API) createManagedOrganizationHandler(w http.ResponseWriter, r *http.Re
 		Country:        req.Country,
 		Subdomain:      req.Subdomain,
 		Timezone:       req.Timezone,
+		DefaultLang:    cmp.Or(req.DefaultLang, apicommon.DefaultLang),
 		Communications: req.Communications,
 		Meta:           apicommon.BuildOrgMeta(nil, req.Name, req.Logo, req.Description, req.Meta),
 		ManagedBy:      integratorAddr,

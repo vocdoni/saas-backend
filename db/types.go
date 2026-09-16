@@ -72,17 +72,21 @@ type OrganizationUser struct {
 }
 
 type Organization struct {
-	Address         common.Address           `json:"address" bson:"_id"` // common.Address is serialized as bytes in the db
-	Website         string                   `json:"website" bson:"website"`
-	Type            OrganizationType         `json:"type" bson:"type"`
-	Creator         string                   `json:"creator" bson:"creator"`
-	CreatedAt       time.Time                `json:"createdAt" bson:"createdAt"`
-	Nonce           string                   `json:"nonce" bson:"nonce"`
-	Size            string                   `json:"size" bson:"size"`
-	Color           string                   `json:"color" bson:"color"`
-	Subdomain       string                   `json:"subdomain" bson:"subdomain"`
-	Country         string                   `json:"country" bson:"country"`
-	Timezone        string                   `json:"timezone" bson:"timezone"`
+	Address   common.Address   `json:"address" bson:"_id"` // common.Address is serialized as bytes in the db
+	Website   string           `json:"website" bson:"website"`
+	Type      OrganizationType `json:"type" bson:"type"`
+	Creator   string           `json:"creator" bson:"creator"`
+	CreatedAt time.Time        `json:"createdAt" bson:"createdAt"`
+	Nonce     string           `json:"nonce" bson:"nonce"`
+	Size      string           `json:"size" bson:"size"`
+	Color     string           `json:"color" bson:"color"`
+	Subdomain string           `json:"subdomain" bson:"subdomain"`
+	Country   string           `json:"country" bson:"country"`
+	Timezone  string           `json:"timezone" bson:"timezone"`
+	// DefaultLang is the language of the notifications sent on behalf of the organization
+	// (see apicommon.NotificationLang). Every organization has one, defaulting to "en".
+	// It can be changed but not cleared, dynamicUpdateDocument skipping zero-valued fields.
+	DefaultLang     string                   `json:"defaultLang,omitempty" bson:"defaultLang,omitempty"`
 	Communications  bool                     `json:"communications" bson:"communications"`
 	TokensPurchased uint64                   `json:"tokensPurchased" bson:"tokensPurchased"`
 	TokensRemaining uint64                   `json:"tokensRemaining" bson:"tokensRemaining"`

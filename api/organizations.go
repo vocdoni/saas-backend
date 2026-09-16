@@ -1,9 +1,11 @@
 package api
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -17,6 +19,16 @@ import (
 	"github.com/vocdoni/saas-backend/subscriptions"
 	"go.vocdoni.io/dvote/log"
 )
+
+// validateDefaultLang reports whether lang is a supported notification language, writing the
+// error response when it is not. An empty value is accepted, meaning "unchanged".
+func validateDefaultLang(w http.ResponseWriter, lang string) bool {
+	if lang != "" && !apicommon.IsValidLang(lang) {
+		errors.ErrMalformedBody.Withf("invalid defaultLang").Write(w)
+		return false
+	}
+	return true
+}
 
 // createOrganizationHandler godoc
 //
@@ -64,6 +76,9 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	// check if the organization type is valid
 	if !db.IsOrganizationTypeValid(orgInfo.Type) {
 		errors.ErrMalformedBody.Withf("invalid organization type").Write(w)
+		return
+	}
+	if !validateDefaultLang(w, orgInfo.DefaultLang) {
 		return
 	}
 	// find default plan
@@ -143,6 +158,7 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		Country:         orgInfo.Country,
 		Subdomain:       orgInfo.Subdomain,
 		Timezone:        orgInfo.Timezone,
+		DefaultLang:     cmp.Or(orgInfo.DefaultLang, apicommon.DefaultLang),
 		Communications:  orgInfo.Communications,
 		Meta:            apicommon.BuildOrgMeta(nil, orgInfo.Name, orgInfo.Logo, orgInfo.Description, orgInfo.Meta),
 		TokensPurchased: 0,
@@ -255,6 +271,9 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		errors.ErrMalformedBody.Write(w)
 		return
 	}
+	if !validateDefaultLang(w, newOrgInfo.DefaultLang) {
+		return
+	}
 	// update just the fields that can be updated and are not empty
 	updateOrg := false
 	if newOrgInfo.Website != "" {
@@ -279,6 +298,10 @@ func (a *API) updateOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	if newOrgInfo.Timezone != "" {
 		org.Timezone = newOrgInfo.Timezone
+		updateOrg = true
+	}
+	if newOrgInfo.DefaultLang != "" {
+		org.DefaultLang = newOrgInfo.DefaultLang
 		updateOrg = true
 	}
 	if newOrgInfo.Name != nil || newOrgInfo.Logo != nil || newOrgInfo.Description != nil || len(newOrgInfo.Meta) > 0 {
@@ -313,6 +336,25 @@ func (*API) organizationsTypesHandler(w http.ResponseWriter, _ *http.Request) {
 		})
 	}
 	apicommon.HTTPWriteJSON(w, &apicommon.OrganizationTypeList{Types: organizationTypes})
+}
+
+// organizationsLanguagesHandler godoc
+//
+//	@Summary		Get supported notification languages
+//	@Description	Get the list of languages supported for notifications, accepted both as the ?lang= query
+//	@Description	parameter and as an organization defaultLang, plus the default used when none applies
+//	@Tags			organizations
+//	@Accept			json
+//	@Produce		json
+//	@Success		200	{object}	apicommon.OrganizationLanguageList
+//	@Router			/organizations/languages [get]
+func (*API) organizationsLanguagesHandler(w http.ResponseWriter, _ *http.Request) {
+	apicommon.HTTPWriteJSON(w, &apicommon.OrganizationLanguageList{
+		// clone: the response must not hand callers a reference to the
+		// package-level slice that IsValidLang validates against.
+		Languages: slices.Clone(apicommon.SupportedLangs),
+		Default:   apicommon.DefaultLang,
+	})
 }
 
 // organizationSubscriptionHandler godoc
@@ -471,7 +513,9 @@ func (a *API) organizationCreateTicket(w http.ResponseWriter, r *http.Request) {
 		errors.ErrEmailMalformed.With("invalid user email address").Write(w)
 		return
 	}
-	lang := a.getLanguageFromContext(r.Context())
+	// the ticket goes to Vocdoni's support desk, not to the organization's
+	// people, so it must not carry the organization's language
+	lang := apicommon.NotificationLang(r.Context(), nil)
 	notification, err := mailtemplates.SupportNotification.Localized(lang).ExecTemplate(
 		struct {
 			Type         string
