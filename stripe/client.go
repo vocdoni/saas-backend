@@ -122,22 +122,6 @@ func (*Client) ListProducts() ([]stripeapi.Product, error) {
 	return products, nil
 }
 
-// GetPrice retrieves a price by lookup key
-func (*Client) GetPrice(lookupKey string) (*stripeapi.Price, error) {
-	params := &stripeapi.PriceSearchParams{
-		SearchParams: stripeapi.SearchParams{
-			Query: fmt.Sprintf("active:'true' AND lookup_key:'%s'", lookupKey),
-		},
-	}
-
-	results := stripeprice.Search(params)
-	if !results.Next() {
-		return nil, errors.ErrStripeError.Withf("price with lookup key %s not found", lookupKey)
-	}
-
-	return results.Price(), nil
-}
-
 // GetProductPrices retrieves all active prices for a given product ID
 func (*Client) GetProductPrices(productID string) ([]stripeapi.Price, error) {
 	var prices []stripeapi.Price
