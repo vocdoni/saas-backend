@@ -13,16 +13,9 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-// sendMail enqueues a localized notification to the given email address.
-// org is the organization the mail is sent on behalf of, and resolves the
-// language together with the context (see apicommon.NotificationLang). Nil for
-// mail sent to the user themselves.
-// It executes the template and pushes the result onto the notify queue for
-// async delivery with retry and circuit breaking. expiresAt, if non-zero, is
-// the deadline after which the content (e.g. an OTP code) is stale and the
-// queue must not deliver it.
-// If the notify queue is not configured (notifyQueue is nil), it returns an error.
-// Returns an error only for missing queue configuration, invalid email addresses, or template failures.
+// sendMail enqueues a localized notification to the given email address. org is the organization
+// it is sent on behalf of, nil for mail to the user themselves (see apicommon.NotificationLang).
+// expiresAt, if non-zero, is the deadline past which the queue must not deliver it.
 func (a *API) sendMail(ctx context.Context, org *db.Organization, to string,
 	mail mailtemplates.MailTemplate, data any, expiresAt time.Time,
 ) error {

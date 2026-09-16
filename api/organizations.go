@@ -20,11 +20,8 @@ import (
 	"go.vocdoni.io/dvote/log"
 )
 
-// validateDefaultLang reports whether the defaultLang of an organization
-// request is a supported notification language, writing the error response
-// when it is not. An empty value is accepted: on update it means "unchanged",
-// and the create handlers replace it with apicommon.DefaultLang so every
-// organization carries a language from its creation.
+// validateDefaultLang reports whether lang is a supported notification language, writing the
+// error response when it is not. An empty value is accepted, meaning "unchanged".
 func validateDefaultLang(w http.ResponseWriter, lang string) bool {
 	if lang != "" && !apicommon.IsValidLang(lang) {
 		errors.ErrMalformedBody.Withf("invalid defaultLang").Write(w)
