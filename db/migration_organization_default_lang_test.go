@@ -10,11 +10,9 @@ import (
 )
 
 // TestOrganizationDefaultLangMigration asserts migration 0021 stamps the default language on both
-// shapes an organization predating the field can have, leaves a deliberate language alone, and
-// that its down removes the field.
-//
-// It pins the filter: the field is omitempty, so real deployments hold the missing-key shape,
-// which a plain {"defaultLang": ""} equality would not match.
+// shapes an organization predating the field can have, leaves a deliberate one alone, and that its
+// down removes the field. The missing-key shape is the one real deployments hold, and a plain
+// {"defaultLang": ""} equality would not match it.
 func TestOrganizationDefaultLangMigration(t *testing.T) {
 	c := qt.New(t)
 	ctx := context.Background()

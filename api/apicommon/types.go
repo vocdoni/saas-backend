@@ -169,10 +169,9 @@ type OrganizationInfo struct {
 	Timezone string `json:"timezone"`
 
 	// Language of the notifications sent on behalf of the organization
-	// (supported: en, es, ca). It wins on authenticated endpoints, such as an
-	// admin invite; on public ones an explicit lang param wins instead.
-	// Optional on creation, where it defaults to en; on update an empty value
-	// leaves it unchanged
+	// (supported: en, es, ca). It wins on authenticated endpoints; on public
+	// ones an explicit lang param wins instead. Optional on creation, where it
+	// defaults to en; on update an empty value leaves it unchanged
 	DefaultLang string `json:"defaultLang"`
 
 	// Whether the organization has enabled communications

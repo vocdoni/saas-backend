@@ -29,8 +29,7 @@ type MembersImportCompletionData struct {
 
 // sendMembersImportCompletionEmail sends an email notification when members import is completed.
 // It runs detached from the request, so ctx must come from
-// context.WithoutCancel: NotificationLang reads values the handler's context
-// carries, and those must outlive it.
+// context.WithoutCancel: NotificationLang needs the request values.
 func (a *API) sendMembersImportCompletionEmail(ctx context.Context, user *db.User, org *db.Organization,
 	progress *db.BulkOrgMembersJob,
 ) {
@@ -261,8 +260,8 @@ func (a *API) addOrganizationMembersHandler(w http.ResponseWriter, r *http.Reque
 		// Continue with in-memory only (fallback)
 	}
 
-	// keep the request values alive for the completion mail, which is sent
-	// after the handler has returned and its context is cancelled
+	// the completion mail is sent after the handler returns, and needs the
+	// request values to outlive it
 	mailCtx := context.WithoutCancel(r.Context())
 
 	go func() {

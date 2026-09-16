@@ -517,8 +517,7 @@ func (a *API) organizationCreateTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// the ticket goes to Vocdoni's support desk, not to the organization's
-	// people, so it must not carry the organization's language. The nil org
-	// makes it the default one, this endpoint being protected.
+	// people, so it must not carry the organization's language
 	lang := apicommon.NotificationLang(r.Context(), nil)
 	notification, err := mailtemplates.SupportNotification.Localized(lang).ExecTemplate(
 		struct {

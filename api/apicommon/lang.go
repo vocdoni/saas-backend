@@ -22,13 +22,10 @@ func IsValidLang(lang string) bool {
 //	public endpoints:    ?lang= -> org.DefaultLang -> DefaultLang
 //	protected endpoints: org.DefaultLang -> DefaultLang
 //
-// The ?lang= param is the caller's own language, so it only applies where the
-// caller is the recipient. On a protected endpoint they act for the
-// organization, and the organization's language wins. Pass a nil org for mail
-// sent to the user themselves, such as registration or password reset.
+// ?lang= is the caller's own language, so it only applies where the caller is
+// the recipient. Pass a nil org for mail sent to the user themselves.
 func NotificationLang(ctx context.Context, org *db.Organization) string {
-	// authenticated means protected: the authenticator middleware, the only
-	// writer of the user value, runs on that group alone.
+	// authenticated means protected: only that group runs the authenticator.
 	if _, authenticated := UserFromContext(ctx); !authenticated {
 		if lang, ok := ctx.Value(LangMetadataKey).(string); ok && lang != "" {
 			return lang

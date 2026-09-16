@@ -20,10 +20,9 @@ var otpEmailRegexps = map[string]*regexp.Regexp{
 	"ca": regexp.MustCompile(`(?i)\s(codi|verificació|compte)\s`),
 }
 
-// TestOrgLangInCSPEmails tests that the organization language decides the OTP
-// emails sent during CSP authentication when the voter sends no lang
-// parameter. A voter who does send one overrides it, the CSP endpoints being
-// public (see TestOrgDefaultLangNotifications).
+// TestOrgLangInCSPEmails tests that the organization language decides the CSP
+// authentication OTP emails when the voter sends no lang parameter. One who
+// does overrides it (see TestOrgDefaultLangNotifications).
 func TestOrgLangInCSPEmails(t *testing.T) {
 	test := func(lang string) {
 		c := qt.New(t)
@@ -88,11 +87,9 @@ func TestLanguageParameterInUserRegistration(t *testing.T) {
 	t.Run("Catalan Registration Email", func(*testing.T) { test("ca") })
 }
 
-// TestOrgDefaultLangNotifications tests the public side of the rule on the
-// voter-facing CSP endpoints: the organization defaultLang applies by default,
-// and a voter sending an explicit lang param overrides it. The protected side
-// is TestOrgLangInInvites; the resolution chain itself is unit-tested in
-// apicommon.
+// TestOrgDefaultLangNotifications tests the public side of the rule: the
+// organization defaultLang applies, and a voter's lang param overrides it. The
+// protected side is TestOrgLangInInvites.
 func TestOrgDefaultLangNotifications(t *testing.T) {
 	c := qt.New(t)
 
@@ -147,9 +144,8 @@ func TestOrgDefaultLangNotifications(t *testing.T) {
 	assertContentMatches(t, waitForEmail(t, members[1].Email), "es", otpEmailRegexps)
 }
 
-// TestOrgLangInInvites tests that an admin's lang param does not reach a
-// notification sent on behalf of the organization. Inviting a user is a
-// protected endpoint, so the organization's language decides.
+// TestOrgLangInInvites tests the protected side: inviting a user is sent on
+// behalf of the organization, so its language wins over the admin's lang param.
 func TestOrgLangInInvites(t *testing.T) {
 	inviteRegexps := map[string]*regexp.Regexp{
 		"en": regexp.MustCompile(`You have been invited`),
