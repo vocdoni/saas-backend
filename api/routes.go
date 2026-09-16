@@ -233,6 +233,12 @@ const (
 	// GET routes to get the server-side price of a voting process
 	processesPriceEndpoint = "/processes/{processId}/price"
 
+	// GET the caller's integrator wallet (balance + ledger, path-less)
+	walletEndpoint = "/wallet"
+
+	// POST starts a one-time checkout that tops up the integrator wallet
+	walletTopUpEndpoint = "/wallet/topup"
+
 	// POST starts (or resumes) the one-time checkout of a voting process;
 	// GET reports its payment status
 	processesCheckoutEndpoint = "/processes/{processId}/checkout"

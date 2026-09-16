@@ -200,6 +200,23 @@ type ProcessCheckoutResponse struct {
 	Currency     string `json:"currency"`
 }
 
+// WalletResponse is an integrator's prepaid wallet: EUR balance plus its paged ledger,
+// newest first.
+type WalletResponse struct {
+	BalanceCents int64                  `json:"balanceCents"`
+	Currency     string                 `json:"currency"`
+	Ledger       []db.WalletLedgerEntry `json:"ledger"`
+	Pagination   *Pagination            `json:"pagination"`
+}
+
+// WalletTopUpRequest starts a one-time checkout that credits the integrator wallet once
+// the payment is webhook-verified. AmountCents is EUR cents, VAT excluded.
+type WalletTopUpRequest struct {
+	AmountCents int64  `json:"amountCents"`
+	ReturnURL   string `json:"returnURL"`
+	Locale      string `json:"locale,omitempty"`
+}
+
 // ProcessPaymentStatusResponse reports the payment state of a voting process, combining
 // the stored payment with the live checkout session state when one is open.
 type ProcessPaymentStatusResponse struct {
