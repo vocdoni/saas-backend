@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"math"
 	"net/http"
@@ -86,15 +85,6 @@ func (a *API) buildWebAppURL(path string, params map[string]any) (string, error)
 	// include the encoded query string in the URL
 	url.RawQuery = q.Encode()
 	return url.String(), nil
-}
-
-// getLanguageFromContext extracts the language from the request context.
-// Returns apicommon.DefaultLang as default if no language is found.
-func (*API) getLanguageFromContext(ctx context.Context) string {
-	if lang, ok := ctx.Value(apicommon.LangMetadataKey).(string); ok && lang != "" {
-		return lang
-	}
-	return apicommon.DefaultLang // default fallback
 }
 
 // generateVerificationCodeAndLink method generates and stores in the database

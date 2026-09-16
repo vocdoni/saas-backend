@@ -88,6 +88,18 @@ func TestOrganizations(t *testing.T) {
 		c.Assert(org.Address, qt.DeepEquals, address)
 		c.Assert(org.Meta["name"], qt.Equals, "TestCSPORg")
 		c.Assert(org.Meta["logo"], qt.Equals, "https://example.com/logo.png")
+		// set the default language and check it round-trips
+		org.DefaultLang = "ca"
+		c.Assert(testDB.SetOrganization(org), qt.IsNil)
+		org, err = testDB.Organization(address)
+		c.Assert(err, qt.IsNil)
+		c.Assert(org.DefaultLang, qt.Equals, "ca")
+		// overwrite the default language
+		org.DefaultLang = "es"
+		c.Assert(testDB.SetOrganization(org), qt.IsNil)
+		org, err = testDB.Organization(address)
+		c.Assert(err, qt.IsNil)
+		c.Assert(org.DefaultLang, qt.Equals, "es")
 	})
 
 	t.Run("DeleteOrganization", func(_ *testing.T) {

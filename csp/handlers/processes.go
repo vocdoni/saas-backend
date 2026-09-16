@@ -183,10 +183,7 @@ func (c *CSPHandlers) ProcessAuthResendHandler(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	lang := apicommon.DefaultLang
-	if l, ok := r.Context().Value(apicommon.LangMetadataKey).(string); ok && l != "" {
-		lang = l
-	}
+	lang := apicommon.NotificationLang(r.Context(), org)
 	toDestination, challengeType, err := determineContactMethod(
 		census, org, &AuthRequest{Email: req.Email, Phone: req.Phone}, member,
 	)

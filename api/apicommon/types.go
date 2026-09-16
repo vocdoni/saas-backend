@@ -168,6 +168,11 @@ type OrganizationInfo struct {
 	// The organization's timezone
 	Timezone string `json:"timezone"`
 
+	// Language of the notifications sent on behalf of the organization. It wins on
+	// authenticated endpoints; on public ones an explicit lang param wins instead.
+	// Optional on creation, where it defaults to en; empty on update means unchanged
+	DefaultLang string `json:"defaultLang"`
+
 	// Whether the organization has enabled communications
 	Communications bool `json:"communications"`
 
@@ -289,6 +294,16 @@ type OrganizationType struct {
 type OrganizationTypeList struct {
 	// List of organization types
 	Types []*OrganizationType `json:"types"`
+}
+
+// OrganizationLanguageList represents the languages supported for notifications.
+// swagger:model OrganizationLanguageList
+type OrganizationLanguageList struct {
+	// Languages accepted for notifications, both as the lang query parameter
+	// and as an organization defaultLang
+	Languages []string `json:"languages"`
+	// Default language used when no other applies
+	Default string `json:"default"`
 }
 
 // OrganizationAddMetaRequest represents a request to add or update meta information for an organization.
@@ -609,6 +624,7 @@ func OrganizationFromDB(dbOrg, parent *db.Organization) *OrganizationInfo {
 		Subdomain:      dbOrg.Subdomain,
 		Country:        dbOrg.Country,
 		Timezone:       dbOrg.Timezone,
+		DefaultLang:    dbOrg.DefaultLang,
 		Communications: dbOrg.Communications,
 		Meta:           meta,
 		Name:           multilingualFromAny(meta["name"]),

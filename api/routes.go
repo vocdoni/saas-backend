@@ -77,6 +77,8 @@ const (
 	organizationRolesEndpoint = "/organizations/roles"
 	// GET /organizations/types to get the available organization types
 	organizationTypesEndpoint = "/organizations/types"
+	// GET /organizations/languages to get the supported notification languages
+	organizationLanguagesEndpoint = "/organizations/languages"
 	// GET /organizations/{orgAddress}/subscription to get the organization subscription
 	organizationSubscriptionEndpoint = "/organizations/{orgAddress}/subscription"
 	// GET /organizations/{orgAddress}/censuses to get the organization censuses
