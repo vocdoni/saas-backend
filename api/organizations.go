@@ -161,8 +161,6 @@ func (a *API) createOrganizationHandler(w http.ResponseWriter, r *http.Request) 
 		DefaultLang:     cmp.Or(orgInfo.DefaultLang, apicommon.DefaultLang),
 		Communications:  orgInfo.Communications,
 		Meta:            apicommon.BuildOrgMeta(nil, orgInfo.Name, orgInfo.Logo, orgInfo.Description, orgInfo.Meta),
-		TokensPurchased: 0,
-		TokensRemaining: 0,
 		Parent:          parentOrg,
 		Subscription: db.OrganizationSubscription{
 			PlanID:    selectedPlan.ID,

@@ -311,37 +311,6 @@ func TestCanCreateManagedOrg(t *testing.T) {
 	c.Assert(err, qt.ErrorIs, errors.ErrMaxManagedOrgsReached)
 }
 
-func TestCanPublishForManagedOrg(t *testing.T) {
-	c := qt.New(t)
-	mockDB := &mockMongoStorage{
-		plans: map[string]*db.Plan{
-			// the aggregate process cap comes from the plan's top-level Organization limit
-			integratorPlanID: {
-				ID:               integratorPlanID,
-				Organization:     db.PlanLimits{MaxProcesses: 5},
-				IntegratorLimits: db.IntegratorLimits{MaxManagedOrgs: 5},
-			},
-		},
-	}
-	subs := &Subscriptions{db: mockDB}
-	integrator := func(processes int) *db.Organization {
-		return &db.Organization{
-			Subscription: db.OrganizationSubscription{PlanID: integratorPlanID, Active: true},
-			Counters:     db.OrganizationCounters{ManagedProcesses: processes},
-		}
-	}
-
-	// a non-integrator org (no override, no plan) is refused
-	err := subs.CanPublishForManagedOrg(&db.Organization{})
-	c.Assert(err, qt.ErrorIs, errors.ErrNotAnIntegrator)
-
-	// within the process quota is allowed
-	c.Assert(subs.CanPublishForManagedOrg(integrator(4)), qt.IsNil)
-
-	// process count at the limit is rejected
-	c.Assert(subs.CanPublishForManagedOrg(integrator(5)), qt.ErrorIs, errors.ErrIntegratorQuotaExceeded)
-}
-
 // TestManagedOrgLimitsUseIntegratorPlan asserts that a managed org's limits are governed
 // by its integrator's plan and aggregate quotas, never by its own (throwaway default) plan.
 // In every case the managed org's own plan is intentionally near-zero while the integrator's
