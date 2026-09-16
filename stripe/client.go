@@ -226,13 +226,23 @@ func (*Client) GetCheckoutSession(sessionID string) (*CheckoutSessionStatus, err
 		return nil, errors.ErrStripeError.Withf("failed to get checkout session: %v", err)
 	}
 
-	status := &CheckoutSessionStatus{
-		Status:             string(session.Status),
-		CustomerEmail:      session.CustomerDetails.Email,
-		SubscriptionStatus: string(session.Subscription.Status),
-	}
+	return checkoutSessionStatus(session), nil
+}
 
-	return status, nil
+// checkoutSessionStatus maps a Stripe checkout session onto the API status shape.
+// Both sub-objects are optional: CustomerDetails is nil until the customer fills the
+// form, and Subscription is nil for one-time (mode "payment") sessions.
+func checkoutSessionStatus(session *stripeapi.CheckoutSession) *CheckoutSessionStatus {
+	status := &CheckoutSessionStatus{
+		Status: string(session.Status),
+	}
+	if session.CustomerDetails != nil {
+		status.CustomerEmail = session.CustomerDetails.Email
+	}
+	if session.Subscription != nil {
+		status.SubscriptionStatus = string(session.Subscription.Status)
+	}
+	return status
 }
 
 // CreatePortalSession creates a billing portal session for a customer

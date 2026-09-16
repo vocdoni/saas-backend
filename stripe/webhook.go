@@ -130,11 +130,15 @@ func (s *Service) handleSubscriptionCreateOrUpdate(subscriptionInfo *Subscriptio
 			subscriptionInfo.ID, plan.ID, subscriptionInfo.Status, subscriptionInfo.OrgAddress, err)
 	}
 
-	// Update if needed customer metadata with organization address
-	if subscriptionInfo.Customer.Metadata["address"] != "" {
-		return fmt.Errorf("customer metadata address mismatch")
-	}
-	if err := s.client.UpdateCustomerMetadata(
+	// Stamp the organization address on the customer so future checkouts can find it.
+	// Skip when already set: every subscription update re-fires this handler, and failing
+	// here after the successful save above would make Stripe retry the event forever.
+	if existing := subscriptionInfo.Customer.Metadata["address"]; existing != "" {
+		if existing != subscriptionInfo.OrgAddress.String() {
+			log.Warnf("stripe webhook: customer %s metadata address %s does not match organization %s",
+				subscriptionInfo.Customer.ID, existing, subscriptionInfo.OrgAddress)
+		}
+	} else if err := s.client.UpdateCustomerMetadata(
 		subscriptionInfo.Customer.ID,
 		map[string]string{"address": subscriptionInfo.OrgAddress.String()},
 	); err != nil {
