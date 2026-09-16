@@ -234,7 +234,8 @@ func (*Client) GetCheckoutSession(sessionID string) (*CheckoutSessionStatus, err
 // form, and Subscription is nil for one-time (mode "payment") sessions.
 func checkoutSessionStatus(session *stripeapi.CheckoutSession) *CheckoutSessionStatus {
 	status := &CheckoutSessionStatus{
-		Status: string(session.Status),
+		Status:        string(session.Status),
+		PaymentStatus: string(session.PaymentStatus),
 	}
 	if session.CustomerDetails != nil {
 		status.CustomerEmail = session.CustomerDetails.Email
@@ -280,4 +281,7 @@ type CheckoutSessionStatus struct {
 	Status             string `json:"status"`
 	CustomerEmail      string `json:"customer_email"`
 	SubscriptionStatus string `json:"subscription_status"`
+	// PaymentStatus is the payment outcome of a one-time (mode "payment") session:
+	// "paid", "unpaid" or "no_payment_required"; empty for subscription sessions.
+	PaymentStatus string `json:"payment_status,omitempty"`
 }

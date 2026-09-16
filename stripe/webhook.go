@@ -70,6 +70,11 @@ func (s *Service) HandleEvent(event *stripeapi.Event) error {
 		return s.handleProductUpsert(event)
 	case stripeapi.EventTypeProductDeleted:
 		return s.handleProductDelete(event)
+	case stripeapi.EventTypeCheckoutSessionCompleted,
+		stripeapi.EventTypeCheckoutSessionAsyncPaymentSucceeded:
+		return s.handleCheckoutSessionResult(event)
+	case stripeapi.EventTypeCheckoutSessionAsyncPaymentFailed:
+		return s.handleCheckoutSessionFailed(event)
 	default:
 		log.Debugf("stripe webhook: received unhandled event type %s (id %s)", event.Type, event.ID)
 		return nil
@@ -310,7 +315,7 @@ func parseSubscriptionFromEvent(event *stripeapi.Event) (*SubscriptionInfo, erro
 	}
 
 	if subscription.Items.Data[0].Price.Type == stripeapi.PriceTypeRecurring {
-		subscriptionInfo.BillingPeriod = db.BillingPeriod((subscription.Items.Data[0].Price.Recurring.Interval))
+		subscriptionInfo.BillingPeriod = db.BillingPeriod(subscription.Items.Data[0].Price.Recurring.Interval)
 	}
 
 	return subscriptionInfo, nil
