@@ -133,6 +133,48 @@ func buildPaymentSessionParams(params *PaymentSessionParams) *stripeapi.Checkout
 	return checkoutParams
 }
 
+// PaymentSessionInfo is the API-facing view of a one-time checkout session: enough to
+// hand the embedded client its secret and to decide reuse/expire/replace.
+type PaymentSessionInfo struct {
+	ID            string
+	ClientSecret  string
+	Status        string // open | complete | expired
+	PaymentStatus string // paid | unpaid | no_payment_required
+}
+
+func paymentSessionInfo(session *stripeapi.CheckoutSession) *PaymentSessionInfo {
+	return &PaymentSessionInfo{
+		ID:            session.ID,
+		ClientSecret:  session.ClientSecret,
+		Status:        string(session.Status),
+		PaymentStatus: string(session.PaymentStatus),
+	}
+}
+
+// CreatePaymentSession opens a one-time checkout session (see the client method for the
+// wire shape) and returns its API-facing view.
+func (s *Service) CreatePaymentSession(params *PaymentSessionParams) (*PaymentSessionInfo, error) {
+	session, err := s.client.CreatePaymentCheckoutSession(params)
+	if err != nil {
+		return nil, err
+	}
+	return paymentSessionInfo(session), nil
+}
+
+// GetPaymentSession retrieves a one-time checkout session's current state.
+func (*Service) GetPaymentSession(sessionID string) (*PaymentSessionInfo, error) {
+	session, err := stripecheckoutsession.Get(sessionID, &stripeapi.CheckoutSessionParams{})
+	if err != nil {
+		return nil, errors.ErrStripeError.Withf("failed to get checkout session: %v", err)
+	}
+	return paymentSessionInfo(session), nil
+}
+
+// ExpirePaymentSession expires an open one-time checkout session.
+func (s *Service) ExpirePaymentSession(sessionID string) error {
+	return s.client.ExpireCheckoutSession(sessionID)
+}
+
 // handleCheckoutSessionResult processes checkout.session.completed and
 // checkout.session.async_payment_succeeded. Sessions from the subscription flow carry
 // none of our metadata keys and are ignored. Fulfillment is idempotent end to end: the

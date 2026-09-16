@@ -118,6 +118,12 @@ var (
 	// is deliberate: the CSP records consumption when it issues the signature, not when the ballot
 	// reaches the chain, so this means "already signed for" and must never be reported as "voted".
 	ErrCensusMemberAlreadySignedFor = Error{Code: 40173, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("member has already been signed for in an ongoing process")}
+	// ErrPaymentRequired carries the current quote in data so the client can start checkout.
+	ErrPaymentRequired           = Error{Code: 40174, HTTPstatus: http.StatusPaymentRequired, Err: fmt.Errorf("process publication requires payment")}
+	ErrInsufficientWalletBalance = Error{Code: 40175, HTTPstatus: http.StatusPaymentRequired, Err: fmt.Errorf("insufficient integrator wallet balance")}
+	// ErrQuoteRequired: the census is above the self-service limit; a custom quote is the only path.
+	ErrQuoteRequired          = Error{Code: 40176, HTTPstatus: http.StatusUnprocessableEntity, Err: fmt.Errorf("census size requires a custom quote, self-service checkout is unavailable")}
+	ErrPaymentSessionConflict = Error{Code: 40177, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("a payment for this process is already processing or completed")}
 
 	// CSP errors (408)
 	ErrZeroWeightVoter = Error{Code: 40801, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("voter weight cannot be zero")}

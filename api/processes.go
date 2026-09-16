@@ -140,6 +140,7 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		StartDate:     start,
 		EndDate:       end,
 		InitialStatus: initialStatus,
+		AddOns:        req.AddOns,
 		CensusID:      census.ID,
 	}
 	vpID, err := a.db.SetVotingProcess(vp)
@@ -444,6 +445,7 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	vp.Title, vp.Description, vp.Header, vp.StreamURI = req.Title, req.Description, req.Header, req.StreamURI
 	vp.StartDate, vp.EndDate, vp.CensusID = start, end, census.ID
 	vp.InitialStatus = initialStatus
+	vp.AddOns = req.AddOns
 	// a stale marker got us past the guard above: editing the draft releases it rather than
 	// writing it back, matching what ClaimVotingProcessForPublish would reclaim anyway. A marker
 	// that went live *after* that guard read is a different matter — the write's own precondition

@@ -5,6 +5,7 @@ package apicommon
 import (
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/internal"
+	"github.com/vocdoni/saas-backend/pricing"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -78,6 +79,10 @@ type CreateVotingProcessRequest struct {
 	// vochain whitelist for NewProcess); anything else is rejected with 400. Persisted on
 	// the draft and applied at publish time.
 	InitialStatus string `json:"initialStatus,omitempty" example:"PAUSED"`
+	// AddOns are the paid per-process options (signed results certificate, custom URL,
+	// branding). The 2FA add-ons are not here: they derive from census.twoFaFields.
+	// They change the process price, so editing them invalidates an open checkout session.
+	AddOns db.ProcessAddOns `json:"addOns,omitzero"`
 	// UpdatedAt, on a PUT, is the updatedAt the client last read. The update then applies only if
 	// the process has not been written since, and is rejected with 409 otherwise, so two clients
 	// editing the same draft cannot silently overwrite each other. Optional: omitting it keeps the
@@ -160,6 +165,54 @@ type VotingProcessResponse struct {
 	// PUT to make the update conditional on nothing else having written in between (see
 	// CreateVotingProcessRequest.UpdatedAt).
 	UpdatedAt string `json:"updatedAt,omitempty"`
+	// AddOns echoes the paid per-process options selected on the draft.
+	AddOns db.ProcessAddOns `json:"addOns,omitzero"`
+}
+
+// ProcessPriceResponse is the server-side quote of a voting process, in EUR cents, VAT
+// excluded (Stripe Tax adds VAT at checkout).
+type ProcessPriceResponse struct {
+	Lines      []pricing.QuoteLine `json:"lines"`
+	TotalCents int64               `json:"totalCents"`
+	Currency   string              `json:"currency"`
+	// QuoteRecommended: census above 15 000 voters — suggest requesting a custom quote.
+	QuoteRecommended bool `json:"quoteRecommended"`
+	// QuoteRequired: census above 50 000 voters — self-service checkout is blocked.
+	QuoteRequired bool `json:"quoteRequired"`
+	// PaymentStatus is the process's current payment state (pending, processing, failed,
+	// paid); empty when no payment exists yet.
+	PaymentStatus db.ProcessPaymentStatus `json:"paymentStatus,omitempty"`
+}
+
+// ProcessCheckoutRequest starts (or resumes) the one-time checkout of a voting process.
+type ProcessCheckoutRequest struct {
+	// ReturnURL is where Stripe redirects after checkout; the session id is appended.
+	ReturnURL string `json:"returnURL"`
+	Locale    string `json:"locale,omitempty"`
+}
+
+// ProcessCheckoutResponse carries the embedded checkout credentials for the process
+// purchase. AmountCents is the net total the session was created for.
+type ProcessCheckoutResponse struct {
+	ClientSecret string `json:"clientSecret"`
+	SessionID    string `json:"sessionId"`
+	AmountCents  int64  `json:"amountCents"`
+	Currency     string `json:"currency"`
+}
+
+// ProcessPaymentStatusResponse reports the payment state of a voting process, combining
+// the stored payment with the live checkout session state when one is open.
+type ProcessPaymentStatusResponse struct {
+	Status      db.ProcessPaymentStatus `json:"status"`
+	AmountCents int64                   `json:"amountCents"`
+	Currency    string                  `json:"currency"`
+	PaidAt      string                  `json:"paidAt,omitempty"`
+	// SessionStatus is the live Stripe session state (open, complete, expired) when a
+	// checkout session exists; empty for wallet-paid processes.
+	SessionStatus string `json:"sessionStatus,omitempty"`
+	// SessionPaymentStatus is the live Stripe payment state of that session (paid,
+	// unpaid, no_payment_required).
+	SessionPaymentStatus string `json:"sessionPaymentStatus,omitempty"`
 }
 
 // VotingProcessListResponse is the paginated list of voting processes.
@@ -308,6 +361,7 @@ func VotingProcessResponseFromDB(
 		StreamURI:     vp.StreamURI,
 		Questions:     questions,
 		InitialStatus: vp.InitialStatus,
+		AddOns:        vp.AddOns,
 		ChainID:       chainID,
 	}
 	if !vp.StartDate.IsZero() {
