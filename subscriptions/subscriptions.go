@@ -631,16 +631,3 @@ func (p *Subscriptions) ManagedPublishLimits(integrator *db.Organization) (maxPr
 	}
 	return plan.Organization.MaxProcesses, nil
 }
-
-// CanPublishForManagedOrg checks the integrator's aggregate process quota before publishing
-// an election under a managed org.
-func (p *Subscriptions) CanPublishForManagedOrg(integrator *db.Organization) error {
-	maxProcesses, err := p.ManagedPublishLimits(integrator)
-	if err != nil {
-		return err
-	}
-	if integrator.Counters.ManagedProcesses >= maxProcesses {
-		return errors.ErrIntegratorQuotaExceeded.Withf("max managed processes %d", maxProcesses)
-	}
-	return nil
-}
