@@ -223,11 +223,6 @@ func (c *CSPHandlers) BundleAuthResendHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	lang := apicommon.DefaultLang
-	if l, ok := r.Context().Value(apicommon.LangMetadataKey).(string); ok && l != "" {
-		lang = l
-	}
-
 	org, err := c.mainDB.Organization(bundle.OrgAddress)
 	if err != nil {
 		if err == db.ErrNotFound {
@@ -237,6 +232,8 @@ func (c *CSPHandlers) BundleAuthResendHandler(w http.ResponseWriter, r *http.Req
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
+
+	lang := apicommon.NotificationLang(r.Context(), org)
 
 	oid, err := bson.ObjectIDFromHex(auth.UserID.String())
 	if err != nil {
@@ -897,11 +894,6 @@ func (c *CSPHandlers) authFirstStep(
 		return nil, errors.ErrMalformedBody.Withf("invalid JSON request")
 	}
 
-	lang := apicommon.DefaultLang
-	if l, ok := r.Context().Value(apicommon.LangMetadataKey).(string); ok && l != "" {
-		lang = l
-	}
-
 	// Get census and org information first (needed for validation)
 	census, err := c.mainDB.Census(censusID)
 	if err != nil {
@@ -918,6 +910,8 @@ func (c *CSPHandlers) authFirstStep(
 		}
 		return nil, errors.ErrGenericInternalServerError.WithErr(err)
 	}
+
+	lang := apicommon.NotificationLang(r.Context(), org)
 
 	// Validate request with census information
 	if err := validateAuthRequest(&req, census); err != nil {

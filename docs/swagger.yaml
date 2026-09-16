@@ -272,6 +272,12 @@ definitions:
       createdAt:
         description: Creation timestamp in RFC3339 format
         type: string
+      defaultLang:
+        description: |-
+          Language of the notifications sent on behalf of the organization. It wins on
+          authenticated endpoints; on public ones an explicit lang param wins instead.
+          Optional on creation, where it defaults to en; empty on update means unchanged
+        type: string
       description:
         allOf:
         - $ref: '#/definitions/apicommon.MultilingualText'
@@ -382,6 +388,12 @@ definitions:
         type: string
       createdAt:
         description: Creation timestamp in RFC3339 format
+        type: string
+      defaultLang:
+        description: |-
+          Language of the notifications sent on behalf of the organization. It wins on
+          authenticated endpoints; on public ones an explicit lang param wins instead.
+          Optional on creation, where it defaults to en; empty on update means unchanged
         type: string
       description:
         allOf:
@@ -963,6 +975,12 @@ definitions:
       createdAt:
         description: Creation timestamp in RFC3339 format
         type: string
+      defaultLang:
+        description: |-
+          Language of the notifications sent on behalf of the organization. It wins on
+          authenticated endpoints; on public ones an explicit lang param wins instead.
+          Optional on creation, where it defaults to en; empty on update means unchanged
+        type: string
       description:
         allOf:
         - $ref: '#/definitions/apicommon.MultilingualText'
@@ -1051,6 +1069,19 @@ definitions:
         description: List of pending invitations
         items:
           $ref: '#/definitions/apicommon.OrganizationInvite'
+        type: array
+    type: object
+  apicommon.OrganizationLanguageList:
+    properties:
+      default:
+        description: Default language used when no other applies
+        type: string
+      languages:
+        description: |-
+          Languages accepted for notifications, both as the lang query parameter
+          and as an organization defaultLang
+        items:
+          type: string
         type: array
     type: object
   apicommon.OrganizationMemberGroupInfo:
@@ -5269,6 +5300,23 @@ paths:
       security:
       - BearerAuth: []
       summary: Update a pending invitation to an organization
+      tags:
+      - organizations
+  /organizations/languages:
+    get:
+      consumes:
+      - application/json
+      description: |-
+        Get the list of languages supported for notifications, accepted both as the ?lang= query
+        parameter and as an organization defaultLang, plus the default used when none applies
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.OrganizationLanguageList'
+      summary: Get supported notification languages
       tags:
       - organizations
   /organizations/roles:
