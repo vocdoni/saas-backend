@@ -45,7 +45,11 @@ func TestComputeAddOns(t *testing.T) {
 		wantCents int64
 	}{
 		{"free process, no add-ons", QuoteInput{CensusSize: 10}, 0},
-		{"free base still pays add-ons", QuoteInput{CensusSize: 10, SignedCert: true}, 4_900},
+		// per-voter add-ons are free inside the free tier (they would price below any
+		// chargeable amount); flat add-ons stay billable at any census size
+		{"free tier zeroes per-voter add-ons", QuoteInput{CensusSize: 10, EmailTwoFA: true, SMSTwoFA: true}, 0},
+		{"free base still pays flat add-ons", QuoteInput{CensusSize: 10, SignedCert: true}, 4_900},
+		{"above the free tier 2FA bills per voter", QuoteInput{CensusSize: 11, EmailTwoFA: true}, 1_011},
 		{"10k voters", QuoteInput{CensusSize: 10_000}, 142_000},
 		// spec examples for 10 000 voters
 		{"10k + email 2FA", QuoteInput{CensusSize: 10_000, EmailTwoFA: true}, 152_000},

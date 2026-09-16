@@ -94,11 +94,16 @@ func Compute(in QuoteInput) (Quote, error) {
 	}
 	basePrice := basePriceFor(in.Payer)
 	addLine(LineBase, fmt.Sprintf("voting process (%d eligible voters)", in.CensusSize), basePrice(in.CensusSize))
-	if in.EmailTwoFA {
-		addLine(LineEmailTwoFA, "email 2FA", int64(in.CensusSize)*emailTwoFACentsPerVoter)
-	}
-	if in.SMSTwoFA {
-		addLine(LineSMSTwoFA, "SMS 2FA", int64(in.CensusSize)*smsTwoFACentsPerVoter)
+	// Per-voter add-ons are free inside the free tier: at most 10 voters they price
+	// below any chargeable amount (Stripe's minimum charge), and such test-sized
+	// processes are meant to be entirely free. Flat add-ons stay billable at any size.
+	if in.CensusSize > FreeCensusSize {
+		if in.EmailTwoFA {
+			addLine(LineEmailTwoFA, "email 2FA", int64(in.CensusSize)*emailTwoFACentsPerVoter)
+		}
+		if in.SMSTwoFA {
+			addLine(LineSMSTwoFA, "SMS 2FA", int64(in.CensusSize)*smsTwoFACentsPerVoter)
+		}
 	}
 	if in.SignedCert {
 		addLine(LineSignedCert, "signed results certificate", signedCertCents)
