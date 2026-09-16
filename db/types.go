@@ -88,8 +88,6 @@ type Organization struct {
 	// It can be changed but not cleared, dynamicUpdateDocument skipping zero-valued fields.
 	DefaultLang     string                   `json:"defaultLang,omitempty" bson:"defaultLang,omitempty"`
 	Communications  bool                     `json:"communications" bson:"communications"`
-	TokensPurchased uint64                   `json:"tokensPurchased" bson:"tokensPurchased"`
-	TokensRemaining uint64                   `json:"tokensRemaining" bson:"tokensRemaining"`
 	Parent          common.Address           `json:"parent" bson:"parent"`
 	Meta            map[string]any           `json:"meta" bson:"meta"`
 	Subscription    OrganizationSubscription `json:"subscription" bson:"subscription"`
