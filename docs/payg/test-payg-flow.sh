@@ -87,7 +87,7 @@ SESSION=$(echo "$CO" | jq -r .sessionId); AMT=$(echo "$CO" | jq -r .amountCents)
 
 step "6. pay (self-signed checkout.session.completed webhook)"
 PAYLOAD=$(jq -cn --arg id "evt_test_$(date +%s)" --arg sess "$SESSION" --arg pid "$PID" --arg email "$EMAIL" '{
-  id:$id, api_version:"2025-08-27.basil", type:"checkout.session.completed",
+  id:$id, object:"event", api_version:"2026-08-26.dahlia", type:"checkout.session.completed",
   data:{object:{id:$sess, object:"checkout.session", mode:"payment", status:"complete",
     payment_status:"paid", amount_subtotal:4900, amount_total:4900,
     metadata:{voting_process_id:$pid, requested_by:$email}}}}')

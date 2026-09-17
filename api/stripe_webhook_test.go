@@ -8,7 +8,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
-	stripeapi "github.com/stripe/stripe-go/v82"
+	stripeapi "github.com/stripe/stripe-go/v86"
 	"github.com/vocdoni/saas-backend/stripe"
 	"go.vocdoni.io/dvote/util"
 )

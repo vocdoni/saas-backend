@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
-	stripeapi "github.com/stripe/stripe-go/v82"
-	stripecheckoutsession "github.com/stripe/stripe-go/v82/checkout/session"
+	stripeapi "github.com/stripe/stripe-go/v86"
+	stripecheckoutsession "github.com/stripe/stripe-go/v86/checkout/session"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -110,7 +110,7 @@ func buildPaymentSessionParams(params *PaymentSessionParams) *stripeapi.Checkout
 		Mode:      stripeapi.String(string(stripeapi.CheckoutSessionModePayment)),
 		LineItems: lineItems,
 		// embedded client, same as the subscription flow
-		UIMode: stripeapi.String(string(stripeapi.CheckoutSessionUIModeCustom)),
+		UIMode: stripeapi.String(string(stripeapi.CheckoutSessionUIModeElements)),
 		AutomaticTax: &stripeapi.CheckoutSessionAutomaticTaxParams{
 			Enabled: stripeapi.Bool(true),
 		},
