@@ -2037,6 +2037,37 @@ definitions:
           $ref: '#/definitions/apicommon.VotingProcessResponse'
         type: array
     type: object
+  apicommon.VotingProcessMetadata:
+    properties:
+      description:
+        $ref: '#/definitions/db.MultiLangString'
+      header:
+        type: string
+      questions:
+        items:
+          $ref: '#/definitions/apicommon.VotingProcessMetadataQuestion'
+        type: array
+      streamUri:
+        type: string
+      title:
+        $ref: '#/definitions/db.MultiLangString'
+    type: object
+  apicommon.VotingProcessMetadataChoice:
+    properties:
+      title:
+        $ref: '#/definitions/db.MultiLangString'
+    type: object
+  apicommon.VotingProcessMetadataQuestion:
+    properties:
+      choices:
+        items:
+          $ref: '#/definitions/apicommon.VotingProcessMetadataChoice'
+        type: array
+      description:
+        $ref: '#/definitions/db.MultiLangString'
+      title:
+        $ref: '#/definitions/db.MultiLangString'
+    type: object
   apicommon.VotingProcessQuestionRequest:
     properties:
       ballotProtocol:
@@ -6467,6 +6498,9 @@ paths:
         `typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a
         400 — omit `ballotProtocol` to edit a question through its `typeSetup`.
 
+        Once published, an election is immutable; PUT /processes/{processId}/metadata is the
+        only way left to edit a published process's textual content.
+
         Send the updatedAt read from GET /processes/{processId} to make the update conditional: it is
         rejected with 409 (40171) if anything wrote the process in between, so two editors cannot
         overwrite each other. Omitting updatedAt opts out of that guarantee and keeps last-writer-wins.
@@ -6884,6 +6918,83 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Check a voter's status for a voting process
+      tags:
+      - processes
+  /processes/{processId}/metadata:
+    get:
+      description: |-
+        Read the textual metadata of a voting process — process Title/Description/Header/StreamUri
+        and each question's Title/Description and choice Titles, in the order the process stores
+        them. Public for published processes; a draft is visible only to a Manager/Admin of the org
+        (or a voting:write API key acting as one) and returns 404 otherwise. The same shape is the
+        body PUT /processes/{processId}/metadata expects back.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.VotingProcessMetadata'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Get a voting process's editable metadata
+      tags:
+      - processes
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Update the textual metadata of a voting process: process Title/Description/Header/StreamUri,
+        and each question's Title/Description and choice Titles. This is the only way to edit a
+        published process — every question's on-chain election is immutable, so the request cannot
+        carry a question or choice count, type, typeSetup, ballotProtocol or choice value: the body
+        shape itself has no fields for them. Questions and choices are matched by position — the
+        body carries no question identity, and its length must match the process's current question
+        and choice counts exactly (400 otherwise) — so send back the shape read from
+        GET /processes/{processId}/metadata. Also works on a draft, as a lighter-weight alternative
+        to a full PUT /processes/{processId} for a text-only edit.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Voting process metadata
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.VotingProcessMetadata'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Update a voting process's editable metadata
       tags:
       - processes
   /processes/{processId}/participants:
