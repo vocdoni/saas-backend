@@ -352,27 +352,19 @@ func (a *API) writeDraftWriteConflict(w http.ResponseWriter, id bson.ObjectID, u
 
 // updateVotingProcessHandler godoc
 //
-//	@Summary		Update a voting process
-//	@Description	Update a voting process. While it is still a draft, the questions are replaced wholesale
-//	@Description	and each one's ballot shape is reconciled exactly as on create. Reading a question and
-//	@Description	PUTting it back unchanged is a no-op; editing its `typeSetup` while echoing the
-//	@Description	`ballotProtocol` that still encodes the old shape is a 400 — omit `ballotProtocol` to edit
-//	@Description	a question through its `typeSetup`.
+//	@Summary		Update a voting process draft
+//	@Description	Update a voting process while it is still a draft (not published). 409 if already published.
+//	@Description	The questions are replaced wholesale, and each one's ballot shape is reconciled exactly
+//	@Description	as on create. Reading a question and PUTting it back unchanged is a no-op; editing its
+//	@Description	`typeSetup` while echoing the `ballotProtocol` that still encodes the old shape is a
+//	@Description	400 — omit `ballotProtocol` to edit a question through its `typeSetup`.
 //	@Description
-//	@Description	Once published, every question's on-chain election is immutable, so only textual metadata
-//	@Description	may still change: process Title/Description/Header/StreamUri, and each question's
-//	@Description	Title/Description and choice Titles. A request that would also change the question or
-//	@Description	choice count, a choice's value, the ballot type/typeSetup/ballotProtocol,
-//	@Description	secretUntilTheEnd, or eligibility is rejected with 400. Questions and choices are matched
-//	@Description	by position — the body carries no question identity — so reordering questions that share the
-//	@Description	same ballot shape is indistinguishable from retitling them and is accepted; send them in the
-//	@Description	order GET /processes/{processId} returned. The body's census, startDate, endDate,
-//	@Description	initialStatus and per-question metadata are ignored on a published process, not applied.
+//	@Description	Once published, an election is immutable; PUT /processes/{processId}/metadata is the
+//	@Description	only way left to edit a published process's textual content.
 //	@Description
-//	@Description	Send the updatedAt read from GET /processes/{processId} to make a draft update conditional:
-//	@Description	it is rejected with 409 (40171) if anything wrote the process in between, so two editors
-//	@Description	cannot overwrite each other. Omitting updatedAt opts out of that guarantee and keeps
-//	@Description	last-writer-wins. updatedAt is not checked for a published update.
+//	@Description	Send the updatedAt read from GET /processes/{processId} to make the update conditional: it is
+//	@Description	rejected with 409 (40171) if anything wrote the process in between, so two editors cannot
+//	@Description	overwrite each other. Omitting updatedAt opts out of that guarantee and keeps last-writer-wins.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -404,6 +396,10 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	if vp.Published {
+		errors.ErrDuplicateConflict.Withf("process already published and not in draft mode").Write(w)
+		return
+	}
 	if refusePublishInProgress(w, vp) {
 		return
 	}
@@ -411,18 +407,6 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization").Write(w)
 		return
 	}
-	if vp.Published {
-		a.updatePublishedVotingProcess(w, vp, req)
-		return
-	}
-	a.updateDraftVotingProcess(w, vp, req)
-}
-
-// updateDraftVotingProcess replaces a draft's questions wholesale and reconciles its census,
-// as documented on updateVotingProcessHandler. vp is still a draft at this point.
-func (a *API) updateDraftVotingProcess(
-	w http.ResponseWriter, vp *db.VotingProcess, req *apicommon.CreateVotingProcessRequest,
-) {
 	if len(req.Questions) == 0 || len(req.Questions) > db.MaxQuestionsPerProcess {
 		errors.ErrMalformedBody.Withf("questions must be between 1 and %d", db.MaxQuestionsPerProcess).Write(w)
 		return
@@ -488,22 +472,109 @@ func (a *API) updateDraftVotingProcess(
 	apicommon.HTTPWriteOK(w)
 }
 
-// updatePublishedVotingProcess handles metadata-only edits to an already-published process: no
-// question/choice structure, census, or on-chain-bound field may change, only textual content.
-// Unlike updateDraftVotingProcess it neither rebuilds the census nor re-validates the ballot
-// shape — the census and every question's election are already live on-chain — it only rewrites
-// the stored text fields once the request has passed rejectStructuralVotingProcessChanges.
-func (a *API) updatePublishedVotingProcess(
-	w http.ResponseWriter, vp *db.VotingProcess, req *apicommon.CreateVotingProcessRequest,
-) {
+// votingProcessMetadataHandler godoc
+//
+//	@Summary		Get a voting process's editable metadata
+//	@Description	Read the textual metadata of a voting process — process Title/Description/Header/StreamUri
+//	@Description	and each question's Title/Description and choice Titles, in the order the process stores
+//	@Description	them. Public for published processes; a draft is visible only to a Manager/Admin of the org
+//	@Description	(or a voting:write API key acting as one) and returns 404 otherwise. The same shape is the
+//	@Description	body PUT /processes/{processId}/metadata expects back.
+//	@Tags			processes
+//	@Produce		json
+//	@Param			processId	path		string	true	"Process ID"
+//	@Success		200			{object}	apicommon.VotingProcessMetadata
+//	@Failure		404			{object}	errors.Error
+//	@Router			/processes/{processId}/metadata [get]
+func (a *API) votingProcessMetadataHandler(w http.ResponseWriter, r *http.Request) {
+	oid, ok := a.votingProcessID(w, r)
+	if !ok {
+		return
+	}
+	vp, questions, err := a.db.ProcessWithQuestions(oid)
+	if err != nil {
+		if err == db.ErrNotFound {
+			errors.ErrProcessNotFound.Write(w)
+			return
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	// public read: published processes are visible to anyone; a draft only to a manager/admin of the
+	// owning org, mirroring votingProcessInfoHandler.
+	if !vp.Published && !a.optionalManager(r, vp.OrgAddress) {
+		errors.ErrProcessNotFound.Write(w)
+		return
+	}
+	apicommon.HTTPWriteJSON(w, apicommon.VotingProcessMetadataFromDB(vp, questions))
+}
+
+// updateVotingProcessMetadataHandler godoc
+//
+//	@Summary		Update a voting process's editable metadata
+//	@Description	Update the textual metadata of a voting process: process Title/Description/Header/StreamUri,
+//	@Description	and each question's Title/Description and choice Titles. This is the only way to edit a
+//	@Description	published process — every question's on-chain election is immutable, so the request cannot
+//	@Description	carry a question or choice count, type, typeSetup, ballotProtocol or choice value: the body
+//	@Description	shape itself has no fields for them. Questions and choices are matched by position — the
+//	@Description	body carries no question identity, and its length must match the process's current question
+//	@Description	and choice counts exactly (400 otherwise) — so send back the shape read from
+//	@Description	GET /processes/{processId}/metadata. Also works on a draft, as a lighter-weight alternative
+//	@Description	to a full PUT /processes/{processId} for a text-only edit.
+//	@Tags			processes
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			processId	path		string							true	"Process ID"
+//	@Param			request		body		apicommon.VotingProcessMetadata	true	"Voting process metadata"
+//	@Success		200			{string}	string							"OK"
+//	@Failure		400			{object}	errors.Error
+//	@Failure		401			{object}	errors.Error
+//	@Failure		404			{object}	errors.Error
+//	@Router			/processes/{processId}/metadata [put]
+func (a *API) updateVotingProcessMetadataHandler(w http.ResponseWriter, r *http.Request) {
+	oid, ok := a.votingProcessID(w, r)
+	if !ok {
+		return
+	}
+	req := &apicommon.VotingProcessMetadata{}
+	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
+		errors.ErrMalformedBody.Write(w)
+		return
+	}
+	user, ok := apicommon.UserFromContext(r.Context())
+	if !ok {
+		errors.ErrUnauthorized.Write(w)
+		return
+	}
+	vp, ok := a.loadVotingProcess(w, oid)
+	if !ok {
+		return
+	}
+	if refusePublishInProgress(w, vp) {
+		return
+	}
+	if !user.HasRoleFor(vp.OrgAddress, db.ManagerRole) && !user.HasRoleFor(vp.OrgAddress, db.AdminRole) {
+		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization").Write(w)
+		return
+	}
 	questions, err := a.db.QuestionsByProcess(vp.ID)
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	if err := rejectStructuralVotingProcessChanges(questions, req); err != nil {
-		errors.ErrInvalidData.WithErr(err).Write(w)
+	if len(req.Questions) != len(questions) {
+		errors.ErrMalformedBody.Withf(
+			"expected %d questions, got %d", len(questions), len(req.Questions)).Write(w)
 		return
+	}
+	for i := range questions {
+		if len(req.Questions[i].Choices) != len(questions[i].Choices) {
+			errors.ErrMalformedBody.Withf(
+				"question %d: expected %d choices, got %d", i, len(questions[i].Choices), len(req.Questions[i].Choices),
+			).Write(w)
+			return
+		}
 	}
 	vp.Title, vp.Description, vp.Header, vp.StreamURI = req.Title, req.Description, req.Header, req.StreamURI
 	if _, err := a.db.SetVotingProcess(vp); err != nil {
@@ -522,59 +593,6 @@ func (a *API) updatePublishedVotingProcess(
 		}
 	}
 	apicommon.HTTPWriteOK(w)
-}
-
-// rejectStructuralVotingProcessChanges compares req against the published process's current
-// questions and returns an error naming the first field that is not purely textual metadata. A
-// published process's on-chain elections are immutable, so only VotingProcess.{Title,
-// Description,Header,StreamURI}, VotingProcessQuestion.{Title,Description} and Choice.Title may
-// change — anything that would alter the ballot shape a voter already cast against (question or
-// choice count, a choice's Value, type/typeSetup/ballotProtocol, secretUntilTheEnd) is rejected
-// here before any write happens. Questions are compared by position, so a reorder that preserves
-// every question's ballot shape reads here as a text edit and is accepted.
-func rejectStructuralVotingProcessChanges(questions []db.VotingProcessQuestion, req *apicommon.CreateVotingProcessRequest) error {
-	if len(req.Questions) != len(questions) {
-		return fmt.Errorf("cannot change the number of questions of a published process")
-	}
-	for i := range questions {
-		cur, sent := &questions[i], &req.Questions[i]
-		if len(sent.Choices) != len(cur.Choices) {
-			return fmt.Errorf("question %d: cannot change the number of choices of a published process", i)
-		}
-		for j := range cur.Choices {
-			curChoice, sentChoice := &cur.Choices[j], &sent.Choices[j]
-			if sentChoice.Value != curChoice.Value {
-				return fmt.Errorf("question %d, choice %d: cannot change a choice's value on a published process", i, j)
-			}
-			if sentChoice.OpenValue != curChoice.OpenValue {
-				return fmt.Errorf("question %d, choice %d: cannot change openValue on a published process", i, j)
-			}
-		}
-		if sent.Type != cur.Type {
-			return fmt.Errorf("question %d: cannot change the question type of a published process", i)
-		}
-		if sent.TypeSetup != cur.TypeSetup {
-			return fmt.Errorf("question %d: cannot change typeSetup of a published process", i)
-		}
-		if !ballotProtocolsEqual(sent.BallotProtocol, cur.BallotProtocol) {
-			return fmt.Errorf("question %d: cannot change ballotProtocol of a published process", i)
-		}
-		if sent.SecretUntilTheEnd != cur.SecretUntilTheEnd {
-			return fmt.Errorf("question %d: cannot change secretUntilTheEnd of a published process", i)
-		}
-		if sent.Eligibility != nil {
-			return fmt.Errorf("question %d: cannot change eligibility of a published process", i)
-		}
-	}
-	return nil
-}
-
-// ballotProtocolsEqual reports whether two possibly-nil BallotProtocols describe the same ballot.
-func ballotProtocolsEqual(a, b *db.BallotProtocol) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return *a == *b
 }
 
 // votingProcessInfoHandler godoc
