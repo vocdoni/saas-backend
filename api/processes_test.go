@@ -1364,6 +1364,12 @@ func TestVotingProcessRejectStructuralChangesOnPublished(t *testing.T) {
 		{"remove a choice", func(m *apicommon.VotingProcessMetadata) {
 			m.Questions[0].Choices = m.Questions[0].Choices[:1]
 		}},
+		{"add a question", func(m *apicommon.VotingProcessMetadata) {
+			m.Questions = append(m.Questions, m.Questions[len(m.Questions)-1])
+		}},
+		{"add a choice", func(m *apicommon.VotingProcessMetadata) {
+			m.Questions[0].Choices = append(m.Questions[0].Choices, m.Questions[0].Choices[0])
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
