@@ -52,6 +52,7 @@
   - [✅ Validate Organization Member Group Data](#-validate-organization-member-group-data)
   - [🤠 Available organization members roles](#-available-organization-members-roles)
   - [🏛️ Available organization types](#-available-organization-types)
+- [💶 Pay-per-process billing](#-pay-per-process-billing)
 - [🏦 Plans](#-plans)
   - [📋 Get Available Plans](#-get-plans)
   - [📄 Get Plan Info](#-get-plan-info)
@@ -1726,6 +1727,33 @@ In case of empty or duplicate fields, the error code `40005` is returned with th
   ]
 }
 ```
+
+## 💶 Pay-per-process billing
+
+Each voting process of the multi-question `/processes` API is priced individually and
+publication is gated on a verified payment. Full design (formula, payment state machine,
+wallet semantics, idempotency): [`docs/payg/payg-billing.md`](../docs/payg/payg-billing.md);
+request/response shapes: the generated swagger.
+
+* `GET /pricing?voters=…&emailTwoFA=…&smsTwoFA=…&signedCertificate=…&customUrl=…&branding=…`
+  — public calculator over the published formula (no auth, no draft): same response
+  shape as the per-process price below, without organization context (no credit
+  discounts, branding charged as requested).
+* `GET /processes/{processId}/price` — server-side quote in EUR cents, VAT excluded
+  (Manager/Admin). Flags `quoteRecommended` (>15k voters) and `quoteRequired` (>50k,
+  self-service checkout blocked).
+* `POST /processes/{processId}/checkout` — open (or resume) the one-time Stripe checkout
+  session for the quote; returns the embedded client secret (Admin, JWT-only). Reuses an
+  open session with an unchanged price, expires and replaces an obsolete one, and
+  answers 409 while a payment is processing or completed.
+* `GET /processes/{processId}/checkout` — stored payment state plus live session state,
+  for polling (Manager/Admin). Fulfillment happens only through webhooks.
+* `POST /processes/{processId}/publish` — answers **402** with the quote in the error
+  data while a priced process is unpaid; free (net €0) processes publish directly.
+* `GET /wallet` — integrator prepaid balance + ledger (path-less; also `quota:read` API
+  key). `POST /wallet/topup` — one-time checkout that credits the wallet on webhook
+  fulfillment (Admin, JWT-only). Managed organizations' processes are debited from the
+  integrator wallet at publish time instead of going through checkout.
 
 ## 🏦 Plans
 

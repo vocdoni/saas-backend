@@ -3,13 +3,13 @@ package stripe
 import (
 	"fmt"
 
-	stripeapi "github.com/stripe/stripe-go/v82"
-	stripeportalsession "github.com/stripe/stripe-go/v82/billingportal/session"
-	stripecheckoutsession "github.com/stripe/stripe-go/v82/checkout/session"
-	stripecustomer "github.com/stripe/stripe-go/v82/customer"
-	stripeprice "github.com/stripe/stripe-go/v82/price"
-	stripeproduct "github.com/stripe/stripe-go/v82/product"
-	stripewebhook "github.com/stripe/stripe-go/v82/webhook"
+	stripeapi "github.com/stripe/stripe-go/v86"
+	stripeportalsession "github.com/stripe/stripe-go/v86/billingportal/session"
+	stripecheckoutsession "github.com/stripe/stripe-go/v86/checkout/session"
+	stripecustomer "github.com/stripe/stripe-go/v86/customer"
+	stripeprice "github.com/stripe/stripe-go/v86/price"
+	stripeproduct "github.com/stripe/stripe-go/v86/product"
+	stripewebhook "github.com/stripe/stripe-go/v86/webhook"
 	"github.com/vocdoni/saas-backend/errors"
 )
 
@@ -122,22 +122,6 @@ func (*Client) ListProducts() ([]stripeapi.Product, error) {
 	return products, nil
 }
 
-// GetPrice retrieves a price by lookup key
-func (*Client) GetPrice(lookupKey string) (*stripeapi.Price, error) {
-	params := &stripeapi.PriceSearchParams{
-		SearchParams: stripeapi.SearchParams{
-			Query: fmt.Sprintf("active:'true' AND lookup_key:'%s'", lookupKey),
-		},
-	}
-
-	results := stripeprice.Search(params)
-	if !results.Next() {
-		return nil, errors.ErrStripeError.Withf("price with lookup key %s not found", lookupKey)
-	}
-
-	return results.Price(), nil
-}
-
 // GetProductPrices retrieves all active prices for a given product ID
 func (*Client) GetProductPrices(productID string) ([]stripeapi.Price, error) {
 	var prices []stripeapi.Price
@@ -184,7 +168,7 @@ func (c *Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeap
 			},
 		},
 		// UI mode is set to embedded, since the client is integrated in our UI
-		UIMode: stripeapi.String(string(stripeapi.CheckoutSessionUIModeCustom)),
+		UIMode: stripeapi.String(string(stripeapi.CheckoutSessionUIModeElements)),
 		// Automatic tax calculation is enabled
 		AutomaticTax: &stripeapi.CheckoutSessionAutomaticTaxParams{
 			Enabled: stripeapi.Bool(true),
@@ -242,13 +226,24 @@ func (*Client) GetCheckoutSession(sessionID string) (*CheckoutSessionStatus, err
 		return nil, errors.ErrStripeError.Withf("failed to get checkout session: %v", err)
 	}
 
-	status := &CheckoutSessionStatus{
-		Status:             string(session.Status),
-		CustomerEmail:      session.CustomerDetails.Email,
-		SubscriptionStatus: string(session.Subscription.Status),
-	}
+	return checkoutSessionStatus(session), nil
+}
 
-	return status, nil
+// checkoutSessionStatus maps a Stripe checkout session onto the API status shape.
+// Both sub-objects are optional: CustomerDetails is nil until the customer fills the
+// form, and Subscription is nil for one-time (mode "payment") sessions.
+func checkoutSessionStatus(session *stripeapi.CheckoutSession) *CheckoutSessionStatus {
+	status := &CheckoutSessionStatus{
+		Status:        string(session.Status),
+		PaymentStatus: string(session.PaymentStatus),
+	}
+	if session.CustomerDetails != nil {
+		status.CustomerEmail = session.CustomerDetails.Email
+	}
+	if session.Subscription != nil {
+		status.SubscriptionStatus = string(session.Subscription.Status)
+	}
+	return status
 }
 
 // CreatePortalSession creates a billing portal session for a customer
@@ -286,4 +281,7 @@ type CheckoutSessionStatus struct {
 	Status             string `json:"status"`
 	CustomerEmail      string `json:"customer_email"`
 	SubscriptionStatus string `json:"subscription_status"`
+	// PaymentStatus is the payment outcome of a one-time (mode "payment") session:
+	// "paid", "unpaid" or "no_payment_required"; empty for subscription sessions.
+	PaymentStatus string `json:"payment_status,omitempty"`
 }

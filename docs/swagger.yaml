@@ -534,6 +534,13 @@ definitions:
     type: object
   apicommon.CreateVotingProcessRequest:
     properties:
+      addOns:
+        allOf:
+        - $ref: '#/definitions/db.ProcessAddOns'
+        description: |-
+          AddOns are the paid per-process options (signed results certificate, custom URL,
+          branding). The 2FA add-ons are not here: they derive from census.twoFaFields.
+          They change the process price, so editing them invalidates an open checkout session.
       census:
         $ref: '#/definitions/apicommon.CensusSpec'
       description:
@@ -1262,6 +1269,26 @@ definitions:
           type: string
         type: array
     type: object
+  apicommon.ProcessCheckoutRequest:
+    properties:
+      locale:
+        type: string
+      returnURL:
+        description: ReturnURL is where Stripe redirects after checkout; the session
+          id is appended.
+        type: string
+    type: object
+  apicommon.ProcessCheckoutResponse:
+    properties:
+      amountCents:
+        type: integer
+      clientSecret:
+        type: string
+      currency:
+        type: string
+      sessionId:
+        type: string
+    type: object
   apicommon.ProcessInfo:
     properties:
       address:
@@ -1340,6 +1367,52 @@ definitions:
         items:
           $ref: '#/definitions/apicommon.ProcessParticipantEntry'
         type: array
+    type: object
+  apicommon.ProcessPaymentStatusResponse:
+    properties:
+      amountCents:
+        type: integer
+      currency:
+        type: string
+      paidAt:
+        type: string
+      sessionPaymentStatus:
+        description: |-
+          SessionPaymentStatus is the live Stripe payment state of that session (paid,
+          unpaid, no_payment_required).
+        type: string
+      sessionStatus:
+        description: |-
+          SessionStatus is the live Stripe session state (open, complete, expired) when a
+          checkout session exists; empty for wallet-paid processes.
+        type: string
+      status:
+        $ref: '#/definitions/db.ProcessPaymentStatus'
+    type: object
+  apicommon.ProcessPriceResponse:
+    properties:
+      currency:
+        type: string
+      lines:
+        items:
+          $ref: '#/definitions/pricing.QuoteLine'
+        type: array
+      paymentStatus:
+        allOf:
+        - $ref: '#/definitions/db.ProcessPaymentStatus'
+        description: |-
+          PaymentStatus is the process's current payment state (pending, processing, failed,
+          paid); empty when no payment exists yet.
+      quoteRecommended:
+        description: 'QuoteRecommended: census above 15 000 voters — suggest requesting
+          a custom quote.'
+        type: boolean
+      quoteRequired:
+        description: 'QuoteRequired: census above 50 000 voters — self-service checkout
+          is blocked.'
+        type: boolean
+      totalCents:
+        type: integer
     type: object
   apicommon.ProcessResultsResponse:
     properties:
@@ -2098,6 +2171,10 @@ definitions:
     type: object
   apicommon.VotingProcessResponse:
     properties:
+      addOns:
+        allOf:
+        - $ref: '#/definitions/db.ProcessAddOns'
+        description: AddOns echoes the paid per-process options selected on the draft.
       census:
         $ref: '#/definitions/apicommon.CensusSpec'
       chainId:
@@ -2161,6 +2238,28 @@ definitions:
         type: array
       valid:
         type: boolean
+    type: object
+  apicommon.WalletResponse:
+    properties:
+      balanceCents:
+        type: integer
+      currency:
+        type: string
+      ledger:
+        items:
+          $ref: '#/definitions/db.WalletLedgerEntry'
+        type: array
+      pagination:
+        $ref: '#/definitions/apicommon.Pagination'
+    type: object
+  apicommon.WalletTopUpRequest:
+    properties:
+      amountCents:
+        type: integer
+      locale:
+        type: string
+      returnURL:
+        type: string
     type: object
   db.BallotProtocol:
     properties:
@@ -2486,6 +2585,27 @@ definitions:
       status:
         type: string
     type: object
+  db.ProcessAddOns:
+    properties:
+      branding:
+        type: boolean
+      customUrl:
+        type: boolean
+      signedCertificate:
+        type: boolean
+    type: object
+  db.ProcessPaymentStatus:
+    enum:
+    - pending
+    - processing
+    - failed
+    - paid
+    type: string
+    x-enum-varnames:
+    - ProcessPaymentPending
+    - ProcessPaymentProcessing
+    - ProcessPaymentFailed
+    - ProcessPaymentPaid
   db.PublishedCensus:
     properties:
       createdAt:
@@ -2668,6 +2788,23 @@ definitions:
       weighted:
         type: boolean
     type: object
+  db.WalletLedgerEntry:
+    properties:
+      amountCents:
+        type: integer
+      createdAt:
+        type: string
+      id:
+        type: string
+      kind:
+        type: string
+      orgAddress:
+        items:
+          type: integer
+        type: array
+      processId:
+        type: string
+    type: object
   errors.Error:
     properties:
       code:
@@ -2687,6 +2824,11 @@ definitions:
   github_com_vocdoni_saas-backend_stripe.CheckoutSessionStatus:
     properties:
       customer_email:
+        type: string
+      payment_status:
+        description: |-
+          PaymentStatus is the payment outcome of a one-time (mode "payment") session:
+          "paid", "unpaid" or "no_payment_required"; empty for subscription sessions.
         type: string
       status:
         type: string
@@ -2979,6 +3121,15 @@ definitions:
       weight:
         example: 2a
         format: hex
+        type: string
+    type: object
+  pricing.QuoteLine:
+    properties:
+      amountCents:
+        type: integer
+      description:
+        type: string
+      kind:
         type: string
     type: object
 host: localhost:8080
@@ -5372,6 +5523,55 @@ paths:
       summary: Get all subscription plans
       tags:
       - plans
+  /pricing:
+    get:
+      description: |-
+        Public calculator over the published pricing formula: pass the inputs, get the
+        same breakdown GET /processes/{processId}/price returns for a draft. EUR cents,
+        VAT excluded (Stripe Tax adds VAT at checkout). No organization context: branding
+        is charged as requested and legacy plan credits are not applied. Above 15 000
+        voters a custom quote is recommended; above 50 000 the flag is informational here —
+        self-service checkout enforces the block.
+      parameters:
+      - description: Eligible voters (census size), at least 1
+        in: query
+        name: voters
+        required: true
+        type: integer
+      - description: Email 2FA add-on
+        in: query
+        name: emailTwoFA
+        type: boolean
+      - description: SMS 2FA add-on
+        in: query
+        name: smsTwoFA
+        type: boolean
+      - description: Signed results certificate add-on
+        in: query
+        name: signedCertificate
+        type: boolean
+      - description: Custom URL add-on
+        in: query
+        name: customUrl
+        type: boolean
+      - description: Branding / white label add-on
+        in: query
+        name: branding
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessPriceResponse'
+        "400":
+          description: Missing or invalid voters
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Compute a pay-per-process price
+      tags:
+      - processes
   /process:
     post:
       consumes:
@@ -6886,6 +7086,99 @@ paths:
       summary: Check a voter's status for a voting process
       tags:
       - processes
+  /processes/{processId}/checkout:
+    get:
+      description: |-
+        The stored payment state (pending, processing, failed, paid) combined with the
+        live Stripe session state when a checkout session exists. Payment truth comes
+        from webhooks — this endpoint is for polling the outcome, it never fulfills.
+        Requires Manager/Admin of the organization.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessPaymentStatusResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Process not found, or it has no payment
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get the payment status of a voting process
+      tags:
+      - processes
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Opens a one-time Stripe checkout session for the draft's server-calculated price
+        (VAT added by Stripe Tax at checkout) and returns its client secret. An open
+        session for the same price is reused; an obsolete one (the draft changed) is
+        expired and replaced. 409 (40177) while a payment is processing or completed —
+        a process is never charged twice. 422 (40176) above 50 000 voters (quote-only).
+        Free processes have nothing to pay: publish directly. Managed organizations pay
+        from their integrator's wallet at publish time, not through checkout.
+        Requires Admin role.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Checkout parameters
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.ProcessCheckoutRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessCheckoutResponse'
+        "400":
+          description: Free process, empty census or managed organization
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "409":
+          description: Payment already processing or completed
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "422":
+          description: Census size requires a custom quote
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Start (or resume) the checkout of a voting process
+      tags:
+      - processes
   /processes/{processId}/participants:
     get:
       description: |-
@@ -6974,6 +7267,43 @@ paths:
       summary: Get a voting process participant
       tags:
       - processes
+  /processes/{processId}/price:
+    get:
+      description: |-
+        Server-side price of the draft in EUR cents, VAT excluded: base price from the
+        census size plus the selected add-ons, with the current payment status. Prices
+        above 15 000 voters recommend a custom quote; above 50 000 self-service checkout
+        is unavailable. Requires Manager/Admin of the organization.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessPriceResponse'
+        "400":
+          description: Census is empty or invalid
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get the price of a voting process
+      tags:
+      - processes
   /processes/{processId}/publish:
     post:
       consumes:
@@ -6984,6 +7314,9 @@ paths:
         GET /jobs/{jobId}. Idempotent once published.
         409 (40172) means the stored questions do not match the process and the draft has to be
         saved again before it can be published.
+        402 (40174) means the process is priced and unpaid — the current quote travels in the
+        error data; start checkout via POST /processes/{processId}/checkout. For a managed
+        organization, 402 (40175) means its integrator's wallet does not cover the price.
       parameters:
       - description: Process ID
         in: path
@@ -7007,6 +7340,11 @@ paths:
             $ref: '#/definitions/errors.Error'
         "401":
           description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "402":
+          description: Payment required (quote in data), or insufficient integrator
+            wallet balance
           schema:
             $ref: '#/definitions/errors.Error'
         "404":
@@ -8297,6 +8635,92 @@ paths:
       summary: Verify vote nullifiers against the Vochain
       tags:
       - vote
+  /wallet:
+    get:
+      description: |-
+        Prepaid EUR balance and paged ledger (top-ups and per-process debits, newest
+        first) of the caller's integrator organization, resolved from the authenticated
+        principal (path-less, like the other integrator endpoints).
+
+        Also callable with a scoped API key (scope: `quota:read`).
+      parameters:
+      - description: Page number, starting at 1
+        in: query
+        name: page
+        type: string
+      - description: Items per page
+        in: query
+        name: limit
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.WalletResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Not an integrator
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get the integrator wallet
+      tags:
+      - integrator
+  /wallet/topup:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Opens a one-time Stripe checkout session that credits the caller's integrator
+        wallet once the payment is verified by webhook — never before. The amount is
+        EUR cents, VAT excluded (Stripe Tax adds VAT at checkout). Requires a user
+        session whose user is an Admin of the integrator organization; deliberately not
+        callable with an API key.
+      parameters:
+      - description: Top-up parameters
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.WalletTopUpRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessCheckoutResponse'
+        "400":
+          description: Amount out of bounds
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "403":
+          description: Not an integrator
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Top up the integrator wallet
+      tags:
+      - integrator
 schemes:
 - http
 - https

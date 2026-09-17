@@ -9,9 +9,10 @@ import (
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
-	stripeapi "github.com/stripe/stripe-go/v82"
+	stripeapi "github.com/stripe/stripe-go/v86"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -22,6 +23,10 @@ type Service struct {
 	processedEvents sync.Map // map[string]time.Time
 	lockManager     *LockManager
 	config          *Config
+	// OnProcessPaid, when set, is invoked once per process payment fulfillment — only
+	// by the webhook call that won the paid CAS, so replays never fire it twice. The
+	// API layer wires it to enqueue publication of the paid process.
+	OnProcessPaid func(processID bson.ObjectID)
 }
 
 // NewService creates a new Stripe service

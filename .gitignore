@@ -1,3 +1,4 @@
 .env
 gocoverage*.txt
 .worktrees
+docs/tmp/

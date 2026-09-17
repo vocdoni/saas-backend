@@ -184,6 +184,9 @@ func (a *API) publishPreflightProblems(
 //	@Description	GET /jobs/{jobId}. Idempotent once published.
 //	@Description	409 (40172) means the stored questions do not match the process and the draft has to be
 //	@Description	saved again before it can be published.
+//	@Description	402 (40174) means the process is priced and unpaid — the current quote travels in the
+//	@Description	error data; start checkout via POST /processes/{processId}/checkout. For a managed
+//	@Description	organization, 402 (40175) means its integrator's wallet does not cover the price.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -193,6 +196,7 @@ func (a *API) publishPreflightProblems(
 //	@Success		200			{object}	apicommon.CreateVotingProcessResponse	"Already published"
 //	@Failure		400			{object}	errors.Error							"Not ready to publish"
 //	@Failure		401			{object}	errors.Error
+//	@Failure		402			{object}	errors.Error	"Payment required (quote in data), or insufficient integrator wallet balance"
 //	@Failure		404			{object}	errors.Error
 //	@Failure		409			{object}	errors.Error	"Publish in progress, or the stored questions do not match the process"
 //	@Failure		503			{object}	errors.Error
@@ -245,19 +249,57 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// atomically claim the process for publishing (duplicate-publish guard)
-	claimed, err := a.db.ClaimVotingProcessForPublish(oid)
+	// payment gate: a priced process publishes only after its payment is verified. The
+	// quote owed travels in the error payload so the client can go straight to checkout.
+	// Free processes pass with no checkout; managed organizations are debited from
+	// their integrator's wallet inside startProcessPublish instead.
+	due, err := a.paymentDueForPublish(vp)
 	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		writeSubscriptionError(w, err)
 		return
 	}
-	if !claimed {
-		if cur, e := a.db.VotingProcess(oid); e == nil && cur.Published {
+	if due != nil {
+		errors.ErrPaymentRequired.WithData(due).Write(w)
+		return
+	}
+
+	jobID, err := a.startProcessPublish(vp, questions, census, user)
+	if err != nil {
+		if err == errProcessAlreadyPublished {
 			apicommon.HTTPWriteJSON(w, apicommon.CreateVotingProcessResponse{ProcessID: oid.Hex()})
 			return
 		}
-		errors.ErrPublishInProgress.Write(w)
+		writeSubscriptionError(w, err)
 		return
+	}
+	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, &apicommon.EnqueuedResponse{JobID: jobID})
+}
+
+// errProcessAlreadyPublished reports that a publish request found the process already on
+// chain — success for the caller, just nothing to enqueue.
+var errProcessAlreadyPublished = fmt.Errorf("process already published")
+
+// startProcessPublish runs the post-preflight publish pipeline: atomic claim, managed
+// slot reservation, organization signer, census publication, job creation and enqueue.
+// The caller is responsible for preflight (publishPreflightProblems) and authorization.
+// It exists apart from the HTTP handler so payment fulfillment can trigger publication
+// server-side with the same guarantees. Errors are errors.Error values carrying their
+// HTTP semantics (write with writeSubscriptionError), plain errors mapping to 500, or
+// errProcessAlreadyPublished.
+func (a *API) startProcessPublish(
+	vp *db.VotingProcess, questions []db.VotingProcessQuestion, census *db.Census, user *db.User,
+) (string, error) {
+	oid := vp.ID
+	// atomically claim the process for publishing (duplicate-publish guard)
+	claimed, err := a.db.ClaimVotingProcessForPublish(oid)
+	if err != nil {
+		return "", fmt.Errorf("failed to claim voting process for publish: %w", err)
+	}
+	if !claimed {
+		if cur, e := a.db.VotingProcess(oid); e == nil && cur.Published {
+			return "", errProcessAlreadyPublished
+		}
+		return "", errors.ErrPublishInProgress
 	}
 	committed := false
 	defer func() {
@@ -271,8 +313,7 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 
 	org, err := a.db.Organization(vp.OrgAddress)
 	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
+		return "", fmt.Errorf("failed to get organization: %w", err)
 	}
 	// a process is one billed unit; reserve a single managed slot when applicable. A resume (a
 	// re-publish of a process that already mined some elections) must NOT reserve again — the
@@ -283,8 +324,7 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 	if !anyMined(questions) {
 		integratorAddr, managedReserved, err = a.reserveManagedProcessSlot(org, uint64(census.Size))
 		if err != nil {
-			writeSubscriptionError(w, err)
-			return
+			return "", err
 		}
 	}
 	if managedReserved {
@@ -298,10 +338,20 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 		}()
 	}
 
+	// payment: a managed organization's process is charged to its integrator's wallet
+	// here, after the claim, so two concurrent publishes cannot both debit — and the
+	// debit's per-process idempotency means a retry after a later failure passes
+	// without a second charge. Standard organizations were gated on a verified
+	// payment before this function.
+	if org.ManagedBy != (common.Address{}) {
+		if err := a.debitManagedProcessWallet(vp, org); err != nil {
+			return "", err
+		}
+	}
+
 	orgSigner, err := account.OrganizationSigner(a.secret, org.Creator, org.Nonce)
 	if err != nil {
-		errors.ErrGenericInternalServerError.Withf("could not restore organization signer: %v", err).Write(w)
-		return
+		return "", errors.ErrGenericInternalServerError.Withf("could not restore organization signer: %v", err)
 	}
 	// root = CSP public key; the on-chain census authorization is delegated to the CSP for every
 	// question. A blind (anonymous) census publishes the CSP blind public key instead, so the
@@ -311,13 +361,11 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 		cspPubKey, err = a.csp.BlindPubKey()
 	}
 	if err != nil {
-		errors.ErrGenericInternalServerError.Withf("could not get csp public key: %v", err).Write(w)
-		return
+		return "", errors.ErrGenericInternalServerError.Withf("could not get csp public key: %v", err)
 	}
 	census.Published = db.PublishedCensus{Root: cspPubKey, URI: a.serverURL, CreatedAt: time.Now()}
 	if _, err := a.db.SetCensus(census); err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
+		return "", fmt.Errorf("failed to publish census: %w", err)
 	}
 
 	orgLock := a.orgTxLocks.lock(org.Address)
@@ -330,12 +378,10 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 
 	jobID, err := apicommon.NewJobID()
 	if err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
+		return "", fmt.Errorf("failed to create job id: %w", err)
 	}
 	if err := a.db.CreateTxJob(jobID, db.JobTypePublishVotingProcess, org.Address); err != nil {
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
-		return
+		return "", fmt.Errorf("failed to create tx job: %w", err)
 	}
 
 	reserved := managedReserved
@@ -351,14 +397,13 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 		if e := a.db.SetJobStatus(jobID, db.JobStatusFailed, nil, "tx queue full"); e != nil {
 			log.Warnw("could not mark job failed after full queue", "error", e)
 		}
-		errors.ErrTxQueueFull.Write(w)
-		return
+		return "", errors.ErrTxQueueFull
 	}
 	// the worker now owns the lock, the publishing claim and the managed reservation.
 	committed = true
 	managedReserved = false
 	lockHeld = false
-	apicommon.HTTPWriteJSONStatus(w, http.StatusAccepted, &apicommon.EnqueuedResponse{JobID: jobID})
+	return jobID, nil
 }
 
 // publishWorker carries the state of an async voting-process publish across the batch +

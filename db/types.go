@@ -86,15 +86,16 @@ type Organization struct {
 	// DefaultLang is the language of the notifications sent on behalf of the organization
 	// (see apicommon.NotificationLang). Every organization has one, defaulting to "en".
 	// It can be changed but not cleared, dynamicUpdateDocument skipping zero-valued fields.
-	DefaultLang     string                   `json:"defaultLang,omitempty" bson:"defaultLang,omitempty"`
-	Communications  bool                     `json:"communications" bson:"communications"`
-	TokensPurchased uint64                   `json:"tokensPurchased" bson:"tokensPurchased"`
-	TokensRemaining uint64                   `json:"tokensRemaining" bson:"tokensRemaining"`
-	Parent          common.Address           `json:"parent" bson:"parent"`
-	Meta            map[string]any           `json:"meta" bson:"meta"`
-	Subscription    OrganizationSubscription `json:"subscription" bson:"subscription"`
-	Counters        OrganizationCounters     `json:"counters" bson:"counters"`
-	ManagedBy       common.Address           `json:"managedBy,omitempty" bson:"managedBy,omitempty"`
+	DefaultLang    string `json:"defaultLang,omitempty" bson:"defaultLang,omitempty"`
+	Communications bool   `json:"communications" bson:"communications"`
+	// BrandingPaidAt records when the organization paid the once-per-organization
+	// branding add-on; pricing charges branding only while it is zero.
+	BrandingPaidAt time.Time                `json:"brandingPaidAt,omitempty" bson:"brandingPaidAt,omitempty"`
+	Parent         common.Address           `json:"parent" bson:"parent"`
+	Meta           map[string]any           `json:"meta" bson:"meta"`
+	Subscription   OrganizationSubscription `json:"subscription" bson:"subscription"`
+	Counters       OrganizationCounters     `json:"counters" bson:"counters"`
+	ManagedBy      common.Address           `json:"managedBy,omitempty" bson:"managedBy,omitempty"`
 	// IntegratorLimits, when set, is a per-organization override that both enables
 	// integrator status (manual/admin path) and caps its managed resources. When unset,
 	// integrator status and limits derive from the active subscription plan instead.
@@ -727,6 +728,9 @@ type VotingProcess struct {
 	InitialStatus string          `json:"initialStatus,omitempty" bson:"initialStatus,omitempty"`
 	CensusID      bson.ObjectID   `json:"-" bson:"censusId"`    // internal ref to a db.Census
 	QuestionIDs   []bson.ObjectID `json:"-" bson:"questionIds"` // ordered question references
+	// AddOns are the paid per-process options selected on the draft. The 2FA add-ons are
+	// not here: they derive from the census TwoFaFields. Priced by the pricing package.
+	AddOns ProcessAddOns `json:"addOns,omitzero" bson:"addOns,omitempty"`
 	// Publishing is the transient claim a publish worker holds on this process (see
 	// ClaimVotingProcessForPublish). It is a struct field rather than only a raw $set so that
 	// SetVotingProcess's ReplaceOne stops wiping a live claim, and so handlers can refuse to
@@ -745,6 +749,86 @@ type VotingProcess struct {
 // so a worker that crashed cannot block edits forever.
 func (vp *VotingProcess) PublishInProgress() bool {
 	return !vp.Publishing.IsZero() && time.Since(vp.Publishing) < PublishStaleAfter
+}
+
+// ProcessAddOns are the paid per-process options of the pay-per-process pricing model.
+type ProcessAddOns struct {
+	SignedCertificate bool `json:"signedCertificate,omitempty" bson:"signedCertificate,omitempty"`
+	CustomURL         bool `json:"customUrl,omitempty" bson:"customUrl,omitempty"`
+	Branding          bool `json:"branding,omitempty" bson:"branding,omitempty"`
+}
+
+// ProcessPaymentStatus is the lifecycle state of a voting process payment.
+type ProcessPaymentStatus string
+
+// Process payment statuses. There is no "none" status: a process without a processPayments
+// document has no payment (it is free, or not quoted yet).
+const (
+	// ProcessPaymentPending: a checkout session is open for the process.
+	ProcessPaymentPending ProcessPaymentStatus = "pending"
+	// ProcessPaymentProcessing: the customer completed checkout with a delayed payment
+	// method and the outcome is not known yet. No new charge may start.
+	ProcessPaymentProcessing ProcessPaymentStatus = "processing"
+	// ProcessPaymentFailed: the payment failed; the process is payable again.
+	ProcessPaymentFailed ProcessPaymentStatus = "failed"
+	// ProcessPaymentPaid: payment verified (webhook) or debited from an integrator
+	// wallet. Terminal — never reverted, so publish retries never re-charge.
+	ProcessPaymentPaid ProcessPaymentStatus = "paid"
+)
+
+// ProcessPayment is the payment state of a voting process, in its own collection keyed by
+// the process id rather than embedded in VotingProcess: both process write paths replace
+// the whole document, and a concurrent draft save must never be able to wipe a live
+// checkout session id or a paid state.
+type ProcessPayment struct {
+	ProcessID  bson.ObjectID        `json:"-" bson:"_id"`
+	OrgAddress common.Address       `json:"-" bson:"orgAddress"`
+	Status     ProcessPaymentStatus `json:"status" bson:"status"`
+	// CheckoutSessionID is the open/completed Stripe checkout session; empty for
+	// wallet-paid processes.
+	CheckoutSessionID string `json:"-" bson:"checkoutSessionId,omitempty"`
+	// QuoteHash fingerprints the priced inputs the session was created for (see
+	// pricing.QuoteHash); a draft edit that changes the price makes it stale.
+	QuoteHash string `json:"-" bson:"quoteHash,omitempty"`
+	// AmountCents is the net total in EUR cents, VAT excluded.
+	AmountCents int64  `json:"amountCents" bson:"amountCents"`
+	Currency    string `json:"currency" bson:"currency"`
+	// RequestedBy is the email of the user who started the checkout; webhook
+	// fulfillment publishes the process acting as this user.
+	RequestedBy string    `json:"-" bson:"requestedBy,omitempty"`
+	PaidAt      time.Time `json:"paidAt,omitempty" bson:"paidAt,omitempty"`
+	CreatedAt   time.Time `json:"-" bson:"createdAt"`
+	UpdatedAt   time.Time `json:"-" bson:"updatedAt"`
+}
+
+// Wallet is an integrator's prepaid EUR balance. AppliedKeys makes credits and debits
+// idempotent inside the one document Mongo can update atomically: a top-up's key is its
+// checkout session id, a debit's key is the process id hex. The wallet document is
+// authoritative for the balance; the walletLedger collection is the audit trail.
+type Wallet struct {
+	OrgAddress   common.Address `json:"orgAddress" bson:"_id"`
+	BalanceCents int64          `json:"balanceCents" bson:"balanceCents"`
+	AppliedKeys  []string       `json:"-" bson:"appliedKeys"`
+	UpdatedAt    time.Time      `json:"updatedAt" bson:"updatedAt"`
+}
+
+// Wallet ledger entry kinds.
+const (
+	WalletEntryTopUp = "topup"
+	WalletEntryDebit = "debit"
+)
+
+// WalletLedgerEntry is one append-only audit record of a wallet balance change:
+// positive amounts are top-ups, negative amounts are debits. IdempotencyKey carries a
+// unique index so a replay cannot record the same operation twice.
+type WalletLedgerEntry struct {
+	ID             bson.ObjectID  `json:"id" bson:"_id"`
+	OrgAddress     common.Address `json:"orgAddress" bson:"orgAddress"`
+	AmountCents    int64          `json:"amountCents" bson:"amountCents"`
+	Kind           string         `json:"kind" bson:"kind"`
+	IdempotencyKey string         `json:"-" bson:"idempotencyKey"`
+	ProcessID      bson.ObjectID  `json:"processId,omitempty" bson:"processId,omitempty"`
+	CreatedAt      time.Time      `json:"createdAt" bson:"createdAt"`
 }
 
 // VotingProcessQuestion is one question of a VotingProcess. Each question maps to

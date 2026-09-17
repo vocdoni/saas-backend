@@ -27,7 +27,7 @@ require (
 require (
 	github.com/lestrrat-go/jwx/v3 v3.2.0
 	github.com/moby/moby/api v1.55.0
-	github.com/stripe/stripe-go/v82 v82.5.1
+	github.com/stripe/stripe-go/v86 v86.4.2
 	github.com/testcontainers/testcontainers-go/modules/mongodb v0.44.0
 	github.com/vocdoni/go-blindsecp256k1 v0.2.0
 	go.mongodb.org/mongo-driver/v2 v2.8.2
