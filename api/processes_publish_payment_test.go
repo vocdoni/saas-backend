@@ -125,6 +125,61 @@ func TestPublishPaidProcessServerSide(t *testing.T) {
 	testAPI.publishPaidProcess(oid)
 }
 
+// TestPublishPaidProcessRefusals: every refusal inside the fulfillment hook must leave
+// the process paid and unpublished — publishing later (manually, for free) is always
+// possible, and the user is never charged again.
+func TestPublishPaidProcessRefusals(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "hookrefusals1234")
+	orgAddress := testCreateOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+
+	payAndHook := func(pid, requestedBy, sessionID string) bson.ObjectID {
+		oid, err := bson.ObjectIDFromHex(pid)
+		c.Assert(err, qt.IsNil)
+		stored, err := testDB.SetProcessPaymentPending(&db.ProcessPayment{
+			ProcessID: oid, OrgAddress: orgAddress, CheckoutSessionID: sessionID,
+			QuoteHash: "hash", AmountCents: 1_515, Currency: "eur", RequestedBy: requestedBy,
+		})
+		c.Assert(err, qt.IsNil)
+		c.Assert(stored, qt.IsTrue)
+		won, err := testDB.MarkProcessPaymentPaid(oid, sessionID)
+		c.Assert(err, qt.IsNil)
+		c.Assert(won, qt.IsTrue)
+		testAPI.publishPaidProcess(oid)
+		return oid
+	}
+	assertPaidUnpublished := func(oid bson.ObjectID) {
+		payment, err := testDB.ProcessPayment(oid)
+		c.Assert(err, qt.IsNil)
+		c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPaid)
+		vp, err := testDB.VotingProcess(oid)
+		c.Assert(err, qt.IsNil)
+		c.Assert(vp.Published, qt.IsFalse)
+		c.Assert(vp.PublishInProgress(), qt.IsFalse) // no claim left behind
+	}
+
+	// the user who paid no longer exists: stays paid, publish manually later
+	ghostPid := newPricedVotingProcess(t, token, orgAddress)
+	assertPaidUnpublished(payAndHook(ghostPid, "ghost@nowhere.example", "cs_refusal_ghost"))
+
+	// the draft fails preflight at fulfillment time (a stray question corrupted the
+	// stored set after payment): stays paid, no claim, repairable + publishable later
+	me := requestAndParse[apicommon.UserInfo](t, http.MethodGet, token, nil, "users", "me")
+	strayPid := newPricedVotingProcess(t, token, orgAddress)
+	strayOid, err := bson.ObjectIDFromHex(strayPid)
+	c.Assert(err, qt.IsNil)
+	_, err = testDB.SetQuestion(&db.VotingProcessQuestion{
+		ProcessID: strayOid, OrgAddress: orgAddress, Order: 2,
+		Title:     db.MultiLangString{"default": "stray"},
+		Type:      db.VotingTypeSingleChoice,
+		TypeSetup: db.QuestionTypeSetup{MinChoices: 1, MaxChoices: 1},
+		Choices:   []db.Choice{{Title: db.MultiLangString{"default": "Yes"}, Value: 0}},
+	})
+	c.Assert(err, qt.IsNil)
+	assertPaidUnpublished(payAndHook(strayPid, me.Email, "cs_refusal_stray"))
+}
+
 // TestManagedProcessWalletPublish: a managed organization's process is paid from its
 // integrator's wallet at publish time — refused (claim released) while the balance is
 // short, debited exactly once when it covers the price, kept across re-publishes.

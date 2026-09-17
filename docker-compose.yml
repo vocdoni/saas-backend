@@ -21,6 +21,9 @@ services:
     depends_on:
       - mongo
   mongo:
+    # pinned to the major the test suite runs (test/mongodb.go): the unpinned latest
+    # (8.2+) refuses to start on Linux kernels >= 6.19 (SERVER-121912), which is what
+    # Docker Desktop's VM ships today
     image: mongo:7
     restart: ${RESTART:-unless-stopped}
     ports:

@@ -5528,6 +5528,55 @@ paths:
       summary: Get all subscription plans
       tags:
       - plans
+  /pricing:
+    get:
+      description: |-
+        Public calculator over the published pricing formula: pass the inputs, get the
+        same breakdown GET /processes/{processId}/price returns for a draft. EUR cents,
+        VAT excluded (Stripe Tax adds VAT at checkout). No organization context: branding
+        is charged as requested and legacy plan credits are not applied. Above 15 000
+        voters a custom quote is recommended; above 50 000 the flag is informational here —
+        self-service checkout enforces the block.
+      parameters:
+      - description: Eligible voters (census size), at least 1
+        in: query
+        name: voters
+        required: true
+        type: integer
+      - description: Email 2FA add-on
+        in: query
+        name: emailTwoFA
+        type: boolean
+      - description: SMS 2FA add-on
+        in: query
+        name: smsTwoFA
+        type: boolean
+      - description: Signed results certificate add-on
+        in: query
+        name: signedCertificate
+        type: boolean
+      - description: Custom URL add-on
+        in: query
+        name: customUrl
+        type: boolean
+      - description: Branding / white label add-on
+        in: query
+        name: branding
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessPriceResponse'
+        "400":
+          description: Missing or invalid voters
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Compute a pay-per-process price
+      tags:
+      - processes
   /process:
     post:
       consumes:

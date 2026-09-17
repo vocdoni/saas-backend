@@ -1732,9 +1732,13 @@ In case of empty or duplicate fields, the error code `40005` is returned with th
 
 Each voting process of the multi-question `/processes` API is priced individually and
 publication is gated on a verified payment. Full design (formula, payment state machine,
-wallet semantics, idempotency): [`docs/payg-billing.md`](../docs/payg-billing.md);
+wallet semantics, idempotency): [`docs/payg/payg-billing.md`](../docs/payg/payg-billing.md);
 request/response shapes: the generated swagger.
 
+* `GET /pricing?voters=…&emailTwoFA=…&smsTwoFA=…&signedCertificate=…&customUrl=…&branding=…`
+  — public calculator over the published formula (no auth, no draft): same response
+  shape as the per-process price below, without organization context (no credit
+  discounts, branding charged as requested).
 * `GET /processes/{processId}/price` — server-side quote in EUR cents, VAT excluded
   (Manager/Admin). Flags `quoteRecommended` (>15k voters) and `quoteRequired` (>50k,
   self-service checkout blocked).
