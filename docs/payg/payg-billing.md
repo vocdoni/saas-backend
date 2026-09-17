@@ -83,8 +83,12 @@ duplicate webhook resolves to a lost CAS instead of a second side effect.
 
 ## Checkout flow (standard organizations)
 
-1. `GET /processes/{id}/price` — the server-side quote (line breakdown, flags, current
-   payment status). The price shown to the user is always this, never client-side math.
+0. `GET /pricing?voters=…&emailTwoFA=…` — the public calculator over the same formula
+   (no auth, no draft needed; for the pricing page). Branding is charged as requested
+   and credits are not applied — it has no organization context.
+1. `GET /processes/{id}/price` — the server-side quote for a draft (line breakdown,
+   flags, current payment status). The price shown to the user before payment is always
+   a server calculation, never client-side math.
 2. `POST /processes/{id}/checkout` (Admin, JWT-only) — reconciles before charging:
    - `processing`/`paid` → 409 (40177), never a second charge;
    - open session with a matching quote hash → **reused** (same client secret);
@@ -171,6 +175,44 @@ is the wallet, and pricing selects the integrator policy for them.
 - `wallets` — one document per integrator (`_id` = org address).
 - `walletLedger` — append-only, unique index on `idempotencyKey`.
 - `votingProcesses` gains `addOns`; `organizations` gains `brandingPaidAt`.
+
+## Testing the flow
+
+Three layers, from hermetic to manual:
+
+1. **Signed-webhook e2e (CI, no network, no cards)** —
+   `api/stripe_checkout_webhook_test.go` signs event payloads with the real Stripe v1
+   signature scheme (`stripe-go/webhook.GenerateTestSignedPayload`) and POSTs them to
+   `/subscriptions/webhook`, driving signature validation, event parsing, fulfillment
+   and server-side publication through the production code path. Card numbers never
+   appear here: the card only matters inside Stripe's browser step, and the webhook is
+   Stripe's signed statement of the outcome.
+2. **Live test-mode session lifecycle (opt-in, network)** — set
+   `STRIPE_TEST_SECRET_KEY=sk_test_…` to run `stripe/payments_livetest_test.go`, which
+   creates, reads and expires a real test-mode session: Stripe itself validates the
+   `price_data` + `automatic_tax` + `invoice_creation` wire shape. It refuses non-test
+   keys and never charges anything.
+3. **Manual browser checklist (Stripe test mode)** — the only layer that exercises the
+   embedded Payment Element and Stripe Tax UI. The full step-by-step runbook (stack
+   setup, curl sequence, a copy-paste payment-page harness) is
+   [`payg-manual-testing.md`](payg-manual-testing.md). Run the stack with test-mode
+   keys, forward webhooks with
+   `stripe listen --forward-to localhost:8080/subscriptions/webhook`,
+   and use Stripe's standard test data (authoritative list:
+   https://docs.stripe.com/testing — any future expiry, any CVC, any postcode):
+
+   | Test data | Behavior to verify |
+   |---|---|
+   | Card `4242 4242 4242 4242` | immediate success → webhook marks paid → process auto-publishes |
+   | Card `4000 0025 0000 3155` | 3DS challenge, then success |
+   | Card `4000 0000 0000 9995` | declined (insufficient funds) → payment `failed` → retry opens a new session |
+   | SEPA IBAN `DE89370400440532013000` | delayed method: `processing`, then `async_payment_succeeded` → publishes |
+   | SEPA IBAN `DE62370400440532013001` | delayed failure: `async_payment_failed` → payable again |
+   | `stripe events resend <evt_…>` | replayed fulfillment is a no-op (no double publish/credit) |
+
+   Also verify: VAT appears on top of the net line items once a billing address is
+   entered; the invoice is generated (invoice_creation); a wallet top-up credits the
+   net amount exactly once.
 
 ## Open questions / follow-ups
 

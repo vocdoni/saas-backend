@@ -55,6 +55,15 @@ func (f *fakePaymentGW) GetPaymentSession(sessionID string) (*stripe.PaymentSess
 	return &copied, nil
 }
 
+// setSessionStatus forces a stored session's status, simulating Stripe-side transitions
+// the fake cannot reach through its own API (a customer completing checkout, the 24h
+// expiry of an abandoned session).
+func (f *fakePaymentGW) setSessionStatus(sessionID, status string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sessions[sessionID].Status = status
+}
+
 func (f *fakePaymentGW) ExpirePaymentSession(sessionID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -169,6 +178,45 @@ func TestProcessCheckoutFlow(t *testing.T) {
 	c.Assert(won, qt.IsTrue)
 	requestAndAssertError(errors.ErrPaymentSessionConflict, t, http.MethodPost, adminToken, checkoutReq,
 		"processes", pid, "checkout")
+}
+
+// TestProcessCheckoutSessionStates covers the checkout reconciliation against
+// Stripe-side session states the customer (or time) produced: a session the customer
+// completed while the webhook has not landed yet refuses a second charge, and a session
+// Stripe expired on its own is replaced without an expire call.
+func TestProcessCheckoutSessionStates(t *testing.T) {
+	c := qt.New(t)
+	fake := installFakePaymentGW(t)
+	adminToken := testCreateUser(t, "sessionstates123")
+	orgAddress := testCreateOrganization(t, adminToken)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	checkoutReq := &apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"}
+
+	// the customer finished checkout (session complete) but the webhook is in flight:
+	// the payment is still pending on our side, yet a new checkout must refuse — the
+	// in-flight payment could already have charged them
+	pid := newPricedVotingProcess(t, adminToken, orgAddress)
+	first := requestAndParse[apicommon.ProcessCheckoutResponse](
+		t, http.MethodPost, adminToken, checkoutReq, "processes", pid, "checkout")
+	fake.setSessionStatus(first.SessionID, "complete")
+	requestAndAssertError(errors.ErrPaymentSessionConflict, t, http.MethodPost, adminToken, checkoutReq,
+		"processes", pid, "checkout")
+	oid, err := bson.ObjectIDFromHex(pid)
+	c.Assert(err, qt.IsNil)
+	payment, err := testDB.ProcessPayment(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPending)
+
+	// an abandoned session Stripe expired on its own (24h): the next checkout opens a
+	// replacement directly — expiring an already-expired session would fail
+	pid2 := newPricedVotingProcess(t, adminToken, orgAddress)
+	second := requestAndParse[apicommon.ProcessCheckoutResponse](
+		t, http.MethodPost, adminToken, checkoutReq, "processes", pid2, "checkout")
+	fake.setSessionStatus(second.SessionID, "expired")
+	replacement := requestAndParse[apicommon.ProcessCheckoutResponse](
+		t, http.MethodPost, adminToken, checkoutReq, "processes", pid2, "checkout")
+	c.Assert(replacement.SessionID, qt.Not(qt.Equals), second.SessionID)
+	c.Assert(fake.expired, qt.HasLen, 0)
 }
 
 func TestProcessCheckoutRefusals(t *testing.T) {

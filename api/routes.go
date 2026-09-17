@@ -233,6 +233,9 @@ const (
 	// GET routes to get the server-side price of a voting process
 	processesPriceEndpoint = "/processes/{processId}/price"
 
+	// GET routes to compute a price from formula inputs (public calculator)
+	pricingEndpoint = "/pricing"
+
 	// GET the caller's integrator wallet (balance + ledger, path-less)
 	walletEndpoint = "/wallet"
 
