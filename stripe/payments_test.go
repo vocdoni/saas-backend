@@ -26,7 +26,7 @@ func TestBuildPaymentSessionParams(t *testing.T) {
 	})
 
 	c.Assert(*params.Mode, qt.Equals, "payment")
-	c.Assert(*params.UIMode, qt.Equals, "custom")
+	c.Assert(*params.UIMode, qt.Equals, "elements")
 	c.Assert(*params.AutomaticTax.Enabled, qt.IsTrue)
 	c.Assert(*params.TaxIDCollection.Enabled, qt.IsTrue)
 	c.Assert(*params.InvoiceCreation.Enabled, qt.IsTrue)

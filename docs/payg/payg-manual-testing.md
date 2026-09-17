@@ -96,13 +96,15 @@ docker compose --profile with-vocone --profile local-smtp up -d
 # seed the default plan (organization creation requires one)
 docker compose --profile with-ui run --rm defaultplan
 # forward real signed webhooks from Stripe to the local API — keep this running;
-# it prints the whsec_… that must be in .env (restart the api after setting it).
-# --api-version pins the delivered events to what our stripe-go expects: without it
-# the CLI uses your account default (often newer, e.g. dahlia) and the backend rejects
-# every event with an API-version-mismatch 500.
-stripe listen --api-version 2025-08-27.basil \
-  --forward-to localhost:8080/subscriptions/webhook
+# it prints the whsec_… that must be in .env (restart the api after setting it)
+stripe listen --forward-to localhost:8080/subscriptions/webhook
 ```
+
+The pinned `stripe-go` (v86, API version `2026-08-26.dahlia`) matches the current Stripe
+account version, so events validate with no extra flags. If Stripe advances your
+account's API version past the SDK's release train, bump `stripe-go` to the matching
+major — the webhook check compares the release train, so staying on the same train is
+enough.
 
 ## 3. User, organization, members, draft (curl)
 
@@ -251,9 +253,9 @@ never what marks anything paid.
 ## Notes
 
 - Everything here is local: staging/production get these endpoints when PR #685 deploys.
-  In production the webhook endpoint's API version is pinned when it is created in the
-  Stripe dashboard — create it at the version the deployed `stripe-go` expects (today
-  `2025-08-27.basil`), or the same mismatch 500 will happen there.
+  Keep the deployed `stripe-go` on the same API-version release train as the Stripe
+  account (currently `dahlia`); bump the SDK major when Stripe advances the account to a
+  new train, or webhook signature validation will start rejecting events.
 - The automated suite already covers the webhook contract with signed payloads
   (`api/stripe_checkout_webhook_test.go`); this runbook is for what only a browser can
   exercise — the Payment Element, Stripe Tax collecting the billing address, and the

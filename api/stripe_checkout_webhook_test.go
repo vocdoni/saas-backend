@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	qt "github.com/frankban/quicktest"
-	stripeapi "github.com/stripe/stripe-go/v82"
-	stripewebhook "github.com/stripe/stripe-go/v82/webhook"
+	stripeapi "github.com/stripe/stripe-go/v86"
+	stripewebhook "github.com/stripe/stripe-go/v86/webhook"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/stripe"
@@ -41,6 +41,9 @@ func postSignedStripeEvent(t *testing.T, secret, eventID, eventType string, obje
 	c := qt.New(t)
 	payload, err := json.Marshal(map[string]any{
 		"id": eventID,
+		// top-level "object":"event" marks this a snapshot event; v86's ConstructEvent
+		// peeks at it and rejects anything else as a thin (v2) event notification
+		"object": "event",
 		// ConstructEvent rejects events whose api_version does not match the SDK's pin
 		"api_version": stripeapi.APIVersion,
 		"type":        eventType,
