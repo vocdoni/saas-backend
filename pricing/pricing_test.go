@@ -1,6 +1,7 @@
 package pricing
 
 import (
+	"fmt"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
@@ -31,8 +32,9 @@ func TestBasePriceBrackets(t *testing.T) {
 		{50_000, 598_000}, // R5(2130 + 0.11·35000) = €5980
 	}
 	for _, tc := range cases {
-		c.Assert(standardBasePriceCents(tc.censusSize), qt.Equals, tc.wantCents,
-			qt.Commentf("census size %d", tc.censusSize))
+		c.Run(fmt.Sprintf("%d voters", tc.censusSize), func(c *qt.C) {
+			c.Assert(standardBasePriceCents(tc.censusSize), qt.Equals, tc.wantCents)
+		})
 	}
 }
 
@@ -66,15 +68,17 @@ func TestComputeAddOns(t *testing.T) {
 		},
 	}
 	for _, tc := range cases {
-		quote, err := Compute(tc.in)
-		c.Assert(err, qt.IsNil, qt.Commentf("%s", tc.name))
-		c.Assert(quote.TotalCents, qt.Equals, tc.wantCents, qt.Commentf("%s", tc.name))
-		// The lines always sum to the total.
-		var sum int64
-		for _, line := range quote.Lines {
-			sum += line.AmountCents
-		}
-		c.Assert(sum, qt.Equals, quote.TotalCents, qt.Commentf("%s", tc.name))
+		c.Run(tc.name, func(c *qt.C) {
+			quote, err := Compute(tc.in)
+			c.Assert(err, qt.IsNil)
+			c.Assert(quote.TotalCents, qt.Equals, tc.wantCents)
+			// The lines always sum to the total.
+			var sum int64
+			for _, line := range quote.Lines {
+				sum += line.AmountCents
+			}
+			c.Assert(sum, qt.Equals, quote.TotalCents)
+		})
 	}
 }
 
@@ -92,10 +96,12 @@ func TestComputeThresholds(t *testing.T) {
 		{50_001, true, true},
 	}
 	for _, tc := range cases {
-		quote, err := Compute(QuoteInput{CensusSize: tc.censusSize})
-		c.Assert(err, qt.IsNil)
-		c.Assert(quote.QuoteRecommended, qt.Equals, tc.recommended, qt.Commentf("census size %d", tc.censusSize))
-		c.Assert(quote.QuoteRequired, qt.Equals, tc.quoteRequired, qt.Commentf("census size %d", tc.censusSize))
+		c.Run(fmt.Sprintf("%d voters", tc.censusSize), func(c *qt.C) {
+			quote, err := Compute(QuoteInput{CensusSize: tc.censusSize})
+			c.Assert(err, qt.IsNil)
+			c.Assert(quote.QuoteRecommended, qt.Equals, tc.recommended)
+			c.Assert(quote.QuoteRequired, qt.Equals, tc.quoteRequired)
+		})
 	}
 }
 
@@ -113,11 +119,13 @@ func TestComputeRejectsInvalidCensus(t *testing.T) {
 func TestPayerPolicyParity(t *testing.T) {
 	c := qt.New(t)
 	for _, censusSize := range []int{1, 11, 600, 801, 5001, 15_001, 60_000} {
-		standard, err := Compute(QuoteInput{CensusSize: censusSize, Payer: PayerStandard})
-		c.Assert(err, qt.IsNil)
-		integrator, err := Compute(QuoteInput{CensusSize: censusSize, Payer: PayerIntegrator})
-		c.Assert(err, qt.IsNil)
-		c.Assert(integrator.TotalCents, qt.Equals, standard.TotalCents, qt.Commentf("census size %d", censusSize))
+		c.Run(fmt.Sprintf("%d voters", censusSize), func(c *qt.C) {
+			standard, err := Compute(QuoteInput{CensusSize: censusSize, Payer: PayerStandard})
+			c.Assert(err, qt.IsNil)
+			integrator, err := Compute(QuoteInput{CensusSize: censusSize, Payer: PayerIntegrator})
+			c.Assert(err, qt.IsNil)
+			c.Assert(integrator.TotalCents, qt.Equals, standard.TotalCents)
+		})
 	}
 }
 
