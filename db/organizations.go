@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -273,6 +274,26 @@ func (ms *MongoStorage) SetOrganizationSubscription(address common.Address, orgS
 		return err
 	}
 	return nil
+}
+
+// SetOrganizationBrandingPaid stamps the once-per-organization branding add-on as paid,
+// but only the first time: the conditional filter matches only while brandingPaidAt is
+// absent (it is omitempty, so an organization that never paid branding has no such
+// field). It reports whether this call was the one that set it. Idempotent — a second
+// call, or a concurrent one that lost the race, matches nothing and returns false
+// without error, so pricing suppresses the branding line from then on.
+func (ms *MongoStorage) SetOrganizationBrandingPaid(address common.Address, when time.Time) (bool, error) {
+	if (address.Cmp(common.Address{}) == 0) || when.IsZero() {
+		return false, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	filter := bson.M{"_id": address, "brandingPaidAt": bson.M{"$exists": false}}
+	res, err := ms.organizations.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"brandingPaidAt": when}})
+	if err != nil {
+		return false, fmt.Errorf("failed to set organization branding paid: %w", err)
+	}
+	return res.MatchedCount == 1, nil
 }
 
 // SetOrganizationMeta method sets the metadata for the organization with the

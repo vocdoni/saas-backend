@@ -13,6 +13,7 @@ import (
 	stripewebhook "github.com/stripe/stripe-go/v86/webhook"
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
+	"github.com/vocdoni/saas-backend/pricing"
 	"github.com/vocdoni/saas-backend/stripe"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/util"
@@ -156,6 +157,56 @@ func TestStripeCheckoutWebhookProcessPayment(t *testing.T) {
 	code = postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8),
 		"checkout.session.completed", checkoutSessionObject("cs_sub_flow", "paid", 19_900, nil))
 	c.Assert(code, qt.Equals, http.StatusOK)
+}
+
+// TestStripeCheckoutWebhookStampsBranding: paying a process that carries the branding
+// add-on stamps the organization branding-paid, so the org's next process is no longer
+// charged the once-per-organization €149 branding fee.
+func TestStripeCheckoutWebhookStampsBranding(t *testing.T) {
+	c := qt.New(t)
+	installStripeWebhookService(t)
+	installFakePaymentGW(t)
+
+	token := testCreateUser(t, "brandingpaid1234")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(2)...)
+
+	// process A selects branding: 2 voters -> free base, +€149 branding = 14900 cents
+	reqA := newVotingProcessRequest(orgAddress, memberIDs(members))
+	reqA.AddOns = db.ProcessAddOns{Branding: true}
+	createdA := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, reqA, processesCreateEndpoint)
+	priceA := requestAndParse[apicommon.ProcessPriceResponse](
+		t, http.MethodGet, token, nil, "processes", createdA.ProcessID, "price")
+	c.Assert(priceA.TotalCents, qt.Equals, int64(14_900))
+
+	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](
+		t, http.MethodPost, token, &apicommon.ProcessCheckoutRequest{ReturnURL: "https://x.example"},
+		"processes", createdA.ProcessID, "checkout")
+
+	// pay it: the fulfillment stamps the organization branding-paid
+	code := postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8),
+		"checkout.session.completed",
+		checkoutSessionObject(checkout.SessionID, "paid", 14_900, map[string]string{
+			stripe.MetadataKeyProcessID: createdA.ProcessID,
+		}))
+	c.Assert(code, qt.Equals, http.StatusOK)
+	org, err := testDB.Organization(orgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(org.BrandingPaidAt.IsZero(), qt.IsFalse)
+
+	// process B also selects branding, but the org already paid it: no branding line, free
+	reqB := newVotingProcessRequest(orgAddress, memberIDs(members))
+	reqB.AddOns = db.ProcessAddOns{Branding: true}
+	createdB := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, reqB, processesCreateEndpoint)
+	priceB := requestAndParse[apicommon.ProcessPriceResponse](
+		t, http.MethodGet, token, nil, "processes", createdB.ProcessID, "price")
+	c.Assert(priceB.TotalCents, qt.Equals, int64(0))
+	for _, line := range priceB.Lines {
+		c.Assert(line.Kind, qt.Not(qt.Equals), pricing.LineBranding)
+	}
 }
 
 // TestStripeCheckoutWebhookCardSuccess: the common card flow — a single

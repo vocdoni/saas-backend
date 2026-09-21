@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/vocdoni/saas-backend/api/apicommon"
@@ -135,6 +136,15 @@ func (a *API) debitManagedProcessWallet(vp *db.VotingProcess, org *db.Organizati
 	}); err != nil {
 		log.Warnw("could not record wallet-paid process payment",
 			"processId", vp.ID.Hex(), "error", err)
+	}
+	// stamp the once-per-organization branding add-on as paid when the debited quote
+	// carried it, so the org's next process is not charged branding again (conditional
+	// in the DB: only the first payment sets it).
+	if vp.AddOns.Branding {
+		if _, err := a.db.SetOrganizationBrandingPaid(vp.OrgAddress, time.Now()); err != nil {
+			log.Warnw("could not stamp organization branding-paid",
+				"processId", vp.ID.Hex(), "orgAddress", vp.OrgAddress.String(), "error", err)
+		}
 	}
 	return nil
 }

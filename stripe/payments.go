@@ -3,6 +3,7 @@ package stripe
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	stripeapi "github.com/stripe/stripe-go/v86"
@@ -252,6 +253,15 @@ func (s *Service) fulfillProcessPayment(session *stripeapi.CheckoutSession) erro
 		return nil
 	}
 	log.Infow("process payment fulfilled", "processId", processID.Hex(), "sessionId", session.ID)
+	// stamp the once-per-organization branding add-on as paid when this process carried
+	// it, so the org's next process is not charged branding again. Conditional in the DB
+	// (only the first payment sets it), and only reached on the winning paid CAS.
+	if vp, err := s.db.VotingProcess(processID); err == nil && vp.AddOns.Branding {
+		if _, err := s.db.SetOrganizationBrandingPaid(vp.OrgAddress, time.Now()); err != nil {
+			log.Warnw("could not stamp organization branding-paid",
+				"processId", processID.Hex(), "orgAddress", vp.OrgAddress.String(), "error", err)
+		}
+	}
 	if s.OnProcessPaid != nil {
 		s.OnProcessPaid(processID)
 	}
