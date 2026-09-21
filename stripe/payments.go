@@ -56,12 +56,12 @@ func (c *Client) CreatePaymentCheckoutSession(params *PaymentSessionParams) (*st
 
 	customer, err := c.GetCustomerByAddress(params.OrgAddress)
 	if err != nil {
-		checkoutParams.CustomerEmail = stripeapi.String(params.CustomerEmail)
+		checkoutParams.CustomerEmail = new(params.CustomerEmail)
 	} else {
 		checkoutParams.Customer = &customer.ID
 		checkoutParams.CustomerUpdate = &stripeapi.CheckoutSessionCustomerUpdateParams{
-			Name:    stripeapi.String("auto"),
-			Address: stripeapi.String("auto"),
+			Name:    new("auto"),
+			Address: new("auto"),
 		}
 	}
 
@@ -89,40 +89,40 @@ func buildPaymentSessionParams(params *PaymentSessionParams) *stripeapi.Checkout
 	lineItems := make([]*stripeapi.CheckoutSessionLineItemParams, 0, len(params.LineItems))
 	for _, item := range params.LineItems {
 		lineItems = append(lineItems, &stripeapi.CheckoutSessionLineItemParams{
-			Quantity: stripeapi.Int64(1),
+			Quantity: new(int64(1)),
 			PriceData: &stripeapi.CheckoutSessionLineItemPriceDataParams{
-				Currency:    stripeapi.String("eur"),
-				UnitAmount:  stripeapi.Int64(item.AmountCents),
-				TaxBehavior: stripeapi.String("exclusive"),
+				Currency:    new("eur"),
+				UnitAmount:  new(item.AmountCents),
+				TaxBehavior: new("exclusive"),
 				ProductData: &stripeapi.CheckoutSessionLineItemPriceDataProductDataParams{
-					Name: stripeapi.String(item.Description),
+					Name: new(item.Description),
 				},
 			},
 		})
 	}
 	checkoutParams := &stripeapi.CheckoutSessionParams{
-		Mode:      stripeapi.String(string(stripeapi.CheckoutSessionModePayment)),
+		Mode:      new(string(stripeapi.CheckoutSessionModePayment)),
 		LineItems: lineItems,
 		// embedded client, same as the subscription flow
-		UIMode: stripeapi.String(string(stripeapi.CheckoutSessionUIModeElements)),
+		UIMode: new(string(stripeapi.CheckoutSessionUIModeElements)),
 		AutomaticTax: &stripeapi.CheckoutSessionAutomaticTaxParams{
-			Enabled: stripeapi.Bool(true),
+			Enabled: new(true),
 		},
 		TaxIDCollection: &stripeapi.CheckoutSessionTaxIDCollectionParams{
-			Enabled: stripeapi.Bool(true),
+			Enabled: new(true),
 		},
-		BillingAddressCollection: stripeapi.String(string(stripeapi.CheckoutSessionBillingAddressCollectionAuto)),
+		BillingAddressCollection: new(string(stripeapi.CheckoutSessionBillingAddressCollectionAuto)),
 		// one-time purchases get a real invoice instead of the subscription invoice flow
 		InvoiceCreation: &stripeapi.CheckoutSessionInvoiceCreationParams{
-			Enabled: stripeapi.Bool(true),
+			Enabled: new(true),
 		},
 		// session-level metadata: a payment session has no SubscriptionData, and the
 		// webhook needs the routing identity back from the session itself
 		Metadata: params.Metadata,
-		Locale:   stripeapi.String(stripeLocale(params.Locale)),
+		Locale:   new(stripeLocale(params.Locale)),
 	}
 	if params.ReturnURL != "" {
-		checkoutParams.ReturnURL = stripeapi.String(params.ReturnURL + "/{CHECKOUT_SESSION_ID}")
+		checkoutParams.ReturnURL = new(params.ReturnURL + "/{CHECKOUT_SESSION_ID}")
 	}
 	return checkoutParams
 }

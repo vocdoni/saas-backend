@@ -49,7 +49,7 @@ func (*Client) GetCustomer(customerID string) (*stripeapi.Customer, error) {
 // GetCustomerByEmail retrieves a customer by email address
 func (*Client) GetCustomerByEmail(email string) (*stripeapi.Customer, error) {
 	params := &stripeapi.CustomerListParams{
-		Email: stripeapi.String(email),
+		Email: new(email),
 	}
 
 	customers := stripecustomer.List(params)
@@ -77,7 +77,7 @@ func (*Client) GetCustomerByAddress(address string) (*stripeapi.Customer, error)
 	customers := stripecustomer.Search(&stripeapi.CustomerSearchParams{
 		SearchParams: stripeapi.SearchParams{
 			Query: fmt.Sprintf("metadata['address']:'%s'", address),
-			Limit: stripeapi.Int64(1),
+			Limit: new(int64(1)),
 		},
 	})
 
@@ -106,7 +106,7 @@ func (*Client) ListProducts() ([]stripeapi.Product, error) {
 	var products []stripeapi.Product
 
 	params := &stripeapi.ProductListParams{
-		Active: stripeapi.Bool(true),
+		Active: new(true),
 	}
 	params.AddExpand("data.default_price")
 	params.Filters.AddFilter("limit", "", "100")
@@ -127,8 +127,8 @@ func (*Client) GetProductPrices(productID string) ([]stripeapi.Price, error) {
 	var prices []stripeapi.Price
 
 	params := &stripeapi.PriceListParams{
-		Product: stripeapi.String(productID),
-		Active:  stripeapi.Bool(true),
+		Product: new(productID),
+		Active:  new(true),
 	}
 	params.Filters.AddFilter("limit", "", "100") // Adjust limit as needed
 
@@ -168,18 +168,18 @@ func stripeLocale(lang string) string {
 func (c *Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeapi.CheckoutSession, error) {
 	checkoutParams := &stripeapi.CheckoutSessionParams{
 		// Subscription mode
-		Mode: stripeapi.String(string(stripeapi.CheckoutSessionModeSubscription)),
+		Mode: new(string(stripeapi.CheckoutSessionModeSubscription)),
 		LineItems: []*stripeapi.CheckoutSessionLineItemParams{
 			{
-				Price:    stripeapi.String(params.PriceID),
-				Quantity: stripeapi.Int64(params.Quantity),
+				Price:    new(params.PriceID),
+				Quantity: new(params.Quantity),
 			},
 		},
 		// UI mode is set to embedded, since the client is integrated in our UI
-		UIMode: stripeapi.String(string(stripeapi.CheckoutSessionUIModeElements)),
+		UIMode: new(string(stripeapi.CheckoutSessionUIModeElements)),
 		// Automatic tax calculation is enabled
 		AutomaticTax: &stripeapi.CheckoutSessionAutomaticTaxParams{
-			Enabled: stripeapi.Bool(true),
+			Enabled: new(true),
 		},
 		// We store in the metadata the address of the organization
 		SubscriptionData: &stripeapi.CheckoutSessionSubscriptionDataParams{
@@ -188,32 +188,32 @@ func (c *Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeap
 			},
 		},
 		TaxIDCollection: &stripeapi.CheckoutSessionTaxIDCollectionParams{
-			Enabled: stripeapi.Bool(true),
+			Enabled: new(true),
 		},
-		AllowPromotionCodes:      stripeapi.Bool(true),
-		BillingAddressCollection: stripeapi.String(string(stripeapi.CheckoutSessionBillingAddressCollectionAuto)),
+		AllowPromotionCodes:      new(true),
+		BillingAddressCollection: new(string(stripeapi.CheckoutSessionBillingAddressCollectionAuto)),
 		// The locale is being used to configure the language of the embedded client
-		Locale: stripeapi.String(stripeLocale(params.Locale)),
+		Locale: new(stripeLocale(params.Locale)),
 	}
 
 	if params.FreeTrialDays > 0 {
-		checkoutParams.SubscriptionData.TrialPeriodDays = stripeapi.Int64(int64(params.FreeTrialDays))
+		checkoutParams.SubscriptionData.TrialPeriodDays = new(int64(params.FreeTrialDays))
 	}
 
 	customer, err := c.GetCustomerByAddress(params.OrgAddress)
 	if err != nil {
-		checkoutParams.CustomerEmail = stripeapi.String(params.CustomerEmail)
+		checkoutParams.CustomerEmail = new(params.CustomerEmail)
 	} else {
 		checkoutParams.Customer = &customer.ID
 		checkoutParams.CustomerUpdate = &stripeapi.CheckoutSessionCustomerUpdateParams{
-			Name:    stripeapi.String("auto"),
-			Address: stripeapi.String("auto"),
+			Name:    new("auto"),
+			Address: new("auto"),
 		}
 	}
 
 	// The returnURL is used to redirect the user after the payment is completed
 	if params.ReturnURL != "" {
-		checkoutParams.ReturnURL = stripeapi.String(params.ReturnURL + "/{CHECKOUT_SESSION_ID}")
+		checkoutParams.ReturnURL = new(params.ReturnURL + "/{CHECKOUT_SESSION_ID}")
 	}
 
 	session, err := stripecheckoutsession.New(checkoutParams)
