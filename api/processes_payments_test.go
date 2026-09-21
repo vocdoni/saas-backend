@@ -180,6 +180,44 @@ func TestProcessCheckoutFlow(t *testing.T) {
 		"processes", pid, "checkout")
 }
 
+// TestDeleteDraftRefusesCompletedSession guards the money race: a pending payment whose
+// Stripe session the customer already completed (webhook not landed yet) must not be
+// deleted — that would capture the money and destroy the process. Delete refuses with a
+// conflict, exactly as the checkout path does.
+func TestDeleteDraftRefusesCompletedSession(t *testing.T) {
+	c := qt.New(t)
+	fake := installFakePaymentGW(t)
+	adminToken := testCreateUser(t, "deleterace123456")
+	orgAddress := testCreateOrganization(t, adminToken)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	pid := newPricedVotingProcess(t, adminToken, orgAddress)
+
+	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](
+		t, http.MethodPost, adminToken, &apicommon.ProcessCheckoutRequest{ReturnURL: "https://x.example"},
+		"processes", pid, "checkout")
+
+	// the customer completed checkout; the webhook has not fulfilled yet (still pending)
+	fake.setSessionStatus(checkout.SessionID, "complete")
+	requestAndAssertError(errors.ErrPaymentSessionConflict, t, http.MethodDelete, adminToken, nil,
+		"processes", pid)
+
+	// the process and its payment are intact — nothing was destroyed
+	oid, err := bson.ObjectIDFromHex(pid)
+	c.Assert(err, qt.IsNil)
+	_, err = testDB.VotingProcess(oid)
+	c.Assert(err, qt.IsNil)
+	payment, err := testDB.ProcessPayment(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPending)
+
+	// a still-open (abandoned) session, by contrast, does not block deletion
+	pid2 := newPricedVotingProcess(t, adminToken, orgAddress)
+	_ = requestAndParse[apicommon.ProcessCheckoutResponse](
+		t, http.MethodPost, adminToken, &apicommon.ProcessCheckoutRequest{ReturnURL: "https://x.example"},
+		"processes", pid2, "checkout")
+	requestAndAssertCode(http.StatusOK, t, http.MethodDelete, adminToken, nil, "processes", pid2)
+}
+
 // TestProcessCheckoutSessionStates covers the checkout reconciliation against
 // Stripe-side session states the customer (or time) produced: a session the customer
 // completed while the webhook has not landed yet refuses a second charge, and a session

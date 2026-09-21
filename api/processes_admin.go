@@ -61,6 +61,16 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		if payment.CheckoutSessionID != "" && a.paymentGW != nil {
+			// a pending payment whose session the customer already completed has not
+			// been webhook-fulfilled yet: deleting now would capture the money and
+			// destroy the process. Refuse (the same live-session guard the checkout
+			// path uses) and let the webhook settle it into paid first.
+			if session, err := a.paymentGW.GetPaymentSession(payment.CheckoutSessionID); err == nil &&
+				session.Status == "complete" {
+				errors.ErrPaymentSessionConflict.
+					Withf("the checkout was completed; wait for it to settle before deleting").Write(w)
+				return
+			}
 			if err := a.paymentGW.ExpirePaymentSession(payment.CheckoutSessionID); err != nil {
 				log.Warnw("could not expire checkout session of deleted draft",
 					"processId", oid.Hex(), "sessionId", payment.CheckoutSessionID, "error", err)
