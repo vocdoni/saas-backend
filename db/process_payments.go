@@ -39,7 +39,13 @@ func (ms *MongoStorage) ProcessPayment(processID bson.ObjectID) (*ProcessPayment
 // the payment document. It only succeeds while no payment exists yet or the existing one
 // is pending or failed; a processing or paid payment must never be replaced (that would
 // allow a second charge), and the call reports false so the caller surfaces the conflict.
-func (ms *MongoStorage) SetProcessPaymentPending(payment *ProcessPayment) (bool, error) {
+//
+// replacesSessionID is the checkout session the caller observed and has already expired —
+// empty when it saw no payment at all. It is part of the filter, so the replace only
+// applies to the state the caller actually reconciled: two concurrent checkouts otherwise
+// both succeed, leaving the session the loser opened still open and payable while the
+// record points at the winner's. Paying that orphan fulfills nothing.
+func (ms *MongoStorage) SetProcessPaymentPending(payment *ProcessPayment, replacesSessionID string) (bool, error) {
 	if payment == nil || payment.ProcessID == bson.NilObjectID ||
 		(payment.OrgAddress.Cmp(common.Address{}) == 0) || payment.AmountCents <= 0 {
 		return false, ErrInvalidData
@@ -55,14 +61,15 @@ func (ms *MongoStorage) SetProcessPaymentPending(payment *ProcessPayment) (bool,
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	filter := bson.M{
-		"_id":    payment.ProcessID,
-		"status": bson.M{"$in": bson.A{ProcessPaymentPending, ProcessPaymentFailed}},
+		"_id":               payment.ProcessID,
+		"status":            bson.M{"$in": bson.A{ProcessPaymentPending, ProcessPaymentFailed}},
+		"checkoutSessionId": replacesSessionID,
 	}
 	res, err := ms.processPayments.ReplaceOne(ctx, filter, payment, options.Replace().SetUpsert(true))
 	if err != nil {
-		// With upsert, an existing document the filter excludes (processing/paid) makes
-		// the server attempt an insert that collides on _id: that duplicate key IS the
-		// refusal, not a storage failure.
+		// With upsert, an existing document the filter excludes (processing/paid, or a
+		// session other than the one being replaced) makes the server attempt an insert
+		// that collides on _id: that duplicate key IS the refusal, not a storage failure.
 		if mongo.IsDuplicateKeyError(err) {
 			return false, nil
 		}

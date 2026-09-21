@@ -32,7 +32,7 @@ func TestProcessPaymentTransitions(t *testing.T) {
 	c.Assert(err, qt.ErrorIs, ErrNotFound)
 
 	// first checkout creates the pending payment
-	ok, err := testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_1"))
+	ok, err := testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_1"), "")
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
 	payment, err := testDB.ProcessPayment(processID)
@@ -41,7 +41,7 @@ func TestProcessPaymentTransitions(t *testing.T) {
 	c.Assert(payment.CheckoutSessionID, qt.Equals, "cs_1")
 
 	// a replacement session while still pending is allowed (obsolete session replaced)
-	ok, err = testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_2"))
+	ok, err = testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_2"), "cs_1")
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
 
@@ -56,7 +56,7 @@ func TestProcessPaymentTransitions(t *testing.T) {
 	c.Assert(ok, qt.IsTrue)
 
 	// while processing, no new checkout may replace the payment
-	ok, err = testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_3"))
+	ok, err = testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_3"), "cs_2")
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsFalse)
 
@@ -78,7 +78,7 @@ func TestProcessPaymentTransitions(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsFalse)
 	// ... and no new checkout can replace it
-	ok, err = testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_4"))
+	ok, err = testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_4"), "cs_2")
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsFalse)
 }
@@ -88,7 +88,7 @@ func TestProcessPaymentFailureAndRetry(t *testing.T) {
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
 	processID := bson.NewObjectID()
-	ok, err := testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_1"))
+	ok, err := testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_1"), "")
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
 
@@ -101,7 +101,7 @@ func TestProcessPaymentFailureAndRetry(t *testing.T) {
 	c.Assert(payment.Status, qt.Equals, ProcessPaymentFailed)
 
 	// a failed payment is payable again with a fresh session
-	ok, err = testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_2"))
+	ok, err = testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_2"), "cs_1")
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
 	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_2")
@@ -139,4 +139,39 @@ func TestProcessPaymentPaidByWallet(t *testing.T) {
 	c.Assert(testDB.DeleteProcessPayment(processID), qt.IsNil)
 	_, err = testDB.ProcessPayment(processID)
 	c.Assert(err, qt.ErrorIs, ErrNotFound)
+}
+
+// TestProcessPaymentPendingPinsReplacedSession: a pending payment may only be replaced by
+// a caller that observed the session it is replacing. Without that condition two
+// simultaneous checkouts both store successfully, and the session the loser opened stays
+// open and payable while the record points at the winner's — money that fulfills nothing.
+func TestProcessPaymentPendingPinsReplacedSession(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	processID := bson.NewObjectID()
+
+	// two checkouts race, each having seen no payment at all: only one may store
+	ok, err := testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_a"), "")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+	ok, err = testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_b"), "")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+	payment, err := testDB.ProcessPayment(processID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.CheckoutSessionID, qt.Equals, "cs_a")
+
+	// replacing a session that is no longer the stored one is refused just the same
+	ok, err = testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_c"), "cs_gone")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+
+	// the caller that actually reconciled cs_a replaces it
+	ok, err = testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_c"), "cs_a")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+	payment, err = testDB.ProcessPayment(processID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.CheckoutSessionID, qt.Equals, "cs_c")
 }

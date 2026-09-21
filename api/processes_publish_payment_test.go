@@ -66,7 +66,7 @@ func TestVotingProcessPublishPaymentGate(t *testing.T) {
 		QuoteHash:         "hash_at_payment_time",
 		AmountCents:       1_515,
 		Currency:          "eur",
-	})
+	}, "")
 	c.Assert(err, qt.IsNil)
 	c.Assert(stored, qt.IsTrue)
 	won, err := testDB.MarkProcessPaymentPaid(oid, "cs_gate_test")
@@ -110,7 +110,7 @@ func TestPublishPaidProcessServerSide(t *testing.T) {
 		AmountCents:       1_515,
 		Currency:          "eur",
 		RequestedBy:       me.Email,
-	})
+	}, "")
 	c.Assert(err, qt.IsNil)
 	c.Assert(stored, qt.IsTrue)
 	won, err := testDB.MarkProcessPaymentPaid(oid, "cs_hook_test")
@@ -140,7 +140,7 @@ func TestPublishPaidProcessRefusals(t *testing.T) {
 		stored, err := testDB.SetProcessPaymentPending(&db.ProcessPayment{
 			ProcessID: oid, OrgAddress: orgAddress, CheckoutSessionID: sessionID,
 			QuoteHash: "hash", AmountCents: 1_515, Currency: "eur", RequestedBy: requestedBy,
-		})
+		}, "")
 		c.Assert(err, qt.IsNil)
 		c.Assert(stored, qt.IsTrue)
 		won, err := testDB.MarkProcessPaymentPaid(oid, sessionID)

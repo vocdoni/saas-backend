@@ -475,7 +475,7 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 		AmountCents:       quote.TotalCents,
 		Currency:          "eur",
 		RequestedBy:       user.Email,
-	})
+	}, previousSessionID)
 	if err != nil || !stored {
 		// the session exists but nothing references it: expire it so it can never be
 		// paid, then surface the refusal (a concurrent payment won the state)
