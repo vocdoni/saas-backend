@@ -142,3 +142,26 @@ func TestQuoteHash(t *testing.T) {
 
 	c.Assert(QuoteHash(in, quote.TotalCents+1), qt.Not(qt.Equals), base)
 }
+
+// TestComputeRejectsOutOfRangeCensus: the formula multiplies the census size by per-voter
+// cents and by 500 inside round5Cents, so an unbounded size overflows int64 into a
+// negative total — reachable from the unauthenticated /pricing calculator.
+func TestComputeRejectsOutOfRangeCensus(t *testing.T) {
+	c := qt.New(t)
+
+	_, err := Compute(QuoteInput{CensusSize: 0})
+	c.Assert(err, qt.Not(qt.IsNil))
+
+	_, err = Compute(QuoteInput{CensusSize: MaxCensusSize + 1})
+	c.Assert(err, qt.Not(qt.IsNil))
+
+	// what used to wrap negative
+	_, err = Compute(QuoteInput{CensusSize: 9_000_000_000_000_000_000, EmailTwoFA: true})
+	c.Assert(err, qt.Not(qt.IsNil))
+
+	// the bound itself still prices, and prices positive
+	quote, err := Compute(QuoteInput{CensusSize: MaxCensusSize, EmailTwoFA: true, SMSTwoFA: true})
+	c.Assert(err, qt.IsNil)
+	c.Assert(quote.TotalCents > 0, qt.IsTrue)
+	c.Assert(quote.QuoteRequired, qt.IsTrue)
+}

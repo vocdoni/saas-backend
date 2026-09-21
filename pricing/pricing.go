@@ -46,6 +46,13 @@ const (
 	// db.TestMaxCensusSize, which already exempts such processes from counters.
 	FreeCensusSize = 10
 
+	// MaxCensusSize bounds what may be priced at all. The formula multiplies the census
+	// size by per-voter cents and by 500 in round5Cents, so an unbounded size overflows
+	// int64 into a negative total — reachable from the unauthenticated /pricing
+	// calculator. Far above any real electorate, and above the 50 000 quote-only
+	// threshold, so it only ever rejects nonsense.
+	MaxCensusSize = 10_000_000
+
 	quoteRecommendedAbove = 15_000 // recommend a custom quote above this census size
 	quoteRequiredAbove    = 50_000 // self-service checkout unavailable above this
 )
@@ -81,8 +88,8 @@ type Quote struct {
 // Compute prices a voting process. A total of zero cents means the process is free and
 // publishes without any checkout.
 func Compute(in QuoteInput) (Quote, error) {
-	if in.CensusSize < 1 {
-		return Quote{}, fmt.Errorf("census size must be at least 1, got %d", in.CensusSize)
+	if in.CensusSize < 1 || in.CensusSize > MaxCensusSize {
+		return Quote{}, fmt.Errorf("census size must be between 1 and %d, got %d", MaxCensusSize, in.CensusSize)
 	}
 	quote := Quote{
 		QuoteRecommended: in.CensusSize > quoteRecommendedAbove,
