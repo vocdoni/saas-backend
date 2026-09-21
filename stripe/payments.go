@@ -86,13 +86,6 @@ func (*Client) ExpireCheckoutSession(sessionID string) error {
 // buildPaymentSessionParams maps PaymentSessionParams onto the Stripe request. Pure, so
 // the exact wire shape (mode, tax config, price_data) is unit-testable.
 func buildPaymentSessionParams(params *PaymentSessionParams) *stripeapi.CheckoutSessionParams {
-	locale := params.Locale
-	if locale == "" {
-		locale = "auto"
-	}
-	if locale == "ca" {
-		locale = "es"
-	}
 	lineItems := make([]*stripeapi.CheckoutSessionLineItemParams, 0, len(params.LineItems))
 	for _, item := range params.LineItems {
 		lineItems = append(lineItems, &stripeapi.CheckoutSessionLineItemParams{
@@ -126,7 +119,7 @@ func buildPaymentSessionParams(params *PaymentSessionParams) *stripeapi.Checkout
 		// session-level metadata: a payment session has no SubscriptionData, and the
 		// webhook needs the routing identity back from the session itself
 		Metadata: params.Metadata,
-		Locale:   stripeapi.String(locale),
+		Locale:   stripeapi.String(stripeLocale(params.Locale)),
 	}
 	if params.ReturnURL != "" {
 		checkoutParams.ReturnURL = stripeapi.String(params.ReturnURL + "/{CHECKOUT_SESSION_ID}")

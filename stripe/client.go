@@ -143,6 +143,21 @@ func (*Client) GetProductPrices(productID string) ([]stripeapi.Price, error) {
 	return prices, nil
 }
 
+// stripeLocale maps an organization language onto the locale of the embedded checkout
+// client: an empty language lets Stripe pick from the browser, and Catalan is served in
+// Spanish because Stripe has no "ca" locale.
+// TODO(#694): fold this into the single localization source of truth.
+func stripeLocale(lang string) string {
+	switch lang {
+	case "":
+		return "auto"
+	case "ca":
+		return "es"
+	default:
+		return lang
+	}
+}
+
 // CreateCheckoutSession creates a new checkout session for subscription
 // It configures the session with the specified price, amount return URL, and subscription metadata.
 // The email provided is used in order to uniquely distinguish the customer on the Stripe side.
@@ -151,13 +166,6 @@ func (*Client) GetProductPrices(productID string) ([]stripeapi.Price, error) {
 // Overview of stripe checkout mechanics: https://docs.stripe.com/checkout/custom/quickstart
 // API description https://docs.stripe.com/api/checkout/sessions
 func (c *Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeapi.CheckoutSession, error) {
-	if params.Locale == "" {
-		params.Locale = "auto"
-	}
-	if params.Locale == "ca" {
-		params.Locale = "es"
-	}
-
 	checkoutParams := &stripeapi.CheckoutSessionParams{
 		// Subscription mode
 		Mode: stripeapi.String(string(stripeapi.CheckoutSessionModeSubscription)),
@@ -185,7 +193,7 @@ func (c *Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeap
 		AllowPromotionCodes:      stripeapi.Bool(true),
 		BillingAddressCollection: stripeapi.String(string(stripeapi.CheckoutSessionBillingAddressCollectionAuto)),
 		// The locale is being used to configure the language of the embedded client
-		Locale: stripeapi.String(params.Locale),
+		Locale: stripeapi.String(stripeLocale(params.Locale)),
 	}
 
 	if params.FreeTrialDays > 0 {
