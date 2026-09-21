@@ -249,13 +249,26 @@ func (s *Service) fulfillProcessPayment(session *stripeapi.CheckoutSession) erro
 		if err != nil || payment.Status != db.ProcessPaymentPaid || payment.CheckoutSessionID != session.ID {
 			log.Errorw(fmt.Errorf("payment received for a session the process does not reference"),
 				fmt.Sprintf("stripe webhook: session %s, process %s — needs manual reconciliation", session.ID, rawProcessID))
+			return nil
 		}
+		// A replay of a payment this service already recorded. Run the side effects
+		// again rather than returning: the CAS only proves the status was written, not
+		// that anything after it ran, and a crash (or a full tx queue) between the two
+		// would otherwise strand a paid process unpublished forever — Stripe's retry is
+		// the only thing that ever comes back for it. Both side effects are idempotent.
+		s.afterProcessPaid(processID)
 		return nil
 	}
 	log.Infow("process payment fulfilled", "processId", processID.Hex(), "sessionId", session.ID)
-	// stamp the once-per-organization branding add-on as paid when this process carried
-	// it, so the org's next process is not charged branding again. Conditional in the DB
-	// (only the first payment sets it), and only reached on the winning paid CAS.
+	s.afterProcessPaid(processID)
+	return nil
+}
+
+// afterProcessPaid runs the side effects of a paid process payment: stamp the
+// once-per-organization branding add-on (conditional in the DB, so only the first payment
+// sets it) and hand the process to publication. Idempotent, so it is safe on a webhook
+// replay of a payment already recorded as paid.
+func (s *Service) afterProcessPaid(processID bson.ObjectID) {
 	if vp, err := s.db.VotingProcess(processID); err == nil && vp.AddOns.Branding {
 		if _, err := s.db.SetOrganizationBrandingPaid(vp.OrgAddress, time.Now()); err != nil {
 			log.Warnw("could not stamp organization branding-paid",
@@ -265,7 +278,6 @@ func (s *Service) fulfillProcessPayment(session *stripeapi.CheckoutSession) erro
 	if s.OnProcessPaid != nil {
 		s.OnProcessPaid(processID)
 	}
-	return nil
 }
 
 // creditWalletTopUp credits a verified top-up to the integrator's wallet. The net

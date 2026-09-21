@@ -341,3 +341,40 @@ func TestStripeCheckoutWebhookWalletTopUp(t *testing.T) {
 	c.Assert(wallet.Ledger, qt.HasLen, 1)
 	c.Assert(wallet.Ledger[0].AmountCents, qt.Equals, int64(50_000))
 }
+
+// TestStripeCheckoutWebhookReplayPublishesStrandedProcess: fulfillment is two steps —
+// win the paid CAS, then publish. A crash in between leaves the money taken and the
+// process unpublished, and every later replay loses the CAS. Losing it must therefore
+// still run the side effects, or that process never publishes at all.
+func TestStripeCheckoutWebhookReplayPublishesStrandedProcess(t *testing.T) {
+	c := qt.New(t)
+	installStripeWebhookService(t)
+	installFakePaymentGW(t)
+
+	token := testCreateUser(t, "replaypass123456")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	pid := newPricedVotingProcess(t, token, orgAddress)
+	oid, err := bson.ObjectIDFromHex(pid)
+	c.Assert(err, qt.IsNil)
+	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](
+		t, http.MethodPost, token, &apicommon.ProcessCheckoutRequest{ReturnURL: "https://x.example"},
+		"processes", pid, "checkout")
+
+	// the crash: the payment is recorded paid (CAS won) but publication never ran
+	won, err := testDB.MarkProcessPaymentPaid(oid, checkout.SessionID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(won, qt.IsTrue)
+	vp, err := testDB.VotingProcess(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(vp.Published, qt.IsFalse)
+
+	// Stripe retries the event: the CAS is already lost, yet the replay publishes
+	code := postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8),
+		"checkout.session.completed",
+		checkoutSessionObject(checkout.SessionID, "paid", 1_515, map[string]string{
+			stripe.MetadataKeyProcessID: pid,
+		}))
+	c.Assert(code, qt.Equals, http.StatusOK)
+	pollProcessPublished(t, token, pid)
+}
