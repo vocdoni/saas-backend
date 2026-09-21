@@ -423,13 +423,13 @@ func (a *API) createProcessCheckoutHandler(w http.ResponseWriter, r *http.Reques
 				errors.ErrStripeError.Withf("cannot reconcile checkout session").WithErr(err).Write(w)
 				return
 			}
-			if session.Status == "complete" {
+			if session.Status == stripe.SessionStatusComplete {
 				// the customer finished checkout and the webhook has not landed yet:
 				// surface the in-flight payment instead of opening a second charge
 				errors.ErrPaymentSessionConflict.Write(w)
 				return
 			}
-			if session.Status == "open" {
+			if session.Status == stripe.SessionStatusOpen {
 				if payment.QuoteHash == quoteHash {
 					apicommon.HTTPWriteJSON(w, &apicommon.ProcessCheckoutResponse{
 						ClientSecret: session.ClientSecret,
@@ -569,8 +569,8 @@ func (a *API) processCheckoutStatusHandler(w http.ResponseWriter, r *http.Reques
 	}
 	if payment.CheckoutSessionID != "" && a.paymentGW != nil {
 		if session, err := a.paymentGW.GetPaymentSession(payment.CheckoutSessionID); err == nil {
-			resp.SessionStatus = session.Status
-			resp.SessionPaymentStatus = session.PaymentStatus
+			resp.SessionStatus = string(session.Status)
+			resp.SessionPaymentStatus = string(session.PaymentStatus)
 		}
 	}
 	apicommon.HTTPWriteJSON(w, resp)

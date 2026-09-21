@@ -12,6 +12,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/stripe"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/log"
 )
@@ -84,7 +85,7 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 			errors.ErrStripeError.Withf("cannot reconcile checkout session").WithErr(err).Write(w)
 			return
 		}
-		if session.Status == "complete" {
+		if session.Status == stripe.SessionStatusComplete {
 			errors.ErrPaymentSessionConflict.
 				Withf("the checkout was completed; wait for it to settle before deleting").Write(w)
 			return

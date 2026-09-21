@@ -134,21 +134,47 @@ func buildPaymentSessionParams(params *PaymentSessionParams) *stripeapi.Checkout
 	return checkoutParams
 }
 
+// SessionStatus and PaymentStatus are the lifecycle states of a checkout session, named
+// here so callers outside this package compare against constants instead of literals
+// without importing stripe-go. The values are taken from the stripe-go enums, so there is
+// no second list to keep in sync.
+type (
+	SessionStatus string
+	PaymentStatus string
+)
+
+const (
+	// SessionStatusOpen means the session is still payable by the client.
+	SessionStatusOpen = SessionStatus(stripeapi.CheckoutSessionStatusOpen)
+	// SessionStatusComplete means the client finished the session; the payment may still
+	// be processing, so PaymentStatus decides whether money actually arrived.
+	SessionStatusComplete = SessionStatus(stripeapi.CheckoutSessionStatusComplete)
+	// SessionStatusExpired means the session can no longer be paid and must be replaced.
+	SessionStatusExpired = SessionStatus(stripeapi.CheckoutSessionStatusExpired)
+
+	// PaymentStatusPaid means the funds are captured; this is the only proof of payment.
+	PaymentStatusPaid = PaymentStatus(stripeapi.CheckoutSessionPaymentStatusPaid)
+	// PaymentStatusUnpaid means no money has been captured (yet).
+	PaymentStatusUnpaid = PaymentStatus(stripeapi.CheckoutSessionPaymentStatusUnpaid)
+	// PaymentStatusNoPaymentRequired means the session totalled zero.
+	PaymentStatusNoPaymentRequired = PaymentStatus(stripeapi.CheckoutSessionPaymentStatusNoPaymentRequired)
+)
+
 // PaymentSessionInfo is the API-facing view of a one-time checkout session: enough to
 // hand the embedded client its secret and to decide reuse/expire/replace.
 type PaymentSessionInfo struct {
 	ID            string
 	ClientSecret  string
-	Status        string // open | complete | expired
-	PaymentStatus string // paid | unpaid | no_payment_required
+	Status        SessionStatus
+	PaymentStatus PaymentStatus
 }
 
 func paymentSessionInfo(session *stripeapi.CheckoutSession) *PaymentSessionInfo {
 	return &PaymentSessionInfo{
 		ID:            session.ID,
 		ClientSecret:  session.ClientSecret,
-		Status:        string(session.Status),
-		PaymentStatus: string(session.PaymentStatus),
+		Status:        SessionStatus(session.Status),
+		PaymentStatus: PaymentStatus(session.PaymentStatus),
 	}
 }
 

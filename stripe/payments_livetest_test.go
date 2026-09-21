@@ -43,18 +43,18 @@ func TestLiveCheckoutSessionLifecycle(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	session := paymentSessionInfo(created)
 	c.Assert(session.ClientSecret, qt.Not(qt.Equals), "")
-	c.Assert(session.Status, qt.Equals, "open")
-	c.Assert(session.PaymentStatus, qt.Equals, "unpaid")
+	c.Assert(session.Status, qt.Equals, SessionStatusOpen)
+	c.Assert(session.PaymentStatus, qt.Equals, PaymentStatusUnpaid)
 
 	// GetPaymentSession and ExpirePaymentSession have no service state; a zero Service
 	// is the documented way to reach them without a database
 	var service Service
 	fetched, err := service.GetPaymentSession(session.ID)
 	c.Assert(err, qt.IsNil)
-	c.Assert(fetched.Status, qt.Equals, "open")
+	c.Assert(fetched.Status, qt.Equals, SessionStatusOpen)
 
 	c.Assert(client.ExpireCheckoutSession(session.ID), qt.IsNil)
 	expired, err := service.GetPaymentSession(session.ID)
 	c.Assert(err, qt.IsNil)
-	c.Assert(expired.Status, qt.Equals, "expired")
+	c.Assert(expired.Status, qt.Equals, SessionStatusExpired)
 }
