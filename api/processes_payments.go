@@ -207,10 +207,17 @@ func (a *API) publishPaidProcess(processID bson.ObjectID) {
 // refusePaymentLocked refuses draft mutations while a payment is processing or paid: the
 // amount charged (or charging) was quoted for the draft exactly as it is. Pending
 // payments do not lock — the open session is expired and replaced at the next checkout.
+// A payment state it cannot read is refused rather than assumed absent: nothing further
+// down the write path consults payment state, so failing open here would let a transient
+// Mongo error unlock exactly the paid draft this guard exists to protect.
 func (a *API) refusePaymentLocked(w http.ResponseWriter, oid bson.ObjectID) bool {
 	payment, err := a.db.ProcessPayment(oid)
 	if err != nil {
-		return false // no payment; a read failure surfaces on the write path instead
+		if err == db.ErrNotFound {
+			return false // no payment: nothing to lock
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return true
 	}
 	if payment.Status == db.ProcessPaymentProcessing || payment.Status == db.ProcessPaymentPaid {
 		errors.ErrPaymentSessionConflict.Withf("the draft is locked by its payment").Write(w)

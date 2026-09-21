@@ -56,26 +56,45 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	// a processing or paid payment refuses deletion (the user would lose what they
 	// paid); a pending one is released: expire its open session so it can never be
 	// paid, then drop the payment record with the draft.
-	if payment, err := a.db.ProcessPayment(oid); err == nil {
-		if a.refusePaymentLocked(w, oid) {
+	if a.refusePaymentLocked(w, oid) {
+		return
+	}
+	payment, err := a.db.ProcessPayment(oid)
+	if err != nil {
+		if err != db.ErrNotFound {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
-		if payment.CheckoutSessionID != "" && a.paymentGW != nil {
-			// a pending payment whose session the customer already completed has not
-			// been webhook-fulfilled yet: deleting now would capture the money and
-			// destroy the process. Refuse (the same live-session guard the checkout
-			// path uses) and let the webhook settle it into paid first.
-			if session, err := a.paymentGW.GetPaymentSession(payment.CheckoutSessionID); err == nil &&
-				session.Status == "complete" {
-				errors.ErrPaymentSessionConflict.
-					Withf("the checkout was completed; wait for it to settle before deleting").Write(w)
-				return
-			}
-			if err := a.paymentGW.ExpirePaymentSession(payment.CheckoutSessionID); err != nil {
-				log.Warnw("could not expire checkout session of deleted draft",
-					"processId", oid.Hex(), "sessionId", payment.CheckoutSessionID, "error", err)
-			}
+		payment = nil // free process, or never quoted: nothing to release
+	}
+	if payment != nil && payment.CheckoutSessionID != "" {
+		// A pending payment whose session the customer already completed has not been
+		// webhook-fulfilled yet: deleting now would capture the money and destroy the
+		// process. Every way of not knowing the session's state is that case until
+		// proven otherwise, so this fails closed exactly like the checkout path does —
+		// an unverifiable session is never grounds to delete a draft someone may have
+		// just paid for.
+		if a.paymentGW == nil {
+			errors.ErrPaymentSessionConflict.
+				Withf("the payment gateway is unavailable; the checkout session cannot be released").Write(w)
+			return
 		}
+		session, err := a.paymentGW.GetPaymentSession(payment.CheckoutSessionID)
+		if err != nil {
+			errors.ErrStripeError.Withf("cannot reconcile checkout session").WithErr(err).Write(w)
+			return
+		}
+		if session.Status == "complete" {
+			errors.ErrPaymentSessionConflict.
+				Withf("the checkout was completed; wait for it to settle before deleting").Write(w)
+			return
+		}
+		if err := a.paymentGW.ExpirePaymentSession(payment.CheckoutSessionID); err != nil {
+			log.Warnw("could not expire checkout session of deleted draft",
+				"processId", oid.Hex(), "sessionId", payment.CheckoutSessionID, "error", err)
+		}
+	}
+	if payment != nil {
 		if err := a.db.DeleteProcessPayment(oid); err != nil {
 			log.Warnw("could not delete process payment", "processId", oid.Hex(), "error", err)
 		}

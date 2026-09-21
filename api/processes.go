@@ -401,13 +401,15 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	if refusePublishInProgress(w, vp) {
 		return
 	}
-	// a processing or paid payment freezes the priced inputs; a pending one does not
-	// (its open session is expired and replaced at the next checkout)
-	if a.refusePaymentLocked(w, oid) {
-		return
-	}
 	if !user.HasRoleFor(vp.OrgAddress, db.ManagerRole) && !user.HasRoleFor(vp.OrgAddress, db.AdminRole) {
 		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization").Write(w)
+		return
+	}
+	// after the role check, so a non-member reads 401 rather than learning from a 409
+	// whether someone is paying for this process. A processing or paid payment freezes
+	// the priced inputs; a pending one does not (its open session is expired and
+	// replaced at the next checkout).
+	if a.refusePaymentLocked(w, oid) {
 		return
 	}
 	if len(req.Questions) == 0 || len(req.Questions) > db.MaxQuestionsPerProcess {

@@ -294,3 +294,43 @@ func TestProcessCheckoutRefusals(t *testing.T) {
 	requestAndAssertError(errors.ErrQuoteRequired, t, http.MethodPost, adminToken, checkoutReq,
 		"processes", pid, "checkout")
 }
+
+// TestDeleteDraftFailsClosedWhenSessionUnverifiable: deleting a draft expires its
+// checkout session, so a session whose state cannot be read may already have been
+// completed — deleting then captures the money and destroys what it paid for. Not
+// knowing has to be a refusal, exactly as on the checkout path.
+func TestDeleteDraftFailsClosedWhenSessionUnverifiable(t *testing.T) {
+	c := qt.New(t)
+	fake := installFakePaymentGW(t)
+	token := testCreateUser(t, "faildelete12345")
+	orgAddress := testCreateOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	pid := newPricedVotingProcess(t, token, orgAddress)
+	oid, err := bson.ObjectIDFromHex(pid)
+	c.Assert(err, qt.IsNil)
+
+	// a pending payment whose session the gateway cannot resolve (Stripe unreachable)
+	stored, err := testDB.SetProcessPaymentPending(&db.ProcessPayment{
+		ProcessID:         oid,
+		OrgAddress:        orgAddress,
+		CheckoutSessionID: "cs_unreachable",
+		QuoteHash:         "hash",
+		AmountCents:       1_515,
+		Currency:          "eur",
+	}, "")
+	c.Assert(err, qt.IsNil)
+	c.Assert(stored, qt.IsTrue)
+	requestAndAssertError(errors.ErrStripeError, t, http.MethodDelete, token, nil, "processes", pid)
+
+	// no gateway configured at all is the same unknown
+	testAPI.paymentGW = nil
+	requestAndAssertError(errors.ErrPaymentSessionConflict, t, http.MethodDelete, token, nil, "processes", pid)
+	testAPI.paymentGW = fake
+
+	// every refusal left the draft and its payment intact
+	_, err = testDB.VotingProcess(oid)
+	c.Assert(err, qt.IsNil)
+	payment, err := testDB.ProcessPayment(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPending)
+}
