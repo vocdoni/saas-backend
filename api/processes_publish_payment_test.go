@@ -12,6 +12,7 @@ import (
 	"github.com/vocdoni/saas-backend/api/apicommon"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"github.com/vocdoni/saas-backend/pricing"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -252,4 +253,61 @@ func TestManagedProcessWalletPublish(t *testing.T) {
 	wallet, err = testDB.Wallet(integratorAddr)
 	c.Assert(err, qt.IsNil)
 	c.Assert(wallet.BalanceCents, qt.Equals, int64(100_000-1_515))
+}
+
+// TestPublishPaidProcessRefusesGrownCensus: the price is the census size at payment time,
+// but a paid draft's census can still be grown through POST /census/{id}, which has no
+// payment state to consult. The publish gate is the only choke point that sees both the
+// money and the current draft, so it has to re-price and refuse — otherwise the extra
+// voters ride on the smaller price.
+func TestPublishPaidProcessRefusesGrownCensus(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "grownpassword123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	pid := newPricedVotingProcess(t, token, orgAddress)
+	oid, err := bson.ObjectIDFromHex(pid)
+	c.Assert(err, qt.IsNil)
+	vp, err := testDB.VotingProcess(oid)
+	c.Assert(err, qt.IsNil)
+
+	// pay the draft at its real quote hash: a placeholder hash would exercise the
+	// mismatch path instead of the price-grew one
+	quote, input, err := testAPI.processQuote(vp)
+	c.Assert(err, qt.IsNil)
+	stored, err := testDB.SetProcessPaymentPending(&db.ProcessPayment{
+		ProcessID:         oid,
+		OrgAddress:        orgAddress,
+		CheckoutSessionID: "cs_grown_census",
+		QuoteHash:         pricing.QuoteHash(input, quote.TotalCents),
+		AmountCents:       quote.TotalCents,
+		Currency:          "eur",
+	}, "")
+	c.Assert(err, qt.IsNil)
+	c.Assert(stored, qt.IsTrue)
+	won, err := testDB.MarkProcessPaymentPaid(oid, "cs_grown_census")
+	c.Assert(err, qt.IsNil)
+	c.Assert(won, qt.IsTrue)
+
+	// grow the census behind the paid draft, through the endpoint that knows nothing
+	// about payments
+	all := postOrgMembers(t, token, orgAddress, newOrgMembers(45)[15:]...)
+	// not postCensusParticipants: it asserts every id was added, and the org listing
+	// includes the 15 already in the census
+	added := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, token,
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: memberIDs(all)},
+		censusEndpoint, vp.CensusID.Hex())
+	c.Assert(added.Added, qt.Equals, uint32(30))
+	price := requestAndParse[apicommon.ProcessPriceResponse](
+		t, http.MethodGet, token, nil, "processes", pid, "price")
+	c.Assert(price.TotalCents > quote.TotalCents, qt.IsTrue)
+
+	// publication is refused with the new price rather than minting a 45-voter election
+	// for the 15-voter price
+	requestAndAssertError(errors.ErrPaymentRequired, t, http.MethodPost, token, nil,
+		"processes", pid, "publish")
+	vp, err = testDB.VotingProcess(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(vp.Published, qt.IsFalse)
+	c.Assert(vp.PublishInProgress(), qt.IsFalse) // no claim left behind
 }

@@ -92,13 +92,22 @@ func (a *API) paymentDueForPublish(vp *db.VotingProcess) (*pricing.Quote, error)
 	if payment.Status != db.ProcessPaymentPaid {
 		return &quote, nil
 	}
-	// paid wins even when the draft no longer matches what was paid for: the money was
-	// taken and paid is terminal, so refusing here could never be resolved by the user.
-	// The edit guard makes this unreachable outside a tiny race; log it if it happens.
-	if payment.QuoteHash != pricing.QuoteHash(input, quote.TotalCents) {
-		log.Warnw("paid quote does not match the current draft, publishing anyway",
-			"processId", vp.ID.Hex(), "paidCents", payment.AmountCents, "quotedCents", quote.TotalCents)
+	if payment.QuoteHash == pricing.QuoteHash(input, quote.TotalCents) {
+		return nil, nil
 	}
+	// The draft no longer matches what was paid for. This is not just a race:
+	// refusePaymentLocked covers the process endpoints, but the census behind a paid
+	// draft can still be grown through POST /census/{id}, which has no payment state to
+	// consult — so the extra voters would otherwise ride on the smaller price.
+	if quote.TotalCents > payment.AmountCents {
+		log.Warnw("paid process is now priced above its payment, refusing publication",
+			"processId", vp.ID.Hex(), "paidCents", payment.AmountCents, "quotedCents", quote.TotalCents)
+		return &quote, nil
+	}
+	// It is not worth more than was paid. The money was taken and paid is terminal, so
+	// refusing would strand it with nothing the user could do; publish and log it.
+	log.Warnw("paid quote does not match the current draft, publishing anyway",
+		"processId", vp.ID.Hex(), "paidCents", payment.AmountCents, "quotedCents", quote.TotalCents)
 	return nil, nil
 }
 
