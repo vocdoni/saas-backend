@@ -57,10 +57,17 @@ func (ms *MongoStorage) CreditWallet(orgAddress common.Address, amountCents int6
 		"$set":  bson.M{"updatedAt": time.Now()},
 	}
 	_, err := ms.wallets.UpdateOne(ctx, filter, update, options.UpdateOne().SetUpsert(true))
-	if err != nil && !mongo.IsDuplicateKeyError(err) {
-		// an existing wallet whose appliedKeys already hold the key fails the filter, so
-		// the upsert attempts an insert that collides on _id: that duplicate key means
-		// "already credited", which is success
+	if mongo.IsDuplicateKeyError(err) {
+		// The filter matched nothing, so the upsert attempted an insert that collided on
+		// _id. Two different causes: the key is already in appliedKeys (already credited),
+		// or another top-up created the wallet in the window between our filter miss and
+		// the insert. Retrying without upsert tells them apart and charges neither twice:
+		// an applied key still matches nothing, while a racing first credit applies here.
+		// Treating the collision itself as "already credited" would silently drop this
+		// top-up's money while still writing its ledger row.
+		_, err = ms.wallets.UpdateOne(ctx, filter, update)
+	}
+	if err != nil {
 		return fmt.Errorf("failed to credit wallet: %w", err)
 	}
 	// always attempt the audit row so a crash between the balance write and the ledger

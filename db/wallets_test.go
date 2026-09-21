@@ -1,6 +1,7 @@
 package db
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 
@@ -130,4 +131,36 @@ func TestWalletInvalidInputs(t *testing.T) {
 	c.Assert(testDB.CreditWallet(testOrgAddress, 100, ""), qt.ErrorIs, ErrInvalidData)
 	c.Assert(testDB.DebitWalletForProcess(testOrgAddress, 0, bson.NewObjectID()), qt.ErrorIs, ErrInvalidData)
 	c.Assert(testDB.DebitWalletForProcess(testOrgAddress, 100, bson.NilObjectID), qt.ErrorIs, ErrInvalidData)
+}
+
+// TestWalletConcurrentFirstCredits: top-ups that race the creation of the wallet must all
+// land. Each one misses the filter on a wallet that does not exist yet and upserts, so all
+// but the first collide on _id — a collision that means "someone else created it", not
+// "already credited". Reading it as the latter drops that top-up's money while still
+// writing its ledger row.
+func TestWalletConcurrentFirstCredits(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	const credits = 12
+	var wg sync.WaitGroup
+	errs := make([]error, credits)
+	for i := range credits {
+		wg.Go(func() {
+			errs[i] = testDB.CreditWallet(testOrgAddress, 1_000, fmt.Sprintf("cs_race_%d", i))
+		})
+	}
+	wg.Wait()
+	for _, err := range errs {
+		c.Assert(err, qt.IsNil)
+	}
+
+	wallet, err := testDB.Wallet(testOrgAddress)
+	c.Assert(err, qt.IsNil)
+	c.Assert(wallet.BalanceCents, qt.Equals, int64(credits*1_000))
+
+	// the balance and the audit trail agree
+	total, _, err := testDB.WalletLedger(testOrgAddress, 1, credits)
+	c.Assert(err, qt.IsNil)
+	c.Assert(total, qt.Equals, int64(credits))
 }
