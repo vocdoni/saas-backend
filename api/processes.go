@@ -521,6 +521,11 @@ func (a *API) votingProcessMetadataHandler(w http.ResponseWriter, r *http.Reques
 //	@Description	and choice counts exactly (400 otherwise) — so send back the shape read from
 //	@Description	GET /processes/{processId}/metadata. Also works on a draft, as a lighter-weight alternative
 //	@Description	to a full PUT /processes/{processId} for a text-only edit.
+//	@Description	Note: a published question's on-chain MetadataURL is left untouched by this call. It keeps
+//	@Description	pointing at the content-addressed ElectionMetadata object written at publish time, so a
+//	@Description	consumer resolving that URL directly against the vochain (rather than through this API)
+//	@Description	keeps seeing the pre-edit snapshot. Only saas-backend-served views (this GET, and the
+//	@Description	question/process GET responses) reflect the edit.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -581,6 +586,13 @@ func (a *API) updateVotingProcessMetadataHandler(w http.ResponseWriter, r *http.
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
+	// intentionally left untouched: a published question's MetadataURL points at a
+	// content-addressed object minted at publish time (see buildBatch in
+	// processes_publish.go), and that URL is what's burned into the on-chain election —
+	// it cannot be repointed after the fact. So this write only updates what the
+	// saas-backend itself serves (this endpoint, and the question/process GET responses);
+	// a consumer that resolves MetadataURL directly against the vochain still gets the
+	// pre-edit snapshot.
 	for i := range questions {
 		q, sent := &questions[i], &req.Questions[i]
 		q.Title, q.Description = sent.Title, sent.Description
