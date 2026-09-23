@@ -55,8 +55,10 @@ URI=${URI//\{DB\}/$DB_NAME}
 # uuids (one per line) of ip_addr rules matching $1. The type filter is
 # load-bearing: without it a cleanup could match and delete an `app` rule.
 rule_uuids() {
-  doctl databases firewalls list "$DB" --format UUID,Type,Value --no-header |
-    awk -v ip="$1" '$2=="ip_addr" && $3==ip {print $1}'
+  # Unlike `databases list`, `firewalls list` has no --format/--no-header, so
+  # parse its default table (UUID ClusterUUID Type Value) and skip the header.
+  doctl databases firewalls list "$DB" |
+    awk -v ip="$1" 'NR>1 && $3=="ip_addr" && $4==ip {print $1}'
 }
 
 IP=$(curl -fsS https://ipv4.icanhazip.com | tr -d '[:space:]')
@@ -72,7 +74,9 @@ if [ -n "$existing" ]; then
   # shellcheck disable=SC2086
   printf '  %s\n' $existing >&2
   read -r -p "adopt it and revoke on exit? [y/N]: " ans
-  case "${ans,,}" in y|yes) ADOPT=1 ;; esac
+  # Case-insensitive pattern rather than ${ans,,}: macOS ships bash 3.2, where
+  # the ,, lowercase expansion is a fatal "bad substitution".
+  case "$ans" in [yY]|[yY][eE][sS]) ADOPT=1 ;; esac
   [ "$ADOPT" = 1 ] || { echo "leaving existing rule(s) untouched; not connecting" >&2; exit 1; }
 fi
 
