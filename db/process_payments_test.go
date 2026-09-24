@@ -46,7 +46,7 @@ func TestProcessPaymentTransitions(t *testing.T) {
 	c.Assert(ok, qt.IsTrue)
 
 	// transitions demand the stored session id: the stale one loses its CAS
-	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_1", "")
+	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_1", ProcessCharge{})
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsFalse)
 
@@ -61,7 +61,7 @@ func TestProcessPaymentTransitions(t *testing.T) {
 	c.Assert(ok, qt.IsFalse)
 
 	// processing -> paid
-	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_2", "")
+	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_2", ProcessCharge{})
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
 	payment, err = testDB.ProcessPayment(processID)
@@ -70,7 +70,7 @@ func TestProcessPaymentTransitions(t *testing.T) {
 	c.Assert(payment.PaidAt.IsZero(), qt.IsFalse)
 
 	// paid is terminal: a duplicate webhook loses the CAS (the idempotency signal) ...
-	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_2", "")
+	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_2", ProcessCharge{})
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsFalse)
 	// ... a failure event cannot regress it ...
@@ -104,7 +104,7 @@ func TestProcessPaymentFailureAndRetry(t *testing.T) {
 	ok, err = testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_2"), "cs_1")
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
-	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_2", "")
+	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_2", ProcessCharge{})
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
 }
@@ -212,11 +212,11 @@ func TestProcessPaymentRefund(t *testing.T) {
 	c.Assert(ok, qt.IsTrue)
 
 	// nothing to refund until the money actually arrived
-	ok, err = testDB.MarkProcessPaymentRefunded(processID, "re_1")
+	ok, err = testDB.MarkProcessPaymentRefunded(processID, "re_1", 29_000)
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsFalse)
 
-	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_1", "pi_1")
+	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_1", ProcessCharge{PaymentIntentID: "pi_1"})
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
 	payment, err := testDB.ProcessPayment(processID)
@@ -224,7 +224,7 @@ func TestProcessPaymentRefund(t *testing.T) {
 	c.Assert(payment.PaymentIntentID, qt.Equals, "pi_1")
 
 	// paid -> refunded, recording what the money went back as
-	ok, err = testDB.MarkProcessPaymentRefunded(processID, "re_1")
+	ok, err = testDB.MarkProcessPaymentRefunded(processID, "re_1", 29_000)
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
 	payment, err = testDB.ProcessPayment(processID)
@@ -233,7 +233,7 @@ func TestProcessPaymentRefund(t *testing.T) {
 	c.Assert(payment.RefundID, qt.Equals, "re_1")
 
 	// a delete retried after the refund landed must not refund twice
-	ok, err = testDB.MarkProcessPaymentRefunded(processID, "re_2")
+	ok, err = testDB.MarkProcessPaymentRefunded(processID, "re_2", 29_000)
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsFalse)
 

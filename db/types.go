@@ -766,6 +766,14 @@ type ProcessAddOns struct {
 	Branding          bool `json:"branding,omitempty" bson:"branding,omitempty"`
 }
 
+// ProcessCharge is what a card checkout took for a process, as the fulfilling webhook reports
+// it: the payment intent a refund is issued against, and the amounts before and after VAT.
+type ProcessCharge struct {
+	PaymentIntentID string
+	SubtotalCents   int64
+	TotalCents      int64
+}
+
 // ProcessPaymentStatus is the lifecycle state of a voting process payment.
 type ProcessPaymentStatus string
 
@@ -809,6 +817,11 @@ type ProcessPayment struct {
 	// fulfillment because it is what a refund is issued against. Empty for a wallet-paid
 	// process, whose refund is a wallet credit instead.
 	PaymentIntentID string `json:"-" bson:"paymentIntentId,omitempty"`
+	// ChargeSubtotalCents and ChargeTotalCents are the first card charge before and after
+	// VAT. Their ratio is the VAT a partial refund withholds along with the net price of what
+	// it keeps; AmountCents cannot give it, because census top-ups raise it later.
+	ChargeSubtotalCents int64 `json:"-" bson:"chargeSubtotalCents,omitempty"`
+	ChargeTotalCents    int64 `json:"-" bson:"chargeTotalCents,omitempty"`
 	// RefundID identifies the refund that returned this payment's money (Stripe refund id,
 	// or the wallet credit's idempotency key).
 	RefundID string `json:"-" bson:"refundId,omitempty"`
@@ -823,10 +836,13 @@ type ProcessPayment struct {
 	// TopUpSessions are the checkout sessions that already raised AmountCents, newest last
 	// and bounded (RaiseProcessPaymentAmount), so a replayed top-up webhook cannot raise the
 	// envelope twice.
-	TopUpSessions []string  `json:"-" bson:"topUpSessions,omitempty"`
-	PaidAt        time.Time `json:"paidAt,omitempty" bson:"paidAt,omitempty"`
-	CreatedAt     time.Time `json:"-" bson:"createdAt"`
-	UpdatedAt     time.Time `json:"-" bson:"updatedAt"`
+	TopUpSessions []string `json:"-" bson:"topUpSessions,omitempty"`
+	// TopUpIntents are the payment intents of the card top-ups that raised AmountCents. Each
+	// is a separate charge, so a refund must return every one of them next to PaymentIntentID.
+	TopUpIntents []string  `json:"-" bson:"topUpIntents,omitempty"`
+	PaidAt       time.Time `json:"paidAt,omitempty" bson:"paidAt,omitempty"`
+	CreatedAt    time.Time `json:"-" bson:"createdAt"`
+	UpdatedAt    time.Time `json:"-" bson:"updatedAt"`
 }
 
 // Wallet is an integrator's prepaid EUR balance. AppliedKeys makes credits and debits

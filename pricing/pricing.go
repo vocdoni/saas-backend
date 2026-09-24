@@ -36,11 +36,13 @@ const (
 
 // Add-on prices in EUR cents and the self-service thresholds, from the spec.
 const (
-	emailTwoFACentsPerVoter = 1     // €0.01 per eligible voter
-	smsTwoFACentsPerVoter   = 3     // €0.03 per eligible voter
-	signedCertCents         = 4900  // €49 per process
-	customURLCents          = 8900  // €89 per process
-	brandingCents           = 14900 // €149 once per organization
+	emailTwoFACentsPerVoter = 1    // €0.01 per eligible voter
+	smsTwoFACentsPerVoter   = 3    // €0.03 per eligible voter
+	signedCertCents         = 4900 // €49 per process
+	customURLCents          = 8900 // €89 per process
+	// BrandingCents is exported because a refund withholds it when the organization kept
+	// using the branding the refunded process paid for.
+	BrandingCents = 14900 // €149 once per organization
 
 	// FreeCensusSize is the largest census that prices to a free base. It matches
 	// db.TestMaxCensusSize, which already exempts such processes from counters.
@@ -119,7 +121,7 @@ func Compute(in QuoteInput) (Quote, error) {
 		addLine(LineCustomURL, "custom URL", customURLCents)
 	}
 	if in.Branding {
-		addLine(LineBranding, "branding and white label", brandingCents)
+		addLine(LineBranding, "branding and white label", BrandingCents)
 	}
 	return quote, nil
 }

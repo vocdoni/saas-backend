@@ -3,6 +3,7 @@ package stripe
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"time"
 
@@ -280,7 +281,11 @@ func (s *Service) fulfillProcessPayment(session *stripeapi.CheckoutSession) erro
 	if session.PaymentIntent != nil {
 		paymentIntentID = session.PaymentIntent.ID
 	}
-	won, err := s.db.MarkProcessPaymentPaid(processID, session.ID, paymentIntentID)
+	won, err := s.db.MarkProcessPaymentPaid(processID, session.ID, db.ProcessCharge{
+		PaymentIntentID: paymentIntentID,
+		SubtotalCents:   session.AmountSubtotal,
+		TotalCents:      session.AmountTotal,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to mark process payment paid: %w", err)
 	}
@@ -346,20 +351,49 @@ func (s *Service) raiseProcessPayment(session *stripeapi.CheckoutSession) error 
 		// census stays refused until async_payment_succeeded arrives
 		return nil
 	}
-	raised, err := s.db.RaiseProcessPaymentAmount(processID, targetCents, session.ID)
+	var paymentIntentID string
+	if session.PaymentIntent != nil {
+		paymentIntentID = session.PaymentIntent.ID
+	}
+	raised, err := s.db.RaiseProcessPaymentAmount(processID, targetCents, session.ID, paymentIntentID)
 	if err != nil {
 		return fmt.Errorf("failed to raise process payment amount: %w", err)
 	}
 	if !raised {
-		// a replay, or an envelope already at or above this target (a larger top-up landed
-		// first). Either way the customer's money bought headroom that is already there —
-		// worth a line, not an error, because retrying can never change it.
-		log.Warnw("census top-up raised nothing",
-			"processId", processID.Hex(), "targetCents", targetCents, "sessionId", session.ID)
-		return nil
+		return s.refundUnappliedTopUp(processID, session, paymentIntentID)
 	}
 	log.Infow("census headroom paid",
 		"processId", processID.Hex(), "targetCents", targetCents, "sessionId", session.ID)
+	return nil
+}
+
+// refundUnappliedTopUp handles a paid census top-up that raised nothing. A replay of one that
+// already raised the envelope is fine. Anything else is money that bought nothing — the draft
+// was deleted and refunded while the customer was paying, or a larger top-up landed first —
+// so it goes straight back, keyed per intent like every other refund of the process, which
+// keeps a replay of this event from refunding twice.
+func (s *Service) refundUnappliedTopUp(
+	processID bson.ObjectID, session *stripeapi.CheckoutSession, paymentIntentID string,
+) error {
+	payment, err := s.db.ProcessPayment(processID)
+	switch {
+	case err == nil && payment.Status == db.ProcessPaymentPaid &&
+		(slices.Contains(payment.TopUpSessions, session.ID) || slices.Contains(payment.TopUpIntents, paymentIntentID)):
+		return nil // a replay of a top-up already applied
+	case err != nil && !errors.Is(err, db.ErrNotFound):
+		return fmt.Errorf("failed to read process payment: %w", err)
+	}
+	if paymentIntentID == "" {
+		return fmt.Errorf("census top-up session %s for process %s bought nothing and has no payment intent"+
+			" to refund — needs manual reconciliation: %w", session.ID, processID.Hex(), errPermanentEvent)
+	}
+	refund, err := s.RefundProcessPayment(processID, paymentIntentID, 0)
+	if err != nil {
+		return fmt.Errorf("failed to refund unapplied census top-up: %w", err)
+	}
+	log.Warnw("census top-up bought nothing and was refunded",
+		"processId", processID.Hex(), "sessionId", session.ID, "amountCents", session.AmountTotal,
+		"refundId", refund.ID)
 	return nil
 }
 

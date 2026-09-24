@@ -75,40 +75,26 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		}
 		payment = nil // free process, or never quoted: nothing to release
 	}
-	if payment != nil && payment.Status == db.ProcessPaymentPaid {
+	switch {
+	case payment == nil:
+		// free process, or never quoted: nothing to release
+	case payment.Status == db.ProcessPaymentPaid:
 		// the money goes back before the draft goes away, and the payment row stays as
 		// the record that it did
 		if !a.refundPaidProcess(w, vp, payment) {
 			return
 		}
-	} else if payment != nil && payment.CheckoutSessionID != "" {
-		// A pending payment whose session the customer already completed has not been
-		// webhook-fulfilled yet: deleting now would capture the money and destroy the
-		// process. Every way of not knowing the session's state is that case until
-		// proven otherwise, so this fails closed exactly like the checkout path does —
-		// an unverifiable session is never grounds to delete a draft someone may have
-		// just paid for.
-		if a.paymentGW == nil {
-			errors.ErrPaymentSessionConflict.
-				Withf("the payment gateway is unavailable; the checkout session cannot be released").Write(w)
+	case payment.Status == db.ProcessPaymentRefunded:
+		// an earlier delete refunded it and then failed to drop the draft: the row is
+		// already the audit record, so only the draft is left to go
+	case payment.Status == db.ProcessPaymentPending && payment.CheckoutSessionID != "":
+		if !a.releasePendingCheckout(w, payment) {
 			return
 		}
-		session, err := a.paymentGW.GetPaymentSession(payment.CheckoutSessionID)
-		if err != nil {
-			errors.ErrStripeError.Withf("cannot reconcile checkout session").WithErr(err).Write(w)
-			return
-		}
-		if session.Status == stripe.SessionStatusComplete {
-			errors.ErrPaymentSessionConflict.
-				Withf("the checkout was completed; wait for it to settle before deleting").Write(w)
-			return
-		}
-		if err := a.paymentGW.ExpirePaymentSession(payment.CheckoutSessionID); err != nil {
-			log.Warnw("could not expire checkout session of deleted draft",
-				"processId", oid.Hex(), "sessionId", payment.CheckoutSessionID, "error", err)
-		}
-	}
-	if payment != nil && payment.Status != db.ProcessPaymentPaid {
+		fallthrough
+	default:
+		// pending (released above, or never checked out) or failed: nothing was paid, so
+		// the payment state goes with the draft
 		if err := a.db.DeleteProcessPayment(oid); err != nil {
 			log.Warnw("could not delete process payment", "processId", oid.Hex(), "error", err)
 		}
@@ -122,6 +108,40 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		_ = a.db.DelCensus(vp.CensusID.Hex())
 	}
 	apicommon.HTTPWriteOK(w)
+}
+
+// releasePendingCheckout makes sure a pending payment's checkout session can never be paid
+// once its draft is gone, writing the error and reporting false when it cannot.
+//
+// A session the customer already completed has not been webhook-fulfilled yet: deleting
+// now would capture the money and destroy the process. Every way of not knowing the
+// session's state is that case until proven otherwise, so this fails closed exactly like
+// the checkout path does — an unverifiable or unexpirable session is never grounds to
+// delete a draft someone may be paying for.
+func (a *API) releasePendingCheckout(w http.ResponseWriter, payment *db.ProcessPayment) bool {
+	if a.paymentGW == nil {
+		errors.ErrPaymentSessionConflict.
+			Withf("the payment gateway is unavailable; the checkout session cannot be released").Write(w)
+		return false
+	}
+	session, err := a.paymentGW.GetPaymentSession(payment.CheckoutSessionID)
+	if err != nil {
+		errors.ErrStripeError.Withf("cannot reconcile checkout session").WithErr(err).Write(w)
+		return false
+	}
+	switch session.Status {
+	case stripe.SessionStatusComplete:
+		errors.ErrPaymentSessionConflict.
+			Withf("the checkout was completed; wait for it to settle before deleting").Write(w)
+		return false
+	case stripe.SessionStatusExpired:
+		return true
+	}
+	if err := a.paymentGW.ExpirePaymentSession(payment.CheckoutSessionID); err != nil {
+		errors.ErrStripeError.Withf("cannot expire checkout session").WithErr(err).Write(w)
+		return false
+	}
+	return true
 }
 
 // votingProcessParticipantsHandler godoc
