@@ -378,3 +378,41 @@ func TestStripeCheckoutWebhookReplayPublishesStrandedProcess(t *testing.T) {
 	c.Assert(code, qt.Equals, http.StatusOK)
 	pollProcessPublished(t, token, pid)
 }
+
+// TestStripeCheckoutWebhookPermanentlyInvalidEvents: metadata Stripe already delivered is
+// immutable, so an event carrying garbage there can never become valid — answering 500
+// would make Stripe retry it for about three days and bury real incidents in the
+// endpoint's failure queue. The endpoint accepts and drops them instead, changing nothing.
+func TestStripeCheckoutWebhookPermanentlyInvalidEvents(t *testing.T) {
+	c := qt.New(t)
+	installStripeWebhookService(t)
+	installFakePaymentGW(t)
+
+	token := testCreateUser(t, "badmetadata12345")
+	integratorAddr := testCreateOrganization(t, token)
+	integratorOrg, err := testDB.Organization(integratorAddr)
+	c.Assert(err, qt.IsNil)
+	integratorOrg.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 1}
+	c.Assert(testDB.SetOrganization(integratorOrg), qt.IsNil)
+
+	// a top-up whose organization is not an address: nothing to credit, ever
+	code := postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8),
+		"checkout.session.completed",
+		checkoutSessionObject("cs_badorg_"+util.RandomHex(4), "paid", 50_000, map[string]string{
+			stripe.MetadataKeyWalletTopUpOrg: "not-an-address",
+		}))
+	c.Assert(code, qt.Equals, http.StatusOK)
+	wallet := requestAndParse[apicommon.WalletResponse](t, http.MethodGet, token, nil, "wallet")
+	c.Assert(wallet.BalanceCents, qt.Equals, int64(0))
+	c.Assert(wallet.Ledger, qt.HasLen, 0)
+
+	// a process payment whose process id is not an ObjectID, on both the completed and
+	// the async-failed event: no process to reconcile it against, ever
+	for _, eventType := range []string{"checkout.session.completed", "checkout.session.async_payment_failed"} {
+		code = postSignedStripeEvent(t, testWebhookSecret, "evt_"+util.RandomHex(8), eventType,
+			checkoutSessionObject("cs_badpid_"+util.RandomHex(4), "paid", 1_515, map[string]string{
+				stripe.MetadataKeyProcessID: "not-an-object-id",
+			}))
+		c.Assert(code, qt.Equals, http.StatusOK)
+	}
+}

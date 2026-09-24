@@ -32,6 +32,12 @@ type InvoiceInfo struct {
 	OrgAddress  common.Address
 }
 
+// errPermanentEvent marks a webhook event that can never succeed: the metadata Stripe
+// delivered is immutable, so every one of its retries — Stripe retries for about three
+// days — would fail identically, burying real incidents in the endpoint's failure queue.
+// Wrap it and HandleWebhookEvent logs the event and answers Stripe with a 200 instead.
+var errPermanentEvent = fmt.Errorf("permanently invalid webhook event")
+
 // HandleWebhookEvent processes a webhook event with idempotency
 func (s *Service) HandleWebhookEvent(payload []byte, signatureHeader string) error {
 	// Validate and parse the event
@@ -48,7 +54,13 @@ func (s *Service) HandleWebhookEvent(payload []byte, signatureHeader string) err
 
 	// Process the event based on its type
 	if err := s.HandleEvent(event); err != nil {
-		return err
+		if !errors.Is(err, errPermanentEvent) {
+			return err
+		}
+		// terminal: a retry cannot fix it, so drop it here — and fall through to Store,
+		// so a retry that arrives anyway short-circuits on the event id
+		log.Errorw(err, fmt.Sprintf("stripe webhook: dropping permanently invalid event %s (%s)",
+			event.ID, event.Type))
 	}
 
 	// Mark event as processed if successful

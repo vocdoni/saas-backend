@@ -230,7 +230,8 @@ func (s *Service) handleCheckoutSessionFailed(event *stripeapi.Event) error {
 	}
 	processID, err := bson.ObjectIDFromHex(rawProcessID)
 	if err != nil {
-		return fmt.Errorf("invalid process id %q in session %s metadata: %w", rawProcessID, session.ID, err)
+		return fmt.Errorf("invalid process id %q in session %s metadata (%v): %w",
+			rawProcessID, session.ID, err, errPermanentEvent)
 	}
 	failed, err := s.db.MarkProcessPaymentFailed(processID, session.ID)
 	if err != nil {
@@ -249,7 +250,8 @@ func (s *Service) fulfillProcessPayment(session *stripeapi.CheckoutSession) erro
 	rawProcessID := session.Metadata[MetadataKeyProcessID]
 	processID, err := bson.ObjectIDFromHex(rawProcessID)
 	if err != nil {
-		return fmt.Errorf("invalid process id %q in session %s metadata: %w", rawProcessID, session.ID, err)
+		return fmt.Errorf("invalid process id %q in session %s metadata (%v): %w",
+			rawProcessID, session.ID, err, errPermanentEvent)
 	}
 	if session.PaymentStatus != stripeapi.CheckoutSessionPaymentStatusPaid {
 		if _, err := s.db.MarkProcessPaymentProcessing(processID, session.ID); err != nil {
@@ -266,9 +268,8 @@ func (s *Service) fulfillProcessPayment(session *stripeapi.CheckoutSession) erro
 		// session the process no longer references — that one must not pass silently
 		payment, err := s.db.ProcessPayment(processID)
 		if err != nil || payment.Status != db.ProcessPaymentPaid || payment.CheckoutSessionID != session.ID {
-			log.Errorw(fmt.Errorf("payment received for a session the process does not reference"),
-				fmt.Sprintf("stripe webhook: session %s, process %s — needs manual reconciliation", session.ID, rawProcessID))
-			return nil
+			return fmt.Errorf("payment received for session %s, which process %s does not reference"+
+				" — needs manual reconciliation: %w", session.ID, rawProcessID, errPermanentEvent)
 		}
 		// A replay of a payment this service already recorded. Run the side effects
 		// again rather than returning: the CAS only proves the status was written, not
@@ -312,7 +313,8 @@ func (s *Service) creditWalletTopUp(session *stripeapi.CheckoutSession) error {
 	}
 	rawOrg := session.Metadata[MetadataKeyWalletTopUpOrg]
 	if !common.IsHexAddress(rawOrg) {
-		return fmt.Errorf("invalid organization address %q in session %s metadata", rawOrg, session.ID)
+		return fmt.Errorf("invalid organization address %q in session %s metadata: %w",
+			rawOrg, session.ID, errPermanentEvent)
 	}
 	orgAddress := common.HexToAddress(rawOrg)
 	if err := s.db.CreditWallet(orgAddress, session.AmountSubtotal, session.ID); err != nil {
