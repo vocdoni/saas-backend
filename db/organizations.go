@@ -93,6 +93,14 @@ func (ms *MongoStorage) SetOrganization(org *Organization) error {
 	if err != nil {
 		return err
 	}
+	// The branding claim and paid stamp are a conditional-write state machine: written back
+	// from a stale read, they would resurrect a released claim or a refunded add-on. Only
+	// their dedicated methods write them.
+	if set, ok := updateDoc["$set"].(bson.M); ok {
+		delete(set, "brandingPaidAt")
+		delete(set, "brandingClaimedBy")
+		delete(set, "brandingClaimedAt")
+	}
 	// set upsert to true to create the document if it doesn't exist
 	opts := options.UpdateOne().SetUpsert(true)
 	if _, err := ms.organizations.UpdateOne(ctx, bson.M{"_id": org.Address}, updateDoc, opts); err != nil {
