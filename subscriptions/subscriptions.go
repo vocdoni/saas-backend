@@ -283,6 +283,9 @@ func (p *Subscriptions) OrgHasPermission(orgAddress common.Address, permission D
 		if err != nil {
 			return errors.ErrOrganizationNotFound.WithErr(err)
 		}
+		if org.ManagedBy == (common.Address{}) && p.IsIntegrator(org) {
+			return errors.ErrIntegratorTopLevelOrgCannotOwnProcess
+		}
 
 		// MaxDrafts value comes from the integrator's plan for managed orgs; the draft
 		// count itself stays per-org.
@@ -313,6 +316,9 @@ func (p *Subscriptions) OrgCanCreateVotingProcessDraft(orgAddress common.Address
 	org, err := p.db.Organization(orgAddress)
 	if err != nil {
 		return errors.ErrOrganizationNotFound.WithErr(err)
+	}
+	if org.ManagedBy == (common.Address{}) && p.IsIntegrator(org) {
+		return errors.ErrIntegratorTopLevelOrgCannotOwnProcess
 	}
 	_, plan, err := p.limitsOwner(org)
 	if err != nil {

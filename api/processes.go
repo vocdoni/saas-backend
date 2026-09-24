@@ -484,17 +484,29 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 //	@Failure		404			{object}	errors.Error
 //	@Router			/processes/{processId} [get]
 func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
-	oid, ok := a.votingProcessID(w, r)
-	if !ok {
+	raw := chi.URLParam(r, "processId")
+	if !isVotingProcessIDShape(raw) {
+		errors.ErrMalformedURLParam.Withf("invalid process ID").Write(w)
 		return
 	}
-	vp, questions, err := a.db.ProcessWithQuestions(oid)
+	vp, questions, err := a.readVotingProcess(raw)
 	if err != nil {
-		if err == db.ErrNotFound {
-			errors.ErrProcessNotFound.Write(w)
+		if !stderrors.Is(err, db.ErrNotFound) {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		// no stored process owns the id, but a process bundle or a legacy /process row still may:
+		// those are served as a read-only projection.
+		legacyResp, err := a.legacyProcessByID(r.Context(), raw)
+		if err != nil {
+			legacyProjectionError(err).Write(w)
+			return
+		}
+		if legacyResp != nil {
+			apicommon.HTTPWriteJSON(w, legacyResp)
+			return
+		}
+		errors.ErrProcessNotFound.Write(w)
 		return
 	}
 	// public read: published processes are visible to anyone; a draft only to a manager/admin of the
@@ -650,7 +662,19 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	pagination, err := calculatePagination(params.Page, params.Limit, total)
+	// legacy records are projected read-only into the tail of the paginated set. They are all
+	// published, so a drafts-only view has none.
+	var legacy []apicommon.VotingProcessResponse
+	if draft != db.DraftOnly {
+		if legacy, err = a.legacyProcesses(r.Context(), orgAddress); err != nil {
+			legacyProjectionError(err).Write(w)
+			return
+		}
+		if statusFilter != "" {
+			legacy = filterLegacyProcessesByStatus(legacy, statusFilter)
+		}
+	}
+	pagination, err := calculatePagination(params.Page, params.Limit, total+int64(len(legacy)))
 	if err != nil {
 		errors.ErrMalformedURLParam.WithErr(err).Write(w)
 		return
@@ -674,6 +698,11 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 		}
 		resp.Processes = append(resp.Processes, *apicommon.VotingProcessResponseFromDB(vp, questions, census, chainID))
 	}
+	// the legacy tail starts where the stored pages ran out: the page holding the boundary comes
+	// back short of the limit, and every page after it is legacy-only.
+	start := min(max((params.Page-1)*params.Limit+int64(len(list))-total, 0), int64(len(legacy)))
+	end := min(start+params.Limit-int64(len(list)), int64(len(legacy)))
+	resp.Processes = append(resp.Processes, legacy[start:end]...)
 	apicommon.HTTPWriteJSON(w, resp)
 }
 
@@ -1058,17 +1087,29 @@ func (a *API) votingProcessParticipantHandler(w http.ResponseWriter, r *http.Req
 //	@Failure		500			{object}	errors.Error
 //	@Router			/processes/{processId}/results [get]
 func (a *API) votingProcessResultsHandler(w http.ResponseWriter, r *http.Request) {
-	oid, ok := a.votingProcessID(w, r)
-	if !ok {
+	raw := chi.URLParam(r, "processId")
+	if !isVotingProcessIDShape(raw) {
+		errors.ErrMalformedURLParam.Withf("invalid process ID").Write(w)
 		return
 	}
-	vp, questions, err := a.db.ProcessWithQuestions(oid)
+	vp, questions, err := a.readVotingProcess(raw)
 	if err != nil {
-		if err == db.ErrNotFound {
-			errors.ErrProcessNotFound.Write(w)
+		if !stderrors.Is(err, db.ErrNotFound) {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
-		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		// no stored process owns the id, but a process bundle or a legacy /process row still may:
+		// their tallies come from the same read-only projection that serves the process itself.
+		resp, err := a.legacyProcessResultsByID(r.Context(), raw)
+		if err != nil {
+			legacyProjectionError(err).Write(w)
+			return
+		}
+		if resp != nil {
+			apicommon.HTTPWriteJSON(w, resp)
+			return
+		}
+		errors.ErrProcessNotFound.Write(w)
 		return
 	}
 	// results only exist once the process has been published on chain.
@@ -1084,7 +1125,7 @@ func (a *API) votingProcessResultsHandler(w http.ResponseWriter, r *http.Request
 		errors.ErrVochainRequestFailed.WithErr(err).Write(w)
 		return
 	}
-	apicommon.HTTPWriteJSON(w, &apicommon.VotingProcessResultsResponse{ID: oid.Hex(), Questions: entries})
+	apicommon.HTTPWriteJSON(w, &apicommon.VotingProcessResultsResponse{ID: vp.ID.Hex(), Questions: entries})
 }
 
 // votingProcessID parses and validates the {processId} URL param.

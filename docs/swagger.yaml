@@ -2121,6 +2121,11 @@ definitions:
           track later per-question status changes.
         example: PAUSED
         type: string
+      legacy:
+        description: |-
+          Legacy marks a process projected read-only from the deprecated /process generation or from a
+          process bundle: not editable through /processes, and its questions may share one upstreamId.
+        type: boolean
       orgAddress:
         example: a1b2c3d4e5f60718293a4b5c6d7e8f9012345678
         format: hex

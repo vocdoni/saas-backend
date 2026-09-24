@@ -287,3 +287,141 @@ func TestIntegratorProcessQuotaViaTransactions(t *testing.T) {
 	c.Assert(postTx(newProcessTx(uint64(db.TestMaxCensusSize))), qt.Equals, http.StatusOK)
 	c.Assert(managedProcesses(), qt.Equals, 1)
 }
+
+// TestIntegratorTopLevelOrgCannotOwnElections closes the freeride: an integrator top-level org
+// (integrator-enabled, not itself managed) must not own elections, because both the /integrator
+// dashboard and the pool-quota checks aggregate strictly across managed orgs (managedBy=integrator)
+// and would silently exclude anything the integrator ran on its own top-level org. The guard fires
+// at draft-create on both API generations and at /transactions NEW_PROCESS (defense in depth), and
+// is independent of census size — the rule is "no elections here", not "no billable elections here".
+func TestIntegratorTopLevelOrgCannotOwnElections(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	token := testCreateUser(t, "integratorpass123")
+	integratorAddr := testCreateOrganization(t, token)
+
+	// enable integrator (override) and subscribe it to a plan that would otherwise let it
+	// create drafts and publish elections. The guard must reject regardless.
+	integratorOrg, err := testDB.Organization(integratorAddr)
+	c.Assert(err, qt.IsNil)
+	integratorOrg.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 1}
+	c.Assert(testDB.SetOrganization(integratorOrg), qt.IsNil)
+
+	plan := &db.Plan{
+		ID:           "prod_test_toplevel_guard",
+		Name:         "Integrator Top-Level Guard",
+		Organization: db.PlanLimits{MaxDrafts: 10, MaxProcesses: 5, MaxCensus: 1000, MaxVotes: 5000, MaxDuration: 30},
+		Features:     db.Features{TwoFaSms: 50, TwoFaEmail: 100},
+	}
+	c.Assert(testDB.SetPlan(plan), qt.IsNil)
+	defer func() { _ = testDB.DelPlan(&db.Plan{ID: plan.ID}) }()
+	c.Assert(testDB.SetOrganizationSubscription(integratorAddr, &db.OrganizationSubscription{
+		PlanID: plan.ID, StartDate: time.Now(), RenewalDate: time.Now().Add(24 * time.Hour),
+		LastPaymentDate: time.Now(), Active: true,
+	}), qt.IsNil)
+
+	// legacy draft-create on the integrator top-level org — rejected.
+	_, code := testRequest(t, http.MethodPost, token,
+		&apicommon.CreateProcessRequest{OrgAddress: integratorAddr}, "process")
+	c.Assert(code, qt.Equals, http.StatusForbidden) // ErrIntegratorTopLevelOrgCannotOwnProcess
+
+	// new /processes draft-create on the integrator top-level org — rejected.
+	_, code = testRequest(t, http.MethodPost, token, &apicommon.CreateVotingProcessRequest{
+		OrgAddress: integratorAddr.Bytes(),
+		Title:      db.MultiLangString{"default": "Freeride attempt"},
+		Questions:  []apicommon.VotingProcessQuestionRequest{{Title: db.MultiLangString{"default": "Q1"}}},
+	}, "processes")
+	c.Assert(code, qt.Equals, http.StatusForbidden) // ErrIntegratorTopLevelOrgCannotOwnProcess
+
+	// direct /transactions NEW_PROCESS on the integrator top-level org — rejected too, even
+	// size-independent: a test-sized election would previously slip through reserveManagedProcessSlot.
+	tx := &models.Tx{Payload: &models.Tx_NewProcess{NewProcess: &models.NewProcessTx{
+		Txtype: models.TxType_NEW_PROCESS,
+		Process: &models.Process{
+			EntityId:      integratorAddr.Bytes(),
+			MaxCensusSize: uint64(db.TestMaxCensusSize), // test-sized: previously exempt from the guard
+			Duration:      86400,
+			EnvelopeType:  &models.EnvelopeType{},
+			VoteOptions:   &models.ProcessVoteOptions{MaxCount: 1, MaxValue: 1},
+		},
+	}}}
+	payload, err := proto.Marshal(tx)
+	c.Assert(err, qt.IsNil)
+	_, code = testRequest(t, http.MethodPost, token,
+		&apicommon.TransactionData{Address: integratorAddr, TxPayload: payload}, "transactions")
+	c.Assert(code, qt.Equals, http.StatusForbidden) // ErrIntegratorTopLevelOrgCannotOwnProcess
+}
+
+// TestManagedOrgOnIntegratorPlanCanCreateDraft guards the exact regression window the toplevel
+// guard opened: managed orgs (managedBy != 0) whose plan happens to carry IntegratorLimits > 0
+// — as the default plan does (scripts/defaultplan/main.go seeds MaxManagedOrgs=10, and every
+// managed org gets subscribed to the default plan by createManagedOrganizationHandler) — must
+// still be able to create drafts. IsIntegrator(managedOrg) is true in that case (the plan grants it),
+// but the org is a leaf inside the pool, not the shell that owns it.
+func TestManagedOrgOnIntegratorPlanCanCreateDraft(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	token := testCreateUser(t, "integratorpass123")
+	integratorAddr := testCreateOrganization(t, token)
+
+	// enable the integrator and build a plan that also grants integrator limits — the same
+	// shape the default plan uses in production.
+	integratorOrg, err := testDB.Organization(integratorAddr)
+	c.Assert(err, qt.IsNil)
+	integratorOrg.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 5}
+	c.Assert(testDB.SetOrganization(integratorOrg), qt.IsNil)
+	plan := &db.Plan{
+		ID:               "prod_test_default_shape",
+		Name:             "Default-Shape Plan",
+		Organization:     db.PlanLimits{MaxDrafts: 10, MaxProcesses: 5, MaxCensus: 1000, MaxVotes: 5000, MaxDuration: 30},
+		Features:         db.Features{TwoFaSms: 50, TwoFaEmail: 100},
+		IntegratorLimits: db.IntegratorLimits{MaxManagedOrgs: 10}, // the exact defaultplan shape
+	}
+	c.Assert(testDB.SetPlan(plan), qt.IsNil)
+	c.Assert(testDB.SetOrganizationSubscription(integratorAddr, &db.OrganizationSubscription{
+		PlanID: plan.ID, StartDate: time.Now(), RenewalDate: time.Now().Add(24 * time.Hour),
+		LastPaymentDate: time.Now(), Active: true,
+	}), qt.IsNil)
+
+	managed := requestAndParse[apicommon.OrganizationInfo](
+		t, http.MethodPost, token,
+		&apicommon.CreateManagedOrganizationRequest{
+			OrganizationInfo: apicommon.OrganizationInfo{Type: string(db.CompanyType), Website: "https://managed.example"},
+		},
+		"integrator", "organizations",
+	)
+	// createManagedOrganizationHandler subscribes managed orgs to the default plan; the test
+	// fixtures' default plan carries no integrator limits, so move the managed org onto the
+	// integrator-limits-bearing plan to mirror production. IsIntegrator(managed) is then true —
+	// the guard must not fire because ManagedBy!=0 makes it a leaf, not the top-level shell.
+	c.Assert(testDB.SetOrganizationSubscription(managed.Address, &db.OrganizationSubscription{
+		PlanID: plan.ID, StartDate: time.Now(), RenewalDate: time.Now().Add(24 * time.Hour),
+		LastPaymentDate: time.Now(), Active: true,
+	}), qt.IsNil)
+	managedOrg, err := testDB.Organization(managed.Address)
+	c.Assert(err, qt.IsNil)
+	c.Assert(managedOrg.ManagedBy, qt.Not(qt.Equals), common.Address{})
+	c.Assert(managedOrg.Subscription.PlanID, qt.Equals, plan.ID)
+
+	// legacy /process draft-create — must succeed, not 403.
+	_, code := testRequest(t, http.MethodPost, token,
+		&apicommon.CreateProcessRequest{OrgAddress: managed.Address}, "process")
+	c.Assert(code, qt.Equals, http.StatusOK)
+
+	// new /processes draft-create — must succeed too.
+	_, code = testRequest(t, http.MethodPost, token, &apicommon.CreateVotingProcessRequest{
+		OrgAddress: managed.Address.Bytes(),
+		Title:      db.MultiLangString{"default": "Managed draft"},
+		Questions: []apicommon.VotingProcessQuestionRequest{{
+			Title: db.MultiLangString{"default": "Q1"},
+			Type:  db.VotingTypeSingleChoice,
+			Choices: []db.Choice{
+				{Title: db.MultiLangString{"default": "Yes"}, Value: 0},
+				{Title: db.MultiLangString{"default": "No"}, Value: 1},
+			},
+		}},
+	}, "processes")
+	c.Assert(code, qt.Equals, http.StatusOK)
+}
