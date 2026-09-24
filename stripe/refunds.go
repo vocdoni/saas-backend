@@ -1,13 +1,16 @@
 package stripe
 
 import (
+	"encoding/json"
 	goerrors "errors"
+	"fmt"
 	"strconv"
 
 	stripeapi "github.com/stripe/stripe-go/v86"
 	striperefund "github.com/stripe/stripe-go/v86/refund"
 	"github.com/vocdoni/saas-backend/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.vocdoni.io/dvote/log"
 )
 
 // RefundInfo is the outcome of a refund: its id, and whether Stripe already settled it.
@@ -54,4 +57,39 @@ func (*Service) RefundProcessPayment(
 		return nil, errors.ErrStripeError.Withf("failed to refund payment intent %s: %v", paymentIntentID, err)
 	}
 	return &RefundInfo{ID: refund.ID, Status: string(refund.Status)}, nil
+}
+
+// handleRefundUpdated reacts to a refund that changed state after it was issued. Only a
+// refund that will never pay out matters: the money did not go back, so the payment returns
+// to paid and stops looking settled. The draft it paid for is already deleted and cannot be
+// restored, so this is deliberately a manual-reconciliation signal — logged at error level,
+// not quietly absorbed.
+func (s *Service) handleRefundUpdated(event *stripeapi.Event) error {
+	var refund stripeapi.Refund
+	if err := json.Unmarshal(event.Data.Raw, &refund); err != nil {
+		return fmt.Errorf("failed to parse refund from event %s: %w", event.ID, err)
+	}
+	if refund.Status != stripeapi.RefundStatusFailed && refund.Status != stripeapi.RefundStatusCanceled {
+		return nil // still pending, or succeeded as expected
+	}
+	rawProcessID := refund.Metadata[MetadataKeyProcessID]
+	processID, err := bson.ObjectIDFromHex(rawProcessID)
+	if err != nil {
+		return fmt.Errorf("invalid process id %q in refund %s metadata (%v): %w",
+			rawProcessID, refund.ID, err, errPermanentEvent)
+	}
+	reverted, err := s.db.MarkProcessPaymentRefundFailed(processID, refund.ID)
+	if err != nil {
+		return fmt.Errorf("failed to mark process payment refund failed: %w", err)
+	}
+	if !reverted {
+		// a replay, or a census top-up's refund: the payment's status names only the first
+		// refund, but a top-up that did not come back is money owed all the same
+		log.Errorw(fmt.Errorf("refund %s of %d cents ended %s", refund.ID, refund.Amount, refund.Status),
+			fmt.Sprintf("process %s may hold unreturned money and needs manual reconciliation", processID.Hex()))
+		return nil
+	}
+	log.Errorw(fmt.Errorf("refund %s of %d cents ended %s", refund.ID, refund.Amount, refund.Status),
+		fmt.Sprintf("the deleted process %s was not refunded and needs manual reconciliation", processID.Hex()))
+	return nil
 }

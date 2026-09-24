@@ -79,8 +79,6 @@ func TestVotingProcessPublishPaymentGate(t *testing.T) {
 	// produced, so an edit can only repair the draft, never under-charge it
 	update := newVotingProcessRequest(orgAddress, memberIDs(members))
 	requestAndAssertCode(http.StatusOK, t, http.MethodPut, token, update, "processes", pid)
-	// but not deletable: that would keep the money for a process that is gone
-	requestAndAssertError(errors.ErrPaymentSessionConflict, t, http.MethodDelete, token, nil, "processes", pid)
 
 	// paid -> publishes end to end
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
