@@ -21,7 +21,7 @@ services:
     depends_on:
       - mongo
   mongo:
-    image: mongo
+    image: mongo:7
     restart: ${RESTART:-unless-stopped}
     ports:
       - 27017:27017
@@ -56,7 +56,7 @@ services:
     ports:
       - ${UI_PORT:-3000}:${UI_PORT:-3000}
     environment:
-      VOCDONI_ENVIRONMENT: dev
+      VOCDONI_ENVIRONMENT: ${VOCDONI_ENVIRONMENT:-dev}
       SAAS_URL: http://localhost:${VOCDONI_PORT:-8080}
     depends_on:
       - api
