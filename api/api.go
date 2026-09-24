@@ -177,9 +177,8 @@ type API struct {
 	otpCooldown     time.Duration
 	notifySync      bool
 	statusSyncer    StatusEnqueuer
-	// ponytail: terminal-status elections are immutable, so cache them; keeps the public
-	// /processes reads from fanning out to the Vochain on every anonymous hit for legacy
-	// processes, whose whole content lives on chain.
+	// ponytail: immutable elections are cached, so the public /processes reads do not fan out to the
+	// Vochain on every anonymous hit for legacy processes, whose whole content lives on chain.
 	electionCache *lru.Cache[string, *dvoteapi.Election]
 }
 

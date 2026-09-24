@@ -491,8 +491,8 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 			return
 		}
-		// no stored process owns the id, but a legacy record still may: a process bundle, or the
-		// deprecated /process generation. Those are served as a read-only projection.
+		// no stored process owns the id, but a process bundle or a legacy /process row still may:
+		// those are served as a read-only projection.
 		legacyResp, err := a.legacyProcessByID(r.Context(), raw)
 		if err != nil {
 			legacyProjectionError(err).Write(w)
@@ -662,9 +662,8 @@ func (a *API) listVotingProcessesHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return
 	}
-	// legacy records (process bundles and the deprecated /process generation) are projected
-	// read-only and ordered after the stored ones, so they occupy the tail of the paginated set.
-	// They are all published, so a drafts-only view has none.
+	// legacy records are projected read-only into the tail of the paginated set. They are all
+	// published, so a drafts-only view has none.
 	var legacy []apicommon.VotingProcessResponse
 	if draft != db.DraftOnly {
 		if legacy, err = a.legacyProcesses(r.Context(), orgAddress); err != nil {

@@ -21,10 +21,9 @@ import (
 // minted outside the draft flow, registered into a process bundle, with no row of its own.
 const explorerElectionID = "6b342d99f2187f3debbb14afcde7f41407f6cf87d4e7667f787c030000000000"
 
-// legacyTestElection builds an election read as the node returns it, with one result row per
-// question and the metadata inlined as the untyped document the projection has to decode. maxCount
-// is the ballot's field count — one per result row — and describes the election itself, not its
-// tally, which is why the projected question type does not change when results are published.
+// legacyTestElection builds an election as the node returns it: metadata inlined as the untyped
+// document the projection decodes, and maxCount set to the ballot's field count (one per result row),
+// which describes the election itself and not its tally.
 func legacyTestElection(results [][]uint64, questions []map[string]any) *dvoteapi.Election {
 	rows := make([][]*types.BigInt, 0, len(results))
 	for _, row := range results {
@@ -180,9 +179,8 @@ func TestLegacyProjectionStoredParams(t *testing.T) {
 }
 
 // TestLegacyProjectionExternalMetadata checks the bundle-only case the projection exists for: the
-// node inlines the metadata document only for ipfs:// references, so an election pointing at an
-// http(s) document must still resolve its questions — otherwise the record projects to nothing and
-// disappears from /processes exactly as it does today.
+// node inlines the metadata only for ipfs://, so an election pointing at an http(s) document must
+// still resolve its questions, or the record projects to nothing and stays invisible.
 func TestLegacyProjectionExternalMetadata(t *testing.T) {
 	c := qt.New(t)
 	election := legacyTestElection([][]uint64{{8, 0}}, []map[string]any{legacyTestQuestion("Statuto")})
@@ -218,16 +216,13 @@ func TestLegacyProcessIDShape(t *testing.T) {
 	c.Assert(isVotingProcessIDShape("deadbeef"), qt.IsFalse)
 }
 
-// TestLegacyProcessesProjection exercises the read-only legacy projection end to end against the
-// in-process chain: a legacy db.Process row is listed and readable through /processes — by its own id
-// and by its on-chain election id — with its content from the stored ElectionParams and its live
-// state from the chain, deduped against a bundle registering the same election, and unwritable.
+// TestLegacyProcessesProjection exercises the projection end to end: a legacy db.Process row listed
+// and readable by its own id and by its election id, content from the stored params and state from
+// the chain, deduped against a bundle registering the same election, and unwritable.
 //
-// The election is minted by publishing a throwaway /processes process and then deleting its stored
-// rows: that leaves a real on-chain election the new format no longer owns — the shape of the records
-// this projection exists for. A bundle-only election, whose content has to be decoded from the
-// on-chain metadata document, is covered by the projection unit tests above: the test chain does not
-// serve the metadata URL (it points back at this in-process server), so it cannot be exercised here.
+// The election is minted by publishing a throwaway /processes process and deleting its stored rows,
+// which leaves the shape this projection exists for. The bundle-only case is left to the unit tests:
+// the test chain does not serve a metadata URL pointing back at this in-process server.
 func TestLegacyProcessesProjection(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "legacyprojection123")
