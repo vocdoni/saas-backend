@@ -86,15 +86,13 @@ type Organization struct {
 	// DefaultLang is the language of the notifications sent on behalf of the organization
 	// (see apicommon.NotificationLang). Every organization has one, defaulting to "en".
 	// It can be changed but not cleared, dynamicUpdateDocument skipping zero-valued fields.
-	DefaultLang     string                   `json:"defaultLang,omitempty" bson:"defaultLang,omitempty"`
-	Communications  bool                     `json:"communications" bson:"communications"`
-	TokensPurchased uint64                   `json:"tokensPurchased" bson:"tokensPurchased"`
-	TokensRemaining uint64                   `json:"tokensRemaining" bson:"tokensRemaining"`
-	Parent          common.Address           `json:"parent" bson:"parent"`
-	Meta            map[string]any           `json:"meta" bson:"meta"`
-	Subscription    OrganizationSubscription `json:"subscription" bson:"subscription"`
-	Counters        OrganizationCounters     `json:"counters" bson:"counters"`
-	ManagedBy       common.Address           `json:"managedBy,omitempty" bson:"managedBy,omitempty"`
+	DefaultLang    string                   `json:"defaultLang,omitempty" bson:"defaultLang,omitempty"`
+	Communications bool                     `json:"communications" bson:"communications"`
+	Parent         common.Address           `json:"parent" bson:"parent"`
+	Meta           map[string]any           `json:"meta" bson:"meta"`
+	Subscription   OrganizationSubscription `json:"subscription" bson:"subscription"`
+	Counters       OrganizationCounters     `json:"counters" bson:"counters"`
+	ManagedBy      common.Address           `json:"managedBy,omitempty" bson:"managedBy,omitempty"`
 	// IntegratorLimits, when set, is a per-organization override that both enables
 	// integrator status (manual/admin path) and caps its managed resources. When unset,
 	// integrator status and limits derive from the active subscription plan instead.

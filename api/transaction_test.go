@@ -186,7 +186,7 @@ func TestSignTxHandler(t *testing.T) {
 				headers: authHeaders,
 				body: mustMarshal(&apicommon.TransactionData{
 					Address:   mainOrgAddress,
-					TxPayload: (bNoInfoURITx),
+					TxPayload: bNoInfoURITx,
 				}),
 				expectedBody:   mustMarshal(errors.ErrInvalidTxFormat.With("missing fields")),
 				expectedStatus: http.StatusBadRequest,
@@ -198,7 +198,7 @@ func TestSignTxHandler(t *testing.T) {
 				headers: authHeaders,
 				body: mustMarshal(&apicommon.TransactionData{
 					Address:   mainOrgAddress,
-					TxPayload: (bNoAccountTx),
+					TxPayload: bNoAccountTx,
 				}),
 				expectedBody:   mustMarshal(errors.ErrInvalidTxFormat.With("missing fields")),
 				expectedStatus: http.StatusBadRequest,

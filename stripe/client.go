@@ -3,13 +3,13 @@ package stripe
 import (
 	"fmt"
 
-	stripeapi "github.com/stripe/stripe-go/v82"
-	stripeportalsession "github.com/stripe/stripe-go/v82/billingportal/session"
-	stripecheckoutsession "github.com/stripe/stripe-go/v82/checkout/session"
-	stripecustomer "github.com/stripe/stripe-go/v82/customer"
-	stripeprice "github.com/stripe/stripe-go/v82/price"
-	stripeproduct "github.com/stripe/stripe-go/v82/product"
-	stripewebhook "github.com/stripe/stripe-go/v82/webhook"
+	stripeapi "github.com/stripe/stripe-go/v86"
+	stripeportalsession "github.com/stripe/stripe-go/v86/billingportal/session"
+	stripecheckoutsession "github.com/stripe/stripe-go/v86/checkout/session"
+	stripecustomer "github.com/stripe/stripe-go/v86/customer"
+	stripeprice "github.com/stripe/stripe-go/v86/price"
+	stripeproduct "github.com/stripe/stripe-go/v86/product"
+	stripewebhook "github.com/stripe/stripe-go/v86/webhook"
 	"github.com/vocdoni/saas-backend/errors"
 )
 
@@ -49,7 +49,7 @@ func (*Client) GetCustomer(customerID string) (*stripeapi.Customer, error) {
 // GetCustomerByEmail retrieves a customer by email address
 func (*Client) GetCustomerByEmail(email string) (*stripeapi.Customer, error) {
 	params := &stripeapi.CustomerListParams{
-		Email: stripeapi.String(email),
+		Email: new(email),
 	}
 
 	customers := stripecustomer.List(params)
@@ -77,7 +77,7 @@ func (*Client) GetCustomerByAddress(address string) (*stripeapi.Customer, error)
 	customers := stripecustomer.Search(&stripeapi.CustomerSearchParams{
 		SearchParams: stripeapi.SearchParams{
 			Query: fmt.Sprintf("metadata['address']:'%s'", address),
-			Limit: stripeapi.Int64(1),
+			Limit: new(int64(1)),
 		},
 	})
 
@@ -106,7 +106,7 @@ func (*Client) ListProducts() ([]stripeapi.Product, error) {
 	var products []stripeapi.Product
 
 	params := &stripeapi.ProductListParams{
-		Active: stripeapi.Bool(true),
+		Active: new(true),
 	}
 	params.AddExpand("data.default_price")
 	params.Filters.AddFilter("limit", "", "100")
@@ -122,29 +122,13 @@ func (*Client) ListProducts() ([]stripeapi.Product, error) {
 	return products, nil
 }
 
-// GetPrice retrieves a price by lookup key
-func (*Client) GetPrice(lookupKey string) (*stripeapi.Price, error) {
-	params := &stripeapi.PriceSearchParams{
-		SearchParams: stripeapi.SearchParams{
-			Query: fmt.Sprintf("active:'true' AND lookup_key:'%s'", lookupKey),
-		},
-	}
-
-	results := stripeprice.Search(params)
-	if !results.Next() {
-		return nil, errors.ErrStripeError.Withf("price with lookup key %s not found", lookupKey)
-	}
-
-	return results.Price(), nil
-}
-
 // GetProductPrices retrieves all active prices for a given product ID
 func (*Client) GetProductPrices(productID string) ([]stripeapi.Price, error) {
 	var prices []stripeapi.Price
 
 	params := &stripeapi.PriceListParams{
-		Product: stripeapi.String(productID),
-		Active:  stripeapi.Bool(true),
+		Product: new(productID),
+		Active:  new(true),
 	}
 	params.Filters.AddFilter("limit", "", "100") // Adjust limit as needed
 
@@ -159,6 +143,21 @@ func (*Client) GetProductPrices(productID string) ([]stripeapi.Price, error) {
 	return prices, nil
 }
 
+// stripeLocale maps an organization language onto the locale of the embedded checkout
+// client: an empty language lets Stripe pick from the browser, and Catalan is served in
+// Spanish because Stripe has no "ca" locale.
+// TODO(#694): fold this into the single localization source of truth.
+func stripeLocale(lang string) string {
+	switch lang {
+	case "":
+		return "auto"
+	case "ca":
+		return "es"
+	default:
+		return lang
+	}
+}
+
 // CreateCheckoutSession creates a new checkout session for subscription
 // It configures the session with the specified price, amount return URL, and subscription metadata.
 // The email provided is used in order to uniquely distinguish the customer on the Stripe side.
@@ -167,27 +166,20 @@ func (*Client) GetProductPrices(productID string) ([]stripeapi.Price, error) {
 // Overview of stripe checkout mechanics: https://docs.stripe.com/checkout/custom/quickstart
 // API description https://docs.stripe.com/api/checkout/sessions
 func (c *Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeapi.CheckoutSession, error) {
-	if params.Locale == "" {
-		params.Locale = "auto"
-	}
-	if params.Locale == "ca" {
-		params.Locale = "es"
-	}
-
 	checkoutParams := &stripeapi.CheckoutSessionParams{
 		// Subscription mode
-		Mode: stripeapi.String(string(stripeapi.CheckoutSessionModeSubscription)),
+		Mode: new(string(stripeapi.CheckoutSessionModeSubscription)),
 		LineItems: []*stripeapi.CheckoutSessionLineItemParams{
 			{
-				Price:    stripeapi.String(params.PriceID),
-				Quantity: stripeapi.Int64(params.Quantity),
+				Price:    new(params.PriceID),
+				Quantity: new(params.Quantity),
 			},
 		},
 		// UI mode is set to embedded, since the client is integrated in our UI
-		UIMode: stripeapi.String(string(stripeapi.CheckoutSessionUIModeCustom)),
+		UIMode: new(string(stripeapi.CheckoutSessionUIModeElements)),
 		// Automatic tax calculation is enabled
 		AutomaticTax: &stripeapi.CheckoutSessionAutomaticTaxParams{
-			Enabled: stripeapi.Bool(true),
+			Enabled: new(true),
 		},
 		// We store in the metadata the address of the organization
 		SubscriptionData: &stripeapi.CheckoutSessionSubscriptionDataParams{
@@ -196,32 +188,32 @@ func (c *Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeap
 			},
 		},
 		TaxIDCollection: &stripeapi.CheckoutSessionTaxIDCollectionParams{
-			Enabled: stripeapi.Bool(true),
+			Enabled: new(true),
 		},
-		AllowPromotionCodes:      stripeapi.Bool(true),
-		BillingAddressCollection: stripeapi.String(string(stripeapi.CheckoutSessionBillingAddressCollectionAuto)),
+		AllowPromotionCodes:      new(true),
+		BillingAddressCollection: new(string(stripeapi.CheckoutSessionBillingAddressCollectionAuto)),
 		// The locale is being used to configure the language of the embedded client
-		Locale: stripeapi.String(params.Locale),
+		Locale: new(stripeLocale(params.Locale)),
 	}
 
 	if params.FreeTrialDays > 0 {
-		checkoutParams.SubscriptionData.TrialPeriodDays = stripeapi.Int64(int64(params.FreeTrialDays))
+		checkoutParams.SubscriptionData.TrialPeriodDays = new(int64(params.FreeTrialDays))
 	}
 
 	customer, err := c.GetCustomerByAddress(params.OrgAddress)
 	if err != nil {
-		checkoutParams.CustomerEmail = stripeapi.String(params.CustomerEmail)
+		checkoutParams.CustomerEmail = new(params.CustomerEmail)
 	} else {
 		checkoutParams.Customer = &customer.ID
 		checkoutParams.CustomerUpdate = &stripeapi.CheckoutSessionCustomerUpdateParams{
-			Name:    stripeapi.String("auto"),
-			Address: stripeapi.String("auto"),
+			Name:    new("auto"),
+			Address: new("auto"),
 		}
 	}
 
 	// The returnURL is used to redirect the user after the payment is completed
 	if params.ReturnURL != "" {
-		checkoutParams.ReturnURL = stripeapi.String(params.ReturnURL + "/{CHECKOUT_SESSION_ID}")
+		checkoutParams.ReturnURL = new(params.ReturnURL + "/{CHECKOUT_SESSION_ID}")
 	}
 
 	session, err := stripecheckoutsession.New(checkoutParams)
@@ -242,13 +234,24 @@ func (*Client) GetCheckoutSession(sessionID string) (*CheckoutSessionStatus, err
 		return nil, errors.ErrStripeError.Withf("failed to get checkout session: %v", err)
 	}
 
-	status := &CheckoutSessionStatus{
-		Status:             string(session.Status),
-		CustomerEmail:      session.CustomerDetails.Email,
-		SubscriptionStatus: string(session.Subscription.Status),
-	}
+	return checkoutSessionStatus(session), nil
+}
 
-	return status, nil
+// checkoutSessionStatus maps a Stripe checkout session onto the API status shape.
+// Both sub-objects are optional: CustomerDetails is nil until the customer fills the
+// form, and Subscription is nil for one-time (mode "payment") sessions.
+func checkoutSessionStatus(session *stripeapi.CheckoutSession) *CheckoutSessionStatus {
+	status := &CheckoutSessionStatus{
+		Status:        string(session.Status),
+		PaymentStatus: string(session.PaymentStatus),
+	}
+	if session.CustomerDetails != nil {
+		status.CustomerEmail = session.CustomerDetails.Email
+	}
+	if session.Subscription != nil {
+		status.SubscriptionStatus = string(session.Subscription.Status)
+	}
+	return status
 }
 
 // CreatePortalSession creates a billing portal session for a customer
@@ -286,4 +289,7 @@ type CheckoutSessionStatus struct {
 	Status             string `json:"status"`
 	CustomerEmail      string `json:"customer_email"`
 	SubscriptionStatus string `json:"subscription_status"`
+	// PaymentStatus is the payment outcome of a one-time (mode "payment") session:
+	// "paid", "unpaid" or "no_payment_required"; empty for subscription sessions.
+	PaymentStatus string `json:"payment_status,omitempty"`
 }

@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	qt "github.com/frankban/quicktest"
-	stripeapi "github.com/stripe/stripe-go/v82"
+	stripeapi "github.com/stripe/stripe-go/v86"
 )
 
 func testPrices() []stripeapi.Price {
