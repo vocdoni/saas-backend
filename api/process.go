@@ -565,6 +565,11 @@ func (a *API) deleteProcessHandler(w http.ResponseWriter, r *http.Request) {
 // this integrator-level reservation enforces it instead; every NEW_PROCESS entry point (draft
 // publish and the remote-signer /transactions path) must call this so the two cannot drift.
 func (a *API) reserveManagedProcessSlot(org *db.Organization, maxCensusSize uint64) (common.Address, bool, error) {
+	// draft creation already rejects integrator top-level orgs, but a caller reaching
+	// /transactions NEW_PROCESS directly would skip that check.
+	if org.ManagedBy == (common.Address{}) && a.subscriptions.IsIntegrator(org) {
+		return common.Address{}, false, errors.ErrIntegratorTopLevelOrgCannotOwnProcess
+	}
 	if org.ManagedBy == (common.Address{}) || maxCensusSize <= uint64(db.TestMaxCensusSize) {
 		return common.Address{}, false, nil
 	}
