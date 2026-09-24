@@ -12,6 +12,7 @@ import (
 	stripeapi "github.com/stripe/stripe-go/v87"
 	"github.com/vocdoni/saas-backend/db"
 	"github.com/vocdoni/saas-backend/errors"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.vocdoni.io/dvote/log"
 )
 
@@ -22,6 +23,11 @@ type Service struct {
 	processedEvents sync.Map // map[string]time.Time
 	lockManager     *LockManager
 	config          *Config
+	// OnProcessPaid, when set, is invoked on every fulfillment of a paid process payment,
+	// including Stripe's replays of it, so it must be idempotent. The API layer wires it
+	// to enqueue publication of the paid process. An error makes the webhook answer 500 so
+	// Stripe redelivers the event; a refusal no retry can fix must return nil.
+	OnProcessPaid func(processID bson.ObjectID) error
 }
 
 // NewService creates a new Stripe service
