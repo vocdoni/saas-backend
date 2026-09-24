@@ -279,6 +279,48 @@ func (a *API) refusePaymentLocked(w http.ResponseWriter, oid bson.ObjectID, also
 	return false
 }
 
+// refuseCensusGrowthBeyondPayment refuses growing a paid process's census past the price
+// that was paid for it. It is a price check, not a size check: the formula rounds to €5, so
+// a few extra voters usually cost nothing and are let through. The projection uses
+// census.Size + added as an upper bound (some of the ids may already be participants), so it
+// can only refuse a little early — never let unpaid voters in. A payment state it cannot read
+// refuses too: this is the only guard between POST-published elections and free growth.
+func (a *API) refuseCensusGrowthBeyondPayment(
+	w http.ResponseWriter, vp *db.VotingProcess, census *db.Census, added int,
+) bool {
+	payment, err := a.db.ProcessPayment(vp.ID)
+	if err != nil {
+		if err == db.ErrNotFound {
+			return false // free process, or never quoted
+		}
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return true
+	}
+	if payment.Status != db.ProcessPaymentPaid {
+		return false
+	}
+	org, err := a.db.Organization(vp.OrgAddress)
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return true
+	}
+	grown := *census
+	grown.Size += int64(added)
+	quote, err := pricing.Compute(processQuoteInput(vp, &grown, org))
+	if err != nil {
+		errors.ErrMalformedBody.WithErr(err).Write(w)
+		return true
+	}
+	if quote.TotalCents <= payment.AmountCents {
+		return false
+	}
+	// carry the projected quote so the client sees the shortfall, not a flat refusal
+	errors.ErrPaymentRequired.
+		Withf("the census cannot grow beyond the size the process was paid for").
+		WithData(quote).Write(w)
+	return true
+}
+
 // pricingHandler godoc
 //
 //	@Summary		Compute a pay-per-process price

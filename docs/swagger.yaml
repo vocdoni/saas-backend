@@ -7031,6 +7031,10 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
+        "402":
+          description: The census would grow beyond the price paid for the process
+          schema:
+            $ref: '#/definitions/errors.Error'
         "404":
           description: Process not found
           schema:

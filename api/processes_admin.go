@@ -259,6 +259,7 @@ func (a *API) votingProcessParticipantsHandler(w http.ResponseWriter, r *http.Re
 //	@Failure		400			{object}	errors.Error							"Invalid input data"
 //	@Failure		401			{object}	errors.Error							"Unauthorized"
 //	@Failure		404			{object}	errors.Error							"Process not found"
+//	@Failure		402			{object}	errors.Error							"The census would grow beyond the price paid for the process"
 //	@Failure		409			{object}	errors.Error							"Process is not published"
 //	@Failure		500			{object}	errors.Error							"Internal server error"
 //	@Router			/processes/{processId}/census [put]
@@ -277,14 +278,6 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 		errors.ErrDuplicateConflict.Withf("process is not published; edit the draft via PUT /processes/{processId}").Write(w)
 		return
 	}
-	// pay-per-process: the price was calculated from the census size at payment time,
-	// so a paid process cannot grow its census — that would be voters the payment never
-	// covered. Growth beyond the paid size requires a new quote (not self-service yet).
-	if payment, err := a.db.ProcessPayment(oid); err == nil && payment.Status == db.ProcessPaymentPaid {
-		errors.ErrPaymentRequired.
-			Withf("the census cannot grow beyond the size the process was paid for").Write(w)
-		return
-	}
 	census, err := a.db.Census(vp.CensusID.Hex())
 	if err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
@@ -298,6 +291,12 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 	}
 	if len(req.MemberIDs) == 0 {
 		apicommon.HTTPWriteJSON(w, &apicommon.UpdateProcessCensusResponse{Added: 0})
+		return
+	}
+	// pay-per-process: the price is a function of the census size, so the census may grow
+	// only as far as the price already paid reaches. Past that a new quote is needed, which
+	// is not self-service yet — hence the 402 rather than a second checkout.
+	if a.refuseCensusGrowthBeyondPayment(w, vp, census, len(req.MemberIDs)) {
 		return
 	}
 

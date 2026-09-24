@@ -406,3 +406,63 @@ func TestManagedWalletDebitRepricesGrownCensus(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(wallet.BalanceCents, qt.Equals, 100_000-grown.TotalCents)
 }
+
+// TestPublishedCensusGrowthWithinPaidPrice: PUT /processes/{processId}/census is the only
+// way a published process's census can grow, and pay-per-process prices by census size — so
+// the guard has to answer the price question. Refusing every paid process would refuse every
+// published non-free one, which is the feature removed. Growth that the €5 rounding absorbs
+// is free and allowed; growth that raises the price is refused with the projected quote.
+func TestPublishedCensusGrowthWithinPaidPrice(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "censusgrowth123")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(25)...)
+	ids := memberIDs(members)
+
+	// no 2FA channel, so only the base price is billed and the rounding leaves room: 14 to
+	// 19 voters all cost €15, the 20th costs €20
+	req := newVotingProcessRequest(orgAddress, ids[:15])
+	req.Census.TwoFaFields = nil
+	req.Census.AuthFields = db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber}
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint)
+	pid := created.ProcessID
+	oid, err := bson.ObjectIDFromHex(pid)
+	c.Assert(err, qt.IsNil)
+	vp, err := testDB.VotingProcess(oid)
+	c.Assert(err, qt.IsNil)
+	quote, input, err := testAPI.processQuote(vp)
+	c.Assert(err, qt.IsNil)
+	c.Assert(quote.TotalCents, qt.Equals, int64(1_500))
+
+	// pay it and publish, which is the state every priced published process is in
+	stored, err := testDB.SetProcessPaymentPending(&db.ProcessPayment{
+		ProcessID:         oid,
+		OrgAddress:        orgAddress,
+		CheckoutSessionID: "cs_census_growth",
+		QuoteHash:         pricing.QuoteHash(input, quote.TotalCents),
+		AmountCents:       quote.TotalCents,
+		Currency:          "eur",
+	}, "")
+	c.Assert(err, qt.IsNil)
+	c.Assert(stored, qt.IsTrue)
+	won, err := testDB.MarkProcessPaymentPaid(oid, "cs_census_growth")
+	c.Assert(err, qt.IsNil)
+	c.Assert(won, qt.IsTrue)
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish job error: %s", job.Errors))
+
+	// 4 more voters still cost €15: allowed, and they land in the census (202: the
+	// whole-census questions need their on-chain maxCensusSize raised)
+	added := requestAndParseWithAssertCode[apicommon.UpdateProcessCensusResponse](
+		http.StatusAccepted, t, http.MethodPut, token,
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[15:19]}, "processes", pid, "census")
+	c.Assert(added.Added, qt.Equals, uint32(4))
+
+	// the ones that raise the price to €20 are refused, and nothing is added
+	requestAndAssertError(errors.ErrPaymentRequired, t, http.MethodPut, token,
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[19:]}, "processes", pid, "census")
+	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
+	c.Assert(got.Census.Size, qt.Equals, int64(19))
+}
