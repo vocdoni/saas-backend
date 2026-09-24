@@ -402,6 +402,13 @@ definitions:
     type: object
   apicommon.CreateVotingProcessRequest:
     properties:
+      addOns:
+        allOf:
+        - $ref: '#/definitions/db.ProcessAddOns'
+        description: |-
+          AddOns are the paid per-process options (signed results certificate, custom URL,
+          branding). The 2FA add-ons are not here: they derive from census.twoFaFields.
+          They change the process price, so editing them invalidates an open checkout session.
       census:
         $ref: '#/definitions/apicommon.CensusSpec'
       description:
@@ -1087,6 +1094,31 @@ definitions:
         items:
           $ref: '#/definitions/apicommon.ProcessParticipantEntry'
         type: array
+    type: object
+  apicommon.ProcessPriceResponse:
+    properties:
+      currency:
+        type: string
+      lines:
+        items:
+          $ref: '#/definitions/pricing.QuoteLine'
+        type: array
+      paymentStatus:
+        allOf:
+        - $ref: '#/definitions/db.ProcessPaymentStatus'
+        description: |-
+          PaymentStatus is the process's current payment state (pending, processing, failed,
+          paid); empty when no payment exists yet.
+      quoteRecommended:
+        description: 'QuoteRecommended: census above 15 000 voters — suggest requesting
+          a custom quote.'
+        type: boolean
+      quoteRequired:
+        description: 'QuoteRequired: census above 50 000 voters — self-service checkout
+          is blocked.'
+        type: boolean
+      totalCents:
+        type: integer
     type: object
   apicommon.PublicQuestionResponse:
     properties:
@@ -1777,6 +1809,10 @@ definitions:
     type: object
   apicommon.VotingProcessResponse:
     properties:
+      addOns:
+        allOf:
+        - $ref: '#/definitions/db.ProcessAddOns'
+        description: AddOns echoes the paid per-process options selected on the draft.
       census:
         $ref: '#/definitions/apicommon.CensusSpec'
       chainId:
@@ -2045,6 +2081,29 @@ definitions:
       teamMembers:
         type: integer
     type: object
+  db.ProcessAddOns:
+    properties:
+      branding:
+        type: boolean
+      customUrl:
+        type: boolean
+      signedCertificate:
+        type: boolean
+    type: object
+  db.ProcessPaymentStatus:
+    enum:
+    - pending
+    - processing
+    - failed
+    - paid
+    - refunded
+    type: string
+    x-enum-varnames:
+    - ProcessPaymentPending
+    - ProcessPaymentProcessing
+    - ProcessPaymentFailed
+    - ProcessPaymentPaid
+    - ProcessPaymentRefunded
   db.QuestionResults:
     properties:
       finalResults:
@@ -2485,6 +2544,15 @@ definitions:
       weight:
         example: 2a
         format: hex
+        type: string
+    type: object
+  pricing.QuoteLine:
+    properties:
+      amountCents:
+        type: integer
+      description:
+        type: string
+      kind:
         type: string
     type: object
 host: localhost:8080
@@ -4491,6 +4559,55 @@ paths:
       summary: Get all subscription plans
       tags:
       - plans
+  /pricing:
+    get:
+      description: |-
+        Public calculator over the published pricing formula: pass the inputs, get the
+        same breakdown GET /processes/{processId}/price returns for a draft. EUR cents,
+        VAT excluded (Stripe Tax adds VAT at checkout). No organization context: branding
+        is charged as requested and legacy plan credits are not applied. Above 15 000
+        voters a custom quote is recommended; above 50 000 the flag is informational here —
+        self-service checkout enforces the block.
+      parameters:
+      - description: Eligible voters (census size), at least 1
+        in: query
+        name: voters
+        required: true
+        type: integer
+      - description: Email 2FA add-on
+        in: query
+        name: emailTwoFA
+        type: boolean
+      - description: SMS 2FA add-on
+        in: query
+        name: smsTwoFA
+        type: boolean
+      - description: Signed results certificate add-on
+        in: query
+        name: signedCertificate
+        type: boolean
+      - description: Custom URL add-on
+        in: query
+        name: customUrl
+        type: boolean
+      - description: Branding / white label add-on
+        in: query
+        name: branding
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessPriceResponse'
+        "400":
+          description: Missing or invalid voters
+          schema:
+            $ref: '#/definitions/errors.Error'
+      summary: Compute a pay-per-process price
+      tags:
+      - processes
   /processes:
     get:
       description: |-
@@ -5193,6 +5310,43 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
       summary: Get a voting process participant
+      tags:
+      - processes
+  /processes/{processId}/price:
+    get:
+      description: |-
+        Server-side price of the draft in EUR cents, VAT excluded: base price from the
+        census size plus the selected add-ons, with the current payment status. Prices
+        above 15 000 voters recommend a custom quote; above 50 000 self-service checkout
+        is unavailable. Requires Manager/Admin of the organization.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessPriceResponse'
+        "400":
+          description: Census is empty or invalid
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Get the price of a voting process
       tags:
       - processes
   /processes/{processId}/publish:
