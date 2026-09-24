@@ -485,6 +485,10 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 //	@Router			/processes/{processId} [get]
 func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 	raw := chi.URLParam(r, "processId")
+	if !isVotingProcessIDShape(raw) {
+		errors.ErrMalformedURLParam.Withf("invalid process ID").Write(w)
+		return
+	}
 	vp, questions, err := a.readVotingProcess(raw)
 	if err != nil {
 		if !stderrors.Is(err, db.ErrNotFound) {
@@ -500,10 +504,6 @@ func (a *API) votingProcessInfoHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		if legacyResp != nil {
 			apicommon.HTTPWriteJSON(w, legacyResp)
-			return
-		}
-		if !isVotingProcessIDShape(raw) {
-			errors.ErrMalformedURLParam.Withf("invalid process ID").Write(w)
 			return
 		}
 		errors.ErrProcessNotFound.Write(w)
