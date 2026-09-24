@@ -118,6 +118,9 @@ var (
 	// is deliberate: the CSP records consumption when it issues the signature, not when the ballot
 	// reaches the chain, so this means "already signed for" and must never be reported as "voted".
 	ErrCensusMemberAlreadySignedFor = Error{Code: 40173, HTTPstatus: http.StatusConflict, Err: fmt.Errorf("member has already been signed for in an ongoing process")}
+	// An integrator's top-level organization is a management shell for its managed orgs; running elections
+	// there would bypass the shared MaxManagedProcesses/MaxVotes/MaxSMS/MaxEmails pool.
+	ErrIntegratorTopLevelOrgCannotOwnProcess = Error{Code: 40174, HTTPstatus: http.StatusForbidden, Err: fmt.Errorf("integrator top-level organizations cannot own elections; use a managed organization")}
 
 	// CSP errors (408)
 	ErrZeroWeightVoter = Error{Code: 40801, HTTPstatus: http.StatusUnauthorized, Err: fmt.Errorf("voter weight cannot be zero")}
