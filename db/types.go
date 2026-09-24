@@ -782,6 +782,10 @@ const (
 	// ProcessPaymentPaid: payment verified (webhook) or debited from an integrator
 	// wallet. Terminal — never reverted, so publish retries never re-charge.
 	ProcessPaymentPaid ProcessPaymentStatus = "paid"
+	// ProcessPaymentRefunded is a paid payment whose money was returned, because the draft
+	// it paid for was deleted. Terminal and kept as the audit trail: the process is gone,
+	// so nothing can be paid for again.
+	ProcessPaymentRefunded ProcessPaymentStatus = "refunded"
 )
 
 // ProcessPayment is the payment state of a voting process, in its own collection keyed by
@@ -801,6 +805,13 @@ type ProcessPayment struct {
 	// AmountCents is the net total in EUR cents, VAT excluded.
 	AmountCents int64  `json:"amountCents" bson:"amountCents"`
 	Currency    string `json:"currency" bson:"currency"`
+	// PaymentIntentID is the Stripe payment intent behind a card payment, recorded at
+	// fulfillment because it is what a refund is issued against. Empty for a wallet-paid
+	// process, whose refund is a wallet credit instead.
+	PaymentIntentID string `json:"-" bson:"paymentIntentId,omitempty"`
+	// RefundID identifies the refund that returned this payment's money (Stripe refund id,
+	// or the wallet credit's idempotency key).
+	RefundID string `json:"-" bson:"refundId,omitempty"`
 	// RequestedBy is the email of the user who started the checkout; webhook
 	// fulfillment publishes the process acting as this user.
 	RequestedBy string `json:"-" bson:"requestedBy,omitempty"`
@@ -836,6 +847,10 @@ type Wallet struct {
 const (
 	WalletEntryTopUp = "topup"
 	WalletEntryDebit = "debit"
+	// WalletEntryRefund is money returned to the wallet for a process that was deleted
+	// before it ran. A distinct kind, not a top-up: an integrator reconciling its ledger
+	// must be able to tell money it added from money it got back.
+	WalletEntryRefund = "refund"
 )
 
 // WalletLedgerEntry is one append-only audit record of a wallet balance change:

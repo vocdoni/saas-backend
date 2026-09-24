@@ -25,13 +25,14 @@ type paymentGateway interface {
 	CreatePaymentSession(params *stripe.PaymentSessionParams) (*stripe.PaymentSessionInfo, error)
 	GetPaymentSession(sessionID string) (*stripe.PaymentSessionInfo, error)
 	ExpirePaymentSession(sessionID string) error
+	RefundProcessPayment(processID bson.ObjectID, paymentIntentID string) (*stripe.RefundInfo, error)
 }
 
 // processQuoteInput derives the pricing input from the draft state: census size, the 2FA
 // channels the census authenticates with, the selected add-ons (branding only while the
 // organization has not paid it yet), and the payer type (managed org -> integrator).
-// Branding is settled in full by processQuote, which also honours the claim a sibling
-// process's live payment holds on it — this function sees only the draft.
+// Branding is settled in full by processQuote, which also honours the claim another process
+// may hold on the organization's add-on — this function sees only the draft.
 func processQuoteInput(vp *db.VotingProcess, census *db.Census, org *db.Organization) pricing.QuoteInput {
 	payer := pricing.PayerStandard
 	if org.ManagedBy != (common.Address{}) {
@@ -362,8 +363,9 @@ func (a *API) publishPaidProcess(processID bson.ObjectID) {
 // draft is not locked — every publish path re-prices against what was paid, refusing when
 // the draft grew worth more, so an edit can only fix a draft that failed publish preflight,
 // never under-charge. Pending payments do not lock either: the open session is expired and
-// replaced at the next checkout. Callers naming extra statuses in alsoLocked refuse those
-// too (DELETE refuses paid: dropping the draft would destroy what was paid for).
+// replaced at the next checkout. A paid draft is not refused by DELETE either: the money is
+// returned first (see refundPaidProcess). Callers naming extra statuses in alsoLocked refuse
+// those too.
 // A payment state it cannot read is refused rather than assumed absent: nothing further
 // down the write path consults payment state, so failing open here would let a transient
 // Mongo error unlock exactly the draft this guard exists to protect.
@@ -991,4 +993,81 @@ func (a *API) processCheckoutStatusHandler(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	apicommon.HTTPWriteJSON(w, resp)
+}
+
+// refundPaidProcess returns a paid draft's money the way it arrived and records that it did:
+// the payment row survives as the audit trail of a process that no longer exists, which is
+// why the caller must not delete it. The organization's branding add-on is released with the
+// refund, so its next draft is quoted — and charged — for what the deleted one paid.
+//
+// Reports false with the response already written when the money could not be returned.
+// Nothing is recorded then and the draft stays, so the delete can be retried; destroying a
+// draft whose money is still with us is the one outcome this must never produce.
+func (a *API) refundPaidProcess(w http.ResponseWriter, vp *db.VotingProcess, payment *db.ProcessPayment) bool {
+	refundID, ok := a.returnProcessPayment(w, vp, payment)
+	if !ok {
+		return false
+	}
+	if _, err := a.db.MarkProcessPaymentRefunded(vp.ID, refundID); err != nil {
+		// the money is already back; losing the status write would let a retry refund
+		// twice, so this is reported rather than swallowed
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return false
+	}
+	if payment.Branding {
+		if err := a.db.ReleaseOrganizationBranding(vp.OrgAddress, vp.ID); err != nil {
+			log.Warnw("could not release organization branding after refund",
+				"processId", vp.ID.Hex(), "orgAddress", vp.OrgAddress.String(), "error", err)
+		}
+	}
+	log.Infow("paid draft refunded", "processId", vp.ID.Hex(), "amountCents", payment.AmountCents,
+		"refundId", refundID, "wallet", payment.CheckoutSessionID == "")
+	return true
+}
+
+// returnProcessPayment moves the money back and returns the id the refund is known by. A
+// card payment is refunded against its payment intent, VAT included; a wallet-paid process
+// credits the integrator wallet that was debited, keyed so a retried delete cannot credit
+// twice. Both are keyed on the process id, which is unique to this refund because a process
+// is paid for once.
+func (a *API) returnProcessPayment(
+	w http.ResponseWriter, vp *db.VotingProcess, payment *db.ProcessPayment,
+) (string, bool) {
+	idempotencyKey := "refund:" + vp.ID.Hex()
+	if payment.CheckoutSessionID == "" {
+		// paid from the integrator wallet: the money goes back where it came from, so the
+		// integrator that funded the draft can spend it on the next one
+		org, err := a.db.Organization(vp.OrgAddress)
+		if err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return "", false
+		}
+		if org.ManagedBy == (common.Address{}) {
+			errors.ErrGenericInternalServerError.
+				Withf("process %s was paid from a wallet but its organization has no integrator", vp.ID.Hex()).Write(w)
+			return "", false
+		}
+		if err := a.db.CreditWallet(db.WalletCredit{
+			OrgAddress:     org.ManagedBy,
+			AmountCents:    payment.AmountCents,
+			IdempotencyKey: idempotencyKey,
+			Kind:           db.WalletEntryRefund,
+			ProcessID:      vp.ID,
+		}); err != nil {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return "", false
+		}
+		return idempotencyKey, true
+	}
+	if a.paymentGW == nil {
+		errors.ErrPaymentSessionConflict.
+			Withf("the payment gateway is unavailable; the payment cannot be refunded").Write(w)
+		return "", false
+	}
+	refund, err := a.paymentGW.RefundProcessPayment(vp.ID, payment.PaymentIntentID)
+	if err != nil {
+		errors.ErrStripeError.Withf("could not refund the process payment").WithErr(err).Write(w)
+		return "", false
+	}
+	return refund.ID, true
 }

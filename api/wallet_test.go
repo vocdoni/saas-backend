@@ -47,7 +47,9 @@ func TestWalletEndpoints(t *testing.T) {
 	// the balance moves only through verified webhook credit, never the checkout call
 	wallet = requestAndParse[apicommon.WalletResponse](t, http.MethodGet, token, nil, "wallet")
 	c.Assert(wallet.BalanceCents, qt.Equals, int64(0))
-	c.Assert(testDB.CreditWallet(integratorAddr, 50_000, checkout.SessionID), qt.IsNil)
+	c.Assert(testDB.CreditWallet(db.WalletCredit{
+		OrgAddress: integratorAddr, AmountCents: 50_000, IdempotencyKey: checkout.SessionID,
+	}), qt.IsNil)
 	wallet = requestAndParse[apicommon.WalletResponse](t, http.MethodGet, token, nil, "wallet")
 	c.Assert(wallet.BalanceCents, qt.Equals, int64(50_000))
 	c.Assert(wallet.Ledger, qt.HasLen, 1)

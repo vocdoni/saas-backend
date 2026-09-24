@@ -77,12 +77,30 @@ func (ms *MongoStorage) Wallet(orgAddress common.Address) (*Wallet, error) {
 	return wallet, nil
 }
 
-// CreditWallet adds a verified top-up to the wallet, creating it on first use. The
-// idempotency key (the checkout session id) makes replayed webhooks no-ops: a key already
-// applied leaves the balance untouched and still reports success.
-func (ms *MongoStorage) CreditWallet(orgAddress common.Address, amountCents int64, idempotencyKey string) error {
+// WalletCredit is one credit to a wallet: a verified top-up, or money returned for a process
+// that was deleted before it ran. Kind defaults to WalletEntryTopUp; a refund sets
+// WalletEntryRefund and the ProcessID it came back from, so the ledger distinguishes the two.
+// IdempotencyKey is the checkout session id for a top-up and "refund:<process id hex>" for a
+// refund.
+type WalletCredit struct {
+	OrgAddress     common.Address
+	AmountCents    int64
+	IdempotencyKey string
+	Kind           string
+	ProcessID      bson.ObjectID
+}
+
+// CreditWallet adds a credit to the wallet, creating it on first use. The idempotency key
+// makes replayed webhooks (and a retried refund) no-ops: a key already applied leaves the
+// balance untouched and still reports success.
+func (ms *MongoStorage) CreditWallet(c WalletCredit) error {
+	orgAddress, amountCents, idempotencyKey := c.OrgAddress, c.AmountCents, c.IdempotencyKey
 	if (orgAddress.Cmp(common.Address{}) == 0) || amountCents <= 0 || idempotencyKey == "" {
 		return ErrInvalidData
+	}
+	kind := c.Kind
+	if kind == "" {
+		kind = WalletEntryTopUp
 	}
 	applied, err := ms.walletKeyApplied(orgAddress, idempotencyKey)
 	if err != nil {
@@ -118,8 +136,9 @@ func (ms *MongoStorage) CreditWallet(orgAddress common.Address, amountCents int6
 	return ms.appendWalletLedger(&WalletLedgerEntry{
 		OrgAddress:     orgAddress,
 		AmountCents:    amountCents,
-		Kind:           WalletEntryTopUp,
+		Kind:           kind,
 		IdempotencyKey: idempotencyKey,
+		ProcessID:      c.ProcessID,
 	})
 }
 

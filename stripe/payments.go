@@ -274,7 +274,13 @@ func (s *Service) fulfillProcessPayment(session *stripeapi.CheckoutSession) erro
 		}
 		return nil
 	}
-	won, err := s.db.MarkProcessPaymentPaid(processID, session.ID)
+	// the payment intent is what a refund is issued against; the webhook carries it as a
+	// bare id, which unmarshals into PaymentIntent.ID without an Expand
+	var paymentIntentID string
+	if session.PaymentIntent != nil {
+		paymentIntentID = session.PaymentIntent.ID
+	}
+	won, err := s.db.MarkProcessPaymentPaid(processID, session.ID, paymentIntentID)
 	if err != nil {
 		return fmt.Errorf("failed to mark process payment paid: %w", err)
 	}
@@ -305,8 +311,8 @@ func (s *Service) fulfillProcessPayment(session *stripeapi.CheckoutSession) erro
 // replay of a payment already recorded as paid.
 func (s *Service) afterProcessPaid(processID bson.ObjectID) {
 	// the payment record, not the draft, says whether branding was charged: a draft may
-	// select branding and still be quoted without it, because a sibling process's live
-	// payment already holds the organization's claim on it.
+	// select branding and still be quoted without it, because another process holds the
+	// organization's claim on the add-on.
 	if payment, err := s.db.ProcessPayment(processID); err == nil && payment.Branding {
 		if _, err := s.db.SetOrganizationBrandingPaid(payment.OrgAddress, time.Now()); err != nil {
 			log.Warnw("could not stamp organization branding-paid",
@@ -371,7 +377,11 @@ func (s *Service) creditWalletTopUp(session *stripeapi.CheckoutSession) error {
 			rawOrg, session.ID, errPermanentEvent)
 	}
 	orgAddress := common.HexToAddress(rawOrg)
-	if err := s.db.CreditWallet(orgAddress, session.AmountSubtotal, session.ID); err != nil {
+	if err := s.db.CreditWallet(db.WalletCredit{
+		OrgAddress:     orgAddress,
+		AmountCents:    session.AmountSubtotal,
+		IdempotencyKey: session.ID,
+	}); err != nil {
 		return fmt.Errorf("failed to credit wallet top-up: %w", err)
 	}
 	log.Infow("wallet top-up credited",

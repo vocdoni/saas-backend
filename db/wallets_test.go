@@ -22,6 +22,15 @@ func debitProcess(org common.Address, cents int64, processID bson.ObjectID) erro
 	})
 }
 
+// topUpTestWallet is the ordinary credit: a verified top-up to the test organization.
+func topUpTestWallet(cents int64, idempotencyKey string) error {
+	return testDB.CreditWallet(WalletCredit{
+		OrgAddress:     testOrgAddress,
+		AmountCents:    cents,
+		IdempotencyKey: idempotencyKey,
+	})
+}
+
 func TestWalletCreditAndDebit(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
@@ -32,13 +41,13 @@ func TestWalletCreditAndDebit(t *testing.T) {
 	c.Assert(wallet.BalanceCents, qt.Equals, int64(0))
 
 	// first top-up creates the wallet
-	c.Assert(testDB.CreditWallet(testOrgAddress, 10_000, "cs_topup_1"), qt.IsNil)
+	c.Assert(topUpTestWallet(10_000, "cs_topup_1"), qt.IsNil)
 	wallet, err = testDB.Wallet(testOrgAddress)
 	c.Assert(err, qt.IsNil)
 	c.Assert(wallet.BalanceCents, qt.Equals, int64(10_000))
 
 	// replaying the same top-up (duplicate webhook) is a no-op
-	c.Assert(testDB.CreditWallet(testOrgAddress, 10_000, "cs_topup_1"), qt.IsNil)
+	c.Assert(topUpTestWallet(10_000, "cs_topup_1"), qt.IsNil)
 	wallet, err = testDB.Wallet(testOrgAddress)
 	c.Assert(err, qt.IsNil)
 	c.Assert(wallet.BalanceCents, qt.Equals, int64(10_000))
@@ -115,7 +124,7 @@ func TestWalletDebitConcurrency(t *testing.T) {
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
 	const workers = 16
-	c.Assert(testDB.CreditWallet(testOrgAddress, 5_000, "cs_topup_conc"), qt.IsNil)
+	c.Assert(topUpTestWallet(5_000, "cs_topup_conc"), qt.IsNil)
 
 	// distinct processes racing for a balance that covers only one
 	results := make(chan error, workers)
@@ -144,7 +153,7 @@ func TestWalletDebitConcurrency(t *testing.T) {
 	c.Assert(wallet.BalanceCents, qt.Equals, int64(0))
 
 	// the same process racing against itself must debit at most once
-	c.Assert(testDB.CreditWallet(testOrgAddress, 3_000, "cs_topup_conc_2"), qt.IsNil)
+	c.Assert(topUpTestWallet(3_000, "cs_topup_conc_2"), qt.IsNil)
 	processID := bson.NewObjectID()
 	sameResults := make(chan error, workers)
 	for range workers {
@@ -166,9 +175,9 @@ func TestWalletInvalidInputs(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
-	c.Assert(testDB.CreditWallet(testOrgAddress, 0, "cs_zero"), qt.ErrorIs, ErrInvalidData)
-	c.Assert(testDB.CreditWallet(testOrgAddress, -100, "cs_neg"), qt.ErrorIs, ErrInvalidData)
-	c.Assert(testDB.CreditWallet(testOrgAddress, 100, ""), qt.ErrorIs, ErrInvalidData)
+	c.Assert(topUpTestWallet(0, "cs_zero"), qt.ErrorIs, ErrInvalidData)
+	c.Assert(topUpTestWallet(-100, "cs_neg"), qt.ErrorIs, ErrInvalidData)
+	c.Assert(topUpTestWallet(100, ""), qt.ErrorIs, ErrInvalidData)
 	c.Assert(debitProcess(testOrgAddress, 0, bson.NewObjectID()), qt.ErrorIs, ErrInvalidData)
 	c.Assert(debitProcess(testOrgAddress, 100, bson.NilObjectID), qt.ErrorIs, ErrInvalidData)
 	c.Assert(testDB.DebitWalletForProcess(WalletDebit{
@@ -193,7 +202,7 @@ func TestWalletConcurrentFirstCredits(t *testing.T) {
 	errs := make([]error, credits)
 	for i := range credits {
 		wg.Go(func() {
-			errs[i] = testDB.CreditWallet(testOrgAddress, 1_000, fmt.Sprintf("cs_race_%d", i))
+			errs[i] = topUpTestWallet(1_000, fmt.Sprintf("cs_race_%d", i))
 		})
 	}
 	wg.Wait()
@@ -219,7 +228,7 @@ func TestWalletAppliedKeysBounded(t *testing.T) {
 	c := qt.New(t)
 	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
 
-	c.Assert(testDB.CreditWallet(testOrgAddress, 1_000, "cs_oldest"), qt.IsNil)
+	c.Assert(topUpTestWallet(1_000, "cs_oldest"), qt.IsNil)
 
 	// fill the guard window in one write, standing in for the ~5000 operations it takes
 	pad := make(bson.A, 0, walletAppliedKeysWindow)
@@ -233,7 +242,7 @@ func TestWalletAppliedKeysBounded(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 
 	// the next credit applies and trims the window back to its ceiling, evicting cs_oldest
-	c.Assert(testDB.CreditWallet(testOrgAddress, 500, "cs_newest"), qt.IsNil)
+	c.Assert(topUpTestWallet(500, "cs_newest"), qt.IsNil)
 	wallet, err := testDB.Wallet(testOrgAddress)
 	c.Assert(err, qt.IsNil)
 	c.Assert(wallet.AppliedKeys, qt.HasLen, walletAppliedKeysWindow)
@@ -242,7 +251,7 @@ func TestWalletAppliedKeysBounded(t *testing.T) {
 	c.Assert(wallet.BalanceCents, qt.Equals, int64(1_500))
 
 	// replaying the evicted top-up must not credit it twice
-	c.Assert(testDB.CreditWallet(testOrgAddress, 1_000, "cs_oldest"), qt.IsNil)
+	c.Assert(topUpTestWallet(1_000, "cs_oldest"), qt.IsNil)
 	wallet, err = testDB.Wallet(testOrgAddress)
 	c.Assert(err, qt.IsNil)
 	c.Assert(wallet.BalanceCents, qt.Equals, int64(1_500))

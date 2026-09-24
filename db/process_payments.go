@@ -87,13 +87,63 @@ func (ms *MongoStorage) MarkProcessPaymentProcessing(processID bson.ObjectID, se
 }
 
 // MarkProcessPaymentPaid marks a payment as paid, from pending or processing, only when
-// the stored checkout session matches the fulfilled one. Paid is terminal: a duplicate
-// webhook (or any replay) no longer matches the filter and reports false, which callers
-// use as the signal to skip fulfillment side effects.
-func (ms *MongoStorage) MarkProcessPaymentPaid(processID bson.ObjectID, sessionID string) (bool, error) {
+// the stored checkout session matches the fulfilled one. Paid is terminal for the charge: a
+// duplicate webhook (or any replay) no longer matches the filter and reports false, which
+// callers use as the signal to skip fulfillment side effects.
+//
+// paymentIntentID is the intent the money landed on, stored because it is the only handle a
+// later refund has on it; empty when the event carries none, which leaves the field untouched
+// rather than blanking what an earlier attempt recorded.
+func (ms *MongoStorage) MarkProcessPaymentPaid(
+	processID bson.ObjectID, sessionID, paymentIntentID string,
+) (bool, error) {
+	set := bson.M{"status": ProcessPaymentPaid, "paidAt": time.Now()}
+	if paymentIntentID != "" {
+		set["paymentIntentId"] = paymentIntentID
+	}
 	return ms.transitionProcessPayment(processID, sessionID,
-		bson.A{ProcessPaymentPending, ProcessPaymentProcessing},
-		bson.M{"status": ProcessPaymentPaid, "paidAt": time.Now()})
+		bson.A{ProcessPaymentPending, ProcessPaymentProcessing}, set)
+}
+
+// MarkProcessPaymentRefunded records that a paid payment's money was returned. Only a paid
+// payment transitions, so a retry of a delete that already refunded reports false instead of
+// refunding twice — the caller issues the refund under an idempotency key and this CAS is
+// what keeps the record honest about it. The document is kept after the draft is deleted: it
+// is the only trace that money moved in and back out.
+func (ms *MongoStorage) MarkProcessPaymentRefunded(processID bson.ObjectID, refundID string) (bool, error) {
+	if processID == bson.NilObjectID || refundID == "" {
+		return false, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.processPayments.UpdateOne(ctx,
+		bson.M{"_id": processID, "status": ProcessPaymentPaid},
+		bson.M{"$set": bson.M{
+			"status": ProcessPaymentRefunded, "refundId": refundID, "updatedAt": time.Now(),
+		}})
+	if err != nil {
+		return false, fmt.Errorf("failed to mark process payment refunded: %w", err)
+	}
+	return res.MatchedCount == 1, nil
+}
+
+// MarkProcessPaymentRefundFailed puts a payment Stripe could not actually refund back to
+// paid, keeping refundId so the failed attempt stays visible. The draft is already deleted at
+// this point, so this is a manual-reconciliation signal, not a state anything recovers from
+// on its own — callers log it at error level.
+func (ms *MongoStorage) MarkProcessPaymentRefundFailed(processID bson.ObjectID, refundID string) (bool, error) {
+	if processID == bson.NilObjectID || refundID == "" {
+		return false, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.processPayments.UpdateOne(ctx,
+		bson.M{"_id": processID, "status": ProcessPaymentRefunded, "refundId": refundID},
+		bson.M{"$set": bson.M{"status": ProcessPaymentPaid, "updatedAt": time.Now()}})
+	if err != nil {
+		return false, fmt.Errorf("failed to revert failed process payment refund: %w", err)
+	}
+	return res.MatchedCount == 1, nil
 }
 
 // MarkProcessPaymentFailed records a failed payment, returning the process to a payable

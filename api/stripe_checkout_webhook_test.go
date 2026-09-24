@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
 	stripeapi "github.com/stripe/stripe-go/v86"
 	stripewebhook "github.com/stripe/stripe-go/v86/webhook"
@@ -362,7 +363,7 @@ func TestStripeCheckoutWebhookReplayPublishesStrandedProcess(t *testing.T) {
 		"processes", pid, "checkout")
 
 	// the crash: the payment is recorded paid (CAS won) but publication never ran
-	won, err := testDB.MarkProcessPaymentPaid(oid, checkout.SessionID)
+	won, err := testDB.MarkProcessPaymentPaid(oid, checkout.SessionID, "")
 	c.Assert(err, qt.IsNil)
 	c.Assert(won, qt.IsTrue)
 	vp, err := testDB.VotingProcess(oid)
@@ -415,4 +416,62 @@ func TestStripeCheckoutWebhookPermanentlyInvalidEvents(t *testing.T) {
 			}))
 		c.Assert(code, qt.Equals, http.StatusOK)
 	}
+}
+
+// TestStripeRefundFailedWebhook covers the refund that does not stick: Stripe accepted it,
+// the draft was deleted on the strength of that, and the refund then failed. The process
+// cannot come back, so the only correct reaction is to stop the payment looking settled and
+// say loudly that a human must reconcile it.
+func TestStripeRefundFailedWebhook(t *testing.T) {
+	c := qt.New(t)
+	installStripeWebhookService(t)
+
+	processID := bson.NewObjectID()
+	stored, err := testDB.SetProcessPaymentPending(&db.ProcessPayment{
+		ProcessID:         processID,
+		OrgAddress:        common.HexToAddress("0x000000000000000000000000000000000000beef"),
+		CheckoutSessionID: "cs_refund_failed",
+		AmountCents:       1_500,
+		Currency:          "eur",
+	}, "")
+	c.Assert(err, qt.IsNil)
+	c.Assert(stored, qt.IsTrue)
+	won, err := testDB.MarkProcessPaymentPaid(processID, "cs_refund_failed", "pi_refund_failed")
+	c.Assert(err, qt.IsNil)
+	c.Assert(won, qt.IsTrue)
+	refunded, err := testDB.MarkProcessPaymentRefunded(processID, "re_failed")
+	c.Assert(err, qt.IsNil)
+	c.Assert(refunded, qt.IsTrue)
+
+	refundObject := func(status, rawProcessID string) map[string]any {
+		return map[string]any{
+			"id":       "re_failed",
+			"object":   "refund",
+			"amount":   1_500,
+			"status":   status,
+			"metadata": map[string]string{"voting_process_id": rawProcessID},
+		}
+	}
+
+	// a refund still on its way changes nothing
+	status := postSignedStripeEvent(t, testWebhookSecret, "evt_refund_pending",
+		"charge.refund.updated", refundObject("pending", processID.Hex()))
+	c.Assert(status, qt.Equals, http.StatusOK)
+	payment, err := testDB.ProcessPayment(processID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentRefunded)
+
+	// one that failed puts the payment back to paid, keeping the refund id to reconcile
+	status = postSignedStripeEvent(t, testWebhookSecret, "evt_refund_failed",
+		"charge.refund.updated", refundObject("failed", processID.Hex()))
+	c.Assert(status, qt.Equals, http.StatusOK)
+	payment, err = testDB.ProcessPayment(processID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPaid)
+	c.Assert(payment.RefundID, qt.Equals, "re_failed")
+
+	// a refund naming no process is permanently invalid: answered 200 so Stripe stops
+	status = postSignedStripeEvent(t, testWebhookSecret, "evt_refund_failed_bad",
+		"charge.refund.updated", refundObject("failed", "not-an-object-id"))
+	c.Assert(status, qt.Equals, http.StatusOK)
 }

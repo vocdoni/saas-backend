@@ -46,7 +46,7 @@ func TestProcessPaymentTransitions(t *testing.T) {
 	c.Assert(ok, qt.IsTrue)
 
 	// transitions demand the stored session id: the stale one loses its CAS
-	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_1")
+	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_1", "")
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsFalse)
 
@@ -61,7 +61,7 @@ func TestProcessPaymentTransitions(t *testing.T) {
 	c.Assert(ok, qt.IsFalse)
 
 	// processing -> paid
-	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_2")
+	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_2", "")
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
 	payment, err = testDB.ProcessPayment(processID)
@@ -70,7 +70,7 @@ func TestProcessPaymentTransitions(t *testing.T) {
 	c.Assert(payment.PaidAt.IsZero(), qt.IsFalse)
 
 	// paid is terminal: a duplicate webhook loses the CAS (the idempotency signal) ...
-	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_2")
+	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_2", "")
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsFalse)
 	// ... a failure event cannot regress it ...
@@ -104,7 +104,7 @@ func TestProcessPaymentFailureAndRetry(t *testing.T) {
 	ok, err = testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_2"), "cs_1")
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
-	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_2")
+	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_2", "")
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
 }
@@ -197,4 +197,61 @@ func TestProcessPaymentPendingPinsReplacedSession(t *testing.T) {
 	payment, err = testDB.ProcessPayment(processID)
 	c.Assert(err, qt.IsNil)
 	c.Assert(payment.CheckoutSessionID, qt.Equals, "cs_c")
+}
+
+// TestProcessPaymentRefund covers the money-back transitions: only a paid payment refunds,
+// the refund is recorded on the row that survives its deleted process, and a refund Stripe
+// later fails puts the payment back to paid so nothing looks settled that is not.
+func TestProcessPaymentRefund(t *testing.T) {
+	c := qt.New(t)
+	c.Cleanup(func() { c.Assert(testDB.DeleteAllDocuments(), qt.IsNil) })
+
+	processID := bson.NewObjectID()
+	ok, err := testDB.SetProcessPaymentPending(newPendingPayment(processID, "cs_1"), "")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+
+	// nothing to refund until the money actually arrived
+	ok, err = testDB.MarkProcessPaymentRefunded(processID, "re_1")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+
+	ok, err = testDB.MarkProcessPaymentPaid(processID, "cs_1", "pi_1")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+	payment, err := testDB.ProcessPayment(processID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.PaymentIntentID, qt.Equals, "pi_1")
+
+	// paid -> refunded, recording what the money went back as
+	ok, err = testDB.MarkProcessPaymentRefunded(processID, "re_1")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+	payment, err = testDB.ProcessPayment(processID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, ProcessPaymentRefunded)
+	c.Assert(payment.RefundID, qt.Equals, "re_1")
+
+	// a delete retried after the refund landed must not refund twice
+	ok, err = testDB.MarkProcessPaymentRefunded(processID, "re_2")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+
+	// a refund that failed at Stripe is not a refund: back to paid, refund id kept as the
+	// trace of what to reconcile by hand
+	ok, err = testDB.MarkProcessPaymentRefundFailed(processID, "re_1")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+	payment, err = testDB.ProcessPayment(processID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, ProcessPaymentPaid)
+	c.Assert(payment.RefundID, qt.Equals, "re_1")
+
+	// a replay of that event, and one naming a refund this payment never had, change nothing
+	ok, err = testDB.MarkProcessPaymentRefundFailed(processID, "re_1")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
+	ok, err = testDB.MarkProcessPaymentRefundFailed(processID, "re_other")
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsFalse)
 }

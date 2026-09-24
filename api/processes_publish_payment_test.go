@@ -72,7 +72,7 @@ func TestVotingProcessPublishPaymentGate(t *testing.T) {
 	}, "")
 	c.Assert(err, qt.IsNil)
 	c.Assert(stored, qt.IsTrue)
-	won, err := testDB.MarkProcessPaymentPaid(oid, "cs_gate_test")
+	won, err := testDB.MarkProcessPaymentPaid(oid, "cs_gate_test", "")
 	c.Assert(err, qt.IsNil)
 	c.Assert(won, qt.IsTrue)
 
@@ -80,9 +80,6 @@ func TestVotingProcessPublishPaymentGate(t *testing.T) {
 	// produced, so an edit can only repair the draft, never under-charge it
 	update := newVotingProcessRequest(orgAddress, memberIDs(members))
 	requestAndAssertCode(http.StatusOK, t, http.MethodPut, token, update, "processes", pid)
-	// deleting it is still refused — that would destroy what was paid for
-	requestAndAssertError(errors.ErrPaymentSessionConflict, t, http.MethodDelete, token, nil,
-		"processes", pid)
 
 	// paid -> publishes end to end
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
@@ -117,7 +114,7 @@ func TestPublishPaidProcessServerSide(t *testing.T) {
 	}, "")
 	c.Assert(err, qt.IsNil)
 	c.Assert(stored, qt.IsTrue)
-	won, err := testDB.MarkProcessPaymentPaid(oid, "cs_hook_test")
+	won, err := testDB.MarkProcessPaymentPaid(oid, "cs_hook_test", "")
 	c.Assert(err, qt.IsNil)
 	c.Assert(won, qt.IsTrue)
 
@@ -147,7 +144,7 @@ func TestPublishPaidProcessRefusals(t *testing.T) {
 		}, "")
 		c.Assert(err, qt.IsNil)
 		c.Assert(stored, qt.IsTrue)
-		won, err := testDB.MarkProcessPaymentPaid(oid, sessionID)
+		won, err := testDB.MarkProcessPaymentPaid(oid, sessionID, "")
 		c.Assert(err, qt.IsNil)
 		c.Assert(won, qt.IsTrue)
 		testAPI.publishPaidProcess(oid)
@@ -248,7 +245,9 @@ func TestManagedProcessWalletPublish(t *testing.T) {
 		"processes", pid, "publish")
 
 	// top up enough (15 voters email 2FA = 1515 cents) and publish
-	c.Assert(testDB.CreditWallet(integratorAddr, 100_000, "cs_wallet_topup_test"), qt.IsNil)
+	c.Assert(testDB.CreditWallet(db.WalletCredit{
+		OrgAddress: integratorAddr, AmountCents: 100_000, IdempotencyKey: "cs_wallet_topup_test",
+	}), qt.IsNil)
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
 	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted)
 	pollProcessPublished(t, token, pid)
@@ -302,7 +301,7 @@ func TestPublishPaidProcessRefusesGrownCensus(t *testing.T) {
 	}, "")
 	c.Assert(err, qt.IsNil)
 	c.Assert(stored, qt.IsTrue)
-	won, err := testDB.MarkProcessPaymentPaid(oid, "cs_grown_census")
+	won, err := testDB.MarkProcessPaymentPaid(oid, "cs_grown_census", "")
 	c.Assert(err, qt.IsNil)
 	c.Assert(won, qt.IsTrue)
 
@@ -361,7 +360,9 @@ func TestManagedWalletDebitRepricesGrownCensus(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	org, err := testDB.Organization(managedAddr)
 	c.Assert(err, qt.IsNil)
-	c.Assert(testDB.CreditWallet(integratorAddr, 100_000, "cs_wallet_growth_topup"), qt.IsNil)
+	c.Assert(testDB.CreditWallet(db.WalletCredit{
+		OrgAddress: integratorAddr, AmountCents: 100_000, IdempotencyKey: "cs_wallet_growth_topup",
+	}), qt.IsNil)
 
 	// the debit the publish path performs (15 voters, email 2FA)
 	c.Assert(testAPI.debitManagedProcessWallet(vp, org), qt.IsNil)
@@ -448,7 +449,7 @@ func TestPublishedCensusGrowthWithinPaidPrice(t *testing.T) {
 	}, "")
 	c.Assert(err, qt.IsNil)
 	c.Assert(stored, qt.IsTrue)
-	won, err := testDB.MarkProcessPaymentPaid(oid, "cs_census_growth")
+	won, err := testDB.MarkProcessPaymentPaid(oid, "cs_census_growth", "")
 	c.Assert(err, qt.IsNil)
 	c.Assert(won, qt.IsTrue)
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
@@ -547,7 +548,9 @@ func TestManagedCensusGrowthChargesIntegratorWallet(t *testing.T) {
 	pid := created.ProcessID
 	oid, err := bson.ObjectIDFromHex(pid)
 	c.Assert(err, qt.IsNil)
-	c.Assert(testDB.CreditWallet(integratorAddr, 100_000, "cs_managed_growth_topup"), qt.IsNil)
+	c.Assert(testDB.CreditWallet(db.WalletCredit{
+		OrgAddress: integratorAddr, AmountCents: 100_000, IdempotencyKey: "cs_managed_growth_topup",
+	}), qt.IsNil)
 
 	// publish, which debits the wallet for 15 voters without 2FA (€15)
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
@@ -608,4 +611,57 @@ func TestManagedCensusGrowthChargesIntegratorWallet(t *testing.T) {
 	wallet, err = testDB.Wallet(integratorAddr)
 	c.Assert(err, qt.IsNil)
 	c.Assert(wallet.BalanceCents, qt.Equals, int64(100_000-2_000))
+}
+
+// TestDeleteWalletPaidDraftCreditsIntegratorWallet is the managed side of the refund: a
+// managed organization pays from its integrator's wallet, so a draft it abandons puts the
+// money back there rather than issuing a card refund the integrator never made. Reaching a
+// paid-but-unpublished managed draft is what happens when the debit lands and publication
+// then fails preflight.
+func TestDeleteWalletPaidDraftCreditsIntegratorWallet(t *testing.T) {
+	c := qt.New(t)
+	installFakePaymentGW(t)
+	token := testCreateUser(t, "walletrefund1234")
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_wallet_refund")
+
+	members := postOrgMembers(t, token, managedAddr, newOrgMembers(15)...)
+	req := newVotingProcessRequest(managedAddr, memberIDs(members))
+	req.Census.TwoFaFields = nil
+	req.Census.AuthFields = db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber}
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint)
+	oid, err := bson.ObjectIDFromHex(created.ProcessID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(testDB.CreditWallet(db.WalletCredit{
+		OrgAddress: integratorAddr, AmountCents: 100_000, IdempotencyKey: "cs_wallet_refund_topup",
+	}), qt.IsNil)
+
+	// the publish path's debit, without the publish: 15 voters without 2FA is €15
+	c.Assert(testDB.DebitWalletForProcess(db.WalletDebit{
+		OrgAddress: integratorAddr, ProcessID: oid, AmountCents: 1_500, PriceCents: 1_500,
+	}), qt.IsNil)
+	stored, err := testDB.SetProcessPaymentPaidByWallet(&db.ProcessPayment{
+		ProcessID: oid, OrgAddress: managedAddr, AmountCents: 1_500, Currency: "eur",
+	})
+	c.Assert(err, qt.IsNil)
+	c.Assert(stored, qt.IsTrue)
+
+	requestAndAssertCode(http.StatusOK, t, http.MethodDelete, token, nil, "processes", created.ProcessID)
+
+	wallet, err := testDB.Wallet(integratorAddr)
+	c.Assert(err, qt.IsNil)
+	c.Assert(wallet.BalanceCents, qt.Equals, int64(100_000))
+	payment, err := testDB.ProcessPayment(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentRefunded)
+	c.Assert(payment.RefundID, qt.Equals, "refund:"+oid.Hex())
+
+	// the credit is a refund in the ledger, not a top-up: an integrator reconciling its own
+	// books has to be able to tell money it added from money it got back
+	_, entries, err := testDB.WalletLedger(integratorAddr, 1, 10)
+	c.Assert(err, qt.IsNil)
+	c.Assert(entries, qt.HasLen, 3)
+	c.Assert(entries[0].Kind, qt.Equals, db.WalletEntryRefund)
+	c.Assert(entries[0].AmountCents, qt.Equals, int64(1_500))
+	c.Assert(entries[0].ProcessID, qt.Equals, oid)
 }

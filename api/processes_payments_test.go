@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	qt "github.com/frankban/quicktest"
@@ -23,6 +24,14 @@ type fakePaymentGW struct {
 	sessions map[string]*stripe.PaymentSessionInfo
 	created  []*stripe.PaymentSessionParams
 	expired  []string
+	refunds  []fakeRefund
+	refundFn func(processID bson.ObjectID, paymentIntentID string) (*stripe.RefundInfo, error)
+}
+
+// fakeRefund is one recorded RefundProcessPayment call.
+type fakeRefund struct {
+	processID       bson.ObjectID
+	paymentIntentID string
 }
 
 func newFakePaymentGW() *fakePaymentGW {
@@ -76,6 +85,20 @@ func (f *fakePaymentGW) ExpirePaymentSession(sessionID string) error {
 	return nil
 }
 
+// RefundProcessPayment records the refund and reports it succeeded, unless the test
+// installed refundFn to make Stripe fail.
+func (f *fakePaymentGW) RefundProcessPayment(
+	processID bson.ObjectID, paymentIntentID string,
+) (*stripe.RefundInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.refunds = append(f.refunds, fakeRefund{processID: processID, paymentIntentID: paymentIntentID})
+	if f.refundFn != nil {
+		return f.refundFn(processID, paymentIntentID)
+	}
+	return &stripe.RefundInfo{ID: "re_test_" + processID.Hex(), Status: "succeeded"}, nil
+}
+
 // installFakePaymentGW swaps the API's payment gateway for a fake for one test.
 func installFakePaymentGW(t *testing.T) *fakePaymentGW {
 	t.Helper()
@@ -93,6 +116,19 @@ func newPricedVotingProcess(t *testing.T, token string, orgAddress common.Addres
 	members := postOrgMembers(t, token, orgAddress, newOrgMembers(15)...)
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
 		t, http.MethodPost, token, newVotingProcessRequest(orgAddress, memberIDs(members)), processesCreateEndpoint)
+	return created.ProcessID
+}
+
+// newBrandedVotingProcess creates a priced draft that selects the branding add-on (15
+// voters with email 2FA, €15.15, plus €149 of branding when the organization can still be
+// charged for it).
+func newBrandedVotingProcess(t *testing.T, token string, orgAddress common.Address) string {
+	t.Helper()
+	members := postOrgMembers(t, token, orgAddress, newOrgMembers(15)...)
+	req := newVotingProcessRequest(orgAddress, memberIDs(members))
+	req.AddOns = db.ProcessAddOns{Branding: true}
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint)
 	return created.ProcessID
 }
 
@@ -173,7 +209,7 @@ func TestProcessCheckoutFlow(t *testing.T) {
 	c.Assert(won, qt.IsTrue)
 	requestAndAssertError(errors.ErrPaymentSessionConflict, t, http.MethodPost, adminToken, checkoutReq,
 		"processes", pid, "checkout")
-	won, err = testDB.MarkProcessPaymentPaid(oid, "cs_test_2")
+	won, err = testDB.MarkProcessPaymentPaid(oid, "cs_test_2", "")
 	c.Assert(err, qt.IsNil)
 	c.Assert(won, qt.IsTrue)
 	requestAndAssertError(errors.ErrPaymentSessionConflict, t, http.MethodPost, adminToken, checkoutReq,
@@ -346,14 +382,7 @@ func TestBrandingChargedOncePerOrganization(t *testing.T) {
 	orgAddress := testCreateOrganization(t, adminToken)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
-	newBrandedProcess := func() string {
-		members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(15)...)
-		req := newVotingProcessRequest(orgAddress, memberIDs(members))
-		req.AddOns = db.ProcessAddOns{Branding: true}
-		created := requestAndParse[apicommon.CreateVotingProcessResponse](
-			t, http.MethodPost, adminToken, req, processesCreateEndpoint)
-		return created.ProcessID
-	}
+	newBrandedProcess := func() string { return newBrandedVotingProcess(t, adminToken, orgAddress) }
 	// 15 voters + email 2FA = €15.15; branding adds €149
 	const plainCents = int64(1_515)
 	const withBrandingCents = plainCents + 14_900
@@ -412,14 +441,7 @@ func TestBrandingClaimReleasedByAbandonedCheckout(t *testing.T) {
 	orgAddress := testCreateOrganization(t, adminToken)
 	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
 
-	newBrandedProcess := func() string {
-		members := postOrgMembers(t, adminToken, orgAddress, newOrgMembers(15)...)
-		req := newVotingProcessRequest(orgAddress, memberIDs(members))
-		req.AddOns = db.ProcessAddOns{Branding: true}
-		created := requestAndParse[apicommon.CreateVotingProcessResponse](
-			t, http.MethodPost, adminToken, req, processesCreateEndpoint)
-		return created.ProcessID
-	}
+	newBrandedProcess := func() string { return newBrandedVotingProcess(t, adminToken, orgAddress) }
 	const plainCents = int64(1_515)
 	const withBrandingCents = plainCents + 14_900
 
@@ -457,4 +479,84 @@ func TestBrandingClaimReleasedByAbandonedCheckout(t *testing.T) {
 		&apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"},
 		"processes", next, "checkout")
 	c.Assert(nextCheckout.AmountCents, qt.Equals, withBrandingCents)
+}
+
+// TestDeletePaidDraftRefunds covers the way out of a paid draft the organization no longer
+// wants: DELETE returns the money before it removes the process. The payment document stays
+// behind as the record that money came and went — the process it names is gone, so nothing
+// can be paid for again — and the organization's once-only branding add-on is released with
+// the refund, because it is about to be charged for it again.
+func TestDeletePaidDraftRefunds(t *testing.T) {
+	c := qt.New(t)
+	fake := installFakePaymentGW(t)
+	adminToken := testCreateUser(t, "refundpass123456")
+	orgAddress := testCreateOrganization(t, adminToken)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	const withBrandingCents = int64(1_515) + 14_900
+
+	paid := newBrandedVotingProcess(t, adminToken, orgAddress)
+	next := newBrandedVotingProcess(t, adminToken, orgAddress)
+	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](t, http.MethodPost, adminToken,
+		&apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"},
+		"processes", paid, "checkout")
+	c.Assert(checkout.AmountCents, qt.Equals, withBrandingCents)
+	oid, err := bson.ObjectIDFromHex(paid)
+	c.Assert(err, qt.IsNil)
+
+	// fulfillment, as the webhook performs it: the payment records the intent a refund is
+	// issued against, and the organization is stamped as having paid branding
+	won, err := testDB.MarkProcessPaymentPaid(oid, checkout.SessionID, "pi_test_refund")
+	c.Assert(err, qt.IsNil)
+	c.Assert(won, qt.IsTrue)
+	stamped, err := testDB.SetOrganizationBrandingPaid(orgAddress, time.Now())
+	c.Assert(err, qt.IsNil)
+	c.Assert(stamped, qt.IsTrue)
+
+	requestAndAssertCode(http.StatusOK, t, http.MethodDelete, adminToken, nil, "processes", paid)
+	c.Assert(fake.refunds, qt.HasLen, 1)
+	c.Assert(fake.refunds[0].processID, qt.Equals, oid)
+	c.Assert(fake.refunds[0].paymentIntentID, qt.Equals, "pi_test_refund")
+	_, err = testDB.VotingProcess(oid)
+	c.Assert(err, qt.ErrorIs, db.ErrNotFound)
+
+	payment, err := testDB.ProcessPayment(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentRefunded)
+	c.Assert(payment.RefundID, qt.Equals, "re_test_"+oid.Hex())
+
+	// branding came back with the money, so the next draft is charged for it again
+	price := requestAndParse[apicommon.ProcessPriceResponse](
+		t, http.MethodGet, adminToken, nil, "processes", next, "price")
+	c.Assert(price.TotalCents, qt.Equals, withBrandingCents)
+}
+
+// TestDeletePaidDraftKeepsDraftWhenRefundFails is the failure this flow must never get
+// wrong: if the money cannot go back, the draft it paid for stays. Deleting it anyway would
+// destroy the process and keep the payment.
+func TestDeletePaidDraftKeepsDraftWhenRefundFails(t *testing.T) {
+	c := qt.New(t)
+	fake := installFakePaymentGW(t)
+	fake.refundFn = func(_ bson.ObjectID, _ string) (*stripe.RefundInfo, error) {
+		return nil, fmt.Errorf("refund declined")
+	}
+	adminToken := testCreateUser(t, "refundfail123456")
+	orgAddress := testCreateOrganization(t, adminToken)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	pid := newPricedVotingProcess(t, adminToken, orgAddress)
+	oid, err := bson.ObjectIDFromHex(pid)
+	c.Assert(err, qt.IsNil)
+	checkout := requestAndParse[apicommon.ProcessCheckoutResponse](t, http.MethodPost, adminToken,
+		&apicommon.ProcessCheckoutRequest{ReturnURL: "https://app.example.com/payment"},
+		"processes", pid, "checkout")
+	won, err := testDB.MarkProcessPaymentPaid(oid, checkout.SessionID, "pi_test_declined")
+	c.Assert(err, qt.IsNil)
+	c.Assert(won, qt.IsTrue)
+
+	requestAndAssertError(errors.ErrStripeError, t, http.MethodDelete, adminToken, nil, "processes", pid)
+	_, err = testDB.VotingProcess(oid)
+	c.Assert(err, qt.IsNil)
+	payment, err := testDB.ProcessPayment(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPaid)
+	c.Assert(payment.RefundID, qt.Equals, "")
 }
