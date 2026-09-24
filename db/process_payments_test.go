@@ -135,6 +135,29 @@ func TestProcessPaymentPaidByWallet(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(ok, qt.IsTrue)
 
+	// a retry after the census grew tops the record up to the new price, keeping the
+	// original CreatedAt so the record's history survives
+	toppedUp := *payment
+	toppedUp.AmountCents = 20_000
+	toppedUp.CreatedAt = stored.CreatedAt
+	ok, err = testDB.SetProcessPaymentPaidByWallet(&toppedUp)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue)
+	raised, err := testDB.ProcessPayment(processID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(raised.AmountCents, qt.Equals, int64(20_000))
+	c.Assert(raised.CreatedAt.Equal(stored.CreatedAt), qt.IsTrue)
+
+	// but never down: a stale retry priced lower leaves the record alone
+	lowered := toppedUp
+	lowered.AmountCents = 14_200
+	ok, err = testDB.SetProcessPaymentPaidByWallet(&lowered)
+	c.Assert(err, qt.IsNil)
+	c.Assert(ok, qt.IsTrue) // already paid, so the caller is not in conflict
+	raised, err = testDB.ProcessPayment(processID)
+	c.Assert(err, qt.IsNil)
+	c.Assert(raised.AmountCents, qt.Equals, int64(20_000))
+
 	// deleting the draft removes its payment state
 	c.Assert(testDB.DeleteProcessPayment(processID), qt.IsNil)
 	_, err = testDB.ProcessPayment(processID)

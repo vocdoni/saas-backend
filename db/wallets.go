@@ -80,18 +80,30 @@ func (ms *MongoStorage) CreditWallet(orgAddress common.Address, amountCents int6
 	})
 }
 
-// DebitWalletForProcess debits the price of a managed-organization process from its
-// integrator's wallet, atomically and at most once per process: the process id is the
-// idempotency key, so a publish retry keeps the original debit and reports success
-// without charging again. Reports ErrInsufficientWalletBalance without touching the
-// wallet when the balance does not cover the amount.
-func (ms *MongoStorage) DebitWalletForProcess(
-	orgAddress common.Address, amountCents int64, processID bson.ObjectID,
-) error {
-	if (orgAddress.Cmp(common.Address{}) == 0) || amountCents <= 0 || processID == bson.NilObjectID {
+// WalletDebit is one process debit: AmountCents is what to take now, PriceCents the
+// process price that brings the total up to. The pair forms the idempotency key, so a
+// publish retry at the same price is a no-op while a retry after the census grew tops the
+// wallet down by the difference only.
+type WalletDebit struct {
+	OrgAddress  common.Address
+	ProcessID   bson.ObjectID
+	AmountCents int64
+	PriceCents  int64
+}
+
+// DebitWalletForProcess debits a managed-organization process from its integrator's
+// wallet, atomically and at most once per (process, price): a publish retry that re-prices
+// the same draft keeps the original debit and reports success without charging again,
+// while a retry priced higher debits only the delta the caller computed. Reports
+// ErrInsufficientWalletBalance without touching the wallet when the balance does not cover
+// the amount.
+func (ms *MongoStorage) DebitWalletForProcess(d WalletDebit) error {
+	if (d.OrgAddress.Cmp(common.Address{}) == 0) || d.AmountCents <= 0 ||
+		d.PriceCents < d.AmountCents || d.ProcessID == bson.NilObjectID {
 		return ErrInvalidData
 	}
-	idempotencyKey := processID.Hex()
+	orgAddress, amountCents := d.OrgAddress, d.AmountCents
+	idempotencyKey := fmt.Sprintf("%s:%d", d.ProcessID.Hex(), d.PriceCents)
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	filter := bson.M{
@@ -125,7 +137,7 @@ func (ms *MongoStorage) DebitWalletForProcess(
 		AmountCents:    -amountCents,
 		Kind:           WalletEntryDebit,
 		IdempotencyKey: idempotencyKey,
-		ProcessID:      processID,
+		ProcessID:      d.ProcessID,
 	})
 }
 

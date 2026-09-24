@@ -107,9 +107,12 @@ func (ms *MongoStorage) MarkProcessPaymentFailed(processID bson.ObjectID, sessio
 
 // SetProcessPaymentPaidByWallet records a wallet-debited payment as paid directly (no
 // checkout session). It upserts, so the integrator publish path needs no prior pending
-// state, and refuses to touch an existing processing or paid payment. An already-paid
-// payment reports true: the wallet debit is idempotent by process id, so a publish retry
-// that already paid must look successful, not conflicted.
+// state, and refuses to touch a payment being charged through Stripe. An already-paid
+// wallet payment may be raised to a higher amount — a publish retry after the census grew
+// tops up the wallet debit, and this records the new price — but never lowered, and an
+// already-paid payment at the same amount reports true so the retry looks successful
+// rather than conflicted. Callers must pass the existing CreatedAt so a top-up does not
+// reset it.
 func (ms *MongoStorage) SetProcessPaymentPaidByWallet(payment *ProcessPayment) (bool, error) {
 	if payment == nil || payment.ProcessID == bson.NilObjectID ||
 		(payment.OrgAddress.Cmp(common.Address{}) == 0) || payment.AmountCents <= 0 {
@@ -127,8 +130,18 @@ func (ms *MongoStorage) SetProcessPaymentPaidByWallet(payment *ProcessPayment) (
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
 	filter := bson.M{
-		"_id":    payment.ProcessID,
-		"status": bson.M{"$in": bson.A{ProcessPaymentPending, ProcessPaymentFailed}},
+		"_id": payment.ProcessID,
+		"$or": bson.A{
+			bson.M{"status": bson.M{"$in": bson.A{ProcessPaymentPending, ProcessPaymentFailed}}},
+			// a top-up of this same wallet payment: only upwards, and only while no
+			// checkout session owns the record
+			bson.M{
+				"status": ProcessPaymentPaid,
+				// absent (the field is omitempty, so a wallet payment has none) or empty
+				"checkoutSessionId": bson.M{"$in": bson.A{"", nil}},
+				"amountCents":       bson.M{"$lt": payment.AmountCents},
+			},
+		},
 	}
 	res, err := ms.processPayments.ReplaceOne(ctx, filter, payment, options.Replace().SetUpsert(true))
 	if err != nil {

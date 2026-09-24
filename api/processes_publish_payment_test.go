@@ -181,13 +181,14 @@ func TestPublishPaidProcessRefusals(t *testing.T) {
 	assertPaidUnpublished(payAndHook(strayPid, me.Email, "cs_refusal_stray"))
 }
 
-// TestManagedProcessWalletPublish: a managed organization's process is paid from its
-// integrator's wallet at publish time — refused (claim released) while the balance is
-// short, debited exactly once when it covers the price, kept across re-publishes.
-func TestManagedProcessWalletPublish(t *testing.T) {
+// newIntegratorWithManagedOrg provisions an integrator organization on a plan that allows
+// managed organizations, and returns its address together with one managed organization
+// created under it. planID must be unique per test; the plan is removed on cleanup.
+func newIntegratorWithManagedOrg(
+	t *testing.T, token, planID string,
+) (integrator, managedOrg common.Address) {
+	t.Helper()
 	c := qt.New(t)
-	installFakePaymentGW(t)
-	token := testCreateUser(t, "walletpassword123")
 	integratorAddr := testCreateOrganization(t, token)
 
 	integratorOrg, err := testDB.Organization(integratorAddr)
@@ -195,14 +196,14 @@ func TestManagedProcessWalletPublish(t *testing.T) {
 	integratorOrg.IntegratorLimits = &db.IntegratorLimits{MaxManagedOrgs: 1}
 	c.Assert(testDB.SetOrganization(integratorOrg), qt.IsNil)
 	integratorPlan := &db.Plan{
-		ID:           "prod_test_wallet_integrator",
+		ID:           planID,
 		Name:         "Wallet Integrator",
 		Organization: db.PlanLimits{MaxProcesses: 5, MaxCensus: 10_000, MaxDuration: 30, MaxDrafts: 5},
 		VotingTypes:  db.VotingTypes{Single: true, Multiple: true},
 		Features:     db.Features{TwoFaEmail: 10_000, TwoFaSms: 10_000},
 	}
 	c.Assert(testDB.SetPlan(integratorPlan), qt.IsNil)
-	defer func() { _ = testDB.DelPlan(&db.Plan{ID: integratorPlan.ID}) }()
+	t.Cleanup(func() { _ = testDB.DelPlan(&db.Plan{ID: integratorPlan.ID}) })
 	c.Assert(testDB.SetOrganizationSubscription(integratorAddr, &db.OrganizationSubscription{
 		PlanID: integratorPlan.ID, StartDate: time.Now(), Active: true,
 	}), qt.IsNil)
@@ -214,10 +215,21 @@ func TestManagedProcessWalletPublish(t *testing.T) {
 			},
 		}, "integrator", "organizations")
 	c.Assert(managed.Address, qt.Not(qt.Equals), common.Address{})
+	return integratorAddr, managed.Address
+}
 
-	members := postOrgMembers(t, token, managed.Address, newOrgMembers(15)...)
+// TestManagedProcessWalletPublish: a managed organization's process is paid from its
+// integrator's wallet at publish time — refused (claim released) while the balance is
+// short, debited exactly once when it covers the price, kept across re-publishes.
+func TestManagedProcessWalletPublish(t *testing.T) {
+	c := qt.New(t)
+	installFakePaymentGW(t)
+	token := testCreateUser(t, "walletpassword123")
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_wallet_integrator")
+
+	members := postOrgMembers(t, token, managedAddr, newOrgMembers(15)...)
 	created := requestAndParse[apicommon.CreateVotingProcessResponse](
-		t, http.MethodPost, token, newVotingProcessRequest(managed.Address, memberIDs(members)),
+		t, http.MethodPost, token, newVotingProcessRequest(managedAddr, memberIDs(members)),
 		processesCreateEndpoint)
 	pid := created.ProcessID
 
@@ -310,4 +322,71 @@ func TestPublishPaidProcessRefusesGrownCensus(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(vp.Published, qt.IsFalse)
 	c.Assert(vp.PublishInProgress(), qt.IsFalse) // no claim left behind
+}
+
+// TestManagedWalletDebitRepricesGrownCensus: the wallet debit is priced at the moment of
+// the attempt, not fixed by the first one. A publish that fails after the debit, followed
+// by census growth through POST /census/{id}, must top up the difference on the retry —
+// the integrator otherwise gets the grown election for the smaller price.
+func TestManagedWalletDebitRepricesGrownCensus(t *testing.T) {
+	c := qt.New(t)
+	installFakePaymentGW(t)
+	token := testCreateUser(t, "walletgrowth1234")
+	integratorAddr, managedAddr := newIntegratorWithManagedOrg(t, token, "prod_test_wallet_growth")
+
+	members := postOrgMembers(t, token, managedAddr, newOrgMembers(15)...)
+	created := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, newVotingProcessRequest(managedAddr, memberIDs(members)),
+		processesCreateEndpoint)
+	oid, err := bson.ObjectIDFromHex(created.ProcessID)
+	c.Assert(err, qt.IsNil)
+	vp, err := testDB.VotingProcess(oid)
+	c.Assert(err, qt.IsNil)
+	org, err := testDB.Organization(managedAddr)
+	c.Assert(err, qt.IsNil)
+	c.Assert(testDB.CreditWallet(integratorAddr, 100_000, "cs_wallet_growth_topup"), qt.IsNil)
+
+	// the debit the publish path performs (15 voters, email 2FA)
+	c.Assert(testAPI.debitManagedProcessWallet(vp, org), qt.IsNil)
+	wallet, err := testDB.Wallet(integratorAddr)
+	c.Assert(err, qt.IsNil)
+	c.Assert(wallet.BalanceCents, qt.Equals, int64(100_000-1_515))
+
+	// a retry of the unchanged draft charges nothing
+	c.Assert(testAPI.debitManagedProcessWallet(vp, org), qt.IsNil)
+	wallet, err = testDB.Wallet(integratorAddr)
+	c.Assert(err, qt.IsNil)
+	c.Assert(wallet.BalanceCents, qt.Equals, int64(100_000-1_515))
+
+	// grow the census behind the paid process, then retry the publish debit
+	all := postOrgMembers(t, token, managedAddr, newOrgMembers(45)[15:]...)
+	added := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, token,
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: memberIDs(all)},
+		censusEndpoint, vp.CensusID.Hex())
+	c.Assert(added.Added, qt.Equals, uint32(30))
+	grown, _, err := testAPI.processQuote(vp)
+	c.Assert(err, qt.IsNil)
+	c.Assert(grown.TotalCents > 1_515, qt.IsTrue)
+
+	c.Assert(testAPI.debitManagedProcessWallet(vp, org), qt.IsNil)
+	wallet, err = testDB.Wallet(integratorAddr)
+	c.Assert(err, qt.IsNil)
+	c.Assert(wallet.BalanceCents, qt.Equals, 100_000-grown.TotalCents)
+
+	// the payment record carries the new price, and the ledger both legs
+	payment, err := testDB.ProcessPayment(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPaid)
+	c.Assert(payment.AmountCents, qt.Equals, grown.TotalCents)
+	total, entries, err := testDB.WalletLedger(integratorAddr, 1, 10)
+	c.Assert(err, qt.IsNil)
+	c.Assert(total, qt.Equals, int64(3)) // top-up + two debits
+	c.Assert(entries[0].AmountCents, qt.Equals, -(grown.TotalCents - 1_515))
+	c.Assert(entries[1].AmountCents, qt.Equals, int64(-1_515))
+
+	// and a further attempt at the unchanged price adds nothing
+	c.Assert(testAPI.debitManagedProcessWallet(vp, org), qt.IsNil)
+	wallet, err = testDB.Wallet(integratorAddr)
+	c.Assert(err, qt.IsNil)
+	c.Assert(wallet.BalanceCents, qt.Equals, 100_000-grown.TotalCents)
 }

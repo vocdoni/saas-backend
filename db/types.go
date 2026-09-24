@@ -803,7 +803,7 @@ type ProcessPayment struct {
 
 // Wallet is an integrator's prepaid EUR balance. AppliedKeys makes credits and debits
 // idempotent inside the one document Mongo can update atomically: a top-up's key is its
-// checkout session id, a debit's key is the process id hex. The wallet document is
+// checkout session id, a debit's key is "<process id hex>:<price cents>". The wallet is
 // authoritative for the balance; the walletLedger collection is the audit trail.
 type Wallet struct {
 	OrgAddress   common.Address `json:"orgAddress" bson:"_id"`

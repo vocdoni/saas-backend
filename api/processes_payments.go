@@ -112,10 +112,12 @@ func (a *API) paymentDueForPublish(vp *db.VotingProcess) (*pricing.Quote, error)
 }
 
 // debitManagedProcessWallet charges a managed organization's process to its integrator's
-// prepaid wallet: atomic, at most once per process (a publish retry keeps the original
-// debit and passes), refused without touching the balance when it does not cover the
-// price. The paid state is recorded afterwards; the wallet document itself is the
-// authoritative record, so a failure there only logs.
+// prepaid wallet: atomic, and priced against the draft as it is right now. A publish retry
+// re-prices, so a retry of an unchanged draft debits nothing while one whose census grew
+// between the attempts is topped up by the difference — the price is never fixed by the
+// first attempt. Refused without touching the balance when the wallet does not cover it.
+// The paid state is recorded afterwards; the wallet document itself is the authoritative
+// record, so a failure there only logs.
 func (a *API) debitManagedProcessWallet(vp *db.VotingProcess, org *db.Organization) error {
 	quote, _, err := a.processQuote(vp)
 	if err != nil {
@@ -124,25 +126,50 @@ func (a *API) debitManagedProcessWallet(vp *db.VotingProcess, org *db.Organizati
 	if quote.TotalCents == 0 {
 		return nil
 	}
-	if err := a.db.DebitWalletForProcess(org.ManagedBy, quote.TotalCents, vp.ID); err != nil {
+	// What this process paid already, so the debit below is the delta. A payment state we
+	// cannot read is never assumed absent: that would debit the whole price a second time.
+	paid, err := a.db.ProcessPayment(vp.ID)
+	if err != nil && err != db.ErrNotFound {
+		return fmt.Errorf("failed to get process payment: %w", err)
+	}
+	var alreadyCents int64
+	if paid != nil && paid.Status == db.ProcessPaymentPaid {
+		alreadyCents = paid.AmountCents
+	}
+	if alreadyCents >= quote.TotalCents {
+		return nil // this price is already covered
+	}
+	dueCents := quote.TotalCents - alreadyCents
+	if err := a.db.DebitWalletForProcess(db.WalletDebit{
+		OrgAddress:  org.ManagedBy,
+		ProcessID:   vp.ID,
+		AmountCents: dueCents,
+		PriceCents:  quote.TotalCents,
+	}); err != nil {
 		if err == db.ErrInsufficientWalletBalance {
 			wallet, werr := a.db.Wallet(org.ManagedBy)
 			if werr != nil {
 				return errors.ErrInsufficientWalletBalance
 			}
 			return errors.ErrInsufficientWalletBalance.WithData(map[string]int64{
-				"requiredCents":  quote.TotalCents,
+				"requiredCents":  dueCents,
 				"availableCents": wallet.BalanceCents,
 			})
 		}
 		return fmt.Errorf("failed to debit integrator wallet: %w", err)
 	}
-	if _, err := a.db.SetProcessPaymentPaidByWallet(&db.ProcessPayment{
+	walletPayment := &db.ProcessPayment{
 		ProcessID:   vp.ID,
 		OrgAddress:  vp.OrgAddress,
 		AmountCents: quote.TotalCents,
 		Currency:    "eur",
-	}); err != nil {
+	}
+	if paid != nil {
+		// keep the record's history across a top-up
+		walletPayment.CreatedAt = paid.CreatedAt
+		walletPayment.RequestedBy = paid.RequestedBy
+	}
+	if _, err := a.db.SetProcessPaymentPaidByWallet(walletPayment); err != nil {
 		log.Warnw("could not record wallet-paid process payment",
 			"processId", vp.ID.Hex(), "error", err)
 	}
