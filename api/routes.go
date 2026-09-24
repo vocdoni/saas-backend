@@ -235,6 +235,10 @@ const (
 
 	// GET routes to compute a price from formula inputs (public calculator)
 	pricingEndpoint = "/pricing"
+
+	// POST starts (or resumes) the one-time checkout of a voting process;
+	// GET reports its payment status
+	processesCheckoutEndpoint = "/processes/{processId}/checkout"
 	// POST /processes/{processId}/check voter eligibility/status (public CSP)
 	processesCheckEndpoint = "/processes/{processId}/check"
 	// POST /processes/{processId}/publish to publish the process (one election per question)

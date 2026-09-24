@@ -187,6 +187,37 @@ type ProcessPriceResponse struct {
 	PaymentStatus db.ProcessPaymentStatus `json:"paymentStatus,omitempty"`
 }
 
+// ProcessCheckoutRequest starts (or resumes) the one-time checkout of a voting process.
+type ProcessCheckoutRequest struct {
+	// ReturnURL is where Stripe redirects after checkout; the session id is appended.
+	ReturnURL string `json:"returnURL"`
+	Locale    string `json:"locale,omitempty"`
+}
+
+// ProcessCheckoutResponse carries the embedded checkout credentials for the process
+// purchase. AmountCents is the net total the session was created for.
+type ProcessCheckoutResponse struct {
+	ClientSecret string `json:"clientSecret"`
+	SessionID    string `json:"sessionId"`
+	AmountCents  int64  `json:"amountCents"`
+	Currency     string `json:"currency"`
+}
+
+// ProcessPaymentStatusResponse reports the payment state of a voting process, combining
+// the stored payment with the live checkout session state when one is open.
+type ProcessPaymentStatusResponse struct {
+	Status      db.ProcessPaymentStatus `json:"status"`
+	AmountCents int64                   `json:"amountCents"`
+	Currency    string                  `json:"currency"`
+	PaidAt      string                  `json:"paidAt,omitempty"`
+	// SessionStatus is the live Stripe session state (open, complete, expired) when a
+	// checkout session exists; empty for wallet-paid processes.
+	SessionStatus string `json:"sessionStatus,omitempty"`
+	// SessionPaymentStatus is the live Stripe payment state of that session (paid,
+	// unpaid, no_payment_required).
+	SessionPaymentStatus string `json:"sessionPaymentStatus,omitempty"`
+}
+
 // VotingProcessListResponse is the paginated list of voting processes.
 type VotingProcessListResponse struct {
 	Processes  []VotingProcessResponse `json:"processes"`

@@ -184,6 +184,9 @@ func (a *API) publishPreflightProblems(
 //	@Description	GET /jobs/{jobId}. Idempotent once published.
 //	@Description	409 (40172) means the stored questions do not match the process and the draft has to be
 //	@Description	saved again before it can be published.
+//	@Description	402 (40174) means the process is priced and unpaid — the current quote travels in the
+//	@Description	error data; start checkout via POST /processes/{processId}/checkout. For a managed
+//	@Description	organization, 402 (40175) means its integrator's wallet does not cover the price.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -193,6 +196,7 @@ func (a *API) publishPreflightProblems(
 //	@Success		200			{object}	apicommon.CreateVotingProcessResponse	"Already published"
 //	@Failure		400			{object}	errors.Error							"Not ready to publish"
 //	@Failure		401			{object}	errors.Error
+//	@Failure		402			{object}	errors.Error	"Payment required (quote in data), or insufficient integrator wallet balance"
 //	@Failure		404			{object}	errors.Error
 //	@Failure		409			{object}	errors.Error	"Publish in progress, or the stored questions do not match the process"
 //	@Failure		503			{object}	errors.Error
@@ -242,6 +246,20 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 			apiErr = errors.ErrProcessQuestionsMismatch
 		}
 		apiErr.Withf("process is not ready to publish: %s", strings.Join(problems, "; ")).Write(w)
+		return
+	}
+
+	// payment gate: a priced process publishes only after its payment is verified. The
+	// quote owed travels in the error payload so the client can go straight to checkout.
+	// Free processes pass with no checkout; managed organizations are debited from
+	// their integrator's wallet inside startProcessPublish instead.
+	due, err := a.paymentDueForPublish(vp)
+	if err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
+	if due != nil {
+		errors.ErrPaymentRequired.WithData(due).Write(w)
 		return
 	}
 
@@ -318,6 +336,17 @@ func (a *API) startProcessPublish(
 				log.Warnw("could not roll back managed processes counter", "error", e)
 			}
 		}()
+	}
+
+	// payment: a managed organization's process is charged to its integrator's wallet
+	// here, after the claim, so two concurrent publishes cannot both debit — and the
+	// debit's per-process idempotency means a retry after a later failure passes
+	// without a second charge. Standard organizations were gated on a verified
+	// payment before this function.
+	if org.ManagedBy != (common.Address{}) {
+		if err := a.debitManagedProcessWallet(vp, org); err != nil {
+			return "", err
+		}
 	}
 
 	orgSigner, err := account.OrganizationSigner(a.secret, org.Creator, org.Nonce)
