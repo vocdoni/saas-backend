@@ -228,19 +228,32 @@ func (c *Client) CreateCheckoutSession(params *CheckoutSessionParams) (*stripeap
 func (*Client) GetCheckoutSession(sessionID string) (*CheckoutSessionStatus, error) {
 	params := &stripeapi.CheckoutSessionParams{}
 	params.AddExpand("line_items")
+	// unexpanded, session.subscription is a bare ID and its status reads as ""
+	params.AddExpand("subscription")
 
 	session, err := stripecheckoutsession.Get(sessionID, params)
 	if err != nil {
 		return nil, errors.ErrStripeError.Withf("failed to get checkout session: %v", err)
 	}
 
-	status := &CheckoutSessionStatus{
-		Status:             string(session.Status),
-		CustomerEmail:      session.CustomerDetails.Email,
-		SubscriptionStatus: string(session.Subscription.Status),
-	}
+	return checkoutSessionStatus(session), nil
+}
 
-	return status, nil
+// checkoutSessionStatus maps a Stripe checkout session onto the API status shape.
+// Both sub-objects are optional: CustomerDetails is nil until the customer fills the
+// form, and Subscription is nil for one-time (mode "payment") sessions.
+func checkoutSessionStatus(session *stripeapi.CheckoutSession) *CheckoutSessionStatus {
+	status := &CheckoutSessionStatus{
+		Status:        string(session.Status),
+		PaymentStatus: string(session.PaymentStatus),
+	}
+	if session.CustomerDetails != nil {
+		status.CustomerEmail = session.CustomerDetails.Email
+	}
+	if session.Subscription != nil {
+		status.SubscriptionStatus = string(session.Subscription.Status)
+	}
+	return status
 }
 
 // CreatePortalSession creates a billing portal session for a customer
@@ -278,4 +291,7 @@ type CheckoutSessionStatus struct {
 	Status             string `json:"status"`
 	CustomerEmail      string `json:"customer_email"`
 	SubscriptionStatus string `json:"subscription_status"`
+	// PaymentStatus is the payment outcome of the session, in every mode: "paid",
+	// "unpaid" or "no_payment_required" (e.g. a subscription that starts with a trial).
+	PaymentStatus string `json:"payment_status,omitempty"`
 }
