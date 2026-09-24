@@ -1269,6 +1269,39 @@ definitions:
           type: string
         type: array
     type: object
+  apicommon.ProcessCensusCheckoutRequest:
+    properties:
+      censusSize:
+        description: CensusSize is the census size to buy room for; it must exceed
+          what is already paid.
+        type: integer
+      locale:
+        type: string
+      returnURL:
+        description: ReturnURL is where Stripe redirects after checkout; the session
+          id is appended.
+        type: string
+    type: object
+  apicommon.ProcessCensusGrowthQuote:
+    properties:
+      censusSize:
+        description: CensusSize is the projected size the quote was computed for.
+        type: integer
+      currency:
+        type: string
+      dueCents:
+        type: integer
+      lines:
+        items:
+          $ref: '#/definitions/pricing.QuoteLine'
+        type: array
+      paidCents:
+        description: PaidCents is the envelope already bought, DueCents the difference
+          to TotalCents.
+        type: integer
+      totalCents:
+        type: integer
+    type: object
   apicommon.ProcessCheckoutRequest:
     properties:
       locale:
@@ -3421,6 +3454,10 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
+        "402":
+          description: The census would grow beyond the price paid for its process
+          schema:
+            $ref: '#/definitions/apicommon.ProcessCensusGrowthQuote'
         "403":
           description: Plan census quota exceeded
           schema:
@@ -6602,8 +6639,12 @@ paths:
         published process has on-chain elections and cannot be deleted. Requires
         Manager/Admin role of the organization that owns the process.
 
-        A paid draft cannot be deleted. A draft whose payment is still processing, or whose
-        checkout was just completed, is refused: retry once it settles.
+        A paid draft is refunded before it is deleted, the way it was paid: a card payment
+        is refunded (VAT included) and a managed organization's payment is credited back to
+        its integrator wallet. The payment record is kept as the audit trail, and the
+        organization's branding add-on is released so its next process can buy it. A draft
+        whose payment is still processing, or whose checkout was just completed, is refused:
+        retry once it settles.
 
         Also callable with a scoped API key (scope: `voting:write`).
       parameters:
@@ -6628,11 +6669,11 @@ paths:
           schema:
             $ref: '#/definitions/errors.Error'
         "409":
-          description: Process already published, or its payment is paid or in flight
+          description: Process already published, or its payment is in flight
           schema:
             $ref: '#/definitions/errors.Error'
         "500":
-          description: Internal server error
+          description: Internal server error, or the payment could not be refunded
           schema:
             $ref: '#/definitions/errors.Error'
       security:
@@ -7036,6 +7077,10 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
+        "402":
+          description: The census would grow beyond the price paid; buy the difference
+          schema:
+            $ref: '#/definitions/apicommon.ProcessCensusGrowthQuote'
         "404":
           description: Process not found
           schema:
@@ -7051,6 +7096,70 @@ paths:
       security:
       - BearerAuth: []
       summary: Add members to a published process's census
+      tags:
+      - processes
+  /processes/{processId}/census/checkout:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Opens a one-time Stripe checkout for the difference between what the process
+        already paid and what its census would cost at censusSize, so a census that
+        outgrew its price can be grown (or a paid draft republished) instead of being
+        stuck behind a 402. Add-ons are priced exactly as the original payment priced
+        them, so the branding add-on is never charged twice. The paid amount is raised
+        when the payment is verified by webhook — never before, so the census stays
+        refused until the money lands. A managed organization pays from its integrator
+        wallet instead: the difference is debited synchronously and the response carries
+        no checkout session, so the census can grow immediately. 400 when the process has
+        no completed payment, or when the target does not cost more than was already
+        paid. Requires Admin role.
+      parameters:
+      - description: Process ID
+        in: path
+        name: processId
+        required: true
+        type: string
+      - description: Census headroom to buy
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/apicommon.ProcessCensusCheckoutRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apicommon.ProcessCheckoutResponse'
+        "400":
+          description: No completed payment, or nothing left to buy
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "402":
+          description: Integrator wallet does not cover the difference
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "422":
+          description: Census size requires a custom quote
+          schema:
+            $ref: '#/definitions/errors.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/errors.Error'
+      security:
+      - BearerAuth: []
+      summary: Buy census headroom for a paid process
       tags:
       - processes
   /processes/{processId}/check:
