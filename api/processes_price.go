@@ -167,6 +167,17 @@ func (a *API) releaseRefusedBrandingClaim(vp *db.VotingProcess, claimedAt time.T
 	}
 }
 
+// releaseDroppedCheckoutClaim frees the branding claim held for vp by a pending checkout that was
+// just dropped (cancelled, or deleted with its draft). Otherwise the claim would keep a sibling
+// draft from being charged branding for up to db.BrandingClaimStaleAfter. org is the
+// organization as read before the checkout was dropped: the release is pinned to that claim, so a
+// newer one, taken by a concurrent checkout of the same draft, is left alone.
+func (a *API) releaseDroppedCheckoutClaim(vp *db.VotingProcess, org *db.Organization) {
+	if org.BrandingClaimedBy == vp.ID {
+		a.releaseRefusedBrandingClaim(vp, org.BrandingClaimedAt)
+	}
+}
+
 // pricingHandler godoc
 //
 //	@Summary		Compute a pay-per-process price

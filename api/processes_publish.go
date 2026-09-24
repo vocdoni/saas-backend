@@ -192,6 +192,9 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 //	@Description	GET /jobs/{jobId}. Idempotent once published.
 //	@Description	409 (40172) means the stored questions do not match the process and the draft has to be
 //	@Description	saved again before it can be published.
+//	@Description	402 (40178) means the process is priced and unpaid — the current quote travels in the
+//	@Description	error data; start checkout via POST /processes/{processId}/checkout. For a managed
+//	@Description	organization, 402 (40175) means its integrator's wallet does not cover the price.
 //	@Tags			processes
 //	@Accept			json
 //	@Produce		json
@@ -201,8 +204,10 @@ func (a *API) publishPreflightProblems(t publishTarget) (problems []string, ques
 //	@Success		200			{object}	apicommon.CreateVotingProcessResponse	"Already published"
 //	@Failure		400			{object}	errors.Error							"Not ready to publish"
 //	@Failure		401			{object}	errors.Error
+//	@Failure		402			{object}	errors.Error	"Payment required (quote in data), or insufficient integrator wallet balance"
 //	@Failure		404			{object}	errors.Error
-//	@Failure		409			{object}	errors.Error	"Publish in progress, or the stored questions do not match the process"
+//	@Failure		409			{object}	errors.Error	"Publish in progress, questions out of sync, or payment still processing"
+//	@Failure		422			{object}	errors.Error	"Managed organization: census size requires a custom quote"
 //	@Failure		503			{object}	errors.Error
 //	@Router			/processes/{processId}/publish [post]
 func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
@@ -251,6 +256,20 @@ func (a *API) publishVotingProcessHandler(w http.ResponseWriter, r *http.Request
 			apiErr = errors.ErrProcessQuestionsMismatch
 		}
 		apiErr.Withf("process is not ready to publish: %s", strings.Join(problems, "; ")).Write(w)
+		return
+	}
+
+	// payment gate: a priced process publishes only after its payment is verified. The
+	// quote owed travels in the error payload so the client can go straight to checkout.
+	// Free processes pass with no checkout; managed organizations are debited from
+	// their integrator's wallet inside startProcessPublish instead.
+	due, err := a.paymentDueForPublish(vp)
+	if err != nil {
+		writeSubscriptionError(w, err)
+		return
+	}
+	if due != nil {
+		errors.ErrPaymentRequired.WithData(due).Write(w)
 		return
 	}
 
@@ -328,6 +347,18 @@ func (a *API) startProcessPublish(t publishTarget) (string, error) {
 		}()
 	}
 
+	// payment: a managed organization's process is charged to its integrator's wallet
+	// here, after the claim, so two concurrent publishes cannot both debit — and the
+	// debit's per-process idempotency means a retry after a later failure passes
+	// without a second charge. Such a failure (a full queue included) leaves a paid
+	// draft, like a card-paid one: publishing again is free and deleting it refunds the
+	// wallet. Standard organizations were gated on a verified payment before this function.
+	if org.ManagedBy != (common.Address{}) {
+		if err := a.debitManagedProcessWallet(vp, org); err != nil {
+			return "", err
+		}
+	}
+
 	orgSigner, err := account.OrganizationSigner(a.secret, org.Creator, org.Nonce)
 	if err != nil {
 		return "", errors.ErrGenericInternalServerError.Withf("could not restore organization signer: %v", err)
@@ -375,6 +406,9 @@ func (a *API) startProcessPublish(t publishTarget) (string, error) {
 	}}) {
 		if e := a.db.SetJobStatus(jobID, db.JobStatusFailed, nil, "tx queue full"); e != nil {
 			log.Warnw("could not mark job failed after full queue", "error", e)
+		}
+		if org.ManagedBy != (common.Address{}) {
+			return "", errors.ErrTxQueueFull.Withf("what the wallet paid is kept; publishing again does not charge it again")
 		}
 		return "", errors.ErrTxQueueFull
 	}
@@ -851,10 +885,6 @@ func parseProcessStatus(s string) (models.ProcessStatus, bool) {
 // HasTxPermission skips the per-org process-count check for managed orgs precisely because
 // this integrator-level reservation enforces it instead.
 func (a *API) reserveManagedProcessSlot(org *db.Organization, maxCensusSize uint64) (common.Address, bool, error) {
-	// draft creation already rejects integrator top-level orgs; re-check at publish.
-	if org.ManagedBy == (common.Address{}) && a.subscriptions.IsIntegrator(org) {
-		return common.Address{}, false, errors.ErrIntegratorTopLevelOrgCannotOwnProcess
-	}
 	if org.ManagedBy == (common.Address{}) || maxCensusSize <= uint64(db.TestMaxCensusSize) {
 		return common.Address{}, false, nil
 	}
