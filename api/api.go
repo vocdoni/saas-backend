@@ -433,6 +433,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPut, processesEndpoint, a.updateVotingProcessHandler)
 		handle(r, http.MethodGet, processesValidateEndpoint, a.validateVotingProcessHandler)
 		handle(r, http.MethodPost, processesPublishEndpoint, a.publishVotingProcessHandler)
+		handle(r, http.MethodGet, processesPriceEndpoint, a.processPriceHandler)
 		handle(r, http.MethodPut, processesQuestionsStatusEndpoint, a.setVotingProcessQuestionsStatusHandler)
 		handle(r, http.MethodPut, processesQuestionStatusEndpoint, a.setVotingProcessQuestionStatusHandler)
 		handle(r, http.MethodDelete, processesEndpoint, a.deleteVotingProcessHandler)
@@ -465,6 +466,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, organizationTypesEndpoint, a.organizationsTypesHandler)
 		handle(r, http.MethodGet, organizationLanguagesEndpoint, a.organizationsLanguagesHandler)
 		handle(r, http.MethodGet, plansEndpoint, a.plansHandler)
+		handle(r, http.MethodGet, pricingEndpoint, a.pricingHandler)
 		// late-bound: a method value would capture a.stripeHandlers as it is at
 		// router-build time (nil when Stripe init failed or a test installs it later)
 		handle(r, http.MethodPost, subscriptionsWebhook, func(w http.ResponseWriter, r *http.Request) {

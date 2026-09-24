@@ -229,6 +229,12 @@ const (
 	processesCensusEndpoint = "/processes/{processId}/census"
 	// GET /processes/{processId}/validation publish-readiness dry-run (protected)
 	processesValidateEndpoint = "/processes/{processId}/validation"
+
+	// GET routes to get the server-side price of a voting process
+	processesPriceEndpoint = "/processes/{processId}/price"
+
+	// GET routes to compute a price from formula inputs (public calculator)
+	pricingEndpoint = "/pricing"
 	// POST /processes/{processId}/check voter eligibility/status (public CSP)
 	processesCheckEndpoint = "/processes/{processId}/check"
 	// POST /processes/{processId}/publish to publish the process (one election per question)
