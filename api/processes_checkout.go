@@ -21,6 +21,7 @@ type paymentGateway interface {
 	CreatePaymentSession(params *stripe.PaymentSessionParams) (*stripe.PaymentSessionInfo, error)
 	GetPaymentSession(sessionID string) (*stripe.PaymentSessionInfo, error)
 	ExpirePaymentSession(sessionID string) error
+	RefundProcessPayment(processID bson.ObjectID, paymentIntentID string, amountCents int64) (*stripe.RefundInfo, error)
 }
 
 // refusePaymentLocked refuses draft mutations while a payment is processing: money is in
@@ -28,8 +29,9 @@ type paymentGateway interface {
 // draft is not locked — every publish path re-prices against what was paid, refusing when
 // the draft grew worth more, so an edit can only fix a draft that failed publish preflight,
 // never under-charge. Pending payments do not lock either: the open session is expired and
-// replaced at the next checkout. Callers naming extra statuses in alsoLocked refuse those
-// too.
+// replaced at the next checkout. A paid draft is not refused by DELETE either: the money is
+// returned first (see refundPaidProcess). Callers naming extra statuses in alsoLocked refuse
+// those too.
 // A payment state it cannot read is refused rather than assumed absent: nothing further
 // down the write path consults payment state, so failing open here would let a transient
 // Mongo error unlock exactly the draft this guard exists to protect.

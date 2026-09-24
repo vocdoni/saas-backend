@@ -23,8 +23,10 @@ type fakePaymentGW struct {
 	sessions map[string]*stripe.PaymentSessionInfo
 	created  []*stripe.PaymentSessionParams
 	expired  []string
+	refunds  []fakeRefund
 	// expireErr, when set, makes ExpirePaymentSession fail (Stripe unreachable)
 	expireErr error
+	refundFn  func(processID bson.ObjectID, paymentIntentID string) (*stripe.RefundInfo, error)
 }
 
 func newFakePaymentGW() *fakePaymentGW {

@@ -23,8 +23,12 @@ import (
 //	@Description	published process has on-chain elections and cannot be deleted. Requires
 //	@Description	Manager/Admin role of the organization that owns the process.
 //	@Description
-//	@Description	A paid draft cannot be deleted. A draft whose payment is still processing, or whose
-//	@Description	checkout was just completed, is refused: retry once it settles.
+//	@Description	A paid draft is refunded before it is deleted, the way it was paid: a card payment
+//	@Description	is refunded (VAT included) and a managed organization's payment is credited back to
+//	@Description	its integrator wallet. The payment record is kept as the audit trail, and the
+//	@Description	organization's branding add-on is released so its next process can buy it. A draft
+//	@Description	whose payment is still processing, or whose checkout was just completed, is refused:
+//	@Description	retry once it settles.
 //	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
@@ -34,8 +38,8 @@ import (
 //	@Success		200			{string}	string			"OK"
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
 //	@Failure		404			{object}	errors.Error	"Process not found"
-//	@Failure		409			{object}	errors.Error	"Process already published, or its payment is paid or in flight"
-//	@Failure		500			{object}	errors.Error	"Internal server error"
+//	@Failure		409			{object}	errors.Error	"Process already published, or its payment is in flight"
+//	@Failure		500			{object}	errors.Error	"Internal server error, or the payment could not be refunded"
 //	@Router			/processes/{processId} [delete]
 func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
 	oid, ok := a.votingProcessID(w, r)
@@ -57,10 +61,9 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	// a processing payment refuses deletion: money is in flight and its outcome unknown.
-	// A paid one is refused too, or the money would be kept for a process that is gone; a
-	// pending one is released by expiring its open session so it can never be paid, and its
-	// payment record goes with the draft.
-	if a.refusePaymentLocked(w, oid, db.ProcessPaymentPaid) {
+	// A paid one is refunded below; a pending one is released by expiring its open session
+	// so it can never be paid, and its payment record goes with the draft.
+	if a.refusePaymentLocked(w, oid) {
 		return
 	}
 	payment, err := a.db.ProcessPayment(oid)
@@ -74,6 +77,15 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	switch {
 	case payment == nil:
 		// free process, or never quoted: nothing to release
+	case payment.Status == db.ProcessPaymentPaid:
+		// the money goes back before the draft goes away, and the payment row stays as
+		// the record that it did
+		if !a.refundPaidProcess(w, vp, payment) {
+			return
+		}
+	case payment.Status == db.ProcessPaymentRefunded:
+		// an earlier delete refunded it and then failed to drop the draft: the row is
+		// already the audit record, so only the draft is left to go
 	case payment.Status == db.ProcessPaymentPending && payment.CheckoutSessionID != "":
 		if !a.releasePendingCheckout(w, payment) {
 			return
@@ -245,6 +257,7 @@ func (a *API) votingProcessParticipantsHandler(w http.ResponseWriter, r *http.Re
 //	@Failure		400			{object}	errors.Error							"Invalid input data"
 //	@Failure		401			{object}	errors.Error							"Unauthorized"
 //	@Failure		404			{object}	errors.Error							"Process not found"
+//	@Failure		402			{object}	apicommon.ProcessCensusGrowthQuote		"The census would grow beyond the price paid; buy the difference"
 //	@Failure		409			{object}	errors.Error							"Process is not published"
 //	@Failure		500			{object}	errors.Error							"Internal server error"
 //	@Router			/processes/{processId}/census [put]
@@ -276,6 +289,13 @@ func (a *API) updateVotingProcessCensusHandler(w http.ResponseWriter, r *http.Re
 	}
 	if len(req.MemberIDs) == 0 {
 		apicommon.HTTPWriteJSON(w, &apicommon.UpdateProcessCensusResponse{Added: 0})
+		return
+	}
+	// pay-per-process: the price is a function of the census size, so the census may grow
+	// only as far as the price already paid reaches. Past that the 402 carries what the
+	// growth costs, which POST /processes/{processId}/census/checkout sells — by card, or
+	// from the integrator wallet for a managed organization.
+	if a.refuseCensusGrowthBeyondPayment(w, vp, census, req.MemberIDs) {
 		return
 	}
 

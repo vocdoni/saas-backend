@@ -79,8 +79,6 @@ func TestVotingProcessPublishPaymentGate(t *testing.T) {
 	// produced, so an edit can only repair the draft, never under-charge it
 	update := newVotingProcessRequest(orgAddress, memberIDs(members))
 	requestAndAssertCode(http.StatusOK, t, http.MethodPut, token, update, "processes", pid)
-	// but not deletable: that would keep the money for a process that is gone
-	requestAndAssertError(errors.ErrPaymentSessionConflict, t, http.MethodDelete, token, nil, "processes", pid)
 
 	// paid -> publishes end to end
 	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
@@ -270,10 +268,10 @@ func TestManagedProcessWalletPublish(t *testing.T) {
 	c.Assert(wallet.BalanceCents, qt.Equals, int64(100_000-1_515))
 }
 
-// TestPublishPaidProcessRefusesGrownCensus: the price is the census size at payment time,
-// but the census behind a paid draft can still grow, so the publish gate — the only choke
-// point that sees both the money and the current draft — re-prices and refuses. Otherwise
-// the extra voters ride on the smaller price.
+// TestPublishPaidProcessRefusesGrownCensus: the price is the census size at payment time.
+// Both census routes refuse growth past it, but a batch can race another past that check, so
+// the publish gate — the only choke point that sees both the money and the current draft —
+// re-prices and refuses too. Otherwise the extra voters ride on the smaller price.
 func TestPublishPaidProcessRefusesGrownCensus(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "grownpassword123")
@@ -305,8 +303,13 @@ func TestPublishPaidProcessRefusesGrownCensus(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(won, qt.IsTrue)
 
-	// grow the census past what was paid; the org listing includes the 15 already in it
+	// the census route refuses the growth outright
 	all := postOrgMembers(t, token, orgAddress, newOrgMembers(45)[15:]...)
+	requestAndAssertError(errors.ErrPaymentRequired, t, http.MethodPost, token,
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: memberIDs(all)},
+		censusEndpoint, vp.CensusID.Hex())
+	// so grow it behind the check, as a racing batch would; the org listing includes the
+	// 15 already in the census
 	added, _, err := testDB.AddCensusParticipantsByMemberIDs(vp.CensusID.Hex(), memberIDs(all))
 	c.Assert(err, qt.IsNil)
 	c.Assert(added, qt.Equals, 30)

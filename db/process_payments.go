@@ -109,6 +109,54 @@ func (ms *MongoStorage) MarkProcessPaymentPaid(
 		bson.A{ProcessPaymentPending, ProcessPaymentProcessing}, set)
 }
 
+// MarkProcessPaymentRefunded records that a paid payment's money was returned. Only a paid
+// payment transitions, so a retry of a delete that already refunded reports false instead of
+// refunding twice — the caller issues the refund under an idempotency key and this CAS is
+// what keeps the record honest about it. The document is kept after the draft is deleted: it
+// is the only trace that money moved in and back out.
+//
+// amountCents is the envelope the caller refunded. It is part of the filter because a census
+// top-up can land between reading the payment and this write: that top-up's intent was not
+// refunded, so the payment must not be recorded as fully refunded — it reports false and the
+// caller retries with the new snapshot.
+func (ms *MongoStorage) MarkProcessPaymentRefunded(
+	processID bson.ObjectID, refundID string, amountCents int64,
+) (bool, error) {
+	if processID == bson.NilObjectID || refundID == "" {
+		return false, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.processPayments.UpdateOne(ctx,
+		bson.M{"_id": processID, "status": ProcessPaymentPaid, "amountCents": amountCents},
+		bson.M{"$set": bson.M{
+			"status": ProcessPaymentRefunded, "refundId": refundID, "updatedAt": time.Now(),
+		}})
+	if err != nil {
+		return false, fmt.Errorf("failed to mark process payment refunded: %w", err)
+	}
+	return res.MatchedCount == 1, nil
+}
+
+// MarkProcessPaymentRefundFailed puts a payment Stripe could not actually refund back to
+// paid, keeping refundId so the failed attempt stays visible. The draft is already deleted at
+// this point, so this is a manual-reconciliation signal, not a state anything recovers from
+// on its own — callers log it at error level.
+func (ms *MongoStorage) MarkProcessPaymentRefundFailed(processID bson.ObjectID, refundID string) (bool, error) {
+	if processID == bson.NilObjectID || refundID == "" {
+		return false, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	res, err := ms.processPayments.UpdateOne(ctx,
+		bson.M{"_id": processID, "status": ProcessPaymentRefunded, "refundId": refundID},
+		bson.M{"$set": bson.M{"status": ProcessPaymentPaid, "updatedAt": time.Now()}})
+	if err != nil {
+		return false, fmt.Errorf("failed to revert failed process payment refund: %w", err)
+	}
+	return res.MatchedCount == 1, nil
+}
+
 // MarkProcessPaymentFailed records a failed payment, returning the process to a payable
 // state. Only pending or processing payments holding this session may fail; paid never
 // regresses.
@@ -170,6 +218,35 @@ func (ms *MongoStorage) SetProcessPaymentPaidByWallet(payment *ProcessPayment) (
 	return res.MatchedCount == 1 || res.UpsertedCount == 1, nil
 }
 
+// SetProcessPaymentFree records a €0 paid payment for a process that was published free, so
+// its census has an envelope to grow against like any paid process: growth past the free
+// price is refused with what it costs and bought through the same census checkout. Insert
+// only — a process that already has a payment keeps it — and reports whether it inserted.
+func (ms *MongoStorage) SetProcessPaymentFree(processID bson.ObjectID, orgAddress common.Address) (bool, error) {
+	if processID == bson.NilObjectID || (orgAddress.Cmp(common.Address{}) == 0) {
+		return false, ErrInvalidData
+	}
+	now := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	_, err := ms.processPayments.InsertOne(ctx, &ProcessPayment{
+		ProcessID:  processID,
+		OrgAddress: orgAddress,
+		Status:     ProcessPaymentPaid,
+		Currency:   "eur",
+		PaidAt:     now,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	})
+	if err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to set free process payment: %w", err)
+	}
+	return true, nil
+}
+
 // DeleteProcessPayment removes the payment state of a process. Used when a draft is
 // deleted; callers must refuse to delete drafts with a processing or paid payment first.
 func (ms *MongoStorage) DeleteProcessPayment(processID bson.ObjectID) error {
@@ -206,4 +283,90 @@ func (ms *MongoStorage) transitionProcessPayment(
 		return false, fmt.Errorf("failed to transition process payment: %w", err)
 	}
 	return res.MatchedCount == 1, nil
+}
+
+// processTopUpSessionsWindow bounds ProcessPayment.TopUpSessions the way
+// walletAppliedKeysWindow bounds a wallet's applied keys: an unbounded $push eventually
+// reaches the 16 MB document limit and a payment that can no longer be updated can never be
+// raised again. A process bought this many census top-ups is already far outside
+// self-service pricing, so the window is small.
+// ponytail: a fixed window — the monotonic amountCents filter is the real replay guard, this
+// list only stops a replay of the *same* session at the *same* target.
+const processTopUpSessionsWindow = 50
+
+// RaiseProcessPaymentAmount raises a paid payment's envelope to toAmountCents, recording the
+// checkout session that bought the increase and, when known, the payment intent that paid for
+// it, so deleting the draft can refund every charge and not only the first. Monotonic and
+// replay-proof: only a paid payment whose amount is strictly below the target and which has
+// not already applied this session matches, so a replayed top-up webhook raises nothing and
+// reports false. Reports whether this call won the raise.
+func (ms *MongoStorage) RaiseProcessPaymentAmount(
+	processID bson.ObjectID, toAmountCents int64, sessionID, paymentIntentID string,
+) (bool, error) {
+	if processID == bson.NilObjectID || sessionID == "" || toAmountCents <= 0 {
+		return false, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	filter := bson.M{
+		"_id":           processID,
+		"status":        ProcessPaymentPaid,
+		"amountCents":   bson.M{"$lt": toAmountCents},
+		"topUpSessions": bson.M{"$ne": sessionID},
+	}
+	update := bson.M{
+		"$set": bson.M{"amountCents": toAmountCents, "updatedAt": time.Now()},
+		"$push": bson.M{"topUpSessions": bson.M{
+			"$each":  bson.A{sessionID},
+			"$slice": -processTopUpSessionsWindow,
+		}},
+	}
+	if paymentIntentID != "" {
+		// never windowed: dropping an intent would leave money a delete cannot refund
+		update["$push"].(bson.M)["topUpIntents"] = paymentIntentID
+	}
+	res, err := ms.processPayments.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return false, fmt.Errorf("failed to raise process payment amount: %w", err)
+	}
+	return res.MatchedCount == 1, nil
+}
+
+// OrganizationBrandingReliedOn reports whether a process of the organization other than
+// exceptProcessID carries the branding add-on and is published or paid for. Such a process got
+// its branding free on the strength of the organization's stamp, so the process that paid for
+// the stamp cannot hand the €149 back when it is deleted: the branding it bought is in use.
+func (ms *MongoStorage) OrganizationBrandingReliedOn(
+	orgAddress common.Address, exceptProcessID bson.ObjectID,
+) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	cursor, err := ms.processPayments.Find(ctx, bson.M{
+		"orgAddress": orgAddress,
+		"_id":        bson.M{"$ne": exceptProcessID},
+		"status":     bson.M{"$in": bson.A{ProcessPaymentPaid, ProcessPaymentProcessing}},
+	}, options.Find().SetProjection(bson.M{"_id": 1}))
+	if err != nil {
+		return false, fmt.Errorf("failed to find paid process payments: %w", err)
+	}
+	var paid []struct {
+		ID bson.ObjectID `bson:"_id"`
+	}
+	if err := cursor.All(ctx, &paid); err != nil {
+		return false, fmt.Errorf("failed to decode paid process payments: %w", err)
+	}
+	paidIDs := bson.A{} // never nil: $in rejects a null array
+	for _, p := range paid {
+		paidIDs = append(paidIDs, p.ID)
+	}
+	n, err := ms.votingProcesses.CountDocuments(ctx, bson.M{
+		"orgAddress":      orgAddress,
+		"_id":             bson.M{"$ne": exceptProcessID},
+		"addOns.branding": true,
+		"$or":             bson.A{bson.M{"published": true}, bson.M{"_id": bson.M{"$in": paidIDs}}},
+	}, options.Count().SetLimit(1))
+	if err != nil {
+		return false, fmt.Errorf("failed to count branded processes: %w", err)
+	}
+	return n > 0, nil
 }

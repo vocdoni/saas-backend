@@ -873,3 +873,39 @@ func calculateParticipantHashesBson(census Census, member OrgMember) bson.M {
 	}
 	return hashes
 }
+
+// CountNewCensusParticipants reports how many of memberIDs are not participants of the census
+// yet, ignoring repeats within the list — the number of rows AddCensusParticipantsByMemberIDs
+// would insert, so a caller can project how far the census would grow before growing it. An id
+// that names no member is counted as new: that is a client error the caller surfaces, not
+// growth to silently absorb.
+func (ms *MongoStorage) CountNewCensusParticipants(censusID string, memberIDs []string) (int64, error) {
+	if len(censusID) == 0 {
+		return 0, ErrInvalidData
+	}
+	seen := make(map[string]struct{}, len(memberIDs))
+	unique := make([]string, 0, len(memberIDs))
+	for _, id := range memberIDs {
+		if _, dup := seen[id]; dup || id == "" {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
+	}
+	if len(unique) == 0 {
+		return 0, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	// participantID holds the member's hex id, which is exactly what memberIDs are (see the
+	// OrgMember lookup in AddCensusParticipantsByMemberIDs).
+	existing, err := ms.censusParticipants.CountDocuments(ctx, bson.M{
+		"censusId":      censusID,
+		"participantID": bson.M{"$in": unique},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to count new census participants: %w", err)
+	}
+	return int64(len(unique)) - existing, nil
+}

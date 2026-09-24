@@ -330,6 +330,26 @@ func (ms *MongoStorage) ClaimOrganizationBranding(
 	return res.MatchedCount == 1, nil
 }
 
+// ReleaseOrganizationBranding gives the once-per-organization branding add-on back, so the
+// next process can be quoted (and charged) for it: both the claim and the paid stamp are
+// removed. Only the claimant releases it — the filter pins brandingClaimedBy to processID —
+// so a refund for a process that no longer holds the claim leaves another process's branding
+// alone. A no-op when the claim moved on.
+func (ms *MongoStorage) ReleaseOrganizationBranding(orgAddress common.Address, processID bson.ObjectID) error {
+	if (orgAddress.Cmp(common.Address{}) == 0) || processID == bson.NilObjectID {
+		return ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	_, err := ms.organizations.UpdateOne(ctx,
+		bson.M{"_id": orgAddress, "brandingClaimedBy": processID},
+		bson.M{"$unset": bson.M{"brandingClaimedBy": "", "brandingClaimedAt": "", "brandingPaidAt": ""}})
+	if err != nil {
+		return fmt.Errorf("failed to release organization branding: %w", err)
+	}
+	return nil
+}
+
 // SetOrganizationBrandingPaid stamps the once-per-organization branding add-on as paid,
 // but only the first time: the conditional filter matches only while brandingPaidAt is
 // absent (it is omitempty, so an organization that never paid branding has no such

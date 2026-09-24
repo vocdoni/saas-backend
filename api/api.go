@@ -441,6 +441,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, processesPriceEndpoint, a.processPriceHandler)
 		handle(r, http.MethodPost, processesCheckoutEndpoint, a.createProcessCheckoutHandler)
 		handle(r, http.MethodGet, processesCheckoutEndpoint, a.processCheckoutStatusHandler)
+		handle(r, http.MethodPost, processesCensusCheckoutEndpoint, a.createProcessCensusCheckoutHandler)
 		handle(r, http.MethodPut, processesQuestionsStatusEndpoint, a.setVotingProcessQuestionsStatusHandler)
 		handle(r, http.MethodPut, processesQuestionStatusEndpoint, a.setVotingProcessQuestionStatusHandler)
 		handle(r, http.MethodDelete, processesEndpoint, a.deleteVotingProcessHandler)
