@@ -170,14 +170,17 @@ type API struct {
 	csp             *csp.CSP
 	oauthServiceURL string
 	stripeHandlers  *StripeHandlers
-	txQueue         chan txTask
-	txQueueMu       sync.Mutex
-	orgTxLocks      *orgTxMutex
-	otpExpiry       time.Duration
-	otpCooldown     time.Duration
-	notifySync      bool
-	statusSyncer    StatusEnqueuer
-	electionCache   *lru.Cache[string, *dvoteapi.Election]
+	// paymentGW is the seam to Stripe's one-time checkout used by pay-per-process
+	// billing; nil when the Stripe service is unavailable. Tests install a fake.
+	paymentGW     paymentGateway
+	txQueue       chan txTask
+	txQueueMu     sync.Mutex
+	orgTxLocks    *orgTxMutex
+	otpExpiry     time.Duration
+	otpCooldown   time.Duration
+	notifySync    bool
+	statusSyncer  StatusEnqueuer
+	electionCache *lru.Cache[string, *dvoteapi.Election]
 }
 
 // enqueueConfirm asks the status syncer to confirm a status change landed on-chain; a no-op when
@@ -405,6 +408,8 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, managedOrganizationsEndpoint, a.managedOrganizationsHandler)
 		handle(r, http.MethodDelete, managedOrganizationEndpoint, a.deleteManagedOrganizationHandler)
 		handle(r, http.MethodGet, integratorEndpoint, a.integratorInfoHandler)
+		handle(r, http.MethodGet, walletEndpoint, a.walletHandler)
+		handle(r, http.MethodPost, walletTopUpEndpoint, a.createWalletTopUpHandler)
 		handle(r, http.MethodPost, integratorOrgAPIKeysEndpoint, a.createAPIKeyHandler)
 		handle(r, http.MethodGet, integratorOrgAPIKeysEndpoint, a.apiKeysHandler)
 		handle(r, http.MethodDelete, integratorOrgAPIKeyEndpoint, a.revokeAPIKeyHandler)
@@ -433,6 +438,9 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodPut, processesEndpoint, a.updateVotingProcessHandler)
 		handle(r, http.MethodGet, processesValidateEndpoint, a.validateVotingProcessHandler)
 		handle(r, http.MethodPost, processesPublishEndpoint, a.publishVotingProcessHandler)
+		handle(r, http.MethodGet, processesPriceEndpoint, a.processPriceHandler)
+		handle(r, http.MethodPost, processesCheckoutEndpoint, a.createProcessCheckoutHandler)
+		handle(r, http.MethodGet, processesCheckoutEndpoint, a.processCheckoutStatusHandler)
 		handle(r, http.MethodPut, processesQuestionsStatusEndpoint, a.setVotingProcessQuestionsStatusHandler)
 		handle(r, http.MethodPut, processesQuestionStatusEndpoint, a.setVotingProcessQuestionStatusHandler)
 		handle(r, http.MethodDelete, processesEndpoint, a.deleteVotingProcessHandler)
@@ -465,6 +473,7 @@ func (a *API) initRouter() http.Handler {
 		handle(r, http.MethodGet, organizationTypesEndpoint, a.organizationsTypesHandler)
 		handle(r, http.MethodGet, organizationLanguagesEndpoint, a.organizationsLanguagesHandler)
 		handle(r, http.MethodGet, plansEndpoint, a.plansHandler)
+		handle(r, http.MethodGet, pricingEndpoint, a.pricingHandler)
 		// late-bound: a method value would capture a.stripeHandlers as it is at
 		// router-build time (nil when Stripe init failed or a test installs it later)
 		handle(r, http.MethodPost, subscriptionsWebhook, func(w http.ResponseWriter, r *http.Request) {

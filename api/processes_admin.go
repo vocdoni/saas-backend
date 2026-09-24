@@ -23,6 +23,9 @@ import (
 //	@Description	published process has on-chain elections and cannot be deleted. Requires
 //	@Description	Manager/Admin role of the organization that owns the process.
 //	@Description
+//	@Description	A paid draft cannot be deleted. A draft whose payment is still processing, or whose
+//	@Description	checkout was just completed, is refused: retry once it settles.
+//	@Description
 //	@Description	Also callable with a scoped API key (scope: `voting:write`).
 //	@Tags			processes
 //	@Produce		json
@@ -31,7 +34,7 @@ import (
 //	@Success		200			{string}	string			"OK"
 //	@Failure		401			{object}	errors.Error	"Unauthorized"
 //	@Failure		404			{object}	errors.Error	"Process not found"
-//	@Failure		409			{object}	errors.Error	"Process already published"
+//	@Failure		409			{object}	errors.Error	"Process already published, or its payment is paid or in flight"
 //	@Failure		500			{object}	errors.Error	"Internal server error"
 //	@Router			/processes/{processId} [delete]
 func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request) {
@@ -52,6 +55,36 @@ func (a *API) deleteVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	// deleting mid-publish would orphan on chain whatever the worker has already mined.
 	if refusePublishInProgress(w, vp) {
 		return
+	}
+	// a processing payment refuses deletion: money is in flight and its outcome unknown.
+	// A paid one is refused too, or the money would be kept for a process that is gone; a
+	// pending one is released by expiring its open session so it can never be paid, and its
+	// payment record goes with the draft.
+	if a.refusePaymentLocked(w, oid, db.ProcessPaymentPaid) {
+		return
+	}
+	payment, err := a.db.ProcessPayment(oid)
+	if err != nil {
+		if err != db.ErrNotFound {
+			errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+			return
+		}
+		payment = nil // free process, or never quoted: nothing to release
+	}
+	switch {
+	case payment == nil:
+		// free process, or never quoted: nothing to release
+	case payment.Status == db.ProcessPaymentPending && payment.CheckoutSessionID != "":
+		if !a.releasePendingCheckout(w, payment) {
+			return
+		}
+		fallthrough
+	default:
+		// pending (released above, or never checked out) or failed: nothing was paid, so
+		// the payment state goes with the draft
+		if err := a.db.DeleteProcessPayment(oid); err != nil {
+			log.Warnw("could not delete process payment", "processId", oid.Hex(), "error", err)
+		}
 	}
 	if err := a.db.DeleteVotingProcess(oid); err != nil {
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)

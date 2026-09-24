@@ -140,6 +140,7 @@ func (a *API) createVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		StartDate:     start,
 		EndDate:       end,
 		InitialStatus: initialStatus,
+		AddOns:        req.AddOns,
 		CensusID:      census.ID,
 	}
 	vpID, err := a.db.SetVotingProcess(vp)
@@ -404,6 +405,13 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 		errors.ErrUnauthorized.Withf("user is not admin or manager of the organization").Write(w)
 		return
 	}
+	// after the role check, so a non-member reads 401 rather than learning from a 409
+	// whether someone is paying for this process. Only a processing payment freezes the
+	// priced inputs; editing a paid draft is how a draft stranded by publish preflight is
+	// repaired, and every publish path re-prices what the edit produced.
+	if a.refusePaymentLocked(w, oid) {
+		return
+	}
 	if len(req.Questions) == 0 || len(req.Questions) > db.MaxQuestionsPerProcess {
 		errors.ErrMalformedBody.Withf("questions must be between 1 and %d", db.MaxQuestionsPerProcess).Write(w)
 		return
@@ -444,6 +452,7 @@ func (a *API) updateVotingProcessHandler(w http.ResponseWriter, r *http.Request)
 	vp.Title, vp.Description, vp.Header, vp.StreamURI = req.Title, req.Description, req.Header, req.StreamURI
 	vp.StartDate, vp.EndDate, vp.CensusID = start, end, census.ID
 	vp.InitialStatus = initialStatus
+	vp.AddOns = req.AddOns
 	// a stale marker got us past the guard above: editing the draft releases it rather than
 	// writing it back, matching what ClaimVotingProcessForPublish would reclaim anyway. A marker
 	// that went live *after* that guard read is a different matter — the write's own precondition
@@ -745,6 +754,14 @@ func (a *API) validateVotingProcessHandler(w http.ResponseWriter, r *http.Reques
 	// the dry-run reports every problem the same way: a mismatched question set is just one more
 	// entry in errors, so the mismatch flag publish acts on is irrelevant here.
 	problems, _ := a.publishPreflightProblems(vp, questions, census, user)
+	// an unpaid price is one more reason a publish would be refused; a quote error is
+	// not reported here (a broken census already surfaces above)
+	if !vp.Published {
+		if due, err := a.paymentDueForPublish(vp); err == nil && due != nil {
+			problems = append(problems,
+				fmt.Sprintf("publication requires payment of %d eur cents", due.TotalCents))
+		}
+	}
 	apicommon.HTTPWriteJSON(w, &apicommon.VotingProcessValidateResponse{
 		Valid:  len(problems) == 0,
 		Errors: problems,
