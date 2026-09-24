@@ -479,9 +479,9 @@ func (a *API) refuseCensusGrowthBeyondPayment(
 		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
 		return true
 	}
-	if growth <= 0 {
-		return false
-	}
+	// no early exit at zero growth: the census may already have outgrown its price (a batch
+	// that raced another past this check), and PUT /processes/{processId}/census pushes the
+	// recounted size on chain even when nothing new is added
 	size := census.Size + growth
 	quote, err := quoteProcessAtCensusSize(p, size)
 	if err != nil {

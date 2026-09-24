@@ -126,6 +126,7 @@ func (a *API) censusInfoHandler(w http.ResponseWriter, r *http.Request) {
 //	@Success		200		{object}	apicommon.AddMembersResponse			"Added count and optional per-member errors"
 //	@Failure		400		{object}	errors.Error							"Invalid input data or census not found"
 //	@Failure		401		{object}	errors.Error							"Unauthorized"
+//	@Failure		402		{object}	apicommon.ProcessCensusGrowthQuote		"The census would grow beyond the price paid for its process"
 //	@Failure		403		{object}	errors.Error							"Plan census quota exceeded"
 //	@Failure		404		{object}	errors.Error							"Census not found"
 //	@Failure		500		{object}	errors.Error							"Internal server error"
@@ -174,6 +175,20 @@ func (a *API) addCensusParticipantsHandler(w http.ResponseWriter, r *http.Reques
 	if len(participants.MemberIDs) == 0 {
 		apicommon.HTTPWriteJSON(w, &apicommon.AddMembersResponse{Added: 0})
 		return
+	}
+
+	// pay-per-process: a census behind a paid process may only grow as far as the price paid
+	// for it reaches — the same guard PUT /processes/{processId}/census applies, or this
+	// legacy route would grow a paid election for free
+	processes, err := a.db.VotingProcessesByCensus([]string{census.ID.Hex()})
+	if err != nil {
+		errors.ErrGenericInternalServerError.WithErr(err).Write(w)
+		return
+	}
+	for i := range processes {
+		if a.refuseCensusGrowthBeyondPayment(w, &processes[i], census, participants.MemberIDs) {
+			return
+		}
 	}
 
 	if err := a.subscriptions.OrgCanAddCensusParticipants(

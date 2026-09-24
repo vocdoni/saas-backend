@@ -3454,6 +3454,10 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/errors.Error'
+        "402":
+          description: The census would grow beyond the price paid for its process
+          schema:
+            $ref: '#/definitions/apicommon.ProcessCensusGrowthQuote'
         "403":
           description: Plan census quota exceeded
           schema:

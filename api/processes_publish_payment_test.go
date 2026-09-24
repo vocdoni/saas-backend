@@ -269,11 +269,10 @@ func TestManagedProcessWalletPublish(t *testing.T) {
 	c.Assert(wallet.BalanceCents, qt.Equals, int64(100_000-1_515))
 }
 
-// TestPublishPaidProcessRefusesGrownCensus: the price is the census size at payment time,
-// but a paid draft's census can still be grown through POST /census/{id}, which has no
-// payment state to consult. The publish gate is the only choke point that sees both the
-// money and the current draft, so it has to re-price and refuse — otherwise the extra
-// voters ride on the smaller price.
+// TestPublishPaidProcessRefusesGrownCensus: the price is the census size at payment time.
+// Both census routes refuse growth past it, but a batch can race another past that check, so
+// the publish gate — the only choke point that sees both the money and the current draft —
+// re-prices and refuses too. Otherwise the extra voters ride on the smaller price.
 func TestPublishPaidProcessRefusesGrownCensus(t *testing.T) {
 	c := qt.New(t)
 	token := testCreateUser(t, "grownpassword123")
@@ -305,15 +304,16 @@ func TestPublishPaidProcessRefusesGrownCensus(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(won, qt.IsTrue)
 
-	// grow the census behind the paid draft, through the endpoint that knows nothing
-	// about payments
+	// the census route refuses the growth outright
 	all := postOrgMembers(t, token, orgAddress, newOrgMembers(45)[15:]...)
-	// not postCensusParticipants: it asserts every id was added, and the org listing
-	// includes the 15 already in the census
-	added := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, token,
+	requestAndAssertError(errors.ErrPaymentRequired, t, http.MethodPost, token,
 		&apicommon.AddCensusParticipantsRequest{MemberIDs: memberIDs(all)},
 		censusEndpoint, vp.CensusID.Hex())
-	c.Assert(added.Added, qt.Equals, uint32(30))
+	// so grow it behind the check, as a racing batch would; the org listing includes the
+	// 15 already in the census
+	added, _, err := testDB.AddCensusParticipantsByMemberIDs(vp.CensusID.Hex(), memberIDs(all))
+	c.Assert(err, qt.IsNil)
+	c.Assert(added, qt.Equals, 30)
 	price := requestAndParse[apicommon.ProcessPriceResponse](
 		t, http.MethodGet, token, nil, "processes", pid, "price")
 	c.Assert(price.TotalCents > quote.TotalCents, qt.IsTrue)
@@ -376,12 +376,12 @@ func TestManagedWalletDebitRepricesGrownCensus(t *testing.T) {
 	c.Assert(err, qt.IsNil)
 	c.Assert(wallet.BalanceCents, qt.Equals, int64(100_000-1_515))
 
-	// grow the census behind the paid process, then retry the publish debit
+	// grow the census behind the paid process — past the census routes' check, as a racing
+	// batch would — then retry the publish debit
 	all := postOrgMembers(t, token, managedAddr, newOrgMembers(45)[15:]...)
-	added := requestAndParse[apicommon.AddMembersResponse](t, http.MethodPost, token,
-		&apicommon.AddCensusParticipantsRequest{MemberIDs: memberIDs(all)},
-		censusEndpoint, vp.CensusID.Hex())
-	c.Assert(added.Added, qt.Equals, uint32(30))
+	added, _, err := testDB.AddCensusParticipantsByMemberIDs(vp.CensusID.Hex(), memberIDs(all))
+	c.Assert(err, qt.IsNil)
+	c.Assert(added, qt.Equals, 30)
 	grown, _, err := testAPI.processQuote(vp)
 	c.Assert(err, qt.IsNil)
 	c.Assert(grown.TotalCents > 1_515, qt.IsTrue)
@@ -407,6 +407,40 @@ func TestManagedWalletDebitRepricesGrownCensus(t *testing.T) {
 	wallet, err = testDB.Wallet(integratorAddr)
 	c.Assert(err, qt.IsNil)
 	c.Assert(wallet.BalanceCents, qt.Equals, 100_000-grown.TotalCents)
+}
+
+// TestPublishedFreeProcessCensusGrowth: a process published free has no checkout to record
+// a price, so publication records a €0 payment instead — without it the census would have no
+// envelope and could grow into a priced size for nothing.
+func TestPublishedFreeProcessCensusGrowth(t *testing.T) {
+	c := qt.New(t)
+	token := testCreateUser(t, "freegrowth12345")
+	orgAddress := testCreateProvisionedOrganization(t, token)
+	setOrganizationSubscription(t, orgAddress, mockEssentialPlan.ID)
+	ids := memberIDs(postOrgMembers(t, token, orgAddress, newOrgMembers(15)...))
+
+	// within the free tier and no 2FA channel: nothing to pay
+	req := newVotingProcessRequest(orgAddress, ids[:pricing.FreeCensusSize])
+	req.Census.TwoFaFields = nil
+	req.Census.AuthFields = db.OrgMemberAuthFields{db.OrgMemberAuthFieldsMemberNumber}
+	pid := requestAndParse[apicommon.CreateVotingProcessResponse](
+		t, http.MethodPost, token, req, processesCreateEndpoint).ProcessID
+	job := enqueueAndPollJob(t, http.MethodPost, token, nil, "processes", pid, "publish")
+	c.Assert(job.Status, qt.Equals, db.JobStatusCompleted, qt.Commentf("publish job error: %s", job.Errors))
+
+	oid, err := bson.ObjectIDFromHex(pid)
+	c.Assert(err, qt.IsNil)
+	payment, err := testDB.ProcessPayment(oid)
+	c.Assert(err, qt.IsNil)
+	c.Assert(payment.Status, qt.Equals, db.ProcessPaymentPaid)
+	c.Assert(payment.AmountCents, qt.Equals, int64(0))
+
+	// growing out of the free tier costs the whole priced amount
+	refusal := requestAndParseWithAssertCode[censusGrowthRefusal](http.StatusPaymentRequired,
+		t, http.MethodPut, token,
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[pricing.FreeCensusSize:]}, "processes", pid, "census")
+	c.Assert(refusal.Data.PaidCents, qt.Equals, int64(0))
+	c.Assert(refusal.Data.DueCents, qt.Equals, int64(1_500))
 }
 
 // TestPublishedCensusGrowthWithinPaidPrice: PUT /processes/{processId}/census is the only
@@ -472,6 +506,9 @@ func TestPublishedCensusGrowthWithinPaidPrice(t *testing.T) {
 	c.Assert(refusal.Data.PaidCents, qt.Equals, int64(1_500))
 	c.Assert(refusal.Data.DueCents, qt.Equals, int64(500))
 	c.Assert(refusal.Data.CensusSize, qt.Equals, int64(25))
+	// the legacy census route is no way around it
+	requestAndAssertError(errors.ErrPaymentRequired, t, http.MethodPost, token,
+		&apicommon.AddCensusParticipantsRequest{MemberIDs: ids[19:]}, "census", vp.CensusID.Hex())
 	got := requestAndParse[apicommon.VotingProcessResponse](t, http.MethodGet, token, nil, "processes", pid)
 	c.Assert(got.Census.Size, qt.Equals, int64(19))
 
