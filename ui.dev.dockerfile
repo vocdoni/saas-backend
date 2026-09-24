@@ -7,7 +7,7 @@ RUN git clone --depth 1 --branch "${VOCDONI_APP_REF}" https://github.com/vocdoni
 FROM node:22
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@10.16.1 --activate
-COPY --from=clone /repo/package.json /repo/pnpm-lock.yaml ./
+COPY --from=clone /repo/package.json /repo/pnpm-lock.yaml /repo/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile --ignore-scripts
 COPY --from=clone /repo/ .
 
