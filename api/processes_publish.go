@@ -481,6 +481,12 @@ func (pw *publishWorker) run() (result *db.JobResult, err error) {
 		}
 		return nil, e
 	}
+	// both payment gates let a process through without a payment only when it priced at zero,
+	// so one that has none was published free: record that as its envelope, or its census
+	// could later grow into a priced size without anything to charge against
+	if _, e := a.db.SetProcessPaymentFree(pw.vp.ID, pw.vp.OrgAddress); e != nil {
+		log.Warnw("could not record free process payment", "processId", pw.vp.ID.Hex(), "error", e)
+	}
 	if pw.nonTestSized {
 		if e := a.db.IncrementOrganizationProcessesCounter(pw.vp.OrgAddress); e != nil {
 			log.Warnw("could not update organization process counter", "error", e)

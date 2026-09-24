@@ -170,6 +170,35 @@ func (ms *MongoStorage) SetProcessPaymentPaidByWallet(payment *ProcessPayment) (
 	return res.MatchedCount == 1 || res.UpsertedCount == 1, nil
 }
 
+// SetProcessPaymentFree records a €0 paid payment for a process that was published free, so
+// its census has an envelope to grow against like any paid process: growth past the free
+// price is refused with what it costs and bought through the same census checkout. Insert
+// only — a process that already has a payment keeps it — and reports whether it inserted.
+func (ms *MongoStorage) SetProcessPaymentFree(processID bson.ObjectID, orgAddress common.Address) (bool, error) {
+	if processID == bson.NilObjectID || (orgAddress.Cmp(common.Address{}) == 0) {
+		return false, ErrInvalidData
+	}
+	now := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	_, err := ms.processPayments.InsertOne(ctx, &ProcessPayment{
+		ProcessID:  processID,
+		OrgAddress: orgAddress,
+		Status:     ProcessPaymentPaid,
+		Currency:   "eur",
+		PaidAt:     now,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	})
+	if err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to set free process payment: %w", err)
+	}
+	return true, nil
+}
+
 // DeleteProcessPayment removes the payment state of a process. Used when a draft is
 // deleted; callers must refuse to delete drafts with a processing or paid payment first.
 func (ms *MongoStorage) DeleteProcessPayment(processID bson.ObjectID) error {
