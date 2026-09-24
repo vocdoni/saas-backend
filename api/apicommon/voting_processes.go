@@ -219,6 +219,16 @@ type ProcessCensusGrowthQuote struct {
 	Currency   string `json:"currency"`
 }
 
+// ProcessCensusCheckoutRequest buys census headroom for a paid process: a one-time checkout
+// for the difference between what the process paid and what CensusSize would cost.
+type ProcessCensusCheckoutRequest struct {
+	// CensusSize is the census size to buy room for; it must exceed what is already paid.
+	CensusSize int64 `json:"censusSize"`
+	// ReturnURL is where Stripe redirects after checkout; the session id is appended.
+	ReturnURL string `json:"returnURL"`
+	Locale    string `json:"locale,omitempty"`
+}
+
 // WalletResponse is an integrator's prepaid wallet: EUR balance plus its paged ledger,
 // newest first.
 type WalletResponse struct {

@@ -236,3 +236,50 @@ func (ms *MongoStorage) transitionProcessPayment(
 	}
 	return res.MatchedCount == 1, nil
 }
+
+// processTopUpSessionsWindow bounds ProcessPayment.TopUpSessions the way
+// walletAppliedKeysWindow bounds a wallet's applied keys: an unbounded $push eventually
+// reaches the 16 MB document limit and a payment that can no longer be updated can never be
+// raised again. A process bought this many census top-ups is already far outside
+// self-service pricing, so the window is small.
+// ponytail: a fixed window — the monotonic amountCents filter is the real replay guard, this
+// list only stops a replay of the *same* session at the *same* target.
+const processTopUpSessionsWindow = 50
+
+// RaiseProcessPaymentAmount raises a paid payment's envelope to toAmountCents, recording the
+// checkout session that bought the increase and, when known, the payment intent that paid for
+// it, so deleting the draft can refund every charge and not only the first. Monotonic and
+// replay-proof: only a paid payment whose amount is strictly below the target and which has
+// not already applied this session matches, so a replayed top-up webhook raises nothing and
+// reports false. Reports whether this call won the raise.
+func (ms *MongoStorage) RaiseProcessPaymentAmount(
+	processID bson.ObjectID, toAmountCents int64, sessionID, paymentIntentID string,
+) (bool, error) {
+	if processID == bson.NilObjectID || sessionID == "" || toAmountCents <= 0 {
+		return false, ErrInvalidData
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	filter := bson.M{
+		"_id":           processID,
+		"status":        ProcessPaymentPaid,
+		"amountCents":   bson.M{"$lt": toAmountCents},
+		"topUpSessions": bson.M{"$ne": sessionID},
+	}
+	update := bson.M{
+		"$set": bson.M{"amountCents": toAmountCents, "updatedAt": time.Now()},
+		"$push": bson.M{"topUpSessions": bson.M{
+			"$each":  bson.A{sessionID},
+			"$slice": -processTopUpSessionsWindow,
+		}},
+	}
+	if paymentIntentID != "" {
+		// never windowed: dropping an intent would leave money a delete cannot refund
+		update["$push"].(bson.M)["topUpIntents"] = paymentIntentID
+	}
+	res, err := ms.processPayments.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return false, fmt.Errorf("failed to raise process payment amount: %w", err)
+	}
+	return res.MatchedCount == 1, nil
+}

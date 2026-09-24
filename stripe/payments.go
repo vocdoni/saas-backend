@@ -27,6 +27,11 @@ const (
 	// MetadataKeyWalletTopUpOrg marks a session as a wallet top-up for an integrator
 	// organization (value: the org address).
 	MetadataKeyWalletTopUpOrg = "wallet_topup_org"
+	// MetadataKeyProcessTopUpCents marks a session as census headroom bought for an
+	// already-paid process, carrying the *target* amount its payment must be raised to (not
+	// the difference charged), so a replay is idempotent and two racing top-ups resolve
+	// monotonically to the larger target.
+	MetadataKeyProcessTopUpCents = "process_topup_cents"
 	// MetadataKeyRequestedBy carries the email of the user who started the checkout.
 	MetadataKeyRequestedBy = "requested_by"
 )
@@ -206,6 +211,10 @@ func (s *Service) handleCheckoutSessionResult(event *stripeapi.Event) error {
 		return err
 	}
 	switch {
+	case session.Metadata[MetadataKeyProcessTopUpCents] != "":
+		// before the process branch: a top-up also carries the process id, but it buys
+		// census headroom for a payment that is already paid, not the payment itself
+		return s.raiseProcessPayment(session)
 	case session.Metadata[MetadataKeyProcessID] != "":
 		return s.fulfillProcessPayment(session)
 	case session.Metadata[MetadataKeyWalletTopUpOrg] != "":
