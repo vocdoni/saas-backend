@@ -2693,6 +2693,11 @@ definitions:
     properties:
       customer_email:
         type: string
+      payment_status:
+        description: |-
+          PaymentStatus is the payment outcome of a one-time (mode "payment") session:
+          "paid", "unpaid" or "no_payment_required"; empty for subscription sessions.
+        type: string
       status:
         type: string
       subscription_status:
